@@ -1,0 +1,14887 @@
+# Provider Processing Policy v29 — development-ci candidate
+
+**UNSELECTED CANDIDATE — exact new-scope Owner decisions pending.** Prepared under [Issue #1120, brief revision 3](https://github.com/zhouy1017/ai7-harness/issues/1120). No approval is inferred from authorship. The unchanged source-checkout carrier still selects active-set v19; preparing set v20 selects no policy and changes no runtime permission.
+
+[Canonical JSON](provider-processing-policy.v29.json) · [whole-document const schema](provider-processing-policy.v29.schema.json) · [candidate set v20](active-policy-set.v20.json) · [unchanged predecessor v1](provider-processing-policy.v1.json) · [ordinary-production counterpart v28](provider-processing-policy.v28.md).
+
+Exact JSON SHA-256: `9d76ef3ccf7759e65d8ff402143179e9c74f3e47f6f42fc972854367ef7f388d`. Candidate set v20 SHA-256: `e6ce0ef16a1a84c69ce180aa5fc041510c3e3f8d427017e867c6081d007b3b13`. The globally numbered v29 is the development-ci successor of v1; immutable fixture-recording v2 is a different scope and is unchanged. The provider decision remains default deny, empty `providerAllowRules`, and zero live transmissions.
+
+## Six closed proposed fixture rules
+
+| Proposed rule | Exact kinds | Categories |
+| --- | --- | --- |
+| `development-ci-fixture-review` | `editorial-review/typos-and-usage`, `editorial-review/style-and-format`, `editorial-review/literary-expression`, `editorial-review/cross-deliverable-consistency`, `editorial-review/factual-review`, `editorial-review/academic-integrity`, `factual-review`, `editorial-review/series-consistency`, `editorial-review/publication-risk`, `editorial-review/plot-consistency` | `public-or-synthetic`, `house-review-preference-excerpt`, `editor-task-instruction`, `house-review-guideline-clause` |
+| `development-ci-fixture-global-agent-dialogue` | `global-agent-dialogue` | `public-or-synthetic` |
+| `development-ci-fixture-learning-curation` | `learning-curation` | `public-or-synthetic`, `editorial-learning-example`, `house-review-preference-excerpt` |
+| `development-ci-fixture-editorial-polish` | `editorial-polish` | `public-or-synthetic`, `house-review-preference-excerpt` |
+| `development-ci-fixture-factual-claim-stages` | `factual-review` | `public-or-synthetic`, `web-search-query`, `public-source-fetch` |
+| `development-ci-fixture-factual-recheck` | `factual-recheck` | `public-or-synthetic`, `web-search-query`, `public-source-fetch` |
+
+Every new rule requires exact fixture, prompt-contract, composition and source pins; missing fixture results refuse. Network, credentials, remote fallback, recording and subagents are false. Only the two exact factual rules may replay research; generic review remains no-web. Each category has the source, per-kind and payload checks below; a category label never admits arbitrary source records.
+
+Only `development-ci-fixture-review`, `development-ci-fixture-factual-claim-stages`, and `development-ci-fixture-factual-recheck` may consume the proposed execution and transport declarations. The configurable defaults are 4 in-flight requests, 3 units per Run and background share 1. Scripted transport has the 180-second deadline and one Retry-After retry. F-04's exact retry=false overrides that retry and forbids request 130 (or extraction request 2), including unknown results and resumed Runs. Legacy routes and the new single-attempt dialogue/polish/batch-curation routes inherit none of those defaults or resends. Concurrency-safe local tool parallelism remains bounded by 5 calls/unit, 8 candidates/call, 65,536-byte result cap and 128 rounds; it is not proof of model-unit concurrency.
+
+The instruction block is <=1,200 graphemes only for typos-and-usage, with exact procedure/version/document/text pins, no names/framing override or truncation. The guideline block is only style-and-format, aggregate <=40 clauses across documents, <=300 graphemes/clause, from pinned admitted public/synthetic documents. Neither kind inherits the other's payload. Review has at most one model synthesis turn; deterministic synthesis adds no model permission. No sampling/reflection/clarification or additional model stage is inherited by these declarations.
+
+## Frozen legacy compatibility, separate from new capabilities
+
+The populated metadata-only manifest has **47 tuples, 34 registered fixture roots and 591 resolved entry-key rows**; all **53 fixture files** are independently pinned and unchanged between frozen `809c96f28bf111db39dac80b3b0743929779d52e` and authoring base `aeeb0ae02f8c11a155acb829709fb2fa90a2548e`. Manifest SHA-256 over the canonical tuples array: `0696535cdedb22cbdbb39a03577171224104fae42ade7b567c47a7e92601bfdc`. Full fixture inventory SHA-256: `2f15e004949aba1d1e8e537b7223dd1bade7b39db994e9e56164df38fe3f1e53`. Predecessor v1 SHA-256: `d9dfe8c13a58649d8d9f607364030468ae71832b94c9436291d29000795d725a`.
+
+Each tuple jointly requires its registered purpose/profile, executable kind or exact session purpose, prompt/contract/source/composition pins, category/tool-set hash, fixture file hash, ordered leaf-first base chain and resolved lineage hash, and finite `(unitOrdinal, requestDigest, attempt|null)` keys. Captured prompt/task digests and explicit null absences are retained. Per-Run source, binding and composition identities remain runtime checks, never invented historical constants. Dynamic custom-dimension identity is confined to the exact registered input profile and derived immutable version, without a wildcard kind. Exact source metadata contains no response/manuscript text.
+
+The five existing deterministic evidence cases are clarification-sample1, polish-sample1-attributive, polish-sample1-usage, review-style-synthetic-museum and review-typos-synthetic-lighthouse. Their exact JSON IDs, case/input hashes, runner owners and fixture metadata appear below. The two polish cases use `sample1-recorded-v41-editorial-polish` through the real FastRoleExecutionOwner with fixture/live:null; the outer runner's resolved policy is not passed to that owner. This preserves existing behavior and claims no consumption of a new capability. The other recorded editorial cases retain their developer-live replay classification and v24 pins outside v29 grants. Four direct adapter/DSH unit-only fixtures are explicitly inventoried with no selected-launch grant.
+
+New contracts always require their new rule; they cannot fall back to this profile or to generic review. The profile grants no new task, source, tool, background origin, throughput, retry or subagent capability. New launches would truthfully pin v29 plus this manifest; existing persisted v1 plans remain v1. Preserve old request keys and resolver semantics, attempt-specific then null-entry lookup, test-constructor-only content-digest lookup, J-10-only outcome-unknown launch and the retained-v1 unmixed complete J-04 restriction. Missing/mismatched tuples retain the disclosed refusal. Selection waits for a strict reader, consumer checks and the affected guest Journey matrix; legacy J-09/J-10 preservation is no new F-16 proof.
+
+## Full proposed fixture contract narrative
+
+Identity collision: provider-processing-policy.v2 already is immutable fixture-recording. Recommend globally unique Provider Processing v29, operationalScope development-ci, predecessorVersion v1. Do not overwrite v2 or silently give the same globally numbered identity new meaning.
+
+Preserve decision.default deny, providerAllowRules [], authorizedLiveTransmissionCount0. Add separately typed fixtureReplayRules; do not fabricate a remote endpoint, model or credential slot to satisfy AdmittedProviderRule.
+
+Every fixture rule:
+- route recorded-deterministic-model-fixture
+- networkAllowed false
+- credentialUseAllowed false
+- remoteFallbackAllowed false
+- fixtureRecordingAllowed false
+- exactFixtureDigestRequired true
+- exactPromptContractAndCompositionRequired true
+- sourceScope admitted-public-or-synthetic-only
+- missingFixtureResult refuse
+
+Closed proposed rules requiring Owner decision:
+1. development-ci-fixture-review: exact kinds editorial-review/typos-and-usage, editorial-review/style-and-format, editorial-review/literary-expression, editorial-review/cross-deliverable-consistency, editorial-review/factual-review, editorial-review/academic-integrity, factual-review, editorial-review/series-consistency, editorial-review/publication-risk, editorial-review/plot-consistency; no wildcard. No web. Preference excerpt carries only admitted synthetic/public-source decision provenance and the same 12/200 bounds.
+2. development-ci-fixture-global-agent-dialogue: exact global-agent-dialogue, Book-less, explicitly listed eligible synthetic memory/preference revisions plus synthetic editor words; disclosure/redaction, no tools.
+3. development-ci-fixture-learning-curation: exact learning-curation; same Owner-approved example contract/envelope/exclusion checks, admitted public/synthetic source only, recorded output only, no activation.
+4. development-ci-fixture-editorial-polish: exact editorial-polish; admitted public/synthetic selected passage plus bounded synthetic preference block; suggestions only/no tools. This is an explicit additional proposal, not a previously approved follow-up.
+5. development-ci-fixture-factual-claim-stages: exact factual-review and only the procedure/contracts/mode/assurance levels in section 4.6, recorded extraction and verification with the same count/source limits; scripted websearch/webfetch only in the verification stage. See 5.3.
+6. development-ci-fixture-factual-recheck: exact factual-recheck and only section 4.3's single-claim/current-request-evidence/enrollment/once contract, recorded verification only with the same 129/128/3 limits, and no extraction. This is a separate proposed Owner scope, not an inherited foreground fixture grant.
+
+Review local declarations are exactly retrieve, exact_fetch, read_blocks, baseline_facts, guideline_clause, term_table, search_manuscript; readOnly/concurrencySafe true; callsPerUnit5, candidatesPerCall8, existing local-tool result cap65536 bytes and breaker roundTrips128; parallelCallsAllowed true resolves to existing callsPerUnit5, not a new number. All reads use frozen Run units and pinned ledger sources; no source expansion.
+
+Only the separately named factual claim-stage and single-claim recheck fixture rules below may replay scripted research tools; the generic review fixture rule remains no-web. No arbitrary custom kinds or unrelated tools are admitted. Existing v1 fixture plans/digests keep historical behavior; new capabilities receive new fixture/prompt/composition identities. Never rewrite retained recordings. Preparation authoring acquires no live responses or material.
+
+### 5.0 Required compatibility: existing local fixture paths under a selected v29
+
+Verified semantics at 809c96f2:
+- Provider Processing v1 has decision.default:deny, providerAllowRules:[] and authorizedLiveTransmissionCount:0. It does not contain a task-kind fixture allowlist.
+- egress-gate.ts:490–587 checks binding currency, categories, exact route/model/system/messages and any named tools, then returns transmit-local for ai7-local-deterministic before development-ci's remote refusal. Local public/synthetic data and the existing editor-selected-manuscript-excerpt/manuscript-conflict-region-excerpt paths therefore do not depend on a remote allow rule. These category names do not waive the admitted test-material boundary.
+- launch-policy.ts:283–291 verifies the v1 deny/empty/zero shape; its current development-ci projection at 2156 onward hardcodes version v1, admittedRules:[], no live transmission and false live reduction/sampling/reflection capabilities. Those false remote flags do not deny the existing local reducers/fixtures.
+- model-fixture.ts pins the exact identity, each file SHA-256, resolved base-chain digest and request-digest/unit-ordinal/attempt lookup; content-digest lookup remains test-constructor-only. Outcome-unknown stays J-10-only. kind-definition.ts retains the special exact recorded-v1/J-04 contract selection and provenance/base-chain restrictions. service/index.ts loads the fixture before opening the store and freezes its identity/lineage/digest into the route.
+
+Consequently, switching new launches to v29 while admitting only the six new fixture rules would omit baseline analysis, ordinary Book dialogue, writing/evaluation/readers/rewrite and other existing Journey paths. Keeping version:'v1' in the new projection or injecting old-policy allow rules would misstate the selected authority. The successor must instead contain an explicit legacyLocalFixtureCompatibility object with a frozen finite tuple manifest, authored inside v29.json and its human projection/schema. It grants only the existing local replay behavior of the fixed 809c96f28bf111db39dac80b3b0743929779d52e baseline. No separate fixture payload, policy file, runtime overlay or new path is needed in the preparation PR.
+
+Required exact profile fields:
+- profileId: development-ci-legacy-local-fixture-809c96f2.
+- sourceCommit:809c96f28bf111db39dac80b3b0743929779d52e; predecessorPolicyId:provider-processing-policy; predecessorVersion:v1; predecessorCanonicalPath:docs/policies/provider-processing-policy.v1.json; predecessorSha256: the independently computed exact v1 byte hash.
+- route:ai7-local-deterministic; model:ai7-deterministic-fixture; fixtureSchema:ai7.model-fixture/1; networkAllowed:false; credentialUseAllowed:false; remoteFallbackAllowed:false; fixtureRecordingAllowed:false.
+- newContractFallbackAllowed:false; newFixtureRuleCapabilitiesInherited:false; executionCapabilityProfile:legacy-existing-only; newTopLevelExecutionDefaultsInherited:false; newTopLevelTransportDefaultsInherited:false.
+- tuples: a sorted, nonempty, concrete metadata-only list. Every tuple names its existing Journey or explicitly registered service-test purpose, exact executable task kind or session purpose, exact legacy task/prompt/composition identity and digest where that owner has one, allowed existing stage/subject, permitted existing category/tool-set digest, fixture identity, fixture file path and SHA-256, exact ordered lineage and resolved lineage SHA-256, plus the finite entry keys (unitOrdinal,requestDigest,attempt|null) and capture prompt/task-contract digests where present. Keep an explicit absent/null value when legacy provenance lacks a field; never invent historical evidence.
+- manifestSha256: SHA-256 of the canonical tuples array. The identity/file/lineage/entry tuples and existing resolver semantics are jointly required, not alternative matching routes. A new kind, contract, composition, fixture, tool set or source payload cannot qualify merely because a legacy task label matches.
+
+Authoring recipe for the Worker: inspect only existing registry/launch selections and fixture metadata at the fixed commit, enumerate the existing baseline, Book dialogue, review/factual, writing, evaluation/readers/rewrite, reduction/sampling/reflection and failure/retry Journey cases actually registered there, and close their fixture base chains. Resolve the inventory at the actual authoring base and verify that its legacy bytes/metadata agree with 809c96f2. Do not duplicate responses, manuscript text or fixture payloads in the policy. Keep any fixture-generator transformation only when it is an existing exact Journey control with its code/inputs pinned in the tuple; do not invent a dynamic wildcard. A missing mapping, changed historical byte or necessary extra allowlist/path returns to the Commander. No placeholder tuple/digest or broad '*'/custom-analysis/* rule is permitted in the reviewable candidate. This metadata inventory is required candidate authoring work, not permission to approve unspecified future entries.
+
+Distinguish static profile/contract/fixture metadata from per-Run source/binding/composition digests. The latter remain exact frozen runtime checks and are not fabricated as historical constants in the manifest. If an existing composition identity is derived from exact plan inputs, pin its current registered profile/derivation contract in the tuple and require the normal per-Run digest validation; do not replace it with a future/default composition. This preserves the existing identity model while closing the finite registered behavior.
+
+The activation child projects selected version v29 truthfully and exposes this compatibility profile separately from the six new fixture rule capabilities. New launches/plans record v29 and the exact legacy profile/manifest pin; they retain the old request construction, local resolver, contract, fixture/attempt identities and special Journey restrictions. Existing persisted v1 plans/bindings remain v1 and are handled by their historical compatibility path; do not rewrite them or silently resume them under v29. A missing fixture or mismatched legacy tuple remains the existing disclosed refusal. A launch with no legacy fixture route acquires none from this profile. No newly selected policy/version string is substituted into a historical recording/request key to manufacture a match.
+
+New-contract precedence is mandatory: any of the newly proposed F-04, F-26 instruction, curation or other new source/tool/contract paths must match its explicit new fixture rule and can never fall back to the legacy profile. Conversely, old baseline/Book dialogue/etc cannot consume the new global 4/3/1 or retry declarations merely because v29 is selected. Their consumer receives its exact legacy execution/transport behavior, with no new throughput, subagent, background-origin or tool permission. Legacy J-09/J-10 proof therefore remains truthful preservation evidence; it is not positive F-16 parallelism/subagent proof.
+
+Activation validation must replay the existing affected Journey matrix under new v29 launches using their compatibility tuples, assert that the historical contract/request/fixture behavior is unchanged, and show remote/tool/credential/new-contract rejection. Also test missing/changed tuple, mixed lineage, J-10 outcome-unknown misuse and the retained-v1/J-04 restrictions. Candidate policy validation alone cannot establish compatibility. If the complete closed inventory/reader/consumer checks are not ready, do not select v29 in the source-checkout carrier or build; keep the candidate unselected rather than silently retaining a v1 overlay under a v29 label.
+
+### 5.1 Capability closure for F-19, F-16 and bounded F-26 proof
+
+Read-only check on 2026-10-25: the declarations below were read from exact v27 at 2269ff47. The relevant policies, validator, generator and pair-count test were also compared through origin/codex/integration-21@809c96f28bf111db39dac80b3b0743929779d52e and are unchanged. This comparison does not change the recorded implementation baseline or claim those features have landed.
+
+F-19: ordinary-production-review.transmissions has crossUnitSynthesisAllowed:true and plusOneCrossUnitSynthesisTurn:true, but crossUnitReductionAllowed:false. These are different terms. Add the following exact candidate counterpart to development-ci-fixture-review.transmissions; here it bounds logical replay dispatches, never network transmissions:
+
+```json
+{
+  "boundedByCoverageManifestUnitCount": true,
+  "oneTechnicalSessionPerAnalysisUnit": true,
+  "accumulatingSingleSessionAllowed": false,
+  "crossUnitSynthesisAllowed": true,
+  "plusOneCrossUnitSynthesisTurn": true,
+  "crossUnitReductionAllowed": false,
+  "plusDeclaredContractRetryAdaptations": true,
+  "plusDeclaredSafeRetryAdaptations": true,
+  "webSearchToolAllowed": false
+}
+```
+
+Semantic bound: U frozen coverage units plus the exact recorded safe retry adaptations, at most one declared contract retry per unit, and at most ONE synthesis turn for that frozen review-category Run. The selected rule authorizes that exact review CrossUnitStep; it does not borrow the baseline-analysis reduction capability. A second model step, repeated synthesis, assurance-sampling or reflection stage is not implicitly admitted by this object. Safe retry must already be a declared bounded adaptation; it is not permission to grow a replay loop. Missing contract/composition/fixture/closed-unit-set digest refuses. Model output source citations still pass the exact result/anchor validation; a cross-chapter scope is frozen by its own plan, not ambient manuscript retrieval.
+
+If F-19 proposes both a model reduction and a separate model synthesis in one category Run, one extra turn is insufficient. Return that exact stage/count contract to the Commander for another Owner-reviewed row; do not interpret the two stage labels as two turns under plusOneCrossUnitSynthesisTurn. The F-26 child's existing local synthesis reducer remains deterministic and does not need, or prove use of, this model capability. Service tests under their truthful selected ordinary-production projection remain acceptable evidence where a successful guest fixture step is not yet admitted/implemented.
+
+F-16: add exactly the v27 execution defaults to the v29 top level as a separate Owner-reviewed fixture execution declaration:
+
+```json
+{
+  "execution": {
+    "maxInFlightRequests": { "configurable": true, "default": 4 },
+    "perRunUnitParallelism": { "configurable": true, "default": 3 },
+    "backgroundShare": { "configurable": true, "default": 1 }
+  },
+  "transport": {
+    "requestDeadlineSeconds": 180,
+    "rateLimitRetry": { "honourRetryAfter": true, "maxRetries": 1 }
+  }
+}
+```
+
+The 4/3/1 numbers are configurable defaults, not new immutable hard maxima. Runtime-resolved validated values are pinned in each tested attempt; a default-fixture proof asserts 4/3/1. Execution admission still requires one of the closed fixture rules and its own origin/source/budget contract. An execution block does not admit a new kind or background origin, and localTools.parallelCallsAllowed does not prove multiple model units in flight. The transport counterpart permits only scripted replay of deadline/rate-limit behavior with the same 180-second/one-retry terms; it arms no host, credential or live adapter. If the fixture scripting contract cannot represent a behavior, prove it in the appropriate existing service test and disclose the missing Journey instead of adding unreviewed fixture bytes. All actual live transmission counts remain zero.
+
+Add exact executionCapabilityRuleIds and transportCapabilityRuleIds, each equal to [development-ci-fixture-review, development-ci-fixture-factual-claim-stages, development-ci-fixture-factual-recheck]. These are eligibility lists for the new declarations, not generic launch defaults. Each matched consumer must name its selected rule; F-04's stricter retry=false overrides the general scripted one-retry declaration. The legacy compatibility profile and the other new single-attempt dialogue/polish/curation rules do not inherit 4/3/1 or a resend from the top-level blocks. Preserve each of those rules' separately specified one-attempt/batch behavior. No fixture identity alone proves that a new execution capability was consumed.
+
+F-26: coordination with the F-26 brief author confirms a bounded first child can reuse editorial-review/typos-and-usage, with template-constrained chunked-review -> existing local synthesis -> derived-report. It introduces no new task kind. Its nonempty instruction has no current consumer at this inspected base. Propose the following exact block on development-ci-fixture-review, plus editorTaskInstructionAllowedTaskKinds:["editorial-review/typos-and-usage"] as a closed per-kind restriction:
+
+```json
+{
+  "editorTaskInstruction": {
+    "category": "editor-task-instruction",
+    "maxGraphemes": 1200,
+    "attributedToProcedureVersion": true,
+    "personNamesAllowed": false,
+    "contractFramingOverrideAllowed": false
+  }
+}
+```
+
+Add only editor-task-instruction to this fixture rule's category vocabulary for that named kind. Input must be admitted public/synthetic instruction text, pinned to the immutable procedureId/version/documentDigest. Proposed consumer block is {procedureId,version,documentDigest,text}; existing identifier contracts apply, text is <=1200 graphemes, and source/contract/composition/fixture digests are exact. Oversize or forbidden names/framing override refuse; no silent truncation or task instruction promoted to system authority. Use a new prompt-contract variant when the consumer lands; old /1 and /2 bytes remain unchanged. This row does not admit house-review-guideline-clause, custom-analysis/*, baseline, Series/factual instruction re-expression, evaluation/writing, arbitrary stage topology or a new F-26 task kind. Those require their own exact feature contract if later needed.
+
+These three fixture additions are explicit proposed Owner decision rows. Their presence in a candidate policy is not a successful Journey. Runtime activation, consumer wiring, new fixture identity and exact-head guest evidence must all exist before claiming the corresponding F-19/F-16/F-26 proof.
+
+### 5.2 Current child-brief cross-check: guideline payload and truthful omissions
+
+The independently read f19b-cross-unit.DRAFT.md revision 2 requires category-specific frozen guideline snapshots, using existing aggregate 40-clause and per-clause 300-grapheme limits. A guideline_clause tool declaration alone does not admit this prompt payload. Add a separate proposed Owner row to development-ci-fixture-review:
+
+```json
+{
+  "houseReviewGuidelineClauseAllowedTaskKinds": [
+    "editorial-review/style-and-format"
+  ],
+  "houseReviewGuidelineClause": {
+    "category": "house-review-guideline-clause",
+    "maxClauses": 40,
+    "maxGraphemesPerClause": 300,
+    "attributedToImportedDocumentVersion": true,
+    "personNamesAllowed": false
+  }
+}
+```
+
+Add house-review-guideline-clause to that fixture rule's category vocabulary only for the named kind. Forty is the aggregate per-request clause cap across all included guideline documents, not forty per document. Each clause is at most 300 graphemes. Source must be an already admitted public/synthetic test guideline document with exact document version/digest and clause identity frozen in the review plan; unavailable/stale pins refuse, and no imported real house document is admitted by this fixture policy. Required redaction and the no-person-names contract remain. The actual guideline snapshot builder must enforce this bound before any full guest-proof claim.
+
+F-19's frozen closed-unit findings and explicitly pinned baseline-lead snapshot (or explicit absence) remain the declared whole-book stage inputs under public-or-synthetic, from the same authorized admitted revision. A baseline_facts tool currently supplies entities/events/settings, not a substitute live lookup of conflicts/lead findings. The feature child must finish the exact source/contract/digest and payload-size validation before its new fixture is authored; this policy row does not invent a new baseline-lead schema or admit ambient latest-state reads. One model CrossUnitStep plus deterministic synthesis fits section 5.1; two model turns do not.
+
+F-26 coordination confirms its typos-and-usage first child keeps existing built-in clauses in the frozen template contract; the only newly supplied text is its bounded editor-task-instruction. It needs no new imported house guideline payload. The style-and-format clause row above must not be applied to typos-and-usage by category inheritance, and F-26's instruction row does not grant F-19 stage behavior or arbitrary topology.
+
+F-07 is local DOCX parsing/sample capture/export; it needs no new model/fixture admission to deliver its bounded import child. Its samples stay outside editorial-learning-example/1 until the F-07 typed sample/source contract and a separately reviewed curation extension exist. Local sample capture success is not evidence that Word examples entered model curation.
+
+F-16's selected execution declaration can support a future fixture proof using one of the expressly admitted kinds, such as a review kind. It does not add baseline-manuscript-analysis, ordinary Book dialogue, connection-test or every existing analysis kind to v29 fixtureReplayRules. The current F-16b2 draft truthfully keeps its J-09/J-10 legacy proof and production service/renderer tests; leave that disposition until a concrete admitted fixture consumer and scenario exist. No missing kind is added from the feature label alone.
+
+Redaction cross-check: unchanged ordinary-production review, Global Agent and generic background rules all retain housePeopleNamesAndRolesStripped:true and remarksAndInternalNotesStripped:true. New category registration must not automatically widen another rule's source scope: Global Agent's category-bookkeeping freedom still permits only its explicitly listed eligible memory/preference revisions and editor words, not arbitrary raw learning examples or unlisted records. Preserve providerProcessingAuthorizesLearning:false: local learning eligibility is a separate required authority, not something the new provider rule creates.
+
+### 5.3 Closed F-04 fixture counterpart — separately proposed Owner scope
+
+development-ci-fixture-factual-claim-stages matches only factual-review, taskMode whole-manuscript, assurance standard/strict, procedure ai7-procedure/factual-claim-check version1, artifact ai7.factual-claim-ledger/1 and contracts ai7.factual-claim-extraction/1 or ai7.factual-claim-verification/1. Copy the exact stage/source/count block in 4.6 with replay dispatch counting in place of network submissions; all common fixture requirements remain, including networkAllowed:false, credentialUseAllowed:false, remoteFallbackAllowed:false, fixtureRecordingAllowed:false and authorizedLiveTransmissionCount0.
+
+Only admitted public/synthetic unit messages, exact validated claim ledgers and pinned public/synthetic recorded research results may enter. Category vocabulary is exactly public-or-synthetic, web-search-query and public-source-fetch; the latter two describe recorded logical query/result payloads and grant no egress. Extraction registers zero tools. Verification registers only scripted websearch/webfetch; no local retrieval or extra tool is inherited from development-ci-fixture-review. Scripted search reservations remain at most3/claim; model steps at most129/claim; platform rounds128; recorded fetches preserve the cited-URL/per-Run/maxBytes5242880/timeout30/no-retry terms. A fixture cannot add a backend, credential, real HTTP request or Search probe. Runtime must match the exact ledger/claim/unit/contract/composition/fixture digest and represent successful replay versus unknown/refused attempts truthfully. Missing script/source/pins refuses without fallback.
+
+This exact contract rule takes precedence over generic fixture review: the new stage contracts are excluded from generic review admission even though factual-review also occurs there. Otherwise a caller could bypass stage source/count limits by selecting the older generic rule. No additional synthesis, sampling, reflection or clarification is inherited through that overlap. Same-scope successful proof needs newly identified fixtures plus the actual stage consumer and guest evidence; existing legacy recordings remain unchanged. No live recording acquisition or developer-live expansion is included in policy preparation.
+
+development-ci-fixture-factual-recheck separately copies section 4.3's exact single-claim request-evidence origin, current decision/result/ledger/source pins, active matching enrollment and once key. Its only stage is ai7.factual-claim-verification/1; it shares the recorded-only category/tool and 129-model/128-round/3-search bounds above. All participating manuscript, decision and source records must originate from admitted public/synthetic fixtures. The fixture must exercise the actual enrollment/decision/claim/counter path; it cannot manufacture authorization by a reader overlay or turn keep-pending into request-evidence. Missing/stale origin refuses. This closed rule grants no generic background processing, curation origin, extraction or real research request.
+
+### 5.4 Explicitly unready and excluded: F-18c fixture subagents
+
+v27 already declares subAgents:{declaredInPlanEnvelopeRequired:true,inheritsParentScopeBindingPolicyAndCeiling:true,countsInsideParentAttemptTransmissionBound:true,finalProviderPayloadEgressGateRequired:true,createsTaskRunOrDecisionRecordAllowed:false}; v28 preserves that object unchanged. No corresponding v29 grant is included in this candidate. F-18c's exact composition/profile and recorded-fixture identity are not frozen, with F-18b/F-16b2 dependencies still pending. A top-level boolean or copied invariant object alone would not close the source/count/profile boundary.
+
+The excluded design sketch is deliberately narrow: only editorial-review/typos-and-usage under development-ci-fixture-review; one leaf child replacing one already-planned unit turn; maxDepth1/maxConcurrentChildren1; zero parent model requests; identical frozen unit message/system contract; shared parent scope/binding/policy/ceiling and shared request/tool/search counters; no child-added retry, fork/seed/persona/agentOptions override, new model tool or cross-unit stage. Even this sketch is not an approved candidate rule: the exact implementation profile and fixture digests must first become reviewable, and any later row needs its own explicit decision. It neither admits external packages nor assumes optional jobs/fork dependencies. Current truthful service evidence can proceed under its actual selected authority; no positive v29 subagent Journey is claimed.
+
+## Later activation and feature dependencies
+
+The separately bounded activation/reader child must preserve historical plans and implement strict projections and consumers before selection. Host preparation is not final completion or release proof. Exact Owner decisions, Reviewer correction, the full exact-head guest ladder `doctor,bootstrap,check,test,service,build,e2e:all` and applicable existing Gate evidence remain required. No Ready, merge, activation or model-quality claim is made.
+
+1. Draft preparation authors/reviews the exact unselected v28/v29/set-v20 files, their schemas/projections, hashes and narrow pair-count synchronization. It changes no launch, build-copy list, Run identity, feature consumer or fixture recording. Candidate validation is not activation readiness.
+2. Record Owner decisions for each new scope row against those exact bytes; accepted omission repairs are separately identified. If any row changes or is declined, revise the concrete candidate and its hashes before proceeding. No approval is inferred for a future feature type.
+3. A separately assigned activation/reader child starts from the approved policy artifacts and exact latest wave base after conflicting writers release. It adds strictly checked projections, preserves historical versions, carries only approved fixture capabilities, updates source-checkout pins and build distribution coherently, and tests the selected candidate. It may keep unimplemented kinds fail-closed, but must not claim those feature Journeys complete. A new projection contract needs its actual synchronized protocol peers; none are pre-reserved here.
+4. Each consuming feature child names that activation commit and its exact selected rule/category/source contract, lands its runtime implementation and newly identified fixtures, and supplies the appropriate guest evidence. A feature whose production path already exists under v27 may proceed with the truthful service/renderer/legacy-Journey proof in its current brief; it does not depend on v29 merely to keep working. A positive new fixture proof does depend on v29 activation and actual consumer readiness.
+5. F-07 local import/sample work is independent of curation activation. Model curation of Word pairs is an explicit later dependency on both typed F-07 sources and its approved category extension. No prepared policy file or successful import closes #1111/F-05.
+6. #1055's probe consumer depends on selected searchConnectionTest plus its exact candidate configuration, broker/ticket path and bounded UI projection; policy preparation/protocol documentation proves no live result or task qualification. F-04's local ledger child after #1058 is independent of new model authority; its later foreground executor depends on the approved claim-stage row, versioned contracts, durable ledger/counters and selected consumer. New fixture success additionally depends on the closed F-04 fixture rule and new exact fixtures. Do not make either product child wait for an unrelated runtime feature, or count an unimplemented candidate row as delivered behavior.
+7. The background single-claim recheck additionally depends on the exact foreground verification executor, actual idle dispatcher, current decision/result-to-claim linkage, matching enrollment and durable once key. It cannot schedule hidden extraction to satisfy a missing ledger. The unready F-18c fixture profile is excluded and is not a dependency of preparing or deciding the closed policy rows above.
+8. Selecting v29 depends on the complete closed legacy compatibility manifest, its strict reader/consumer selection and preservation checks across the existing affected Journey matrix (including J-04/J-07/J-09/J-10/J-11/J-13/J-16 where the inventory shows a model fixture path). Preserve old records as v1 and new launches as v29; legacy profile consumers receive no new execution defaults. A missing compatibility mapping blocks selection, not the provider-free Draft preparation work.
+
+## Exact Owner decisions still open
+
+After the Draft has exact hashes, ask for the named diffs independently, citing the candidate files and their exact digests:
+
+1. Approve ordinary-production v28 editorial-learning-example/1 from eligible typed proposal-decision records, with the exact 10-example/2048-per-text/512-reason/16000-total/131072-byte bounds and mandatory enabled-learning envelope; retain the separate 12-line/200-grapheme reference preference block.
+2. Approve the existing bounded house-review-preference-excerpt category for polish, preserving the foreground one-attempt/Fast/no-web/suggestions-only contract.
+3. Approve the standalone searchConnectionTest purpose in 4.5: exactly the fixed public argument digest, direct Search endpoint, existing ready production search-deepseek credential, one request per explicit action, 25 seconds/2 MiB, bounded transient titles/URLs, no retry/fallback/default/qualification/durable output. This grants no task research backend or non-production permission.
+4. Approve the exact foreground factual-review procedure/contracts in 4.6, whole-manuscript and standard/strict only: immutable U/A/C membership, <=200 assertions/unit, <=U+C initial sessions, incremental <=U+129C model submissions and <=3C search submissions, metadata<=16384 bytes plus the exact already-authorized source-unit message, with new-stage retries disabled and no extra inherited +1.
+5. Approve the separately closed enrolled factual-recheck rule in 4.3: one preexisting exact claim, latest current request-evidence decision and active same-Book enrollment, durable once key, no extraction/source refresh, verification-only 129-model/128-round/3-search maximum, and no automatic unresolved-result loop. These are new exact origin/selection choices, not authority inferred from foreground review.
+6. Approve the six exact v29 fixture-only rules and their declared categories/tools. This includes the review's single synthesis turn and the new execution/transport declarations only for the three exact eligibility-list rule IDs: configurable defaults4/3/1 and scripted transport180 seconds/one Retry-After retry; exact F-04 stages override that retry to false and keep their own total bounds. Legacy and other new rules do not inherit these capabilities. All fixture rules have zero live transmissions, zero credential use, no remote fallback or recording.
+7. Approve the v29 1200-grapheme procedure instruction for typos-and-usage only and aggregate40-clause/300-grapheme guideline payload for style-and-format only; no cross-kind inheritance.
+8. Approve the coherent candidate set-v20 references to the accepted exact v28/v29 bytes, leaving fixture-recording v2, developer-live v24 and External Export v2 pins unchanged. Source-checkout selection/build/consumer activation belongs to the separately bounded later child.
+9. Accept the exact metadata-only legacyLocalFixtureCompatibility manifest as preservation of existing local fixture behavior, with its fixed809c source/policy/profile/fixture/entry pins, separate capability projection and no new-contract fallback. This grants no new kinds, tools, source payloads, throughput or subagents; review the complete populated tuples, not an empty future manifest.
+
+All decisions preserve ADR0079 redaction, existing credential/material boundaries, historical bytes and publication/export separation. Word examples and other untyped curation sources, arbitrary kinds/topology, developer-live F-04 stages, Search probe fixture success, and the unready v29 F-18c subagent counterpart remain explicitly excluded. No approval of unknown future profile, fixture, contract field or source type is requested.
+
+Offer the curation partial-only alternative explicitly if the Owner declines the useful example payload. Do not ask them to approve unknown future source types, runtime schemas, raw captures or a redaction amendment by implication. Do not mark #1111 or F-05 complete from policy files or fixture success alone.
+
+## Complete metadata-only legacy manifest
+
+This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON and its whole-document const schema. Canonical tuple hashing sorts object keys recursively, retains array order and encodes UTF-8 JSON without whitespace. Resolved lineage hashing uses leaf-first `identity:rawFileSha256` lines separated by LF, without a final LF.
+
+```json
+{
+  "profileId": "development-ci-legacy-local-fixture-809c96f2",
+  "sourceCommit": "809c96f28bf111db39dac80b3b0743929779d52e",
+  "predecessorPolicyId": "provider-processing-policy",
+  "predecessorVersion": "v1",
+  "predecessorCanonicalPath": "docs/policies/provider-processing-policy.v1.json",
+  "predecessorSha256": "d9dfe8c13a58649d8d9f607364030468ae71832b94c9436291d29000795d725a",
+  "route": "ai7-local-deterministic",
+  "model": "ai7-deterministic-fixture",
+  "fixtureSchema": "ai7.model-fixture/1",
+  "networkAllowed": false,
+  "credentialUseAllowed": false,
+  "remoteFallbackAllowed": false,
+  "fixtureRecordingAllowed": false,
+  "newContractFallbackAllowed": false,
+  "newFixtureRuleCapabilitiesInherited": false,
+  "executionCapabilityProfile": "legacy-existing-only",
+  "newTopLevelExecutionDefaultsInherited": false,
+  "newTopLevelTransportDefaultsInherited": false,
+  "registryPins": [
+    {
+      "path": "src/service/analysis/kind-definition.ts",
+      "sha256": "8fc7079f1799f3497657d68b5d13f0111a0c86767bc0c8ab438af810174c68ae"
+    },
+    {
+      "path": "src/service/provider/model-fixture.ts",
+      "sha256": "9efba0dff867a7dad26d1fc6766303b5caafc88f8b30c1e94362a5edeb7594b8"
+    },
+    {
+      "path": "src/service/provider/local-deterministic-adapter.ts",
+      "sha256": "471cf0bcdb0680cc8ce4f422acc06a552f03abb38bf4615cf43c0d3bcef84d3e"
+    },
+    {
+      "path": "src/service/harness/primary-agent-harness.ts",
+      "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+    },
+    {
+      "path": "src/service/provider/egress-gate.ts",
+      "sha256": "299aff44f773516873b7c8460e7655341d59fab8d5a3c9a69c1fda112266552a"
+    },
+    {
+      "path": "src/service/provider/platform-tools.ts",
+      "sha256": "55d8a998936ad6079c89e4d2fafecebfc9e2359b4bb89645a983ef3d646a865f"
+    },
+    {
+      "path": "tests/editorial-cases/runner/index.ts",
+      "sha256": "1bc7382c30aa915aae0b8242816a3a5c2bb48c3422ca443d6239076770c4f22c"
+    },
+    {
+      "path": "tests/editorial-cases/runner/session.ts",
+      "sha256": "3300db9e4640ff0030fddfc5a684c6eb7ebeed90221a1a14a53185368419418c"
+    },
+    {
+      "path": "tests/editorial-cases/runner/run-polish.ts",
+      "sha256": "f6e23c5a6d65c7ed4ff19bd66c0161af9e952714d0c7411ac761b2e836904df1"
+    },
+    {
+      "path": "tests/editorial-cases/runner/run-review.ts",
+      "sha256": "0317ac90136e4eeb26889250106f73815d55d6b9f71c7b1512d55f1071d8215a"
+    },
+    {
+      "path": "tests/editorial-cases/runner/run-structural.ts",
+      "sha256": "c3e2bf0f1294cef14becb1f4a001bfff9da98e297851647312f15719c30f5be8"
+    },
+    {
+      "path": "tests/editorial-cases/runner/run-setups.ts",
+      "sha256": "100e41aac39b36089fcd0f9351fee2f4341c5c31104c290dfa38538986e6d2ff"
+    },
+    {
+      "path": "tests/editorial-cases/runner/case-file.ts",
+      "sha256": "c0e0c795390496eecc91319cd58509fbdff24ebb4ae732465f2d4f0dbc3ced5d"
+    },
+    {
+      "path": "tests/editorial-cases/synthetic-manuscripts.mjs",
+      "sha256": "bab11f9bc31323b6bdd1eb080ae259da2109b721bd18acab44e3dae93a90a521"
+    },
+    {
+      "path": "tools/editorial-evidence.mjs",
+      "sha256": "ee8bcde700c4ea23042f9984822888ad318ae92568fd5164346a67c33c264edc"
+    }
+  ],
+  "allFixtureFileInventory": [
+    {
+      "fixtureIdentity": "review-overlap-authored",
+      "fixtureFile": "tests/fixtures/model/review-overlap-authored.json",
+      "fixtureFileSha256": "c24b4549e1404b58e6829f3c97b97b88e88798fa301086c3785f6d3b2eda40d3",
+      "basedOn": null,
+      "provenance": "authored",
+      "entryCount": 4
+    },
+    {
+      "fixtureIdentity": "sample1-agent-workspace",
+      "fixtureFile": "tests/fixtures/model/sample1-agent-workspace.json",
+      "fixtureFileSha256": "ed01cb161afb83878aa99441447ae32675b1b9d1af06f2ae6b2f15244527e2cf",
+      "basedOn": "sample1-dialogue-retrieval",
+      "provenance": "authored",
+      "entryCount": 2
+    },
+    {
+      "fixtureIdentity": "sample1-baseline-account-limit",
+      "fixtureFile": "tests/fixtures/model/sample1-baseline-account-limit.json",
+      "fixtureFileSha256": "1eec1d5af1e13ab93d844a2851b0d03d99d5a3d7e3eb62cc68e0e51a0ff2d738",
+      "basedOn": "sample1-baseline-happy",
+      "provenance": "recorded",
+      "entryCount": 1
+    },
+    {
+      "fixtureIdentity": "sample1-baseline-happy",
+      "fixtureFile": "tests/fixtures/model/sample1-baseline-happy.json",
+      "fixtureFileSha256": "9c3bb63c931966ddbc4c94c5aafb29f7d04d55083f9b4f372391c6714bffba0a",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 12
+    },
+    {
+      "fixtureIdentity": "sample1-baseline-one-unit-failure",
+      "fixtureFile": "tests/fixtures/model/sample1-baseline-one-unit-failure.json",
+      "fixtureFileSha256": "49b5bf7eb0a2262f79fe6382ea77f65fa2f34eae03e33d7eae1244989cac52e1",
+      "basedOn": "sample1-baseline-happy",
+      "provenance": "recorded",
+      "entryCount": 7
+    },
+    {
+      "fixtureIdentity": "sample1-baseline-outcome-unknown",
+      "fixtureFile": "tests/fixtures/model/sample1-baseline-outcome-unknown.json",
+      "fixtureFileSha256": "c41b2f1c81efdc956029adc492b84b9c1b4b7a2e65811d577522d79a05bceb66",
+      "basedOn": "sample1-baseline-happy",
+      "provenance": "recorded",
+      "entryCount": 1
+    },
+    {
+      "fixtureIdentity": "sample1-baseline-reduction-unknown",
+      "fixtureFile": "tests/fixtures/model/sample1-baseline-reduction-unknown.json",
+      "fixtureFileSha256": "ffe7bb34525f24198de95c15fae0f62d77179292617672815574b4ead631e6b3",
+      "basedOn": "sample1-baseline-happy",
+      "provenance": "recorded",
+      "entryCount": 1
+    },
+    {
+      "fixtureIdentity": "sample1-baseline-sampling-two-turns",
+      "fixtureFile": "tests/fixtures/model/sample1-baseline-sampling-two-turns.json",
+      "fixtureFileSha256": "0dbe9e8cd3e24653cc494637a4601b7d04746a4b7513b01cbbcb4758b9c4f533",
+      "basedOn": "sample1-baseline-happy",
+      "provenance": "recorded",
+      "entryCount": 3
+    },
+    {
+      "fixtureIdentity": "sample1-baseline-transient-retry",
+      "fixtureFile": "tests/fixtures/model/sample1-baseline-transient-retry.json",
+      "fixtureFileSha256": "a5d36dca822009d93727af65850254d6f4105db826942bb762455f5ac4c15fd5",
+      "basedOn": "sample1-baseline-one-unit-failure",
+      "provenance": "recorded",
+      "entryCount": 4
+    },
+    {
+      "fixtureIdentity": "sample1-conflict-regenerate-authored",
+      "fixtureFile": "tests/fixtures/model/sample1-conflict-regenerate-authored.json",
+      "fixtureFileSha256": "61490b45172cada9f9eab613714643919d75e36cab0b5f2f31ba77bbbcebe76d",
+      "basedOn": null,
+      "provenance": "authored",
+      "entryCount": 1
+    },
+    {
+      "fixtureIdentity": "sample1-custom-analysis-authored",
+      "fixtureFile": "tests/fixtures/model/sample1-custom-analysis-authored.json",
+      "fixtureFileSha256": "eac9a12c020b70c3ee052938cccdb937d156198491a3cea5d589aa20c73e1b1e",
+      "basedOn": "sample1-baseline-happy",
+      "provenance": "authored",
+      "entryCount": 9
+    },
+    {
+      "fixtureIdentity": "sample1-dialogue",
+      "fixtureFile": "tests/fixtures/model/sample1-dialogue.json",
+      "fixtureFileSha256": "b8b1206a06c85eb5dfc7bf669368b99ffe77d42619712e0e9dac6ada26d5e18f",
+      "basedOn": "sample1-baseline-happy",
+      "provenance": "recorded",
+      "entryCount": 2
+    },
+    {
+      "fixtureIdentity": "sample1-dialogue-recorded-v41",
+      "fixtureFile": "tests/fixtures/model/sample1-dialogue-recorded-v41.json",
+      "fixtureFileSha256": "ad9db1efa161c9f77afbfa70d010ece80e23748a56db2547218d0b03cc6926e1",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 1
+    },
+    {
+      "fixtureIdentity": "sample1-dialogue-recorded-v41-stream",
+      "fixtureFile": "tests/fixtures/model/sample1-dialogue-recorded-v41-stream.json",
+      "fixtureFileSha256": "d719d1efc5fd441d9674cd8502099c78896bf70f3626498d9b937681e1a0a904",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 1
+    },
+    {
+      "fixtureIdentity": "sample1-dialogue-retrieval",
+      "fixtureFile": "tests/fixtures/model/sample1-dialogue-retrieval.json",
+      "fixtureFileSha256": "ad626c7a067d977f9dee7bddb0205fc7221ef10f133b2983640419e96a257520",
+      "basedOn": "sample1-dialogue",
+      "provenance": "authored",
+      "entryCount": 1
+    },
+    {
+      "fixtureIdentity": "sample1-evaluation-authored",
+      "fixtureFile": "tests/fixtures/model/sample1-evaluation-authored.json",
+      "fixtureFileSha256": "8675ee3dfc904759589b8d08aed621233306739dac4c354836052e73ee184d1c",
+      "basedOn": "sample1-baseline-happy",
+      "provenance": "authored",
+      "entryCount": 10
+    },
+    {
+      "fixtureIdentity": "sample1-evaluation-rewrite-authored",
+      "fixtureFile": "tests/fixtures/model/sample1-evaluation-rewrite-authored.json",
+      "fixtureFileSha256": "9e21d82a8a5c5759101940e6708a055ad4991a0a0d4eb317ca230c3d6fa08194",
+      "basedOn": "sample1-readers-report-authored",
+      "provenance": "authored",
+      "entryCount": 10
+    },
+    {
+      "fixtureIdentity": "sample1-factual-authored",
+      "fixtureFile": "tests/fixtures/model/sample1-factual-authored.json",
+      "fixtureFileSha256": "ef285a2a5d0dbbbb74cc9c1f304768d763c22cbfd51d638f091b46881327a13b",
+      "basedOn": null,
+      "provenance": "authored",
+      "entryCount": 17
+    },
+    {
+      "fixtureIdentity": "sample1-factual-verified",
+      "fixtureFile": "tests/fixtures/model/sample1-factual-verified.json",
+      "fixtureFileSha256": "b68e88613ba360250beaa61ab56a575705a4e611e8ab5597de0cd51dd02e36a2",
+      "basedOn": "sample1-factual-authored",
+      "provenance": "authored",
+      "entryCount": 8
+    },
+    {
+      "fixtureIdentity": "sample1-model-clarification",
+      "fixtureFile": "tests/fixtures/model/sample1-model-clarification.json",
+      "fixtureFileSha256": "d61948d9bbc6ebbf9275831b72b266f65a155ae6817055f7cbbc7ea96737a100",
+      "basedOn": "sample1-baseline-happy",
+      "provenance": "authored",
+      "entryCount": 9
+    },
+    {
+      "fixtureIdentity": "sample1-model-clarification-live-ambiguous",
+      "fixtureFile": "tests/fixtures/model/sample1-model-clarification-live-ambiguous.json",
+      "fixtureFileSha256": "ff338f29c29ef4c7b45390a659535b49fb1e6d24997a55b22ff71deaa5c44b85",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 20
+    },
+    {
+      "fixtureIdentity": "sample1-model-clarification-live-baseline",
+      "fixtureFile": "tests/fixtures/model/sample1-model-clarification-live-baseline.json",
+      "fixtureFileSha256": "d79e0b5f890c36cee7e84c521791316fc34acbf953511f0eaef9f0c1560a8928",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 13
+    },
+    {
+      "fixtureIdentity": "sample1-polish-authored",
+      "fixtureFile": "tests/fixtures/model/sample1-polish-authored.json",
+      "fixtureFileSha256": "8ba20145b3aa48ea9e3bc72d5ec8f11ac0e7f266b590632d04c0b01405abd417",
+      "basedOn": null,
+      "provenance": "authored",
+      "entryCount": 1
+    },
+    {
+      "fixtureIdentity": "sample1-readers-report-authored",
+      "fixtureFile": "tests/fixtures/model/sample1-readers-report-authored.json",
+      "fixtureFileSha256": "5cd0192953a62c5a359de38ec7ad2df4ce1d3b671413eb243fed0027dc2e8128",
+      "basedOn": "sample1-evaluation-authored",
+      "provenance": "authored",
+      "entryCount": 10
+    },
+    {
+      "fixtureIdentity": "sample1-recorded-v41-baseline",
+      "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-baseline.json",
+      "fixtureFileSha256": "9650b60b4277cfcd2fa943653ef2b6fc816d674ba38707ae6ec05155238cf391",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 12
+    },
+    {
+      "fixtureIdentity": "sample1-recorded-v41-conflict-regenerate",
+      "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-conflict-regenerate.json",
+      "fixtureFileSha256": "642323156cb588d6a03bebcc8a40ba665c609e623a63280c61f0c37364d72c3f",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 1
+    },
+    {
+      "fixtureIdentity": "sample1-recorded-v41-editorial-evaluation-initial",
+      "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-editorial-evaluation-initial.json",
+      "fixtureFileSha256": "76d91f91c5c192e7a3712b48a7eebe646866efe47bbcc8d716af0f0d1e1244c3",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 9
+    },
+    {
+      "fixtureIdentity": "sample1-recorded-v41-editorial-polish",
+      "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-editorial-polish.json",
+      "fixtureFileSha256": "f01fff37883ebdee13b958a1a26d989e2ee2f57f762196fbcf140afcd3b7f129",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 2
+    },
+    {
+      "fixtureIdentity": "sample1-recorded-v41-editorial-readers-report",
+      "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-editorial-readers-report.json",
+      "fixtureFileSha256": "843e2be914f773e27f5d171a8f38b14820a03c803c263b915582b508947eded1",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 9
+    },
+    {
+      "fixtureIdentity": "sample1-recorded-v41-editorial-review",
+      "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-editorial-review.json",
+      "fixtureFileSha256": "d16ada896ff969c1634c994e4556af8b7e27a7c02ffe74e70b7574fba4039176",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 37
+    },
+    {
+      "fixtureIdentity": "sample1-recorded-v41-editorial-writing-draft",
+      "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-editorial-writing-draft.json",
+      "fixtureFileSha256": "20ab36fc2427dbb7fd942792e673d70d974f5a04b9e5e3438ce241e93767d00c",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 9
+    },
+    {
+      "fixtureIdentity": "sample1-recorded-v41-evaluation-initial",
+      "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-evaluation-initial.json",
+      "fixtureFileSha256": "ee1b09546154573a84af52baa12cfa2ca8b9ca61f296e714793aebbf26f5fda6",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 10
+    },
+    {
+      "fixtureIdentity": "sample1-recorded-v41-evaluation-readers-report",
+      "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-evaluation-readers-report.json",
+      "fixtureFileSha256": "73774a1ddaeca048b7a3dd2152168fb8881c2b2632b7f5bda82fc888e5cef171",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 10
+    },
+    {
+      "fixtureIdentity": "sample1-recorded-v41-evaluation-rewrite",
+      "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-evaluation-rewrite.json",
+      "fixtureFileSha256": "533aeedce51507c7fe8e606f78e140225650b7f1c95aa6478345a5ea77b72ae5",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 9
+    },
+    {
+      "fixtureIdentity": "sample1-recorded-v41-material-readers-report",
+      "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-material-readers-report.json",
+      "fixtureFileSha256": "c0c80033e26e3753c9a573806d321a6ad729529c9ec0c1832eea243f4384f944",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 10
+    },
+    {
+      "fixtureIdentity": "sample1-recorded-v41-material-review",
+      "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-material-review.json",
+      "fixtureFileSha256": "926b71fe3ddf4c6a66bee659b6d88decd8597d2fbdb0f6fefa019b9c33905d6e",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 13
+    },
+    {
+      "fixtureIdentity": "sample1-recorded-v41-material-writing",
+      "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-material-writing.json",
+      "fixtureFileSha256": "60db2db2b46a583934e81fc7cdeae9457c414ec73794c886e1c2a55c6b15631b",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 10
+    },
+    {
+      "fixtureIdentity": "sample1-recorded-v41-polish",
+      "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-polish.json",
+      "fixtureFileSha256": "4bc348f5485c8788091c64bc9721eadf6aaa26d11a0496158f05633b8adb694b",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 1
+    },
+    {
+      "fixtureIdentity": "sample1-recorded-v41-range",
+      "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-range.json",
+      "fixtureFileSha256": "bdcf19c5a1c7d407d1ef16f1e8dcdea0519f920aa275a086445650c55d1f473a",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 6
+    },
+    {
+      "fixtureIdentity": "sample1-recorded-v41-review-cross-deliverable-consistency",
+      "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-review-cross-deliverable-consistency.json",
+      "fixtureFileSha256": "5b87f80859d10d872bc18d8be6ce60ff1818f4e8e4609f659920b6cfe2651af7",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 4
+    },
+    {
+      "fixtureIdentity": "sample1-recorded-v41-review-style-and-format",
+      "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-review-style-and-format.json",
+      "fixtureFileSha256": "265d028ac1a20a29c73893eca90eb49bc7220988c156a8f19432dac9ede0476d",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 14
+    },
+    {
+      "fixtureIdentity": "sample1-recorded-v41-review-typos-and-usage",
+      "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-review-typos-and-usage.json",
+      "fixtureFileSha256": "13112e021d371c27328ec686f2f42e9312d8a741938499652a3df2cea558ae41",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 13
+    },
+    {
+      "fixtureIdentity": "sample1-recorded-v41-writing-draft",
+      "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-writing-draft.json",
+      "fixtureFileSha256": "5f458dce0ea5fa110688737dc7d23138aeb34b7a08a8e8c3e7a902108d7949fb",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 9
+    },
+    {
+      "fixtureIdentity": "sample1-recorded-v41-writing-revision",
+      "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-writing-revision.json",
+      "fixtureFileSha256": "0602077b37b11e9c7de7e3cbafce9821396504957de1f63a89d87c79358101f9",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 9
+    },
+    {
+      "fixtureIdentity": "sample1-review-authored",
+      "fixtureFile": "tests/fixtures/model/sample1-review-authored.json",
+      "fixtureFileSha256": "6b44f23ff4eb0f31632fca0b11dc48a3a4469543e7388db72a9592deb92e4ebe",
+      "basedOn": "sample1-baseline-transient-retry",
+      "provenance": "authored",
+      "entryCount": 53
+    },
+    {
+      "fixtureIdentity": "sample1-review-contract-v2-controls",
+      "fixtureFile": "tests/fixtures/model/sample1-review-contract-v2-controls.json",
+      "fixtureFileSha256": "06111345b9e87649e4aae9e415a15d8126261eba7e9c553f21be26e1506eca8b",
+      "basedOn": "sample1-baseline-transient-retry",
+      "provenance": "authored",
+      "entryCount": 62
+    },
+    {
+      "fixtureIdentity": "sample1-series-consistency-authored",
+      "fixtureFile": "tests/fixtures/model/sample1-series-consistency-authored.json",
+      "fixtureFileSha256": "8ffbf90824dc0c4098cdff2924da9643dff6c9a73fa3104689e42e75cd67e6e4",
+      "basedOn": null,
+      "provenance": "authored",
+      "entryCount": 12
+    },
+    {
+      "fixtureIdentity": "sample1-writing-authored",
+      "fixtureFile": "tests/fixtures/model/sample1-writing-authored.json",
+      "fixtureFileSha256": "e658c268f3eb1d3e2992024cf59747b0f8194df347bdf7cf27ae07e1b1aaa845",
+      "basedOn": null,
+      "provenance": "authored",
+      "entryCount": 19
+    },
+    {
+      "fixtureIdentity": "synthetic-editorial-review-authored",
+      "fixtureFile": "tests/fixtures/model/synthetic-editorial-review-authored.json",
+      "fixtureFileSha256": "c9643fba6d07074521fd582609b68188013fe3be8f0e327e9e3398354a3ecc76",
+      "basedOn": null,
+      "provenance": "authored",
+      "entryCount": 8
+    },
+    {
+      "fixtureIdentity": "synthetic-interrupted",
+      "fixtureFile": "tests/fixtures/model/synthetic-interrupted.json",
+      "fixtureFileSha256": "8e44f36542981f0fc308ee21c59674a64df3f13842af910bb2b18b939ff18f6f",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 1
+    },
+    {
+      "fixtureIdentity": "synthetic-local-tool-turn",
+      "fixtureFile": "tests/fixtures/model/synthetic-local-tool-turn.json",
+      "fixtureFileSha256": "88ad6284ae6785415ec6afae0e3b2ee890fb83a9313b8edbb620dd7f0b25717e",
+      "basedOn": null,
+      "provenance": "authored",
+      "entryCount": 2
+    },
+    {
+      "fixtureIdentity": "synthetic-quota-exceeded",
+      "fixtureFile": "tests/fixtures/model/synthetic-quota-exceeded.json",
+      "fixtureFileSha256": "8a48c9f1bc0c45e329f8fa2f1d4f89121ed20e246ec148a1b71990d40ba60f5b",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 1
+    },
+    {
+      "fixtureIdentity": "synthetic-usage-ceiling",
+      "fixtureFile": "tests/fixtures/model/synthetic-usage-ceiling.json",
+      "fixtureFileSha256": "0ef1288cb0d02a98c5e289fd27294e2802c3c26ca3213915e83456240675500f",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 1
+    }
+  ],
+  "allFixtureFileInventorySha256": "2f15e004949aba1d1e8e537b7223dd1bade7b39db994e9e56164df38fe3f1e53",
+  "registeredEvidenceCases": [
+    {
+      "id": "clarification-sample1",
+      "kind": "clarification",
+      "replayRoute": "deterministic",
+      "fixtureIdentity": "sample1-model-clarification-live-ambiguous",
+      "caseFile": {
+        "path": "tests/editorial-cases/cases/clarification-sample1.json",
+        "sha256": "7a751f0189ae03aaafef634b97b92521132b073d7778c9c50f45f024e1d97fe8"
+      },
+      "caseInputSha256": "ffa77de0ad5e4999a06ed0e42cf6c7380f2727ef26005d3458a8723c958968c5"
+    },
+    {
+      "id": "cross-deliverable-sample1",
+      "kind": "cross-deliverable",
+      "replayRoute": "developer-live",
+      "fixtureIdentity": "sample1-recorded-v41-review-cross-deliverable-consistency",
+      "caseFile": {
+        "path": "tests/editorial-cases/cases/cross-deliverable-sample1.json",
+        "sha256": "59f368fa4062bbaff7358fd8b94151371c0ab4d1885b1b871f67ce44ff8dd370"
+      },
+      "caseInputSha256": "a968f1a22ff15873795be146f785bcc02645cbe021346de888b626e42c9acce1"
+    },
+    {
+      "id": "initial-evaluation-sample1",
+      "kind": "initial-evaluation",
+      "replayRoute": "developer-live",
+      "fixtureIdentity": "sample1-recorded-v41-editorial-evaluation-initial",
+      "caseFile": {
+        "path": "tests/editorial-cases/cases/initial-evaluation-sample1.json",
+        "sha256": "f98a6f737d679d0789851765b216a3bc2c2e28bc97799a5fa102ce47f866a911"
+      },
+      "caseInputSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    {
+      "id": "material-review-sample1",
+      "kind": "material-review",
+      "replayRoute": "developer-live",
+      "fixtureIdentity": "sample1-recorded-v41-material-review",
+      "caseFile": {
+        "path": "tests/editorial-cases/cases/material-review-sample1.json",
+        "sha256": "80aea9892d0c70ec4103888964486f8e8d8416ae9a231369ee2f98b1176c39aa"
+      },
+      "caseInputSha256": "824c1781732e5c9bcdd8ed8441c6a9ac2a4e73db255b6ab8af5bee2506559525"
+    },
+    {
+      "id": "polish-sample1-attributive",
+      "kind": "polish",
+      "replayRoute": "deterministic",
+      "fixtureIdentity": "sample1-recorded-v41-editorial-polish",
+      "caseFile": {
+        "path": "tests/editorial-cases/cases/polish-sample1-attributive.json",
+        "sha256": "c07674c2196737141818a913d97c711392e4dc531b0e4c1c3ce8e72b4fd9fe2f"
+      },
+      "caseInputSha256": "efcabb9045f67cbd0566034333b46dc19427a81dd46b071824bfbf1f812fa4c0"
+    },
+    {
+      "id": "polish-sample1-usage",
+      "kind": "polish",
+      "replayRoute": "deterministic",
+      "fixtureIdentity": "sample1-recorded-v41-editorial-polish",
+      "caseFile": {
+        "path": "tests/editorial-cases/cases/polish-sample1-usage.json",
+        "sha256": "d3380fd7ca687b362913b27e72c28e58ca90934dc379fe84b0aec2b081ecc41b"
+      },
+      "caseInputSha256": "b29a52c4545fe5b52807a247a37b8164aa06d0de447ae3e633a44271954f3e51"
+    },
+    {
+      "id": "readers-report-sample1",
+      "kind": "readers-report",
+      "replayRoute": "developer-live",
+      "fixtureIdentity": "sample1-recorded-v41-editorial-readers-report",
+      "caseFile": {
+        "path": "tests/editorial-cases/cases/readers-report-sample1.json",
+        "sha256": "086e2bf9ad8e517addc7c00dfb968d9c17e580f212d618b1ec51cef9fbba5f72"
+      },
+      "caseInputSha256": "2baa5b196e9316e45ab608423afd5b7233c246cdff42a7a1e636cc3034cdc09d"
+    },
+    {
+      "id": "review-literary-sample1",
+      "kind": "review",
+      "replayRoute": "developer-live",
+      "fixtureIdentity": "sample1-recorded-v41-editorial-review",
+      "caseFile": {
+        "path": "tests/editorial-cases/cases/review-literary-sample1.json",
+        "sha256": "34443479fa8d3c2b46dc9a4598490d57c6c6215ba29d5d6b6c508ae353eab3a1"
+      },
+      "caseInputSha256": "914800cfb1919877901b5462cba8bd8c98e2bc7926097262fc6f7a6fcc6994ce"
+    },
+    {
+      "id": "review-style-sample1",
+      "kind": "review",
+      "replayRoute": "developer-live",
+      "fixtureIdentity": "sample1-recorded-v41-editorial-review",
+      "caseFile": {
+        "path": "tests/editorial-cases/cases/review-style-sample1.json",
+        "sha256": "b58327f8fb1bcdc2b1038307622d2d8cb8ac06ccfaaea987d93e99249d40465d"
+      },
+      "caseInputSha256": "f510ede92f943a9315260cf2b86c6b75ce728a5a1deeb5ba2ae854cfa4c77675"
+    },
+    {
+      "id": "review-style-synthetic-museum",
+      "kind": "review",
+      "replayRoute": "deterministic",
+      "fixtureIdentity": "synthetic-editorial-review-authored",
+      "caseFile": {
+        "path": "tests/editorial-cases/cases/review-style-synthetic-museum.json",
+        "sha256": "b14946d174cd35962e3c6f285659f35ebaa026cdc150887f9de273a373d43792"
+      },
+      "caseInputSha256": "f510ede92f943a9315260cf2b86c6b75ce728a5a1deeb5ba2ae854cfa4c77675"
+    },
+    {
+      "id": "review-typos-sample1",
+      "kind": "review",
+      "replayRoute": "developer-live",
+      "fixtureIdentity": "sample1-recorded-v41-editorial-review",
+      "caseFile": {
+        "path": "tests/editorial-cases/cases/review-typos-sample1.json",
+        "sha256": "8264c48a1523589afe4c98a38f5e450f8f39beb40eaa100b7e728b332a7d4781"
+      },
+      "caseInputSha256": "90f060b26ce51e367ad3fce664bc05ab0d2bdf38b0b43b51feb5db7596274703"
+    },
+    {
+      "id": "review-typos-synthetic-lighthouse",
+      "kind": "review",
+      "replayRoute": "deterministic",
+      "fixtureIdentity": "synthetic-editorial-review-authored",
+      "caseFile": {
+        "path": "tests/editorial-cases/cases/review-typos-synthetic-lighthouse.json",
+        "sha256": "7ee0d3666450731129a49ed5f121752a8c40dbe1a46bbd39cbfc3c1c36e6330d"
+      },
+      "caseInputSha256": "90f060b26ce51e367ad3fce664bc05ab0d2bdf38b0b43b51feb5db7596274703"
+    },
+    {
+      "id": "writing-draft-sample1",
+      "kind": "writing-draft",
+      "replayRoute": "developer-live",
+      "fixtureIdentity": "sample1-recorded-v41-editorial-writing-draft",
+      "caseFile": {
+        "path": "tests/editorial-cases/cases/writing-draft-sample1.json",
+        "sha256": "a060083201b56b9b86f44f99c3c356c861e7b5522198ac05d657492804b51e83"
+      },
+      "caseInputSha256": "9ab0bbba7141f6df1023b04a01a71912f38903f68faf1946c9ebdad8d1a3853b"
+    }
+  ],
+  "excludedNoGrantInventory": [
+    {
+      "fixtureIdentity": "sample1-recorded-v41-editorial-evaluation-initial",
+      "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-editorial-evaluation-initial.json",
+      "fixtureFileSha256": "76d91f91c5c192e7a3712b48a7eebe646866efe47bbcc8d716af0f0d1e1244c3",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 9,
+      "classification": "existing-developer-live-provider-free-replay; outside-development-ci-grant",
+      "v29ReplayGrant": false,
+      "selectedDeveloperLiveVersion": "v24"
+    },
+    {
+      "fixtureIdentity": "sample1-recorded-v41-editorial-readers-report",
+      "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-editorial-readers-report.json",
+      "fixtureFileSha256": "843e2be914f773e27f5d171a8f38b14820a03c803c263b915582b508947eded1",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 9,
+      "classification": "existing-developer-live-provider-free-replay; outside-development-ci-grant",
+      "v29ReplayGrant": false,
+      "selectedDeveloperLiveVersion": "v24"
+    },
+    {
+      "fixtureIdentity": "sample1-recorded-v41-editorial-review",
+      "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-editorial-review.json",
+      "fixtureFileSha256": "d16ada896ff969c1634c994e4556af8b7e27a7c02ffe74e70b7574fba4039176",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 37,
+      "classification": "existing-developer-live-provider-free-replay; outside-development-ci-grant",
+      "v29ReplayGrant": false,
+      "selectedDeveloperLiveVersion": "v24"
+    },
+    {
+      "fixtureIdentity": "sample1-recorded-v41-editorial-writing-draft",
+      "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-editorial-writing-draft.json",
+      "fixtureFileSha256": "20ab36fc2427dbb7fd942792e673d70d974f5a04b9e5e3438ce241e93767d00c",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 9,
+      "classification": "existing-developer-live-provider-free-replay; outside-development-ci-grant",
+      "v29ReplayGrant": false,
+      "selectedDeveloperLiveVersion": "v24"
+    },
+    {
+      "fixtureIdentity": "sample1-recorded-v41-evaluation-initial",
+      "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-evaluation-initial.json",
+      "fixtureFileSha256": "ee1b09546154573a84af52baa12cfa2ca8b9ca61f296e714793aebbf26f5fda6",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 10,
+      "classification": "existing-developer-live-provider-free-replay; outside-development-ci-grant",
+      "v29ReplayGrant": false,
+      "selectedDeveloperLiveVersion": "v24"
+    },
+    {
+      "fixtureIdentity": "sample1-recorded-v41-evaluation-readers-report",
+      "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-evaluation-readers-report.json",
+      "fixtureFileSha256": "73774a1ddaeca048b7a3dd2152168fb8881c2b2632b7f5bda82fc888e5cef171",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 10,
+      "classification": "existing-developer-live-provider-free-replay; outside-development-ci-grant",
+      "v29ReplayGrant": false,
+      "selectedDeveloperLiveVersion": "v24"
+    },
+    {
+      "fixtureIdentity": "sample1-recorded-v41-evaluation-rewrite",
+      "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-evaluation-rewrite.json",
+      "fixtureFileSha256": "533aeedce51507c7fe8e606f78e140225650b7f1c95aa6478345a5ea77b72ae5",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 9,
+      "classification": "existing-developer-live-provider-free-replay; outside-development-ci-grant",
+      "v29ReplayGrant": false,
+      "selectedDeveloperLiveVersion": "v24"
+    },
+    {
+      "fixtureIdentity": "sample1-recorded-v41-material-readers-report",
+      "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-material-readers-report.json",
+      "fixtureFileSha256": "c0c80033e26e3753c9a573806d321a6ad729529c9ec0c1832eea243f4384f944",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 10,
+      "classification": "existing-developer-live-provider-free-replay; outside-development-ci-grant",
+      "v29ReplayGrant": false,
+      "selectedDeveloperLiveVersion": "v24"
+    },
+    {
+      "fixtureIdentity": "sample1-recorded-v41-material-review",
+      "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-material-review.json",
+      "fixtureFileSha256": "926b71fe3ddf4c6a66bee659b6d88decd8597d2fbdb0f6fefa019b9c33905d6e",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 13,
+      "classification": "existing-developer-live-provider-free-replay; outside-development-ci-grant",
+      "v29ReplayGrant": false,
+      "selectedDeveloperLiveVersion": "v24"
+    },
+    {
+      "fixtureIdentity": "sample1-recorded-v41-material-writing",
+      "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-material-writing.json",
+      "fixtureFileSha256": "60db2db2b46a583934e81fc7cdeae9457c414ec73794c886e1c2a55c6b15631b",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 10,
+      "classification": "existing-developer-live-provider-free-replay; outside-development-ci-grant",
+      "v29ReplayGrant": false,
+      "selectedDeveloperLiveVersion": "v24"
+    },
+    {
+      "fixtureIdentity": "sample1-recorded-v41-review-cross-deliverable-consistency",
+      "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-review-cross-deliverable-consistency.json",
+      "fixtureFileSha256": "5b87f80859d10d872bc18d8be6ce60ff1818f4e8e4609f659920b6cfe2651af7",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 4,
+      "classification": "existing-developer-live-provider-free-replay; outside-development-ci-grant",
+      "v29ReplayGrant": false,
+      "selectedDeveloperLiveVersion": "v24"
+    },
+    {
+      "fixtureIdentity": "sample1-recorded-v41-review-style-and-format",
+      "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-review-style-and-format.json",
+      "fixtureFileSha256": "265d028ac1a20a29c73893eca90eb49bc7220988c156a8f19432dac9ede0476d",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 14,
+      "classification": "existing-developer-live-provider-free-replay; outside-development-ci-grant",
+      "v29ReplayGrant": false,
+      "selectedDeveloperLiveVersion": "v24"
+    },
+    {
+      "fixtureIdentity": "sample1-recorded-v41-review-typos-and-usage",
+      "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-review-typos-and-usage.json",
+      "fixtureFileSha256": "13112e021d371c27328ec686f2f42e9312d8a741938499652a3df2cea558ae41",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 13,
+      "classification": "existing-developer-live-provider-free-replay; outside-development-ci-grant",
+      "v29ReplayGrant": false,
+      "selectedDeveloperLiveVersion": "v24"
+    },
+    {
+      "fixtureIdentity": "sample1-recorded-v41-writing-draft",
+      "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-writing-draft.json",
+      "fixtureFileSha256": "5f458dce0ea5fa110688737dc7d23138aeb34b7a08a8e8c3e7a902108d7949fb",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 9,
+      "classification": "existing-developer-live-provider-free-replay; outside-development-ci-grant",
+      "v29ReplayGrant": false,
+      "selectedDeveloperLiveVersion": "v24"
+    },
+    {
+      "fixtureIdentity": "sample1-recorded-v41-writing-revision",
+      "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-writing-revision.json",
+      "fixtureFileSha256": "0602077b37b11e9c7de7e3cbafce9821396504957de1f63a89d87c79358101f9",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 9,
+      "classification": "existing-developer-live-provider-free-replay; outside-development-ci-grant",
+      "v29ReplayGrant": false,
+      "selectedDeveloperLiveVersion": "v24"
+    },
+    {
+      "fixtureIdentity": "synthetic-interrupted",
+      "fixtureFile": "tests/fixtures/model/synthetic-interrupted.json",
+      "fixtureFileSha256": "8e44f36542981f0fc308ee21c59674a64df3f13842af910bb2b18b939ff18f6f",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 1,
+      "classification": "direct-adapter-or-DSH-unit-only; no-selected-launch-grant",
+      "v29ReplayGrant": false,
+      "selectedDeveloperLiveVersion": null
+    },
+    {
+      "fixtureIdentity": "synthetic-local-tool-turn",
+      "fixtureFile": "tests/fixtures/model/synthetic-local-tool-turn.json",
+      "fixtureFileSha256": "88ad6284ae6785415ec6afae0e3b2ee890fb83a9313b8edbb620dd7f0b25717e",
+      "basedOn": null,
+      "provenance": "authored",
+      "entryCount": 2,
+      "classification": "direct-adapter-or-DSH-unit-only; no-selected-launch-grant",
+      "v29ReplayGrant": false,
+      "selectedDeveloperLiveVersion": null
+    },
+    {
+      "fixtureIdentity": "synthetic-quota-exceeded",
+      "fixtureFile": "tests/fixtures/model/synthetic-quota-exceeded.json",
+      "fixtureFileSha256": "8a48c9f1bc0c45e329f8fa2f1d4f89121ed20e246ec148a1b71990d40ba60f5b",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 1,
+      "classification": "direct-adapter-or-DSH-unit-only; no-selected-launch-grant",
+      "v29ReplayGrant": false,
+      "selectedDeveloperLiveVersion": null
+    },
+    {
+      "fixtureIdentity": "synthetic-usage-ceiling",
+      "fixtureFile": "tests/fixtures/model/synthetic-usage-ceiling.json",
+      "fixtureFileSha256": "0ef1288cb0d02a98c5e289fd27294e2802c3c26ca3213915e83456240675500f",
+      "basedOn": null,
+      "provenance": "recorded",
+      "entryCount": 1,
+      "classification": "direct-adapter-or-DSH-unit-only; no-selected-launch-grant",
+      "v29ReplayGrant": false,
+      "selectedDeveloperLiveVersion": null
+    }
+  ],
+  "tuples": [
+    {
+      "fixtureIdentity": "review-overlap-authored",
+      "registeredProfile": "review",
+      "registeredPurposes": [
+        {
+          "kind": "journey",
+          "id": "J-04",
+          "registrationPath": "e2e/run-j04.mjs",
+          "fixtureSelectionSha256": "078029dbdc24f80fb1dc0d6fd65c5f42d2ce64f7150096e34a0bd48438cae9f5",
+          "sameSelectionsAtPreparationBase": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/review-runs.test.ts",
+          "registrationPath": "tests/service/review-runs.test.ts",
+          "fixtureSelectionSha256": "ab7aea5178dfd87738137dd73a51b342e3673e4aee4ee654843237a6f7fbb434",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        }
+      ],
+      "allowedTaskKinds": [
+        "editorial-review/typos-and-usage"
+      ],
+      "sessionPurpose": null,
+      "taskContractIdentities": [
+        "ai7.editorial-review/1"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/review/review-category-contract.ts",
+        "fixedFileSha256": "1cac3679ee0501e5f6f08797a00043b4562d536671ada27c5e4eecd8013b0df2",
+        "existingContractBytesUnchanged": true,
+        "addedExportExcluded": "REVIEW_CATEGORY_SELECTED_PREFERENCE_PROMPT_SCHEMA",
+        "constants": {
+          "REVIEW_CATEGORY_PROMPT_CONTRACT_SCHEMA": "ai7.editorial-review.prompt-contract/2",
+          "REVIEW_CATEGORY_RESULT_SET_REVISION_SCHEMA": "ai7.editorial-review.result-set-revision/1",
+          "REVIEW_CATEGORY_SUCCESSOR_REVISION_SCHEMA": "ai7.editorial-review.result-set-revision/2",
+          "REVIEW_CATEGORY_UNIT_RESULT_SCHEMA": "ai7.editorial-review.unit-result/2",
+          "REVIEW_CATEGORY_UNIT_RESULT_SCHEMA_V1": "ai7.editorial-review.unit-result/1"
+        }
+      },
+      "capturedTaskPromptContractDigests": [],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/analysis/execution.ts",
+        "sha256": "75fe09cc4aeb9d84774c59be547dcbf80b3dc7e2460bfac00651da405de377f3"
+      },
+      "planCompositionDerivation": {
+        "path": "src/service/analysis/baseline-analysis-store.ts",
+        "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
+      },
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "e02a1d5a3eb3750c8c5620c2a236dd51e67faa17606b3dab2da99319d5c4a8ed",
+      "fixtureFile": "tests/fixtures/model/review-overlap-authored.json",
+      "fixtureFileSha256": "c24b4549e1404b58e6829f3c97b97b88e88798fa301086c3785f6d3b2eda40d3",
+      "fixtureProvenance": "authored",
+      "orderedLineage": [
+        {
+          "identity": "review-overlap-authored",
+          "fixtureFile": "tests/fixtures/model/review-overlap-authored.json",
+          "sha256": "c24b4549e1404b58e6829f3c97b97b88e88798fa301086c3785f6d3b2eda40d3"
+        }
+      ],
+      "resolvedLineageSha256": "367b5aa4f0ae4ec39c24e2a0b1fc28664f3b6e8a95adebd9c0231ae186c48232",
+      "allowedExistingResultSchemas": [
+        "ai7.analysis.assurance-sampling-result/1",
+        "ai7.analysis.run-report-reflection-result/1",
+        "ai7.editorial-review.unit-result/1"
+      ],
+      "allowedCapturedSubjects": [],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "2a09bf3c361a6d36d17c8161958a655f78b78c42267c7223b8670eee0adca18f",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "review-overlap-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "2ed874862ad1fd3a2427374c9ebb8a05826617f566a9486208024b721f0d77fb",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "review-overlap-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "d9c715385e85040c20a8ae9fab3290630b7b8e881cdd0eddf35ca87b7f5706ae",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "review-overlap-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 2,
+          "requestDigest": "07ab89d3ccce59777d2cef9924ab93d633f4d8c080832b5bd431bc0f428ecef0",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "review-overlap-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/1",
+          "capture": null
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false,
+      "registeredProfileInputs": {
+        "path": "tests/support/review-categories.ts",
+        "sha256": "9aa348934a32556d6b04d19a8de72eefb46849d8f8bb2d2946a7acf1b9709e07"
+      }
+    },
+    {
+      "fixtureIdentity": "sample1-agent-workspace",
+      "registeredProfile": "baseline",
+      "registeredPurposes": [
+        {
+          "kind": "journey",
+          "id": "J-16",
+          "registrationPath": "e2e/run-j16.mjs",
+          "fixtureSelectionSha256": "2ac842fb7e8362800429feec74b86748ffabf7f60c60eea9a1176eec6e496037",
+          "sameSelectionsAtPreparationBase": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/agent-workspace.test.ts",
+          "registrationPath": "tests/service/agent-workspace.test.ts",
+          "fixtureSelectionSha256": "9e65a15425d557a32e030d15966568b9fbd0245c51b2eede7b0136c67dae5140",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        }
+      ],
+      "allowedTaskKinds": [
+        "baseline-manuscript-analysis"
+      ],
+      "sessionPurpose": null,
+      "taskContractIdentities": [
+        "ai7.baseline-manuscript-analysis/1"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/analysis/contract.ts",
+        "sha256": "51b42bae865b24f846c790dc821666cf77b5718aa61f42129249754dc18cee2b",
+        "constants": {
+          "BASELINE_PROMPT_CONTRACT_DIGEST": "89776b1b5ca2e4d3ef529b0be6b2380bfc0cb5addf0426e815df7aa195c7d386",
+          "BASELINE_PROMPT_CONTRACT_SCHEMA": "ai7.baseline-manuscript-analysis.prompt-contract/2",
+          "BASELINE_PROMPT_CONTRACT_V1_DIGEST": "4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5",
+          "BASELINE_PROMPT_CONTRACT_V1_SCHEMA": "ai7.baseline-manuscript-analysis.prompt-contract/1",
+          "BASELINE_UNIT_RESULT_SCHEMA": "ai7.baseline-manuscript-analysis.unit-result/1"
+        }
+      },
+      "capturedTaskPromptContractDigests": [],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/analysis/execution.ts",
+        "sha256": "75fe09cc4aeb9d84774c59be547dcbf80b3dc7e2460bfac00651da405de377f3"
+      },
+      "planCompositionDerivation": {
+        "path": "src/service/analysis/baseline-analysis-store.ts",
+        "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
+      },
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "e02a1d5a3eb3750c8c5620c2a236dd51e67faa17606b3dab2da99319d5c4a8ed",
+      "fixtureFile": "tests/fixtures/model/sample1-agent-workspace.json",
+      "fixtureFileSha256": "ed01cb161afb83878aa99441447ae32675b1b9d1af06f2ae6b2f15244527e2cf",
+      "fixtureProvenance": "authored",
+      "orderedLineage": [
+        {
+          "identity": "sample1-agent-workspace",
+          "fixtureFile": "tests/fixtures/model/sample1-agent-workspace.json",
+          "sha256": "ed01cb161afb83878aa99441447ae32675b1b9d1af06f2ae6b2f15244527e2cf"
+        },
+        {
+          "identity": "sample1-dialogue-retrieval",
+          "fixtureFile": "tests/fixtures/model/sample1-dialogue-retrieval.json",
+          "sha256": "ad626c7a067d977f9dee7bddb0205fc7221ef10f133b2983640419e96a257520"
+        },
+        {
+          "identity": "sample1-dialogue",
+          "fixtureFile": "tests/fixtures/model/sample1-dialogue.json",
+          "sha256": "b8b1206a06c85eb5dfc7bf669368b99ffe77d42619712e0e9dac6ada26d5e18f"
+        },
+        {
+          "identity": "sample1-baseline-happy",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-happy.json",
+          "sha256": "9c3bb63c931966ddbc4c94c5aafb29f7d04d55083f9b4f372391c6714bffba0a"
+        }
+      ],
+      "resolvedLineageSha256": "7b60ec802522e5da6a39470112491f25810752845d61ef0e351c2b835991c0ad",
+      "allowedExistingResultSchemas": [
+        "ai7.analysis.assurance-sampling-result/1",
+        "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+        "ai7.baseline-manuscript-analysis.unit-result/1"
+      ],
+      "allowedCapturedSubjects": [],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "1b0ddc63e99dd5221b18f003565fd6324ff9ce031565271e80a24f56c5d14a88",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "36e16438e6d759c4a2a850c1620b2b3db3fa660fce4c0e079c46c85724f5577d",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "3e6c2262e197cb0179a4f49ab26d8bb54ca14e2eae81af26ed62f28eb039c336",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "97072d1ab7bfdea86363b46ac85e8d469b019a3b1644ea70b7e10763deb13521",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "c667fc1443c70e4dc38370c5c16f17602ca5d0aaa249a5a8ad3e1e2a3465f2a5",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 2,
+          "requestDigest": "6d3c892f661c0d2b10edad6cf29ffa9d6cc522057b7cc1fcff0ab5c0e89af00b",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 3,
+          "requestDigest": "ba2e16f6d1d35617d25cfcaee836b532c1ab07bd077f4e87f7440e5ae8440f4a",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 4,
+          "requestDigest": "8c845a19c7d2490d4161288d9b74985e297941b9141767b155069340ae10e4e2",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "8abcb377378be04322959cc962315565229946cc6a76496e45b7cbc1697094a9",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 6,
+          "requestDigest": "eb508fdc039e94e62e92797a09683a5f6ee14bce8a8133f13021bd53b33986e7",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 7,
+          "requestDigest": "3fe4cb693a94f6338e771fd6f52f9ddca153825257bd4b006ebbe1f46fe0d9f8",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 8,
+          "requestDigest": "03e8183266d513aa4c3ac1707e1bc25b79098c3aa017c50c52b111378afc31fe",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false
+    },
+    {
+      "fixtureIdentity": "sample1-agent-workspace",
+      "registeredProfile": "dialogue",
+      "registeredPurposes": [
+        {
+          "kind": "journey",
+          "id": "J-16",
+          "registrationPath": "e2e/run-j16.mjs",
+          "fixtureSelectionSha256": "2ac842fb7e8362800429feec74b86748ffabf7f60c60eea9a1176eec6e496037",
+          "sameSelectionsAtPreparationBase": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/agent-workspace.test.ts",
+          "registrationPath": "tests/service/agent-workspace.test.ts",
+          "fixtureSelectionSha256": "9e65a15425d557a32e030d15966568b9fbd0245c51b2eede7b0136c67dae5140",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        }
+      ],
+      "allowedTaskKinds": [],
+      "sessionPurpose": "editorial-dialogue",
+      "taskContractIdentities": [
+        "ai7.editorial-dialogue/1"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/dialogue/contract.ts",
+        "sha256": "5faa939e03ec282755a55aef79771fb80dfb7e6448971bb3a3745dac502c0f61",
+        "constants": {
+          "AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST": "52c2ac13bad53d6763620038adad73b727285caae5364d8e20601274bdcf071e",
+          "AGENT_WORKSPACE_RESULT_SCHEMA": "ai7.agent-workspace.change-set/1",
+          "DIALOGUE_CONTRACT_VERSION": "ai7.editorial-dialogue/1",
+          "DIALOGUE_PROMPT_CONTRACT_DIGEST": "81cf644d1c52f63aa5db1e1a84c24e5256e96686fea0c8b69e4d1d71fe0d09ee",
+          "DIALOGUE_PROMPT_CONTRACT_SCHEMA": "ai7.dialogue-prompt-contract/1",
+          "DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST": "7875521807a89016a04f73d5392c997547f85c9af00693e457844875c655c8f6"
+        }
+      },
+      "capturedTaskPromptContractDigests": [],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/dialogue/dialogue-execution.ts",
+        "sha256": "910cedac5b65fef05a8b0916f7896b51139fdcdb5f12ed94aa6bdbbd6c2db737"
+      },
+      "planCompositionDerivation": null,
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "editor-selected-manuscript-excerpt"
+        ],
+        "allowedTools": [
+          "retrieve",
+          "exact_fetch"
+        ]
+      },
+      "categoryAndToolSetSha256": "c85ca2ef01b79d4b798213e7e7af414cd939a4ce2c8ceca3338453a9795c90aa",
+      "fixtureFile": "tests/fixtures/model/sample1-agent-workspace.json",
+      "fixtureFileSha256": "ed01cb161afb83878aa99441447ae32675b1b9d1af06f2ae6b2f15244527e2cf",
+      "fixtureProvenance": "authored",
+      "orderedLineage": [
+        {
+          "identity": "sample1-agent-workspace",
+          "fixtureFile": "tests/fixtures/model/sample1-agent-workspace.json",
+          "sha256": "ed01cb161afb83878aa99441447ae32675b1b9d1af06f2ae6b2f15244527e2cf"
+        },
+        {
+          "identity": "sample1-dialogue-retrieval",
+          "fixtureFile": "tests/fixtures/model/sample1-dialogue-retrieval.json",
+          "sha256": "ad626c7a067d977f9dee7bddb0205fc7221ef10f133b2983640419e96a257520"
+        },
+        {
+          "identity": "sample1-dialogue",
+          "fixtureFile": "tests/fixtures/model/sample1-dialogue.json",
+          "sha256": "b8b1206a06c85eb5dfc7bf669368b99ffe77d42619712e0e9dac6ada26d5e18f"
+        },
+        {
+          "identity": "sample1-baseline-happy",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-happy.json",
+          "sha256": "9c3bb63c931966ddbc4c94c5aafb29f7d04d55083f9b4f372391c6714bffba0a"
+        }
+      ],
+      "resolvedLineageSha256": "7b60ec802522e5da6a39470112491f25810752845d61ef0e351c2b835991c0ad",
+      "allowedExistingResultSchemas": [
+        "ai7.local-retrieval-stimulus/1"
+      ],
+      "allowedCapturedSubjects": [],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "7b00c9a51c87489421084e0a3b5bcccb090359bb5620c52d5d79398731b29e73",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-dialogue-retrieval",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.local-retrieval-stimulus/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "99d222cfa2aac85a27b6839fed74ea01b00f602a19028cc903f0872c33a206ed",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-dialogue",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "answer-chunks",
+          "resultSchema": null,
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "e3460da6fdc716fe6a8087d4b408341f661d6c1b5716e5e64b6c0a524e03dad3",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-dialogue",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "answer-chunks",
+          "resultSchema": null,
+          "capture": null
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false
+    },
+    {
+      "fixtureIdentity": "sample1-agent-workspace",
+      "registeredProfile": "workspace",
+      "registeredPurposes": [
+        {
+          "kind": "journey",
+          "id": "J-16",
+          "registrationPath": "e2e/run-j16.mjs",
+          "fixtureSelectionSha256": "2ac842fb7e8362800429feec74b86748ffabf7f60c60eea9a1176eec6e496037",
+          "sameSelectionsAtPreparationBase": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/agent-workspace.test.ts",
+          "registrationPath": "tests/service/agent-workspace.test.ts",
+          "fixtureSelectionSha256": "9e65a15425d557a32e030d15966568b9fbd0245c51b2eede7b0136c67dae5140",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        }
+      ],
+      "allowedTaskKinds": [],
+      "sessionPurpose": "agent-workspace",
+      "taskContractIdentities": [],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/dialogue/contract.ts",
+        "sha256": "5faa939e03ec282755a55aef79771fb80dfb7e6448971bb3a3745dac502c0f61",
+        "constants": {
+          "AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST": "52c2ac13bad53d6763620038adad73b727285caae5364d8e20601274bdcf071e",
+          "AGENT_WORKSPACE_RESULT_SCHEMA": "ai7.agent-workspace.change-set/1",
+          "DIALOGUE_CONTRACT_VERSION": "ai7.editorial-dialogue/1",
+          "DIALOGUE_PROMPT_CONTRACT_DIGEST": "81cf644d1c52f63aa5db1e1a84c24e5256e96686fea0c8b69e4d1d71fe0d09ee",
+          "DIALOGUE_PROMPT_CONTRACT_SCHEMA": "ai7.dialogue-prompt-contract/1",
+          "DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST": "7875521807a89016a04f73d5392c997547f85c9af00693e457844875c655c8f6"
+        }
+      },
+      "capturedTaskPromptContractDigests": [],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/dialogue/dialogue-execution.ts",
+        "sha256": "910cedac5b65fef05a8b0916f7896b51139fdcdb5f12ed94aa6bdbbd6c2db737"
+      },
+      "planCompositionDerivation": null,
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "editor-selected-manuscript-excerpt"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "ce3c7a0bb60b5ef7ee2683f0889d1e4a56a7f24b6b4fa488135f95ae3ba6706a",
+      "fixtureFile": "tests/fixtures/model/sample1-agent-workspace.json",
+      "fixtureFileSha256": "ed01cb161afb83878aa99441447ae32675b1b9d1af06f2ae6b2f15244527e2cf",
+      "fixtureProvenance": "authored",
+      "orderedLineage": [
+        {
+          "identity": "sample1-agent-workspace",
+          "fixtureFile": "tests/fixtures/model/sample1-agent-workspace.json",
+          "sha256": "ed01cb161afb83878aa99441447ae32675b1b9d1af06f2ae6b2f15244527e2cf"
+        },
+        {
+          "identity": "sample1-dialogue-retrieval",
+          "fixtureFile": "tests/fixtures/model/sample1-dialogue-retrieval.json",
+          "sha256": "ad626c7a067d977f9dee7bddb0205fc7221ef10f133b2983640419e96a257520"
+        },
+        {
+          "identity": "sample1-dialogue",
+          "fixtureFile": "tests/fixtures/model/sample1-dialogue.json",
+          "sha256": "b8b1206a06c85eb5dfc7bf669368b99ffe77d42619712e0e9dac6ada26d5e18f"
+        },
+        {
+          "identity": "sample1-baseline-happy",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-happy.json",
+          "sha256": "9c3bb63c931966ddbc4c94c5aafb29f7d04d55083f9b4f372391c6714bffba0a"
+        }
+      ],
+      "resolvedLineageSha256": "7b60ec802522e5da6a39470112491f25810752845d61ef0e351c2b835991c0ad",
+      "allowedExistingResultSchemas": [],
+      "allowedCapturedSubjects": [],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "791d954ebc38a92562493357f6c557684a919e4603ac599ea88bff16bd20e67f",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-agent-workspace",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "answer-chunks",
+          "resultSchema": null,
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "aa5ef4594b21112d61aa6eb63d3c491db9efe0e2931b0c595467b74280193630",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-agent-workspace",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "answer-chunks",
+          "resultSchema": null,
+          "capture": null
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false
+    },
+    {
+      "fixtureIdentity": "sample1-baseline-account-limit",
+      "registeredProfile": "baseline",
+      "registeredPurposes": [
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/model-service-proxy.test.ts",
+          "registrationPath": "tests/service/model-service-proxy.test.ts",
+          "fixtureSelectionSha256": "c7c136f2fc378efdafb94c0cafe5b8cd1958f282f1732fa9efa32f5183f9d7d2",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "journey",
+          "id": "J-10",
+          "registrationPath": "e2e/run-j10.mjs",
+          "fixtureSelectionSha256": "d07c2b52f4500c390caf8be0c2f50ada761f67fb887273399923e0f02ce2e197",
+          "sameSelectionsAtPreparationBase": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/account-limit.test.ts",
+          "registrationPath": "tests/service/account-limit.test.ts",
+          "fixtureSelectionSha256": "e537de870338ce9e75034a9fb9976dd8137b2552ea5de6a7b9fa0ff2efeef923",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        }
+      ],
+      "allowedTaskKinds": [
+        "baseline-manuscript-analysis"
+      ],
+      "sessionPurpose": null,
+      "taskContractIdentities": [
+        "ai7.baseline-manuscript-analysis/1"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/analysis/contract.ts",
+        "sha256": "51b42bae865b24f846c790dc821666cf77b5718aa61f42129249754dc18cee2b",
+        "constants": {
+          "BASELINE_PROMPT_CONTRACT_DIGEST": "89776b1b5ca2e4d3ef529b0be6b2380bfc0cb5addf0426e815df7aa195c7d386",
+          "BASELINE_PROMPT_CONTRACT_SCHEMA": "ai7.baseline-manuscript-analysis.prompt-contract/2",
+          "BASELINE_PROMPT_CONTRACT_V1_DIGEST": "4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5",
+          "BASELINE_PROMPT_CONTRACT_V1_SCHEMA": "ai7.baseline-manuscript-analysis.prompt-contract/1",
+          "BASELINE_UNIT_RESULT_SCHEMA": "ai7.baseline-manuscript-analysis.unit-result/1"
+        }
+      },
+      "capturedTaskPromptContractDigests": [],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/analysis/execution.ts",
+        "sha256": "75fe09cc4aeb9d84774c59be547dcbf80b3dc7e2460bfac00651da405de377f3"
+      },
+      "planCompositionDerivation": {
+        "path": "src/service/analysis/baseline-analysis-store.ts",
+        "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
+      },
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "e02a1d5a3eb3750c8c5620c2a236dd51e67faa17606b3dab2da99319d5c4a8ed",
+      "fixtureFile": "tests/fixtures/model/sample1-baseline-account-limit.json",
+      "fixtureFileSha256": "1eec1d5af1e13ab93d844a2851b0d03d99d5a3d7e3eb62cc68e0e51a0ff2d738",
+      "fixtureProvenance": "recorded",
+      "orderedLineage": [
+        {
+          "identity": "sample1-baseline-account-limit",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-account-limit.json",
+          "sha256": "1eec1d5af1e13ab93d844a2851b0d03d99d5a3d7e3eb62cc68e0e51a0ff2d738"
+        },
+        {
+          "identity": "sample1-baseline-happy",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-happy.json",
+          "sha256": "9c3bb63c931966ddbc4c94c5aafb29f7d04d55083f9b4f372391c6714bffba0a"
+        }
+      ],
+      "resolvedLineageSha256": "1024903048562990b3634b3444790f63581dd869304dd8dc94d9f590abcfba79",
+      "allowedExistingResultSchemas": [
+        "ai7.analysis.assurance-sampling-result/1",
+        "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+        "ai7.baseline-manuscript-analysis.unit-result/1"
+      ],
+      "allowedCapturedSubjects": [],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "1b0ddc63e99dd5221b18f003565fd6324ff9ce031565271e80a24f56c5d14a88",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "36e16438e6d759c4a2a850c1620b2b3db3fa660fce4c0e079c46c85724f5577d",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "3e6c2262e197cb0179a4f49ab26d8bb54ca14e2eae81af26ed62f28eb039c336",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "97072d1ab7bfdea86363b46ac85e8d469b019a3b1644ea70b7e10763deb13521",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "c667fc1443c70e4dc38370c5c16f17602ca5d0aaa249a5a8ad3e1e2a3465f2a5",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 2,
+          "requestDigest": "6d3c892f661c0d2b10edad6cf29ffa9d6cc522057b7cc1fcff0ab5c0e89af00b",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 3,
+          "requestDigest": "ba2e16f6d1d35617d25cfcaee836b532c1ab07bd077f4e87f7440e5ae8440f4a",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 4,
+          "requestDigest": "8c845a19c7d2490d4161288d9b74985e297941b9141767b155069340ae10e4e2",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 4,
+          "requestDigest": "8c845a19c7d2490d4161288d9b74985e297941b9141767b155069340ae10e4e2",
+          "attempt": 1,
+          "entryOriginFixtureIdentity": "sample1-baseline-account-limit",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "quota-exceeded",
+          "resultSchema": null,
+          "capture": null
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "8abcb377378be04322959cc962315565229946cc6a76496e45b7cbc1697094a9",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 6,
+          "requestDigest": "eb508fdc039e94e62e92797a09683a5f6ee14bce8a8133f13021bd53b33986e7",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 7,
+          "requestDigest": "3fe4cb693a94f6338e771fd6f52f9ddca153825257bd4b006ebbe1f46fe0d9f8",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 8,
+          "requestDigest": "03e8183266d513aa4c3ac1707e1bc25b79098c3aa017c50c52b111378afc31fe",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false
+    },
+    {
+      "fixtureIdentity": "sample1-baseline-happy",
+      "registeredProfile": "baseline",
+      "registeredPurposes": [
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/baseline-prompt-contract.test.ts",
+          "registrationPath": "tests/service/baseline-prompt-contract.test.ts",
+          "fixtureSelectionSha256": "0967a883d363aa5b01420659750fef139e21eaf65ef6bd28ddadc4e6cb5cf4ce",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "journey",
+          "id": "J-09",
+          "registrationPath": "e2e/run-j09.mjs",
+          "fixtureSelectionSha256": "1fa6302c225c2b1660ee82f5e70edab1a787e4ee74700a392f33928b416233ed",
+          "sameSelectionsAtPreparationBase": true
+        },
+        {
+          "kind": "journey",
+          "id": "J-10",
+          "registrationPath": "e2e/run-j10.mjs",
+          "fixtureSelectionSha256": "1fa6302c225c2b1660ee82f5e70edab1a787e4ee74700a392f33928b416233ed",
+          "sameSelectionsAtPreparationBase": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/background-analysis-scopes.test.ts",
+          "registrationPath": "tests/service/background-analysis-scopes.test.ts",
+          "fixtureSelectionSha256": "32cfc16f9a4d3b2167bb1ac4db3cbfa4abfce02834ebb061f1f034eece952796",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/model-clarification.test.ts",
+          "registrationPath": "tests/service/model-clarification.test.ts",
+          "fixtureSelectionSha256": "34ded541395a4db278e8b26ea0ff3e6a704ae1ee8be70f2df3af3bc5ca073d7b",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/outcome-unconfirmed.test.ts",
+          "registrationPath": "tests/service/outcome-unconfirmed.test.ts",
+          "fixtureSelectionSha256": "3aa627128a4d338a98a56d6e4566fd43f1040ae49623a6f7ac8b2ff52d97905f",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/background-analysis-enrollments.test.ts",
+          "registrationPath": "tests/service/background-analysis-enrollments.test.ts",
+          "fixtureSelectionSha256": "401e78bf8160836581761017e0f4059478f0378d5d14c35a46a017f1c2802344",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/concurrent-runs.test.ts",
+          "registrationPath": "tests/service/concurrent-runs.test.ts",
+          "fixtureSelectionSha256": "401e78bf8160836581761017e0f4059478f0378d5d14c35a46a017f1c2802344",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/connectivity-wait.test.ts",
+          "registrationPath": "tests/service/connectivity-wait.test.ts",
+          "fixtureSelectionSha256": "401e78bf8160836581761017e0f4059478f0378d5d14c35a46a017f1c2802344",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/default-execution-rules.test.ts",
+          "registrationPath": "tests/service/default-execution-rules.test.ts",
+          "fixtureSelectionSha256": "401e78bf8160836581761017e0f4059478f0378d5d14c35a46a017f1c2802344",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/plan-version-range.test.ts",
+          "registrationPath": "tests/service/plan-version-range.test.ts",
+          "fixtureSelectionSha256": "401e78bf8160836581761017e0f4059478f0378d5d14c35a46a017f1c2802344",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/run-cancellation.test.ts",
+          "registrationPath": "tests/service/run-cancellation.test.ts",
+          "fixtureSelectionSha256": "401e78bf8160836581761017e0f4059478f0378d5d14c35a46a017f1c2802344",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/run-continuation.test.ts",
+          "registrationPath": "tests/service/run-continuation.test.ts",
+          "fixtureSelectionSha256": "401e78bf8160836581761017e0f4059478f0378d5d14c35a46a017f1c2802344",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/run-redo.test.ts",
+          "registrationPath": "tests/service/run-redo.test.ts",
+          "fixtureSelectionSha256": "401e78bf8160836581761017e0f4059478f0378d5d14c35a46a017f1c2802344",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/task-intent-drafts.test.ts",
+          "registrationPath": "tests/service/task-intent-drafts.test.ts",
+          "fixtureSelectionSha256": "401e78bf8160836581761017e0f4059478f0378d5d14c35a46a017f1c2802344",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/analysis-feedback.test.ts",
+          "registrationPath": "tests/service/analysis-feedback.test.ts",
+          "fixtureSelectionSha256": "501f463bd901488c29bedd171576301e74911d8509c27657512952fc500d9851",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/book-tasks.test.ts",
+          "registrationPath": "tests/service/book-tasks.test.ts",
+          "fixtureSelectionSha256": "501f463bd901488c29bedd171576301e74911d8509c27657512952fc500d9851",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/developer-live-analysis.test.ts",
+          "registrationPath": "tests/service/developer-live-analysis.test.ts",
+          "fixtureSelectionSha256": "501f463bd901488c29bedd171576301e74911d8509c27657512952fc500d9851",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/ordinary-production.test.ts",
+          "registrationPath": "tests/service/ordinary-production.test.ts",
+          "fixtureSelectionSha256": "501f463bd901488c29bedd171576301e74911d8509c27657512952fc500d9851",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/evaluation-fixture-generator.test.ts",
+          "registrationPath": "tests/service/evaluation-fixture-generator.test.ts",
+          "fixtureSelectionSha256": "6b9c1dcecec95e765bf79bca150d49735aa7a4c8c577fd769507648da04835ab",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/custom-analysis-fixture-generator.test.ts",
+          "registrationPath": "tests/service/custom-analysis-fixture-generator.test.ts",
+          "fixtureSelectionSha256": "71e4f2f43c1f1a1d24cb41fe00cf5f4fdd266d92d2f8494b7c05ebd4087f7bb2",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/outcome-unknown-steps.test.ts",
+          "registrationPath": "tests/service/outcome-unknown-steps.test.ts",
+          "fixtureSelectionSha256": "9046bee6091d277183cb37476bc91142585567d616464b776cb657e3871c6ad0",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/baseline-analysis.test.ts",
+          "registrationPath": "tests/service/baseline-analysis.test.ts",
+          "fixtureSelectionSha256": "bbeaf652cd21da46b0af48803703bff227eebae9d90867521f5421cf4ef7ff87",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/clarification.test.ts",
+          "registrationPath": "tests/service/clarification.test.ts",
+          "fixtureSelectionSha256": "c7d7f4305139ce115b386dfb2b4bb573f68f7ba4c23694f57182d102e9a156c0",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/plan-edits.test.ts",
+          "registrationPath": "tests/service/plan-edits.test.ts",
+          "fixtureSelectionSha256": "c7d7f4305139ce115b386dfb2b4bb573f68f7ba4c23694f57182d102e9a156c0",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/run-budget-ceiling.test.ts",
+          "registrationPath": "tests/service/run-budget-ceiling.test.ts",
+          "fixtureSelectionSha256": "d76002d25d2ea852ed12e6d421b43f9e725fa820655fe5f6314bbad2a853cb8b",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/outcome-unknown.test.ts",
+          "registrationPath": "tests/service/outcome-unknown.test.ts",
+          "fixtureSelectionSha256": "eb0baa37797e525c3e8304a65a9cc3e5ebbfdaf93d1f1123d62b301d79196d85",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        }
+      ],
+      "allowedTaskKinds": [
+        "baseline-manuscript-analysis"
+      ],
+      "sessionPurpose": null,
+      "taskContractIdentities": [
+        "ai7.baseline-manuscript-analysis/1"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/analysis/contract.ts",
+        "sha256": "51b42bae865b24f846c790dc821666cf77b5718aa61f42129249754dc18cee2b",
+        "constants": {
+          "BASELINE_PROMPT_CONTRACT_DIGEST": "89776b1b5ca2e4d3ef529b0be6b2380bfc0cb5addf0426e815df7aa195c7d386",
+          "BASELINE_PROMPT_CONTRACT_SCHEMA": "ai7.baseline-manuscript-analysis.prompt-contract/2",
+          "BASELINE_PROMPT_CONTRACT_V1_DIGEST": "4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5",
+          "BASELINE_PROMPT_CONTRACT_V1_SCHEMA": "ai7.baseline-manuscript-analysis.prompt-contract/1",
+          "BASELINE_UNIT_RESULT_SCHEMA": "ai7.baseline-manuscript-analysis.unit-result/1"
+        }
+      },
+      "capturedTaskPromptContractDigests": [],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/analysis/execution.ts",
+        "sha256": "75fe09cc4aeb9d84774c59be547dcbf80b3dc7e2460bfac00651da405de377f3"
+      },
+      "planCompositionDerivation": {
+        "path": "src/service/analysis/baseline-analysis-store.ts",
+        "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
+      },
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "e02a1d5a3eb3750c8c5620c2a236dd51e67faa17606b3dab2da99319d5c4a8ed",
+      "fixtureFile": "tests/fixtures/model/sample1-baseline-happy.json",
+      "fixtureFileSha256": "9c3bb63c931966ddbc4c94c5aafb29f7d04d55083f9b4f372391c6714bffba0a",
+      "fixtureProvenance": "recorded",
+      "orderedLineage": [
+        {
+          "identity": "sample1-baseline-happy",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-happy.json",
+          "sha256": "9c3bb63c931966ddbc4c94c5aafb29f7d04d55083f9b4f372391c6714bffba0a"
+        }
+      ],
+      "resolvedLineageSha256": "dae24297df8ecd82c7351478e383b6386d2b0ded1f4597c43f33f4c65bee9a75",
+      "allowedExistingResultSchemas": [
+        "ai7.analysis.assurance-sampling-result/1",
+        "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+        "ai7.baseline-manuscript-analysis.unit-result/1"
+      ],
+      "allowedCapturedSubjects": [],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "1b0ddc63e99dd5221b18f003565fd6324ff9ce031565271e80a24f56c5d14a88",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "36e16438e6d759c4a2a850c1620b2b3db3fa660fce4c0e079c46c85724f5577d",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "3e6c2262e197cb0179a4f49ab26d8bb54ca14e2eae81af26ed62f28eb039c336",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "97072d1ab7bfdea86363b46ac85e8d469b019a3b1644ea70b7e10763deb13521",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "c667fc1443c70e4dc38370c5c16f17602ca5d0aaa249a5a8ad3e1e2a3465f2a5",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 2,
+          "requestDigest": "6d3c892f661c0d2b10edad6cf29ffa9d6cc522057b7cc1fcff0ab5c0e89af00b",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 3,
+          "requestDigest": "ba2e16f6d1d35617d25cfcaee836b532c1ab07bd077f4e87f7440e5ae8440f4a",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 4,
+          "requestDigest": "8c845a19c7d2490d4161288d9b74985e297941b9141767b155069340ae10e4e2",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "8abcb377378be04322959cc962315565229946cc6a76496e45b7cbc1697094a9",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 6,
+          "requestDigest": "eb508fdc039e94e62e92797a09683a5f6ee14bce8a8133f13021bd53b33986e7",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 7,
+          "requestDigest": "3fe4cb693a94f6338e771fd6f52f9ddca153825257bd4b006ebbe1f46fe0d9f8",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 8,
+          "requestDigest": "03e8183266d513aa4c3ac1707e1bc25b79098c3aa017c50c52b111378afc31fe",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false
+    },
+    {
+      "fixtureIdentity": "sample1-baseline-one-unit-failure",
+      "registeredProfile": "baseline",
+      "registeredPurposes": [
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/global-attention.test.ts",
+          "registrationPath": "tests/service/global-attention.test.ts",
+          "fixtureSelectionSha256": "1b65cb38d2841ac2f244dc4b14694e0b17fecf0f5001db910baaa4480260bf6d",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/task-plan.test.ts",
+          "registrationPath": "tests/service/task-plan.test.ts",
+          "fixtureSelectionSha256": "1b65cb38d2841ac2f244dc4b14694e0b17fecf0f5001db910baaa4480260bf6d",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "journey",
+          "id": "J-04",
+          "registrationPath": "e2e/run-j04.mjs",
+          "fixtureSelectionSha256": "24bb105d4893d9c006760eaa394fe13ade2d20a50c7e9cdaff145e168642aa98",
+          "sameSelectionsAtPreparationBase": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/run-redo.test.ts",
+          "registrationPath": "tests/service/run-redo.test.ts",
+          "fixtureSelectionSha256": "4405e678496b823d6032c768bcd8d9c54585c4c628cf7ea2f4f7f9319914c38f",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/outcome-unknown.test.ts",
+          "registrationPath": "tests/service/outcome-unknown.test.ts",
+          "fixtureSelectionSha256": "4d2af8eb914060f583c1c45f5017963854601f4dd72b8e2287c237bc4d6798ff",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/factual-review.test.ts",
+          "registrationPath": "tests/service/factual-review.test.ts",
+          "fixtureSelectionSha256": "6b76f3fc70ade8678aa0e7180db91142d8724ab1ad824c53cb6d3549f91ac3c1",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/usage.test.ts",
+          "registrationPath": "tests/service/usage.test.ts",
+          "fixtureSelectionSha256": "6b76f3fc70ade8678aa0e7180db91142d8724ab1ad824c53cb6d3549f91ac3c1",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/run-budget-ceiling.test.ts",
+          "registrationPath": "tests/service/run-budget-ceiling.test.ts",
+          "fixtureSelectionSha256": "bdcefb0f5db588d389a224e3832b5c3087562a6e4056d75bca4677c4b60fa5ca",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/baseline-analysis.test.ts",
+          "registrationPath": "tests/service/baseline-analysis.test.ts",
+          "fixtureSelectionSha256": "e19043addeafa8172a00533a410d7b13a19dc9974313fed539b91b3db5139928",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        }
+      ],
+      "allowedTaskKinds": [
+        "baseline-manuscript-analysis"
+      ],
+      "sessionPurpose": null,
+      "taskContractIdentities": [
+        "ai7.baseline-manuscript-analysis/1"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/analysis/contract.ts",
+        "sha256": "51b42bae865b24f846c790dc821666cf77b5718aa61f42129249754dc18cee2b",
+        "constants": {
+          "BASELINE_PROMPT_CONTRACT_DIGEST": "89776b1b5ca2e4d3ef529b0be6b2380bfc0cb5addf0426e815df7aa195c7d386",
+          "BASELINE_PROMPT_CONTRACT_SCHEMA": "ai7.baseline-manuscript-analysis.prompt-contract/2",
+          "BASELINE_PROMPT_CONTRACT_V1_DIGEST": "4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5",
+          "BASELINE_PROMPT_CONTRACT_V1_SCHEMA": "ai7.baseline-manuscript-analysis.prompt-contract/1",
+          "BASELINE_UNIT_RESULT_SCHEMA": "ai7.baseline-manuscript-analysis.unit-result/1"
+        }
+      },
+      "capturedTaskPromptContractDigests": [],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/analysis/execution.ts",
+        "sha256": "75fe09cc4aeb9d84774c59be547dcbf80b3dc7e2460bfac00651da405de377f3"
+      },
+      "planCompositionDerivation": {
+        "path": "src/service/analysis/baseline-analysis-store.ts",
+        "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
+      },
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "e02a1d5a3eb3750c8c5620c2a236dd51e67faa17606b3dab2da99319d5c4a8ed",
+      "fixtureFile": "tests/fixtures/model/sample1-baseline-one-unit-failure.json",
+      "fixtureFileSha256": "49b5bf7eb0a2262f79fe6382ea77f65fa2f34eae03e33d7eae1244989cac52e1",
+      "fixtureProvenance": "recorded",
+      "orderedLineage": [
+        {
+          "identity": "sample1-baseline-one-unit-failure",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-one-unit-failure.json",
+          "sha256": "49b5bf7eb0a2262f79fe6382ea77f65fa2f34eae03e33d7eae1244989cac52e1"
+        },
+        {
+          "identity": "sample1-baseline-happy",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-happy.json",
+          "sha256": "9c3bb63c931966ddbc4c94c5aafb29f7d04d55083f9b4f372391c6714bffba0a"
+        }
+      ],
+      "resolvedLineageSha256": "0148a63a0c56b9e486efa558269c4983c1ab11f016b96b775c405681877973aa",
+      "allowedExistingResultSchemas": [
+        "ai7.analysis.assurance-sampling-result/1",
+        "ai7.analysis.run-report-reflection-result/1",
+        "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+        "ai7.baseline-manuscript-analysis.unit-result/1"
+      ],
+      "allowedCapturedSubjects": [],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "146651af4d337a6ea9c695a3608105bc2b5bd2715d2d7878340d9660db168b11",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-one-unit-failure",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "1b0ddc63e99dd5221b18f003565fd6324ff9ce031565271e80a24f56c5d14a88",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "36e16438e6d759c4a2a850c1620b2b3db3fa660fce4c0e079c46c85724f5577d",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "3e6c2262e197cb0179a4f49ab26d8bb54ca14e2eae81af26ed62f28eb039c336",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "7b0e5f7ad72982c225f7812c6096222e1d810db6be5bcc69eea3ed5ec3a7a59a",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-one-unit-failure",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "baafcb8b5f8eef4e71f828e2d625bc5719cfbd8c0aa49cc397eedbcbad1b39be",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-one-unit-failure",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "beadd216031f094e1f6add8140c942cd915d78a11629d96973aaa28fb48a1c5f",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-one-unit-failure",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "f165b9f47a625feeb2d38ce95f0298dcaf90de2e8fa927c81463ee8f9b8ff996",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-one-unit-failure",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "febb575449d202394e4d8ffe012453d53fd276082a8d785831347c387b19b192",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-one-unit-failure",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "97072d1ab7bfdea86363b46ac85e8d469b019a3b1644ea70b7e10763deb13521",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "c667fc1443c70e4dc38370c5c16f17602ca5d0aaa249a5a8ad3e1e2a3465f2a5",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 2,
+          "requestDigest": "6d3c892f661c0d2b10edad6cf29ffa9d6cc522057b7cc1fcff0ab5c0e89af00b",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-one-unit-failure",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "adapter-failure",
+          "resultSchema": null,
+          "capture": null
+        },
+        {
+          "unitOrdinal": 3,
+          "requestDigest": "ba2e16f6d1d35617d25cfcaee836b532c1ab07bd077f4e87f7440e5ae8440f4a",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 4,
+          "requestDigest": "8c845a19c7d2490d4161288d9b74985e297941b9141767b155069340ae10e4e2",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "8abcb377378be04322959cc962315565229946cc6a76496e45b7cbc1697094a9",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 6,
+          "requestDigest": "eb508fdc039e94e62e92797a09683a5f6ee14bce8a8133f13021bd53b33986e7",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 7,
+          "requestDigest": "3fe4cb693a94f6338e771fd6f52f9ddca153825257bd4b006ebbe1f46fe0d9f8",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 8,
+          "requestDigest": "03e8183266d513aa4c3ac1707e1bc25b79098c3aa017c50c52b111378afc31fe",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false
+    },
+    {
+      "fixtureIdentity": "sample1-baseline-outcome-unknown",
+      "registeredProfile": "baseline",
+      "registeredPurposes": [
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/outcome-unknown.test.ts",
+          "registrationPath": "tests/service/outcome-unknown.test.ts",
+          "fixtureSelectionSha256": "5cfcd19125598c1aaf6cacf0007f3b165e36759668de330c12861f999f721f4e",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/outcome-unconfirmed.test.ts",
+          "registrationPath": "tests/service/outcome-unconfirmed.test.ts",
+          "fixtureSelectionSha256": "5f80756fdd6df448893bd1b44bcfcfd3f2b9ab5002b5322da7947ca83c315e7d",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "journey",
+          "id": "J-10",
+          "registrationPath": "e2e/run-j10.mjs",
+          "fixtureSelectionSha256": "75d81ff7e6d9e0dc93fb5c981ccc08bfba43168c2e220e3d8affe1f271a7452f",
+          "sameSelectionsAtPreparationBase": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/run-cancellation.test.ts",
+          "registrationPath": "tests/service/run-cancellation.test.ts",
+          "fixtureSelectionSha256": "c95a61db072ba5fc0a74f636e406506e36e9b6ff4e977fa4d633afad2505c098",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        }
+      ],
+      "allowedTaskKinds": [
+        "baseline-manuscript-analysis"
+      ],
+      "sessionPurpose": null,
+      "taskContractIdentities": [
+        "ai7.baseline-manuscript-analysis/1"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/analysis/contract.ts",
+        "sha256": "51b42bae865b24f846c790dc821666cf77b5718aa61f42129249754dc18cee2b",
+        "constants": {
+          "BASELINE_PROMPT_CONTRACT_DIGEST": "89776b1b5ca2e4d3ef529b0be6b2380bfc0cb5addf0426e815df7aa195c7d386",
+          "BASELINE_PROMPT_CONTRACT_SCHEMA": "ai7.baseline-manuscript-analysis.prompt-contract/2",
+          "BASELINE_PROMPT_CONTRACT_V1_DIGEST": "4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5",
+          "BASELINE_PROMPT_CONTRACT_V1_SCHEMA": "ai7.baseline-manuscript-analysis.prompt-contract/1",
+          "BASELINE_UNIT_RESULT_SCHEMA": "ai7.baseline-manuscript-analysis.unit-result/1"
+        }
+      },
+      "capturedTaskPromptContractDigests": [],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/analysis/execution.ts",
+        "sha256": "75fe09cc4aeb9d84774c59be547dcbf80b3dc7e2460bfac00651da405de377f3"
+      },
+      "planCompositionDerivation": {
+        "path": "src/service/analysis/baseline-analysis-store.ts",
+        "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
+      },
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "e02a1d5a3eb3750c8c5620c2a236dd51e67faa17606b3dab2da99319d5c4a8ed",
+      "fixtureFile": "tests/fixtures/model/sample1-baseline-outcome-unknown.json",
+      "fixtureFileSha256": "c41b2f1c81efdc956029adc492b84b9c1b4b7a2e65811d577522d79a05bceb66",
+      "fixtureProvenance": "recorded",
+      "orderedLineage": [
+        {
+          "identity": "sample1-baseline-outcome-unknown",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-outcome-unknown.json",
+          "sha256": "c41b2f1c81efdc956029adc492b84b9c1b4b7a2e65811d577522d79a05bceb66"
+        },
+        {
+          "identity": "sample1-baseline-happy",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-happy.json",
+          "sha256": "9c3bb63c931966ddbc4c94c5aafb29f7d04d55083f9b4f372391c6714bffba0a"
+        }
+      ],
+      "resolvedLineageSha256": "7703b57083cfe546683707a8057ad861d835e210a41be12957d5ff00078e234a",
+      "allowedExistingResultSchemas": [
+        "ai7.analysis.assurance-sampling-result/1",
+        "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+        "ai7.baseline-manuscript-analysis.unit-result/1"
+      ],
+      "allowedCapturedSubjects": [],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "1b0ddc63e99dd5221b18f003565fd6324ff9ce031565271e80a24f56c5d14a88",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "36e16438e6d759c4a2a850c1620b2b3db3fa660fce4c0e079c46c85724f5577d",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "3e6c2262e197cb0179a4f49ab26d8bb54ca14e2eae81af26ed62f28eb039c336",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "97072d1ab7bfdea86363b46ac85e8d469b019a3b1644ea70b7e10763deb13521",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "c667fc1443c70e4dc38370c5c16f17602ca5d0aaa249a5a8ad3e1e2a3465f2a5",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 2,
+          "requestDigest": "6d3c892f661c0d2b10edad6cf29ffa9d6cc522057b7cc1fcff0ab5c0e89af00b",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 3,
+          "requestDigest": "ba2e16f6d1d35617d25cfcaee836b532c1ab07bd077f4e87f7440e5ae8440f4a",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 4,
+          "requestDigest": "8c845a19c7d2490d4161288d9b74985e297941b9141767b155069340ae10e4e2",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 4,
+          "requestDigest": "8c845a19c7d2490d4161288d9b74985e297941b9141767b155069340ae10e4e2",
+          "attempt": 1,
+          "entryOriginFixtureIdentity": "sample1-baseline-outcome-unknown",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "outcome-unknown",
+          "resultSchema": null,
+          "capture": null
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "8abcb377378be04322959cc962315565229946cc6a76496e45b7cbc1697094a9",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 6,
+          "requestDigest": "eb508fdc039e94e62e92797a09683a5f6ee14bce8a8133f13021bd53b33986e7",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 7,
+          "requestDigest": "3fe4cb693a94f6338e771fd6f52f9ddca153825257bd4b006ebbe1f46fe0d9f8",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 8,
+          "requestDigest": "03e8183266d513aa4c3ac1707e1bc25b79098c3aa017c50c52b111378afc31fe",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false,
+      "restrictions": {
+        "onlyLaunchJourney": "J-10",
+        "registeredServiceTestConstructorOnlyOutsideJourney": true
+      }
+    },
+    {
+      "fixtureIdentity": "sample1-baseline-reduction-unknown",
+      "registeredProfile": "baseline",
+      "registeredPurposes": [
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/outcome-unknown-steps.test.ts",
+          "registrationPath": "tests/service/outcome-unknown-steps.test.ts",
+          "fixtureSelectionSha256": "3f82e36f12558f3352bbb3cbb414ad0704134f515c24097006e7765c0aa57b80",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/outcome-unconfirmed.test.ts",
+          "registrationPath": "tests/service/outcome-unconfirmed.test.ts",
+          "fixtureSelectionSha256": "49aaa2f112af930fa1ccb65ed4b2d6aaffe4a463141244c4c376c9231c7f0366",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "journey",
+          "id": "J-10",
+          "registrationPath": "e2e/run-j10.mjs",
+          "fixtureSelectionSha256": "b281822a8dd89afb04c23b9568f35eb0e40c53f5c5c79f4c93c86a72b41be1cf",
+          "sameSelectionsAtPreparationBase": true
+        }
+      ],
+      "allowedTaskKinds": [
+        "baseline-manuscript-analysis"
+      ],
+      "sessionPurpose": null,
+      "taskContractIdentities": [
+        "ai7.baseline-manuscript-analysis/1"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/analysis/contract.ts",
+        "sha256": "51b42bae865b24f846c790dc821666cf77b5718aa61f42129249754dc18cee2b",
+        "constants": {
+          "BASELINE_PROMPT_CONTRACT_DIGEST": "89776b1b5ca2e4d3ef529b0be6b2380bfc0cb5addf0426e815df7aa195c7d386",
+          "BASELINE_PROMPT_CONTRACT_SCHEMA": "ai7.baseline-manuscript-analysis.prompt-contract/2",
+          "BASELINE_PROMPT_CONTRACT_V1_DIGEST": "4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5",
+          "BASELINE_PROMPT_CONTRACT_V1_SCHEMA": "ai7.baseline-manuscript-analysis.prompt-contract/1",
+          "BASELINE_UNIT_RESULT_SCHEMA": "ai7.baseline-manuscript-analysis.unit-result/1"
+        }
+      },
+      "capturedTaskPromptContractDigests": [],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/analysis/execution.ts",
+        "sha256": "75fe09cc4aeb9d84774c59be547dcbf80b3dc7e2460bfac00651da405de377f3"
+      },
+      "planCompositionDerivation": {
+        "path": "src/service/analysis/baseline-analysis-store.ts",
+        "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
+      },
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "e02a1d5a3eb3750c8c5620c2a236dd51e67faa17606b3dab2da99319d5c4a8ed",
+      "fixtureFile": "tests/fixtures/model/sample1-baseline-reduction-unknown.json",
+      "fixtureFileSha256": "ffe7bb34525f24198de95c15fae0f62d77179292617672815574b4ead631e6b3",
+      "fixtureProvenance": "recorded",
+      "orderedLineage": [
+        {
+          "identity": "sample1-baseline-reduction-unknown",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-reduction-unknown.json",
+          "sha256": "ffe7bb34525f24198de95c15fae0f62d77179292617672815574b4ead631e6b3"
+        },
+        {
+          "identity": "sample1-baseline-happy",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-happy.json",
+          "sha256": "9c3bb63c931966ddbc4c94c5aafb29f7d04d55083f9b4f372391c6714bffba0a"
+        }
+      ],
+      "resolvedLineageSha256": "ae9debc01664052a40a1c5041276cd99eecdb4bea507bddea7cd9c5b91cd0f0a",
+      "allowedExistingResultSchemas": [
+        "ai7.analysis.assurance-sampling-result/1",
+        "ai7.baseline-manuscript-analysis.unit-result/1"
+      ],
+      "allowedCapturedSubjects": [],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "1b0ddc63e99dd5221b18f003565fd6324ff9ce031565271e80a24f56c5d14a88",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "36e16438e6d759c4a2a850c1620b2b3db3fa660fce4c0e079c46c85724f5577d",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "3e6c2262e197cb0179a4f49ab26d8bb54ca14e2eae81af26ed62f28eb039c336",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-reduction-unknown",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "outcome-unknown",
+          "resultSchema": null,
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "97072d1ab7bfdea86363b46ac85e8d469b019a3b1644ea70b7e10763deb13521",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "c667fc1443c70e4dc38370c5c16f17602ca5d0aaa249a5a8ad3e1e2a3465f2a5",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 2,
+          "requestDigest": "6d3c892f661c0d2b10edad6cf29ffa9d6cc522057b7cc1fcff0ab5c0e89af00b",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 3,
+          "requestDigest": "ba2e16f6d1d35617d25cfcaee836b532c1ab07bd077f4e87f7440e5ae8440f4a",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 4,
+          "requestDigest": "8c845a19c7d2490d4161288d9b74985e297941b9141767b155069340ae10e4e2",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "8abcb377378be04322959cc962315565229946cc6a76496e45b7cbc1697094a9",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 6,
+          "requestDigest": "eb508fdc039e94e62e92797a09683a5f6ee14bce8a8133f13021bd53b33986e7",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 7,
+          "requestDigest": "3fe4cb693a94f6338e771fd6f52f9ddca153825257bd4b006ebbe1f46fe0d9f8",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 8,
+          "requestDigest": "03e8183266d513aa4c3ac1707e1bc25b79098c3aa017c50c52b111378afc31fe",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false,
+      "restrictions": {
+        "onlyLaunchJourney": "J-10",
+        "registeredServiceTestConstructorOnlyOutsideJourney": true
+      }
+    },
+    {
+      "fixtureIdentity": "sample1-baseline-sampling-two-turns",
+      "registeredProfile": "baseline",
+      "registeredPurposes": [
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/outcome-unknown-steps.test.ts",
+          "registrationPath": "tests/service/outcome-unknown-steps.test.ts",
+          "fixtureSelectionSha256": "1b428146e590b5498caba32d35d26a061698bc88cf6d13c1a39837efa8f7017b",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        }
+      ],
+      "allowedTaskKinds": [
+        "baseline-manuscript-analysis"
+      ],
+      "sessionPurpose": null,
+      "taskContractIdentities": [
+        "ai7.baseline-manuscript-analysis/1"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/analysis/contract.ts",
+        "sha256": "51b42bae865b24f846c790dc821666cf77b5718aa61f42129249754dc18cee2b",
+        "constants": {
+          "BASELINE_PROMPT_CONTRACT_DIGEST": "89776b1b5ca2e4d3ef529b0be6b2380bfc0cb5addf0426e815df7aa195c7d386",
+          "BASELINE_PROMPT_CONTRACT_SCHEMA": "ai7.baseline-manuscript-analysis.prompt-contract/2",
+          "BASELINE_PROMPT_CONTRACT_V1_DIGEST": "4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5",
+          "BASELINE_PROMPT_CONTRACT_V1_SCHEMA": "ai7.baseline-manuscript-analysis.prompt-contract/1",
+          "BASELINE_UNIT_RESULT_SCHEMA": "ai7.baseline-manuscript-analysis.unit-result/1"
+        }
+      },
+      "capturedTaskPromptContractDigests": [],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/analysis/execution.ts",
+        "sha256": "75fe09cc4aeb9d84774c59be547dcbf80b3dc7e2460bfac00651da405de377f3"
+      },
+      "planCompositionDerivation": {
+        "path": "src/service/analysis/baseline-analysis-store.ts",
+        "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
+      },
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "e02a1d5a3eb3750c8c5620c2a236dd51e67faa17606b3dab2da99319d5c4a8ed",
+      "fixtureFile": "tests/fixtures/model/sample1-baseline-sampling-two-turns.json",
+      "fixtureFileSha256": "0dbe9e8cd3e24653cc494637a4601b7d04746a4b7513b01cbbcb4758b9c4f533",
+      "fixtureProvenance": "recorded",
+      "orderedLineage": [
+        {
+          "identity": "sample1-baseline-sampling-two-turns",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-sampling-two-turns.json",
+          "sha256": "0dbe9e8cd3e24653cc494637a4601b7d04746a4b7513b01cbbcb4758b9c4f533"
+        },
+        {
+          "identity": "sample1-baseline-happy",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-happy.json",
+          "sha256": "9c3bb63c931966ddbc4c94c5aafb29f7d04d55083f9b4f372391c6714bffba0a"
+        }
+      ],
+      "resolvedLineageSha256": "8442735efd2eb74436c124b00db98d24eecad778ebc3608ac565649edf472c3d",
+      "allowedExistingResultSchemas": [
+        "ai7.analysis.assurance-sampling-result/1",
+        "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+        "ai7.baseline-manuscript-analysis.unit-result/1"
+      ],
+      "allowedCapturedSubjects": [],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "1b0ddc63e99dd5221b18f003565fd6324ff9ce031565271e80a24f56c5d14a88",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "344bc2117c3a2436f4fb76fa611c100a359f0483db1731cb0f956962548ae4be",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-sampling-two-turns",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "36e16438e6d759c4a2a850c1620b2b3db3fa660fce4c0e079c46c85724f5577d",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "3e6c2262e197cb0179a4f49ab26d8bb54ca14e2eae81af26ed62f28eb039c336",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-sampling-two-turns",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "8d7199f97a4189ad8c2e5f622f511fc7e70824a6b61a286c09ac375e7108578e",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-sampling-two-turns",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "outcome-unknown",
+          "resultSchema": null,
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "97072d1ab7bfdea86363b46ac85e8d469b019a3b1644ea70b7e10763deb13521",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "c667fc1443c70e4dc38370c5c16f17602ca5d0aaa249a5a8ad3e1e2a3465f2a5",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 2,
+          "requestDigest": "6d3c892f661c0d2b10edad6cf29ffa9d6cc522057b7cc1fcff0ab5c0e89af00b",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 3,
+          "requestDigest": "ba2e16f6d1d35617d25cfcaee836b532c1ab07bd077f4e87f7440e5ae8440f4a",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 4,
+          "requestDigest": "8c845a19c7d2490d4161288d9b74985e297941b9141767b155069340ae10e4e2",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "8abcb377378be04322959cc962315565229946cc6a76496e45b7cbc1697094a9",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 6,
+          "requestDigest": "eb508fdc039e94e62e92797a09683a5f6ee14bce8a8133f13021bd53b33986e7",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 7,
+          "requestDigest": "3fe4cb693a94f6338e771fd6f52f9ddca153825257bd4b006ebbe1f46fe0d9f8",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 8,
+          "requestDigest": "03e8183266d513aa4c3ac1707e1bc25b79098c3aa017c50c52b111378afc31fe",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false
+    },
+    {
+      "fixtureIdentity": "sample1-baseline-transient-retry",
+      "registeredProfile": "baseline",
+      "registeredPurposes": [
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/background-analysis-scopes.test.ts",
+          "registrationPath": "tests/service/background-analysis-scopes.test.ts",
+          "fixtureSelectionSha256": "04cff196dce03e1f593d6ae1377651e2f5e227c8391a3fbd39295a4a430bb118",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "journey",
+          "id": "J-04",
+          "registrationPath": "e2e/run-j04.mjs",
+          "fixtureSelectionSha256": "0e3f2f32f8fbbf3ab1c69447a47d8c6c327e288a391beb36aae5cf33449474e5",
+          "sameSelectionsAtPreparationBase": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/review-fixture-generator.test.ts",
+          "registrationPath": "tests/service/review-fixture-generator.test.ts",
+          "fixtureSelectionSha256": "26f0e73f2f8544525d3e469fdb3c95849da1a8b81dbc0a7cdf80f295289d8adc",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/clarification.test.ts",
+          "registrationPath": "tests/service/clarification.test.ts",
+          "fixtureSelectionSha256": "361b016ba9719868c874e5b55b39d0192d9722efd709a1e588fc0344e00d024d",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/plan-edits.test.ts",
+          "registrationPath": "tests/service/plan-edits.test.ts",
+          "fixtureSelectionSha256": "361b016ba9719868c874e5b55b39d0192d9722efd709a1e588fc0344e00d024d",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/concurrent-runs.test.ts",
+          "registrationPath": "tests/service/concurrent-runs.test.ts",
+          "fixtureSelectionSha256": "53ae34c14b53df543f614e6aa3b21124f32d274b197ebe1ae3e8c9564900356b",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/baseline-analysis.test.ts",
+          "registrationPath": "tests/service/baseline-analysis.test.ts",
+          "fixtureSelectionSha256": "53c5dcab9e86de89f3c9c0557288630be74b18d86f6911c4c38c94f01bcb9ba4",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "journey",
+          "id": "J-10",
+          "registrationPath": "e2e/run-j10.mjs",
+          "fixtureSelectionSha256": "602264d3fb63b355452a7f858743791cb90fb20e7f45d07afcb7f2321770ee13",
+          "sameSelectionsAtPreparationBase": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/run-budget-ceiling.test.ts",
+          "registrationPath": "tests/service/run-budget-ceiling.test.ts",
+          "fixtureSelectionSha256": "837b4ed4c69d23a595ea4e7cbce28871da2cf3c99bb5b855247060e3ce65cbce",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/run-redo.test.ts",
+          "registrationPath": "tests/service/run-redo.test.ts",
+          "fixtureSelectionSha256": "9d4d975994e8fd8d2f105f57bfbd7a037512ae53f7fce77aeeb8257e6c28c645",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        }
+      ],
+      "allowedTaskKinds": [
+        "baseline-manuscript-analysis"
+      ],
+      "sessionPurpose": null,
+      "taskContractIdentities": [
+        "ai7.baseline-manuscript-analysis/1"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/analysis/contract.ts",
+        "sha256": "51b42bae865b24f846c790dc821666cf77b5718aa61f42129249754dc18cee2b",
+        "constants": {
+          "BASELINE_PROMPT_CONTRACT_DIGEST": "89776b1b5ca2e4d3ef529b0be6b2380bfc0cb5addf0426e815df7aa195c7d386",
+          "BASELINE_PROMPT_CONTRACT_SCHEMA": "ai7.baseline-manuscript-analysis.prompt-contract/2",
+          "BASELINE_PROMPT_CONTRACT_V1_DIGEST": "4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5",
+          "BASELINE_PROMPT_CONTRACT_V1_SCHEMA": "ai7.baseline-manuscript-analysis.prompt-contract/1",
+          "BASELINE_UNIT_RESULT_SCHEMA": "ai7.baseline-manuscript-analysis.unit-result/1"
+        }
+      },
+      "capturedTaskPromptContractDigests": [],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/analysis/execution.ts",
+        "sha256": "75fe09cc4aeb9d84774c59be547dcbf80b3dc7e2460bfac00651da405de377f3"
+      },
+      "planCompositionDerivation": {
+        "path": "src/service/analysis/baseline-analysis-store.ts",
+        "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
+      },
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "e02a1d5a3eb3750c8c5620c2a236dd51e67faa17606b3dab2da99319d5c4a8ed",
+      "fixtureFile": "tests/fixtures/model/sample1-baseline-transient-retry.json",
+      "fixtureFileSha256": "a5d36dca822009d93727af65850254d6f4105db826942bb762455f5ac4c15fd5",
+      "fixtureProvenance": "recorded",
+      "orderedLineage": [
+        {
+          "identity": "sample1-baseline-transient-retry",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-transient-retry.json",
+          "sha256": "a5d36dca822009d93727af65850254d6f4105db826942bb762455f5ac4c15fd5"
+        },
+        {
+          "identity": "sample1-baseline-one-unit-failure",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-one-unit-failure.json",
+          "sha256": "49b5bf7eb0a2262f79fe6382ea77f65fa2f34eae03e33d7eae1244989cac52e1"
+        },
+        {
+          "identity": "sample1-baseline-happy",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-happy.json",
+          "sha256": "9c3bb63c931966ddbc4c94c5aafb29f7d04d55083f9b4f372391c6714bffba0a"
+        }
+      ],
+      "resolvedLineageSha256": "954da67966455550a027bc0071140d14db99b52ffc5b1912ba2e83f78b4f486b",
+      "allowedExistingResultSchemas": [
+        "ai7.analysis.assurance-sampling-result/1",
+        "ai7.analysis.run-report-reflection-result/1",
+        "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+        "ai7.baseline-manuscript-analysis.unit-result/1"
+      ],
+      "allowedCapturedSubjects": [],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "146651af4d337a6ea9c695a3608105bc2b5bd2715d2d7878340d9660db168b11",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-one-unit-failure",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "1b0ddc63e99dd5221b18f003565fd6324ff9ce031565271e80a24f56c5d14a88",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "36e16438e6d759c4a2a850c1620b2b3db3fa660fce4c0e079c46c85724f5577d",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "3e6c2262e197cb0179a4f49ab26d8bb54ca14e2eae81af26ed62f28eb039c336",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "4b75c1aea668a788c490dfb6084ef6deb7b621ba41f1dfd01f972e2dcff28e12",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-transient-retry",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "7b0e5f7ad72982c225f7812c6096222e1d810db6be5bcc69eea3ed5ec3a7a59a",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-one-unit-failure",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "a3eab029a5b3c667d46db2981436c5384beade55a8a8ed62e0296db588be440d",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-transient-retry",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "b5b0d47b071e3daaea61e25c547aef2ef1ae92a0f18c6e2b69ed80c17010a4d5",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-transient-retry",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "baafcb8b5f8eef4e71f828e2d625bc5719cfbd8c0aa49cc397eedbcbad1b39be",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-one-unit-failure",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "beadd216031f094e1f6add8140c942cd915d78a11629d96973aaa28fb48a1c5f",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-one-unit-failure",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "f165b9f47a625feeb2d38ce95f0298dcaf90de2e8fa927c81463ee8f9b8ff996",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-one-unit-failure",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "febb575449d202394e4d8ffe012453d53fd276082a8d785831347c387b19b192",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-one-unit-failure",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "97072d1ab7bfdea86363b46ac85e8d469b019a3b1644ea70b7e10763deb13521",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "c667fc1443c70e4dc38370c5c16f17602ca5d0aaa249a5a8ad3e1e2a3465f2a5",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 2,
+          "requestDigest": "6d3c892f661c0d2b10edad6cf29ffa9d6cc522057b7cc1fcff0ab5c0e89af00b",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-one-unit-failure",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "adapter-failure",
+          "resultSchema": null,
+          "capture": null
+        },
+        {
+          "unitOrdinal": 3,
+          "requestDigest": "ba2e16f6d1d35617d25cfcaee836b532c1ab07bd077f4e87f7440e5ae8440f4a",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 4,
+          "requestDigest": "8c845a19c7d2490d4161288d9b74985e297941b9141767b155069340ae10e4e2",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "8abcb377378be04322959cc962315565229946cc6a76496e45b7cbc1697094a9",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "8abcb377378be04322959cc962315565229946cc6a76496e45b7cbc1697094a9",
+          "attempt": 1,
+          "entryOriginFixtureIdentity": "sample1-baseline-transient-retry",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "adapter-failure",
+          "resultSchema": null,
+          "capture": null
+        },
+        {
+          "unitOrdinal": 6,
+          "requestDigest": "eb508fdc039e94e62e92797a09683a5f6ee14bce8a8133f13021bd53b33986e7",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 7,
+          "requestDigest": "3fe4cb693a94f6338e771fd6f52f9ddca153825257bd4b006ebbe1f46fe0d9f8",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 8,
+          "requestDigest": "03e8183266d513aa4c3ac1707e1bc25b79098c3aa017c50c52b111378afc31fe",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false
+    },
+    {
+      "fixtureIdentity": "sample1-conflict-regenerate-authored",
+      "registeredProfile": "conflict",
+      "registeredPurposes": [
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/fast-role.test.ts",
+          "registrationPath": "tests/service/fast-role.test.ts",
+          "fixtureSelectionSha256": "7ce2f2aafde326870e940e9c6624e92912cb4e073ea997e8aa30a270aae601ea",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/fast-role-fixture-generator.test.ts",
+          "registrationPath": "tests/service/fast-role-fixture-generator.test.ts",
+          "fixtureSelectionSha256": "94681592a15954d28052ed6e943bd9b058e3b796329766ed0363f43024d76a4e",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        }
+      ],
+      "allowedTaskKinds": [
+        "conflict-regenerate"
+      ],
+      "sessionPurpose": null,
+      "taskContractIdentities": [
+        "ai7.conflict-regenerate/1"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/fast-role/conflict-regenerate-contract.ts",
+        "sha256": "c242f4f9a218091c98806ede7cab47e57f960740840108e07a89a4adc326ae39",
+        "constants": {
+          "CONFLICT_REGENERATE_CONTRACT_VERSION": "ai7.conflict-regenerate/1",
+          "CONFLICT_REGENERATE_PROMPT_CONTRACT_DIGEST": "c3a6b351cc1af5bfe2947da5b3f720c2162f65d1c0a5d4b8bca8dd7a91033789",
+          "CONFLICT_REGENERATE_PROMPT_CONTRACT_SCHEMA": "ai7.conflict-regenerate-prompt-contract/1",
+          "CONFLICT_REGENERATE_RESULT_SCHEMA": "ai7.conflict-regenerate.result/1"
+        }
+      },
+      "capturedTaskPromptContractDigests": [],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/fast-role/fast-role-execution.ts",
+        "sha256": "23d938f28d062d1fe3949d399739b0e558dc2e7f435589b3115f1eb200755599"
+      },
+      "planCompositionDerivation": null,
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "manuscript-conflict-region-excerpt"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "e0e66031d101726fb74c207708d16cb98677dba4f1f666da872d78d0b45aacb4",
+      "fixtureFile": "tests/fixtures/model/sample1-conflict-regenerate-authored.json",
+      "fixtureFileSha256": "61490b45172cada9f9eab613714643919d75e36cab0b5f2f31ba77bbbcebe76d",
+      "fixtureProvenance": "authored",
+      "orderedLineage": [
+        {
+          "identity": "sample1-conflict-regenerate-authored",
+          "fixtureFile": "tests/fixtures/model/sample1-conflict-regenerate-authored.json",
+          "sha256": "61490b45172cada9f9eab613714643919d75e36cab0b5f2f31ba77bbbcebe76d"
+        }
+      ],
+      "resolvedLineageSha256": "273d212e2a7cf709a594714970b844bc77e2182edd0c1abfc0f99a5ae911cd7f",
+      "allowedExistingResultSchemas": [
+        "ai7.conflict-regenerate.result/1"
+      ],
+      "allowedCapturedSubjects": [],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "e94b8f89617ed00f79e22511493abddfd8ba8e23a8ac845ae0f883eaeca4e584",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-conflict-regenerate-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.conflict-regenerate.result/1",
+          "capture": null
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false
+    },
+    {
+      "fixtureIdentity": "sample1-custom-analysis-authored",
+      "registeredProfile": "baseline",
+      "registeredPurposes": [
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/custom-analysis-fixture-generator.test.ts",
+          "registrationPath": "tests/service/custom-analysis-fixture-generator.test.ts",
+          "fixtureSelectionSha256": "357c810da56e562bb45d745bbbffee052f04af1040b6272657c7fae0b8adfc31",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/custom-analysis.test.ts",
+          "registrationPath": "tests/service/custom-analysis.test.ts",
+          "fixtureSelectionSha256": "68dd1e0b1c93a2e5992cb0cf50c188b3724c2cd57df727bb3c69fe0f00901243",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "journey",
+          "id": "J-04",
+          "registrationPath": "e2e/run-j04.mjs",
+          "fixtureSelectionSha256": "b64f51d304f7bde7cc2ca586f2cd138b483779bfb501948b31a9689c3159963d",
+          "sameSelectionsAtPreparationBase": true
+        }
+      ],
+      "allowedTaskKinds": [
+        "baseline-manuscript-analysis"
+      ],
+      "sessionPurpose": null,
+      "taskContractIdentities": [
+        "ai7.baseline-manuscript-analysis/1"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/analysis/contract.ts",
+        "sha256": "51b42bae865b24f846c790dc821666cf77b5718aa61f42129249754dc18cee2b",
+        "constants": {
+          "BASELINE_PROMPT_CONTRACT_DIGEST": "89776b1b5ca2e4d3ef529b0be6b2380bfc0cb5addf0426e815df7aa195c7d386",
+          "BASELINE_PROMPT_CONTRACT_SCHEMA": "ai7.baseline-manuscript-analysis.prompt-contract/2",
+          "BASELINE_PROMPT_CONTRACT_V1_DIGEST": "4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5",
+          "BASELINE_PROMPT_CONTRACT_V1_SCHEMA": "ai7.baseline-manuscript-analysis.prompt-contract/1",
+          "BASELINE_UNIT_RESULT_SCHEMA": "ai7.baseline-manuscript-analysis.unit-result/1"
+        }
+      },
+      "capturedTaskPromptContractDigests": [],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/analysis/execution.ts",
+        "sha256": "75fe09cc4aeb9d84774c59be547dcbf80b3dc7e2460bfac00651da405de377f3"
+      },
+      "planCompositionDerivation": {
+        "path": "src/service/analysis/baseline-analysis-store.ts",
+        "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
+      },
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "e02a1d5a3eb3750c8c5620c2a236dd51e67faa17606b3dab2da99319d5c4a8ed",
+      "fixtureFile": "tests/fixtures/model/sample1-custom-analysis-authored.json",
+      "fixtureFileSha256": "eac9a12c020b70c3ee052938cccdb937d156198491a3cea5d589aa20c73e1b1e",
+      "fixtureProvenance": "authored",
+      "orderedLineage": [
+        {
+          "identity": "sample1-custom-analysis-authored",
+          "fixtureFile": "tests/fixtures/model/sample1-custom-analysis-authored.json",
+          "sha256": "eac9a12c020b70c3ee052938cccdb937d156198491a3cea5d589aa20c73e1b1e"
+        },
+        {
+          "identity": "sample1-baseline-happy",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-happy.json",
+          "sha256": "9c3bb63c931966ddbc4c94c5aafb29f7d04d55083f9b4f372391c6714bffba0a"
+        }
+      ],
+      "resolvedLineageSha256": "d61b6ed0b713ba34def54fb46bd430be74c0faee574956c653ecb17653d7f85b",
+      "allowedExistingResultSchemas": [
+        "ai7.analysis.assurance-sampling-result/1",
+        "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+        "ai7.baseline-manuscript-analysis.unit-result/1"
+      ],
+      "allowedCapturedSubjects": [],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "1b0ddc63e99dd5221b18f003565fd6324ff9ce031565271e80a24f56c5d14a88",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "36e16438e6d759c4a2a850c1620b2b3db3fa660fce4c0e079c46c85724f5577d",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "3e6c2262e197cb0179a4f49ab26d8bb54ca14e2eae81af26ed62f28eb039c336",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "97072d1ab7bfdea86363b46ac85e8d469b019a3b1644ea70b7e10763deb13521",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "c667fc1443c70e4dc38370c5c16f17602ca5d0aaa249a5a8ad3e1e2a3465f2a5",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 2,
+          "requestDigest": "6d3c892f661c0d2b10edad6cf29ffa9d6cc522057b7cc1fcff0ab5c0e89af00b",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 3,
+          "requestDigest": "ba2e16f6d1d35617d25cfcaee836b532c1ab07bd077f4e87f7440e5ae8440f4a",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 4,
+          "requestDigest": "8c845a19c7d2490d4161288d9b74985e297941b9141767b155069340ae10e4e2",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "8abcb377378be04322959cc962315565229946cc6a76496e45b7cbc1697094a9",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 6,
+          "requestDigest": "eb508fdc039e94e62e92797a09683a5f6ee14bce8a8133f13021bd53b33986e7",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 7,
+          "requestDigest": "3fe4cb693a94f6338e771fd6f52f9ddca153825257bd4b006ebbe1f46fe0d9f8",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 8,
+          "requestDigest": "03e8183266d513aa4c3ac1707e1bc25b79098c3aa017c50c52b111378afc31fe",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false
+    },
+    {
+      "fixtureIdentity": "sample1-custom-analysis-authored",
+      "registeredProfile": "custom",
+      "registeredPurposes": [
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/custom-analysis-fixture-generator.test.ts",
+          "registrationPath": "tests/service/custom-analysis-fixture-generator.test.ts",
+          "fixtureSelectionSha256": "357c810da56e562bb45d745bbbffee052f04af1040b6272657c7fae0b8adfc31",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/custom-analysis.test.ts",
+          "registrationPath": "tests/service/custom-analysis.test.ts",
+          "fixtureSelectionSha256": "68dd1e0b1c93a2e5992cb0cf50c188b3724c2cd57df727bb3c69fe0f00901243",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "journey",
+          "id": "J-04",
+          "registrationPath": "e2e/run-j04.mjs",
+          "fixtureSelectionSha256": "b64f51d304f7bde7cc2ca586f2cd138b483779bfb501948b31a9689c3159963d",
+          "sameSelectionsAtPreparationBase": true
+        }
+      ],
+      "allowedTaskKinds": [],
+      "sessionPurpose": "exact-registered-custom-dimension-version",
+      "taskContractIdentities": [
+        "ai7.custom-analysis/1"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/analysis/custom-analysis-contract.ts",
+        "sha256": "4b086e290a144ba77af66fffc60465d5ec4a4a447aee41303c9f3d2af4b340d5",
+        "constants": {
+          "CUSTOM_ANALYSIS_PROMPT_CONTRACT_SCHEMA": "ai7.custom-analysis.prompt-contract/1",
+          "CUSTOM_ANALYSIS_RESULT_SET_REVISION_SCHEMA": "ai7.custom-analysis.result-set-revision/1",
+          "CUSTOM_ANALYSIS_SUCCESSOR_REVISION_SCHEMA": "ai7.custom-analysis.result-set-revision/2",
+          "CUSTOM_ANALYSIS_UNIT_RESULT_SCHEMA": "ai7.custom-analysis.unit-result/1"
+        }
+      },
+      "capturedTaskPromptContractDigests": [],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/analysis/execution.ts",
+        "sha256": "75fe09cc4aeb9d84774c59be547dcbf80b3dc7e2460bfac00651da405de377f3"
+      },
+      "planCompositionDerivation": {
+        "path": "src/service/analysis/baseline-analysis-store.ts",
+        "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
+      },
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "e02a1d5a3eb3750c8c5620c2a236dd51e67faa17606b3dab2da99319d5c4a8ed",
+      "fixtureFile": "tests/fixtures/model/sample1-custom-analysis-authored.json",
+      "fixtureFileSha256": "eac9a12c020b70c3ee052938cccdb937d156198491a3cea5d589aa20c73e1b1e",
+      "fixtureProvenance": "authored",
+      "orderedLineage": [
+        {
+          "identity": "sample1-custom-analysis-authored",
+          "fixtureFile": "tests/fixtures/model/sample1-custom-analysis-authored.json",
+          "sha256": "eac9a12c020b70c3ee052938cccdb937d156198491a3cea5d589aa20c73e1b1e"
+        },
+        {
+          "identity": "sample1-baseline-happy",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-happy.json",
+          "sha256": "9c3bb63c931966ddbc4c94c5aafb29f7d04d55083f9b4f372391c6714bffba0a"
+        }
+      ],
+      "resolvedLineageSha256": "d61b6ed0b713ba34def54fb46bd430be74c0faee574956c653ecb17653d7f85b",
+      "allowedExistingResultSchemas": [
+        "ai7.analysis.run-report-reflection-result/1",
+        "ai7.custom-analysis.unit-result/1"
+      ],
+      "allowedCapturedSubjects": [],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "6379514fc2e402d45209e691cdee00be5fe3f9f794b0ccd8879b7a41c26b2326",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-custom-analysis-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "654a4bef6c2796e89cd7ade17146b3fae7c81505b3c1995449e37ffde8737cbb",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-custom-analysis-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.custom-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 2,
+          "requestDigest": "0a8e4ad0ead0947a1955f8484acd9c9dc3c2794ef97c01f1a0c0c64e780cd74a",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-custom-analysis-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.custom-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 3,
+          "requestDigest": "9e435e94dfca916d3d6f7a3c22496cae77cd20609089f14bec3db1a0f9ca9aed",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-custom-analysis-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.custom-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 4,
+          "requestDigest": "63f9354d92caba440f3088fef77bfd6ed965bba4acc0f9e703faa0957205f1b3",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-custom-analysis-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.custom-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "d47bfff9bfabbd72784f20c86a6bf5707d956889466dcc39bf80a8793a9a23fc",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-custom-analysis-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.custom-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 6,
+          "requestDigest": "ca5f76e4e632b5008ab882036f7739de4721d352539817c789b3e83544830267",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-custom-analysis-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.custom-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 7,
+          "requestDigest": "b0ba6c5991a6ae0c1e3c2acf9b5d7ddd975e1c7df9eae3586bcd31e2d39d8820",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-custom-analysis-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.custom-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 8,
+          "requestDigest": "b0be3eb261108987ac47fae5499cb138c3a4e7c29e6bcb9a92781a608da38bdf",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-custom-analysis-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.custom-analysis.unit-result/1",
+          "capture": null
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false,
+      "registeredProfileInputs": {
+        "path": "tests/support/custom-analysis.ts",
+        "sha256": "d6cc957a9632b1cbdc137419ebd26b8e741e1c69e321752f4bc7d3056c7ffc00"
+      }
+    },
+    {
+      "fixtureIdentity": "sample1-dialogue",
+      "registeredProfile": "baseline",
+      "registeredPurposes": [
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/dialogue.test.ts",
+          "registrationPath": "tests/service/dialogue.test.ts",
+          "fixtureSelectionSha256": "389f30d8a98231cf5509f5b5370de90941f8c6adf769ae84a6d007a6637daff9",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/dialogue-live.test.ts",
+          "registrationPath": "tests/service/dialogue-live.test.ts",
+          "fixtureSelectionSha256": "f09174590c3d861753f2bea0af910adf5e3f46e7e5603baba1e286d51d79262c",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        }
+      ],
+      "allowedTaskKinds": [
+        "baseline-manuscript-analysis"
+      ],
+      "sessionPurpose": null,
+      "taskContractIdentities": [
+        "ai7.baseline-manuscript-analysis/1"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/analysis/contract.ts",
+        "sha256": "51b42bae865b24f846c790dc821666cf77b5718aa61f42129249754dc18cee2b",
+        "constants": {
+          "BASELINE_PROMPT_CONTRACT_DIGEST": "89776b1b5ca2e4d3ef529b0be6b2380bfc0cb5addf0426e815df7aa195c7d386",
+          "BASELINE_PROMPT_CONTRACT_SCHEMA": "ai7.baseline-manuscript-analysis.prompt-contract/2",
+          "BASELINE_PROMPT_CONTRACT_V1_DIGEST": "4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5",
+          "BASELINE_PROMPT_CONTRACT_V1_SCHEMA": "ai7.baseline-manuscript-analysis.prompt-contract/1",
+          "BASELINE_UNIT_RESULT_SCHEMA": "ai7.baseline-manuscript-analysis.unit-result/1"
+        }
+      },
+      "capturedTaskPromptContractDigests": [],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/analysis/execution.ts",
+        "sha256": "75fe09cc4aeb9d84774c59be547dcbf80b3dc7e2460bfac00651da405de377f3"
+      },
+      "planCompositionDerivation": {
+        "path": "src/service/analysis/baseline-analysis-store.ts",
+        "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
+      },
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "e02a1d5a3eb3750c8c5620c2a236dd51e67faa17606b3dab2da99319d5c4a8ed",
+      "fixtureFile": "tests/fixtures/model/sample1-dialogue.json",
+      "fixtureFileSha256": "b8b1206a06c85eb5dfc7bf669368b99ffe77d42619712e0e9dac6ada26d5e18f",
+      "fixtureProvenance": "recorded",
+      "orderedLineage": [
+        {
+          "identity": "sample1-dialogue",
+          "fixtureFile": "tests/fixtures/model/sample1-dialogue.json",
+          "sha256": "b8b1206a06c85eb5dfc7bf669368b99ffe77d42619712e0e9dac6ada26d5e18f"
+        },
+        {
+          "identity": "sample1-baseline-happy",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-happy.json",
+          "sha256": "9c3bb63c931966ddbc4c94c5aafb29f7d04d55083f9b4f372391c6714bffba0a"
+        }
+      ],
+      "resolvedLineageSha256": "6d6ec69b21fd5a79f6430a716280a2f5b2eee3b2b694eb2ebdfed8f5af3b0973",
+      "allowedExistingResultSchemas": [
+        "ai7.analysis.assurance-sampling-result/1",
+        "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+        "ai7.baseline-manuscript-analysis.unit-result/1"
+      ],
+      "allowedCapturedSubjects": [],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "1b0ddc63e99dd5221b18f003565fd6324ff9ce031565271e80a24f56c5d14a88",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "36e16438e6d759c4a2a850c1620b2b3db3fa660fce4c0e079c46c85724f5577d",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "3e6c2262e197cb0179a4f49ab26d8bb54ca14e2eae81af26ed62f28eb039c336",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "97072d1ab7bfdea86363b46ac85e8d469b019a3b1644ea70b7e10763deb13521",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "c667fc1443c70e4dc38370c5c16f17602ca5d0aaa249a5a8ad3e1e2a3465f2a5",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 2,
+          "requestDigest": "6d3c892f661c0d2b10edad6cf29ffa9d6cc522057b7cc1fcff0ab5c0e89af00b",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 3,
+          "requestDigest": "ba2e16f6d1d35617d25cfcaee836b532c1ab07bd077f4e87f7440e5ae8440f4a",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 4,
+          "requestDigest": "8c845a19c7d2490d4161288d9b74985e297941b9141767b155069340ae10e4e2",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "8abcb377378be04322959cc962315565229946cc6a76496e45b7cbc1697094a9",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 6,
+          "requestDigest": "eb508fdc039e94e62e92797a09683a5f6ee14bce8a8133f13021bd53b33986e7",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 7,
+          "requestDigest": "3fe4cb693a94f6338e771fd6f52f9ddca153825257bd4b006ebbe1f46fe0d9f8",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 8,
+          "requestDigest": "03e8183266d513aa4c3ac1707e1bc25b79098c3aa017c50c52b111378afc31fe",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false
+    },
+    {
+      "fixtureIdentity": "sample1-dialogue",
+      "registeredProfile": "dialogue",
+      "registeredPurposes": [
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/dialogue.test.ts",
+          "registrationPath": "tests/service/dialogue.test.ts",
+          "fixtureSelectionSha256": "389f30d8a98231cf5509f5b5370de90941f8c6adf769ae84a6d007a6637daff9",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/dialogue-live.test.ts",
+          "registrationPath": "tests/service/dialogue-live.test.ts",
+          "fixtureSelectionSha256": "f09174590c3d861753f2bea0af910adf5e3f46e7e5603baba1e286d51d79262c",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        }
+      ],
+      "allowedTaskKinds": [],
+      "sessionPurpose": "editorial-dialogue",
+      "taskContractIdentities": [
+        "ai7.editorial-dialogue/1"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/dialogue/contract.ts",
+        "sha256": "5faa939e03ec282755a55aef79771fb80dfb7e6448971bb3a3745dac502c0f61",
+        "constants": {
+          "AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST": "52c2ac13bad53d6763620038adad73b727285caae5364d8e20601274bdcf071e",
+          "AGENT_WORKSPACE_RESULT_SCHEMA": "ai7.agent-workspace.change-set/1",
+          "DIALOGUE_CONTRACT_VERSION": "ai7.editorial-dialogue/1",
+          "DIALOGUE_PROMPT_CONTRACT_DIGEST": "81cf644d1c52f63aa5db1e1a84c24e5256e96686fea0c8b69e4d1d71fe0d09ee",
+          "DIALOGUE_PROMPT_CONTRACT_SCHEMA": "ai7.dialogue-prompt-contract/1",
+          "DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST": "7875521807a89016a04f73d5392c997547f85c9af00693e457844875c655c8f6"
+        }
+      },
+      "capturedTaskPromptContractDigests": [],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/dialogue/dialogue-execution.ts",
+        "sha256": "910cedac5b65fef05a8b0916f7896b51139fdcdb5f12ed94aa6bdbbd6c2db737"
+      },
+      "planCompositionDerivation": null,
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "editor-selected-manuscript-excerpt"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "ce3c7a0bb60b5ef7ee2683f0889d1e4a56a7f24b6b4fa488135f95ae3ba6706a",
+      "fixtureFile": "tests/fixtures/model/sample1-dialogue.json",
+      "fixtureFileSha256": "b8b1206a06c85eb5dfc7bf669368b99ffe77d42619712e0e9dac6ada26d5e18f",
+      "fixtureProvenance": "recorded",
+      "orderedLineage": [
+        {
+          "identity": "sample1-dialogue",
+          "fixtureFile": "tests/fixtures/model/sample1-dialogue.json",
+          "sha256": "b8b1206a06c85eb5dfc7bf669368b99ffe77d42619712e0e9dac6ada26d5e18f"
+        },
+        {
+          "identity": "sample1-baseline-happy",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-happy.json",
+          "sha256": "9c3bb63c931966ddbc4c94c5aafb29f7d04d55083f9b4f372391c6714bffba0a"
+        }
+      ],
+      "resolvedLineageSha256": "6d6ec69b21fd5a79f6430a716280a2f5b2eee3b2b694eb2ebdfed8f5af3b0973",
+      "allowedExistingResultSchemas": [],
+      "allowedCapturedSubjects": [],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "99d222cfa2aac85a27b6839fed74ea01b00f602a19028cc903f0872c33a206ed",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-dialogue",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "answer-chunks",
+          "resultSchema": null,
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "e3460da6fdc716fe6a8087d4b408341f661d6c1b5716e5e64b6c0a524e03dad3",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-dialogue",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "answer-chunks",
+          "resultSchema": null,
+          "capture": null
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false
+    },
+    {
+      "fixtureIdentity": "sample1-dialogue-recorded-v41",
+      "registeredProfile": "dialogue",
+      "registeredPurposes": [
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/dialogue-live.test.ts",
+          "registrationPath": "tests/service/dialogue-live.test.ts",
+          "fixtureSelectionSha256": "cdc5b8700350055b1c1aa2d49aab46015ea351489e29005a43693fe2243523c5",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        }
+      ],
+      "allowedTaskKinds": [],
+      "sessionPurpose": "editorial-dialogue",
+      "taskContractIdentities": [
+        "ai7.editorial-dialogue/1"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/dialogue/contract.ts",
+        "sha256": "5faa939e03ec282755a55aef79771fb80dfb7e6448971bb3a3745dac502c0f61",
+        "constants": {
+          "AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST": "52c2ac13bad53d6763620038adad73b727285caae5364d8e20601274bdcf071e",
+          "AGENT_WORKSPACE_RESULT_SCHEMA": "ai7.agent-workspace.change-set/1",
+          "DIALOGUE_CONTRACT_VERSION": "ai7.editorial-dialogue/1",
+          "DIALOGUE_PROMPT_CONTRACT_DIGEST": "81cf644d1c52f63aa5db1e1a84c24e5256e96686fea0c8b69e4d1d71fe0d09ee",
+          "DIALOGUE_PROMPT_CONTRACT_SCHEMA": "ai7.dialogue-prompt-contract/1",
+          "DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST": "7875521807a89016a04f73d5392c997547f85c9af00693e457844875c655c8f6"
+        }
+      },
+      "capturedTaskPromptContractDigests": [
+        "81cf644d1c52f63aa5db1e1a84c24e5256e96686fea0c8b69e4d1d71fe0d09ee"
+      ],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/dialogue/dialogue-execution.ts",
+        "sha256": "910cedac5b65fef05a8b0916f7896b51139fdcdb5f12ed94aa6bdbbd6c2db737"
+      },
+      "planCompositionDerivation": null,
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "editor-selected-manuscript-excerpt"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "ce3c7a0bb60b5ef7ee2683f0889d1e4a56a7f24b6b4fa488135f95ae3ba6706a",
+      "fixtureFile": "tests/fixtures/model/sample1-dialogue-recorded-v41.json",
+      "fixtureFileSha256": "ad9db1efa161c9f77afbfa70d010ece80e23748a56db2547218d0b03cc6926e1",
+      "fixtureProvenance": "recorded",
+      "orderedLineage": [
+        {
+          "identity": "sample1-dialogue-recorded-v41",
+          "fixtureFile": "tests/fixtures/model/sample1-dialogue-recorded-v41.json",
+          "sha256": "ad9db1efa161c9f77afbfa70d010ece80e23748a56db2547218d0b03cc6926e1"
+        }
+      ],
+      "resolvedLineageSha256": "331ecf35b2f6c85927e3f33b73ed65d1d52fd03853a9b26fe2a85759ef27718d",
+      "allowedExistingResultSchemas": [],
+      "allowedCapturedSubjects": [
+        "dialogue"
+      ],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "99d222cfa2aac85a27b6839fed74ea01b00f602a19028cc903f0872c33a206ed",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-dialogue-recorded-v41",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "answer-chunks",
+          "resultSchema": null,
+          "capture": {
+            "subject": "dialogue",
+            "itemId": "S17c/editorial-dialogue/5",
+            "selectedItemId": "S17c/editorial-dialogue/5",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "81cf644d1c52f63aa5db1e1a84c24e5256e96686fea0c8b69e4d1d71fe0d09ee",
+            "taskPromptContractDigest": "81cf644d1c52f63aa5db1e1a84c24e5256e96686fea0c8b69e4d1d71fe0d09ee",
+            "capturedAt": "2026-10-13T12:04:43.876Z",
+            "providerRequestDigest": "a592ba70641b4b8d0de2aecd3fe64ad18ee1ba789a97e5752182fcb5b1ecd40f",
+            "providerResponseDigest": "a9b49642708c82a30e92194cde921f931fab1cb8320e0e0a302aa4fdfff7a337",
+            "fixtureResponseDigest": "e116b9bb31ee943805f3f73f695727e1ab6db35286ba9156ada85668b7febbc9",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "editorial-dialogue",
+              "case": "sample1-selected-paragraph",
+              "step": "editorial-dialogue/ask"
+            },
+            "cacheKey": "47f6f3a4fc6ed721fc2ee14cb0c1669ca6ad0d055f6797983ec2a951181c32eb",
+            "generation": "974386d12d1efb3faee3bdf93ffaf0af3a151125640dda289d93786bea2e3c60",
+            "identityMapSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false
+    },
+    {
+      "fixtureIdentity": "sample1-dialogue-recorded-v41-stream",
+      "registeredProfile": "dialogue",
+      "registeredPurposes": [
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/dialogue-live.test.ts",
+          "registrationPath": "tests/service/dialogue-live.test.ts",
+          "fixtureSelectionSha256": "d0529fe3e178cc6b1c561e2418c19c78ba1a847f145ee749fe6e70642abc0de9",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        }
+      ],
+      "allowedTaskKinds": [],
+      "sessionPurpose": "editorial-dialogue",
+      "taskContractIdentities": [
+        "ai7.editorial-dialogue/1"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/dialogue/contract.ts",
+        "sha256": "5faa939e03ec282755a55aef79771fb80dfb7e6448971bb3a3745dac502c0f61",
+        "constants": {
+          "AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST": "52c2ac13bad53d6763620038adad73b727285caae5364d8e20601274bdcf071e",
+          "AGENT_WORKSPACE_RESULT_SCHEMA": "ai7.agent-workspace.change-set/1",
+          "DIALOGUE_CONTRACT_VERSION": "ai7.editorial-dialogue/1",
+          "DIALOGUE_PROMPT_CONTRACT_DIGEST": "81cf644d1c52f63aa5db1e1a84c24e5256e96686fea0c8b69e4d1d71fe0d09ee",
+          "DIALOGUE_PROMPT_CONTRACT_SCHEMA": "ai7.dialogue-prompt-contract/1",
+          "DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST": "7875521807a89016a04f73d5392c997547f85c9af00693e457844875c655c8f6"
+        }
+      },
+      "capturedTaskPromptContractDigests": [
+        "81cf644d1c52f63aa5db1e1a84c24e5256e96686fea0c8b69e4d1d71fe0d09ee"
+      ],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/dialogue/dialogue-execution.ts",
+        "sha256": "910cedac5b65fef05a8b0916f7896b51139fdcdb5f12ed94aa6bdbbd6c2db737"
+      },
+      "planCompositionDerivation": null,
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "editor-selected-manuscript-excerpt"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "ce3c7a0bb60b5ef7ee2683f0889d1e4a56a7f24b6b4fa488135f95ae3ba6706a",
+      "fixtureFile": "tests/fixtures/model/sample1-dialogue-recorded-v41-stream.json",
+      "fixtureFileSha256": "d719d1efc5fd441d9674cd8502099c78896bf70f3626498d9b937681e1a0a904",
+      "fixtureProvenance": "recorded",
+      "orderedLineage": [
+        {
+          "identity": "sample1-dialogue-recorded-v41-stream",
+          "fixtureFile": "tests/fixtures/model/sample1-dialogue-recorded-v41-stream.json",
+          "sha256": "d719d1efc5fd441d9674cd8502099c78896bf70f3626498d9b937681e1a0a904"
+        }
+      ],
+      "resolvedLineageSha256": "6d3f99799d06b2b99ba76a68ea9b9a110ab1d8784d0fdcf81ba8c0af04a39a5c",
+      "allowedExistingResultSchemas": [],
+      "allowedCapturedSubjects": [
+        "dialogue"
+      ],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "4d0d357ec9549aca74d0548e65236038fb375b33c58132366eaa708df9394220",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-dialogue-recorded-v41-stream",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "answer-chunks",
+          "resultSchema": null,
+          "capture": {
+            "subject": "dialogue",
+            "itemId": "S17c/editorial-dialogue/3",
+            "selectedItemId": "S17c/editorial-dialogue/3",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "editorial-dialogue-sse",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "81cf644d1c52f63aa5db1e1a84c24e5256e96686fea0c8b69e4d1d71fe0d09ee",
+            "taskPromptContractDigest": "81cf644d1c52f63aa5db1e1a84c24e5256e96686fea0c8b69e4d1d71fe0d09ee",
+            "capturedAt": "2026-10-14T04:48:38.551Z",
+            "providerRequestDigest": "c152a59c8cb396e055cef40703b70d59274fa3497507b6441d235a5ce22d22af",
+            "providerResponseDigest": "d648a6c592b6bede4bea951cd4340f81d8de61babf3c8a4a2856861f49040f74",
+            "fixtureResponseDigest": "ed043972b6d3ae27613bd9f0eadf6476fb206786d6fb311e6f68c869cc54f671",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "editorial-dialogue-stream",
+              "case": "sample1-stop-continue",
+              "step": "editorial-dialogue/continue"
+            },
+            "cacheKey": "7b059cf34c5216d301769bf30b41a0804461f2c76cd87ade887121d44dad5342",
+            "generation": "099da90eeb44dcd44ae1a165b520ff5692d3eb7b09a465e2d6c9a3ab2b8459f3",
+            "identityMapSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false
+    },
+    {
+      "fixtureIdentity": "sample1-dialogue-retrieval",
+      "registeredProfile": "baseline",
+      "registeredPurposes": [
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/dialogue.test.ts",
+          "registrationPath": "tests/service/dialogue.test.ts",
+          "fixtureSelectionSha256": "93e2ecc901144f2d6d7aa68916a3bcf4db798d599d979f93c50bb5b38db7093b",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        }
+      ],
+      "allowedTaskKinds": [
+        "baseline-manuscript-analysis"
+      ],
+      "sessionPurpose": null,
+      "taskContractIdentities": [
+        "ai7.baseline-manuscript-analysis/1"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/analysis/contract.ts",
+        "sha256": "51b42bae865b24f846c790dc821666cf77b5718aa61f42129249754dc18cee2b",
+        "constants": {
+          "BASELINE_PROMPT_CONTRACT_DIGEST": "89776b1b5ca2e4d3ef529b0be6b2380bfc0cb5addf0426e815df7aa195c7d386",
+          "BASELINE_PROMPT_CONTRACT_SCHEMA": "ai7.baseline-manuscript-analysis.prompt-contract/2",
+          "BASELINE_PROMPT_CONTRACT_V1_DIGEST": "4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5",
+          "BASELINE_PROMPT_CONTRACT_V1_SCHEMA": "ai7.baseline-manuscript-analysis.prompt-contract/1",
+          "BASELINE_UNIT_RESULT_SCHEMA": "ai7.baseline-manuscript-analysis.unit-result/1"
+        }
+      },
+      "capturedTaskPromptContractDigests": [],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/analysis/execution.ts",
+        "sha256": "75fe09cc4aeb9d84774c59be547dcbf80b3dc7e2460bfac00651da405de377f3"
+      },
+      "planCompositionDerivation": {
+        "path": "src/service/analysis/baseline-analysis-store.ts",
+        "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
+      },
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "e02a1d5a3eb3750c8c5620c2a236dd51e67faa17606b3dab2da99319d5c4a8ed",
+      "fixtureFile": "tests/fixtures/model/sample1-dialogue-retrieval.json",
+      "fixtureFileSha256": "ad626c7a067d977f9dee7bddb0205fc7221ef10f133b2983640419e96a257520",
+      "fixtureProvenance": "authored",
+      "orderedLineage": [
+        {
+          "identity": "sample1-dialogue-retrieval",
+          "fixtureFile": "tests/fixtures/model/sample1-dialogue-retrieval.json",
+          "sha256": "ad626c7a067d977f9dee7bddb0205fc7221ef10f133b2983640419e96a257520"
+        },
+        {
+          "identity": "sample1-dialogue",
+          "fixtureFile": "tests/fixtures/model/sample1-dialogue.json",
+          "sha256": "b8b1206a06c85eb5dfc7bf669368b99ffe77d42619712e0e9dac6ada26d5e18f"
+        },
+        {
+          "identity": "sample1-baseline-happy",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-happy.json",
+          "sha256": "9c3bb63c931966ddbc4c94c5aafb29f7d04d55083f9b4f372391c6714bffba0a"
+        }
+      ],
+      "resolvedLineageSha256": "284e4ec330a576a15782d832e8058755f41eb8c689ed781893143b89c18a02d1",
+      "allowedExistingResultSchemas": [
+        "ai7.analysis.assurance-sampling-result/1",
+        "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+        "ai7.baseline-manuscript-analysis.unit-result/1"
+      ],
+      "allowedCapturedSubjects": [],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "1b0ddc63e99dd5221b18f003565fd6324ff9ce031565271e80a24f56c5d14a88",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "36e16438e6d759c4a2a850c1620b2b3db3fa660fce4c0e079c46c85724f5577d",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "3e6c2262e197cb0179a4f49ab26d8bb54ca14e2eae81af26ed62f28eb039c336",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "97072d1ab7bfdea86363b46ac85e8d469b019a3b1644ea70b7e10763deb13521",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "c667fc1443c70e4dc38370c5c16f17602ca5d0aaa249a5a8ad3e1e2a3465f2a5",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 2,
+          "requestDigest": "6d3c892f661c0d2b10edad6cf29ffa9d6cc522057b7cc1fcff0ab5c0e89af00b",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 3,
+          "requestDigest": "ba2e16f6d1d35617d25cfcaee836b532c1ab07bd077f4e87f7440e5ae8440f4a",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 4,
+          "requestDigest": "8c845a19c7d2490d4161288d9b74985e297941b9141767b155069340ae10e4e2",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "8abcb377378be04322959cc962315565229946cc6a76496e45b7cbc1697094a9",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 6,
+          "requestDigest": "eb508fdc039e94e62e92797a09683a5f6ee14bce8a8133f13021bd53b33986e7",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 7,
+          "requestDigest": "3fe4cb693a94f6338e771fd6f52f9ddca153825257bd4b006ebbe1f46fe0d9f8",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 8,
+          "requestDigest": "03e8183266d513aa4c3ac1707e1bc25b79098c3aa017c50c52b111378afc31fe",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false
+    },
+    {
+      "fixtureIdentity": "sample1-dialogue-retrieval",
+      "registeredProfile": "dialogue",
+      "registeredPurposes": [
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/dialogue.test.ts",
+          "registrationPath": "tests/service/dialogue.test.ts",
+          "fixtureSelectionSha256": "93e2ecc901144f2d6d7aa68916a3bcf4db798d599d979f93c50bb5b38db7093b",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        }
+      ],
+      "allowedTaskKinds": [],
+      "sessionPurpose": "editorial-dialogue",
+      "taskContractIdentities": [
+        "ai7.editorial-dialogue/1"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/dialogue/contract.ts",
+        "sha256": "5faa939e03ec282755a55aef79771fb80dfb7e6448971bb3a3745dac502c0f61",
+        "constants": {
+          "AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST": "52c2ac13bad53d6763620038adad73b727285caae5364d8e20601274bdcf071e",
+          "AGENT_WORKSPACE_RESULT_SCHEMA": "ai7.agent-workspace.change-set/1",
+          "DIALOGUE_CONTRACT_VERSION": "ai7.editorial-dialogue/1",
+          "DIALOGUE_PROMPT_CONTRACT_DIGEST": "81cf644d1c52f63aa5db1e1a84c24e5256e96686fea0c8b69e4d1d71fe0d09ee",
+          "DIALOGUE_PROMPT_CONTRACT_SCHEMA": "ai7.dialogue-prompt-contract/1",
+          "DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST": "7875521807a89016a04f73d5392c997547f85c9af00693e457844875c655c8f6"
+        }
+      },
+      "capturedTaskPromptContractDigests": [],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/dialogue/dialogue-execution.ts",
+        "sha256": "910cedac5b65fef05a8b0916f7896b51139fdcdb5f12ed94aa6bdbbd6c2db737"
+      },
+      "planCompositionDerivation": null,
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "editor-selected-manuscript-excerpt"
+        ],
+        "allowedTools": [
+          "retrieve",
+          "exact_fetch"
+        ]
+      },
+      "categoryAndToolSetSha256": "c85ca2ef01b79d4b798213e7e7af414cd939a4ce2c8ceca3338453a9795c90aa",
+      "fixtureFile": "tests/fixtures/model/sample1-dialogue-retrieval.json",
+      "fixtureFileSha256": "ad626c7a067d977f9dee7bddb0205fc7221ef10f133b2983640419e96a257520",
+      "fixtureProvenance": "authored",
+      "orderedLineage": [
+        {
+          "identity": "sample1-dialogue-retrieval",
+          "fixtureFile": "tests/fixtures/model/sample1-dialogue-retrieval.json",
+          "sha256": "ad626c7a067d977f9dee7bddb0205fc7221ef10f133b2983640419e96a257520"
+        },
+        {
+          "identity": "sample1-dialogue",
+          "fixtureFile": "tests/fixtures/model/sample1-dialogue.json",
+          "sha256": "b8b1206a06c85eb5dfc7bf669368b99ffe77d42619712e0e9dac6ada26d5e18f"
+        },
+        {
+          "identity": "sample1-baseline-happy",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-happy.json",
+          "sha256": "9c3bb63c931966ddbc4c94c5aafb29f7d04d55083f9b4f372391c6714bffba0a"
+        }
+      ],
+      "resolvedLineageSha256": "284e4ec330a576a15782d832e8058755f41eb8c689ed781893143b89c18a02d1",
+      "allowedExistingResultSchemas": [
+        "ai7.local-retrieval-stimulus/1"
+      ],
+      "allowedCapturedSubjects": [],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "7b00c9a51c87489421084e0a3b5bcccb090359bb5620c52d5d79398731b29e73",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-dialogue-retrieval",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.local-retrieval-stimulus/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "99d222cfa2aac85a27b6839fed74ea01b00f602a19028cc903f0872c33a206ed",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-dialogue",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "answer-chunks",
+          "resultSchema": null,
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "e3460da6fdc716fe6a8087d4b408341f661d6c1b5716e5e64b6c0a524e03dad3",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-dialogue",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "answer-chunks",
+          "resultSchema": null,
+          "capture": null
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false
+    },
+    {
+      "fixtureIdentity": "sample1-evaluation-authored",
+      "registeredProfile": "baseline",
+      "registeredPurposes": [
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/live-material-references.test.ts",
+          "registrationPath": "tests/service/live-material-references.test.ts",
+          "fixtureSelectionSha256": "26ef25b1c55345a0eb67ec8ff6ffd6aebeb61e6aa1647947e780a4afb7520062",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/evaluation-library-references.test.ts",
+          "registrationPath": "tests/service/evaluation-library-references.test.ts",
+          "fixtureSelectionSha256": "3170cd59f0598e28c5312186c04ed25d5c3c026122bf10d3fb9dd6a37bc1e709",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/readers-report-fixture-generator.test.ts",
+          "registrationPath": "tests/service/readers-report-fixture-generator.test.ts",
+          "fixtureSelectionSha256": "44a881cddd0be7baa8f759312a4fa7ee3bd1c9b383c511ccb2897d693448749a",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/outcome-unconfirmed.test.ts",
+          "registrationPath": "tests/service/outcome-unconfirmed.test.ts",
+          "fixtureSelectionSha256": "570fa7b9cd3bf0eb95b488f95618106ee288d08b99e0883fce55bbdce23f9a10",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/writing-tasks.test.ts",
+          "registrationPath": "tests/service/writing-tasks.test.ts",
+          "fixtureSelectionSha256": "5855050211000eb7e443b46d3a11dfd1f4de1f9d3ee292eb8d079c709f97c0c5",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/initial-evaluation.test.ts",
+          "registrationPath": "tests/service/initial-evaluation.test.ts",
+          "fixtureSelectionSha256": "5917e461adb23acdc36154fc1d626b27308fda3323470bbf9a2b8136bf493b82",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/evaluation-fixture-generator.test.ts",
+          "registrationPath": "tests/service/evaluation-fixture-generator.test.ts",
+          "fixtureSelectionSha256": "648c4e2ddd935252b346fc4170dd8d3bcb28cf73ba691733e424de6debabc67b",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/start-when-online-kinds.test.ts",
+          "registrationPath": "tests/service/start-when-online-kinds.test.ts",
+          "fixtureSelectionSha256": "e0b026a0632408dd4eedaf62ed97dce9719e40173db15ea5b86e505c0d191ac2",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/live-evaluation.test.ts",
+          "registrationPath": "tests/service/live-evaluation.test.ts",
+          "fixtureSelectionSha256": "e1949f92d6db20014cf364615930b99e92d6555fc24b4e1eb198136c5a1d97a3",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/run-kind-controls.test.ts",
+          "registrationPath": "tests/service/run-kind-controls.test.ts",
+          "fixtureSelectionSha256": "ed46207e0df10c4ba4823e6439cb3bf0c70450a6c9d7daacaad02fb67db153f8",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/model-clarification.test.ts",
+          "registrationPath": "tests/service/model-clarification.test.ts",
+          "fixtureSelectionSha256": "f9a62e9e5a86401a2ba4dc62efe3f1a595a438fa157efec3c75d6d608a4e24d3",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        }
+      ],
+      "allowedTaskKinds": [
+        "baseline-manuscript-analysis"
+      ],
+      "sessionPurpose": null,
+      "taskContractIdentities": [
+        "ai7.baseline-manuscript-analysis/1"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/analysis/contract.ts",
+        "sha256": "51b42bae865b24f846c790dc821666cf77b5718aa61f42129249754dc18cee2b",
+        "constants": {
+          "BASELINE_PROMPT_CONTRACT_DIGEST": "89776b1b5ca2e4d3ef529b0be6b2380bfc0cb5addf0426e815df7aa195c7d386",
+          "BASELINE_PROMPT_CONTRACT_SCHEMA": "ai7.baseline-manuscript-analysis.prompt-contract/2",
+          "BASELINE_PROMPT_CONTRACT_V1_DIGEST": "4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5",
+          "BASELINE_PROMPT_CONTRACT_V1_SCHEMA": "ai7.baseline-manuscript-analysis.prompt-contract/1",
+          "BASELINE_UNIT_RESULT_SCHEMA": "ai7.baseline-manuscript-analysis.unit-result/1"
+        }
+      },
+      "capturedTaskPromptContractDigests": [],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/analysis/execution.ts",
+        "sha256": "75fe09cc4aeb9d84774c59be547dcbf80b3dc7e2460bfac00651da405de377f3"
+      },
+      "planCompositionDerivation": {
+        "path": "src/service/analysis/baseline-analysis-store.ts",
+        "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
+      },
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "e02a1d5a3eb3750c8c5620c2a236dd51e67faa17606b3dab2da99319d5c4a8ed",
+      "fixtureFile": "tests/fixtures/model/sample1-evaluation-authored.json",
+      "fixtureFileSha256": "8675ee3dfc904759589b8d08aed621233306739dac4c354836052e73ee184d1c",
+      "fixtureProvenance": "authored",
+      "orderedLineage": [
+        {
+          "identity": "sample1-evaluation-authored",
+          "fixtureFile": "tests/fixtures/model/sample1-evaluation-authored.json",
+          "sha256": "8675ee3dfc904759589b8d08aed621233306739dac4c354836052e73ee184d1c"
+        },
+        {
+          "identity": "sample1-baseline-happy",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-happy.json",
+          "sha256": "9c3bb63c931966ddbc4c94c5aafb29f7d04d55083f9b4f372391c6714bffba0a"
+        }
+      ],
+      "resolvedLineageSha256": "bbe61e9ac504f1a6a0d88502952e8b51b3ea0c7a201118e893cdf3e00f61f366",
+      "allowedExistingResultSchemas": [
+        "ai7.analysis.assurance-sampling-result/1",
+        "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+        "ai7.baseline-manuscript-analysis.unit-result/1"
+      ],
+      "allowedCapturedSubjects": [],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "1b0ddc63e99dd5221b18f003565fd6324ff9ce031565271e80a24f56c5d14a88",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "36e16438e6d759c4a2a850c1620b2b3db3fa660fce4c0e079c46c85724f5577d",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "3e6c2262e197cb0179a4f49ab26d8bb54ca14e2eae81af26ed62f28eb039c336",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "97072d1ab7bfdea86363b46ac85e8d469b019a3b1644ea70b7e10763deb13521",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "c667fc1443c70e4dc38370c5c16f17602ca5d0aaa249a5a8ad3e1e2a3465f2a5",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 2,
+          "requestDigest": "6d3c892f661c0d2b10edad6cf29ffa9d6cc522057b7cc1fcff0ab5c0e89af00b",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 3,
+          "requestDigest": "ba2e16f6d1d35617d25cfcaee836b532c1ab07bd077f4e87f7440e5ae8440f4a",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 4,
+          "requestDigest": "8c845a19c7d2490d4161288d9b74985e297941b9141767b155069340ae10e4e2",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "8abcb377378be04322959cc962315565229946cc6a76496e45b7cbc1697094a9",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 6,
+          "requestDigest": "eb508fdc039e94e62e92797a09683a5f6ee14bce8a8133f13021bd53b33986e7",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 7,
+          "requestDigest": "3fe4cb693a94f6338e771fd6f52f9ddca153825257bd4b006ebbe1f46fe0d9f8",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 8,
+          "requestDigest": "03e8183266d513aa4c3ac1707e1bc25b79098c3aa017c50c52b111378afc31fe",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false
+    },
+    {
+      "fixtureIdentity": "sample1-evaluation-authored",
+      "registeredProfile": "evaluation",
+      "registeredPurposes": [
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/live-material-references.test.ts",
+          "registrationPath": "tests/service/live-material-references.test.ts",
+          "fixtureSelectionSha256": "26ef25b1c55345a0eb67ec8ff6ffd6aebeb61e6aa1647947e780a4afb7520062",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/evaluation-library-references.test.ts",
+          "registrationPath": "tests/service/evaluation-library-references.test.ts",
+          "fixtureSelectionSha256": "3170cd59f0598e28c5312186c04ed25d5c3c026122bf10d3fb9dd6a37bc1e709",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/readers-report-fixture-generator.test.ts",
+          "registrationPath": "tests/service/readers-report-fixture-generator.test.ts",
+          "fixtureSelectionSha256": "44a881cddd0be7baa8f759312a4fa7ee3bd1c9b383c511ccb2897d693448749a",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/outcome-unconfirmed.test.ts",
+          "registrationPath": "tests/service/outcome-unconfirmed.test.ts",
+          "fixtureSelectionSha256": "570fa7b9cd3bf0eb95b488f95618106ee288d08b99e0883fce55bbdce23f9a10",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/writing-tasks.test.ts",
+          "registrationPath": "tests/service/writing-tasks.test.ts",
+          "fixtureSelectionSha256": "5855050211000eb7e443b46d3a11dfd1f4de1f9d3ee292eb8d079c709f97c0c5",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/initial-evaluation.test.ts",
+          "registrationPath": "tests/service/initial-evaluation.test.ts",
+          "fixtureSelectionSha256": "5917e461adb23acdc36154fc1d626b27308fda3323470bbf9a2b8136bf493b82",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/evaluation-fixture-generator.test.ts",
+          "registrationPath": "tests/service/evaluation-fixture-generator.test.ts",
+          "fixtureSelectionSha256": "648c4e2ddd935252b346fc4170dd8d3bcb28cf73ba691733e424de6debabc67b",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/start-when-online-kinds.test.ts",
+          "registrationPath": "tests/service/start-when-online-kinds.test.ts",
+          "fixtureSelectionSha256": "e0b026a0632408dd4eedaf62ed97dce9719e40173db15ea5b86e505c0d191ac2",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/live-evaluation.test.ts",
+          "registrationPath": "tests/service/live-evaluation.test.ts",
+          "fixtureSelectionSha256": "e1949f92d6db20014cf364615930b99e92d6555fc24b4e1eb198136c5a1d97a3",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/run-kind-controls.test.ts",
+          "registrationPath": "tests/service/run-kind-controls.test.ts",
+          "fixtureSelectionSha256": "ed46207e0df10c4ba4823e6439cb3bf0c70450a6c9d7daacaad02fb67db153f8",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/model-clarification.test.ts",
+          "registrationPath": "tests/service/model-clarification.test.ts",
+          "fixtureSelectionSha256": "f9a62e9e5a86401a2ba4dc62efe3f1a595a438fa157efec3c75d6d608a4e24d3",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        }
+      ],
+      "allowedTaskKinds": [
+        "evaluation"
+      ],
+      "sessionPurpose": null,
+      "taskContractIdentities": [
+        "ai7.evaluation/1"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/evaluation/initial-evaluation-contract.ts",
+        "sha256": "53d5b64568a2b7c7234384fec1df30483e48f7ee9313b83fc4d86f50be507dd0",
+        "constants": {
+          "INITIAL_EVALUATION_PROMPT_CONTRACT_SCHEMA": "ai7.evaluation.prompt-contract/2",
+          "INITIAL_EVALUATION_RESULT_SET_REVISION_SCHEMA": "ai7.evaluation.result-set-revision/1",
+          "INITIAL_EVALUATION_SUCCESSOR_REVISION_SCHEMA": "ai7.evaluation.result-set-revision/2",
+          "INITIAL_EVALUATION_SYNTHESIS_RESULT_SCHEMA": "ai7.evaluation.synthesis-result/2",
+          "INITIAL_EVALUATION_UNIT_RESULT_SCHEMA": "ai7.evaluation.unit-result/1"
+        }
+      },
+      "capturedTaskPromptContractDigests": [],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/analysis/execution.ts",
+        "sha256": "75fe09cc4aeb9d84774c59be547dcbf80b3dc7e2460bfac00651da405de377f3"
+      },
+      "planCompositionDerivation": {
+        "path": "src/service/analysis/baseline-analysis-store.ts",
+        "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
+      },
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "e02a1d5a3eb3750c8c5620c2a236dd51e67faa17606b3dab2da99319d5c4a8ed",
+      "fixtureFile": "tests/fixtures/model/sample1-evaluation-authored.json",
+      "fixtureFileSha256": "8675ee3dfc904759589b8d08aed621233306739dac4c354836052e73ee184d1c",
+      "fixtureProvenance": "authored",
+      "orderedLineage": [
+        {
+          "identity": "sample1-evaluation-authored",
+          "fixtureFile": "tests/fixtures/model/sample1-evaluation-authored.json",
+          "sha256": "8675ee3dfc904759589b8d08aed621233306739dac4c354836052e73ee184d1c"
+        },
+        {
+          "identity": "sample1-baseline-happy",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-happy.json",
+          "sha256": "9c3bb63c931966ddbc4c94c5aafb29f7d04d55083f9b4f372391c6714bffba0a"
+        }
+      ],
+      "resolvedLineageSha256": "bbe61e9ac504f1a6a0d88502952e8b51b3ea0c7a201118e893cdf3e00f61f366",
+      "allowedExistingResultSchemas": [
+        "ai7.analysis.run-report-reflection-result/1",
+        "ai7.evaluation.synthesis-result/2",
+        "ai7.evaluation.unit-result/1"
+      ],
+      "allowedCapturedSubjects": [],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "12e4fb6dc1f5510fd35a373710070de9afbefafd5260ff369b70b6ee5edf727e",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-evaluation-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.evaluation.synthesis-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "d814639994d282c66d72ae398159ad56394c549c11658809f5cb1fd3484deff8",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-evaluation-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "47940f22f71b317026fa33626d9a9af89ff1c336873a1e9546fcde15730ac2a1",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-evaluation-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.evaluation.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 2,
+          "requestDigest": "b7d78d719fefd62537cc1329fa6bf20e5be532c9081604cf80f15eb91fd5db2a",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-evaluation-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.evaluation.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 3,
+          "requestDigest": "23fea5adf5a7e056be0b62d901a8a79a1c4be2fb48ebb3081f58c94afd041a53",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-evaluation-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.evaluation.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 4,
+          "requestDigest": "ff800063fe175f6b54495c52e3b6577ed34810efe2c7a61ff13ae00d31fe9b27",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-evaluation-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.evaluation.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "2df9635eb8f8a7a35e9d230ceb8cb95eb2bc2993e16ae0e3855d927eca4f912b",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-evaluation-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.evaluation.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 6,
+          "requestDigest": "141f156d3252f81bbfe6636fd6970b539d865f1190baab3238018a76e83f6729",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-evaluation-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.evaluation.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 7,
+          "requestDigest": "167d291ff9ca49bc006e8cf772422ab7adb1c0661b855abb0c9468c79413f46c",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-evaluation-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.evaluation.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 8,
+          "requestDigest": "77d0d8f74f7118fb01f0de13dedca6ecaf7cd76b7069c0c419996c97522823ce",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-evaluation-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.evaluation.unit-result/1",
+          "capture": null
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false
+    },
+    {
+      "fixtureIdentity": "sample1-evaluation-rewrite-authored",
+      "registeredProfile": "baseline",
+      "registeredPurposes": [
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/run-kind-controls.test.ts",
+          "registrationPath": "tests/service/run-kind-controls.test.ts",
+          "fixtureSelectionSha256": "2c2fac5ecb4eaef600bc2869e0e59583af1ca38f6ea30313a27d49e2d74fe211",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "journey",
+          "id": "J-11",
+          "registrationPath": "e2e/run-j11.mjs",
+          "fixtureSelectionSha256": "7ee8fc5e056a113920f3ebd38e519fdb47d262aa3908003e02218a5468af6b82",
+          "sameSelectionsAtPreparationBase": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/live-evaluation.test.ts",
+          "registrationPath": "tests/service/live-evaluation.test.ts",
+          "fixtureSelectionSha256": "81cdf57c2289af7c9e1b388b76ae26ced6efe7c825ca2ac474d79a258401f791",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        }
+      ],
+      "allowedTaskKinds": [
+        "baseline-manuscript-analysis"
+      ],
+      "sessionPurpose": null,
+      "taskContractIdentities": [
+        "ai7.baseline-manuscript-analysis/1"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/analysis/contract.ts",
+        "sha256": "51b42bae865b24f846c790dc821666cf77b5718aa61f42129249754dc18cee2b",
+        "constants": {
+          "BASELINE_PROMPT_CONTRACT_DIGEST": "89776b1b5ca2e4d3ef529b0be6b2380bfc0cb5addf0426e815df7aa195c7d386",
+          "BASELINE_PROMPT_CONTRACT_SCHEMA": "ai7.baseline-manuscript-analysis.prompt-contract/2",
+          "BASELINE_PROMPT_CONTRACT_V1_DIGEST": "4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5",
+          "BASELINE_PROMPT_CONTRACT_V1_SCHEMA": "ai7.baseline-manuscript-analysis.prompt-contract/1",
+          "BASELINE_UNIT_RESULT_SCHEMA": "ai7.baseline-manuscript-analysis.unit-result/1"
+        }
+      },
+      "capturedTaskPromptContractDigests": [],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/analysis/execution.ts",
+        "sha256": "75fe09cc4aeb9d84774c59be547dcbf80b3dc7e2460bfac00651da405de377f3"
+      },
+      "planCompositionDerivation": {
+        "path": "src/service/analysis/baseline-analysis-store.ts",
+        "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
+      },
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "e02a1d5a3eb3750c8c5620c2a236dd51e67faa17606b3dab2da99319d5c4a8ed",
+      "fixtureFile": "tests/fixtures/model/sample1-evaluation-rewrite-authored.json",
+      "fixtureFileSha256": "9e21d82a8a5c5759101940e6708a055ad4991a0a0d4eb317ca230c3d6fa08194",
+      "fixtureProvenance": "authored",
+      "orderedLineage": [
+        {
+          "identity": "sample1-evaluation-rewrite-authored",
+          "fixtureFile": "tests/fixtures/model/sample1-evaluation-rewrite-authored.json",
+          "sha256": "9e21d82a8a5c5759101940e6708a055ad4991a0a0d4eb317ca230c3d6fa08194"
+        },
+        {
+          "identity": "sample1-readers-report-authored",
+          "fixtureFile": "tests/fixtures/model/sample1-readers-report-authored.json",
+          "sha256": "5cd0192953a62c5a359de38ec7ad2df4ce1d3b671413eb243fed0027dc2e8128"
+        },
+        {
+          "identity": "sample1-evaluation-authored",
+          "fixtureFile": "tests/fixtures/model/sample1-evaluation-authored.json",
+          "sha256": "8675ee3dfc904759589b8d08aed621233306739dac4c354836052e73ee184d1c"
+        },
+        {
+          "identity": "sample1-baseline-happy",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-happy.json",
+          "sha256": "9c3bb63c931966ddbc4c94c5aafb29f7d04d55083f9b4f372391c6714bffba0a"
+        }
+      ],
+      "resolvedLineageSha256": "194e1a1d63d7141dba45e04877b994cc4e88490d49b7a8548bca4e07dd015d91",
+      "allowedExistingResultSchemas": [
+        "ai7.analysis.assurance-sampling-result/1",
+        "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+        "ai7.baseline-manuscript-analysis.unit-result/1"
+      ],
+      "allowedCapturedSubjects": [],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "1b0ddc63e99dd5221b18f003565fd6324ff9ce031565271e80a24f56c5d14a88",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "36e16438e6d759c4a2a850c1620b2b3db3fa660fce4c0e079c46c85724f5577d",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "3e6c2262e197cb0179a4f49ab26d8bb54ca14e2eae81af26ed62f28eb039c336",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "97072d1ab7bfdea86363b46ac85e8d469b019a3b1644ea70b7e10763deb13521",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "c667fc1443c70e4dc38370c5c16f17602ca5d0aaa249a5a8ad3e1e2a3465f2a5",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 2,
+          "requestDigest": "6d3c892f661c0d2b10edad6cf29ffa9d6cc522057b7cc1fcff0ab5c0e89af00b",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 3,
+          "requestDigest": "ba2e16f6d1d35617d25cfcaee836b532c1ab07bd077f4e87f7440e5ae8440f4a",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 4,
+          "requestDigest": "8c845a19c7d2490d4161288d9b74985e297941b9141767b155069340ae10e4e2",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "8abcb377378be04322959cc962315565229946cc6a76496e45b7cbc1697094a9",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 6,
+          "requestDigest": "eb508fdc039e94e62e92797a09683a5f6ee14bce8a8133f13021bd53b33986e7",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 7,
+          "requestDigest": "3fe4cb693a94f6338e771fd6f52f9ddca153825257bd4b006ebbe1f46fe0d9f8",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 8,
+          "requestDigest": "03e8183266d513aa4c3ac1707e1bc25b79098c3aa017c50c52b111378afc31fe",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false
+    },
+    {
+      "fixtureIdentity": "sample1-evaluation-rewrite-authored",
+      "registeredProfile": "evaluation",
+      "registeredPurposes": [
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/run-kind-controls.test.ts",
+          "registrationPath": "tests/service/run-kind-controls.test.ts",
+          "fixtureSelectionSha256": "2c2fac5ecb4eaef600bc2869e0e59583af1ca38f6ea30313a27d49e2d74fe211",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "journey",
+          "id": "J-11",
+          "registrationPath": "e2e/run-j11.mjs",
+          "fixtureSelectionSha256": "7ee8fc5e056a113920f3ebd38e519fdb47d262aa3908003e02218a5468af6b82",
+          "sameSelectionsAtPreparationBase": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/live-evaluation.test.ts",
+          "registrationPath": "tests/service/live-evaluation.test.ts",
+          "fixtureSelectionSha256": "81cdf57c2289af7c9e1b388b76ae26ced6efe7c825ca2ac474d79a258401f791",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        }
+      ],
+      "allowedTaskKinds": [
+        "evaluation"
+      ],
+      "sessionPurpose": null,
+      "taskContractIdentities": [
+        "ai7.evaluation/1"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/evaluation/initial-evaluation-contract.ts",
+        "sha256": "53d5b64568a2b7c7234384fec1df30483e48f7ee9313b83fc4d86f50be507dd0",
+        "constants": {
+          "INITIAL_EVALUATION_PROMPT_CONTRACT_SCHEMA": "ai7.evaluation.prompt-contract/2",
+          "INITIAL_EVALUATION_RESULT_SET_REVISION_SCHEMA": "ai7.evaluation.result-set-revision/1",
+          "INITIAL_EVALUATION_SUCCESSOR_REVISION_SCHEMA": "ai7.evaluation.result-set-revision/2",
+          "INITIAL_EVALUATION_SYNTHESIS_RESULT_SCHEMA": "ai7.evaluation.synthesis-result/2",
+          "INITIAL_EVALUATION_UNIT_RESULT_SCHEMA": "ai7.evaluation.unit-result/1"
+        }
+      },
+      "capturedTaskPromptContractDigests": [],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/analysis/execution.ts",
+        "sha256": "75fe09cc4aeb9d84774c59be547dcbf80b3dc7e2460bfac00651da405de377f3"
+      },
+      "planCompositionDerivation": {
+        "path": "src/service/analysis/baseline-analysis-store.ts",
+        "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
+      },
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "e02a1d5a3eb3750c8c5620c2a236dd51e67faa17606b3dab2da99319d5c4a8ed",
+      "fixtureFile": "tests/fixtures/model/sample1-evaluation-rewrite-authored.json",
+      "fixtureFileSha256": "9e21d82a8a5c5759101940e6708a055ad4991a0a0d4eb317ca230c3d6fa08194",
+      "fixtureProvenance": "authored",
+      "orderedLineage": [
+        {
+          "identity": "sample1-evaluation-rewrite-authored",
+          "fixtureFile": "tests/fixtures/model/sample1-evaluation-rewrite-authored.json",
+          "sha256": "9e21d82a8a5c5759101940e6708a055ad4991a0a0d4eb317ca230c3d6fa08194"
+        },
+        {
+          "identity": "sample1-readers-report-authored",
+          "fixtureFile": "tests/fixtures/model/sample1-readers-report-authored.json",
+          "sha256": "5cd0192953a62c5a359de38ec7ad2df4ce1d3b671413eb243fed0027dc2e8128"
+        },
+        {
+          "identity": "sample1-evaluation-authored",
+          "fixtureFile": "tests/fixtures/model/sample1-evaluation-authored.json",
+          "sha256": "8675ee3dfc904759589b8d08aed621233306739dac4c354836052e73ee184d1c"
+        },
+        {
+          "identity": "sample1-baseline-happy",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-happy.json",
+          "sha256": "9c3bb63c931966ddbc4c94c5aafb29f7d04d55083f9b4f372391c6714bffba0a"
+        }
+      ],
+      "resolvedLineageSha256": "194e1a1d63d7141dba45e04877b994cc4e88490d49b7a8548bca4e07dd015d91",
+      "allowedExistingResultSchemas": [
+        "ai7.analysis.run-report-reflection-result/1",
+        "ai7.evaluation.synthesis-result/2",
+        "ai7.evaluation.unit-result/1"
+      ],
+      "allowedCapturedSubjects": [],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "12e4fb6dc1f5510fd35a373710070de9afbefafd5260ff369b70b6ee5edf727e",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-evaluation-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.evaluation.synthesis-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "d814639994d282c66d72ae398159ad56394c549c11658809f5cb1fd3484deff8",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-evaluation-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "47940f22f71b317026fa33626d9a9af89ff1c336873a1e9546fcde15730ac2a1",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-evaluation-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.evaluation.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 2,
+          "requestDigest": "b7d78d719fefd62537cc1329fa6bf20e5be532c9081604cf80f15eb91fd5db2a",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-evaluation-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.evaluation.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 3,
+          "requestDigest": "23fea5adf5a7e056be0b62d901a8a79a1c4be2fb48ebb3081f58c94afd041a53",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-evaluation-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.evaluation.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 4,
+          "requestDigest": "ff800063fe175f6b54495c52e3b6577ed34810efe2c7a61ff13ae00d31fe9b27",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-evaluation-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.evaluation.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "2df9635eb8f8a7a35e9d230ceb8cb95eb2bc2993e16ae0e3855d927eca4f912b",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-evaluation-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.evaluation.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 6,
+          "requestDigest": "141f156d3252f81bbfe6636fd6970b539d865f1190baab3238018a76e83f6729",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-evaluation-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.evaluation.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 7,
+          "requestDigest": "167d291ff9ca49bc006e8cf772422ab7adb1c0661b855abb0c9468c79413f46c",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-evaluation-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.evaluation.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 8,
+          "requestDigest": "77d0d8f74f7118fb01f0de13dedca6ecaf7cd76b7069c0c419996c97522823ce",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-evaluation-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.evaluation.unit-result/1",
+          "capture": null
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false
+    },
+    {
+      "fixtureIdentity": "sample1-evaluation-rewrite-authored",
+      "registeredProfile": "readers",
+      "registeredPurposes": [
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/run-kind-controls.test.ts",
+          "registrationPath": "tests/service/run-kind-controls.test.ts",
+          "fixtureSelectionSha256": "2c2fac5ecb4eaef600bc2869e0e59583af1ca38f6ea30313a27d49e2d74fe211",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "journey",
+          "id": "J-11",
+          "registrationPath": "e2e/run-j11.mjs",
+          "fixtureSelectionSha256": "7ee8fc5e056a113920f3ebd38e519fdb47d262aa3908003e02218a5468af6b82",
+          "sameSelectionsAtPreparationBase": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/live-evaluation.test.ts",
+          "registrationPath": "tests/service/live-evaluation.test.ts",
+          "fixtureSelectionSha256": "81cdf57c2289af7c9e1b388b76ae26ced6efe7c825ca2ac474d79a258401f791",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        }
+      ],
+      "allowedTaskKinds": [
+        "readers-report"
+      ],
+      "sessionPurpose": null,
+      "taskContractIdentities": [
+        "ai7.readers-report/1"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/evaluation/readers-report-contract.ts",
+        "sha256": "7931128595d5a8e3d6c072e256e35b7cf8e95805e1f5793a22317b5a6083f04d",
+        "constants": {
+          "READERS_REPORT_PROMPT_CONTRACT_SCHEMA": "ai7.readers-report.prompt-contract/1",
+          "READERS_REPORT_RESULT_SET_REVISION_SCHEMA": "ai7.readers-report.result-set-revision/1",
+          "READERS_REPORT_SUCCESSOR_REVISION_SCHEMA": "ai7.readers-report.result-set-revision/2",
+          "READERS_REPORT_SYNTHESIS_RESULT_SCHEMA": "ai7.readers-report.synthesis-result/1",
+          "READERS_REPORT_UNIT_RESULT_SCHEMA": "ai7.readers-report.unit-result/1"
+        }
+      },
+      "capturedTaskPromptContractDigests": [],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/analysis/execution.ts",
+        "sha256": "75fe09cc4aeb9d84774c59be547dcbf80b3dc7e2460bfac00651da405de377f3"
+      },
+      "planCompositionDerivation": {
+        "path": "src/service/analysis/baseline-analysis-store.ts",
+        "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
+      },
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "e02a1d5a3eb3750c8c5620c2a236dd51e67faa17606b3dab2da99319d5c4a8ed",
+      "fixtureFile": "tests/fixtures/model/sample1-evaluation-rewrite-authored.json",
+      "fixtureFileSha256": "9e21d82a8a5c5759101940e6708a055ad4991a0a0d4eb317ca230c3d6fa08194",
+      "fixtureProvenance": "authored",
+      "orderedLineage": [
+        {
+          "identity": "sample1-evaluation-rewrite-authored",
+          "fixtureFile": "tests/fixtures/model/sample1-evaluation-rewrite-authored.json",
+          "sha256": "9e21d82a8a5c5759101940e6708a055ad4991a0a0d4eb317ca230c3d6fa08194"
+        },
+        {
+          "identity": "sample1-readers-report-authored",
+          "fixtureFile": "tests/fixtures/model/sample1-readers-report-authored.json",
+          "sha256": "5cd0192953a62c5a359de38ec7ad2df4ce1d3b671413eb243fed0027dc2e8128"
+        },
+        {
+          "identity": "sample1-evaluation-authored",
+          "fixtureFile": "tests/fixtures/model/sample1-evaluation-authored.json",
+          "sha256": "8675ee3dfc904759589b8d08aed621233306739dac4c354836052e73ee184d1c"
+        },
+        {
+          "identity": "sample1-baseline-happy",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-happy.json",
+          "sha256": "9c3bb63c931966ddbc4c94c5aafb29f7d04d55083f9b4f372391c6714bffba0a"
+        }
+      ],
+      "resolvedLineageSha256": "194e1a1d63d7141dba45e04877b994cc4e88490d49b7a8548bca4e07dd015d91",
+      "allowedExistingResultSchemas": [
+        "ai7.analysis.run-report-reflection-result/1",
+        "ai7.readers-report.synthesis-result/1",
+        "ai7.readers-report.unit-result/1"
+      ],
+      "allowedCapturedSubjects": [],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "0d86d582db6813df67f9622e907825b3d7051b53b20826169344e4bf693b8260",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-readers-report-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "a3769af17630e9f325343044d6f0c2149099ce44014043f950e9cfd1d8b9f01f",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-readers-report-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.readers-report.synthesis-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "77d152e995913b399b1392c013675c2a66548f65c58642ed24d1abcd38998dc7",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-readers-report-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.readers-report.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 2,
+          "requestDigest": "be3843755893419faaefada92defe858c7566c74c616ea562d38d54dc6fe28ae",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-readers-report-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.readers-report.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 3,
+          "requestDigest": "41d2d524b2560cc2439cc0458e5f9dc06098dab0c94dd0f0509cb29a224197a0",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-readers-report-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.readers-report.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 4,
+          "requestDigest": "5ed2225b31de6295f768495f27e861c45ad63ac28987b8db20589accfb689db4",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-readers-report-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.readers-report.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "4e26c61f32d4af5b597feaf1d9b8af8c923c8a29d3001659a30f778a045c95f4",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-readers-report-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.readers-report.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 6,
+          "requestDigest": "4f35256ec4feb73834a7cbb4daa36cf86c3a1f99c990d844763be309769d93cd",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-readers-report-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.readers-report.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 7,
+          "requestDigest": "a1298e3f8e950bd7dd4fca4a7315eff476e1666288b13bbf48e38baeb98d214b",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-readers-report-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.readers-report.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 8,
+          "requestDigest": "19f745f039ec534c226d9963dff6e21bcbdbac179eca6049c4846738b48042bc",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-readers-report-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.readers-report.unit-result/1",
+          "capture": null
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false
+    },
+    {
+      "fixtureIdentity": "sample1-evaluation-rewrite-authored",
+      "registeredProfile": "rewrite",
+      "registeredPurposes": [
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/run-kind-controls.test.ts",
+          "registrationPath": "tests/service/run-kind-controls.test.ts",
+          "fixtureSelectionSha256": "2c2fac5ecb4eaef600bc2869e0e59583af1ca38f6ea30313a27d49e2d74fe211",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "journey",
+          "id": "J-11",
+          "registrationPath": "e2e/run-j11.mjs",
+          "fixtureSelectionSha256": "7ee8fc5e056a113920f3ebd38e519fdb47d262aa3908003e02218a5468af6b82",
+          "sameSelectionsAtPreparationBase": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/live-evaluation.test.ts",
+          "registrationPath": "tests/service/live-evaluation.test.ts",
+          "fixtureSelectionSha256": "81cdf57c2289af7c9e1b388b76ae26ced6efe7c825ca2ac474d79a258401f791",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        }
+      ],
+      "allowedTaskKinds": [
+        "evaluation-rewrite"
+      ],
+      "sessionPurpose": null,
+      "taskContractIdentities": [
+        "ai7.evaluation-rewrite/1"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/evaluation/evaluation-rewrite-contract.ts",
+        "sha256": "65d3fec45a58b0af37fda2e51bef0d31fbcec84b256cf144d5941588b8876aba",
+        "constants": {
+          "EVALUATION_REWRITE_PROMPT_CONTRACT_SCHEMA": "ai7.evaluation-rewrite.prompt-contract/1",
+          "EVALUATION_REWRITE_RESULT_SET_REVISION_SCHEMA": "ai7.evaluation-rewrite.result-set-revision/1",
+          "EVALUATION_REWRITE_SUCCESSOR_REVISION_SCHEMA": "ai7.evaluation-rewrite.result-set-revision/2",
+          "EVALUATION_REWRITE_SYNTHESIS_RESULT_SCHEMA": "ai7.evaluation-rewrite.synthesis-result/1",
+          "EVALUATION_REWRITE_UNIT_RESULT_SCHEMA": "ai7.evaluation-rewrite.unit-result/1"
+        }
+      },
+      "capturedTaskPromptContractDigests": [],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/analysis/execution.ts",
+        "sha256": "75fe09cc4aeb9d84774c59be547dcbf80b3dc7e2460bfac00651da405de377f3"
+      },
+      "planCompositionDerivation": {
+        "path": "src/service/analysis/baseline-analysis-store.ts",
+        "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
+      },
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "e02a1d5a3eb3750c8c5620c2a236dd51e67faa17606b3dab2da99319d5c4a8ed",
+      "fixtureFile": "tests/fixtures/model/sample1-evaluation-rewrite-authored.json",
+      "fixtureFileSha256": "9e21d82a8a5c5759101940e6708a055ad4991a0a0d4eb317ca230c3d6fa08194",
+      "fixtureProvenance": "authored",
+      "orderedLineage": [
+        {
+          "identity": "sample1-evaluation-rewrite-authored",
+          "fixtureFile": "tests/fixtures/model/sample1-evaluation-rewrite-authored.json",
+          "sha256": "9e21d82a8a5c5759101940e6708a055ad4991a0a0d4eb317ca230c3d6fa08194"
+        },
+        {
+          "identity": "sample1-readers-report-authored",
+          "fixtureFile": "tests/fixtures/model/sample1-readers-report-authored.json",
+          "sha256": "5cd0192953a62c5a359de38ec7ad2df4ce1d3b671413eb243fed0027dc2e8128"
+        },
+        {
+          "identity": "sample1-evaluation-authored",
+          "fixtureFile": "tests/fixtures/model/sample1-evaluation-authored.json",
+          "sha256": "8675ee3dfc904759589b8d08aed621233306739dac4c354836052e73ee184d1c"
+        },
+        {
+          "identity": "sample1-baseline-happy",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-happy.json",
+          "sha256": "9c3bb63c931966ddbc4c94c5aafb29f7d04d55083f9b4f372391c6714bffba0a"
+        }
+      ],
+      "resolvedLineageSha256": "194e1a1d63d7141dba45e04877b994cc4e88490d49b7a8548bca4e07dd015d91",
+      "allowedExistingResultSchemas": [
+        "ai7.analysis.run-report-reflection-result/1",
+        "ai7.evaluation-rewrite.synthesis-result/1",
+        "ai7.evaluation-rewrite.unit-result/1"
+      ],
+      "allowedCapturedSubjects": [],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "7e1d5e7e838b599785291b150116bddf3c53aeb99e6299f43f6b5c28d97a645e",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-evaluation-rewrite-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.evaluation-rewrite.synthesis-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "b736c7bfa66ffbb38ef2fbad586c5b8e71372483174a3bb0416b93b66f238c15",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-evaluation-rewrite-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "f4b683969e05943def3ac36345f1cc1ec561ac44f7c7011b09d807304d21d24b",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-evaluation-rewrite-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.evaluation-rewrite.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 2,
+          "requestDigest": "6123b6899f263113c85215dd2b9b1558e0bb4dc4eb6ddb88a54fc8ed86f2aa4c",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-evaluation-rewrite-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.evaluation-rewrite.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 3,
+          "requestDigest": "d99f276adf9b753dbb7ef3a78e94d8bbc9ac7a83dd54dc9217f9ee1dd8b5b579",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-evaluation-rewrite-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.evaluation-rewrite.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 4,
+          "requestDigest": "c96a9abf42cbd5d024f89c1b520d6b050d9b0c5863cd4598d8f428153d7b6138",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-evaluation-rewrite-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.evaluation-rewrite.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "d37220bc40287cdd380bc072dac5da2f08554867aa36a6a502841de511a542f0",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-evaluation-rewrite-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.evaluation-rewrite.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 6,
+          "requestDigest": "e926345fb19a30d67f9edfce363251a57491591a67520c14d05e2721cb846a57",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-evaluation-rewrite-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.evaluation-rewrite.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 7,
+          "requestDigest": "354105948ca1eb068f7c174d1aa86f4a2ec06b4afdd08c651e3c128130aef7f5",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-evaluation-rewrite-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.evaluation-rewrite.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 8,
+          "requestDigest": "43f8dad70d57f8a4805ad2a78b356e6aa9ec9e1760c3d92df9ba076921c5cc75",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-evaluation-rewrite-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.evaluation-rewrite.unit-result/1",
+          "capture": null
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false
+    },
+    {
+      "fixtureIdentity": "sample1-factual-authored",
+      "registeredProfile": "factual",
+      "registeredPurposes": [
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/review-runs.test.ts",
+          "registrationPath": "tests/service/review-runs.test.ts",
+          "fixtureSelectionSha256": "530c569bd5e44987ebad1f4a8bf20a0948e2bf07b96069f848e8a0affb4efc1e",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/factual-review.test.ts",
+          "registrationPath": "tests/service/factual-review.test.ts",
+          "fixtureSelectionSha256": "64535285366ec0ac90f409e7ab5097d8b2d0c3b7d54680e2a2a85847aa5530d3",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/outcome-unknown.test.ts",
+          "registrationPath": "tests/service/outcome-unknown.test.ts",
+          "fixtureSelectionSha256": "7cc5b553f67f7aad13435a00eb11447a6d4784c485f7953bd983e45d184da25b",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/research-evidence-inert.test.ts",
+          "registrationPath": "tests/service/research-evidence-inert.test.ts",
+          "fixtureSelectionSha256": "b2969e7203a133afeafc589affc1f8c8d7c21438f3cbf43fcbc50fd7f4735ca3",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/factual-verification-fixture.test.ts",
+          "registrationPath": "tests/service/factual-verification-fixture.test.ts",
+          "fixtureSelectionSha256": "c2e6d701d84f7dd3ebebc7dca37f36edfc3ce31d69982ed1728830cb4e55f0fa",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/usage.test.ts",
+          "registrationPath": "tests/service/usage.test.ts",
+          "fixtureSelectionSha256": "d76cf0f5cc125de474fd4ec707b20e5a47ef21910b9ab2059cc5d6f81c578ce2",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        }
+      ],
+      "allowedTaskKinds": [
+        "factual-review"
+      ],
+      "sessionPurpose": null,
+      "taskContractIdentities": [
+        "ai7.factual-review/1"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/analysis/factual-review-contract.ts",
+        "sha256": "a809daa48bcbb47621ed4ba6236422fb3d4449c334257a9407f4c2ffaabb2dc3",
+        "constants": {
+          "FACTUAL_REVIEW_CONTRACT_VERSION": "ai7.factual-review/1",
+          "FACTUAL_REVIEW_PROMPT_CONTRACT_DIGEST": "22beb453ba08208c65cc65c78e1d5fc766fdb7efbc99865e0d7046f39cb39a37",
+          "FACTUAL_REVIEW_PROMPT_CONTRACT_SCHEMA": "ai7.factual-review.prompt-contract/1",
+          "FACTUAL_REVIEW_RESULT_SET_REVISION_SCHEMA": "ai7.factual-review.result-set-revision/1",
+          "FACTUAL_REVIEW_SUCCESSOR_REVISION_SCHEMA": "ai7.factual-review.result-set-revision/2",
+          "FACTUAL_REVIEW_UNIT_RESULT_SCHEMA": "ai7.factual-review.unit-result/1"
+        }
+      },
+      "capturedTaskPromptContractDigests": [],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/analysis/execution.ts",
+        "sha256": "75fe09cc4aeb9d84774c59be547dcbf80b3dc7e2460bfac00651da405de377f3"
+      },
+      "planCompositionDerivation": {
+        "path": "src/service/analysis/baseline-analysis-store.ts",
+        "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
+      },
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "e02a1d5a3eb3750c8c5620c2a236dd51e67faa17606b3dab2da99319d5c4a8ed",
+      "fixtureFile": "tests/fixtures/model/sample1-factual-authored.json",
+      "fixtureFileSha256": "ef285a2a5d0dbbbb74cc9c1f304768d763c22cbfd51d638f091b46881327a13b",
+      "fixtureProvenance": "authored",
+      "orderedLineage": [
+        {
+          "identity": "sample1-factual-authored",
+          "fixtureFile": "tests/fixtures/model/sample1-factual-authored.json",
+          "sha256": "ef285a2a5d0dbbbb74cc9c1f304768d763c22cbfd51d638f091b46881327a13b"
+        }
+      ],
+      "resolvedLineageSha256": "31fe7e3e43f13d01ef7c33979be958f9222e206fa454461b4bb6d0d5ff06a6d7",
+      "allowedExistingResultSchemas": [
+        "ai7.analysis.assurance-sampling-result/1",
+        "ai7.analysis.run-report-reflection-result/1",
+        "ai7.factual-review.unit-result/1"
+      ],
+      "allowedCapturedSubjects": [],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "04a59d5ce868a943a8b0576ffdfe2a4e72f4d8377af7006493a9f46e11b2dcff",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-factual-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "48bfeb66810d7171e83cabedafce95653e07eef95870c7261bc5580f957092cc",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-factual-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "6d80c7251e393b5910d76e7dba2f73feb5b069a0122d4e1debdd93a70fe09dc8",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-factual-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "85635afca8dde8ae656f3a7d1114f1c177c5432a85ef2aa49d02359f99b4822a",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-factual-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "94c3f12e5d139117a3888285fe408c7386f3db7fff681f08c104ed41e3405b35",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-factual-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "9c1f85b51cc12d4be53c2729edac7b9a851473763536600f4c9ee404d1725287",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-factual-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "9f33a81faf96dab164ae10e9dfdad49feeec035e5ecfe46473a5fb0173c7814e",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-factual-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "a3d385c966092fd33b87c77f9346a8d990b59f9434adc20499cd80348ae0d421",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-factual-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "dfb2cf1d65e8c1e72499c0b91f9ee17406e656a2895f89c9514dead6d97cb64f",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-factual-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "a72d824bfbbc30310d1f4e93539ed59b88c999c77088433ed3f36d1bdbb96048",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-factual-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.factual-review.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 2,
+          "requestDigest": "58f2f1ddb05f95fde73b6bd36a572a612cfc77348f5351b4941fc7d019ff3ad4",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-factual-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.factual-review.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 3,
+          "requestDigest": "1a7339023e5da259e73233b5cff4937b887dc1fef743b73ce2f84b7cc19c4938",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-factual-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.factual-review.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 4,
+          "requestDigest": "7b4df19a1045ed0649c36c6d834abc6b14cb151a97660b82bf84846e24b5a70c",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-factual-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.factual-review.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "b795a00683ef4aadfad6055b96fb8c1db1e392dccc7114750336fb741d718ecd",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-factual-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.factual-review.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 6,
+          "requestDigest": "488d1b3fddbe24e9bc3078c988329b44a695cab7468b17c40e92a12dee14ec5d",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-factual-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.factual-review.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 7,
+          "requestDigest": "5a103858929f0a0d9a0bc4daaebf6e7dc940ab081b8638fa3454cb1d4a538923",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-factual-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.factual-review.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 8,
+          "requestDigest": "e67e9f0ea6cd324b1a2b7457b376da8f91265fb09d431ddc0d01a5327c6e49a8",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-factual-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.factual-review.unit-result/1",
+          "capture": null
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false
+    },
+    {
+      "fixtureIdentity": "sample1-factual-verified",
+      "registeredProfile": "factual",
+      "registeredPurposes": [
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/factual-verification-fixture.test.ts",
+          "registrationPath": "tests/service/factual-verification-fixture.test.ts",
+          "fixtureSelectionSha256": "466c6e7723fef00a6c9ddcb33d921cafdfbb5c11eb127187a2ef53330869874d",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "journey",
+          "id": "J-04",
+          "registrationPath": "e2e/run-j04.mjs",
+          "fixtureSelectionSha256": "68e9cf999d8ba421c2e27dcd1c77d746c050be6e822ed8c382837133b034c8ee",
+          "sameSelectionsAtPreparationBase": true
+        }
+      ],
+      "allowedTaskKinds": [
+        "factual-review"
+      ],
+      "sessionPurpose": null,
+      "taskContractIdentities": [
+        "ai7.factual-review/1"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/analysis/factual-review-contract.ts",
+        "sha256": "a809daa48bcbb47621ed4ba6236422fb3d4449c334257a9407f4c2ffaabb2dc3",
+        "constants": {
+          "FACTUAL_REVIEW_CONTRACT_VERSION": "ai7.factual-review/1",
+          "FACTUAL_REVIEW_PROMPT_CONTRACT_DIGEST": "22beb453ba08208c65cc65c78e1d5fc766fdb7efbc99865e0d7046f39cb39a37",
+          "FACTUAL_REVIEW_PROMPT_CONTRACT_SCHEMA": "ai7.factual-review.prompt-contract/1",
+          "FACTUAL_REVIEW_RESULT_SET_REVISION_SCHEMA": "ai7.factual-review.result-set-revision/1",
+          "FACTUAL_REVIEW_SUCCESSOR_REVISION_SCHEMA": "ai7.factual-review.result-set-revision/2",
+          "FACTUAL_REVIEW_UNIT_RESULT_SCHEMA": "ai7.factual-review.unit-result/1"
+        }
+      },
+      "capturedTaskPromptContractDigests": [],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/analysis/execution.ts",
+        "sha256": "75fe09cc4aeb9d84774c59be547dcbf80b3dc7e2460bfac00651da405de377f3"
+      },
+      "planCompositionDerivation": {
+        "path": "src/service/analysis/baseline-analysis-store.ts",
+        "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
+      },
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "e02a1d5a3eb3750c8c5620c2a236dd51e67faa17606b3dab2da99319d5c4a8ed",
+      "fixtureFile": "tests/fixtures/model/sample1-factual-verified.json",
+      "fixtureFileSha256": "b68e88613ba360250beaa61ab56a575705a4e611e8ab5597de0cd51dd02e36a2",
+      "fixtureProvenance": "authored",
+      "orderedLineage": [
+        {
+          "identity": "sample1-factual-verified",
+          "fixtureFile": "tests/fixtures/model/sample1-factual-verified.json",
+          "sha256": "b68e88613ba360250beaa61ab56a575705a4e611e8ab5597de0cd51dd02e36a2"
+        },
+        {
+          "identity": "sample1-factual-authored",
+          "fixtureFile": "tests/fixtures/model/sample1-factual-authored.json",
+          "sha256": "ef285a2a5d0dbbbb74cc9c1f304768d763c22cbfd51d638f091b46881327a13b"
+        }
+      ],
+      "resolvedLineageSha256": "f152f0254a157a3bc98de282106aeadbfe67c43d535d5e555233b947a5a3a969",
+      "allowedExistingResultSchemas": [
+        "ai7.analysis.assurance-sampling-result/1",
+        "ai7.analysis.run-report-reflection-result/1",
+        "ai7.factual-review.unit-result/1",
+        "ai7.factual-review.unit-result/2"
+      ],
+      "allowedCapturedSubjects": [],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "04a59d5ce868a943a8b0576ffdfe2a4e72f4d8377af7006493a9f46e11b2dcff",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-factual-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "48bfeb66810d7171e83cabedafce95653e07eef95870c7261bc5580f957092cc",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-factual-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "6d80c7251e393b5910d76e7dba2f73feb5b069a0122d4e1debdd93a70fe09dc8",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-factual-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "85635afca8dde8ae656f3a7d1114f1c177c5432a85ef2aa49d02359f99b4822a",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-factual-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "94c3f12e5d139117a3888285fe408c7386f3db7fff681f08c104ed41e3405b35",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-factual-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "9c1f85b51cc12d4be53c2729edac7b9a851473763536600f4c9ee404d1725287",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-factual-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "9f33a81faf96dab164ae10e9dfdad49feeec035e5ecfe46473a5fb0173c7814e",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-factual-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "a3d385c966092fd33b87c77f9346a8d990b59f9434adc20499cd80348ae0d421",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-factual-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "dfb2cf1d65e8c1e72499c0b91f9ee17406e656a2895f89c9514dead6d97cb64f",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-factual-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "a72d824bfbbc30310d1f4e93539ed59b88c999c77088433ed3f36d1bdbb96048",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-factual-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.factual-review.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "b209df15fa9c0a834adaf9f19764d551d35d17c179528f5e856ba04f2d3e59ac",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-factual-verified",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.factual-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 2,
+          "requestDigest": "58f2f1ddb05f95fde73b6bd36a572a612cfc77348f5351b4941fc7d019ff3ad4",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-factual-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.factual-review.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 2,
+          "requestDigest": "ec5e0da605fc1c10ae7b97396c63a3a3f806f3a30520ed711559af2df2a37b58",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-factual-verified",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.factual-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 3,
+          "requestDigest": "1a7339023e5da259e73233b5cff4937b887dc1fef743b73ce2f84b7cc19c4938",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-factual-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.factual-review.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 3,
+          "requestDigest": "c38ce2df46ab39ff58305d00c88f7ed01eea7671179b1dedf7e4a10916a40597",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-factual-verified",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.factual-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 4,
+          "requestDigest": "37ad0e391fb5b41edf82534bc0bebaa736da0ce6e47750f546b5c48284fc8ff3",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-factual-verified",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.factual-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 4,
+          "requestDigest": "7b4df19a1045ed0649c36c6d834abc6b14cb151a97660b82bf84846e24b5a70c",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-factual-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.factual-review.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "b795a00683ef4aadfad6055b96fb8c1db1e392dccc7114750336fb741d718ecd",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-factual-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.factual-review.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "e06eeb2e08640fee919a7f9350ed571371988eb41b234acf890e1b4b572d715e",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-factual-verified",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.factual-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 6,
+          "requestDigest": "488d1b3fddbe24e9bc3078c988329b44a695cab7468b17c40e92a12dee14ec5d",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-factual-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.factual-review.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 6,
+          "requestDigest": "dd704965016921fdab67df26d8b4465ef664063903ead4cdd4e37d99c7172b80",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-factual-verified",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.factual-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 7,
+          "requestDigest": "5a103858929f0a0d9a0bc4daaebf6e7dc940ab081b8638fa3454cb1d4a538923",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-factual-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.factual-review.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 7,
+          "requestDigest": "8ec1f5fe5f838fd0f9b806c06b0f6a4c146b9e4bb5abeba9f388f902ebcbb5cc",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-factual-verified",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.factual-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 8,
+          "requestDigest": "e67e9f0ea6cd324b1a2b7457b376da8f91265fb09d431ddc0d01a5327c6e49a8",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-factual-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.factual-review.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 8,
+          "requestDigest": "f18b2c8ba0f41ca08f3b3224d430929625523277865abd550f0d09dbf78665c3",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-factual-verified",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.factual-review.unit-result/2",
+          "capture": null
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false
+    },
+    {
+      "fixtureIdentity": "sample1-model-clarification",
+      "registeredProfile": "baseline",
+      "registeredPurposes": [
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/model-clarification.test.ts",
+          "registrationPath": "tests/service/model-clarification.test.ts",
+          "fixtureSelectionSha256": "8dbb7a96b8cbf5e3c74f4f7aae632bf555ad692dbc76f597e8814e141a28c82f",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/model-clarification-live-replay.test.ts",
+          "registrationPath": "tests/service/model-clarification-live-replay.test.ts",
+          "fixtureSelectionSha256": "c8ac3f3a1abf4656eb330cd63b29b15b663bf072af182750f01b1744295f6d6a",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "journey",
+          "id": "J-09",
+          "registrationPath": "e2e/run-j09.mjs",
+          "fixtureSelectionSha256": "e47b3f46c42458f88052d39a5295b024096312b30ad1c7332f1925e9d42aab44",
+          "sameSelectionsAtPreparationBase": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/background-analysis-scopes.test.ts",
+          "registrationPath": "tests/service/background-analysis-scopes.test.ts",
+          "fixtureSelectionSha256": "e583c6c29176bd5c256cbd168742f03cfee50c3eb309b577ea3c2e2f7e8e722e",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        }
+      ],
+      "allowedTaskKinds": [
+        "baseline-manuscript-analysis"
+      ],
+      "sessionPurpose": null,
+      "taskContractIdentities": [
+        "ai7.baseline-manuscript-analysis/1"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/analysis/contract.ts",
+        "sha256": "51b42bae865b24f846c790dc821666cf77b5718aa61f42129249754dc18cee2b",
+        "constants": {
+          "BASELINE_PROMPT_CONTRACT_DIGEST": "89776b1b5ca2e4d3ef529b0be6b2380bfc0cb5addf0426e815df7aa195c7d386",
+          "BASELINE_PROMPT_CONTRACT_SCHEMA": "ai7.baseline-manuscript-analysis.prompt-contract/2",
+          "BASELINE_PROMPT_CONTRACT_V1_DIGEST": "4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5",
+          "BASELINE_PROMPT_CONTRACT_V1_SCHEMA": "ai7.baseline-manuscript-analysis.prompt-contract/1",
+          "BASELINE_UNIT_RESULT_SCHEMA": "ai7.baseline-manuscript-analysis.unit-result/1"
+        }
+      },
+      "capturedTaskPromptContractDigests": [],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/analysis/execution.ts",
+        "sha256": "75fe09cc4aeb9d84774c59be547dcbf80b3dc7e2460bfac00651da405de377f3"
+      },
+      "planCompositionDerivation": {
+        "path": "src/service/analysis/baseline-analysis-store.ts",
+        "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
+      },
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "e02a1d5a3eb3750c8c5620c2a236dd51e67faa17606b3dab2da99319d5c4a8ed",
+      "fixtureFile": "tests/fixtures/model/sample1-model-clarification.json",
+      "fixtureFileSha256": "d61948d9bbc6ebbf9275831b72b266f65a155ae6817055f7cbbc7ea96737a100",
+      "fixtureProvenance": "authored",
+      "orderedLineage": [
+        {
+          "identity": "sample1-model-clarification",
+          "fixtureFile": "tests/fixtures/model/sample1-model-clarification.json",
+          "sha256": "d61948d9bbc6ebbf9275831b72b266f65a155ae6817055f7cbbc7ea96737a100"
+        },
+        {
+          "identity": "sample1-baseline-happy",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-happy.json",
+          "sha256": "9c3bb63c931966ddbc4c94c5aafb29f7d04d55083f9b4f372391c6714bffba0a"
+        }
+      ],
+      "resolvedLineageSha256": "5dfdff32c9983a2f8ff7e3bc7c6fb83ac853c12e85413d5a1208f3e51e85832d",
+      "allowedExistingResultSchemas": [
+        "ai7.analysis.assurance-sampling-result/1",
+        "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+        "ai7.baseline-manuscript-analysis.unit-result/1"
+      ],
+      "allowedCapturedSubjects": [],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "1b0ddc63e99dd5221b18f003565fd6324ff9ce031565271e80a24f56c5d14a88",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "36e16438e6d759c4a2a850c1620b2b3db3fa660fce4c0e079c46c85724f5577d",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "3e6c2262e197cb0179a4f49ab26d8bb54ca14e2eae81af26ed62f28eb039c336",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "340ca9da0ecd3a490279936203c800b829b9560202e0d13dd1d1be03fb9892ba",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-model-clarification",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "97072d1ab7bfdea86363b46ac85e8d469b019a3b1644ea70b7e10763deb13521",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "c3caace51ba401d52d94413c33ff315c53eb66cae05c5cfb73220cd418662df9",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-model-clarification",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": null,
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "c667fc1443c70e4dc38370c5c16f17602ca5d0aaa249a5a8ad3e1e2a3465f2a5",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 2,
+          "requestDigest": "6d3c892f661c0d2b10edad6cf29ffa9d6cc522057b7cc1fcff0ab5c0e89af00b",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 2,
+          "requestDigest": "b2ac20431f20e1389ff1b0fd95fbd851e307f90a2ba3635050d59de26e3a03fd",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-model-clarification",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 3,
+          "requestDigest": "0efa150a4fe99c56282761b088501c75d7f8f776c154b7a55f1edf521856f64c",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-model-clarification",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 3,
+          "requestDigest": "ba2e16f6d1d35617d25cfcaee836b532c1ab07bd077f4e87f7440e5ae8440f4a",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 4,
+          "requestDigest": "34568207a072202ef17ea4dbcf3ca28a7d5eaedb2913dbe215a1605cce22a7e3",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-model-clarification",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 4,
+          "requestDigest": "8c845a19c7d2490d4161288d9b74985e297941b9141767b155069340ae10e4e2",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "8abcb377378be04322959cc962315565229946cc6a76496e45b7cbc1697094a9",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "c203d816b6f3a77f2909e7e2df3fd78fe40874ac47bc5d1d323db56db0d1a4b6",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-model-clarification",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 6,
+          "requestDigest": "9c47b01cced7e1d635887f62a200c2794366ab4b7d75ff2f441982448f224374",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-model-clarification",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 6,
+          "requestDigest": "eb508fdc039e94e62e92797a09683a5f6ee14bce8a8133f13021bd53b33986e7",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 7,
+          "requestDigest": "3fe4cb693a94f6338e771fd6f52f9ddca153825257bd4b006ebbe1f46fe0d9f8",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 7,
+          "requestDigest": "7696b4f3a299e3c6b98cecf7c36d0cb5386327094b4a3616933b580ba7173020",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-model-clarification",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 8,
+          "requestDigest": "03e8183266d513aa4c3ac1707e1bc25b79098c3aa017c50c52b111378afc31fe",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 8,
+          "requestDigest": "6d902e25b6bb9da2bc5ea309c9c6cf2b7eafb350294ece0e39a670afd53d4a31",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-model-clarification",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false
+    },
+    {
+      "fixtureIdentity": "sample1-model-clarification-live-ambiguous",
+      "registeredProfile": "baseline",
+      "registeredPurposes": [
+        {
+          "kind": "registered-editorial-evidence-case",
+          "id": "clarification-sample1",
+          "registrationPath": "tests/editorial-cases/cases/clarification-sample1.json",
+          "caseFileSha256": "7a751f0189ae03aaafef634b97b92521132b073d7778c9c50f45f024e1d97fe8",
+          "caseInputSha256": "ffa77de0ad5e4999a06ed0e42cf6c7380f2727ef26005d3458a8723c958968c5",
+          "owner": "tests/editorial-cases/runner/index.ts",
+          "selectedPolicyPassedToPolishOwner": null,
+          "newCapabilityConsumptionClaimed": false
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/model-clarification-live-replay.test.ts",
+          "registrationPath": "tests/service/model-clarification-live-replay.test.ts",
+          "fixtureSelectionSha256": "c8ac3f3a1abf4656eb330cd63b29b15b663bf072af182750f01b1744295f6d6a",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        }
+      ],
+      "allowedTaskKinds": [
+        "baseline-manuscript-analysis"
+      ],
+      "sessionPurpose": null,
+      "taskContractIdentities": [
+        "ai7.baseline-manuscript-analysis/1"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/analysis/contract.ts",
+        "sha256": "51b42bae865b24f846c790dc821666cf77b5718aa61f42129249754dc18cee2b",
+        "constants": {
+          "BASELINE_PROMPT_CONTRACT_DIGEST": "89776b1b5ca2e4d3ef529b0be6b2380bfc0cb5addf0426e815df7aa195c7d386",
+          "BASELINE_PROMPT_CONTRACT_SCHEMA": "ai7.baseline-manuscript-analysis.prompt-contract/2",
+          "BASELINE_PROMPT_CONTRACT_V1_DIGEST": "4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5",
+          "BASELINE_PROMPT_CONTRACT_V1_SCHEMA": "ai7.baseline-manuscript-analysis.prompt-contract/1",
+          "BASELINE_UNIT_RESULT_SCHEMA": "ai7.baseline-manuscript-analysis.unit-result/1"
+        }
+      },
+      "capturedTaskPromptContractDigests": [
+        "65e77cb540778976e3fdcbbd290d49d38ce7f91774b674ddad61081e61686691"
+      ],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/analysis/execution.ts",
+        "sha256": "75fe09cc4aeb9d84774c59be547dcbf80b3dc7e2460bfac00651da405de377f3"
+      },
+      "planCompositionDerivation": {
+        "path": "src/service/analysis/baseline-analysis-store.ts",
+        "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
+      },
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "e02a1d5a3eb3750c8c5620c2a236dd51e67faa17606b3dab2da99319d5c4a8ed",
+      "fixtureFile": "tests/fixtures/model/sample1-model-clarification-live-ambiguous.json",
+      "fixtureFileSha256": "ff338f29c29ef4c7b45390a659535b49fb1e6d24997a55b22ff71deaa5c44b85",
+      "fixtureProvenance": "recorded",
+      "orderedLineage": [
+        {
+          "identity": "sample1-model-clarification-live-ambiguous",
+          "fixtureFile": "tests/fixtures/model/sample1-model-clarification-live-ambiguous.json",
+          "sha256": "ff338f29c29ef4c7b45390a659535b49fb1e6d24997a55b22ff71deaa5c44b85"
+        }
+      ],
+      "resolvedLineageSha256": "b0fad8dff857d6d41bab0a4e9d2e4821ac92686a62e15b3737dcbf25ee6af5cb",
+      "allowedExistingResultSchemas": [
+        "ai7.analysis.assurance-sampling-result/1",
+        "ai7.analysis.run-report-reflection-result/1",
+        "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+        "ai7.baseline-manuscript-analysis.unit-result/1"
+      ],
+      "allowedCapturedSubjects": [
+        "reduction",
+        "reflection",
+        "sampling",
+        "unit"
+      ],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "144f73a637cedb431e980181d6903c45c4e7bb82191e95b1364b5750552ea157",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-model-clarification-live-ambiguous",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": {
+            "subject": "sampling",
+            "itemId": "S40/first-baseline/63",
+            "selectedItemId": "S40/first-baseline/63",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "1bfd29ecb6ba5d9bdbd1e1d097da4de6a0d1c9e6319c5f2318d2ca8c5eeb112c",
+            "taskPromptContractDigest": "65e77cb540778976e3fdcbbd290d49d38ce7f91774b674ddad61081e61686691",
+            "capturedAt": "2026-10-15T11:50:47.672Z",
+            "providerRequestDigest": "eb641df881308f71934b65ae8951631894b26f102aaf3189f384b7e3514cb963",
+            "providerResponseDigest": "0586046c8a49abddec1dc3327c9170018a07c5cae688e35b13070f0d65c3c00f",
+            "fixtureResponseDigest": "7ca98bb7ca28e7984f02df872ccaa50937c151135fef53665dd19f378befe3fd",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "model-clarification",
+              "case": "sample1-ambiguous-focus",
+              "step": "first-baseline/sampling-1-unit-5"
+            },
+            "cacheKey": "2d32cadca52c56289babf311dcce9861e3beb94f2891ad847fdb011dcae01ccc",
+            "generation": "868acc720ab2e8699aa63ab5caef1038ba9a717a5648f0d8709a4974264b33f8",
+            "identityMapSha256": "a5c84268f30fcb38a09a4892c5144f2ef9a5f90a7c4717bd798bb45f96c7f3ed"
+          }
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "202a1da761b4f86ae0ef9cd6095ac02478f8cafe5ec81a910b104abed9b4683b",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-model-clarification-live-ambiguous",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": {
+            "subject": "reflection",
+            "itemId": "S40/first-baseline/65",
+            "selectedItemId": "S40/first-baseline/65",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "96456fc99625e12014633439564f17a54cdb1f4f0a05b8076c10a4b03bbd7676",
+            "taskPromptContractDigest": "65e77cb540778976e3fdcbbd290d49d38ce7f91774b674ddad61081e61686691",
+            "capturedAt": "2026-10-15T11:51:02.112Z",
+            "providerRequestDigest": "897f51cb97a9ab7219cfc1896f4cf7ae76e7ff9d6145ea49b9161669053541bc",
+            "providerResponseDigest": "36238b3d66ac5333c84f1c1c9f3aab916b0c3bb68dc0f356c70830cae7f413c2",
+            "fixtureResponseDigest": "f28d444aae0279d97d023745f3e1446b95af65e70936d1e75e2d2a2cf4c32038",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "model-clarification",
+              "case": "sample1-ambiguous-focus",
+              "step": "first-baseline/reflection"
+            },
+            "cacheKey": "d45100dbf94a4cd11adecc1f577c8d4b4a1cd8d85c852245337d38c7fb43109b",
+            "generation": "1ef4ee06d48305b04a038d95100d0c07f4d4e1926981f5388bf5129216fb2d16",
+            "identityMapSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "23259f2646eb0d291605ace89e1f405b1f896fbd4a77f1a70da48ce3d7d2f209",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-model-clarification-live-ambiguous",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": {
+            "subject": "sampling",
+            "itemId": "S40/first-baseline/64",
+            "selectedItemId": "S40/first-baseline/64",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "1bfd29ecb6ba5d9bdbd1e1d097da4de6a0d1c9e6319c5f2318d2ca8c5eeb112c",
+            "taskPromptContractDigest": "65e77cb540778976e3fdcbbd290d49d38ce7f91774b674ddad61081e61686691",
+            "capturedAt": "2026-10-15T11:50:55.368Z",
+            "providerRequestDigest": "d46217e27bb94785a75429fd711fdd0deda5420a395b94f196b6485889dceb0b",
+            "providerResponseDigest": "87acfed8e3718bcc7d41ec5da33458e8e497d6df12758966ae5b11969ca904e1",
+            "fixtureResponseDigest": "1d8cdf5d3f61252d95a112e36a637180c9cf5e271e2a192dda71aad95cd3ae1f",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "model-clarification",
+              "case": "sample1-ambiguous-focus",
+              "step": "first-baseline/sampling-2-unit-7"
+            },
+            "cacheKey": "25c733d74eb33519cadb7f77c54e7c83220a314f49be10492cc30ceef1da3267",
+            "generation": "868acc720ab2e8699aa63ab5caef1038ba9a717a5648f0d8709a4974264b33f8",
+            "identityMapSha256": "7b15de43390efbefe1598b7207cf6f2531e1918526dc74cd2f10b9a6b8bb9caa"
+          }
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "253fe6982ad8345dbdd96db92a4cb22c94b36d05bc5d847e05df714764aeeac9",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-model-clarification-live-ambiguous",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+          "capture": {
+            "subject": "reduction",
+            "itemId": "S40/first-baseline/62",
+            "selectedItemId": "S40/first-baseline/62",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "8298dc9db1b95f26072cabb00a8c9a14997f68ebe7bf07d01181985f848e66cb",
+            "taskPromptContractDigest": "65e77cb540778976e3fdcbbd290d49d38ce7f91774b674ddad61081e61686691",
+            "capturedAt": "2026-10-15T11:47:19.273Z",
+            "providerRequestDigest": "9c6412b510e62d283b0c06468daeac61623ac92e92407b253dda8b0a57a41329",
+            "providerResponseDigest": "065f5b432a06e930c358fefe6bab4d8cda301109e4ab2c5c00caf25a064de207",
+            "fixtureResponseDigest": "b44879ad176cde26179222bb2260ae282cba51a70752be139a668eff70b709da",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "model-clarification",
+              "case": "sample1-ambiguous-focus",
+              "step": "first-baseline/reduction"
+            },
+            "cacheKey": "08d86f2886fc7ee3dad23fed9a378b4dce4841171d0a6232b51d6507e1c98854",
+            "generation": "ce40297032f28a7d52e567c4732a41c3c868ac7c1c8d0ae66e77da2d7467d4d1",
+            "identityMapSha256": "86e0fd0298c9cb0a3537455a8e5f690b2bcdbf21e14b7eb0a763ca733f0aee12"
+          }
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "d51dc9e679c2bf2b1e6f7193745b9b6bffad5227c05f37b54774beeb4b667c31",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-model-clarification-live-ambiguous",
+          "contentDigest": "582fd4c3541fa6f2cfc613106f45b9713aeeeeacfb82ffbbcd940853533b9981",
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": null,
+          "capture": {
+            "subject": "unit",
+            "itemId": "S40/first-baseline/46",
+            "selectedItemId": "S40/first-baseline/46",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "65e77cb540778976e3fdcbbd290d49d38ce7f91774b674ddad61081e61686691",
+            "taskPromptContractDigest": "65e77cb540778976e3fdcbbd290d49d38ce7f91774b674ddad61081e61686691",
+            "capturedAt": "2026-10-15T11:38:47.045Z",
+            "providerRequestDigest": "ed9eab4345ac7f542c6dd1d73d560d93d1497feb3acf320480e6f8ba2a1582eb",
+            "providerResponseDigest": "d75a844689e66b2cd868de4ec88e70b12b9ee8e013711c1595d8098768f8fbb7",
+            "fixtureResponseDigest": "4029a97a825434b1530bdfac6ee2f994b7f9bae98612210c50819cf7ffac8a76",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "model-clarification",
+              "case": "sample1-ambiguous-focus",
+              "step": "first-baseline/unit-1"
+            },
+            "cacheKey": "fd6b12630811e270ce1d99e860080e2099fb4047319838ad75b579351503ff07",
+            "generation": "bb22af53bbe3dcef2308dc60168e988acab917424af28c8e2309318475fc71c5",
+            "identityMapSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "f24843f50b13228c61e7b7172d35cddfc4887a57c9b7d298cb69b21f9874d36d",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-model-clarification-live-ambiguous",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": {
+            "subject": "unit",
+            "itemId": "S40/first-baseline/54",
+            "selectedItemId": "S40/first-baseline/54",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "65e77cb540778976e3fdcbbd290d49d38ce7f91774b674ddad61081e61686691",
+            "taskPromptContractDigest": "65e77cb540778976e3fdcbbd290d49d38ce7f91774b674ddad61081e61686691",
+            "capturedAt": "2026-10-15T11:39:12.577Z",
+            "providerRequestDigest": "40335ea587048dca01b00e9f9b3c0653e9cc44e42b3258c2242a97b1c1a0a745",
+            "providerResponseDigest": "48c1a3c8f852f82b555aaf7e5d2c41f1266176d446e15c45a4a67ff2b4a18732",
+            "fixtureResponseDigest": "7a1429b2bf68a048fd6f996eead3b2833ddbd3eac7956d59351205df12652452",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "model-clarification",
+              "case": "sample1-ambiguous-focus",
+              "step": "first-baseline/unit-1-clarification-answer"
+            },
+            "cacheKey": "14b2eb4257c4aa4cc29239531cc954d7766482eed1488931229d9e3362312587",
+            "generation": "bb22af53bbe3dcef2308dc60168e988acab917424af28c8e2309318475fc71c5",
+            "identityMapSha256": "cbc88775703de048dbb5e171a04d6dfbebb7e5b2041c0c068164108e8e156162"
+          }
+        },
+        {
+          "unitOrdinal": 2,
+          "requestDigest": "3aa1e60556e62e79ebce8084e2950c9b4f075b9320799d19c839c68fa569680b",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-model-clarification-live-ambiguous",
+          "contentDigest": "30b634d2e636a3bf1e188be27744461154be936fe298bf09e5daf5cda6037eef",
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": null,
+          "capture": {
+            "subject": "unit",
+            "itemId": "S40/first-baseline/47",
+            "selectedItemId": "S40/first-baseline/47",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "65e77cb540778976e3fdcbbd290d49d38ce7f91774b674ddad61081e61686691",
+            "taskPromptContractDigest": "65e77cb540778976e3fdcbbd290d49d38ce7f91774b674ddad61081e61686691",
+            "capturedAt": "2026-10-15T11:38:51.044Z",
+            "providerRequestDigest": "1767ab2efa8312e1b60744840341de0189fc0734fd97bba1ef03b1456cea1cd2",
+            "providerResponseDigest": "4ae446798dc29a7862d90d8cc040106fc8e8cdd28475956a1c50f5225c9b24d3",
+            "fixtureResponseDigest": "249f04fe6a93f326c9f19d0aab09898546764c57a8bf18dc34f045c5230b272e",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "model-clarification",
+              "case": "sample1-ambiguous-focus",
+              "step": "first-baseline/unit-2"
+            },
+            "cacheKey": "ff0e43c827e15a84e2f4e48ed048faa959643beb06791f98722f315f04e4bc94",
+            "generation": "bb22af53bbe3dcef2308dc60168e988acab917424af28c8e2309318475fc71c5",
+            "identityMapSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        },
+        {
+          "unitOrdinal": 2,
+          "requestDigest": "a350b8cd42fb84bf73013305b9e0432577f12632584bc87b3ea7f328d1ea2da2",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-model-clarification-live-ambiguous",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": {
+            "subject": "unit",
+            "itemId": "S40/first-baseline/55",
+            "selectedItemId": "S40/first-baseline/55",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "65e77cb540778976e3fdcbbd290d49d38ce7f91774b674ddad61081e61686691",
+            "taskPromptContractDigest": "65e77cb540778976e3fdcbbd290d49d38ce7f91774b674ddad61081e61686691",
+            "capturedAt": "2026-10-15T11:39:56.255Z",
+            "providerRequestDigest": "0dd681ea27d83b15b08dd4a42313186a756f89fae457049cd9dd7aed45e3bdf4",
+            "providerResponseDigest": "44d5fbcb65ae1c909dbc237e44506f4bc8ad7dd04af96911c4a60100194728dc",
+            "fixtureResponseDigest": "51961770a31dfc0c7a294634a715e60564698ffb6cd33a8d1f27ca0dabf0d73e",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "model-clarification",
+              "case": "sample1-ambiguous-focus",
+              "step": "first-baseline/unit-2-clarification-answer"
+            },
+            "cacheKey": "f7923b9b375be100f5d26b3d2285f088a9c6f738325261921d61946035ece0c3",
+            "generation": "bb22af53bbe3dcef2308dc60168e988acab917424af28c8e2309318475fc71c5",
+            "identityMapSha256": "5133fb981c0335422b98a5aadfe250cf3e1d3f4275c003a5f2f1a6817fe66a59"
+          }
+        },
+        {
+          "unitOrdinal": 3,
+          "requestDigest": "733e94128a214ff15198168db0337cf538c7dfa32c80e48cf84f7296e8336018",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-model-clarification-live-ambiguous",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": {
+            "subject": "unit",
+            "itemId": "S40/first-baseline/56",
+            "selectedItemId": "S40/first-baseline/56",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "65e77cb540778976e3fdcbbd290d49d38ce7f91774b674ddad61081e61686691",
+            "taskPromptContractDigest": "65e77cb540778976e3fdcbbd290d49d38ce7f91774b674ddad61081e61686691",
+            "capturedAt": "2026-10-15T11:40:50.237Z",
+            "providerRequestDigest": "cd18f3b8671b39d4199635e73a894a7132ca6cad773ac25a60c9f23c17954fe1",
+            "providerResponseDigest": "edba0948a9cfcc13221ee73a1d4e645e9754e86bb78247dec8811b5810b6650d",
+            "fixtureResponseDigest": "3f90ff2732ffa5d01862ae256e23cbefff9168581517aac9ca984cb791c623b7",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "model-clarification",
+              "case": "sample1-ambiguous-focus",
+              "step": "first-baseline/unit-3-clarification-answer"
+            },
+            "cacheKey": "1494edeb967d3a20d7b27975b3106c54ec8f87f56f1212ee7e89124c2decc6cf",
+            "generation": "bb22af53bbe3dcef2308dc60168e988acab917424af28c8e2309318475fc71c5",
+            "identityMapSha256": "9c456729eec080ca974b8976200b43ceef005fe6bf3717ae889a9830a892ea03"
+          }
+        },
+        {
+          "unitOrdinal": 3,
+          "requestDigest": "ede2cadccf91a94487a301c962e28a7899f17778bb9c14f772579b89daa83b57",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-model-clarification-live-ambiguous",
+          "contentDigest": "a961d6dc02f89d79d932b93f7d23398f5ae6d205901f48adc2ba7e8b682b0d29",
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": null,
+          "capture": {
+            "subject": "unit",
+            "itemId": "S40/first-baseline/48",
+            "selectedItemId": "S40/first-baseline/48",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "65e77cb540778976e3fdcbbd290d49d38ce7f91774b674ddad61081e61686691",
+            "taskPromptContractDigest": "65e77cb540778976e3fdcbbd290d49d38ce7f91774b674ddad61081e61686691",
+            "capturedAt": "2026-10-15T11:38:53.808Z",
+            "providerRequestDigest": "4b7960fd4a02346948bc66a994e69580d5bd0dcd002d3571ac9e22353abee81c",
+            "providerResponseDigest": "9252f676bb0edc2029e7201261f5b84a4200384210f2bfdb1488af01405f5098",
+            "fixtureResponseDigest": "f052e36792eaecfcfd26a6961d6ed7d228e34d3082c2b16622d5b28a012c64ba",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "model-clarification",
+              "case": "sample1-ambiguous-focus",
+              "step": "first-baseline/unit-3"
+            },
+            "cacheKey": "a7d783ae763410078687244f9126eb543257a5f75f8116a173bb13795fa7ac6b",
+            "generation": "bb22af53bbe3dcef2308dc60168e988acab917424af28c8e2309318475fc71c5",
+            "identityMapSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        },
+        {
+          "unitOrdinal": 4,
+          "requestDigest": "19f6800b25399e3dca40d86b089b78fddd14162fb6be40de995cf8c70dd8de5f",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-model-clarification-live-ambiguous",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": {
+            "subject": "unit",
+            "itemId": "S40/first-baseline/57",
+            "selectedItemId": "S40/first-baseline/57",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "65e77cb540778976e3fdcbbd290d49d38ce7f91774b674ddad61081e61686691",
+            "taskPromptContractDigest": "65e77cb540778976e3fdcbbd290d49d38ce7f91774b674ddad61081e61686691",
+            "capturedAt": "2026-10-15T11:42:29.827Z",
+            "providerRequestDigest": "154c802d1a7f57ee50e8974f7d754997efdcf8189e85adc07dffea52d6a9d166",
+            "providerResponseDigest": "12b27690235ac4f7db07de60de86c63b2ddba0bbcfc4d54f5c31fa767a35bf73",
+            "fixtureResponseDigest": "af71a1e3ecbc0d30e835746398e2f874ac975b3ad2a76c7ee201d1d47f2b8cb7",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "model-clarification",
+              "case": "sample1-ambiguous-focus",
+              "step": "first-baseline/unit-4-clarification-answer"
+            },
+            "cacheKey": "6294e7130b0afb8acada029bfc28a5fc2569c3ef72ed1dced0ef29533cff52b6",
+            "generation": "bb22af53bbe3dcef2308dc60168e988acab917424af28c8e2309318475fc71c5",
+            "identityMapSha256": "44ec787d02fd4627503607e51ba10b86c34bbb714e2e4ec1c455a88e0e4ab586"
+          }
+        },
+        {
+          "unitOrdinal": 4,
+          "requestDigest": "587426c2366a9a853806760cd97e64ede32ee597400796f07349782eed1732f2",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-model-clarification-live-ambiguous",
+          "contentDigest": "12743a413d0267626854136350c016a039416f2f096dca9decfd5c7d4f8956cc",
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": null,
+          "capture": {
+            "subject": "unit",
+            "itemId": "S40/first-baseline/49",
+            "selectedItemId": "S40/first-baseline/49",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "65e77cb540778976e3fdcbbd290d49d38ce7f91774b674ddad61081e61686691",
+            "taskPromptContractDigest": "65e77cb540778976e3fdcbbd290d49d38ce7f91774b674ddad61081e61686691",
+            "capturedAt": "2026-10-15T11:38:56.790Z",
+            "providerRequestDigest": "d8c91157ab6d0714b9e595a587aff69aa5aeb1e3e9cc286db52f7e753954c6e7",
+            "providerResponseDigest": "31573b475c2e3a100813e25622775f303f74167465eaaae590ead05ccdd5fec7",
+            "fixtureResponseDigest": "ecc72a752629ebe47c300e1d674dd61cc3e2756a8104ec4bf691252ba007f2fe",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "model-clarification",
+              "case": "sample1-ambiguous-focus",
+              "step": "first-baseline/unit-4"
+            },
+            "cacheKey": "07d67d4bb8824041dad7f07c33bae342ed6e49845e1767535357300677a49809",
+            "generation": "bb22af53bbe3dcef2308dc60168e988acab917424af28c8e2309318475fc71c5",
+            "identityMapSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "1589e495dab91f3564d6454d264fc32379106372cd168a936408c73aba142ba9",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-model-clarification-live-ambiguous",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": {
+            "subject": "unit",
+            "itemId": "S40/first-baseline/58",
+            "selectedItemId": "S40/first-baseline/58",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "65e77cb540778976e3fdcbbd290d49d38ce7f91774b674ddad61081e61686691",
+            "taskPromptContractDigest": "65e77cb540778976e3fdcbbd290d49d38ce7f91774b674ddad61081e61686691",
+            "capturedAt": "2026-10-15T11:43:34.204Z",
+            "providerRequestDigest": "06a4365337075d5896dcfe0fc3d51c18c234f09ff2ceeca12f9c03c94c0f99e9",
+            "providerResponseDigest": "62921fe0ca2414f9684283aec566417b85b19c366ff267ae89e078498c2a97d5",
+            "fixtureResponseDigest": "17f5d1eecc9bfaf3bed71fcb0078bf272c9afc5dd52e18f4b78585ed695efd11",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "model-clarification",
+              "case": "sample1-ambiguous-focus",
+              "step": "first-baseline/unit-5-clarification-answer"
+            },
+            "cacheKey": "be4c50789fc48a74e543497619e56ab7125156f41830aca76f953f81e1fa4353",
+            "generation": "bb22af53bbe3dcef2308dc60168e988acab917424af28c8e2309318475fc71c5",
+            "identityMapSha256": "a92d4e9a171557c1c31614358aff4e99b1b0e54928c4ffd87ff42c6a25f3ffc9"
+          }
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "19e9b5c8570b41f1bae719ab60af83290792982d85cdb6c34676fa240bac9199",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-model-clarification-live-ambiguous",
+          "contentDigest": "48fb4b784e0dd65b543799e015af64f0abe448d8913011525d29bf328972394b",
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": null,
+          "capture": {
+            "subject": "unit",
+            "itemId": "S40/first-baseline/50",
+            "selectedItemId": "S40/first-baseline/50",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "65e77cb540778976e3fdcbbd290d49d38ce7f91774b674ddad61081e61686691",
+            "taskPromptContractDigest": "65e77cb540778976e3fdcbbd290d49d38ce7f91774b674ddad61081e61686691",
+            "capturedAt": "2026-10-15T11:38:59.690Z",
+            "providerRequestDigest": "efcf328fc3e4f947768e3e53f354b2868647ebabde7ab5615af9c6dcbd3d32cb",
+            "providerResponseDigest": "b4f56992d58e0d9c58b8b4da1511278afc745714b6fa7cf88ccc75d88776fa02",
+            "fixtureResponseDigest": "bf5897a0983eaf4591958e132599112e6ea92870e4bd379019686c203c1350b1",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "model-clarification",
+              "case": "sample1-ambiguous-focus",
+              "step": "first-baseline/unit-5"
+            },
+            "cacheKey": "298655d3c174444609dc0f3c8fb76f54f35e1d84b47263cab413bb7c5657ff67",
+            "generation": "bb22af53bbe3dcef2308dc60168e988acab917424af28c8e2309318475fc71c5",
+            "identityMapSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        },
+        {
+          "unitOrdinal": 6,
+          "requestDigest": "0a7071dac7b2847d0b052f1cded425b7e2ec93b216041cd0fcd51d3827c8041b",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-model-clarification-live-ambiguous",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": {
+            "subject": "unit",
+            "itemId": "S40/first-baseline/59",
+            "selectedItemId": "S40/first-baseline/59",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "65e77cb540778976e3fdcbbd290d49d38ce7f91774b674ddad61081e61686691",
+            "taskPromptContractDigest": "65e77cb540778976e3fdcbbd290d49d38ce7f91774b674ddad61081e61686691",
+            "capturedAt": "2026-10-15T11:44:40.808Z",
+            "providerRequestDigest": "2a208f873d832633e51e136cf47f4b4f75dfc625983a70a41e1edcd03714d3b6",
+            "providerResponseDigest": "b9d41182699428fe24450e57312a26408388eb7a758cec42c276b99e47d47aa7",
+            "fixtureResponseDigest": "238e483ae89b7736fa79ea079209c389b61cc950c11cc664bfa2de4eebf136f3",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "model-clarification",
+              "case": "sample1-ambiguous-focus",
+              "step": "first-baseline/unit-6-clarification-answer"
+            },
+            "cacheKey": "ff3c7ffbb711da66d37c3fab8ec8dd6e28750624abab8e466811a84d51835beb",
+            "generation": "bb22af53bbe3dcef2308dc60168e988acab917424af28c8e2309318475fc71c5",
+            "identityMapSha256": "e6671b14136b53ab90e9b5564f3fcc16e5f73691e6dd95aa8ae77eb0a342f14a"
+          }
+        },
+        {
+          "unitOrdinal": 6,
+          "requestDigest": "17d64166ae7cf872eb26d0641c6a918aabcefa2ee9f542a92e1b90ff78473c10",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-model-clarification-live-ambiguous",
+          "contentDigest": "81cda8000df69574b2084ed55f80191148b5a479aa2c9916d8c463f40555a804",
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": null,
+          "capture": {
+            "subject": "unit",
+            "itemId": "S40/first-baseline/51",
+            "selectedItemId": "S40/first-baseline/51",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "65e77cb540778976e3fdcbbd290d49d38ce7f91774b674ddad61081e61686691",
+            "taskPromptContractDigest": "65e77cb540778976e3fdcbbd290d49d38ce7f91774b674ddad61081e61686691",
+            "capturedAt": "2026-10-15T11:39:02.534Z",
+            "providerRequestDigest": "e275d487db649fb624aa0729a6e9237e3f31d28bd1f5bda446d614ada80ddbe6",
+            "providerResponseDigest": "175ace092c6cf75561419054ad98779818277ea9f5153c16b67a67e6216813a9",
+            "fixtureResponseDigest": "decd9e2333320083101c9bc7b7fe940180756093da20b82d03204a8ec8d44734",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "model-clarification",
+              "case": "sample1-ambiguous-focus",
+              "step": "first-baseline/unit-6"
+            },
+            "cacheKey": "88283861598c76d5b3b84d6840d0ba3257f6ac60eeac5005509455c2945009de",
+            "generation": "bb22af53bbe3dcef2308dc60168e988acab917424af28c8e2309318475fc71c5",
+            "identityMapSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        },
+        {
+          "unitOrdinal": 7,
+          "requestDigest": "7d54a86a808f4a9e48503b770b0722647d901574c44edd0a2fa4e8a4a446399d",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-model-clarification-live-ambiguous",
+          "contentDigest": "ff158e0f8eec32fdf485f964e2c66d92fed84cbf57de527a97b67c515b9aad50",
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": null,
+          "capture": {
+            "subject": "unit",
+            "itemId": "S40/first-baseline/52",
+            "selectedItemId": "S40/first-baseline/52",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "65e77cb540778976e3fdcbbd290d49d38ce7f91774b674ddad61081e61686691",
+            "taskPromptContractDigest": "65e77cb540778976e3fdcbbd290d49d38ce7f91774b674ddad61081e61686691",
+            "capturedAt": "2026-10-15T11:39:06.252Z",
+            "providerRequestDigest": "7a7fae7f6e1a96fc405fd2e2de9ba074d2e9516236ae09658c67d3365599d74f",
+            "providerResponseDigest": "e4ef22ca67b02806154d6d9d38d5f3feca674e5a423c568524dfdf3387b97ec6",
+            "fixtureResponseDigest": "130053b12432542e4a1ccc20344b62449e1aae3e0a14354d634c95678f4612c0",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "model-clarification",
+              "case": "sample1-ambiguous-focus",
+              "step": "first-baseline/unit-7"
+            },
+            "cacheKey": "69c5043cdd9be6f0901f645755b6a8109b25a60f8d49c0bd67c68281db57e292",
+            "generation": "bb22af53bbe3dcef2308dc60168e988acab917424af28c8e2309318475fc71c5",
+            "identityMapSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        },
+        {
+          "unitOrdinal": 7,
+          "requestDigest": "bc74e264c6d4e745fcf4f9b4b41fc9631e2c7dca45d1ad380fdc03d70578ca48",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-model-clarification-live-ambiguous",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": {
+            "subject": "unit",
+            "itemId": "S40/first-baseline/60",
+            "selectedItemId": "S40/first-baseline/60",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "65e77cb540778976e3fdcbbd290d49d38ce7f91774b674ddad61081e61686691",
+            "taskPromptContractDigest": "65e77cb540778976e3fdcbbd290d49d38ce7f91774b674ddad61081e61686691",
+            "capturedAt": "2026-10-15T11:45:50.806Z",
+            "providerRequestDigest": "f9989c5bd0e46162d23b31e048434cfbb703a4588cdce409b57a7b3da02cfb18",
+            "providerResponseDigest": "07c224c4c5f9864352e7d0d0b93ad5b7a03669f475fc68290e1217e60677ba44",
+            "fixtureResponseDigest": "1165882e4932a2e1c047db46c6799202d3b6fb437657e93b308510cadc693d71",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "model-clarification",
+              "case": "sample1-ambiguous-focus",
+              "step": "first-baseline/unit-7-clarification-answer"
+            },
+            "cacheKey": "b6046f20348753ffceb9b85761c2afde93ae42fc64427090930758268403269c",
+            "generation": "bb22af53bbe3dcef2308dc60168e988acab917424af28c8e2309318475fc71c5",
+            "identityMapSha256": "954f652e32794639026c77955e85bb7149203d2362e91fa76fc96aa53e3c1edf"
+          }
+        },
+        {
+          "unitOrdinal": 8,
+          "requestDigest": "05e56ae1d710a9e2f04d53328925cb95d420b3293c8429a4149457f939c7cd0e",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-model-clarification-live-ambiguous",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": {
+            "subject": "unit",
+            "itemId": "S40/first-baseline/61",
+            "selectedItemId": "S40/first-baseline/61",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "65e77cb540778976e3fdcbbd290d49d38ce7f91774b674ddad61081e61686691",
+            "taskPromptContractDigest": "65e77cb540778976e3fdcbbd290d49d38ce7f91774b674ddad61081e61686691",
+            "capturedAt": "2026-10-15T11:46:35.877Z",
+            "providerRequestDigest": "fb259fcec5108c5f31dbfa91472886d3394cd5cb63580c066a6a2235ed67b753",
+            "providerResponseDigest": "a369ce054af070c4dd55011eb78de09048f3fb6cbc8ee44bffb40893a8e20aa3",
+            "fixtureResponseDigest": "64692c55a6f9f8fc73ff9eae25607d5ba34788b4fd2194f9e1df5e485f91e582",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "model-clarification",
+              "case": "sample1-ambiguous-focus",
+              "step": "first-baseline/unit-8-clarification-answer"
+            },
+            "cacheKey": "b649a71a99eb82187cb3cdf56f8e7844405c64a72db56cbcab51043afa22b51a",
+            "generation": "bb22af53bbe3dcef2308dc60168e988acab917424af28c8e2309318475fc71c5",
+            "identityMapSha256": "4a9ce883f870240c4610d6aeddb96e486df84c8030e4509668b4130ee5f51605"
+          }
+        },
+        {
+          "unitOrdinal": 8,
+          "requestDigest": "4bd738516bc586f5c6280557e278ce4c8b2eccd95aa3043764eac36b9a533ac9",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-model-clarification-live-ambiguous",
+          "contentDigest": "baa26a771e30cec986053cba5981096b238feef12305bd62e9312c133af4f3d0",
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": null,
+          "capture": {
+            "subject": "unit",
+            "itemId": "S40/first-baseline/53",
+            "selectedItemId": "S40/first-baseline/53",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "65e77cb540778976e3fdcbbd290d49d38ce7f91774b674ddad61081e61686691",
+            "taskPromptContractDigest": "65e77cb540778976e3fdcbbd290d49d38ce7f91774b674ddad61081e61686691",
+            "capturedAt": "2026-10-15T11:39:09.390Z",
+            "providerRequestDigest": "690a03388ec24dcfdac4e37f87d22156635b13e1e778c17cbb995e9e103c9b46",
+            "providerResponseDigest": "54688af13c2bac0b78a05f33396c0c5baf15840369986fd65715038cca270e51",
+            "fixtureResponseDigest": "0e24e6ebc970748cf9f2875307af07eef4998ac1905f934c1d32631d842b92e4",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "model-clarification",
+              "case": "sample1-ambiguous-focus",
+              "step": "first-baseline/unit-8"
+            },
+            "cacheKey": "a2ae8a7d7841a7bd07b547dba32300e0fe62e489c6c9943c2d8565b54658ed15",
+            "generation": "bb22af53bbe3dcef2308dc60168e988acab917424af28c8e2309318475fc71c5",
+            "identityMapSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false
+    },
+    {
+      "fixtureIdentity": "sample1-model-clarification-live-baseline",
+      "registeredProfile": "baseline",
+      "registeredPurposes": [
+        {
+          "kind": "registered-editorial-evidence-case",
+          "id": "clarification-sample1",
+          "registrationPath": "tests/editorial-cases/cases/clarification-sample1.json",
+          "caseFileSha256": "7a751f0189ae03aaafef634b97b92521132b073d7778c9c50f45f024e1d97fe8",
+          "caseInputSha256": "ffa77de0ad5e4999a06ed0e42cf6c7380f2727ef26005d3458a8723c958968c5",
+          "owner": "tests/editorial-cases/runner/index.ts",
+          "selectedPolicyPassedToPolishOwner": null,
+          "newCapabilityConsumptionClaimed": false
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/model-clarification-live-replay.test.ts",
+          "registrationPath": "tests/service/model-clarification-live-replay.test.ts",
+          "fixtureSelectionSha256": "c8ac3f3a1abf4656eb330cd63b29b15b663bf072af182750f01b1744295f6d6a",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        }
+      ],
+      "allowedTaskKinds": [
+        "baseline-manuscript-analysis"
+      ],
+      "sessionPurpose": null,
+      "taskContractIdentities": [
+        "ai7.baseline-manuscript-analysis/1"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/analysis/contract.ts",
+        "sha256": "51b42bae865b24f846c790dc821666cf77b5718aa61f42129249754dc18cee2b",
+        "constants": {
+          "BASELINE_PROMPT_CONTRACT_DIGEST": "89776b1b5ca2e4d3ef529b0be6b2380bfc0cb5addf0426e815df7aa195c7d386",
+          "BASELINE_PROMPT_CONTRACT_SCHEMA": "ai7.baseline-manuscript-analysis.prompt-contract/2",
+          "BASELINE_PROMPT_CONTRACT_V1_DIGEST": "4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5",
+          "BASELINE_PROMPT_CONTRACT_V1_SCHEMA": "ai7.baseline-manuscript-analysis.prompt-contract/1",
+          "BASELINE_UNIT_RESULT_SCHEMA": "ai7.baseline-manuscript-analysis.unit-result/1"
+        }
+      },
+      "capturedTaskPromptContractDigests": [
+        "ca40954825c5a30a30ad853d68a657218ea60d3005286d8b42266521fbd878b1"
+      ],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/analysis/execution.ts",
+        "sha256": "75fe09cc4aeb9d84774c59be547dcbf80b3dc7e2460bfac00651da405de377f3"
+      },
+      "planCompositionDerivation": {
+        "path": "src/service/analysis/baseline-analysis-store.ts",
+        "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
+      },
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "e02a1d5a3eb3750c8c5620c2a236dd51e67faa17606b3dab2da99319d5c4a8ed",
+      "fixtureFile": "tests/fixtures/model/sample1-model-clarification-live-baseline.json",
+      "fixtureFileSha256": "d79e0b5f890c36cee7e84c521791316fc34acbf953511f0eaef9f0c1560a8928",
+      "fixtureProvenance": "recorded",
+      "orderedLineage": [
+        {
+          "identity": "sample1-model-clarification-live-baseline",
+          "fixtureFile": "tests/fixtures/model/sample1-model-clarification-live-baseline.json",
+          "sha256": "d79e0b5f890c36cee7e84c521791316fc34acbf953511f0eaef9f0c1560a8928"
+        }
+      ],
+      "resolvedLineageSha256": "1fb1225ccf47378ec88e8f645e76c460a639a36153fad4aa822975d88a216fa4",
+      "allowedExistingResultSchemas": [
+        "ai7.analysis.assurance-sampling-result/1",
+        "ai7.analysis.run-report-reflection-result/1",
+        "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+        "ai7.baseline-manuscript-analysis.unit-result/1"
+      ],
+      "allowedCapturedSubjects": [
+        "reduction",
+        "reflection",
+        "sampling",
+        "unit"
+      ],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "3937382d04c72fbfa56626632f2b45556eaec138bd8bef9e2790661d88620029",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-model-clarification-live-baseline",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": {
+            "subject": "sampling",
+            "itemId": "S40/first-baseline/40",
+            "selectedItemId": "S40/first-baseline/40",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "1bfd29ecb6ba5d9bdbd1e1d097da4de6a0d1c9e6319c5f2318d2ca8c5eeb112c",
+            "taskPromptContractDigest": "ca40954825c5a30a30ad853d68a657218ea60d3005286d8b42266521fbd878b1",
+            "capturedAt": "2026-10-15T11:37:52.921Z",
+            "providerRequestDigest": "cdfb8c4e24232c593f763ce1c3280aa6515cdca90865b4a170d0e30dc6ab8c5b",
+            "providerResponseDigest": "5919252bff05f94a43f09400c92b6df581d03af1243a667999615ead4647fc94",
+            "fixtureResponseDigest": "c76d2efadeeb702e9b8945264d8936152da6c051a329b822a6fff308dad03e1b",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "model-clarification",
+              "case": "sample1-instruction2",
+              "step": "first-baseline/sampling-2-unit-4"
+            },
+            "cacheKey": "3457bb1922582413e4a9a8c1d4f8eb8875402f447484739554a17a1494e49c0d",
+            "generation": "a76fbcb24b49e99fd8714a8bdd9d2289efc2a44c71d834188b3c21d460c2b14b",
+            "identityMapSha256": "5017f08ba8b9195841a5a6c78dc788a64b69019a3d12a5d0fe895fcc7f55f7bb"
+          }
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "473a6060eb00969a1d78448454f5daaed37d6c09f747757d9510a2c582a936f9",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-model-clarification-live-baseline",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+          "capture": {
+            "subject": "reduction",
+            "itemId": "S40/first-baseline/36",
+            "selectedItemId": "S40/first-baseline/36",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "8298dc9db1b95f26072cabb00a8c9a14997f68ebe7bf07d01181985f848e66cb",
+            "taskPromptContractDigest": "ca40954825c5a30a30ad853d68a657218ea60d3005286d8b42266521fbd878b1",
+            "capturedAt": "2026-10-15T11:35:21.318Z",
+            "providerRequestDigest": "d32032c88e21931a94eaf191dede061386766c85e33c65e51540ad472e68b50c",
+            "providerResponseDigest": "1400b138a486becbc8a2f6d07b19325a3a67e4c9b8c25c442092863855334f72",
+            "fixtureResponseDigest": "7f8824cce6bfcfaabaafcfeedbbb4db64e6bd2c61c419d2a2f6885e443bee9e1",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "model-clarification",
+              "case": "sample1-instruction2",
+              "step": "first-baseline/reduction"
+            },
+            "cacheKey": "de12246c82b67c0bac54645a21cbae6d532c3cc257b00d658f5ffe7284618915",
+            "generation": "7e7b3d5e801ff99a5d6824ea795fe916d8db09f25df8b50350627ee14d72e400",
+            "identityMapSha256": "825d402e3a98546e097af1caa0ce988359bbeaf3f48236a654c3ddf1e2aae7ee"
+          }
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "815ded972e0e93c451a88dfb8a50bd895141434238603cfc1651739110a774fc",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-model-clarification-live-baseline",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": {
+            "subject": "reflection",
+            "itemId": "S40/first-baseline/43",
+            "selectedItemId": "S40/first-baseline/43",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "96456fc99625e12014633439564f17a54cdb1f4f0a05b8076c10a4b03bbd7676",
+            "taskPromptContractDigest": "ca40954825c5a30a30ad853d68a657218ea60d3005286d8b42266521fbd878b1",
+            "capturedAt": "2026-10-15T11:38:06.654Z",
+            "providerRequestDigest": "047996dd89ceb547c53de12a408c2e5626452a937869a6cc8575cc99f8988941",
+            "providerResponseDigest": "879e5a524aa6b18585fbc48c7f4e38bbce8d933bd84e3d6e480c3cfae450722c",
+            "fixtureResponseDigest": "61cfdf4788dd18497817b7ac2f311429edd75a2fb4b0b566095776da5416f690",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "model-clarification",
+              "case": "sample1-instruction2",
+              "step": "first-baseline/reflection"
+            },
+            "cacheKey": "8d21a5dfab437bd87decbcdbb74ab087293ea1263d91df6d41cc830a4b12e386",
+            "generation": "ad0eef422ec8522301cc6b2e166dacfc8ef697b430d2cc97db2a5b9eb951a9b9",
+            "identityMapSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "d1687849d78f4438e3e6861f1d0a2564146ab46afd1b4dd25e483f4a65051b7c",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-model-clarification-live-baseline",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": {
+            "subject": "sampling",
+            "itemId": "S40/first-baseline/41",
+            "selectedItemId": "S40/first-baseline/41",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "1bfd29ecb6ba5d9bdbd1e1d097da4de6a0d1c9e6319c5f2318d2ca8c5eeb112c",
+            "taskPromptContractDigest": "ca40954825c5a30a30ad853d68a657218ea60d3005286d8b42266521fbd878b1",
+            "capturedAt": "2026-10-15T11:37:58.808Z",
+            "providerRequestDigest": "55f4ae28bb18137adc62050fe61b057f88a6b63fef25a8f1035803a1abdc6259",
+            "providerResponseDigest": "9ff99402cb992500cbb51647cc8326df9f4ed8a4785032194a0974719aa9a845",
+            "fixtureResponseDigest": "cc0a1b05c4b3d9557af536b5812d34946cc749b99511cfe537013421c1d9d90e",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "model-clarification",
+              "case": "sample1-instruction2",
+              "step": "first-baseline/sampling-3-unit-6"
+            },
+            "cacheKey": "3478200d47efffd6a924d366de8d41a8b8fe8b7adc70343276ee28b8d509ad62",
+            "generation": "a76fbcb24b49e99fd8714a8bdd9d2289efc2a44c71d834188b3c21d460c2b14b",
+            "identityMapSha256": "c0816421652af095e45c71091e55b3d8fc7088cc1ae3252dd246e0be1ee39f75"
+          }
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "f8d6165bd682a15d18b8cdf5c8467a74c5050bf5e3b186bc82c3cd23ef67681b",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-model-clarification-live-baseline",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": {
+            "subject": "sampling",
+            "itemId": "S40/first-baseline/39",
+            "selectedItemId": "S40/first-baseline/39",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "1bfd29ecb6ba5d9bdbd1e1d097da4de6a0d1c9e6319c5f2318d2ca8c5eeb112c",
+            "taskPromptContractDigest": "ca40954825c5a30a30ad853d68a657218ea60d3005286d8b42266521fbd878b1",
+            "capturedAt": "2026-10-15T11:37:33.779Z",
+            "providerRequestDigest": "d2ad58c1dd0f0323cd96cef580693c252b009cc27b0c0b97ddb2ee1d9efed7f1",
+            "providerResponseDigest": "3ae0f89bd090485d2dd21de3ad41184fd5f1147c846d46baeca8c8a46b072cbe",
+            "fixtureResponseDigest": "92d46086a006d7b67b96bf1eb6eb255f6d30fe45ad9625b3644d2355fb3ddceb",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "model-clarification",
+              "case": "sample1-instruction2",
+              "step": "first-baseline/sampling-1-unit-1"
+            },
+            "cacheKey": "b6cbf7a000b52bc60167236532dc504857fcd58f667680361d0c554ae17df76a",
+            "generation": "a76fbcb24b49e99fd8714a8bdd9d2289efc2a44c71d834188b3c21d460c2b14b",
+            "identityMapSha256": "4d141618d199ff711925b15ba9699e8928280bf9878c8bba340159b7c038257e"
+          }
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "c3caace51ba401d52d94413c33ff315c53eb66cae05c5cfb73220cd418662df9",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-model-clarification-live-baseline",
+          "contentDigest": "582fd4c3541fa6f2cfc613106f45b9713aeeeeacfb82ffbbcd940853533b9981",
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": {
+            "subject": "unit",
+            "itemId": "S40/first-baseline/21",
+            "selectedItemId": "S40/first-baseline/21",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "ca40954825c5a30a30ad853d68a657218ea60d3005286d8b42266521fbd878b1",
+            "taskPromptContractDigest": "ca40954825c5a30a30ad853d68a657218ea60d3005286d8b42266521fbd878b1",
+            "capturedAt": "2026-10-15T11:29:21.775Z",
+            "providerRequestDigest": "5cd20def5e26e18c93686fe14fa914e3cd0b7f574c940ced50c2a3d4f82924cc",
+            "providerResponseDigest": "58a25b4d501d58609dafe8e4a71836ed4f830efcfaa6cdc0ad580604a86a416c",
+            "fixtureResponseDigest": "6ae590ff5922647544fbeee1ae3459f6badb2143ccf92b0e93c3c4460ce59e8c",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "model-clarification",
+              "case": "sample1-instruction2",
+              "step": "first-baseline/unit-1"
+            },
+            "cacheKey": "f5d13b2b28a985f81f7522ceb79e95ac32eca0b8ff817594e7aff1c63e997bd0",
+            "generation": "e036542ebf780fd4f52e3b191c9f7cf096606ead165e4305d13238bca66a83dd",
+            "identityMapSha256": "b1ca0bdc361fa25ca50a818f327ae52797d5884bf217b2046f50cb764eda09a5"
+          }
+        },
+        {
+          "unitOrdinal": 2,
+          "requestDigest": "b2ac20431f20e1389ff1b0fd95fbd851e307f90a2ba3635050d59de26e3a03fd",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-model-clarification-live-baseline",
+          "contentDigest": "30b634d2e636a3bf1e188be27744461154be936fe298bf09e5daf5cda6037eef",
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": {
+            "subject": "unit",
+            "itemId": "S40/first-baseline/22",
+            "selectedItemId": "S40/first-baseline/22",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "ca40954825c5a30a30ad853d68a657218ea60d3005286d8b42266521fbd878b1",
+            "taskPromptContractDigest": "ca40954825c5a30a30ad853d68a657218ea60d3005286d8b42266521fbd878b1",
+            "capturedAt": "2026-10-15T11:29:57.835Z",
+            "providerRequestDigest": "74aae6852316a8715b87dfdeae1d1c147847a6ead22dadb1140972358217590d",
+            "providerResponseDigest": "8cd2812c63ea0ef4ff859c458a8ee603d164988bd472a01d0a93f22a9c682fb1",
+            "fixtureResponseDigest": "09f640a06c403a3f07c4cca743c091d2ee0ac239ceb5d46b67398824ad90fbe2",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "model-clarification",
+              "case": "sample1-instruction2",
+              "step": "first-baseline/unit-2"
+            },
+            "cacheKey": "e2988c6667dd41e77bb6b01197c47b21066ba28b6407268da8ed00c28afe39cd",
+            "generation": "e036542ebf780fd4f52e3b191c9f7cf096606ead165e4305d13238bca66a83dd",
+            "identityMapSha256": "77cabb93761759ab186a683848d0a8661437492a1745abc5aa4dec19a8e9b294"
+          }
+        },
+        {
+          "unitOrdinal": 3,
+          "requestDigest": "0efa150a4fe99c56282761b088501c75d7f8f776c154b7a55f1edf521856f64c",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-model-clarification-live-baseline",
+          "contentDigest": "a961d6dc02f89d79d932b93f7d23398f5ae6d205901f48adc2ba7e8b682b0d29",
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": {
+            "subject": "unit",
+            "itemId": "S40/first-baseline/23",
+            "selectedItemId": "S40/first-baseline/23",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "ca40954825c5a30a30ad853d68a657218ea60d3005286d8b42266521fbd878b1",
+            "taskPromptContractDigest": "ca40954825c5a30a30ad853d68a657218ea60d3005286d8b42266521fbd878b1",
+            "capturedAt": "2026-10-15T11:30:32.472Z",
+            "providerRequestDigest": "e9301c6948c18f9f4249e17ae86188401a37d66636dbd6e4c8cd06bb36f16de0",
+            "providerResponseDigest": "0c3bfd2947d1fac0f3a3192e7720a1ce02a2e0f1bb19df95e40cc1ae25ac88ef",
+            "fixtureResponseDigest": "97dd6b9ce7bfa50d079fe91e7a24c798e6ea260a61104ebef6751c3397b3f00c",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "model-clarification",
+              "case": "sample1-instruction2",
+              "step": "first-baseline/unit-3"
+            },
+            "cacheKey": "c0e631e7a8176058782d434fab9c2c55009e173e5f4b13c6bb82e8975dddc972",
+            "generation": "e036542ebf780fd4f52e3b191c9f7cf096606ead165e4305d13238bca66a83dd",
+            "identityMapSha256": "8ceec3af1fb9b125dbfc87d4ed77fe5673874fe8a349ebe5b903583614a6b6ac"
+          }
+        },
+        {
+          "unitOrdinal": 4,
+          "requestDigest": "34568207a072202ef17ea4dbcf3ca28a7d5eaedb2913dbe215a1605cce22a7e3",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-model-clarification-live-baseline",
+          "contentDigest": "12743a413d0267626854136350c016a039416f2f096dca9decfd5c7d4f8956cc",
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": {
+            "subject": "unit",
+            "itemId": "S40/first-baseline/24",
+            "selectedItemId": "S40/first-baseline/24",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "ca40954825c5a30a30ad853d68a657218ea60d3005286d8b42266521fbd878b1",
+            "taskPromptContractDigest": "ca40954825c5a30a30ad853d68a657218ea60d3005286d8b42266521fbd878b1",
+            "capturedAt": "2026-10-15T11:31:52.543Z",
+            "providerRequestDigest": "5e50ebf1b43644ff9cbf7ca919b61baf59bf78827cedfcc54f95be9245e3e5a1",
+            "providerResponseDigest": "c7a05eac7ae801f8a1385c3ecdf56ebc4f182bdd9186ccb7583d39765aa97050",
+            "fixtureResponseDigest": "3d7c40e00ccd842c365839bd512cd49a25d625dc837896c474efad6ed0d895f0",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "model-clarification",
+              "case": "sample1-instruction2",
+              "step": "first-baseline/unit-4"
+            },
+            "cacheKey": "06bdc9cd57f35c0a7fe22a4fd647ed3aa1f6c3d4316705b42d18b31791004c76",
+            "generation": "e036542ebf780fd4f52e3b191c9f7cf096606ead165e4305d13238bca66a83dd",
+            "identityMapSha256": "e88621fcbf64ebc977fbab51e265f53dee229244c47b9e012c6046fc7a291427"
+          }
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "c203d816b6f3a77f2909e7e2df3fd78fe40874ac47bc5d1d323db56db0d1a4b6",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-model-clarification-live-baseline",
+          "contentDigest": "48fb4b784e0dd65b543799e015af64f0abe448d8913011525d29bf328972394b",
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": {
+            "subject": "unit",
+            "itemId": "S40/first-baseline/25",
+            "selectedItemId": "S40/first-baseline/25",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "ca40954825c5a30a30ad853d68a657218ea60d3005286d8b42266521fbd878b1",
+            "taskPromptContractDigest": "ca40954825c5a30a30ad853d68a657218ea60d3005286d8b42266521fbd878b1",
+            "capturedAt": "2026-10-15T11:32:40.236Z",
+            "providerRequestDigest": "4cbc744d42effa6d57532a6db6f80641993b4b79005b769baf5dd4f091f6d11a",
+            "providerResponseDigest": "eb68968ef5fc8ca5ac69de326f267e3fb17eeff962bde198cdb913e9925dc644",
+            "fixtureResponseDigest": "068ea3389d1351526ab8dc8943d98143cf415922cfa4431d3e7ace797f6a07ff",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "model-clarification",
+              "case": "sample1-instruction2",
+              "step": "first-baseline/unit-5"
+            },
+            "cacheKey": "8e6a50c76f2a5c41c8a7a8f48b2d744c0641aa5b4373bf981f56c9002ae48757",
+            "generation": "e036542ebf780fd4f52e3b191c9f7cf096606ead165e4305d13238bca66a83dd",
+            "identityMapSha256": "d1fb83c240f1ceb5fc1c76f8b9fbf076184b5941601eaeab39b21ad412a3e772"
+          }
+        },
+        {
+          "unitOrdinal": 6,
+          "requestDigest": "9c47b01cced7e1d635887f62a200c2794366ab4b7d75ff2f441982448f224374",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-model-clarification-live-baseline",
+          "contentDigest": "81cda8000df69574b2084ed55f80191148b5a479aa2c9916d8c463f40555a804",
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": {
+            "subject": "unit",
+            "itemId": "S40/first-baseline/31",
+            "selectedItemId": "S40/first-baseline/31",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "ca40954825c5a30a30ad853d68a657218ea60d3005286d8b42266521fbd878b1",
+            "taskPromptContractDigest": "ca40954825c5a30a30ad853d68a657218ea60d3005286d8b42266521fbd878b1",
+            "capturedAt": "2026-10-15T11:33:32.109Z",
+            "providerRequestDigest": "7bd9a6e1df9e65589c09b4c4165d07dbed29729ca2b00cc0a35c4cf397ad1f09",
+            "providerResponseDigest": "856209fb7dea4da30cf8ade3702f1496906079d30baa1b9976e33cfa87ad2568",
+            "fixtureResponseDigest": "d937a84bb1cfac033864c7be0e0472b6441aff1ccf9a8c2bc838c741b6032576",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "model-clarification",
+              "case": "sample1-instruction2",
+              "step": "first-baseline/unit-6"
+            },
+            "cacheKey": "a0bec8030e4e021dbd9bb94613e5cbc846efe885c352db5932284f68d01376d1",
+            "generation": "e036542ebf780fd4f52e3b191c9f7cf096606ead165e4305d13238bca66a83dd",
+            "identityMapSha256": "a60ed6fb2b0ed500c4d3222a8bea759a6f1539f77b807a84c479aebf41f1a1e9"
+          }
+        },
+        {
+          "unitOrdinal": 7,
+          "requestDigest": "7696b4f3a299e3c6b98cecf7c36d0cb5386327094b4a3616933b580ba7173020",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-model-clarification-live-baseline",
+          "contentDigest": "ff158e0f8eec32fdf485f964e2c66d92fed84cbf57de527a97b67c515b9aad50",
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": {
+            "subject": "unit",
+            "itemId": "S40/first-baseline/33",
+            "selectedItemId": "S40/first-baseline/33",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "ca40954825c5a30a30ad853d68a657218ea60d3005286d8b42266521fbd878b1",
+            "taskPromptContractDigest": "ca40954825c5a30a30ad853d68a657218ea60d3005286d8b42266521fbd878b1",
+            "capturedAt": "2026-10-15T11:34:04.207Z",
+            "providerRequestDigest": "be61bf0ccf2fc252887b40e4d46b9134128da228b5850b6f3c5441f2be9a1852",
+            "providerResponseDigest": "79ec01625b84c6bd9a331d4342e14b5e8fcc2569bc89680fecdfdfe60690b7e3",
+            "fixtureResponseDigest": "8e4248bdb79c3b87c0e88c4fd096a63a26599b158a0b9d2202c0384f926e243e",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "model-clarification",
+              "case": "sample1-instruction2",
+              "step": "first-baseline/unit-7"
+            },
+            "cacheKey": "8703f6a446394b43920fd3f94f3e7ec505837ed1e3f4999dbede2826888c1d06",
+            "generation": "e036542ebf780fd4f52e3b191c9f7cf096606ead165e4305d13238bca66a83dd",
+            "identityMapSha256": "86a970637f62a52e87c8b28629712c8dca6423f63669701743175b7eee6ef2ff"
+          }
+        },
+        {
+          "unitOrdinal": 8,
+          "requestDigest": "6d902e25b6bb9da2bc5ea309c9c6cf2b7eafb350294ece0e39a670afd53d4a31",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-model-clarification-live-baseline",
+          "contentDigest": "baa26a771e30cec986053cba5981096b238feef12305bd62e9312c133af4f3d0",
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": {
+            "subject": "unit",
+            "itemId": "S40/first-baseline/35",
+            "selectedItemId": "S40/first-baseline/35",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "ca40954825c5a30a30ad853d68a657218ea60d3005286d8b42266521fbd878b1",
+            "taskPromptContractDigest": "ca40954825c5a30a30ad853d68a657218ea60d3005286d8b42266521fbd878b1",
+            "capturedAt": "2026-10-15T11:34:55.525Z",
+            "providerRequestDigest": "3c49aeefb0d81fcd1841fe8090477d95923a943883e4d718a6af3f1dd6c50539",
+            "providerResponseDigest": "b2fa3be9c6f1a87863e6394b861b6e5203c7dc890ce207937d70d7f11d03d7ce",
+            "fixtureResponseDigest": "015552f284a81c9ebd01a12103c9e6a36c2462686fa952fe61a8a723e93945c5",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "model-clarification",
+              "case": "sample1-instruction2",
+              "step": "first-baseline/unit-8"
+            },
+            "cacheKey": "497c58a2c2acd32bb832f379e7c79fc8b7bd545cce561d8d490f1692921e47ed",
+            "generation": "e036542ebf780fd4f52e3b191c9f7cf096606ead165e4305d13238bca66a83dd",
+            "identityMapSha256": "53deb144987805aa973f2afbb8fcf0f68df26925875430b0895253460e3b8995"
+          }
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false
+    },
+    {
+      "fixtureIdentity": "sample1-polish-authored",
+      "registeredProfile": "polish",
+      "registeredPurposes": [
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/fast-role.test.ts",
+          "registrationPath": "tests/service/fast-role.test.ts",
+          "fixtureSelectionSha256": "012ac862bfd0a285e5d5712e90b17e4612263ed6c7b0385c5670a622e49e7868",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/fast-role-fixture-generator.test.ts",
+          "registrationPath": "tests/service/fast-role-fixture-generator.test.ts",
+          "fixtureSelectionSha256": "62d77d3aeafb264772db25c1b3be964df834d6f4ef198fc4b8f773218253576e",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        }
+      ],
+      "allowedTaskKinds": [
+        "editorial-polish"
+      ],
+      "sessionPurpose": null,
+      "taskContractIdentities": [
+        "ai7.editorial-polish/1"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/fast-role/polish-contract.ts",
+        "sha256": "3e224e199c07e6039a2b0e8a337812e0686a0393f133984c25422ec721f0defe",
+        "constants": {
+          "EDITORIAL_POLISH_CONTRACT_VERSION": "ai7.editorial-polish/1",
+          "EDITORIAL_POLISH_PROMPT_CONTRACT_DIGEST": "7078415b8216761fca5c85a68d9b25e153dccd5d910dcafbdc447e3f4ff93e8a",
+          "EDITORIAL_POLISH_PROMPT_CONTRACT_SCHEMA": "ai7.editorial-polish-prompt-contract/1",
+          "EDITORIAL_POLISH_RESULT_SCHEMA": "ai7.editorial-polish.result/1"
+        }
+      },
+      "capturedTaskPromptContractDigests": [],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/fast-role/fast-role-execution.ts",
+        "sha256": "23d938f28d062d1fe3949d399739b0e558dc2e7f435589b3115f1eb200755599"
+      },
+      "planCompositionDerivation": null,
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "editor-selected-manuscript-excerpt"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "ce3c7a0bb60b5ef7ee2683f0889d1e4a56a7f24b6b4fa488135f95ae3ba6706a",
+      "fixtureFile": "tests/fixtures/model/sample1-polish-authored.json",
+      "fixtureFileSha256": "8ba20145b3aa48ea9e3bc72d5ec8f11ac0e7f266b590632d04c0b01405abd417",
+      "fixtureProvenance": "authored",
+      "orderedLineage": [
+        {
+          "identity": "sample1-polish-authored",
+          "fixtureFile": "tests/fixtures/model/sample1-polish-authored.json",
+          "sha256": "8ba20145b3aa48ea9e3bc72d5ec8f11ac0e7f266b590632d04c0b01405abd417"
+        }
+      ],
+      "resolvedLineageSha256": "049bf1b2129ffcd90bf62099b23d75fb0c4fb6d974762f9c6525b6dccd2eacce",
+      "allowedExistingResultSchemas": [
+        "ai7.editorial-polish.result/1"
+      ],
+      "allowedCapturedSubjects": [],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "fe63b62969f3caa2a172afe8d692479d2aad28815553ef0d08d51e2ce21b1f49",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-polish-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-polish.result/1",
+          "capture": null
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false
+    },
+    {
+      "fixtureIdentity": "sample1-readers-report-authored",
+      "registeredProfile": "baseline",
+      "registeredPurposes": [
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/live-evaluation.test.ts",
+          "registrationPath": "tests/service/live-evaluation.test.ts",
+          "fixtureSelectionSha256": "316630cdc629b562e9df92964f12f9bf8ab454545ef6f5eceddacd8b1dd22d2e",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/evaluation-rewrite-fixture-generator.test.ts",
+          "registrationPath": "tests/service/evaluation-rewrite-fixture-generator.test.ts",
+          "fixtureSelectionSha256": "475048644eeee8babb4e0b0eebdf8f7cc5504ba3b9a96a3810e0cf869999c300",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/live-material-references.test.ts",
+          "registrationPath": "tests/service/live-material-references.test.ts",
+          "fixtureSelectionSha256": "d1b0abe5e7a34c428df4c95a4adc6ac9c3cfba33b3b624b4d35ac4708d11d0e0",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/run-kind-controls.test.ts",
+          "registrationPath": "tests/service/run-kind-controls.test.ts",
+          "fixtureSelectionSha256": "fc20baf39ac2ca11b62a698035b41124b0cd9dd4aee2d78ce559994fee1b7c14",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        }
+      ],
+      "allowedTaskKinds": [
+        "baseline-manuscript-analysis"
+      ],
+      "sessionPurpose": null,
+      "taskContractIdentities": [
+        "ai7.baseline-manuscript-analysis/1"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/analysis/contract.ts",
+        "sha256": "51b42bae865b24f846c790dc821666cf77b5718aa61f42129249754dc18cee2b",
+        "constants": {
+          "BASELINE_PROMPT_CONTRACT_DIGEST": "89776b1b5ca2e4d3ef529b0be6b2380bfc0cb5addf0426e815df7aa195c7d386",
+          "BASELINE_PROMPT_CONTRACT_SCHEMA": "ai7.baseline-manuscript-analysis.prompt-contract/2",
+          "BASELINE_PROMPT_CONTRACT_V1_DIGEST": "4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5",
+          "BASELINE_PROMPT_CONTRACT_V1_SCHEMA": "ai7.baseline-manuscript-analysis.prompt-contract/1",
+          "BASELINE_UNIT_RESULT_SCHEMA": "ai7.baseline-manuscript-analysis.unit-result/1"
+        }
+      },
+      "capturedTaskPromptContractDigests": [],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/analysis/execution.ts",
+        "sha256": "75fe09cc4aeb9d84774c59be547dcbf80b3dc7e2460bfac00651da405de377f3"
+      },
+      "planCompositionDerivation": {
+        "path": "src/service/analysis/baseline-analysis-store.ts",
+        "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
+      },
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "e02a1d5a3eb3750c8c5620c2a236dd51e67faa17606b3dab2da99319d5c4a8ed",
+      "fixtureFile": "tests/fixtures/model/sample1-readers-report-authored.json",
+      "fixtureFileSha256": "5cd0192953a62c5a359de38ec7ad2df4ce1d3b671413eb243fed0027dc2e8128",
+      "fixtureProvenance": "authored",
+      "orderedLineage": [
+        {
+          "identity": "sample1-readers-report-authored",
+          "fixtureFile": "tests/fixtures/model/sample1-readers-report-authored.json",
+          "sha256": "5cd0192953a62c5a359de38ec7ad2df4ce1d3b671413eb243fed0027dc2e8128"
+        },
+        {
+          "identity": "sample1-evaluation-authored",
+          "fixtureFile": "tests/fixtures/model/sample1-evaluation-authored.json",
+          "sha256": "8675ee3dfc904759589b8d08aed621233306739dac4c354836052e73ee184d1c"
+        },
+        {
+          "identity": "sample1-baseline-happy",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-happy.json",
+          "sha256": "9c3bb63c931966ddbc4c94c5aafb29f7d04d55083f9b4f372391c6714bffba0a"
+        }
+      ],
+      "resolvedLineageSha256": "69a9f3fc46600705b4ea864075f31bf338b3a43ff6f8c7305a0a7e2f191ab018",
+      "allowedExistingResultSchemas": [
+        "ai7.analysis.assurance-sampling-result/1",
+        "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+        "ai7.baseline-manuscript-analysis.unit-result/1"
+      ],
+      "allowedCapturedSubjects": [],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "1b0ddc63e99dd5221b18f003565fd6324ff9ce031565271e80a24f56c5d14a88",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "36e16438e6d759c4a2a850c1620b2b3db3fa660fce4c0e079c46c85724f5577d",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "3e6c2262e197cb0179a4f49ab26d8bb54ca14e2eae81af26ed62f28eb039c336",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "97072d1ab7bfdea86363b46ac85e8d469b019a3b1644ea70b7e10763deb13521",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "c667fc1443c70e4dc38370c5c16f17602ca5d0aaa249a5a8ad3e1e2a3465f2a5",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 2,
+          "requestDigest": "6d3c892f661c0d2b10edad6cf29ffa9d6cc522057b7cc1fcff0ab5c0e89af00b",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 3,
+          "requestDigest": "ba2e16f6d1d35617d25cfcaee836b532c1ab07bd077f4e87f7440e5ae8440f4a",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 4,
+          "requestDigest": "8c845a19c7d2490d4161288d9b74985e297941b9141767b155069340ae10e4e2",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "8abcb377378be04322959cc962315565229946cc6a76496e45b7cbc1697094a9",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 6,
+          "requestDigest": "eb508fdc039e94e62e92797a09683a5f6ee14bce8a8133f13021bd53b33986e7",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 7,
+          "requestDigest": "3fe4cb693a94f6338e771fd6f52f9ddca153825257bd4b006ebbe1f46fe0d9f8",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 8,
+          "requestDigest": "03e8183266d513aa4c3ac1707e1bc25b79098c3aa017c50c52b111378afc31fe",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false
+    },
+    {
+      "fixtureIdentity": "sample1-readers-report-authored",
+      "registeredProfile": "evaluation",
+      "registeredPurposes": [
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/live-evaluation.test.ts",
+          "registrationPath": "tests/service/live-evaluation.test.ts",
+          "fixtureSelectionSha256": "316630cdc629b562e9df92964f12f9bf8ab454545ef6f5eceddacd8b1dd22d2e",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/evaluation-rewrite-fixture-generator.test.ts",
+          "registrationPath": "tests/service/evaluation-rewrite-fixture-generator.test.ts",
+          "fixtureSelectionSha256": "475048644eeee8babb4e0b0eebdf8f7cc5504ba3b9a96a3810e0cf869999c300",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/live-material-references.test.ts",
+          "registrationPath": "tests/service/live-material-references.test.ts",
+          "fixtureSelectionSha256": "d1b0abe5e7a34c428df4c95a4adc6ac9c3cfba33b3b624b4d35ac4708d11d0e0",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/run-kind-controls.test.ts",
+          "registrationPath": "tests/service/run-kind-controls.test.ts",
+          "fixtureSelectionSha256": "fc20baf39ac2ca11b62a698035b41124b0cd9dd4aee2d78ce559994fee1b7c14",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        }
+      ],
+      "allowedTaskKinds": [
+        "evaluation"
+      ],
+      "sessionPurpose": null,
+      "taskContractIdentities": [
+        "ai7.evaluation/1"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/evaluation/initial-evaluation-contract.ts",
+        "sha256": "53d5b64568a2b7c7234384fec1df30483e48f7ee9313b83fc4d86f50be507dd0",
+        "constants": {
+          "INITIAL_EVALUATION_PROMPT_CONTRACT_SCHEMA": "ai7.evaluation.prompt-contract/2",
+          "INITIAL_EVALUATION_RESULT_SET_REVISION_SCHEMA": "ai7.evaluation.result-set-revision/1",
+          "INITIAL_EVALUATION_SUCCESSOR_REVISION_SCHEMA": "ai7.evaluation.result-set-revision/2",
+          "INITIAL_EVALUATION_SYNTHESIS_RESULT_SCHEMA": "ai7.evaluation.synthesis-result/2",
+          "INITIAL_EVALUATION_UNIT_RESULT_SCHEMA": "ai7.evaluation.unit-result/1"
+        }
+      },
+      "capturedTaskPromptContractDigests": [],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/analysis/execution.ts",
+        "sha256": "75fe09cc4aeb9d84774c59be547dcbf80b3dc7e2460bfac00651da405de377f3"
+      },
+      "planCompositionDerivation": {
+        "path": "src/service/analysis/baseline-analysis-store.ts",
+        "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
+      },
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "e02a1d5a3eb3750c8c5620c2a236dd51e67faa17606b3dab2da99319d5c4a8ed",
+      "fixtureFile": "tests/fixtures/model/sample1-readers-report-authored.json",
+      "fixtureFileSha256": "5cd0192953a62c5a359de38ec7ad2df4ce1d3b671413eb243fed0027dc2e8128",
+      "fixtureProvenance": "authored",
+      "orderedLineage": [
+        {
+          "identity": "sample1-readers-report-authored",
+          "fixtureFile": "tests/fixtures/model/sample1-readers-report-authored.json",
+          "sha256": "5cd0192953a62c5a359de38ec7ad2df4ce1d3b671413eb243fed0027dc2e8128"
+        },
+        {
+          "identity": "sample1-evaluation-authored",
+          "fixtureFile": "tests/fixtures/model/sample1-evaluation-authored.json",
+          "sha256": "8675ee3dfc904759589b8d08aed621233306739dac4c354836052e73ee184d1c"
+        },
+        {
+          "identity": "sample1-baseline-happy",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-happy.json",
+          "sha256": "9c3bb63c931966ddbc4c94c5aafb29f7d04d55083f9b4f372391c6714bffba0a"
+        }
+      ],
+      "resolvedLineageSha256": "69a9f3fc46600705b4ea864075f31bf338b3a43ff6f8c7305a0a7e2f191ab018",
+      "allowedExistingResultSchemas": [
+        "ai7.analysis.run-report-reflection-result/1",
+        "ai7.evaluation.synthesis-result/2",
+        "ai7.evaluation.unit-result/1"
+      ],
+      "allowedCapturedSubjects": [],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "12e4fb6dc1f5510fd35a373710070de9afbefafd5260ff369b70b6ee5edf727e",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-evaluation-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.evaluation.synthesis-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "d814639994d282c66d72ae398159ad56394c549c11658809f5cb1fd3484deff8",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-evaluation-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "47940f22f71b317026fa33626d9a9af89ff1c336873a1e9546fcde15730ac2a1",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-evaluation-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.evaluation.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 2,
+          "requestDigest": "b7d78d719fefd62537cc1329fa6bf20e5be532c9081604cf80f15eb91fd5db2a",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-evaluation-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.evaluation.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 3,
+          "requestDigest": "23fea5adf5a7e056be0b62d901a8a79a1c4be2fb48ebb3081f58c94afd041a53",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-evaluation-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.evaluation.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 4,
+          "requestDigest": "ff800063fe175f6b54495c52e3b6577ed34810efe2c7a61ff13ae00d31fe9b27",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-evaluation-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.evaluation.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "2df9635eb8f8a7a35e9d230ceb8cb95eb2bc2993e16ae0e3855d927eca4f912b",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-evaluation-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.evaluation.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 6,
+          "requestDigest": "141f156d3252f81bbfe6636fd6970b539d865f1190baab3238018a76e83f6729",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-evaluation-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.evaluation.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 7,
+          "requestDigest": "167d291ff9ca49bc006e8cf772422ab7adb1c0661b855abb0c9468c79413f46c",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-evaluation-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.evaluation.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 8,
+          "requestDigest": "77d0d8f74f7118fb01f0de13dedca6ecaf7cd76b7069c0c419996c97522823ce",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-evaluation-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.evaluation.unit-result/1",
+          "capture": null
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false
+    },
+    {
+      "fixtureIdentity": "sample1-readers-report-authored",
+      "registeredProfile": "readers",
+      "registeredPurposes": [
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/live-evaluation.test.ts",
+          "registrationPath": "tests/service/live-evaluation.test.ts",
+          "fixtureSelectionSha256": "316630cdc629b562e9df92964f12f9bf8ab454545ef6f5eceddacd8b1dd22d2e",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/evaluation-rewrite-fixture-generator.test.ts",
+          "registrationPath": "tests/service/evaluation-rewrite-fixture-generator.test.ts",
+          "fixtureSelectionSha256": "475048644eeee8babb4e0b0eebdf8f7cc5504ba3b9a96a3810e0cf869999c300",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/live-material-references.test.ts",
+          "registrationPath": "tests/service/live-material-references.test.ts",
+          "fixtureSelectionSha256": "d1b0abe5e7a34c428df4c95a4adc6ac9c3cfba33b3b624b4d35ac4708d11d0e0",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/run-kind-controls.test.ts",
+          "registrationPath": "tests/service/run-kind-controls.test.ts",
+          "fixtureSelectionSha256": "fc20baf39ac2ca11b62a698035b41124b0cd9dd4aee2d78ce559994fee1b7c14",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        }
+      ],
+      "allowedTaskKinds": [
+        "readers-report"
+      ],
+      "sessionPurpose": null,
+      "taskContractIdentities": [
+        "ai7.readers-report/1"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/evaluation/readers-report-contract.ts",
+        "sha256": "7931128595d5a8e3d6c072e256e35b7cf8e95805e1f5793a22317b5a6083f04d",
+        "constants": {
+          "READERS_REPORT_PROMPT_CONTRACT_SCHEMA": "ai7.readers-report.prompt-contract/1",
+          "READERS_REPORT_RESULT_SET_REVISION_SCHEMA": "ai7.readers-report.result-set-revision/1",
+          "READERS_REPORT_SUCCESSOR_REVISION_SCHEMA": "ai7.readers-report.result-set-revision/2",
+          "READERS_REPORT_SYNTHESIS_RESULT_SCHEMA": "ai7.readers-report.synthesis-result/1",
+          "READERS_REPORT_UNIT_RESULT_SCHEMA": "ai7.readers-report.unit-result/1"
+        }
+      },
+      "capturedTaskPromptContractDigests": [],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/analysis/execution.ts",
+        "sha256": "75fe09cc4aeb9d84774c59be547dcbf80b3dc7e2460bfac00651da405de377f3"
+      },
+      "planCompositionDerivation": {
+        "path": "src/service/analysis/baseline-analysis-store.ts",
+        "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
+      },
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "e02a1d5a3eb3750c8c5620c2a236dd51e67faa17606b3dab2da99319d5c4a8ed",
+      "fixtureFile": "tests/fixtures/model/sample1-readers-report-authored.json",
+      "fixtureFileSha256": "5cd0192953a62c5a359de38ec7ad2df4ce1d3b671413eb243fed0027dc2e8128",
+      "fixtureProvenance": "authored",
+      "orderedLineage": [
+        {
+          "identity": "sample1-readers-report-authored",
+          "fixtureFile": "tests/fixtures/model/sample1-readers-report-authored.json",
+          "sha256": "5cd0192953a62c5a359de38ec7ad2df4ce1d3b671413eb243fed0027dc2e8128"
+        },
+        {
+          "identity": "sample1-evaluation-authored",
+          "fixtureFile": "tests/fixtures/model/sample1-evaluation-authored.json",
+          "sha256": "8675ee3dfc904759589b8d08aed621233306739dac4c354836052e73ee184d1c"
+        },
+        {
+          "identity": "sample1-baseline-happy",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-happy.json",
+          "sha256": "9c3bb63c931966ddbc4c94c5aafb29f7d04d55083f9b4f372391c6714bffba0a"
+        }
+      ],
+      "resolvedLineageSha256": "69a9f3fc46600705b4ea864075f31bf338b3a43ff6f8c7305a0a7e2f191ab018",
+      "allowedExistingResultSchemas": [
+        "ai7.analysis.run-report-reflection-result/1",
+        "ai7.readers-report.synthesis-result/1",
+        "ai7.readers-report.unit-result/1"
+      ],
+      "allowedCapturedSubjects": [],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "0d86d582db6813df67f9622e907825b3d7051b53b20826169344e4bf693b8260",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-readers-report-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "a3769af17630e9f325343044d6f0c2149099ce44014043f950e9cfd1d8b9f01f",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-readers-report-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.readers-report.synthesis-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "77d152e995913b399b1392c013675c2a66548f65c58642ed24d1abcd38998dc7",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-readers-report-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.readers-report.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 2,
+          "requestDigest": "be3843755893419faaefada92defe858c7566c74c616ea562d38d54dc6fe28ae",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-readers-report-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.readers-report.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 3,
+          "requestDigest": "41d2d524b2560cc2439cc0458e5f9dc06098dab0c94dd0f0509cb29a224197a0",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-readers-report-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.readers-report.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 4,
+          "requestDigest": "5ed2225b31de6295f768495f27e861c45ad63ac28987b8db20589accfb689db4",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-readers-report-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.readers-report.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "4e26c61f32d4af5b597feaf1d9b8af8c923c8a29d3001659a30f778a045c95f4",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-readers-report-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.readers-report.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 6,
+          "requestDigest": "4f35256ec4feb73834a7cbb4daa36cf86c3a1f99c990d844763be309769d93cd",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-readers-report-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.readers-report.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 7,
+          "requestDigest": "a1298e3f8e950bd7dd4fca4a7315eff476e1666288b13bbf48e38baeb98d214b",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-readers-report-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.readers-report.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 8,
+          "requestDigest": "19f745f039ec534c226d9963dff6e21bcbdbac179eca6049c4846738b48042bc",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-readers-report-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.readers-report.unit-result/1",
+          "capture": null
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false
+    },
+    {
+      "fixtureIdentity": "sample1-recorded-v41-baseline",
+      "registeredProfile": "baseline",
+      "registeredPurposes": [
+        {
+          "kind": "journey",
+          "id": "J-04",
+          "registrationPath": "e2e/run-j04.mjs",
+          "fixtureSelectionSha256": "316268eafc8931ad97aba7eddcd9a4654e470951d13a89984bc59161f05fa963",
+          "sameSelectionsAtPreparationBase": true
+        }
+      ],
+      "allowedTaskKinds": [
+        "baseline-manuscript-analysis"
+      ],
+      "sessionPurpose": null,
+      "taskContractIdentities": [
+        "ai7.baseline-manuscript-analysis/1"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/analysis/contract.ts",
+        "sha256": "51b42bae865b24f846c790dc821666cf77b5718aa61f42129249754dc18cee2b",
+        "constants": {
+          "BASELINE_PROMPT_CONTRACT_DIGEST": "89776b1b5ca2e4d3ef529b0be6b2380bfc0cb5addf0426e815df7aa195c7d386",
+          "BASELINE_PROMPT_CONTRACT_SCHEMA": "ai7.baseline-manuscript-analysis.prompt-contract/2",
+          "BASELINE_PROMPT_CONTRACT_V1_DIGEST": "4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5",
+          "BASELINE_PROMPT_CONTRACT_V1_SCHEMA": "ai7.baseline-manuscript-analysis.prompt-contract/1",
+          "BASELINE_UNIT_RESULT_SCHEMA": "ai7.baseline-manuscript-analysis.unit-result/1"
+        }
+      },
+      "capturedTaskPromptContractDigests": [
+        "4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5"
+      ],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/analysis/execution.ts",
+        "sha256": "75fe09cc4aeb9d84774c59be547dcbf80b3dc7e2460bfac00651da405de377f3"
+      },
+      "planCompositionDerivation": {
+        "path": "src/service/analysis/baseline-analysis-store.ts",
+        "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
+      },
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "e02a1d5a3eb3750c8c5620c2a236dd51e67faa17606b3dab2da99319d5c4a8ed",
+      "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-baseline.json",
+      "fixtureFileSha256": "9650b60b4277cfcd2fa943653ef2b6fc816d674ba38707ae6ec05155238cf391",
+      "fixtureProvenance": "recorded",
+      "orderedLineage": [
+        {
+          "identity": "sample1-recorded-v41-baseline",
+          "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-baseline.json",
+          "sha256": "9650b60b4277cfcd2fa943653ef2b6fc816d674ba38707ae6ec05155238cf391"
+        }
+      ],
+      "resolvedLineageSha256": "5eb52c7735e325b8cfb1c8e00fe20d90a448c8f1704b99aa9694d607b2dc10a8",
+      "allowedExistingResultSchemas": [
+        "ai7.analysis.assurance-sampling-result/1",
+        "ai7.analysis.run-report-reflection-result/1",
+        "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+        "ai7.baseline-manuscript-analysis.unit-result/1"
+      ],
+      "allowedCapturedSubjects": [
+        "reduction",
+        "reflection",
+        "sampling",
+        "unit"
+      ],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "0c4eb65caf12d83ec7a28e5b5ceee0a104335991ef85349bff5d427d66b77683",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-recorded-v41-baseline",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": {
+            "subject": "sampling",
+            "itemId": "S40/first-baseline/18",
+            "selectedItemId": "S40/first-baseline/18",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "4c05e66ba8077c85aa1334b53e98155566fcd9f51d9bd3343e95e7b14ddc03db",
+            "taskPromptContractDigest": "4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5",
+            "capturedAt": "2026-10-12T12:23:05.395Z",
+            "providerRequestDigest": "bec8c7aa8b1a75d9efba132a512d8564d98d1c1cc809e3257278d17349f20991",
+            "providerResponseDigest": "1beb2cdfe3ee3cb623637679b1b536790318a78aba573a77438961bc40f267a7",
+            "fixtureResponseDigest": "aaa3bee30b9ed0deaeee81406c755e56cecbea20b9fa72bcd8a572c277697472",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "baseline-analysis",
+              "case": "sample1-whole-book",
+              "step": "first-baseline/sampling-1-unit-2"
+            },
+            "cacheKey": "e8b1db42aa3742b6986d752116d4fbd4ba1d1950819147eb7004bcac78e22b57",
+            "generation": "f632edacecd56d9891e3dd51ec4f7899058a1457850238e1f64ca8ec0525bef1",
+            "identityMapSha256": "d935758668c002926df6e4c862ce3eb58dec63e6da76b90835596d67ba4cae2f"
+          }
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "59d78d494c5d7bf64b2269030ec2dfe32e8cfb31e2713f28d3e6f9217ec106eb",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-recorded-v41-baseline",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": {
+            "subject": "sampling",
+            "itemId": "S40/first-baseline/19",
+            "selectedItemId": "S40/first-baseline/19",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "4c05e66ba8077c85aa1334b53e98155566fcd9f51d9bd3343e95e7b14ddc03db",
+            "taskPromptContractDigest": "4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5",
+            "capturedAt": "2026-10-12T12:23:12.125Z",
+            "providerRequestDigest": "aa41e1a77ee4d573fe89d8a3bd92b0c5d2631005d104a7039c9fef235f3b1dd8",
+            "providerResponseDigest": "7245e8ba3a4341c9b9b7e2e4fd38c48593205f5bca3edfea5ca08f07f7cb4498",
+            "fixtureResponseDigest": "a16c4827d7671f6abd7a603959dae3b5b77bf4b6e3bd0365db48a682ef044cb8",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "baseline-analysis",
+              "case": "sample1-whole-book",
+              "step": "first-baseline/sampling-2-unit-5"
+            },
+            "cacheKey": "d6f57d5397ca9cb40d90fb336edb4d562382f1ccc6eef8ae04342a432a6c973d",
+            "generation": "f632edacecd56d9891e3dd51ec4f7899058a1457850238e1f64ca8ec0525bef1",
+            "identityMapSha256": "5017f08ba8b9195841a5a6c78dc788a64b69019a3d12a5d0fe895fcc7f55f7bb"
+          }
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "9f4775637a2c3d370db83dd2180d7814ad9a7ad9a9a68bee3f642bf085a90044",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-recorded-v41-baseline",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": {
+            "subject": "reflection",
+            "itemId": "S40/first-baseline/20",
+            "selectedItemId": "S40/first-baseline/20",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "96456fc99625e12014633439564f17a54cdb1f4f0a05b8076c10a4b03bbd7676",
+            "taskPromptContractDigest": "4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5",
+            "capturedAt": "2026-10-12T12:23:24.191Z",
+            "providerRequestDigest": "c1253a52e84b137acfb9464dbdf7cca36eb9c5fb81efcf39d121e278efbcedd4",
+            "providerResponseDigest": "be48357647d1fb39b954384b8ae4ab8ab9800a66444e83448c7d8f2c7103bba7",
+            "fixtureResponseDigest": "0706de3d8653e6d7ff6e55f6d69125af70b460e1667523624f75d6734ecfd1cb",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "baseline-analysis",
+              "case": "sample1-whole-book",
+              "step": "first-baseline/reflection"
+            },
+            "cacheKey": "cd3f6e50289a22415f3944e7a581441eb2345c4bff45300f863dcd5312c74f3f",
+            "generation": "49a00b56681e783d63ddb922a52979ac1506e4aa8d5c2a30844bc46319db6645",
+            "identityMapSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "ee7b301c80e4013dff3f5f2811eb7e2658fd734f138612a571c9ef14819a0e19",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-recorded-v41-baseline",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+          "capture": {
+            "subject": "reduction",
+            "itemId": "S40/first-baseline/17",
+            "selectedItemId": "S40/first-baseline/17",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "8298dc9db1b95f26072cabb00a8c9a14997f68ebe7bf07d01181985f848e66cb",
+            "taskPromptContractDigest": "4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5",
+            "capturedAt": "2026-10-12T12:20:10.111Z",
+            "providerRequestDigest": "705407f4a207748344200d2fd0de86bbffd86ed9fc201dd49e3f3a57591340fe",
+            "providerResponseDigest": "536b55d6d2f541843d1c612e6e82f604ec29febfbb9706707b1a952a9a0c919b",
+            "fixtureResponseDigest": "324b37fa5338a0a5d3bc6069f7034dbf88e971d67754d22849f9690ebc23cdcc",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "baseline-analysis",
+              "case": "sample1-whole-book",
+              "step": "first-baseline/reduction"
+            },
+            "cacheKey": "da68f18755f7b58d7156d024fd158e816bb71ef704161dfcd4dd3a1c80bdbce6",
+            "generation": "9a0311ba89ddc7ddbe26123b307f1d462f0217ea76d190bfc9a2869aacaeb880",
+            "identityMapSha256": "e187be841fe139e2ded257b4bc7b2d4903deaa88253d147df6700fad138d634b"
+          }
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "9d601172a5f245b3eef374d863d65045b078ded15da7fb38c8e3c788b4bc8245",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-recorded-v41-baseline",
+          "contentDigest": "582fd4c3541fa6f2cfc613106f45b9713aeeeeacfb82ffbbcd940853533b9981",
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": {
+            "subject": "unit",
+            "itemId": "S40/first-baseline/9",
+            "selectedItemId": "S40/first-baseline/9",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5",
+            "taskPromptContractDigest": "4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5",
+            "capturedAt": "2026-10-12T12:13:08.054Z",
+            "providerRequestDigest": "19483d30a0d8f713588cb4c4b1e0946d6bdfee5f31ff523cbcb88c04056859c3",
+            "providerResponseDigest": "30bfa4969c7d75f197b3f2a119dbc7ad3cb874685380eca856a874a3edf97fb6",
+            "fixtureResponseDigest": "952e17bde13d3d18693c035e7ed97e24ae68dc55ba8ed3f3d0ae8cc375f2dc6d",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "baseline-analysis",
+              "case": "sample1-whole-book",
+              "step": "first-baseline/unit-1"
+            },
+            "cacheKey": "05f74942ac21f47d0de5497f79b0a7de7dfa90c8ec3c8651fb2e9aca193e373e",
+            "generation": "7f3856a5286122e52259606b3117aa60202edd065ece300fe227b10daeaff29a",
+            "identityMapSha256": "a8ff04ddd991632e3e994696aacc8d42373521e5d34059883399d5c1a1429d79"
+          }
+        },
+        {
+          "unitOrdinal": 2,
+          "requestDigest": "cbc613c1c72be55aa803ab03658fa4e70638719764daf6a3a2ceef1034496295",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-recorded-v41-baseline",
+          "contentDigest": "30b634d2e636a3bf1e188be27744461154be936fe298bf09e5daf5cda6037eef",
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": {
+            "subject": "unit",
+            "itemId": "S40/first-baseline/10",
+            "selectedItemId": "S40/first-baseline/10",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5",
+            "taskPromptContractDigest": "4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5",
+            "capturedAt": "2026-10-12T12:13:43.757Z",
+            "providerRequestDigest": "9ad9ebfd7c468be5b269f51395e942d0282463f00f7bf7a399b5e7042976f53c",
+            "providerResponseDigest": "519fe7fc9838b098f6924eefa85e45d9928492e230a846f287d4e3a239e30d14",
+            "fixtureResponseDigest": "ce7b1a14e6d5b2401342bc5e9af64a25bb6424285066d64de7268de69c71ee46",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "baseline-analysis",
+              "case": "sample1-whole-book",
+              "step": "first-baseline/unit-2"
+            },
+            "cacheKey": "1c556dcd768327c71ce252508b62207a64120aab7df95cc78774693023a79efb",
+            "generation": "7f3856a5286122e52259606b3117aa60202edd065ece300fe227b10daeaff29a",
+            "identityMapSha256": "ea6f89a5030636e5636f346da63ea9741b6a95f81922bdb5a59523ed4c0200c0"
+          }
+        },
+        {
+          "unitOrdinal": 3,
+          "requestDigest": "20dc5264f2658c3e4e6526d550bd6479e03710a68e28c105a20c192f808f5940",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-recorded-v41-baseline",
+          "contentDigest": "a961d6dc02f89d79d932b93f7d23398f5ae6d205901f48adc2ba7e8b682b0d29",
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": {
+            "subject": "unit",
+            "itemId": "S40/first-baseline/11",
+            "selectedItemId": "S40/first-baseline/11",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5",
+            "taskPromptContractDigest": "4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5",
+            "capturedAt": "2026-10-12T12:15:09.364Z",
+            "providerRequestDigest": "adba77bdb1668c3304fe266116bc33694701ac80ca24065071201a87e4eae0c9",
+            "providerResponseDigest": "ba6eed1ad65ea80a648cccc254b88d80041b56bf18b8e53fd452bb7600255588",
+            "fixtureResponseDigest": "14ac72bd6b616006a8c95dbdda8f6ee197491b4011d52e2b1b46ed0822c78eac",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "baseline-analysis",
+              "case": "sample1-whole-book",
+              "step": "first-baseline/unit-3"
+            },
+            "cacheKey": "321b18e6116cf8fb79db7f4708d49decdef7b1815c7219d14b55e3626c232d96",
+            "generation": "7f3856a5286122e52259606b3117aa60202edd065ece300fe227b10daeaff29a",
+            "identityMapSha256": "185dc3d50b0063d33edbdd103f8b2026a1d79cacfbf7586aa42234e4b3cfb9c7"
+          }
+        },
+        {
+          "unitOrdinal": 4,
+          "requestDigest": "d7eef03bffc2df6e4b39f8d430a9841f00a3f83feb7ab68e8a96700326433c46",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-recorded-v41-baseline",
+          "contentDigest": "12743a413d0267626854136350c016a039416f2f096dca9decfd5c7d4f8956cc",
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": {
+            "subject": "unit",
+            "itemId": "S40/first-baseline/12",
+            "selectedItemId": "S40/first-baseline/12",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5",
+            "taskPromptContractDigest": "4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5",
+            "capturedAt": "2026-10-12T12:16:00.254Z",
+            "providerRequestDigest": "29e6fb7218eaa4f25dc2bdb75237c39fddcfb44d3fcf796117f7c378cc2654ee",
+            "providerResponseDigest": "375c423d9fb09a11c511579332948d456d372f881cfd59023a8754bc51cc9dc9",
+            "fixtureResponseDigest": "9c21e41eca868e4cbbcfe36b1b556651798a42b1693d575c8fb111b344975fbc",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "baseline-analysis",
+              "case": "sample1-whole-book",
+              "step": "first-baseline/unit-4"
+            },
+            "cacheKey": "8cc13bbf89a8f1b0d9b807dd6901310ad8fb55a66b6cc7129ef6713f03a96b2b",
+            "generation": "7f3856a5286122e52259606b3117aa60202edd065ece300fe227b10daeaff29a",
+            "identityMapSha256": "59e8a857cbd324025eb1bf35343c511653ce98188d4472b86b17f4112acdde39"
+          }
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "8d32b61042d075334c910da1d6fc6887b2c6f84c3034707c721070399fba328f",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-recorded-v41-baseline",
+          "contentDigest": "48fb4b784e0dd65b543799e015af64f0abe448d8913011525d29bf328972394b",
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": {
+            "subject": "unit",
+            "itemId": "S40/first-baseline/13",
+            "selectedItemId": "S40/first-baseline/13",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5",
+            "taskPromptContractDigest": "4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5",
+            "capturedAt": "2026-10-12T12:16:35.321Z",
+            "providerRequestDigest": "8c15ad307b39984f56f6f07c86a17778a787955e6e6fe0bb302dcc24168f1944",
+            "providerResponseDigest": "c8944d3b49aced9d4931e9193bf538c1794d94b8f4941ec2ed5c477c53b4344f",
+            "fixtureResponseDigest": "d7bb46b406d779765a0f1494ff9e0fbe447f1af5cb8e9652254a5d4062b16f97",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "baseline-analysis",
+              "case": "sample1-whole-book",
+              "step": "first-baseline/unit-5"
+            },
+            "cacheKey": "daef9866957f62fed3c93bfbb6216f0bf2d2eda64466519888a0709d3afc75f1",
+            "generation": "7f3856a5286122e52259606b3117aa60202edd065ece300fe227b10daeaff29a",
+            "identityMapSha256": "0e9e15af7b01a773887be181a262cf0c28c360fb5db966d2345efade96e80858"
+          }
+        },
+        {
+          "unitOrdinal": 6,
+          "requestDigest": "b33f6deda07d460f3a1b1f681821b3013437fe80c635d38ccc439108590520c5",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-recorded-v41-baseline",
+          "contentDigest": "81cda8000df69574b2084ed55f80191148b5a479aa2c9916d8c463f40555a804",
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": {
+            "subject": "unit",
+            "itemId": "S40/first-baseline/14",
+            "selectedItemId": "S40/first-baseline/14",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5",
+            "taskPromptContractDigest": "4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5",
+            "capturedAt": "2026-10-12T12:17:12.609Z",
+            "providerRequestDigest": "8dad64479aee9740b6b72b0e4e0e4c4a9a2548c1d6b3c85cd9839bc201f552fd",
+            "providerResponseDigest": "99a8afc00bb2925fd58cb262965341c0cfc3b56c6d864dc4fa7986dc05451d21",
+            "fixtureResponseDigest": "595f5a2be29ee13de3b2e367f5bd9c0da442196ea9f470d4ed53d098658e7a2b",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "baseline-analysis",
+              "case": "sample1-whole-book",
+              "step": "first-baseline/unit-6"
+            },
+            "cacheKey": "594b3a7c90bc1fa0c1dc2e5b6d97e78f6513d7b1477488bba2b0b1b906bea419",
+            "generation": "7f3856a5286122e52259606b3117aa60202edd065ece300fe227b10daeaff29a",
+            "identityMapSha256": "4c4f43c2d63425065935d3f0191dc7ba10e3f0ffcd40a392dd339fa943d5147c"
+          }
+        },
+        {
+          "unitOrdinal": 7,
+          "requestDigest": "e74d5f8430300066c5a498904e761a0e73ef058d870ce03e465cccc58e463bc7",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-recorded-v41-baseline",
+          "contentDigest": "ff158e0f8eec32fdf485f964e2c66d92fed84cbf57de527a97b67c515b9aad50",
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": {
+            "subject": "unit",
+            "itemId": "S40/first-baseline/15",
+            "selectedItemId": "S40/first-baseline/15",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5",
+            "taskPromptContractDigest": "4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5",
+            "capturedAt": "2026-10-12T12:18:23.804Z",
+            "providerRequestDigest": "cb9f0ce1f018c7b01d31478ad1137cb929517ecbb9cc9e3fa9d4be6a67fe9193",
+            "providerResponseDigest": "778bc85a558ae96716d07d301689900742e716b2f3939180ad9e5bea94e5db75",
+            "fixtureResponseDigest": "7cb8287eb099fca19711dcaa01b0afe4cce0c8d765ada671273ca48d8bedf0b4",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "baseline-analysis",
+              "case": "sample1-whole-book",
+              "step": "first-baseline/unit-7"
+            },
+            "cacheKey": "fc105f97ffb0b220140b382b9cdf96753114f396681cf970f4dc393ad94011ac",
+            "generation": "7f3856a5286122e52259606b3117aa60202edd065ece300fe227b10daeaff29a",
+            "identityMapSha256": "728e796fd2c9e24458439157b59131a3e4a04fc7133ed065a09465a0e67fab73"
+          }
+        },
+        {
+          "unitOrdinal": 8,
+          "requestDigest": "e5b0441081d12ea40980cca1e0983ae978b62770b1507fcc3f14c365fc831fa7",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-recorded-v41-baseline",
+          "contentDigest": "baa26a771e30cec986053cba5981096b238feef12305bd62e9312c133af4f3d0",
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": {
+            "subject": "unit",
+            "itemId": "S40/first-baseline/16",
+            "selectedItemId": "S40/first-baseline/16",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5",
+            "taskPromptContractDigest": "4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5",
+            "capturedAt": "2026-10-12T12:19:47.252Z",
+            "providerRequestDigest": "1bb0514c431458d4983e3987b22ce3a94a4f0beb58cd2c22960a24038b7cbc10",
+            "providerResponseDigest": "2181527d5bf792a94509eff9e102f699cbd62a912b592be0db30b538dbff66fc",
+            "fixtureResponseDigest": "2c586a08c56654487655c7d750e0eeb39b4da45b9b1631426bf18ded800a2e70",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "baseline-analysis",
+              "case": "sample1-whole-book",
+              "step": "first-baseline/unit-8"
+            },
+            "cacheKey": "49d2da852fd28aad73f2b527674edf063f7ff4cc6fdb97e0b341f9ec2a8d814f",
+            "generation": "7f3856a5286122e52259606b3117aa60202edd065ece300fe227b10daeaff29a",
+            "identityMapSha256": "4de0a8d3b9f924de806085063a042a9769c8145bccee7b0af3a06e997f5cc01a"
+          }
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false,
+      "restrictions": {
+        "onlyJourney": "J-04",
+        "onlyScope": "development-ci",
+        "baselinePromptSelection": "retained-v1",
+        "unmixedSingleLeafLineageRequired": true,
+        "completeJourneyOnly": true,
+        "historicalTaskDigest": "4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5"
+      }
+    },
+    {
+      "fixtureIdentity": "sample1-recorded-v41-conflict-regenerate",
+      "registeredProfile": "conflict",
+      "registeredPurposes": [
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/fast-role.test.ts",
+          "registrationPath": "tests/service/fast-role.test.ts",
+          "fixtureSelectionSha256": "74239a19f1d0e72cdf7f79de9efd86c721340750493b52392f6b620a2d18fad0",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        }
+      ],
+      "allowedTaskKinds": [
+        "conflict-regenerate"
+      ],
+      "sessionPurpose": null,
+      "taskContractIdentities": [
+        "ai7.conflict-regenerate/1"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/fast-role/conflict-regenerate-contract.ts",
+        "sha256": "c242f4f9a218091c98806ede7cab47e57f960740840108e07a89a4adc326ae39",
+        "constants": {
+          "CONFLICT_REGENERATE_CONTRACT_VERSION": "ai7.conflict-regenerate/1",
+          "CONFLICT_REGENERATE_PROMPT_CONTRACT_DIGEST": "c3a6b351cc1af5bfe2947da5b3f720c2162f65d1c0a5d4b8bca8dd7a91033789",
+          "CONFLICT_REGENERATE_PROMPT_CONTRACT_SCHEMA": "ai7.conflict-regenerate-prompt-contract/1",
+          "CONFLICT_REGENERATE_RESULT_SCHEMA": "ai7.conflict-regenerate.result/1"
+        }
+      },
+      "capturedTaskPromptContractDigests": [
+        "c3a6b351cc1af5bfe2947da5b3f720c2162f65d1c0a5d4b8bca8dd7a91033789"
+      ],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/fast-role/fast-role-execution.ts",
+        "sha256": "23d938f28d062d1fe3949d399739b0e558dc2e7f435589b3115f1eb200755599"
+      },
+      "planCompositionDerivation": null,
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "manuscript-conflict-region-excerpt"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "e0e66031d101726fb74c207708d16cb98677dba4f1f666da872d78d0b45aacb4",
+      "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-conflict-regenerate.json",
+      "fixtureFileSha256": "642323156cb588d6a03bebcc8a40ba665c609e623a63280c61f0c37364d72c3f",
+      "fixtureProvenance": "recorded",
+      "orderedLineage": [
+        {
+          "identity": "sample1-recorded-v41-conflict-regenerate",
+          "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-conflict-regenerate.json",
+          "sha256": "642323156cb588d6a03bebcc8a40ba665c609e623a63280c61f0c37364d72c3f"
+        }
+      ],
+      "resolvedLineageSha256": "01905840cf0924ac4519904d0f5b614c450067912c6638cb50bc78c743c928bf",
+      "allowedExistingResultSchemas": [
+        "ai7.conflict-regenerate.result/1"
+      ],
+      "allowedCapturedSubjects": [
+        "conflict-regenerate"
+      ],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "e94b8f89617ed00f79e22511493abddfd8ba8e23a8ac845ae0f883eaeca4e584",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-recorded-v41-conflict-regenerate",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.conflict-regenerate.result/1",
+          "capture": {
+            "subject": "conflict-regenerate",
+            "itemId": "S22/conflict-regenerate/1",
+            "selectedItemId": "S22/conflict-regenerate/1",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "c3a6b351cc1af5bfe2947da5b3f720c2162f65d1c0a5d4b8bca8dd7a91033789",
+            "taskPromptContractDigest": "c3a6b351cc1af5bfe2947da5b3f720c2162f65d1c0a5d4b8bca8dd7a91033789",
+            "capturedAt": "2026-10-14T05:27:26.409Z",
+            "providerRequestDigest": "394c415751f6233ff6b73e1313dab7b80ea75a070ca288d1e5b5e34896bf9a4f",
+            "providerResponseDigest": "2c28d27f9a06230f6e34dc075a0dc2bb1560446b0612c99d04289abbfbe5e877",
+            "fixtureResponseDigest": "874b2ac605581ba88e1adca1baf0cb4b07a3b2a42c30573d10f0f9e90a776626",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "conflict-regenerate",
+              "case": "sample1-edited-phrase",
+              "step": "conflict-regenerate/unit"
+            },
+            "cacheKey": "afa7f9247b53f14962884afb078554a21ac13038de04966360e271d5fb392d80",
+            "generation": "cbb6100152c3087385198a0316905dc79c710203dbb203ad483ff8aa5112c530",
+            "identityMapSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false
+    },
+    {
+      "fixtureIdentity": "sample1-recorded-v41-editorial-polish",
+      "registeredProfile": "polish",
+      "registeredPurposes": [
+        {
+          "kind": "registered-editorial-evidence-case",
+          "id": "polish-sample1-attributive",
+          "registrationPath": "tests/editorial-cases/cases/polish-sample1-attributive.json",
+          "caseFileSha256": "c07674c2196737141818a913d97c711392e4dc531b0e4c1c3ce8e72b4fd9fe2f",
+          "caseInputSha256": "efcabb9045f67cbd0566034333b46dc19427a81dd46b071824bfbf1f812fa4c0",
+          "owner": "tests/editorial-cases/runner/run-polish.ts",
+          "selectedPolicyPassedToPolishOwner": false,
+          "newCapabilityConsumptionClaimed": false
+        },
+        {
+          "kind": "registered-editorial-evidence-case",
+          "id": "polish-sample1-usage",
+          "registrationPath": "tests/editorial-cases/cases/polish-sample1-usage.json",
+          "caseFileSha256": "d3380fd7ca687b362913b27e72c28e58ca90934dc379fe84b0aec2b081ecc41b",
+          "caseInputSha256": "b29a52c4545fe5b52807a247a37b8164aa06d0de447ae3e633a44271954f3e51",
+          "owner": "tests/editorial-cases/runner/run-polish.ts",
+          "selectedPolicyPassedToPolishOwner": false,
+          "newCapabilityConsumptionClaimed": false
+        }
+      ],
+      "allowedTaskKinds": [
+        "editorial-polish"
+      ],
+      "sessionPurpose": null,
+      "taskContractIdentities": [
+        "ai7.editorial-polish/1"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/fast-role/polish-contract.ts",
+        "sha256": "3e224e199c07e6039a2b0e8a337812e0686a0393f133984c25422ec721f0defe",
+        "constants": {
+          "EDITORIAL_POLISH_CONTRACT_VERSION": "ai7.editorial-polish/1",
+          "EDITORIAL_POLISH_PROMPT_CONTRACT_DIGEST": "7078415b8216761fca5c85a68d9b25e153dccd5d910dcafbdc447e3f4ff93e8a",
+          "EDITORIAL_POLISH_PROMPT_CONTRACT_SCHEMA": "ai7.editorial-polish-prompt-contract/1",
+          "EDITORIAL_POLISH_RESULT_SCHEMA": "ai7.editorial-polish.result/1"
+        }
+      },
+      "capturedTaskPromptContractDigests": [
+        "7078415b8216761fca5c85a68d9b25e153dccd5d910dcafbdc447e3f4ff93e8a"
+      ],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/fast-role/fast-role-execution.ts",
+        "sha256": "23d938f28d062d1fe3949d399739b0e558dc2e7f435589b3115f1eb200755599"
+      },
+      "planCompositionDerivation": null,
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "editor-selected-manuscript-excerpt"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "ce3c7a0bb60b5ef7ee2683f0889d1e4a56a7f24b6b4fa488135f95ae3ba6706a",
+      "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-editorial-polish.json",
+      "fixtureFileSha256": "f01fff37883ebdee13b958a1a26d989e2ee2f57f762196fbcf140afcd3b7f129",
+      "fixtureProvenance": "recorded",
+      "orderedLineage": [
+        {
+          "identity": "sample1-recorded-v41-editorial-polish",
+          "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-editorial-polish.json",
+          "sha256": "f01fff37883ebdee13b958a1a26d989e2ee2f57f762196fbcf140afcd3b7f129"
+        }
+      ],
+      "resolvedLineageSha256": "a820f604793614b077f97754aa04a3bf71dd516ca083a81b49b2cac3aee454f9",
+      "allowedExistingResultSchemas": [
+        "ai7.editorial-polish.result/1"
+      ],
+      "allowedCapturedSubjects": [
+        "editorial-polish"
+      ],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "1cd588d1cb2d814aaa8dc9d04a0142dda74cc5c2b8e4a8ff8da6b25833097003",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-recorded-v41-editorial-polish",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-polish.result/1",
+          "capture": {
+            "subject": "editorial-polish",
+            "itemId": "S30/editorial-polish/2",
+            "selectedItemId": "S30/editorial-polish/2",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "7078415b8216761fca5c85a68d9b25e153dccd5d910dcafbdc447e3f4ff93e8a",
+            "taskPromptContractDigest": "7078415b8216761fca5c85a68d9b25e153dccd5d910dcafbdc447e3f4ff93e8a",
+            "capturedAt": "2026-10-15T16:55:45.309Z",
+            "providerRequestDigest": "a4a86eeab4f03103abd06f67c6d1d6c71578ef030c975d7a8baa5813027e15f4",
+            "providerResponseDigest": "35189dd08da41b9450f8e74ee6e9b44efe3ed47add49e6ebeff64996839988b1",
+            "fixtureResponseDigest": "ced41159e6bb0cd5e134deccffd383acff1a0298b85aab6b94fc7c9d2cefd49f",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "editorial-evidence",
+              "case": "sample1-polish-two-sentences",
+              "step": "editorial-polish/ask"
+            },
+            "cacheKey": "c0f3f2a63961cf55d47bb1f1b077f160cded0a462e3f1b405af6fe44d0145d2a",
+            "generation": "9e4cd81d723e0f1e42060e40c984f1cdad9fbb9d8435d81588c092cef1b8d64c",
+            "identityMapSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "8869854feceae24b6d9c47304e08468fc5a347a066d29b7a7c9434fc30ba9035",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-recorded-v41-editorial-polish",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-polish.result/1",
+          "capture": {
+            "subject": "editorial-polish",
+            "itemId": "S30/editorial-polish/3",
+            "selectedItemId": "S30/editorial-polish/3",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "7078415b8216761fca5c85a68d9b25e153dccd5d910dcafbdc447e3f4ff93e8a",
+            "taskPromptContractDigest": "7078415b8216761fca5c85a68d9b25e153dccd5d910dcafbdc447e3f4ff93e8a",
+            "capturedAt": "2026-10-15T16:56:05.275Z",
+            "providerRequestDigest": "a42ae824acd9f80467c61465bb31bc326815b28dbcd530fb65dc53382ba91ac4",
+            "providerResponseDigest": "a964cc763c544b2e6e4885d6b73fd340e2aae49df0db60f07262daeebacc2447",
+            "fixtureResponseDigest": "606dbf65e9fb60c893de4fafc881452161c636b0fb9d3bbe03c650e6594865c2",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "editorial-evidence",
+              "case": "sample1-polish-two-sentences",
+              "step": "editorial-polish/ask"
+            },
+            "cacheKey": "6364587a7d5ffd6adcb14aeb02f6ada37191dfd0d69b6603131a40b4ac7303f6",
+            "generation": "9e4cd81d723e0f1e42060e40c984f1cdad9fbb9d8435d81588c092cef1b8d64c",
+            "identityMapSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false
+    },
+    {
+      "fixtureIdentity": "sample1-recorded-v41-polish",
+      "registeredProfile": "polish",
+      "registeredPurposes": [
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/fast-role.test.ts",
+          "registrationPath": "tests/service/fast-role.test.ts",
+          "fixtureSelectionSha256": "0ceacca9a27a93ecdbf3315654584f09220a86601919ca9377409cf8e74e697f",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        }
+      ],
+      "allowedTaskKinds": [
+        "editorial-polish"
+      ],
+      "sessionPurpose": null,
+      "taskContractIdentities": [
+        "ai7.editorial-polish/1"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/fast-role/polish-contract.ts",
+        "sha256": "3e224e199c07e6039a2b0e8a337812e0686a0393f133984c25422ec721f0defe",
+        "constants": {
+          "EDITORIAL_POLISH_CONTRACT_VERSION": "ai7.editorial-polish/1",
+          "EDITORIAL_POLISH_PROMPT_CONTRACT_DIGEST": "7078415b8216761fca5c85a68d9b25e153dccd5d910dcafbdc447e3f4ff93e8a",
+          "EDITORIAL_POLISH_PROMPT_CONTRACT_SCHEMA": "ai7.editorial-polish-prompt-contract/1",
+          "EDITORIAL_POLISH_RESULT_SCHEMA": "ai7.editorial-polish.result/1"
+        }
+      },
+      "capturedTaskPromptContractDigests": [
+        "7078415b8216761fca5c85a68d9b25e153dccd5d910dcafbdc447e3f4ff93e8a"
+      ],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/fast-role/fast-role-execution.ts",
+        "sha256": "23d938f28d062d1fe3949d399739b0e558dc2e7f435589b3115f1eb200755599"
+      },
+      "planCompositionDerivation": null,
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "editor-selected-manuscript-excerpt"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "ce3c7a0bb60b5ef7ee2683f0889d1e4a56a7f24b6b4fa488135f95ae3ba6706a",
+      "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-polish.json",
+      "fixtureFileSha256": "4bc348f5485c8788091c64bc9721eadf6aaa26d11a0496158f05633b8adb694b",
+      "fixtureProvenance": "recorded",
+      "orderedLineage": [
+        {
+          "identity": "sample1-recorded-v41-polish",
+          "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-polish.json",
+          "sha256": "4bc348f5485c8788091c64bc9721eadf6aaa26d11a0496158f05633b8adb694b"
+        }
+      ],
+      "resolvedLineageSha256": "504c5950e3bbbd7f044770cf8d323107452b39548818933cc4a0dccff8824bd6",
+      "allowedExistingResultSchemas": [
+        "ai7.editorial-polish.result/1"
+      ],
+      "allowedCapturedSubjects": [
+        "editorial-polish"
+      ],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "fe63b62969f3caa2a172afe8d692479d2aad28815553ef0d08d51e2ce21b1f49",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-recorded-v41-polish",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-polish.result/1",
+          "capture": {
+            "subject": "editorial-polish",
+            "itemId": "S30/editorial-polish/1",
+            "selectedItemId": "S30/editorial-polish/1",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "7078415b8216761fca5c85a68d9b25e153dccd5d910dcafbdc447e3f4ff93e8a",
+            "taskPromptContractDigest": "7078415b8216761fca5c85a68d9b25e153dccd5d910dcafbdc447e3f4ff93e8a",
+            "capturedAt": "2026-10-14T05:26:38.217Z",
+            "providerRequestDigest": "28df71fb28354f9af5aac444fcc4f6752d09a93953fcd58439e6d52eed977961",
+            "providerResponseDigest": "e30c00c0b50ddfded664ab045944e2c37733b0deefe5e935d82e9e59ea7e19b2",
+            "fixtureResponseDigest": "e8c8b6773c6879dca1e9fc52c6210fa53cbd4dfd29102e3abcff01384d1c70ea",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "editorial-polish",
+              "case": "sample1-selected-sentence",
+              "step": "editorial-polish/ask"
+            },
+            "cacheKey": "4fea1e5077e3a07dba1c3097d503875d192ae7af5dbe9445ad1fe3734aaf5681",
+            "generation": "9e4cd81d723e0f1e42060e40c984f1cdad9fbb9d8435d81588c092cef1b8d64c",
+            "identityMapSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+          }
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false
+    },
+    {
+      "fixtureIdentity": "sample1-recorded-v41-range",
+      "registeredProfile": "baseline",
+      "registeredPurposes": [
+        {
+          "kind": "journey",
+          "id": "J-04",
+          "registrationPath": "e2e/run-j04.mjs",
+          "fixtureSelectionSha256": "ba23f2428512d5164c02f0fd986e9f49ded8f7049fa5c8da0c80dda2aa179bd3",
+          "sameSelectionsAtPreparationBase": true
+        }
+      ],
+      "allowedTaskKinds": [
+        "baseline-manuscript-analysis"
+      ],
+      "sessionPurpose": null,
+      "taskContractIdentities": [
+        "ai7.baseline-manuscript-analysis/1"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/analysis/contract.ts",
+        "sha256": "51b42bae865b24f846c790dc821666cf77b5718aa61f42129249754dc18cee2b",
+        "constants": {
+          "BASELINE_PROMPT_CONTRACT_DIGEST": "89776b1b5ca2e4d3ef529b0be6b2380bfc0cb5addf0426e815df7aa195c7d386",
+          "BASELINE_PROMPT_CONTRACT_SCHEMA": "ai7.baseline-manuscript-analysis.prompt-contract/2",
+          "BASELINE_PROMPT_CONTRACT_V1_DIGEST": "4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5",
+          "BASELINE_PROMPT_CONTRACT_V1_SCHEMA": "ai7.baseline-manuscript-analysis.prompt-contract/1",
+          "BASELINE_UNIT_RESULT_SCHEMA": "ai7.baseline-manuscript-analysis.unit-result/1"
+        }
+      },
+      "capturedTaskPromptContractDigests": [
+        "89776b1b5ca2e4d3ef529b0be6b2380bfc0cb5addf0426e815df7aa195c7d386"
+      ],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/analysis/execution.ts",
+        "sha256": "75fe09cc4aeb9d84774c59be547dcbf80b3dc7e2460bfac00651da405de377f3"
+      },
+      "planCompositionDerivation": {
+        "path": "src/service/analysis/baseline-analysis-store.ts",
+        "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
+      },
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "e02a1d5a3eb3750c8c5620c2a236dd51e67faa17606b3dab2da99319d5c4a8ed",
+      "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-range.json",
+      "fixtureFileSha256": "bdcf19c5a1c7d407d1ef16f1e8dcdea0519f920aa275a086445650c55d1f473a",
+      "fixtureProvenance": "recorded",
+      "orderedLineage": [
+        {
+          "identity": "sample1-recorded-v41-range",
+          "fixtureFile": "tests/fixtures/model/sample1-recorded-v41-range.json",
+          "sha256": "bdcf19c5a1c7d407d1ef16f1e8dcdea0519f920aa275a086445650c55d1f473a"
+        }
+      ],
+      "resolvedLineageSha256": "af5b17d5e32d99a48c5e640e7ee8e842b9c7079803c685891adbcfb55d5bf889",
+      "allowedExistingResultSchemas": [
+        "ai7.analysis.assurance-sampling-result/1",
+        "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+        "ai7.baseline-manuscript-analysis.unit-result/1"
+      ],
+      "allowedCapturedSubjects": [
+        "reduction",
+        "sampling",
+        "unit"
+      ],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "00a1ec99bd589d6c1affa3d77fb491c2b3d32aa30fc45f8c26497815c6885c2a",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-recorded-v41-range",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": {
+            "subject": "sampling",
+            "itemId": "S40/reanalyze-range/13",
+            "selectedItemId": "S40/reanalyze-range/13",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "1bfd29ecb6ba5d9bdbd1e1d097da4de6a0d1c9e6319c5f2318d2ca8c5eeb112c",
+            "taskPromptContractDigest": "89776b1b5ca2e4d3ef529b0be6b2380bfc0cb5addf0426e815df7aa195c7d386",
+            "capturedAt": "2026-10-13T05:10:00.700Z",
+            "providerRequestDigest": "5e308b61db150ae1a467880294be0757542b22447ef30ecea697ab0182ba67d0",
+            "providerResponseDigest": "2f3b1648434b45a8d159a6309e8e56a7db7c4b2c1eee1be5a8cadf2d0b431416",
+            "fixtureResponseDigest": "1ab66fd75a884a76419e917d8da602ba998ddfd9e87195d00e0f1371c7d342e0",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "baseline-analysis",
+              "case": "sample1-whole-book",
+              "step": "reanalyze-range/sampling-2-unit-6"
+            },
+            "cacheKey": "2294142fb346af44338272cd80d4107bc12451330dd2dff2629cdeb86cf1bcd5",
+            "generation": "c7495e754499062bc9f32bfb6e8ec727834f62a4d96e14b8e16563a4cb165c38",
+            "identityMapSha256": "c0816421652af095e45c71091e55b3d8fc7088cc1ae3252dd246e0be1ee39f75"
+          }
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "67f64efcea3415ec065eac48ebddf62fbb6168cdfb81e3e25beec78ae5d458e4",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-recorded-v41-range",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": {
+            "subject": "sampling",
+            "itemId": "S40/reanalyze-range/14",
+            "selectedItemId": "S40/reanalyze-range/14",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "1bfd29ecb6ba5d9bdbd1e1d097da4de6a0d1c9e6319c5f2318d2ca8c5eeb112c",
+            "taskPromptContractDigest": "89776b1b5ca2e4d3ef529b0be6b2380bfc0cb5addf0426e815df7aa195c7d386",
+            "capturedAt": "2026-10-13T05:10:12.302Z",
+            "providerRequestDigest": "17e8c7e9f7a0f40cc5253d71221513b26a40de9e5d1704371b1d357c41714586",
+            "providerResponseDigest": "727c8aea0a71a5d722b44affde684f90a5dd90bbbc6f14f2be2856811e950933",
+            "fixtureResponseDigest": "b1505b7d252f33f367a98efa2d0e075de9e3db67ce3a11a45dbea36c74cf3991",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "baseline-analysis",
+              "case": "sample1-whole-book",
+              "step": "reanalyze-range/sampling-3-unit-7"
+            },
+            "cacheKey": "305dba23033554c18a4a6c0a1b327f59410d8c24187bae887ccd42705ff1dfc9",
+            "generation": "c7495e754499062bc9f32bfb6e8ec727834f62a4d96e14b8e16563a4cb165c38",
+            "identityMapSha256": "bf7534dbedfd29fa382b677d03fe6cf16bc1ec6b713b125e5a33f8bd08b5f13d"
+          }
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "df33a0a1971210bbfb383a042323efbc1e914c2453a23f3f4de2cb744d2a681a",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-recorded-v41-range",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+          "capture": {
+            "subject": "reduction",
+            "itemId": "S40/reanalyze-range/4",
+            "selectedItemId": "S40/reanalyze-range/4",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "8298dc9db1b95f26072cabb00a8c9a14997f68ebe7bf07d01181985f848e66cb",
+            "taskPromptContractDigest": "89776b1b5ca2e4d3ef529b0be6b2380bfc0cb5addf0426e815df7aa195c7d386",
+            "capturedAt": "2026-10-13T04:52:27.633Z",
+            "providerRequestDigest": "634dd86a72f88a16931d78d0435533b7b23997635e040b66473a35268db0844f",
+            "providerResponseDigest": "fe20c0bbac85a6d3705533a2daf8aaad16347da027bf193c3da3ffef437da43b",
+            "fixtureResponseDigest": "b4b26b36b85a7e3ea675a9f708179aa453ffd71a3bb21510396003834988bf07",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "baseline-analysis",
+              "case": "sample1-whole-book",
+              "step": "reanalyze-range/reduction"
+            },
+            "cacheKey": "245608a367a4238c77d18202d9a4cb18b3e2c2cda7a14b2a2f293fc26a259201",
+            "generation": "13b52069697b48d70413f96126d685a9b497c2454e21af543fb2d7acf6609baf",
+            "identityMapSha256": "ae2bba04a619515918768e3ea44a208a5a81fbad5d78fb3d51ad59065066ea7b"
+          }
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "fe8eca8fcd622b0730edf52a3845ba27acd3e68e4d112815a5bb30aa0c5a3691",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-recorded-v41-range",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": {
+            "subject": "sampling",
+            "itemId": "S40/reanalyze-range/12",
+            "selectedItemId": "S40/reanalyze-range/12",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "1bfd29ecb6ba5d9bdbd1e1d097da4de6a0d1c9e6319c5f2318d2ca8c5eeb112c",
+            "taskPromptContractDigest": "89776b1b5ca2e4d3ef529b0be6b2380bfc0cb5addf0426e815df7aa195c7d386",
+            "capturedAt": "2026-10-13T05:09:50.875Z",
+            "providerRequestDigest": "e577504cf90696742c785693f11bd3ca328c2a5119cdc5a07ff2dfabd2b1ee25",
+            "providerResponseDigest": "8477edc3c2e02e54aab0288ee06d6c77e629dda840a5e4dad380021e2719d34d",
+            "fixtureResponseDigest": "47e4d381143d6b99dc54210cc65d4fcbdb58563d4ad3ed28eb890b14681709d3",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "baseline-analysis",
+              "case": "sample1-whole-book",
+              "step": "reanalyze-range/sampling-1-unit-2"
+            },
+            "cacheKey": "99cecf4fe73ff05db0de51ca9588db07339949963cba483339e89dd3be98a759",
+            "generation": "c7495e754499062bc9f32bfb6e8ec727834f62a4d96e14b8e16563a4cb165c38",
+            "identityMapSha256": "5017f08ba8b9195841a5a6c78dc788a64b69019a3d12a5d0fe895fcc7f55f7bb"
+          }
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "97072d1ab7bfdea86363b46ac85e8d469b019a3b1644ea70b7e10763deb13521",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-recorded-v41-range",
+          "contentDigest": "582fd4c3541fa6f2cfc613106f45b9713aeeeeacfb82ffbbcd940853533b9981",
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": {
+            "subject": "unit",
+            "itemId": "S40/reanalyze-range/2",
+            "selectedItemId": "S40/reanalyze-range/2",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "89776b1b5ca2e4d3ef529b0be6b2380bfc0cb5addf0426e815df7aa195c7d386",
+            "taskPromptContractDigest": "89776b1b5ca2e4d3ef529b0be6b2380bfc0cb5addf0426e815df7aa195c7d386",
+            "capturedAt": "2026-10-13T04:50:43.314Z",
+            "providerRequestDigest": "756b48a7c3f7248cdf48f4a4bee8ff8a0d6ce5044adf60cb56169020178c7a98",
+            "providerResponseDigest": "48d6bda9e70b961bc0bf37069980c996e2475aea1501c9177a310347ed5f7866",
+            "fixtureResponseDigest": "280059e54c9411bd735bc8cc03908337e8ccbd738a8fd101b91c6f2b479d161b",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "baseline-analysis",
+              "case": "sample1-whole-book",
+              "step": "reanalyze-range/unit-1"
+            },
+            "cacheKey": "76d6ebee95f8a07a2d4d7b639c6e2c4b6f5828ed37fc26b33ce591cd28078eca",
+            "generation": "ddb005b11f39f8a628faceff9dd03e954136d1ba89d6a83993a61ad46d1c4b1b",
+            "identityMapSha256": "a8ff04ddd991632e3e994696aacc8d42373521e5d34059883399d5c1a1429d79"
+          }
+        },
+        {
+          "unitOrdinal": 2,
+          "requestDigest": "6d3c892f661c0d2b10edad6cf29ffa9d6cc522057b7cc1fcff0ab5c0e89af00b",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-recorded-v41-range",
+          "contentDigest": "30b634d2e636a3bf1e188be27744461154be936fe298bf09e5daf5cda6037eef",
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": {
+            "subject": "unit",
+            "itemId": "S40/reanalyze-range/3",
+            "selectedItemId": "S40/reanalyze-range/3",
+            "evidenceScope": "namespaced",
+            "route": "opencode-go",
+            "endpoint": "https://opencode.ai/zen/go/v1/chat/completions",
+            "requestShape": "openai-chat-completions",
+            "model": "deepseek-v4.1-flash",
+            "promptContractDigest": "89776b1b5ca2e4d3ef529b0be6b2380bfc0cb5addf0426e815df7aa195c7d386",
+            "taskPromptContractDigest": "89776b1b5ca2e4d3ef529b0be6b2380bfc0cb5addf0426e815df7aa195c7d386",
+            "capturedAt": "2026-10-13T04:51:38.756Z",
+            "providerRequestDigest": "704ba1c0cf957f9e4a81a6ba1414c35ebd3445e66763850297d634b00f7870d6",
+            "providerResponseDigest": "deb525dbb5c55fa7a35a301c3927f8933d3a3f75a1349b9bf78fbd429f46b739",
+            "fixtureResponseDigest": "08bab5a33dedbb41ad7925a16957fba97b37398736185d49c75673b45a569ac6",
+            "responseDigestOrigin": "recorded",
+            "validation": {
+              "family": "baseline-analysis",
+              "case": "sample1-whole-book",
+              "step": "reanalyze-range/unit-2"
+            },
+            "cacheKey": "321b6272e8c510a360c9a4ef13efd8789aae95df2e07ab42f0061103a7fc5602",
+            "generation": "ddb005b11f39f8a628faceff9dd03e954136d1ba89d6a83993a61ad46d1c4b1b",
+            "identityMapSha256": "ea6f89a5030636e5636f346da63ea9741b6a95f81922bdb5a59523ed4c0200c0"
+          }
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false
+    },
+    {
+      "fixtureIdentity": "sample1-review-authored",
+      "registeredProfile": "baseline",
+      "registeredPurposes": [
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/run-kind-controls.test.ts",
+          "registrationPath": "tests/service/run-kind-controls.test.ts",
+          "fixtureSelectionSha256": "043850459fc788ba6c826a3280bd9bb5462478cbe150cd368a68f9645be3269e",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/review-runs.test.ts",
+          "registrationPath": "tests/service/review-runs.test.ts",
+          "fixtureSelectionSha256": "0f9826b6718cb619d24fe049b567ce0b8b0298cdc2b998dc478caea388c6805b",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/book-tasks.test.ts",
+          "registrationPath": "tests/service/book-tasks.test.ts",
+          "fixtureSelectionSha256": "1a415d15512f9aae8084041f890bee9dc9f72e1f71d4e388a410574f1181ee15",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/global-attention.test.ts",
+          "registrationPath": "tests/service/global-attention.test.ts",
+          "fixtureSelectionSha256": "1a415d15512f9aae8084041f890bee9dc9f72e1f71d4e388a410574f1181ee15",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/review-guidelines.test.ts",
+          "registrationPath": "tests/service/review-guidelines.test.ts",
+          "fixtureSelectionSha256": "1a415d15512f9aae8084041f890bee9dc9f72e1f71d4e388a410574f1181ee15",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/task-plan.test.ts",
+          "registrationPath": "tests/service/task-plan.test.ts",
+          "fixtureSelectionSha256": "1a415d15512f9aae8084041f890bee9dc9f72e1f71d4e388a410574f1181ee15",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/learning-eligibility.test.ts",
+          "registrationPath": "tests/service/learning-eligibility.test.ts",
+          "fixtureSelectionSha256": "1c8fb0eee96603cea385c750800c90dce259470a5d53cb4bcdcd9e5607d482c7",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/outcome-unconfirmed.test.ts",
+          "registrationPath": "tests/service/outcome-unconfirmed.test.ts",
+          "fixtureSelectionSha256": "26f51780e12f3589dca0d5beb541f8713a377e6b17e90ce71993221e4a4d1ce7",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/start-when-online-kinds.test.ts",
+          "registrationPath": "tests/service/start-when-online-kinds.test.ts",
+          "fixtureSelectionSha256": "317001dc1077baff5f739bcee259dace20d36c61f09be9d5ff3115f72a3fbd1a",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/captured-procedures.test.ts",
+          "registrationPath": "tests/service/captured-procedures.test.ts",
+          "fixtureSelectionSha256": "3221ba7ec2f65be0b79350752668eb974d281c738cdd764aaff37b1bd8c5e6d4",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/review-library-references.test.ts",
+          "registrationPath": "tests/service/review-library-references.test.ts",
+          "fixtureSelectionSha256": "4831e8cf4ab980d5a4c37a77d5ccc6c03fe95c8783045e47f4ee7360c230a6df",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "journey",
+          "id": "J-13",
+          "registrationPath": "e2e/run-j13.mjs",
+          "fixtureSelectionSha256": "79c49054223989fecf420c950020b5c41ec8e1ba8967907d04a43e94edc97950",
+          "sameSelectionsAtPreparationBase": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/start-when-online-followups.test.ts",
+          "registrationPath": "tests/service/start-when-online-followups.test.ts",
+          "fixtureSelectionSha256": "7a8af5b9eaaf3a0858e0a50d3ccf22239f029b96fb9c9977c56674e590e9f8d6",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/house-review-preference-materials.test.ts",
+          "registrationPath": "tests/service/house-review-preference-materials.test.ts",
+          "fixtureSelectionSha256": "84b741984079f7c8b2842613196a2640689ae2f42f0339122e90eac297761b6c",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/series-exclusion-runs.test.ts",
+          "registrationPath": "tests/service/series-exclusion-runs.test.ts",
+          "fixtureSelectionSha256": "8b91408f7122fe521c148abbe57f66aa66f37c79de2e5ff5976ea485ec50a66f",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/task-intent-drafts.test.ts",
+          "registrationPath": "tests/service/task-intent-drafts.test.ts",
+          "fixtureSelectionSha256": "93db19b758bbd2c66c44bf70d8c4dcf21ca7d734394013463aa992612abad23b",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "journey",
+          "id": "J-10",
+          "registrationPath": "e2e/run-j10.mjs",
+          "fixtureSelectionSha256": "bb444bc65243a5dc453cc963b087ecca4f728ac2ea4b4ab4a0998d49cb9dc0c4",
+          "sameSelectionsAtPreparationBase": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/review-fixture-generator.test.ts",
+          "registrationPath": "tests/service/review-fixture-generator.test.ts",
+          "fixtureSelectionSha256": "d9b58a0907db085a09b987c25ee1709f3b7307eaf0fe85fccbbd280a9168d3c5",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/review-category.test.ts",
+          "registrationPath": "tests/service/review-category.test.ts",
+          "fixtureSelectionSha256": "e61126de744bd4642c26bad2f039226dfe46acf358286f802117a7c2b2d72005",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        }
+      ],
+      "allowedTaskKinds": [
+        "baseline-manuscript-analysis"
+      ],
+      "sessionPurpose": null,
+      "taskContractIdentities": [
+        "ai7.baseline-manuscript-analysis/1"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/analysis/contract.ts",
+        "sha256": "51b42bae865b24f846c790dc821666cf77b5718aa61f42129249754dc18cee2b",
+        "constants": {
+          "BASELINE_PROMPT_CONTRACT_DIGEST": "89776b1b5ca2e4d3ef529b0be6b2380bfc0cb5addf0426e815df7aa195c7d386",
+          "BASELINE_PROMPT_CONTRACT_SCHEMA": "ai7.baseline-manuscript-analysis.prompt-contract/2",
+          "BASELINE_PROMPT_CONTRACT_V1_DIGEST": "4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5",
+          "BASELINE_PROMPT_CONTRACT_V1_SCHEMA": "ai7.baseline-manuscript-analysis.prompt-contract/1",
+          "BASELINE_UNIT_RESULT_SCHEMA": "ai7.baseline-manuscript-analysis.unit-result/1"
+        }
+      },
+      "capturedTaskPromptContractDigests": [],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/analysis/execution.ts",
+        "sha256": "75fe09cc4aeb9d84774c59be547dcbf80b3dc7e2460bfac00651da405de377f3"
+      },
+      "planCompositionDerivation": {
+        "path": "src/service/analysis/baseline-analysis-store.ts",
+        "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
+      },
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "e02a1d5a3eb3750c8c5620c2a236dd51e67faa17606b3dab2da99319d5c4a8ed",
+      "fixtureFile": "tests/fixtures/model/sample1-review-authored.json",
+      "fixtureFileSha256": "6b44f23ff4eb0f31632fca0b11dc48a3a4469543e7388db72a9592deb92e4ebe",
+      "fixtureProvenance": "authored",
+      "orderedLineage": [
+        {
+          "identity": "sample1-review-authored",
+          "fixtureFile": "tests/fixtures/model/sample1-review-authored.json",
+          "sha256": "6b44f23ff4eb0f31632fca0b11dc48a3a4469543e7388db72a9592deb92e4ebe"
+        },
+        {
+          "identity": "sample1-baseline-transient-retry",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-transient-retry.json",
+          "sha256": "a5d36dca822009d93727af65850254d6f4105db826942bb762455f5ac4c15fd5"
+        },
+        {
+          "identity": "sample1-baseline-one-unit-failure",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-one-unit-failure.json",
+          "sha256": "49b5bf7eb0a2262f79fe6382ea77f65fa2f34eae03e33d7eae1244989cac52e1"
+        },
+        {
+          "identity": "sample1-baseline-happy",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-happy.json",
+          "sha256": "9c3bb63c931966ddbc4c94c5aafb29f7d04d55083f9b4f372391c6714bffba0a"
+        }
+      ],
+      "resolvedLineageSha256": "52c1d4edda9f6af399693a3e2378bb079b7686d3827d40c1b156412ef3e2c72e",
+      "allowedExistingResultSchemas": [
+        "ai7.analysis.assurance-sampling-result/1",
+        "ai7.analysis.run-report-reflection-result/1",
+        "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+        "ai7.baseline-manuscript-analysis.unit-result/1"
+      ],
+      "allowedCapturedSubjects": [],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "146651af4d337a6ea9c695a3608105bc2b5bd2715d2d7878340d9660db168b11",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-one-unit-failure",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "1b0ddc63e99dd5221b18f003565fd6324ff9ce031565271e80a24f56c5d14a88",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "36e16438e6d759c4a2a850c1620b2b3db3fa660fce4c0e079c46c85724f5577d",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "3e6c2262e197cb0179a4f49ab26d8bb54ca14e2eae81af26ed62f28eb039c336",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "4b75c1aea668a788c490dfb6084ef6deb7b621ba41f1dfd01f972e2dcff28e12",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-transient-retry",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "7b0e5f7ad72982c225f7812c6096222e1d810db6be5bcc69eea3ed5ec3a7a59a",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-one-unit-failure",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "a3eab029a5b3c667d46db2981436c5384beade55a8a8ed62e0296db588be440d",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-transient-retry",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "b5b0d47b071e3daaea61e25c547aef2ef1ae92a0f18c6e2b69ed80c17010a4d5",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-transient-retry",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "baafcb8b5f8eef4e71f828e2d625bc5719cfbd8c0aa49cc397eedbcbad1b39be",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-one-unit-failure",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "beadd216031f094e1f6add8140c942cd915d78a11629d96973aaa28fb48a1c5f",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-one-unit-failure",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "f165b9f47a625feeb2d38ce95f0298dcaf90de2e8fa927c81463ee8f9b8ff996",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-one-unit-failure",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "febb575449d202394e4d8ffe012453d53fd276082a8d785831347c387b19b192",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-one-unit-failure",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "97072d1ab7bfdea86363b46ac85e8d469b019a3b1644ea70b7e10763deb13521",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "c667fc1443c70e4dc38370c5c16f17602ca5d0aaa249a5a8ad3e1e2a3465f2a5",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 2,
+          "requestDigest": "6d3c892f661c0d2b10edad6cf29ffa9d6cc522057b7cc1fcff0ab5c0e89af00b",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-one-unit-failure",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "adapter-failure",
+          "resultSchema": null,
+          "capture": null
+        },
+        {
+          "unitOrdinal": 3,
+          "requestDigest": "ba2e16f6d1d35617d25cfcaee836b532c1ab07bd077f4e87f7440e5ae8440f4a",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 4,
+          "requestDigest": "8c845a19c7d2490d4161288d9b74985e297941b9141767b155069340ae10e4e2",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "8abcb377378be04322959cc962315565229946cc6a76496e45b7cbc1697094a9",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "8abcb377378be04322959cc962315565229946cc6a76496e45b7cbc1697094a9",
+          "attempt": 1,
+          "entryOriginFixtureIdentity": "sample1-baseline-transient-retry",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "adapter-failure",
+          "resultSchema": null,
+          "capture": null
+        },
+        {
+          "unitOrdinal": 6,
+          "requestDigest": "eb508fdc039e94e62e92797a09683a5f6ee14bce8a8133f13021bd53b33986e7",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 7,
+          "requestDigest": "3fe4cb693a94f6338e771fd6f52f9ddca153825257bd4b006ebbe1f46fe0d9f8",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 8,
+          "requestDigest": "03e8183266d513aa4c3ac1707e1bc25b79098c3aa017c50c52b111378afc31fe",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false
+    },
+    {
+      "fixtureIdentity": "sample1-review-authored",
+      "registeredProfile": "review",
+      "registeredPurposes": [
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/run-kind-controls.test.ts",
+          "registrationPath": "tests/service/run-kind-controls.test.ts",
+          "fixtureSelectionSha256": "043850459fc788ba6c826a3280bd9bb5462478cbe150cd368a68f9645be3269e",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/review-runs.test.ts",
+          "registrationPath": "tests/service/review-runs.test.ts",
+          "fixtureSelectionSha256": "0f9826b6718cb619d24fe049b567ce0b8b0298cdc2b998dc478caea388c6805b",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/book-tasks.test.ts",
+          "registrationPath": "tests/service/book-tasks.test.ts",
+          "fixtureSelectionSha256": "1a415d15512f9aae8084041f890bee9dc9f72e1f71d4e388a410574f1181ee15",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/global-attention.test.ts",
+          "registrationPath": "tests/service/global-attention.test.ts",
+          "fixtureSelectionSha256": "1a415d15512f9aae8084041f890bee9dc9f72e1f71d4e388a410574f1181ee15",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/review-guidelines.test.ts",
+          "registrationPath": "tests/service/review-guidelines.test.ts",
+          "fixtureSelectionSha256": "1a415d15512f9aae8084041f890bee9dc9f72e1f71d4e388a410574f1181ee15",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/task-plan.test.ts",
+          "registrationPath": "tests/service/task-plan.test.ts",
+          "fixtureSelectionSha256": "1a415d15512f9aae8084041f890bee9dc9f72e1f71d4e388a410574f1181ee15",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/learning-eligibility.test.ts",
+          "registrationPath": "tests/service/learning-eligibility.test.ts",
+          "fixtureSelectionSha256": "1c8fb0eee96603cea385c750800c90dce259470a5d53cb4bcdcd9e5607d482c7",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/outcome-unconfirmed.test.ts",
+          "registrationPath": "tests/service/outcome-unconfirmed.test.ts",
+          "fixtureSelectionSha256": "26f51780e12f3589dca0d5beb541f8713a377e6b17e90ce71993221e4a4d1ce7",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/start-when-online-kinds.test.ts",
+          "registrationPath": "tests/service/start-when-online-kinds.test.ts",
+          "fixtureSelectionSha256": "317001dc1077baff5f739bcee259dace20d36c61f09be9d5ff3115f72a3fbd1a",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/captured-procedures.test.ts",
+          "registrationPath": "tests/service/captured-procedures.test.ts",
+          "fixtureSelectionSha256": "3221ba7ec2f65be0b79350752668eb974d281c738cdd764aaff37b1bd8c5e6d4",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/review-library-references.test.ts",
+          "registrationPath": "tests/service/review-library-references.test.ts",
+          "fixtureSelectionSha256": "4831e8cf4ab980d5a4c37a77d5ccc6c03fe95c8783045e47f4ee7360c230a6df",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "journey",
+          "id": "J-13",
+          "registrationPath": "e2e/run-j13.mjs",
+          "fixtureSelectionSha256": "79c49054223989fecf420c950020b5c41ec8e1ba8967907d04a43e94edc97950",
+          "sameSelectionsAtPreparationBase": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/start-when-online-followups.test.ts",
+          "registrationPath": "tests/service/start-when-online-followups.test.ts",
+          "fixtureSelectionSha256": "7a8af5b9eaaf3a0858e0a50d3ccf22239f029b96fb9c9977c56674e590e9f8d6",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/house-review-preference-materials.test.ts",
+          "registrationPath": "tests/service/house-review-preference-materials.test.ts",
+          "fixtureSelectionSha256": "84b741984079f7c8b2842613196a2640689ae2f42f0339122e90eac297761b6c",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/series-exclusion-runs.test.ts",
+          "registrationPath": "tests/service/series-exclusion-runs.test.ts",
+          "fixtureSelectionSha256": "8b91408f7122fe521c148abbe57f66aa66f37c79de2e5ff5976ea485ec50a66f",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/task-intent-drafts.test.ts",
+          "registrationPath": "tests/service/task-intent-drafts.test.ts",
+          "fixtureSelectionSha256": "93db19b758bbd2c66c44bf70d8c4dcf21ca7d734394013463aa992612abad23b",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "journey",
+          "id": "J-10",
+          "registrationPath": "e2e/run-j10.mjs",
+          "fixtureSelectionSha256": "bb444bc65243a5dc453cc963b087ecca4f728ac2ea4b4ab4a0998d49cb9dc0c4",
+          "sameSelectionsAtPreparationBase": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/review-fixture-generator.test.ts",
+          "registrationPath": "tests/service/review-fixture-generator.test.ts",
+          "fixtureSelectionSha256": "d9b58a0907db085a09b987c25ee1709f3b7307eaf0fe85fccbbd280a9168d3c5",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/review-category.test.ts",
+          "registrationPath": "tests/service/review-category.test.ts",
+          "fixtureSelectionSha256": "e61126de744bd4642c26bad2f039226dfe46acf358286f802117a7c2b2d72005",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        }
+      ],
+      "allowedTaskKinds": [
+        "editorial-review/typos-and-usage",
+        "editorial-review/style-and-format",
+        "editorial-review/literary-expression"
+      ],
+      "sessionPurpose": null,
+      "taskContractIdentities": [
+        "ai7.editorial-review/2"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/review/review-category-contract.ts",
+        "fixedFileSha256": "1cac3679ee0501e5f6f08797a00043b4562d536671ada27c5e4eecd8013b0df2",
+        "existingContractBytesUnchanged": true,
+        "addedExportExcluded": "REVIEW_CATEGORY_SELECTED_PREFERENCE_PROMPT_SCHEMA",
+        "constants": {
+          "REVIEW_CATEGORY_PROMPT_CONTRACT_SCHEMA": "ai7.editorial-review.prompt-contract/2",
+          "REVIEW_CATEGORY_RESULT_SET_REVISION_SCHEMA": "ai7.editorial-review.result-set-revision/1",
+          "REVIEW_CATEGORY_SUCCESSOR_REVISION_SCHEMA": "ai7.editorial-review.result-set-revision/2",
+          "REVIEW_CATEGORY_UNIT_RESULT_SCHEMA": "ai7.editorial-review.unit-result/2",
+          "REVIEW_CATEGORY_UNIT_RESULT_SCHEMA_V1": "ai7.editorial-review.unit-result/1"
+        }
+      },
+      "capturedTaskPromptContractDigests": [],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/analysis/execution.ts",
+        "sha256": "75fe09cc4aeb9d84774c59be547dcbf80b3dc7e2460bfac00651da405de377f3"
+      },
+      "planCompositionDerivation": {
+        "path": "src/service/analysis/baseline-analysis-store.ts",
+        "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
+      },
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "e02a1d5a3eb3750c8c5620c2a236dd51e67faa17606b3dab2da99319d5c4a8ed",
+      "fixtureFile": "tests/fixtures/model/sample1-review-authored.json",
+      "fixtureFileSha256": "6b44f23ff4eb0f31632fca0b11dc48a3a4469543e7388db72a9592deb92e4ebe",
+      "fixtureProvenance": "authored",
+      "orderedLineage": [
+        {
+          "identity": "sample1-review-authored",
+          "fixtureFile": "tests/fixtures/model/sample1-review-authored.json",
+          "sha256": "6b44f23ff4eb0f31632fca0b11dc48a3a4469543e7388db72a9592deb92e4ebe"
+        },
+        {
+          "identity": "sample1-baseline-transient-retry",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-transient-retry.json",
+          "sha256": "a5d36dca822009d93727af65850254d6f4105db826942bb762455f5ac4c15fd5"
+        },
+        {
+          "identity": "sample1-baseline-one-unit-failure",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-one-unit-failure.json",
+          "sha256": "49b5bf7eb0a2262f79fe6382ea77f65fa2f34eae03e33d7eae1244989cac52e1"
+        },
+        {
+          "identity": "sample1-baseline-happy",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-happy.json",
+          "sha256": "9c3bb63c931966ddbc4c94c5aafb29f7d04d55083f9b4f372391c6714bffba0a"
+        }
+      ],
+      "resolvedLineageSha256": "52c1d4edda9f6af399693a3e2378bb079b7686d3827d40c1b156412ef3e2c72e",
+      "allowedExistingResultSchemas": [
+        "ai7.analysis.assurance-sampling-result/1",
+        "ai7.analysis.run-report-reflection-result/1",
+        "ai7.editorial-review.unit-result/2"
+      ],
+      "allowedCapturedSubjects": [],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "01b4f898ea973025c78a2d9bef68571dab6a1f31afa74abaffa91b75bb28b533",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "0b1161e4d875bc278da4463a9c1c68812ad6b137159ad03683146f1100bdd1ac",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "2f1d9f6b6b7b6a9b1f81eb184ef72c6d4ae7a03b6f86f229f6e70b58423f2043",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "357066e57ac6733495df222db638867f4f6f2dcdb750a707b29c70997b42fccb",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "4560d6cca6de863fcfbd538c84e778ae63124693ce73ff9a8f4fe69a57b8234e",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "46350d865755e3567c5775503d7d1c4d644e5e22410b29d08643523089613557",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "47a1c17f8dfa58c11ecf20b1e6c5983737976641761492bce31d6f1941c1e6aa",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "4af6736fd410202e9d1dcd734404ca3262597bb24b62fc6cb9e601f484d1bd93",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "82a220b65efdfe7e6763401fb480349a1da0d511b2366472d1d25e5b9e761e30",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "8980b7109e789cc0b968f744fcaf2c23ac478295a6ad49822d1b929228e9ba73",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "93cc98e61c5706ccc81f2f7ea053759dda8e0941e27a3fee744189bd48faf59f",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "95f0a0275f29eb5684a6faed2cb0192c5a5b930c39ee3ec033514737da0487cb",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "96df5c28fe0d8b14031c311b7582234aca876672e59f7d6b65e8f1eadfcc0543",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "96eadccb9439622ef22f5eabab89a9c7879df10f7b9e15e617c85c75074e29ec",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "9b0b6996f0f3f86f0c274f060d3a752aeb084563908e07be7038b9fca3291b9b",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "9ba2551a667068342672664fa20bbef7fa2d41b8e619bab285c756376931be8e",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "bc2145dd2485a9005f9950ac7ade545372e329742cd8e664fc101583dc4ea2d5",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "c2542f242b5a9993c113a2084ed40b9227a724a2abb81f198370d246b83f2a97",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "c520e7b5efc7a871aa8fb5951c65538ba8365c2c593612c772c88d439e4de036",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "ce90bb7068bb2b4d7c2eb0cc0d31ac3f1ff3f3081a9cd828d5d4397e09b903ed",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "e36359ac8f6a064961aceadb9b96d91e3db48c8526f549b14fa3f7885f4c7606",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "eb7ac2ba9a090cde3b84e75150c8c93ebb5129638c3cf067e4cc2e4c37d8439b",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "fd8dfc3c76d0bb560bc20382ff81efb8445c78d011105dfeb0c97119f261bc00",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "007ef440ef59dc5f4d30229ee9428fefe626375877104aa9b55d6e8bb9936f3c",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "1bd255fe4858f16bedb1d70fa125448c8b7d4c13ed9038292f0a648027de6c0b",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "43e170abd37d458aa64f94440634892068377e30fa917fd334abcfcfca6e42a8",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "8674dd7fbf879a92ef150a2eac4f0c6c0c41df9bb24daf9ebbdbda9a08626138",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "a85cf2de95873579e4bf9dae5a01c311efea7127a60bb18bf1a754fcbd15b655",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "aace118e915c6191067b840be6c8d9b48c5818eab79cd718b4caf36089b64556",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "b24ae142bc31e7ed570d4ba9f44a1f9a60a43d146b3df8dc578c29f6354ada8a",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "cd98f5d9a8a12761490bd3a6862b31ec55983943ace07ad2ec6f778e2f428d5c",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "d1fd62f6209cfbce107c497b53fb079d6ceaed51625c0bb1cf11383ae3a32917",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 2,
+          "requestDigest": "72de6b1eb776c3c3919285f31e1458914e2a572c0bf9bd07e57fb57fbd7f6168",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 2,
+          "requestDigest": "8fc396c18f13d32d82b7b5575d5da6e0a85cd483db50380a744dc926b36842d2",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 2,
+          "requestDigest": "bd394a8038b17f2b93e4f6ab8c875352701092dbeef0742e89599d4f9aceb408",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 3,
+          "requestDigest": "292748fc95286db93072a8feb72d847c8728e183a5c4a11ef7ceb6f30ec85dec",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 3,
+          "requestDigest": "d94467d715242482ebc6ca01a84f37aa7d0d04a65c5eabd3fc80a29e67964ba9",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 3,
+          "requestDigest": "ecf28c1555652e131f4b9a140e496dea10d1e63bb06ef48e519e708bafc43527",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 4,
+          "requestDigest": "4ba0700b4c52ad71e2d50743159c99168b75db48c9397d26ccd2ee2c2da3c7ec",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 4,
+          "requestDigest": "9cb1d94aeb77cbf6aab9b608438082b74c53007a69825b2eb292aa743130510e",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 4,
+          "requestDigest": "a583f61c0ca4728a7a8b931b7f375b53e5d6cb53c980a0a05400ae002654bf06",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "15b07ef43c02ed578dcc434e6cbe2f6543e04b16956fd0cae5cf7dd7510a827a",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "958e3d573a6fdc6f4a383fd7f5deccb3b44c4a1f1532272e7738df3bbb8345be",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "9df38a55e24fa29e9e895753e03b3452f1d76aefeea82344244e8a679ed7953c",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 6,
+          "requestDigest": "03b818baccc048a2b5f742e6dafd76355a423c6111288355ac36c0153c1d6ef0",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 6,
+          "requestDigest": "a083eb269e4cf68065dc64fd6bae522e4f3f31f18b2d2e3c9ca3f0fa9bb4bb55",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 6,
+          "requestDigest": "ac8f467b9ea40c4b9d3d09c7ae6e407f2edcc5b244306ac12127bd0e0e798c93",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 7,
+          "requestDigest": "5cdea391475f74b03081fb724be78656d8ecbf92f2384f9fdcc97b8c5031207e",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 7,
+          "requestDigest": "8014aec6cfd741f457ccb001ff543a5c2678e19ad0db22a5e11cdf4e270bd42e",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 7,
+          "requestDigest": "a0d3db2435fe63fb86616cdfbb01a995b856517707e53f5b8fd6dcc5621319e7",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 8,
+          "requestDigest": "af689dde7a8130a17258048a54ff19e1c4e368d5e97cde853ee54316d7421b6b",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 8,
+          "requestDigest": "b73106bc8eb53c0d7e4b4207bf19e72f914fc6abe382ece33fe0cf1eeab75e88",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 8,
+          "requestDigest": "efd3fe7b54f9318e5bb77edb64bb98ada292e5e375f848102ca4d1004890e04d",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false,
+      "registeredProfileInputs": {
+        "path": "tests/support/review-categories.ts",
+        "sha256": "9aa348934a32556d6b04d19a8de72eefb46849d8f8bb2d2946a7acf1b9709e07"
+      }
+    },
+    {
+      "fixtureIdentity": "sample1-review-contract-v2-controls",
+      "registeredProfile": "baseline",
+      "registeredPurposes": [
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/review-runs.test.ts",
+          "registrationPath": "tests/service/review-runs.test.ts",
+          "fixtureSelectionSha256": "01cbc6f283a1f4aecab66a8d193c2bd0d37575abaab14e404cb43a17a53ea722",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "journey",
+          "id": "J-04",
+          "registrationPath": "e2e/run-j04.mjs",
+          "fixtureSelectionSha256": "c80bacf4789723fdbbdcd3fbba7bbc45a9efb5024f7d2e516e649b332400c333",
+          "sameSelectionsAtPreparationBase": true
+        }
+      ],
+      "allowedTaskKinds": [
+        "baseline-manuscript-analysis"
+      ],
+      "sessionPurpose": null,
+      "taskContractIdentities": [
+        "ai7.baseline-manuscript-analysis/1"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/analysis/contract.ts",
+        "sha256": "51b42bae865b24f846c790dc821666cf77b5718aa61f42129249754dc18cee2b",
+        "constants": {
+          "BASELINE_PROMPT_CONTRACT_DIGEST": "89776b1b5ca2e4d3ef529b0be6b2380bfc0cb5addf0426e815df7aa195c7d386",
+          "BASELINE_PROMPT_CONTRACT_SCHEMA": "ai7.baseline-manuscript-analysis.prompt-contract/2",
+          "BASELINE_PROMPT_CONTRACT_V1_DIGEST": "4ba25b2f848b99213336f67dc2b7960c942bfbcf6213a0d3fd91c427efb57eb5",
+          "BASELINE_PROMPT_CONTRACT_V1_SCHEMA": "ai7.baseline-manuscript-analysis.prompt-contract/1",
+          "BASELINE_UNIT_RESULT_SCHEMA": "ai7.baseline-manuscript-analysis.unit-result/1"
+        }
+      },
+      "capturedTaskPromptContractDigests": [],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/analysis/execution.ts",
+        "sha256": "75fe09cc4aeb9d84774c59be547dcbf80b3dc7e2460bfac00651da405de377f3"
+      },
+      "planCompositionDerivation": {
+        "path": "src/service/analysis/baseline-analysis-store.ts",
+        "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
+      },
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "e02a1d5a3eb3750c8c5620c2a236dd51e67faa17606b3dab2da99319d5c4a8ed",
+      "fixtureFile": "tests/fixtures/model/sample1-review-contract-v2-controls.json",
+      "fixtureFileSha256": "06111345b9e87649e4aae9e415a15d8126261eba7e9c553f21be26e1506eca8b",
+      "fixtureProvenance": "authored",
+      "orderedLineage": [
+        {
+          "identity": "sample1-review-contract-v2-controls",
+          "fixtureFile": "tests/fixtures/model/sample1-review-contract-v2-controls.json",
+          "sha256": "06111345b9e87649e4aae9e415a15d8126261eba7e9c553f21be26e1506eca8b"
+        },
+        {
+          "identity": "sample1-baseline-transient-retry",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-transient-retry.json",
+          "sha256": "a5d36dca822009d93727af65850254d6f4105db826942bb762455f5ac4c15fd5"
+        },
+        {
+          "identity": "sample1-baseline-one-unit-failure",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-one-unit-failure.json",
+          "sha256": "49b5bf7eb0a2262f79fe6382ea77f65fa2f34eae03e33d7eae1244989cac52e1"
+        },
+        {
+          "identity": "sample1-baseline-happy",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-happy.json",
+          "sha256": "9c3bb63c931966ddbc4c94c5aafb29f7d04d55083f9b4f372391c6714bffba0a"
+        }
+      ],
+      "resolvedLineageSha256": "dccf51ec60495facc08eb9bfd4bffbf1de28dec25f1c962b69b8fed37396c3aa",
+      "allowedExistingResultSchemas": [
+        "ai7.analysis.assurance-sampling-result/1",
+        "ai7.analysis.run-report-reflection-result/1",
+        "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+        "ai7.baseline-manuscript-analysis.unit-result/1"
+      ],
+      "allowedCapturedSubjects": [],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "146651af4d337a6ea9c695a3608105bc2b5bd2715d2d7878340d9660db168b11",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-one-unit-failure",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "1b0ddc63e99dd5221b18f003565fd6324ff9ce031565271e80a24f56c5d14a88",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "36e16438e6d759c4a2a850c1620b2b3db3fa660fce4c0e079c46c85724f5577d",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "3e6c2262e197cb0179a4f49ab26d8bb54ca14e2eae81af26ed62f28eb039c336",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "4b75c1aea668a788c490dfb6084ef6deb7b621ba41f1dfd01f972e2dcff28e12",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-transient-retry",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "7b0e5f7ad72982c225f7812c6096222e1d810db6be5bcc69eea3ed5ec3a7a59a",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-one-unit-failure",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "a3eab029a5b3c667d46db2981436c5384beade55a8a8ed62e0296db588be440d",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-transient-retry",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "b5b0d47b071e3daaea61e25c547aef2ef1ae92a0f18c6e2b69ed80c17010a4d5",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-transient-retry",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "baafcb8b5f8eef4e71f828e2d625bc5719cfbd8c0aa49cc397eedbcbad1b39be",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-one-unit-failure",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "beadd216031f094e1f6add8140c942cd915d78a11629d96973aaa28fb48a1c5f",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-one-unit-failure",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "f165b9f47a625feeb2d38ce95f0298dcaf90de2e8fa927c81463ee8f9b8ff996",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-one-unit-failure",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.cross-unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "febb575449d202394e4d8ffe012453d53fd276082a8d785831347c387b19b192",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-one-unit-failure",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "97072d1ab7bfdea86363b46ac85e8d469b019a3b1644ea70b7e10763deb13521",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "c667fc1443c70e4dc38370c5c16f17602ca5d0aaa249a5a8ad3e1e2a3465f2a5",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 2,
+          "requestDigest": "6d3c892f661c0d2b10edad6cf29ffa9d6cc522057b7cc1fcff0ab5c0e89af00b",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-one-unit-failure",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "adapter-failure",
+          "resultSchema": null,
+          "capture": null
+        },
+        {
+          "unitOrdinal": 3,
+          "requestDigest": "ba2e16f6d1d35617d25cfcaee836b532c1ab07bd077f4e87f7440e5ae8440f4a",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 4,
+          "requestDigest": "8c845a19c7d2490d4161288d9b74985e297941b9141767b155069340ae10e4e2",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "8abcb377378be04322959cc962315565229946cc6a76496e45b7cbc1697094a9",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "8abcb377378be04322959cc962315565229946cc6a76496e45b7cbc1697094a9",
+          "attempt": 1,
+          "entryOriginFixtureIdentity": "sample1-baseline-transient-retry",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "adapter-failure",
+          "resultSchema": null,
+          "capture": null
+        },
+        {
+          "unitOrdinal": 6,
+          "requestDigest": "eb508fdc039e94e62e92797a09683a5f6ee14bce8a8133f13021bd53b33986e7",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 7,
+          "requestDigest": "3fe4cb693a94f6338e771fd6f52f9ddca153825257bd4b006ebbe1f46fe0d9f8",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 8,
+          "requestDigest": "03e8183266d513aa4c3ac1707e1bc25b79098c3aa017c50c52b111378afc31fe",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-baseline-happy",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.baseline-manuscript-analysis.unit-result/1",
+          "capture": null
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false
+    },
+    {
+      "fixtureIdentity": "sample1-review-contract-v2-controls",
+      "registeredProfile": "review",
+      "registeredPurposes": [
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/review-runs.test.ts",
+          "registrationPath": "tests/service/review-runs.test.ts",
+          "fixtureSelectionSha256": "01cbc6f283a1f4aecab66a8d193c2bd0d37575abaab14e404cb43a17a53ea722",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "journey",
+          "id": "J-04",
+          "registrationPath": "e2e/run-j04.mjs",
+          "fixtureSelectionSha256": "c80bacf4789723fdbbdcd3fbba7bbc45a9efb5024f7d2e516e649b332400c333",
+          "sameSelectionsAtPreparationBase": true
+        }
+      ],
+      "allowedTaskKinds": [
+        "editorial-review/typos-and-usage",
+        "editorial-review/style-and-format",
+        "editorial-review/literary-expression",
+        "editorial-review/plot-consistency"
+      ],
+      "sessionPurpose": null,
+      "taskContractIdentities": [
+        "ai7.editorial-review/2"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/review/review-category-contract.ts",
+        "fixedFileSha256": "1cac3679ee0501e5f6f08797a00043b4562d536671ada27c5e4eecd8013b0df2",
+        "existingContractBytesUnchanged": true,
+        "addedExportExcluded": "REVIEW_CATEGORY_SELECTED_PREFERENCE_PROMPT_SCHEMA",
+        "constants": {
+          "REVIEW_CATEGORY_PROMPT_CONTRACT_SCHEMA": "ai7.editorial-review.prompt-contract/2",
+          "REVIEW_CATEGORY_RESULT_SET_REVISION_SCHEMA": "ai7.editorial-review.result-set-revision/1",
+          "REVIEW_CATEGORY_SUCCESSOR_REVISION_SCHEMA": "ai7.editorial-review.result-set-revision/2",
+          "REVIEW_CATEGORY_UNIT_RESULT_SCHEMA": "ai7.editorial-review.unit-result/2",
+          "REVIEW_CATEGORY_UNIT_RESULT_SCHEMA_V1": "ai7.editorial-review.unit-result/1"
+        }
+      },
+      "capturedTaskPromptContractDigests": [],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/analysis/execution.ts",
+        "sha256": "75fe09cc4aeb9d84774c59be547dcbf80b3dc7e2460bfac00651da405de377f3"
+      },
+      "planCompositionDerivation": {
+        "path": "src/service/analysis/baseline-analysis-store.ts",
+        "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
+      },
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "e02a1d5a3eb3750c8c5620c2a236dd51e67faa17606b3dab2da99319d5c4a8ed",
+      "fixtureFile": "tests/fixtures/model/sample1-review-contract-v2-controls.json",
+      "fixtureFileSha256": "06111345b9e87649e4aae9e415a15d8126261eba7e9c553f21be26e1506eca8b",
+      "fixtureProvenance": "authored",
+      "orderedLineage": [
+        {
+          "identity": "sample1-review-contract-v2-controls",
+          "fixtureFile": "tests/fixtures/model/sample1-review-contract-v2-controls.json",
+          "sha256": "06111345b9e87649e4aae9e415a15d8126261eba7e9c553f21be26e1506eca8b"
+        },
+        {
+          "identity": "sample1-baseline-transient-retry",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-transient-retry.json",
+          "sha256": "a5d36dca822009d93727af65850254d6f4105db826942bb762455f5ac4c15fd5"
+        },
+        {
+          "identity": "sample1-baseline-one-unit-failure",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-one-unit-failure.json",
+          "sha256": "49b5bf7eb0a2262f79fe6382ea77f65fa2f34eae03e33d7eae1244989cac52e1"
+        },
+        {
+          "identity": "sample1-baseline-happy",
+          "fixtureFile": "tests/fixtures/model/sample1-baseline-happy.json",
+          "sha256": "9c3bb63c931966ddbc4c94c5aafb29f7d04d55083f9b4f372391c6714bffba0a"
+        }
+      ],
+      "resolvedLineageSha256": "dccf51ec60495facc08eb9bfd4bffbf1de28dec25f1c962b69b8fed37396c3aa",
+      "allowedExistingResultSchemas": [
+        "ai7.analysis.assurance-sampling-result/1",
+        "ai7.analysis.run-report-reflection-result/1",
+        "ai7.editorial-review.unit-result/2"
+      ],
+      "allowedCapturedSubjects": [],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "01b4f898ea973025c78a2d9bef68571dab6a1f31afa74abaffa91b75bb28b533",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "0b1161e4d875bc278da4463a9c1c68812ad6b137159ad03683146f1100bdd1ac",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "2f1d9f6b6b7b6a9b1f81eb184ef72c6d4ae7a03b6f86f229f6e70b58423f2043",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "357066e57ac6733495df222db638867f4f6f2dcdb750a707b29c70997b42fccb",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "4560d6cca6de863fcfbd538c84e778ae63124693ce73ff9a8f4fe69a57b8234e",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "46350d865755e3567c5775503d7d1c4d644e5e22410b29d08643523089613557",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "47a1c17f8dfa58c11ecf20b1e6c5983737976641761492bce31d6f1941c1e6aa",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "4af6736fd410202e9d1dcd734404ca3262597bb24b62fc6cb9e601f484d1bd93",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "82a220b65efdfe7e6763401fb480349a1da0d511b2366472d1d25e5b9e761e30",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "8980b7109e789cc0b968f744fcaf2c23ac478295a6ad49822d1b929228e9ba73",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "93cc98e61c5706ccc81f2f7ea053759dda8e0941e27a3fee744189bd48faf59f",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "95f0a0275f29eb5684a6faed2cb0192c5a5b930c39ee3ec033514737da0487cb",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "96df5c28fe0d8b14031c311b7582234aca876672e59f7d6b65e8f1eadfcc0543",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "96eadccb9439622ef22f5eabab89a9c7879df10f7b9e15e617c85c75074e29ec",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "9b0b6996f0f3f86f0c274f060d3a752aeb084563908e07be7038b9fca3291b9b",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "9ba2551a667068342672664fa20bbef7fa2d41b8e619bab285c756376931be8e",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "bc2145dd2485a9005f9950ac7ade545372e329742cd8e664fc101583dc4ea2d5",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "c2542f242b5a9993c113a2084ed40b9227a724a2abb81f198370d246b83f2a97",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "c520e7b5efc7a871aa8fb5951c65538ba8365c2c593612c772c88d439e4de036",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "ce90bb7068bb2b4d7c2eb0cc0d31ac3f1ff3f3081a9cd828d5d4397e09b903ed",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "e36359ac8f6a064961aceadb9b96d91e3db48c8526f549b14fa3f7885f4c7606",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "eb7ac2ba9a090cde3b84e75150c8c93ebb5129638c3cf067e4cc2e4c37d8439b",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "fd8dfc3c76d0bb560bc20382ff81efb8445c78d011105dfeb0c97119f261bc00",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "007ef440ef59dc5f4d30229ee9428fefe626375877104aa9b55d6e8bb9936f3c",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "1bd255fe4858f16bedb1d70fa125448c8b7d4c13ed9038292f0a648027de6c0b",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "1bd255fe4858f16bedb1d70fa125448c8b7d4c13ed9038292f0a648027de6c0b",
+          "attempt": 1,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": null,
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "1bd255fe4858f16bedb1d70fa125448c8b7d4c13ed9038292f0a648027de6c0b",
+          "attempt": 2,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "43e170abd37d458aa64f94440634892068377e30fa917fd334abcfcfca6e42a8",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "8674dd7fbf879a92ef150a2eac4f0c6c0c41df9bb24daf9ebbdbda9a08626138",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "a85cf2de95873579e4bf9dae5a01c311efea7127a60bb18bf1a754fcbd15b655",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "a85cf2de95873579e4bf9dae5a01c311efea7127a60bb18bf1a754fcbd15b655",
+          "attempt": 1,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": null,
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "a85cf2de95873579e4bf9dae5a01c311efea7127a60bb18bf1a754fcbd15b655",
+          "attempt": 2,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "aace118e915c6191067b840be6c8d9b48c5818eab79cd718b4caf36089b64556",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "b24ae142bc31e7ed570d4ba9f44a1f9a60a43d146b3df8dc578c29f6354ada8a",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "b722cdfe16e35c7c2cd0ff71945f9595d1681abddbb89c74b4b99698aebd78d6",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "b722cdfe16e35c7c2cd0ff71945f9595d1681abddbb89c74b4b99698aebd78d6",
+          "attempt": 1,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": null,
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "b722cdfe16e35c7c2cd0ff71945f9595d1681abddbb89c74b4b99698aebd78d6",
+          "attempt": 2,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "cd98f5d9a8a12761490bd3a6862b31ec55983943ace07ad2ec6f778e2f428d5c",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "d1fd62f6209cfbce107c497b53fb079d6ceaed51625c0bb1cf11383ae3a32917",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "d1fd62f6209cfbce107c497b53fb079d6ceaed51625c0bb1cf11383ae3a32917",
+          "attempt": 1,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": null,
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "d1fd62f6209cfbce107c497b53fb079d6ceaed51625c0bb1cf11383ae3a32917",
+          "attempt": 2,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 2,
+          "requestDigest": "72de6b1eb776c3c3919285f31e1458914e2a572c0bf9bd07e57fb57fbd7f6168",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 2,
+          "requestDigest": "8fc396c18f13d32d82b7b5575d5da6e0a85cd483db50380a744dc926b36842d2",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 2,
+          "requestDigest": "bd394a8038b17f2b93e4f6ab8c875352701092dbeef0742e89599d4f9aceb408",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 3,
+          "requestDigest": "292748fc95286db93072a8feb72d847c8728e183a5c4a11ef7ceb6f30ec85dec",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 3,
+          "requestDigest": "d94467d715242482ebc6ca01a84f37aa7d0d04a65c5eabd3fc80a29e67964ba9",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 3,
+          "requestDigest": "ecf28c1555652e131f4b9a140e496dea10d1e63bb06ef48e519e708bafc43527",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 4,
+          "requestDigest": "4ba0700b4c52ad71e2d50743159c99168b75db48c9397d26ccd2ee2c2da3c7ec",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 4,
+          "requestDigest": "9cb1d94aeb77cbf6aab9b608438082b74c53007a69825b2eb292aa743130510e",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 4,
+          "requestDigest": "a583f61c0ca4728a7a8b931b7f375b53e5d6cb53c980a0a05400ae002654bf06",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "15b07ef43c02ed578dcc434e6cbe2f6543e04b16956fd0cae5cf7dd7510a827a",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "958e3d573a6fdc6f4a383fd7f5deccb3b44c4a1f1532272e7738df3bbb8345be",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "9df38a55e24fa29e9e895753e03b3452f1d76aefeea82344244e8a679ed7953c",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 6,
+          "requestDigest": "03b818baccc048a2b5f742e6dafd76355a423c6111288355ac36c0153c1d6ef0",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 6,
+          "requestDigest": "a083eb269e4cf68065dc64fd6bae522e4f3f31f18b2d2e3c9ca3f0fa9bb4bb55",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 6,
+          "requestDigest": "ac8f467b9ea40c4b9d3d09c7ae6e407f2edcc5b244306ac12127bd0e0e798c93",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 7,
+          "requestDigest": "5cdea391475f74b03081fb724be78656d8ecbf92f2384f9fdcc97b8c5031207e",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 7,
+          "requestDigest": "8014aec6cfd741f457ccb001ff543a5c2678e19ad0db22a5e11cdf4e270bd42e",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 7,
+          "requestDigest": "a0d3db2435fe63fb86616cdfbb01a995b856517707e53f5b8fd6dcc5621319e7",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 8,
+          "requestDigest": "af689dde7a8130a17258048a54ff19e1c4e368d5e97cde853ee54316d7421b6b",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 8,
+          "requestDigest": "b73106bc8eb53c0d7e4b4207bf19e72f914fc6abe382ece33fe0cf1eeab75e88",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 8,
+          "requestDigest": "efd3fe7b54f9318e5bb77edb64bb98ada292e5e375f848102ca4d1004890e04d",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-review-contract-v2-controls",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false,
+      "registeredProfileInputs": {
+        "path": "tests/support/review-categories.ts",
+        "sha256": "9aa348934a32556d6b04d19a8de72eefb46849d8f8bb2d2946a7acf1b9709e07"
+      }
+    },
+    {
+      "fixtureIdentity": "sample1-series-consistency-authored",
+      "registeredProfile": "series",
+      "registeredPurposes": [
+        {
+          "kind": "journey",
+          "id": "J-13",
+          "registrationPath": "e2e/run-j13.mjs",
+          "fixtureSelectionSha256": "249e96caee6f9e24791a52c8114d659534037b040ba0157c2ae448921e0fc750",
+          "sameSelectionsAtPreparationBase": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/captured-procedures.test.ts",
+          "registrationPath": "tests/service/captured-procedures.test.ts",
+          "fixtureSelectionSha256": "5af4ff9daf14fb1b76cfcc6606d57723db62b14f04fb8fca7011ca7c140d404f",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/review-runs.test.ts",
+          "registrationPath": "tests/service/review-runs.test.ts",
+          "fixtureSelectionSha256": "7bc705cb631c6d6c10afd9614f15fa24085a09d10adc20838163199ab53065fa",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/series-consistency-fixture-generator.test.ts",
+          "registrationPath": "tests/service/series-consistency-fixture-generator.test.ts",
+          "fixtureSelectionSha256": "976f54a6a9805b49c7957c1b08ae0e243e79632715435e7ea747be262590e43a",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/start-when-online-followups.test.ts",
+          "registrationPath": "tests/service/start-when-online-followups.test.ts",
+          "fixtureSelectionSha256": "bd2691b719b2c9c2eb561f508c60b4d2ed4f2caae699978ae97b091dc08d80b7",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/series-consistency.test.ts",
+          "registrationPath": "tests/service/series-consistency.test.ts",
+          "fixtureSelectionSha256": "d00f00e4ac7e2db382294f2cd924a05496a8d1b09b684f8ed74cf1bbf52a55a2",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/series-exclusion-runs.test.ts",
+          "registrationPath": "tests/service/series-exclusion-runs.test.ts",
+          "fixtureSelectionSha256": "d00f00e4ac7e2db382294f2cd924a05496a8d1b09b684f8ed74cf1bbf52a55a2",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        }
+      ],
+      "allowedTaskKinds": [
+        "editorial-review/series-consistency"
+      ],
+      "sessionPurpose": null,
+      "taskContractIdentities": [
+        "ai7.editorial-review/1"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/review/review-category-contract.ts",
+        "fixedFileSha256": "1cac3679ee0501e5f6f08797a00043b4562d536671ada27c5e4eecd8013b0df2",
+        "existingContractBytesUnchanged": true,
+        "addedExportExcluded": "REVIEW_CATEGORY_SELECTED_PREFERENCE_PROMPT_SCHEMA",
+        "constants": {
+          "REVIEW_CATEGORY_PROMPT_CONTRACT_SCHEMA": "ai7.editorial-review.prompt-contract/2",
+          "REVIEW_CATEGORY_RESULT_SET_REVISION_SCHEMA": "ai7.editorial-review.result-set-revision/1",
+          "REVIEW_CATEGORY_SUCCESSOR_REVISION_SCHEMA": "ai7.editorial-review.result-set-revision/2",
+          "REVIEW_CATEGORY_UNIT_RESULT_SCHEMA": "ai7.editorial-review.unit-result/2",
+          "REVIEW_CATEGORY_UNIT_RESULT_SCHEMA_V1": "ai7.editorial-review.unit-result/1"
+        }
+      },
+      "capturedTaskPromptContractDigests": [],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/analysis/execution.ts",
+        "sha256": "75fe09cc4aeb9d84774c59be547dcbf80b3dc7e2460bfac00651da405de377f3"
+      },
+      "planCompositionDerivation": {
+        "path": "src/service/analysis/baseline-analysis-store.ts",
+        "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
+      },
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "e02a1d5a3eb3750c8c5620c2a236dd51e67faa17606b3dab2da99319d5c4a8ed",
+      "fixtureFile": "tests/fixtures/model/sample1-series-consistency-authored.json",
+      "fixtureFileSha256": "8ffbf90824dc0c4098cdff2924da9643dff6c9a73fa3104689e42e75cd67e6e4",
+      "fixtureProvenance": "authored",
+      "orderedLineage": [
+        {
+          "identity": "sample1-series-consistency-authored",
+          "fixtureFile": "tests/fixtures/model/sample1-series-consistency-authored.json",
+          "sha256": "8ffbf90824dc0c4098cdff2924da9643dff6c9a73fa3104689e42e75cd67e6e4"
+        }
+      ],
+      "resolvedLineageSha256": "3f1aa75922700a7abf16bd3d04f33af8c72ac5a580572e75c5196f7197a05d00",
+      "allowedExistingResultSchemas": [
+        "ai7.analysis.assurance-sampling-result/1",
+        "ai7.analysis.run-report-reflection-result/1",
+        "ai7.editorial-review.unit-result/1"
+      ],
+      "allowedCapturedSubjects": [],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "081a46f7eec93ecad6b1ce5ffdebbe67484489566b421188aa00dfa0bf0004e4",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-series-consistency-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "29ab91c0a7ae34ea068407ef850bd589e8e1814ae94f7a47a1489ba8b9f999dc",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-series-consistency-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "2d56b42a55f8bfe7059774bb65e6a09f45ffaa21ceecf0e8d539240f32e6c78c",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-series-consistency-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "5c8886cfcea12869bbcbea8150ce75cbba199a6db0294de3d6b74a35bbb60b9c",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-series-consistency-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "2dc28a02725d4734265c7881f2d52efab6a91e32a34cec22a92edaf7005412f6",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-series-consistency-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 2,
+          "requestDigest": "d1b6408577203f38897fe183fbbfdec0eb33976dce4205a1184354c7e35010f3",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-series-consistency-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 3,
+          "requestDigest": "6f4cb9d0ab22671f3fa2d94cb87fb1421103b9c4ca1fcd9110abe7430417af86",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-series-consistency-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 4,
+          "requestDigest": "f9121daf911a541c81d5556a7fdb9f4f7c915bc46a634bac50deaad32c126951",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-series-consistency-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "43e34703e20d30f099a7e0032904800a34e6904cda9ea21e86d7994e91b7ba94",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-series-consistency-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 6,
+          "requestDigest": "5dd066e54ababfb10c26f56af544c0bb2940718234be00b9acf9ddf5724d2c6c",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-series-consistency-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 7,
+          "requestDigest": "d955d3ebc1e66bd514aea084574be6a4feccff2dc144fcedc36840844693c6bc",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-series-consistency-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 8,
+          "requestDigest": "c4d2b5bbf52b4c66a8670f285d1342a5e32d7bf1215d112d3ebc800b2c612bb0",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-series-consistency-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/1",
+          "capture": null
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false,
+      "registeredProfileInputs": {
+        "path": "tests/support/series-consistency.ts",
+        "sha256": "a7be7ddeee72717f82828f8029785f84380225488a69c0942dcf3b72f5d549db"
+      }
+    },
+    {
+      "fixtureIdentity": "sample1-writing-authored",
+      "registeredProfile": "writing",
+      "registeredPurposes": [
+        {
+          "kind": "registered-service-test",
+          "id": "tests/service/run-kind-controls.test.ts",
+          "registrationPath": "tests/service/run-kind-controls.test.ts",
+          "fixtureSelectionSha256": "0e32e95032d42bdc3e6c8a71a6a4303d8ce302c723ca5a1b44eb22178b432fd3",
+          "sameSelectionsAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true
+        },
+        {
+          "kind": "journey",
+          "id": "J-07",
+          "registrationPath": "e2e/run-j07.mjs",
+          "fixtureSelectionSha256": "3358411218f3ce083ad08aa4d8d0fb91dcf36f2df3345683964a2bd36d7c7fd1",
+          "sameSelectionsAtPreparationBase": true
+        }
+      ],
+      "allowedTaskKinds": [
+        "writing"
+      ],
+      "sessionPurpose": null,
+      "taskContractIdentities": [
+        "ai7.writing/1"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/writing/writing-contract.ts",
+        "sha256": "1cc766dc003d5b90c7ec353c80acd70d218d3033026e74589464b3396d88e613",
+        "constants": {
+          "WRITING_PROMPT_CONTRACT_SCHEMA": "ai7.writing.prompt-contract/2",
+          "WRITING_PROMPT_CONTRACT_SCHEMA_V1": "ai7.writing.prompt-contract/1",
+          "WRITING_PROMPT_CONTRACT_SCHEMA_V3": "ai7.writing.prompt-contract/3",
+          "WRITING_RESULT_SET_REVISION_SCHEMA": "ai7.writing.result-set-revision/1",
+          "WRITING_SUCCESSOR_REVISION_SCHEMA": "ai7.writing.result-set-revision/2",
+          "WRITING_SYNTHESIS_RESULT_SCHEMA": "ai7.writing.synthesis-result/1",
+          "WRITING_UNIT_RESULT_SCHEMA": "ai7.writing.unit-result/1"
+        }
+      },
+      "capturedTaskPromptContractDigests": [],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/analysis/execution.ts",
+        "sha256": "75fe09cc4aeb9d84774c59be547dcbf80b3dc7e2460bfac00651da405de377f3"
+      },
+      "planCompositionDerivation": {
+        "path": "src/service/analysis/baseline-analysis-store.ts",
+        "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
+      },
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "e02a1d5a3eb3750c8c5620c2a236dd51e67faa17606b3dab2da99319d5c4a8ed",
+      "fixtureFile": "tests/fixtures/model/sample1-writing-authored.json",
+      "fixtureFileSha256": "e658c268f3eb1d3e2992024cf59747b0f8194df347bdf7cf27ae07e1b1aaa845",
+      "fixtureProvenance": "authored",
+      "orderedLineage": [
+        {
+          "identity": "sample1-writing-authored",
+          "fixtureFile": "tests/fixtures/model/sample1-writing-authored.json",
+          "sha256": "e658c268f3eb1d3e2992024cf59747b0f8194df347bdf7cf27ae07e1b1aaa845"
+        }
+      ],
+      "resolvedLineageSha256": "0462d5d4494abfb9e383d29bf91c953905d606613ab3146bab925b466fbc47b8",
+      "allowedExistingResultSchemas": [
+        "ai7.analysis.run-report-reflection-result/1",
+        "ai7.writing.synthesis-result/1",
+        "ai7.writing.unit-result/1"
+      ],
+      "allowedCapturedSubjects": [],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "ab14d91a17eef5f90142cdb90274bf349d33d56963d77a5edd19da0cd41637b1",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-writing-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.writing.synthesis-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "eb8f602acdcd421de4c4c0087c48ad86a0d9772697b9eed6e852cab04c2dcc80",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-writing-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.writing.synthesis-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "f3b838fe1610cc66b860517f75ef988159445cabbba4459cae1963f1a10aad6e",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-writing-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "8ac02d176346395d26c87d00da92bf57b866e3d8d833087f94b44e9e8bab09bd",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-writing-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.writing.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "976fcec04b6ee048e70f445a1ff0d3082c0be5dc5b7754395b11680d39bc0b50",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-writing-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.writing.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 2,
+          "requestDigest": "504b6b1f3716b94da1be7e5710e3e3679dea351b70967b8deb7e9d1e50f814e6",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-writing-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.writing.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 2,
+          "requestDigest": "ac8f1ace5e0f7d560ad611d4a82f36d5b2700fb2b4f904d2c78a0978faeac52f",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-writing-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.writing.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 3,
+          "requestDigest": "835cf9c871ab4df9ad7cc433899ffdbc9f11ab27f4552f57a45791cdb88f02db",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-writing-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.writing.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 3,
+          "requestDigest": "fd9054b72a43eb9d85be657a4bd27f61c9b2ae653ad9d30fff6a6a5a5861b630",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-writing-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.writing.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 4,
+          "requestDigest": "45616eb7f80abc7caeafacc91d8afbd69a31f38fe6519c440bcdba63d01080b7",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-writing-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.writing.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 4,
+          "requestDigest": "52a0e08b72f7bfbbb271a4a6c391a8918d2049b939c26aff0460a5f797c0f56e",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-writing-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.writing.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "023cba7009ae0963dc60fd987d2e0dc15d734fcfa61ec5263c9fd3247e12f3ba",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-writing-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.writing.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 5,
+          "requestDigest": "3ebca65e5a9dd412736c38f1b598e620aaa3b3045faa948a2cab36d9197b109d",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-writing-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.writing.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 6,
+          "requestDigest": "2218e4fdf243481bd2ae1207d6488f1f203f622ac9b004353d4eb4eb404580dd",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-writing-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.writing.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 6,
+          "requestDigest": "bb3910043cc9e4c362eee93adc783851bd793520526363b890983ecc5144fb54",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-writing-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.writing.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 7,
+          "requestDigest": "7a883a1bf5fa2f8286b9243586623331478fa1c8460dbafdd5b61553b5fea023",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-writing-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.writing.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 7,
+          "requestDigest": "a0d248c758bddca8c9b8747ffdde07531a6ae144b41b40df3415456d1ac3504f",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-writing-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.writing.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 8,
+          "requestDigest": "60465f45bd5e89534adb7195916d20b3633ae2af817f38fd94baf2c9a65b1795",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-writing-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.writing.unit-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 8,
+          "requestDigest": "a373675b85a63c4d6937fb053f5114f87f05bb97bc37c21fe2347bd9e650d992",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "sample1-writing-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.writing.unit-result/1",
+          "capture": null
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false
+    },
+    {
+      "fixtureIdentity": "synthetic-editorial-review-authored",
+      "registeredProfile": "review",
+      "registeredPurposes": [
+        {
+          "kind": "registered-editorial-evidence-case",
+          "id": "review-typos-synthetic-lighthouse",
+          "registrationPath": "tests/editorial-cases/cases/review-typos-synthetic-lighthouse.json",
+          "caseFileSha256": "7ee0d3666450731129a49ed5f121752a8c40dbe1a46bbd39cbfc3c1c36e6330d",
+          "caseInputSha256": "90f060b26ce51e367ad3fce664bc05ab0d2bdf38b0b43b51feb5db7596274703",
+          "owner": "tests/editorial-cases/runner/index.ts",
+          "selectedPolicyPassedToPolishOwner": null,
+          "newCapabilityConsumptionClaimed": false
+        },
+        {
+          "kind": "registered-editorial-evidence-case",
+          "id": "review-style-synthetic-museum",
+          "registrationPath": "tests/editorial-cases/cases/review-style-synthetic-museum.json",
+          "caseFileSha256": "b14946d174cd35962e3c6f285659f35ebaa026cdc150887f9de273a373d43792",
+          "caseInputSha256": "f510ede92f943a9315260cf2b86c6b75ce728a5a1deeb5ba2ae854cfa4c77675",
+          "owner": "tests/editorial-cases/runner/index.ts",
+          "selectedPolicyPassedToPolishOwner": null,
+          "newCapabilityConsumptionClaimed": false
+        }
+      ],
+      "allowedTaskKinds": [
+        "editorial-review/typos-and-usage",
+        "editorial-review/style-and-format"
+      ],
+      "sessionPurpose": null,
+      "taskContractIdentities": [
+        "ai7.editorial-review/2"
+      ],
+      "taskContractStaticSha256": null,
+      "taskContractAbsenceReason": "identity-is-versioned; exact prompt/composition/source digests remain required per Run",
+      "promptContractOwner": {
+        "path": "src/service/review/review-category-contract.ts",
+        "fixedFileSha256": "1cac3679ee0501e5f6f08797a00043b4562d536671ada27c5e4eecd8013b0df2",
+        "existingContractBytesUnchanged": true,
+        "addedExportExcluded": "REVIEW_CATEGORY_SELECTED_PREFERENCE_PROMPT_SCHEMA",
+        "constants": {
+          "REVIEW_CATEGORY_PROMPT_CONTRACT_SCHEMA": "ai7.editorial-review.prompt-contract/2",
+          "REVIEW_CATEGORY_RESULT_SET_REVISION_SCHEMA": "ai7.editorial-review.result-set-revision/1",
+          "REVIEW_CATEGORY_SUCCESSOR_REVISION_SCHEMA": "ai7.editorial-review.result-set-revision/2",
+          "REVIEW_CATEGORY_UNIT_RESULT_SCHEMA": "ai7.editorial-review.unit-result/2",
+          "REVIEW_CATEGORY_UNIT_RESULT_SCHEMA_V1": "ai7.editorial-review.unit-result/1"
+        }
+      },
+      "capturedTaskPromptContractDigests": [],
+      "staticPromptDigestWhereAbsent": "derived-only-from-exact-registered-profile-and-frozen-plan-inputs; not-a-default-or-wildcard",
+      "compositionIdentity": null,
+      "compositionDigest": null,
+      "compositionDigestBasis": "per-Run-exact-describeComposition; never fabricated as a historical constant",
+      "compositionDerivation": {
+        "path": "src/service/harness/primary-agent-harness.ts",
+        "sha256": "fc900493eb6548f2753ab56ce13a0aecd4b50c841172046e9ddb3f8c4017f68d"
+      },
+      "compositionCaller": {
+        "path": "src/service/analysis/execution.ts",
+        "sha256": "75fe09cc4aeb9d84774c59be547dcbf80b3dc7e2460bfac00651da405de377f3"
+      },
+      "planCompositionDerivation": {
+        "path": "src/service/analysis/baseline-analysis-store.ts",
+        "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
+      },
+      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "categoryAndToolSet": {
+        "allowedOutboundDataCategories": [
+          "public-or-synthetic"
+        ],
+        "allowedTools": []
+      },
+      "categoryAndToolSetSha256": "e02a1d5a3eb3750c8c5620c2a236dd51e67faa17606b3dab2da99319d5c4a8ed",
+      "fixtureFile": "tests/fixtures/model/synthetic-editorial-review-authored.json",
+      "fixtureFileSha256": "c9643fba6d07074521fd582609b68188013fe3be8f0e327e9e3398354a3ecc76",
+      "fixtureProvenance": "authored",
+      "orderedLineage": [
+        {
+          "identity": "synthetic-editorial-review-authored",
+          "fixtureFile": "tests/fixtures/model/synthetic-editorial-review-authored.json",
+          "sha256": "c9643fba6d07074521fd582609b68188013fe3be8f0e327e9e3398354a3ecc76"
+        }
+      ],
+      "resolvedLineageSha256": "802615ca2977c1a767873382df7b0c892d02e3f94db9ab71bbab10186e80becb",
+      "allowedExistingResultSchemas": [
+        "ai7.analysis.assurance-sampling-result/1",
+        "ai7.analysis.run-report-reflection-result/1",
+        "ai7.editorial-review.unit-result/2"
+      ],
+      "allowedCapturedSubjects": [],
+      "absentCaptureSubject": null,
+      "absentSubjectMeaning": "no-historical-subject-proof; existing pinned resolver and exact key still required",
+      "entries": [
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "1742a8c124452c6507254b63c9deb0d230b2e51c652dc7c3790f7cb6b1f6b27c",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "synthetic-editorial-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "29d1a2468bcb5364ac7fe05409cfa47a76f61c7da2f60b4cd6845a31dd39033d",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "synthetic-editorial-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "3f156124cf1df9b05a2a1fc3a9390647c3e1a81614d1594c80610e6ad6b04fbd",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "synthetic-editorial-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "40bae73a308d55d75a16fd0e4e2ab66ac6bac7ed9791eb21cc9a40e1f38cd494",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "synthetic-editorial-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.assurance-sampling-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "6d264430048ec70de848db707247480865fd70d7f06bee3c6e9172be2b0d2e68",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "synthetic-editorial-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 0,
+          "requestDigest": "d0146db48c32fc7fcab4bdb3e7f3cc8a416456bd102e891b794905c1c45bfb15",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "synthetic-editorial-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.analysis.run-report-reflection-result/1",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "992c587a4433bffcdcdac64b5abdb09f78fd20c01884a1902ff5e3a629f78b05",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "synthetic-editorial-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        },
+        {
+          "unitOrdinal": 1,
+          "requestDigest": "ffcf3cbd26cdad0532b4697c2d3235ad99cc4ec8847114333eb3cf0bc47dcf96",
+          "attempt": null,
+          "entryOriginFixtureIdentity": "synthetic-editorial-review-authored",
+          "contentDigest": null,
+          "contentDigestLookup": "test-constructor-only; not-a-launch-matching-alternative",
+          "responseKind": "unit-result",
+          "resultSchema": "ai7.editorial-review.unit-result/2",
+          "capture": null
+        }
+      ],
+      "perRunChecks": [
+        "exact-registered-purpose-and-profile",
+        "exact-executable-kind-or-session-purpose",
+        "frozen-prompt-contract-and-composition-digests",
+        "frozen-source-category-tool-and-message-digests",
+        "exact-fixture-identity-file-lineage-and-entry-key",
+        "existing-attempt-resolution-semantics",
+        "final-payload-egress-gate",
+        "current-binding-source-and-exclusion-standing"
+      ],
+      "newContractFallbackAllowed": false,
+      "newFixtureRuleCapabilitiesInherited": false,
+      "registeredProfileInputs": {
+        "path": "tests/support/review-categories.ts",
+        "sha256": "9aa348934a32556d6b04d19a8de72eefb46849d8f8bb2d2946a7acf1b9709e07"
+      }
+    }
+  ],
+  "manifestSha256": "0696535cdedb22cbdbb39a03577171224104fae42ade7b567c47a7e92601bfdc",
+  "manifestCanonicalization": "UTF-8 JSON; recursively sorted object keys; array order retained; no whitespace; SHA-256",
+  "resolvedLineageCanonicalization": "SHA-256 of leaf-first identity:rawFileSha256 lines joined by LF with no trailing LF",
+  "fixtureResolverSemantics": {
+    "variantEntryOverridesSameBaseKey": true,
+    "key": [
+      "unitOrdinal",
+      "requestDigest",
+      "attempt-or-null"
+    ],
+    "attemptSpecificThenNullFallback": true,
+    "contentDigestIsProductionLookupAlternative": false,
+    "outcomeUnknownLaunchJourneyOnly": "J-10",
+    "retainedV1BaselineCompleteJourneyOnly": "J-04"
+  },
+  "newLaunchPlans": "v29 with exact legacy profile/manifest pin; preserve historical request construction and request keys",
+  "persistedV1Plans": "remain v1; historical compatibility path; never silently relabel or rewrite",
+  "missingFixtureOrTupleResult": "existing-disclosed-refusal",
+  "newContractPrecedenceRequired": true,
+  "newKindsToolsSourcesThroughputBackgroundOriginsOrSubagentsGranted": false,
+  "exactFixedMetadataUnchangedAtPreparationBase": "aeeb0ae02f8c11a155acb829709fb2fa90a2548e"
+}
+```
