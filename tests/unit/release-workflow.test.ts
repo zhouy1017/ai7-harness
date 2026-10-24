@@ -96,11 +96,17 @@ describe('nightly source and artifact admission', () => {
     }
     expect(() => verifyGate(candidate, run, jobs.slice(0, -1))).toThrow(/gate/);
     expect(() => verifyGate(candidate, run, [...jobs, jobs[1]])).toThrow(/gate/);
-    for (const status of ['failure', 'skipped', 'cancelled']) {
-      expect(() => verifyGate(candidate, run, jobs.map((job, index) => index === 2 ? { ...job, conclusion: status } : job))).toThrow(/gate/);
+    // ADR 0097: the Windows Gate job (index 1) and the Windows package job (index 2) are each required.
+    for (const at of [1, 2]) {
+      for (const status of ['failure', 'skipped', 'cancelled']) {
+        expect(() => verifyGate(candidate, run, jobs.map((job, index) => index === at ? { ...job, conclusion: status } : job))).toThrow(/gate/);
+      }
     }
+    const windowsCandidate = passedJob('Candidate #9 / J-01 + admitted set (Windows Server 2025 x64 CI)', 2, 20);
+    expect(() => verifyGate(candidate, run, jobs.map((job, index) => index === 1 ? windowsCandidate : job))).toThrow(/gate/);
     expect(() => verifyGate(candidate, run, jobs.map((job, index) => index === 2 ? extraCandidate : job))).toThrow(/gate/);
     expect(() => verifyGate(candidate, run, jobs.map((job, index) => index === 1 ? { ...job, steps: [] } : job))).toThrow(/gate/);
+    expect(() => verifyGate(candidate, run, jobs.map((job, index) => index === 1 ? { ...job, started_at: time(0) } : job))).toThrow(/gate-order/);
     expect(() => verifyGate(candidate, run, jobs.map((job, index) => index === 2 ? { ...job, started_at: time(3) } : job))).toThrow(/gate-order/);
   });
 
