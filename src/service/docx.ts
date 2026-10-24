@@ -1709,7 +1709,9 @@ function createWordPartParser(part: string, inventory: WordInventoryDraft,
     if (skipped) { frames.push(frame); return; }
     const word = WORD_NAMESPACES.has(tag.uri);
     if (ordinal === 0) {
-      story = main || (word && ['document', 'hdr', 'ftr', 'footnotes', 'endnotes', 'comments', 'txbxContent'].includes(tag.local));
+      const math = tag.uri === 'http://schemas.openxmlformats.org/officeDocument/2006/math' || tag.uri === 'http://purl.oclc.org/ooxml/officeDocument/math';
+      story = main || (word && ['document', 'hdr', 'ftr', 'footnotes', 'endnotes', 'comments', 'txbxContent', 'customXml'].includes(tag.local)) ||
+        (math && (tag.local === 'oMath' || tag.local === 'oMathPara'));
       if (story) inventory.storyParts.push(part);
     }
     if (main && ordinal === 0) mainRootValid = word && tag.local === 'document';

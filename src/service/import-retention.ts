@@ -175,7 +175,7 @@ export interface WordSourceMark {
 
 export type WordIncompatibilityCode = 'table-revision' | 'custom-xml-or-math-revision' |
   'story-or-text-box-revision' | 'incompatible-paragraph-join' | 'invalid-move-graph' |
-  'unrepresentable-comment' | 'unusable-reading';
+  'unrepresentable-comment' | 'unusable-reading' | 'resource-limit';
 
 export interface WordIncompatibility {
   code: WordIncompatibilityCode;

@@ -174,6 +174,22 @@ describe('successor exact source correspondence (#1132)', () => {
       expect(() => validateWordSampleCursor({ ...cursor, ...change }, { sampleDigest, detailDigest }, lookup)).toThrow('Word');
     }
   });
+
+  it('does not turn the existing imported-mark bound into an accepted-baseline sample cap', () => {
+    const count = 20_001;
+    const body = Array.from({ length: count }, (_, index) => `<w:p><w:r><w:t>b</w:t></w:r>` +
+      `<w:ins w:id="${index}"><w:r><w:t>n</w:t></w:r></w:ins></w:p>`).join('');
+    const compiled = compileWordTrackedDocxBytes(buildSyntheticTrackedDocx(body));
+    if (compiled.kind !== 'ready') throw new Error('expected accepted mode to retain the complete template manifest');
+    expect(compiled.templates).toHaveLength(count);
+    expect(compiled.readings.rejected.usable).toBe(false);
+    expect(compiled.readings.rejected.marks).toEqual([]);
+    expect(compiled.readings.rejected.refusals.some((reason) => reason.code === 'resource-limit')).toBe(true);
+    expect(compiled.readings.accepted.usable).toBe(true);
+    expect(compiled.readings.accepted.blocks).toHaveLength(count);
+    expect(compiled.readings.accepted.marks).toEqual([]);
+    expect(compiled.previewReading).toBe('accepted');
+  });
 });
 
 beforeEach(async () => {

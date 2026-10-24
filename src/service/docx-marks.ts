@@ -952,11 +952,14 @@ export function compileWordReading(graph: WordRevisionGraph, decoded: ReadonlyMa
   const mappingDigest = sha256Hex(canonicalJson(segments));
   const comments = wordCommentMarks(graph, blocks, commentBodies, signal);
   const revisions = wordRevisionMarks(graph, blocks, decoded, templates, reading, signal);
-  const marks = [...comments.marks, ...revisions.marks].sort((a, b) => a.mark.blockPosition - b.mark.blockPosition ||
+  let marks = [...comments.marks, ...revisions.marks].sort((a, b) => a.mark.blockPosition - b.mark.blockPosition ||
     a.mark.fromGrapheme - b.mark.fromGrapheme || a.mark.toGrapheme - b.mark.toGrapheme || a.mark.ordinal - b.mark.ordinal)
     .map((entry, index) => ({ ...entry, mark: { ...entry.mark, ordinal: index + 1 } }));
-  requireMarks(marks.length <= MAX_IMPORTED_MARKS, 'too many comments or revisions');
   const refusals = [...comments.refusals, ...revisions.refusals];
+  if (marks.length > MAX_IMPORTED_MARKS) {
+    refusals.push({ code: 'resource-limit', part: 'word/document.xml', elementOrdinal: 0, paragraphIndex: null });
+    marks = [];
+  }
   const facts = { reading, textBoxes, usable: blocks.length > 0 && refusals.length === 0, blocks, segments, contentDigest, structureDigest, mappingDigest,
     commentMarks: comments.marks, marks, refusals,
     characterCount: blocks.reduce((count, block) => count + block.graphemeLength, 0) };
@@ -1090,7 +1093,9 @@ function wordCommentMarks(graph: WordRevisionGraph, blocks: readonly WordReading
       if (group.fragments.some((fragment) => fragment.atomOrdinal < first || fragment.atomOrdinal >= last)) { exact = false; break; }
       let entry = mapped.get(block.blockId);
       if (entry === undefined) {
-        requireMarks(marks.length + mapped.size < MAX_IMPORTED_MARKS, 'too many comments or revisions');
+        if (marks.length + mapped.size >= MAX_IMPORTED_MARKS) return { marks: [], refusals: [...refusals,
+          { code: 'resource-limit', part: 'word/document.xml', elementOrdinal: markers[0]!.elementOrdinal,
+            paragraphIndex: markers[0]!.location.paragraphIndex }] };
         entry = { block, groups: new Set() }; mapped.set(block.blockId, entry);
       }
       entry.groups.add(group);
@@ -1221,7 +1226,9 @@ function wordRevisionMarks(graph: WordRevisionGraph, blocks: readonly WordReadin
           ? template.before.length > 0 ? 'paragraph-merge' : 'paragraph-split' : template.before.length === 0 ? 'paragraph-insertion' : 'replacement',
         authorLabel: label, body: truncateToFit(body, MAX_MARK_BODY_CODE_UNITS), proposedText: null, status: 'open' };
     }
-    requireMarks(marks.length < MAX_IMPORTED_MARKS, 'too many comments or revisions');
+    if (marks.length >= MAX_IMPORTED_MARKS) return { marks: [], refusals: [...refusals,
+      { code: 'resource-limit', part: location.part, elementOrdinal: events.get(template.eventMembership[0]!)!.elementOrdinal,
+        paragraphIndex: location.paragraphIndex }] };
     marks.push({ mark: proposal, eventMembership: template.eventMembership, templateKey: template.templateKey,
       commentId: null, fragments: [...template.before, ...template.after] });
   }

@@ -218,6 +218,10 @@ describe('explicit tracked Word successor compiler (#1132)', () => {
       'custom/header.data': Buffer.from(`<q:hdr xmlns:q="${WORD_NS}"><q:p><q:ins q:id="1"><q:r><q:t>new</q:t></q:r></q:ins></q:p></q:hdr>`) })).compiled;
     expect(compiled.kind).toBe('unsupported');
     expect(compiled.inventory.locations[0]).toMatchObject({ part: 'custom/header.data', code: 'story-or-text-box-revision' });
+    const math = (await compileTrackedBody(plain, { 'custom/math.xml': Buffer.from('<m:oMath xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math" ' +
+      `xmlns:w="${WORD_NS}"><w:ins w:id="1"><m:r><m:t>x</m:t></m:r></w:ins></m:oMath>`) })).compiled;
+    expect(math.kind).toBe('unsupported');
+    expect(math.inventory.locations[0]!.code).toBe('custom-xml-or-math-revision');
   });
 });
 
