@@ -189,6 +189,10 @@ describe('real hosted Gate results independent of role receipts', () => {
     const nightly = { ...run, path: '.github/workflows/e2e-nightly.yml', event: 'workflow_dispatch',
       status: 'completed', conclusion: 'success', display_title: `E2E Nightly Full Gate · ${HEAD}` };
     expect(release.hostedGatePassed({ ...input, run: nightly })).toBe(true);
+    for (const incomplete of [[], [macJob], [jobs[0], jobs[0]],
+      [{ ...jobs[0], conclusion: 'failure' }], [{ ...jobs[0], status: 'in_progress', conclusion: null }]]) {
+      expect(release.hostedGatePassed({ ...input, run: nightly, jobs: incomplete })).toBe(false);
+    }
     expect(release.hostedGatePassed({ ...input, run: nightly, candidate: CORRECTED })).toBe(false);
     expect(release.hostedGatePassed({ ...input, run: { ...nightly, conclusion: 'cancelled' } })).toBe(false);
   });
