@@ -804,7 +804,8 @@
               "sourceRefreshAllowed": false,
               "wholeLedgerTransmissionAllowed": false,
               "modelSelectedClaimIdAllowed": false,
-              "ambientContextAllowed": false
+              "ambientContextAllowed": false,
+              "metadataByteLimitExcludesSourceUnitMessage": true
             },
             "research": {
               "searchReservationKey": [
@@ -2914,7 +2915,8 @@
               "sourceRefreshAllowed": false,
               "wholeLedgerTransmissionAllowed": false,
               "modelSelectedClaimIdAllowed": false,
-              "ambientContextAllowed": false
+              "ambientContextAllowed": false,
+              "metadataByteLimitExcludesSourceUnitMessage": true
             },
             "research": {
               "searchReservationKey": [
@@ -2945,7 +2947,8 @@
             "otherClaimWholeLedgerAmbientBookOrHouseMaterialPreferenceGuidelineOrImportedSourceInherited": false,
             "missingLedgerOrClaimResult": "disclosed-refusal-requiring-separately-authorized-upstream-work",
             "alreadySentWorkSettlement": "existing-cancellation-and-settlement-rules",
-            "freshResearchCaptureProvenanceOwner": "existing-provenance-and-retention-owner"
+            "freshResearchCaptureProvenanceOwner": "existing-provenance-and-retention-owner",
+            "immutableDecisionNotInventedRevision": true
           }
         }
       ]
@@ -3294,7 +3297,8 @@
         "fixture-recording",
         "developer-live"
       ],
-      "rejectionPrecedesTicketCredentialOrTransport": true
+      "rejectionPrecedesTicketCredentialOrTransport": true,
+      "unsafeUrlResult": "reject"
     }
   }
 }

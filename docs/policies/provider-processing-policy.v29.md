@@ -4,9 +4,9 @@
 
 [Canonical JSON](provider-processing-policy.v29.json) · [whole-document const schema](provider-processing-policy.v29.schema.json) · [candidate set v20](active-policy-set.v20.json) · [unchanged predecessor v1](provider-processing-policy.v1.json) · [ordinary-production counterpart v28](provider-processing-policy.v28.md).
 
-Exact JSON SHA-256: `ef450cf75877d226678066aa229d1c3981d413b62dea9be310a951b1d9dd361e`. Candidate set v20 SHA-256: `f9c4c45ef703383f7cf043bfd33c1e54b9c1d83cf6fde4645f5b3f02107453cc`. The globally numbered v29 is the development-ci successor of v1; immutable fixture-recording v2 is a different scope and is unchanged. The provider decision remains default deny, empty `providerAllowRules`, and zero live transmissions.
+Exact JSON SHA-256: `5aec0a8cb62ab6836294d88fc08a3a1a6130a2827db90274af4d0d377e678361`. Candidate set v20 SHA-256: `874706d31ebc6e969f38a355636491d9e1790d8c81b601515c36af4c167de767`. The globally numbered v29 is the development-ci successor of v1; immutable fixture-recording v2 is a different scope and is unchanged. The provider decision remains default deny, empty `providerAllowRules`, and zero live transmissions.
 
-The canonical JSON carries structured declarations only, as v26/v27 do. Candidate status, the per-delta authority map, the Owner decision wording and the specification narrative live in this unpinned projection and the Draft PR, so an accepted candidate never carries pending-status text in its pinned bytes. Constraints the specification states in prose are encoded as named keys (fixtureRuleSelection, review synthesis/instruction/guideline bounds, curation exclusions and the factual claim/recheck scope, payload and count additions). The v1 category vocabulary is retained and the two legacy local excerpt categories its tuples name are declared. Legacy registration pins are the exact registration-file SHA-256 at the frozen source with a verified selection-unchanged flag; every digest basis is stated in digestCanonicalization, and registeredPurposeBasis states that Journey and evidence-case purposes are complete while service-test purposes are documentary. The JSON blocks quoted below are the specification's proposed blocks; the candidate adds those named keys beside them.
+The canonical JSON carries structured declarations only, as v26/v27 do. Candidate status, the per-delta authority map, the Owner decision wording and the specification narrative live in this unpinned projection and the Draft PR, so an accepted candidate never carries pending-status text in its pinned bytes. Constraints the specification states in prose are encoded as named keys (fixtureRuleSelection, review synthesis/instruction/guideline bounds, curation exclusions and the factual claim/recheck scope, payload and count additions). The v1 category vocabulary is retained and the two legacy local excerpt categories its tuples name are declared. Legacy registration pins are the exact registration-file SHA-256 at the frozen source with a verified selection-unchanged flag; every digest basis is stated in digestCanonicalization, matchSemantics states that code-file pins are frozen-source provenance rather than runtime match preconditions (current code is revalidated by the selecting child at its base), and registeredPurposeBasis states that Journey and evidence-case purposes are complete while service-test purposes are documentary. The JSON blocks quoted below are the specification's proposed blocks; the candidate adds those named keys beside them.
 
 ## Six closed proposed fixture rules
 
@@ -27,7 +27,7 @@ The instruction block is <=1,200 graphemes only for typos-and-usage, with exact 
 
 ## Frozen legacy compatibility, separate from new capabilities
 
-The populated metadata-only manifest has **47 tuples, 34 registered fixture roots and 591 resolved entry-key rows**; all **53 fixture files** are independently pinned and unchanged between frozen `809c96f28bf111db39dac80b3b0743929779d52e` and authoring base `aeeb0ae02f8c11a155acb829709fb2fa90a2548e`. Manifest SHA-256 over the canonical tuples array: `ee20728723205e3e4c1e6df4170f7d9af8fd3e17f62b48e4a20d3ff2020e434e`. Full fixture inventory SHA-256: `2f15e004949aba1d1e8e537b7223dd1bade7b39db994e9e56164df38fe3f1e53`. Predecessor v1 SHA-256: `d9dfe8c13a58649d8d9f607364030468ae71832b94c9436291d29000795d725a`.
+The populated metadata-only manifest has **47 tuples, 34 registered fixture roots and 591 resolved entry-key rows**; all **53 fixture files** are independently pinned and unchanged between frozen `809c96f28bf111db39dac80b3b0743929779d52e` and authoring base `aeeb0ae02f8c11a155acb829709fb2fa90a2548e`. Manifest SHA-256 over the canonical tuples array: `7f55b9845550ed91cb44d9d7999a9b0a2ee6d79df9390adaab01194b81b1702a`. Full fixture inventory SHA-256: `2f15e004949aba1d1e8e537b7223dd1bade7b39db994e9e56164df38fe3f1e53`. Predecessor v1 SHA-256: `d9dfe8c13a58649d8d9f607364030468ae71832b94c9436291d29000795d725a`.
 
 Each tuple jointly requires its registered purpose/profile, executable kind or exact session purpose, prompt/contract/source/composition pins, category/tool-set hash, fixture file hash, ordered leaf-first base chain and resolved lineage hash, and finite `(unitOrdinal, requestDigest, attempt|null)` keys. Captured prompt/task digests and explicit null absences are retained. Per-Run source, binding and composition identities remain runtime checks, never invented historical constants. Dynamic custom-dimension identity is confined to the exact registered input profile and derived immutable version, without a wildcard kind. Exact source metadata contains no response/manuscript text.
 
@@ -1163,7 +1163,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "path": "src/service/analysis/baseline-analysis-store.ts",
         "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
       },
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "public-or-synthetic"
@@ -1237,7 +1237,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -1312,7 +1312,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "path": "src/service/analysis/baseline-analysis-store.ts",
         "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
       },
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "public-or-synthetic"
@@ -1489,7 +1489,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -1556,7 +1556,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "sha256": "910cedac5b65fef05a8b0916f7896b51139fdcdb5f12ed94aa6bdbbd6c2db737"
       },
       "planCompositionDerivation": null,
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "editor-selected-manuscript-excerpt"
@@ -1635,7 +1635,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -1700,7 +1700,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "sha256": "910cedac5b65fef05a8b0916f7896b51139fdcdb5f12ed94aa6bdbbd6c2db737"
       },
       "planCompositionDerivation": null,
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "editor-selected-manuscript-excerpt"
@@ -1763,7 +1763,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -1843,7 +1843,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "path": "src/service/analysis/baseline-analysis-store.ts",
         "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
       },
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "public-or-synthetic"
@@ -2021,7 +2021,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -2316,7 +2316,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "path": "src/service/analysis/baseline-analysis-store.ts",
         "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
       },
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "public-or-synthetic"
@@ -2478,7 +2478,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -2612,7 +2612,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "path": "src/service/analysis/baseline-analysis-store.ts",
         "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
       },
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "public-or-synthetic"
@@ -2846,7 +2846,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -2935,7 +2935,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "path": "src/service/analysis/baseline-analysis-store.ts",
         "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
       },
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "public-or-synthetic"
@@ -3113,7 +3113,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -3197,7 +3197,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "path": "src/service/analysis/baseline-analysis-store.ts",
         "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
       },
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "public-or-synthetic"
@@ -3363,7 +3363,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -3430,7 +3430,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "path": "src/service/analysis/baseline-analysis-store.ts",
         "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
       },
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "public-or-synthetic"
@@ -3619,7 +3619,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -3629,7 +3629,11 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "current-binding-source-and-exclusion-standing"
       ],
       "newContractFallbackAllowed": false,
-      "newFixtureRuleCapabilitiesInherited": false
+      "newFixtureRuleCapabilitiesInherited": false,
+      "restrictions": {
+        "onlyLaunchJourney": "J-10",
+        "registeredServiceTestConstructorOnlyOutsideJourney": true
+      }
     },
     {
       "fixtureIdentity": "sample1-baseline-transient-retry",
@@ -3761,7 +3765,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "path": "src/service/analysis/baseline-analysis-store.ts",
         "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
       },
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "public-or-synthetic"
@@ -4044,7 +4048,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -4112,7 +4116,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "sha256": "23d938f28d062d1fe3949d399739b0e558dc2e7f435589b3115f1eb200755599"
       },
       "planCompositionDerivation": null,
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "manuscript-conflict-region-excerpt"
@@ -4151,7 +4155,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -4231,7 +4235,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "path": "src/service/analysis/baseline-analysis-store.ts",
         "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
       },
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "public-or-synthetic"
@@ -4398,7 +4402,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -4475,7 +4479,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "path": "src/service/analysis/baseline-analysis-store.ts",
         "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
       },
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "public-or-synthetic"
@@ -4608,7 +4612,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -4684,7 +4688,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "path": "src/service/analysis/baseline-analysis-store.ts",
         "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
       },
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "public-or-synthetic"
@@ -4851,7 +4855,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -4919,7 +4923,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "sha256": "910cedac5b65fef05a8b0916f7896b51139fdcdb5f12ed94aa6bdbbd6c2db737"
       },
       "planCompositionDerivation": null,
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "editor-selected-manuscript-excerpt"
@@ -4972,7 +4976,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -5033,7 +5037,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "sha256": "910cedac5b65fef05a8b0916f7896b51139fdcdb5f12ed94aa6bdbbd6c2db737"
       },
       "planCompositionDerivation": null,
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "editor-selected-manuscript-excerpt"
@@ -5096,7 +5100,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -5157,7 +5161,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "sha256": "910cedac5b65fef05a8b0916f7896b51139fdcdb5f12ed94aa6bdbbd6c2db737"
       },
       "planCompositionDerivation": null,
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "editor-selected-manuscript-excerpt"
@@ -5220,7 +5224,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -5283,7 +5287,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "path": "src/service/analysis/baseline-analysis-store.ts",
         "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
       },
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "public-or-synthetic"
@@ -5455,7 +5459,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -5514,7 +5518,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "sha256": "910cedac5b65fef05a8b0916f7896b51139fdcdb5f12ed94aa6bdbbd6c2db737"
       },
       "planCompositionDerivation": null,
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "editor-selected-manuscript-excerpt"
@@ -5588,7 +5592,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -5741,7 +5745,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "path": "src/service/analysis/baseline-analysis-store.ts",
         "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
       },
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "public-or-synthetic"
@@ -5908,7 +5912,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -6061,7 +6065,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "path": "src/service/analysis/baseline-analysis-store.ts",
         "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
       },
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "public-or-synthetic"
@@ -6206,7 +6210,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -6286,7 +6290,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "path": "src/service/analysis/baseline-analysis-store.ts",
         "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
       },
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "public-or-synthetic"
@@ -6463,7 +6467,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -6543,7 +6547,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "path": "src/service/analysis/baseline-analysis-store.ts",
         "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
       },
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "public-or-synthetic"
@@ -6698,7 +6702,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -6778,7 +6782,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "path": "src/service/analysis/baseline-analysis-store.ts",
         "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
       },
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "public-or-synthetic"
@@ -6933,7 +6937,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -7013,7 +7017,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "path": "src/service/analysis/baseline-analysis-store.ts",
         "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
       },
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "public-or-synthetic"
@@ -7168,7 +7172,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -7277,7 +7281,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "path": "src/service/analysis/baseline-analysis-store.ts",
         "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
       },
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "public-or-synthetic"
@@ -7494,7 +7498,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -7566,7 +7570,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "path": "src/service/analysis/baseline-analysis-store.ts",
         "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
       },
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "public-or-synthetic"
@@ -7877,7 +7881,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -7966,7 +7970,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "path": "src/service/analysis/baseline-analysis-store.ts",
         "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
       },
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "public-or-synthetic"
@@ -8232,7 +8236,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -8307,7 +8311,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "path": "src/service/analysis/baseline-analysis-store.ts",
         "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
       },
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "public-or-synthetic"
@@ -9043,7 +9047,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -9118,7 +9122,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "path": "src/service/analysis/baseline-analysis-store.ts",
         "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
       },
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "public-or-synthetic"
@@ -9609,7 +9613,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -9677,7 +9681,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "sha256": "23d938f28d062d1fe3949d399739b0e558dc2e7f435589b3115f1eb200755599"
       },
       "planCompositionDerivation": null,
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "editor-selected-manuscript-excerpt"
@@ -9716,7 +9720,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -9806,7 +9810,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "path": "src/service/analysis/baseline-analysis-store.ts",
         "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
       },
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "public-or-synthetic"
@@ -9978,7 +9982,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -10068,7 +10072,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "path": "src/service/analysis/baseline-analysis-store.ts",
         "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
       },
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "public-or-synthetic"
@@ -10218,7 +10222,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -10308,7 +10312,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "path": "src/service/analysis/baseline-analysis-store.ts",
         "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
       },
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "public-or-synthetic"
@@ -10458,7 +10462,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -10522,7 +10526,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "path": "src/service/analysis/baseline-analysis-store.ts",
         "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
       },
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "public-or-synthetic"
@@ -10978,7 +10982,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -11047,7 +11051,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "sha256": "23d938f28d062d1fe3949d399739b0e558dc2e7f435589b3115f1eb200755599"
       },
       "planCompositionDerivation": null,
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "manuscript-conflict-region-excerpt"
@@ -11112,7 +11116,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -11184,7 +11188,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "sha256": "23d938f28d062d1fe3949d399739b0e558dc2e7f435589b3115f1eb200755599"
       },
       "planCompositionDerivation": null,
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "editor-selected-manuscript-excerpt"
@@ -11284,7 +11288,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -11345,7 +11349,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "sha256": "23d938f28d062d1fe3949d399739b0e558dc2e7f435589b3115f1eb200755599"
       },
       "planCompositionDerivation": null,
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "editor-selected-manuscript-excerpt"
@@ -11410,7 +11414,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -11474,7 +11478,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "path": "src/service/analysis/baseline-analysis-store.ts",
         "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
       },
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "public-or-synthetic"
@@ -11718,7 +11722,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -11941,7 +11945,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "path": "src/service/analysis/baseline-analysis-store.ts",
         "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
       },
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "public-or-synthetic"
@@ -12229,7 +12233,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -12456,7 +12460,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "path": "src/service/analysis/baseline-analysis-store.ts",
         "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
       },
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "public-or-synthetic"
@@ -13084,7 +13088,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -13159,7 +13163,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "path": "src/service/analysis/baseline-analysis-store.ts",
         "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
       },
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "public-or-synthetic"
@@ -13447,7 +13451,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -13523,7 +13527,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "path": "src/service/analysis/baseline-analysis-store.ts",
         "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
       },
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "public-or-synthetic"
@@ -14250,7 +14254,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -14372,7 +14376,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "path": "src/service/analysis/baseline-analysis-store.ts",
         "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
       },
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "public-or-synthetic"
@@ -14534,7 +14538,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -14611,7 +14615,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "path": "src/service/analysis/baseline-analysis-store.ts",
         "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
       },
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "public-or-synthetic"
@@ -14850,7 +14854,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -14927,7 +14931,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         "path": "src/service/analysis/baseline-analysis-store.ts",
         "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
       },
-      "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+      "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
       "categoryAndToolSet": {
         "allowedOutboundDataCategories": [
           "public-or-synthetic"
@@ -15045,7 +15049,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "exact-registered-purpose-and-profile",
+        "existing-journey-and-evidence-route-restrictions",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -15062,7 +15066,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
       }
     }
   ],
-  "manifestSha256": "ee20728723205e3e4c1e6df4170f7d9af8fd3e17f62b48e4a20d3ff2020e434e",
+  "manifestSha256": "7f55b9845550ed91cb44d9d7999a9b0a2ee6d79df9390adaab01194b81b1702a",
   "manifestCanonicalization": "UTF-8 JSON; recursively sorted object keys; array order retained; no whitespace; SHA-256",
   "resolvedLineageCanonicalization": "SHA-256 of leaf-first identity:rawFileSha256 lines joined by LF with no trailing LF",
   "digestCanonicalization": {
@@ -15091,6 +15095,33 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
     "outcomeUnknownLaunchJourneyOnly": "J-10",
     "retainedV1BaselineCompleteJourneyOnly": "J-04"
   },
+  "matchSemantics": {
+    "codeFilePins": "sourceCommit provenance verified unchanged at exactFixedMetadataUnchangedAtPreparationBase; not a runtime match precondition",
+    "codeFilePinFields": [
+      "registryPins",
+      "promptContractOwner",
+      "compositionDerivation",
+      "compositionCaller",
+      "planCompositionDerivation",
+      "registeredProfileInputs",
+      "registeredEvidenceCases.caseFile",
+      "registeredPurposes.registrationFileSha256"
+    ],
+    "runtimeMatchKeys": [
+      "exact executable task kind or session purpose",
+      "exact fixture identity, fixture file SHA-256, ordered lineage and resolved lineage SHA-256",
+      "exact entry key unitOrdinal, requestDigest and attempt-or-null under fixtureResolverSemantics",
+      "per-Run frozen prompt-contract, composition, source, category/tool and message digests",
+      "existing restrictions objects and fixtureResolverSemantics Journey limits",
+      "final payload Egress Gate and current binding, source and exclusion standing"
+    ],
+    "registeredPurposes": "provenance; runtime purpose enforcement is limited to the existing restrictions objects, fixtureResolverSemantics and the registered evidence cases existing routes; no new purpose restriction and no purpose-based widening",
+    "currentCodeRevalidation": "the selecting activation child and any landing base re-verify current semantics at that exact base by replaying the affected Journey matrix and registered evidence routes; a changed request digest, contract, composition or entry key yields the existing disclosed refusal",
+    "historicalBytesIdentitiesOrRequestKeysRewritten": false,
+    "relaxedOrWildcardMatchingOnCodeDrift": false
+  },
+  "launchWithoutLegacyFixtureRouteAcquiresOne": false,
+  "selectedVersionSubstitutedIntoHistoricalRequestKeys": false,
   "newLaunchPlans": "v29 with exact legacy profile/manifest pin; preserve historical request construction and request keys",
   "persistedV1Plans": "remain v1; historical compatibility path; never silently relabel or rewrite",
   "missingFixtureOrTupleResult": "existing-disclosed-refusal",

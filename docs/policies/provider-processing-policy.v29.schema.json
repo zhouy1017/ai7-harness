@@ -1042,7 +1042,7 @@
             "path": "src/service/analysis/baseline-analysis-store.ts",
             "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
           },
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "public-or-synthetic"
@@ -1116,7 +1116,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -1191,7 +1191,7 @@
             "path": "src/service/analysis/baseline-analysis-store.ts",
             "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
           },
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "public-or-synthetic"
@@ -1368,7 +1368,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -1435,7 +1435,7 @@
             "sha256": "910cedac5b65fef05a8b0916f7896b51139fdcdb5f12ed94aa6bdbbd6c2db737"
           },
           "planCompositionDerivation": null,
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "editor-selected-manuscript-excerpt"
@@ -1514,7 +1514,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -1579,7 +1579,7 @@
             "sha256": "910cedac5b65fef05a8b0916f7896b51139fdcdb5f12ed94aa6bdbbd6c2db737"
           },
           "planCompositionDerivation": null,
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "editor-selected-manuscript-excerpt"
@@ -1642,7 +1642,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -1722,7 +1722,7 @@
             "path": "src/service/analysis/baseline-analysis-store.ts",
             "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
           },
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "public-or-synthetic"
@@ -1900,7 +1900,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -2195,7 +2195,7 @@
             "path": "src/service/analysis/baseline-analysis-store.ts",
             "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
           },
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "public-or-synthetic"
@@ -2357,7 +2357,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -2491,7 +2491,7 @@
             "path": "src/service/analysis/baseline-analysis-store.ts",
             "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
           },
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "public-or-synthetic"
@@ -2725,7 +2725,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -2814,7 +2814,7 @@
             "path": "src/service/analysis/baseline-analysis-store.ts",
             "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
           },
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "public-or-synthetic"
@@ -2992,7 +2992,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -3076,7 +3076,7 @@
             "path": "src/service/analysis/baseline-analysis-store.ts",
             "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
           },
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "public-or-synthetic"
@@ -3242,7 +3242,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -3309,7 +3309,7 @@
             "path": "src/service/analysis/baseline-analysis-store.ts",
             "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
           },
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "public-or-synthetic"
@@ -3498,7 +3498,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -3508,7 +3508,11 @@
             "current-binding-source-and-exclusion-standing"
           ],
           "newContractFallbackAllowed": false,
-          "newFixtureRuleCapabilitiesInherited": false
+          "newFixtureRuleCapabilitiesInherited": false,
+          "restrictions": {
+            "onlyLaunchJourney": "J-10",
+            "registeredServiceTestConstructorOnlyOutsideJourney": true
+          }
         },
         {
           "fixtureIdentity": "sample1-baseline-transient-retry",
@@ -3640,7 +3644,7 @@
             "path": "src/service/analysis/baseline-analysis-store.ts",
             "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
           },
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "public-or-synthetic"
@@ -3923,7 +3927,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -3991,7 +3995,7 @@
             "sha256": "23d938f28d062d1fe3949d399739b0e558dc2e7f435589b3115f1eb200755599"
           },
           "planCompositionDerivation": null,
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "manuscript-conflict-region-excerpt"
@@ -4030,7 +4034,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -4110,7 +4114,7 @@
             "path": "src/service/analysis/baseline-analysis-store.ts",
             "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
           },
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "public-or-synthetic"
@@ -4277,7 +4281,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -4354,7 +4358,7 @@
             "path": "src/service/analysis/baseline-analysis-store.ts",
             "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
           },
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "public-or-synthetic"
@@ -4487,7 +4491,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -4563,7 +4567,7 @@
             "path": "src/service/analysis/baseline-analysis-store.ts",
             "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
           },
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "public-or-synthetic"
@@ -4730,7 +4734,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -4798,7 +4802,7 @@
             "sha256": "910cedac5b65fef05a8b0916f7896b51139fdcdb5f12ed94aa6bdbbd6c2db737"
           },
           "planCompositionDerivation": null,
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "editor-selected-manuscript-excerpt"
@@ -4851,7 +4855,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -4912,7 +4916,7 @@
             "sha256": "910cedac5b65fef05a8b0916f7896b51139fdcdb5f12ed94aa6bdbbd6c2db737"
           },
           "planCompositionDerivation": null,
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "editor-selected-manuscript-excerpt"
@@ -4975,7 +4979,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -5036,7 +5040,7 @@
             "sha256": "910cedac5b65fef05a8b0916f7896b51139fdcdb5f12ed94aa6bdbbd6c2db737"
           },
           "planCompositionDerivation": null,
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "editor-selected-manuscript-excerpt"
@@ -5099,7 +5103,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -5162,7 +5166,7 @@
             "path": "src/service/analysis/baseline-analysis-store.ts",
             "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
           },
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "public-or-synthetic"
@@ -5334,7 +5338,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -5393,7 +5397,7 @@
             "sha256": "910cedac5b65fef05a8b0916f7896b51139fdcdb5f12ed94aa6bdbbd6c2db737"
           },
           "planCompositionDerivation": null,
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "editor-selected-manuscript-excerpt"
@@ -5467,7 +5471,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -5620,7 +5624,7 @@
             "path": "src/service/analysis/baseline-analysis-store.ts",
             "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
           },
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "public-or-synthetic"
@@ -5787,7 +5791,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -5940,7 +5944,7 @@
             "path": "src/service/analysis/baseline-analysis-store.ts",
             "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
           },
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "public-or-synthetic"
@@ -6085,7 +6089,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -6165,7 +6169,7 @@
             "path": "src/service/analysis/baseline-analysis-store.ts",
             "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
           },
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "public-or-synthetic"
@@ -6342,7 +6346,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -6422,7 +6426,7 @@
             "path": "src/service/analysis/baseline-analysis-store.ts",
             "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
           },
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "public-or-synthetic"
@@ -6577,7 +6581,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -6657,7 +6661,7 @@
             "path": "src/service/analysis/baseline-analysis-store.ts",
             "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
           },
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "public-or-synthetic"
@@ -6812,7 +6816,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -6892,7 +6896,7 @@
             "path": "src/service/analysis/baseline-analysis-store.ts",
             "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
           },
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "public-or-synthetic"
@@ -7047,7 +7051,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -7156,7 +7160,7 @@
             "path": "src/service/analysis/baseline-analysis-store.ts",
             "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
           },
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "public-or-synthetic"
@@ -7373,7 +7377,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -7445,7 +7449,7 @@
             "path": "src/service/analysis/baseline-analysis-store.ts",
             "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
           },
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "public-or-synthetic"
@@ -7756,7 +7760,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -7845,7 +7849,7 @@
             "path": "src/service/analysis/baseline-analysis-store.ts",
             "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
           },
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "public-or-synthetic"
@@ -8111,7 +8115,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -8186,7 +8190,7 @@
             "path": "src/service/analysis/baseline-analysis-store.ts",
             "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
           },
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "public-or-synthetic"
@@ -8922,7 +8926,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -8997,7 +9001,7 @@
             "path": "src/service/analysis/baseline-analysis-store.ts",
             "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
           },
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "public-or-synthetic"
@@ -9488,7 +9492,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -9556,7 +9560,7 @@
             "sha256": "23d938f28d062d1fe3949d399739b0e558dc2e7f435589b3115f1eb200755599"
           },
           "planCompositionDerivation": null,
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "editor-selected-manuscript-excerpt"
@@ -9595,7 +9599,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -9685,7 +9689,7 @@
             "path": "src/service/analysis/baseline-analysis-store.ts",
             "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
           },
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "public-or-synthetic"
@@ -9857,7 +9861,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -9947,7 +9951,7 @@
             "path": "src/service/analysis/baseline-analysis-store.ts",
             "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
           },
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "public-or-synthetic"
@@ -10097,7 +10101,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -10187,7 +10191,7 @@
             "path": "src/service/analysis/baseline-analysis-store.ts",
             "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
           },
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "public-or-synthetic"
@@ -10337,7 +10341,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -10401,7 +10405,7 @@
             "path": "src/service/analysis/baseline-analysis-store.ts",
             "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
           },
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "public-or-synthetic"
@@ -10857,7 +10861,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -10926,7 +10930,7 @@
             "sha256": "23d938f28d062d1fe3949d399739b0e558dc2e7f435589b3115f1eb200755599"
           },
           "planCompositionDerivation": null,
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "manuscript-conflict-region-excerpt"
@@ -10991,7 +10995,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -11063,7 +11067,7 @@
             "sha256": "23d938f28d062d1fe3949d399739b0e558dc2e7f435589b3115f1eb200755599"
           },
           "planCompositionDerivation": null,
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "editor-selected-manuscript-excerpt"
@@ -11163,7 +11167,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -11224,7 +11228,7 @@
             "sha256": "23d938f28d062d1fe3949d399739b0e558dc2e7f435589b3115f1eb200755599"
           },
           "planCompositionDerivation": null,
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "editor-selected-manuscript-excerpt"
@@ -11289,7 +11293,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -11353,7 +11357,7 @@
             "path": "src/service/analysis/baseline-analysis-store.ts",
             "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
           },
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "public-or-synthetic"
@@ -11597,7 +11601,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -11820,7 +11824,7 @@
             "path": "src/service/analysis/baseline-analysis-store.ts",
             "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
           },
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "public-or-synthetic"
@@ -12108,7 +12112,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -12335,7 +12339,7 @@
             "path": "src/service/analysis/baseline-analysis-store.ts",
             "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
           },
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "public-or-synthetic"
@@ -12963,7 +12967,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -13038,7 +13042,7 @@
             "path": "src/service/analysis/baseline-analysis-store.ts",
             "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
           },
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "public-or-synthetic"
@@ -13326,7 +13330,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -13402,7 +13406,7 @@
             "path": "src/service/analysis/baseline-analysis-store.ts",
             "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
           },
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "public-or-synthetic"
@@ -14129,7 +14133,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -14251,7 +14255,7 @@
             "path": "src/service/analysis/baseline-analysis-store.ts",
             "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
           },
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "public-or-synthetic"
@@ -14413,7 +14417,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -14490,7 +14494,7 @@
             "path": "src/service/analysis/baseline-analysis-store.ts",
             "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
           },
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "public-or-synthetic"
@@ -14729,7 +14733,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -14806,7 +14810,7 @@
             "path": "src/service/analysis/baseline-analysis-store.ts",
             "sha256": "c393df302d6208e6efe21176ee7cc2bc67c31673bc891e715eab7c0a72b4b8fd"
           },
-          "compositionOptions": "exact-existing-registered-plan-inputs-and-pinned-caller; no-future-or-default-substitution",
+          "compositionOptions": "exact-existing-registered-plan-inputs; caller-and-derivation-file-pins-are-sourceCommit-provenance; no-future-or-default-substitution",
           "categoryAndToolSet": {
             "allowedOutboundDataCategories": [
               "public-or-synthetic"
@@ -14924,7 +14928,7 @@
             }
           ],
           "perRunChecks": [
-            "exact-registered-purpose-and-profile",
+            "existing-journey-and-evidence-route-restrictions",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -14941,7 +14945,7 @@
           }
         }
       ],
-      "manifestSha256": "ee20728723205e3e4c1e6df4170f7d9af8fd3e17f62b48e4a20d3ff2020e434e",
+      "manifestSha256": "7f55b9845550ed91cb44d9d7999a9b0a2ee6d79df9390adaab01194b81b1702a",
       "manifestCanonicalization": "UTF-8 JSON; recursively sorted object keys; array order retained; no whitespace; SHA-256",
       "resolvedLineageCanonicalization": "SHA-256 of leaf-first identity:rawFileSha256 lines joined by LF with no trailing LF",
       "digestCanonicalization": {
@@ -14970,6 +14974,33 @@
         "outcomeUnknownLaunchJourneyOnly": "J-10",
         "retainedV1BaselineCompleteJourneyOnly": "J-04"
       },
+      "matchSemantics": {
+        "codeFilePins": "sourceCommit provenance verified unchanged at exactFixedMetadataUnchangedAtPreparationBase; not a runtime match precondition",
+        "codeFilePinFields": [
+          "registryPins",
+          "promptContractOwner",
+          "compositionDerivation",
+          "compositionCaller",
+          "planCompositionDerivation",
+          "registeredProfileInputs",
+          "registeredEvidenceCases.caseFile",
+          "registeredPurposes.registrationFileSha256"
+        ],
+        "runtimeMatchKeys": [
+          "exact executable task kind or session purpose",
+          "exact fixture identity, fixture file SHA-256, ordered lineage and resolved lineage SHA-256",
+          "exact entry key unitOrdinal, requestDigest and attempt-or-null under fixtureResolverSemantics",
+          "per-Run frozen prompt-contract, composition, source, category/tool and message digests",
+          "existing restrictions objects and fixtureResolverSemantics Journey limits",
+          "final payload Egress Gate and current binding, source and exclusion standing"
+        ],
+        "registeredPurposes": "provenance; runtime purpose enforcement is limited to the existing restrictions objects, fixtureResolverSemantics and the registered evidence cases existing routes; no new purpose restriction and no purpose-based widening",
+        "currentCodeRevalidation": "the selecting activation child and any landing base re-verify current semantics at that exact base by replaying the affected Journey matrix and registered evidence routes; a changed request digest, contract, composition or entry key yields the existing disclosed refusal",
+        "historicalBytesIdentitiesOrRequestKeysRewritten": false,
+        "relaxedOrWildcardMatchingOnCodeDrift": false
+      },
+      "launchWithoutLegacyFixtureRouteAcquiresOne": false,
+      "selectedVersionSubstitutedIntoHistoricalRequestKeys": false,
       "newLaunchPlans": "v29 with exact legacy profile/manifest pin; preserve historical request construction and request keys",
       "persistedV1Plans": "remain v1; historical compatibility path; never silently relabel or rewrite",
       "missingFixtureOrTupleResult": "existing-disclosed-refusal",
@@ -15031,7 +15062,9 @@
           "missingContractCompositionFixtureOrClosedUnitSetDigestResult": "refuse",
           "modelCitationsPassExactResultAnchorValidation": true,
           "crossChapterScopeFrozenByPlanNotAmbientRetrieval": true,
-          "baselineFactsToolSubstitutesForLeadFindings": false
+          "baselineFactsToolSubstitutesForLeadFindings": false,
+          "maximumDeclaredContractRetriesPerUnit": 1,
+          "ambientLatestStateReadsAdmitted": false
         },
         "localTools": {
           "targetedRetrieval": {
@@ -15638,7 +15671,8 @@
             "sourceRefreshAllowed": false,
             "wholeLedgerTransmissionAllowed": false,
             "modelSelectedClaimIdAllowed": false,
-            "ambientContextAllowed": false
+            "ambientContextAllowed": false,
+            "metadataByteLimitExcludesSourceUnitMessage": true
           },
           "research": {
             "searchReservationKey": [
@@ -15902,7 +15936,8 @@
             "sourceRefreshAllowed": false,
             "wholeLedgerTransmissionAllowed": false,
             "modelSelectedClaimIdAllowed": false,
-            "ambientContextAllowed": false
+            "ambientContextAllowed": false,
+            "metadataByteLimitExcludesSourceUnitMessage": true
           },
           "research": {
             "searchReservationKey": [
@@ -15930,7 +15965,8 @@
           },
           "foregroundKindOrProcedureGrantInherited": false,
           "categoriesRestrictedToExactClaimUnitInputAndRecordedResearchOutputs": true,
-          "missingLedgerOrClaimResult": "disclosed-refusal-requiring-separately-authorized-upstream-work"
+          "missingLedgerOrClaimResult": "disclosed-refusal-requiring-separately-authorized-upstream-work",
+          "immutableDecisionNotInventedRevision": true
         },
         "transmissions": {
           "oneTechnicalSessionForOnePreexistingClaim": true,
@@ -15979,7 +16015,11 @@
       "existingV1FixturePlansAndDigestsKeepHistoricalBehavior": true,
       "newCapabilitiesRequireNewFixturePromptAndCompositionIdentities": true,
       "retainedRecordingsRewriteAllowed": false,
-      "liveResponseOrMaterialAcquisitionAllowed": false
+      "liveResponseOrMaterialAcquisitionAllowed": false,
+      "executionResolvedValuesPinnedPerAttempt": true,
+      "executionBlockAdmitsKindOrBackgroundOrigin": false,
+      "localToolParallelismProvesModelConcurrency": false,
+      "scriptedTransportArmsHostCredentialOrLiveAdapter": false
     }
   }
 }
