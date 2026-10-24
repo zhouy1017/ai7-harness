@@ -2885,7 +2885,7 @@ async function main() {
     requireJourney(JSON.stringify(stopPreview.preview.groups) === JSON.stringify([
       ['future', '1', '未来使用 · 1', `1 条学习材料今后不再可用于学习（原来是仅纳入《${THIRD.title}》）；它们会显示为明确排除。`],
       ['running', '0', '正在运行 · 0', '没有正在运行的任务使用它们。'],
-      ['memory', '0', '候选或已启用记忆 · 0', '没有由它们生成的记忆候选或已启用记忆：AI7 还没有生成这些。'],
+      ['memory', '0', '候选或已启用记忆 · 0', '没有引用这些材料的编辑记忆候选或已启用记忆。'],
       ['completed', '0', '已完成历史 · 0', '没有已完成的任务用过它们，因此没有结果需要标记；它们来自的反馈与改动，以及此前的 1 个准入决定，都原样保留。'],
     ]) && stopPreview.preview.leftOut.length === 0 && stopPreview.preview.confirm === true &&
       stopPreview.preview.included.length === 1 && stopPreview.preview.included[0].startsWith('修改建议 · 拒绝 · ') && stopPreview.preview.included[0].endsWith(' · 你的原因：分页原因0') &&
