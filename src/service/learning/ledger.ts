@@ -8,7 +8,7 @@ import type {
 } from '../../shared/protocol/learning.js';
 import { LEARNING_REASON_OPTIONS } from '../../shared/protocol/learning.js';
 import { graphemesOf } from '../../shared/mark-anchor.js';
-import { canonicalJson, canonicalRecord, sha256Hex, UUID_PATTERN } from '../analysis/canonical.js';
+import { canonicalJson, canonicalRecord, isRecord, sha256Hex, UUID_PATTERN } from '../analysis/canonical.js';
 import { BookPeople } from '../book-people.js';
 import { DecisionFeedbackLedger } from '../decision-feedback.js';
 import { graphemeEditVolume } from '../edit-quality-signals.js';
@@ -90,16 +90,81 @@ export function initializeEditorialLearningSchema(db: DatabaseSync): void {
 
 interface Controls { enabled: boolean; entries: number; excludedBooks: Set<string> }
 
+interface LearningControl {
+  schema: 'ai7.editorial-learning-control/1';
+  entryId: string; ordinal: number; kind: 'switch' | 'book'; bookId: string | null;
+  value: boolean; actor: 'editor'; recordedAt: string; basis: typeof LOCAL_LEARNING_POLICY_BASIS;
+  importedFrom?: { record: LearningControl; sha256: string };
+}
+
+/** One control as `change` writes it, with the provenance a merge adds. */
+function controlRecord(record: unknown): LearningControl {
+  requireLearning(isRecord(record) && record.schema === 'ai7.editorial-learning-control/1' &&
+    typeof record.entryId === 'string' && record.entryId.length > 0 && Number.isSafeInteger(record.ordinal) && Number(record.ordinal) > 0 &&
+    (record.kind === 'switch' || record.kind === 'book') &&
+    (record.kind === 'book' ? typeof record.bookId === 'string' && record.bookId.length > 0 : record.bookId === null) &&
+    typeof record.value === 'boolean' && record.actor === 'editor' && typeof record.recordedAt === 'string' &&
+    Number.isFinite(Date.parse(record.recordedAt)) && canonicalJson(record.basis) === canonicalJson(LOCAL_LEARNING_POLICY_BASIS));
+  const keys = ['schema', 'entryId', 'ordinal', 'kind', 'bookId', 'value', 'actor', 'recordedAt', 'basis'];
+  if (record.importedFrom !== undefined) keys.push('importedFrom');
+  requireLearning(Object.keys(record).length === keys.length && keys.every((key) => Object.hasOwn(record, key)));
+  return record as unknown as LearningControl;
+}
+
+/**
+ * A carried control embeds its source control whole: the embedded record's canonical JSON is the source row's exact bytes, held
+ * to that row's digest, so the original entry, editor attribution, time, ordinal and any earlier merge provenance stay
+ * verifiable. Embedded as a record rather than as escaped text, each merge adds the source once instead of doubling its escapes.
+ */
+function readControl(row: Row): LearningControl {
+  const record = controlRecord(read<unknown>(row));
+  requireLearning(canonicalJson(record) === row.canonical_json && record.entryId === row.entry_id && record.ordinal === row.ordinal &&
+    record.kind === row.kind && record.bookId === row.book_id && Number(record.value) === row.value && record.recordedAt === row.recorded_at);
+  // Walk rather than recurse: repeated Book merges retain the whole provenance chain without growing the call stack.
+  let current = record;
+  while (current.importedFrom !== undefined) {
+    const origin: unknown = current.importedFrom;
+    requireLearning(current.kind === 'book' && isRecord(origin) && Object.keys(origin).length === 2 && typeof origin.sha256 === 'string');
+    const source = controlRecord(origin.record);
+    requireLearning(sha256Hex(canonicalJson(source)) === origin.sha256 &&
+      canonicalJson(current) === canonicalJson({ ...source, ordinal: current.ordinal, importedFrom: origin }));
+    current = source;
+  }
+  return record;
+}
+
+function* controlHistory(db: DatabaseSync, schema: 'main' | 'src'): Generator<{ row: Row; record: LearningControl }> {
+  let ordinal = 0;
+  for (const row of db.prepare(`SELECT * FROM ${schema}.editorial_learning_controls ORDER BY ordinal`).iterate() as Iterable<Row>) {
+    const record = readControl(row);
+    requireLearning(record.ordinal === ++ordinal);
+    yield { row, record };
+  }
+}
+
+/** Only called inside the database merge transaction, after the selected Books have been inserted with their original IDs. */
+export function importBookLearningControls(db: DatabaseSync, selectedBook: (bookId: string) => boolean): number {
+  let destinationEntries = 0;
+  for (const _entry of controlHistory(db, 'main')) destinationEntries += 1;
+  let imported = 0;
+  const insert = db.prepare('INSERT INTO main.editorial_learning_controls VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+  for (const { row, record } of controlHistory(db, 'src')) {
+    if (record.kind !== 'book' || !selectedBook(record.bookId!)) continue;
+    const ordinal = destinationEntries + ++imported;
+    const carried = canonicalRecord({ ...record, ordinal, importedFrom: { record, sha256: String(row.sha256) } });
+    insert.run(record.entryId, ordinal, record.kind, record.bookId, Number(record.value), record.recordedAt, carried.json, carried.digest);
+  }
+  return imported;
+}
+
 /** Local capture only: no provider, scheduler, retrieval or composition dependency. The caller owns the transaction. */
 export class EditorialLearningLedger {
   constructor(readonly db: DatabaseSync) {}
 
   controls(): Controls {
     const result: Controls = { enabled: true, entries: 0, excludedBooks: new Set() };
-    for (const row of this.db.prepare('SELECT * FROM editorial_learning_controls ORDER BY ordinal').iterate() as Iterable<Row>) {
-      const record = read<{ entryId: string; ordinal: number; kind: string; bookId: string | null; value: boolean; recordedAt: string }>(row);
-      requireLearning(record.entryId === row.entry_id && record.ordinal === ++result.entries && record.kind === row.kind &&
-        record.bookId === row.book_id && typeof record.value === 'boolean' && Number(record.value) === row.value && record.recordedAt === row.recorded_at);
+    for (const { record } of controlHistory(this.db, 'main')) {
+      result.entries += 1;
       if (record.kind === 'switch') result.enabled = record.value;
       else if (record.value) result.excludedBooks.add(record.bookId!);
       else result.excludedBooks.delete(record.bookId!);
