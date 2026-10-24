@@ -303,7 +303,7 @@ export class HouseReviewPreferenceLedger {
   } {
     const people = [...names];
     const governed = this.#governed(scope, baseLines, people, strict === true);
-    if (strict !== false) this.#reserve(scope, governed?.explicit ?? []);
+    if (strict !== false) this.#reserve(scope, baseLines);
     const memoryLines = this.#memoryLines(scope, people);
     const previous = this.history(scope).at(-1);
     if (memoryLines.length === 0 && previous?.schema !== 'ai7.house-review-preference/2') return {
@@ -329,11 +329,35 @@ export class HouseReviewPreferenceLedger {
    * memory owner holds one line and its words before any name is taken out, so neither a restoration nor a later name change can
    * make an accepted line overflow. The unredacted words are only counted here, never sent.
    */
-  #reserve(scope: TrustedOperationalScope, explicit: ReadonlyArray<string>): void {
+  #reserve(scope: TrustedOperationalScope, baseLines: HouseReviewPreferenceVersion['lines']): void {
     const memories = this.db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'global_editorial_memory_items'").get() ? this.#learning().activeTitles(scope) : [];
-    const reserved = [...explicit, ...memories];
+    const reserved = [...this.#reservedLegacy(scope, baseLines), ...memories];
     if (reserved.length > HOUSE_REVIEW_PREFERENCE_MAX_LINES ||
       reserved.reduce((total, text) => total + graphemesOf(text.trim()).length, 0) > HOUSE_REVIEW_PREFERENCE_MAX_GRAPHEMES) memoryLimit();
+  }
+
+  /**
+   * Each still-active explicit legacy owner's words, once (Brief revision 9): the existing directive replay over every legacy owner a
+   * recorded publication of this scope carried, and the post-action base, so a correction whose derived source is reversibly
+   * excluded keeps its place. Corrections replace their own words, a merge consumes its parents and a freeze or deactivation
+   * releases them. Recorded presence is local capacity evidence only, never a current source or a line that may be sent.
+   */
+  #reservedLegacy(scope: TrustedOperationalScope, baseLines: HouseReviewPreferenceVersion['lines']): string[] {
+    const directives = this.#legacyDirectives(scope);
+    if (directives.length === 0) return [];
+    const owners = new Map<string, ReturnType<typeof preferenceItems>[number]>();
+    for (const lines of [...this.history(scope).map((version) => version.legacyBasis?.lines ?? version.governance?.baseLines ?? version.lines), baseLines]) {
+      for (const item of preferenceItems({ lines, versionId: 'base' })) owners.set(item.itemId, item);
+    }
+    return governedMemoryItems([...owners.values()], directives).filter((item) => item.state === 'active' && item.revisionId !== 'base').map((item) => item.text);
+  }
+
+  /** The scope's directives over legacy owners only: one naming a real memory item is that owner's own, never replayed here. */
+  #legacyDirectives(scope: TrustedOperationalScope): ReturnType<SupervisionDirectives['history']> {
+    if (this.db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'learning_supervision_directives'").get() === undefined) return [];
+    const hasMemories = this.db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'global_editorial_memory_items'").get() !== undefined;
+    return new SupervisionDirectives(this.db).history(scope).filter((directive) => !hasMemories ||
+      !directive.targets.some((pin) => this.db.prepare('SELECT 1 FROM global_editorial_memory_items WHERE item_id = ?').get(pin.itemId)));
   }
 
   #validatePublication(record: HouseReviewPreferenceVersion, historical = false): void {
@@ -462,14 +486,10 @@ export class HouseReviewPreferenceLedger {
    */
   #governed(scope: TrustedOperationalScope, baseLines: HouseReviewPreferenceVersion['lines'], names: Iterable<string>, strict = false): {
     entries: Array<{ derived: boolean; itemId: string; revisionId: string; line: HouseReviewPreferenceVersion['lines'][number] }>;
-    /** Each surviving explicit line's words before any name is taken out: the capacity they reserve. */
-    explicit: string[];
     headDirectiveId: string; directiveAt: ReadonlyMap<string, string>;
   } | null {
     if (this.db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'learning_supervision_directives'").get() === undefined) return null;
-    const hasMemories = this.db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'global_editorial_memory_items'").get() !== undefined;
-    const directives = new SupervisionDirectives(this.db).history(scope).filter((directive) => !hasMemories ||
-      !directive.targets.some((pin) => this.db.prepare('SELECT 1 FROM global_editorial_memory_items WHERE item_id = ?').get(pin.itemId)));
+    const directives = this.#legacyDirectives(scope);
     const head = directives.at(-1);
     if (head === undefined) return null;
     const base = preferenceItems({ lines: baseLines, versionId: 'base' });
@@ -499,8 +519,7 @@ export class HouseReviewPreferenceLedger {
       if (last < 0) limit();
       entries.splice(last, 1);
     }
-    return { entries, explicit: governed.filter((item) => item.revisionId !== 'base').map((item) => item.text),
-      headDirectiveId: head.directiveId, directiveAt: new Map(directives.map((directive) => [directive.directiveId, directive.recordedAt])) };
+    return { entries, headDirectiveId: head.directiveId, directiveAt: new Map(directives.map((directive) => [directive.directiveId, directive.recordedAt])) };
   }
 
   /**

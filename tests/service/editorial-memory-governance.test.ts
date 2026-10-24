@@ -791,6 +791,85 @@ it('refuses a rebuild over a corrupt control rather than reading an accepted aut
   expect(() => subject.inspectGlobalAgent()).toThrow();
 });
 
+it.each(['material', 'book'] as const)('reserves a legacy correction whose source is reversibly excluded (%s), so restoration never overflows', async (exclusion) => {
+  const { subject, book, explicit, make, accept, sourceBook } = await sourceDecisions();
+  const legacyItem = () => subject.inspectGlobalAgent().items.find((entry) => entry.kind === 'preference' && entry.categoryId === 'typos-and-usage');
+  const derived = legacyItem()!;
+  // A still-eligible automatic signal of another Book, so neither exclusion reaches the memory's own source.
+  const other = (await sourceBook('合成另一来源')).signals[0]!;
+  const create = (title: string): CreateEditorialMemoryInput => ({ schema: 'ai7.global-editorial-memory/2', actionId: randomUUID(), signalIds: [other.signalId],
+    applicability: { kind: 'house' }, title, editorialDimension: 'typos-and-usage', confidence: 0.6 });
+  const correct = (text: string) => { const item = legacyItem()!; subject.recordLearningSupervision({ operation: 'correct', targets: [{ itemId: item.itemId, revisionId: item.revisionId }],
+    scope: { kind: 'house' }, categoryId: 'typos-and-usage', text, effect: 'guide' }); };
+  // A correction replaces its own reservation.
+  correct('合'.repeat(150));
+  correct('合'.repeat(120));
+  const material = () => subject.inspectLearningMaterial(book.bookId, explicit.source.materialKey);
+  const exclude = () => exclusion === 'material'
+    ? subject.decideLearningMaterial({ bookId: book.bookId, materialKey: material().materialKey, materialDigest: material().digest, expectedDecisions: material().decisions, choice: 'excluded', note: null })
+    : subject.changeEditorialLearning({ kind: 'book', bookId: book.bookId, excluded: true, expectedEntries: 0 });
+  const restore = () => exclusion === 'material'
+    ? subject.decideLearningMaterial({ bookId: book.bookId, materialKey: material().materialKey, materialDigest: material().digest, expectedDecisions: material().decisions, choice: 'house', note: null })
+    : subject.changeEditorialLearning({ kind: 'book', bookId: book.bookId, excluded: false, expectedEntries: 1 });
+  exclude();
+  // A material exclusion removes the derived base the correction replays over; a Book exclusion keeps it (the negative control).
+  expect(subject.inspectGlobalAgent().items.some((entry) => entry.itemId === derived.itemId)).toBe(exclusion === 'book');
+  const versions = subject.inspectHouseReviewPreference().history.length;
+  const overflowing = make(create('乙'.repeat(81)));
+  expect(() => accept(overflowing)).toThrow(/200 字/u);
+  expect(subject.inspectHouseReviewPreference().history).toHaveLength(versions);
+  const fitting = accept(make(create('乙'.repeat(80))));
+  restore();
+  const restored = subject.inspectHouseReviewPreference().current!;
+  expect(restored.lines.map((line) => line.text).sort()).toEqual(['合'.repeat(120), '乙'.repeat(80)].sort());
+  expect(restored.lines.find((line) => line.owner?.itemId === fitting.itemId)).toBeDefined();
+});
+
+it('reserves a line for an excluded legacy correction beside twelve memories, and freezing the correction releases it', async () => {
+  const { subject, book, signals, explicit, make, create, accept } = await sourceDecisions();
+  const legacyItem = () => subject.inspectGlobalAgent().items.find((entry) => entry.kind === 'preference' && entry.categoryId === 'typos-and-usage')!;
+  const item = legacyItem();
+  subject.recordLearningSupervision({ operation: 'correct', targets: [{ itemId: item.itemId, revisionId: item.revisionId }], scope: { kind: 'house' },
+    categoryId: 'typos-and-usage', text: '合成更正的旧版偏好', effect: 'guide' });
+  const material = () => subject.inspectLearningMaterial(book.bookId, explicit.source.materialKey);
+  subject.decideLearningMaterial({ bookId: book.bookId, materialKey: material().materialKey, materialDigest: material().digest, expectedDecisions: material().decisions, choice: 'excluded', note: null });
+  const other = signals.find((entry) => entry.signalId !== explicit.signalId)!;
+  for (let index = 0; index < 11; index += 1) accept(make(create([other.signalId], `合成记忆${index}`)));
+  const twelfth = make(create([other.signalId], '合成记忆11'));
+  expect(() => accept(twelfth)).toThrow(/12 条/u);
+  subject.decideLearningMaterial({ bookId: book.bookId, materialKey: material().materialKey, materialDigest: material().digest, expectedDecisions: material().decisions, choice: 'house', note: null });
+  expect(subject.inspectHouseReviewPreference().current!.lines).toHaveLength(12);
+  const corrected = legacyItem();
+  subject.recordLearningSupervision({ operation: 'supervise', targets: [{ itemId: corrected.itemId, revisionId: corrected.revisionId }], scope: { kind: 'house' },
+    categoryId: 'typos-and-usage', text: '冻结更正。', effect: 'freeze' });
+  accept(twelfth);
+  expect(subject.inspectHouseReviewPreference().current!.lines.filter((line) => line.owner?.kind === 'editorial-memory')).toHaveLength(12);
+});
+
+it('counts a legacy merge over an excluded derived parent once, and its deactivation releases the place', async () => {
+  const { subject, book, signals, explicit, make, create, accept } = await sourceDecisions();
+  const legacy = () => subject.inspectGlobalAgent().items.filter((entry) => entry.kind === 'preference' && entry.categoryId === 'typos-and-usage' && entry.state === 'active');
+  subject.recordLearningSupervision({ operation: 'create', targets: [], scope: { kind: 'house' }, categoryId: 'typos-and-usage', text: '合'.repeat(40), effect: 'guide' });
+  const parents = legacy();
+  expect(parents).toHaveLength(2);
+  subject.recordLearningSupervision({ operation: 'merge', targets: parents.map(({ itemId, revisionId }) => ({ itemId, revisionId })), scope: { kind: 'house' },
+    categoryId: 'typos-and-usage', text: '并'.repeat(100), effect: 'guide' });
+  const material = () => subject.inspectLearningMaterial(book.bookId, explicit.source.materialKey);
+  subject.decideLearningMaterial({ bookId: book.bookId, materialKey: material().materialKey, materialDigest: material().digest, expectedDecisions: material().decisions, choice: 'excluded', note: null });
+  expect(legacy()).toEqual([]);
+  const other = signals.find((entry) => entry.signalId !== explicit.signalId)!;
+  expect(() => accept(make(create([other.signalId], '乙'.repeat(101))))).toThrow(/200 字/u);
+  const fitting = accept(make(create([other.signalId], '乙'.repeat(100))));
+  subject.decideLearningMaterial({ bookId: book.bookId, materialKey: material().materialKey, materialDigest: material().digest, expectedDecisions: material().decisions, choice: 'house', note: null });
+  expect(subject.inspectHouseReviewPreference().current!.lines.map((line) => line.text).sort()).toEqual(['并'.repeat(100), '乙'.repeat(100)].sort());
+  const merged = legacy()[0]!;
+  subject.recordLearningSupervision({ operation: 'deactivate', targets: [{ itemId: merged.itemId, revisionId: merged.revisionId }], scope: { kind: 'house' },
+    categoryId: 'typos-and-usage', text: '', effect: 'guide' });
+  accept(make(create([other.signalId], '丙'.repeat(100))));
+  expect(subject.inspectHouseReviewPreference().current!.lines.filter((line) => line.owner?.kind === 'editorial-memory').map((line) => line.owner!.itemId))
+    .toContain(fitting.itemId);
+});
+
 it('ranks a /2 version\'s legacy lines by their /1 dating, not by array position', async () => {
   const { subject, book, signals, make, create, accept, govern, current } = await sourceDecisions();
   const memory = accept(make(create([signals[0]!.signalId], '冻结后仍保持 /2。')));
