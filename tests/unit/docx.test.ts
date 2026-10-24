@@ -3,7 +3,9 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { unzipSync, zipSync } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { fixedArchiveTime } from '../../src/shared/archive-time.js';
 import {
   DOCX_PARSER_IDENTITY,
   DOCX_PARSER_IDENTITY_V1,
@@ -20,6 +22,7 @@ import type { ConversionLoss } from '../../src/service/text-manuscript.js';
 import type { FidelityCategoryProjection } from '../../src/shared/protocol.js';
 import { SAMPLE1_V1_REPORT } from '../support/import-retention.js';
 import { buildSyntheticDocx, writeSyntheticDocx, type SyntheticDocxOptions } from '../support/synthetic-docx.js';
+import { buildCorpusSource } from '../fixtures/docx-fidelity/builder.js';
 
 const NO_SIGNALS: DocumentSignals = {
   inlineStyles: 0, commentsRevisions: 0, notes: 0, tables: 0, imagesCaptions: 0, sections: 0, textBoxes: 0, fields: 0,
@@ -225,13 +228,28 @@ describe('explicit tracked Word successor compiler (#1132)', () => {
   });
 
   it.each(['footnoteReference', 'endnoteReference'])('refuses joins across retained %s and splits adjacent edit hunks at that payload', async (reference) => {
+    // Keep the corpus carrier's note bodies, content types and package/document relationships.
+    // Replacing only the main story gives every reference a real, unchanged retained note.
+    const parts = unzipSync(await buildCorpusSource('synthetic'));
+    const path = join(sandbox, 'complete-note-revisions.docx');
+    const compile = async (body: string) => {
+      parts['word/document.xml'] = new Uint8Array(bodyDocumentXml(`${body}<w:sectPr/>`));
+      await writeFile(path, zipSync(parts, { level: 6, mtime: fixedArchiveTime() }));
+      return compileWordTrackedDocx(path);
+    };
     const note = `<w:r><w:${reference} w:id="1"/></w:r>`;
-    const joined = (await compileTrackedBody('<w:p><w:pPr><w:rPr><w:del w:id="1"/></w:rPr></w:pPr>' +
-      `<w:r><w:t>A</w:t></w:r>${note}</w:p><w:p><w:r><w:t>B</w:t></w:r></w:p>`)).compiled;
+    const ordinary = `<w:p><w:r><w:t>A</w:t></w:r>${note}</w:p><w:p><w:r><w:t>B</w:t></w:r></w:p>`;
+    expect((await compile(ordinary)).kind).toBe('ordinary');
+    const ordinaryBlocks: ParsedDocxBlock[] = [];
+    const parsed = await parseDocx(path, 'complete-note.docx', (block) => ordinaryBlocks.push(block));
+    expect(ordinaryBlocks.map((block) => block.text)).toEqual(['A', 'B']);
+    expect(parsed.fidelity.find((category) => category.key === 'notes')!.count).toBe(1);
+    const joined = await compile('<w:p><w:pPr><w:rPr><w:del w:id="1"/></w:rPr></w:pPr>' +
+      `<w:r><w:t>A</w:t></w:r>${note}</w:p><w:p><w:r><w:t>B</w:t></w:r></w:p>`);
     expect(joined.kind).toBe('unsupported');
     expect(joined.inventory.locations.some((location) => location.code === 'incompatible-paragraph-join')).toBe(true);
-    const split = (await compileTrackedBody('<w:p><w:r><w:t>base</w:t></w:r><w:del w:id="1"><w:r><w:delText>old</w:delText></w:r></w:del>' +
-      `${note}<w:ins w:id="2"><w:r><w:t>new</w:t></w:r></w:ins></w:p>`)).compiled;
+    const split = await compile('<w:p><w:r><w:t>base</w:t></w:r><w:del w:id="1"><w:r><w:delText>old</w:delText></w:r></w:del>' +
+      `${note}<w:ins w:id="2"><w:r><w:t>new</w:t></w:r></w:ins></w:p>`);
     if (split.kind !== 'ready') throw new Error('expected supported note-separated text edits');
     expect(split.templates.map((template) => template.operationKind)).toEqual(['delete', 'insert']);
   });
