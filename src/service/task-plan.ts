@@ -741,7 +741,7 @@ function baselineState(projection: BaselineAnalysisProjection, stopped?: Baselin
       return { key: 'waiting', label: WAITING_LABELS.network };
     // 等待运行名额 (Issue #49, S14; CONC-007): authorized, and waiting on the governor for a place.
     case 'queued':
-      return { key: 'queued', label: '等待运行名额' };
+      return { key: 'queued', label: projection.authorization?.startWhen === 'idle' ? '等待空闲' : '等待运行名额' };
     // A Run the editor cancelled before it ran anything keeps the dash of a cancelled wait (Issue #502); one it
     // cancelled after it began reading reads 已取消 in its own shape, and 正在取消 while it stops (Issue #422).
     case 'cancelled':
@@ -754,7 +754,7 @@ function baselineState(projection: BaselineAnalysisProjection, stopped?: Baselin
     case 'pausing':
       return { key: 'pausing', label: '正在暂停' };
     case 'paused':
-      return { key: 'paused', label: '已暂停' };
+      return { key: 'paused', label: projection.run?.stateLabel ?? '已暂停' };
     case 'resumable':
       // 模型服务账户限额 (Issue #51, S16b; RUN-012): its own words, never 任务已中断 · 可续行's.
       return stopped?.accountLimit != null ? { ...ACCOUNT_LIMIT_STATE }
@@ -2392,7 +2392,7 @@ function reviewState(facts: ReviewRunPlanFacts): TaskPlanProjection['state'] {
       return { key: 'settled', label: '已完成' };
     // 联网后开始任务 (Issue #760, S74c): the label says what it waits for once the service has looked (`withWaitingReason`).
     case 'waiting':
-      return { key: 'waiting', label: WAITING_LABELS.network };
+      return { key: 'waiting', label: facts.stateLabel === '等待空闲' ? '等待空闲' : WAITING_LABELS.network };
     // Its plan moved while it waited (OFF-008): it never started.
     case 'plan-moved':
       return { key: 'plan-moved', label: PLAN_MOVED_LABEL };

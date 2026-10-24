@@ -1481,8 +1481,11 @@ async function main() {
     // 开始任务: four ranges spend 6,620 tokens and the fifth would pass the ceiling, so it is never sent. The Run stops as
     // 已停止 · 预算已达上限 with what it read and used — 调整预算并重做 and 查看部分结果, never 续行 or 重试 — its partial revision
     // kept, and 待我处理 holds it as an exception whose next step is 调整预算并重做.
+    await assertRenderer(renderer, `(() => { const timing=document.querySelector('#task-drawer select[data-task-start-when]'); if(!(timing instanceof HTMLSelectElement)||timing.value!=='now')return false; timing.value='idle'; timing.dispatchEvent(new Event('change',{bubbles:true})); return true; })()`, 'budget-deferred-start-choice');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'fifth-start');
     await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.taskIntent?.taskIntentId===${JSON.stringify(fifthIntentId)} && analysis.run?.state==='interrupted')`, 'budget-run-stopped', 180_000);
+    const idleBudgetRun = await renderer.evaluate('window.ai7.inspectBaselineAnalysis()');
+    requireJourney(idleBudgetRun.authorization?.startWhen === 'idle' && idleBudgetRun.planVersion?.materialInputs.runBudgetCeiling.maxTotalTokens === BUDGET.maxTotalTokens, 'deferred-budget-still-frozen');
     await waitForBar(renderer, {
       state: 'budget-reached', pill: '已停止 · 预算已达上限', status: '已停止 · 预算已达上限', note: BUDGET_STOP_NOTE,
       actions: [['redo', '调整预算并重做', 'enabled', null], ['run-link', '查看部分结果', 'enabled', null]],

@@ -37,7 +37,7 @@ import {
   MAX_REVIEW_CATEGORY_GOAL_LENGTH,
   MAX_TASK_INTENT_GOAL_LENGTH,
 } from '../shared/protocol.js';
-import { canonicalRecord as analysisCanonicalRecord } from './analysis/canonical.js';
+import { isRecord, canonicalRecord as analysisCanonicalRecord } from './analysis/canonical.js';
 import { ACTIVE_SET_VERSION, DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION } from './launch-policy.js';
 import {
   ANALYSIS_RESULT_SET_REVISION_58_SQL,
@@ -502,7 +502,9 @@ export const PROCEDURE_DEFINITION_SCHEMA_VERSION = 85;
 export const EDITORIAL_LEARNING_SCHEMA_VERSION = 86;
 export const GLOBAL_AGENT_SCHEMA_VERSION = 87;
 export const REVIEW_CONTRACT_SCHEMA_VERSION = 88;
-export const LATEST_SCHEMA_VERSION = REVIEW_CONTRACT_SCHEMA_VERSION;
+const PRE_IDLE_SCHEMA_VERSION = REVIEW_CONTRACT_SCHEMA_VERSION;
+export const IDLE_BACKGROUND_SCHEMA_VERSION = 89;
+export const LATEST_SCHEMA_VERSION = IDLE_BACKGROUND_SCHEMA_VERSION;
 /** The custom analysis kind family slice 7f brings (ADR 0090 item 4): admitted here so it needs no second rebuild. */
 const CUSTOM_ANALYSIS_KIND_GLOB = 'custom-analysis/[a-z0-9-]*' as const;
 const CUSTOM_ANALYSIS_CONTRACT_VERSION_GLOB = 'ai7.custom-analysis*/[0-9]*' as const;
@@ -1821,7 +1823,10 @@ function requireExactObjects(
 ): void {
   for (const [name, sql] of Object.entries(expected)) {
     const row = db.prepare('SELECT sql FROM sqlite_schema WHERE type = ? AND name = ?').get(type, name) as SqlRow | undefined;
-    requireTask(row !== undefined && normalizeSql(asString(row.sql)) === normalizeSql(sql),
+    const idlePreStamp = type === 'table' && name === 'analysis_run_authorizations' &&
+      normalizeSql(sql) === normalizeSql(ANALYSIS_LEDGER_SCHEMA_SQL.analysis_run_authorizations) &&
+      row !== undefined && normalizeSql(asString(row.sql)) === normalizeSql(IDLE_RUN_AUTHORIZATIONS_SQL);
+    requireTask(row !== undefined && (normalizeSql(asString(row.sql)) === normalizeSql(sql) || idlePreStamp),
       'SCHEMA_INVALID', `${label} ${name} 结构不兼容。`);
   }
 }
@@ -1857,7 +1862,8 @@ function widenWebToolsPlanRecords(db: DatabaseSync): void {
 }
 
 export function validateAnalysisLedgerSchema(db: DatabaseSync): void {
-  requireExactObjects(db, 'table', asNumber((db.prepare('PRAGMA user_version').get() as SqlRow).user_version) >= SEARCH_BACKEND_SCHEMA_VERSION ? { ...ANALYSIS_LEDGER_SCHEMA_SQL, analysis_plan_records: WEB_TOOLS_PLAN_RECORDS_SQL } : ANALYSIS_LEDGER_SCHEMA_SQL, '分析任务账本表');
+  const version = Number(db.prepare('PRAGMA user_version').get()?.user_version);
+  requireExactObjects(db, 'table', { ...ANALYSIS_LEDGER_SCHEMA_SQL, ...(version >= SEARCH_BACKEND_SCHEMA_VERSION ? { analysis_plan_records: WEB_TOOLS_PLAN_RECORDS_SQL } : {}), ...(version >= IDLE_BACKGROUND_SCHEMA_VERSION ? { analysis_run_authorizations: IDLE_RUN_AUTHORIZATIONS_SQL } : {}) }, '分析任务账本表');
   requireExactObjects(db, 'trigger', ANALYSIS_LEDGER_TRIGGER_SQL, '分析任务账本触发器');
   validateCanonicalRowDigests(db, ANALYSIS_LEDGER_TABLES);
   requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0,
@@ -1880,9 +1886,9 @@ function validateRevision16AnalysisLedgerSchema(db: DatabaseSync): void {
   validateCanonicalRowDigests(db, Object.keys(tables));
 }
 
-export function validateTaskAuthorizationSchema(db: DatabaseSync): void {
+function validatePreIdleTaskAuthorizationSchema(db: DatabaseSync): void {
   const version = asNumber((db.prepare('PRAGMA user_version').get() as SqlRow).user_version);
-  requireTask(version === LATEST_SCHEMA_VERSION, 'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');
+  requireTask(version === PRE_IDLE_SCHEMA_VERSION, 'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');
   validateJ03TaskAuthorizationSchema(db);
   validateAnalysisLedgerSchema(db);
 }
@@ -1917,6 +1923,7 @@ type AuthorizationsAsFound = { readonly analysis_run_authorizations: string };
  */
 function authorizationsAsFound(db: DatabaseSync): AuthorizationsAsFound {
   const row = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'analysis_run_authorizations'").get() as SqlRow | undefined;
+  if (row !== undefined && normalizeSql(asString(row.sql)) === normalizeSql(IDLE_RUN_AUTHORIZATIONS_SQL)) return { analysis_run_authorizations: IDLE_RUN_AUTHORIZATIONS_SQL };
   const widened = row !== undefined && normalizeSql(asString(row.sql)) === normalizeSql(ANALYSIS_LEDGER_SCHEMA_SQL.analysis_run_authorizations);
   return { analysis_run_authorizations: widened ? ANALYSIS_LEDGER_SCHEMA_SQL.analysis_run_authorizations : ANALYSIS_LEDGER_REVISION_65_SQL.analysis_run_authorizations };
 }
@@ -2024,7 +2031,7 @@ function migrateInTransaction(db: DatabaseSync, statements: string, label: strin
     db.exec(`BEGIN IMMEDIATE;
       ${statements}`);
     widenWebToolsPlanRecords(db);
-    validateTaskAuthorizationSchema(db);
+    validatePreIdleTaskAuthorizationSchema(db);
     db.exec('COMMIT');
   } catch (error) {
     try { db.exec('ROLLBACK'); } catch (rollbackError) {
@@ -2095,7 +2102,7 @@ function widenAnalysisRelation(
   const row = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) as SqlRow | undefined;
   if (row === undefined) return;
   const shape = normalizeSql(asString(row.sql));
-  if (shape === normalizeSql(ANALYSIS_LEDGER_SCHEMA_SQL[table])) return;
+  if (shape === normalizeSql(ANALYSIS_LEDGER_SCHEMA_SQL[table]) || (table === 'analysis_run_authorizations' && shape === normalizeSql(IDLE_RUN_AUTHORIZATIONS_SQL))) return;
   requireTask(priorSqls.some((priorSql) => shape === normalizeSql(priorSql)), 'SCHEMA_INVALID', `分析任务账本表 ${table} 结构不兼容。`);
   validateCanonicalRowDigests(db, [table]);
   const foreignKeysState = (): number => asNumber((db.prepare('PRAGMA foreign_keys').get() as SqlRow).foreign_keys);
@@ -2194,9 +2201,9 @@ function migrateAnalysisLedgerToRevision17(db: DatabaseSync, from: typeof J04_BA
       }
       seedInitialPlanVersions(db);
       widenWebToolsPlanRecords(db);
-      db.exec(`PRAGMA user_version = ${LATEST_SCHEMA_VERSION}`);
+      db.exec(`PRAGMA user_version = ${PRE_IDLE_SCHEMA_VERSION}`);
       requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '分析任务账本迁移后引用校验失败。');
-      validateTaskAuthorizationSchema(db);
+      validatePreIdleTaskAuthorizationSchema(db);
       db.exec('COMMIT');
     } catch (error) {
       try { db.exec('ROLLBACK'); } catch (rollbackError) {
@@ -2299,7 +2306,7 @@ function migrateAnalysisLedgerToRevision80(db: DatabaseSync): void {
 
 /** Revision 82 → 83 (#89): the existing ledger is unchanged; only the version advances. */
 function advanceToTerminalRevision(db: DatabaseSync): void {
-  migrateInTransaction(db, `PRAGMA user_version = ${LATEST_SCHEMA_VERSION};`, 'Terminal version');
+  migrateInTransaction(db, `PRAGMA user_version = ${PRE_IDLE_SCHEMA_VERSION};`, 'Terminal version');
 }
 
 /**
@@ -2317,9 +2324,9 @@ function migrateResultSetsToRevision82(db: DatabaseSync): void {
     try {
       db.exec('BEGIN IMMEDIATE');
       rebuildResultSetRelations(db);
-      db.exec(`PRAGMA user_version = ${LATEST_SCHEMA_VERSION}`);
+      db.exec(`PRAGMA user_version = ${PRE_IDLE_SCHEMA_VERSION}`);
       requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '分析任务账本迁移后引用校验失败。');
-      validateTaskAuthorizationSchema(db);
+      validatePreIdleTaskAuthorizationSchema(db);
       db.exec('COMMIT');
     } catch (error) {
       try { db.exec('ROLLBACK'); } catch (rollbackError) {
@@ -2360,9 +2367,9 @@ function rebuildKindCoupledAnalysisRelations(db: DatabaseSync, revision: 20 | 24
       // analysis family, so every rebuild from a store before revision 80 moves them too and stamps the terminal version (83).
       rebuildResultSetRelations(db);
       widenWebToolsPlanRecords(db);
-      db.exec(`PRAGMA user_version = ${LATEST_SCHEMA_VERSION}`);
+      db.exec(`PRAGMA user_version = ${PRE_IDLE_SCHEMA_VERSION}`);
       requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '分析任务账本迁移后引用校验失败。');
-      validateTaskAuthorizationSchema(db);
+      validatePreIdleTaskAuthorizationSchema(db);
       db.exec('COMMIT');
     } catch (error) {
       try { db.exec('ROLLBACK'); } catch (rollbackError) {
@@ -2425,7 +2432,7 @@ function widenReviewContractLedger(db: DatabaseSync): void {
   finally { if (restoreForeignKeys) db.exec('PRAGMA foreign_keys = ON'); }
 }
 
-export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
+function initializePreIdleTaskAuthorizationSchema(db: DatabaseSync): void {
   const version = asNumber((db.prepare('PRAGMA user_version').get() as SqlRow).user_version);
   requireTask(
     version === PREDECESSOR_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
@@ -2459,7 +2466,7 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
     'SCHEMA_UNSUPPORTED', '数据库版本不受支持。',
   );
   if (version < REVIEW_CONTRACT_SCHEMA_VERSION) widenReviewContractLedger(db);
-  if (version === REVIEW_CONTRACT_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  if (version === REVIEW_CONTRACT_SCHEMA_VERSION) return validatePreIdleTaskAuthorizationSchema(db);
   // Revision 87 → 88 (Issue #1084): the review contract CHECKs widen above; only the version advances here.
   if (version === GLOBAL_AGENT_SCHEMA_VERSION) return advanceToTerminalRevision(db);
   // Revision 86 → 87 (Issue #1083) moves no analysis relation: the supervision ledger and the Book-less dialogue metadata are
@@ -2583,7 +2590,7 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
   }
   const analysisStatements = `${Object.values(ANALYSIS_LEDGER_SCHEMA_SQL).join(';\n')};
       ${Object.values(ANALYSIS_LEDGER_TRIGGER_SQL).join(';\n')};
-      PRAGMA user_version = ${LATEST_SCHEMA_VERSION};`;
+      PRAGMA user_version = ${PRE_IDLE_SCHEMA_VERSION};`;
   if (version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION) {
     validateJ03TaskAuthorizationSchema(db);
     return migrateInTransaction(db, analysisStatements, 'Analysis ledger');
@@ -3049,4 +3056,52 @@ export class TaskAuthorizationStore {
       createdAt: asString(row.created_at),
     };
   }
+}
+
+/** Revision 89 adds a start choice without changing any historical canonical record. */
+export const IDLE_RUN_AUTHORIZATIONS_SQL = ANALYSIS_LEDGER_SCHEMA_SQL.analysis_run_authorizations.replace(
+  "sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64)",
+  "sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64),\n    start_when TEXT NOT NULL DEFAULT 'now' CHECK(start_when IN ('now', 'idle'))",
+);
+
+export function validateTaskAuthorizationSchema(db: DatabaseSync): void {
+  requireTask(Number(db.prepare('PRAGMA user_version').get()?.user_version) === LATEST_SCHEMA_VERSION, 'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');
+  validateJ03TaskAuthorizationSchema(db);
+  validateAnalysisLedgerSchema(db);
+  for (const row of db.prepare('SELECT start_when, canonical_json FROM analysis_run_authorizations').all()) {
+    const record = parseCanonicalJson(asString(row.canonical_json));
+    requireTask(isRecord(record) && (record.startWhen ?? 'now') === row.start_when, 'TASK_RECORD_INVALID', '任务开始时机与授权记录不一致。');
+  }
+}
+
+export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
+  if (Number(db.prepare('PRAGMA user_version').get()?.user_version) === LATEST_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  const idleShape = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'analysis_run_authorizations'").get()?.sql;
+  const preStamped = typeof idleShape === 'string' && normalizeSql(idleShape) === normalizeSql(IDLE_RUN_AUTHORIZATIONS_SQL);
+  if (preStamped) requireTask(db.prepare("SELECT 1 FROM analysis_run_authorizations WHERE start_when <> 'now' LIMIT 1").get() === undefined,
+    'SCHEMA_INVALID', '未完成迁移的任务授权不能包含新的空闲运行。');
+  initializePreIdleTaskAuthorizationSchema(db);
+  if (preStamped) {
+    transact(db, () => { db.exec(`PRAGMA user_version = ${LATEST_SCHEMA_VERSION}`); validateTaskAuthorizationSchema(db); });
+    return;
+  }
+  validateCanonicalRowDigests(db, ['analysis_run_authorizations']);
+  const foreignKeys = Number(db.prepare('PRAGMA foreign_keys').get()?.foreign_keys) === 1;
+  db.exec('PRAGMA foreign_keys = OFF');
+  try {
+    db.exec('BEGIN IMMEDIATE');
+    const columns = (db.prepare('PRAGMA table_info(analysis_run_authorizations)').all() as SqlRow[]).map((row) => asString(row.name)).join(', ');
+    db.exec('CREATE TEMP TABLE idle_authorizations AS SELECT rowid AS prior_rowid, * FROM analysis_run_authorizations');
+    db.exec('DROP TABLE analysis_run_authorizations');
+    db.exec(IDLE_RUN_AUTHORIZATIONS_SQL);
+    db.exec(`INSERT INTO analysis_run_authorizations(rowid, ${columns}) SELECT prior_rowid, ${columns} FROM temp.idle_authorizations ORDER BY prior_rowid`);
+    db.exec('DROP TABLE temp.idle_authorizations');
+    db.exec(ANALYSIS_LEDGER_TRIGGER_SQL.analysis_run_authorizations_no_update!);
+    db.exec(ANALYSIS_LEDGER_TRIGGER_SQL.analysis_run_authorizations_no_delete!);
+    requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '空闲任务迁移后引用校验失败。');
+    db.exec(`PRAGMA user_version = ${LATEST_SCHEMA_VERSION}`);
+    db.exec('COMMIT');
+  } catch (error) { db.exec('ROLLBACK'); throw error; }
+  finally { if (foreignKeys) db.exec('PRAGMA foreign_keys = ON'); }
+  validateTaskAuthorizationSchema(db);
 }

@@ -1191,6 +1191,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'background-enrollment-resumed',
     'background-revoke',
     'background-revoked-no-dispatch',
+    'idle-start-choice',
+    'idle-yield-to-foreground',
     'model-question-launch',
     'model-question-decision-item',
     'model-question-answer-turn',

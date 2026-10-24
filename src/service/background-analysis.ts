@@ -22,10 +22,12 @@ export interface BackgroundAnalysisDispatcherDependencies {
   readonly store: Pick<EditorialStore,
     'backgroundAnalysisBooks' | 'backgroundAnalysisDecisionFor' | 'createBackgroundBaselineAnalysisPreparationWork' |
     'advanceBaselineAnalysisPreparationWork' | 'cancelBaselineAnalysisPreparationWork' | 'backgroundMayContinue' |
-    'startEnrolledBaselineAnalysis' | 'noteBackgroundNotStarted' | 'replacementFrozen'>;
-  readonly execution: Pick<BaselineAnalysisExecutionOwner, 'full' | 'routeExecutable' | 'admitOrQueue' | 'capacity'>;
+    'startEnrolledBaselineAnalysis' | 'noteBackgroundNotStarted' | 'replacementFrozen'> & Partial<Pick<EditorialStore, 'backgroundIdleFacts'>>;
+  readonly execution: Pick<BaselineAnalysisExecutionOwner, 'full' | 'routeExecutable' | 'admitOrQueue' | 'capacity'> & Partial<Pick<BaselineAnalysisExecutionOwner, 'setBackgroundIdle'>>;
   /** Whether a job the editor asked for is queued or under way: the dispatcher never steps in beside one. */
   readonly editorWorkBusy?: () => boolean;
+  /** Deferred starts wait for connectivity as well as quiet. */
+  readonly dispatchReady?: () => boolean;
   readonly launchPolicy: LaunchPolicyProjection;
   readonly tickMs?: number;
   readonly quietMs?: number;
@@ -108,6 +110,11 @@ export class BackgroundAnalysisDispatcher {
       try {
         // Nothing starts while a replacement of the local data waits: what it wrote would be lost with the data.
         if (this.#deps.store.replacementFrozen()) return;
+        const runtime = this.runtime();
+        const facts = this.#deps.store.backgroundIdleFacts?.(runtime);
+        const idle = (facts?.idle ?? true) && (this.#deps.dispatchReady?.() ?? true);
+        this.#deps.execution.setBackgroundIdle?.(idle);
+        if (!idle) return;
         books = this.#deps.store.backgroundAnalysisBooks();
       } catch {
         return;

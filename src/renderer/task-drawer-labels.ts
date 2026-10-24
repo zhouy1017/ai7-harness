@@ -726,7 +726,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
         readiness,
         summary,
         statement: null,
-        note: TASK_BAR_QUEUED_NOTE,
+        note: plan.state.label === '等待空闲' ? '停下编辑 30 秒且没有编辑操作运行后开始；预算上限不变，可以取消任务' : TASK_BAR_QUEUED_NOTE,
         status: plan.state.label,
         actions: [{ name: 'cancel-wait', label: TASK_BAR_CANCEL_WAIT, tone: 'secondary', disabledReason: null }, runLink],
       };
@@ -736,7 +736,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
         readiness,
         summary,
         statement: null,
-        note: plan.state.label === TASK_BAR_WAITING_FOR_SLOT ? TASK_BAR_WAITING_SLOT_NOTE : TASK_BAR_WAITING_NOTE,
+        note: plan.state.label === '等待空闲' ? '停下编辑 30 秒且没有编辑操作运行后开始；可以取消任务' : plan.state.label === TASK_BAR_WAITING_FOR_SLOT ? TASK_BAR_WAITING_SLOT_NOTE : TASK_BAR_WAITING_NOTE,
         status: plan.state.label,
         actions: [
           ...(plan.state.label === TASK_BAR_WAITING_FOR_CONNECTION
@@ -832,7 +832,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
           readiness,
           summary,
           statement: null,
-          note: continuation === null ? null : taskBarContinuationNote(continuation.unitsSettled, continuation.unitsTotal, continuation.pendingAnswerUnits,
+          note: plan.state.label === '让位给你的任务' ? '下次空闲后接着处理；运行授权与预算上限不变' : continuation === null ? null : taskBarContinuationNote(continuation.unitsSettled, continuation.unitsTotal, continuation.pendingAnswerUnits,
             plan.listPages?.['runControl.continuation.pendingAnswerUnits']?.total),
           status: plan.state.label,
           actions: [

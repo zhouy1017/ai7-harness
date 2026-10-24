@@ -17,7 +17,7 @@ import { createServiceTestRoots } from '../support/temp-data-root.js';
 import { writeSyntheticDocx } from '../support/synthetic-docx.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 
-const PLAN_OPS = ['inspectTaskPlan', 'resolveUnconfirmedOutcomes', 'editTaskPlan', 'controlTaskRun', 'startTaskWhenOnline', 'cancelWaitingTask'] as const;
+const PLAN_OPS = ['inspectTaskPlan', 'resolveUnconfirmedOutcomes', 'editTaskPlan', 'controlTaskRun', 'startTaskWhenOnline', 'startTaskWhenIdle', 'cancelWaitingTask'] as const;
 const ID = '00000000-0000-4000-8000-000000000000';
 function sweep(shape: string, state: string, op: string, result: unknown): void {
   const response = { id: ID, ok: true, op, result };

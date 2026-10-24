@@ -77,7 +77,7 @@ describe('Procedure Definition persistence and exact plan pins', () => {
     store.markCleanShutdown(); store.close();
     db = new DatabaseSync(path);
     // Synchronized with #1082, #1083 and #1084: revisions 86 to 88 follow; 88 adds the version-2 review procedures beside version 1.
-    expect(db.prepare('PRAGMA user_version').get()!.user_version).toBe(88);
+    expect(db.prepare('PRAGMA user_version').get()!.user_version).toBe(89);
     const originalVersions = db.prepare('SELECT * FROM procedure_definition_versions WHERE version = 1 ORDER BY version_id').all();
     db.exec('DROP TRIGGER procedure_definition_versions_no_delete; DELETE FROM procedure_definition_versions WHERE version = 2; PRAGMA user_version = 85;');
     db.exec(PROCEDURE_DEFINITION_TRIGGER_SQL['procedure_definition_versions_no_delete']!);

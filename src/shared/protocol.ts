@@ -127,7 +127,7 @@ import type { PublicSampleBookSourceDigest } from './public-samplebooks.js';
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 168 as const;
+export const SERVICE_PROTOCOL_VERSION = 169 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 export interface BookFindingProjection {
@@ -283,6 +283,7 @@ export const IPC_CHANNELS = {
   startBaselineAnalysisWhenOnline: 'ai7:j04:start-baseline-analysis-when-online',
   cancelWaitingBaselineAnalysis: 'ai7:j04:cancel-waiting-baseline-analysis',
   // 联网后开始任务 and its 取消 for every other kind that has a plan (Issue #760, S74c): one pair, keyed by kind.
+  startTaskWhenIdle: 'ai7:j09:start-task-when-idle',
   startTaskWhenOnline: 'ai7:j04:start-task-when-online',
   cancelWaitingTask: 'ai7:j04:cancel-waiting-task',
   cancelBaselineAnalysisRun: 'ai7:j04:cancel-baseline-analysis-run',
@@ -4839,6 +4840,7 @@ export interface BaselineAnalysisProjection {
      * `default-execution-rule` when 快速开始 started the Task under a 默认执行规则 (Issue #421); `background-analysis-enrollment`
      * when AI7 started it by itself under the Book's 后台分析登记 (Issue #95, S39).
      */
+    startWhen?: 'now' | 'idle';
     origin: 'standard-direct' | 'default-execution-rule' | 'background-analysis-enrollment';
     /** The rule version the authorization names; `null` for a standard-direct start. */
     ruleVersionId: string | null;
@@ -7748,6 +7750,8 @@ export interface BackgroundAnalysisScopeOffer {
 
 /** One Book's 后台分析登记 on ②A: what it is, its state, what it would do now and why, and the decisions it offers. */
 export interface BackgroundAnalysisEnrollmentProjection {
+  kind?: string;
+  kinds?: readonly { kind: string; label: string; enabled: boolean; reason: string | null }[];
   bookId: string;
   bookTitle: string;
   /**
@@ -10240,6 +10244,8 @@ export type GlobalAttentionStateKey =
   | 'analysis-waiting-admission'
   // 等待运行名额 on the governor (Issue #49, S14; CONC-007): a start waiting for a place, never a ceiling or a limit.
   | 'analysis-waiting-capacity'
+  | 'analysis-waiting-idle'
+  | 'analysis-yielded'
   | 'analysis-cancelling'
   | 'analysis-pausing'
   | 'analysis-paused'
@@ -11695,6 +11701,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations {
    * — a ledger Task's Run Record, or a Review Run's one approval — and the Run waits in Connectivity Wait; nothing is sent, no
    * usage arises, and nothing implies it began. Reconnect Preflight then starts it as 开始任务 would. The answer is the plan.
    */
+  startTaskWhenIdle: { input: Omit<StartTaskWhenOnlineInput, 'kind'> & { kind: TaskPlanKind }; output: TaskPlanProjection };
   startTaskWhenOnline: { input: StartTaskWhenOnlineInput; output: TaskPlanProjection };
   /** 取消 while that Run waits (OFF-010), or while it waits on the governor for a place: terminal, before any dispatch. */
   cancelWaitingTask: { input: CancelWaitingTaskInput; output: TaskPlanProjection };
@@ -11724,7 +11731,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations {
   };
   /** 后台分析登记 of one Book (Issue #95, S39): its state, what it would do now, and its disclosure. */
   inspectBackgroundAnalysisEnrollment: {
-    input: { bookId: string };
+    input: { bookId: string; kind?: string };
     output: BackgroundAnalysisEnrollmentProjection;
   };
   /**
@@ -11734,6 +11741,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations {
   enrollBackgroundAnalysis: {
     input: {
       bookId: string;
+      kind?: string;
       disclosureDigest: string;
       startingPoint: BackgroundAnalysisStartingPoint;
       scope: { kind: BackgroundAnalysisScopeKind; seriesId: string | null };
@@ -12581,6 +12589,7 @@ export interface RendererApi extends GlobalAgentRendererApi {
   startBaselineAnalysisWhenOnline(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<BaselineAnalysisWireProjection>;
   cancelWaitingBaselineAnalysis(input: { taskIntentId: string }): Promise<BaselineAnalysisWireProjection>;
   /** 联网后开始任务 and its 取消 for every other kind with a plan (Issue #760, S74c), within the route's Book. */
+  startTaskWhenIdle(input: Omit<ServiceOperationMap['startTaskWhenIdle']['input'], 'bookId'>): Promise<TaskPlanProjection>;
   startTaskWhenOnline(input: Omit<StartTaskWhenOnlineInput, 'bookId'>): Promise<TaskPlanProjection>;
   cancelWaitingTask(input: Omit<CancelWaitingTaskInput, 'bookId'>): Promise<TaskPlanProjection>;
   cancelBaselineAnalysisRun(input: { taskIntentId: string }): Promise<BaselineAnalysisWireProjection>;
@@ -12613,7 +12622,7 @@ export interface RendererApi extends GlobalAgentRendererApi {
   inspectDefaultExecutionRules(): Promise<DefaultExecutionRulesProjection>;
   deactivateDefaultExecutionRule(input: { ruleId: string }): Promise<DefaultExecutionRuleProjection>;
   /** 后台分析登记 of the Book the window is showing (Issue #95, S39). */
-  inspectBackgroundAnalysisEnrollment(): Promise<BackgroundAnalysisEnrollmentProjection>;
+  inspectBackgroundAnalysisEnrollment(input?: { kind?: string }): Promise<BackgroundAnalysisEnrollmentProjection>;
   enrollBackgroundAnalysis(input: Omit<ServiceOperationMap['enrollBackgroundAnalysis']['input'], 'bookId'>): Promise<BackgroundAnalysisEnrollmentProjection>;
   revokeBackgroundAnalysisEnrollment(input: { enrollmentId: string }): Promise<BackgroundAnalysisEnrollmentProjection>;
   holdBackgroundAnalysisEnrollment(input: { enrollmentId: string; hold: 'pause' | 'resume' }): Promise<BackgroundAnalysisEnrollmentProjection>;

@@ -156,6 +156,8 @@ export const GLOBAL_ATTENTION_STATE_LABELS: Readonly<Record<GlobalAttentionState
   'analysis-waiting-admission': '正在排队',
   // A start waiting on the governor for a place (Issue #49, S14; CONC-007), in the drawer's words for it.
   'analysis-waiting-capacity': '等待运行名额',
+  'analysis-waiting-idle': '等待空闲',
+  'analysis-yielded': '让位给你的任务',
   'analysis-cancelling': '正在取消',
   'analysis-pausing': '正在暂停',
   'analysis-paused': '已暂停',
@@ -223,6 +225,8 @@ export const GLOBAL_ATTENTION_STATE_PILLS: Readonly<Record<GlobalAttentionStateK
   'analysis-waiting-slot': { tone: 'neutral', shape: 'ring' },
   'analysis-waiting-admission': { tone: 'neutral', shape: 'ring' },
   'analysis-waiting-capacity': { tone: 'neutral', shape: 'ring' },
+  'analysis-waiting-idle': { tone: 'neutral', shape: 'ring' },
+  'analysis-yielded': { tone: 'neutral', shape: 'half' },
   'analysis-cancelling': { tone: 'attention', shape: 'half' },
   'analysis-pausing': { tone: 'attention', shape: 'half' },
   'analysis-paused': { tone: 'neutral', shape: 'half' },
@@ -452,6 +456,8 @@ export function globalAttentionReason(item: GlobalAttentionItemProjection): stri
     case 'analysis-waiting-slot':
       // It holds no place in the queue of starts waiting for one, and says so (Issue #632).
       return '已经联网，但运行名额已满：有名额空出时，AI7 先核对计划再开始；之后开始的任务可能先开始。现在什么都没有运行。';
+    case 'analysis-waiting-idle': return '已记录本次运行授权；停下编辑 30 秒且没有编辑操作运行后开始，可以取消任务。';
+    case 'analysis-yielded': return '让位给你的任务：已完成的部分都已保存，下次空闲后接着处理；预算上限不变。';
     case 'analysis-waiting-capacity':
       return '运行名额已满：正在运行的任务结束后，这项任务自动开始；在此之前什么都没有发送。';
     case 'analysis-waiting-admission':

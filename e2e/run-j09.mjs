@@ -32,7 +32,7 @@ import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState
 // pinned to the manuscript revision the Run was authorized on, with the applied words standing; and each Run's
 // revision, attempt and record stay its own Book's.
 //
-// 后台分析登记 (Issue #95, plan slice S39; ADR 0048; V2-UX-ANALYSIS-016 to 021) follows: on 乙's ②A, `登记后台分析…` opens its
+// 后台处理登记 (Issue #95, plan slice S39; ADR 0048; V2-UX-ANALYSIS-016 to 021) follows: on 乙's ②A, `登记后台处理…` opens its
 // disclosure first — scope, analysis, when it starts, what it binds and never does — with no starting point chosen; Escape
 // closes it. Since Issue #864 the disclosure offers the Book alone or every Book of the house, the Book chosen, and holds `登记`
 // until a tokens ceiling is typed too, saying what each Run is held to. Enrolled `只分析登记之后的改动` with a ceiling, the
@@ -70,7 +70,7 @@ const ACTIVE_EMPTY = '没有正在运行或中途停止的任务。';
 // (`src/renderer/task-drawer-labels.ts`), pinned there by their unit suites.
 const REASON_WAITING_CAPACITY = '运行名额已满：正在运行的任务结束后，这项任务自动开始；在此之前什么都没有发送。';
 const QUEUED_NOTE = '运行名额已满：正在运行的任务结束后，这项任务自动开始；在此之前什么都没有发送，也不产生用量';
-// 后台分析登记's words (`src/service/background-analysis-enrollments.ts`, `src/renderer/background-analysis-labels.ts`), pinned
+// 后台处理登记's words (`src/service/background-analysis-enrollments.ts`, `src/renderer/background-analysis-labels.ts`), pinned
 // there by `tests/unit/background-analysis.test.ts`.
 const BACKGROUND_CURRENT_LINE = '现在：分析结果与当前稿件一致，没有要做的。';
 const BACKGROUND_REVOKED_LINE = '现在：已撤销：不会再开始新的后台分析。';
@@ -81,10 +81,10 @@ const BACKGROUND_CEILING_FIRST = '请先填写预算上限（tokens）。';
 const BACKGROUND_PAUSED_LINE = '现在：已暂停：续行之前不会开始新的后台分析；已经开始的运行照常进行。';
 const BACKGROUND_AUTHORIZED_DETAIL = '后台分析按登记记录了运行授权。';
 /**
- * The quiet period this Journey's launch sets for 后台分析登记 (`--j09-background-quiet-ms`, development-ci and J-09 only; #713
+ * The quiet period this Journey's launch sets for 后台处理登记 (`--j09-background-quiet-ms`, development-ci and J-09 only; #713
  * review, P2-7): the dispatcher then looks four times as often, and every background stage waits on its progress, not a clock.
  */
-const BACKGROUND_QUIET_MS = 3_000;
+const BACKGROUND_QUIET_MS = 30_000;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
 const BROWSER_CLOSE_TIMEOUT_MS = 25_000;
@@ -1437,16 +1437,16 @@ async function main() {
       new Set([pausedA.run.attempt.attemptId, settledB2.run.attempt.attemptId, cancelledC.run.attempt.attemptId]).size === 3,
     'concurrent-a-paused-own', { state: pausedA?.state, spans: pausedA?.run?.attempt?.spans?.length, revision: pausedA?.resultSetRevision ?? null });
 
-    // ---- 后台分析登记 (Issue #95, plan slice S39; ADR 0048; V2-UX-ANALYSIS-016 to 021) ----------------------------------------
+    // ---- 后台处理登记 (Issue #95, plan slice S39; ADR 0048; V2-UX-ANALYSIS-016 to 021) ----------------------------------------
     at('background-enrollment-disclosure');
-    // 乙's ②A: no Enrollment yet — nothing the import, the profile or its Runs did made one — and `登记后台分析…` opens the
+    // 乙's ②A: no Enrollment yet — nothing the import, the profile or its Runs did made one — and `登记后台处理…` opens the
     // disclosure first, with no starting point chosen for the editor and `登记` held until one is.
     await toLibrary(renderer, 'background-b');
     await openAnalysisOf(renderer, bookB, 'background-b');
     await waitFor(renderer, `(${READ_BACKGROUND})?.state==='none'`, 'background-block-none', 30_000);
     const noneBlock = await renderer.evaluate(READ_BACKGROUND);
     requireJourney(noneBlock.pill === '未登记' && noneBlock.nextLine === null && noneBlock.startedLines.length === 0 &&
-      JSON.stringify(noneBlock.actions) === JSON.stringify([['enroll-open', '登记后台分析…', 'enabled']]), 'background-block-none-read', noneBlock);
+      JSON.stringify(noneBlock.actions) === JSON.stringify([['enroll-open', '登记后台处理…', 'enabled']]), 'background-block-none-read', noneBlock);
     const noneService = await renderer.evaluate(`window.ai7.inspectBackgroundAnalysisEnrollment()`);
     requireJourney(noneService?.bookId === bookB && noneService.state === 'none' && noneService.enrollment === null && noneService.startedRunCount === 0, 'background-none-record');
     await clickSelector(renderer, '[data-background-action="enroll-open"]', 'background-open');
@@ -1483,7 +1483,7 @@ async function main() {
     requireJourney(enrolled?.state === 'active' && enrolled.enrollment?.ordinal === 1 && enrolled.enrollment.startingPoint === 'prospective' &&
       UUID_PATTERN.test(enrolled.enrollment.enrollmentVersionId ?? '') && enrolled.next?.kind === 'none' &&
       enrolled.enrollment.ceilingTokens === BACKGROUND_CEILING_TOKENS && enrolled.enrollment.shareTokens === BACKGROUND_CEILING_TOKENS && enrolled.enrollment.scope?.kind === 'book' &&
-      activeBlock.pill === '已登记' && (activeBlock.enrollment ?? '').startsWith('后台分析登记 · 第 1 版 · 只分析登记之后的改动 · 本机编辑登记于 ') &&
+      activeBlock.pill === '已登记' && (activeBlock.enrollment ?? '').startsWith('后台处理登记 · 第 1 版 · 只分析登记之后的改动 · 本机编辑登记于 ') &&
       activeBlock.ceiling === `范围：《${SECOND.title}》这一本书 · 预算上限 ${BACKGROUND_CEILING_TOKENS} tokens` &&
       activeBlock.nextLine === BACKGROUND_CURRENT_LINE && JSON.stringify(activeBlock.actions) === JSON.stringify([['pause', '暂停', 'enabled'], ['revoke-open', '撤销登记…', 'enabled']]),
     'background-enrolled-record', { enrolled: enrolled?.state, next: enrolled?.next, block: activeBlock });
@@ -1506,7 +1506,7 @@ async function main() {
     // itself, in the background: the screen, the Book and the focus stay exactly where the editor left them.
     await toLibrary(renderer, 'background-edit');
     await openManuscriptOf(renderer, bookB, 'background-edit');
-    await editAndSave(renderer, '〔后台分析登记旅程的改动〕', 'background-edit');
+    await editAndSave(renderer, '〔后台处理登记旅程的改动〕', 'background-edit');
     const backgroundFocusBefore = await renderer.evaluate(FOCUS_STATE);
     requireJourney(backgroundFocusBefore?.screen === 'editor' && backgroundFocusBefore.book === bookB && backgroundFocusBefore.focused === true, 'background-focus-before', backgroundFocusBefore);
     const settledBackground = await waitForItems(renderer, (answer) => answer.items.some((item) => item.group === 'recent' && item.bookId === bookB &&
@@ -1532,13 +1532,13 @@ async function main() {
       backgroundRun.resultSetRevision.freshness?.state === 'current' &&
       // Issue #864: the plan held the Run to the Enrollment's ceiling, and its Run Report names the Enrollment.
       backgroundRun.planVersion?.materialInputs?.runBudgetCeiling?.maxTotalTokens === BACKGROUND_CEILING_TOKENS &&
-      backgroundRun.taskOutcome?.report?.background?.[0] === '由后台分析登记开始 · 按第 1 版登记',
+      backgroundRun.taskOutcome?.report?.background?.[0] === '由后台处理登记开始 · 按第 1 版登记',
     'background-run-exact', { mode: backgroundRun?.taskIntent?.mode, origin: backgroundRun?.authorization?.origin, run: backgroundRun?.run?.state, ordinal: backgroundRun?.resultSetRevision?.ordinal });
     await waitFor(renderer, `(${READ_BACKGROUND})?.started==='1'`, 'background-started-listed', 30_000);
     const startedBlock = await renderer.evaluate(READ_BACKGROUND);
     requireJourney(startedBlock.startedLines.length === 1 && (startedBlock.startedLines[0] ?? '').startsWith('同步到当前稿件 · 按第 1 版登记 · 授权于 ') &&
       startedBlock.nextLine === BACKGROUND_CURRENT_LINE, 'background-started-read', startedBlock);
-    await assertRenderer(renderer, `document.querySelector('.analysis-run-report-background li')?.textContent==='由后台分析登记开始 · 按第 1 版登记'`, 'background-run-report-lines');
+    await assertRenderer(renderer, `document.querySelector('.analysis-run-report-background li')?.textContent==='由后台处理登记开始 · 按第 1 版登记'`, 'background-run-report-lines');
 
     at('background-enrollment-paused');
     // `暂停` (Issue #864) holds what the Enrollment would start: the block reads 已暂停, `续行` takes the focus, the Run it started stays.
@@ -1572,7 +1572,7 @@ async function main() {
     await waitFor(renderer, `(${READ_BACKGROUND})?.state==='revoked'`, 'background-revoked', 30_000);
     const revokedBlock = await renderer.evaluate(READ_BACKGROUND);
     requireJourney(revokedBlock.pill === '已撤销' && revokedBlock.nextLine === BACKGROUND_REVOKED_LINE && revokedBlock.history.length === 4 &&
-      revokedBlock.startedLines.length === 1 && JSON.stringify(revokedBlock.actions) === JSON.stringify([['enroll-open', '登记后台分析…', 'enabled']]),
+      revokedBlock.startedLines.length === 1 && JSON.stringify(revokedBlock.actions) === JSON.stringify([['enroll-open', '登记后台处理…', 'enabled']]),
     'background-revoked-read', revokedBlock);
     const keptRecord = JSON.stringify({ task: backgroundRun.taskIntent, authorization: backgroundRun.authorization, run: backgroundRun.run.state, revision: backgroundRun.resultSetRevision.revisionId });
 
@@ -1594,6 +1594,95 @@ async function main() {
     const unchanged = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(JSON.stringify({ task: unchanged?.taskIntent, authorization: unchanged?.authorization, run: unchanged?.run?.state, revision: unchanged?.resultSetRevision?.revisionId }) === keptRecord &&
       unchanged.resultSetRevision.freshness?.state === 'stale', 'background-history-intact', { task: unchanged?.taskIntent?.taskIntentId, freshness: unchanged?.resultSetRevision?.freshness?.state });
+
+    // F-17a: one explicit idle choice authorizes now, holds no place, yields only at a unit boundary and resumes unchanged.
+    at('idle-start-choice');
+    await writeFile(holdPath, '0', 'utf8');
+    await prepareRange(renderer, 1, 'idle-range');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanStart==='ready'`, 'idle-plan-ready', 120_000);
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="revise"]', 'idle-budget-revise');
+    await clickSelector(renderer, '#task-drawer [data-task-plan-edit="budget"]', 'idle-budget-open');
+    await waitFor(renderer, `document.activeElement?.dataset.taskDrawerControl==='budget-input'`, 'idle-budget-focus');
+    await renderer.send('Input.insertText', { text: '100000' });
+    await pressEnter(renderer);
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="update-plan"]', 'idle-budget-update');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanVersion==='2' && document.querySelector('#task-drawer')?.dataset.taskPlanStart==='ready'`, 'idle-budget-frozen', 120_000);
+    const idlePlan = await renderer.evaluate('window.ai7.inspectBaselineAnalysis()');
+    // Confirm an edit on another Book, then start B's frozen plan: idle is application-wide and the plan remains exact.
+    await toLibrary(renderer, 'idle-cross-book-edit');
+    await openManuscriptOf(renderer, bookC, 'idle-cross-book-edit');
+    await editAndSave(renderer, '〔空闲处理前的改动〕', 'idle-cross-book-edit');
+    await toLibrary(renderer, 'idle-start-return');
+    await openAnalysisOf(renderer, bookB, 'idle-start-return');
+    await clickSelector(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', 'idle-open-plan');
+    await waitFor(renderer, `document.querySelector('#task-drawer select[data-task-start-when]')`, 'idle-choice-visible');
+    await assertRenderer(renderer, `(() => { const select=document.querySelector('#task-drawer select[data-task-start-when]'); if(!(select instanceof HTMLSelectElement)||select.value!=='now'||Array.from(select.options).map((option)=>option.textContent).join('/')!=='立即/空闲时处理')return false; select.value='idle'; select.dispatchEvent(new Event('change',{bubbles:true})); return select.value==='idle'; })()`, 'idle-choice-explicit');
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'idle-authorize');
+    await waitFor(renderer, `document.querySelector('#task-drawer .task-bar-status')?.textContent==='等待空闲'`, 'idle-waits');
+    const idleWaiting = await renderer.evaluate('window.ai7.inspectBaselineAnalysis()');
+    requireJourney(idleWaiting.authorization?.startWhen === 'idle' && idleWaiting.authorization.origin === 'standard-direct' &&
+      idleWaiting.run?.state === 'authorized' && idleWaiting.run.attempt === null && idleWaiting.run.progress === null &&
+      idleWaiting.planEnvelope.digest === idlePlan.planEnvelope.digest && idleWaiting.planVersion.materialInputs.runBudgetCeiling.maxTotalTokens === 100000,
+    'idle-exact-authorization-no-place');
+    const idleRunId = idleWaiting.run.runRecordId;
+    const idleTaskId = idleWaiting.taskIntent.taskIntentId;
+    const idleAuthorizationId = idleWaiting.authorization.authorizationId;
+    const idleAttention = await renderer.evaluate(READ_ITEMS);
+    requireJourney(idleAttention.count === 0 && idleAttention.items.some((item)=>item.bookId===bookB && item.group==='active' && item.state==='analysis-waiting-idle'), 'idle-uncounted-by-book');
+    await runHeldAt(renderer, bookB, 0, 'idle-admitted-after-quiet');
+
+    at('idle-yield-to-foreground');
+    // A resumes into the other place. C is explicitly prepared/authorized and queues; the editor then types in C.
+    await toLibrary(renderer, 'idle-foreground-a');
+    await openAnalysisOf(renderer, bookA, 'idle-foreground-a');
+    await renderer.evaluate(`window.ai7.resumeBaselineAnalysisRun({taskIntentId:${JSON.stringify(taskA)}})`);
+    await runHeldAt(renderer, bookA, 2, 'idle-foreground-a-held');
+    await toLibrary(renderer, 'idle-foreground-c');
+    await openAnalysisOf(renderer, bookC, 'idle-foreground-c');
+    let idleForegroundJob = await renderer.evaluate(`window.ai7.prepareBaselineAnalysis({goal:'重新分析全书：绕过全部既有模型结果，按当前覆盖清单重算每个分析单元，追加一个结果集修订版。',update:{mode:'reanalyze-book',selectedRange:null},reconfirm:false})`);
+    const idlePrepareDeadline = Date.now() + 120000;
+    while (idleForegroundJob?.state === 'queued' || idleForegroundJob?.state === 'running') {
+      cancellation.throwIfRequested();
+      requireJourney(Date.now() < idlePrepareDeadline, 'idle-foreground-prepare-bounded');
+      await new Promise((resolveWait) => setTimeout(resolveWait, 25));
+      idleForegroundJob = await renderer.evaluate(`window.ai7.pollServiceJob({jobId:${JSON.stringify(idleForegroundJob.jobId)}})`);
+    }
+    requireJourney(idleForegroundJob?.state === 'completed', 'idle-foreground-prepared');
+    const idleForegroundPlan = await renderer.evaluate('window.ai7.inspectBaselineAnalysis()');
+    const idleForegroundTask = idleForegroundPlan.taskIntent.taskIntentId;
+    await renderer.evaluate(`window.ai7.authorizeBaselineAnalysis({taskIntentId:${JSON.stringify(idleForegroundTask)},planEnvelopeDigest:${JSON.stringify(idleForegroundPlan.planEnvelope.digest)}})`);
+    const idleForegroundQueued = await renderer.evaluate('window.ai7.inspectBaselineAnalysis()');
+    requireJourney(idleForegroundQueued.run?.state === 'authorized', 'idle-foreground-queued');
+    await toLibrary(renderer, 'idle-return-typing');
+    await openManuscriptOf(renderer, bookC, 'idle-return-typing');
+    await editAndSave(renderer, '〔回来处理即时任务〕', 'idle-return-typing');
+    // The post-response hold keeps the sent unit in flight until released; yielding does not interrupt that request.
+    await waitForItems(renderer, (answer) => answer.items.some((item)=>item.bookId===bookB && item.state==='analysis-pausing'), 'idle-request-finishes-before-yield');
+    await writeFile(holdPath, '1', 'utf8');
+    await waitForItems(renderer, (answer) => answer.items.some((item)=>item.bookId===bookB && item.state==='analysis-yielded') &&
+      !answer.items.some((item)=>item.bookId===bookC && item.state==='analysis-waiting-capacity'), 'idle-yield-boundary');
+    await toLibrary(renderer, 'idle-yielded-b');
+    await openAnalysisOf(renderer, bookB, 'idle-yielded-b');
+    const yieldedIdle = await renderer.evaluate('window.ai7.inspectBaselineAnalysis()');
+    requireJourney(yieldedIdle.run?.runRecordId === idleRunId && yieldedIdle.state === 'paused' && yieldedIdle.stateLabel === '让位给你的任务' &&
+      yieldedIdle.run.attempt?.spans?.length === 1 && yieldedIdle.authorization.authorizationId === idleAuthorizationId &&
+      yieldedIdle.planVersion.materialInputs.runBudgetCeiling.maxTotalTokens === 100000,
+    'idle-yield-keeps-unit-authorization-ceiling');
+    // Cancel the foreground work through its existing controls, then idle resumes B without another authorization.
+    for (const [foregroundBook, foregroundTask] of [[bookA, taskA], [bookC, idleForegroundTask]]) {
+      await toLibrary(renderer, 'idle-foreground-cancel');
+      await openAnalysisOf(renderer, foregroundBook, 'idle-foreground-cancel');
+      await renderer.evaluate(`window.ai7.cancelBaselineAnalysisRun({taskIntentId:${JSON.stringify(foregroundTask)}})`);
+    }
+    await writeFile(holdPath, String(SAMPLE1_UNITS), 'utf8');
+    await toLibrary(renderer, 'idle-resume-b');
+    await openAnalysisOf(renderer, bookB, 'idle-resume-b');
+    await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((reading)=>reading.run?.runRecordId===${JSON.stringify(idleRunId)} && reading.state==='settled')`, 'idle-resumed-on-quiet', 120000);
+    const idleFinished = await renderer.evaluate('window.ai7.inspectBaselineAnalysis()');
+    requireJourney(idleFinished.authorization.authorizationId === idleAuthorizationId && idleFinished.authorization.startWhen === 'idle' &&
+      idleFinished.planVersion.materialInputs.runBudgetCeiling.maxTotalTokens === 100000 &&
+      idleFinished.run.transitions.filter((transition)=>transition.state==='admitted').length === 2 &&
+      idleFinished.run.attempt.spans.length === 1, 'idle-same-run-no-resend');
 
     // #865 synchronized delta: the same clarification family carries one model-originated question, only its unit waits.
     at('model-question-launch');

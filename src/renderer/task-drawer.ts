@@ -226,6 +226,7 @@ type DrawerApi = Pick<
   | 'startBaselineAnalysisWhenOnline'
   | 'cancelWaitingBaselineAnalysis'
   | 'startTaskWhenOnline'
+  | 'startTaskWhenIdle'
   | 'cancelWaitingTask'
   | 'cancelBaselineAnalysisRun'
   | 'pauseBaselineAnalysisRun'
@@ -383,6 +384,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   let interrupted = false;
   let focusTitle = false;
   /** A start or a reconfirmation is under way: every bar action waits for it. */
+  let startWhen: 'now' | 'idle' = 'now';
   let working = false;
   /** Why the last start or reconfirmation was refused, beside the actions until the next one or a new plan. */
   let refusal: string | null = null;
@@ -1268,6 +1270,18 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     }
     const actions = el('div', 'task-bar-actions');
     for (const action of view.actions) actions.append(barAction(action, noteId));
+    const startAction = view.actions.find((action) => action.name === 'start' || action.name === 'start-when-online');
+    if (startAction !== undefined && startAction.disabledReason === null && (next.start.readiness === 'ready' || next.start.readiness === 'offline')) {
+      const timing = el('select');
+      timing.setAttribute('aria-label', '开始时间');
+      timing.dataset['taskStartWhen'] = '';
+      for (const [value, label] of [['now', '立即'], ['idle', '空闲时处理']] as const) {
+        const option = el('option', undefined, label); option.value = value; option.selected = value === startWhen;
+        timing.append(option);
+      }
+      timing.addEventListener('change', () => { startWhen = timing.value === 'idle' ? 'idle' : 'now'; });
+      actions.prepend(timing);
+    }
     parts.push(actions);
     const run = next.runControl;
     if (run !== null && run.outcomeUnknown !== null && unconfirmedShown) parts.push(unconfirmedBlock(run.outcomeUnknown.units));
@@ -1846,6 +1860,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
    * actions — every place taken, in the bar's own words.
    */
   async function start(): Promise<void> {
+    if (startWhen === 'idle') return startWhenIdle();
     const current = plan;
     const asked = request;
     if (current === null || !beginWork()) return;
@@ -1887,7 +1902,25 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
    * Run Record for the plan on show — the digest the bar read with it — and the Run waits in Connectivity Wait.
    * Nothing is sent and nothing implies it began; the bar then says what it waits for, beside 取消.
    */
+  async function startWhenIdle(): Promise<void> {
+    const current = plan;
+    const asked = request;
+    if (current === null || !beginWork()) return;
+    options.setStatus('正在记录空闲时处理…', 'busy');
+    try {
+      await api.startTaskWhenIdle({ kind: current.kind, ref: current.ref,
+        planEnvelopeDigest: current.start.planEnvelopeDigest, planDigests: current.start.categoryDigests });
+      options.setStatus('已记录授权；等待空闲', 'success');
+      focusBar = true;
+      options.onRecorded(current.kind, current.bookId, current.ref);
+    } catch (error) {
+      refusal = options.errorMessage(error, TASK_BAR_START_FAILED);
+      options.setStatus(refusal, 'error');
+    } finally { endWork(asked); }
+  }
+
   async function startWhenOnline(): Promise<void> {
+    if (startWhen === 'idle') return startWhenIdle();
     const current = plan;
     const asked = request;
     // The operation the bar offered the control by (#710 review P3-1): a kind without one never shows it.
@@ -2530,6 +2563,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       panelBookId = null;
       cancelOnOpen = how?.cancel === true;
       showView();
+      if (request?.ref !== next.ref || request?.bookId !== next.bookId || request?.kind !== next.kind) startWhen = 'now';
       request = next;
       returnFocus = finder;
       plan = null;

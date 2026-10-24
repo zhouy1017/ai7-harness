@@ -283,3 +283,10 @@ export function taskDeclaresPlatformTools(kind: string): boolean {
   if (review !== undefined) return review.researchDeclaration?.webSearch === true && review.searchEngine && review.categoryId !== 'publication-risk';
   return kind === WRITING_KIND || kind === INITIAL_EVALUATION_KIND;
 }
+
+/** Per-kind enrollment permissions; later consumers still require exact dispatch admission. */
+export function backgroundEnrollmentKinds(policy: LaunchPolicyProjection | undefined): readonly { kind: string; mandatoryCeiling: true }[] {
+  if (policy?.integrityState !== 'verified' || policy.denialReason !== null) return [];
+  const baseline = liveKindRule(policy, 'baseline-manuscript-analysis', [], 'background') === null ? [] : [{ kind: 'baseline-analysis', mandatoryCeiling: true as const }];
+  return [...baseline, ...(policy.providerProcessing.backgroundProcessingEnrollment?.enrollableKinds ?? [])];
+}
