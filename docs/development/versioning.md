@@ -2,7 +2,20 @@
 
 Issue [#1015](https://github.com/zhouy1017/ai7-harness/issues/1015) unifies source, build, package and running-app identity. Release orchestration remains in [releasing](releasing.md); compatibility remains in the [Data Version decision](../adr/0079-record-the-owner-s-decisions-of-2026-09-10-on-storage-policies-export-egress-providers-and-samplebooks.md).
 
-[ADR 0093](../adr/0093-automate-nightly-packages-and-windows-version-tag-releases.md) authorizes paired nightly native packages and Windows-only version-tag releases. Stable tags publish normal Windows releases and RC tags publish prereleases; macOS releases are deferred indefinitely until the Owner explicitly requests resumption. Unsigned macOS packages remain nightly inspection artifacts.
+[ADR 0093](../adr/0093-automate-nightly-packages-and-windows-version-tag-releases.md) authorizes Windows nightly native packages and Windows-only version-tag releases. Stable tags publish normal Windows releases and RC tags publish prereleases; the macOS platform is deferred indefinitely under [ADR 0097](../adr/0097-defer-the-macos-platform-indefinitely-and-deliver-windows-only.md), so no macOS package is built.
+
+## Version scheme (ADR 0098)
+
+One `x.y.z` in root `package.json` names the software everywhere — source, build identity, native package metadata, the `vX.Y.Z` / `vX.Y.Z-rc.N` tags of ADR 0093, the development plan's wave targets, PROGRESS, GitHub milestones and Issue placement ([ADR 0098](../adr/0098-adopt-one-x-y-z-version-across-releases-and-internal-management.md)). `x` rises for a new product generation or an incompatible Data Version change; `y` rises by one with every integrated wave, and features enter only through `y`; `z` rises for a fix-only integration between waves or a hotfix of a released version; `-rc.N` precedes a stable tag. A nightly build is identified by version, build number and source commit and has no version of its own. The Commander raises `package.json` and adds the ledger row in each wave's integration PR; the Owner tags; `main` is the release line that fast-forwards to each stable tag. `tools/check-version.mjs`, run by `pnpm run check`, fails when `package.json`, the ledger below, PROGRESS's version line and the plan's wave → version pairs disagree.
+
+## Version ledger
+
+| Version | Status | Wave or scope | Integrated dev commit | Tag / release |
+| --- | --- | --- | --- | --- |
+| 0.1.0 | integrated | Waves 1–20 and the governance wave `codex/integration-1098` (ADR 0097, ADR 0098) | `a40bf0b8acc4f67b14df08670df80dc509386978` and its successors until Wave 21 integrates | none |
+| 0.2.0 | planned | Wave 21 — the core completes and procedures become editable | — | — |
+| 0.3.0 | planned | Wave 22 — desk work and derived deliverables | — | — |
+| 1.0.0 | planned | Wave 23 — acceptance and closure (`1.0.0-rc.N` before the Owner accepts) | — | — |
 
 ## Canonical inputs
 
@@ -47,7 +60,7 @@ Packaging rebuilds clean source, checks the persisted identity, and copies it un
 
 For count 1234, macOS receives `1.12.34`; count 10000 becomes `2.0.0`. This reversible encoding obeys Apple's positive first component and 4/2/2 digit limits, including before software 1.0.0. The complete SemVer (including prerelease), count, Data Version, SHA and dirty flag are retained as `AI7SoftwareVersion`, `AI7BuildNumber`, `AI7DataVersion`, `AI7SourceCommit`, `AI7Dirty` in the macOS plist and in the shared manifest. See Apple's [bundle-version reference](https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html#//apple_ref/doc/uid/TP40009249-SW18).
 
-The admitted software core has at most four digits per component. Windows count is capped at 65535; higher counts fail packaging with `AI7_BUILD_IDENTITY_WINDOWS_VERSION_OVERFLOW`, requiring an explicitly revised encoding instead of truncation. Build identity itself retains the full safe integer count. Both `buildNumber` and `buildVersion` are passed explicitly to electron-builder so hosted environment variables cannot substitute for them.
+The macOS projections stay in the build-identity code for a later resumption; no macOS package is built while [ADR 0097](../adr/0097-defer-the-macos-platform-indefinitely-and-deliver-windows-only.md) holds. The admitted software core has at most four digits per component. Windows count is capped at 65535; higher counts fail packaging with `AI7_BUILD_IDENTITY_WINDOWS_VERSION_OVERFLOW`, requiring an explicitly revised encoding instead of truncation. Build identity itself retains the full safe integer count. Both `buildNumber` and `buildVersion` are passed explicitly to electron-builder so hosted environment variables cannot substitute for them.
 
 The actual pinned `electron-builder` / `app-builder-lib` **26.15.3** implementation was inspected: `out/appInfo.js` selects explicit build fields; `out/winPackager.js` skips all editing for `signAndEditExecutable: false`, while `signExecutable: false` preserves resource edits and bypasses signing; `out/util/resEdit.js` edits PE resources through the already-locked `resedit` JavaScript dependency; `out/macPackager.js` uses explicit `bundleVersion` and `bundleShortVersion`; NSIS uses the numeric Windows projection. Thus Windows enables resource editing and disables signing. It acquires no rcedit, signing bundle or new dependency. The existing declared, digested packager archives and offline packaging boundary remain in force. macOS signing/notarization remain disabled in this development package path.
 

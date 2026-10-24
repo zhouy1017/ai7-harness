@@ -2,6 +2,8 @@
 status: accepted — wave routing and integration authority amended by ADR 0089; implementation adaptation pending
 ---
 
+> [ADR 0097](0097-defer-the-macos-platform-indefinitely-and-deliver-windows-only.md): the full Gate over candidates and the integration line runs on Windows only (2026-10-24); "paired-platform" and "Windows and macOS" below read Windows-only while that hold lasts.
+
 # Run the nightly full Gate over candidates and the integration line
 
 The retained design is a provider-free paired-platform full Gate over the exact candidate tree and the integration line. [ADR 0089](./0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md) replaces the old nightly integration operating instructions with [Orca dispatch](../agents/orca-dispatch.md): the new branch flow is defined there rather than repeated here.

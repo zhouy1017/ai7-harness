@@ -2,6 +2,8 @@
 status: accepted
 ---
 
+> [ADR 0097](0097-defer-the-macos-platform-indefinitely-and-deliver-windows-only.md) suspends the macOS half of this one-product contract indefinitely (2026-10-24): Windows is the only delivery platform, and no macOS gate, package, release or re-entry runs until the Owner explicitly requests resumption. The one-product semantics below remain the design a resumption picks up; they are suspended, not revoked.
+
 # Support Windows and macOS as one AI7 product
 
 ## Decision

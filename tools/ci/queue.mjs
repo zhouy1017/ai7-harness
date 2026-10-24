@@ -229,7 +229,7 @@ export function formatResultComment({ platform, runUrl, attempt, result }) {
 /** The two comments that end a candidate before or instead of a merge, worded for the case. */
 export function formatCandidateComment({ reason, dev, devTip, reservedPath }) {
   if (reason === 'unreleased') return [
-    'Nightly merge queue — both platforms passed, but this candidate has no current role release or changes an Owner-reserved record.',
+    'Nightly merge queue — the Windows Gate passed, but this candidate has no current role release or changes an Owner-reserved record.',
     '', 'Green tests alone do not authorize a merge. The Commander must attest the current assignment, completion and exact head/target/base release; Owner reservations still apply.',
   ];
   if (reason === 'conflict') {
@@ -249,7 +249,7 @@ export function formatCandidateComment({ reason, dev, devTip, reservedPath }) {
     ];
   }
   return [
-    'Nightly merge queue — the full admitted Journey set passed on both platforms, but this pull request is left to the Owner: it changes an Owner-reserved record.',
+    'Nightly merge queue — the full admitted Journey set passed on Windows, but this pull request is left to the Owner: it changes an Owner-reserved record.',
     '',
     `\`${reservedPath}\``,
     '',
@@ -876,7 +876,7 @@ function cleanupCommand(options) {
 /**
  * Post one candidate's outcome on its own pull request. A platform's result is read back from the
  * payload-safe marker lines the platform job kept; a candidate the Owner reserved is announced
- * after both platforms passed, and one the queue refused to merge says why.
+ * after the Windows job passed (ADR 0097: the only platform job), and one the queue refused to merge says why.
  */
 function reportCommand(options) {
   const { repo, pr, platform, log } = options;

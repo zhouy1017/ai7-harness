@@ -2,7 +2,7 @@
 
 AI7 是面向中文文学编辑的本地桌面工作台：把长篇稿件、审校建议、参考资料、事实考据和出版交付放在同一条可追溯的工作流里。你决定哪些修改进入稿件；模型输出先成为建议或证据线索。
 
-当前可从源码构建 Windows 与 macOS 工作台。Windows 是本轮 v3.2 产品方向的首发重点；v3.2 是规划名称，不是已发布的软件版本。[PROGRESS](PROGRESS.md) 记录实际集成能力与证据，已完成的 Initial v1.0.0 Development Milestone 不代表公开发行或平台认证。
+当前面向 Windows 交付并从源码构建。依 [ADR 0097](docs/adr/0097-defer-the-macos-platform-indefinitely-and-deliver-windows-only.md)，macOS 平台的全部 gate 与目标（托管 Gate 作业、nightly 打包、发布与再入验证）无限期后置，源码中的 macOS 适配保留但不再验证，直到 Owner 明确要求恢复。当前源码版本 **0.1.0**（Data Version 1），下一目标 0.2.0（Wave 21），1.0.0 为 Wave 23 验收发布（[ADR 0098](docs/adr/0098-adopt-one-x-y-z-version-across-releases-and-internal-management.md)）。[PROGRESS](PROGRESS.md) 记录实际集成能力与证据，已完成的 Initial v1.0.0 Development Milestone 不代表公开发行或平台认证。
 
 ## 现在可以怎样工作
 
@@ -14,7 +14,7 @@ AI7 是面向中文文学编辑的本地桌面工作台：把长篇稿件、审�
 
 工作台提供暖纸/夜墨外观、图书搜索切换、专注模式、阅读密度、快捷键与按需技术详情。当前正式模型连接为用户自己的 OpenCode Go 或 DeepSeek 官方凭据；运行数据与开发测试证据分开。
 
-## 已接受、尚待实现的 v3.2 方向
+## 已接受、尚待实现的方向（0.2.0 → 1.0.0）
 
 [ADR 0094](docs/adr/0094-unified-multi-provider-runtime-global-learning-agent-and-word-track-changes-intake.md)、[ADR 0095](docs/adr/0095-make-procedures-the-central-object-govern-concurrent-execution-and-use-dsh-as-the-complex-task-harness.md)、[ADR 0096](docs/adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md) 与[开发计划](docs/development/development-plan.md)规定后续交付顺序；文档变更没有实现下列能力：
 
@@ -35,14 +35,14 @@ AI 输出需要编辑判断。确定性测试证明程序行为，一次模型�
 
 Word 插件集成、OCR、独立稿件窗口、结构调整模式、可执行外来 Skill 与自动更新仍在演进池。DOCX 修订导入是桌面文件工作流，不等于 Word 插件集成；默认学习、全域智能体和真实本地语义模型尚未交付。
 
-已有未签名 Windows 安装包/便携包构建与便携程序自检记录；这不等于安装卸载或完整打包环境验收。依据[自动交付约定](docs/adr/0093-automate-nightly-packages-and-windows-version-tag-releases.md)，配对 nightly Gate 与原生构建通过后，匹配版本标签发布对应 Windows 产物并披露未签名状态。macOS 公开发布无限期后置，直到 Owner 明确恢复；nightly macOS 包仅供检查。签名准备与 `main` 晋升仍需各自授权。打包版目前不附赠示例书。
+已有未签名 Windows 安装包/便携包构建与便携程序自检记录；这不等于安装卸载或完整打包环境验收。依据[自动交付约定](docs/adr/0093-automate-nightly-packages-and-windows-version-tag-releases.md)，Windows nightly Gate 与原生构建通过后，匹配版本标签发布对应 Windows 产物并披露未签名状态。macOS 平台整体依 [ADR 0097](docs/adr/0097-defer-the-macos-platform-indefinitely-and-deliver-windows-only.md) 无限期后置：不运行 macOS Gate，不构建 macOS 包。签名准备与 `main` 晋升仍需各自授权。打包版目前不附赠示例书。
 
 <details>
 <summary>开发者：从源码构建、打开与配置生产连接</summary>
 
 ## Getting started from source
 
-Use Windows 11 24H2+ on x64 or macOS 15+ on Apple Silicon. Install Git, Node **24.18.1** and Corepack; the repository selects pnpm **11.24.0**. Microsoft Office, Python and a model credential are not required to build and open the local workbench.
+Use Windows 11 24H2+ on x64; macOS 15+ on Apple Silicon remains a declared but unverified host while the macOS platform is deferred under ADR 0097. Install Git, Node **24.18.1** and Corepack; the repository selects pnpm **11.24.0**. Microsoft Office, Python and a model credential are not required to build and open the local workbench.
 
 From the repository root:
 
@@ -67,7 +67,7 @@ Choose the product data location when prompted. In 设置 › 模型服务, conf
 ## Documentation and contributions
 
 - [Documentation index](docs/README.md) — current guides, design owners and evidence.
-- [Nightly builds and Windows version-tag releases](docs/development/releasing.md) — native package builds, unsigned Windows releases and macOS inspection artifacts.
+- [Nightly builds and Windows version-tag releases](docs/development/releasing.md) — Windows nightly package builds and unsigned Windows releases.
 - [Version identity](docs/development/versioning.md) — matching software version, Data Version, build number and source commit across the app and its packages.
 - [PROGRESS](PROGRESS.md) — exact integrated checkpoint and remaining risks.
 - [Development plan](docs/development/development-plan.md) — next fixes, features and decision blockers.

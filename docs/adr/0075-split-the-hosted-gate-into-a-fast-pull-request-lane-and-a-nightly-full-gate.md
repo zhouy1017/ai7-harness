@@ -2,6 +2,8 @@
 status: accepted
 ---
 
+> [ADR 0097](0097-defer-the-macos-platform-indefinitely-and-deliver-windows-only.md) removes the macOS entry of the nightly matrix (2026-10-24; §1, §2, §4 and Consequences below): the full Gate runs on Windows Server 2025 only until the Owner explicitly resumes macOS. The two-occurrence topology is unchanged.
+
 > Gate occurrence topology is retained. Candidate routing and release authority follow [ADR 0089](./0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md) and [Orca dispatch](../agents/orca-dispatch.md); the existing dev-only nightly queue is a disclosed P0 adaptation, not the new wave integration procedure.
 
 # Split the hosted E2E gate into a fast pull-request lane and a nightly full Gate

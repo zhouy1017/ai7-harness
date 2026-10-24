@@ -4,7 +4,9 @@ Status: Owner-confirmed on 2026-10-13 (decision record kept by the Commander out
 
 For the historical 2026-10-13 scope and completion record below, the Owner defined 1.0.0 as **every designed capability** in the PRD, `docs/ui-ux-v2/editor-surfaces.md` and `docs/ui-ux-v2/requirements.md`, except the items listed under the historical exclusions below. Delivery order lives in the [development plan](development-plan.md); this file only fixes what is in and what is out.
 
-## Windows v3.2 successor scope (accepted direction; not milestone backfill)
+Under [ADR 0098](../adr/0098-adopt-one-x-y-z-version-across-releases-and-internal-management.md) this boundary is a development record, not software version 1.0.0; version 1.0.0 is Wave 23's acceptance release.
+
+## Successor scope toward 1.0.0 (accepted direction; not milestone backfill)
 
 [ADR 0095](../adr/0095-make-procedures-the-central-object-govern-concurrent-execution-and-use-dsh-as-the-complex-task-harness.md) and [ADR 0096](../adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md) (2026-10-23) extend this successor scope with procedures as the central object (F-26), the execution governor and idle lane (F-16/F-17), DSH as the complex-task harness (F-18), review contract v2 and evidence on cards (F-19), the deterministic checker (F-20), the single policy successor (F-21), structural editing and recognition (F-22), ceremony removal (F-23), the quality baseline (F-24) and hub extraction (F-25); the [development plan](development-plan.md) owns their order. They change neither the milestone boundary commit nor its evidence.
 

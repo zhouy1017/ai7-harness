@@ -1,6 +1,6 @@
 # Windows and macOS product-platform revision
 
-Status: **accepted product target and consistency contract; concrete macOS mechanics remain deferred**
+Status: **accepted product target and consistency contract; the macOS half is suspended indefinitely by [ADR 0097](../docs/adr/0097-defer-the-macos-platform-indefinitely-and-deliver-windows-only.md) — Windows is the only delivery platform until the Owner explicitly resumes macOS**
 
 On 2026-08-21 the owner revised the post-interview product target from Windows-only to Windows and macOS with a consistent product outlook. On 2026-08-25 the owner directed all product-scope documents to be unified on that target. This hard-to-reverse architecture decision is recorded in [ADR 0028](../docs/adr/0028-support-windows-and-macos-as-one-product.md) and is not a new interview question. The original 36-question history remains evidence; its Windows-only clauses no longer state current intent.
 

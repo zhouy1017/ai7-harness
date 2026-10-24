@@ -2,6 +2,8 @@
 status: accepted
 ---
 
+> [ADR 0097](0097-defer-the-macos-platform-indefinitely-and-deliver-windows-only.md) defers the macOS platform indefinitely (2026-10-24): the one logical Gate runs on Windows Server 2025 only until the Owner explicitly resumes macOS. Nothing else here changes.
+
 # Concentrate engineering verification on E2E functionality
 
 The Owner-accepted [Source Checkout Buildability Contract](../agents/source-checkout-buildability.md) is part of the current `dev` design baseline. It defines setup inside the one applicable product journey and grants no implementation, release, or `main`-promotion authority by itself.

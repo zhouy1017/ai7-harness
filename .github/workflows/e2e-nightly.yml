@@ -5,6 +5,9 @@ run-name: E2E Nightly Full Gate · ${{ inputs.ref || github.sha }}
 # over each open pull request and then calls this workflow once for the final `dev` tip. What this
 # file runs is unchanged, so a dispatched occurrence against an exact ref is byte-for-byte the
 # occurrence ADR 0075 §3 describes.
+#
+# ADR 0097 (2026-10-24): the matrix holds one Windows Server 2025 entry. The macOS entry is deferred
+# indefinitely with the whole macOS platform; it is re-added only by a new Owner decision.
 
 on:
   workflow_dispatch:
@@ -40,10 +43,6 @@ jobs:
             runner: windows-2025
             architecture: x64
             windows_server_marker: '1'
-          - label: macOS 15 arm64
-            runner: macos-15
-            architecture: arm64
-            windows_server_marker: '0'
     env:
       AI7_CI_WINDOWS_SERVER_2025: ${{ matrix.windows_server_marker }}
       NPM_CONFIG_PREFIX: ''
