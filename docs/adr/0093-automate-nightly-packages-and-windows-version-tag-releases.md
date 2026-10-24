@@ -2,6 +2,8 @@
 status: accepted
 ---
 
+> [ADR 0098](0098-adopt-one-x-y-z-version-across-releases-and-internal-management.md) (2026-10-24) defines when `package.json` is raised — minor per integrated wave, patch for a fix-only integration or hotfix, major for a new generation or Data Version break — and the version ledger; the identity and publication rules here are unchanged.
+
 > [ADR 0097](0097-defer-the-macos-platform-indefinitely-and-deliver-windows-only.md) widens the macOS release hold to the whole platform (2026-10-24): the nightly queue's Gate and packaging run on Windows only and no macOS inspection DMG is built; "both platforms" and "both native package jobs" below read Windows-only. Windows publication is unchanged.
 
 # Automate nightly packages and Windows version-tag releases

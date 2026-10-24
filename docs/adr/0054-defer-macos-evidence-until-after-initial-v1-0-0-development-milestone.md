@@ -2,6 +2,8 @@
 status: accepted
 ---
 
+> [ADR 0098](0098-adopt-one-x-y-z-version-across-releases-and-internal-management.md) (2026-10-24): the Initial v1.0.0 Development Milestone Boundary below is a development record, not software version 1.0.0; that version is Wave 23's acceptance release.
+
 > [ADR 0097](0097-defer-the-macos-platform-indefinitely-and-deliver-windows-only.md) defers the consolidated Windows/macOS re-entry below indefinitely with the macOS platform (2026-10-24); the Windows-only lifecycle is the current release path. The milestone definition, historical disclosures and evidence limits are unchanged.
 
 # Defer macOS evidence until after the initial v1.0.0 development milestone

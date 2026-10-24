@@ -4,6 +4,19 @@ Issue [#1015](https://github.com/zhouy1017/ai7-harness/issues/1015) unifies sour
 
 [ADR 0093](../adr/0093-automate-nightly-packages-and-windows-version-tag-releases.md) authorizes Windows nightly native packages and Windows-only version-tag releases. Stable tags publish normal Windows releases and RC tags publish prereleases; the macOS platform is deferred indefinitely under [ADR 0097](../adr/0097-defer-the-macos-platform-indefinitely-and-deliver-windows-only.md), so no macOS package is built.
 
+## Version scheme (ADR 0098)
+
+One `x.y.z` in root `package.json` names the software everywhere — source, build identity, native package metadata, the `vX.Y.Z` / `vX.Y.Z-rc.N` tags of ADR 0093, the development plan's wave targets, PROGRESS, GitHub milestones and Issue placement ([ADR 0098](../adr/0098-adopt-one-x-y-z-version-across-releases-and-internal-management.md)). `x` rises for a new product generation or an incompatible Data Version change; `y` rises by one with every integrated wave, and features enter only through `y`; `z` rises for a fix-only integration between waves or a hotfix of a released version; `-rc.N` precedes a stable tag. A nightly build is identified by version, build number and source commit and has no version of its own. The Commander raises `package.json` and adds the ledger row in each wave's integration PR; the Owner tags; `main` is the release line that fast-forwards to each stable tag. `tools/check-version.mjs`, run by `pnpm run check`, fails when `package.json`, the ledger below, PROGRESS's version line and the plan's wave → version pairs disagree.
+
+## Version ledger
+
+| Version | Status | Wave or scope | Integrated dev commit | Tag / release |
+| --- | --- | --- | --- | --- |
+| 0.1.0 | integrated | Waves 1–20 and the governance wave `codex/integration-1098` (ADR 0097, ADR 0098) | `a40bf0b8acc4f67b14df08670df80dc509386978` and its successors until Wave 21 integrates | none |
+| 0.2.0 | planned | Wave 21 — the core completes and procedures become editable | — | — |
+| 0.3.0 | planned | Wave 22 — desk work and derived deliverables | — | — |
+| 1.0.0 | planned | Wave 23 — acceptance and closure (`1.0.0-rc.N` before the Owner accepts) | — | — |
+
 ## Canonical inputs
 
 Root `package.json.version` owns the software SemVer, currently `0.1.0`. Root `package.json.ai7.dataVersion` owns the existing Data Version, currently **1**. `src/service/data-version.ts` reads that value and retains the freeze, schema classification and compatibility checks. Database revision **84** and service protocol **161** keep their separate meanings. Build identity never enters a store-version ledger, backup manifest or migration decision; an ordinary rebuild does not create a software upgrade.

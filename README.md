@@ -2,7 +2,7 @@
 
 AI7 是面向中文文学编辑的本地桌面工作台：把长篇稿件、审校建议、参考资料、事实考据和出版交付放在同一条可追溯的工作流里。你决定哪些修改进入稿件；模型输出先成为建议或证据线索。
 
-当前面向 Windows 交付并从源码构建。依 [ADR 0097](docs/adr/0097-defer-the-macos-platform-indefinitely-and-deliver-windows-only.md)，macOS 平台的全部 gate 与目标（托管 Gate 作业、nightly 打包、发布与再入验证）无限期后置，源码中的 macOS 适配保留但不再验证，直到 Owner 明确要求恢复。v3.2 是规划名称，不是已发布的软件版本。[PROGRESS](PROGRESS.md) 记录实际集成能力与证据，已完成的 Initial v1.0.0 Development Milestone 不代表公开发行或平台认证。
+当前面向 Windows 交付并从源码构建。依 [ADR 0097](docs/adr/0097-defer-the-macos-platform-indefinitely-and-deliver-windows-only.md)，macOS 平台的全部 gate 与目标（托管 Gate 作业、nightly 打包、发布与再入验证）无限期后置，源码中的 macOS 适配保留但不再验证，直到 Owner 明确要求恢复。当前源码版本 **0.1.0**（Data Version 1），下一目标 0.2.0（Wave 21），1.0.0 为 Wave 23 验收发布（[ADR 0098](docs/adr/0098-adopt-one-x-y-z-version-across-releases-and-internal-management.md)）。[PROGRESS](PROGRESS.md) 记录实际集成能力与证据，已完成的 Initial v1.0.0 Development Milestone 不代表公开发行或平台认证。
 
 ## 现在可以怎样工作
 
@@ -14,7 +14,7 @@ AI7 是面向中文文学编辑的本地桌面工作台：把长篇稿件、审�
 
 工作台提供暖纸/夜墨外观、图书搜索切换、专注模式、阅读密度、快捷键与按需技术详情。当前正式模型连接为用户自己的 OpenCode Go 或 DeepSeek 官方凭据；运行数据与开发测试证据分开。
 
-## 已接受、尚待实现的 v3.2 方向
+## 已接受、尚待实现的方向（0.2.0 → 1.0.0）
 
 [ADR 0094](docs/adr/0094-unified-multi-provider-runtime-global-learning-agent-and-word-track-changes-intake.md)、[ADR 0095](docs/adr/0095-make-procedures-the-central-object-govern-concurrent-execution-and-use-dsh-as-the-complex-task-harness.md)、[ADR 0096](docs/adr/0096-edit-manuscript-structure-recognize-structure-and-remove-editor-facing-ceremony.md) 与[开发计划](docs/development/development-plan.md)规定后续交付顺序；文档变更没有实现下列能力：
 

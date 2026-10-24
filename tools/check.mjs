@@ -56,6 +56,18 @@ if (documentation.error || documentation.status !== 0) {
   process.exit(1);
 }
 
+// ADR 0098: package.json, the version ledger, PROGRESS and the development plan name one x.y.z version.
+const version = spawnSync(process.execPath, [resolve(ROOT, 'tools', 'check-version.mjs')], {
+  cwd: ROOT,
+  env: ENV,
+  stdio: 'inherit',
+  windowsHide: true,
+});
+if (version.error || version.status !== 0) {
+  console.error('CHECK/version-inconsistent');
+  process.exit(1);
+}
+
 const enumerated = spawnSync('git', ['ls-files', '-z', '--', 'e2e/*.mjs', 'tools/*.mjs'], {
   cwd: ROOT,
   env: ENV,

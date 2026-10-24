@@ -48,6 +48,7 @@ Give the Issue URL, brief revision and the exact assigned workspace/base or inco
 - Incoming reviewed head, final corrected/tested head and target base, as applicable
 - Applicable checks, guest/host, results and disclosed skips; documentation checks for documentation-only work
 - Migration, cleanup, unresolved matters and next action
+- Version: unchanged | raised to x.y.z with its ledger row (wave integration, ADR 0098)
 - Integration status: slice in wave | final wave in dev
 ```
 
