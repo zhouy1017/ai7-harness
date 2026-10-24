@@ -567,6 +567,11 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'launch-restart-renderer-target-attach',
     'launch-restart-renderer-runtime-enable',
     'restart-reopen',
+    // Issue #1127: the restart launch leaves the Manuscript screen through the workbench and reopens it once.
+    'screen-lifecycle-place',
+    'screen-lifecycle-leave',
+    'screen-lifecycle-reopen',
+    'screen-lifecycle-one-edit',
     'j14-composition-focus',
     'j14-ime-command-guard',
     'j14-ime-command-guard-window-unfocused',
