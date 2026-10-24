@@ -61,8 +61,8 @@ describe('frozen backend egress and per-Run tool accounting', () => {
     const search = { tool: 'websearch' as const, arguments: { query: 'public fact' }, signal: new AbortController().signal };
     const dispatch = { token: Symbol(), active: () => !search.signal.aborted };
     const first = await session.execute({ ...search, callId: 'one', dispatch });
-    expect(await session.execute({ ...search, callId: 'repeat' })).toEqual(first);
-    const second = await session.execute({ ...search, callId: 'different', arguments: { query: 'a different public fact' } });
+    expect(await session.execute({ ...search, callId: 'repeat', dispatch: { token: Symbol(), active: () => !search.signal.aborted } })).toEqual(first);
+    const second = await session.execute({ ...search, callId: 'different', arguments: { query: 'a different public fact' }, dispatch: { token: Symbol(), active: () => !search.signal.aborted } });
     expect(second).toMatchObject({ sourceUrl: null, text: expect.stringContaining('本单元的检索次数已用完') });
     expect(session.breakerState).toBe('intact');
     expect(session.unitDisclosure).toBe('联网核查已完成');
@@ -70,10 +70,10 @@ describe('frozen backend egress and per-Run tool accounting', () => {
     session.admit({ ...first, tool: 'websearch', callId: 'one', dispatch });
     expect([...session.egressScope.admittedToolResults!.values()][0]).toMatchObject({ sourceKind: 'tool', backendId: frozen.id, host: frozen.host });
     session.startUnit();
-    expect(await session.execute({ ...search, callId: 'two' })).toEqual(first);
-    const bad = await session.execute({ callId: 'uncited', tool: 'webfetch', arguments: { url: 'https://example.org/not-cited' }, signal: new AbortController().signal });
+    expect(await session.execute({ ...search, callId: 'two', dispatch: { token: Symbol(), active: () => !search.signal.aborted } })).toEqual(first);
+    const bad = await session.execute({ callId: 'uncited', tool: 'webfetch', arguments: { url: 'https://example.org/not-cited' }, signal: new AbortController().signal, dispatch: { token: Symbol(), active: () => true } });
     expect(bad.sourceUrl).toBeNull();
-    const page = await session.execute({ callId: 'cited', tool: 'webfetch', arguments: { url: 'https://example.org/source' }, signal: new AbortController().signal });
+    const page = await session.execute({ callId: 'cited', tool: 'webfetch', arguments: { url: 'https://example.org/source' }, signal: new AbortController().signal, dispatch: { token: Symbol(), active: () => true } });
     expect(page.text).toContain('# Public source');
     expect(searches).toBe(1); expect(pages).toBe(1);
     expect(opened).toEqual([
@@ -87,7 +87,7 @@ describe('frozen backend egress and per-Run tool accounting', () => {
     expect(session.provenance.every((entry) => /^[0-9a-f]{64}$/u.test(entry.argumentsDigest) && /^[0-9a-f]{64}$/u.test(entry.responseDigest))).toBe(true);
     // A new unit has its own query allowance; the Run still freezes the same backend.
     session.startUnit();
-    await session.execute({ ...search, callId: 'new-unit-query', arguments: { query: 'another public fact' } });
+    await session.execute({ ...search, callId: 'new-unit-query', arguments: { query: 'another public fact' }, dispatch: { token: Symbol(), active: () => !search.signal.aborted } });
     expect(searches).toBe(2);
   });
 
@@ -97,8 +97,8 @@ describe('frozen backend egress and per-Run tool accounting', () => {
       purpose: 'provider-free-empty', admitHost: admitTicketHost, fetch: async () => { sends += 1; return new Response(JSON.stringify({ results: [] })); },
     });
     const call = { tool: 'websearch' as const, signal: new AbortController().signal };
-    await session.execute({ ...call, callId: 'first', arguments: { query: 'public empty fact' } });
-    const refused = await session.execute({ ...call, callId: 'second', arguments: { query: 'different public fact' } });
+    await session.execute({ ...call, callId: 'first', arguments: { query: 'public empty fact' }, dispatch: { token: Symbol(), active: () => !call.signal.aborted } });
+    const refused = await session.execute({ ...call, callId: 'second', arguments: { query: 'different public fact' }, dispatch: { token: Symbol(), active: () => !call.signal.aborted } });
     expect(refused.text).toContain('联网核查未完成');
     expect(session.unitDisclosure).toBe('联网核查未完成');
     expect(session.breakerState).toBe('intact');
@@ -111,9 +111,9 @@ describe('frozen backend egress and per-Run tool accounting', () => {
     const session = new PlatformToolSession({ binding, scope, broker: new CredentialBroker({ resolve: async () => 'synthetic-key' }),
       purpose: 'provider-free-breaker', admitHost: admitTicketHost, fetch: async () => { sends += 1; return new Response(JSON.stringify({ results: [] })); },
     });
-    for (let n = 0; n < 128; n += 1) await session.execute({ tool: 'websearch', callId: `call-${n}`, arguments: { query: 'public fact' }, signal: new AbortController().signal });
+    for (let n = 0; n < 128; n += 1) await session.execute({ tool: 'websearch', callId: `call-${n}`, arguments: { query: 'public fact' }, signal: new AbortController().signal, dispatch: { token: Symbol(), active: () => true } });
     expect(session.breakerState).toBe('intact');
-    const last = await session.execute({ tool: 'websearch', callId: 'call-128', arguments: { query: 'public fact' }, signal: new AbortController().signal });
+    const last = await session.execute({ tool: 'websearch', callId: 'call-128', arguments: { query: 'public fact' }, signal: new AbortController().signal, dispatch: { token: Symbol(), active: () => true } });
     expect(last.text).toContain('联网核查未完成');
     expect(session.breakerState).toBe('tripped');
     expect(sends).toBe(1);
@@ -126,15 +126,15 @@ describe('frozen backend egress and per-Run tool accounting', () => {
       fetch: async () => { sends += 1; return new Response(JSON.stringify({ results: [{ title: 'Public source', url: 'https://example.org/source' }] })); },
     });
     const signal = new AbortController().signal;
-    await session.execute({ tool: 'websearch', callId: 'first', arguments: { query: 'public fact' }, signal });
+    await session.execute({ tool: 'websearch', callId: 'first', arguments: { query: 'public fact' }, signal, dispatch: { token: Symbol(), active: () => !signal.aborted } });
     // 1 fresh search + 126 different queries + 1 malformed call = 128 round trips: refused, counted, not yet tripped.
     for (let n = 0; n < 126; n += 1) {
-      expect((await session.execute({ tool: 'websearch', callId: `other-${n}`, arguments: { query: `public fact ${n}` }, signal })).text).toContain('本单元的检索次数已用完');
+      expect((await session.execute({ tool: 'websearch', callId: `other-${n}`, arguments: { query: `public fact ${n}` }, signal, dispatch: { token: Symbol(), active: () => !signal.aborted } })).text).toContain('本单元的检索次数已用完');
     }
-    expect((await session.execute({ tool: 'websearch', callId: 'malformed', arguments: { q: 'x' }, signal })).text).toContain('参数不是');
+    expect((await session.execute({ tool: 'websearch', callId: 'malformed', arguments: { q: 'x' }, signal, dispatch: { token: Symbol(), active: () => !signal.aborted } })).text).toContain('参数不是');
     expect(session.breakerState).toBe('intact');
     expect(session.usage.refusedSearchCalls).toBe(126);
-    const tripped = await session.execute({ tool: 'websearch', callId: 'other-last', arguments: { query: 'yet another public fact' }, signal });
+    const tripped = await session.execute({ tool: 'websearch', callId: 'other-last', arguments: { query: 'yet another public fact' }, signal, dispatch: { token: Symbol(), active: () => !signal.aborted } });
     expect(tripped.text).toContain('联网核查未完成');
     expect(session.breakerState).toBe('tripped');
     expect(session.unitDisclosure).toBe('联网核查未完成');
@@ -148,9 +148,9 @@ describe('frozen backend egress and per-Run tool accounting', () => {
       fetch: async () => { await new Promise<void>((resolve) => { finish = resolve; }); return new Response(JSON.stringify({ results: [] })); },
     });
     const signal = new AbortController().signal;
-    const first = session.execute({ tool: 'websearch', callId: 'first', arguments: { query: 'public fact' }, signal });
+    const first = session.execute({ tool: 'websearch', callId: 'first', arguments: { query: 'public fact' }, signal, dispatch: { token: Symbol(), active: () => !signal.aborted } });
     await new Promise((resolve) => setTimeout(resolve, 10));
-    expect((await session.execute({ tool: 'webfetch', callId: 'second', arguments: { url: 'https://example.org/source' }, signal })).text).toContain('顺序');
+    expect((await session.execute({ tool: 'webfetch', callId: 'second', arguments: { url: 'https://example.org/source' }, signal, dispatch: { token: Symbol(), active: () => !signal.aborted } })).text).toContain('顺序');
     finish!();
     await first;
     expect(ticketHostHolds()).toBe(0);

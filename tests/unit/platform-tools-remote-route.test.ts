@@ -244,7 +244,7 @@ describe('the remote route with platform tool calls, over recorded exchanges', (
       session.startUnit();
       // The unit's one round trip is spent before the model asks for its search.
       const signal = new AbortController().signal;
-      await session.execute({ callId: 'pre-1', tool: 'websearch', arguments: { query: '狂人日记 发表 年份 新青年' }, signal });
+      await session.execute({ callId: 'pre-1', tool: 'websearch', arguments: { query: '狂人日记 发表 年份 新青年' }, signal, dispatch: { token: Symbol(), active: () => !signal.aborted } });
       const outcome = await handle.submitUnit(UNIT);
       // The model's call trips the breaker and is answered with a refusal; the next model call carrying it is refused.
       expect(decisions).toEqual(['transmit-remote', 'refuse:circuit-breaker-tripped']);

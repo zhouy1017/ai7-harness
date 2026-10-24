@@ -41,8 +41,6 @@ interface DispatchAccounting {
   observation: BreakerVerdict | null;
 }
 
-type CorrelatedToolExecution = PlatformToolExecution & { readonly dispatch: PlatformToolDispatch };
-
 /**
  * One attempt's platform tools, end to end (ADR 0080 §7, Issue #473 S87-f3a): the owner the harness routes `websearch`
  * and `webfetch` calls to. Each call is canonicalized, counted by the unit's breaker, decided by the one Egress Gate
@@ -292,15 +290,13 @@ export class PlatformToolSession implements PlatformToolOwner {
   }
 
   async execute(call: PlatformToolExecution): Promise<{ readonly text: string; readonly sourceUrl: string | null }> {
-    const dispatch = call.dispatch ?? { token: Symbol(), active: () => !call.signal.aborted };
-    const state = this.#dispatchState(call, dispatch);
+    const state = this.#dispatchState(call, call.dispatch);
     // DSH enters a body at most once, before its finalizer: a token already observed is a replay, never another read or send.
-    if (!dispatch.active() || state.unit !== this.#unit || state.observation !== null) return refusal('工具调用未完成。');
-    const execution = { ...call, dispatch };
-    if (isLocalToolName(call.tool)) return this.#executeLocal(execution);
-    if (this.#inFlight) return this.#refuseCounted(execution, '平台工具必须顺序调用。');
+    if (!call.dispatch.active() || state.unit !== this.#unit || state.observation !== null) return refusal('工具调用未完成。');
+    if (isLocalToolName(call.tool)) return this.#executeLocal(call);
+    if (this.#inFlight) return this.#refuseCounted(call, '平台工具必须顺序调用。');
     this.#inFlight = true;
-    try { return await this.#execute(execution); }
+    try { return await this.#execute(call); }
     finally { this.#inFlight = false; }
   }
 
@@ -331,7 +327,7 @@ export class PlatformToolSession implements PlatformToolOwner {
     return state.observation ??= this.#breaker.observe(digest);
   }
 
-  async #executeLocal(call: CorrelatedToolExecution): Promise<{ readonly text: string; readonly sourceUrl: null }> {
+  async #executeLocal(call: PlatformToolExecution): Promise<{ readonly text: string; readonly sourceUrl: null }> {
     const refuse = (text: string): { text: string; sourceUrl: null } => { this.usage.refusedRetrievalCalls = (this.usage.refusedRetrievalCalls ?? 0) + 1; return refusal(text); };
     // Every local request counts, including malformed, concurrent, duplicate and over-cap refusals.
     if (this.#observeLocal(call.tool, this.#dispatchState(call, call.dispatch)) === 'tripped') return refuse('检索未完成：本单元的工具往返已达到熔断上限。');
@@ -370,7 +366,7 @@ export class PlatformToolSession implements PlatformToolOwner {
    * keeps asking — a different query after the unit's one, a malformed or repeated call — ends at 128 with 联网核查未完成
    * instead of looping; the refusal itself never trips the breaker earlier.
    */
-  #refuseCounted(call: CorrelatedToolExecution, text: string): { readonly text: string; readonly sourceUrl: null } {
+  #refuseCounted(call: PlatformToolExecution, text: string): { readonly text: string; readonly sourceUrl: null } {
     this.#refusedRoundTrips += 1;
     return this.#observeWeb(this.#dispatchState(call, call.dispatch), `refused:${this.#refusedRoundTrips}`) === 'tripped' ? refusal('联网核查未完成：本单元的工具往返已达到熔断上限。') : refusal(text);
   }
@@ -410,7 +406,7 @@ export class PlatformToolSession implements PlatformToolOwner {
     } };
   }
 
-  async #execute(call: CorrelatedToolExecution): Promise<{ readonly text: string; readonly sourceUrl: string | null }> {
+  async #execute(call: PlatformToolExecution): Promise<{ readonly text: string; readonly sourceUrl: string | null }> {
     if (this.#executedCallIds.has(call.callId)) return this.#refuseCounted(call, '调用标识已在本次尝试中使用过；不执行。');
     this.#executedCallIds.add(call.callId);
     const args = canonicalToolArguments(call.tool, call.arguments);

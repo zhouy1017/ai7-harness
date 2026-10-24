@@ -462,9 +462,13 @@ describe('registered raw-wire failures before the DSH body', () => {
       const missing = { ...first, callId: 'missing', tool: 'retrieve' as const, dispatch };
       Reflect.deleteProperty(missing, 'dispatch');
       expect(() => session.admit(missing)).toThrow();
+      const anonymous = { callId: 'anonymous', tool: 'retrieve' as const, arguments: { query: 'x', k: 1 }, signal: new AbortController().signal, dispatch };
+      Reflect.deleteProperty(anonymous, 'dispatch');
+      await expect(session.execute(anonymous)).rejects.toThrow();
+      expect(reads).not.toHaveBeenCalled();
       expect(session.usage.retrievalCalls).toBe(1);
       for (let index = 0; index < 5; index++) {
-        await session.execute({ callId: `new_${index}`, tool: 'retrieve', arguments: { query: 'x', k: 1 }, signal: new AbortController().signal });
+        await session.execute({ callId: `new_${index}`, tool: 'retrieve', arguments: { query: 'x', k: 1 }, signal: new AbortController().signal, dispatch: { token: Symbol(), active: () => true } });
       }
       expect(reads).toHaveBeenCalledTimes(5);
       expect(session.usage.retrievalCalls).toBe(6);
@@ -860,17 +864,17 @@ describe('the platform tools inside the composition', () => {
     });
     const signal = new AbortController().signal;
     session.startUnit();
-    const first = await session.execute({ callId: 'c1', tool: 'websearch', arguments: { query: '狂人日记' }, signal });
-    const second = await session.execute({ callId: 'c2', tool: 'websearch', arguments: { query: ' 狂人日记 ' }, signal });
+    const first = await session.execute({ callId: 'c1', tool: 'websearch', arguments: { query: '狂人日记' }, signal, dispatch: { token: Symbol(), active: () => !signal.aborted } });
+    const second = await session.execute({ callId: 'c2', tool: 'websearch', arguments: { query: ' 狂人日记 ' }, signal, dispatch: { token: Symbol(), active: () => !signal.aborted } });
     expect(first).toEqual({ text: SEARCH_TEXT, sourceUrl: 'https://search.parallel.ai/mcp' });
     expect(second).toEqual({ text: expect.stringContaining('不再重复'), sourceUrl: null });
     expect(sent).toHaveLength(1);
     // A URL the attempt never saw is refused before any host opens; one the search returned is fetched under its ticket.
-    const uncited = await session.execute({ callId: 'c3', tool: 'webfetch', arguments: { url: 'https://elsewhere.example/' }, signal });
+    const uncited = await session.execute({ callId: 'c3', tool: 'webfetch', arguments: { url: 'https://elsewhere.example/' }, signal, dispatch: { token: Symbol(), active: () => !signal.aborted } });
     expect(uncited).toEqual({ text: expect.stringContaining('请改用下一条引用'), sourceUrl: null });
     expect(opened).toEqual([]);
     expect(sent).toHaveLength(1);
-    const cited = await session.execute({ callId: 'c4', tool: 'webfetch', arguments: { url: 'https://example.org/source' }, signal });
+    const cited = await session.execute({ callId: 'c4', tool: 'webfetch', arguments: { url: 'https://example.org/source' }, signal, dispatch: { token: Symbol(), active: () => !signal.aborted } });
     expect(cited).toEqual({ text: '# 新青年\n\n1918 年 5 月号。', sourceUrl: 'https://example.org/source' });
     expect(opened).toEqual(['example.org']);
     expect(held).toBe(0);
@@ -886,8 +890,8 @@ describe('the platform tools inside the composition', () => {
       breaker: new PlatformToolBreaker(1),
     });
     tight.startUnit();
-    await tight.execute({ callId: 'd1', tool: 'websearch', arguments: { query: '狂人日记' }, signal });
-    expect(await tight.execute({ callId: 'd2', tool: 'websearch', arguments: { query: '新青年' }, signal })).toEqual({ text: expect.stringContaining('联网核查未完成'), sourceUrl: null });
+    await tight.execute({ callId: 'd1', tool: 'websearch', arguments: { query: '狂人日记' }, signal, dispatch: { token: Symbol(), active: () => !signal.aborted } });
+    expect(await tight.execute({ callId: 'd2', tool: 'websearch', arguments: { query: '新青年' }, signal, dispatch: { token: Symbol(), active: () => !signal.aborted } })).toEqual({ text: expect.stringContaining('联网核查未完成'), sourceUrl: null });
     expect(tight.breakerState).toBe('tripped');
   });
 });
@@ -922,9 +926,9 @@ describe('the session reads its decisions from the binding and its breaker end f
     session.cite('https://example.org/source');
     const signal = new AbortController().signal;
     session.startUnit();
-    expect(await session.execute({ callId: 'c1', tool: 'websearch', arguments: { query: '狂人日记' }, signal }))
+    expect(await session.execute({ callId: 'c1', tool: 'websearch', arguments: { query: '狂人日记' }, signal, dispatch: { token: Symbol(), active: () => !signal.aborted } }))
       .toEqual({ text: expect.stringContaining('公开或合成'), sourceUrl: null });
-    expect(await session.execute({ callId: 'c2', tool: 'webfetch', arguments: { url: 'https://example.org/source' }, signal }))
+    expect(await session.execute({ callId: 'c2', tool: 'webfetch', arguments: { url: 'https://example.org/source' }, signal, dispatch: { token: Symbol(), active: () => !signal.aborted } }))
       .toEqual({ text: expect.stringContaining('公开或合成'), sourceUrl: null });
     expect(sent).toBe(0);
     expect(cache.lines).toEqual([]);
@@ -955,7 +959,7 @@ describe('the session reads its decisions from the binding and its breaker end f
       purpose: 'factual-review',
     });
     session.startUnit();
-    expect(await session.execute({ callId: 'c1', tool: 'websearch', arguments: { query: '狂人日记' }, signal: new AbortController().signal }))
+    expect(await session.execute({ callId: 'c1', tool: 'websearch', arguments: { query: '狂人日记' }, signal: new AbortController().signal, dispatch: { token: Symbol(), active: () => true } }))
       .toEqual({ text: expect.stringContaining('PLATFORM_TOOL_TICKET_REFUSED'), sourceUrl: null });
     expect(sent).toBe(0);
     expect(cache.lines).toEqual([]);
@@ -983,8 +987,8 @@ describe('the session reads its decisions from the binding and its breaker end f
     // An intact breaker: even the breaker's code is not this unit's end.
     expect(session.unitEnd(breakerTurn)).toBeNull();
     const signal = new AbortController().signal;
-    await session.execute({ callId: 'c1', tool: 'websearch', arguments: { query: '甲' }, signal });
-    await session.execute({ callId: 'c2', tool: 'websearch', arguments: { query: '乙' }, signal });
+    await session.execute({ callId: 'c1', tool: 'websearch', arguments: { query: '甲' }, signal, dispatch: { token: Symbol(), active: () => !signal.aborted } });
+    await session.execute({ callId: 'c2', tool: 'websearch', arguments: { query: '乙' }, signal, dispatch: { token: Symbol(), active: () => !signal.aborted } });
     expect(session.breakerState).toBe('tripped');
     expect(session.unitEnd(breakerTurn)).toEqual({ reason: 'circuit-breaker-tripped', disclosure: '联网核查未完成', retry: 'never', settles: 'unit-only' });
     // Every other ending of a tripped unit's turn settles as it would without platform tools.

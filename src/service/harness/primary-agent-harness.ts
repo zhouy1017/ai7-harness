@@ -156,8 +156,8 @@ export interface PlatformToolExecution {
   readonly tool: PlatformToolName;
   readonly arguments: unknown;
   readonly signal: AbortSignal;
-  /** Direct owner calls may omit correlation when they do not subsequently admit a result. */
-  readonly dispatch?: PlatformToolDispatch;
+  /** The DSH execution this call is: its finalizer admits the result under the same identity. */
+  readonly dispatch: PlatformToolDispatch;
 }
 
 /**
