@@ -21,7 +21,9 @@ import {
   providerEvidenceGeneration,
   providerRequestDigest,
   providerSemanticDigest,
+  type ProviderCacheEntry,
   type ProviderLedgerLine,
+  type ProviderToolLedgerLine,
 } from '../../src/service/provider/provider-result-cache.js';
 import { ResearchSnapshotCache } from '../../src/service/provider/research-snapshot-cache.js';
 
@@ -599,6 +601,287 @@ describe('the semantic digest and the evidence generation', () => {
 });
 
 describe('the ledger across slices and kinds', () => {
+  function foreignModel(body = unitBody(BLOCK_A, 'synthetic ledger question')): ProviderLedgerLine {
+    const namespace = { route: 'opencode-go', endpoint: ENDPOINT, requestShape: SHAPE, model: 'deepseek-v4-flash' };
+    const requestDigest = providerRequestDigest(body);
+    const semanticDigest = providerSemanticDigest(body);
+    return {
+      itemId: 'Future7/first-baseline/1', purpose: 'first-baseline', ...namespace,
+      promptContractDigest: CONTRACT, requestDigest, semanticDigest,
+      cacheKey: providerCacheKey(namespace, requestDigest), claimKey: providerCacheKey(namespace, semanticDigest),
+      generation: providerEvidenceGeneration(namespace, CONTRACT), evidencePosition: 0,
+      outcome: 'transmitted', status: 200, usage: { inputTokens: 3, outputTokens: 2 },
+      validation: { ...SAMPLE_CASE, step: 'first-baseline/unit-1', decision: 'first-capture', evidence: [] },
+      recordedAt: '2026-10-08T00:00:00.000Z',
+    };
+  }
+
+  async function ledger(...lines: unknown[]): Promise<void> {
+    await writeFile(join(root, PROVIDER_LEDGER_FILE), lines.map((line) => JSON.stringify(line)).join('\n') + '\n');
+  }
+
+  function foreignTool(): ProviderToolLedgerLine {
+    return { itemId: 'Future7/search/1', kind: 'search-call', purpose: 'search', argumentsDigest: CONTRACT, host: 'search.invalid',
+      outcome: 'transmitted', status: 200, resultDigest: CONTRACT, resultBytes: 10, elapsedMs: 0.5, recordedAt: '2026-10-08T00:00:00.000Z' };
+  }
+
+  it.each([undefined, 'model-call'] as const)('admits foreign model metadata with kind %s without granting positive evidence', async (kind) => {
+    await ledger({ ...foreignModel(), kind });
+    const cache = await opened();
+    expect(cache.lines).toHaveLength(1);
+    expect(await cache.validEvidence()).toEqual([]);
+    expect(cache.foreignRows).toEqual([{ position: 0, itemId: 'Future7/first-baseline/1', kind: 'model-call', outcome: 'transmitted' }]);
+  });
+
+  it('holds foreign transmission history even when a supported entry and completed claim would otherwise replay', async () => {
+    const cache = await opened();
+    const calls: string[] = [];
+    const body = unitBody(BLOCK_A, 'synthetic ledger question');
+    await call(cache, modelFetch(calls), body);
+    await ledger({ ...modelLines(cache)[0]!, itemId: 'Future7/first-baseline/1' });
+    expect(await refusal(call(await opened(), modelFetch(calls), body))).toBe('PROVIDER_VALIDATION_OUTCOME_UNKNOWN');
+    expect(calls).toHaveLength(1);
+  });
+
+  it.each(['transmitted', 'unknown'] as const)('holds matching foreign %s history with no entry or claim before any send', async (outcome) => {
+    const line = foreignModel();
+    await ledger(outcome === 'unknown' ? { ...line, outcome: 'failed', classification: 'outcome-unknown', usage: null } : line);
+    const cache = await opened();
+    const calls: string[] = [];
+    const body = unitBody(BLOCK_B, 'synthetic ledger question', 'e');
+    expect(await refusal(call(cache, modelFetch(calls), body))).toBe('PROVIDER_VALIDATION_OUTCOME_UNKNOWN');
+    expect(calls).toHaveLength(0);
+    expect((await readdir(join(root, PROVIDER_CLAIM_DIRECTORY))).filter((name) => !name.startsWith('item-'))).toEqual([]);
+    expect(refusalLines(cache).at(-1)).toEqual(['PROVIDER_VALIDATION_OUTCOME_UNKNOWN', [line.itemId]]);
+  });
+
+  it('preserves all nonempty positions and foreign invalidations, including an in-flight retirement', async () => {
+    const foreign = foreignModel();
+    const invalidation = { kind: 'invalidation', target: { itemId: foreign.itemId }, reason: 'question-revised', recordedAt: foreign.recordedAt };
+    const known = { ...foreign, itemId: 'S40/first-baseline/1', evidencePosition: 4 };
+    const rows = [foreign, foreignTool(), invalidation, invalidation,
+      { ...invalidation, target: { family: SAMPLE_CASE.family, case: SAMPLE_CASE.case } }, known];
+    const raw = '\n \n' + rows.map((row) => JSON.stringify(row)).join('\n\n') + '\n';
+    await writeFile(join(root, PROVIDER_LEDGER_FILE), raw);
+    const cache = await opened();
+    expect(cache.lines).toEqual(rows);
+    expect(cache.foreignRows.map(({ position, kind, outcome }) => ({ position, kind, outcome }))).toEqual([
+      { position: 0, kind: 'model-call', outcome: 'transmitted' }, { position: 1, kind: 'search-call', outcome: 'transmitted' },
+      { position: 2, kind: 'invalidation', outcome: null }, { position: 3, kind: 'invalidation', outcome: null },
+    ]);
+    expect(cache.isRetired(known.itemId, { family: SAMPLE_CASE.family, case: SAMPLE_CASE.case,
+      capturedAt: known.recordedAt, evidencePosition: known.evidencePosition })).toBe(true);
+    expect(await cache.validEvidence()).toEqual([]);
+    expect(await readFile(join(root, PROVIDER_LEDGER_FILE), 'utf8')).toBe(raw);
+  });
+
+  it('bounds foreign report counts and identity length without exposing other row fields or changing storage', async () => {
+    const rows = Array.from({ length: 101 }, (_, index) => ({ ...foreignTool(), itemId: `${'F'.repeat(170)}/search/${index + 1}` }));
+    await ledger(...rows);
+    const cache = await opened();
+    expect(cache.lines).toHaveLength(101);
+    expect(cache.foreignRows).toHaveLength(100);
+    expect(cache.foreignRows.every((row) => row.itemId.length === 160 && Object.keys(row).sort().join(',') === 'itemId,kind,outcome,position')).toBe(true);
+  });
+
+  it.each(['S40', 'Future7'])('rejects duplicate non-stale #808 model-call identities in %s', async (slice) => {
+    const model = { ...foreignModel(), itemId: `${slice}/same/1` };
+    await ledger(model, model);
+    await expect(opened()).rejects.toMatchObject({ code: 'PROVIDER_LEDGER_CORRUPT' });
+  });
+
+  it.each(['S40', 'Future7'])('keeps %s tool and pre-#808 duplicate identities readable, since only #808 model calls reserve theirs', async (slice) => {
+    const model = { ...foreignModel(), itemId: `${slice}/same/1` };
+    const { route: _route, endpoint: _endpoint, requestShape: _shape, cacheKey: _cacheKey, claimKey: _claimKey, semanticDigest: _semantic,
+      generation: _generation, evidencePosition: _position, validation: _validation, ...legacy } = model;
+    const tool = { ...foreignTool(), itemId: model.itemId };
+    await ledger(model, tool, tool, legacy, legacy);
+    expect((await opened()).lines).toEqual([model, tool, tool, legacy, legacy]);
+  });
+
+  it('keeps explicit stale history readable and allocates past every stale ordinal', async () => {
+    const model = { ...foreignModel(), itemId: 'S40/first-baseline/1' };
+    const stale = { ...model, outcome: 'failed', stale: true, usage: null, status: null };
+    await ledger(model, stale, { ...stale, itemId: 'S40/first-baseline/9' }, { ...stale, itemId: 'Future7/first-baseline/1' });
+    const cache = await opened();
+    expect(cache.lines).toHaveLength(4);
+    expect(cache.nextItemId('first-baseline')).toBe('S40/first-baseline/10');
+    expect(() => cache.claimItem(model.itemId)).toThrowError();
+    expect(() => cache.claimItem('S40/first-baseline/9')).not.toThrow();
+  });
+
+  it.each([
+    ['item grammar', { itemId: 'Future_7/test/1' }], ['ordinal zero', { itemId: 'Future7/test/0' }],
+    ['item type', { itemId: ['Future7/first-baseline/1'] }],
+    ['ordinal limit', { itemId: 'Future7/test/1000000' }], ['kind', { kind: 'shell' }], ['outcome', { outcome: 'maybe' }],
+    ['timestamp', { recordedAt: 'invalid' }], ['stale', { stale: 'true' }], ['status', { status: '200' }],
+    ['negative status', { status: -1 }], ['status range', { status: 600 }],
+    ['usage', { usage: { inputTokens: -1, outputTokens: 2 } }], ['incurred usage', { incurredUsage: { inputTokens: 1 } }],
+    ['model', { model: null }], ['prompt digest', { promptContractDigest: 'wrong' }], ['request digest', { requestDigest: 'wrong' }],
+    ['task digest', { taskPromptContractDigest: 'wrong' }], ['semantic digest', { semanticDigest: 'wrong' }],
+    ['response digest shape', { responseDigest: 'wrong' }], ['cache key shape', { cacheKey: 'wrong' }],
+    ['cache key relation', { cacheKey: 'b'.repeat(64) }], ['claim key relation', { claimKey: 'b'.repeat(64) }],
+    ['generation relation', { generation: 'b'.repeat(64) }], ['task generation relation', { taskPromptContractDigest: 'b'.repeat(64) }],
+    ['namespace key relation', { route: 'different-route' }], ['namespace required for key', { endpoint: undefined }],
+    ['namespace type', { requestShape: 1 }], ['classification', { classification: 'unknown' }], ['reset window', { resetWindow: 1 }],
+    ['captured timestamp', { capturedAt: 'invalid' }], ['evidence scope', { evidenceScope: 'foreign' }],
+    ['future evidence position', { evidencePosition: 1 }], ['fractional evidence position', { evidencePosition: 0.5 }],
+    ['negative evidence position', { evidencePosition: -1 }], ['validation', { validation: null }],
+    ['validation decision', { validation: { ...SAMPLE_CASE, step: 'unit-1', decision: 'maybe', evidence: [] } }],
+    ['validation evidence', { validation: { ...SAMPLE_CASE, step: 'unit-1', decision: 'first-capture', evidence: ['bad-id'] } }],
+    ['validation delta', { validation: { ...SAMPLE_CASE, delta: { kind: 'config', rationale: 'test' }, step: 'unit-1', decision: 'first-capture', evidence: [] } }],
+    ['validation changed', { validation: { ...SAMPLE_CASE, step: 'unit-1', decision: 'config-delta', evidence: [], changed: [1] } }],
+    ['validation refusal', { validation: { ...SAMPLE_CASE, step: 'unit-1', decision: 'refused', evidence: [], refusal: 1 } }],
+  ] as const)('rejects malformed foreign model metadata: %s', async (_name, patch) => {
+    await ledger({ ...foreignModel(), ...patch });
+    await expect(opened()).rejects.toMatchObject({ code: 'PROVIDER_LEDGER_CORRUPT' });
+  });
+
+  it.each(['requestDigest', 'promptContractDigest'] as const)('rejects a non-string required %s even without foreign identity keys', async (field) => {
+    const line = foreignModel();
+    await ledger({ ...line, cacheKey: undefined, claimKey: undefined, generation: undefined, [field]: [line[field]] });
+    expect(await refusal(opened())).toBe('PROVIDER_LEDGER_CORRUPT');
+  });
+
+  it.each([
+    ['tool outcome', { outcome: 'refused' }], ['tool timestamp', { recordedAt: 'invalid' }], ['tool status', { status: 0.5 }],
+    ['tool status range', { status: -1 }],
+    ['argument digest', { argumentsDigest: 'wrong' }], ['host', { host: null }], ['result digest', { resultDigest: 'wrong' }],
+    ['result size', { resultBytes: -1 }], ['fractional size', { resultBytes: 0.5 }], ['missing size', { resultBytes: undefined }],
+    ['elapsed time', { elapsedMs: -1 }], ['missing time', { elapsedMs: undefined }],
+  ] as const)('rejects malformed foreign tool metadata: %s', async (_name, patch) => {
+    await ledger({ ...foreignTool(), ...patch });
+    await expect(opened()).rejects.toMatchObject({ code: 'PROVIDER_LEDGER_CORRUPT' });
+  });
+
+  it.each(['invalid', null])('rejects malformed foreign invalidation timestamps: %s', async (recordedAt) => {
+    await ledger({ kind: 'invalidation', target: { itemId: 'Future7/search/1' }, reason: 'question-revised', recordedAt });
+    await expect(opened()).rejects.toMatchObject({ code: 'PROVIDER_LEDGER_CORRUPT' });
+  });
+
+  it('reads legacy foreign model rows and nullable fetch results without claiming their response digest is verified', async () => {
+    const { route, endpoint, requestShape, cacheKey, claimKey, generation, semanticDigest, ...legacy } = foreignModel();
+    await ledger({ ...legacy, responseDigest: 'b'.repeat(64) }, { ...foreignTool(), kind: 'fetch',
+      outcome: 'failed', status: null, resultDigest: null, resultBytes: null, elapsedMs: null });
+    expect((await opened()).foreignRows.map((row) => row.kind)).toEqual(['model-call', 'fetch']);
+  });
+
+  it.each(['transmitted', 'unknown'] as const)('holds legacy foreign %s history without storage or namespace', async (outcome) => {
+    const { route, endpoint, requestShape, cacheKey, claimKey, generation, semanticDigest, ...legacy } = foreignModel();
+    await ledger({ ...legacy, ...(outcome === 'unknown' ? { outcome: 'failed', classification: 'outcome-unknown' } : {}) });
+    const calls: string[] = [];
+    expect(await refusal(call(await opened(), modelFetch(calls), unitBody(BLOCK_A, 'synthetic ledger question')))).toBe('PROVIDER_VALIDATION_OUTCOME_UNKNOWN');
+    expect(calls).toHaveLength(0);
+  });
+
+  it.each([false, true])('matches foreign history without a cache key using recorded namespace facts (different route: %s)', async (differentRoute) => {
+    const line = foreignModel();
+    await ledger({ ...line, route: differentRoute ? 'different-route' : line.route,
+      cacheKey: undefined, claimKey: undefined, generation: undefined });
+    const calls: string[] = [];
+    const result = await refusal(call(await opened(), modelFetch(calls), unitBody(BLOCK_B, 'synthetic ledger question', 'e')));
+    expect(result).toBe(differentRoute ? 'sent' : 'PROVIDER_VALIDATION_OUTCOME_UNKNOWN');
+    expect(calls).toHaveLength(differentRoute ? 1 : 0);
+  });
+
+  it.each(['route', 'endpoint', 'requestShape'] as const)('does not hold an unrelated foreign unknown with no cache key and a different %s', async (field) => {
+    const line = foreignModel();
+    await ledger({ ...line, [field]: 'different-configuration', cacheKey: undefined, claimKey: undefined, generation: undefined,
+      outcome: 'failed', classification: 'outcome-unknown' });
+    const cache = await opened();
+    const calls: string[] = [];
+    expect(await refusal(call(cache, modelFetch(calls), unitBody(BLOCK_A, 'synthetic ledger question')))).toBe('sent');
+    expect(calls).toHaveLength(1);
+    expect(await cache.validEvidence()).toHaveLength(1);
+  });
+
+  it.each(['item', 'family', 'stale'] as const)('releases retired foreign transmitted history through %s retirement', async (retirement) => {
+    const line = foreignModel();
+    await ledger({ ...line, ...(retirement === 'stale' ? { stale: true } : {}) });
+    const cache = await opened();
+    if (retirement !== 'stale') await ledger(line, { kind: 'invalidation',
+      target: retirement === 'item' ? { itemId: line.itemId } : { family: SAMPLE_CASE.family, case: SAMPLE_CASE.case },
+      reason: 'question-revised', recordedAt: line.recordedAt });
+    const calls: string[] = [];
+    expect((await call(cache, modelFetch(calls), unitBody(BLOCK_A, 'synthetic ledger question'))).replayed).toBeUndefined();
+    expect(calls).toHaveLength(1);
+    expect(modelLines(cache).at(-1)?.itemId).toBe('S40/first-baseline/1');
+  });
+
+  it('never releases foreign unknown history through retirement or a declared retry', async () => {
+    const line = { ...foreignModel(), outcome: 'failed', classification: 'outcome-unknown', stale: true };
+    await ledger(line, { kind: 'invalidation', target: { itemId: line.itemId }, reason: 'question-revised', recordedAt: line.recordedAt });
+    const calls: string[] = [];
+    const intent: DevelopmentValidationIntent = { ...SAMPLE_CASE, delta: { kind: 'retry-unknown', rationale: 'sender-confirmed-stopped' } };
+    expect(await refusal(call(await opened(), modelFetch(calls), unitBody(BLOCK_A, 'synthetic ledger question'), { intent }))).toBe('PROVIDER_VALIDATION_OUTCOME_UNKNOWN');
+    expect(calls).toHaveLength(0);
+  });
+
+  it.each(['request', 'route', 'endpoint', 'requestShape', 'model', 'tool'] as const)('does not block a supported request with unrelated foreign %s history', async (difference) => {
+    const line = foreignModel();
+    const namespace = { route: line.route!, endpoint: line.endpoint!, requestShape: line.requestShape!, model: line.model,
+      ...(['route', 'endpoint', 'requestShape', 'model'].includes(difference) ? { [difference]: 'different-configuration' } : {}) };
+    await ledger(difference === 'request' ? foreignModel(unitBody(BLOCK_A, 'unrelated synthetic question')) : difference === 'tool' ? foreignTool() :
+      { ...line, ...namespace, cacheKey: providerCacheKey(namespace, line.requestDigest), claimKey: providerCacheKey(namespace, line.semanticDigest!),
+        generation: providerEvidenceGeneration(namespace, CONTRACT), classification: 'outcome-unknown' });
+    const cache = await opened();
+    const calls: string[] = [];
+    await call(cache, modelFetch(calls), unitBody(BLOCK_A, 'synthetic ledger question'));
+    expect(calls).toHaveLength(1);
+    expect(await cache.validEvidence()).toHaveLength(1);
+  });
+
+  it('rejects every foreign mutation while retaining known-only claims, settlements and entries', async () => {
+    const cache = await opened();
+    const foreign = foreignModel();
+    const facts = { cacheKey: foreign.claimKey!, itemId: foreign.itemId, claimedAt: foreign.recordedAt, family: SAMPLE_CASE.family,
+      case: SAMPLE_CASE.case, step: 'first-baseline/unit-1' };
+    expect(() => cache.nextItemId('first-baseline', 'Future7' as never)).toThrowError();
+    await expect(cache.reserveItemId('first-baseline', 'Future7' as never)).rejects.toMatchObject({ code: 'PROVIDER_TEST_ITEM_INVALID' });
+    expect(() => cache.claimItem(foreign.itemId)).toThrowError();
+    for (const mutation of [() => cache.record(foreign), () => cache.claim(facts), () => cache.holdUnknown(facts),
+      () => cache.settle(facts, 'completed'), () => cache.settle(facts, 'failed')]) {
+      await expect(mutation()).rejects.toMatchObject({ code: 'PROVIDER_TEST_ITEM_INVALID' });
+    }
+    await expect(cache.invalidate({ itemId: foreign.itemId }, 'question-revised')).rejects.toMatchObject({ code: 'PROVIDER_INVALIDATION_INVALID' });
+    const entry: ProviderCacheEntry & { cacheKey: string } = { itemId: foreign.itemId, cacheKey: foreign.cacheKey!, model: foreign.model,
+      requestBody: '{}', requestDigest: providerRequestDigest('{}'), status: 200, response: {}, usage: null, transmittedAt: foreign.recordedAt };
+    await expect(cache.keep(entry)).rejects.toMatchObject({ code: 'PROVIDER_TEST_ITEM_INVALID' });
+    await expect(cache.store(entry)).rejects.toMatchObject({ code: 'PROVIDER_TEST_ITEM_INVALID' });
+    expect(await readdir(join(root, PROVIDER_CLAIM_DIRECTORY))).toEqual([]);
+    expect(await readdir(join(root, PROVIDER_CACHE_DIRECTORY))).toEqual([]);
+    expect(cache.lines).toEqual([]);
+    const calls: string[] = [];
+    await call(cache, modelFetch(calls), unitBody(BLOCK_A, 'known synthetic question'));
+    const known = modelLines(cache)[0]!;
+    expect(known.itemId).toBe('S40/first-baseline/1');
+    expect((await cache.readEntry(known.cacheKey!)).state).toBe('present');
+    expect((await cache.readClaim(known.claimKey!)).state).toBe('completed');
+  });
+
+  it('does not replay a transplanted foreign entry even when no foreign ledger row survives', async () => {
+    const cache = await opened();
+    const calls: string[] = [];
+    const body = unitBody(BLOCK_A, 'known synthetic question');
+    await call(cache, modelFetch(calls), body);
+    const entryPath = join(root, PROVIDER_CACHE_DIRECTORY, `${modelLines(cache)[0]!.cacheKey}.json`);
+    const entry = JSON.parse(await readFile(entryPath, 'utf8')) as ProviderCacheEntry;
+    await writeFile(entryPath, JSON.stringify({ ...entry, itemId: 'Future7/first-baseline/1' }));
+    await ledger();
+    expect(await refusal(call(await opened(), modelFetch(calls), body))).toBe('PROVIDER_VALIDATION_OUTCOME_UNKNOWN');
+    expect(calls).toHaveLength(1);
+  });
+
+  it('keeps a supported capture/ledger mismatch classified as unavailable evidence', async () => {
+    const cache = await opened();
+    const calls: string[] = [];
+    const body = unitBody(BLOCK_A, 'known synthetic question');
+    await call(cache, modelFetch(calls), body);
+    await ledger({ ...modelLines(cache)[0]!, generation: 'b'.repeat(64) });
+    expect(await refusal(call(await opened(), modelFetch(calls), body))).toBe('PROVIDER_VALIDATION_EVIDENCE_UNAVAILABLE');
+    expect(calls).toHaveLength(1);
+  });
+
   it('reads every line it already carries, names only the closed slice set, and counts model calls apart from tools', async () => {
     const legacy = { itemId: 'S40/smoke/1', purpose: 'smoke', model: 'm', promptContractDigest: CONTRACT, requestDigest: CONTRACT, outcome: 'transmitted', status: 200, usage: null, recordedAt: '2026-09-06T00:00:00.000Z' };
     const tool = { itemId: 'S87/factual-review/1', kind: 'search-call', purpose: 'factual-review', argumentsDigest: CONTRACT, host: 'search.parallel.ai', outcome: 'transmitted', status: 200, resultDigest: CONTRACT, resultBytes: 10, elapsedMs: 5, recordedAt: '2026-10-08T00:00:00.000Z' };
@@ -708,6 +991,21 @@ describe('platformToolCallOnce', () => {
     await expect(platformToolCallOnce(cache, snapshots, item, { authorize: () => null, send: async () => { throw new Error('boom'); } })).rejects.toThrowError('boom');
     expect(cache.lines.filter(isItemLine).map((line) => [line.itemId, line.outcome])).toEqual([['S87/factual-review/1', 'failed'], ['S87/factual-review/2', 'failed']]);
     expect(await snapshots.lookup('fetch', 'webfetch', item.argumentsDigest)).toBeNull();
+  });
+
+  it('keeps the shared ledger readable after two checkouts number different tool calls alike', async () => {
+    // A tool id is numbered from each checkout's own view of the ledger, so both record S87/factual-review/1 (#1054 review).
+    const first = await opened();
+    const second = await opened();
+    const bytes = new TextEncoder().encode('{}');
+    const call = { authorize: () => null, send: async () => ({ url: 'https://example.org/', status: 200, contentType: 'application/json', bytes, text: '结果' }) };
+    const item = (digest: string) => ({ kind: 'fetch' as const, purpose: 'factual-review', argumentsDigest: digest.repeat(64), host: 'example.org', origin: 'webfetch' });
+    await platformToolCallOnce(first.cache, first.snapshots, item('b'), call);
+    await platformToolCallOnce(second.cache, second.snapshots, item('c'), call);
+    const reader = await opened();
+    expect(reader.cache.lines.filter(isItemLine).map((line) => [line.itemId, line.outcome])).toEqual([
+      ['S87/factual-review/1', 'transmitted'], ['S87/factual-review/1', 'transmitted'],
+    ]);
   });
 });
 
