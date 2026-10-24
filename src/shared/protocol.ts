@@ -6889,9 +6889,6 @@ export interface HouseReviewPreferenceVersion {
   sourceCount: number;
   lines: ReadonlyArray<{
     text: string; categoryId: string; bookId: string | null;
-    /** Optional recorded retrieval facts; older preference records have no confidence estimate. */
-    confidence?: number;
-    recordedAt?: string;
     sources: ReadonlyArray<{ bookId: string; bookTitle: string; materialDigest: string; decisionId: string; eligibilityDecisionId: string; qualityLineageDigest: string;
       attribution: { peopleVersion: number; authors: ReadonlyArray<string>; editors: ReadonlyArray<string> } }>;
   }>;
@@ -6956,7 +6953,7 @@ export interface ReviewReportRecord {
   };
   appendix: {
     title: '附录';
-    referencedRules?: ReadonlyArray<{ findingId: string; rules: ReadonlyArray<ReferencedRuleVersion> }>;
+    referencedRules?: ReadonlyArray<{ findingId: string; categoryLabel: string; locationLabel: string; rules: ReadonlyArray<ReferencedRuleVersion> }>;
     configuration: { schema: string; version: string; digest: string };
     categories: ReadonlyArray<{
       categoryId: string;

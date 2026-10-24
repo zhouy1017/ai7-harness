@@ -102,9 +102,9 @@ export function reviewCategorySchemaDigest(promptContractDigest: string, version
   }));
 }
 
-export function reviewCategoryKindDefinition(input: ReviewCategoryContractInput, version: 1 | 2 = 2, tools?: LocalToolsRule, promptGeneration: 2 | 3 | 4 = 2): AnalysisKindDefinition {
+export function reviewCategoryKindDefinition(input: ReviewCategoryContractInput, version: 1 | 2 = 2, tools?: LocalToolsRule): AnalysisKindDefinition {
   const names = tools?.declarations === undefined ? [] : ruleNamedToolSchemas(false, tools).map((schema) => schema.name);
-  const contract = reviewCategoryContract(input, version, names, promptGeneration);
+  const contract = reviewCategoryContract(input, version, names);
   const category = contract.category;
   const promptContractDigest = reviewCategoryContractDigest(contract);
   const clauseIds = category.clauses.map((clause) => clause.clauseId);
@@ -140,7 +140,7 @@ export function reviewCategoryKindDefinition(input: ReviewCategoryContractInput,
     outOfScope: 'leave-unreviewed',
     systemPrompt: contract.systemPrompt,
     promptContractDigest,
-    ...(category.deliverables === undefined ? {} : { livePromptContractDigest: () => reviewCategoryContractDigest(reviewCategoryContract(input, version, names, promptGeneration)) }),
+    ...(category.deliverables === undefined ? {} : { livePromptContractDigest: () => reviewCategoryContractDigest(reviewCategoryContract(input, version)) }),
     unitResultSchema: contract.responseSchema,
     revisionSchema: REVIEW_CATEGORY_RESULT_SET_REVISION_SCHEMA,
     successorRevisionSchema: REVIEW_CATEGORY_SUCCESSOR_REVISION_SCHEMA,
@@ -251,11 +251,8 @@ export function reviewCategoryKindDefinition(input: ReviewCategoryContractInput,
     conflictCountOf: () => 0,
     mode: modeIndex(modes),
   };
-  return Object.assign(definition, { reviewToolInput: input, reviewToolPromptDigest: promptContractDigest, reviewPromptGeneration: promptGeneration,
-    ...(version === 1 ? {} : { reviewPromptPredecessors: promptGeneration === 4
-      ? [reviewCategoryKindDefinition(input, 2, tools, 3), reviewCategoryKindDefinition(input, 2, undefined, 2), reviewCategoryKindDefinition(input, 1)]
-      : [] }),
-    ...(names.length === 0 ? {} : { numberedReviewContract: reviewCategoryKindDefinition(input, 2, undefined, promptGeneration) }) });
+  return Object.assign(definition, { reviewToolInput: input, reviewToolPromptDigest: promptContractDigest,
+    ...(names.length === 0 ? {} : { numberedReviewContract: reviewCategoryKindDefinition(input, 2) }) });
 }
 
 /** Policy selects prompt bytes only for new plans; both earlier prompt contracts remain reproducible. */
@@ -268,17 +265,15 @@ export function withReviewLocalTools(definition: AnalysisKindDefinition, tools: 
   if (material !== null) return material;
   const input = (definition as AnalysisKindDefinition & { reviewToolInput?: ReviewCategoryContractInput }).reviewToolInput;
   if (input === undefined) return definition;
-  const generation = (definition as AnalysisKindDefinition & { reviewPromptGeneration?: 2 | 3 | 4 }).reviewPromptGeneration ?? 2;
-  const numbered = reviewCategoryKindDefinition(input, 2, undefined, generation);
-  const next = reviewCategoryKindDefinition(input, 2, tools, generation);
+  const numbered = reviewCategoryKindDefinition(input, 2);
+  const next = reviewCategoryKindDefinition(input, 2, tools);
   // Other wrappers retain their own proof; only this owner's exact base can be replaced here.
   return owned.reviewToolPromptDigest === definition.promptContractDigest || definition.promptContractDigest === numbered.promptContractDigest ? next : definition;
 }
 export function pinnedReviewDefinition(definition: AnalysisKindDefinition, digest: string): AnalysisKindDefinition {
   const numbered = (definition as AnalysisKindDefinition & { numberedReviewContract?: AnalysisKindDefinition }).numberedReviewContract;
   const predecessor = (definition as AnalysisKindDefinition & { toolPromptPredecessor?: AnalysisKindDefinition }).toolPromptPredecessor;
-  const retired = (definition as AnalysisKindDefinition & { reviewPromptPredecessors?: readonly AnalysisKindDefinition[] }).reviewPromptPredecessors ?? [];
-  for (const candidate of [definition, predecessor, numbered, ...retired, definition.legacyReviewContract]) {
+  for (const candidate of [definition, predecessor, numbered, definition.legacyReviewContract]) {
     if (candidate === undefined) continue;
     if (candidate.promptContractDigest === digest) return candidate;
     if (candidate.clarificationBase === undefined) {

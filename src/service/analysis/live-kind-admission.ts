@@ -170,11 +170,8 @@ function liveKindExpectation(definition: LiveKindDefinition, policy?: LaunchPoli
   const review = BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.find((category) => reviewCategoryKindId(category.categoryId) === definition.kind);
   if (review !== undefined) {
     if (review.executor !== 'review-category-contract' || review.seriesKnowledge !== undefined) return null;
-    const input = reviewCategoryContractInput(review);
-    const tools = kindLocalTools(policy, definition.kind) ?? undefined;
-    const candidates = [reviewCategoryKindDefinition(input, 1), reviewCategoryKindDefinition(input, 2, undefined, 4),
-      reviewCategoryKindDefinition(input, 2, tools, 4), reviewCategoryKindDefinition(input, 2, undefined, 2),
-      reviewCategoryKindDefinition(input, 2, tools, 3)];
+    const candidates = [reviewCategoryKindDefinition(reviewCategoryContractInput(review), definition.contractVersion === 'ai7.editorial-review/1' ? 1 : 2),
+      reviewCategoryKindDefinition(reviewCategoryContractInput(review), 2, kindLocalTools(policy, definition.kind) ?? undefined)];
     const expectedBase = liveMaterialContract(definition)?.basePromptContractDigest ?? definition.promptContractDigest;
     return {
       promptContractDigest: candidates.find((entry) => entry.promptContractDigest === expectedBase)?.promptContractDigest ?? null,

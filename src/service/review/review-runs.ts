@@ -2689,7 +2689,7 @@ export class ReviewRunStore {
             clauseId: finding.clauseId,
             stateLine: finding.stateLine,
             basis: finding.basis,
-            referencedRuleVersions: finding.referencedRuleVersions ?? [],
+            ...((finding.referencedRuleVersions?.length ?? 0) === 0 ? {} : { referencedRuleVersions: finding.referencedRuleVersions }),
             markId,
             carried: carried[index] !== null,
             anchor,
@@ -2870,8 +2870,11 @@ export class ReviewRunStore {
           locationLabel: finding.blockPosition === null ? '内容块已不在当前稿件中' : `内容块 ${finding.blockPosition}`,
         })),
       });
+      // Named as the report names a finding elsewhere (its category and place), never by an internal identity alone.
+      const categoryLabels = new Map(record.overview.rows.map((row) => [row.categoryId, row.label] as const));
       const referencedRules = view.findings.filter((finding) => finding.referencedRuleVersions.length > 0)
-        .map((finding) => ({ findingId: finding.findingId, rules: finding.referencedRuleVersions }));
+        .map((finding) => ({ findingId: finding.findingId, categoryLabel: categoryLabels.get(finding.categoryId) ?? finding.categoryId,
+          locationLabel: finding.blockPosition === null ? '内容块已不在当前稿件中' : `内容块 ${finding.blockPosition}`, rules: finding.referencedRuleVersions }));
       if (referencedRules.length > 0) record.appendix.referencedRules = referencedRules;
       const canonical = canonicalRecord(record);
       this.#db.prepare('INSERT INTO review_reports(report_id, review_run_id, version, generated_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?)')

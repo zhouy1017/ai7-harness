@@ -238,10 +238,11 @@ export class EditorialLearningLedger {
       const latest = this.db.prepare('SELECT decision_id FROM proposal_item_decisions WHERE item_id = ? ORDER BY ordinal DESC LIMIT 1').get(row.item_id!);
       if (latest?.decision_id !== decisionId) return null;
       const finding = this.db.prepare('SELECT review_run_id, category_id FROM review_findings WHERE mark_id = ? ORDER BY rowid DESC LIMIT 1').get(row.mark_id!);
+      // The third same-category edit of a Run asks once (Issue #1109); later ones in that Run do not, so a batch Apply never fans out.
       const repeated = finding !== undefined && Number(this.db.prepare(`SELECT count(DISTINCT d.item_id) n FROM proposal_item_decisions d
         JOIN proposal_change_items i ON i.item_id = d.item_id JOIN review_findings f ON f.mark_id = i.mark_id
         WHERE f.review_run_id = ? AND f.category_id = ? AND d.disposition IN ('accepted', 'accepted-with-edit')
-          AND d.rowid <= (SELECT rowid FROM proposal_item_decisions WHERE decision_id = ?)`).get(finding.review_run_id!, finding.category_id!, decisionId)?.n) >= 3;
+          AND d.rowid <= (SELECT rowid FROM proposal_item_decisions WHERE decision_id = ?)`).get(finding.review_run_id!, finding.category_id!, decisionId)?.n) === 3;
       const disposition = String(row.disposition);
       return { disposition, eligible: disposition === 'rejected' ||
         disposition === 'accepted-with-edit' && row.edited_text !== row.proposed_text || repeated,
@@ -445,7 +446,9 @@ export class EditorialLearningLedger {
 
   inspect(input: InspectEditorialLearningInput): EditorialLearningProjection {
     const controls = this.controls();
-    const rows = this.db.prepare('SELECT signal_id FROM learning_signals ORDER BY rowid DESC LIMIT ? OFFSET ?').all(PAGE_SIZE + 1, input.signalOffset);
+    // An ask's own bookkeeping (offered, suppressed, dismissed) only paces later asks; the editor's list shows what they told AI7.
+    const rows = this.db.prepare(`SELECT signal_id FROM learning_signals WHERE coalesce(json_extract(canonical_json, '$.ask.state'), 'answered') = 'answered'
+      ORDER BY rowid DESC LIMIT ? OFFSET ?`).all(PAGE_SIZE + 1, input.signalOffset);
     const signals = rows.slice(0, PAGE_SIZE).map((row) => {
       const signal = this.#signal(String(row.signal_id));
       return { ...signal, currentEligibility: this.#currentEligibility(signal, controls),

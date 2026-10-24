@@ -48,7 +48,9 @@ describe('local proactive reason asks', () => {
     store!.markCleanShutdown(); store!.close(); store = undefined;
     store = await EditorialStore.open(roots!.dataRoot, roots!.codeRoot);
     expect(store.recordLearningReasonAsk({ action: 'offer', decisionId }, 'often')).toBeNull();
-    expect(store.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }).signals.some((entry) => entry.ask?.state === 'answered')).toBe(true);
+    // The offer's own bookkeeping row paces later asks; the editor's list shows only the answer.
+    expect(store.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }).signals.filter((entry) => entry.kind === 'proactive-reason')
+      .map((entry) => entry.ask?.state)).toEqual(['answered']);
   });
 
   it('occasionally waits for three eligible decisions and sixty seconds across dismissal and restart', async () => {

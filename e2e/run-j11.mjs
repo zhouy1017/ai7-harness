@@ -2159,11 +2159,16 @@ async function main() {
     }
 
     at('decision-feedback-dismiss');
-    // F-05 part 2a: the persisted off setting suppresses every proactive ask; manual reasons remain reachable.
+    // F-05 part 2a (Issue #1109): a decision no longer opens the reason row by itself; the learning ask follows the persisted
+    // 经常 / 偶尔 / 关闭, 偶尔 by default. Under 关闭 the service offers nothing for an eligible rejection — awaited below through
+    // the same public offer the card makes — and the editor's own 补充原因… remains.
+    requireJourney((await renderer.evaluate(`window.ai7.getPreferences()`))?.values?.['learning.askFrequency'] === 'occasionally', 'learning-ask-frequency-default-before-off');
     await renderer.evaluate(`window.ai7.savePreference({key:'learning.askFrequency',value:'off'})`);
     await openMarkCard(renderer, 'change-suggestion', rejectBlock, 'decision-reject-card');
     await assertRenderer(renderer, `window.__j11.act('reject')`, 'decision-reject');
     const dismissed = await readDecision(renderer, (card) => card.state === 'none' && card.later === '补充原因…', 'decision-dismissed');
+    const offAfterRejection = await renderer.evaluate(`(async () => { const decisionId = window.__j11.card()?.dataset.learningDecisionId; return decisionId ? { decisionId, ask: await window.ai7.recordLearningReasonAsk({ action: 'offer', decisionId }) } : null; })()`);
+    requireJourney(offAfterRejection !== null && offAfterRejection.ask === null, 'learning-off-offers-nothing-after-rejection', offAfterRejection);
     await assertRenderer(renderer, `!document.querySelector('[data-learning-reason-ask]')`, 'learning-off-no-ask-after-rejection');
     requireJourney(dismissed.prompt === null && dismissed.reason === null && dismissed.later === '补充原因…', 'decision-dismissed-words', dismissed);
     await pressEscape(renderer);
@@ -2202,12 +2207,14 @@ async function main() {
     await waitFor(renderer, `window.__j11.card() === null`, 'decision-revised-closed');
 
     at('decision-feedback-after-apply');
-    // 接受并应用 asks why too, with the reasons fitted to an acceptance; moving on without answering ends the prompt and records
-    // nothing: reopened, the card offers 补充原因… and the service holds no entry after the decision.
+    // 接受并应用 under 关闭 asks nothing either: moving on records nothing, and reopened, the card offers 补充原因… with the service
+    // holding no entry after the decision.
     await openMarkCard(renderer, 'change-suggestion', applyBlock, 'decision-apply-card');
     await assertRenderer(renderer, `window.__j11.act('accept-and-apply')`, 'decision-accept-and-apply');
     const applied = await readDecision(renderer, (card) => card.applied && card.later === '补充原因…', 'decision-applied-asked');
     requireJourney(applied.state === 'none' && applied.prompt === null, 'decision-applied-asked-words', applied);
+    const offAfterApply = await renderer.evaluate(`(async () => { const decisionId = window.__j11.card()?.dataset.learningDecisionId; return decisionId ? { decisionId, ask: await window.ai7.recordLearningReasonAsk({ action: 'offer', decisionId }) } : null; })()`);
+    requireJourney(offAfterApply !== null && offAfterApply.ask === null, 'learning-off-offers-nothing-after-apply', offAfterApply);
     await assertRenderer(renderer, `!document.querySelector('[data-learning-reason-ask]')`, 'learning-off-no-ask-after-apply');
     await pressEscape(renderer);
     await waitFor(renderer, `window.__j11.card() === null`, 'decision-applied-moved-on');
@@ -3250,6 +3257,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-learning-enabled]')?.checked === false && document.querySelector('[data-learning-enabled]')?.disabled === false`, 'editorial-memory-switch-off-saved');
 
     at('learning-ask-frequency');
+    // The 关闭 proof above changed the persisted setting; the default it read there is restored so the control reads it again.
     await renderer.evaluate(`window.ai7.savePreference({key:'learning.askFrequency',value:'occasionally'})`);
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'learning-frequency-settings');
     await waitFor(renderer, `document.querySelector('[data-settings-group="editorial"] [data-learning-ask-frequency]')?.disabled === false`, 'learning-frequency-ready');

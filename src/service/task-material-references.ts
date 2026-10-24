@@ -223,10 +223,6 @@ export function taskMaterialKindDefinition(
       ? base.kind === 'evaluation' ? initialEvaluationRequestDigest(promptContractDigest, ordinal, unitDigest) : readersReportRequestDigest(promptContractDigest, ordinal, unitDigest)
       : sha256Hex(canonicalJson({ promptContractDigest, baseRequestDigest: base.requestDigest(ordinal, unitDigest) })),
   };
-  const predecessors = (base as AnalysisKindDefinition & { reviewPromptPredecessors?: readonly AnalysisKindDefinition[] }).reviewPromptPredecessors;
-  if (predecessors !== undefined && refusal === null) Object.assign(definition, {
-    reviewPromptPredecessors: predecessors.map((prior) => taskMaterialKindDefinition(prior, boundary, readings)),
-  });
   materialBaseMappers.set(definition, (map) => {
     if (refusal !== null) return definition;
     const mapped = map(base);
