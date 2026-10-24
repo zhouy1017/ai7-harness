@@ -6,6 +6,12 @@ export const PROCEDURE_STAGE_TYPES = [
 ] as const;
 export type ProcedureStageType = (typeof PROCEDURE_STAGE_TYPES)[number];
 
+/** Closed local formats; declaring v2 does not select or activate it. */
+export type LocalCheckProcedureVersion = 1 | 2;
+export type LocalCheckPlanSchema = 'ai7.review.local-plan/1' | 'ai7.review.local-plan/2';
+export type LocalCheckResultSchema = 'ai7.review.local-result/1' | 'ai7.review.local-result/2';
+export type LocalCheckArtifactSchema = 'ai7.review.local-stage-artifact/1' | 'ai7.review.local-stage-artifact/2';
+
 /** F-20a: these declarations are affirmative choices for this Run, never inferred from a Book type. */
 export interface LocalCheckOptions {
   readonly punctuation: 'chinese-prose' | 'off';
