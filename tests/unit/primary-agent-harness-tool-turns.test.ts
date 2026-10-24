@@ -7,8 +7,9 @@ import { canonicalJson } from '../../src/service/analysis/canonical.js';
 import { describeComposition, prepareExecution } from '../../src/service/harness/primary-agent-harness.js';
 import { Ai7LocalDeterministicAdapter } from '../../src/service/provider/local-deterministic-adapter.js';
 import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
-import { LOCAL_TOOL_DECLARATION_NAMES, readLocalToolsRule } from '../../src/service/provider/local-tools.js';
+import { LOCAL_TOOL_DECLARATION_NAMES, LOCAL_TOOL_RESULT_MAX_BYTES, readLocalToolsRule } from '../../src/service/provider/local-tools.js';
 import { PlatformToolSession } from '../../src/service/provider/platform-tool-session.js';
+import { canonicalToolArguments } from '../../src/service/provider/platform-tools.js';
 import { toolResultOf, type AssembledModelPayload } from '../../src/service/provider/payload.js';
 import { evaluateEgress, LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from '../../src/service/provider/egress-gate.js';
 import { RetrievalIndex } from '../../src/service/retrieval/index.js';
@@ -59,7 +60,7 @@ describe('declared local-tool turns', () => {
 
   it('reads only pinned blocks and snapshot records, without a live-ledger or external source seam', () => {
     const sources = { baseline: { revisionId: 'fixed', digest: 'a'.repeat(64), entities: [{ name: '合成名', kind: 'person' }], events: [], settingClaims: [] },
-      guidelines: [{ documentId: 'fixed-guideline', version: '2', clauses: [{ clauseId: 'clause/1', text: '固定条款' }] }], terms: [{ name: '固定术语' }] };
+      guidelines: [{ documentId: 'fixed-guideline', version: '2', clauses: [{ clauseId: 'clause/1', text: '固定条款' }] }], terms: [{ name: '固定术语', kind: 'term' }] };
     const index = new RetrievalIndex([{ sourceKind: 'manuscript', sourceId: 'one-book', digest: 'a'.repeat(64),
       read: () => ({ digest: 'a'.repeat(64), segments: [{ blockId: 'one', text: '合成文本' }, { blockId: 'two', text: '另一段' }] }) }], null, null, sources);
     sources.terms[0]!.name = '改动后的表';
@@ -67,11 +68,63 @@ describe('declared local-tool turns', () => {
     expect(() => index.readBlocks('other-book-block', 1)).toThrow('RETRIEVAL_SOURCE_NOT_AUTHORIZED');
     expect(index.searchManuscript('合成', 'exact').map((block) => block.blockId)).toEqual(['one']);
     expect(index.searchManuscript('合成文本', 'tokenized').map((block) => block.blockId)).toEqual(['one']);
-    expect(index.pinnedRecords('baseline_facts')).toMatchObject({ revisionId: 'fixed' });
+    expect(index.pinnedRecords('baseline_facts', '合成')).toEqual({ revisionId: 'fixed', entities: [{ name: '合成名', kind: 'person' }], events: [], settingClaims: [],
+      more: { entities: 0, events: 0, settingClaims: 0 } });
     expect(index.pinnedRecords('guideline_clause', 'clause/1')).toEqual([{ documentId: 'fixed-guideline', version: '2', clauseId: 'clause/1', text: '固定条款' }]);
-    expect(index.pinnedRecords('term_table')).toEqual([{ name: '固定术语' }]);
+    expect(index.pinnedRecords('term_table')).toEqual({ revisionId: 'fixed', person: [], place: [], term: [{ name: '固定术语', kind: 'term' }], more: { person: 0, place: 0, term: 0 } });
     index.dispose();
     expect(() => index.pinnedRecords('term_table')).toThrow('RETRIEVAL_SOURCE_NOT_AUTHORIZED');
+  });
+
+  it('reads a required baseline query and an optional term query of 1–200 graphemes', () => {
+    expect(canonicalToolArguments('baseline_facts', {})).toBeNull();
+    expect(canonicalToolArguments('baseline_facts', { query: ' 合成名 ' })).toEqual({ tool: 'baseline_facts', query: '合成名' });
+    expect(canonicalToolArguments('baseline_facts', { query: '合'.repeat(200) })).toEqual({ tool: 'baseline_facts', query: '合'.repeat(200) });
+    expect(canonicalToolArguments('baseline_facts', { query: '合'.repeat(201) })).toBeNull();
+    expect(canonicalToolArguments('baseline_facts', { query: '   ' })).toBeNull();
+    expect(canonicalToolArguments('term_table', {})).toEqual({ tool: 'term_table' });
+    expect(canonicalToolArguments('term_table', { query: '' })).toBeNull();
+    expect(canonicalToolArguments('term_table', { query: '合成', other: true })).toBeNull();
+  });
+
+  it('answers sample1-sized baseline facts and term rows under the byte cap, and an unmatched query with an empty answer', async () => {
+    // sample1's recorded baseline units, unmerged: more facts than the Book's merged synthesis, which alone exceeds the cap.
+    const recorded = JSON.parse(await readFile(resolve('tests/fixtures/model/sample1-recorded-v41-baseline.json'), 'utf8')) as { entries: Array<{ response: { kind: string; text?: string } }> };
+    const units = recorded.entries.flatMap((entry) => entry.response.kind === 'unit-result' ? [JSON.parse(entry.response.text!.replace(/\{\{block:\d+\}\}/gu, `blk_${'0'.repeat(24)}`)) as
+      { entities?: Array<{ name: string; kind: string }>; events?: unknown[]; settingClaims?: unknown[] }] : []).filter((unit) => unit.entities !== undefined);
+    const entities = units.flatMap((unit) => unit.entities!);
+    const baseline = { revisionId: 'pinned', digest: 'a'.repeat(64), entities, events: units.flatMap((unit) => unit.events ?? []), settingClaims: units.flatMap((unit) => unit.settingClaims ?? []) };
+    const terms = entities.filter((entity) => ['person', 'place', 'term'].includes(entity.kind));
+    expect(Buffer.byteLength(JSON.stringify(baseline))).toBeGreaterThan(LOCAL_TOOL_RESULT_MAX_BYTES);
+    const digest = 'a'.repeat(64);
+    const index = new RetrievalIndex([{ sourceKind: 'manuscript', sourceId: 'synthetic', digest, read: () => ({ digest, segments: [{ blockId: 'one', text: '合成段落。' }] }) }],
+      null, null, { baseline, guidelines: [], terms });
+    const binding = { bindingDigest: digest, route: LOCAL_DETERMINISTIC_ROUTE, model: LOCAL_DETERMINISTIC_MODEL, systemPrompt: '合成审阅',
+      outboundDataCategory: 'public-or-synthetic' as const, localTools: rule, admittedUserMessages: new Set<string>(),
+      policy: { operationalScope: 'development-ci' as const, providerProcessingVersion: 'v1' as const, liveTransmissionAllowed: false as const, authorizedLiveTransmissionCount: 0 as const } };
+    const session = new PlatformToolSession({ binding, scope: { currentBindingDigest: () => digest, acceptedOutputDigests: new Set() }, retrieval: index, purpose: 'authored-unit' });
+    const signal = new AbortController().signal;
+    const call = async (callId: string, tool: 'baseline_facts' | 'term_table', args: Record<string, unknown>) => {
+      const result = await session.execute({ callId, tool, arguments: args, signal });
+      expect(Buffer.byteLength(result.text)).toBeLessThanOrEqual(LOCAL_TOOL_RESULT_MAX_BYTES);
+      return result.text;
+    };
+    try {
+      const name = entities[0]!.name;
+      const facts = JSON.parse(await call('1', 'baseline_facts', { query: ` ${name} ` })) as { revisionId: string; entities: Array<{ name: string }>; more: Record<string, number> };
+      expect(facts.revisionId).toBe('pinned');
+      expect(facts.entities.length).toBeGreaterThan(0);
+      expect(facts.entities.length).toBeLessThanOrEqual(8);
+      const table = JSON.parse(await call('2', 'term_table', {})) as Record<'person' | 'place' | 'term', unknown[]> & { more: Record<'person' | 'place' | 'term', number> };
+      for (const kind of ['person', 'place', 'term'] as const) expect(table[kind].length).toBeLessThanOrEqual(8);
+      expect((['person', 'place', 'term'] as const).reduce((sum, kind) => sum + table[kind].length + table.more[kind], 0)).toBe(terms.length);
+      expect(JSON.parse(await call('3', 'baseline_facts', { query: '没有这个合成名称' }))).toEqual({ revisionId: 'pinned', entities: [], events: [], settingClaims: [],
+        more: { entities: 0, events: 0, settingClaims: 0 } });
+      expect(session.usage.refusedRetrievalCalls ?? 0).toBe(0);
+      // The query is the read's selector: baseline_facts without one is a refusal, never the whole synthesis.
+      expect(await call('4', 'baseline_facts', {})).not.toContain('"entities"');
+      expect(session.usage.refusedRetrievalCalls).toBe(1);
+    } finally { index.dispose(); }
   });
   it('keeps explicit v1 bytes and gives v2 an exact named subset and resolved bound', () => {
     const old = describeComposition(LOCAL_DETERMINISTIC_ROUTE, LOCAL_DETERMINISTIC_MODEL, 'a'.repeat(64), { localTools: true });

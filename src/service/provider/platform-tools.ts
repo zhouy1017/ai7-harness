@@ -260,12 +260,12 @@ export const LOCAL_TOOL_SCHEMAS: ReadonlyArray<PlatformToolSchema> = Object.free
   ...LEGACY_LOCAL_TOOL_SCHEMAS,
   { name: 'read_blocks', description: '读取固定稿件中指定内容块及其相邻段落；只在本次授权范围内读取。',
     parameters: { type: 'object', properties: { blockId: { type: 'string' }, radius: { type: 'integer', minimum: 0, maximum: 3 } }, required: ['blockId', 'radius'], additionalProperties: false } },
-  { name: 'baseline_facts', description: '读取本次计划固定的本书基线实体、设定与事件；未固定来源时返回空结果。',
-    parameters: { type: 'object', properties: {}, additionalProperties: false } },
+  { name: 'baseline_facts', description: '按名称或文字查询本次计划固定的本书基线实体、设定与事件；每类最多返回 8 条并注明其余条数；未固定来源或没有匹配时返回空结果。',
+    parameters: { type: 'object', properties: { query: { type: 'string', minLength: 1, maxLength: 200 } }, required: ['query'], additionalProperties: false } },
   { name: 'guideline_clause', description: '读取本次计划固定的规范文件条款；未固定来源时返回空结果。',
     parameters: { type: 'object', properties: { clauseId: { type: 'string', maxLength: 200 } }, additionalProperties: false } },
-  { name: 'term_table', description: '读取本次计划固定的本书术语、人名和地名表；未固定来源时返回空结果。',
-    parameters: { type: 'object', properties: {}, additionalProperties: false } },
+  { name: 'term_table', description: '读取本次计划固定的本书人名、地名和术语表，可按文字查询；每类最多返回 8 条并注明其余条数；未固定来源或没有匹配时返回空结果。',
+    parameters: { type: 'object', properties: { query: { type: 'string', minLength: 1, maxLength: 200 } }, additionalProperties: false } },
   { name: 'search_manuscript', description: '在本次授权固定稿件中精确或分词检索；只返回匹配段落。',
     parameters: { type: 'object', properties: { query: { type: 'string', minLength: 1, maxLength: 1000 }, mode: { type: 'string', enum: ['exact', 'tokenized'] } }, required: ['query', 'mode'], additionalProperties: false } },
 ]);
@@ -313,12 +313,22 @@ export type PlatformToolArguments =
   | { readonly tool: 'retrieve'; readonly query: string; readonly k: number; readonly sourceKinds?: ReadonlyArray<'manuscript' | 'material' | 'retained-source'> }
   | { readonly tool: 'exact_fetch'; readonly candidateId: string }
   | { readonly tool: 'read_blocks'; readonly blockId: string; readonly radius: number }
-  | { readonly tool: 'baseline_facts' | 'term_table' }
+  | { readonly tool: 'baseline_facts'; readonly query: string }
+  | { readonly tool: 'term_table'; readonly query?: string }
   | { readonly tool: 'guideline_clause'; readonly clauseId?: string }
   | { readonly tool: 'search_manuscript'; readonly query: string; readonly mode: 'exact' | 'tokenized' };
 
 /** The longest query AI7 forwards; a longer one is a refusal returned to the model, never a truncation. */
 export const WEBSEARCH_QUERY_MAX_CHARACTERS = 1_000;
+
+const GRAPHEMES = new Intl.Segmenter('zh', { granularity: 'grapheme' });
+/** A `baseline_facts` / `term_table` query (Issue #1090 revision 10): 1–200 graphemes of well-formed text, NFC and trimmed. */
+function pinnedRecordQuery(value: unknown): string | null {
+  if (typeof value !== 'string' || !value.isWellFormed()) return null;
+  const query = value.normalize('NFC').trim();
+  const graphemes = [...GRAPHEMES.segment(query)].length;
+  return graphemes >= 1 && graphemes <= 200 ? query : null;
+}
 
 /**
  * Parse one call's raw arguments into their canonical form, or `null` when they are not a call this tool accepts. A query
@@ -327,7 +337,12 @@ export const WEBSEARCH_QUERY_MAX_CHARACTERS = 1_000;
  */
 export function canonicalToolArguments(name: string, args: unknown): PlatformToolArguments | null {
   if (!isRecord(args)) return null;
-  if (name === 'baseline_facts' || name === 'term_table') return exactKeys(args, []) ? { tool: name } : null;
+  if (name === 'baseline_facts' || name === 'term_table') {
+    if (!Object.keys(args).every((key) => key === 'query')) return null;
+    if (args.query === undefined) return name === 'term_table' ? { tool: name } : null;
+    const query = pinnedRecordQuery(args.query);
+    return query === null ? null : { tool: name, query };
+  }
   if (name === 'guideline_clause') return Object.keys(args).every((key) => key === 'clauseId') &&
     (args.clauseId === undefined || (typeof args.clauseId === 'string' && args.clauseId.length > 0 && args.clauseId.length <= 200))
     ? { tool: name, ...(args.clauseId === undefined ? {} : { clauseId: args.clauseId }) } : null;

@@ -304,7 +304,7 @@ export class PlatformToolSession implements PlatformToolOwner {
         case 'exact_fetch': value = this.#retrieval.exactFetch(args.candidateId); break;
         case 'read_blocks': value = this.#retrieval.readBlocks(args.blockId, args.radius); break;
         case 'search_manuscript': value = this.#retrieval.searchManuscript(args.query, args.mode); break;
-        case 'baseline_facts': case 'term_table': value = this.#retrieval.pinnedRecords(args.tool); break;
+        case 'baseline_facts': case 'term_table': value = this.#retrieval.pinnedRecords(args.tool, args.query); break;
         case 'guideline_clause': value = this.#retrieval.pinnedRecords(args.tool, args.clauseId); break;
         default: return refuse('本次尝试未准许该工具。');
       }

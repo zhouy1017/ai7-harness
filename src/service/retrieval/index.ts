@@ -1,4 +1,4 @@
-import { canonicalJson, sha256Hex } from '../analysis/canonical.js';
+import { canonicalJson, isRecord, sha256Hex } from '../analysis/canonical.js';
 import type { EmbeddingProvider } from '../knowledge/embedding.js';
 
 /** Disposable projections only. Readers own authorization, availability and the authoritative pinned bytes. */
@@ -44,6 +44,18 @@ export interface PinnedLocalToolSources {
     readonly events: readonly unknown[]; readonly settingClaims: readonly unknown[] } | null;
   readonly guidelines: readonly { readonly documentId: string; readonly version: string; readonly clauses: readonly { readonly clauseId: string; readonly text: string }[] }[];
   readonly terms: readonly unknown[];
+}
+/** The rows one `baseline_facts` or `term_table` section returns; the answer counts the rest. */
+export const PINNED_RECORDS_PER_SECTION = 8;
+/** The term table's sections: the baseline entities of these kinds. */
+const TERM_TABLE_KINDS = ['person', 'place', 'term'] as const;
+/** A pinned row's searchable text: its named string fields and string-array fields, NFC and lower-cased. */
+function pinnedRowTexts(row: unknown, fields: readonly string[]): string[] {
+  if (!isRecord(row)) return [];
+  return fields.flatMap((field) => {
+    const value = row[field];
+    return typeof value === 'string' ? [value] : Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
+  }).map((text) => text.normalize('NFC').toLowerCase());
 }
 
 /** Runs of Han characters become adjacent bigrams; Latin words and numbers remain whole tokens. */
@@ -132,13 +144,34 @@ export class RetrievalIndex {
     return this.#manuscriptBlocks().filter((block) => mode === 'exact' ? block.text.normalize('NFC').includes(query)
       : tokens.length > 0 && tokens.every((token) => retrievalTokens(block.text).includes(token))).slice(0, RETRIEVAL_MAX_CANDIDATES);
   }
-  pinnedRecords(tool: 'baseline_facts' | 'guideline_clause' | 'term_table', clauseId?: string): unknown {
+  /**
+   * `guideline_clause` names one clause or all. `baseline_facts` and `term_table` answer a query section by section — entities,
+   * events and setting claims; persons, places and terms — with at most {@link PINNED_RECORDS_PER_SECTION} rows each and the
+   * count left out, so even a whole Book's facts answer under the byte cap (Issue #1090 revision 10). No match, or no pinned
+   * baseline, is an empty answer, never an error.
+   */
+  pinnedRecords(tool: 'baseline_facts' | 'guideline_clause' | 'term_table', argument?: string): unknown {
     if (this.#disposed) throw new RetrievalError('RETRIEVAL_SOURCE_NOT_AUTHORIZED');
-    if (tool === 'baseline_facts') return this.#records?.baseline ?? [];
-    if (tool === 'term_table') return this.#records?.terms ?? [];
-    return (this.#records?.guidelines ?? []).flatMap((document) => document.clauses
-      .filter((clause) => clauseId === undefined || clause.clauseId === clauseId)
-      .map((clause) => ({ documentId: document.documentId, version: document.version, ...clause })));
+    if (tool === 'guideline_clause') {
+      return (this.#records?.guidelines ?? []).flatMap((document) => document.clauses
+        .filter((clause) => argument === undefined || clause.clauseId === argument)
+        .map((clause) => ({ documentId: document.documentId, version: document.version, ...clause })));
+    }
+    const baseline = this.#records?.baseline ?? null;
+    const terms = this.#records?.terms ?? [];
+    const sections: ReadonlyArray<readonly [string, readonly unknown[], readonly string[]]> = tool === 'baseline_facts'
+      ? [['entities', baseline?.entities ?? [], ['name', 'aliases']], ['events', baseline?.events ?? [], ['summary', 'chronology', 'participants']],
+        ['settingClaims', baseline?.settingClaims ?? [], ['subject', 'claim']]]
+      : TERM_TABLE_KINDS.map((kind) => [kind, terms.filter((row) => isRecord(row) && row.kind === kind), ['name', 'aliases']] as const);
+    const needle = argument?.normalize('NFC').toLowerCase();
+    const answer: Record<string, unknown> = { revisionId: baseline?.revisionId ?? null };
+    const more: Record<string, number> = {};
+    for (const [section, rows, fields] of sections) {
+      const matched = needle === undefined ? rows : rows.filter((row) => pinnedRowTexts(row, fields).some((text) => text.includes(needle)));
+      answer[section] = matched.slice(0, PINNED_RECORDS_PER_SECTION);
+      more[section] = Math.max(0, matched.length - PINNED_RECORDS_PER_SECTION);
+    }
+    return { ...answer, more };
   }
   #read(source: RetrievalSource): ReturnType<RetrievalSource['read']> {
     try {
