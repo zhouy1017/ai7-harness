@@ -46,7 +46,7 @@ import { normalizeModelResponse, type CanonicalModelResult, type ModelUsage, typ
 export const DEEPSEEK_ADAPTER_REVISION = 1 as const;
 export const DEEPSEEK_CONFIGURATION_REVISION = 1 as const;
 export const DEEPSEEK_REASONING_EFFORT = 'high' as const;
-/** Factory default until transport.requestDeadlineSeconds is consumed (F-21). */
+/** Pre-v26 launch fallback. */
 export const MODEL_REQUEST_DEADLINE_MS = 180_000;
 /** The opaque per-request Session header the gateway uses for prompt caching; it carries the Session id and nothing else. */
 export const OPENCODE_GO_SESSION_HEADER = 'x-opencode-session' as const;
@@ -745,6 +745,10 @@ export type DeepSeekTransport = (
 ) => Promise<DeepSeekTransportResponse>;
 
 export interface DeepSeekAdapterDependencies {
+  readonly transportSettings?: {
+    readonly requestDeadlineSeconds: number;
+    readonly rateLimitRetry: { readonly honourRetryAfter: boolean; readonly maxRetries: number };
+  };
   readonly broker: CredentialBroker;
   readonly slotBinding: CredentialSlotBinding;
   readonly tickets: TransmitTicketSource;
@@ -880,7 +884,8 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
     let sent = false;
     let responseStatus: number | undefined;
     const deadline = new AbortController();
-    const timer = setTimeout(() => deadline.abort(new DOMException('模型请求超过时限。', 'TimeoutError')), MODEL_REQUEST_DEADLINE_MS);
+    const timer = setTimeout(() => deadline.abort(new DOMException('模型请求超过时限。', 'TimeoutError')),
+      this.#deps.transportSettings === undefined ? MODEL_REQUEST_DEADLINE_MS : this.#deps.transportSettings.requestDeadlineSeconds * 1000);
     const signal = AbortSignal.any([deadline.signal, ...(options.signal === undefined ? [] : [options.signal]),
       ...(this.#deps.signal === undefined ? [] : [this.#deps.signal])]);
     // The transport owns its send/cache settlement. Abort it through the signal and await its result so a possibly billed

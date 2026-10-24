@@ -3,12 +3,12 @@ import { readFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { LAUNCH_SELECTABLE_SCOPES, isTrustedOperationalScope, type AdmittedLocalTools, type AdmittedPlatformTools, type AdmittedProviderRule, type DeveloperLiveCeiling, type OutboundDataCategoryId, type DevelopmentValidationIntent, type LaunchPolicyProjection, type TrustedLaunchForm, type TrustedOperationalScope } from '../shared/protocol.js';
 import { CREDENTIAL_REFERENCE_PATTERN, DEVELOPMENT_CREDENTIAL_REFERENCES } from '../shared/protected-secret-identity.js';
-import { CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES } from '../shared/provider-configuration.generated.js';
+import { CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES, CONFIGURED_RUNTIME_MODEL_TABLE } from '../shared/provider-configuration.generated.js';
 import {
   PLATFORM_TOOL_BREAKER_END, PLATFORM_TOOL_ROUND_TRIP_BREAKER, WEBFETCH_MAX_BYTES, WEBFETCH_TIMEOUT_SECONDS, isConfiguredPlatformTools, readPlatformToolsRule,
 } from './provider/platform-tools.js';
 import {
-  LOCAL_TOOL_BREAKER_END, LOCAL_TOOL_CALLS_PER_UNIT, LOCAL_TOOL_CANDIDATES_PER_CALL, LOCAL_TOOL_ROUND_TRIP_BREAKER, readLocalToolsRule,
+  LOCAL_TOOL_BREAKER_END, LOCAL_TOOL_CALLS_PER_UNIT, LOCAL_TOOL_CANDIDATES_PER_CALL, LOCAL_TOOL_DECLARATION_NAMES, LOCAL_TOOL_ROUND_TRIP_BREAKER, readLocalToolsRule,
 } from './provider/local-tools.js';
 import { modelProfileFor } from './provider/model-profile.js';
 import type { RemoteExecutionRoute } from './provider/egress-gate.js';
@@ -73,10 +73,7 @@ const EXTERNAL_PIN = {
 export const DEVELOPER_LIVE_POLICY_BINDING = {
   ruleId: 'developer-live-public-samplebook-analysis',
   launchArgument: '--trusted-operational-scope developer-live',
-  route: 'opencode-go',
-  endpoint: 'https://opencode.ai/zen/go/v1/chat/completions',
-  model: 'deepseek-v4.1-flash',
-  credentialSlot: 'opencode-go',
+  ...CONFIGURED_RUNTIME_MODEL_TABLE.developerLive,
   defaultRunBudgetCeilingTokensPerFrozenUnit: 30_000,
   providerAccountLimitClassification: 'quota-exhausted',
 } as const;
@@ -85,21 +82,12 @@ export const DEVELOPER_LIVE_POLICY_BINDING = {
 export const DEFAULT_PROVIDER_CACHE_DIRECTORY = 'ai7-harness-provider-cache';
 
 /**
- * Main Editorial retains the two existing production bindings (Issue #811): OpenCode
- * Go DeepSeek V4.1 Flash, the default, and DeepSeek 开放平台（官方） V4.1 Flash, an independent choice — exactly v13's
- * `allowedBindings`, which `tests/unit/ordinary-production-launch.test.ts` pins against the bytes. The store lists these routes,
- * the service arms their hosts, and the resolver checks a configured binding against the policy itself. Never a fallback chain.
+ * Reviewed v26 runtime choices, default first (ADR 0095 §6). The store lists these routes and the service arms their
+ * declared hosts. The verifier separately checks the immutable policy baseline; a choice is never a fallback chain.
  */
-export const ORDINARY_PRODUCTION_ALLOWED_BINDINGS = [
-  { route: 'opencode-go', endpoint: 'https://opencode.ai/zen/go/v1/chat/completions', model: 'deepseek-v4.1-flash', credentialSlot: 'opencode-go' },
-  { route: 'deepseek-open-platform', endpoint: 'https://api.deepseek.com/chat/completions', model: 'deepseek-flash', credentialSlot: 'deepseek-api-key' },
-] as const;
+export const ORDINARY_PRODUCTION_ALLOWED_BINDINGS = CONFIGURED_RUNTIME_MODEL_TABLE.ordinaryProduction.main;
 export type OrdinaryProductionAllowedBinding = (typeof ORDINARY_PRODUCTION_ALLOWED_BINDINGS)[number];
-export const ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS = [
-  ...ORDINARY_PRODUCTION_ALLOWED_BINDINGS,
-  { route: 'openai-platform', endpoint: 'https://api.openai.com/v1/responses', model: 'gpt-5.6-luna', credentialSlot: 'openai-platform' },
-  { route: 'openai-platform', endpoint: 'https://api.openai.com/v1/responses', model: 'gpt-5.6-sol', credentialSlot: 'openai-platform' },
-] as const;
+export const ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS = CONFIGURED_RUNTIME_MODEL_TABLE.ordinaryProduction.fast;
 export type OrdinaryProductionFastAllowedBinding = (typeof ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS)[number];
 
 export const CONNECTION_TEST_KIND = 'model-connection-test' as const;
@@ -1507,6 +1495,9 @@ const PRODUCTION_AUTHORITY_SEPARATIONS = [
 
 /** What a verified ordinary-production policy says, before any configured binding is applied. */
 export interface OrdinaryProductionPolicyReading {
+  readonly execution?: LaunchPolicyProjection['providerProcessing']['execution'];
+  readonly transport?: LaunchPolicyProjection['providerProcessing']['transport'];
+  readonly research?: LaunchPolicyProjection['providerProcessing']['research'];
   readonly crossUnitReductionAllowed: boolean;
   readonly assuranceSamplingAllowed: boolean;
   readonly runReportReflectionAllowed: boolean;
@@ -1522,6 +1513,8 @@ export interface OrdinaryProductionPolicyReading {
     readonly platformTools: AdmittedPlatformTools | null;
     /** The rule's verified local tools: retrieval allowed on every rule but enrolled background analysis, material translation and custom analysis. */
     readonly localTools: AdmittedLocalTools;
+    readonly projection?: Pick<AdmittedProviderRule, 'taskKinds' | 'outboundDataCategories' | 'crossUnitSynthesisAllowed' |
+      'plusDeclaredContractRetryAdaptations' | 'taskKindOverrides' | 'editorTaskInstruction' | 'houseReviewGuidelineClause'>;
   }>;
 }
 
@@ -1538,9 +1531,8 @@ function allowedBindingsOf(role: unknown): AllowedRoleBinding[] {
 }
 
 /**
- * Read v26's Wave 20 eligibility declarations exactly, then pass the existing runtime terms to the v25 reader.
- * F-21b owns their projection and the later slices own consumption; this activation changes no tool registration,
- * task admission, retry, synthesis or outbound payload. Missing, extra or differently shaped terms fail closed.
+ * Verify v26's additions exactly before verifying its inherited terms with the v25 reader.
+ * Projection happens only after both checks pass. Missing, extra or differently shaped terms fail closed.
  * The governor terms state configurable defaults only; their effective numbers are runtime configuration (ADR 0095 §2, §6).
  */
 function readWave20Eligibility(policy: Record<string, unknown>): Record<string, unknown> {
@@ -1558,7 +1550,7 @@ function readWave20Eligibility(policy: Record<string, unknown>): Record<string, 
   delete legacyCategories['house-review-guideline-clause'];
   const decision = policy['decision'];
   requirePolicy(isRecord(decision) && Array.isArray(decision['providerAllowRules']));
-  const declarations = ['retrieve', 'exact_fetch', 'read_blocks', 'baseline_facts', 'guideline_clause', 'term_table', 'search_manuscript']
+  const declarations = LOCAL_TOOL_DECLARATION_NAMES
     .map((name) => ({ name, readOnly: true, concurrencySafe: true }));
   const rules = decision['providerAllowRules'].map((rule: unknown) => {
     requirePolicy(isRecord(rule) && typeof rule['ruleId'] === 'string' && Object.hasOwn(ORDINARY_PRODUCTION_RULES, rule['ruleId']));
@@ -1617,6 +1609,7 @@ function readWave20Eligibility(policy: Record<string, unknown>): Record<string, 
  * the document's `allowedBindings`, which the SHA-256 pin fixes, and checked for consistency across the roles and rules.
  */
 export function verifyOrdinaryProductionPolicy(policy: Record<string, unknown>): OrdinaryProductionPolicyReading {
+  const wave20 = policy['version'] === 'v26' ? policy : null;
   if (policy['version'] === 'v26') policy = readWave20Eligibility(policy);
   const selectedBindingPolicy = policy['version'] === 'v25' || policy['version'] === 'v26';
   requirePolicy(exactKeys(policy, [...PRODUCTION_POLICY_TERMS, ...(selectedBindingPolicy ? ['connectionTest'] : [])]) && policy['operationalScope'] === 'ordinary-production' && policy['lifecycleStatus'] === 'active');
@@ -1656,11 +1649,14 @@ export function verifyOrdinaryProductionPolicy(policy: Record<string, unknown>):
   // are unbound by default and named by no rule. Only v25's Fast role gains the reviewed text bindings.
   const roles = policy['roleBindings'];
   requirePolicy(isRecord(roles) && exactKeys(roles, ['Main Editorial Role', 'Fast Interaction Role', 'Difficult Escalation Role', 'Frontier Model Role']));
-  if (selectedBindingPolicy) requirePolicy(sameValue(policy['connectionTest'], CONNECTION_TEST_POLICY));
+  if (selectedBindingPolicy) requirePolicy(sameValue(policy['connectionTest'], {
+    ...CONNECTION_TEST_POLICY, allowedBindings: CONFIGURED_RUNTIME_MODEL_TABLE.policyBaseline.fast,
+  }));
   const mainBindings = allowedBindingsOf(roles['Main Editorial Role']);
   const fastBindings = allowedBindingsOf(roles['Fast Interaction Role']);
   if (selectedBindingPolicy) {
-    requirePolicy(sameValue(mainBindings, ORDINARY_PRODUCTION_ALLOWED_BINDINGS) && sameValue(fastBindings, ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS));
+    requirePolicy(sameValue(mainBindings, CONFIGURED_RUNTIME_MODEL_TABLE.policyBaseline.main) &&
+      sameValue(fastBindings, CONFIGURED_RUNTIME_MODEL_TABLE.policyBaseline.fast));
   }
   const routes = [...new Set(mainBindings.map((binding) => binding.route))];
   for (const roleName of ['Main Editorial Role', 'Fast Interaction Role']) {
@@ -1733,8 +1729,37 @@ export function verifyOrdinaryProductionPolicy(policy: Record<string, unknown>):
     rules.push({ ruleId, reading, allowedRoutes, platformTools, localTools });
   }
   requirePolicy(seen.has(ORDINARY_PRODUCTION_BASELINE_RULE_ID));
-  return { crossUnitReductionAllowed: true, assuranceSamplingAllowed: true, runReportReflectionAllowed: true, allowedBindings: mainBindings, rules,
-    ...(selectedBindingPolicy ? { fastAllowedBindings: fastBindings, connectionTestAllowed: true } : {}) };
+  const verified: OrdinaryProductionPolicyReading = {
+    crossUnitReductionAllowed: true, assuranceSamplingAllowed: true, runReportReflectionAllowed: true, allowedBindings: mainBindings, rules,
+    ...(selectedBindingPolicy ? { fastAllowedBindings: fastBindings, connectionTestAllowed: true } : {}),
+  };
+  if (wave20 === null) return verified;
+  // Every value below has passed both the v26 exact checks and the inherited rule checks above.
+  const declaredRules = (wave20['decision'] as { providerAllowRules: Array<Record<string, unknown>> }).providerAllowRules;
+  return {
+    ...verified,
+    allowedBindings: ORDINARY_PRODUCTION_ALLOWED_BINDINGS,
+    fastAllowedBindings: ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS,
+    execution: structuredClone(wave20['execution']) as NonNullable<OrdinaryProductionPolicyReading['execution']>,
+    transport: structuredClone(wave20['transport']) as NonNullable<OrdinaryProductionPolicyReading['transport']>,
+    research: structuredClone(wave20['research']) as NonNullable<OrdinaryProductionPolicyReading['research']>,
+    rules: rules.map((entry) => {
+      const declared = declaredRules.find((rule) => rule['ruleId'] === entry.ruleId)!;
+      const localTools = structuredClone(declared['localTools']) as AdmittedLocalTools;
+      const configuredRoutes = [...new Set((entry.reading.modelRole === 'Fast Interaction Role' && entry.reading.taskKinds.includes(MATERIAL_TRANSLATION_KIND)
+        ? ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS : ORDINARY_PRODUCTION_ALLOWED_BINDINGS).map((binding) => binding.route))];
+      if (entry.ruleId !== 'ordinary-production-review') return { ...entry, localTools, allowedRoutes: configuredRoutes };
+      return { ...entry, localTools, allowedRoutes: configuredRoutes, projection: {
+        taskKinds: [...declared['allowedTaskKinds'] as string[]],
+        outboundDataCategories: [...declared['allowedOutboundDataCategories'] as OutboundDataCategoryId[]],
+        crossUnitSynthesisAllowed: true,
+        plusDeclaredContractRetryAdaptations: true,
+        taskKindOverrides: structuredClone(declared['taskKindOverrides']) as NonNullable<AdmittedProviderRule['taskKindOverrides']>,
+        editorTaskInstruction: structuredClone(declared['editorTaskInstruction']) as NonNullable<AdmittedProviderRule['editorTaskInstruction']>,
+        houseReviewGuidelineClause: structuredClone(declared['houseReviewGuidelineClause']) as NonNullable<AdmittedProviderRule['houseReviewGuidelineClause']>,
+      } };
+    }),
+  };
 }
 
 /**
@@ -1750,7 +1775,7 @@ export function bindOrdinaryProductionRules(reading: OrdinaryProductionPolicyRea
           candidate.route === selected.route && candidate.model === selected.model && candidate.endpoint === selected.endpoint && candidate.credentialSlot === selected.credentialSlot)) return null;
   }
   const admitted: AdmittedProviderRule[] = [];
-  for (const { ruleId, reading: kind, allowedRoutes, platformTools, localTools } of reading.rules) {
+  for (const { ruleId, reading: kind, allowedRoutes, platformTools, localTools, projection } of reading.rules) {
     const selected = kind.modelRole === 'Fast Interaction Role' ? fastBinding : binding;
     if (selected === null) continue;
     const allowed = kind.modelRole === 'Fast Interaction Role' ? allowedProductionBindingOf(selected, 'fast-interaction') : allowedProductionBindingOf(selected);
@@ -1781,8 +1806,9 @@ export function bindOrdinaryProductionRules(reading: OrdinaryProductionPolicyRea
       matchingActiveDefaultExecutionRuleAllowed: kind.blocks.authorityOrigin['matchingActiveDefaultExecutionRuleAllowed'] === true,
       webSearchToolAllowed: platformTools !== null,
       platformTools,
-      localTools: { targetedRetrieval: { ...localTools.targetedRetrieval }, breaker: { ...localTools.breaker } },
+      localTools: structuredClone(localTools),
       sourceTranslationAllowed: kind.sourceTranslation,
+      ...(projection === undefined ? {} : structuredClone(projection)),
     });
   }
   if (fastBinding !== null && reading.connectionTestAllowed === true) {
@@ -1958,6 +1984,9 @@ export async function resolveSourceCheckoutLaunchPolicy(
         activePolicySetVersion: ACTIVE_SET_VERSION,
         providerProcessing: {
           version: ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION,
+          ...(reading.execution === undefined ? {} : { execution: reading.execution }),
+          ...(reading.transport === undefined ? {} : { transport: reading.transport }),
+          ...(reading.research === undefined ? {} : { research: reading.research }),
           decision: 'eligible-only',
           authorizedLiveTransmissionCount: 'bounded-by-run',
           // Nothing can transmit until the editor's own model service is configured: no rule is admitted before then.

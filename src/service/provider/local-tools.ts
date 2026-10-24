@@ -16,6 +16,8 @@ export const LOCAL_TOOL_CANDIDATES_PER_CALL = 8;
 export const LOCAL_TOOL_ROUND_TRIP_BREAKER = 128;
 /** How a unit the breaker ends is disclosed. */
 export const LOCAL_TOOL_BREAKER_END = '检索未完成';
+/** v26 eligibility only; the current reader still returns the existing targeted retrieval terms. */
+export const LOCAL_TOOL_DECLARATION_NAMES = ['retrieve', 'exact_fetch', 'read_blocks', 'baseline_facts', 'guideline_clause', 'term_table', 'search_manuscript'] as const;
 
 /** The `localTools` block of one Provider Processing v18 or v19 rule, exactly as the policy states it (the shape the launch projects). */
 export type LocalToolsRule = AdmittedLocalTools;
@@ -53,11 +55,22 @@ export function readLocalToolsRule(rule: unknown): LocalToolsRule | null {
   if (!isRecord(rule)) return null;
   const block = rule['localTools'];
   if (block === undefined) return null;
-  requireRule(isRecord(block) && exactKeys(block, ['targetedRetrieval', 'breaker']), 'localTools 必须恰好命名 targetedRetrieval 与 breaker。');
+  requireRule(isRecord(block), 'localTools 必须是对象。');
+  const metadata = Object.hasOwn(block, 'declarations') || Object.hasOwn(block, 'parallelCallsAllowed');
+  requireRule(exactKeys(block, ['targetedRetrieval', 'breaker', ...(metadata ? ['declarations', 'parallelCallsAllowed'] : [])]),
+    'localTools 字段不完整或含有未知字段。');
+  if (metadata) {
+    const declarations = block['declarations'];
+    requireRule(block['parallelCallsAllowed'] === true && Array.isArray(declarations) && declarations.length === LOCAL_TOOL_DECLARATION_NAMES.length &&
+      declarations.every((entry, index) => isRecord(entry) && exactKeys(entry, ['name', 'readOnly', 'concurrencySafe']) &&
+        entry['name'] === LOCAL_TOOL_DECLARATION_NAMES[index] && entry['readOnly'] === true && entry['concurrencySafe'] === true),
+    'localTools 工具声明无效。');
+  }
   const retrieval = block['targetedRetrieval'];
   requireRule(isRecord(retrieval) && exactKeys(retrieval, ['allowed', 'source', 'callsPerUnit', 'candidatesPerCall', 'exactFetchRequiredBeforeCitation', 'scope']),
     'targetedRetrieval 字段不完整。');
   requireRule(typeof retrieval['allowed'] === 'boolean', 'targetedRetrieval.allowed 无效。');
+  requireRule(!metadata || retrieval['allowed'] === true, '不允许检索的规则不得声明并行工具。');
   requireRule(retrieval['source'] === 'authorized-pinned-sources-only', 'targetedRetrieval 只能读取已授权并固定的来源。');
   requireRule(positiveInteger(retrieval['callsPerUnit']), 'targetedRetrieval.callsPerUnit 无效。');
   requireRule(positiveInteger(retrieval['candidatesPerCall']), 'targetedRetrieval.candidatesPerCall 无效。');

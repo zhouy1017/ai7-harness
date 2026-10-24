@@ -107,6 +107,7 @@ async function collect(stream: AsyncIterable<StreamChunk>): Promise<StreamChunk[
 }
 
 function adapter(options: {
+  transportSettings?: NonNullable<ConstructorParameters<typeof DeepSeekOpenAiCompatibleAdapter>[0]['transportSettings']>;
   ticket: TransmitTicket | null;
   secret?: string;
   transport?: DeepSeekTransport;
@@ -115,6 +116,7 @@ function adapter(options: {
   const broker = new CredentialBroker({ resolve: async () => options.secret ?? null });
   let ticket = options.ticket;
   const instance = new DeepSeekOpenAiCompatibleAdapter({
+    ...(options.transportSettings === undefined ? {} : { transportSettings: options.transportSettings }),
     broker,
     slotBinding,
     tickets: { take: () => { const current = ticket; ticket = null; return current; } },
@@ -765,7 +767,9 @@ describe('DeepSeekOpenAiCompatibleAdapter.stream', () => {
     expect(running.calls).toHaveLength(1);
   });
 
-  it.each(['headers', 'body'] as const)('bounds a stalled %s read by the default deadline without resending', async (stage) => {
+  it.each([
+    ['headers', undefined], ['body', undefined], ['headers', 2], ['body', 2],
+  ] as const)('bounds a stalled %s read by the projected or fallback deadline (%s) without resending', async (stage, seconds) => {
     vi.useFakeTimers();
     try {
       let sent = false;
@@ -778,12 +782,12 @@ describe('DeepSeekOpenAiCompatibleAdapter.stream', () => {
         });
         if (stage === 'headers') return pending();
         return { status: 200, json: pending };
-      } });
+      }, ...(seconds === undefined ? {} : { transportSettings: { requestDeadlineSeconds: seconds, rateLimitRetry: { honourRetryAfter: true, maxRetries: 1 } } }) });
       const completed = collect(stalled.adapter.stream(request()));
       await vi.advanceTimersByTimeAsync(0);
       expect(sent).toBe(true);
       expect(signal).toBeInstanceOf(AbortSignal);
-      await vi.advanceTimersByTimeAsync(MODEL_REQUEST_DEADLINE_MS - 1);
+      await vi.advanceTimersByTimeAsync((seconds === undefined ? MODEL_REQUEST_DEADLINE_MS : seconds * 1000) - 1);
       expect(signal?.aborted).toBe(false);
       await vi.advanceTimersByTimeAsync(1);
       expect((await completed).at(-1)).toMatchObject({ reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.OUTCOME_UNKNOWN } } });

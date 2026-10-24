@@ -190,7 +190,9 @@ export function readProviderDocuments(directory = resolve(ROOT, PROVIDERS_DIRECT
     refuse(existsSync(path), `PROVIDER_CONFIGURATION/recorded-evidence-absent: ${RECORDED_EVIDENCE_DIRECTORY}/${name}`);
     recordedEvidence[key] = JSON.parse(readFileSync(path, 'utf8'));
   }
-  return { schema: read(SCHEMA_FILE), documents, recordedEvidence, searchBackends: readSearchBackendDocuments(resolve(directory, SEARCH_BACKENDS_DIRECTORY)) };
+  const runtimeBindings = Object.fromEntries([['data', 'model-table.json'], ['schema', 'model-table.v1.schema.json']]
+    .map(([key, name]) => [key, JSON.parse(readFileSync(resolve(directory, 'runtime-bindings', name), 'utf8'))]));
+  return { schema: read(SCHEMA_FILE), documents, recordedEvidence, runtimeBindings, searchBackends: readSearchBackendDocuments(resolve(directory, SEARCH_BACKENDS_DIRECTORY)) };
 }
 
 /** Every search backend document beside its schema in the `search-backends/` subdirectory, sorted by file name, parsed. */
@@ -350,7 +352,7 @@ function evidenceRecord(record, where) {
  * in route order, every capability present with its evidence, every evidence key resolved. Throws a
  * `ProviderConfigurationError` naming the first rule a document breaks.
  */
-export function resolveProviderConfiguration({ schema, documents, recordedEvidence, searchBackends }) {
+export function resolveProviderConfiguration({ schema, documents, recordedEvidence, searchBackends, runtimeBindings }) {
   const recorded = resolveRecordedEvidence(recordedEvidence);
   const routeIds = new Set();
   const declaredRows = new Set();
@@ -576,12 +578,39 @@ export function resolveProviderConfiguration({ schema, documents, recordedEviden
   refuse(withdrawnDeclared.length === 0, `PROVIDER_CONFIGURATION/recorded-evidence-withdrawn-declared: ${RECORDED_EVIDENCE_FILE} marks ${withdrawnDeclared.join(', ')} withdrawn, but a document still declares its row`);
   return {
     providers,
+    runtimeModelTable: resolveRuntimeBindings(runtimeBindings, providers),
     searchBackends: resolvedSearchBackends,
     recordedEvidence: {
       liveTestItems: [...recorded.items].map(([itemId, item]) => ({ itemId, ...item })),
       frozenRequestBaselines: [...recorded.baselines].map(([since, baseline]) => ({ since, ...baseline })),
     },
   };
+}
+
+/** Resolve only reviewed, readable rows; no endpoint or credential slot is independently configurable here. */
+function resolveRuntimeBindings(input, providers) {
+  validatePolicyDocument(input.data, input.schema);
+  const resolveBinding = ({ route, model }) => {
+    const declared = providers.flatMap((provider) => provider.routes).find((entry) => entry.profile.route === route);
+    const profile = declared?.models.find((entry) => entry.model === model);
+    refuse(profile !== undefined && profile.capabilities.answerChannel !== 'none', `PROVIDER_CONFIGURATION/runtime-binding-unreadable: ${route}/${model}`);
+    return { route, endpoint: declared.profile.endpoint, model, credentialSlot: declared.profile.credentialSlot };
+  };
+  const resolveRoles = (roles) => Object.fromEntries(Object.entries(roles).map(([role, bindings]) => [role, bindings.map(resolveBinding)]));
+  const result = {
+    developerLive: resolveBinding(input.data.developerLive),
+    legacyDeepSeek: resolveBinding(input.data.legacyDeepSeek),
+    policyBaseline: resolveRoles(input.data.policyBaseline),
+    ordinaryProduction: resolveRoles(input.data.ordinaryProduction),
+  };
+  // The configuration may change bindings within the selected policy's protocol families, never add a protocol.
+  const shapes = (bindings) => new Set(bindings.map((binding) => providers.flatMap((provider) => provider.routes)
+    .find((route) => route.profile.route === binding.route).requestShape));
+  for (const role of ['main', 'fast']) {
+    const admitted = shapes(result.policyBaseline[role]);
+    refuse([...shapes(result.ordinaryProduction[role])].every((shape) => admitted.has(shape)), 'PROVIDER_CONFIGURATION/runtime-binding-protocol');
+  }
+  return result;
 }
 
 /** A developer host, not CI: the ledger is human-attended by construction (ADR 0065, ADR 0067). */
@@ -661,7 +690,7 @@ function renderValue(value, indent, named = new Map()) {
   return `{\n${entries.map(([entry, item]) => `${pad}${key(entry)}: ${renderValue(item, indent + 1, named)},`).join('\n')}\n${close}}`;
 }
 
-function renderShared({ providers, searchBackends = [] }) {
+function renderShared({ providers, searchBackends = [], runtimeModelTable }) {
   const routes = providers.flatMap((provider) => provider.routes.map((route) => ({ id: route.profile.route, label: provider.displayName })));
   // A search backend's slot follows the providers' (Issue #883): a slot, never a route or a label.
   const slots = [...providers.map((provider) => provider.credential), ...searchBackends.map((backend) => backend.credential)];
@@ -674,6 +703,9 @@ function renderShared({ providers, searchBackends = [] }) {
     ...routes.map((route) => `  ${literal(route.id)},`),
     '] as const;',
     'export type ConfiguredRouteId = (typeof CONFIGURED_ROUTE_IDS)[number];',
+    '',
+    '/** Reviewed bindings within declared protocol families (ADR 0095 §6); eligibility still requires the selected policy. */',
+    `export const CONFIGURED_RUNTIME_MODEL_TABLE = ${renderValue(runtimeModelTable, 0)} as const;`,
     '',
     '/** One credential slot per configured provider (ADR 0073 §4): the members of `CredentialSlotId`, and the Credential Broker\'s closed set. */',
     'export const CONFIGURED_CREDENTIAL_SLOTS = [',
@@ -847,11 +879,13 @@ function renderSupport({ providers, recordedEvidence, searchBackends = [] }) {
     '',
     '## Three senses of "supported"',
     '',
+    'Runtime role choices are reviewed in [`config/providers/runtime-bindings/model-table.json`](../../config/providers/runtime-bindings/model-table.json). The generator resolves their endpoints and credential slots from the provider documents and refuses unreadable models or a protocol family outside the role’s declared baseline. `policyBaseline` preserves the predecessor declaration checks; `ordinaryProduction` supplies v26 Main/Fast choices, default first. Developer-live still has to match its immutable policy binding exactly. Configuration alone grants no transmission. Settings selector literals remain with F-01; this slice preserves their choices.',
+    '',
     '- **Declared** — a document declares the route and the model. A declared model whose `answerChannel` is `none` is inert: it can read no response. A declared format is a claim about the request shape and nothing else (ADR 0073 §3).',
     '- **Live-verified** — a capability whose evidence is `live-test-item`, cited by its item ids.',
     '- **Bindable** — a route the selected Provider Processing policy admits for an exact role and operation; a declaration alone grants no authority. [Current runtime selection](../policies/README.md#current-runtime-selection) owns the active pins, scope and evidence requirements. Developer-live remains OpenCode Go `opencode-go` · `deepseek-v4.1-flash` under ADR 0067. Ordinary-production saves Main and Fast independently: Main retains Go or DeepSeek 开放平台（官方） `deepseek-open-platform` · `deepseek-flash`; Fast additionally admits OpenAI `gpt-5.6-luna` and `gpt-5.6-sol` only for buffered 来源译文 after a successful exact-binding fixed public connection probe. The separate explicit probe grants no editorial authority, tools or native streaming, and declarations are not account availability or live proof (Issue #1044; Provider Processing v25).',
     '',
-    'Task research declarations (Issue #744, ADR 0080 rows 15/17) resolve to `webSearch: true`, `searchEngine: user-selected-backend` only when the task declares web research, the [selected policy rule](../policies/README.md#current-runtime-selection) admits AI7 platform tools and the exact route/model has recorded live tool-loop evidence. The admitted web-bearing kinds are 事实核查 and 学术道德与引用 review, writing, and AI7 初评 evaluation (its market section). 审稿意见 and 按我的评分重写评语 declare no web even where their evaluation policy rule allows tools; 出版政策与风险 remains excluded. Other kinds declare no web. The composition pins the effective declaration; the Run freezes the backend. Reports disclose 未联网核查, 联网核查未完成 with the refusal/breaker reason, or 联网核查已完成; completed tool execution alone establishes no supported factual conclusion.',
+    'Task research declarations (Issue #744, ADR 0080 rows 15/17) resolve to `webSearch: true`, `searchEngine: user-selected-backend` only when the task declares web research, the [selected policy rule](../policies/README.md#current-runtime-selection) admits AI7 platform tools and the exact route/model has recorded live tool-loop evidence. The admitted web-bearing kinds are 事实核查 and 学术道德与引用 review, writing, and AI7 初评 evaluation (its market section). 审稿意见 and 按我的评分重写评语 declare no web even where their evaluation policy rule allows tools; 出版政策与风险 is eligible under ordinary-production v26 without web and discloses 未联网核查; developer-live v24 keeps it excluded. Other kinds declare no web. The composition pins the effective declaration; the Run freezes the backend. Reports disclose 未联网核查, 联网核查未完成 with the refusal/breaker reason, or 联网核查已完成; completed tool execution alone establishes no supported factual conclusion.',
     '',
     'A capability a document does not declare is absent with `unverified` evidence. A context size is the one the vendor page states, in tokens (an input limit where the page states one separately; a page\'s "1M" is read as 1,000,000), and `none` where no page read states one.',
     '',
@@ -954,7 +988,7 @@ function renderSupport({ providers, recordedEvidence, searchBackends = [] }) {
   lines.push('');
   lines.push('## How a provider is added');
   lines.push('');
-  lines.push(`Write or edit one document under \`config/providers/\`, run \`node tools/generate-provider-configuration.mjs\`, and commit the document with the four generated files. A model is a row: it is admitted only when the vendor's documentation places it on a path and states its id verbatim, and an unverified capability is declared absent (Issue #310). The generator refuses a capability the request shape does not implement, a header form the shape is not spoken with, an anthropic-messages route without a per-turn output cap, a duplicate route, slot or Credential Reference, an evidence record nothing cites or whose fields or days are malformed, an endpoint on a local, internal, reserved, literal or dotless host or one written otherwise than it is requested (a \`.\` or \`..\` segment), a live test item or frozen request baseline \`${RECORDED_EVIDENCE_FILE}\` does not record, cited from any row but the one it records or under another day, DeepSeek's thinking parameters or the DSH attribution headers outside DeepSeek official, and the OpenCode session header outside an OpenCode Go route, whose page documents it. Nothing a document says authorizes a transmission: a route becomes bindable only through a Provider Processing policy revision (ADR 0073 §3). See Issue #310, Issue #321, Issue #322, Issue #435 and Issue #715.`);
+  lines.push(`Write or edit one document under \`config/providers/\`, run \`node tools/generate-provider-configuration.mjs\`, and commit the document with the four generated files. A model is a row: it is admitted only when the vendor's documentation places it on a path and states its id verbatim, and an unverified capability is declared absent (Issue #310). The generator refuses a capability the request shape does not implement, a header form the shape is not spoken with, an anthropic-messages route without a per-turn output cap, a duplicate route, slot or Credential Reference, an evidence record nothing cites or whose fields or days are malformed, an endpoint on a local, internal, reserved, literal or dotless host or one written otherwise than it is requested (a \`.\` or \`..\` segment), a live test item or frozen request baseline \`${RECORDED_EVIDENCE_FILE}\` does not record, cited from any row but the one it records or under another day, DeepSeek's thinking parameters or the DSH attribution headers outside DeepSeek official, and the OpenCode session header outside an OpenCode Go route, whose page documents it. Nothing a document says authorizes a transmission: the selected policy, a reviewed binding within its declared protocol families, capability evidence and a ready credential must agree (ADR 0095 §6). See Issue #310, Issue #321, Issue #322, Issue #435 and Issue #715.`);
   lines.push('');
   return lines.join('\n');
 }

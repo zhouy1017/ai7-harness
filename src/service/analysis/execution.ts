@@ -154,6 +154,15 @@ function materialInterruptionMessage(refusal: MaterialGuardRefusal): string {
  * their existing share (`backgroundAnalysisShare`: capacity − 1) and never reserve an otherwise free foreground place.
  */
 export const EXECUTION_RUN_CAPACITY = 2;
+/** v26 supplies the configured default; predecessors retain their existing share. */
+export function executionBackgroundShare(policy: LaunchPolicyProjection, capacity: number): number {
+  return policy.providerProcessing.execution?.backgroundShare.default ?? backgroundAnalysisShare(capacity);
+}
+
+/** Predecessors keep the single safe retry; policy projection cannot widen the declared adaptation. */
+export function rateLimitRetryAllowed(policy: LaunchPolicyProjection): boolean {
+  return (policy.providerProcessing.transport?.rateLimitRetry.maxRetries ?? 1) > 0;
+}
 /** Foreground Runs may use the whole governor (ADR 0095 §2); the background share is unchanged. */
 const LIVE_FOREGROUND_PLACES = EXECUTION_RUN_CAPACITY;
 /** Waiting units retain their records and hold no governor place; all other admission semantics stay with the governor. */
@@ -596,7 +605,7 @@ export class BaselineAnalysisExecutionOwner {
   /** Starts and continuations consume the same origin's share; a waiting Run owns no place (Issue #864 revision 5). */
   #placeForOrigin(origin: ExecutionPlanFacts['origin']): boolean {
     return origin === 'background-analysis-enrollment'
-      ? !this.full && this.#occupiedPlaces().filter((run) => this.#backgroundActive.has(run.runRecordId)).length < backgroundAnalysisShare(this.#capacity)
+      ? !this.full && this.#occupiedPlaces().filter((run) => this.#backgroundActive.has(run.runRecordId)).length < executionBackgroundShare(this.#policy(), this.#capacity)
       : !this.busy;
   }
 
@@ -808,7 +817,7 @@ export class BaselineAnalysisExecutionOwner {
     // The background place takes only a Run a 后台分析登记 started; the editor's take their own (Issue #864).
     const background = facts.origin === 'background-analysis-enrollment';
     if (!this.#placeForOrigin(facts.origin)) throw new ExecutionAdmissionError('EXECUTION_BUSY', background
-      ? backgroundShareFullReason(backgroundAnalysisShare(this.#capacity))
+      ? backgroundShareFullReason(executionBackgroundShare(this.#policy(), this.#capacity))
       : `运行名额已满：本实例一次执行 ${this.#capacity} 个运行。`);
     this.#requireTransmittable(facts, live);
     this.#requireOrigin(facts, live, ledger, this.#policy());
@@ -1412,6 +1421,7 @@ export class BaselineAnalysisExecutionOwner {
           promptContractDigest,
           codes,
           signal: active.requestAbort.signal,
+          ...(policy.providerProcessing.transport === undefined ? {} : { transportSettings: policy.providerProcessing.transport }),
           profile: routeProfile,
           modelProfile: liveModelProfile,
           sessionId: () => harness.currentSessionId(),
@@ -2056,13 +2066,14 @@ export class BaselineAnalysisExecutionOwner {
         answerId: string | null,
         retryDelayMs: number | null = null,
       ): Promise<SubmittedAttempt | null> => {
+        if (failure.code === 'RATE_LIMIT' && !rateLimitRetryAllowed(policy)) return null;
         if (live !== null && routeProfile.limitPolicy === 'rate-limit-retryable' &&
             (failure.code === 'RATE_LIMIT' || (failure.code === 'PROVIDER_ERROR' && failure.status !== null && failure.status >= 500 && failure.status <= 599))) {
           const signal = active.requestAbort.signal;
           await new Promise<void>((resolve) => {
             if (signal.aborted) { resolve(); return; }
             const finish = (): void => { clearTimeout(timer); signal.removeEventListener('abort', finish); resolve(); };
-            const timer = setTimeout(finish, retryDelayMs ?? 5_000);
+            const timer = setTimeout(finish, policy.providerProcessing.transport?.rateLimitRetry.honourRetryAfter === false ? 5_000 : retryDelayMs ?? 5_000);
             signal.addEventListener('abort', finish, { once: true });
           });
         }
@@ -2249,7 +2260,8 @@ export class BaselineAnalysisExecutionOwner {
         // A safe retry is a further transmission, so a Run the editor cancelled meanwhile makes none.
         if (attempt.turn.terminal === 'failed' && !active.interrupted && !active.cancelRequested && !active.pauseRequested) {
           const failed = attempt.turn.signals.find((signal) => signal.kind === 'failed');
-          if (failed?.kind === 'failed' && failed.failure.retrySafe) {
+          if (failed?.kind === 'failed' && failed.failure.retrySafe &&
+              (failed.failure.code !== 'RATE_LIMIT' || rateLimitRetryAllowed(policy))) {
             const mode = adaptationMode(facts.editorEdits, 'safe-retry');
             if (mode !== 'withheld' && ceilingState() === 'reached') {
               // The retry is a further dispatch, and the ceiling is evaluated before every dispatch (Issue #51, S16a): the

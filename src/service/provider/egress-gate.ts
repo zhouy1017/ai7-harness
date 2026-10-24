@@ -3,6 +3,7 @@ import type { LocalToolsRule } from './local-tools.js';
 import { randomUUID } from 'node:crypto';
 import type { OrdinaryProductionProviderProcessingVersion } from '../../shared/protocol.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from '../../shared/provider-configuration.generated.js';
+import { CONFIGURED_RUNTIME_MODEL_TABLE } from '../../shared/provider-configuration.generated.js';
 import type { OutboundDataCategoryId } from '../../shared/protocol.js';
 import { MAX_WRITING_MATERIALS, MAX_WRITING_MATERIAL_GRAPHEMES, MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES } from '../../shared/protocol.js';
 import { graphemeLength, writingMaterialDigest } from '../writing-tasks.js';
@@ -31,18 +32,15 @@ import {
 export const LOCAL_DETERMINISTIC_ROUTE = 'ai7-local-deterministic' as const;
 export const LOCAL_DETERMINISTIC_MODEL = 'ai7-deterministic-fixture' as const;
 /*
- * The two bindings this gate admits today: the production connection's pair and Provider Processing
- * v9's developer-live pair. Which pairs are bindable is the policy's statement, not the provider
- * documents' (ADR 0073 §3), and moving these four from source constants to a read of the policy's
- * pinned binding is #452's gate share (S87-f3b). Until then each route is checked against the
- * configured set, so a document that renamed or dropped one fails `check` here instead of leaving a
- * binding to a route no document declares.
+ * Retained adapter aliases and the developer-live binding come from reviewed configuration (ADR 0095 §6).
+ * The latter must still match the selected developer-live policy exactly. The gate below checks every
+ * request against its frozen binding and policy; a configuration row alone never permits a send.
  */
-export const DEEPSEEK_ROUTE = 'deepseek-open-platform' as const satisfies ConfiguredRouteId;
-export const DEEPSEEK_MODEL = 'deepseek-v4-pro' as const;
+export const DEEPSEEK_ROUTE = CONFIGURED_RUNTIME_MODEL_TABLE.legacyDeepSeek.route satisfies ConfiguredRouteId;
+export const DEEPSEEK_MODEL = CONFIGURED_RUNTIME_MODEL_TABLE.legacyDeepSeek.model;
 /** The developer-live route of Provider Processing v9 (ADR 0065, ADR 0067): OpenCode Go with the bare model id. */
-export const OPENCODE_GO_ROUTE = 'opencode-go' as const satisfies ConfiguredRouteId;
-export const OPENCODE_GO_MODEL = 'deepseek-v4.1-flash' as const;
+export const OPENCODE_GO_ROUTE = CONFIGURED_RUNTIME_MODEL_TABLE.developerLive.route satisfies ConfiguredRouteId;
+export const OPENCODE_GO_MODEL = CONFIGURED_RUNTIME_MODEL_TABLE.developerLive.model;
 
 /**
  * Every route a Provider Resolution Plan may bind. No configured route beyond these two is here —

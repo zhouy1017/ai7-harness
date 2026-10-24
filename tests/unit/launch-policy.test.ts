@@ -460,16 +460,47 @@ describe('Provider Processing v26 Wave 20 eligibility', () => {
     ]),
   ];
 
-  it('directly succeeds v25 without changing bindings, connection test, existing admissions or the input document', () => {
+  it('projects v26 additions without changing bindings, connection test or the input document', () => {
     const predecessor = readPolicySync(predecessorPath);
     const policy = readPolicySync(path);
     const before = structuredClone(policy);
     expect(policy).toMatchObject({ version: 'v26', predecessorVersion: 'v25', predecessorCanonicalPath: predecessorPath });
     expect(policy.roleBindings).toEqual(predecessor.roleBindings);
     expect(policy.connectionTest).toEqual(predecessor.connectionTest);
-    expect(bindOrdinaryProductionRules(verifyOrdinaryProductionPolicy(policy), GO_PRODUCTION_BINDING))
-      .toEqual(bindOrdinaryProductionRules(verifyOrdinaryProductionPolicy(predecessor), GO_PRODUCTION_BINDING));
+    const reading = verifyOrdinaryProductionPolicy(policy);
+    expect(reading).toMatchObject({ execution: policy.execution, transport: policy.transport, research: policy.research });
+    const rules = bindOrdinaryProductionRules(reading, GO_PRODUCTION_BINDING)!;
+    const review = rules.find((rule) => rule.ruleId === 'ordinary-production-review')!;
+    const declared = rulesOf(policy).find((rule) => rule.ruleId === review.ruleId)!;
+    expect(review).toMatchObject({
+      taskKinds: declared.allowedTaskKinds, outboundDataCategories: declared.allowedOutboundDataCategories,
+      crossUnitSynthesisAllowed: true, plusDeclaredContractRetryAdaptations: true,
+      taskKindOverrides: declared.taskKindOverrides, editorTaskInstruction: declared.editorTaskInstruction,
+      houseReviewGuidelineClause: declared.houseReviewGuidelineClause, localTools: declared.localTools,
+    });
+    for (const rule of rules.filter((entry) => entry.localTools.targetedRetrieval.allowed)) {
+      expect(rule.localTools.declarations?.map((tool) => tool.name)).toEqual(['retrieve', 'exact_fetch', 'read_blocks', 'baseline_facts', 'guideline_clause', 'term_table', 'search_manuscript']);
+      expect(rule.localTools.parallelCallsAllowed).toBe(true);
+    }
+    const legacy = bindOrdinaryProductionRules(verifyOrdinaryProductionPolicy(predecessor), GO_PRODUCTION_BINDING)!;
+    expect(legacy.find((rule) => rule.ruleId === review.ruleId)).toMatchObject({ crossUnitSynthesisAllowed: false });
+    expect(legacy.some((rule) => rule.plusDeclaredContractRetryAdaptations || rule.taskKinds.includes('editorial-review/publication-risk') || rule.localTools.declarations)).toBe(false);
     expect(policy).toEqual(before);
+  });
+
+  it('carries root settings through configured and setup-required launches without adding them to v24 or v1', async () => {
+    await placeValidCheckout();
+    for (const binding of [null, GO_PRODUCTION_BINDING]) {
+      const projection = await resolveSourceCheckoutLaunchPolicy(codeRoot, 'ordinary-production', binding);
+      const document = readPolicySync(path);
+      expect(projection.providerProcessing).toMatchObject({ execution: document.execution, transport: document.transport, research: document.research });
+    }
+    for (const scope of ['developer-live', 'development-ci'] as const) {
+      const projection = await resolveSourceCheckoutLaunchPolicy(codeRoot, scope);
+      expect(projection.providerProcessing.execution).toBeUndefined();
+      expect(projection.providerProcessing.transport).toBeUndefined();
+      expect(projection.providerProcessing.research).toBeUndefined();
+    }
   });
 
   it('changes only the ordinary-production pin from active set v17 and preserves its other scopes', () => {
@@ -1276,6 +1307,9 @@ describe('Provider Processing v23 (ordinary-production, inherited from v19 and v
       expect(projection.activePolicySetVersion).toBe('v18');
       expect(projection.providerProcessing).toEqual({
         version: 'v26',
+        execution: readPolicySync('docs/policies/provider-processing-policy.v26.json').execution,
+        transport: readPolicySync('docs/policies/provider-processing-policy.v26.json').transport,
+        research: readPolicySync('docs/policies/provider-processing-policy.v26.json').research,
         decision: 'eligible-only',
         authorizedLiveTransmissionCount: 'bounded-by-run',
         liveTransmissionAllowed: false,
@@ -1301,13 +1335,16 @@ describe('Provider Processing v23 (ordinary-production, inherited from v19 and v
     expect(projection.operationalScope).toBe('ordinary-production');
     expect(projection.providerProcessing).toEqual({
       version: 'v26',
+      execution: readPolicySync('docs/policies/provider-processing-policy.v26.json').execution,
+      transport: readPolicySync('docs/policies/provider-processing-policy.v26.json').transport,
+      research: readPolicySync('docs/policies/provider-processing-policy.v26.json').research,
       decision: 'eligible-only',
       authorizedLiveTransmissionCount: 'bounded-by-run',
       liveTransmissionAllowed: true,
       crossUnitReductionAllowed: true,
       assuranceSamplingAllowed: true,
       runReportReflectionAllowed: true,
-      admittedRules: [...productionAdmittedRules(binding), expect.objectContaining({ ruleId: 'ordinary-production-model-connection-test', taskKinds: ['model-connection-test'], route: binding.route, model: binding.model })],
+      admittedRules: [...v26ProductionAdmittedRules(binding), expect.objectContaining({ ruleId: 'ordinary-production-model-connection-test', taskKinds: ['model-connection-test'], route: binding.route, model: binding.model })],
       bindingState: 'configured',
       label: '本机生产：实时传输受运行边界约束',
     });
@@ -1325,7 +1362,7 @@ describe('Provider Processing v23 (ordinary-production, inherited from v19 and v
     expect(new Set(projection.providerProcessing.admittedRules.map((rule) => `${rule.route}|${rule.endpoint}|${rule.model}|${rule.credentialSlot}`)).size).toBe(1);
     expect(JSON.stringify(projection)).not.toContain(binding.credentialReference);
     // Production admission must retain every policy category, including all three unpublished classes.
-    const policyRules = rulesOf(await readPolicy(V23_PATH));
+    const policyRules = rulesOf(readPolicySync('docs/policies/provider-processing-policy.v26.json'));
     for (const rule of projection.providerProcessing.admittedRules.filter((rule) => rule.ruleId !== 'ordinary-production-model-connection-test')) {
       expect(rule.outboundDataCategories, rule.ruleId).toEqual(policyRules.find((candidate) => candidate.ruleId === rule.ruleId)!.allowedOutboundDataCategories);
     }
@@ -1576,6 +1613,7 @@ describe('Provider Processing v22 and v23: enrolled background analysis and mode
         'baseline-manuscript-analysis',
         'editorial-review/typos-and-usage', 'editorial-review/style-and-format', 'editorial-review/literary-expression', 'editorial-review/cross-deliverable-consistency',
         ...WEB_REVIEW_KINDS, SERIES_REVIEW_KIND,
+        ...(projection === production ? ['editorial-review/publication-risk'] : []),
         'writing', 'evaluation', 'readers-report', 'evaluation-rewrite',
         'baseline-manuscript-analysis',
         'custom-analysis/*',
@@ -1599,7 +1637,8 @@ describe('Provider Processing v22 and v23: platform tools on the research rules 
     expect(review?.webSearchToolAllowed).toBe(true);
     expect(review?.platformTools).not.toBeNull();
     expect(liveKindRule(policy, 'editorial-review/academic-integrity')?.ruleId).toBe(ruleId);
-    expect(liveKindRule(policy, 'editorial-review/publication-risk')).toBeNull();
+    if (scope === 'ordinary-production') expect(liveKindRule(policy, 'editorial-review/publication-risk')?.taskKindOverrides).toEqual({ 'editorial-review/publication-risk': { webSearch: false } });
+    else expect(liveKindRule(policy, 'editorial-review/publication-risk')).toBeNull();
     expect(liveKindRule(policy, 'publication-risk')).toBeNull();
 
     // Reconstruct the predecessor's kind/category projection from its immutable bytes, keeping the same binding and origins.
@@ -2287,3 +2326,20 @@ describe('Provider Processing v24: the ADR 0091 Public SampleBooks (Issue #990)'
     expect(now.admittedRules).toEqual(V16_ADMITTED_RULES);
   });
 });
+
+/** Independent predecessor expectations plus the exact selected v26 additions. */
+function v26ProductionAdmittedRules(binding: ConfiguredProviderBinding): AdmittedProviderRule[] {
+  const declared = rulesOf(readPolicySync('docs/policies/provider-processing-policy.v26.json'));
+  return productionAdmittedRules(binding).map((rule) => {
+    const document = declared.find((entry) => entry.ruleId === rule.ruleId)!;
+    return { ...rule, localTools: document.localTools as AdmittedLocalTools,
+      ...(rule.ruleId !== 'ordinary-production-review' ? {} : {
+        taskKinds: document.allowedTaskKinds as string[], outboundDataCategories: document.allowedOutboundDataCategories as AdmittedProviderRule['outboundDataCategories'],
+        plusDeclaredContractRetryAdaptations: true, crossUnitSynthesisAllowed: true,
+        taskKindOverrides: document.taskKindOverrides as NonNullable<AdmittedProviderRule['taskKindOverrides']>,
+        editorTaskInstruction: document.editorTaskInstruction as NonNullable<AdmittedProviderRule['editorTaskInstruction']>,
+        houseReviewGuidelineClause: document.houseReviewGuidelineClause as NonNullable<AdmittedProviderRule['houseReviewGuidelineClause']>,
+      }),
+    };
+  });
+}

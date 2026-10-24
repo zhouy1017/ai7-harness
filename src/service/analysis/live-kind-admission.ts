@@ -217,7 +217,9 @@ export function liveKindAdmission(
   }
   const category = BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.find((entry) => reviewCategoryKindId(entry.categoryId) === definition.kind ||
     (definition.kind === FACTUAL_REVIEW_KIND && entry.categoryId === 'factual-review'));
-  if (category?.categoryId === 'publication-risk') return null;
+  if (category?.categoryId === 'publication-risk' &&
+      (policy?.operationalScope !== 'ordinary-production' ||
+        liveKindRule(policy, definition.kind)?.taskKindOverrides?.[definition.kind]?.webSearch !== false)) return null;
   if (category !== undefined && category.searchEngine &&
       (platformToolsFromProjection(liveKindRule(policy, definition.kind)) === null || !modelAdmitsPlatformTools(binding.route, binding.model))) return null;
   const expectation = liveKindExpectation(definition);
@@ -261,6 +263,7 @@ export function kindResearchDeclaration(
 ): ResearchDeclaration {
   const rule = liveKindRule(policy, kind);
   const webSearch = taskDeclaresPlatformTools(kind) && declaration?.webSearch !== false &&
+    rule?.taskKindOverrides?.[kind]?.webSearch !== false &&
     rule?.webSearchToolAllowed === true && platformToolsFromProjection(rule) !== null &&
     modelAdmitsPlatformTools(rule.route, rule.model);
   return { webSearch, searchEngine: webSearch ? 'user-selected-backend' : null };
