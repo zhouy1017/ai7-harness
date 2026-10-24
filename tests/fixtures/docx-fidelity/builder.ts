@@ -18,6 +18,18 @@ export type CorpusVariant = 'unchanged' | 'edited' | 'mark-exported';
 
 export type WordProfileRecipe = 'replacement' | 'paragraph-join' | 'named-move' | 'all-inserted' | 'all-deleted' | 'normalization' | 'ordinary';
 
+/** Paired paragraph marks have evidence but no boundary effect in the selected Word profile. */
+export function wordParagraphMoveBody(withMovedRuns: boolean): string {
+  const movedFrom = withMovedRuns ? '<w:moveFrom w:id="11" w:author="run source"><w:r><w:delText>X</w:delText></w:r></w:moveFrom>' : '';
+  const movedTo = withMovedRuns ? '<w:moveTo w:id="21" w:author="run destination"><w:r><w:t>X</w:t></w:r></w:moveTo>' : '';
+  return '<w:moveFromRangeStart w:id="4" w:name="paragraph move"/>' +
+    '<w:p><w:pPr><w:rPr><w:moveFrom w:id="10" w:author="mark source" w:date=""/></w:rPr></w:pPr>' +
+    `${movedFrom}<w:r><w:t>A</w:t></w:r></w:p><w:moveFromRangeEnd w:id="4"/>` +
+    '<w:p><w:r><w:t>M</w:t></w:r></w:p><w:moveToRangeStart w:id="9" w:name="paragraph move"/>' +
+    '<w:p><w:pPr><w:rPr><w:moveTo w:id="20" w:author="mark destination"/></w:rPr></w:pPr>' +
+    `<w:r><w:t>B</w:t></w:r>${movedTo}</w:p><w:moveToRangeEnd w:id="9"/>`;
+}
+
 /** Additive compiler/export recipes; these do not change the six historical corpus pairs. */
 export function buildWordProfileRecipe(recipe: WordProfileRecipe): Uint8Array {
   const text = (value: string): string => `<w:r><w:t xml:space="preserve">${escape(value)}</w:t></w:r>`;

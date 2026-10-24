@@ -22,7 +22,7 @@ import type { ConversionLoss } from '../../src/service/text-manuscript.js';
 import type { FidelityCategoryProjection } from '../../src/shared/protocol.js';
 import { SAMPLE1_V1_REPORT } from '../support/import-retention.js';
 import { buildSyntheticDocx, writeSyntheticDocx, type SyntheticDocxOptions } from '../support/synthetic-docx.js';
-import { buildCorpusSource } from '../fixtures/docx-fidelity/builder.js';
+import { buildCorpusSource, wordParagraphMoveBody } from '../fixtures/docx-fidelity/builder.js';
 
 const NO_SIGNALS: DocumentSignals = {
   inlineStyles: 0, commentsRevisions: 0, notes: 0, tables: 0, imagesCaptions: 0, sections: 0, textBoxes: 0, fields: 0,
@@ -197,6 +197,31 @@ describe('explicit tracked Word successor compiler (#1132)', () => {
       expect(compiled.kind).toBe('unsupported');
       expect(compiled.inventory.locations.some((location) => location.code === 'invalid-move-graph')).toBe(true);
     }
+  });
+
+  it.each([true, false])('keeps paragraph move marks out of reading presence, including a final destination (moved runs: %s)', async (withMovedRuns) => {
+    const { compiled, path } = await compileTrackedBody(wordParagraphMoveBody(withMovedRuns));
+    if (compiled.kind !== 'ready') throw new Error('expected supported paired paragraph move');
+    expect(compiled.readings.rejected.blocks.map((block) => block.text)).toEqual(withMovedRuns ? ['XA', 'M', 'B'] : ['A', 'M', 'B']);
+    expect(compiled.readings.accepted.blocks.map((block) => block.text)).toEqual(withMovedRuns ? ['A', 'M', 'BX'] : ['A', 'M', 'B']);
+    const marks = compiled.graph.events.filter((event) => event.context === 'paragraph-boundary');
+    expect(marks.map((event) => [event.kind, event.rawId, event.rawAuthor, event.rawDate])).toEqual([
+      ['moveFrom', '10', 'mark source', ''], ['moveTo', '20', 'mark destination', null],
+    ]);
+    expect(compiled.graph.events.filter((event) => event.kind.endsWith('RangeStart')).map((event) => event.rawId)).toEqual(['4', '9']);
+    for (const event of marks) {
+      const atom = compiled.graph.atoms[event.location.atomOrdinal]!;
+      expect(atom).toMatchObject({ kind: 'paragraph-boundary', paragraphIndex: event.location.paragraphIndex,
+        accepted: true, rejected: true, eventMembership: [event.eventId] });
+      expect(event.location.codeUnitOffset).toBe(0);
+      expect(event.location.atomOrdinal).toBe(compiled.graph.paragraphs[event.location.paragraphIndex]!.boundaryAtomOrdinal);
+      expect(event.disposition).toBe('no-visible-transition');
+    }
+    expect(compiled.graph.events).toHaveLength(withMovedRuns ? 8 : 6);
+    expect(await compileWordTrackedDocx(path, undefined, { xmlFeedBytes: 7 })).toEqual(compiled);
+    const malformed = (await compileTrackedBody(wordParagraphMoveBody(withMovedRuns).replace('<w:moveToRangeEnd w:id="9"/>', ''))).compiled;
+    expect(malformed.kind).toBe('unsupported');
+    expect(malformed.inventory.locations.some((location) => location.code === 'invalid-move-graph')).toBe(true);
   });
 
   it('refuses mixed projected paragraph joins and observes cancellation through the real compiler', async () => {

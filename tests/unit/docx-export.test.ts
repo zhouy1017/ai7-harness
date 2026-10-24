@@ -25,7 +25,7 @@ import { DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, type ExportFidelityRowProjection } f
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx, sourceSpanText, type SourceSpan } from '../support/composed-fixture.js';
 import { buildSyntheticDocx } from '../support/synthetic-docx.js';
 import { planWordManuscriptExport, requireWordExportBinding } from '../../src/service/manuscript-export.js';
-import { buildCorpusSource } from '../fixtures/docx-fidelity/builder.js';
+import { buildCorpusSource, wordParagraphMoveBody } from '../fixtures/docx-fidelity/builder.js';
 
 // DOCX export (Issue #413, plan slice S64) over composed documents: every word of every input is a span of exact
 // `sample1`, and every mark body and author is a neutral authored phrase. Each written file is read back with the
@@ -115,6 +115,23 @@ describe('Word graph mapped export (#1132)', () => {
     for (const mode of ['suggestions', 'accepted-baseline'] as const) {
       const input = makeInput(body, mode);
       expect((await parseBytes(renderDocxExport(input, { emit: true }).bytes!)).blocks.map((block) => block.text)).toEqual(input.blocks.map((block) => block.text));
+    }
+  });
+
+  it.each([true, false])('round-trips both paragraph move readings through unchanged, edited and mark-exported output (moved runs: %s)', async (withMovedRuns) => {
+    for (const mode of ['suggestions', 'accepted-baseline'] as const) {
+      for (const variant of ['unchanged', 'edited', 'mark-exported'] as const) {
+        const input = makeInput(wordParagraphMoveBody(withMovedRuns), mode, false, 'retain', variant === 'mark-exported');
+        expect(input.blocks.map((block) => block.text)).toEqual(withMovedRuns
+          ? mode === 'suggestions' ? ['XA', 'M', 'B'] : ['A', 'M', 'BX'] : ['A', 'M', 'B']);
+        const blocks = input.blocks.map((block) => variant === 'edited' && block.position === 2
+          ? { ...block, text: 'ME', digest: blockDigest(block.kind, block.level, 'ME') } : block);
+        const output = renderDocxExport({ ...input, blocks }, { emit: true });
+        const reread = await parseBytes(output.bytes!);
+        expect(reread.blocks.map((block) => block.text)).toEqual(blocks.map((block) => block.text));
+        expect(reread.parsed.importedMarks.filter((mark) => mark.kind === 'change-suggestion')).toEqual([]);
+        expect(output.written.annotations).toBe(variant === 'mark-exported' && withMovedRuns && mode === 'suggestions' ? 1 : 0);
+      }
     }
   });
 

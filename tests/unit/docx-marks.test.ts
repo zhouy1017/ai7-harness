@@ -36,7 +36,7 @@ import {
   type SourceSpan,
 } from '../support/composed-fixture.js';
 import { buildSyntheticTrackedDocx } from '../support/synthetic-docx.js';
-import { buildWordProfileRecipe } from '../fixtures/docx-fidelity/builder.js';
+import { buildWordProfileRecipe, wordParagraphMoveBody } from '../fixtures/docx-fidelity/builder.js';
 import { validateWordSampleCursor, wordSampleDetailDigest, wordTrackedSamples, type WordSampleDetailEntry } from '../../src/service/import-retention.js';
 import classification from '../fixtures/docx-fidelity/classification.json' with { type: 'json' };
 
@@ -201,6 +201,38 @@ describe('successor exact source correspondence (#1132)', () => {
     expect(compiled.graph.events.map((event) => event.disposition)).toEqual(['visible-transition', 'no-visible-transition']);
     expect(compiled.graph.atoms.find((atom) => compiled.decodedAtoms.get(atom.atomOrdinal) === 'hidden')).toMatchObject({ accepted: false, rejected: false });
     expect(compiled.readings.rejected.marks[0]!.mark.authorLabel).toBe('A');
+  });
+
+  it.each([true, false])('uses only actual moved runs as transition fragments while retaining paragraph move evidence (moved runs: %s)', (withMovedRuns) => {
+    const compiled = compileWordTrackedDocxBytes(buildSyntheticTrackedDocx(wordParagraphMoveBody(withMovedRuns)));
+    if (compiled.kind !== 'ready') throw new Error('expected supported paired paragraph move evidence');
+    expect(compiled.templates).toHaveLength(withMovedRuns ? 1 : 0);
+    expect(compiled.graph.events.map((event) => event.disposition)).toEqual(withMovedRuns
+      ? ['range', 'no-visible-transition', 'visible-transition', 'range', 'range', 'no-visible-transition', 'visible-transition', 'range']
+      : ['range', 'no-visible-transition', 'range', 'range', 'no-visible-transition', 'range']);
+    const moveMarks = compiled.graph.events.filter((event) => event.context === 'paragraph-boundary');
+    for (const event of moveMarks) {
+      const start = compiled.graph.events.find((linked) => event.linkedEventIds.includes(linked.eventId))!;
+      expect(start.kind).toBe(event.kind === 'moveFrom' ? 'moveFromRangeStart' : 'moveToRangeStart');
+      expect(start.rangeName).toBe('paragraph move');
+    }
+    if (withMovedRuns) {
+      const sample = compiled.templates[0]!;
+      expect(sample.operationKind).toBe('move');
+      expect(sample.eventMembership).toEqual(compiled.graph.events.map((event) => event.eventId));
+      for (const fragments of [sample.before, sample.after]) {
+        expect(fragments).toHaveLength(1);
+        expect(fragments[0]).toMatchObject({ kind: 'text', fromCodeUnit: 0, toCodeUnit: 1, codeUnits: 1, sha256: digest('X') });
+        expect(compiled.decodedAtoms.get(fragments[0]!.atomOrdinal)).toBe('X');
+      }
+      expect(sample.sourceLocation).toMatchObject({ paragraphIndex: 0, atomOrdinal: sample.before[0]!.atomOrdinal });
+      expect(sample.destinationLocation).toMatchObject({ paragraphIndex: 2, atomOrdinal: sample.after[0]!.atomOrdinal });
+      expect(compiled.readings.rejected.marks).toHaveLength(1);
+      expect(compiled.readings.rejected.marks[0]!.mark.kind).toBe('annotation');
+    } else {
+      expect(compiled.readings.rejected.marks).toEqual([]);
+    }
+    expect(compiled.readings.accepted.marks).toEqual([]);
   });
 });
 

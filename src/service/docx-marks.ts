@@ -720,7 +720,8 @@ export function wordSampleTemplates(graph: WordRevisionGraph, decoded: ReadonlyM
   const templates: WordSampleTemplate[] = [];
   const membership = (ids: Iterable<string>): string[] => [...new Set(ids)].sort((a, b) => eventOrder.get(a)! - eventOrder.get(b)!);
   const add = (operationKind: WordSampleTemplate['operationKind'], atoms: readonly WordSourceAtom[], extra: readonly string[] = []): void => {
-    const visible = atoms.filter((atom) => atom.kind === 'paragraph-boundary' || atom.codeUnits > 0);
+    const visible = atoms.filter((atom) => atom.kind === 'paragraph-boundary'
+      ? atom.rejected !== atom.accepted : atom.codeUnits > 0);
     const before = visible.filter((atom) => atom.rejected).map((atom) => wordAtomFragment(atom, decoded));
     const after = visible.filter((atom) => atom.accepted).map((atom) => wordAtomFragment(atom, decoded));
     if (before.length + after.length === 0) return;

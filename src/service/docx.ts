@@ -1684,8 +1684,12 @@ function createWordPartParser(part: string, inventory: WordInventoryDraft,
     }
     signal?.throwIfAborted();
     const atomOrdinal = atoms.length;
-    const rejected = !membership.some((index) => events[index]!.kind === 'ins' || events[index]!.kind === 'moveTo');
-    const accepted = !membership.some((index) => events[index]!.kind === 'del' || events[index]!.kind === 'moveFrom');
+    // Word ignores paragraph-mark move presence; retain its membership/location as evidence.
+    // Only run wrappers and paragraph ins/del constrain their respective atom's reading.
+    const presence = membership.map((index) => events[index]!).filter((event) =>
+      event.context === 'run' || event.kind === 'ins' || event.kind === 'del');
+    const rejected = !presence.some((event) => event.kind === 'ins' || event.kind === 'moveTo');
+    const accepted = !presence.some((event) => event.kind === 'del' || event.kind === 'moveFrom');
     const sha = kind === 'text' ? sha256Hex(text) : sha256Hex(wordCanonicalJson({ schema: 'ai7.word-paragraph-boundary/1', part,
       paragraphIndex: paragraph.paragraphIndex, atomOrdinal }));
     atoms.push({ kind, part, paragraphIndex: paragraph.paragraphIndex, atomOrdinal, elementOrdinal: ordinal,
