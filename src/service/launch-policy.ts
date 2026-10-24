@@ -16,20 +16,20 @@ import { SEARCH_BACKENDS } from './provider/search-backends.js';
 
 /**
  * The source-checkout launch authority (ADR 0046, ADR 0065): the build-embedded carrier pins active
- * policy set v18, the sole active set for all four Provider Processing scopes, and names the three
+ * policy set v19, the sole active set for all four Provider Processing scopes, and names the three
  * scopes the built entry may bind from its launch form. `development-ci` is the default and binds
  * Provider Processing v1 (zero live transmissions); `developer-live` is bound only by the launch
  * argument `--trusted-operational-scope developer-live` on a developer host and binds the immutable
  * Provider Processing v24; `ordinary-production` is bound only by `--trusted-operational-scope ordinary-production`
- * and binds v26, whose rules are filled from the editor's own configured provider binding. `fixture-recording`
+ * and binds v27, whose rules are filled from the editor's own configured provider binding. `fixture-recording`
  * is pinned by the active set but is not selectable from the source checkout. No environment variable or product
  * setting selects a scope; every invalid state resolves to the zero-transmission denial.
  */
 const CARRIER_PATH = 'config/source-checkout-launch-authority.json';
 const CARRIER_VERSION = 2;
-export const ACTIVE_SET_VERSION = 'v18' as const;
-const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v18.json';
-const ACTIVE_SET_SHA256 = '165ddae6775e892579356bf838f340b8f626bc5ae3c2ed15c0165e886ecc099e';
+export const ACTIVE_SET_VERSION = 'v19' as const;
+const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v19.json';
+const ACTIVE_SET_SHA256 = 'd769b5ed4a087c4d6d96c26087595a754d2f63ac08f4e149c5c93ac677f16fb3';
 const PROVIDER_PINS = {
   'development-ci': {
     version: 'v1',
@@ -42,9 +42,9 @@ const PROVIDER_PINS = {
     sha256: 'd0e3996ce7ba091200d83178b48fb578090bf73b509406182a2d5403ab2a4ebc',
   },
   'ordinary-production': {
-    version: 'v26',
-    canonicalPath: 'docs/policies/provider-processing-policy.v26.json',
-    sha256: 'ab33c4fbab602a09e7233d3bf92cb4d59d841e3d532a933c5a155a2800d2063a',
+    version: 'v27',
+    canonicalPath: 'docs/policies/provider-processing-policy.v27.json',
+    sha256: '582ee4cad9298612a5468cbfca44b56eacb8fd3d04c2cdf69ff2b2e6ef712ad6',
   },
   'developer-live': {
     version: 'v24',
@@ -480,7 +480,7 @@ function verifyPlatformTools(rule: Record<string, unknown>, scope: 'developer-li
  * citation, at most 5 calls of 8 candidates per unit, and a 128-round-trip breaker ending 检索未完成. Enrolled background analysis
  * and 来源译文 state the same block with retrieval not allowed. The bounds are this build's constants.
  */
-function expectedLocalTools(allowed: boolean): Record<string, unknown> {
+function expectedLocalTools(allowed: boolean): AdmittedLocalTools {
   return {
     targetedRetrieval: {
       allowed,
@@ -1495,6 +1495,8 @@ const PRODUCTION_AUTHORITY_SEPARATIONS = [
 
 /** What a verified ordinary-production policy says, before any configured binding is applied. */
 export interface OrdinaryProductionPolicyReading {
+  readonly backgroundProcessingEnrollment?: LaunchPolicyProjection['providerProcessing']['backgroundProcessingEnrollment'];
+  readonly subAgents?: LaunchPolicyProjection['providerProcessing']['subAgents'];
   readonly execution?: LaunchPolicyProjection['providerProcessing']['execution'];
   readonly transport?: LaunchPolicyProjection['providerProcessing']['transport'];
   readonly research?: LaunchPolicyProjection['providerProcessing']['research'];
@@ -1513,8 +1515,9 @@ export interface OrdinaryProductionPolicyReading {
     readonly platformTools: AdmittedPlatformTools | null;
     /** The rule's verified local tools: retrieval allowed on every rule but enrolled background analysis, material translation and custom analysis. */
     readonly localTools: AdmittedLocalTools;
-    readonly projection?: Pick<AdmittedProviderRule, 'taskKinds' | 'outboundDataCategories' | 'crossUnitSynthesisAllowed' |
-      'plusDeclaredContractRetryAdaptations' | 'taskKindOverrides' | 'editorTaskInstruction' | 'houseReviewGuidelineClause'>;
+    readonly projection?: Partial<Pick<AdmittedProviderRule, 'taskKinds' | 'outboundDataCategories' | 'crossUnitSynthesisAllowed' |
+      'plusDeclaredContractRetryAdaptations' | 'plusOneCrossUnitSynthesisTurn' | 'globalAgentDialogue' |
+      'taskKindOverrides' | 'editorTaskInstruction' | 'houseReviewGuidelineClause'>>;
   }>;
 }
 
@@ -1601,6 +1604,128 @@ function readWave20Eligibility(policy: Record<string, unknown>): Record<string, 
   return legacy;
 }
 
+const GLOBAL_AGENT_RULE_ID = 'ordinary-production-global-agent-dialogue';
+const GLOBAL_AGENT_SOURCE = {
+  bookRequired: false, explicitlyListedEligibleMemoryAndPreferenceRevisionsOnly: true,
+  eligibleRevisionPinsRequired: true, editorOwnWordsAllowed: true, unlistedSourcesAllowed: false,
+} as const;
+const GLOBAL_AGENT_REDACTION = {
+  housePeopleNamesAndRolesStripped: false, remarksAndInternalNotesStripped: false,
+  authorInformationAllowed: true, houseNameAllowed: true,
+} as const;
+const GLOBAL_AGENT_READING: OrdinaryProductionRuleReading = {
+  ...productionReading('Fast Interaction Role', ['global-agent-dialogue'], [], {
+    ...FOREGROUND_BLOCKS,
+    authorityOrigin: {
+      foregroundEditorQuestionRequired: true, admittedAttemptActions: ['ask', 'continue', 'regenerate'],
+      planEnvelopeOrRunAuthorizationRequired: false, matchingActiveDefaultExecutionRuleAllowed: false,
+      backgroundAnalysisEnrollmentAllowed: false, idleScheduledImportTriggeredOrCrossRunDispatchAllowed: false,
+    },
+    source: GLOBAL_AGENT_SOURCE,
+    transmissions: {
+      oneTechnicalSessionPerAttempt: true, oneBoundedPayloadPerAttempt: true,
+      payloadLimitedToFrozenContractListedRevisionsEditorWordsAndRetainedFragments: true,
+      continueAndRegenerateAreNewAttempts: true, automaticResendInsideStoppedSessionAllowed: false,
+      identicalRequestReplaysFromProviderResultCache: false, webSearchToolAllowed: false,
+    },
+    authorizationPreconditions: {
+      ...PRODUCTION_FOREGROUND_PRECONDITIONS, listedSourceRevisionsRecheckedBeforeTransmission: true,
+      outboundDataDisclosureRequired: true,
+    },
+    output: null,
+  }),
+  policyCategories: [...PRODUCTION_CATEGORY_VOCABULARY, 'editor-task-instruction', 'house-review-guideline-clause'],
+  outboundDataCategories: [...PRODUCTION_CATEGORY_VOCABULARY, 'editor-task-instruction', 'house-review-guideline-clause'],
+  noRetrieval: true,
+};
+const BACKGROUND_PROCESSING_RULE_ID = 'enrolled-background-processing';
+const BACKGROUND_PROCESSING_KINDS = ['learning-curation', 'material-index', 'review-reduction', 'factual-recheck'] as const;
+const BACKGROUND_PROCESSING_READING = productionReading('Main Editorial Role', BACKGROUND_PROCESSING_KINDS, ['public-or-synthetic'], {
+  ...RUN_BLOCKS,
+  authorityOrigin: {
+    activeMatchingBackgroundProcessingEnrollmentRequired: true, newUserInitiatedTaskRequired: false,
+    providerSetupCreatesEnrollment: false, manuscriptImportCreatesEnrollment: false, artifactInstallOrEnablementCreatesEnrollment: false,
+    eachDispatchCreatesExactRun: true, matchingActiveDefaultExecutionRuleAllowed: false, importTriggeredOrUnenrolledCrossRunDispatchAllowed: false,
+  },
+  executionMode: PRODUCTION_BACKGROUND_EXECUTION_MODE,
+  scopeLimits: { declaredEnrolledKindOnly: true, formalManuscriptMutationAllowed: false, externalEffectAllowed: false, backgroundPolicyWorkAllowed: false },
+  source: { admittedInputs: 'authorized-pinned-sources-only', runSourceScopeRequired: true, unlistedSourcesAllowed: false },
+  transmissions: PRODUCTION_BASELINE_TRANSMISSIONS,
+  authorizationPreconditions: {
+    ...BACKGROUND_PRECONDITIONS,
+    backgroundShare: 'execution.backgroundShare',
+  },
+}, false, true);
+
+/** Verify the Owner's Wave 21 additions before reading the unchanged v26 declarations. */
+function readWave21Eligibility(policy: Record<string, unknown>): Record<string, unknown> {
+  const declaredDecision = policy['decision'];
+  requirePolicy(isRecord(declaredDecision) && Array.isArray(declaredDecision['providerAllowRules']));
+  const backgroundRules = declaredDecision['providerAllowRules'].filter((rule: unknown) => isRecord(rule) && rule['ruleId'] === BACKGROUND_PROCESSING_RULE_ID);
+  requirePolicy(backgroundRules.length === 1 && isRecord(backgroundRules[0]));
+  const enrollment = backgroundRules[0]['backgroundProcessingEnrollment'];
+  requirePolicy(sameValue(enrollment, {
+    enrollableKinds: BACKGROUND_PROCESSING_KINDS
+      .map((kind) => ({ kind, mandatoryCeiling: true })),
+    activeMatchingEnrollmentRequired: true, revocable: true, planEnvelopeRequired: true,
+    exactProviderBindingRequired: true, runAuthorizationRequired: true, runSourceScopeRequired: true,
+    ceilingEvaluatedBeforeEveryDispatch: true, finalProviderPayloadEgressGateRequired: true,
+    openingPageOrImportCreatesEnrollment: false,
+  }));
+  requirePolicy(sameValue(policy['subAgents'], {
+    declaredInPlanEnvelopeRequired: true, inheritsParentScopeBindingPolicyAndCeiling: true,
+    countsInsideParentAttemptTransmissionBound: true, finalProviderPayloadEgressGateRequired: true,
+    createsTaskRunOrDecisionRecordAllowed: false,
+  }));
+  const legacy = structuredClone(policy);
+  delete legacy['subAgents'];
+  const decision = legacy['decision'];
+  requirePolicy(isRecord(decision) && Array.isArray(decision['providerAllowRules']));
+  const globalRules = decision['providerAllowRules'].filter((rule: unknown) => isRecord(rule) && rule['ruleId'] === GLOBAL_AGENT_RULE_ID);
+  const blocks = GLOBAL_AGENT_READING.blocks;
+  requirePolicy(globalRules.length === 1 && sameValue(globalRules[0], {
+    ruleId: GLOBAL_AGENT_RULE_ID, policyResult: 'eligible-only', purpose: 'ordinary-production-model-processing',
+    authorityOrigin: blocks.authorityOrigin, executionMode: blocks.executionMode, source: blocks.source,
+    allowedOutboundDataCategories: GLOBAL_AGENT_READING.policyCategories, outboundCategoryRestriction: 'none',
+    redaction: GLOBAL_AGENT_REDACTION,
+    providerBinding: {
+      modelRole: 'Fast Interaction Role', bindingSource: 'user-configured-role-binding',
+      allowedRoutes: ['opencode-go', 'deepseek-open-platform'], exactProviderBindingRequired: true,
+      fallbackAllowed: false, approvedFallbackChainMaximumItems: 0, secondModelAllowed: false, productionDefaultsChanged: false,
+    },
+    transmissions: blocks.transmissions, localTools: expectedLocalTools(false), clarification: blocks.clarification,
+    authorizationPreconditions: blocks.authorizationPreconditions, providerAccountLimit: blocks.providerAccountLimit,
+    capture: PRODUCTION_CAPTURE, additionalPrivacyPrompts: NO_EXTRA_PRIVACY_PROMPTS,
+    allowedTaskKinds: GLOBAL_AGENT_READING.taskKinds,
+  }));
+  const backgroundBlocks = BACKGROUND_PROCESSING_READING.blocks;
+  const backgroundPreconditions = { ...backgroundBlocks.authorizationPreconditions };
+  delete backgroundPreconditions['backgroundSlotShare'];
+  requirePolicy(sameValue(backgroundRules[0], {
+    ruleId: BACKGROUND_PROCESSING_RULE_ID, policyResult: 'eligible-only', purpose: 'ordinary-production-model-processing',
+    authorityOrigin: backgroundBlocks.authorityOrigin, scopeLimits: backgroundBlocks.scopeLimits,
+    executionMode: backgroundBlocks.executionMode, source: backgroundBlocks.source,
+    allowedOutboundDataCategories: BACKGROUND_PROCESSING_READING.policyCategories, redaction: HOUSE_PEOPLE_REDACTION,
+    providerBinding: {
+      modelRole: 'Main Editorial Role', bindingSource: 'user-configured-role-binding',
+      allowedRoutes: ['opencode-go', 'deepseek-open-platform'], exactProviderBindingRequired: true,
+      fallbackAllowed: false, approvedFallbackChainMaximumItems: 0, secondModelAllowed: false, productionDefaultsChanged: false,
+    },
+    transmissions: backgroundBlocks.transmissions, localTools: expectedLocalTools(false), clarification: backgroundBlocks.clarification,
+    authorizationPreconditions: backgroundPreconditions, providerAccountLimit: backgroundBlocks.providerAccountLimit,
+    capture: PRODUCTION_CAPTURE, additionalPrivacyPrompts: NO_EXTRA_PRIVACY_PROMPTS,
+    allowedTaskKinds: BACKGROUND_PROCESSING_KINDS, backgroundProcessingEnrollment: enrollment,
+  }));
+  const inheritedRules = decision['providerAllowRules'].filter((rule: unknown) => !isRecord(rule) ||
+    (rule['ruleId'] !== BACKGROUND_PROCESSING_RULE_ID && rule['ruleId'] !== GLOBAL_AGENT_RULE_ID));
+  decision['providerAllowRules'] = inheritedRules;
+  const review = inheritedRules.find((rule: unknown) => isRecord(rule) && rule['ruleId'] === 'ordinary-production-review');
+  requirePolicy(isRecord(review) && isRecord(review['transmissions']) && review['transmissions']['plusOneCrossUnitSynthesisTurn'] === true);
+  delete review['transmissions']['plusOneCrossUnitSynthesisTurn'];
+  legacy['version'] = 'v26';
+  return legacy;
+}
+
 /**
  * Provider Processing v23 (ordinary-production): default deny with ten eligible-only rules this launch can read, each bound to
  * a user-configured role binding, the three that may research each with the platform tools block the search backend registry implies. Everything is read whole and fails closed: a missing term, an unknown term, a rule id outside
@@ -1609,6 +1734,8 @@ function readWave20Eligibility(policy: Record<string, unknown>): Record<string, 
  * the document's `allowedBindings`, which the SHA-256 pin fixes, and checked for consistency across the roles and rules.
  */
 export function verifyOrdinaryProductionPolicy(policy: Record<string, unknown>): OrdinaryProductionPolicyReading {
+  const wave21 = policy['version'] === 'v27' ? policy : null;
+  if (policy['version'] === 'v27') policy = readWave21Eligibility(policy);
   const wave20 = policy['version'] === 'v26' ? policy : null;
   if (policy['version'] === 'v26') policy = readWave20Eligibility(policy);
   const selectedBindingPolicy = policy['version'] === 'v25' || policy['version'] === 'v26';
@@ -1738,27 +1865,49 @@ export function verifyOrdinaryProductionPolicy(policy: Record<string, unknown>):
   const declaredRules = (wave20['decision'] as { providerAllowRules: Array<Record<string, unknown>> }).providerAllowRules;
   return {
     ...verified,
+    ...(wave21 === null ? {} : {
+      backgroundProcessingEnrollment: structuredClone((wave21['decision'] as { providerAllowRules: Array<Record<string, unknown>> })
+        .providerAllowRules.find((rule) => rule['ruleId'] === BACKGROUND_PROCESSING_RULE_ID)!['backgroundProcessingEnrollment']) as NonNullable<OrdinaryProductionPolicyReading['backgroundProcessingEnrollment']>,
+      subAgents: structuredClone(wave21['subAgents']) as NonNullable<OrdinaryProductionPolicyReading['subAgents']>,
+    }),
     allowedBindings: ORDINARY_PRODUCTION_ALLOWED_BINDINGS,
     fastAllowedBindings: ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS,
     execution: structuredClone(wave20['execution']) as NonNullable<OrdinaryProductionPolicyReading['execution']>,
     transport: structuredClone(wave20['transport']) as NonNullable<OrdinaryProductionPolicyReading['transport']>,
     research: structuredClone(wave20['research']) as NonNullable<OrdinaryProductionPolicyReading['research']>,
-    rules: rules.map((entry) => {
+    rules: rules.map<OrdinaryProductionPolicyReading['rules'][number]>((entry) => {
       const declared = declaredRules.find((rule) => rule['ruleId'] === entry.ruleId)!;
       const localTools = structuredClone(declared['localTools']) as AdmittedLocalTools;
       const configuredRoutes = [...new Set((entry.reading.modelRole === 'Fast Interaction Role' && entry.reading.taskKinds.includes(MATERIAL_TRANSLATION_KIND)
         ? ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS : ORDINARY_PRODUCTION_ALLOWED_BINDINGS).map((binding) => binding.route))];
-      if (entry.ruleId !== 'ordinary-production-review') return { ...entry, localTools, allowedRoutes: configuredRoutes };
+      if (entry.ruleId !== 'ordinary-production-review') return { ...entry, localTools, allowedRoutes: configuredRoutes,
+        ...(wave21 !== null && declared['transmissions'] !== undefined &&
+          (declared['transmissions'] as Record<string, unknown>)['plusOneCrossUnitSynthesisTurn'] === true
+          ? { projection: { plusOneCrossUnitSynthesisTurn: true } } : {}),
+      };
       return { ...entry, localTools, allowedRoutes: configuredRoutes, projection: {
         taskKinds: [...declared['allowedTaskKinds'] as string[]],
         outboundDataCategories: [...declared['allowedOutboundDataCategories'] as OutboundDataCategoryId[]],
         crossUnitSynthesisAllowed: true,
+        ...(wave21 === null ? {} : { plusOneCrossUnitSynthesisTurn: true }),
         plusDeclaredContractRetryAdaptations: true,
         taskKindOverrides: structuredClone(declared['taskKindOverrides']) as NonNullable<AdmittedProviderRule['taskKindOverrides']>,
         editorTaskInstruction: structuredClone(declared['editorTaskInstruction']) as NonNullable<AdmittedProviderRule['editorTaskInstruction']>,
         houseReviewGuidelineClause: structuredClone(declared['houseReviewGuidelineClause']) as NonNullable<AdmittedProviderRule['houseReviewGuidelineClause']>,
       } };
-    }),
+    }).concat(wave21 === null ? [] : [{
+      ruleId: GLOBAL_AGENT_RULE_ID, reading: GLOBAL_AGENT_READING,
+      allowedRoutes: [...new Set(ORDINARY_PRODUCTION_ALLOWED_BINDINGS.map((binding) => binding.route))],
+      platformTools: null, localTools: expectedLocalTools(false),
+      projection: { globalAgentDialogue: {
+        source: GLOBAL_AGENT_SOURCE, redaction: GLOBAL_AGENT_REDACTION,
+        outboundCategoryRestriction: 'none', outboundDataDisclosureRequired: true,
+      } },
+    }, {
+      ruleId: BACKGROUND_PROCESSING_RULE_ID, reading: BACKGROUND_PROCESSING_READING,
+      allowedRoutes: [...new Set(ORDINARY_PRODUCTION_ALLOWED_BINDINGS.map((binding) => binding.route))],
+      platformTools: null, localTools: expectedLocalTools(false),
+    }]),
   };
 }
 
@@ -1987,6 +2136,8 @@ export async function resolveSourceCheckoutLaunchPolicy(
           ...(reading.execution === undefined ? {} : { execution: reading.execution }),
           ...(reading.transport === undefined ? {} : { transport: reading.transport }),
           ...(reading.research === undefined ? {} : { research: reading.research }),
+          ...(reading.backgroundProcessingEnrollment === undefined ? {} : { backgroundProcessingEnrollment: reading.backgroundProcessingEnrollment }),
+          ...(reading.subAgents === undefined ? {} : { subAgents: reading.subAgents }),
           decision: 'eligible-only',
           authorizedLiveTransmissionCount: 'bounded-by-run',
           // Nothing can transmit until the editor's own model service is configured: no rule is admitted before then.

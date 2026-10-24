@@ -544,9 +544,9 @@ describe('task authorization over the real store on exact sample1', () => {
       expect(live.executionPlan?.stopCondition).not.toMatch(/\bv1(?!\d)/);
       expect(live.planEnvelope?.summary).not.toMatch(/\bv1(?!\d)/);
       if (pin.version === 'v18' || pin.version === 'v20' || pin.version === 'v22') {
-        // #920 rev 4, #990, #1044: predecessor records retain their exact pin while active set v18 still selects developer-live v24.
+        // #920 rev 4, #990, #1044: predecessor records retain their exact pin while active set v19 still selects developer-live v24.
         const selected = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live');
-        expect(selected.activePolicySetVersion).toBe('v18');
+        expect(selected.activePolicySetVersion).toBe('v19');
         expect(selected.providerProcessing.version).toBe('v24');
         const authorized = reopened.authorizeTaskAuthorization(bookId, live.taskIntent!.taskIntentId, live.planEnvelope!.digest);
         expect(authorized.state).toBe('authorized');
