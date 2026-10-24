@@ -1086,12 +1086,13 @@ async function main() {
 
     at('knowledge-procedures');
     // 工序与规则 (Issue #427, S79d; since Issue #1081, F-26a, the pre-installed procedure library): the nine review categories'
-    // 工序 and baseline analysis by what each does, each 已启用 drawn solid with its version and its stages in order — none used
+    // 工序 and baseline analysis by what each does, and since Issue #1119 本地文字检查 at version 1 (local-text-check@1) as the
+    // eleventh, each 已启用 drawn solid with its version and its stages in order — none used
     // in this Journey — the review-only predecessor named above 可复用工序, and the 方案
     // in the house's words, 本社方案 v2, installed and enabled for the one Book that enabled it. Both layers (LAYER-008): the
     // words carry no identifier, and 查看技术详情, closed, holds the carrier's and the 权限侧车's identities and each 工序's id.
     await click(renderer, '工序与规则', 'knowledge-procedures-tab');
-    await waitFor(renderer, `document.querySelector('.knowledge-base')?.dataset.knowledgeTab==='rules' && document.querySelector('.knowledge-procedures')?.dataset.procedureCount==='10'`, 'knowledge-procedures-painted');
+    await waitFor(renderer, `document.querySelector('.knowledge-base')?.dataset.knowledgeTab==='rules' && document.querySelector('.knowledge-procedures')?.dataset.procedureCount==='11'`, 'knowledge-procedures-painted');
     const procedures = await renderer.evaluate(`(() => {
       const section = document.querySelector('.knowledge-procedures');
       const details = section?.querySelector(':scope > details.technical-details') ?? null;
@@ -1111,10 +1112,10 @@ async function main() {
       };
     })()`);
     const library = await renderer.evaluate(`({ stages: Array.from(document.querySelectorAll('.procedure-stages'), (node) => node.textContent), predecessor: document.querySelector('.procedure-predecessor')?.textContent, baseline: document.querySelector('[data-procedure-id="ai7-procedure/baseline-analysis"]')?.textContent })`);
-    requireJourney(library.stages.length === 10 && library.stages.every((value) => value.length > 0) && library.predecessor?.includes('审阅专用前身') && library.baseline?.includes('跨单元归并与跨章一致性'), 'preinstalled-procedure-library', library);
+    requireJourney(library.stages.length === 11 && library.stages.every((value) => value.length > 0) && library.predecessor?.includes('审阅专用前身') && library.baseline?.includes('跨单元归并与跨章一致性'), 'preinstalled-procedure-library', library);
     await assertRenderer(renderer, `(() => { const entries=document.querySelectorAll('.preinstalled-procedure-library li[data-procedure-version="2"]'); if(entries.length!==7)return false; return Array.from(entries).every((entry) => { const history=entry.querySelector('details.procedure-previous-versions'); if(!(history instanceof HTMLDetailsElement))return false; history.open=true; const row=history.querySelector('[data-procedure-previous-version="1"]'); return row?.textContent.startsWith('第 1 版 · ') === true && /^[0-9a-f]{64}$/u.test(row.dataset.procedureDigest ?? '') && !/[0-9a-f]{64}/u.test(row.textContent); }); })()`, 'preinstalled-review-v2-with-v1-history');
     const technical = new Map(procedures?.technical ?? []);
-    requireJourney(JSON.stringify(procedures?.states) === JSON.stringify(Array(10).fill(['enabled', '已启用', '0', 'solid'])) &&
+    requireJourney(JSON.stringify(procedures?.states) === JSON.stringify(Array(11).fill(['enabled', '已启用', '0', 'solid'])) &&
       // #1084: the review procedures read under contract /2 are version 2, version 1 kept in their closed 历史版本.
       procedures.first === '已启用 错别字与规范用语审阅工序 · 第 2 版 · 预装 · 已使用 0 次 · 分块审读 → 综合 → 派生报告历史版本第 1 版 · 分块审读 → 综合 → 派生报告' &&
       JSON.stringify(procedures.reasons) === '[]' &&
@@ -1122,7 +1123,7 @@ async function main() {
       procedures.detailsOpen === false && procedures.summary === '查看技术详情' &&
       technical.get('原生载体身份') === '@ai7/editorial-workspace-profile' && technical.get('原生载体版本') === '1.0.0' &&
       /^[0-9a-f]{64}$/u.test(technical.get('SHA-256') ?? '') && technical.get('权限侧车') === 'ai7.editorial-workspace-profile.authority' &&
-      /^[0-9a-f]{64}$/u.test(technical.get('权限侧车 SHA-256') ?? '') && procedures.technical.length === 5 + 10 &&
+      /^[0-9a-f]{64}$/u.test(technical.get('权限侧车 SHA-256') ?? '') && procedures.technical.length === 5 + 11 &&
       procedures.technical.slice(5).every(([, procedureId]) => /^ai7-procedure\//u.test(procedureId ?? '')),
     'knowledge-procedures-list', procedures);
     // 可复用工序 and 开发建议 (Issue #65, S30; ADR 0087) sit apart from the built-in 工序, empty here and saying how one is made;
