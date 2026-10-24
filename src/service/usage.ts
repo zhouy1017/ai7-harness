@@ -182,7 +182,10 @@ export class UsageLedger {
     };
   }
 
-  /** Only the session's reported token events, through each exact binding/span; missing usage is disclosed, never estimated. */
+  /**
+   * Only the session's reported token events, through each exact binding/span. An attempt with none reported adds nothing:
+   * never estimated, and not an unrecorded AI7 Run, since a Book-less attempt is no Run.
+   */
   #globalDialogueOutcomes(since: string | null, until: string): SqlRow[] {
     if (this.globalDialogue === undefined) return [];
     const ledger = new DialogueLedger(this.#db);

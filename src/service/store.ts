@@ -6,7 +6,7 @@ import type { ChangeEditorialLearningInput, CreateEditorialMemoryInput, Deactiva
 import { dialogueQuestionDigest } from './dialogue/contract.js';
 import { fragmentsText } from './dialogue/fragments.js';
 import { globalAgentDialogueProjection } from './dialogue/global-agent-session.js';
-import type { AskGlobalAgentInput, GlobalAgentDialogueProjection, GlobalAgentAttemptInput, GlobalMemoryPin, GlobalAgentSourceCandidate, PrepareGlobalAgentTurnInput } from '../shared/protocol.js';
+import type { AskGlobalAgentInput, GlobalAgentDialogueProjection, GlobalAgentAttemptInput, GlobalMemoryPin, GlobalAgentSourceCandidate, HouseReviewPreferenceVersion, PrepareGlobalAgentTurnInput } from '../shared/protocol.js';
 import { GLOBAL_AGENT_SCHEMA_VERSION } from './task-authorization.js';
 import { SupervisionDirectives, governedMemoryItems, preferenceItems, initializeSupervisionSchema, supervisionSourceCandidates } from './learning/supervision-directives.js';
 import { GLOBAL_AGENT_POLICY_BLOCKED, type GlobalAgentProjection, type RecordLearningSupervisionInput } from '../shared/protocol.js';
@@ -13243,7 +13243,7 @@ export class EditorialStore {
       const preference = new HouseReviewPreferenceLedger(this.#authority).history(operationalScope).at(-1) ?? null;
       const base = preference === null ? null : { ...preference, lines: preference.governance?.baseLines ?? preference.lines };
       const directives = new SupervisionDirectives(this.#authority).history(operationalScope);
-      const names = preferenceNames(base?.lines ?? [], this.#housePreferencePeopleNames());
+      const names = this.#globalAgentNames(preference);
       const items = governedMemoryItems(preferenceItems(base), directives).map((item) => ({ ...item, text: withoutNames(item.text, names),
         revisionId: `${item.revisionId}@${directives.at(-1)?.directiveId ?? 'base'}` }));
       const memories: GlobalAgentSourceCandidate[] = [];
@@ -13261,7 +13261,7 @@ export class EditorialStore {
         books: this.#authority.prepare('SELECT book_id, title FROM books ORDER BY title, book_id').all().map((row) => ({ bookId: String(row.book_id), title: String(row.title) })),
         items, sourceCandidates: [
           ...items.filter((item) => item.state === 'active').map((item) => ({ itemId: item.itemId, revisionId: item.revisionId, kind: item.kind,
-            title: `本社审阅偏好 · ${item.categoryId}`, text: item.text })),
+            title: `本社审阅偏好 · ${reviewCategoryEntry(item.categoryId)?.label ?? item.categoryId}`, text: item.text })),
           ...memories, ...supervisionSourceCandidates(directives).map((entry) => ({ ...entry, text: withoutNames(entry.text, names) })),
         ], directives, history: this.#globalAgentHistory(live) };
     });
@@ -13281,8 +13281,13 @@ export class EditorialStore {
 
   /** Reuse the preference consumer's known-people filter. Notes, roles, examples and manuscript references are never assembled. */
   globalAgentRedact(text: string): string {
-    return withoutNames(text, preferenceNames(new HouseReviewPreferenceLedger(this.#authority)
-      .history(this.#baselineAnalysis.launch.operationalScope).at(-1)?.lines ?? [], this.#housePreferencePeopleNames()));
+    return withoutNames(text, this.#globalAgentNames(new HouseReviewPreferenceLedger(this.#authority)
+      .history(this.#baselineAnalysis.launch.operationalScope).at(-1) ?? null));
+  }
+
+  /** One name set for listing and the final-gate recheck: the base lines' attributed people and the house's people now. */
+  #globalAgentNames(preference: HouseReviewPreferenceVersion | null): string[] {
+    return preferenceNames(preference?.governance?.baseLines ?? preference?.lines ?? [], this.#housePreferencePeopleNames());
   }
 
   /** A disclosure read creates no Task, attempt, log, credential release or transmission. */

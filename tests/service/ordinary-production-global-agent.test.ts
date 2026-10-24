@@ -105,6 +105,7 @@ describe('v27 Book-less Global Agent', () => {
     const proposed = input();
     const full = prepareGlobalAgentDisclosure(store, owner, policy, proposed);
     expect(full.sources).toHaveLength(2);
+    expect(full.sources.map((entry) => entry.title)).toEqual(['本社审阅偏好 · 错别字与规范用语', '本社审阅偏好 · 错别字与规范用语']);
     expect(full.provider).toMatchObject({ route: binding.route, model: binding.model, policyRuleId: 'ordinary-production-global-agent-dialogue' });
     expect(calls).toHaveLength(0); expect(store.inspectGlobalAgent().history).toEqual([]);
     const removed: PrepareGlobalAgentTurnInput = { ...proposed, kind: 'ask', question: full.question, sources: [pinOf(full.sources[0]!)] };
