@@ -3322,7 +3322,10 @@ async function main() {
     const lineOwners = await renderer.evaluate(`window.ai7.inspectHouseReviewPreference().then(page=>page.current.lines.filter(line=>line.owner?.kind==='editorial-memory').map(line=>line.owner.itemId))`);
     requireJourney(lineOwners.includes(firstGovernedMemory) && lineOwners.includes(secondGovernedMemory) && new Set(lineOwners).size === lineOwners.length, 'memory-governance-distinct-lines');
     const governMemory = async (ids, operation, text, effect, name) => {
-      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('global-agent')), `${name}-global`);
+      // renderGlobalAgent awaits leaving the workbench before it remounts, so a second navigation would expose the old form meanwhile.
+      if (await renderer.evaluate(`document.querySelector('[data-global-agent="destination"]')?.isConnected === true`) !== true) {
+        await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('global-agent')), `${name}-global`);
+      }
       // The destination mounts its form before its projection loads: wait for this projection's exact targets and category.
       await waitFor(renderer, `(() => { const form=document.querySelector('[data-global-agent-governance]'); const root=form?.closest('[data-global-agent]'); return form?.querySelector('[data-global-agent-save]')?.disabled === false && Array.from(form.querySelectorAll('select')).some((select)=>select.value==='typos-and-usage') && ${JSON.stringify(ids)}.every((id)=>root?.querySelector('[data-global-agent-item="'+id+'"]') instanceof HTMLInputElement); })()`, `${name}-ready`);
       await assertRenderer(renderer, `(() => {for(const id of ${JSON.stringify(ids)}) {const checkbox=document.querySelector('[data-global-agent-item="'+id+'"]');if(!(checkbox instanceof HTMLInputElement))return false;checkbox.click();}return true;})()`, `${name}-targets`);
@@ -3342,7 +3345,8 @@ async function main() {
     const deactivatedMemoryId = await createCandidate('合成记忆：仅供停止使用回归。', 'memory-governance-third');
     await assertRenderer(renderer, `(() => {const item=document.querySelector('[data-memory-item="${deactivatedMemoryId}"]');const button=Array.from(item.querySelectorAll('button')).find(button=>button.textContent==='停用');if(!button||button.disabled)return false;button.click();return true;})()`, 'memory-governance-deactivate');
     await waitFor(renderer, `document.querySelector('[data-memory-item="${deactivatedMemoryId}"]')?.textContent.includes('已停用') && document.querySelector('[data-learning-enabled]')?.disabled === false`, 'memory-governance-inactive');
-    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'memory-governance-leave');
+    // returnToLibrary finishes with initializeStartup: only its landing list proves the leave before the page is reopened.
+    await backToLibrary(renderer, 'memory-governance-leave');
     await openMemory('memory-governance-reopen');
     await waitFor(renderer, `document.querySelector('[data-memory-item="${mergedMemoryId}"]')?.textContent.includes('已冻结') && document.querySelector('[data-memory-item="${deactivatedMemoryId}"]')?.textContent.includes('已停用')`, 'memory-governance-reopened-state');
     await close(); await launch();
