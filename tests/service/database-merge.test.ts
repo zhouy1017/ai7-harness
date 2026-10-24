@@ -22,6 +22,8 @@ import { writeDatabasePackage } from '../../src/service/database-exports.js';
 import { EDITORIAL_WORKSPACE_PROFILE_DIGEST } from '../../src/service/editorial-workspace-profile.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { preMergeBackupFileName, replacementStagingFor, writeMergeReceipt, type ReplacementIntent } from '../../src/service/database-replacement.js';
+import { NO_EDIT_QUALITY } from '../../src/service/edit-quality-signals.js';
+import { HouseReviewPreferenceLedger, type HousePreferenceSource } from '../../src/service/house-review-preference.js';
 import { EDITORIAL_LEARNING_SCHEMA_SQL, EditorialLearningLedger, importBookLearningControls } from '../../src/service/learning/ledger.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { MAX_DATABASE_REPLACEMENTS_LISTED } from '../../src/shared/protocol.js';
@@ -492,7 +494,42 @@ describe('Book learning controls across database merge (#1115)', () => {
       expect(learning(target)).toEqual(beforeRestart);
       expect(learningRows(otherRoot)).toEqual(carried);
       expect(learningRows(roots.dataRoot)).toEqual(sourceControls);
+      target.markCleanShutdown();
     } finally { target.close(); }
+
+    // The actual consumer (Issue #1113) over the merged data. House preferences never merge, so controlled sources name the
+    // imported Books: the line the imported excluded Book supports is refused, the restored comparison Book's line is used.
+    const scope = 'ordinary-production';
+    const preferenceSource = (bookId: string, bookTitle: string, categoryId: string, categoryLabel: string, reason: string): HousePreferenceSource => ({
+      bookId, bookTitle, categoryId, categoryLabel, materialDigest: sha256Hex(`${bookId}/${categoryId}`), decisionId: randomUUID(),
+      eligibilityDecisionId: randomUUID(), eligibility: 'house', operationalScope: scope, disposition: 'rejected', reason,
+      attribution: { peopleVersion: 0, authors: [], editors: [] }, quality: NO_EDIT_QUALITY });
+    const withPreferences = <T>(run: (preferences: HouseReviewPreferenceLedger, db: DatabaseSync) => T): T => {
+      const db = new DatabaseSync(storeOf(otherRoot));
+      try { return run(new HouseReviewPreferenceLedger(db), db); } finally { db.close(); }
+    };
+    const typosLine = withPreferences((preferences, db) => {
+      expect(db.prepare('SELECT count(*) AS n FROM house_review_preference_versions').get()!.n).toBe(0);
+      const version = preferences.rebuild(scope, [
+        preferenceSource(excluded.bookId, '学习排除图书', 'typos-and-usage', '错别字与规范用语', '保留作者用字'),
+        preferenceSource(comparison.bookId, '学习恢复图书', 'style-and-format', '体例与格式', '体例从旧')])!;
+      const line = (categoryId: string) => version.lines.find((entry) => entry.categoryId === categoryId)!;
+      expect(line('typos-and-usage').sources.map((source) => source.bookId)).toEqual([excluded.bookId]);
+      expect(line('style-and-format').sources.map((source) => source.bookId)).toEqual([comparison.bookId]);
+      expect(preferences.use(scope, comparison.bookId, 'style-and-format')).toMatchObject({
+        versionId: version.versionId, lines: [line('style-and-format').text], sourceCount: 1 });
+      expect(preferences.use(scope, comparison.bookId, 'typos-and-usage')).toBeNull();
+      expect(preferences.use(scope, excluded.bookId, 'style-and-format')).toBeNull();
+      return line('typos-and-usage').text;
+    });
+    // Restoring the imported Book after its carried history lets the same line be used: the carried exclusion was the refusal.
+    target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    try {
+      excludeBook(target, excluded.bookId, false);
+      expect(learningRows(otherRoot).at(-1)).toMatchObject({ ordinal: learningRows(otherRoot).length, kind: 'book', book_id: excluded.bookId, value: 0 });
+      target.markCleanShutdown();
+    } finally { target.close(); }
+    withPreferences((preferences) => expect(preferences.use(scope, comparison.bookId, 'typos-and-usage')?.lines).toEqual([typosLine]));
   }, 180_000);
 
   it('takes only selected new Books, never switches or already-present Book controls, and retains multi-hop provenance', async () => {
