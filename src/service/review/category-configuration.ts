@@ -35,7 +35,7 @@ export const BUILTIN_GUIDELINE_ISSUER = 'AI7 内置默认' as const;
  * 书系一致性 before it is resolved for one Book (Issue #64, S29a): the contract over that Book's Series Knowledge, or
  * unavailable with the Book's own reason — nothing reads the house entry unresolved.
  */
-export type ReviewCategoryExecutor = 'review-category-contract' | 'baseline-leads' | 'factual-review-kind' | 'series-knowledge' | 'unavailable';
+export type ReviewCategoryExecutor = 'review-category-contract' | 'baseline-leads' | 'factual-review-kind' | 'series-knowledge' | 'unavailable' | 'local-text-check';
 
 /**
  * What a 书系一致性 entry resolved for one Book used (Issue #64, S29a; REV-013): every Series the Book was in, by name, and
@@ -90,6 +90,14 @@ export interface ReviewCategoryConfiguration {
   readonly version: string;
   readonly categories: ReadonlyArray<ReviewCategoryConfigurationEntry>;
 }
+
+/** Separate from the historical nine category entries and their immutable procedure bytes. */
+export const LOCAL_REVIEW_CATEGORY: ReviewCategoryConfigurationEntry = {
+  categoryId: 'local-text-check', label: '本地文字检查',
+  description: '按五项有限标点、数字规则提示可能问题；只生成批注，数字默认不检查。',
+  output: 'annotation', riskPointsOnly: false, batchApply: false, searchEngine: false, executor: 'local-text-check', unavailableReason: null,
+  guidelineDocuments: [], procedure: { procedureId: 'ai7-procedure/local-text-check', title: '本地文字检查', version: '1' },
+};
 
 function builtinDocument(documentId: string, title: string, clauses: ReadonlyArray<ReviewGuidelineClause>): ReviewGuidelineDocument {
   return { documentId, title, issuer: BUILTIN_GUIDELINE_ISSUER, version: '1', clauses };
@@ -312,6 +320,7 @@ export function houseGuidelineDocuments(entry: ReviewCategoryConfigurationEntry)
  */
 export function reviewCategoryBasisStatement(entry: ReviewCategoryConfigurationEntry): string {
   const procedure = `工序：${entry.procedure.title}（第 ${entry.procedure.version} 版）`;
+  if (entry.executor === 'local-text-check') return `依据：GB/T 15834-2011、GB/T 15835-2011 的有限条款识别或编辑明确选择的数字约定 · ${procedure} · 本机确定性检查，不调用模型 · 不表示整部标准合规`;
   if (entry.deliverables !== undefined) {
     const named = entry.deliverables.participants.map((document) => `${document.typeLabel}《${document.title}》${document.versionLabel}（文档 ${document.documentId} · 修订 ${document.revisionId}）`
       + (document.laterSaves === 0 ? '' : `；定稿后另有 ${document.laterSaves} 次保存，未参与`)

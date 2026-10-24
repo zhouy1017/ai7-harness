@@ -2447,6 +2447,7 @@ export function reviewRunPlan(input: {
   blocks: ReadonlyArray<ManifestBlockInput>;
 }): TaskPlanProjection {
   const { facts, bookTitle, blocks } = input;
+  const local = facts.localPlan;
   const scope = facts.scope;
   const reading = scope.kind === 'whole' ? readRange(blocks, null)
     : scope.selectedRange !== null ? readRange(blocks, scope.selectedRange) : null;
@@ -2499,7 +2500,8 @@ export function reviewRunPlan(input: {
           readiness: routes.includes('none') ? 'no-route' : 'ready',
           needsModelConnection,
           planEnvelopeDigest: null,
-          categoryDigests: tasks.map((category) => ({ categoryId: category.categoryId, planEnvelopeDigest: category.task!.planEnvelopeDigest })),
+          categoryDigests: local === undefined ? tasks.map((category) => ({ categoryId: category.categoryId, planEnvelopeDigest: category.task!.planEnvelopeDigest }))
+            : [{ categoryId: 'local-text-check', planEnvelopeDigest: local.digest }],
           reconfirm: null,
         };
   return {
@@ -2522,7 +2524,7 @@ export function reviewRunPlan(input: {
     scope: {
       process: `《${bookTitle}》${position}${reading === null ? '' : ` · ${groupedCount(reading.graphemes)} 字`} · ${categories.length} 个类别` +
         (spans === null ? (selection ? '；只在所选段落上标出发现' : '') : selection ? `；读取 ${spans} 作为上下文，只在所选段落上标出发现` : `；读取 ${spans}`),
-      reference: [...categories.map((category) => category.modelFree
+      reference: [...categories.map((category) => local !== undefined ? category.basisStatement : category.modelFree
         ? `${category.label}：基线分析的前后不一致线索与未决事项`
         : category.guidelineDocuments.length === 0
           ? `${category.label}：${category.procedure.title}（第 ${category.procedure.version} 版）`
@@ -2534,7 +2536,7 @@ export function reviewRunPlan(input: {
     steps: [
       ...categories.map((category): TaskPlanStepProjection => ({
         id: `category:${category.categoryId}`,
-        label: category.modelFree ? `读取基线分析的线索：${category.label}` : `逐章审读：${category.label}`,
+        label: local !== undefined ? `本机确定性检查：${category.label}` : category.modelFree ? `读取基线分析的线索：${category.label}` : `逐章审读：${category.label}`,
         result: `${category.label}的发现（稿件上的标记）`,
         removable: false,
         removed: false,
@@ -2548,16 +2550,16 @@ export function reviewRunPlan(input: {
     service: {
       role: roleLabel('Main Editorial Role'),
       provider: (route === null ? '不调用模型' : live ? `${route.kind} · ${route.model}` : 'AI7 本地确定性模型适配器') + (webSearchLabels.length === 0 ? '' : ` · 联网检索 · ${webSearchLabels.join('、')}`),
-      decision: (route === null
+      decision: (local !== undefined ? '本机执行五项有限识别规则，数字默认关闭；只生成可能问题批注，不表示整部标准合规' : route === null
         ? '只读基线分析的线索，不调用模型'
         : live ? `${production ? '本地正式生产' : '开发者实时'}：实时传输受运行边界约束`
           : route.kind === 'none'
             ? '远程模型服务被拒绝，且没有可执行的本地路由；授权后会在派发前阻止'
             : '远程模型服务被拒绝（0 次实时传输）；由 AI7 本地确定性模型适配器执行') + ' · ' + (tasks.length === 0 ? '未联网核查' : tasks.map((category) =>
         researchDecisionLine(category.label, category.task!.researchReport, category.task!.components['web-tools-backend'] as import('../shared/protocol.js').FrozenWebToolsBackend | undefined)).join('；')),
-      send: route === null ? '只读基线分析的线索，不发送任何内容' : live ? `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款${preferenceSent}，发往为审阅配置的模型服务` : NOTHING_SENT,
+      send: local !== undefined ? '本机读取冻结的所选正文，不发送任何内容' : route === null ? '只读基线分析的线索，不发送任何内容' : live ? `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款${preferenceSent}，发往为审阅配置的模型服务` : NOTHING_SENT,
       sendCategory: outboundLabel('public-or-synthetic'),
-      usage: live && allSet ? `至多 ${groupedCount(ceilingTotal)} tokens（${tasks.length} 类合计）` : live && production ? PRODUCTION_UNSET_USAGE : NO_USAGE,
+      usage: local !== undefined ? '本地计算，不产生模型用量' : live && allSet ? `至多 ${groupedCount(ceilingTotal)} tokens（${tasks.length} 类合计）` : live && production ? PRODUCTION_UNSET_USAGE : NO_USAGE,
       usageIsCeiling: live && allSet,
       duration: DURATION_UNKNOWN,
       budgetCeiling: allSet ? `任务运行预算上限：${groupedCount(ceilingTotal)} tokens（${tasks.length} 类合计）` : BUDGET_NOT_SET,
@@ -2591,6 +2593,8 @@ export function reviewRunPlan(input: {
         : '没有开始的类别可以在「审阅」里新建一次审阅再审。',
     },
     technical: [
+      ...(local === undefined ? [] : [{ key: 'local-plan', label: '本地检查计划', value: `ai7.review.local-plan/1 · ${local.digest} · ${local.paragraphs} 个冻结段落` },
+        { key: 'local-applicability', label: '本次适用范围', value: `标点 ${local.options.punctuation} · 数字 ${local.options.numerals} · 出版物 ${local.options.publication} · 规则 ${local.options.numeralRules.join('、') || '数字未启用'} · 排除 ${local.options.excludedRanges.length} 处` }]),
       ...(facts.housePreferences === undefined ? [] : preferences.length === 0 ? [{ key: 'house-review-preference', label: '本社审阅偏好', value: HOUSE_PREFERENCE_CLOSED }]
         : preferences.map(({ categoryLabel, preference }, index) => ({ key: `house-review-preference:${index}`, label: '本社审阅偏好',
           value: `${categoryLabel} · ${housePreferenceLabel(preference)} · ${preference.versionId} · ${preference.materialSetDigest}` }))),
@@ -2603,7 +2607,7 @@ export function reviewRunPlan(input: {
       ...categories.map((category) => ({
         key: `category:${category.categoryId}`,
         label: category.label,
-        value: category.task === null
+        value: local !== undefined ? `${category.procedure.title}（第 ${category.procedure.version} 版）· 本地确定性检查 → 派生报告 · ${local.digest}` : category.task === null
           ? `${category.procedure.title}（第 ${category.procedure.version} 版）· 直接读取基线分析的线索，没有任务`
           : `${category.procedure.title}（第 ${category.procedure.version} 版）· 任务 ${category.task.taskIntentId} · ${category.task.modeLabel} · 计划版本 ${category.task.planVersion} · 计划权限边界 ${category.task.planEnvelopeDigest} · ${category.task.plan.routeLabel} · ${category.task.plan.providerStatusLabel} · ${category.task.plan.budgetCeilingLabel}`,
       })),

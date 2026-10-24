@@ -128,7 +128,7 @@ import type { PublicSampleBookSourceDigest } from './public-samplebooks.js';
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 171 as const;
+export const SERVICE_PROTOCOL_VERSION = 172 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 export interface BookFindingProjection {
@@ -6969,6 +6969,14 @@ export interface ReviewReportRecord {
 
 /** The opened Review Run (the latest when none is named) with its categories, findings and Report. */
 export interface ReviewRunProjection {
+  localCheck?: {
+    planDigest: string;
+    options: import('./protocol/procedures.js').LocalCheckOptions;
+    state: string;
+    paragraphs: number;
+    counts: Readonly<Record<string, { checked: number; exempt: number; skipped: number; error: number; findings: number; disabled: number; outOfApplicability: number; notRecognized: number; noFinding: number }>> | null;
+    excluded: readonly { candidateId: string; reason: string }[];
+  };
   reviewRunId: string;
   ordinal: number;
   label: string;
@@ -7124,6 +7132,7 @@ export interface FrozenSeriesScope {
 }
 
 export interface PrepareReviewRunInput {
+  localCheck?: import('./protocol/procedures.js').LocalCheckOptions;
   seriesId?: string | null;
   materialIds?: ReadonlyArray<string>;
   bookId: string;
