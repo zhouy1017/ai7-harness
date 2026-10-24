@@ -6222,7 +6222,10 @@ export class EditorialStore {
       recordDispatch: (reviewRunId, categoryId, runRecordId) => this.#reviewCall(() => runs.recordDispatch(reviewRunId, categoryId, runRecordId)),
       refuseDispatch: (reviewRunId, categoryId, runRecordId, code, message) =>
         this.#reviewCall(() => runs.refuseDispatch(reviewRunId, categoryId, runRecordId, code, message)),
-      settle: (reviewRunId, categoryId) => this.#reviewCall(() => runs.settle(reviewRunId, categoryId)),
+      settle: (reviewRunId, categoryId) => {
+        this.#reviewCall(() => runs.settle(reviewRunId, categoryId));
+        if (categoryId === 'factual-review') this.materializeFactualVerification(reviewRunId);
+      },
       write: (reviewRunId, categoryId) => {
         this.#reviewCall(() => runs.write(reviewRunId, categoryId));
         // The settled 事实核查 category's Versioned Verification Results (Issue #901), once its findings are on the manuscript.
@@ -6909,16 +6912,18 @@ export class EditorialStore {
   /** Reconcile stranded Runs to their kept continuation points; queued starts still require an explicit new start. */
   reconcileStoppedFactualReviewRuns(): { settled: number } {
     this.#assertAvailable();
-    return {
-      settled: this.#analysisCall(() =>
-        this.#factualReview.reconcileStoppedRuns({ leaveAuthorized: (runRecordId) => this.#reviewRuns.ownsCategoryRun(runRecordId) })).settled,
-    };
+    const result = this.#analysisCall(() =>
+      this.#factualReview.reconcileStoppedRuns({ leaveAuthorized: (runRecordId) => this.#reviewRuns.ownsCategoryRun(runRecordId) }));
+    for (const reviewRunId of this.#reviewCall(() => this.#reviewRuns.retainStoppedFactualRuns())) this.materializeFactualVerification(reviewRunId);
+    return { settled: result.settled };
   }
 
   /** Reconcile stranded Runs to their kept continuation points; queued starts still require an explicit new start. */
   reconcileStoppedReviewCategoryRuns(): { settled: number } {
     this.#assertAvailable();
-    return { settled: this.#reviewCall(() => this.#analysisCall(() => this.#reviewRuns.reconcileStoppedCategoryRuns())) };
+    const settled = this.#reviewCall(() => this.#analysisCall(() => this.#reviewRuns.reconcileStoppedCategoryRuns()));
+    for (const reviewRunId of this.#reviewCall(() => this.#reviewRuns.retainStoppedFactualRuns())) this.materializeFactualVerification(reviewRunId);
+    return { settled };
   }
 
   /** Exact recorded ranges for a live Run's cancellation disclosure; no stopped-Run authority is inferred. */
@@ -10372,22 +10377,25 @@ export class EditorialStore {
   }
 
   /**
-   * The Versioned Verification Results of one Review Run's settled 事实核查 category (FREV-001), recorded once it has put its
+   * The Versioned Verification Results of one Review Run's completed or eligible retained 事实核查 output (FREV-001), recorded once it has put its
    * findings on the manuscript: each finding with the relations and Correction Variants the Run's model stated for its
    * assertions, which the ledger checks against what the Run captured. Repeating it records nothing more.
    */
   #materializeFactualVerification(reviewRunId: string): void {
-    const event = this.#authority.prepare(`SELECT result_set_revision_id FROM review_run_category_events WHERE review_run_id = ? AND category_id = 'factual-review'
+    const event = this.#authority.prepare(`SELECT state, result_set_revision_id, run_record_id FROM review_run_category_events WHERE review_run_id = ? AND category_id = 'factual-review'
+      AND (state = 'materialized' OR (state IN ('failed', 'interrupted') AND json_extract(canonical_json, '$.partialFactualRetentionVersion') = 1))
       AND result_set_revision_id IS NOT NULL ORDER BY sequence DESC LIMIT 1`).get(reviewRunId) as SqlRow | undefined;
     if (event === undefined) return;
     const revisionId = asString(event.result_set_revision_id);
+    if (event.state !== 'materialized' && this.#reviewCall(() => this.#reviewRuns.retainedFactualRevision(reviewRunId)) !== revisionId) return;
     const run = this.#authority.prepare('SELECT book_id, branch_id, manuscript_id FROM review_runs WHERE review_run_id = ?').get(reviewRunId) as SqlRow;
     const bookId = asString(run.book_id);
-    const revisionRow = this.#authority.prepare('SELECT task_intent_id, run_record_id, manuscript_revision_id FROM analysis_result_set_revisions WHERE revision_id = ?')
-      .get(revisionId) as SqlRow | undefined;
+    const revisionRow = this.#authority.prepare(`SELECT v.task_intent_id, v.run_record_id, v.manuscript_revision_id FROM analysis_result_set_revisions v
+      JOIN analysis_result_sets s ON s.result_set_id = v.result_set_id AND s.book_id = ? AND s.kind = 'factual-review'
+      WHERE v.revision_id = ? AND v.run_record_id = ?`)
+      .get(bookId, revisionId, asString(event.run_record_id)) as SqlRow | undefined;
     if (revisionRow === undefined) return;
     const runRecordId = asString(revisionRow.run_record_id);
-    if (this.#authority.prepare('SELECT 1 FROM factual_verification_results WHERE run_record_id = ? LIMIT 1').get(runRecordId) !== undefined) return;
     const inspected = this.#analysisCall(() => this.#factualReview.inspect(bookId, undefined, revisionId)).inspectedRevision;
     if (inspected === null) return;
     const revision = inspected.revision as FactualReviewResultSetRevisionProjection;
@@ -10426,8 +10434,8 @@ export class EditorialStore {
       });
     }
     const assurance = this.#factualVerification.runAssurance(runRecordId);
-    const facts = this.#analysisCall(() => this.#factualReview.loadExecutionPlan(runRecordId));
-    const contractLevel = this.#factualReview.definitionForDigest(facts.promptContractDigest).evidenceAssuranceLevel ?? null;
+    // Local recovery reads the persisted revision's contract/plan pins; it needs no currently executable provider route.
+    const contractLevel = this.#factualReview.definitionForDigest(revision.bindingPin.promptContractDigest).evidenceAssuranceLevel ?? null;
     const findingsById = new Map(revision.findings.map((finding) => [finding.findingId, finding] as const));
     const findings: MaterializedFactualFinding[] = [];
     for (const row of this.#authority.prepare("SELECT finding_id, kind_ref, mark_id FROM review_findings WHERE review_run_id = ? AND category_id = 'factual-review' ORDER BY ordinal")
@@ -10449,7 +10457,7 @@ export class EditorialStore {
     }
     this.#transaction(this.#authority, () => this.#factualVerification.materialize({
       bookId, reviewRunId, runRecordId, taskIntentId, revisionId, manuscriptRevisionId, contractLevel,
-      plannedLevel: assurance?.plannedLevel ?? planEditAssuranceLevel(this.#frozenPlanEdits(facts.taskIntentId, facts.planVersionOrdinal)), findings,
+      plannedLevel: assurance?.plannedLevel ?? planEditAssuranceLevel(this.#frozenPlanEdits(taskIntentId, revision.provenance.planVersion ?? 1)), findings,
     }));
   }
 

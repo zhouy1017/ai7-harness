@@ -9,6 +9,9 @@ import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execu
 import { parseFactualReviewUnitMessageHeader } from '../../src/service/analysis/factual-review-contract.js';
 import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/assurance-sampling-contract.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
+import type { ReviewRunDriveSteps } from '../../src/service/review/review-run-driver.js';
+import { canonicalRecord } from '../../src/service/analysis/canonical.js';
+import { EditorialMarkStore } from '../../src/service/editorial-marks.js';
 import { SEARCH_BACKENDS } from '../../src/service/provider/search-backends.js';
 import { armPerTicketHostAdmission } from '../../src/shared/network-denial.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../src/shared/protected-secret-identity.js';
@@ -52,6 +55,12 @@ interface Scenario {
   relations: Relation[];
   correction?: boolean;
   offline?: boolean;
+  maxTotalTokens?: number;
+  twoAssertions?: boolean;
+  noAssertions?: boolean;
+  invalidUnit?: boolean;
+  secondUnit?: 'clarification' | 'unknown';
+  atSecondUnit?: () => void;
 }
 
 let roots: ServiceTestRoots;
@@ -62,7 +71,7 @@ let sends: { model: number; search: number; pages: string[]; toolSchemas: number
 let scenario: Scenario;
 let connected = false;
 
-function quoteFrom(unit: string): { quote: string; blockOrdinal: number } | null {
+function quoteFrom(unit: string, offset = 0): { quote: string; blockOrdinal: number } | null {
   const lines = unit.split('\n');
   const own = lines.findIndex((line) => line.startsWith('以下为本单元需要核查的内容块'));
   let ordinal = 0;
@@ -72,7 +81,7 @@ function quoteFrom(unit: string): { quote: string; blockOrdinal: number } | null
     ordinal += 1;
     if (index < own) continue;
     const text = [...match[1]!];
-    for (let start = 0; start + 8 <= text.length; start += 4) {
+    for (let start = offset; start + 8 <= text.length; start += 4) {
       const quote = text.slice(start, start + 8).join('');
       if (quote.trim().length === 8 && match[1]!.indexOf(quote) === match[1]!.lastIndexOf(quote)) return { quote, blockOrdinal: ordinal };
     }
@@ -88,7 +97,7 @@ async function setup(initial: Scenario): Promise<void> {
   store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
   const launch = {
     operationalScope: 'developer-live' as const, policy,
-    live: { ...DEVELOPER_LIVE_POLICY_BINDING, credentialReference: DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE, runBudgetCeiling: { kind: 'tokens' as const, maxTotalTokens: 500_000 } },
+    live: { ...DEVELOPER_LIVE_POLICY_BINDING, credentialReference: DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE, runBudgetCeiling: { kind: 'tokens' as const, maxTotalTokens: initial.maxTotalTokens ?? 500_000 } },
   };
   store.baselineAnalysisLedger.bindLaunch(launch);
   store.factualReviewLedger.bindLaunch(launch);
@@ -115,12 +124,19 @@ async function setup(initial: Scenario): Promise<void> {
     const tools = body.messages.filter((message) => message.role === 'tool').length;
     const declared = (body.tools?.length ?? 0) > 0;
     if (header !== null) {
+      if (header.ordinal === 2) {
+        scenario.atSecondUnit?.();
+        if (scenario.secondUnit === 'clarification') return answer({ content: JSON.stringify({ question: '本范围按哪个重点处理？', options: ['人物', '事件'], freeTextAllowed: true }) });
+        if (scenario.secondUnit === 'unknown') return new Response('data: {"choices":[{"index":0,"delta":{"content":"public synthetic"}}]}\n\n', { headers: { 'content-type': 'text/event-stream' } });
+      }
       if (declared && header.ordinal === 1 && tools === 0) return answer({ content: null, tool_calls: [{ id: 'call_search', type: 'function', function: { name: 'websearch', arguments: JSON.stringify({ query: 'public background fact for a provider-free verification regression' }) } }] });
       if (declared && header.ordinal === 1 && tools === 1) return answer({ content: null, tool_calls: [{ id: 'call_fetch', type: 'function', function: { name: 'webfetch', arguments: JSON.stringify({ url: MUSEUM }) } }] });
       const cited = header.ordinal === 1 ? quoteFrom(unit) : null;
       const v2 = body.messages[0]!.content?.includes('ai7.factual-review.unit-result/2') === true;
-      const base = cited === null ? [] : [{ quote: cited.quote, blockOrdinal: cited.blockOrdinal, assertionClass: 'real-world-fact', category: '机构', severity: 'A',
-        question: '该器物现藏何处？', basis: '馆藏页记载其收藏地点。' }];
+      if (scenario.invalidUnit === true) return answer({ content: '{}' });
+      const citations = cited === null || scenario.noAssertions === true ? [] : [cited, ...(scenario.twoAssertions === true ? [quoteFrom(unit, 12)].filter((entry) => entry !== null) : [])];
+      const base = citations.map((citation) => ({ quote: citation.quote, blockOrdinal: citation.blockOrdinal, assertionClass: 'real-world-fact', category: '机构', severity: 'A',
+        question: '该器物现藏何处？', basis: '馆藏页记载其收藏地点。' }));
       if (!v2) return answer({ content: JSON.stringify({ schema: 'ai7.factual-review.unit-result/1', unitOrdinal: header.ordinal, assertions: base }) });
       const assertions = base.map((assertion) => ({ ...assertion, evidenceRelations: scenario.relations }));
       const corrections = cited !== null && scenario.correction === true
@@ -162,10 +178,14 @@ async function newBook(name: string): Promise<Book> {
 }
 
 /** One 事实核查 Review Run of the whole Book, at the level named (left at the default 标准核查 when none is). */
-async function review(book: Book, level?: EvidenceAssuranceLevel): Promise<{ reviewRunId: string; results: FactualVerificationResultProjection[] }> {
+async function review(book: Book, level?: EvidenceAssuranceLevel, hooks: {
+  prepared?: (reviewRunId: string) => void;
+  steps?: (steps: ReviewRunDriveSteps) => ReviewRunDriveSteps;
+} = {}): Promise<{ reviewRunId: string; results: FactualVerificationResultProjection[] }> {
   let work = store.createReviewRunPreparationWork(book.bookId, ['factual-review'], { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy);
   while (!work.done) work = store.advanceReviewRunPreparationWork(work.workId!);
   const reviewRunId = work.projection!.run!.reviewRunId;
+  hooks.prepared?.(reviewRunId);
   const plan = store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: reviewRunId });
   expect(plan.edit.assurance?.level).toBe('standard');
   if (level !== undefined && level !== 'standard') {
@@ -176,7 +196,8 @@ async function review(book: Book, level?: EvidenceAssuranceLevel): Promise<{ rev
   const run = store.inspectReviewWorkspace(book.bookId, reviewRunId).run!;
   store.authorizeReviewRun(book.bookId, reviewRunId, run.categories.map((category) => ({ categoryId: category.categoryId, planEnvelopeDigest: category.planEnvelopeDigest! })));
   sends.runs += 1;
-  const driver = new ReviewRunDriver(store.reviewRunDriveSteps, owner);
+  const steps = store.reviewRunDriveSteps;
+  const driver = new ReviewRunDriver(hooks.steps?.(steps) ?? steps, owner);
   try { await driver.drive(reviewRunId); } finally { await driver.dispose(); }
   const lens = store.inspectFactualVerification({ bookId: book.bookId, reviewRunId, after: null, chapterBlockId: null, outcome: null, severity: null, sourceCondition: null, actionNeed: null });
   return { reviewRunId, results: [...lens.results] };
@@ -198,14 +219,57 @@ function changesOf(): number {
 }
 
 /** Hash every table without exposing row payloads; counts alone cannot detect updates or delete/insert pairs. */
-function databaseState(): Record<string, string> {
+function databaseState(includeLifetimes = true): Record<string, string> {
   const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
   try {
     const tables = database.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name").all();
-    return Object.fromEntries(tables.map(({ name }) => [String(name), createHash('sha256').update(JSON.stringify(
+    return Object.fromEntries(tables.filter(({ name }) => includeLifetimes || name !== 'service_lifetimes').map(({ name }) => [String(name), createHash('sha256').update(JSON.stringify(
       database.prepare(`SELECT * FROM "${String(name).replaceAll('"', '""')}"`).all(),
     )).digest('hex')]));
   } finally { database.close(); }
+}
+
+/** Deterministic crash/corruption setup only; restore the exact existing immutability triggers before reopening. */
+function editRecordedTables(tables: string[], operation: (db: DatabaseSync) => void): void {
+  const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+  const triggers = tables.flatMap((table) => db.prepare("SELECT name, sql FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = ?").all(table));
+  try {
+    db.exec('BEGIN');
+    for (const trigger of triggers) db.exec(`DROP TRIGGER "${String(trigger.name).replaceAll('"', '""')}"`);
+    operation(db);
+    for (const trigger of triggers) db.exec(String(trigger.sql));
+    db.exec('COMMIT');
+  } catch (error) { db.exec('ROLLBACK'); throw error; } finally { db.close(); }
+}
+
+async function reopen(): Promise<void> {
+  await owner.dispose();
+  store.close();
+  store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  const launch = { operationalScope: 'developer-live' as const, policy, live: { ...DEVELOPER_LIVE_POLICY_BINDING,
+    credentialReference: DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE,
+    runBudgetCeiling: { kind: 'tokens' as const, maxTotalTokens: scenario.maxTotalTokens ?? 500_000 } } };
+  store.baselineAnalysisLedger.bindLaunch(launch);
+  store.factualReviewLedger.bindLaunch(launch);
+  store.reconcileStoppedFactualReviewRuns();
+  store.reconcileStoppedReviewCategoryRuns();
+}
+
+function lens(book: Book, reviewRunId: string) {
+  return store.inspectFactualVerification({ bookId: book.bookId, reviewRunId, after: null, chapterBlockId: null, outcome: null, severity: null, sourceCondition: null, actionNeed: null });
+}
+
+function retentionRows(reviewRunId: string) {
+  const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+  try {
+    const snapshot = db.prepare('SELECT canonical_json, sha256 FROM review_runs WHERE review_run_id = ?').get(reviewRunId)!;
+    const outcome = db.prepare(`SELECT o.run_record_id, o.result_set_revision_id, o.classification FROM analysis_task_outcomes o
+      JOIN review_runs rr JOIN json_each(rr.canonical_json, '$.categories') c
+      ON json_extract(c.value, '$.task.taskIntentId') = o.task_intent_id WHERE rr.review_run_id = ?`).get(reviewRunId)!;
+    const events = db.prepare('SELECT state, run_record_id, result_set_revision_id, canonical_json, sha256 FROM review_run_category_events WHERE review_run_id = ? ORDER BY sequence').all(reviewRunId);
+    const versions = db.prepare('SELECT result_id, version, finding_id, run_record_id, sha256 FROM factual_verification_results WHERE review_run_id = ? ORDER BY rowid').all(reviewRunId);
+    return { snapshot, outcome, events, versions };
+  } finally { db.close(); }
 }
 
 function binding(book: Book): Book & { windowStartBlockId: string } {
@@ -213,6 +277,310 @@ function binding(book: Book): Book & { windowStartBlockId: string } {
 }
 
 describe('Evidence Assurance Levels on 事实核查 (Issue #901)', () => {
+  // #1058 / J04: an actual terminal refusal after unit 1 must keep its exact findings, without another send.
+  it('retains closed factual findings after a durable terminal budget refusal', async () => {
+    await setup({ relations: [{ sourceRef: MUSEUM, relation: '支持', excerptRef: HELD, lineage: 'original' }], maxTotalTokens: 180 });
+    const book = await newBook('终态部分核查回归');
+    let prepared: { canonical_json: unknown; sha256: unknown } | undefined;
+    const { reviewRunId, results } = await review(book, undefined, { prepared: (id) => {
+      const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+      try {
+        const row = db.prepare('SELECT canonical_json, sha256 FROM review_runs WHERE review_run_id = ?').get(id)!;
+        prepared = { canonical_json: row.canonical_json, sha256: row.sha256 };
+        const task = JSON.parse(String(row.canonical_json)).categories[0].task.taskIntentId;
+        expect(db.prepare('SELECT count(*) AS n FROM review_run_authorizations WHERE review_run_id = ?').get(id)?.n).toBe(0);
+        expect(db.prepare('SELECT count(*) AS n FROM analysis_run_records WHERE task_intent_id = ?').get(task)?.n).toBe(0);
+      } finally { db.close(); }
+    } });
+    const run = store.inspectReviewWorkspace(book.bookId, reviewRunId).run!;
+    expect(store.factualReviewLedger.inspect(book.bookId).run?.state).toBe('interrupted');
+    expect(sends.model).toBe(3);
+    expect(run.categories[0]?.state).toBe('interrupted');
+    expect(run.categories[0]?.findingsCount).toBeGreaterThan(0);
+    expect(results.length).toBe(run.categories[0]?.findingsCount);
+    expect(run.state).toBe('partial');
+    expect(run.canContinue).toBe(false);
+    expect(run.capture.available).toBe(false);
+    expect(store.inspectReviewWorkspace(book.bookId, reviewRunId).coverage.find((entry) => entry.categoryId === 'factual-review')?.state).not.toBe('current');
+    const rows = retentionRows(reviewRunId);
+    expect(rows.snapshot).toEqual(prepared);
+    expect(JSON.parse(String(rows.snapshot.canonical_json)).categories[0].partialFactualRetentionVersion).toBe(1);
+    expect(rows.outcome.classification).toBe('interrupted');
+    expect(rows.events.map((event) => event.state)).toEqual(['dispatched', 'interrupted', 'interrupted']);
+    expect(rows.events.at(-1)?.result_set_revision_id).toBe(rows.outcome.result_set_revision_id);
+    const complete = JSON.parse(String(rows.events.at(-1)!.canonical_json));
+    expect(complete.partialFactualRetentionVersion).toBe(1);
+    expect(complete.findingCount).toBe(results.length);
+    expect(complete.detail).toBe(JSON.parse(String(rows.events[1]!.canonical_json)).detail);
+    expect(results.every((result) => result.runRecordId === rows.outcome.run_record_id && result.reviewRunId === reviewRunId && result.version === 1)).toBe(true);
+    expect(results[0]!.sourceCounts.checked).toBe(1);
+    const source = store.inspectEvidenceWorkspace({ bookId: book.bookId, resultId: results[0]!.resultId, sourcesAfter: null }).sources[0]!;
+    expect(source.sourceRef).toBe(MUSEUM);
+    expect(source.sourceVersion).toMatch(/^[0-9a-f]{64}$/u);
+    expect(source.evidenceId).not.toBeNull();
+    const before = databaseState(false);
+    for (const result of results) expect(store.inspectEvidenceWorkspace({ bookId: book.bookId, resultId: result.resultId, sourcesAfter: null }).result.resultId).toBe(result.resultId);
+    expect(databaseState(false)).toEqual(before);
+    const sendsBefore = structuredClone(sends);
+    await reopen();
+    expect(databaseState(false)).toEqual(before);
+    expect(lens(book, reviewRunId).results.map((result) => result.resultId)).toEqual(results.map((result) => result.resultId));
+    expect(sends).toEqual(sendsBefore);
+  });
+
+  it.each(['outcome', 'findings', 'versions'] as const)('converges after a crash at the %s phase and repeated reopen (#1058 / J04)', async (phase) => {
+    await setup({ relations: [{ sourceRef: MUSEUM, relation: '支持', excerptRef: HELD, lineage: 'original' }], maxTotalTokens: 180, twoAssertions: true });
+    const book = await newBook('核查恢复边界');
+    const materialize = vi.spyOn(store, 'materializeFactualVerification');
+    if (phase === 'findings') materialize.mockImplementation(() => { throw new Error('synthetic crash'); });
+    const { reviewRunId } = await review(book, undefined, { steps: (steps) => phase === 'outcome'
+      ? { ...steps, settle: () => { throw new Error('synthetic crash'); }, fail: () => undefined } : steps });
+    materialize.mockRestore();
+    const initial = retentionRows(reviewRunId);
+    expect(initial.outcome.classification).toBe('interrupted');
+    expect(initial.outcome.result_set_revision_id).not.toBeNull();
+    let kept: { result_id: unknown; sha256: unknown } | undefined;
+    if (phase === 'versions') editRecordedTables(['factual_verification_results'], (db) => {
+      const rows = db.prepare('SELECT result_id, sha256 FROM factual_verification_results WHERE review_run_id = ? ORDER BY rowid').all(reviewRunId);
+      expect(rows.length).toBe(2);
+      kept = { result_id: rows[0]!.result_id, sha256: rows[0]!.sha256 };
+      db.prepare('DELETE FROM factual_verification_results WHERE result_id = ?').run(rows[1]!.result_id!);
+    });
+    const sendsBefore = structuredClone(sends);
+    const executionBefore = databaseState();
+    await reopen();
+    const results = lens(book, reviewRunId).results;
+    expect(results.length).toBe(2);
+    if (kept !== undefined) {
+      expect(results.some((result) => result.resultId === kept!.result_id)).toBe(true);
+      expect(retentionRows(reviewRunId).versions.find((row) => row.result_id === kept!.result_id)?.sha256).toBe(kept.sha256);
+    }
+    expect(retentionRows(reviewRunId).snapshot).toEqual(initial.snapshot);
+    const converged = databaseState(false);
+    for (const table of ['analysis_run_records', 'analysis_execution_attempts', 'analysis_task_outcomes', 'analysis_result_set_revisions', 'review_run_authorizations'])
+      expect(converged[table]).toBe(executionBefore[table]);
+    await reopen();
+    expect(databaseState(false)).toEqual(converged);
+    expect(sends).toEqual(sendsBefore);
+    expect(store.inspectReviewWorkspace(book.bookId, reviewRunId).run).toMatchObject({ state: 'partial', canContinue: false, categories: [{ state: 'interrupted', findingsCount: 2 }] });
+  });
+
+  it('never enrolls a marker-free prepared Run at authorization, settlement or reopen (#1058)', async () => {
+    await setup({ relations: [], maxTotalTokens: 180 });
+    const book = await newBook('旧版准备记录');
+    let legacy: unknown;
+    const { reviewRunId, results } = await review(book, undefined, { prepared: (id) => editRecordedTables(['review_runs'], (db) => {
+      const row = db.prepare('SELECT canonical_json FROM review_runs WHERE review_run_id = ?').get(id)!;
+      const snapshot = JSON.parse(String(row.canonical_json));
+      delete snapshot.categories[0].partialFactualRetentionVersion;
+      const record = canonicalRecord(snapshot);
+      db.prepare('UPDATE review_runs SET canonical_json = ?, sha256 = ? WHERE review_run_id = ?').run(record.json, record.digest, id);
+      legacy = db.prepare('SELECT canonical_json, sha256 FROM review_runs WHERE review_run_id = ?').get(id);
+    }) });
+    expect(results.length).toBe(0);
+    expect(retentionRows(reviewRunId).snapshot).toEqual(legacy);
+    await reopen();
+    expect(retentionRows(reviewRunId).snapshot).toEqual(legacy);
+    expect(lens(book, reviewRunId).results.length).toBe(0);
+  });
+
+  it.each(['paused', 'resumable', 'awaiting-clarification'] as const)('leaves actual %s checkpoints nonterminal without another send (#1058, #1114/#1117)', async (state) => {
+    await setup({ relations: [], ...(state !== 'paused' ? { secondUnit: 'clarification' as const } : {}) });
+    const book = await newBook('未终态核查检查点');
+    if (state === 'paused') scenario.atSecondUnit = () => {
+      const projection = store.factualReviewLedger.inspect(book.bookId);
+      store.factualReviewLedger.requestPause(book.bookId, projection.taskIntent!.taskIntentId);
+      owner.pauseRun(projection.run!.runRecordId, store.factualReviewLedger);
+    };
+    const { reviewRunId, results } = await review(book);
+    const projection = store.factualReviewLedger.inspect(book.bookId);
+    expect(projection.run?.state).toBe(state === 'resumable' ? 'awaiting-clarification' : state);
+    if (state === 'resumable') {
+      // #1117's actual answered-wait checkpoint becomes resumable at startup, without applying the answer or sending it.
+      const request = store.factualReviewLedger.clarificationsOf(projection.run!.runRecordId)[0]!;
+      store.answerBaselineAnalysisClarification({ bookId: book.bookId, taskIntentId: projection.taskIntent!.taskIntentId,
+        requestId: request.requestId, optionId: 'model-option-0', note: null });
+    }
+    expect(results.length).toBe(0);
+    const before = databaseState(false);
+    const sendsBefore = structuredClone(sends);
+    await reopen();
+    expect(store.factualReviewLedger.inspect(book.bookId).run?.state).toBe(state);
+    if (state !== 'resumable') expect(databaseState(false)).toEqual(before);
+    const stopped = databaseState(false);
+    await reopen();
+    expect(databaseState(false)).toEqual(stopped);
+    expect(sends).toEqual(sendsBefore);
+    expect(retentionRows(reviewRunId).events.some((event) => ['settled', 'failed', 'interrupted', 'materialized'].includes(String(event.state)))).toBe(false);
+  });
+
+  it('keeps an unknown-after-send unit unknown and never sends it during reconciliation (#1058)', async () => {
+    await setup({ relations: [], secondUnit: 'unknown' });
+    const book = await newBook('未知结果核查');
+    const { reviewRunId } = await review(book);
+    const revision = store.factualReviewLedger.inspect(book.bookId).resultSetRevision!;
+    expect(revision.gaps.some((gap) => gap.unitOrdinal === 2 && gap.code === 'outcome-unknown')).toBe(true);
+    const before = databaseState(false);
+    const sendsBefore = structuredClone(sends);
+    await reopen();
+    expect(databaseState(false)).toEqual(before);
+    expect(sends).toEqual(sendsBefore);
+    expect(retentionRows(reviewRunId).events.some((event) => JSON.parse(String(event.canonical_json)).partialFactualRetentionVersion === 1)).toBe(false);
+  });
+
+  it.each(['empty', 'invalid', 'before-first'] as const)('creates no result for %s terminal work (#1058)', async (kind) => {
+    await setup({ relations: [], maxTotalTokens: kind === 'before-first' ? 1 : 180,
+      ...(kind === 'empty' ? { noAssertions: true } : kind === 'invalid' ? { invalidUnit: true } : {}) });
+    const book = await newBook('无可保留核查发现');
+    const { reviewRunId, results } = await review(book);
+    expect(results.length).toBe(0);
+    expect(store.inspectReviewWorkspace(book.bookId, reviewRunId).run?.categories[0]?.findingsCount).toBe(0);
+    await reopen();
+    expect(lens(book, reviewRunId).results.length).toBe(0);
+  });
+
+  it.each(['no-outcome', 'no-revision', 'foreign-revision', 'corrupt-outcome'] as const)('refuses retention with %s (#1058)', async (kind) => {
+    await setup({ relations: [], maxTotalTokens: 180 });
+    const book = await newBook('终态绑定反例');
+    const hooks = { steps: (steps: ReviewRunDriveSteps): ReviewRunDriveSteps => ({ ...steps, settle: () => { throw new Error('synthetic crash'); }, fail: () => undefined }) };
+    const { reviewRunId } = await review(book, undefined, hooks);
+    let foreign: string | null = null;
+    if (kind === 'foreign-revision') {
+      const other = await newBook('异书核查修订版');
+      const otherRun = await review(other, undefined, hooks);
+      foreign = String(retentionRows(otherRun.reviewRunId).outcome.result_set_revision_id);
+    }
+    const initial = retentionRows(reviewRunId);
+    editRecordedTables(['analysis_task_outcomes'], (db) => {
+      if (kind === 'no-outcome') { db.prepare('DELETE FROM analysis_task_outcomes WHERE run_record_id = ?').run(initial.outcome.run_record_id!); return; }
+      const row = db.prepare('SELECT canonical_json FROM analysis_task_outcomes WHERE run_record_id = ?').get(initial.outcome.run_record_id!)!;
+      const outcome = JSON.parse(String(row.canonical_json));
+      outcome.resultSetRevisionId = kind === 'foreign-revision' ? foreign : kind === 'no-revision' ? null : outcome.resultSetRevisionId;
+      const record = canonicalRecord(outcome);
+      db.prepare('UPDATE analysis_task_outcomes SET result_set_revision_id = ?, canonical_json = ?, sha256 = ? WHERE run_record_id = ?')
+        .run(outcome.resultSetRevisionId, record.json, kind === 'corrupt-outcome' ? '0'.repeat(64) : record.digest, initial.outcome.run_record_id!);
+    });
+    if (kind === 'no-outcome') store.reviewRunDriveSteps.fail(reviewRunId, 'factual-review', 'SYNTHETIC_STOP', '合成孤立类别终态。');
+    const eventsBefore = retentionRows(reviewRunId).events;
+    if (kind === 'corrupt-outcome') {
+      expect(storeError(() => store.reconcileStoppedFactualReviewRuns())).toBe('REVIEW_RECORD_INVALID');
+    } else await reopen();
+    expect(lens(book, reviewRunId).results.length).toBe(0);
+    expect(retentionRows(reviewRunId).events).toEqual(eventsBefore);
+  });
+
+  it.each(['quick', 'strict'] as const)('keeps %s evidence gates on retained findings (#1058)', async (level) => {
+    await setup({ relations: [{ sourceRef: MUSEUM, relation: '支持', excerptRef: HELD, lineage: 'original' }], maxTotalTokens: level === 'quick' ? 60 : 180 });
+    const book = await newBook('部分核查保证级别');
+    const { reviewRunId, results } = await review(book, level);
+    expect(results.length).toBeGreaterThan(0);
+    expect(results.every((entry) => entry.level === level && entry.states.factualVerification !== '证据支持' && entry.states.factualVerification !== '疑似错误')).toBe(true);
+    expect(store.inspectReviewWorkspace(book.bookId, reviewRunId).run).toMatchObject({ state: 'partial', canContinue: false, capture: { available: false } });
+  });
+
+  it('rolls findings, marks and closed retention bookkeeping back together (#1058)', async () => {
+    await setup({ relations: [], maxTotalTokens: 180 });
+    const book = await newBook('核查原子保留回滚');
+    const before = databaseState();
+    const original = EditorialMarkStore.prototype.createProducedMany;
+    const fail = vi.spyOn(EditorialMarkStore.prototype, 'createProducedMany').mockImplementation(function (this: EditorialMarkStore, inputs, record): never {
+      original.call(this, inputs, (marks) => { record(marks); throw new Error('synthetic crash inside category transaction'); });
+      throw new Error('unreachable');
+    });
+    const { reviewRunId, results } = await review(book);
+    fail.mockRestore();
+    expect(results.length).toBe(0);
+    const rolledBack = databaseState();
+    for (const table of ['review_findings', 'editorial_marks', 'editorial_mark_events', 'review_excluded_findings']) expect(rolledBack[table]).toBe(before[table]);
+    expect(retentionRows(reviewRunId).events.map((event) => event.state)).toEqual(['dispatched', 'interrupted']);
+    await reopen();
+    expect(lens(book, reviewRunId).results.length).toBe(1);
+  });
+
+  it('retains an unplaceable exact finding without inventing a current manuscript mark (#1058)', async () => {
+    await setup({ relations: [], maxTotalTokens: 180 });
+    const book = await newBook('部分核查定位变化');
+    const { reviewRunId } = await review(book, undefined, { steps: (steps) => ({ ...steps, settle: () => { throw new Error('synthetic crash'); }, fail: () => undefined }) });
+    const revision = store.factualReviewLedger.inspect(book.bookId).resultSetRevision!;
+    if (!('findings' in revision)) throw new Error('factual revision required');
+    const finding = revision.findings[0]!;
+    const window = store.getManuscriptWindowAt(book.manuscriptId, book.branchId, { kind: 'block', blockId: finding.sourceRange.blockId });
+    const block = window.blocks.find((entry) => entry.blockId === finding.sourceRange.blockId)!;
+    store.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: book.manuscriptId, branchId: book.branchId, baseRevisionId: window.revisionId,
+      blockId: block.blockId, windowStartBlockId: window.blocks[0]!.blockId, baseBlockDigest: block.digest, expectedJournalSequence: window.journalSequence,
+      fromGrapheme: finding.sourceRange.fromGrapheme + 1, toGrapheme: finding.sourceRange.fromGrapheme + 2, insertText: '改' });
+    await reopen();
+    const run = store.inspectReviewWorkspace(book.bookId, reviewRunId).run!;
+    expect(run.categories[0]).toMatchObject({ state: 'interrupted', findingsCount: 1 });
+    expect(run.findings[0]).toMatchObject({ markId: null, anchorState: 'anchor-changed' });
+    expect(lens(book, reviewRunId).results[0]).toMatchObject({ findingId: finding.findingId, markId: null, anchor: { state: 'stale' } });
+  });
+
+  it('retains an exact failed Task Outcome revision without a successful category event (#1058)', async () => {
+    await setup({ relations: [], maxTotalTokens: 180 });
+    const book = await newBook('失败终态修订版');
+    const { reviewRunId } = await review(book, undefined, { steps: (steps) => ({ ...steps, settle: () => { throw new Error('synthetic crash'); }, fail: () => undefined }) });
+    const run = store.factualReviewLedger.inspect(book.bookId);
+    const runRecordId = run.run!.runRecordId;
+    // Prepare a durable failed-outcome handoff using the real ledger writers and the exact already persisted revision.
+    // The composed refusal above supplies the actual partial revision; this check exercises the other admitted terminal classification.
+    editRecordedTables(['analysis_task_outcomes', 'analysis_run_states'], (db) => {
+      db.prepare('DELETE FROM analysis_task_outcomes WHERE run_record_id = ?').run(runRecordId);
+      db.prepare('DELETE FROM analysis_run_states WHERE run_record_id = ? AND state = ?').run(runRecordId, 'interrupted');
+    });
+    store.factualReviewLedger.recordRunState(runRecordId, 'failed', { detail: '合成失败终态。' });
+    store.factualReviewLedger.recordOutcome({ taskIntentId: run.taskIntent!.taskIntentId, runRecordId, classification: 'failed',
+      resultSetRevisionId: run.resultSetRevision!.revisionId, summary: '合成失败终态；保留实际缺口。', safeNextAction: '重新准备任务。', report: { ...run.taskOutcome!.report!, classification: 'failed' } });
+    const sendsBefore = structuredClone(sends);
+    await reopen();
+    expect(store.inspectReviewWorkspace(book.bookId, reviewRunId).run).toMatchObject({ state: 'partial', canContinue: false, categories: [{ state: 'failed', findingsCount: 1 }] });
+    expect(lens(book, reviewRunId).results.length).toBe(1);
+    expect(retentionRows(reviewRunId).events.map((event) => event.state)).toEqual(['dispatched', 'failed', 'failed']);
+    expect(sends).toEqual(sendsBefore);
+  });
+
+  it.each([0, 2, null, '1'])('rejects a malformed preparation retention version %s without backfill (#1058)', async (version) => {
+    await setup({ relations: [] });
+    const book = await newBook('无效保留标记');
+    let id = '';
+    await expect(review(book, undefined, { prepared: (reviewRunId) => {
+      id = reviewRunId;
+      editRecordedTables(['review_runs'], (db) => {
+        const row = db.prepare('SELECT canonical_json FROM review_runs WHERE review_run_id = ?').get(id)!;
+        const snapshot = JSON.parse(String(row.canonical_json));
+        snapshot.categories[0].partialFactualRetentionVersion = version;
+        const record = canonicalRecord(snapshot);
+        db.prepare('UPDATE review_runs SET canonical_json = ?, sha256 = ? WHERE review_run_id = ?').run(record.json, record.digest, id);
+      });
+    } })).rejects.toMatchObject({ code: 'REVIEW_RECORD_INVALID' });
+    expect(sends.model).toBe(0);
+    const before = databaseState(false);
+    store.reconcileStoppedFactualReviewRuns();
+    expect(databaseState(false)).toEqual(before);
+    expect(id.length).toBeGreaterThan(0);
+  });
+
+  it('keeps local-only preparations and recovery outside factual eligibility (#1058, #1122)', async () => {
+    await setup({ relations: [] });
+    const book = await newBook('本地检查隔离');
+    let work = store.createReviewRunPreparationWork(book.bookId, ['local-text-check'], { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy,
+      null, [], null, null, null, { punctuation: 'chinese-prose', numerals: 'off', publication: 'unknown', numeralRules: [], numeralsConfirmed: false, excludedRanges: [], doubledEllipsisBlockIds: [] });
+    while (!work.done) work = store.advanceReviewRunPreparationWork(work.workId!);
+    const reviewRunId = work.projection!.run!.reviewRunId;
+    const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+    try {
+      const row = db.prepare('SELECT canonical_json FROM review_runs WHERE review_run_id = ?').get(reviewRunId)!;
+      const snapshot = JSON.parse(String(row.canonical_json));
+      expect(snapshot.localPlan).toBeDefined();
+      expect(snapshot.categories.every((entry: Record<string, unknown>) => !Object.hasOwn(entry, 'partialFactualRetentionVersion') && entry.task === null)).toBe(true);
+    } finally { db.close(); }
+    const before = databaseState(false);
+    await reopen();
+    expect(databaseState(false)).toEqual(before);
+    expect(lens(book, reviewRunId).results.length).toBe(0);
+    expect(sends.model).toBe(0);
+  });
+
   it('records 证据支持 from one exact excerpt at 标准核查, and the evidence workspace reads it without writing anything', async () => {
     await setup({ relations: [{ sourceRef: MUSEUM, relation: '支持', excerptRef: HELD, lineage: 'original' }, { sourceRef: GONE, relation: '反驳', excerptRef: null, lineage: null }] });
     const book = await newBook('标准核查回归');
