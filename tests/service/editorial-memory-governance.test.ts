@@ -106,7 +106,23 @@ async function sourceDecisions() {
   const govern = (memories: readonly EditorialMemoryVersion[], operation: RecordLearningSupervisionInput['operation'], text: string,
     effect: RecordLearningSupervisionInput['effect'] = 'guide') => subject.recordLearningSupervision({ actionId: randomUUID(), operation,
     targets: memories.map((entry) => ({ itemId: entry.itemId, revisionId: entry.versionId })), scope: { kind: 'house' }, categoryId: 'typos-and-usage', text, effect });
-  return { subject, book, signals, explicit, inspect, current, make, create, accept, govern, prepare, requests };
+  /** Another Book's real automatically admitted review decisions, through the same production store/gate and synthetic transport. */
+  const sourceBook = async (title: string) => {
+    const other = await importSample1Book(subject, roots!.codeRoot, title);
+    await pinEditorialWorkspaceProfileRevision2(subject, other.bookId);
+    let work = subject.createReviewRunPreparationWork(other.bookId, ['typos-and-usage'], { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy);
+    while (!work.done) work = subject.advanceReviewRunPreparationWork(work.workId!);
+    const otherRun = work.projection!.run!;
+    subject.authorizeReviewRun(other.bookId, otherRun.reviewRunId, otherRun.categories.filter((category) => category.planEnvelopeDigest !== null)
+      .map((category) => ({ categoryId: category.categoryId, planEnvelopeDigest: category.planEnvelopeDigest! })));
+    await driver!.drive(otherRun.reviewRunId);
+    const reviewed = subject.inspectReviewWorkspace(other.bookId, otherRun.reviewRunId).run!;
+    reviewed.findings.forEach((finding, index) => subject.recordChangeSuggestionDecision({ manuscriptId: reviewed.manuscript.manuscriptId,
+      branchId: reviewed.manuscript.branchId, windowStartBlockId: finding.blockId, markId: finding.markId!, clientDecisionId: randomUUID(),
+      disposition: 'accepted-with-edit', editedText: `合成另一本书${index}`, reason: '合成另一本书的判断。' }));
+    return { book: other, signals: inspect().signals.filter((signal) => signal.source.bookId === other.bookId) };
+  };
+  return { subject, book, signals, explicit, inspect, current, make, create, accept, govern, prepare, requests, sourceBook };
 }
 
 it('publishes two same-category memories with true automatic/explicit ancestry, one real owner each, and atomic governance', async () => {
@@ -145,9 +161,14 @@ it('publishes two same-category memories with true automatic/explicit ancestry, 
     scope: directive.scope, categoryId: directive.categoryId, text: directive.text, effect: directive.effect });
   expect(subject.inspectGlobalAgent().directives.at(-1)!.directiveId).toBe(directive.directiveId);
   expect(() => govern([a], 'correct', '失效版本不能修正。')).toThrow();
+  // A derived line yields to an active correction (Brief revision 7); an overflow of the owners' own reserved words refuses atomically.
+  govern([current(a.itemId)], 'correct', '界'.repeat(160));
   const before = subject.inspectHouseReviewPreference().current!.versionId;
-  expect(() => govern([current(a.itemId)], 'correct', '界'.repeat(160))).toThrow();
+  const directiveCount = subject.inspectGlobalAgent().directives.length;
+  expect(() => govern([current(b.itemId)], 'correct', '界'.repeat(41))).toThrow(/12 条/u);
   expect(subject.inspectHouseReviewPreference().current!.versionId).toBe(before);
+  expect(subject.inspectGlobalAgent().directives).toHaveLength(directiveCount);
+  expect(current(b.itemId).versionId).toBe(b.versionId);
   const legacy = subject.inspectGlobalAgent().items.find((entry) => entry.kind === 'preference')!;
   expect(() => subject.recordLearningSupervision({ operation: 'merge', actionId: randomUUID(), targets: [legacy,
     { itemId: b.itemId, revisionId: b.versionId }].map(({ itemId, revisionId }) => ({ itemId, revisionId })),
@@ -581,6 +602,105 @@ it('refuses a line-breaking memory title before the candidate is written', async
   const count = inspect().items.length;
   expect(() => subject.createEditorialMemory(create([signals[0]!.signalId], '合成第一行\n合成第二行'))).toThrow();
   expect(inspect().items).toHaveLength(count);
+});
+
+it('refilters a memory-only House by its names now: a fresh Run reads it, the old pin stays stale and a removed name restores the line', async () => {
+  const { subject, book, signals, make, create, accept, prepare, current } = await sourceDecisions();
+  const memory = accept(make(create([signals[0]!.signalId], '合成丙丁的统一用语')));
+  const named = accept(make(create([signals[0]!.signalId], '合成丙丁')));
+  expect(subject.inspectGlobalAgent().directives).toEqual([]);
+  const task = (run: ReturnType<typeof prepare>) => run.categories.find((entry) => entry.categoryId === 'typos-and-usage')!.taskIntentId!;
+  const old = task(prepare());
+  const lineOf = (itemId: string) => subject.inspectHouseReviewPreference().current!.lines.find((line) => line.owner?.itemId === itemId);
+  expect(lineOf(memory.itemId)!.text).toBe('合成丙丁的统一用语');
+  const people = subject.getBookOverview(book.bookId).people;
+  subject.updateBookPeople({ bookId: book.bookId, expectedVersion: people.version, authors: ['合成丙丁'], editors: [], related: [] });
+  expect(lineOf(memory.itemId)!.text).toBe('的统一用语');
+  expect(lineOf(named.itemId)).toBeUndefined();
+  const db = new DatabaseSync(join(roots!.dataRoot, 'store', 'ai7.sqlite'));
+  try {
+    const ledger = new HouseReviewPreferenceLedger(db);
+    const names = () => ['合成丙丁'];
+    expect(ledger.governanceChanged(old, names)).toBe(true);
+    const fresh = task(prepare());
+    expect(ledger.pinned(fresh)!.lines).toContain('的统一用语');
+    expect(ledger.pinned(fresh)!.lines.join('')).not.toContain('合成丙丁');
+    expect(ledger.governanceChanged(fresh, names)).toBe(false);
+  } finally { db.close(); }
+  subject.updateBookPeople({ bookId: book.bookId, expectedVersion: people.version + 1, authors: [], editors: [], related: [] });
+  expect(lineOf(memory.itemId)!.text).toBe('合成丙丁的统一用语');
+  expect(lineOf(named.itemId)!.text).toBe('合成丙丁');
+  expect([current(memory.itemId).versionId, current(named.itemId).versionId]).toEqual([memory.versionId, named.versionId]);
+});
+
+it('reserves capacity for still-active memories across a Book exclusion, refuses only the overflowing admission and restores without a second accept', async () => {
+  const { subject, book, signals, make, create, accept, current, govern, sourceBook } = await sourceDecisions();
+  const fromA = Array.from({ length: 7 }, (_, index) => accept(make(create([signals[0]!.signalId], `合成甲${index}`))));
+  subject.changeEditorialLearning({ kind: 'book', bookId: book.bookId, excluded: true, expectedEntries: 0 });
+  const other = await sourceBook('合成第二来源');
+  const fromB = (title: string): CreateEditorialMemoryInput => ({ schema: 'ai7.global-editorial-memory/2', actionId: randomUUID(),
+    signalIds: [other.signals[0]!.signalId], applicability: { kind: 'house' }, title, editorialDimension: 'typos-and-usage', confidence: 0.6 });
+  const b = Array.from({ length: 5 }, (_, index) => accept(make(fromB(`合成乙${index}`))));
+  expect(subject.inspectHouseReviewPreference().current!.lines.filter((line) => line.owner?.kind === 'editorial-memory')).toHaveLength(5);
+  const sixth = make(fromB('合成乙5'));
+  const before = { preference: subject.inspectHouseReviewPreference().current!.versionId, history: subject.inspectHouseReviewPreference().history.length };
+  expect(() => accept(sixth)).toThrow(/12 条/u);
+  expect(current(sixth.itemId)).toMatchObject({ versionId: sixth.versionId, state: 'proposed' });
+  expect(subject.inspectHouseReviewPreference()).toMatchObject({ current: { versionId: before.preference } });
+  expect(subject.inspectHouseReviewPreference().history).toHaveLength(before.history);
+  // A merge counts its successor once; freezing or deactivating an owner releases its place.
+  const merged = govern([b[0]!, b[1]!], 'merge', '合成乙合并');
+  expect(merged.items.filter((entry) => entry.kind === 'memory' && entry.state === 'active')).toHaveLength(11);
+  accept(sixth);
+  expect(() => accept(make(fromB('合成乙6')))).toThrow(/12 条/u);
+  govern([b[2]!], 'supervise', '冻结一条合成记忆。', 'freeze');
+  const seventh = accept(make(fromB('合成乙7')));
+  const stop = current(b[3]!.itemId);
+  subject.deactivateEditorialMemory({ itemId: stop.itemId, expectedVersionId: stop.versionId, actionId: randomUUID() });
+  accept(make(fromB('合成乙8')));
+  subject.changeEditorialLearning({ kind: 'book', bookId: book.bookId, excluded: false, expectedEntries: 1 });
+  const restored = subject.inspectHouseReviewPreference().current!;
+  expect(restored.lines).toHaveLength(12);
+  expect(restored.lines.every((line) => line.owner?.kind === 'editorial-memory')).toBe(true);
+  for (const memory of [...fromA, seventh]) expect(current(memory.itemId).versionId).toBe(memory.versionId);
+  expect(fromA.every((memory) => restored.lines.some((line) => line.owner?.itemId === memory.itemId))).toBe(true);
+});
+
+it('holds the 200-grapheme reservation across exclusion, active correction, explicit legacy lines and name changes', async () => {
+  const { subject, book, signals, make, create, accept, current, govern, sourceBook } = await sourceDecisions();
+  const long = accept(make(create([signals[0]!.signalId], '甲'.repeat(120))));
+  subject.changeEditorialLearning({ kind: 'book', bookId: book.bookId, excluded: true, expectedEntries: 0 });
+  const other = await sourceBook('合成字数来源');
+  const fromB = (title: string): CreateEditorialMemoryInput => ({ schema: 'ai7.global-editorial-memory/2', actionId: randomUUID(),
+    signalIds: [other.signals[0]!.signalId], applicability: { kind: 'house' }, title, editorialDimension: 'typos-and-usage', confidence: 0.6 });
+  expect(() => accept(make(fromB('乙'.repeat(100))))).toThrow(/200 字/u);
+  const exact = accept(make(fromB(`合成丙丁${'乙'.repeat(76)}`)));
+  // Exactly 200 reserved: an active correction replaces its own slot, and one more grapheme refuses atomically.
+  const corrected = govern([exact], 'correct', `合成丙丁${'丙'.repeat(76)}`);
+  const sameSize = current(exact.itemId);
+  expect(sameSize.title).toBe(`合成丙丁${'丙'.repeat(76)}`);
+  const directives = corrected.directives.length;
+  expect(() => govern([sameSize], 'correct', `合成丙丁${'丙'.repeat(77)}`)).toThrow(/200 字/u);
+  expect(subject.inspectGlobalAgent().directives).toHaveLength(directives);
+  expect(current(exact.itemId).versionId).toBe(sameSize.versionId);
+  expect(() => subject.recordLearningSupervision({ operation: 'create', targets: [], scope: { kind: 'house' }, categoryId: 'style-and-format',
+    text: '合成旧版偏好', effect: 'guide' })).toThrow(/200 字/u);
+  // A recorded name shortens what is sent, never what is reserved: removing it again cannot overflow.
+  const people = subject.getBookOverview(other.book.bookId).people;
+  subject.updateBookPeople({ bookId: other.book.bookId, expectedVersion: people.version, authors: ['合成丙丁'], editors: [], related: [] });
+  expect(subject.inspectHouseReviewPreference().current!.lines.find((line) => line.owner?.itemId === exact.itemId)!.text).toBe('丙'.repeat(76));
+  expect(() => accept(make(fromB('乙')))).toThrow(/200 字/u);
+  subject.updateBookPeople({ bookId: other.book.bookId, expectedVersion: people.version + 1, authors: [], editors: [], related: [] });
+  subject.changeEditorialLearning({ kind: 'book', bookId: book.bookId, excluded: false, expectedEntries: 1 });
+  const restored = subject.inspectHouseReviewPreference().current!;
+  expect(restored.lines.filter((line) => line.owner?.kind === 'editorial-memory').map((line) => line.text).sort())
+    .toEqual(['甲'.repeat(120), `合成丙丁${'丙'.repeat(76)}`].sort());
+  expect(current(long.itemId).versionId).toBe(long.versionId);
+  // An explicit legacy line reserves its place too, and freezing an owner releases it.
+  govern([current(long.itemId)], 'supervise', '冻结长记忆。', 'freeze');
+  subject.recordLearningSupervision({ operation: 'create', targets: [], scope: { kind: 'house' }, categoryId: 'style-and-format', text: '合'.repeat(100), effect: 'guide' });
+  expect(() => accept(make(fromB('乙'.repeat(21))))).toThrow(/200 字/u);
+  accept(make(fromB('乙'.repeat(20))));
 });
 
 it('ranks a /2 version\'s legacy lines by their /1 dating, not by array position', async () => {

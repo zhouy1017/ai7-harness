@@ -84,6 +84,9 @@ export interface HousePreferenceSource {
 function valid(condition: unknown): asserts condition {
   if (!condition) throw new LearningEligibilityError('HOUSE_REVIEW_PREFERENCE_INVALID', '本社审阅偏好记录与摘要不一致。');
 }
+function memoryLimit(): never {
+  throw new LearningEligibilityError('GLOBAL_AGENT_MEMORY_LIMIT', '本社审阅偏好最多 12 条，合计最多 200 字；请先合并或停用已有条目。');
+}
 
 /** Local lineage identity is not necessarily a human eligibility decision. */
 export function preferenceSourceIdentity(source: HouseReviewPreferenceSource): string {
@@ -270,15 +273,21 @@ export class HouseReviewPreferenceLedger {
     return lines;
   }
 
-  #publication(scope: TrustedOperationalScope, baseLines: HouseReviewPreferenceVersion['lines'], baseDigest: string, names: Iterable<string>, strict = false): {
+  /**
+   * `strict` is the editor's admission of text: `true` for a legacy directive, under its existing rule, or `'memory'` for an
+   * accepted memory owner's accept, correction or merge. Either is held to the capacity that surviving explicit legacy lines and
+   * every still-active memory reserve; derived lines never block it and still yield as a rebuild leaves them out.
+   */
+  #publication(scope: TrustedOperationalScope, baseLines: HouseReviewPreferenceVersion['lines'], baseDigest: string, names: Iterable<string>, strict: boolean | 'memory' = false): {
     schema: HouseReviewPreferenceVersion['schema']; materialSetDigest: string; lines: HouseReviewPreferenceVersion['lines']; governance?: NonNullable<HouseReviewPreferenceVersion['governance']>; legacyBasis?: HouseReviewPreferenceVersion['legacyBasis'];
   } {
     const people = [...names];
-    const governed = this.#governed(scope, baseLines, people, strict);
+    const governed = this.#governed(scope, baseLines, people, strict === true);
+    if (strict !== false) this.#reserve(scope, governed?.explicit ?? []);
     const memoryLines = this.#memoryLines(scope, people);
     const previous = this.history(scope).at(-1);
     if (memoryLines.length === 0 && previous?.schema !== 'ai7.house-review-preference/2') return {
-      schema: 'ai7.house-review-preference/1', materialSetDigest: baseDigest, ...this.#govern(scope, baseLines, baseDigest, people, strict),
+      schema: 'ai7.house-review-preference/1', materialSetDigest: baseDigest, ...this.#govern(scope, baseLines, baseDigest, people, strict === true),
     };
     const entries = governed?.entries ?? baseLines.map((line) => ({ derived: true, itemId: line.owner?.itemId ?? `preference:${line.bookId ?? 'house'}:${line.categoryId}`,
       revisionId: 'base', line }));
@@ -287,14 +296,23 @@ export class HouseReviewPreferenceLedger {
       sources: entry.line.sources.map((source) => { valid(source.kind !== 'editorial-memory'); return { ...source, kind: 'review-decision' as const, feedbackKey: feedbackKeyOf(this.db, source) }; }) } }));
     const over = () => legacy.length + memoryLines.length > HOUSE_REVIEW_PREFERENCE_MAX_LINES ||
       [...legacy.map((entry) => entry.line), ...memoryLines].reduce((total, line) => total + graphemesOf(line.text).length, 0) > HOUSE_REVIEW_PREFERENCE_MAX_GRAPHEMES;
-    const limit = (): never => { throw new LearningEligibilityError('GLOBAL_AGENT_MEMORY_LIMIT', '本社审阅偏好最多 12 条，合计最多 200 字；请先合并或停用已有条目。'); };
-    if (strict && over()) limit();
-    while (over()) { const last = legacy.findLastIndex((entry) => entry.derived); if (last < 0) limit(); legacy.splice(last, 1); }
+    while (over()) { const last = legacy.findLastIndex((entry) => entry.derived); if (last < 0) memoryLimit(); legacy.splice(last, 1); }
     const lines = [...legacy.map((entry) => entry.line), ...memoryLines];
     return { schema: 'ai7.house-review-preference/2', lines, legacyBasis: { lines: baseLines, materialSetDigest: baseDigest },
       materialSetDigest: sha256Hex(canonicalJson({ baseDigest, lines })),
       ...(governed === null ? {} : { governance: { baseLines, baseMaterialSetDigest: baseDigest, headDirectiveId: governed.headDirectiveId } }),
     };
+  }
+
+  /**
+   * Refuse an admission whose post-action reserved set no longer fits: each surviving explicit legacy line and each still-active
+   * memory owner holds one line and its words before any name is taken out, so neither a restoration nor a later name change can
+   * make an accepted line overflow. The unredacted words are only counted here, never sent.
+   */
+  #reserve(scope: TrustedOperationalScope, explicit: ReadonlyArray<string>): void {
+    const reserved = [...explicit, ...new EditorialLearningLedger(this.db).activeTitles(scope)];
+    if (reserved.length > HOUSE_REVIEW_PREFERENCE_MAX_LINES ||
+      reserved.reduce((total, text) => total + graphemesOf(text.trim()).length, 0) > HOUSE_REVIEW_PREFERENCE_MAX_GRAPHEMES) memoryLimit();
   }
 
   #validatePublication(record: HouseReviewPreferenceVersion, historical = false): void {
@@ -419,6 +437,8 @@ export class HouseReviewPreferenceLedger {
    */
   #governed(scope: TrustedOperationalScope, baseLines: HouseReviewPreferenceVersion['lines'], names: Iterable<string>, strict = false): {
     entries: Array<{ derived: boolean; itemId: string; revisionId: string; line: HouseReviewPreferenceVersion['lines'][number] }>;
+    /** Each surviving explicit line's words before any name is taken out: the capacity they reserve. */
+    explicit: string[];
     headDirectiveId: string; directiveAt: ReadonlyMap<string, string>;
   } | null {
     if (this.db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'learning_supervision_directives'").get() === undefined) return null;
@@ -454,7 +474,8 @@ export class HouseReviewPreferenceLedger {
       if (last < 0) limit();
       entries.splice(last, 1);
     }
-    return { entries, headDirectiveId: head.directiveId, directiveAt: new Map(directives.map((directive) => [directive.directiveId, directive.recordedAt])) };
+    return { entries, explicit: governed.filter((item) => item.revisionId !== 'base').map((item) => item.text),
+      headDirectiveId: head.directiveId, directiveAt: new Map(directives.map((directive) => [directive.directiveId, directive.recordedAt])) };
   }
 
   /**
@@ -497,7 +518,7 @@ export class HouseReviewPreferenceLedger {
    * Append a preference version after an explicit governance action or a change of the house's people, preserving its derived
    * source lineage; `strict` for the editor's own action, refused when the text it adds cannot fit.
    */
-  refreshGovernance(scope: TrustedOperationalScope, names: Iterable<string> = [], strict = false): void {
+  refreshGovernance(scope: TrustedOperationalScope, names: Iterable<string> = [], strict: boolean | 'memory' = false): void {
     const prior = this.history(scope).at(-1);
     const baseLines = prior?.legacyBasis?.lines ?? prior?.governance?.baseLines ?? prior?.lines ?? [];
     const materialSetDigest = prior?.legacyBasis?.materialSetDigest ?? prior?.governance?.baseMaterialSetDigest ?? prior?.materialSetDigest ?? sha256Hex(canonicalJson([]));

@@ -917,6 +917,19 @@ export class EditorialLearningLedger {
     return revisions;
   }
 
+  /**
+   * The immutable titles of every still-active /2 owner of one scope, whatever their sources, controls or names allow now: an
+   * accepted memory keeps its place in the house's bounded block through a reversible suppression (Issue #1128 revision 7).
+   */
+  activeTitles(scope: TrustedOperationalScope): string[] {
+    const titles: string[] = [];
+    for (const row of this.db.prepare('SELECT item_id FROM global_editorial_memory_items ORDER BY item_id').iterate()) {
+      const current = this.version(String(row.item_id));
+      if (current.schema === 'ai7.global-editorial-memory/2' && current.operationalScope === scope && current.state === 'active') titles.push(current.title);
+    }
+    return titles;
+  }
+
   candidateMemoryCount(bookId: string, materialKey: string): number {
     let count = 0;
     for (const row of this.db.prepare('SELECT item_id FROM global_editorial_memory_items').iterate()) {

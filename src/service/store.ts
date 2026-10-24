@@ -13243,7 +13243,7 @@ export class EditorialStore {
   acceptEditorialMemory(input: import('../shared/protocol/learning.js').AcceptEditorialMemoryInput): EditorialLearningProjection {
     return this.#learningCall(() => this.#transaction(this.#authority, () => {
       new EditorialLearningLedger(this.#authority).accept(input, this.#baselineAnalysis.launch.operationalScope);
-      new HouseReviewPreferenceLedger(this.#authority).refreshGovernance(this.#baselineAnalysis.launch.operationalScope, this.#housePreferencePeopleNames(), true);
+      new HouseReviewPreferenceLedger(this.#authority).refreshGovernance(this.#baselineAnalysis.launch.operationalScope, this.#housePreferencePeopleNames(), 'memory');
       return this.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
     }));
   }
@@ -13408,7 +13408,8 @@ export class EditorialStore {
       // Only an action that adds text is refused at the bound; a guide, freeze or deactivation lets derived lines yield as a rebuild does.
       const addsText = input.operation === 'create' || input.operation === 'merge' || input.operation === 'correct' ||
         input.operation === 'supervise' && input.effect === 'correct';
-      new HouseReviewPreferenceLedger(this.#authority).refreshGovernance(current.operationalScope, this.#housePreferencePeopleNames(), addsText);
+      new HouseReviewPreferenceLedger(this.#authority).refreshGovernance(current.operationalScope, this.#housePreferencePeopleNames(),
+        addsText && (memoryTargets.length > 0 ? 'memory' : true));
     }));
     return this.inspectGlobalAgent();
   }
@@ -14160,8 +14161,10 @@ export class EditorialStore {
     return this.#peopleCall(() => this.#transaction(this.#authority, () => {
       const result = this.#bookPeople.update(input);
       const scope = this.#baselineAnalysis.launch.operationalScope;
-      if (new SupervisionDirectives(this.#authority).history(scope).length > 0)
-        new HouseReviewPreferenceLedger(this.#authority).refreshGovernance(scope, this.#housePreferencePeopleNames());
+      // An editor's words reach a record by a directive or, from /2 on, by an accepted memory: either is refiltered by the house's names now.
+      const preferences = new HouseReviewPreferenceLedger(this.#authority);
+      if (new SupervisionDirectives(this.#authority).history(scope).length > 0 || preferences.history(scope).at(-1)?.schema === 'ai7.house-review-preference/2')
+        preferences.refreshGovernance(scope, this.#housePreferencePeopleNames());
       return result;
     }));
   }
