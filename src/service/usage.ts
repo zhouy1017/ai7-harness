@@ -1,4 +1,6 @@
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
+import { DialogueLedger } from './dialogue/dialogue-ledger.js';
+import { readHarnessSessionLog } from './harness/session-log.js';
 import {
   USAGE_EMPTY_LABEL,
   USAGE_ROW_RUN_LINKS,
@@ -72,9 +74,9 @@ interface Accumulator {
   runs: UsageRunLinkProjection[];
 }
 
-function accumulate(into: Accumulator['byRoute'], route: string | null, inputTokens: number, outputTokens: number): void {
+function accumulate(into: Accumulator['byRoute'], route: string | null, inputTokens: number, outputTokens: number, runCount = 1): void {
   const held = into.get(route) ?? { runCount: 0, inputTokens: 0, outputTokens: 0 };
-  held.runCount += 1;
+  held.runCount += runCount;
   held.inputTokens += inputTokens;
   held.outputTokens += outputTokens;
   into.set(route, held);
@@ -89,7 +91,7 @@ function routesOf(byRoute: Accumulator['byRoute']): UsageRouteTokensProjection[]
 export class UsageLedger {
   readonly #db: DatabaseSync;
 
-  constructor(db: DatabaseSync) {
+  constructor(db: DatabaseSync, readonly globalDialogue?: { readonly sessionLogRoot: string; readonly operationalScope: () => string }) {
     this.#db = db;
   }
 
@@ -109,6 +111,8 @@ export class UsageLedger {
        WHERE (?1 IS NULL OR o.recorded_at >= ?1) AND o.recorded_at <= ?2
        ORDER BY o.recorded_at DESC, o.run_record_id DESC`,
     ).all(since, now.toISOString()) as SqlRow[];
+    outcomes.push(...this.#globalDialogueOutcomes(since, now.toISOString()));
+    outcomes.sort((left, right) => String(right.recorded_at).localeCompare(String(left.recorded_at)) || String(right.run_record_id).localeCompare(String(left.run_record_id)));
 
     const reviewRuns = this.#reviewRunsOfTasks(outcomes);
     const rows = new Map<string, Accumulator>();
@@ -119,12 +123,12 @@ export class UsageLedger {
     for (const outcome of outcomes) {
       // A Task Outcome recorded before the Run Report existed holds no usage: said apart, never counted as zero.
       if (outcome.report_type !== 'object') {
-        unrecordedRuns += 1;
+        if (outcome.global_dialogue !== 1) unrecordedRuns += 1;
         continue;
       }
       const recordedAt = String(outcome.recorded_at);
       const kind = String(outcome.kind);
-      const bookId = String(outcome.book_id);
+      const bookId = outcome.global_dialogue === 1 ? 'global-agent' : String(outcome.book_id);
       const bookTitle = String(outcome.title);
       const key = groupBy === 'book' ? bookId : groupBy === 'taskKind' ? kind : periodOf(recordedAt, range);
       if (key === null) continue;
@@ -135,11 +139,14 @@ export class UsageLedger {
         row = { key, label: groupBy === 'book' ? bookTitle : key, runCount: 0, inputTokens: 0, outputTokens: 0, byRoute: new Map(), runs: [] };
         rows.set(key, row);
       }
-      row.runCount += 1;
+      // Dialogue tokens contribute to usage, but a Book-less attempt creates no AI7 Run, count or report link.
+      const runCount = outcome.global_dialogue === 1 ? 0 : 1;
+      row.runCount += runCount;
       row.inputTokens += usage.inputTokens;
       row.outputTokens += usage.outputTokens;
-      accumulate(row.byRoute, route, usage.inputTokens, usage.outputTokens);
-      if ((row.runCount > runOffset && row.runs.length < USAGE_ROW_RUN_LINKS) || outcome.run_record_id === runRecordId) {
+      accumulate(row.byRoute, route, usage.inputTokens, usage.outputTokens, runCount);
+      // A Book-less turn has no Run report or Book link to manufacture.
+      if (outcome.global_dialogue !== 1 && ((row.runCount > runOffset && row.runs.length < USAGE_ROW_RUN_LINKS) || outcome.run_record_id === runRecordId)) {
         const taskIntentId = String(outcome.task_intent_id);
         const link: UsageRunLinkProjection = {
           runRecordId: String(outcome.run_record_id), taskIntentId, bookId, bookTitle, taskKind: kind,
@@ -153,10 +160,10 @@ export class UsageLedger {
           detail = { ...link, report: report !== null && report.runRecordId === runRecordId && report.taskIntentId === taskIntentId ? report : null };
         }
       }
-      totals.runCount += 1;
+      totals.runCount += runCount;
       totals.inputTokens += usage.inputTokens;
       totals.outputTokens += usage.outputTokens;
-      accumulate(totals.byRoute, route, usage.inputTokens, usage.outputTokens);
+      accumulate(totals.byRoute, route, usage.inputTokens, usage.outputTokens, runCount);
     }
 
     const ordered = [...rows.values()].sort((left, right) => groupBy === 'time'
@@ -173,6 +180,44 @@ export class UsageLedger {
       emptyLabel: projected.length === 0 ? USAGE_EMPTY_LABEL : null,
       ...(runRecordId === undefined ? {} : { detail }),
     };
+  }
+
+  /** Only the session's reported token events, through each exact binding/span; missing usage is disclosed, never estimated. */
+  #globalDialogueOutcomes(since: string | null, until: string): SqlRow[] {
+    if (this.globalDialogue === undefined) return [];
+    const ledger = new DialogueLedger(this.#db);
+    const outcomes: SqlRow[] = [];
+    const tasks = [];
+    for (let offset = 0;;) {
+      const page = ledger.globalTasks(offset);
+      if (page.length === 0) break;
+      tasks.push(...page); offset += page.length;
+    }
+    for (const task of tasks) {
+      if (task.operationalScope !== this.globalDialogue.operationalScope()) continue;
+      for (const attempt of ledger.attempts(task.dialogueId)) {
+        if (attempt.binding === null || attempt.span === null) continue;
+        const at = attempt.createdAt;
+        if (since !== null && at < since || at > until) continue;
+        const steps = new Map<string, { inputTokens: number; outputTokens: number }>();
+        try {
+          const log = readHarnessSessionLog(this.globalDialogue.sessionLogRoot, attempt.span.harnessSessionId);
+          for (const event of log?.events.slice(attempt.span.startSeq, (attempt.outcome?.endSeq ?? (log.events.length - 1)) + 1) ?? []) {
+            if (event.type !== 'assistant/message' && event.type !== 'assistant/chunk') continue;
+            const data = event.data as { turn: number; step: number; usage?: unknown; chunk?: { type: string; usage?: unknown } };
+            const usage = event.type === 'assistant/message' ? data.usage : data.chunk?.type === 'usage' ? data.chunk.usage : undefined;
+            if (usage === undefined || usage === null || typeof usage !== 'object') continue;
+            const tokens = usage as Record<string, unknown>;
+            // The assembled message repeats the chunk's step total. A per-step key counts it once, including cancellation.
+            steps.set(`${data.turn}/${data.step}`, { inputTokens: tokenCount(tokens['inputTokens']), outputTokens: tokenCount(tokens['outputTokens']) });
+          }
+        } catch { /* A missing/damaged session is an unrecorded attempt, not zero usage. */ }
+        outcomes.push({ global_dialogue: 1, run_record_id: attempt.attemptId, task_intent_id: task.dialogueId, recorded_at: at,
+          report_type: steps.size === 0 ? null : 'object', usage: JSON.stringify(Object.fromEntries(steps)),
+          book_id: null, title: '全域智能体（无图书）', kind: 'global-agent-dialogue', route: attempt.binding.route });
+      }
+    }
+    return outcomes;
   }
 
   /** The Review Run each review-category Task belongs to, read only when a Task of that family is among the Runs. */

@@ -6,9 +6,9 @@ import type { ChangeEditorialLearningInput, CreateEditorialMemoryInput, Deactiva
 import { dialogueQuestionDigest } from './dialogue/contract.js';
 import { fragmentsText } from './dialogue/fragments.js';
 import { globalAgentDialogueProjection } from './dialogue/global-agent-session.js';
-import type { AskGlobalAgentInput, GlobalAgentDialogueProjection, GlobalAgentAttemptInput, GlobalMemoryPin } from '../shared/protocol.js';
+import type { AskGlobalAgentInput, GlobalAgentDialogueProjection, GlobalAgentAttemptInput, GlobalMemoryPin, GlobalAgentSourceCandidate, PrepareGlobalAgentTurnInput } from '../shared/protocol.js';
 import { GLOBAL_AGENT_SCHEMA_VERSION } from './task-authorization.js';
-import { SupervisionDirectives, governedMemoryItems, preferenceItems, initializeSupervisionSchema } from './learning/supervision-directives.js';
+import { SupervisionDirectives, governedMemoryItems, preferenceItems, initializeSupervisionSchema, supervisionSourceCandidates } from './learning/supervision-directives.js';
 import { GLOBAL_AGENT_POLICY_BLOCKED, type GlobalAgentProjection, type RecordLearningSupervisionInput } from '../shared/protocol.js';
 import { analysisBytePage, revisionUnitsPage, analysisOverviewPage, baselineAnalysisSummaryPage } from './analysis/baseline-analysis-wire.js';
 import { acquireSkillPackage, ImportedSkills, ImportedSkillError, SkillAcquisitions, type AcquiredSkillPackage } from './imported-skills.js';
@@ -4857,7 +4857,8 @@ export class EditorialStore {
     this.#learningEligibility = new LearningEligibilityLedger(authority);
     this.#evaluationCalibration = new EvaluationCalibrationLedger(authority);
     this.#series = new SeriesLedger(authority);
-    this.#usage = new UsageLedger(authority);
+    this.#usage = new UsageLedger(authority, { sessionLogRoot: join(dataRoot, HARNESS_SESSION_LOG_DIRECTORY),
+      operationalScope: () => this.#baselineAnalysis.launch.operationalScope });
     this.#seriesKnowledge = new SeriesKnowledgeLedger(authority);
     this.#seriesExclusions = new SeriesExclusionLedger(authority);
     this.#dialogues = new DialogueLedger(authority);
@@ -13243,13 +13244,26 @@ export class EditorialStore {
       const base = preference === null ? null : { ...preference, lines: preference.governance?.baseLines ?? preference.lines };
       const directives = new SupervisionDirectives(this.#authority).history(operationalScope);
       const names = preferenceNames(base?.lines ?? [], this.#housePreferencePeopleNames());
+      const items = governedMemoryItems(preferenceItems(base), directives).map((item) => ({ ...item, text: withoutNames(item.text, names),
+        revisionId: `${item.revisionId}@${directives.at(-1)?.directiveId ?? 'base'}` }));
+      const memories: GlobalAgentSourceCandidate[] = [];
+      const learning = new EditorialLearningLedger(this.#authority);
+      for (let itemOffset: number | null = 0; itemOffset !== null;) {
+        const page = learning.inspect({ signalOffset: 0, itemOffset });
+        for (const entry of page.items) if (entry.usable) memories.push({ itemId: entry.current.itemId, revisionId: entry.current.versionId,
+          kind: 'memory', title: withoutNames(entry.current.title, names), text: withoutNames(entry.current.title, names) });
+        itemOffset = page.nextItemOffset;
+      }
       return { operationalScope, dialogueState: dialogueAdmitted ? 'available' : GLOBAL_AGENT_POLICY_BLOCKED,
         explanation: dialogueAdmitted ? '只使用明确勾选的已启用记忆版本，不读取稿件；治理仍须单独操作。'
           : '此处暂不能调用模型。记忆与学习监督操作仅在本机记录，不读取稿件。',
         categories: BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.map(({ categoryId, label }) => ({ categoryId, label })),
         books: this.#authority.prepare('SELECT book_id, title FROM books ORDER BY title, book_id').all().map((row) => ({ bookId: String(row.book_id), title: String(row.title) })),
-        items: governedMemoryItems(preferenceItems(base), directives).map((item) => ({ ...item, text: withoutNames(item.text, names),
-          revisionId: `${item.revisionId}@${directives.at(-1)?.directiveId ?? 'base'}` })), directives, history: this.#globalAgentHistory(live) };
+        items, sourceCandidates: [
+          ...items.filter((item) => item.state === 'active').map((item) => ({ itemId: item.itemId, revisionId: item.revisionId, kind: item.kind,
+            title: `本社审阅偏好 · ${item.categoryId}`, text: item.text })),
+          ...memories, ...supervisionSourceCandidates(directives).map((entry) => ({ ...entry, text: withoutNames(entry.text, names) })),
+        ], directives, history: this.#globalAgentHistory(live) };
     });
   }
 
@@ -13261,20 +13275,37 @@ export class EditorialStore {
   }
 
   globalAgentSourcesCurrent(pins: ReadonlyArray<GlobalMemoryPin>): boolean {
-    const items = this.inspectGlobalAgent().items;
-    return pins.every((pin) => items.some((item) => item.itemId === pin.itemId && item.revisionId === pin.revisionId && item.state === 'active'));
+    const items = this.inspectGlobalAgent().sourceCandidates ?? [];
+    return pins.every((pin) => items.some((item) => item.itemId === pin.itemId && item.revisionId === pin.revisionId));
+  }
+
+  /** Reuse the preference consumer's known-people filter. Notes, roles, examples and manuscript references are never assembled. */
+  globalAgentRedact(text: string): string {
+    return withoutNames(text, preferenceNames(new HouseReviewPreferenceLedger(this.#authority)
+      .history(this.#baselineAnalysis.launch.operationalScope).at(-1)?.lines ?? [], this.#housePreferencePeopleNames()));
+  }
+
+  /** A disclosure read creates no Task, attempt, log, credential release or transmission. */
+  prepareGlobalAgentTurn(input: PrepareGlobalAgentTurnInput): DialogueTurnStart['message'] {
+    if (input.kind !== 'ask') {
+      const turn = this.globalAgentAttempt(input, input.kind, new Date(), true);
+      requireStore(typeof turn !== 'string', 'DIALOGUE_INVALID', '回答标识无效。');
+      return turn.message;
+    }
+    const question = dialogueQuestion(this.globalAgentRedact(dialogueQuestion(input.question)));
+    requireStore(input.sources.length <= 12 && new Set(input.sources.map((pin) => pin.itemId)).size === input.sources.length &&
+      this.globalAgentSourcesCurrent(input.sources), 'GLOBAL_AGENT_SCOPE_CHANGED', '记忆版本已经变化，请重新选择。');
+    const candidates = this.inspectGlobalAgent().sourceCandidates ?? [];
+    return { kind: 'ask', selection: '', question, kept: null, globalSources: input.sources.map((pin) => ({ ...pin,
+      text: candidates.find((entry) => entry.itemId === pin.itemId && entry.revisionId === pin.revisionId)!.text })) };
   }
 
   /** Called only after the execution owner admits this exact Book-less policy binding. */
   askGlobalAgent(input: AskGlobalAgentInput, now = new Date()): DialogueTurnStart {
     return this.#dialogueCall(() => {
-      const question = dialogueQuestion(input.question);
-      requireStore(input.sources.length <= 12 && new Set(input.sources.map((pin) => pin.itemId)).size === input.sources.length &&
-        this.globalAgentSourcesCurrent(input.sources), 'GLOBAL_AGENT_SCOPE_CHANGED', '记忆版本已经变化，请重新选择。');
-      const items = this.inspectGlobalAgent().items;
-      const globalSources = input.sources.map((pin) => ({ ...pin, text: items.find((item) => item.itemId === pin.itemId)!.text }));
-      const { task, attemptId } = this.#transaction(this.#authority, () => this.#dialogues.askGlobal(this.#baselineAnalysis.launch.operationalScope, input.sources, dialogueQuestionDigest(question), now));
-      return { dialogueId: task.dialogueId, attemptId, message: { kind: 'ask', selection: '', question, kept: null, globalSources } };
+      const message = this.prepareGlobalAgentTurn({ ...input, kind: 'ask' });
+      const { task, attemptId } = this.#transaction(this.#authority, () => this.#dialogues.askGlobal(this.#baselineAnalysis.launch.operationalScope, input.sources, dialogueQuestionDigest(message.question), now));
+      return { dialogueId: task.dialogueId, attemptId, message };
     });
   }
 
@@ -13286,7 +13317,7 @@ export class EditorialStore {
     });
   }
 
-  globalAgentAttempt(input: GlobalAgentAttemptInput, kind: 'continue' | 'regenerate' | 'stop', now = new Date()): DialogueTurnStart | string {
+  globalAgentAttempt(input: GlobalAgentAttemptInput, kind: 'continue' | 'regenerate' | 'stop', now = new Date(), preview = false): DialogueTurnStart | string {
     return this.#dialogueCall(() => {
       const task = this.#dialogues.globalTask(input.dialogueId);
       requireStore(task !== null && task.operationalScope === this.#baselineAnalysis.launch.operationalScope, 'DIALOGUE_NOT_FOUND', '全域对话不存在。');
@@ -13301,9 +13332,13 @@ export class EditorialStore {
       const resolved = resolveAttempts(attempts, this.#dialogueHistory, () => null);
       requireStore(resolved.first?.globalSources !== undefined, 'DIALOGUE_HISTORY_MISSING', '对话记录无法读取。');
       const answer = resolved.attempts.at(-1)!;
-      const attemptId = this.#transaction(this.#authority, () => this.#dialogues.nextAttempt(task.dialogueId, kind, () => answer.fragments.length, now));
+      requireStore(last.outcome !== null && (kind === 'regenerate' ||
+        (answer.state === 'stopped' || answer.state === 'interrupted') && answer.fragments.length > 0), 'DIALOGUE_NOT_STOPPED', '回答尚不能继续。');
+      const attemptId = preview ? last.attemptId : this.#transaction(this.#authority, () => this.#dialogues.nextAttempt(task.dialogueId, kind, () => answer.fragments.length, now));
       return { dialogueId: task.dialogueId, attemptId, message: { ...resolved.first, kind: kind === 'continue' ? 'continue' : 'ask',
-        kept: kind === 'continue' ? fragmentsText(answer.fragments) : null } };
+        question: this.globalAgentRedact(resolved.first.question),
+        globalSources: resolved.first.globalSources.map((source) => ({ ...source, text: this.globalAgentRedact(source.text) })),
+        kept: kind === 'continue' ? this.globalAgentRedact(fragmentsText(answer.fragments)) : null } };
     });
   }
 

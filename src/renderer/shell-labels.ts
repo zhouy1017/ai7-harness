@@ -1,4 +1,12 @@
 import type { ShellBookSection } from '../shared/preferences.js';
+import type { DialogueAttemptProjection } from '../shared/protocol.js';
+import { dialogueIncompleteLine } from './dialogue-labels.js';
+
+export function globalAgentAnswerStatus(attempt: DialogueAttemptProjection | undefined): string {
+  if (attempt?.causeCode === 'QUOTA') return '模型服务按账户限额拒绝了请求，回答已停下，已收到的内容已保存；处理好模型服务、限额解除后可重新回答。';
+  return attempt === undefined ? '尚无回答' : attempt.state === 'answering' ? '正在回答 · 内容尚未完成'
+    : attempt.state === 'completed' ? '回答已完成' : dialogueIncompleteLine(attempt) ?? '回答不完整';
+}
 
 // The shell's words (Issue #934, wave 11 slice 11a; Issue #1002, wave 16 slice 16a; editor-surfaces §0.3, §8; IA-006 to IA-013, ADR 0092):
 // the two-level sidebar, the searchable multi-book switcher, the context header and the 设置 hub. Each row's icon is one

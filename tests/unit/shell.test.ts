@@ -19,7 +19,17 @@ import {
   SHELL_LABELS,
   SHELL_SETTINGS,
   shellRecentStateLine,
+  globalAgentAnswerStatus,
 } from '../../src/renderer/shell-labels.js';
+import type { DialogueAttemptProjection } from '../../src/shared/protocol.js';
+
+it('keeps Global Agent closing, account-limit and cancel states in editorial words', () => {
+  const attempt: DialogueAttemptProjection = { attemptId: 'attempt', ordinal: 1, kind: 'ask', state: 'interrupted', fragments: [],
+    fragmentsFrom: 0, fragmentTotal: 0, source: 'ledger', causeCode: 'AI7_CLOSED', startedAt: '', settledAt: '', convertedMarkIds: [] };
+  expect(globalAgentAnswerStatus(attempt)).toContain('AI7 关闭时回答被中断');
+  expect(globalAgentAnswerStatus({ ...attempt, state: 'failed', causeCode: 'QUOTA' })).toContain('限额解除后可重新回答');
+  expect(globalAgentAnswerStatus({ ...attempt, state: 'stopped', causeCode: null })).toContain('你停止了回答');
+});
 
 // Unit suite for the shell's model (Issue #934, wave 11 slice 11a; editor-surfaces §0.3, §8.6; IA-006 to IA-013). The
 // model checks the sidebar through what it is built from: the destinations and groups in their

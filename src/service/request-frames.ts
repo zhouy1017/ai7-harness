@@ -2537,8 +2537,9 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'stopGlobalAgentAnswer':
     case 'continueGlobalAgentAnswer':
     case 'regenerateGlobalAgentAnswer': {
-      const input = requireInput(value.input, ['dialogueId', 'attemptId'], tentativeId);
-      if (!validUuid(input.dialogueId) || !validUuid(input.attemptId)) throw new ProtocolError(tentativeId);
+      const input = requireInputWithOptional(value.input, ['dialogueId', 'attemptId'], ['disclosureSha256'], tentativeId);
+      if (!validUuid(input.dialogueId) || !validUuid(input.attemptId) ||
+          input.disclosureSha256 !== undefined && (typeof input.disclosureSha256 !== 'string' || !HEX_DIGEST_PATTERN.test(input.disclosureSha256))) throw new ProtocolError(tentativeId);
       break;
     }
     case 'recordLearningSupervision': {
@@ -2546,8 +2547,17 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       if (!validSupervisionInput(input)) throw new ProtocolError(tentativeId);
       break;
     }
+    case 'prepareGlobalAgentTurn':
     case 'askGlobalAgent': {
-      const input = requireInput(value.input, ['question', 'sources'], tentativeId);
+      if (value.op === 'prepareGlobalAgentTurn' && isRecord(value.input) && value.input.kind !== 'ask') {
+        const input = requireInput(value.input, ['kind', 'dialogueId', 'attemptId'], tentativeId);
+        if ((input.kind !== 'continue' && input.kind !== 'regenerate') || !validUuid(input.dialogueId) || !validUuid(input.attemptId)) throw new ProtocolError(tentativeId);
+        break;
+      }
+      const input = value.op === 'prepareGlobalAgentTurn' ? requireInput(value.input, ['kind', 'question', 'sources'], tentativeId)
+        : requireInputWithOptional(value.input, ['question', 'sources'], ['disclosureSha256'], tentativeId);
+      if (value.op === 'prepareGlobalAgentTurn' && input.kind !== 'ask' ||
+          input.disclosureSha256 !== undefined && (typeof input.disclosureSha256 !== 'string' || !HEX_DIGEST_PATTERN.test(input.disclosureSha256))) throw new ProtocolError(tentativeId);
       if (!isBoundedString(input.question, MAX_DIALOGUE_QUESTION_CHARACTERS) || !Array.isArray(input.sources) || input.sources.length > 12 ||
           input.sources.some((pin) => !isRecord(pin) || !hasExactKeys(pin, ['itemId', 'revisionId']) ||
             !isBoundedString(pin.itemId, 180) || !isBoundedString(pin.revisionId, 180))) throw new ProtocolError(tentativeId);

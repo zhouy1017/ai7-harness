@@ -1,6 +1,7 @@
 import type { CallId, GenerateOptions, LlmAdapter, LlmProviderInfo, LlmResolvedModelInfo, StreamChunk } from '@deepseek-ai/dsh-llm';
 import { canonicalJson, isRecord, sha256Hex } from '../analysis/canonical.js';
 import { DIALOGUE_PROMPT_CONTRACT, DIALOGUE_PROMPT_CONTRACT_DIGEST, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST, parseDialogueMessage } from '../dialogue/contract.js';
+import { GLOBAL_AGENT_PROMPT_CONTRACT, GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST } from '../dialogue/global-agent-session.js';
 import { AI7_FAILURE_CODES, retryBackoffMs, type DshFailureCodes } from './classification.js';
 import type { CredentialBroker, CredentialSlotBinding } from './credential-broker.js';
 import {
@@ -475,9 +476,12 @@ export function assembleProviderRequest(
       payload.system === DIALOGUE_PROMPT_CONTRACT.systemPrompt && payload.messages.length === 1 &&
       message?.role === 'user' && parseDialogueMessage(messageText(message) ?? '') !== null && (payload.tools ?? []).length === 0;
     const retrieval = context.promptContractDigest === DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST && isRetrievalDialogue(payload);
+    const global = context.promptContractDigest === GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST &&
+      payload.system === GLOBAL_AGENT_PROMPT_CONTRACT.systemPrompt && payload.messages.length === 1 && message?.role === 'user' &&
+      parseDialogueMessage(messageText(message) ?? '')?.globalSources !== undefined && (payload.tools ?? []).length === 0;
     if (profile.route !== OPENCODE_GO_ROUTE || model.capabilities.requestShape !== 'openai-chat-completions' ||
       model.capabilities.streaming !== 'chat-completions-sse' ||
-      (!predecessor && !retrieval)) throw new Error('PROVIDER_DIALOGUE_STREAM_SHAPE_INVALID');
+      (!predecessor && !retrieval && !global)) throw new Error('PROVIDER_DIALOGUE_STREAM_SHAPE_INVALID');
     body = canonicalJson({ ...JSON.parse(body), stream: true, stream_options: { include_usage: true } });
   }
   if (profile.sessionHeader && (context.sessionId === undefined || context.sessionId.length === 0)) {

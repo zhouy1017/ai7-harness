@@ -4429,7 +4429,7 @@ function registerRendererHandlers(
     requireSender(event); requireAuthority();
     return service.call('inspectGlobalAgent', {});
   }));
-  for (const operation of ['recordLearningSupervision', 'askGlobalAgent', 'stopGlobalAgentAnswer', 'continueGlobalAgentAnswer', 'regenerateGlobalAgentAnswer'] as const) {
+  for (const operation of ['prepareGlobalAgentTurn', 'recordLearningSupervision', 'askGlobalAgent', 'stopGlobalAgentAnswer', 'continueGlobalAgentAnswer', 'regenerateGlobalAgentAnswer'] as const) {
     ipcMain.handle(IPC_CHANNELS[operation], (event, input: ServiceOperationMap[typeof operation]['input']) => envelope(async () => {
       requireSender(event);
       return serializeEffect(async () => {

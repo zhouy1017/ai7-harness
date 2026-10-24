@@ -511,9 +511,9 @@ export class DialogueLedger {
     return task;
   }
 
-  globalTasks(): StoredGlobalDialogueTask[] {
-    return this.#db.prepare('SELECT dialogue_id FROM dialogue_tasks WHERE book_id IS NULL ORDER BY asked_at DESC, dialogue_id DESC LIMIT ?')
-      .all(DIALOGUE_TASKS_READ_LIMIT).map((row) => this.globalTask(String(row.dialogue_id))!);
+  globalTasks(offset = 0): StoredGlobalDialogueTask[] {
+    return this.#db.prepare('SELECT dialogue_id FROM dialogue_tasks WHERE book_id IS NULL ORDER BY asked_at DESC, dialogue_id DESC LIMIT ? OFFSET ?')
+      .all(DIALOGUE_TASKS_READ_LIMIT, offset).map((row) => this.globalTask(String(row.dialogue_id))!);
   }
 
   #taskRecord(task: StoredDialogueTask): Record<string, unknown> {

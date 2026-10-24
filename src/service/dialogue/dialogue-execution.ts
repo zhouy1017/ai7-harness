@@ -213,13 +213,21 @@ export class DialogueExecutionOwner {
 
   requireGlobalReady(policy: LaunchPolicyProjection): AdmittedDialogueRoute {
     const route = admittedGlobalAgentRoute(policy);
-    if (route === null || this.#deps.live === null || this.#disposed) throw new DialogueError('GLOBAL_AGENT_POLICY_BLOCKED', '当前处理策略未允许');
+    const bound = this.#deps.live?.route;
+    if (route === null || this.#deps.live === null || this.#disposed || !this.#deps.live.credentialReference ||
+        bound?.profile.route !== route.profile.route || bound.modelProfile.model !== route.modelProfile.model)
+      throw new DialogueError('GLOBAL_AGENT_POLICY_BLOCKED', '当前处理策略未允许');
     return route;
   }
 
+  globalDisclosureReference(): string { return this.#deps.live?.credentialReference ?? ''; }
+
   beginGlobal(turn: DialogueTurnStart, route: AdmittedDialogueRoute, sourceGuard: () => boolean): void {
     if (turn.message.globalSources === undefined || !sourceGuard()) throw new DialogueError('GLOBAL_AGENT_SCOPE_CHANGED', '记忆范围已经变化；未发送任何内容。');
-    this.begin({ ...turn, globalRoute: route, globalCredentialReference: this.#deps.live?.credentialReference ?? '', sourceGuard });
+    const credentialReference = this.#deps.live?.credentialReference ?? '';
+    const bindingCurrent = (): boolean => sourceGuard() && this.#deps.live?.credentialReference === credentialReference &&
+      this.#deps.live.route?.profile.route === route.profile.route && this.#deps.live.route.modelProfile.model === route.modelProfile.model;
+    this.begin({ ...turn, globalRoute: route, globalCredentialReference: credentialReference, sourceGuard: bindingCurrent });
   }
 
   /** What the attempt in flight sent and has streamed so far; `null` for any other attempt. */
@@ -351,6 +359,9 @@ export class DialogueExecutionOwner {
         // The editor's own selected words and question: the local deterministic route, or a remote one whose rule names them.
         outboundDataCategory: global ? 'public-or-synthetic' : DIALOGUE_OUTBOUND_CATEGORY,
         ...(global ? { contractCategories: new Set(['house-review-preference-excerpt'] as const) } : {}),
+        ...(global && route?.globalAgentDialogue !== undefined ? { globalAgentScope: {
+          rule: route.globalAgentDialogue, payloadCurrent: () => turn.sourceGuard?.() === true,
+        } } : {}),
         policy: route === null
           ? { operationalScope: 'development-ci', providerProcessingVersion: 'v1', liveTransmissionAllowed: false, authorizedLiveTransmissionCount: 0 }
           // The selected version, as the verified projection names it.
