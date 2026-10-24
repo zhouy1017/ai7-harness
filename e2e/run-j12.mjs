@@ -1591,7 +1591,13 @@ async function main() {
     manager = await launch(databaseExportPath);
     [primary] = await waitForRendererCount(manager, 1, 'database-import-window');
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'database-import-landing');
-    await createEmptyBook(primary, 'J12 替换前的图书');
+    const preReplacementBook = await createEmptyBook(primary, 'J12 替换前的图书');
+    requireJourney(await primary.evaluate(`(async () => {
+      const before = await window.ai7.inspectEditorialLearning({signalOffset:0,itemOffset:0});
+      const excluded = await window.ai7.changeEditorialLearning({kind:'book',bookId:${JSON.stringify(preReplacementBook)},excluded:true,expectedEntries:before.controlEntries});
+      const off = await window.ai7.changeEditorialLearning({kind:'switch',enabled:false,expectedEntries:excluded.controlEntries});
+      return !off.enabled && off.excludedBooks.some(book=>book.bookId===${JSON.stringify(preReplacementBook)});
+    })()`), 'database-backup-book-learning-excluded');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('library')), 'database-import-book-return');
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'database-import-book-returned');
     const titlesBeforeReplace = await bookTitles();
@@ -1650,6 +1656,7 @@ async function main() {
     manager = await launch(resolve(backupLocation, replaceBackup));
     [primary] = await waitForRendererCount(manager, 1, 'database-merge-window');
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'database-merge-landing');
+    const destinationLearningEnabled = await primary.evaluate(`window.ai7.inspectEditorialLearning({signalOffset:0,itemOffset:0}).then(page=>page.enabled)`);
     await openDataAndStorage('database-merge');
     await click(primary, '导入数据库…', 'database-merge-choose');
     await waitFor(primary, `document.querySelector('.database-import-preview')?.dataset.previewId !== undefined`, 'database-merge-previewed');
@@ -1680,6 +1687,16 @@ async function main() {
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'database-merged-landing');
     const titlesMerged = await bookTitles();
     requireJourney(JSON.stringify(titlesMerged) === JSON.stringify(titlesBeforeReplace), 'database-merged-titles', titlesMerged);
+    requireJourney(await primary.evaluate(`(async () => {
+      const page = await window.ai7.inspectEditorialLearning({signalOffset:0,itemOffset:0});
+      const books = await window.ai7.listBooks({after:null});
+      return page.enabled===${JSON.stringify(destinationLearningEnabled)} &&
+        page.excludedBooks.some(book=>book.bookId===${JSON.stringify(preReplacementBook)} && book.title==='J12 替换前的图书') &&
+        books.items.some(book=>book.bookId===${JSON.stringify(preReplacementBook)} && book.title==='J12 替换前的图书');
+    })()`), 'database-merged-book-learning-exclusion');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('knowledge')), 'database-merged-learning-knowledge');
+    await click(primary, '社级编辑记忆', 'database-merged-learning-memory');
+    await waitFor(primary, `document.querySelector('[data-editorial-memory] details')?.textContent.includes('已排除《J12 替换前的图书》') && document.querySelector('[data-learning-enabled]')?.checked===${JSON.stringify(destinationLearningEnabled)}`, 'database-merged-learning-display');
     await openDataAndStorage('database-merged');
     // The merge is recorded beside the replacement, and 回退 still offers the replacement's backup.
     await waitFor(primary, `document.querySelector('.database-import')?.dataset.replacements === '2' && document.querySelector('.database-import')?.dataset.rollBackOf === ${JSON.stringify(replacementId)} && (document.querySelector('.database-replacement-record')?.textContent ?? '').endsWith(${JSON.stringify(` · 已从「${replaceBackup}」合并 1 本图书：《J12 替换前的图书》 · 合并前备份「${mergeBackup}」`)})`, 'database-merged-recorded');

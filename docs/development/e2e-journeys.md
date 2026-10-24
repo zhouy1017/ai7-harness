@@ -56,6 +56,7 @@ Since S86d, the stage `database-import-merge` relaunches with the replacement's 
 - 只导入其中的图书 names every Book of the file: the one the replacement took away `将导入`, the others `本机已有，不导入`.
 - The merge waits for the next start, naming its `AI7 合并前备份 …` file, and `现在关闭 AI7` closes AI7.
 - After the next start, the Books are exactly those before the replacement. 导入记录 lists the merge beside the replacement, and 回退 still offers the replacement's backup.
+- Before replacement, J-12 excludes “J12 替换前的图书” through `changeEditorialLearning` and turns source learning off. After backup merge/restart, `inspectEditorialLearning` and 社级编辑记忆 retain that exact Book's identity and exclusion; destination global enablement stays unchanged. This adds no model or curation fixture.
 
 The stage `database-import-roll-back` then confirms 回退到替换前的数据 on its own, and after another start the Books are again exactly those before the replacement.
 
