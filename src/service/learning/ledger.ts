@@ -586,22 +586,35 @@ export class EditorialLearningLedger {
   }
 
   sourceSnapshot(signalId: string): EditorialMemorySourceSnapshot {
+    const standing = this.#sourceStanding(signalId);
+    requireLearning('snapshot' in standing);
+    return standing.snapshot;
+  }
+
+  /**
+   * Where one signal stands as a memory source now (Issue #1128 revision 8): its current snapshot, or the normal reason it is
+   * not — learning off, an excluded Book or material, a deferred or superseded source, an admission made for another version of
+   * its material, or a signal outside the review-decision family. Only validated records give such a reason; a malformed or
+   * missing signal, control, decision chain or review origin propagates its refusal and never reads as absence.
+   */
+  #sourceStanding(signalId: string): { readonly snapshot: EditorialMemorySourceSnapshot } | { readonly unavailable: 'not-current' | 'not-review' } {
     const signal = this.#signal(signalId);
     const eligibility = this.#currentEligibility(signal, this.controls());
-    requireLearning(eligibility === 'book' || eligibility === 'house');
-    const origin = this.#reviewOrigin(signal);
+    if (eligibility !== 'book' && eligibility !== 'house') return { unavailable: 'not-current' };
+    const origin = this.#reviewOrigin(signal, true);
+    if (origin === null) return { unavailable: 'not-review' };
     const last = this.#eligibilityHistory(signal.source.bookId, signal.source.materialKey).at(-1);
     const controls = this.#controlSnapshot(signal.source.bookId);
-    if (last !== undefined) requireLearning(last.materialDigest === signal.source.materialDigest);
+    if (last !== undefined && last.materialDigest !== signal.source.materialDigest) return { unavailable: 'not-current' };
     const admission: EditorialMemoryAdmission = last === undefined
       ? { kind: 'automatic', basis: { policy: LOCAL_LEARNING_POLICY_BASIS.policy, mode: LOCAL_LEARNING_POLICY_BASIS.mode, version: 2 },
         signalId, materialDigest: signal.source.materialDigest, controls }
       : { kind: 'explicit', decisionId: last.decisionId, ordinal: last.ordinal, basis: last.basis,
         materialDigest: signal.source.materialDigest, controls };
-    return { sourceKey: sha256Hex(canonicalJson({ signalId, materialDigest: signal.source.materialDigest, reasonRevision: signal.source.reasonRevision })),
+    return { snapshot: { sourceKey: sha256Hex(canonicalJson({ signalId, materialDigest: signal.source.materialDigest, reasonRevision: signal.source.reasonRevision })),
       feedbackKey: sha256Hex(canonicalJson({ bookId: signal.source.bookId, materialKey: signal.source.materialKey, materialDigest: signal.source.materialDigest })),
       signalId, source: signal.source, ...origin, eligibility, admission, attribution: signal.attribution,
-      bookTitle: String(this.db.prepare('SELECT title FROM books WHERE book_id = ?').get(signal.source.bookId)?.title ?? '') };
+      bookTitle: String(this.db.prepare('SELECT title FROM books WHERE book_id = ?').get(signal.source.bookId)?.title ?? '') } };
   }
 
   #validateSource(snapshot: EditorialMemorySourceSnapshot): void {
@@ -763,20 +776,33 @@ export class EditorialLearningLedger {
   }
 
   currentSources(version: EditorialMemoryVersion): EditorialMemorySourceSnapshot[] {
-    return this.#read(() => this.effectiveSources(version).map((source) => {
-      const current = this.sourceSnapshot(source.signalId);
-      requireLearning(current.sourceKey === source.sourceKey && current.operationalScope === version.operationalScope &&
-        (version.applicability.kind === 'house' ? current.eligibility === 'house'
-          : current.source.bookId === version.applicability.bookId));
+    return this.#read(() => {
+      const current = this.#currentOrNone(version);
+      requireLearning(current !== null);
       return current;
-    }));
+    });
+  }
+
+  /**
+   * The version's current sources, or `null` when a validated record positively places one outside current use (revision 8): a
+   * source that stands nowhere now, or one restricted to its Book behind House memory. Every integrity failure propagates.
+   */
+  #currentOrNone(version: EditorialMemoryVersion): EditorialMemorySourceSnapshot[] | null {
+    const current: EditorialMemorySourceSnapshot[] = [];
+    for (const source of this.effectiveSources(version)) {
+      const standing = this.#sourceStanding(source.signalId);
+      // The ancestry walk already proved each source's review origin; losing it now is missing lineage, not ordinary standing.
+      if (!('snapshot' in standing)) { requireLearning(standing.unavailable === 'not-current'); return null; }
+      if (version.applicability.kind === 'house' && standing.snapshot.eligibility !== 'house') return null;
+      requireLearning(standing.snapshot.sourceKey === source.sourceKey && standing.snapshot.operationalScope === version.operationalScope &&
+        (version.applicability.kind === 'house' || standing.snapshot.source.bookId === version.applicability.bookId));
+      current.push(standing.snapshot);
+    }
+    return current;
   }
 
   usable(version: EditorialMemoryVersion): boolean {
-    return this.#read(() => {
-      if (version.state !== 'active' || this.version(version.itemId).versionId !== version.versionId) return false;
-      try { this.currentSources(version); return true; } catch (error) { if (error instanceof LearningEligibilityError) return false; throw error; }
-    });
+    return this.#read(() => version.state === 'active' && this.version(version.itemId).versionId === version.versionId && this.#currentOrNone(version) !== null);
   }
 
   /** Existing opaque read-pin field, binding this memory version to its relevant current source/control basis only. */
@@ -1058,12 +1084,10 @@ export class EditorialLearningLedger {
       ORDER BY rowid DESC LIMIT ? OFFSET ?`).all(PAGE_SIZE + 1, input.signalOffset);
     const signals = rows.slice(0, PAGE_SIZE).map((row) => {
       const signal = this.#signal(String(row.signal_id));
-      let memoryCandidate: { editorialDimension: string; operationalScope: TrustedOperationalScope } | null = null;
-      try {
-        const snapshot = this.sourceSnapshot(signal.signalId);
-        if (scope === undefined || snapshot.operationalScope === scope) memoryCandidate = {
-          editorialDimension: snapshot.editorialDimension, operationalScope: snapshot.operationalScope };
-      } catch (error) { if (!(error instanceof LearningEligibilityError)) throw error; }
+      // Only a normal standing leaves a signal out of candidate selection (revision 8); a corrupt record refuses the whole page.
+      const standing = this.#sourceStanding(signal.signalId);
+      const memoryCandidate = 'snapshot' in standing && (scope === undefined || standing.snapshot.operationalScope === scope)
+        ? { editorialDimension: standing.snapshot.editorialDimension, operationalScope: standing.snapshot.operationalScope } : null;
       return { ...signal, currentEligibility: this.#currentEligibility(signal, controls),
         memoryCandidate,
         bookTitle: String(this.db.prepare('SELECT title FROM books WHERE book_id = ?').get(signal.source.bookId)?.title ?? '') };
