@@ -19,7 +19,11 @@ import {
   type PlatformToolSchema,
   toolSetEqualsPlatformSchemas,
   type PlatformToolName,
+  isLocalToolName,
 } from '../provider/platform-tools.js';
+import { localToolParallelBound, type LocalToolsRule } from '../provider/local-tools.js';
+import type { PinnedLocalToolSources } from '../retrieval/index.js';
+import type { ProcedureDefinitionPin } from '../../shared/protocol/procedures.js';
 import { HarnessSessionLogBackend } from './session-log.js';
 import type { ResearchDeclaration } from '../analysis/kind-definition.js';
 
@@ -49,13 +53,14 @@ export const HARNESS_SERVICE_SET = ['agents', 'sessions', 'llm', 'systemPrompt',
 export const PROMPT_SECTION_NAME = 'ai7:baseline-analysis-contract' as const;
 
 export interface HarnessCompositionDescriptor {
+  readonly version: 1 | 2;
   readonly researchDeclaration?: ResearchDeclaration;
   readonly packages: typeof HARNESS_PACKAGE_PINS;
   readonly services: typeof HARNESS_SERVICE_SET;
   readonly systemPrompt: { readonly includeHarnessIdentity: false; readonly includeRuntimeContext: false; readonly persona: ''; readonly completeSection: typeof PROMPT_SECTION_NAME };
   /** `registeredTools` is 0 on every composition but one that registers the two platform tools (Issue #473), where it is 2. */
-  readonly tools: { readonly mode: 'native'; readonly maxParallelSubCalls: 1; readonly registeredTools: number };
-  readonly agentLoop: { readonly maxParallelToolCalls: 1; readonly configuredAgents: 0 };
+  readonly tools: { readonly mode: 'native'; readonly maxParallelSubCalls: number; readonly registeredTools: number };
+  readonly agentLoop: { readonly maxParallelToolCalls: number; readonly configuredAgents: 0 };
   readonly subagents: false;
   readonly route: ExecutionRoute;
   readonly model: string;
@@ -72,7 +77,14 @@ export interface HarnessCompositionDescriptor {
    * selected Provider Processing rule names them — keeps its descriptor and its digest byte-identical.
    */
   readonly platformTools?: { readonly names: typeof PLATFORM_TOOL_NAMES; readonly schemaDigest: string };
-  readonly localTools?: { readonly names: typeof LOCAL_TOOL_NAMES; readonly schemaDigest: string };
+  /**
+   * v2 records the bound's derivation beside the resolved `maxParallelToolCalls` (Issue #1090 revision 4): the rule's
+   * `parallelCallsAllowed` permission resolves to its `callsPerUnit` cap, and its absence or `false` to 1.
+   */
+  readonly localTools?: { readonly names: readonly string[]; readonly schemaDigest: string; readonly callsPerUnit?: number; readonly parallelCallsAllowed?: boolean };
+  readonly procedure?: ProcedureDefinitionPin;
+  readonly stages?: readonly { readonly ordinal: number; readonly stageType: string; readonly digest: string }[];
+  readonly sources?: PinnedLocalToolSources;
   /** SHA-256 over every field above in canonical JSON; the Execution Binding pins it. */
   readonly digest: string;
 }
@@ -81,26 +93,38 @@ export interface HarnessCompositionDescriptor {
 export const SESSION_LOG_PACKAGE_PIN = '0.1.0-rc.6' as const;
 
 export interface CompositionOptions {
+  readonly version?: 1 | 2;
+  readonly procedure?: ProcedureDefinitionPin;
+  readonly stages?: readonly { readonly ordinal: number; readonly stageType: string; readonly digest: string }[];
+  readonly sources?: PinnedLocalToolSources;
   readonly researchDeclaration?: ResearchDeclaration;
   /** The composition persists its Session log under the Agent Data Root. */
   readonly sessionLog?: boolean;
   /** The composition registers the two platform tools (Issue #473); only for a Run whose rule names them and whose plan declares web search. */
   readonly platformTools?: boolean;
-  readonly localTools?: boolean;
+  readonly localTools?: boolean | LocalToolsRule;
 }
 
 export function describeComposition(route: ExecutionRoute, model: string, promptContractDigest: string, options: CompositionOptions = {}): HarnessCompositionDescriptor {
   const withTools = options.platformTools === true;
+  const version = options.version ?? 1;
+  const local = version === 1 ? options.localTools !== undefined && options.localTools !== false : options.localTools ?? false;
+  const schemas = ruleNamedToolSchemas(withTools, local);
+  const localSchemas = ruleNamedToolSchemas(false, local);
+  const parallel = version === 2 && typeof local === 'object' ? localToolParallelBound(local) : 1;
   if (options.researchDeclaration !== undefined && (options.researchDeclaration.webSearch !== withTools ||
       options.researchDeclaration.searchEngine !== (withTools ? 'user-selected-backend' : null))) {
     throw new Error('RESEARCH_DECLARATION_COMPOSITION_MISMATCH');
   }
   const body = {
+    ...(version === 2 ? { version: 2 as const, ...(options.procedure === undefined ? {} : { procedure: options.procedure }),
+      ...(options.stages === undefined ? {} : { stages: options.stages }),
+      ...(options.sources === undefined ? {} : { sources: options.sources }) } : {}),
     packages: HARNESS_PACKAGE_PINS,
     services: HARNESS_SERVICE_SET,
     systemPrompt: { includeHarnessIdentity: false as const, includeRuntimeContext: false as const, persona: '' as const, completeSection: PROMPT_SECTION_NAME },
-    tools: { mode: 'native' as const, maxParallelSubCalls: 1 as const, registeredTools: ruleNamedToolSchemas(withTools, options.localTools === true).length },
-    agentLoop: { maxParallelToolCalls: 1 as const, configuredAgents: 0 as const },
+    tools: { mode: 'native' as const, maxParallelSubCalls: parallel, registeredTools: schemas.length },
+    agentLoop: { maxParallelToolCalls: parallel, configuredAgents: 0 as const },
     subagents: false as const,
     route,
     model,
@@ -110,9 +134,14 @@ export function describeComposition(route: ExecutionRoute, model: string, prompt
       ? { sessionLog: { package: { '@deepseek-ai/dsh-session-persistence': SESSION_LOG_PACKAGE_PIN }, storage: 'agent-data-root-jsonl' as const } }
       : {}),
     ...(withTools ? { platformTools: { names: PLATFORM_TOOL_NAMES, schemaDigest: PLATFORM_TOOL_SCHEMA_DIGEST } } : {}),
-    ...(options.localTools === true ? { localTools: { names: LOCAL_TOOL_NAMES, schemaDigest: LOCAL_TOOL_SCHEMA_DIGEST } } : {}),
+    ...(localSchemas.length > 0 ? { localTools: version === 1 ? { names: LOCAL_TOOL_NAMES, schemaDigest: LOCAL_TOOL_SCHEMA_DIGEST }
+      : { names: localSchemas.map((schema) => schema.name), schemaDigest: sha256Hex(canonicalJson(localSchemas)),
+        ...(typeof local === 'object' ? { callsPerUnit: local.targetedRetrieval.callsPerUnit, parallelCallsAllowed: local.parallelCallsAllowed === true } : {}) } } : {}),
   };
-  return { ...body, digest: sha256Hex(canonicalJson(body)) };
+  const descriptor = { ...body, digest: sha256Hex(canonicalJson(body)) } as HarnessCompositionDescriptor;
+  // v1's serialized bytes predate a version field; its implicit version remains accessible without changing those bytes.
+  if (version === 1) Object.defineProperty(descriptor, 'version', { value: 1, enumerable: false });
+  return descriptor;
 }
 
 /** One platform-tool call the harness hands its owner: the model's call id, the tool, and the arguments as the model sent them. */
@@ -184,6 +213,8 @@ export interface HarnessTurnOutcome {
 export type HarnessSessionMode = 'single' | 'per-unit';
 
 export interface HarnessExecutionRequest {
+  readonly compositionOptions?: CompositionOptions;
+  readonly localToolsRule?: LocalToolsRule;
   readonly sessionId: string;
   readonly route: ExecutionRoute;
   readonly model: string;
@@ -273,11 +304,14 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
     CONTEXT_WINDOW_EXCEEDED_CODE: llm.CONTEXT_WINDOW_EXCEEDED_CODE,
   };
   const toolOwner = request.platformTools ?? request.localTools ?? null;
-  const schemas = ruleNamedToolSchemas(request.platformTools !== undefined, request.localTools !== undefined);
+  const selectedLocal = request.localTools === undefined ? false : request.compositionOptions?.version === 2
+    ? request.localToolsRule ?? request.compositionOptions.localTools ?? true : true;
+  const schemas = ruleNamedToolSchemas(request.platformTools !== undefined, selectedLocal);
   const composition = describeComposition(request.route, request.model, request.promptContractDigest, {
+    ...request.compositionOptions,
     sessionLog: request.sessionLogRoot !== undefined,
     platformTools: request.platformTools !== undefined,
-    localTools: request.localTools !== undefined,
+    localTools: selectedLocal,
   });
   const context: Context = new cordis.Context();
   let bound = false;
@@ -292,9 +326,9 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
     if (request.sessionLogRoot !== undefined) await context.plugin(await sessionLogService(), { root: request.sessionLogRoot });
     await context.plugin(llm.LlmRuntime);
     await context.plugin(prompt.SystemPrompt, { includeHarnessIdentity: false, includeRuntimeContext: false, persona: '' });
-    await context.plugin(tools.ToolRuntime, { mode: 'native', maxParallelSubCalls: 1 });
-    if (toolOwner !== null) registerPlatformTools(context, toolOwner, schemas, request.localTools);
-    await context.plugin(loop.AgentLoop, { maxParallelToolCalls: 1, agents: [] });
+    await context.plugin(tools.ToolRuntime, { mode: 'native', maxParallelSubCalls: composition.tools.maxParallelSubCalls });
+    if (toolOwner !== null) registerPlatformTools(context, toolOwner, schemas, request.localTools, typeof selectedLocal === 'object' ? selectedLocal : undefined);
+    await context.plugin(loop.AgentLoop, { maxParallelToolCalls: composition.agentLoop.maxParallelToolCalls, agents: [] });
     context.systemPrompt.suppressRuntimeContext();
     context.systemPrompt.section({ name: PROMPT_SECTION_NAME, order: 0, text: request.systemPrompt, complete: true });
     context.llm.registerAdapter([request.route], request.adapterFactory(failureCodes));
@@ -509,12 +543,13 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
  * success, refusal, or a pipeline failure — immediately before materializing it, fixes the one text the model will read
  * and has the owner admit it, so no result can reach the payload that the owner did not admit.
  */
-function registerPlatformTools(context: Context, owner: PlatformToolOwner, schemas: ReadonlyArray<PlatformToolSchema>, localOwner?: PlatformToolOwner): void {
+function registerPlatformTools(context: Context, owner: PlatformToolOwner, schemas: ReadonlyArray<PlatformToolSchema>, localOwner?: PlatformToolOwner, localRule?: LocalToolsRule): void {
   for (const schema of schemas) {
     const tool = schema.name;
-    const selectedOwner = tool === 'retrieve' || tool === 'exact_fetch' ? localOwner ?? owner : owner;
+    const selectedOwner = isLocalToolName(tool) ? localOwner ?? owner : owner;
     const definition: ToolDefinition = {
       name: tool,
+      isConcurrencySafe: () => isLocalToolName(tool) && localRule?.declarations?.some((entry) => entry.name === tool && entry.concurrencySafe) === true,
       description: schema.description,
       parameters: JSON.parse(JSON.stringify(schema.parameters)) as Record<string, unknown>,
       output: {

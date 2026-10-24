@@ -127,7 +127,7 @@ import type { PublicSampleBookSourceDigest } from './public-samplebooks.js';
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 167 as const;
+export const SERVICE_PROTOCOL_VERSION = 168 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 export interface BookFindingProjection {
@@ -3408,6 +3408,7 @@ export const RUN_REPORT_USAGE_STAGES = ['units', 'cross-unit-reduction', 'assura
 export type RunReportUsageStageId = (typeof RUN_REPORT_USAGE_STAGES)[number];
 
 export interface RunReportUsageProjection {
+  localToolCalls?: Readonly<Record<string, number>>;
   retrievalCalls?: number;
   exactFetchCalls?: number;
   refusedRetrievalCalls?: number;
@@ -4532,6 +4533,7 @@ export interface BaselineAnalysisPlanAdaptationProjection {
 export type SafeRetryRepetition = 'byte-identical' | 'differs' | 'unrecorded';
 
 export interface BaselineAnalysisExecutionBindingProjection {
+  compositionVersion?: 2;
   attemptId: string;
   bindingDigest: string;
   harnessSessionId: string;
@@ -4806,6 +4808,7 @@ export interface BaselineAnalysisProjection {
     stopCondition: string;
   };
   planEnvelope: null | {
+    compositionVersion?: 2;
     digest: string;
     dispatchAllowed: boolean;
     providerStatus: 'remote-denied-local-deterministic' | 'remote-denied-no-route' | 'remote-eligible-developer-live' | 'remote-eligible-ordinary-production';

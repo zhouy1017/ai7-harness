@@ -151,7 +151,7 @@ function plannedPayloadCategories(kind: string): readonly OutboundDataCategory[]
  * metadata, words and exemplars); a missing owner derivation or a changed declared digest refuses admission. Any other
  * kind has no row and is not admitted.
  */
-function liveKindExpectation(definition: LiveKindDefinition): LiveKindExpectation | null {
+function liveKindExpectation(definition: LiveKindDefinition, policy?: LaunchPolicyProjection): LiveKindExpectation | null {
   if (definition.kind === FACTUAL_REVIEW_KIND) {
     // The research contract (#744) and each Evidence Assurance Level's own (Issue #901): 快速整理 is v1 with no tool declared.
     const admitted = [withFactualResearch(factualReviewKindDefinition()), factualReviewLevelDefinition('standard'), factualReviewLevelDefinition('strict')]
@@ -170,8 +170,11 @@ function liveKindExpectation(definition: LiveKindDefinition): LiveKindExpectatio
   const review = BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.find((category) => reviewCategoryKindId(category.categoryId) === definition.kind);
   if (review !== undefined) {
     if (review.executor !== 'review-category-contract' || review.seriesKnowledge !== undefined) return null;
+    const candidates = [reviewCategoryKindDefinition(reviewCategoryContractInput(review), definition.contractVersion === 'ai7.editorial-review/1' ? 1 : 2),
+      reviewCategoryKindDefinition(reviewCategoryContractInput(review), 2, kindLocalTools(policy, definition.kind) ?? undefined)];
+    const expectedBase = liveMaterialContract(definition)?.basePromptContractDigest ?? definition.promptContractDigest;
     return {
-      promptContractDigest: reviewCategoryKindDefinition(reviewCategoryContractInput(review), definition.contractVersion === 'ai7.editorial-review/1' ? 1 : 2).promptContractDigest,
+      promptContractDigest: candidates.find((entry) => entry.promptContractDigest === expectedBase)?.promptContractDigest ?? null,
       payloadCategories: ['public-or-synthetic'],
     };
   }
@@ -222,7 +225,7 @@ export function liveKindAdmission(
         liveKindRule(policy, definition.kind)?.taskKindOverrides?.[definition.kind]?.webSearch !== false)) return null;
   if (category !== undefined && category.searchEngine &&
       (platformToolsFromProjection(liveKindRule(policy, definition.kind)) === null || !modelAdmitsPlatformTools(binding.route, binding.model))) return null;
-  const expectation = liveKindExpectation(definition);
+  const expectation = liveKindExpectation(definition, policy);
   return expectation === null ? null : liveKindAdmitted(policy, definition.kind, definition, binding, expectation);
 }
 
@@ -251,7 +254,7 @@ export function modelAdmitsPlatformTools(route: string, model: string): boolean 
 /** Local retrieval never changes web declarations. Baseline and enrolled background remain outside targeted retrieval. */
 export function kindLocalTools(policy: LaunchPolicyProjection | undefined, kind: string, origin: 'foreground' | 'background' = 'foreground'): LocalToolsRule | null {
   if (kind === 'baseline-manuscript-analysis' || origin === 'background') return null;
-  const rule = liveKindRule(policy, kind);
+  const rule = liveKindRule(policy, kind, [], origin);
   return rule === null || !modelAdmitsPlatformTools(rule.route, rule.model) ? null : localToolsFromProjection(rule);
 }
 

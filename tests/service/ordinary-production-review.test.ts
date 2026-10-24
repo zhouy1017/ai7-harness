@@ -10,6 +10,7 @@ import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/ass
 import type { LaunchPolicyProjection } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2 } from '../support/sample1-baseline.js';
+import { sample1DerivedLibraryItem } from '../editorial-cases/runner/run-setups.js';
 
 let roots: ServiceTestRoots | undefined;
 let store: EditorialStore | undefined;
@@ -32,8 +33,9 @@ interface ReviewRequest { readonly category: string; readonly ordinal: number; r
  */
 async function productionReview(
   categories: readonly string[],
-  answer: (category: string, ordinal: number, prior: number) => 'valid' | 'invalid' | 'stall',
+  answer: (category: string, ordinal: number, prior: number) => 'valid' | 'invalid' | 'stall' | 'tools',
   project: (policy: LaunchPolicyProjection) => LaunchPolicyProjection = (policy) => policy,
+  useMaterial = false,
 ) {
   roots = await createServiceTestRoots('ai7-production-review-');
   store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
@@ -50,8 +52,8 @@ async function productionReview(
     live: { scope: 'ordinary-production', ...binding, runBudgetCeiling: 'unset' } });
   const requests: ReviewRequest[] = [];
   const nativeFetch: typeof fetch = async (_url, init) => {
-    const body = JSON.parse(String(init?.body)) as { messages: Array<{ content: string }>; tools?: Array<{ function: { name: string } }> };
-    const message = body.messages.at(-1)!.content;
+    const body = JSON.parse(String(init?.body)) as { messages: Array<{ role: string; content: string }>; tools?: Array<{ function: { name: string } }> };
+    const message = body.messages.findLast((entry) => entry.role === 'user')!.content;
     const header = parseReviewCategoryUnitMessageHeader(message);
     let content: string;
     if (header !== null) {
@@ -59,6 +61,13 @@ async function productionReview(
       const request: ReviewRequest = { category: header.categoryId, ordinal: header.ordinal, body: String(init?.body), tools: body.tools?.map((tool) => tool.function.name) ?? [], sentAt: Date.now() };
       requests.push(request);
       const shape = answer(header.categoryId, header.ordinal, prior);
+      if (shape === 'tools') {
+        const blockId = /\[1\] \[(blk_[0-9a-f]{24})\]/u.exec(message)![1]!;
+        return new Response(JSON.stringify({ model: choice.model, choices: [{ message: { content: null, reasoning_content: '合成推理。', tool_calls: [
+          { id: 'read-1', type: 'function', function: { name: 'read_blocks', arguments: JSON.stringify({ blockId, radius: 0 }) } },
+          { id: 'search-1', type: 'function', function: { name: 'search_manuscript', arguments: JSON.stringify({ query: '的', mode: 'exact' }) } },
+        ] }, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 40, completion_tokens: 20 } }), { status: 200 });
+      }
       if (shape === 'stall') {
         // Answers nothing: only the request's own signal ends it, as the native fetch rejects on abort.
         return new Promise<Response>((_resolve, reject) => {
@@ -76,8 +85,9 @@ async function productionReview(
         });
         const block = blocks.find((entry) => entry.text.length >= 10 && entry.text.length <= 80);
         content = JSON.stringify({ schema: 'ai7.editorial-review.unit-result/2', unitOrdinal: header.ordinal,
-          findings: header.categoryId === 'publication-risk' && header.ordinal === 1 && block !== undefined
-            ? [{ quote: block.text, blockOrdinal: block.ordinal, severity: 'should', note: '合成风险点；请按本社制度人工复核。', clauseId: 'publication-risk/1' }] : [],
+          findings: header.ordinal === 1 && block !== undefined && (header.categoryId === 'publication-risk' || body.messages.some((entry) => entry.role === 'tool'))
+            ? [{ quote: block.text, blockOrdinal: block.ordinal, severity: 'should', note: '合成审阅发现；请人工复核。',
+              ...(header.categoryId === 'publication-risk' ? { clauseId: 'publication-risk/1' } : { replacement: `${block.text}合成` }) }] : [],
         });
       }
     } else if (message.startsWith('保证抽样 ')) content = JSON.stringify({ schema: 'ai7.analysis.assurance-sampling-result/1',
@@ -93,8 +103,9 @@ async function productionReview(
   driver = new ReviewRunDriver(store.reviewRunDriveSteps, owner);
   const book = await importSample1Book(store, roots.codeRoot, '合成生产审阅');
   await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
+  const materialIds = useMaterial ? [await sample1DerivedLibraryItem(store, roots, book)] : [];
   let work = store.createReviewRunPreparationWork(book.bookId, [...categories],
-    { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy);
+    { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy, null, materialIds);
   while (!work.done) work = store.advanceReviewRunPreparationWork(work.workId!);
   const run = work.projection!.run!;
   store.authorizeReviewRun(book.bookId, run.reviewRunId, run.categories.filter((category) => category.planEnvelopeDigest !== null)
@@ -104,6 +115,15 @@ async function productionReview(
 }
 
 const typosDefinition = () => reviewCategoryKindDefinition(reviewCategoryContractInput(reviewCategoryEntry('typos-and-usage')!));
+
+it('reconstructs a tool-aware material review from its frozen plan and retains its material wrapper', async () => {
+  const { store: opened, bookId, reviewRunId, requests } = await productionReview(['typos-and-usage'],
+    (_category, ordinal, prior) => ordinal === 1 && prior === 0 ? 'tools' : 'valid', (policy) => policy, true);
+  const settled = opened.inspectReviewWorkspace(bookId, reviewRunId).run!;
+  expect(settled.categories.every((category) => category.state === 'settled')).toBe(true);
+  expect(requests.some((request) => request.body.includes('read_blocks') && request.body.includes('sample1 背景摘录'))).toBe(true);
+  expect(settled.findings.filter((finding) => finding.categoryId === 'typos-and-usage')).toHaveLength(1);
+}, 60_000);
 
 it('admits one byte-identical contract retry under v26 and publishes risk points with 未联网核查', async () => {
   const { store: opened, bookId, reviewRunId, requests } = await productionReview(['typos-and-usage', 'publication-risk'],
@@ -116,13 +136,28 @@ it('admits one byte-identical contract retry under v26 and publishes risk points
   expect(retried[0]!.body === retried[1]!.body).toBe(true);
   const riskRequests = requests.filter((entry) => entry.category === 'publication-risk');
   expect(riskRequests.length).toBeGreaterThan(0);
-  // Existing retrieval remains available; no web tool or newly declared F-18a tool registers.
-  expect(riskRequests.every((entry) => [...entry.tools].sort().join(',') === 'exact_fetch,retrieve')).toBe(true);
+  expect(riskRequests.every((entry) => [...entry.tools].sort().join(',') === 'baseline_facts,exact_fetch,guideline_clause,read_blocks,retrieve,search_manuscript,term_table')).toBe(true);
   const settled = opened.inspectReviewWorkspace(bookId, reviewRunId).run!;
   expect(settled.categories.every((category) => category.state === 'settled')).toBe(true);
   const risk = settled.findings.filter((finding) => finding.categoryId === 'publication-risk');
   expect(risk).toHaveLength(1);
   expect(risk.every((finding) => finding.riskPoint && finding.stateLine === '未联网核查' && finding.note.includes('未联网核查'))).toBe(true);
+}, 60_000);
+
+it('admits a two-tool turn under the verified ordinary-production policy and settles its anchored review', async () => {
+  const { store: opened, bookId, reviewRunId, requests } = await productionReview(['typos-and-usage'],
+    (_category, ordinal, prior) => ordinal === 1 && prior === 0 ? 'tools' : 'valid');
+  const first = requests.filter((entry) => entry.ordinal === 1);
+  expect(first).toHaveLength(2);
+  const next = JSON.parse(first[1]!.body) as { messages: Array<{ role: string; content: string }> };
+  const results = next.messages.filter((entry) => entry.role === 'tool');
+  expect(results).toHaveLength(2);
+  expect(results.every((entry) => Array.isArray(JSON.parse(entry.content)))).toBe(true);
+  expect(first[0]!.body.includes('不调用任何工具')).toBe(false);
+  const settled = opened.inspectReviewWorkspace(bookId, reviewRunId).run!;
+  expect(settled.categories.every((category) => category.state === 'settled')).toBe(true);
+  expect(settled.findings.filter((finding) => finding.categoryId === 'typos-and-usage')).toHaveLength(1);
+  expect(opened.inspectReviewCategory(bookId, typosDefinition()).resultSetRevision?.gaps).toEqual([]);
 }, 60_000);
 
 // The Run hands the projected `transport.requestDeadlineSeconds` to the adapter (#1103): v26 states the fallback's 180 s, so only a

@@ -520,9 +520,8 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
       // The shared once-only transmission writes the analysis path's model-call lines exactly as before (Issue #473).
       expect(line).not.toHaveProperty('kind');
     }
-    // The frozen composition registers zero tools: its digest is the one every plan without platform tools pins, the
-    // literal dev froze before the platform tools existed (dev@29a9831a), so a change to the tool-less body moves it.
-    expect(settled.planEnvelope!.behaviorCompositionDigest).toBe(DEV_LIVE_COMPOSITION_DIGEST);
+    // New plans pin v2; the explicit v1 constructor still reproduces the predecessor's frozen digest.
+    expect(settled.planEnvelope!.compositionVersion).toBe(2);
     expect(describeComposition('opencode-go', 'deepseek-v4.1-flash', BASELINE_PROMPT_CONTRACT_DIGEST).digest).toBe(DEV_LIVE_COMPOSITION_DIGEST);
     await store.close();
   });

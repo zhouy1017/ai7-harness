@@ -1,6 +1,6 @@
 import type { ProviderModelProfile } from './model-profile.js';
 import { RetrievalError, type RetrievalIndex } from '../retrieval/index.js';
-import { LOCAL_TOOL_BREAKER_END, LOCAL_TOOL_ROUND_TRIP_BREAKER } from './local-tools.js';
+import { LOCAL_TOOL_BREAKER_END, LOCAL_TOOL_RESULT_MAX_BYTES, LOCAL_TOOL_ROUND_TRIP_BREAKER, localToolParallelBound } from './local-tools.js';
 import type { DevelopmentValidationIntent } from '../../shared/protocol.js';
 import type { CredentialBroker } from './credential-broker.js';
 import type { PlatformToolCallItem, PlatformToolCallResult } from './live-transmission.js';
@@ -23,6 +23,8 @@ import {
   canonicalPublicUrl,
   canonicalToolArguments,
   toolArgumentsDigest,
+  isLocalToolName,
+  ruleNamedToolSchemas,
   type PlatformToolName,
 } from './platform-tools.js';
 import type { PlatformToolFetch } from './platform-tool-http.js';
@@ -62,6 +64,7 @@ export class PlatformToolSession implements PlatformToolOwner {
   readonly #onUsage: ((usage: { inputTokens: number; outputTokens: number }) => void) | undefined;
   readonly #runResults = new Map<string, { readonly text: string; readonly sourceUrl: string | null }>();
   #inFlight = false;
+  #localInFlight = 0;
   #refusedRoundTrips = 0;
   readonly #oneQueryPerUnit: boolean;
   #unitSearchQuery: string | null = null;
@@ -70,7 +73,7 @@ export class PlatformToolSession implements PlatformToolOwner {
   readonly #evidenceOnly: boolean;
   evidenceNeedsCommander = false;
   readonly usage: { requests: number; inputTokens: number; outputTokens: number; searchCalls: Record<string, number>; refusedSearchCalls: number;
-    fetchCount: number; fetchBytes: number; retrievalCalls?: number; exactFetchCalls?: number; refusedRetrievalCalls?: number } = {
+    fetchCount: number; fetchBytes: number; retrievalCalls?: number; exactFetchCalls?: number; refusedRetrievalCalls?: number; localToolCalls?: Record<string, number> } = {
     requests: 0, inputTokens: 0, outputTokens: 0, searchCalls: {}, refusedSearchCalls: 0, fetchCount: 0, fetchBytes: 0,
   };
   readonly provenance: Array<{ sourceKind: 'tool'; backendId: string | null; host: string; capturedAt: string; argumentsDigest: string; responseDigest: string }> = [];
@@ -265,7 +268,7 @@ export class PlatformToolSession implements PlatformToolOwner {
   }
 
   async execute(call: PlatformToolExecution): Promise<{ readonly text: string; readonly sourceUrl: string | null }> {
-    if (call.tool === 'retrieve' || call.tool === 'exact_fetch') return this.#executeLocal(call);
+    if (isLocalToolName(call.tool)) return this.#executeLocal(call);
     if (this.#inFlight) return this.#refuseCounted('平台工具必须顺序调用。');
     this.#inFlight = true;
     try { return await this.#execute(call); }
@@ -274,7 +277,11 @@ export class PlatformToolSession implements PlatformToolOwner {
 
   async #executeLocal(call: PlatformToolExecution): Promise<{ readonly text: string; readonly sourceUrl: null }> {
     if (call.tool === 'retrieve') this.usage.retrievalCalls = (this.usage.retrievalCalls ?? 0) + 1;
-    else this.usage.exactFetchCalls = (this.usage.exactFetchCalls ?? 0) + 1;
+    else if (call.tool === 'exact_fetch') this.usage.exactFetchCalls = (this.usage.exactFetchCalls ?? 0) + 1;
+    if (this.#binding.localTools?.declarations !== undefined) {
+      this.usage.localToolCalls ??= {};
+      this.usage.localToolCalls[call.tool] = (this.usage.localToolCalls[call.tool] ?? 0) + 1;
+    }
     this.#unitLocalCalls += 1;
     const refuse = (text: string): { text: string; sourceUrl: null } => { this.usage.refusedRetrievalCalls = (this.usage.refusedRetrievalCalls ?? 0) + 1; return refusal(text); };
     // Every local request counts, including malformed, concurrent, duplicate and over-cap refusals.
@@ -283,18 +290,30 @@ export class PlatformToolSession implements PlatformToolOwner {
     if (rule?.targetedRetrieval.allowed !== true || this.#retrieval === null) return refuse('RETRIEVAL_SOURCE_NOT_AUTHORIZED');
     if (this.#base.currentBindingDigest() !== this.#binding.bindingDigest || call.signal.aborted) return refuse('RETRIEVAL_SOURCE_NOT_AUTHORIZED');
     if (this.#unitLocalCalls > rule.targetedRetrieval.callsPerUnit) return refuse('检索未完成：本单元的检索调用次数已用完，请使用已有结果。');
-    if (this.#inFlight || this.#executedCallIds.has(call.callId)) return refuse('检索工具必须顺序调用，且不能重复使用调用标识。');
+    if (!ruleNamedToolSchemas(false, rule).some((schema) => schema.name === call.tool)) return refuse('本次尝试未准许该工具。');
+    if (this.#base.ceilingState?.() === 'reached') return refuse('已达到运行预算上限。');
+    if (this.#inFlight || this.#localInFlight >= localToolParallelBound(rule) || this.#executedCallIds.has(call.callId)) return refuse('检索工具超出并行上限，或重复使用调用标识。');
     this.#executedCallIds.add(call.callId);
     const args = canonicalToolArguments(call.tool, call.arguments);
-    if (args === null || (args.tool !== 'retrieve' && args.tool !== 'exact_fetch')) return refuse('检索参数无效。');
-    this.#inFlight = true;
+    if (args === null || !isLocalToolName(args.tool)) return refuse('检索参数无效。');
+    this.#localInFlight += 1;
     try {
-      const value = args.tool === 'retrieve' ? await this.#retrieval.retrieve(args.query, args.k, args.sourceKinds) : this.#retrieval.exactFetch(args.candidateId);
+      let value: unknown;
+      switch (args.tool) {
+        case 'retrieve': value = await this.#retrieval.retrieve(args.query, args.k, args.sourceKinds); break;
+        case 'exact_fetch': value = this.#retrieval.exactFetch(args.candidateId); break;
+        case 'read_blocks': value = this.#retrieval.readBlocks(args.blockId, args.radius); break;
+        case 'search_manuscript': value = this.#retrieval.searchManuscript(args.query, args.mode); break;
+        case 'baseline_facts': case 'term_table': value = this.#retrieval.pinnedRecords(args.tool, args.query); break;
+        case 'guideline_clause': value = this.#retrieval.pinnedRecords(args.tool, args.clauseId); break;
+        default: return refuse('本次尝试未准许该工具。');
+      }
       if (call.signal.aborted || this.#base.currentBindingDigest() !== this.#binding.bindingDigest) return refuse('检索未完成');
-      return { text: JSON.stringify(value), sourceUrl: null };
+      const text = JSON.stringify(value);
+      return Buffer.byteLength(text, 'utf8') > LOCAL_TOOL_RESULT_MAX_BYTES ? refuse('检索未完成：结果超过字节上限。') : { text, sourceUrl: null };
     } catch (error) {
       return refuse(error instanceof RetrievalError ? error.code : '检索未完成');
-    } finally { this.#inFlight = false; }
+    } finally { this.#localInFlight -= 1; }
   }
 
   /**
@@ -347,7 +366,7 @@ export class PlatformToolSession implements PlatformToolOwner {
     this.#executedCallIds.add(call.callId);
     const args = canonicalToolArguments(call.tool, call.arguments);
     if (args === null) return this.#refuseCounted('参数不是这个工具接受的形式。');
-    if (args.tool === 'retrieve' || args.tool === 'exact_fetch' || this.#book === null) return this.#refuseCounted('本次尝试未准许该工具。');
+    if (args.tool !== 'websearch' && args.tool !== 'webfetch' || this.#book === null) return this.#refuseCounted('本次尝试未准许该工具。');
     if (this.#evidenceOnly && args.tool === 'webfetch') return this.#refuseCounted('此最小证据项只执行一次检索往返；不取回网页。');
     const digest = toolArgumentsDigest(args);
     if (args.tool === 'websearch' && this.#oneQueryPerUnit) {

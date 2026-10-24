@@ -315,8 +315,10 @@ export class DialogueExecutionOwner {
     // An Agent 工作区 turn registers no tool, whatever the rule or fixture offers the dialogue (Issue #90, slice 13a).
     const global = turn.message.globalSources !== undefined;
     const workspace = turn.settled !== undefined;
-    const localRule = workspace || global ? null
+    const admittedLocalRule = workspace || global ? null
       : live?.route?.localTools ?? (live === null && this.#deps.fixture !== null ? dialogueRetrievalFixtureRule(this.#deps.fixture, turn.message) : null);
+    // This caller still pins composition v1; Book dialogue's expanded tool composition belongs to F-18b.
+    const localRule = admittedLocalRule === null ? null : { targetedRetrieval: admittedLocalRule.targetedRetrieval, breaker: admittedLocalRule.breaker };
     let retrieval: RetrievalIndex | null = null;
     const promptContractDigest = global ? GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST : workspace ? AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST
       : localRule === null ? DIALOGUE_PROMPT_CONTRACT_DIGEST : DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST;

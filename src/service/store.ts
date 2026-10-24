@@ -373,7 +373,7 @@ import {
   WRITING_MODE_GOALS,
 } from '../shared/protocol.js';
 import { INITIAL_EVALUATION_LIVE_UNAVAILABLE, initialEvaluationKindDefinition } from './evaluation/initial-evaluation-kind.js';
-import { EVALUATION_PAYLOAD_CATEGORIES, liveKindAdmission, liveKindRule, liveMaterialRule } from './analysis/live-kind-admission.js';
+import { EVALUATION_PAYLOAD_CATEGORIES, liveKindAdmission, liveKindRule, liveMaterialRule, kindLocalTools } from './analysis/live-kind-admission.js';
 import { reviewCategoryKindId } from '../shared/protocol.js';
 import { producedUnverified } from './evaluation/unverified-disclosure.js';
 import { readersReportKindDefinition } from './evaluation/readers-report-kind.js';
@@ -1037,7 +1037,7 @@ import {
 import { REIMPORT_GROUP_VERBS, groupReimportMappings, reimportGroupResolutions, reimportGroupVerbs } from './reimport-groups.js';
 import type { ReviewRunDriveSteps } from './review/review-run-driver.js';
 import { reviewCategoryContractInput, type ReviewCategoryConfigurationEntry } from './review/category-configuration.js';
-import { reviewCategoryKindDefinition } from './review/review-category-kind.js';
+import { reviewCategoryKindDefinition, withReviewLocalTools } from './review/review-category-kind.js';
 import {
   EditorialMarkError,
   EditorialMarkStore,
@@ -5633,7 +5633,8 @@ export class EditorialStore {
     requireStore(entry.executor === 'review-category-contract', 'REVIEW_CATEGORY_NOT_TASK_BACKED', '这一类没有自己的任务账本。');
     const input = reviewCategoryContractInput(entry);
     const contractVersion = frozenVersion ?? this.#control.baselineAnalysisRoute?.reviewContractVersion ?? 2;
-    let base = this.#reviewCategoryDefinitions.obtain(JSON.stringify([input, contractVersion]), () => this.#analysisCall(() => reviewCategoryKindDefinition(input, contractVersion)));
+    const base = this.#reviewCategoryDefinitions.obtain(JSON.stringify([input, contractVersion]), () => this.#analysisCall(() => reviewCategoryKindDefinition(input, contractVersion)));
+    const toolBase = withReviewLocalTools(base, kindLocalTools(this.#baselineAnalysis.launch.policy, base.kind));
     let scopes = entry.seriesScopes;
     const finish = (definition: AnalysisKindDefinition): AnalysisKindDefinition => scopes === undefined ? definition
       : entry.seriesKnowledge === undefined ? seriesScopeKindDefinition(this.#authority, definition, scopes) : definition;
@@ -5656,7 +5657,7 @@ export class EditorialStore {
           requireStore(typeof frozenBase === 'string' && /^[0-9a-f]{64}$/u.test(frozenBase), 'ANALYSIS_RECORD_INVALID', '任务参考资料的基础契约记录无效。');
           // A new guideline version is a new current kind contract, not corruption of the previous Task's pins.
           // Its ordinary ledger projection already knows how to offer a fresh preparation under that contract.
-          if (frozenBase !== base.promptContractDigest) return this.reviewCategoryLedger(base);
+          if (frozenBase !== base.promptContractDigest && frozenBase !== toolBase.promptContractDigest) return this.reviewCategoryLedger(base);
           materials = { bookId: latestForBook, references: this.#analysisCall(() => taskMaterialSources(pins)) };
           const envelope = components.get('plan-envelope');
           requireStore(envelope !== undefined, 'ANALYSIS_RECORD_INVALID', '任务计划记录不完整。');
@@ -5664,19 +5665,25 @@ export class EditorialStore {
         }
       }
     }
-    if (entry.seriesKnowledge !== undefined && scopes !== undefined) base = seriesConsistencyKindDefinition(this.#authority, base, scopes);
-    if (materials === undefined) return this.reviewCategoryLedger(finish(houseReviewPreferenceKindDefinition(base, preference ?? null, true)));
-    const readings = this.#taskMaterialReadings(materials);
+    const readings = materials === undefined ? [] : this.#taskMaterialReadings(materials);
     // The frozen digest is the outermost contract's. A readable pin re-derives the material contract and wraps it again, which
     // must give that digest; an unreadable one is the material wrapper's own blocked definition under it, and never sends.
     const refused = readings.some((reading) => reading.refusal !== null);
-    const material = this.#analysisCall(() => taskMaterialKindDefinition(base, materials!, readings, scopes === undefined && (preference == null || refused) ? frozenPromptDigest : undefined));
-    const definition = refused ? material : houseReviewPreferenceKindDefinition(material, preference ?? null, true);
-    requireStore(scopes !== undefined || preference == null || frozenPromptDigest === undefined || refused || definition.promptContractDigest === frozenPromptDigest,
-      'HOUSE_REVIEW_PREFERENCE_INVALID', '本社审阅偏好与任务计划不一致。');
+    const wrap = (candidate: AnalysisKindDefinition): AnalysisKindDefinition => {
+      const series = entry.seriesKnowledge !== undefined && scopes !== undefined ? seriesConsistencyKindDefinition(this.#authority, candidate, scopes) : candidate;
+      const material = materials === undefined ? series : this.#analysisCall(() => taskMaterialKindDefinition(series, materials, readings,
+        refused && scopes === undefined ? frozenPromptDigest : undefined));
+      return finish(refused ? material : houseReviewPreferenceKindDefinition(material, preference ?? null, true));
+    };
+    const current = wrap(toolBase);
+    const prior = toolBase.promptContractDigest === base.promptContractDigest ? current : wrap(base);
+    const definition = frozenPromptDigest !== undefined && prior.promptContractDigest === frozenPromptDigest ? prior : current;
+    requireStore(materials === undefined || scopes !== undefined || frozenPromptDigest === undefined || refused || definition.promptContractDigest === frozenPromptDigest,
+      preference == null ? 'TASK_MATERIAL_RECORD_INVALID' : 'HOUSE_REVIEW_PREFERENCE_INVALID', '固定提示契约与任务计划不一致。');
+    if (definition !== prior) Object.assign(definition, { toolPromptPredecessor: prior });
     // A pin unreadable now gives a definition that cannot build requests, under the frozen contract's own key: it is never
     // cached, so the same plan runs once the pin reads again, and a cached readable ledger never outlives its pin.
-    return this.reviewCategoryLedger(finish(definition), readings.every((reading) => reading.refusal === null));
+    return this.reviewCategoryLedger(definition, readings.every((reading) => reading.refusal === null));
   }
 
   // ---- 自定义分析维度 (Issue #922, wave 10 slice 7f; ADR 0090 item 4) ---------------------------------------------------
@@ -10874,7 +10881,13 @@ export class EditorialStore {
   /** A Run's disposable index over exactly its pinned sources, ranked lexically and by this store's local vectors (#892). */
   retrievalIndexForRun(runRecordId: string, ledger: BaselineAnalysisStore): RetrievalIndex {
     const { boundary, sources } = this.#runRetrieval(runRecordId, ledger);
-    return new RetrievalIndex(sources, this.#embedding, this.#materialVectorQuery(boundary));
+    const facts = ledger.loadExecutionPlan(runRecordId);
+    const submitted = facts.update === null ? null : new Set(facts.update.reusePlan.units.filter((unit) => unit.disposition === 'recomputed').map((unit) => unit.unitOrdinal));
+    const allowed = new Set(facts.manifest.units.filter((unit) => submitted === null || submitted.has(unit.ordinal)).flatMap((unit) => [...unit.blockIds, ...unit.overlapBlockIds]));
+    const scoped = facts.compositionOptions?.version !== 2 ? sources : sources.map((source) => source.sourceKind !== 'manuscript' ? source : {
+      ...source, read: () => { const reading = source.read(); return { ...reading, segments: reading.segments.filter((segment) => segment.blockId !== undefined && allowed.has(segment.blockId)) }; },
+    });
+    return new RetrievalIndex(scoped, this.#embedding, this.#materialVectorQuery(boundary), ledger.pinnedToolSourcesForRun(runRecordId));
   }
 
   #runRetrieval(runRecordId: string, ledger: BaselineAnalysisStore): { boundary: MaterialReferenceBoundary; sources: RetrievalSource[] } {

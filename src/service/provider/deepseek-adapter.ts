@@ -17,7 +17,7 @@ import {
 } from './model-profile.js';
 import { assistantToolCalls, messageText, toolResultOf, type AssembledModelPayload } from './payload.js';
 import { GENERATED_ROUTE_PROFILES } from './provider-profiles.generated.js';
-import { LOCAL_TOOL_NAMES, LOCAL_TOOL_SCHEMAS, toolSetEqualsPlatformSchemas } from './platform-tools.js';
+import { LOCAL_TOOL_NAMES, LEGACY_LOCAL_TOOL_SCHEMAS, toolSetEqualsPlatformSchemas } from './platform-tools.js';
 import { normalizeModelResponse, type CanonicalModelResult, type ModelUsage, type NormalizeOptions } from './response-normalization.js';
 
 /**
@@ -432,7 +432,7 @@ function providerRequestUrl(profile: ProviderRouteProfile, model: ProviderModelP
 function isRetrievalDialogue(payload: AssembledModelPayload): boolean {
   const first = payload.messages[0];
   if (payload.system !== DIALOGUE_RETRIEVAL_PROMPT_CONTRACT.systemPrompt ||
-    !toolSetEqualsPlatformSchemas(payload.tools ?? [], LOCAL_TOOL_SCHEMAS) || first?.role !== 'user' ||
+    !toolSetEqualsPlatformSchemas(payload.tools ?? [], LEGACY_LOCAL_TOOL_SCHEMAS) || first?.role !== 'user' ||
     parseDialogueMessage(messageText(first) ?? '') === null) return false;
   const issued = new Set<string>();
   const pending = new Set<string>();

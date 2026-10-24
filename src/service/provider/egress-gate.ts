@@ -1,5 +1,5 @@
 import { SEARCH_BACKENDS } from './search-backends.js';
-import type { LocalToolsRule } from './local-tools.js';
+import { LOCAL_TOOL_RESULT_MAX_BYTES, type LocalToolsRule } from './local-tools.js';
 import { randomUUID } from 'node:crypto';
 import type { OrdinaryProductionProviderProcessingVersion } from '../../shared/protocol.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from '../../shared/provider-configuration.generated.js';
@@ -423,7 +423,7 @@ function evaluateToolMessage(
   const toolCalls = assistantToolCalls(message);
   if (toolCalls !== null) {
     if (message.source.kind !== 'model' || message.source.provider !== binding.route || message.source.model !== binding.model ||
-        !toolCalls.calls.every((call) => ruleNamedToolSchemas(rule !== null, binding.localTools?.targetedRetrieval.allowed === true).some((schema) => schema.name === call.name)) ||
+        !toolCalls.calls.every((call) => ruleNamedToolSchemas(rule !== null, binding.localTools).some((schema) => schema.name === call.name)) ||
         !(scope.acceptedToolCallDigests?.has(assistantToolCallDigest(message.content)) ?? false)) {
       return refuse('payload-out-of-scope', `第 ${index + 1} 条模型工具调用不是本次尝试已接受的输出；未发送任何内容。`);
     }
@@ -455,7 +455,11 @@ export function toolResultKey(callId: string, tool: PlatformToolName): string {
 
 /** Whether a tool result's URL is one its tool may have read: the rule's search host, or a cited public page. */
 function toolResultSourceAdmitted(admitted: AdmittedToolResult, rule: PlatformToolsRule | null, scope: EgressAttemptScope, binding: EgressBindingFacts): boolean {
-  if (admitted.tool === 'retrieve' || admitted.tool === 'exact_fetch') return binding.localTools?.targetedRetrieval.allowed === true && admitted.sourceUrl === null;
+  if (ruleNamedToolSchemas(false, binding.localTools).some((schema) => schema.name === admitted.tool)) {
+    return admitted.sourceUrl === null && admitted.byteCount <= LOCAL_TOOL_RESULT_MAX_BYTES &&
+      (admitted.tool !== 'guideline_clause' || binding.policy.operationalScope !== 'ordinary-production' ||
+        binding.ruleOutboundCategories?.has('house-review-guideline-clause') === true || admitted.sha256 === sha256Hex('[]'));
+  }
   if (admitted.sourceUrl === null) return true;
   if (rule === null) return false;
   if (admitted.tool === 'websearch') {
@@ -518,7 +522,7 @@ export function evaluateEgress(
   // ADR 0080 §7.2: a payload may expose tools only when its tool set equals exactly the platform tools the binding's rule
   // names. A rule that names none — Provider Processing v9's — matches no tool set, so every tool is refused as before.
   const rule = platformToolsOf(binding);
-  const schemas = ruleNamedToolSchemas(rule !== null, binding.localTools?.targetedRetrieval.allowed === true);
+  const schemas = ruleNamedToolSchemas(rule !== null, binding.localTools);
   if (payload.tools !== undefined && payload.tools.length > 0 && !toolSetEqualsPlatformSchemas(payload.tools, schemas)) {
     return refuse('tools-present', '组合运行时向模型暴露了规则未命名的工具；未发送任何内容。');
   }
