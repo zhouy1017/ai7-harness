@@ -942,9 +942,9 @@ async function main() {
     const exactBytes = await readFile(exactSample);
     requireJourney(exactBytes.length === 29_550 && createHash('sha256').update(exactBytes).digest('hex') === 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483', 'local-exact-admitted-input');
     await close(); renderer = await launch({ picker: exactSample });
-    // The launch's J-14 dark pass names its own locations; a failure from here on is the local sequence's.
-    at('local-check-exact-sample1');
     await importAndOpen(renderer, '本地文字检查旅程');
+    // importAndOpen's J-14 dark pass names its own locations; a failure from here on is the local sequence's.
+    at('local-check-exact-sample1');
     await assertRenderer(renderer, PAGE_HELPERS, 'local-page-helpers');
     await assertRenderer(renderer, `(() => { const block=document.querySelector('[data-testid="manuscript-editor"] > p[data-block-id]'); if(!block)return false; window.__j05LocalBlock=block.dataset.blockId; return window.__j05.place(window.__j05LocalBlock,0,0) && document.execCommand('insertText',false,'本地检查…保留原文。'); })()`, 'local-tester-edit');
     await settled(renderer, 'local-edit-durable');
@@ -964,7 +964,9 @@ async function main() {
     await assertRenderer(renderer, `(() => { const field=document.querySelector('textarea[data-review-field="convert-to"]'); field.value='……'; field.dispatchEvent(new Event('input',{bubbles:true})); document.querySelector('[data-review-action="convert-confirm"]').click(); return true; })()`, 'local-editor-conversion-confirm');
     await waitFor(renderer, `!document.querySelector('textarea[data-review-field="convert-to"]')`, 'local-conversion-saved');
     await assertRenderer(renderer, `(() => { document.querySelector('article[data-finding-id="'+window.__j05LocalFinding+'"] [data-review-action="go-to-text"]').click(); return true; })()`, 'local-return-to-mark');
-    await waitFor(renderer, `document.querySelector('[data-screen="editor"]') && window.__j05.card()?.dataset.markKind==='change-suggestion'`, 'local-suggestion-card');
+    // The converted annotation stays the finding's own mark, so 回到原文 opens its paragraph; the editor then opens the new suggestion.
+    await waitFor(renderer, `document.querySelector('[data-screen="editor"]') && window.__j05.mark('change-suggestion', window.__j05LocalBlock).length===1`, 'local-converted-suggestion-on-text');
+    await openMarkCard(renderer, 'change-suggestion', await renderer.evaluate('window.__j05LocalBlock'), 'local-suggestion');
     await assertRenderer(renderer, `window.__j05.act('accept-and-apply')`, 'local-apply');
     await waitFor(renderer, `window.__j05.card()?.querySelector('[data-mark-application]') && window.__j05.text(window.__j05LocalBlock).startsWith('本地检查……保留原文。')`, 'local-apply-writes-editor-choice');
     await assertRenderer(renderer, `window.__j05.act('prepare-reverse')`, 'local-prepare-reversal');
