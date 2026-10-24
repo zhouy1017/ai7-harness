@@ -77,7 +77,7 @@ describe('Procedure Definition persistence and exact plan pins', () => {
     store.markCleanShutdown(); store.close();
     db = new DatabaseSync(path);
     // Synchronized with #1082, #1083 and #1084: revisions 86 to 88 follow; 88 adds the version-2 review procedures beside version 1.
-    expect(db.prepare('PRAGMA user_version').get()!.user_version).toBe(90);
+    expect(db.prepare('PRAGMA user_version').get()!.user_version).toBe(91);
     const originalVersions = db.prepare("SELECT * FROM procedure_definition_versions WHERE version = 1 AND procedure_id <> 'ai7-procedure/local-text-check' ORDER BY version_id").all();
     // A genuine revision85 holds the historical ten definitions, before the new local identity exists.
     db.exec("DROP TRIGGER procedure_definition_versions_no_delete; DROP TRIGGER procedure_definitions_no_delete; DELETE FROM procedure_definition_versions WHERE version = 2 OR procedure_id = 'ai7-procedure/local-text-check'; DELETE FROM procedure_definitions WHERE procedure_id = 'ai7-procedure/local-text-check'; PRAGMA user_version = 85;");

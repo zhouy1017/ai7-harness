@@ -870,6 +870,45 @@ it('counts a legacy merge over an excluded derived parent once, and its deactiva
     .toContain(fitting.itemId);
 });
 
+it('stamps revision 91 over a revision-90 store of /1 records without changing a byte', async () => {
+  const { subject, signals } = await sourceDecisions();
+  subject.createEditorialMemory({ clientMemoryId: randomUUID(), signalId: signals[0]!.signalId, title: '旧版引用记忆', editorialDimension: '原有自由维度', confidence: 0.5 });
+  expect(subject.inspectHouseReviewPreference().current!.schema).toBe('ai7.house-review-preference/1');
+  subject.markCleanShutdown(); subject.close(); store = undefined;
+  const dbPath = join(roots!.dataRoot, 'store', 'ai7.sqlite');
+  const learningRows = (db: DatabaseSync) => ['learning_signals', 'editorial_learning_controls', 'global_editorial_memory_items', 'global_editorial_memory_item_versions',
+    'house_review_preference_versions', 'review_run_preference_pins', 'learning_supervision_directives'].map((table) => db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all());
+  const legacy = new DatabaseSync(dbPath);
+  let before: unknown;
+  try { legacy.exec('PRAGMA user_version = 90'); before = learningRows(legacy); } finally { legacy.close(); }
+  store = await EditorialStore.open(roots!.dataRoot, roots!.codeRoot);
+  store.markCleanShutdown(); store.close(); store = undefined;
+  const stamped = new DatabaseSync(dbPath);
+  try { expect(stamped.prepare('PRAGMA user_version').get()!.user_version).toBe(91); expect(learningRows(stamped)).toEqual(before); } finally { stamped.close(); }
+});
+
+it.each(['partial-stamp', 'publication'] as const)('refuses to open over a %s inconsistency in revision-91 records', async (damage) => {
+  const { subject, signals, make, create, accept } = await sourceDecisions();
+  accept(make(create([signals[0]!.signalId], '合成修订记录。')));
+  expect(subject.inspectHouseReviewPreference().current!.schema).toBe('ai7.house-review-preference/2');
+  subject.markCleanShutdown(); subject.close(); store = undefined;
+  const db = new DatabaseSync(join(roots!.dataRoot, 'store', 'ai7.sqlite'));
+  try {
+    // A /2 record under a revision-90 stamp is an interrupted or forged upgrade, never read by the revision-90 readers.
+    if (damage === 'partial-stamp') db.exec('PRAGMA user_version = 90');
+    else {
+      const row = db.prepare("SELECT version_id, canonical_json FROM house_review_preference_versions WHERE json_extract(canonical_json, '$.schema') = 'ai7.house-review-preference/2'").get()!;
+      const record = canonicalRecord({ ...(JSON.parse(String(row.canonical_json)) as Record<string, unknown>), sourceCount: 7 });
+      db.exec('DROP TRIGGER house_review_preference_versions_no_update');
+      db.prepare('UPDATE house_review_preference_versions SET canonical_json = ?, sha256 = ? WHERE version_id = ?').run(record.json, record.digest, String(row.version_id));
+      db.exec(HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL['house_review_preference_versions_no_update']!);
+    }
+  } finally { db.close(); }
+  await expect(EditorialStore.open(roots!.dataRoot, roots!.codeRoot)).rejects.toThrow();
+  const after = new DatabaseSync(join(roots!.dataRoot, 'store', 'ai7.sqlite'));
+  try { expect(after.prepare('PRAGMA user_version').get()!.user_version).toBe(damage === 'partial-stamp' ? 90 : 91); } finally { after.close(); }
+});
+
 it('ranks a /2 version\'s legacy lines by their /1 dating, not by array position', async () => {
   const { subject, book, signals, make, create, accept, govern, current } = await sourceDecisions();
   const memory = accept(make(create([signals[0]!.signalId], '冻结后仍保持 /2。')));

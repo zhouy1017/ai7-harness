@@ -1128,15 +1128,17 @@ export class EditorialLearningLedger {
   }
 
   /** Validate append-only records on open, including history beyond the visible page. */
-  validate(): void { this.#read(() => this.#validateAll()); }
+  validate(memoryRevision = true): void { this.#read(() => this.#validateAll(memoryRevision)); }
 
-  #validateAll(): void {
+  /** Before revision 91 a store was written by the /1 readers alone: a /2 record there is a partial upgrade, refused. */
+  #validateAll(memoryRevision: boolean): void {
     this.controls();
     for (const row of this.db.prepare('SELECT signal_id FROM learning_signals').iterate()) this.#signal(String(row.signal_id));
     for (const row of this.db.prepare('SELECT * FROM global_editorial_memory_items').iterate()) {
       const signal = this.#signal(String(row.source_signal_id));
       for (const version of this.#versions(String(row.item_id))) {
         if (version.schema === 'ai7.global-editorial-memory/2') {
+          requireLearning(memoryRevision);
           if (version.ordinal === 1) requireLearning(row.client_memory_id === version.actionId && row.recorded_at === version.recordedAt);
           const sources = this.effectiveSources(version);
           requireLearning(sources.length > 0 && sources[0]!.signalId === signal.signalId);

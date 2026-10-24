@@ -229,11 +229,15 @@ export class HouseReviewPreferenceLedger {
 
   #learning(): EditorialLearningLedger { return new EditorialLearningLedger(this.db, this.#reads ?? undefined); }
 
-  /** Additive reader preflight; the store's revision/open wiring is integrated only at the released landing base. */
-  validate(): void { this.#read(() => this.#validateAll()); }
+  /** Revision 91's whole-store proof on open (Issue #1128): every publication, including history beyond any page, and every Run pin. */
+  validate(memoryRevision = true): void { this.#read(() => this.#validateAll(memoryRevision)); }
 
-  #validateAll(): void {
-    for (const scope of ['development-ci', 'developer-live', 'ordinary-production'] as const) this.history(scope);
+  /** Before revision 91 no /2 publication or Run pin may stand: one there is a partial upgrade, refused rather than read. */
+  #validateAll(memoryRevision: boolean): void {
+    for (const scope of ['development-ci', 'developer-live', 'ordinary-production'] as const) {
+      valid(this.history(scope).every((version) => memoryRevision || version.schema === 'ai7.house-review-preference/1'));
+    }
+    valid(memoryRevision || this.db.prepare("SELECT 1 FROM review_run_preference_pins WHERE json_extract(canonical_json, '$.schema') <> 'ai7.review-run-preference-pin/1' LIMIT 1").get() === undefined);
     for (const row of this.db.prepare(`SELECT p.task_intent_id, t.book_id, t.kind FROM review_run_preference_pins p
       JOIN analysis_task_intents t ON t.task_intent_id = p.task_intent_id ORDER BY p.rowid`).iterate()) {
       const preference = this.pinned(String(row.task_intent_id)); valid(preference !== null);
