@@ -17,6 +17,7 @@ try {
 if (process.exitCode !== 1) {
   journeyStartup('application-import');
   void (async () => {
+    // The Windows runtime notification identity (Issue #1063): set after denial and before application.ts evaluates.
     if (process.platform === 'win32') {
       const { app } = await import('electron');
       app.setAppUserModelId('AI7');
