@@ -22,6 +22,8 @@ Start with the [product README](../../README.md) for what AI7 does, [source chec
 
 Generated `node_modules/`, `.pnpm-store/`, `.cache/`, `.runtime/`, `dist/`, `release/` and `test-results/` stay ignored and reconstructable. Product data and credentials stay outside the repository. Cleanup never includes unrelated untracked files or another worktree's state.
 
+[manuscript-screen.ts](../../src/renderer/manuscript-screen.ts) owns the existing Manuscript and Production Document editor rendering, screen-local coordination and destruction. [index.ts](../../src/renderer/index.ts) retains shell composition, routing, shared authorities and one semantic handle to the current screen.
+
 ## Tooling ownership
 
 The existing commands `node tools/nightly-queue.mjs …` and imports from `tools/orca-release.mjs` remain compatible. Their implementations live in [queue.mjs](../../tools/ci/queue.mjs) and [release-authority.mjs](../../tools/ci/release-authority.mjs). The latter authorizes repository merges; it is distinct from creating a product release. Keeping the entry paths stable also preserves trusted control checkouts used by existing workflow runs.
