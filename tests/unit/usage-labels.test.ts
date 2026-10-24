@@ -16,6 +16,10 @@ import { bindingRefusalLabel } from '../../src/renderer/commands-labels.js';
 
 const price = { inputPerMillion: 2, outputPerMillion: 8, currency: 'CNY', enteredAt: '2026-10-17' };
 
+it('names the Book-less session in editorial words in usage grouping', () => {
+  expect(usageTaskKindLabel('global-agent-dialogue')).toBe('全域对话');
+});
+
 describe('the estimate', () => {
   it('estimates zero tokens as zero when a unit price is entered', () => {
     const routes = [{ route: 'opencode-go', runCount: 1, inputTokens: 0, outputTokens: 0 }];

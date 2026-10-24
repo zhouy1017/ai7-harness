@@ -127,7 +127,7 @@ import type { PublicSampleBookSourceDigest } from './public-samplebooks.js';
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 169 as const;
+export const SERVICE_PROTOCOL_VERSION = 170 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 export interface BookFindingProjection {
@@ -529,6 +529,7 @@ export const IPC_CHANNELS = {
   inspectGlobalAgent: 'ai7:global-agent:inspect',
   recordLearningSupervision: 'ai7:global-agent:supervise',
   askGlobalAgent: 'ai7:global-agent:ask',
+  prepareGlobalAgentTurn: 'ai7:global-agent:prepare',
   inspectGlobalAttention: 'ai7:j09:inspect-global-attention',
   inspectBookTasks: 'ai7:j16:inspect-book-tasks',
   askAboutSelection: 'ai7:j16:ask-about-selection',

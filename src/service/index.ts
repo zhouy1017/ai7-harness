@@ -1,4 +1,5 @@
 import { reviewFixtureContractVersion } from './provider/model-fixture.js';
+import { prepareGlobalAgentDisclosure, startGlobalAgentTurn } from './dialogue/global-agent-session.js';
 import { ImportedExemplarError } from './imported-exemplars.js';
 import { dataVersionStartupRefusal } from '../shared/data-version-labels.js';
 import { isAbsolute, resolve } from 'node:path';
@@ -1558,10 +1559,10 @@ async function dispatch(
     case 'recordLearningSupervision':
       store.recordLearningSupervision(request.input);
       return { id: request.id, ok: true, op: request.op, result: store.inspectGlobalAgent((id) => dialogues.liveText(id), globalDialogueAdmitted(dialogues, launchPolicy)) };
+    case 'prepareGlobalAgentTurn':
+      return { id: request.id, ok: true, op: request.op, result: globalDialogueCall(() => prepareGlobalAgentDisclosure(store, dialogues, launchPolicy, request.input)) };
     case 'askGlobalAgent': {
-      const route = globalDialogueReady(dialogues, launchPolicy);
-      const turn = store.askGlobalAgent(request.input);
-      dialogues.beginGlobal(turn, route, () => store.globalAgentSourcesCurrent(request.input.sources));
+      const turn = globalDialogueCall(() => startGlobalAgentTurn(store, dialogues, () => launchPolicy, { ...request.input, kind: 'ask' }, request.input.disclosureSha256));
       return { id: request.id, ok: true, op: request.op, result: store.inspectGlobalAgentDialogue(turn.dialogueId, (id) => dialogues.liveText(id)) };
     }
     case 'inspectGlobalAgentDialogue':
@@ -1574,11 +1575,8 @@ async function dispatch(
     }
     case 'continueGlobalAgentAnswer':
     case 'regenerateGlobalAgentAnswer': {
-      const route = globalDialogueReady(dialogues, launchPolicy);
-      const turn = store.globalAgentAttempt(request.input, request.op === 'continueGlobalAgentAnswer' ? 'continue' : 'regenerate');
-      if (typeof turn === 'string') throw new StoreErrorClass('DIALOGUE_INVALID', '回答标识无效。');
-      const pins = turn.message.globalSources!;
-      dialogues.beginGlobal(turn, route, () => store.globalAgentSourcesCurrent(pins));
+      const turn = globalDialogueCall(() => startGlobalAgentTurn(store, dialogues, () => launchPolicy,
+        { ...request.input, kind: request.op === 'continueGlobalAgentAnswer' ? 'continue' : 'regenerate' }, request.input.disclosureSha256));
       return { id: request.id, ok: true, op: request.op, result: store.inspectGlobalAgentDialogue(turn.dialogueId, (id) => dialogues.liveText(id)) };
     }
     case 'inspectGlobalAttention':
@@ -1709,8 +1707,8 @@ async function dispatch(
 }
 
 /** The Book-less dialogue's route (Issue #1083), refused before anything is recorded unless the selected policy admits one. */
-function globalDialogueReady(dialogues: DialogueExecutionOwner, policy: LaunchPolicyProjection) {
-  try { return dialogues.requireGlobalReady(policy); }
+function globalDialogueCall<T>(operation: () => T): T {
+  try { return operation(); }
   catch (error) {
     if (error instanceof DialogueError) throw new StoreErrorClass(error.code, error.message);
     throw error;

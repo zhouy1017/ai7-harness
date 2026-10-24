@@ -1,4 +1,5 @@
-import { GLOBAL_AGENT_TITLE, type GlobalAgentDialogueProjection, type GlobalAgentProjection, type GlobalAgentRendererApi, type GlobalMemoryItem, type RecordLearningSupervisionInput } from '../shared/protocol.js';
+import { GLOBAL_AGENT_TITLE, type GlobalAgentDialogueProjection, type GlobalAgentProjection, type GlobalAgentRendererApi, type GlobalMemoryItem, type GlobalAgentSourceCandidate, type PrepareGlobalAgentTurnInput, type RecordLearningSupervisionInput } from '../shared/protocol.js';
+import { globalAgentAnswerStatus } from './shell-labels.js';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
@@ -73,7 +74,9 @@ export function mountGlobalAgent(options: {
   const answerStatus = el('p');
   const prose = el('div');
   const answerActions = el('div');
-  answer.append(answerQuestion, answerStatus, prose, answerActions,
+  const submitted = el('details'); submitted.append(el('summary', '本次提交内容'));
+  const submittedContent = el('div'); submitted.append(submittedContent);
+  answer.append(answerQuestion, answerStatus, prose, answerActions, submitted,
     el('p', '回答仅供参考；治理必须单独操作。修改稿件请返回相应图书。'));
   let displayedAttempt: string | null = null;
   let displayedFragments = 0;
@@ -86,10 +89,11 @@ export function mountGlobalAgent(options: {
       const last = latestDialogue?.attempts.at(-1);
       if (last === undefined || latestDialogue === null) return;
       const input = { dialogueId: latestDialogue.dialogueId, attemptId: last.attemptId };
-      const action = operation === 'stop' ? options.api.stopGlobalAgentAnswer(input)
-        : operation === 'continue' ? options.api.continueGlobalAgentAnswer(input) : options.api.regenerateGlobalAgentAnswer(input);
-      button.disabled = true;
-      void action.then(() => showDialogue()).catch((error: unknown) => options.setStatus(options.errorMessage(error, '对话操作未能完成。'), 'error'));
+      if (operation === 'stop') {
+        button.disabled = true;
+        void options.api.stopGlobalAgentAnswer(input).then(() => showDialogue())
+          .catch((error: unknown) => options.setStatus(options.errorMessage(error, '对话操作未能完成。'), 'error'));
+      } else void preview({ ...input, kind: operation });
     });
     answerButtons.set(operation, button); answerActions.append(button);
   }
@@ -105,7 +109,14 @@ export function mountGlobalAgent(options: {
       latestDialogue = dialogue;
       const last = dialogue.attempts.at(-1);
       answerQuestion.textContent = dialogue.question ?? '问题记录暂不可读';
-      answerStatus.textContent = last?.state === 'answering' ? '正在回答 · 内容尚未完成' : last?.state === 'completed' ? '回答已完成' : '回答不完整';
+      answerStatus.textContent = globalAgentAnswerStatus(last);
+      submittedContent.replaceChildren();
+      for (const submission of dialogue.submissions ?? []) {
+        submittedContent.append(el('p', `本次回答 · ${submission.attemptId}`),
+          el('p', submission.provider === null ? '尚无模型服务绑定记录' : `${submission.provider.route} · ${submission.provider.model}`),
+          el('p', submission.question), ...submission.sources.map((entry) => el('p', `${entry.itemId} · ${entry.revisionId} · ${entry.text}`)));
+        if (submission.kept !== null) submittedContent.append(el('p', `接着回答时保留的内容：${submission.kept}`));
+      }
       if (displayedAttempt !== (last?.attemptId ?? null)) {
         displayedAttempt = last?.attemptId ?? null; displayedFragments = 0; prose.replaceChildren();
       }
@@ -120,15 +131,69 @@ export function mountGlobalAgent(options: {
   };
   const questionForm = el('form');
   const question = el('textarea'); question.maxLength = 500; question.rows = 3;
-  const ask = el('button', '提问'); ask.type = 'submit'; ask.disabled = true; question.disabled = true;
-  questionForm.append(field('关于记忆与学习方向的问题', question), el('p', '只使用明确勾选的已启用记忆版本；不发送稿件。'), ask);
+  const ask = el('button', '查看将发送的内容'); ask.type = 'submit'; ask.disabled = true; question.disabled = true;
+  const sourceList = el('fieldset'); sourceList.append(el('legend', '本次对话的来源（可逐项移除）'));
+  const sourceRows = el('div'); sourceList.append(sourceRows);
+  const disclosure = el('section'); disclosure.setAttribute('aria-label', '将发送的内容');
+  const selectedSources = new Map<string, GlobalAgentSourceCandidate>();
+  let previewGeneration = 0;
+  let sending = false;
+  const invalidatePreview = (): void => { previewGeneration += 1; disclosure.replaceChildren(); };
+  question.addEventListener('input', invalidatePreview);
+  const askInput = (): PrepareGlobalAgentTurnInput => ({ kind: 'ask', question: question.value,
+    sources: [...selectedSources.values()].map(({ itemId, revisionId }) => ({ itemId, revisionId })) });
+  const preview = async (input: PrepareGlobalAgentTurnInput): Promise<void> => {
+    const generation = ++previewGeneration;
+    disclosure.replaceChildren(el('p', '正在核对发送内容…'));
+    try {
+      const prepared = await options.api.prepareGlobalAgentTurn(input);
+      if (!root.isConnected || generation !== previewGeneration) return;
+      disclosure.replaceChildren(el('h3', '将发送的内容'), el('p', `${prepared.provider.route} · ${prepared.provider.model}`),
+        el('p', `你的问题：${prepared.question}`), el('p', '已过滤本社人员姓名；备注、内部记录及记忆的原文例证不随发送。'));
+      if (prepared.sources.length === 0) disclosure.append(el('p', '本次没有选用记忆版本。'));
+      for (const entry of prepared.sources) {
+        const row = el('div'); row.append(el('p', `${entry.title} · ${entry.revisionId}`), el('p', entry.text));
+        {
+          const remove = el('button', '本次移除'); remove.type = 'button';
+          remove.addEventListener('click', () => {
+            if (input.kind === 'ask') {
+              selectedSources.delete(entry.itemId);
+              for (const checkbox of sourceRows.querySelectorAll<HTMLInputElement>('input')) if (checkbox.dataset['sourceItem'] === entry.itemId) checkbox.checked = false;
+              void preview(askInput());
+            } else void preview({ ...input, sources: prepared.sources.filter((source) => source.itemId !== entry.itemId)
+              .map(({ itemId, revisionId }) => ({ itemId, revisionId })) });
+          }); row.append(remove);
+        }
+        disclosure.append(row);
+      }
+      if (prepared.kept !== null) disclosure.append(el('p', `接着回答时保留的内容：${prepared.kept}`));
+      const send = el('button', input.kind === 'ask' ? '发送问题' : input.kind === 'continue' ? '发送并继续回答' : '发送并重新回答'); send.type = 'button';
+      send.addEventListener('click', () => {
+        if (sending || generation !== previewGeneration) return;
+        sending = true; send.disabled = true;
+        const action = input.kind === 'ask' ? options.api.askGlobalAgent({ question: input.question, sources: input.sources, disclosureSha256: prepared.sha256 })
+          : input.kind === 'continue' ? options.api.continueGlobalAgentAnswer({ dialogueId: input.dialogueId, attemptId: input.attemptId, sources: prepared.sources.map(({ itemId, revisionId }) => ({ itemId, revisionId })), disclosureSha256: prepared.sha256 })
+            : options.api.regenerateGlobalAgentAnswer({ dialogueId: input.dialogueId, attemptId: input.attemptId, sources: prepared.sources.map(({ itemId, revisionId }) => ({ itemId, revisionId })), disclosureSha256: prepared.sha256 });
+        void action.then(async (dialogue) => {
+          foreground = dialogue.dialogueId; invalidatePreview(); selectedSources.clear();
+          for (const checkbox of sourceRows.querySelectorAll<HTMLInputElement>('input')) checkbox.checked = false;
+          const projection = await options.api.inspectGlobalAgent();
+          if (root.isConnected) render(projection);
+          return showDialogue();
+        }).catch((error: unknown) => { invalidatePreview(); options.setStatus(options.errorMessage(error, '对话未能开始。'), 'error'); })
+          .finally(() => { sending = false; });
+      });
+      disclosure.append(send);
+    } catch (error) {
+      if (generation === previewGeneration) disclosure.replaceChildren(el('p', options.errorMessage(error, '无法核对发送内容。')));
+    }
+  };
+  questionForm.append(field('关于记忆与学习方向的问题', question), sourceList,
+    el('p', '只使用明确勾选的来源版本；发送前可逐项移除。'), ask, disclosure);
   questionForm.addEventListener('submit', (event) => {
     event.preventDefault();
     if (current?.dialogueState !== 'available') return;
-    void options.api.askGlobalAgent({ question: question.value,
-      sources: [...selected.values()].filter((item) => item.state === 'active').map(({ itemId, revisionId }) => ({ itemId, revisionId })) })
-      .then((dialogue) => { foreground = dialogue.dialogueId; return showDialogue(); })
-      .catch((error: unknown) => options.setStatus(options.errorMessage(error, '对话未能开始。'), 'error'));
+    void preview(askInput());
   });
   const audit = el('button', '学习回溯 · 停止今后使用');
   audit.type = 'button';
@@ -149,6 +214,15 @@ export function mountGlobalAgent(options: {
     current = projection;
     ask.disabled = projection.dialogueState !== 'available'; question.disabled = ask.disabled;
     selected.clear();
+    selectedSources.clear(); invalidatePreview(); sourceRows.replaceChildren();
+    for (const entry of projection.sourceCandidates ?? []) {
+      const checkbox = el('input'); checkbox.type = 'checkbox'; checkbox.dataset['sourceItem'] = entry.itemId;
+      checkbox.addEventListener('change', () => {
+        if (checkbox.checked) selectedSources.set(entry.itemId, entry); else selectedSources.delete(entry.itemId);
+        invalidatePreview();
+      });
+      sourceRows.append(field(`${entry.title} · ${entry.revisionId} · ${entry.text}`, checkbox));
+    }
     state.textContent = `${projection.dialogueState === 'available' ? '可以提问' : projection.dialogueState} · ${projection.explanation}`;
     list.replaceChildren();
     if (projection.items.length === 0) list.append(el('p', '还没有记忆。可以明确新建一条本社审阅偏好。'));

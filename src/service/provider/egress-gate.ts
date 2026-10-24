@@ -1,7 +1,7 @@
 import { SEARCH_BACKENDS } from './search-backends.js';
 import { LOCAL_TOOL_RESULT_MAX_BYTES, type LocalToolsRule } from './local-tools.js';
 import { randomUUID } from 'node:crypto';
-import type { OrdinaryProductionProviderProcessingVersion } from '../../shared/protocol.js';
+import type { AdmittedProviderRule, OrdinaryProductionProviderProcessingVersion } from '../../shared/protocol.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from '../../shared/provider-configuration.generated.js';
 import { CONFIGURED_RUNTIME_MODEL_TABLE } from '../../shared/provider-configuration.generated.js';
 import type { OutboundDataCategoryId } from '../../shared/protocol.js';
@@ -134,6 +134,11 @@ export interface SearchBackendBinding {
 }
 
 export interface EgressBindingFacts {
+  /** Book-less dialogue's exact listed revisions, disclosure and retained redaction, rechecked at the final gate. */
+  readonly globalAgentScope?: {
+    readonly rule: NonNullable<AdmittedProviderRule['globalAgentDialogue']>;
+    readonly payloadCurrent: () => boolean;
+  };
   readonly seriesScopeGuard?: () => string | null;
   readonly searchBackend?: SearchBackendBinding;
   readonly bindingDigest: string;
@@ -485,6 +490,15 @@ export function evaluateEgress(
   binding: EgressBindingFacts,
   scope: EgressAttemptScope,
 ): EgressDecision {
+  const global = binding.globalAgentScope;
+  const globalAdmitted = global !== undefined && binding.policy.operationalScope === 'ordinary-production' &&
+    global.rule.source.bookRequired === false && global.rule.source.explicitlyListedEligibleMemoryAndPreferenceRevisionsOnly === true &&
+    global.rule.source.eligibleRevisionPinsRequired === true && global.rule.source.editorOwnWordsAllowed === true &&
+    global.rule.source.unlistedSourcesAllowed === false && global.rule.outboundCategoryRestriction === 'none' &&
+    global.rule.outboundDataDisclosureRequired === true && global.rule.redaction.housePeopleNamesAndRolesStripped === true &&
+    global.rule.redaction.remarksAndInternalNotesStripped === true && global.payloadCurrent();
+  if (global !== undefined && !globalAdmitted) return refuse('payload-out-of-scope', '全域对话的来源、发送披露或隐私过滤已经变化；未发送任何内容。');
+  if (global !== undefined && payload.tools !== undefined && payload.tools.length > 0) return refuse('tools-present', '全域对话没有注册工具；未发送任何内容。');
   const excluded = seriesScopeRefusal(binding.seriesScopeGuard);
   if (excluded !== null) return refuse('series-retrieval-scope-changed', `书系检索范围已变化 · 需要重新确认计划：${excluded}；未发送任何内容。`);
   if (!DIGEST_PATTERN.test(binding.bindingDigest) || scope.currentBindingDigest() !== binding.bindingDigest) {
@@ -577,7 +591,7 @@ export function evaluateEgress(
   // Ordinary production leaves the per-Run ceiling to the editor (Issue #811; S16a): unset is a Run without one, not a refusal.
   const ceiling = scope.ceilingState?.() ?? 'unset';
   if ((ceiling === 'unset' && binding.policy.operationalScope !== 'ordinary-production') ||
-      (ceiling === 'not-applicable' && !excerptAdmittedByRule(binding))) {
+      (ceiling === 'not-applicable' && !excerptAdmittedByRule(binding) && !globalAdmitted)) {
     return refuse('run-budget-ceiling-unset', 'Provider Processing v9 要求非 unset 的任务运行预算上限；未发送任何内容。');
   }
   if (ceiling === 'reached') {

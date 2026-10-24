@@ -197,7 +197,7 @@ describe('revision 87 (Issue #1083)', () => {
     await expect(EditorialStore.open(roots!.dataRoot, roots!.codeRoot).then((opened) => { store = opened; return opened; })).rejects.toThrow();
   }, 120_000);
 
-  it('admits no Book-less turn under the developer-live or ordinary-production policy, even where the Book dialogue is admitted', async () => {
+  it('keeps developer-live refused and resolves the dedicated v27 Book-less rule beside the Book dialogue', async () => {
     roots = await createServiceTestRoots('ai7-global-agent-policy-');
     const live = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live');
     const fast = { route: 'opencode-go', endpoint: OPENCODE_GO_ROUTE_PROFILE.endpoint, model: OPENCODE_GO_MODEL,
@@ -207,8 +207,9 @@ describe('revision 87 (Issue #1083)', () => {
       expect(policy.integrityState).toBe('verified');
       // The Book dialogue's own rule stands, and the session borrows neither it nor any other.
       expect(admittedDialogueRoute(policy)).not.toBeNull();
-      expect(admittedGlobalAgentRoute(policy)).toBeNull();
     }
+    expect(admittedGlobalAgentRoute(live)).toBeNull();
+    expect(admittedGlobalAgentRoute(production)?.ruleId).toBe('ordinary-production-global-agent-dialogue');
   });
 });
 

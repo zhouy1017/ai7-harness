@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
-import type { GlobalEditorialMemoryVersion, GlobalMemoryItem, GlobalMemoryPin, HouseReviewPreferenceVersion, LearningSupervisionDirective, RecordLearningSupervisionInput, TrustedOperationalScope } from '../../shared/protocol.js';
+import type { GlobalAgentSourceCandidate, GlobalEditorialMemoryVersion, GlobalMemoryItem, GlobalMemoryPin, HouseReviewPreferenceVersion, LearningSupervisionDirective, RecordLearningSupervisionInput, TrustedOperationalScope } from '../../shared/protocol.js';
 import { canonicalJson, sha256Hex, UUID_PATTERN } from '../analysis/canonical.js';
 import { LearningEligibilityError } from '../learning-eligibility.js';
 
@@ -43,6 +43,14 @@ export function editorialMemoryGovernanceItem(
 ): GlobalMemoryItem {
   return { itemId: entry.current.itemId, revisionId: entry.current.versionId, kind: 'memory', text: entry.current.title,
     categoryId, bookId: null, state: entry.usable && entry.current.activation === 'active' ? 'active' : 'inactive', lineage: [] };
+}
+
+/** Explicit directions are selectable data for the next question; listing one neither runs nor changes curation. */
+export function supervisionSourceCandidates(directives: ReadonlyArray<LearningSupervisionDirective>): GlobalAgentSourceCandidate[] {
+  const head = directives.at(-1)?.directiveId ?? 'base';
+  return directives.filter((entry) => entry.operation === 'supervise' && entry.effect === 'guide' && entry.text.length > 0)
+    .map((entry) => ({ itemId: `supervision:${entry.directiveId}`, revisionId: `${entry.directiveId}@${head}`,
+      kind: 'supervision', title: `学习方向 ${entry.ordinal}`, text: entry.text }));
 }
 
 function valid(condition: unknown, code = 'LEARNING_SUPERVISION_INVALID'): asserts condition {

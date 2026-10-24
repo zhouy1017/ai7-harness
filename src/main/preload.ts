@@ -753,6 +753,7 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
   inspectGlobalAgent: () => invoke<ServiceOperationMap['inspectGlobalAgent']['output']>(IPC_CHANNELS.inspectGlobalAgent, {}),
   recordLearningSupervision: (input: ServiceOperationMap['recordLearningSupervision']['input']) => invoke<ServiceOperationMap['recordLearningSupervision']['output']>(IPC_CHANNELS.recordLearningSupervision, input),
   askGlobalAgent: (input: ServiceOperationMap['askGlobalAgent']['input']) => invoke<ServiceOperationMap['askGlobalAgent']['output']>(IPC_CHANNELS.askGlobalAgent, input),
+  prepareGlobalAgentTurn: (input: ServiceOperationMap['prepareGlobalAgentTurn']['input']) => invoke<ServiceOperationMap['prepareGlobalAgentTurn']['output']>(IPC_CHANNELS.prepareGlobalAgentTurn, input),
   inspectGlobalAttention: () =>
     invoke<ServiceOperationMap['inspectGlobalAttention']['output']>(IPC_CHANNELS.inspectGlobalAttention, {}),
   reviewManuscriptExport: (input: Parameters<RendererApi['reviewManuscriptExport']>[0]) =>
