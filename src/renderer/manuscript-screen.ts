@@ -185,25 +185,24 @@ async function copyPlainText(api: RendererApi, text: string): Promise<void> {
 /** How long the entry notice stays before it removes itself (V2-UX-COPY-015). */
 const ENTRY_NOTICE_MS = 6_000;
 
-/**
- * V2-UX-COPY-015's transient floating notice: it floats over the surface rather than taking a row in
- * it, it disappears on its own without any editor action, and it settles nothing — removing it reads
- * nothing and writes nothing, so an editor who never looks at it loses no decision. It is announced
- * politely rather than asserted, so a screen reader hears it without being interrupted.
- */
-
 function panel(): HTMLElement { return element('section', 'panel'); }
 
 /** The Manuscript and Production Document screen owns all mutable editor coordination until destruction. */
 export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   const { api, initialWindow, bookTitle, recoveryAttentionId, entryNotice, openMarkId, productionDocument,
-    persistenceStatus, viewPreferences, preferences, commandDispatcher, taskDrawer,
+    persistenceStatus, viewPreferences, preferences, commandDispatcher, taskDrawer, setCloseRisk,
     recentlyActivatedControl, awaitServiceJob, composerRangeOf, selectionTaskOffer, selectionProcedureOffer,
     prepareSelectionTask, renderEditorWindow, renderBookOverview, renderBookAnalysis,
     renderBookSources, renderBookReview, renderBookDeliverables, renderBookEvaluation, renderBookFindings,
     renderProposalConflict, renderProposalWorkspace, returnToRecoveryComparison } = options;
   const rendererErrorMessage = options.errorMessage;
   const entryNoticeTimers = new Set<number>();
+  /**
+   * V2-UX-COPY-015's transient floating notice: it floats over the surface rather than taking a row in
+   * it, it disappears on its own without any editor action, and it settles nothing — removing it reads
+   * nothing and writes nothing, so an editor who never looks at it loses no decision. It is announced
+   * politely rather than asserted, so a screen reader hears it without being interrupted.
+   */
   function showEntryNotice(host: HTMLElement, message: string): void {
     if (destroyed) return;
     const notice = element('p', 'entry-notice', message);
@@ -223,10 +222,15 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   let supportingSeparator: { destroy(): void } | undefined;
   let paragraphSelectionOff: (() => void) | undefined;
   let editorCommandsOff: (() => void) | undefined;
+  // What destroy() ends is declared before the shell attaches this screen, so a mount that throws part way is still destroyed.
+  let milestonePersistenceTimer: number | undefined;
+  let milestonePersistenceRead = 0;
+  let returnRequest = 0;
+  let railRefreshTimer: number | undefined;
+  // A departed screen no longer speaks on the shared status line. The window's close risk still follows its writes (DUR-010).
   const setStatus: ManuscriptScreenOptions['setStatus'] = (message, tone) => {
     if (!destroyed) options.setStatus(message, tone);
   };
-  const setCloseRisk = (risk: boolean): void => { if (!destroyed) options.setCloseRisk(risk); };
   /**
    * A Review Run of the Book whose manuscript is on screen was started from the drawer (Issue #423 review, P2-6, P3-2): that Run —
    * by its identity — is followed while it runs, read in the projection's light form (no findings), more slowly the longer it
@@ -237,6 +241,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   let reviewMarksFollower = 0;
   let reviewMarksTimer: number | undefined;
   const REVIEW_MARKS_FOLLOW_LIMIT_MS = 2 * 60 * 60_000;
+  /** A 审阅 followed for its marks that runs past the follower's limit (review P3-2): where its marks will be. */
+  const REVIEW_MARKS_FOLLOW_STOPPED = '审阅仍在进行；完成后它标出的发现会在稿件里，重新打开稿件即可看到。';
 
   const content = panel();
   content.classList.add('editor-shell');
@@ -726,16 +732,23 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   identities.append(identityGrid);
   content.append(toolbar, workspace, identities);
   if (options.reimportNotice !== undefined) toolbar.after(options.reimportNotice);
+  const toggleSaveMenu = (): void => {
+    if (saveMenu !== undefined) (saveMenu.element as HTMLDetailsElement).open = !(saveMenu.element as HTMLDetailsElement).open;
+  };
+  const saveMenuKeydown = (event: KeyboardEvent): void => {
+    if (saveMenu !== undefined && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); persistenceStatus.click(); }
+  };
   const surface: ManuscriptScreen = {
     bookId: initialWindow.bookId,
     manuscriptId: initialWindow.manuscriptId,
     branchId: initialWindow.branchId,
-    readingPlace: () => readingPlace(),
+    // A mount that threw before its editor existed has no place to read and nothing to settle, so the shell can still leave it.
+    readingPlace: () => (editor === undefined ? null : readingPlace()),
     jump,
     refreshMarks,
     selectionSpan: async () => editorialMarks === undefined ? SELECTION_TASK_PICK_RANGE : editorialMarks.selectionSpan(),
     composeProcedures: (span) => editorialMarks?.composeProcedures(span),
-    settle: () => settle(),
+    settle: () => (editor === undefined ? Promise.resolve(!destroyed) : settle()),
     isComposing: () => editor?.isComposing() === true,
     closeSupportingPanel: () => {
       if (!navigator.hidden) setNavigationOpen(false);
@@ -781,12 +794,6 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   });
   workspace.append(separator.element);
   supportingSeparator = separator;
-  const toggleSaveMenu = (): void => {
-    if (saveMenu !== undefined) (saveMenu.element as HTMLDetailsElement).open = !(saveMenu.element as HTMLDetailsElement).open;
-  };
-  const saveMenuKeydown = (event: KeyboardEvent): void => {
-    if (saveMenu !== undefined && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); persistenceStatus.click(); }
-  };
   persistenceStatus.addEventListener('click', toggleSaveMenu);
   persistenceStatus.addEventListener('keydown', saveMenuKeydown);
   if (saveMenu !== undefined) {
@@ -841,8 +848,6 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   let retryRequired = false;
   let editingInterrupted = false;
   let changedSinceMilestone: string | null = null;
-  let milestonePersistenceTimer: number | undefined;
-  let milestonePersistenceRead = 0;
   let milestoneReadDigest: string | undefined;
   const updatePersistenceMenu = (): void => saveMenu?.update({ dirty, saving, retryRequired, interrupted: editingInterrupted }, changedSinceMilestone);
   const refreshMilestonePersistence = (force = false): void => {
@@ -1282,7 +1287,6 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   // 回到<位置> (Issue #423, S77a; TASK-045): where this manuscript is read, the chip that goes back, and a result's jump.
   let returnPlace: ReadingPlace | null = null;
   let returnReadFailed = false;
-  let returnRequest = 0;
   const loadReturnPlace = async (): Promise<void> => {
     const request = ++returnRequest;
     try {
@@ -1968,7 +1972,13 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     initialWindow,
     flushJournalEdit: (input) => api.flushJournalEdit(input),
     onStateChange: (state) => {
-      if (destroyed) return;
+      const closeRisk = authoritativeMutationBusy() || state.dirty || state.saving || state.retryRequired || (state.interrupted && state.dirty) ||
+        (state.protection?.atRisk.characters ?? 0) > 0;
+      // A write still in flight when the screen left settles the window's close risk; nothing on the departed screen changes.
+      if (destroyed) {
+        setCloseRisk(closeRisk);
+        return;
+      }
       dirty = state.dirty;
       saving = state.saving;
       retryRequired = state.retryRequired;
@@ -1978,8 +1988,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       journal.textContent = `修订日志序号 ${state.journalSequence}`;
       // Editing Protection Mode (Issue #951): the header's protection surface, and the close guard while input is at risk (DUR-010).
       protectionSurface?.update(state.protection);
-      setCloseRisk(authoritativeMutationBusy() || state.dirty || state.saving || state.retryRequired || (state.interrupted && state.dirty) ||
-        (state.protection?.atRisk.characters ?? 0) > 0);
+      setCloseRisk(closeRisk);
       if (editor) {
         const editorWindowProjection = editor.currentWindow();
         const bindingChanged = editorWindowProjection.revisionId !== currentWindow.revisionId ||
@@ -2036,7 +2045,6 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   });
   // Typing moves every place behind the caret a little; the rail is read again once the typing rests,
   // never per keystroke, and its cost follows the chapters and marks, not the manuscript's length.
-  let railRefreshTimer: number | undefined;
   const scheduleRailRefresh = (): void => {
     if (railRefreshTimer !== undefined) window.clearTimeout(railRefreshTimer);
     railRefreshTimer = window.setTimeout(() => {
@@ -2228,7 +2236,4 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     };
     step();
   }
-  /** A 审阅 followed for its marks that runs past the follower's limit (review P3-2): where its marks will be. */
-  const REVIEW_MARKS_FOLLOW_STOPPED = '审阅仍在进行；完成后它标出的发现会在稿件里，重新打开稿件即可看到。';
-
 }
