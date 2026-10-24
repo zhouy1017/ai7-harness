@@ -26,6 +26,21 @@ import type { ServiceOperation, ServiceOperationMap, ServiceRequest } from '../.
 
 const encoder = new TextEncoder();
 
+describe('explicit local review options (#1119)', () => {
+  it('binds finite affirmative options only to the local entry and rejects resource/model additions', () => {
+    const options = { punctuation: 'chinese-prose', numerals: 'off', publication: 'unknown', numeralRules: [], numeralsConfirmed: false, excludedRanges: [], doubledEllipsisBlockIds: [] };
+    const input = { bookId: randomUUID(), categoryIds: ['local-text-check'], scope: { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, localCheck: options };
+    const frame = { id: randomUUID(), op: 'prepareReviewRun', input };
+    expect(decodeRequest(encoder.encode(JSON.stringify(frame)))).toEqual(frame);
+    for (const invalid of [
+      { ...input, localCheck: undefined }, { ...input, categoryIds: ['typos-and-usage'] },
+      { ...input, categoryIds: ['local-text-check', 'style-and-format'] }, { ...input, seriesId: randomUUID() },
+      { ...input, materialIds: [randomUUID()] }, { ...input, localCheck: { ...options, numerals: 'editor-convention', numeralRules: ['N01'] } },
+      { ...input, localCheck: { ...options, provider: 'fixture' } },
+    ]) expect(() => decodeRequest(encoder.encode(JSON.stringify({ ...frame, input: invalid })))).toThrow(ProtocolError);
+  });
+});
+
 describe('whole package archive frames (#953)', () => {
   it('accepts the archive review, exact destination, approval and cancellation through the real decoder', () => {
     const bookId = randomUUID();

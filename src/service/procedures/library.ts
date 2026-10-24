@@ -5,6 +5,7 @@ import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION } from '../review/category-config
 import { resolveProcedureDefinition } from './definition-store.js';
 import { BASELINE_PROCEDURE_ID, preinstalledProcedureDefinitions, reviewProcedureId } from './preinstalled.js';
 import { PROCEDURE_STAGE_LABELS } from './stage-types.js';
+import { LOCAL_CHECK_CATEGORY, LOCAL_CHECK_PROCEDURE } from '../review/deterministic/rules.js';
 
 /**
  * 知识库's procedure library (Issue #1081, F-26a; ADR 0095 §1). A version 1 re-expresses its kind byte for byte, so its uses
@@ -13,6 +14,7 @@ import { PROCEDURE_STAGE_LABELS } from './stage-types.js';
  */
 export function readPreinstalledProcedures(db: DatabaseSync, reviewRuns: ReadonlyMap<string, number>): readonly PreinstalledProcedureProjection[] {
   const uses = new Map([
+    [LOCAL_CHECK_PROCEDURE, reviewRuns.get(LOCAL_CHECK_CATEGORY) ?? 0] as const,
     ...BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.map((entry) => [reviewProcedureId(entry.categoryId), reviewRuns.get(entry.categoryId) ?? 0] as const),
     [BASELINE_PROCEDURE_ID, Number(db.prepare(`SELECT count(*) total FROM analysis_run_records r
       JOIN analysis_task_intents t ON t.task_intent_id = r.task_intent_id WHERE t.kind = ?`).get(BASELINE_ANALYSIS_KIND)!.total)] as const,

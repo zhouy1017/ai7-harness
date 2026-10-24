@@ -6,6 +6,17 @@ export const PROCEDURE_STAGE_TYPES = [
 ] as const;
 export type ProcedureStageType = (typeof PROCEDURE_STAGE_TYPES)[number];
 
+/** F-20a: these declarations are affirmative choices for this Run, never inferred from a Book type. */
+export interface LocalCheckOptions {
+  readonly punctuation: 'chinese-prose' | 'off';
+  readonly numerals: 'off' | 'national-standard' | 'editor-convention';
+  readonly publication: 'within-scope' | 'literary' | 'reprinted-classic' | 'unknown';
+  readonly numeralRules: readonly ('N01' | 'N02')[];
+  readonly numeralsConfirmed: boolean;
+  readonly excludedRanges: readonly { readonly blockId: string; readonly from: number; readonly to: number; readonly reason: 'foreign' | 'technical' }[];
+  readonly doubledEllipsisBlockIds: readonly string[];
+}
+
 export interface ProcedureStageDefinition {
   readonly stageType: ProcedureStageType;
   readonly inputs: readonly string[];

@@ -2,7 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { ProcedureDefinitionDocument, ProcedureDefinitionPin } from '../../shared/protocol/procedures.js';
 import { canonicalJson, canonicalRecord, parseCanonicalJson, requireAnalysis, sha256Hex } from '../analysis/canonical.js';
 import { preinstalledProcedureDefinitions, allPreinstalledProcedureDefinitions } from './preinstalled.js';
-import { REVIEW_CONTRACT_SCHEMA_VERSION } from '../task-authorization.js';
+import { LOCAL_REVIEW_SCHEMA_VERSION, REVIEW_CONTRACT_SCHEMA_VERSION } from '../task-authorization.js';
 
 export const PROCEDURE_DEFINITION_SCHEMA_SQL = {
   procedure_definitions: `CREATE TABLE procedure_definitions (
@@ -72,7 +72,7 @@ function insertProcedureVersions(db: DatabaseSync, documents: readonly Procedure
 export function initializeProcedureDefinitionSchema(db: DatabaseSync): void {
   const existing = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'procedure_definitions'").get() !== undefined;
   if (existing) {
-    const legacy = Number(db.prepare('PRAGMA user_version').get()?.user_version) < REVIEW_CONTRACT_SCHEMA_VERSION;
+    const legacy = Number(db.prepare('PRAGMA user_version').get()?.user_version) < LOCAL_REVIEW_SCHEMA_VERSION;
     validateProcedureDefinitions(db, legacy);
     const count = Number(db.prepare('SELECT count(*) total FROM procedure_definition_versions').get()!.total);
     if (count === allPreinstalledProcedureDefinitions().length) return;
@@ -83,7 +83,8 @@ export function initializeProcedureDefinitionSchema(db: DatabaseSync): void {
       for (const sql of Object.values(PROCEDURE_DEFINITION_SCHEMA_SQL)) db.exec(sql);
       for (const sql of Object.values(PROCEDURE_DEFINITION_TRIGGER_SQL)) db.exec(sql);
     }
-    insertProcedureVersions(db, existing ? preinstalledProcedureDefinitions().filter((document) => document.version === 2) : allPreinstalledProcedureDefinitions());
+    insertProcedureVersions(db, existing ? allPreinstalledProcedureDefinitions().filter((document) =>
+      db.prepare('SELECT 1 FROM procedure_definition_versions WHERE procedure_id = ? AND version = ?').get(document.id, document.version) === undefined) : allPreinstalledProcedureDefinitions());
     validateProcedureDefinitions(db);
     db.exec('COMMIT');
   } catch (error) {
@@ -98,8 +99,11 @@ export function initializeProcedureDefinitionSchema(db: DatabaseSync): void {
 export function validateProcedureDefinitions(db: DatabaseSync, allowLegacy = false): void {
   const identities = db.prepare('SELECT * FROM procedure_definitions').all();
   const versions = db.prepare('SELECT * FROM procedure_definition_versions').all();
-  const expected = allowLegacy && versions.length === 10 ? preinstalledProcedureDefinitions(1) : allPreinstalledProcedureDefinitions();
-  requireAnalysis(identities.length === 10 && versions.length === expected.length,
+  const preReview = Number(db.prepare('PRAGMA user_version').get()?.user_version) < REVIEW_CONTRACT_SCHEMA_VERSION;
+  const expected = allowLegacy && preReview && versions.length === 10 ? preinstalledProcedureDefinitions(1)
+    : allowLegacy && !identities.some((row) => row.procedure_id === 'ai7-procedure/local-text-check')
+      ? allPreinstalledProcedureDefinitions().filter((document) => document.id !== 'ai7-procedure/local-text-check') : allPreinstalledProcedureDefinitions();
+  requireAnalysis(identities.length === new Set(expected.map((document) => document.id)).size && versions.length === expected.length,
     'PROCEDURE_RECORD_INVALID', '预装工序版本不完整。');
   for (const document of expected) {
     const identity = identities.find((row) => row.procedure_id === document.id);

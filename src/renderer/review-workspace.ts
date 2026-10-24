@@ -320,6 +320,7 @@ interface BatchStrip {
 type SheetSelection = { readonly fromBlockId: string; readonly toBlockId: string };
 
 interface SheetState {
+  localOptions: import('../shared/protocol/procedures.js').LocalCheckOptions;
   seriesId: string | null;
   readonly seriesChoices: ReadonlyArray<{ readonly seriesId: string; readonly title: string }>;
   readonly recommendation: ProcedureRecommendationSelection;
@@ -850,7 +851,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   function renderNewReview(next: ReviewWorkspaceProjection, reasonId: string): HTMLElement {
     const row = el('div', 'button-row review-new-actions');
     const start = actionButton('new-review', 'primary', () => void openSheet(null, start));
-    row.append(start);
+    const local = actionButton('new-local-check', 'secondary', () => void openSheet({ categories: ['local-text-check'], scope: 'whole', from: null, to: null }, local));
+    local.disabled = !next.newReview.available || working;
+    row.append(start, local);
     if (!next.newReview.available) {
       start.disabled = true;
       const why = el('p', 'field-note review-unavailable-reason', next.newReview.unavailableReason ?? '');
@@ -898,6 +901,18 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       meta.append(authorized);
     }
     section.append(heading, meta);
+    if (run.localCheck !== undefined) {
+      const local = el('section', 'review-local-check');
+      local.dataset['localCheck'] = run.localCheck.state;
+      local.append(el('p', 'field-note', '本地文字检查只按五项有限规则提示可能问题；专业符号、元语言用法可能误报，无发现不表示整部标准合规。原始官方文档仅核对了索引条款，未直接核看原页。'));
+      local.append(el('p', 'field-note', `本次数字依据：${run.localCheck.options.numerals === 'editor-convention' ? '编辑约定' : run.localCheck.options.numerals === 'off' ? '未启用' : run.localCheck.options.publication === 'within-scope' ? '编辑明确声明在适用范围内' : '不在适用范围内，未检查'}。`));
+      for (const [rule, count] of Object.entries(run.localCheck.counts ?? {})) local.append(el('p', 'field-note', `${rule}/v1：检查 ${count.checked} 段，排除上下文 ${count.exempt}，跳过 ${count.skipped}，未识别 ${count.notRecognized}，已检查无发现 ${count.noFinding}，发现 ${count.findings}，错误 ${count.error}，未启用 ${count.disabled}，不适用 ${count.outOfApplicability}。`));
+      for (const exclusion of run.localCheck.excluded) local.append(el('p', 'field-note', `未生成批注：${exclusion.reason}（${exclusion.candidateId}）。`));
+      section.append(local);
+      if (run.authorization !== null && (run.state === 'running' || run.canContinue)) {
+        local.append(actionButton('scope-cancel', 'secondary', () => void cancelRun(run)));
+      }
+    }
     // The Captured Procedure version the Run was prepared from (ADR 0087 §4), and the steps it left out for this Book.
     if (run.procedure !== null) {
       const pin = el('div', 'review-procedure-pin');
@@ -2013,6 +2028,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     sheetOpening = false;
     if (destroyed || projection === null || sheet.open) return;
     sheetState = {
+      localOptions: { punctuation: 'off', numerals: 'off', publication: 'unknown', numeralRules: [], numeralsConfirmed: false, excludedRanges: [], doubledEllipsisBlockIds: [] },
       seriesId: null,
       seriesChoices,
       recommendation: new ProcedureRecommendationSelection(),
@@ -2141,9 +2157,13 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     if (state.recommendation.projection === null) void recommendations.load();
 
     const categories = el('fieldset', 'review-category-options');
+    const localSheet = state.categories.has('local-text-check');
+    procedureField.hidden = localSheet;
+    recommendationSlot.hidden = localSheet;
     categories.append(el('legend', undefined, REVIEW_CATEGORY_LEGEND));
     const categoryInputs = new Map<string, { input: HTMLInputElement; label: HTMLLabelElement; reason: HTMLElement; entry: ReviewWorkspaceCategoryProjection }>();
     for (const entry of workspace.categories) {
+      if (entry.categoryId === 'local-text-check' || localSheet) continue;
       const label = el('label', 'review-category-option');
       label.dataset['reviewCategoryOption'] = entry.categoryId;
       const input = el('input');
@@ -2162,6 +2182,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       text.append(el('strong', undefined, entry.label), description, basis, reason);
       label.append(input, text);
       input.addEventListener('change', () => {
+        if (input.checked && entry.categoryId === 'local-text-check') state.categories.clear();
+        else if (input.checked) state.categories.delete('local-text-check');
         if (input.checked) state.categories.add(entry.categoryId);
         else state.categories.delete(entry.categoryId);
         state.problem = null;
@@ -2170,6 +2192,36 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       categories.append(label);
       categoryInputs.set(entry.categoryId, { input, label, reason, entry });
     }
+    const localOptions = el('fieldset', 'review-local-options');
+    localOptions.dataset['localCheckOptions'] = '';
+    localOptions.append(el('legend', undefined, '本次本地检查选项'));
+    const proseLabel = el('label', 'review-field');
+    const prose = el('input'); prose.type = 'checkbox'; prose.dataset['localCheckProse'] = '';
+    prose.checked = state.localOptions.punctuation === 'chinese-prose';
+    prose.addEventListener('change', () => { state.localOptions = { ...state.localOptions, punctuation: prose.checked ? 'chinese-prose' : 'off' }; updateSheet(); });
+    proseLabel.append(prose, el('span', undefined, '我确认所选范围为中文正文，启用 P01–P03 标点检查'));
+    const numeralLabel = el('label', 'review-field');
+    const numerals = el('select'); numerals.dataset['localCheckNumerals'] = '';
+    for (const [value, label] of [['off', '数字检查关闭（默认）'], ['national-standard', '按国标有限条款检查 N01、N02'], ['editor-convention', '按编辑约定检查 N01、N02']]) numerals.append(new Option(label, value));
+    numerals.value = state.localOptions.numerals;
+    numerals.addEventListener('change', () => {
+      const value = numerals.value as typeof state.localOptions.numerals;
+      state.localOptions = { ...state.localOptions, numerals: value, numeralRules: value === 'off' ? [] : ['N01', 'N02'], numeralsConfirmed: value === 'off' ? false : state.localOptions.numeralsConfirmed }; updateSheet();
+    });
+    numeralLabel.append(el('span', undefined, '数字依据'), numerals);
+    const publicationLabel = el('label', 'review-field');
+    const publication = el('select'); publication.dataset['localCheckPublication'] = '';
+    for (const [value, label] of [['unknown', '适用范围未确认'], ['within-scope', '我声明本次出版物/范围在 GB/T 15835 §1 适用范围内'], ['literary', '文艺类出版物（不适用国标数字选项）'], ['reprinted-classic', '重印古籍（不适用国标数字选项）']]) publication.append(new Option(label, value));
+    publication.value = state.localOptions.publication;
+    publication.addEventListener('change', () => { state.localOptions = { ...state.localOptions, publication: publication.value as typeof state.localOptions.publication }; updateSheet(); });
+    publicationLabel.append(el('span', undefined, '出版物适用范围'), publication);
+    const confirmationLabel = el('label', 'review-field');
+    const confirmation = el('input'); confirmation.type = 'checkbox'; confirmation.dataset['localCheckConfirmation'] = ''; confirmation.checked = state.localOptions.numeralsConfirmed;
+    confirmation.addEventListener('change', () => { state.localOptions = { ...state.localOptions, numeralsConfirmed: confirmation.checked }; updateSheet(); });
+    confirmationLabel.append(confirmation, el('span', undefined, '我明确选择本次数字依据及 N01、N02；编辑约定不表示国标适用'));
+    localOptions.append(proseLabel, numeralLabel, publicationLabel, confirmationLabel,
+      el('p', 'field-note', '只生成可能问题批注。四字符省略号没有省略段落/诗行声明时跳过；代码、网址、邮件等识别范围会排除。未识别和无发现均不表示合规。'));
+    categories.append(localOptions);
 
     const scopes = el('fieldset', 'review-scope-options');
     scopes.append(el('legend', undefined, REVIEW_SCOPE_LEGEND));
@@ -2314,6 +2366,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       const loading = state.requests.loading;
       procedureField.dataset['procedureLoading'] = String(loading);
       for (const { input, label, reason, entry } of categoryInputs.values()) {
+        input.checked = state.categories.has(entry.categoryId);
         const scopeAvailability = state.scope === null ? null : entry.scopes[state.scope];
         const step = filled?.steps.find((candidate) => candidate.categoryId === entry.categoryId) ?? null;
         const why = filled !== null && step === null
@@ -2340,6 +2393,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
           input.dataset['unavailableReason'] = why;
         }
       }
+      const local = state.categories.has('local-text-check');
+      localOptions.hidden = !local;
+      confirmation.disabled = state.localOptions.numerals === 'off';
+      confirmation.checked = state.localOptions.numeralsConfirmed;
       for (const [kind, input] of scopeInputs) input.disabled = !scopeAvailability(workspace, state, kind).available || preparing || (filled !== null && kind !== filled.scopeSlot);
       const currentOffers = projection?.materials?.items ?? materialItems;
       const acceptsMaterials = syncReviewMaterials(materialInputs, currentOffers, state, workspace.categories, preparing || loading);
@@ -2354,7 +2411,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       const from = chapterOptions.find((chapter) => chapter.blockId === state.from) ?? null;
       const to = chapterOptions.find((chapter) => chapter.blockId === state.to) ?? null;
       readValue.textContent = reviewReadConsequence(state.scope, workspace.manuscript, { from, to });
-      const send = reviewSendConsequence(workspace.categories.filter((entry) => state.categories.has(entry.categoryId)));
+      const send = local ? '只在本机读取冻结的所选正文，不发送任何内容；不调用模型。' : reviewSendConsequence(workspace.categories.filter((entry) => state.categories.has(entry.categoryId)));
       sendValue.textContent = state.materialIds.size === 0 || !acceptsMaterials ? send
         : `${send.replace(/。$/u, '')}；所选资料库资料的文字随稿件一并发往，只参照，不照抄。`;
       problem.textContent = state.problem ?? '';
@@ -2362,6 +2419,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       progress.hidden = state.job === null;
       progress.textContent = state.job === null ? '' : reviewPreparationLine(state.job.progress);
       prepare.disabled = preparing || loading || (state.materialIds.size > 0 && !acceptsMaterials);
+      if (local && ((state.localOptions.punctuation === 'off' && state.localOptions.numerals === 'off') || (state.localOptions.numerals !== 'off' && !state.localOptions.numeralsConfirmed))) prepare.disabled = true;
       quick.disabled = prepare.disabled || state.categories.size === 0 || state.scope === null;
       close.disabled = preparing;
       cancelPreparation.hidden = !preparing;
@@ -2376,6 +2434,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
 
   /** A scope as the sheet offers it: 当前选区 once it holds a Run's selection, every other as the workspace says (P2-4). */
   function scopeAvailability(workspace: ReviewWorkspaceProjection, state: SheetState, kind: ReviewScopeKind): { available: boolean; unavailableReason: string | null } {
+    if (state.categories.has('local-text-check') && kind === 'changed') return { available: false, unavailableReason: '本地文字检查请选择全书、选章或当前选区。' };
     if (kind === 'selection' && state.selection !== null) return { available: true, unavailableReason: null };
     return workspace.scopeOptions[kind];
   }
@@ -2399,7 +2458,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       sheetUpdate();
       return;
     }
-    const categoryIds = projection.categories.filter((entry) => state.categories.has(entry.categoryId)).map((entry) => entry.categoryId);
+    const categoryIds = state.categories.has('local-text-check') ? ['local-text-check'] : projection.categories.filter((entry) => state.categories.has(entry.categoryId)).map((entry) => entry.categoryId);
     const { from, to } = chaptersOf(state);
     const asked = reviewSheetScope({
       scope: state.scope,
@@ -2418,6 +2477,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     options.setStatus(REVIEW_STATUS_LINES.preparing, 'busy');
     try {
       const initial = await api.prepareReviewRun({
+        ...(categoryIds.includes('local-text-check') ? { localCheck: state.localOptions } : {}),
         ...(state.seriesId === null ? {} : { seriesId: state.seriesId }),
         categoryIds,
         scope,

@@ -113,6 +113,8 @@ export function reviewCategoryScopePlan(
 ): ReviewCategoryScopePlan {
   if (executor === 'unavailable' || executor === 'series-knowledge') return { kind: 'refused', reason: unavailableReason ?? '这一类暂不可用。' };
   if (scope.kind === 'selection' && scope.selectedRange === null) return { kind: 'refused', reason: SELECTION_UNAVAILABLE_REASON };
+  if (executor === 'local-text-check') return scope.kind === 'changed' ? { kind: 'refused', reason: '本地文字检查请选择全书、选章或当前选区。' }
+    : scope.kind !== 'whole' && scope.selectedRange === null ? { kind: 'refused', reason: NO_CHAPTERS_REASON } : { kind: 'leads', selectedRange: scope.selectedRange };
   if (executor === 'baseline-leads') {
     if (!facts.baselineRevision) return { kind: 'refused', reason: LEADS_ABSENT_REASON };
     if (scope.kind === 'changed') return { kind: 'refused', reason: LEADS_CHANGED_REASON };

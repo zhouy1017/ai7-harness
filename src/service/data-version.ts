@@ -64,6 +64,7 @@ export const SCHEMA_REVISION_CLASSES: ReadonlyArray<ClassifiedSchemaRevision> = 
   { revision: 87, class: 'additive' },
   { revision: 88, class: 'additive' },
   { revision: 89, class: 'additive' },
+  { revision: 90, class: 'additive' },
 ];
 
 /**

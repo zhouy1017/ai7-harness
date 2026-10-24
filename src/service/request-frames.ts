@@ -1,3 +1,4 @@
+import { validLocalOptions } from './review/deterministic/plan.js';
 import { validSupervisionInput } from './learning/supervision-directives.js';
 import { AnalysisError } from './analysis/canonical.js';
 import { baselineAnalysisOutbound } from './analysis/baseline-analysis-wire.js';
@@ -1661,7 +1662,10 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     case 'prepareReviewRun': {
       // A sheet pre-filled from a Captured Procedure (Issue #65, S30) names the exact version and digest it was filled from.
-      const input = requireInputWithOptional(value.input, ['bookId', 'categoryIds', 'scope'], ['capturedProcedure', 'materialIds', 'seriesId'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'categoryIds', 'scope'], ['capturedProcedure', 'materialIds', 'seriesId', 'localCheck'], tentativeId);
+      if (input.localCheck !== undefined && (!validLocalOptions(input.localCheck) || !Array.isArray(input.categoryIds) || input.categoryIds.length !== 1 || input.categoryIds[0] !== 'local-text-check')) throw new ProtocolError(tentativeId);
+      if (Array.isArray(input.categoryIds) && input.categoryIds.includes('local-text-check') &&
+        (!validLocalOptions(input.localCheck) || input.capturedProcedure != null || input.seriesId != null || (Array.isArray(input.materialIds) && input.materialIds.length > 0))) throw new ProtocolError(tentativeId);
       if (!optionalOrNull(input, 'seriesId', validUuid)) throw new ProtocolError(tentativeId);
       if (!validUuid(input.bookId) || !Array.isArray(input.categoryIds) || !validReviewCategoryIds(input.categoryIds, 1) ||
           !validReviewRunScope(input.scope) ||

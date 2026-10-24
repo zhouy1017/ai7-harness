@@ -210,6 +210,7 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   review_runs: 'owned',
   review_run_authorizations: 'owned',
   review_run_category_events: 'owned',
+  review_local_stage_artifacts: 'owned',
   review_findings: 'owned',
   review_excluded_findings: 'owned',
   review_finding_dispositions: 'owned',
