@@ -465,6 +465,7 @@ async function constructPredecessorV12(dataRoot, bookId) {
     // Synchronized delta with #66: revision 81's four imported Skill relations follow them.
     // Synchronized delta with Issue #423 (slice 7a): revision 80's three Task Intent Draft relations follow them.
     // Synchronized delta with Issue #1084: revision 88's review_excluded_findings goes with the Review Run relations it extends.
+    // Synchronized delta with Issue #1119: revision 90's review_local_stage_artifacts, a child of review_runs, goes just before it.
     database.exec(`
       PRAGMA foreign_keys = OFF;
       BEGIN IMMEDIATE;
@@ -597,6 +598,7 @@ async function constructPredecessorV12(dataRoot, bookId) {
       DROP TABLE review_excluded_findings;
       DROP TABLE review_run_category_events;
       DROP TABLE review_run_authorizations;
+      DROP TABLE review_local_stage_artifacts;
       DROP TABLE review_runs;
       DROP TABLE manuscript_effect_receipts;
       DROP TABLE manuscript_effect_dispatches;

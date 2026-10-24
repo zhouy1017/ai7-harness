@@ -24,32 +24,35 @@ type ListRow = { block: LocalCheckBlock; indent: string; number: bigint; from: n
 const SEGMENTER = new Intl.Segmenter('zh', { granularity: 'grapheme' });
 const PAIRS: Readonly<Record<string, string>> = { '”': '“', '’': '‘', '）': '（' };
 const IDENTIFIER_CHARACTER = /^(?!\p{Script=Han})[\p{L}\p{N}\p{M}_]$/u;
+// Sign glyphs other than the ASCII pair N01 spells: a token they start is signed, so it stays outside both grammars.
+const OTHER_SIGN = /[＋－±∓﹢﹣]/u;
 const emptyCounts = (): LocalRuleCounts => ({ checked: 0, exempt: 0, skipped: 0, error: 0, findings: 0, disabled: 0, outOfApplicability: 0, notRecognized: 0, noFinding: 0 });
 
 /** Deterministic offsets never enter the quotation-search fallback used by a model. */
-export function candidateHasExactAnchor(plan: LocalCheckPlan, candidate: LocalCandidate, graphemes?: readonly string[]): boolean {
-  const block = plan.blocks.find((block) => block.blockId === candidate.blockId);
+export function candidateHasExactAnchor(plan: LocalCheckPlan, candidate: LocalCandidate, graphemes?: readonly string[],
+  block: LocalCheckBlock | undefined = plan.blocks.find((frozen) => frozen.blockId === candidate.blockId)): boolean {
   const basis = numeralBasis(plan.options);
   const enabled = candidate.ruleId.startsWith('P') ? plan.options.punctuation === 'chinese-prose' && candidate.basis === 'national-standard'
     : (basis === 'national-standard' || basis === 'editor-convention') && candidate.basis === basis && plan.options.numeralRules.some((id) => id === candidate.ruleId);
   const expectedId = sha256Hex(canonicalJson({ source: plan.source, rule: candidate.ruleId, version: 1, blockId: candidate.blockId, from: candidate.from, to: candidate.to }));
-  return enabled && candidate.version === 1 && candidate.id === expectedId && block !== undefined && Number.isSafeInteger(candidate.from) && Number.isSafeInteger(candidate.to) && candidate.from >= 0 && candidate.to > candidate.from &&
+  return enabled && candidate.version === 1 && candidate.id === expectedId && block !== undefined && block.blockId === candidate.blockId && Number.isSafeInteger(candidate.from) && Number.isSafeInteger(candidate.to) && candidate.from >= 0 && candidate.to > candidate.from &&
     candidate.quote.length > 0 && candidate.to <= (graphemes?.length ?? graphemeCount(block.text)) &&
     (graphemes === undefined ? sliceGraphemes(block.text, candidate.from, candidate.to) : graphemes.slice(candidate.from, candidate.to).join('')) === candidate.quote;
 }
 
 /** Materialization validates each frozen block once, including repeated-text candidates with known offsets. */
 export function exactLocalCandidateIds(plan: LocalCheckPlan, candidates: readonly LocalCandidate[]): ReadonlySet<string> {
+  const blocks = new Map(plan.blocks.map((block) => [block.blockId, block]));
   const cache = new Map<string, readonly string[]>();
   const valid = new Set<string>();
   for (const candidate of candidates) {
+    const block = blocks.get(candidate.blockId);
+    if (block === undefined) continue;
     let graphemes = cache.get(candidate.blockId);
     if (graphemes === undefined) {
-      const block = plan.blocks.find((block) => block.blockId === candidate.blockId);
-      if (block === undefined) continue;
       graphemes = Array.from(SEGMENTER.segment(block.text), (segment) => segment.segment); cache.set(candidate.blockId, graphemes);
     }
-    if (candidateHasExactAnchor(plan, candidate, graphemes)) valid.add(candidate.id);
+    if (candidateHasExactAnchor(plan, candidate, graphemes, block)) valid.add(candidate.id);
   }
   return valid;
 }
@@ -86,8 +89,9 @@ export async function checkLocalPlan(plan: LocalCheckPlan, options: {
       if (excluded.length < 256) excluded.push({ candidateId: candidate.id, reason: 'local-result-limit' });
       return;
     }
-    if (!candidateHasExactAnchor(plan, candidate, parts)) {
-      counts[id].error += 1; excluded.push({ candidateId: candidate.id, reason: 'exact-grapheme-anchor-invalid' }); return;
+    if (!candidateHasExactAnchor(plan, candidate, parts, block)) {
+      // Counted in full; the listed reasons stay within the artifact's 256-entry bound.
+      counts[id].error += 1; if (excluded.length < 256) excluded.push({ candidateId: candidate.id, reason: 'exact-grapheme-anchor-invalid' }); return;
     }
     candidates.push(candidate); counts[id].findings += 1;
   };
@@ -182,6 +186,8 @@ export async function checkLocalPlan(plan: LocalCheckPlan, options: {
             }
             stack.splice(matched);
           } else if ((discardedClosers.get(mark) ?? 0) > 0) discardedClosers.set(mark, discardedClosers.get(mark)! - 1);
+          // A right single quote with no left single quote open is a possible apostrophe, which this rule never diagnoses.
+          else if (mark === '’') counts.P01.skipped++;
           else if (plan.scope === 'whole' && !gap) emit('P01', block, index, index + 1, '在完整全书边界内未找到对应开符。');
           else counts.P01.skipped++;
         }
@@ -224,7 +230,7 @@ export async function checkLocalPlan(plan: LocalCheckPlan, options: {
         const preceding = Array.from(block.text.slice(Math.max(0, start - 2), start)).at(-1) ?? '';
         const following = Array.from(block.text.slice(end, end + 2))[0] ?? '';
         // Identifier, path, signed/scientific and dotted continuations are outside this grammar.
-        if (IDENTIFIER_CHARACTER.test(preceding) || IDENTIFIER_CHARACTER.test(following) || /[.\/%％万亿+\-−—~～]/u.test(preceding) || preceding === '\\' ||
+        if (IDENTIFIER_CHARACTER.test(preceding) || IDENTIFIER_CHARACTER.test(following) || /[.\/%％万亿+\-−—~～]/u.test(preceding) || OTHER_SIGN.test(preceding) || preceding === '\\' ||
             /[.\/]/u.test(following) || following === '\\') { counts[id].skipped++; continue; }
         const from = indexAt.get(start); const to = indexAt.get(end);
         if (from === undefined || to === undefined || !exact(from, to)) { counts[id].skipped++; continue; }
@@ -243,7 +249,9 @@ export async function checkLocalPlan(plan: LocalCheckPlan, options: {
     else counts.P01.skipped++;
   }
   await checkpoint();
-  candidates.sort((a, b) => plan.blocks.findIndex((block) => block.blockId === a.blockId) - plan.blocks.findIndex((block) => block.blockId === b.blockId) || a.from - b.from || a.ruleId.localeCompare(b.ruleId));
+  // Block order by a precomputed index: a lookup per comparison would hold the event loop on a dense whole Book.
+  const order = new Map(plan.blocks.map((block, index) => [block.blockId, index]));
+  candidates.sort((a, b) => order.get(a.blockId)! - order.get(b.blockId)! || a.from - b.from || a.ruleId.localeCompare(b.ruleId));
   return { schema: 'ai7.review.local-result/1', planDigest: plan.digest, paragraphs: plan.blocks.length, candidates, excluded, counts };
 }
 
