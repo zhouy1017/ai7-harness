@@ -25,7 +25,7 @@
           "policyType": "provider-processing",
           "version": "v29",
           "canonicalPath": "docs/policies/provider-processing-policy.v29.json",
-          "sha256": "5aec0a8cb62ab6836294d88fc08a3a1a6130a2827db90274af4d0d377e678361"
+          "sha256": "c9545a5f461a7791115c1f4664bbd731757775951f814d39c28b12c85af88c9d"
         },
         "fixture-recording": {
           "policyId": "provider-processing-policy",
@@ -39,7 +39,7 @@
           "policyType": "provider-processing",
           "version": "v28",
           "canonicalPath": "docs/policies/provider-processing-policy.v28.json",
-          "sha256": "93434da9df1a51354b08dcdf211ee01cc73706d76c8af812a5d8da5e7056d5f6"
+          "sha256": "f8e5f1031f2e923e7693fdc153497349f368a12c5929714c7af9aa5afadcb147"
         },
         "developer-live": {
           "policyId": "provider-processing-policy",

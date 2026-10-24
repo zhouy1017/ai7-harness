@@ -4,7 +4,7 @@
 
 [Canonical JSON](provider-processing-policy.v29.json) · [whole-document const schema](provider-processing-policy.v29.schema.json) · [candidate set v20](active-policy-set.v20.json) · [unchanged predecessor v1](provider-processing-policy.v1.json) · [ordinary-production counterpart v28](provider-processing-policy.v28.md).
 
-Exact JSON SHA-256: `5aec0a8cb62ab6836294d88fc08a3a1a6130a2827db90274af4d0d377e678361`. Candidate set v20 SHA-256: `874706d31ebc6e969f38a355636491d9e1790d8c81b601515c36af4c167de767`. The globally numbered v29 is the development-ci successor of v1; immutable fixture-recording v2 is a different scope and is unchanged. The provider decision remains default deny, empty `providerAllowRules`, and zero live transmissions.
+Exact JSON SHA-256: `c9545a5f461a7791115c1f4664bbd731757775951f814d39c28b12c85af88c9d`. Candidate set v20 SHA-256: `c5587d32e87a6422a09d2c3cb77271d1e0773a016923b91b776c623a7b5ff168`. The globally numbered v29 is the development-ci successor of v1; immutable fixture-recording v2 is a different scope and is unchanged. The provider decision remains default deny, empty `providerAllowRules`, and zero live transmissions.
 
 The canonical JSON carries structured declarations only, as v26/v27 do. Candidate status, the per-delta authority map, the Owner decision wording and the specification narrative live in this unpinned projection and the Draft PR, so an accepted candidate never carries pending-status text in its pinned bytes. Constraints the specification states in prose are encoded as named keys (fixtureRuleSelection, review synthesis/instruction/guideline bounds, curation exclusions and the factual claim/recheck scope, payload and count additions). The v1 category vocabulary is retained and the two legacy local excerpt categories its tuples name are declared. Legacy registration pins are the exact registration-file SHA-256 at the frozen source with a verified selection-unchanged flag; every digest basis is stated in digestCanonicalization, matchSemantics states that code-file pins are frozen-source provenance rather than runtime match preconditions (current code is revalidated by the selecting child at its base), and registeredPurposeBasis states that Journey and evidence-case purposes are complete while service-test purposes are documentary. The JSON blocks quoted below are the specification's proposed blocks; the candidate adds those named keys beside them.
 
@@ -27,7 +27,7 @@ The instruction block is <=1,200 graphemes only for typos-and-usage, with exact 
 
 ## Frozen legacy compatibility, separate from new capabilities
 
-The populated metadata-only manifest has **47 tuples, 34 registered fixture roots and 591 resolved entry-key rows**; all **53 fixture files** are independently pinned and unchanged between frozen `809c96f28bf111db39dac80b3b0743929779d52e` and authoring base `aeeb0ae02f8c11a155acb829709fb2fa90a2548e`. Manifest SHA-256 over the canonical tuples array: `7f55b9845550ed91cb44d9d7999a9b0a2ee6d79df9390adaab01194b81b1702a`. Full fixture inventory SHA-256: `2f15e004949aba1d1e8e537b7223dd1bade7b39db994e9e56164df38fe3f1e53`. Predecessor v1 SHA-256: `d9dfe8c13a58649d8d9f607364030468ae71832b94c9436291d29000795d725a`.
+The populated metadata-only manifest has **47 tuples, 34 registered fixture roots and 591 resolved entry-key rows**; all **53 fixture files** are independently pinned and unchanged between frozen `809c96f28bf111db39dac80b3b0743929779d52e` and authoring base `aeeb0ae02f8c11a155acb829709fb2fa90a2548e`. Manifest SHA-256 over the canonical tuples array: `2572c1b5aa05d6ccc9a60a2a8a03ba2cefc10d5f48c1a85377d53797360bc0d2`. Full fixture inventory SHA-256: `2f15e004949aba1d1e8e537b7223dd1bade7b39db994e9e56164df38fe3f1e53`. Predecessor v1 SHA-256: `d9dfe8c13a58649d8d9f607364030468ae71832b94c9436291d29000795d725a`.
 
 Each tuple jointly requires its registered purpose/profile, executable kind or exact session purpose, prompt/contract/source/composition pins, category/tool-set hash, fixture file hash, ordered leaf-first base chain and resolved lineage hash, and finite `(unitOrdinal, requestDigest, attempt|null)` keys. Captured prompt/task digests and explicit null absences are retained. Per-Run source, binding and composition identities remain runtime checks, never invented historical constants. Dynamic custom-dimension identity is confined to the exact registered input profile and derived immutable version, without a wildcard kind. Exact source metadata contains no response/manuscript text.
 
@@ -202,6 +202,8 @@ v27 already declares subAgents:{declaredInPlanEnvelopeRequired:true,inheritsPare
 The excluded design sketch is deliberately narrow: only editorial-review/typos-and-usage under development-ci-fixture-review; one leaf child replacing one already-planned unit turn; maxDepth1/maxConcurrentChildren1; zero parent model requests; identical frozen unit message/system contract; shared parent scope/binding/policy/ceiling and shared request/tool/search counters; no child-added retry, fork/seed/persona/agentOptions override, new model tool or cross-unit stage. Even this sketch is not an approved candidate rule: the exact implementation profile and fixture digests must first become reviewable, and any later row needs its own explicit decision. It neither admits external packages nor assumes optional jobs/fork dependencies. Current truthful service evidence can proceed under its actual selected authority; no positive v29 subagent Journey is claimed.
 
 ## Later activation and feature dependencies
+
+F-06 boundary: this candidate grants no Global Agent cross-Book or procedure tool. The Global Agent rule keeps v27 targetedRetrieval.allowed=false, its listed memory/preference-only source contract and one bounded payload per attempt. Category-free bookkeeping wording and the excluded redaction lift add no tool or source. A bounded F-06 source/tool contract is a separate Commander decision before any later candidate expansion.
 
 The separately bounded activation/reader child must preserve historical plans and implement strict projections and consumers before selection. Host preparation is not final completion or release proof. Exact Owner decisions, Reviewer correction, the full exact-head guest ladder `doctor,bootstrap,check,test,service,build,e2e:all` and applicable existing Gate evidence remain required. No Ready, merge, activation or model-quality claim is made.
 
@@ -1237,7 +1239,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -1489,7 +1492,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -1635,7 +1639,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -1763,7 +1768,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -2021,7 +2027,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -2478,7 +2485,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -2846,7 +2854,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -3113,7 +3122,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -3363,7 +3373,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -3619,7 +3630,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -4048,7 +4060,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -4155,7 +4168,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -4402,7 +4416,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -4612,7 +4627,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -4855,7 +4871,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -4976,7 +4993,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -5100,7 +5118,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -5224,7 +5243,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -5459,7 +5479,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -5592,7 +5613,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -5912,7 +5934,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -6210,7 +6233,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -6467,7 +6491,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -6702,7 +6727,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -6937,7 +6963,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -7172,7 +7199,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -7498,7 +7526,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -7881,7 +7910,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -8236,7 +8266,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -9047,7 +9078,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -9613,7 +9645,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -9720,7 +9753,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -9982,7 +10016,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -10222,7 +10257,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -10462,7 +10498,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -10982,7 +11019,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -11116,7 +11154,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -11288,7 +11327,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -11414,7 +11454,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -11722,7 +11763,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -12233,7 +12275,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -13088,7 +13131,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -13451,7 +13495,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -14254,7 +14299,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -14538,7 +14584,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -14854,7 +14901,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -15049,7 +15097,8 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
         }
       ],
       "perRunChecks": [
-        "existing-journey-and-evidence-route-restrictions",
+        "exact-registered-profile-and-its-partitioned-entry-keys",
+        "existing-journey-and-evidence-route-restrictions-where-present",
         "exact-executable-kind-or-session-purpose",
         "frozen-prompt-contract-and-composition-digests",
         "frozen-source-category-tool-and-message-digests",
@@ -15066,7 +15115,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
       }
     }
   ],
-  "manifestSha256": "7f55b9845550ed91cb44d9d7999a9b0a2ee6d79df9390adaab01194b81b1702a",
+  "manifestSha256": "2572c1b5aa05d6ccc9a60a2a8a03ba2cefc10d5f48c1a85377d53797360bc0d2",
   "manifestCanonicalization": "UTF-8 JSON; recursively sorted object keys; array order retained; no whitespace; SHA-256",
   "resolvedLineageCanonicalization": "SHA-256 of leaf-first identity:rawFileSha256 lines joined by LF with no trailing LF",
   "digestCanonicalization": {
@@ -15096,7 +15145,7 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
     "retainedV1BaselineCompleteJourneyOnly": "J-04"
   },
   "matchSemantics": {
-    "codeFilePins": "sourceCommit provenance verified unchanged at exactFixedMetadataUnchangedAtPreparationBase; not a runtime match precondition",
+    "codeFilePins": "sourceCommit reconstruction provenance, verified unchanged only at exactFixedMetadataUnchangedAtPreparationBase; later control-flow changes are not claimed unchanged; not a runtime match precondition",
     "codeFilePinFields": [
       "registryPins",
       "promptContractOwner",
@@ -15107,16 +15156,17 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
       "registeredEvidenceCases.caseFile",
       "registeredPurposes.registrationFileSha256"
     ],
-    "runtimeMatchKeys": [
+    "runtimeMatchConjunction": [
+      "exact registeredProfile and only its partitioned entry keys",
       "exact executable task kind or session purpose",
+      "populated frozen prompt-contract, composition, source, category/tool and message digests, with explicit absences kept absent",
       "exact fixture identity, fixture file SHA-256, ordered lineage and resolved lineage SHA-256",
       "exact entry key unitOrdinal, requestDigest and attempt-or-null under fixtureResolverSemantics",
-      "per-Run frozen prompt-contract, composition, source, category/tool and message digests",
-      "existing restrictions objects and fixtureResolverSemantics Journey limits",
+      "existing restrictions objects and fixtureResolverSemantics Journey limits where present",
       "final payload Egress Gate and current binding, source and exclusion standing"
     ],
-    "registeredPurposes": "provenance; runtime purpose enforcement is limited to the existing restrictions objects, fixtureResolverSemantics and the registered evidence cases existing routes; no new purpose restriction and no purpose-based widening",
-    "currentCodeRevalidation": "the selecting activation child and any landing base re-verify current semantics at that exact base by replaying the affected Journey matrix and registered evidence routes; a changed request digest, contract, composition or entry key yields the existing disclosed refusal",
+    "registeredPurposes": "Journey and evidence-case names are matched only through the existing restrictions objects, fixtureResolverSemantics and the registered evidence cases existing routes; registered service-test file names are documentation only and are the sole purposes of 17 tuples; no new purpose restriction, no purpose-based widening and no wildcard",
+    "currentCodeRevalidation": "request and identity semantic compatibility is proved at the named activation base by replaying the affected Journey matrix and registered evidence routes there; a changed request digest, contract, composition or entry key yields the existing disclosed refusal",
     "historicalBytesIdentitiesOrRequestKeysRewritten": false,
     "relaxedOrWildcardMatchingOnCodeDrift": false
   },

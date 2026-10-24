@@ -1116,7 +1116,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -1368,7 +1369,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -1514,7 +1516,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -1642,7 +1645,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -1900,7 +1904,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -2357,7 +2362,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -2725,7 +2731,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -2992,7 +2999,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -3242,7 +3250,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -3498,7 +3507,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -3927,7 +3937,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -4034,7 +4045,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -4281,7 +4293,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -4491,7 +4504,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -4734,7 +4748,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -4855,7 +4870,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -4979,7 +4995,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -5103,7 +5120,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -5338,7 +5356,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -5471,7 +5490,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -5791,7 +5811,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -6089,7 +6110,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -6346,7 +6368,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -6581,7 +6604,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -6816,7 +6840,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -7051,7 +7076,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -7377,7 +7403,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -7760,7 +7787,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -8115,7 +8143,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -8926,7 +8955,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -9492,7 +9522,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -9599,7 +9630,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -9861,7 +9893,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -10101,7 +10134,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -10341,7 +10375,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -10861,7 +10896,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -10995,7 +11031,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -11167,7 +11204,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -11293,7 +11331,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -11601,7 +11640,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -12112,7 +12152,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -12967,7 +13008,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -13330,7 +13372,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -14133,7 +14176,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -14417,7 +14461,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -14733,7 +14778,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -14928,7 +14974,8 @@
             }
           ],
           "perRunChecks": [
-            "existing-journey-and-evidence-route-restrictions",
+            "exact-registered-profile-and-its-partitioned-entry-keys",
+            "existing-journey-and-evidence-route-restrictions-where-present",
             "exact-executable-kind-or-session-purpose",
             "frozen-prompt-contract-and-composition-digests",
             "frozen-source-category-tool-and-message-digests",
@@ -14945,7 +14992,7 @@
           }
         }
       ],
-      "manifestSha256": "7f55b9845550ed91cb44d9d7999a9b0a2ee6d79df9390adaab01194b81b1702a",
+      "manifestSha256": "2572c1b5aa05d6ccc9a60a2a8a03ba2cefc10d5f48c1a85377d53797360bc0d2",
       "manifestCanonicalization": "UTF-8 JSON; recursively sorted object keys; array order retained; no whitespace; SHA-256",
       "resolvedLineageCanonicalization": "SHA-256 of leaf-first identity:rawFileSha256 lines joined by LF with no trailing LF",
       "digestCanonicalization": {
@@ -14975,7 +15022,7 @@
         "retainedV1BaselineCompleteJourneyOnly": "J-04"
       },
       "matchSemantics": {
-        "codeFilePins": "sourceCommit provenance verified unchanged at exactFixedMetadataUnchangedAtPreparationBase; not a runtime match precondition",
+        "codeFilePins": "sourceCommit reconstruction provenance, verified unchanged only at exactFixedMetadataUnchangedAtPreparationBase; later control-flow changes are not claimed unchanged; not a runtime match precondition",
         "codeFilePinFields": [
           "registryPins",
           "promptContractOwner",
@@ -14986,16 +15033,17 @@
           "registeredEvidenceCases.caseFile",
           "registeredPurposes.registrationFileSha256"
         ],
-        "runtimeMatchKeys": [
+        "runtimeMatchConjunction": [
+          "exact registeredProfile and only its partitioned entry keys",
           "exact executable task kind or session purpose",
+          "populated frozen prompt-contract, composition, source, category/tool and message digests, with explicit absences kept absent",
           "exact fixture identity, fixture file SHA-256, ordered lineage and resolved lineage SHA-256",
           "exact entry key unitOrdinal, requestDigest and attempt-or-null under fixtureResolverSemantics",
-          "per-Run frozen prompt-contract, composition, source, category/tool and message digests",
-          "existing restrictions objects and fixtureResolverSemantics Journey limits",
+          "existing restrictions objects and fixtureResolverSemantics Journey limits where present",
           "final payload Egress Gate and current binding, source and exclusion standing"
         ],
-        "registeredPurposes": "provenance; runtime purpose enforcement is limited to the existing restrictions objects, fixtureResolverSemantics and the registered evidence cases existing routes; no new purpose restriction and no purpose-based widening",
-        "currentCodeRevalidation": "the selecting activation child and any landing base re-verify current semantics at that exact base by replaying the affected Journey matrix and registered evidence routes; a changed request digest, contract, composition or entry key yields the existing disclosed refusal",
+        "registeredPurposes": "Journey and evidence-case names are matched only through the existing restrictions objects, fixtureResolverSemantics and the registered evidence cases existing routes; registered service-test file names are documentation only and are the sole purposes of 17 tuples; no new purpose restriction, no purpose-based widening and no wildcard",
+        "currentCodeRevalidation": "request and identity semantic compatibility is proved at the named activation base by replaying the affected Journey matrix and registered evidence routes there; a changed request digest, contract, composition or entry key yields the existing disclosed refusal",
         "historicalBytesIdentitiesOrRequestKeysRewritten": false,
         "relaxedOrWildcardMatchingOnCodeDrift": false
       },
@@ -15608,7 +15656,8 @@
             "existingPerRunStagesAddedOrMultipliedByC": false,
             "membershipUAndCFixedBeforeVerificationAdmission": true,
             "explicitCeilingReservesInFlightAndStopsAtExhaustion": true,
-            "unsetCeilingMeansUnlimitedProviderCredit": false
+            "unsetCeilingMeansUnlimitedProviderCredit": false,
+            "reservationsPersistedDurably": true
           },
           "assertionContract": {
             "maximumAssertionsPerCoverageUnit": 200,
@@ -15855,6 +15904,21 @@
           "revocationAndExclusionRecheckedBeforeAdmission": true,
           "historicalResultsAndEvidenceImmutable": true,
           "unknownRequestResendAllowed": false,
+          "countContract": {
+            "claims": "C=1",
+            "maximumInitialSessions": 1,
+            "maximumModelSubmissions": 129,
+            "maximumPlatformToolRounds": 128,
+            "maximumSearchSubmissions": 3,
+            "counterReservationBeforeTransportRequired": true,
+            "reservationsPersistedDurably": true,
+            "unknownOrFailedSubmissionConsumesSlot": true,
+            "resumeOrRestartResetsCounters": false,
+            "newStageRetryOverridesGeneralTransportRetry": true,
+            "extractionOrAdditionalStageAllowance": false,
+            "occurrenceMembershipImmutable": true,
+            "membershipFixedBeforeVerificationAdmission": true
+          },
           "verificationContract": {
             "contractId": "ai7.factual-claim-verification/1",
             "stageId": "web-verification",

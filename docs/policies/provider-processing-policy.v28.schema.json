@@ -741,7 +741,8 @@
               "existingPerRunStagesAddedOrMultipliedByC": false,
               "membershipUAndCFixedBeforeVerificationAdmission": true,
               "explicitCeilingReservesInFlightAndStopsAtExhaustion": true,
-              "unsetCeilingMeansUnlimitedProviderCredit": false
+              "unsetCeilingMeansUnlimitedProviderCredit": false,
+              "reservationsPersistedDurably": true
             },
             "assertionContract": {
               "maximumAssertionsPerCoverageUnit": 200,
@@ -2834,6 +2835,21 @@
             "revocationAndExclusionRecheckedBeforeAdmission": true,
             "historicalResultsAndEvidenceImmutable": true,
             "unknownRequestResendAllowed": false,
+            "countContract": {
+              "claims": "C=1",
+              "maximumInitialSessions": 1,
+              "maximumModelSubmissions": 129,
+              "maximumPlatformToolRounds": 128,
+              "maximumSearchSubmissions": 3,
+              "counterReservationBeforeTransportRequired": true,
+              "reservationsPersistedDurably": true,
+              "unknownOrFailedSubmissionConsumesSlot": true,
+              "resumeOrRestartResetsCounters": false,
+              "newStageRetryOverridesGeneralTransportRetry": true,
+              "extractionOrAdditionalStageAllowance": false,
+              "occurrenceMembershipImmutable": true,
+              "membershipFixedBeforeVerificationAdmission": true
+            },
             "verificationContract": {
               "contractId": "ai7.factual-claim-verification/1",
               "stageId": "web-verification",
