@@ -241,41 +241,6 @@ async function expectedFixtureDigest(identities = [FIXTURE_IDENTITY, FIXTURE_BAS
   return createHash('sha256').update(lineage.join('\n'), 'utf8').digest('hex');
 }
 
-/** Same authored sample1 answers, keyed to this Run's real preference version; no recording is changed or created. */
-async function writeLearningPreferenceFixture(dataRoot, taskIntentId, identity, target) {
-  const { DatabaseSync } = await import('node:sqlite');
-  const db = new DatabaseSync(resolve(dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
-  let envelope;
-  let manifest;
-  try {
-    const rows = db.prepare(`SELECT component, canonical_json, sha256 FROM analysis_plan_records WHERE task_intent_id = ?
-      AND plan_version = (SELECT max(plan_version) FROM analysis_plan_records WHERE task_intent_id = ?)
-      AND component IN ('plan-envelope','coverage-manifest')`).all(taskIntentId, taskIntentId);
-    const records = new Map(rows.map((row) => {
-      requireJourney(sha256Hex(row.canonical_json) === row.sha256, 'review-learning-fixture-plan-integrity');
-      return [row.component, JSON.parse(row.canonical_json)];
-    }));
-    envelope = records.get('plan-envelope'); manifest = records.get('coverage-manifest');
-    requireJourney(DIGEST_PATTERN.test(envelope?.promptContractDigest) && manifest?.units?.length === SAMPLE1_UNITS, 'review-learning-fixture-plan');
-  } finally { db.close(); }
-  const authored = JSON.parse(await readFile(resolve(ROOT, 'tests', 'fixtures', 'model', `${REVIEW_FIXTURE_IDENTITY}.json`), 'utf8'));
-  const entries = [];
-  for (const unit of manifest.units) {
-    // The source's first group for each ordinal is its authored typos response; preserve its exact retry sequence and bytes.
-    const template = authored.entries.find((entry) => {
-      if (entry.unitOrdinal !== unit.ordinal || entry.response.kind !== 'unit-result') return false;
-      try { return JSON.parse(entry.response.text).schema === 'ai7.editorial-review.unit-result/2'; } catch { return false; }
-    });
-    requireJourney(template !== undefined, 'review-learning-fixture-template');
-    const requestDigest = sha256Hex(canonicalJson({ promptContractDigest: envelope.promptContractDigest,
-      categoryId: 'typos-and-usage', unitOrdinal: unit.ordinal, unitDigest: unit.digest }));
-    entries.push(...authored.entries.filter((entry) => entry.unitOrdinal === unit.ordinal && entry.requestDigest === template.requestDigest)
-      .map((entry) => ({ ...entry, requestDigest })));
-  }
-  await writeFile(target, JSON.stringify({ ...authored, identity, basedOn: REVIEW_FIXTURE_IDENTITY,
-    description: 'Ephemeral authored J-04 preference-input variant; original response bytes and retry sequence retained.', entries }), { flag: 'wx' });
-}
-
 async function awaitFixedOperation(operation, timeoutMs, timeoutError) {
   operation.catch(() => undefined);
   let timeout;
@@ -899,7 +864,6 @@ async function main() {
   let runRootAcquisition;
   let tempParent;
   let dataRoot;
-  let learningFixturePath;
   let launchForCleanup;
   let electronExecutableForCleanup;
   let credentialMutationReached = false;
@@ -1033,9 +997,6 @@ async function main() {
     if (browserCloseRejected) throw cleanupFailure ?? journeyCheckFailure('J-04', 'browser-cleanup-failed');
     const browserClosed = await closeOwnedBrowserForCleanup();
     if (!browserClosed) throw cleanupFailure ?? journeyCheckFailure('J-04', 'browser-cleanup-failed');
-    if (learningFixturePath !== undefined) {
-      try { await rm(learningFixturePath, { force: true }); learningFixturePath = undefined; } catch (error) { cleanupFailure ??= error; }
-    }
     const ownedLoopback = loopback ?? (loopbackAcquisition === undefined ? undefined : await loopbackAcquisition.catch(() => undefined));
     try { await ownedLoopback?.close(); } catch (error) { cleanupFailure ??= error; }
     loopback = undefined;
@@ -2975,39 +2936,18 @@ async function main() {
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const boxes=Array.from(sheet.querySelectorAll('input[type=checkbox][name="review-category"]')); const scopes=Array.from(sheet.querySelectorAll('input[name="review-scope"]')); const disabled=boxes.filter((box)=>box.disabled); const quick=sheet.querySelector('[data-review-action="quick-start"]'); const terms=Array.from(sheet.querySelectorAll('dl.review-consequences dt')).map((term)=>term.textContent); return boxes.length===9 && boxes.every((box)=>!box.checked) && JSON.stringify(disabled.map((box)=>box.value).sort())===JSON.stringify(['cross-deliverable-consistency','series-consistency']) && disabled.every((box)=>(box.dataset.unavailableReason??'').length>0) && scopes.length===4 && scopes.every((scope)=>!scope.checked) && quick instanceof HTMLButtonElement && quick.disabled && sheet.querySelector('.review-quick-start-reason')?.textContent==='快速开始先准备所选类别的计划；只有匹配这本书的默认执行规则才会开始，否则先看计划。' && JSON.stringify(terms)===JSON.stringify(['会读取','会发送','不会做','费用']); })()`, 'review-sheet-contract');
 
     at('review-prepare');
-    // F-05 part 2a: an explicit local rule, consumed by the same bounded wrapper on the provider-free route.
-    await renderer.evaluate(`window.ai7.recordLearningSupervision({operation:'create',targets:[],scope:{kind:'house'},categoryId:'typos-and-usage',text:'统一编辑用语，保留有意的节奏。',effect:'guide'})`);
+    // F-05 part 2a: fixture requests retain the development-ci v1 policy; only the local ask is exercised.
     await renderer.evaluate(`window.ai7.savePreference({key:'learning.askFrequency',value:'often'})`);
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for (const id of ['typos-and-usage','style-and-format','plot-consistency']) { const box=sheet.querySelector('input[name="review-category"][value="'+id+'"]'); if(!(box instanceof HTMLInputElement)||box.disabled)return false; box.click(); } const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'review-prepare-start');
     // Synchronized delta with Issue #418 (S72 D4): the prepared Run is one line on ②B; its plan opens in the
     // Task Drawer. Synchronized delta with Issue #420 (S74a A5): the Run's one approval left ②B for the
     // drawer's bar, so ②B offers 查看计划并开始 beside 返回修改 and no authorization button.
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared' && document.querySelector('section.review-plans')?.dataset.reviewCategories==='typos-and-usage,style-and-format,plot-consistency'`, 'review-prepared', 120_000);
-    let preparedReview = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
-    let taskBacked = (preparedReview?.categories ?? []).filter((category) => (category.planEnvelopeDigest ?? '').length === 64);
+    const preparedReview = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
+    const taskBacked = (preparedReview?.categories ?? []).filter((category) => (category.planEnvelopeDigest ?? '').length === 64);
     requireJourney(preparedReview?.state === 'prepared' && UUID_PATTERN.test(preparedReview.reviewRunId) &&
       JSON.stringify(preparedReview.categories.map((category) => category.categoryId)) === JSON.stringify(['typos-and-usage', 'style-and-format', 'plot-consistency']) &&
       JSON.stringify(taskBacked.map((category) => category.categoryId)) === JSON.stringify(['typos-and-usage', 'style-and-format']), 'review-prepared-run', preparedReview?.categories);
-    const provisionalReviewId = preparedReview.reviewRunId;
-    const learningFixtureIdentity = `j04-learning-${randomBytes(8).toString('hex')}`;
-    learningFixturePath = resolve(ROOT, 'tests', 'fixtures', 'model', `${learningFixtureIdentity}.json`);
-    await writeLearningPreferenceFixture(dataRoot, taskBacked.find((category) => category.categoryId === 'typos-and-usage').taskIntentId,
-      learningFixtureIdentity, learningFixturePath);
-    // The new preparation pins the overlay's actual digest. The provisional plan is never authorized or dispatched.
-    await closeOwnedBrowser();
-    modelAdapterIdentity = learningFixtureIdentity;
-    await launchForCleanup();
-    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'review-learning-relaunch');
-    await assertRenderer(renderer, `(() => {document.querySelector('button[data-book-id=${JSON.stringify(imported.bookId)}]').click();return true;})()`, 'review-learning-open-book');
-    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'review-learning-book-ready');
-    await openReviewDestination(renderer, 'review-learning-destination');
-    await reviewAction(renderer, '[data-review-action="new-review"]', 'review-learning-new');
-    await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'review-learning-sheet');
-    await assertRenderer(renderer, `(() => {const sheet=document.querySelector('dialog.review-sheet');for(const id of ['typos-and-usage','style-and-format','plot-consistency'])sheet.querySelector('input[name="review-category"][value="'+id+'"]').click();sheet.querySelector('input[name="review-scope"][value="whole"]').click();sheet.querySelector('[data-review-action="prepare"]').click();return true;})()`, 'review-learning-prepare');
-    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared' && document.querySelector('section.review-run')?.dataset.reviewRunId!==${JSON.stringify(provisionalReviewId)}`, 'review-learning-prepared', 120_000);
-    preparedReview = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
-    requireJourney(preparedReview?.state === 'prepared' && preparedReview.reviewRunId !== provisionalReviewId, 'review-learning-new-plan-pin');
-    taskBacked = preparedReview.categories.filter((category) => (category.planEnvelopeDigest ?? '').length === 64);
     await assertRenderer(renderer, `(() => { const plans=document.querySelector('section.review-plans'); const open=plans?.querySelector('[data-review-action="view-plan"]'); return plans?.querySelector('.task-plan-summary-line')?.textContent===${JSON.stringify(`计划：3 个类别，授权一次后逐类审阅 · ${preparedReview.scope.label} · 任务输入修订版 ${preparedReview.manuscript.revisionLabel}`)} && open instanceof HTMLButtonElement && open.textContent==='查看计划并开始' && open.dataset.taskPlanOpen==='review-run' && plans.querySelector('[data-review-action="revise"]')?.textContent==='返回修改' && document.querySelectorAll('[data-review-action="authorize"]').length===0 && !plans.querySelector('.review-authorize-note') && ${AUTHORIZE_LABELED_BUTTONS}===0 && document.querySelector('dialog.review-sheet')?.open!==true; })()`, 'review-plans');
     // One step per category — the leads read the baseline and freeze no model plan — and 汇总; each
     // model-read category's own frozen plan one step away in 查看技术详情 (S72 D7).
@@ -3117,8 +3057,9 @@ async function main() {
     // names the category that produced it (MARK-008, MARK-010).
     const typosFinding = reviewed.run.findings.find((finding) => finding.categoryId === 'typos-and-usage' && finding.markId !== null);
     requireJourney(typosFinding !== undefined, 'review-typos-finding-marked');
-    requireJourney(typosFinding.referencedRuleVersions?.length === 1 && typosFinding.referencedRuleVersions[0].text === '统一编辑用语，保留有意的节奏。', 'review-preference-version-recorded');
-    await assertRenderer(renderer, `(() => { const rules=document.querySelector('article.review-finding[data-finding-id="${typosFinding.findingId}"] [data-referenced-rules]');if(!(rules instanceof HTMLDetailsElement)||rules.querySelector('summary')?.textContent!=='已参考规则')return false;rules.open=true;return rules.textContent.includes('统一编辑用语，保留有意的节奏。')&&rules.textContent.includes(${JSON.stringify(typosFinding.referencedRuleVersions[0].versionId)}); })()`, 'review-referenced-rules-chip');
+    // development-ci v1 admits no preference excerpt, so neither lineage nor a chip may imply one was sent.
+    requireJourney(reviewed.run.findings.every((finding) => (finding.referencedRuleVersions?.length ?? 0) === 0), 'review-no-preference-references-under-ci');
+    await assertRenderer(renderer, `document.querySelectorAll('article.review-finding [data-referenced-rules]').length===0`, 'review-no-referenced-rules-chip-under-ci');
     await reviewAction(renderer, `article.review-finding[data-finding-id="${typosFinding.findingId}"] [data-review-action="go-to-text"]`, 'review-go-to-text');
     await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] [data-mark-id="${typosFinding.markId}"]')?.dataset.markSource==='ai7' && (document.querySelector('[data-mark-card]')?.textContent??'').includes('AI7 · 审阅「错别字与规范用语」')`, 'review-mark-and-card', 30_000);
     await assertRenderer(renderer, `(() => {const reject=document.querySelector('[data-mark-card] [data-mark-action="reject"]');if(!(reject instanceof HTMLButtonElement)||reject.disabled)return false;reject.click();return true;})()`, 'review-learning-reject');

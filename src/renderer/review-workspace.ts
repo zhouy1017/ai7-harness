@@ -372,6 +372,17 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   return node;
 }
 
+/** The finding card discloses the recorded rules on demand through native details/summary. */
+export function findingReferencedRules(finding: Pick<ReviewFindingProjection, 'referencedRuleVersions'>): HTMLDetailsElement | null {
+  if ((finding.referencedRuleVersions?.length ?? 0) === 0) return null;
+  const disclosure = el('details', 'review-referenced-rules');
+  disclosure.dataset['referencedRules'] = '';
+  disclosure.append(el('summary', 'status-pill', '已参考规则'));
+  for (const rule of finding.referencedRuleVersions ?? []) disclosure.append(el('p', 'field-note',
+    `${rule.text}（本社审阅偏好 v${rule.ordinal} · ${rule.versionId} · 行 ${rule.lineIndex + 1}）`));
+  return disclosure;
+}
+
 let identities = 0;
 function uid(prefix: string): string {
   identities += 1;
@@ -1387,14 +1398,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     article.append(heading, el('blockquote', 'review-finding-quote', reviewQuote(finding.quote)));
     if (finding.replacement !== null) article.append(el('p', 'review-finding-replacement', reviewReplacementLine(finding.replacement)));
     article.append(el('p', 'review-finding-note', finding.note));
-    if ((finding.referencedRuleVersions?.length ?? 0) > 0) {
-      const disclosure = el('details', 'review-referenced-rules');
-      disclosure.dataset['referencedRules'] = '';
-      disclosure.append(el('summary', 'status-pill', '已参考规则'));
-      for (const rule of finding.referencedRuleVersions ?? []) disclosure.append(el('p', 'field-note',
-        `${rule.text}（本社审阅偏好 v${rule.ordinal} · ${rule.versionId} · 行 ${rule.lineIndex + 1}）`));
-      article.append(disclosure);
-    }
+    const referencedRules = findingReferencedRules(finding);
+    if (referencedRules !== null) article.append(referencedRules);
     if (finding.clauseRefs.length === 0) article.append(el('p', 'review-finding-basis', category.basisStatement));
     for (const clause of finding.clauseRefs) article.append(el('p', 'review-finding-basis', reviewClauseLine(clause)));
     const lines = [finding.stateLine, finding.anchorState === 'anchor-changed' ? REVIEW_ANCHOR_CHANGED : null]

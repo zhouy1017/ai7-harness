@@ -40,7 +40,7 @@ async function productionReview(
   answer: (category: string, ordinal: number, prior: number) => 'valid' | 'invalid' | 'stall' | 'tools' | 'three',
   project: (policy: LaunchPolicyProjection) => LaunchPolicyProjection = (policy) => policy,
   useMaterial = false,
-  usePreferences = false,
+  usePreferences: boolean | 'top-five' = false,
 ) {
   roots = await createServiceTestRoots('ai7-production-review-');
   store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
@@ -113,6 +113,10 @@ async function productionReview(
   await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
   if (usePreferences) store.recordLearningSupervision({ operation: 'create', targets: [], scope: { kind: 'house' },
     categoryId: 'typos-and-usage', text: '统一编辑用语，保留有意的节奏。', effect: 'guide' });
+  if (usePreferences === 'top-five') for (let index = 2; index <= 7; index += 1) {
+    store.recordLearningSupervision({ operation: 'create', targets: [], scope: { kind: 'house' },
+      categoryId: 'typos-and-usage', text: `合成偏好${index}：统一用语。`, effect: 'guide' });
+  }
   const materialIds = useMaterial ? [await sample1DerivedLibraryItem(store, roots, book)] : [];
   let work = store.createReviewRunPreparationWork(book.bookId, [...categories],
     { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy, null, materialIds);
@@ -144,23 +148,32 @@ it('offers a local ask on the third same-category accepted edit within a Run, wi
 
 it('sends only selected preference lines, records exact unit/finding versions, exports them and measures adoption from decisions', async () => {
   const { store: opened, bookId, reviewRunId, requests } = await productionReview(['typos-and-usage', 'publication-risk'],
-    (category, ordinal, prior) => category === 'typos-and-usage' && ordinal === 1 && prior === 0 ? 'tools' : 'valid', (policy) => policy, false, true);
+    (category, ordinal, prior) => category === 'typos-and-usage' && ordinal === 1 && prior === 0 ? 'tools' : 'valid', (policy) => policy, false, 'top-five');
   const result = opened.inspectReviewWorkspace(bookId, reviewRunId).run!;
   const finding = result.findings.find((entry) => entry.categoryId === 'typos-and-usage')!;
   expect(finding).toBeDefined();
-  expect(finding.referencedRuleVersions).toHaveLength(1);
+  const version = opened.inspectHouseReviewPreference().current!;
+  expect(version.lines).toHaveLength(7);
+  expect(finding.referencedRuleVersions).toEqual(version.lines.slice(0, 5).map((line, lineIndex) =>
+    ({ versionId: version.versionId, ordinal: version.ordinal, lineIndex, text: line.text })));
+  const selected = finding.referencedRuleVersions!;
+  expect(selected).toHaveLength(5);
+  const segmenter = new Intl.Segmenter('zh', { granularity: 'grapheme' });
+  expect(selected.reduce((sum, line) => sum + [...segmenter.segment(line.text)].length, 0)).toBeLessThanOrEqual(200);
   const rule = finding.referencedRuleVersions![0]!;
-  expect(rule.text).toBe('统一编辑用语，保留有意的节奏。');
-  expect(requests.filter((entry) => entry.category === 'typos-and-usage').every((entry) => entry.body.includes(rule.text))).toBe(true);
-  expect(requests.filter((entry) => entry.category === 'publication-risk').every((entry) => !entry.body.includes(rule.text))).toBe(true);
+  expect(requests.filter((entry) => entry.category === 'typos-and-usage').every((entry) =>
+    selected.every((line) => entry.body.includes(line.text)) && version.lines.slice(5).every((line) => !entry.body.includes(line.text)))).toBe(true);
+  expect(requests.filter((entry) => entry.category === 'publication-risk').every((entry) =>
+    version.lines.every((line) => !entry.body.includes(line.text)))).toBe(true);
   const db = new DatabaseSync(join(roots!.dataRoot, 'store', 'ai7.sqlite'));
   try {
     const records = db.prepare(`SELECT u.canonical_json FROM analysis_unit_results u JOIN analysis_result_set_revisions r ON r.revision_id = u.revision_id
       JOIN analysis_task_intents t ON t.task_intent_id = r.task_intent_id WHERE t.kind = 'editorial-review/typos-and-usage' AND u.state = 'closed'`).all();
     expect(records.length).toBeGreaterThan(0);
-    expect(records.every((row) => (JSON.parse(String(row.canonical_json)) as { referencedRuleVersions: unknown[] }).referencedRuleVersions.length === 1)).toBe(true);
+    for (const row of records) expect((JSON.parse(String(row.canonical_json)) as { referencedRuleVersions: unknown[] }).referencedRuleVersions).toEqual(selected);
   } finally { db.close(); }
   const report = opened.generateReviewReport(bookId, reviewRunId).run!.report!;
+  expect(report.record.appendix.referencedRules).toEqual([{ findingId: finding.findingId, rules: selected }]);
   for (const format of ['markdown', 'pdf', 'docx'] as const) {
     const output = renderReportExport({ bookTitle: '合成生产审阅', version: report.version, generatedAt: report.generatedAt, record: report.record }, format, { emit: true });
     expect(output.bytes?.byteLength).toBeGreaterThan(0);
