@@ -292,9 +292,10 @@ function anthropicMessagesConversation(payload: AssembledModelPayload, offeredNa
     const message = payload.messages[index]!;
     // Shared history readers intentionally project a wider canonical shape for Chat/Responses.
     // Messages cannot replay opaque fields, including those on otherwise ordinary text blocks.
+    // Results are checked where they are consumed; every other block type keeps its existing refusal below.
     for (const block of message.content) {
-      const fields = block.type === 'text' ? ['type', 'text'] : ['type', 'id', 'name', 'arguments'];
-      if (Object.keys(block).some((key) => !fields.includes(key))) throw new Error('PROVIDER_TOOL_CALLS_INVALID');
+      const fields = block.type === 'text' ? ['type', 'text'] : block.type === 'tool-call' ? ['type', 'id', 'name', 'arguments'] : null;
+      if (fields !== null && Object.keys(block).some((key) => !fields.includes(key))) throw new Error('PROVIDER_TOOL_CALLS_INVALID');
     }
     const calls = assistantToolCalls(message);
     if (calls !== null) {
@@ -303,7 +304,8 @@ function anthropicMessagesConversation(payload: AssembledModelPayload, offeredNa
       const pending = new Set<string>();
       for (const block of message.content) {
         if (block.type === 'text' && typeof block.text === 'string' && pending.size === 0) {
-          content.push({ type: 'text', text: block.text });
+          // A Messages text block must be non-empty; an empty one carries nothing, as Chat/Responses already omit it.
+          if (block.text.length > 0) content.push({ type: 'text', text: block.text });
           continue;
         }
         if (block.type !== 'tool-call' || typeof block.id !== 'string' || block.id.length === 0 ||

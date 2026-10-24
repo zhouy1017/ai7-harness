@@ -194,6 +194,22 @@ describe('Messages buffered client functions · synthetic profiles only', () => 
     ]);
   });
 
+  it('omits an empty leading text block, which a Messages text block cannot carry', () => {
+    const history = [payload().messages[0]!, callMessage([{ type: 'text', text: '' }, ...callMessage().content]), resultMessage()];
+    const body = JSON.parse(assembleProviderRequest(CAPPED_ROUTE_PROFILE, functionModel(), toolPayload(history), context).body) as { messages: unknown[] };
+    expect(body.messages[1]).toEqual({ role: 'assistant', content: [toolUse()] });
+  });
+
+  it('keeps the existing refusals for non-text content and orphaned results', () => {
+    const image = [{ ...payload().messages[0]!, content: [{ type: 'image', attachment: { id: 'synthetic' } }] }] as unknown as AssembledMessage[];
+    expect(() => assembleProviderRequest(CAPPED_ROUTE_PROFILE, messagesModel(), { ...payload(), messages: image }, context))
+      .toThrow('DEEPSEEK_REQUEST_NON_TEXT_CONTENT');
+    for (const messages of [[resultMessage()], [callMessage(), resultMessage(), resultMessage()]]) {
+      expect(() => assembleProviderRequest(CAPPED_ROUTE_PROFILE, functionModel(), toolPayload(messages), context))
+        .toThrow('PROVIDER_TOOL_CORRELATION_INVALID');
+    }
+  });
+
   it('groups a complete parallel batch and preserves canonical result order and error flags', async () => {
     const { adapter, bodies } = stubToolsAdapter([toolResponse([toolUse(), toolUse('call_2', 'summarize', {})]), {
       content: [{ type: 'text', text: 'finished' }], stop_reason: 'end_turn',
