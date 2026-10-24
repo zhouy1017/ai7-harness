@@ -4,7 +4,9 @@
 
 [Canonical JSON](provider-processing-policy.v29.json) · [whole-document const schema](provider-processing-policy.v29.schema.json) · [candidate set v20](active-policy-set.v20.json) · [unchanged predecessor v1](provider-processing-policy.v1.json) · [ordinary-production counterpart v28](provider-processing-policy.v28.md).
 
-Exact JSON SHA-256: `9d76ef3ccf7759e65d8ff402143179e9c74f3e47f6f42fc972854367ef7f388d`. Candidate set v20 SHA-256: `e6ce0ef16a1a84c69ce180aa5fc041510c3e3f8d427017e867c6081d007b3b13`. The globally numbered v29 is the development-ci successor of v1; immutable fixture-recording v2 is a different scope and is unchanged. The provider decision remains default deny, empty `providerAllowRules`, and zero live transmissions.
+Exact JSON SHA-256: `ef450cf75877d226678066aa229d1c3981d413b62dea9be310a951b1d9dd361e`. Candidate set v20 SHA-256: `f9c4c45ef703383f7cf043bfd33c1e54b9c1d83cf6fde4645f5b3f02107453cc`. The globally numbered v29 is the development-ci successor of v1; immutable fixture-recording v2 is a different scope and is unchanged. The provider decision remains default deny, empty `providerAllowRules`, and zero live transmissions.
+
+The canonical JSON carries structured declarations only, as v26/v27 do. Candidate status, the per-delta authority map, the Owner decision wording and the specification narrative live in this unpinned projection and the Draft PR, so an accepted candidate never carries pending-status text in its pinned bytes. Constraints the specification states in prose are encoded as named keys (fixtureRuleSelection, review synthesis/instruction/guideline bounds, curation exclusions and the factual claim/recheck scope, payload and count additions). The v1 category vocabulary is retained and the two legacy local excerpt categories its tuples name are declared. Legacy registration pins are the exact registration-file SHA-256 at the frozen source with a verified selection-unchanged flag; every digest basis is stated in digestCanonicalization, and registeredPurposeBasis states that Journey and evidence-case purposes are complete while service-test purposes are documentary. The JSON blocks quoted below are the specification's proposed blocks; the candidate adds those named keys beside them.
 
 ## Six closed proposed fixture rules
 
@@ -25,7 +27,7 @@ The instruction block is <=1,200 graphemes only for typos-and-usage, with exact 
 
 ## Frozen legacy compatibility, separate from new capabilities
 
-The populated metadata-only manifest has **47 tuples, 34 registered fixture roots and 591 resolved entry-key rows**; all **53 fixture files** are independently pinned and unchanged between frozen `809c96f28bf111db39dac80b3b0743929779d52e` and authoring base `aeeb0ae02f8c11a155acb829709fb2fa90a2548e`. Manifest SHA-256 over the canonical tuples array: `0696535cdedb22cbdbb39a03577171224104fae42ade7b567c47a7e92601bfdc`. Full fixture inventory SHA-256: `2f15e004949aba1d1e8e537b7223dd1bade7b39db994e9e56164df38fe3f1e53`. Predecessor v1 SHA-256: `d9dfe8c13a58649d8d9f607364030468ae71832b94c9436291d29000795d725a`.
+The populated metadata-only manifest has **47 tuples, 34 registered fixture roots and 591 resolved entry-key rows**; all **53 fixture files** are independently pinned and unchanged between frozen `809c96f28bf111db39dac80b3b0743929779d52e` and authoring base `aeeb0ae02f8c11a155acb829709fb2fa90a2548e`. Manifest SHA-256 over the canonical tuples array: `ee20728723205e3e4c1e6df4170f7d9af8fd3e17f62b48e4a20d3ff2020e434e`. Full fixture inventory SHA-256: `2f15e004949aba1d1e8e537b7223dd1bade7b39db994e9e56164df38fe3f1e53`. Predecessor v1 SHA-256: `d9dfe8c13a58649d8d9f607364030468ae71832b94c9436291d29000795d725a`.
 
 Each tuple jointly requires its registered purpose/profile, executable kind or exact session purpose, prompt/contract/source/composition pins, category/tool-set hash, fixture file hash, ordered leaf-first base chain and resolved lineage hash, and finite `(unitOrdinal, requestDigest, attempt|null)` keys. Captured prompt/task digests and explicit null absences are retained. Per-Run source, binding and composition identities remain runtime checks, never invented historical constants. Dynamic custom-dimension identity is confined to the exact registered input profile and derived immutable version, without a wildcard kind. Exact source metadata contains no response/manuscript text.
 
@@ -1108,16 +1110,18 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "journey",
           "id": "J-04",
           "registrationPath": "e2e/run-j04.mjs",
-          "fixtureSelectionSha256": "078029dbdc24f80fb1dc0d6fd65c5f42d2ce64f7150096e34a0bd48438cae9f5",
-          "sameSelectionsAtPreparationBase": true
+          "registrationFileSha256": "fd25f7913c54406a45a7a939dc29e6e22a11e0d3c3e8ddaac018c5d7816181d5",
+          "registrationFileBytesUnchangedAtPreparationBase": false,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/review-runs.test.ts",
           "registrationPath": "tests/service/review-runs.test.ts",
-          "fixtureSelectionSha256": "ab7aea5178dfd87738137dd73a51b342e3673e4aee4ee654843237a6f7fbb434",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "15be4662a950f058c0ddf3dd4114b53b0630ff39d42d95f9717a928bff08ea08",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [
@@ -1257,16 +1261,18 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "journey",
           "id": "J-16",
           "registrationPath": "e2e/run-j16.mjs",
-          "fixtureSelectionSha256": "2ac842fb7e8362800429feec74b86748ffabf7f60c60eea9a1176eec6e496037",
-          "sameSelectionsAtPreparationBase": true
+          "registrationFileSha256": "309e30116396aaedaf931c86897fa8a4baf87914697ab70a55dfcc565550c2f6",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/agent-workspace.test.ts",
           "registrationPath": "tests/service/agent-workspace.test.ts",
-          "fixtureSelectionSha256": "9e65a15425d557a32e030d15966568b9fbd0245c51b2eede7b0136c67dae5140",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "760bb4dde96204a99c2d8661f359cb4bbee6a74b2c5a0d398abfa82cb055cb82",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [
@@ -1503,16 +1509,18 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "journey",
           "id": "J-16",
           "registrationPath": "e2e/run-j16.mjs",
-          "fixtureSelectionSha256": "2ac842fb7e8362800429feec74b86748ffabf7f60c60eea9a1176eec6e496037",
-          "sameSelectionsAtPreparationBase": true
+          "registrationFileSha256": "309e30116396aaedaf931c86897fa8a4baf87914697ab70a55dfcc565550c2f6",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/agent-workspace.test.ts",
           "registrationPath": "tests/service/agent-workspace.test.ts",
-          "fixtureSelectionSha256": "9e65a15425d557a32e030d15966568b9fbd0245c51b2eede7b0136c67dae5140",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "760bb4dde96204a99c2d8661f359cb4bbee6a74b2c5a0d398abfa82cb055cb82",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [],
@@ -1647,16 +1655,18 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "journey",
           "id": "J-16",
           "registrationPath": "e2e/run-j16.mjs",
-          "fixtureSelectionSha256": "2ac842fb7e8362800429feec74b86748ffabf7f60c60eea9a1176eec6e496037",
-          "sameSelectionsAtPreparationBase": true
+          "registrationFileSha256": "309e30116396aaedaf931c86897fa8a4baf87914697ab70a55dfcc565550c2f6",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/agent-workspace.test.ts",
           "registrationPath": "tests/service/agent-workspace.test.ts",
-          "fixtureSelectionSha256": "9e65a15425d557a32e030d15966568b9fbd0245c51b2eede7b0136c67dae5140",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "760bb4dde96204a99c2d8661f359cb4bbee6a74b2c5a0d398abfa82cb055cb82",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [],
@@ -1773,24 +1783,27 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "registered-service-test",
           "id": "tests/service/model-service-proxy.test.ts",
           "registrationPath": "tests/service/model-service-proxy.test.ts",
-          "fixtureSelectionSha256": "c7c136f2fc378efdafb94c0cafe5b8cd1958f282f1732fa9efa32f5183f9d7d2",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "1421131e44f08ad5c3257ffab446d110708a2b25646779ca6cd7dfe173a6284e",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "journey",
           "id": "J-10",
           "registrationPath": "e2e/run-j10.mjs",
-          "fixtureSelectionSha256": "d07c2b52f4500c390caf8be0c2f50ada761f67fb887273399923e0f02ce2e197",
-          "sameSelectionsAtPreparationBase": true
+          "registrationFileSha256": "7ea01a221bf44161eda23268a352a58b83b69fee9ce9e334dff6ceeffab2d8eb",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/account-limit.test.ts",
           "registrationPath": "tests/service/account-limit.test.ts",
-          "fixtureSelectionSha256": "e537de870338ce9e75034a9fb9976dd8137b2552ea5de6a7b9fa0ff2efeef923",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "642068303b756f9cd3e826fbb8ed28b491ec5fc49dde0e71b946526949c7d3f5",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [
@@ -2028,215 +2041,242 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "registered-service-test",
           "id": "tests/service/baseline-prompt-contract.test.ts",
           "registrationPath": "tests/service/baseline-prompt-contract.test.ts",
-          "fixtureSelectionSha256": "0967a883d363aa5b01420659750fef139e21eaf65ef6bd28ddadc4e6cb5cf4ce",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "ee744d9f134dfddfe95598d4e7fa3ae7b8c7c2add04081dc9e938caf754ed2c3",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "journey",
           "id": "J-09",
           "registrationPath": "e2e/run-j09.mjs",
-          "fixtureSelectionSha256": "1fa6302c225c2b1660ee82f5e70edab1a787e4ee74700a392f33928b416233ed",
-          "sameSelectionsAtPreparationBase": true
+          "registrationFileSha256": "f1aef0ea18ab2f433d80da1e7bc16986caffd588683b0d6940a5c0af32e53fd3",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "journey",
           "id": "J-10",
           "registrationPath": "e2e/run-j10.mjs",
-          "fixtureSelectionSha256": "1fa6302c225c2b1660ee82f5e70edab1a787e4ee74700a392f33928b416233ed",
-          "sameSelectionsAtPreparationBase": true
+          "registrationFileSha256": "7ea01a221bf44161eda23268a352a58b83b69fee9ce9e334dff6ceeffab2d8eb",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/background-analysis-scopes.test.ts",
           "registrationPath": "tests/service/background-analysis-scopes.test.ts",
-          "fixtureSelectionSha256": "32cfc16f9a4d3b2167bb1ac4db3cbfa4abfce02834ebb061f1f034eece952796",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "3c4cd742dc7799763cf9886a958a68a37f53fed6e9878874b33d0a3ab6d2ba47",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/model-clarification.test.ts",
           "registrationPath": "tests/service/model-clarification.test.ts",
-          "fixtureSelectionSha256": "34ded541395a4db278e8b26ea0ff3e6a704ae1ee8be70f2df3af3bc5ca073d7b",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "7f17a55f3f22b9ce5f08d303dd6fa68c39291fd58661d332d107c1512c975642",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/outcome-unconfirmed.test.ts",
           "registrationPath": "tests/service/outcome-unconfirmed.test.ts",
-          "fixtureSelectionSha256": "3aa627128a4d338a98a56d6e4566fd43f1040ae49623a6f7ac8b2ff52d97905f",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "c8c583fd3ea3ea56d2801454225b18ecd45ed596cdef03e3044b4e16ee819d6a",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/background-analysis-enrollments.test.ts",
           "registrationPath": "tests/service/background-analysis-enrollments.test.ts",
-          "fixtureSelectionSha256": "401e78bf8160836581761017e0f4059478f0378d5d14c35a46a017f1c2802344",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "08aaa9b3c73502d340c8043c53f970f50f4f54d93c79999af3a4f4aa05b0ceb5",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/concurrent-runs.test.ts",
           "registrationPath": "tests/service/concurrent-runs.test.ts",
-          "fixtureSelectionSha256": "401e78bf8160836581761017e0f4059478f0378d5d14c35a46a017f1c2802344",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "b0463ba38e6bda1c569250cd3570b82f5a9103c5ce14442db785fcc16c5abaf9",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/connectivity-wait.test.ts",
           "registrationPath": "tests/service/connectivity-wait.test.ts",
-          "fixtureSelectionSha256": "401e78bf8160836581761017e0f4059478f0378d5d14c35a46a017f1c2802344",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "7c529d8ad351585380ea9872b242d1692bec1512ce5e389a3ce3402088b3de7b",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/default-execution-rules.test.ts",
           "registrationPath": "tests/service/default-execution-rules.test.ts",
-          "fixtureSelectionSha256": "401e78bf8160836581761017e0f4059478f0378d5d14c35a46a017f1c2802344",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "5615b2f540f34850bf4a5622c58aa1a03d098136efe40eeb89ebf61eb609133e",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/plan-version-range.test.ts",
           "registrationPath": "tests/service/plan-version-range.test.ts",
-          "fixtureSelectionSha256": "401e78bf8160836581761017e0f4059478f0378d5d14c35a46a017f1c2802344",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "22d170dcfa8ec836b2790e6f4486170ead3af5e40231dc36412d429902f20184",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/run-cancellation.test.ts",
           "registrationPath": "tests/service/run-cancellation.test.ts",
-          "fixtureSelectionSha256": "401e78bf8160836581761017e0f4059478f0378d5d14c35a46a017f1c2802344",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "d0ce92b65a83a69398758306a84fdf08e1bb27069457a4a45a2d50e568f928cb",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/run-continuation.test.ts",
           "registrationPath": "tests/service/run-continuation.test.ts",
-          "fixtureSelectionSha256": "401e78bf8160836581761017e0f4059478f0378d5d14c35a46a017f1c2802344",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "ab5502a2f6f57a02c05a524f70373ab48a92d35ff34ff2f6bc335c089604371e",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/run-redo.test.ts",
           "registrationPath": "tests/service/run-redo.test.ts",
-          "fixtureSelectionSha256": "401e78bf8160836581761017e0f4059478f0378d5d14c35a46a017f1c2802344",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "e5dca40b0141cef281a53bcfe950055faf69d5077c624f5a6c77e4e436ef469c",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/task-intent-drafts.test.ts",
           "registrationPath": "tests/service/task-intent-drafts.test.ts",
-          "fixtureSelectionSha256": "401e78bf8160836581761017e0f4059478f0378d5d14c35a46a017f1c2802344",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "c94e3e6a1aa8adb97b6bfc89a4602770307f6901bd671475a78b0c8d9dff8ca9",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/analysis-feedback.test.ts",
           "registrationPath": "tests/service/analysis-feedback.test.ts",
-          "fixtureSelectionSha256": "501f463bd901488c29bedd171576301e74911d8509c27657512952fc500d9851",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "ea4e638e4626ff6b6eb85fb536d08fbed16dedd8b22b88e73f9afbcd9316ab01",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/book-tasks.test.ts",
           "registrationPath": "tests/service/book-tasks.test.ts",
-          "fixtureSelectionSha256": "501f463bd901488c29bedd171576301e74911d8509c27657512952fc500d9851",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "9d6cc1905247dab960fd66ddfce8b98e4f22fdf8aedbf396babf7ab0ba3cb300",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/developer-live-analysis.test.ts",
           "registrationPath": "tests/service/developer-live-analysis.test.ts",
-          "fixtureSelectionSha256": "501f463bd901488c29bedd171576301e74911d8509c27657512952fc500d9851",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "0cac329f95e83a97b183279a998051b2cae0f660c6d4bda38a38c6c1194e3457",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/ordinary-production.test.ts",
           "registrationPath": "tests/service/ordinary-production.test.ts",
-          "fixtureSelectionSha256": "501f463bd901488c29bedd171576301e74911d8509c27657512952fc500d9851",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "d9c05dd62b8e5b08cdc456cb130fde379d9921243dd8505d323648fbfe30f49c",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/evaluation-fixture-generator.test.ts",
           "registrationPath": "tests/service/evaluation-fixture-generator.test.ts",
-          "fixtureSelectionSha256": "6b9c1dcecec95e765bf79bca150d49735aa7a4c8c577fd769507648da04835ab",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "def737716925289b75b273dafc2343363a6f3d2e11a2b54ea4d16d2255a9dd10",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/custom-analysis-fixture-generator.test.ts",
           "registrationPath": "tests/service/custom-analysis-fixture-generator.test.ts",
-          "fixtureSelectionSha256": "71e4f2f43c1f1a1d24cb41fe00cf5f4fdd266d92d2f8494b7c05ebd4087f7bb2",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "60b1b6f38dc09637ab631fd2066038bb99ca701aa003dff16d895b03f053d534",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/outcome-unknown-steps.test.ts",
           "registrationPath": "tests/service/outcome-unknown-steps.test.ts",
-          "fixtureSelectionSha256": "9046bee6091d277183cb37476bc91142585567d616464b776cb657e3871c6ad0",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "473e26123122e2865cf72b4477767c48064b53b37a14ef2e8b6961e8fd42abdf",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/baseline-analysis.test.ts",
           "registrationPath": "tests/service/baseline-analysis.test.ts",
-          "fixtureSelectionSha256": "bbeaf652cd21da46b0af48803703bff227eebae9d90867521f5421cf4ef7ff87",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "19c5b00d39fba1ce5d8099f82ece16270715a34743fa9ad882ae02cfb8105489",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/clarification.test.ts",
           "registrationPath": "tests/service/clarification.test.ts",
-          "fixtureSelectionSha256": "c7d7f4305139ce115b386dfb2b4bb573f68f7ba4c23694f57182d102e9a156c0",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "a14155cd2f58c3adfd7701457177a2dc7d3b690466034a33c7f8aec35e073add",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/plan-edits.test.ts",
           "registrationPath": "tests/service/plan-edits.test.ts",
-          "fixtureSelectionSha256": "c7d7f4305139ce115b386dfb2b4bb573f68f7ba4c23694f57182d102e9a156c0",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "cd974a90318a6b3b8d323f70547b94b630d4d9e961e7b7cfee86101b04e7d5f7",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/run-budget-ceiling.test.ts",
           "registrationPath": "tests/service/run-budget-ceiling.test.ts",
-          "fixtureSelectionSha256": "d76002d25d2ea852ed12e6d421b43f9e725fa820655fe5f6314bbad2a853cb8b",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "0ef719f1611dcc81fc52f595cf00bc0ca833ed42aad03a0437950947d515f3fd",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/outcome-unknown.test.ts",
           "registrationPath": "tests/service/outcome-unknown.test.ts",
-          "fixtureSelectionSha256": "eb0baa37797e525c3e8304a65a9cc3e5ebbfdaf93d1f1123d62b301d79196d85",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "61252fd7df050f518cd5acea35e9941794c95ae194325e095902053846ace7ec",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [
@@ -2458,72 +2498,81 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "registered-service-test",
           "id": "tests/service/global-attention.test.ts",
           "registrationPath": "tests/service/global-attention.test.ts",
-          "fixtureSelectionSha256": "1b65cb38d2841ac2f244dc4b14694e0b17fecf0f5001db910baaa4480260bf6d",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "de7bc99752275b926dbc2e643826e152a638b215c40c82e7b3076c1249656e37",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/task-plan.test.ts",
           "registrationPath": "tests/service/task-plan.test.ts",
-          "fixtureSelectionSha256": "1b65cb38d2841ac2f244dc4b14694e0b17fecf0f5001db910baaa4480260bf6d",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "fc8341a4c24cf4fd7225104df128523feadc56a61fb7f437f3d05d7e9d89af98",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "journey",
           "id": "J-04",
           "registrationPath": "e2e/run-j04.mjs",
-          "fixtureSelectionSha256": "24bb105d4893d9c006760eaa394fe13ade2d20a50c7e9cdaff145e168642aa98",
-          "sameSelectionsAtPreparationBase": true
+          "registrationFileSha256": "fd25f7913c54406a45a7a939dc29e6e22a11e0d3c3e8ddaac018c5d7816181d5",
+          "registrationFileBytesUnchangedAtPreparationBase": false,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/run-redo.test.ts",
           "registrationPath": "tests/service/run-redo.test.ts",
-          "fixtureSelectionSha256": "4405e678496b823d6032c768bcd8d9c54585c4c628cf7ea2f4f7f9319914c38f",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "e5dca40b0141cef281a53bcfe950055faf69d5077c624f5a6c77e4e436ef469c",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/outcome-unknown.test.ts",
           "registrationPath": "tests/service/outcome-unknown.test.ts",
-          "fixtureSelectionSha256": "4d2af8eb914060f583c1c45f5017963854601f4dd72b8e2287c237bc4d6798ff",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "61252fd7df050f518cd5acea35e9941794c95ae194325e095902053846ace7ec",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/factual-review.test.ts",
           "registrationPath": "tests/service/factual-review.test.ts",
-          "fixtureSelectionSha256": "6b76f3fc70ade8678aa0e7180db91142d8724ab1ad824c53cb6d3549f91ac3c1",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "9d8a0f3fa64a5c01578858405818f2bcd2cb601d0bd7c7120636e45a9fdbd71e",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/usage.test.ts",
           "registrationPath": "tests/service/usage.test.ts",
-          "fixtureSelectionSha256": "6b76f3fc70ade8678aa0e7180db91142d8724ab1ad824c53cb6d3549f91ac3c1",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "887bcc581ec88d2078eda90ed9bc2421e87da9347ff67029fe78b5d95bbf57b7",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/run-budget-ceiling.test.ts",
           "registrationPath": "tests/service/run-budget-ceiling.test.ts",
-          "fixtureSelectionSha256": "bdcefb0f5db588d389a224e3832b5c3087562a6e4056d75bca4677c4b60fa5ca",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "0ef719f1611dcc81fc52f595cf00bc0ca833ed42aad03a0437950947d515f3fd",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/baseline-analysis.test.ts",
           "registrationPath": "tests/service/baseline-analysis.test.ts",
-          "fixtureSelectionSha256": "e19043addeafa8172a00533a410d7b13a19dc9974313fed539b91b3db5139928",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "19c5b00d39fba1ce5d8099f82ece16270715a34743fa9ad882ae02cfb8105489",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [
@@ -2817,32 +2866,36 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "registered-service-test",
           "id": "tests/service/outcome-unknown.test.ts",
           "registrationPath": "tests/service/outcome-unknown.test.ts",
-          "fixtureSelectionSha256": "5cfcd19125598c1aaf6cacf0007f3b165e36759668de330c12861f999f721f4e",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "61252fd7df050f518cd5acea35e9941794c95ae194325e095902053846ace7ec",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/outcome-unconfirmed.test.ts",
           "registrationPath": "tests/service/outcome-unconfirmed.test.ts",
-          "fixtureSelectionSha256": "5f80756fdd6df448893bd1b44bcfcfd3f2b9ab5002b5322da7947ca83c315e7d",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "c8c583fd3ea3ea56d2801454225b18ecd45ed596cdef03e3044b4e16ee819d6a",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "journey",
           "id": "J-10",
           "registrationPath": "e2e/run-j10.mjs",
-          "fixtureSelectionSha256": "75d81ff7e6d9e0dc93fb5c981ccc08bfba43168c2e220e3d8affe1f271a7452f",
-          "sameSelectionsAtPreparationBase": true
+          "registrationFileSha256": "7ea01a221bf44161eda23268a352a58b83b69fee9ce9e334dff6ceeffab2d8eb",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/run-cancellation.test.ts",
           "registrationPath": "tests/service/run-cancellation.test.ts",
-          "fixtureSelectionSha256": "c95a61db072ba5fc0a74f636e406506e36e9b6ff4e977fa4d633afad2505c098",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "d0ce92b65a83a69398758306a84fdf08e1bb27069457a4a45a2d50e568f928cb",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [
@@ -3084,24 +3137,27 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "registered-service-test",
           "id": "tests/service/outcome-unknown-steps.test.ts",
           "registrationPath": "tests/service/outcome-unknown-steps.test.ts",
-          "fixtureSelectionSha256": "3f82e36f12558f3352bbb3cbb414ad0704134f515c24097006e7765c0aa57b80",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "473e26123122e2865cf72b4477767c48064b53b37a14ef2e8b6961e8fd42abdf",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/outcome-unconfirmed.test.ts",
           "registrationPath": "tests/service/outcome-unconfirmed.test.ts",
-          "fixtureSelectionSha256": "49aaa2f112af930fa1ccb65ed4b2d6aaffe4a463141244c4c376c9231c7f0366",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "c8c583fd3ea3ea56d2801454225b18ecd45ed596cdef03e3044b4e16ee819d6a",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "journey",
           "id": "J-10",
           "registrationPath": "e2e/run-j10.mjs",
-          "fixtureSelectionSha256": "b281822a8dd89afb04c23b9568f35eb0e40c53f5c5c79f4c93c86a72b41be1cf",
-          "sameSelectionsAtPreparationBase": true
+          "registrationFileSha256": "7ea01a221bf44161eda23268a352a58b83b69fee9ce9e334dff6ceeffab2d8eb",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [
@@ -3331,9 +3387,10 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "registered-service-test",
           "id": "tests/service/outcome-unknown-steps.test.ts",
           "registrationPath": "tests/service/outcome-unknown-steps.test.ts",
-          "fixtureSelectionSha256": "1b428146e590b5498caba32d35d26a061698bc88cf6d13c1a39837efa8f7017b",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "473e26123122e2865cf72b4477767c48064b53b37a14ef2e8b6961e8fd42abdf",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [
@@ -3582,79 +3639,89 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "registered-service-test",
           "id": "tests/service/background-analysis-scopes.test.ts",
           "registrationPath": "tests/service/background-analysis-scopes.test.ts",
-          "fixtureSelectionSha256": "04cff196dce03e1f593d6ae1377651e2f5e227c8391a3fbd39295a4a430bb118",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "3c4cd742dc7799763cf9886a958a68a37f53fed6e9878874b33d0a3ab6d2ba47",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "journey",
           "id": "J-04",
           "registrationPath": "e2e/run-j04.mjs",
-          "fixtureSelectionSha256": "0e3f2f32f8fbbf3ab1c69447a47d8c6c327e288a391beb36aae5cf33449474e5",
-          "sameSelectionsAtPreparationBase": true
+          "registrationFileSha256": "fd25f7913c54406a45a7a939dc29e6e22a11e0d3c3e8ddaac018c5d7816181d5",
+          "registrationFileBytesUnchangedAtPreparationBase": false,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/review-fixture-generator.test.ts",
           "registrationPath": "tests/service/review-fixture-generator.test.ts",
-          "fixtureSelectionSha256": "26f0e73f2f8544525d3e469fdb3c95849da1a8b81dbc0a7cdf80f295289d8adc",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "b01563bd7394ed51c02e4f8686e73ee73977f2c19ef8056e4a70348d3cae2396",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/clarification.test.ts",
           "registrationPath": "tests/service/clarification.test.ts",
-          "fixtureSelectionSha256": "361b016ba9719868c874e5b55b39d0192d9722efd709a1e588fc0344e00d024d",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "a14155cd2f58c3adfd7701457177a2dc7d3b690466034a33c7f8aec35e073add",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/plan-edits.test.ts",
           "registrationPath": "tests/service/plan-edits.test.ts",
-          "fixtureSelectionSha256": "361b016ba9719868c874e5b55b39d0192d9722efd709a1e588fc0344e00d024d",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "cd974a90318a6b3b8d323f70547b94b630d4d9e961e7b7cfee86101b04e7d5f7",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/concurrent-runs.test.ts",
           "registrationPath": "tests/service/concurrent-runs.test.ts",
-          "fixtureSelectionSha256": "53ae34c14b53df543f614e6aa3b21124f32d274b197ebe1ae3e8c9564900356b",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "b0463ba38e6bda1c569250cd3570b82f5a9103c5ce14442db785fcc16c5abaf9",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/baseline-analysis.test.ts",
           "registrationPath": "tests/service/baseline-analysis.test.ts",
-          "fixtureSelectionSha256": "53c5dcab9e86de89f3c9c0557288630be74b18d86f6911c4c38c94f01bcb9ba4",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "19c5b00d39fba1ce5d8099f82ece16270715a34743fa9ad882ae02cfb8105489",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "journey",
           "id": "J-10",
           "registrationPath": "e2e/run-j10.mjs",
-          "fixtureSelectionSha256": "602264d3fb63b355452a7f858743791cb90fb20e7f45d07afcb7f2321770ee13",
-          "sameSelectionsAtPreparationBase": true
+          "registrationFileSha256": "7ea01a221bf44161eda23268a352a58b83b69fee9ce9e334dff6ceeffab2d8eb",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/run-budget-ceiling.test.ts",
           "registrationPath": "tests/service/run-budget-ceiling.test.ts",
-          "fixtureSelectionSha256": "837b4ed4c69d23a595ea4e7cbce28871da2cf3c99bb5b855247060e3ce65cbce",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "0ef719f1611dcc81fc52f595cf00bc0ca833ed42aad03a0437950947d515f3fd",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/run-redo.test.ts",
           "registrationPath": "tests/service/run-redo.test.ts",
-          "fixtureSelectionSha256": "9d4d975994e8fd8d2f105f57bfbd7a037512ae53f7fce77aeeb8257e6c28c645",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "e5dca40b0141cef281a53bcfe950055faf69d5077c624f5a6c77e4e436ef469c",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [
@@ -3997,17 +4064,19 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "registered-service-test",
           "id": "tests/service/fast-role.test.ts",
           "registrationPath": "tests/service/fast-role.test.ts",
-          "fixtureSelectionSha256": "7ce2f2aafde326870e940e9c6624e92912cb4e073ea997e8aa30a270aae601ea",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "663c40b569f6213381bb0cf9c11502742c0f1b03fb4f95d66a68a04a29f0b616",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/fast-role-fixture-generator.test.ts",
           "registrationPath": "tests/service/fast-role-fixture-generator.test.ts",
-          "fixtureSelectionSha256": "94681592a15954d28052ed6e943bd9b058e3b796329766ed0363f43024d76a4e",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "0b8e75aeeaff272c4d272fa8e6c7c17bd44210565a027af17d835fc1d6a89e6a",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [
@@ -4102,24 +4171,27 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "registered-service-test",
           "id": "tests/service/custom-analysis-fixture-generator.test.ts",
           "registrationPath": "tests/service/custom-analysis-fixture-generator.test.ts",
-          "fixtureSelectionSha256": "357c810da56e562bb45d745bbbffee052f04af1040b6272657c7fae0b8adfc31",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "60b1b6f38dc09637ab631fd2066038bb99ca701aa003dff16d895b03f053d534",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/custom-analysis.test.ts",
           "registrationPath": "tests/service/custom-analysis.test.ts",
-          "fixtureSelectionSha256": "68dd1e0b1c93a2e5992cb0cf50c188b3724c2cd57df727bb3c69fe0f00901243",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "965965a7dee55ec5f52f8a98f0688c23fe0708bedd7f68a8f8533a70c9d87708",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "journey",
           "id": "J-04",
           "registrationPath": "e2e/run-j04.mjs",
-          "fixtureSelectionSha256": "b64f51d304f7bde7cc2ca586f2cd138b483779bfb501948b31a9689c3159963d",
-          "sameSelectionsAtPreparationBase": true
+          "registrationFileSha256": "fd25f7913c54406a45a7a939dc29e6e22a11e0d3c3e8ddaac018c5d7816181d5",
+          "registrationFileBytesUnchangedAtPreparationBase": false,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [
@@ -4346,24 +4418,27 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "registered-service-test",
           "id": "tests/service/custom-analysis-fixture-generator.test.ts",
           "registrationPath": "tests/service/custom-analysis-fixture-generator.test.ts",
-          "fixtureSelectionSha256": "357c810da56e562bb45d745bbbffee052f04af1040b6272657c7fae0b8adfc31",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "60b1b6f38dc09637ab631fd2066038bb99ca701aa003dff16d895b03f053d534",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/custom-analysis.test.ts",
           "registrationPath": "tests/service/custom-analysis.test.ts",
-          "fixtureSelectionSha256": "68dd1e0b1c93a2e5992cb0cf50c188b3724c2cd57df727bb3c69fe0f00901243",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "965965a7dee55ec5f52f8a98f0688c23fe0708bedd7f68a8f8533a70c9d87708",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "journey",
           "id": "J-04",
           "registrationPath": "e2e/run-j04.mjs",
-          "fixtureSelectionSha256": "b64f51d304f7bde7cc2ca586f2cd138b483779bfb501948b31a9689c3159963d",
-          "sameSelectionsAtPreparationBase": true
+          "registrationFileSha256": "fd25f7913c54406a45a7a939dc29e6e22a11e0d3c3e8ddaac018c5d7816181d5",
+          "registrationFileBytesUnchangedAtPreparationBase": false,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [],
@@ -4557,17 +4632,19 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "registered-service-test",
           "id": "tests/service/dialogue.test.ts",
           "registrationPath": "tests/service/dialogue.test.ts",
-          "fixtureSelectionSha256": "389f30d8a98231cf5509f5b5370de90941f8c6adf769ae84a6d007a6637daff9",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "d9698cc555a8dbedbcacb9bac42ced441d4b85625a5b00bdc2b1e835544a047e",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/dialogue-live.test.ts",
           "registrationPath": "tests/service/dialogue-live.test.ts",
-          "fixtureSelectionSha256": "f09174590c3d861753f2bea0af910adf5e3f46e7e5603baba1e286d51d79262c",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "40d35ba6e57a5bf8003ee32f90020a202482134df315908ed5dbca5157b93fbc",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [
@@ -4794,17 +4871,19 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "registered-service-test",
           "id": "tests/service/dialogue.test.ts",
           "registrationPath": "tests/service/dialogue.test.ts",
-          "fixtureSelectionSha256": "389f30d8a98231cf5509f5b5370de90941f8c6adf769ae84a6d007a6637daff9",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "d9698cc555a8dbedbcacb9bac42ced441d4b85625a5b00bdc2b1e835544a047e",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/dialogue-live.test.ts",
           "registrationPath": "tests/service/dialogue-live.test.ts",
-          "fixtureSelectionSha256": "f09174590c3d861753f2bea0af910adf5e3f46e7e5603baba1e286d51d79262c",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "40d35ba6e57a5bf8003ee32f90020a202482134df315908ed5dbca5157b93fbc",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [],
@@ -4913,9 +4992,10 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "registered-service-test",
           "id": "tests/service/dialogue-live.test.ts",
           "registrationPath": "tests/service/dialogue-live.test.ts",
-          "fixtureSelectionSha256": "cdc5b8700350055b1c1aa2d49aab46015ea351489e29005a43693fe2243523c5",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "40d35ba6e57a5bf8003ee32f90020a202482134df315908ed5dbca5157b93fbc",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [],
@@ -5036,9 +5116,10 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "registered-service-test",
           "id": "tests/service/dialogue-live.test.ts",
           "registrationPath": "tests/service/dialogue-live.test.ts",
-          "fixtureSelectionSha256": "d0529fe3e178cc6b1c561e2418c19c78ba1a847f145ee749fe6e70642abc0de9",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "40d35ba6e57a5bf8003ee32f90020a202482134df315908ed5dbca5157b93fbc",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [],
@@ -5159,9 +5240,10 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "registered-service-test",
           "id": "tests/service/dialogue.test.ts",
           "registrationPath": "tests/service/dialogue.test.ts",
-          "fixtureSelectionSha256": "93e2ecc901144f2d6d7aa68916a3bcf4db798d599d979f93c50bb5b38db7093b",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "d9698cc555a8dbedbcacb9bac42ced441d4b85625a5b00bdc2b1e835544a047e",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [
@@ -5393,9 +5475,10 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "registered-service-test",
           "id": "tests/service/dialogue.test.ts",
           "registrationPath": "tests/service/dialogue.test.ts",
-          "fixtureSelectionSha256": "93e2ecc901144f2d6d7aa68916a3bcf4db798d599d979f93c50bb5b38db7093b",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "d9698cc555a8dbedbcacb9bac42ced441d4b85625a5b00bdc2b1e835544a047e",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [],
@@ -5525,89 +5608,100 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "registered-service-test",
           "id": "tests/service/live-material-references.test.ts",
           "registrationPath": "tests/service/live-material-references.test.ts",
-          "fixtureSelectionSha256": "26ef25b1c55345a0eb67ec8ff6ffd6aebeb61e6aa1647947e780a4afb7520062",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "59183718f60c85794b73eb820c12e202a60b1b5cd8f0bfba93132e618151ff58",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/evaluation-library-references.test.ts",
           "registrationPath": "tests/service/evaluation-library-references.test.ts",
-          "fixtureSelectionSha256": "3170cd59f0598e28c5312186c04ed25d5c3c026122bf10d3fb9dd6a37bc1e709",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "d0d2a00ba7dfe99677c512693150dbd2be50ef962d5ed9e90fbdae87e935153d",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/readers-report-fixture-generator.test.ts",
           "registrationPath": "tests/service/readers-report-fixture-generator.test.ts",
-          "fixtureSelectionSha256": "44a881cddd0be7baa8f759312a4fa7ee3bd1c9b383c511ccb2897d693448749a",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "febda5305fd3ae6391b342dc84125136b390a9869f857e027174bc2d18998b11",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/outcome-unconfirmed.test.ts",
           "registrationPath": "tests/service/outcome-unconfirmed.test.ts",
-          "fixtureSelectionSha256": "570fa7b9cd3bf0eb95b488f95618106ee288d08b99e0883fce55bbdce23f9a10",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "c8c583fd3ea3ea56d2801454225b18ecd45ed596cdef03e3044b4e16ee819d6a",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/writing-tasks.test.ts",
           "registrationPath": "tests/service/writing-tasks.test.ts",
-          "fixtureSelectionSha256": "5855050211000eb7e443b46d3a11dfd1f4de1f9d3ee292eb8d079c709f97c0c5",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "712cdb41c5bf176f90b7e25dd59a0a044b8aa45dd8f6d5af43f8160c75d62a45",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/initial-evaluation.test.ts",
           "registrationPath": "tests/service/initial-evaluation.test.ts",
-          "fixtureSelectionSha256": "5917e461adb23acdc36154fc1d626b27308fda3323470bbf9a2b8136bf493b82",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "314ff8cb92c0b2f4122d57235a33012b92f19b76125ce7b7e194c5d5e8d5cfd1",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/evaluation-fixture-generator.test.ts",
           "registrationPath": "tests/service/evaluation-fixture-generator.test.ts",
-          "fixtureSelectionSha256": "648c4e2ddd935252b346fc4170dd8d3bcb28cf73ba691733e424de6debabc67b",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "def737716925289b75b273dafc2343363a6f3d2e11a2b54ea4d16d2255a9dd10",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/start-when-online-kinds.test.ts",
           "registrationPath": "tests/service/start-when-online-kinds.test.ts",
-          "fixtureSelectionSha256": "e0b026a0632408dd4eedaf62ed97dce9719e40173db15ea5b86e505c0d191ac2",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "11cf5b6785a049487af7bd8de10405c36d7b2511d1c2c5545d776b5c95ee40ce",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/live-evaluation.test.ts",
           "registrationPath": "tests/service/live-evaluation.test.ts",
-          "fixtureSelectionSha256": "e1949f92d6db20014cf364615930b99e92d6555fc24b4e1eb198136c5a1d97a3",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "db15bc70755cc4c72095c1e3cbc64be4ba2951e021ef821d4659c7a1e7429945",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/run-kind-controls.test.ts",
           "registrationPath": "tests/service/run-kind-controls.test.ts",
-          "fixtureSelectionSha256": "ed46207e0df10c4ba4823e6439cb3bf0c70450a6c9d7daacaad02fb67db153f8",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "c6bbb0ea255796ebfb56970571703d32063a9d6b930af20e47d1f64c823961c6",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/model-clarification.test.ts",
           "registrationPath": "tests/service/model-clarification.test.ts",
-          "fixtureSelectionSha256": "f9a62e9e5a86401a2ba4dc62efe3f1a595a438fa157efec3c75d6d608a4e24d3",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "7f17a55f3f22b9ce5f08d303dd6fa68c39291fd58661d332d107c1512c975642",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [
@@ -5834,89 +5928,100 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "registered-service-test",
           "id": "tests/service/live-material-references.test.ts",
           "registrationPath": "tests/service/live-material-references.test.ts",
-          "fixtureSelectionSha256": "26ef25b1c55345a0eb67ec8ff6ffd6aebeb61e6aa1647947e780a4afb7520062",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "59183718f60c85794b73eb820c12e202a60b1b5cd8f0bfba93132e618151ff58",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/evaluation-library-references.test.ts",
           "registrationPath": "tests/service/evaluation-library-references.test.ts",
-          "fixtureSelectionSha256": "3170cd59f0598e28c5312186c04ed25d5c3c026122bf10d3fb9dd6a37bc1e709",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "d0d2a00ba7dfe99677c512693150dbd2be50ef962d5ed9e90fbdae87e935153d",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/readers-report-fixture-generator.test.ts",
           "registrationPath": "tests/service/readers-report-fixture-generator.test.ts",
-          "fixtureSelectionSha256": "44a881cddd0be7baa8f759312a4fa7ee3bd1c9b383c511ccb2897d693448749a",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "febda5305fd3ae6391b342dc84125136b390a9869f857e027174bc2d18998b11",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/outcome-unconfirmed.test.ts",
           "registrationPath": "tests/service/outcome-unconfirmed.test.ts",
-          "fixtureSelectionSha256": "570fa7b9cd3bf0eb95b488f95618106ee288d08b99e0883fce55bbdce23f9a10",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "c8c583fd3ea3ea56d2801454225b18ecd45ed596cdef03e3044b4e16ee819d6a",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/writing-tasks.test.ts",
           "registrationPath": "tests/service/writing-tasks.test.ts",
-          "fixtureSelectionSha256": "5855050211000eb7e443b46d3a11dfd1f4de1f9d3ee292eb8d079c709f97c0c5",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "712cdb41c5bf176f90b7e25dd59a0a044b8aa45dd8f6d5af43f8160c75d62a45",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/initial-evaluation.test.ts",
           "registrationPath": "tests/service/initial-evaluation.test.ts",
-          "fixtureSelectionSha256": "5917e461adb23acdc36154fc1d626b27308fda3323470bbf9a2b8136bf493b82",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "314ff8cb92c0b2f4122d57235a33012b92f19b76125ce7b7e194c5d5e8d5cfd1",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/evaluation-fixture-generator.test.ts",
           "registrationPath": "tests/service/evaluation-fixture-generator.test.ts",
-          "fixtureSelectionSha256": "648c4e2ddd935252b346fc4170dd8d3bcb28cf73ba691733e424de6debabc67b",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "def737716925289b75b273dafc2343363a6f3d2e11a2b54ea4d16d2255a9dd10",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/start-when-online-kinds.test.ts",
           "registrationPath": "tests/service/start-when-online-kinds.test.ts",
-          "fixtureSelectionSha256": "e0b026a0632408dd4eedaf62ed97dce9719e40173db15ea5b86e505c0d191ac2",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "11cf5b6785a049487af7bd8de10405c36d7b2511d1c2c5545d776b5c95ee40ce",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/live-evaluation.test.ts",
           "registrationPath": "tests/service/live-evaluation.test.ts",
-          "fixtureSelectionSha256": "e1949f92d6db20014cf364615930b99e92d6555fc24b4e1eb198136c5a1d97a3",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "db15bc70755cc4c72095c1e3cbc64be4ba2951e021ef821d4659c7a1e7429945",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/run-kind-controls.test.ts",
           "registrationPath": "tests/service/run-kind-controls.test.ts",
-          "fixtureSelectionSha256": "ed46207e0df10c4ba4823e6439cb3bf0c70450a6c9d7daacaad02fb67db153f8",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "c6bbb0ea255796ebfb56970571703d32063a9d6b930af20e47d1f64c823961c6",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/model-clarification.test.ts",
           "registrationPath": "tests/service/model-clarification.test.ts",
-          "fixtureSelectionSha256": "f9a62e9e5a86401a2ba4dc62efe3f1a595a438fa157efec3c75d6d608a4e24d3",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "7f17a55f3f22b9ce5f08d303dd6fa68c39291fd58661d332d107c1512c975642",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [
@@ -6121,24 +6226,27 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "registered-service-test",
           "id": "tests/service/run-kind-controls.test.ts",
           "registrationPath": "tests/service/run-kind-controls.test.ts",
-          "fixtureSelectionSha256": "2c2fac5ecb4eaef600bc2869e0e59583af1ca38f6ea30313a27d49e2d74fe211",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "c6bbb0ea255796ebfb56970571703d32063a9d6b930af20e47d1f64c823961c6",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "journey",
           "id": "J-11",
           "registrationPath": "e2e/run-j11.mjs",
-          "fixtureSelectionSha256": "7ee8fc5e056a113920f3ebd38e519fdb47d262aa3908003e02218a5468af6b82",
-          "sameSelectionsAtPreparationBase": true
+          "registrationFileSha256": "9b264086f6ffebc391f05d25f80bb843ff662e02a93a7db28f338c225a442fb7",
+          "registrationFileBytesUnchangedAtPreparationBase": false,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/live-evaluation.test.ts",
           "registrationPath": "tests/service/live-evaluation.test.ts",
-          "fixtureSelectionSha256": "81cdf57c2289af7c9e1b388b76ae26ced6efe7c825ca2ac474d79a258401f791",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "db15bc70755cc4c72095c1e3cbc64be4ba2951e021ef821d4659c7a1e7429945",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [
@@ -6375,24 +6483,27 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "registered-service-test",
           "id": "tests/service/run-kind-controls.test.ts",
           "registrationPath": "tests/service/run-kind-controls.test.ts",
-          "fixtureSelectionSha256": "2c2fac5ecb4eaef600bc2869e0e59583af1ca38f6ea30313a27d49e2d74fe211",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "c6bbb0ea255796ebfb56970571703d32063a9d6b930af20e47d1f64c823961c6",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "journey",
           "id": "J-11",
           "registrationPath": "e2e/run-j11.mjs",
-          "fixtureSelectionSha256": "7ee8fc5e056a113920f3ebd38e519fdb47d262aa3908003e02218a5468af6b82",
-          "sameSelectionsAtPreparationBase": true
+          "registrationFileSha256": "9b264086f6ffebc391f05d25f80bb843ff662e02a93a7db28f338c225a442fb7",
+          "registrationFileBytesUnchangedAtPreparationBase": false,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/live-evaluation.test.ts",
           "registrationPath": "tests/service/live-evaluation.test.ts",
-          "fixtureSelectionSha256": "81cdf57c2289af7c9e1b388b76ae26ced6efe7c825ca2ac474d79a258401f791",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "db15bc70755cc4c72095c1e3cbc64be4ba2951e021ef821d4659c7a1e7429945",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [
@@ -6607,24 +6718,27 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "registered-service-test",
           "id": "tests/service/run-kind-controls.test.ts",
           "registrationPath": "tests/service/run-kind-controls.test.ts",
-          "fixtureSelectionSha256": "2c2fac5ecb4eaef600bc2869e0e59583af1ca38f6ea30313a27d49e2d74fe211",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "c6bbb0ea255796ebfb56970571703d32063a9d6b930af20e47d1f64c823961c6",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "journey",
           "id": "J-11",
           "registrationPath": "e2e/run-j11.mjs",
-          "fixtureSelectionSha256": "7ee8fc5e056a113920f3ebd38e519fdb47d262aa3908003e02218a5468af6b82",
-          "sameSelectionsAtPreparationBase": true
+          "registrationFileSha256": "9b264086f6ffebc391f05d25f80bb843ff662e02a93a7db28f338c225a442fb7",
+          "registrationFileBytesUnchangedAtPreparationBase": false,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/live-evaluation.test.ts",
           "registrationPath": "tests/service/live-evaluation.test.ts",
-          "fixtureSelectionSha256": "81cdf57c2289af7c9e1b388b76ae26ced6efe7c825ca2ac474d79a258401f791",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "db15bc70755cc4c72095c1e3cbc64be4ba2951e021ef821d4659c7a1e7429945",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [
@@ -6839,24 +6953,27 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "registered-service-test",
           "id": "tests/service/run-kind-controls.test.ts",
           "registrationPath": "tests/service/run-kind-controls.test.ts",
-          "fixtureSelectionSha256": "2c2fac5ecb4eaef600bc2869e0e59583af1ca38f6ea30313a27d49e2d74fe211",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "c6bbb0ea255796ebfb56970571703d32063a9d6b930af20e47d1f64c823961c6",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "journey",
           "id": "J-11",
           "registrationPath": "e2e/run-j11.mjs",
-          "fixtureSelectionSha256": "7ee8fc5e056a113920f3ebd38e519fdb47d262aa3908003e02218a5468af6b82",
-          "sameSelectionsAtPreparationBase": true
+          "registrationFileSha256": "9b264086f6ffebc391f05d25f80bb843ff662e02a93a7db28f338c225a442fb7",
+          "registrationFileBytesUnchangedAtPreparationBase": false,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/live-evaluation.test.ts",
           "registrationPath": "tests/service/live-evaluation.test.ts",
-          "fixtureSelectionSha256": "81cdf57c2289af7c9e1b388b76ae26ced6efe7c825ca2ac474d79a258401f791",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "db15bc70755cc4c72095c1e3cbc64be4ba2951e021ef821d4659c7a1e7429945",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [
@@ -7071,49 +7188,55 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "registered-service-test",
           "id": "tests/service/review-runs.test.ts",
           "registrationPath": "tests/service/review-runs.test.ts",
-          "fixtureSelectionSha256": "530c569bd5e44987ebad1f4a8bf20a0948e2bf07b96069f848e8a0affb4efc1e",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "15be4662a950f058c0ddf3dd4114b53b0630ff39d42d95f9717a928bff08ea08",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/factual-review.test.ts",
           "registrationPath": "tests/service/factual-review.test.ts",
-          "fixtureSelectionSha256": "64535285366ec0ac90f409e7ab5097d8b2d0c3b7d54680e2a2a85847aa5530d3",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "9d8a0f3fa64a5c01578858405818f2bcd2cb601d0bd7c7120636e45a9fdbd71e",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/outcome-unknown.test.ts",
           "registrationPath": "tests/service/outcome-unknown.test.ts",
-          "fixtureSelectionSha256": "7cc5b553f67f7aad13435a00eb11447a6d4784c485f7953bd983e45d184da25b",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "61252fd7df050f518cd5acea35e9941794c95ae194325e095902053846ace7ec",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/research-evidence-inert.test.ts",
           "registrationPath": "tests/service/research-evidence-inert.test.ts",
-          "fixtureSelectionSha256": "b2969e7203a133afeafc589affc1f8c8d7c21438f3cbf43fcbc50fd7f4735ca3",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "fc66c5aa05c30083437cf7a2e4f37a39eed980d8c8c3c547bb769d427d4b40da",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/factual-verification-fixture.test.ts",
           "registrationPath": "tests/service/factual-verification-fixture.test.ts",
-          "fixtureSelectionSha256": "c2e6d701d84f7dd3ebebc7dca37f36edfc3ce31d69982ed1728830cb4e55f0fa",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "5677cbd415558f1a8b43c208a7f8a1889dfc4f63637d3e063ec5406ba50b35a5",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/usage.test.ts",
           "registrationPath": "tests/service/usage.test.ts",
-          "fixtureSelectionSha256": "d76cf0f5cc125de474fd4ec707b20e5a47ef21910b9ab2059cc5d6f81c578ce2",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "887bcc581ec88d2078eda90ed9bc2421e87da9347ff67029fe78b5d95bbf57b7",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [
@@ -7391,16 +7514,18 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "registered-service-test",
           "id": "tests/service/factual-verification-fixture.test.ts",
           "registrationPath": "tests/service/factual-verification-fixture.test.ts",
-          "fixtureSelectionSha256": "466c6e7723fef00a6c9ddcb33d921cafdfbb5c11eb127187a2ef53330869874d",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "5677cbd415558f1a8b43c208a7f8a1889dfc4f63637d3e063ec5406ba50b35a5",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "journey",
           "id": "J-04",
           "registrationPath": "e2e/run-j04.mjs",
-          "fixtureSelectionSha256": "68e9cf999d8ba421c2e27dcd1c77d746c050be6e822ed8c382837133b034c8ee",
-          "sameSelectionsAtPreparationBase": true
+          "registrationFileSha256": "fd25f7913c54406a45a7a939dc29e6e22a11e0d3c3e8ddaac018c5d7816181d5",
+          "registrationFileBytesUnchangedAtPreparationBase": false,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [
@@ -7772,32 +7897,36 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "registered-service-test",
           "id": "tests/service/model-clarification.test.ts",
           "registrationPath": "tests/service/model-clarification.test.ts",
-          "fixtureSelectionSha256": "8dbb7a96b8cbf5e3c74f4f7aae632bf555ad692dbc76f597e8814e141a28c82f",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "7f17a55f3f22b9ce5f08d303dd6fa68c39291fd58661d332d107c1512c975642",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/model-clarification-live-replay.test.ts",
           "registrationPath": "tests/service/model-clarification-live-replay.test.ts",
-          "fixtureSelectionSha256": "c8ac3f3a1abf4656eb330cd63b29b15b663bf072af182750f01b1744295f6d6a",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "8f57dccfce0e268bdadb320f6e14fb634ee3f4e5edecf82aec467fc7c0778670",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "journey",
           "id": "J-09",
           "registrationPath": "e2e/run-j09.mjs",
-          "fixtureSelectionSha256": "e47b3f46c42458f88052d39a5295b024096312b30ad1c7332f1925e9d42aab44",
-          "sameSelectionsAtPreparationBase": true
+          "registrationFileSha256": "f1aef0ea18ab2f433d80da1e7bc16986caffd588683b0d6940a5c0af32e53fd3",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/background-analysis-scopes.test.ts",
           "registrationPath": "tests/service/background-analysis-scopes.test.ts",
-          "fixtureSelectionSha256": "e583c6c29176bd5c256cbd168742f03cfee50c3eb309b577ea3c2e2f7e8e722e",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "3c4cd742dc7799763cf9886a958a68a37f53fed6e9878874b33d0a3ab6d2ba47",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [
@@ -8133,9 +8262,10 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "registered-service-test",
           "id": "tests/service/model-clarification-live-replay.test.ts",
           "registrationPath": "tests/service/model-clarification-live-replay.test.ts",
-          "fixtureSelectionSha256": "c8ac3f3a1abf4656eb330cd63b29b15b663bf072af182750f01b1744295f6d6a",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "8f57dccfce0e268bdadb320f6e14fb634ee3f4e5edecf82aec467fc7c0778670",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [
@@ -8943,9 +9073,10 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "registered-service-test",
           "id": "tests/service/model-clarification-live-replay.test.ts",
           "registrationPath": "tests/service/model-clarification-live-replay.test.ts",
-          "fixtureSelectionSha256": "c8ac3f3a1abf4656eb330cd63b29b15b663bf072af182750f01b1744295f6d6a",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "8f57dccfce0e268bdadb320f6e14fb634ee3f4e5edecf82aec467fc7c0778670",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [
@@ -9498,17 +9629,19 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "registered-service-test",
           "id": "tests/service/fast-role.test.ts",
           "registrationPath": "tests/service/fast-role.test.ts",
-          "fixtureSelectionSha256": "012ac862bfd0a285e5d5712e90b17e4612263ed6c7b0385c5670a622e49e7868",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "663c40b569f6213381bb0cf9c11502742c0f1b03fb4f95d66a68a04a29f0b616",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/fast-role-fixture-generator.test.ts",
           "registrationPath": "tests/service/fast-role-fixture-generator.test.ts",
-          "fixtureSelectionSha256": "62d77d3aeafb264772db25c1b3be964df834d6f4ef198fc4b8f773218253576e",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "0b8e75aeeaff272c4d272fa8e6c7c17bd44210565a027af17d835fc1d6a89e6a",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [
@@ -9603,33 +9736,37 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "registered-service-test",
           "id": "tests/service/live-evaluation.test.ts",
           "registrationPath": "tests/service/live-evaluation.test.ts",
-          "fixtureSelectionSha256": "316630cdc629b562e9df92964f12f9bf8ab454545ef6f5eceddacd8b1dd22d2e",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "db15bc70755cc4c72095c1e3cbc64be4ba2951e021ef821d4659c7a1e7429945",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/evaluation-rewrite-fixture-generator.test.ts",
           "registrationPath": "tests/service/evaluation-rewrite-fixture-generator.test.ts",
-          "fixtureSelectionSha256": "475048644eeee8babb4e0b0eebdf8f7cc5504ba3b9a96a3810e0cf869999c300",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "c10592f46d839a533d027288bfd0ed8656642f613505fcb0668548b2803cbcb9",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/live-material-references.test.ts",
           "registrationPath": "tests/service/live-material-references.test.ts",
-          "fixtureSelectionSha256": "d1b0abe5e7a34c428df4c95a4adc6ac9c3cfba33b3b624b4d35ac4708d11d0e0",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "59183718f60c85794b73eb820c12e202a60b1b5cd8f0bfba93132e618151ff58",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/run-kind-controls.test.ts",
           "registrationPath": "tests/service/run-kind-controls.test.ts",
-          "fixtureSelectionSha256": "fc20baf39ac2ca11b62a698035b41124b0cd9dd4aee2d78ce559994fee1b7c14",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "c6bbb0ea255796ebfb56970571703d32063a9d6b930af20e47d1f64c823961c6",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [
@@ -9861,33 +9998,37 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "registered-service-test",
           "id": "tests/service/live-evaluation.test.ts",
           "registrationPath": "tests/service/live-evaluation.test.ts",
-          "fixtureSelectionSha256": "316630cdc629b562e9df92964f12f9bf8ab454545ef6f5eceddacd8b1dd22d2e",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "db15bc70755cc4c72095c1e3cbc64be4ba2951e021ef821d4659c7a1e7429945",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/evaluation-rewrite-fixture-generator.test.ts",
           "registrationPath": "tests/service/evaluation-rewrite-fixture-generator.test.ts",
-          "fixtureSelectionSha256": "475048644eeee8babb4e0b0eebdf8f7cc5504ba3b9a96a3810e0cf869999c300",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "c10592f46d839a533d027288bfd0ed8656642f613505fcb0668548b2803cbcb9",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/live-material-references.test.ts",
           "registrationPath": "tests/service/live-material-references.test.ts",
-          "fixtureSelectionSha256": "d1b0abe5e7a34c428df4c95a4adc6ac9c3cfba33b3b624b4d35ac4708d11d0e0",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "59183718f60c85794b73eb820c12e202a60b1b5cd8f0bfba93132e618151ff58",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/run-kind-controls.test.ts",
           "registrationPath": "tests/service/run-kind-controls.test.ts",
-          "fixtureSelectionSha256": "fc20baf39ac2ca11b62a698035b41124b0cd9dd4aee2d78ce559994fee1b7c14",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "c6bbb0ea255796ebfb56970571703d32063a9d6b930af20e47d1f64c823961c6",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [
@@ -10097,33 +10238,37 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "registered-service-test",
           "id": "tests/service/live-evaluation.test.ts",
           "registrationPath": "tests/service/live-evaluation.test.ts",
-          "fixtureSelectionSha256": "316630cdc629b562e9df92964f12f9bf8ab454545ef6f5eceddacd8b1dd22d2e",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "db15bc70755cc4c72095c1e3cbc64be4ba2951e021ef821d4659c7a1e7429945",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/evaluation-rewrite-fixture-generator.test.ts",
           "registrationPath": "tests/service/evaluation-rewrite-fixture-generator.test.ts",
-          "fixtureSelectionSha256": "475048644eeee8babb4e0b0eebdf8f7cc5504ba3b9a96a3810e0cf869999c300",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "c10592f46d839a533d027288bfd0ed8656642f613505fcb0668548b2803cbcb9",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/live-material-references.test.ts",
           "registrationPath": "tests/service/live-material-references.test.ts",
-          "fixtureSelectionSha256": "d1b0abe5e7a34c428df4c95a4adc6ac9c3cfba33b3b624b4d35ac4708d11d0e0",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "59183718f60c85794b73eb820c12e202a60b1b5cd8f0bfba93132e618151ff58",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/run-kind-controls.test.ts",
           "registrationPath": "tests/service/run-kind-controls.test.ts",
-          "fixtureSelectionSha256": "fc20baf39ac2ca11b62a698035b41124b0cd9dd4aee2d78ce559994fee1b7c14",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "c6bbb0ea255796ebfb56970571703d32063a9d6b930af20e47d1f64c823961c6",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [
@@ -10333,8 +10478,9 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "journey",
           "id": "J-04",
           "registrationPath": "e2e/run-j04.mjs",
-          "fixtureSelectionSha256": "316268eafc8931ad97aba7eddcd9a4654e470951d13a89984bc59161f05fa963",
-          "sameSelectionsAtPreparationBase": true
+          "registrationFileSha256": "fd25f7913c54406a45a7a939dc29e6e22a11e0d3c3e8ddaac018c5d7816181d5",
+          "registrationFileBytesUnchangedAtPreparationBase": false,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [
@@ -10860,9 +11006,10 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "registered-service-test",
           "id": "tests/service/fast-role.test.ts",
           "registrationPath": "tests/service/fast-role.test.ts",
-          "fixtureSelectionSha256": "74239a19f1d0e72cdf7f79de9efd86c721340750493b52392f6b620a2d18fad0",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "663c40b569f6213381bb0cf9c11502742c0f1b03fb4f95d66a68a04a29f0b616",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [
@@ -11157,9 +11304,10 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "registered-service-test",
           "id": "tests/service/fast-role.test.ts",
           "registrationPath": "tests/service/fast-role.test.ts",
-          "fixtureSelectionSha256": "0ceacca9a27a93ecdbf3315654584f09220a86601919ca9377409cf8e74e697f",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "663c40b569f6213381bb0cf9c11502742c0f1b03fb4f95d66a68a04a29f0b616",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [
@@ -11282,8 +11430,9 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "journey",
           "id": "J-04",
           "registrationPath": "e2e/run-j04.mjs",
-          "fixtureSelectionSha256": "ba23f2428512d5164c02f0fd986e9f49ded8f7049fa5c8da0c80dda2aa179bd3",
-          "sameSelectionsAtPreparationBase": true
+          "registrationFileSha256": "fd25f7913c54406a45a7a939dc29e6e22a11e0d3c3e8ddaac018c5d7816181d5",
+          "registrationFileBytesUnchangedAtPreparationBase": false,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [
@@ -11589,151 +11738,170 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "registered-service-test",
           "id": "tests/service/run-kind-controls.test.ts",
           "registrationPath": "tests/service/run-kind-controls.test.ts",
-          "fixtureSelectionSha256": "043850459fc788ba6c826a3280bd9bb5462478cbe150cd368a68f9645be3269e",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "c6bbb0ea255796ebfb56970571703d32063a9d6b930af20e47d1f64c823961c6",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/review-runs.test.ts",
           "registrationPath": "tests/service/review-runs.test.ts",
-          "fixtureSelectionSha256": "0f9826b6718cb619d24fe049b567ce0b8b0298cdc2b998dc478caea388c6805b",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "15be4662a950f058c0ddf3dd4114b53b0630ff39d42d95f9717a928bff08ea08",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/book-tasks.test.ts",
           "registrationPath": "tests/service/book-tasks.test.ts",
-          "fixtureSelectionSha256": "1a415d15512f9aae8084041f890bee9dc9f72e1f71d4e388a410574f1181ee15",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "9d6cc1905247dab960fd66ddfce8b98e4f22fdf8aedbf396babf7ab0ba3cb300",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/global-attention.test.ts",
           "registrationPath": "tests/service/global-attention.test.ts",
-          "fixtureSelectionSha256": "1a415d15512f9aae8084041f890bee9dc9f72e1f71d4e388a410574f1181ee15",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "de7bc99752275b926dbc2e643826e152a638b215c40c82e7b3076c1249656e37",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/review-guidelines.test.ts",
           "registrationPath": "tests/service/review-guidelines.test.ts",
-          "fixtureSelectionSha256": "1a415d15512f9aae8084041f890bee9dc9f72e1f71d4e388a410574f1181ee15",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "cf4b4204b835b1dd7a45bc01cb464cc4b2a0247eb889d2dbad0272a2949385ae",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/task-plan.test.ts",
           "registrationPath": "tests/service/task-plan.test.ts",
-          "fixtureSelectionSha256": "1a415d15512f9aae8084041f890bee9dc9f72e1f71d4e388a410574f1181ee15",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "fc8341a4c24cf4fd7225104df128523feadc56a61fb7f437f3d05d7e9d89af98",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/learning-eligibility.test.ts",
           "registrationPath": "tests/service/learning-eligibility.test.ts",
-          "fixtureSelectionSha256": "1c8fb0eee96603cea385c750800c90dce259470a5d53cb4bcdcd9e5607d482c7",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "62197e3fa0bde32c6a9165ee9a99eb9e96449b6b5a621edda652dd4573de2b4d",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/outcome-unconfirmed.test.ts",
           "registrationPath": "tests/service/outcome-unconfirmed.test.ts",
-          "fixtureSelectionSha256": "26f51780e12f3589dca0d5beb541f8713a377e6b17e90ce71993221e4a4d1ce7",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "c8c583fd3ea3ea56d2801454225b18ecd45ed596cdef03e3044b4e16ee819d6a",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/start-when-online-kinds.test.ts",
           "registrationPath": "tests/service/start-when-online-kinds.test.ts",
-          "fixtureSelectionSha256": "317001dc1077baff5f739bcee259dace20d36c61f09be9d5ff3115f72a3fbd1a",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "11cf5b6785a049487af7bd8de10405c36d7b2511d1c2c5545d776b5c95ee40ce",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/captured-procedures.test.ts",
           "registrationPath": "tests/service/captured-procedures.test.ts",
-          "fixtureSelectionSha256": "3221ba7ec2f65be0b79350752668eb974d281c738cdd764aaff37b1bd8c5e6d4",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "117d2a2a298b00433ba9e8aa7215c37ebd5e3d230dd50292dd8ec27ca45f5e72",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/review-library-references.test.ts",
           "registrationPath": "tests/service/review-library-references.test.ts",
-          "fixtureSelectionSha256": "4831e8cf4ab980d5a4c37a77d5ccc6c03fe95c8783045e47f4ee7360c230a6df",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "71dd16905b4721263a3b158b29bd9c076f19e3b82ff21a262953df589eb2c0c6",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "journey",
           "id": "J-13",
           "registrationPath": "e2e/run-j13.mjs",
-          "fixtureSelectionSha256": "79c49054223989fecf420c950020b5c41ec8e1ba8967907d04a43e94edc97950",
-          "sameSelectionsAtPreparationBase": true
+          "registrationFileSha256": "ac0cb1ed65301107a84bcab08f31ac7a536b3bb0356e13f825b7fdde79c7cf30",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/start-when-online-followups.test.ts",
           "registrationPath": "tests/service/start-when-online-followups.test.ts",
-          "fixtureSelectionSha256": "7a8af5b9eaaf3a0858e0a50d3ccf22239f029b96fb9c9977c56674e590e9f8d6",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "dbf337befe7d37c74d798260ff5ac9ac8fc380821129d72a7769f5a961b2631f",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/house-review-preference-materials.test.ts",
           "registrationPath": "tests/service/house-review-preference-materials.test.ts",
-          "fixtureSelectionSha256": "84b741984079f7c8b2842613196a2640689ae2f42f0339122e90eac297761b6c",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "600782c2a88aadbf93d0dd2eb13ab6ff96ee0568c5d7b1bf622426cf0ee51b3e",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/series-exclusion-runs.test.ts",
           "registrationPath": "tests/service/series-exclusion-runs.test.ts",
-          "fixtureSelectionSha256": "8b91408f7122fe521c148abbe57f66aa66f37c79de2e5ff5976ea485ec50a66f",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "9b5df021b6337c93a64766775ae2fc494fd84b8812349441457f8f3cc1d359af",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/task-intent-drafts.test.ts",
           "registrationPath": "tests/service/task-intent-drafts.test.ts",
-          "fixtureSelectionSha256": "93db19b758bbd2c66c44bf70d8c4dcf21ca7d734394013463aa992612abad23b",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "c94e3e6a1aa8adb97b6bfc89a4602770307f6901bd671475a78b0c8d9dff8ca9",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "journey",
           "id": "J-10",
           "registrationPath": "e2e/run-j10.mjs",
-          "fixtureSelectionSha256": "bb444bc65243a5dc453cc963b087ecca4f728ac2ea4b4ab4a0998d49cb9dc0c4",
-          "sameSelectionsAtPreparationBase": true
+          "registrationFileSha256": "7ea01a221bf44161eda23268a352a58b83b69fee9ce9e334dff6ceeffab2d8eb",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/review-fixture-generator.test.ts",
           "registrationPath": "tests/service/review-fixture-generator.test.ts",
-          "fixtureSelectionSha256": "d9b58a0907db085a09b987c25ee1709f3b7307eaf0fe85fccbbd280a9168d3c5",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "b01563bd7394ed51c02e4f8686e73ee73977f2c19ef8056e4a70348d3cae2396",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/review-category.test.ts",
           "registrationPath": "tests/service/review-category.test.ts",
-          "fixtureSelectionSha256": "e61126de744bd4642c26bad2f039226dfe46acf358286f802117a7c2b2d72005",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "0b9bc8aa1a9230988e9445484af4d437bd599f313bb90b4ad05484615b1dcc79",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [
@@ -12081,151 +12249,170 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "registered-service-test",
           "id": "tests/service/run-kind-controls.test.ts",
           "registrationPath": "tests/service/run-kind-controls.test.ts",
-          "fixtureSelectionSha256": "043850459fc788ba6c826a3280bd9bb5462478cbe150cd368a68f9645be3269e",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "c6bbb0ea255796ebfb56970571703d32063a9d6b930af20e47d1f64c823961c6",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/review-runs.test.ts",
           "registrationPath": "tests/service/review-runs.test.ts",
-          "fixtureSelectionSha256": "0f9826b6718cb619d24fe049b567ce0b8b0298cdc2b998dc478caea388c6805b",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "15be4662a950f058c0ddf3dd4114b53b0630ff39d42d95f9717a928bff08ea08",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/book-tasks.test.ts",
           "registrationPath": "tests/service/book-tasks.test.ts",
-          "fixtureSelectionSha256": "1a415d15512f9aae8084041f890bee9dc9f72e1f71d4e388a410574f1181ee15",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "9d6cc1905247dab960fd66ddfce8b98e4f22fdf8aedbf396babf7ab0ba3cb300",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/global-attention.test.ts",
           "registrationPath": "tests/service/global-attention.test.ts",
-          "fixtureSelectionSha256": "1a415d15512f9aae8084041f890bee9dc9f72e1f71d4e388a410574f1181ee15",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "de7bc99752275b926dbc2e643826e152a638b215c40c82e7b3076c1249656e37",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/review-guidelines.test.ts",
           "registrationPath": "tests/service/review-guidelines.test.ts",
-          "fixtureSelectionSha256": "1a415d15512f9aae8084041f890bee9dc9f72e1f71d4e388a410574f1181ee15",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "cf4b4204b835b1dd7a45bc01cb464cc4b2a0247eb889d2dbad0272a2949385ae",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/task-plan.test.ts",
           "registrationPath": "tests/service/task-plan.test.ts",
-          "fixtureSelectionSha256": "1a415d15512f9aae8084041f890bee9dc9f72e1f71d4e388a410574f1181ee15",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "fc8341a4c24cf4fd7225104df128523feadc56a61fb7f437f3d05d7e9d89af98",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/learning-eligibility.test.ts",
           "registrationPath": "tests/service/learning-eligibility.test.ts",
-          "fixtureSelectionSha256": "1c8fb0eee96603cea385c750800c90dce259470a5d53cb4bcdcd9e5607d482c7",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "62197e3fa0bde32c6a9165ee9a99eb9e96449b6b5a621edda652dd4573de2b4d",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/outcome-unconfirmed.test.ts",
           "registrationPath": "tests/service/outcome-unconfirmed.test.ts",
-          "fixtureSelectionSha256": "26f51780e12f3589dca0d5beb541f8713a377e6b17e90ce71993221e4a4d1ce7",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "c8c583fd3ea3ea56d2801454225b18ecd45ed596cdef03e3044b4e16ee819d6a",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/start-when-online-kinds.test.ts",
           "registrationPath": "tests/service/start-when-online-kinds.test.ts",
-          "fixtureSelectionSha256": "317001dc1077baff5f739bcee259dace20d36c61f09be9d5ff3115f72a3fbd1a",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "11cf5b6785a049487af7bd8de10405c36d7b2511d1c2c5545d776b5c95ee40ce",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/captured-procedures.test.ts",
           "registrationPath": "tests/service/captured-procedures.test.ts",
-          "fixtureSelectionSha256": "3221ba7ec2f65be0b79350752668eb974d281c738cdd764aaff37b1bd8c5e6d4",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "117d2a2a298b00433ba9e8aa7215c37ebd5e3d230dd50292dd8ec27ca45f5e72",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/review-library-references.test.ts",
           "registrationPath": "tests/service/review-library-references.test.ts",
-          "fixtureSelectionSha256": "4831e8cf4ab980d5a4c37a77d5ccc6c03fe95c8783045e47f4ee7360c230a6df",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "71dd16905b4721263a3b158b29bd9c076f19e3b82ff21a262953df589eb2c0c6",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "journey",
           "id": "J-13",
           "registrationPath": "e2e/run-j13.mjs",
-          "fixtureSelectionSha256": "79c49054223989fecf420c950020b5c41ec8e1ba8967907d04a43e94edc97950",
-          "sameSelectionsAtPreparationBase": true
+          "registrationFileSha256": "ac0cb1ed65301107a84bcab08f31ac7a536b3bb0356e13f825b7fdde79c7cf30",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/start-when-online-followups.test.ts",
           "registrationPath": "tests/service/start-when-online-followups.test.ts",
-          "fixtureSelectionSha256": "7a8af5b9eaaf3a0858e0a50d3ccf22239f029b96fb9c9977c56674e590e9f8d6",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "dbf337befe7d37c74d798260ff5ac9ac8fc380821129d72a7769f5a961b2631f",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/house-review-preference-materials.test.ts",
           "registrationPath": "tests/service/house-review-preference-materials.test.ts",
-          "fixtureSelectionSha256": "84b741984079f7c8b2842613196a2640689ae2f42f0339122e90eac297761b6c",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "600782c2a88aadbf93d0dd2eb13ab6ff96ee0568c5d7b1bf622426cf0ee51b3e",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/series-exclusion-runs.test.ts",
           "registrationPath": "tests/service/series-exclusion-runs.test.ts",
-          "fixtureSelectionSha256": "8b91408f7122fe521c148abbe57f66aa66f37c79de2e5ff5976ea485ec50a66f",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "9b5df021b6337c93a64766775ae2fc494fd84b8812349441457f8f3cc1d359af",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/task-intent-drafts.test.ts",
           "registrationPath": "tests/service/task-intent-drafts.test.ts",
-          "fixtureSelectionSha256": "93db19b758bbd2c66c44bf70d8c4dcf21ca7d734394013463aa992612abad23b",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "c94e3e6a1aa8adb97b6bfc89a4602770307f6901bd671475a78b0c8d9dff8ca9",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "journey",
           "id": "J-10",
           "registrationPath": "e2e/run-j10.mjs",
-          "fixtureSelectionSha256": "bb444bc65243a5dc453cc963b087ecca4f728ac2ea4b4ab4a0998d49cb9dc0c4",
-          "sameSelectionsAtPreparationBase": true
+          "registrationFileSha256": "7ea01a221bf44161eda23268a352a58b83b69fee9ce9e334dff6ceeffab2d8eb",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/review-fixture-generator.test.ts",
           "registrationPath": "tests/service/review-fixture-generator.test.ts",
-          "fixtureSelectionSha256": "d9b58a0907db085a09b987c25ee1709f3b7307eaf0fe85fccbbd280a9168d3c5",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "b01563bd7394ed51c02e4f8686e73ee73977f2c19ef8056e4a70348d3cae2396",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/review-category.test.ts",
           "registrationPath": "tests/service/review-category.test.ts",
-          "fixtureSelectionSha256": "e61126de744bd4642c26bad2f039226dfe46acf358286f802117a7c2b2d72005",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "0b9bc8aa1a9230988e9445484af4d437bd599f313bb90b4ad05484615b1dcc79",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [
@@ -12921,16 +13108,18 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "registered-service-test",
           "id": "tests/service/review-runs.test.ts",
           "registrationPath": "tests/service/review-runs.test.ts",
-          "fixtureSelectionSha256": "01cbc6f283a1f4aecab66a8d193c2bd0d37575abaab14e404cb43a17a53ea722",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "15be4662a950f058c0ddf3dd4114b53b0630ff39d42d95f9717a928bff08ea08",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "journey",
           "id": "J-04",
           "registrationPath": "e2e/run-j04.mjs",
-          "fixtureSelectionSha256": "c80bacf4789723fdbbdcd3fbba7bbc45a9efb5024f7d2e516e649b332400c333",
-          "sameSelectionsAtPreparationBase": true
+          "registrationFileSha256": "fd25f7913c54406a45a7a939dc29e6e22a11e0d3c3e8ddaac018c5d7816181d5",
+          "registrationFileBytesUnchangedAtPreparationBase": false,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [
@@ -13278,16 +13467,18 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "registered-service-test",
           "id": "tests/service/review-runs.test.ts",
           "registrationPath": "tests/service/review-runs.test.ts",
-          "fixtureSelectionSha256": "01cbc6f283a1f4aecab66a8d193c2bd0d37575abaab14e404cb43a17a53ea722",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "15be4662a950f058c0ddf3dd4114b53b0630ff39d42d95f9717a928bff08ea08",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "journey",
           "id": "J-04",
           "registrationPath": "e2e/run-j04.mjs",
-          "fixtureSelectionSha256": "c80bacf4789723fdbbdcd3fbba7bbc45a9efb5024f7d2e516e649b332400c333",
-          "sameSelectionsAtPreparationBase": true
+          "registrationFileSha256": "fd25f7913c54406a45a7a939dc29e6e22a11e0d3c3e8ddaac018c5d7816181d5",
+          "registrationFileBytesUnchangedAtPreparationBase": false,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [
@@ -14083,56 +14274,63 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "journey",
           "id": "J-13",
           "registrationPath": "e2e/run-j13.mjs",
-          "fixtureSelectionSha256": "249e96caee6f9e24791a52c8114d659534037b040ba0157c2ae448921e0fc750",
-          "sameSelectionsAtPreparationBase": true
+          "registrationFileSha256": "ac0cb1ed65301107a84bcab08f31ac7a536b3bb0356e13f825b7fdde79c7cf30",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/captured-procedures.test.ts",
           "registrationPath": "tests/service/captured-procedures.test.ts",
-          "fixtureSelectionSha256": "5af4ff9daf14fb1b76cfcc6606d57723db62b14f04fb8fca7011ca7c140d404f",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "117d2a2a298b00433ba9e8aa7215c37ebd5e3d230dd50292dd8ec27ca45f5e72",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/review-runs.test.ts",
           "registrationPath": "tests/service/review-runs.test.ts",
-          "fixtureSelectionSha256": "7bc705cb631c6d6c10afd9614f15fa24085a09d10adc20838163199ab53065fa",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "15be4662a950f058c0ddf3dd4114b53b0630ff39d42d95f9717a928bff08ea08",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/series-consistency-fixture-generator.test.ts",
           "registrationPath": "tests/service/series-consistency-fixture-generator.test.ts",
-          "fixtureSelectionSha256": "976f54a6a9805b49c7957c1b08ae0e243e79632715435e7ea747be262590e43a",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "00e4487328717c0f617695eb21d78d548bc693699df4687b03455cbf69ec1f67",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/start-when-online-followups.test.ts",
           "registrationPath": "tests/service/start-when-online-followups.test.ts",
-          "fixtureSelectionSha256": "bd2691b719b2c9c2eb561f508c60b4d2ed4f2caae699978ae97b091dc08d80b7",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "dbf337befe7d37c74d798260ff5ac9ac8fc380821129d72a7769f5a961b2631f",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/series-consistency.test.ts",
           "registrationPath": "tests/service/series-consistency.test.ts",
-          "fixtureSelectionSha256": "d00f00e4ac7e2db382294f2cd924a05496a8d1b09b684f8ed74cf1bbf52a55a2",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "07d8fb3455c8195fbf233e7fbe71ef4e27bcde746b6d77e08f799df586ff71aa",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "registered-service-test",
           "id": "tests/service/series-exclusion-runs.test.ts",
           "registrationPath": "tests/service/series-exclusion-runs.test.ts",
-          "fixtureSelectionSha256": "d00f00e4ac7e2db382294f2cd924a05496a8d1b09b684f8ed74cf1bbf52a55a2",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "9b5df021b6337c93a64766775ae2fc494fd84b8812349441457f8f3cc1d359af",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [
@@ -14360,16 +14558,18 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
           "kind": "registered-service-test",
           "id": "tests/service/run-kind-controls.test.ts",
           "registrationPath": "tests/service/run-kind-controls.test.ts",
-          "fixtureSelectionSha256": "0e32e95032d42bdc3e6c8a71a6a4303d8ce302c723ca5a1b44eb22178b432fd3",
-          "sameSelectionsAtPreparationBase": true,
-          "localConstructorAndExistingExactPlanChecksRequired": true
+          "registrationFileSha256": "c6bbb0ea255796ebfb56970571703d32063a9d6b930af20e47d1f64c823961c6",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "localConstructorAndExistingExactPlanChecksRequired": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         },
         {
           "kind": "journey",
           "id": "J-07",
           "registrationPath": "e2e/run-j07.mjs",
-          "fixtureSelectionSha256": "3358411218f3ce083ad08aa4d8d0fb91dcf36f2df3345683964a2bd36d7c7fd1",
-          "sameSelectionsAtPreparationBase": true
+          "registrationFileSha256": "7d809c8f2958a3dbc3401997eb094f6772b70931d802c7c60bdbabb3caf41917",
+          "registrationFileBytesUnchangedAtPreparationBase": true,
+          "fixtureSelectionUnchangedAtPreparationBase": true
         }
       ],
       "allowedTaskKinds": [
@@ -14862,9 +15062,23 @@ This is the exact `legacyLocalFixtureCompatibility` object in the candidate JSON
       }
     }
   ],
-  "manifestSha256": "0696535cdedb22cbdbb39a03577171224104fae42ade7b567c47a7e92601bfdc",
+  "manifestSha256": "ee20728723205e3e4c1e6df4170f7d9af8fd3e17f62b48e4a20d3ff2020e434e",
   "manifestCanonicalization": "UTF-8 JSON; recursively sorted object keys; array order retained; no whitespace; SHA-256",
   "resolvedLineageCanonicalization": "SHA-256 of leaf-first identity:rawFileSha256 lines joined by LF with no trailing LF",
+  "digestCanonicalization": {
+    "fixtureFileSha256": "SHA-256 of the exact fixture file bytes at sourceCommit",
+    "registrationFileSha256": "SHA-256 of the exact registration file bytes at sourceCommit",
+    "categoryAndToolSetSha256": "SHA-256 of UTF-8 JSON of categoryAndToolSet with recursively sorted object keys, array order retained, no whitespace",
+    "identityMapSha256": "SHA-256 of UTF-8 JSON of the fixture entry capture identityMap array with recursively sorted object keys, array order retained, no whitespace",
+    "caseInputSha256": "SHA-256 of UTF-8 JSON of the editorial case file input member with recursively sorted object keys, array order retained, no whitespace",
+    "allFixtureFileInventorySha256": "SHA-256 of UTF-8 JSON of allFixtureFileInventory with recursively sorted object keys, array order retained, no whitespace"
+  },
+  "registeredPurposeBasis": {
+    "journey": "every e2e --j04-model-adapter launch selection at sourceCommit; complete for J-04, J-07, J-09, J-10, J-11, J-13 and J-16",
+    "registeredEditorialEvidenceCase": "exactly the five deterministic cases in registeredEvidenceCases",
+    "registeredServiceTest": "documentary fixture-identity references found at sourceCommit; not exhaustive, not scope-filtered and not a runtime match key",
+    "selectionUnchangedCheck": "registration file bytes identical at exactFixedMetadataUnchangedAtPreparationBase, or no line added or removed between sourceCommit and that base names a fixture identity, a fixture constant, loadModelFixture, loadLaunchFixture or --j04-model-adapter"
+  },
   "fixtureResolverSemantics": {
     "variantEntryOverridesSameBaseKey": true,
     "key": [

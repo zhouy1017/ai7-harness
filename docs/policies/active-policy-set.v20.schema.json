@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "Active Policy Set v20 — UNSELECTED candidate",
+  "title": "AI7 Active Policy Set v20",
   "type": "object",
   "const": {
     "schemaDialect": "http://json-schema.org/draft-07/schema#",
@@ -29,7 +29,7 @@
             "policyType": "provider-processing",
             "version": "v29",
             "canonicalPath": "docs/policies/provider-processing-policy.v29.json",
-            "sha256": "9d76ef3ccf7759e65d8ff402143179e9c74f3e47f6f42fc972854367ef7f388d"
+            "sha256": "ef450cf75877d226678066aa229d1c3981d413b62dea9be310a951b1d9dd361e"
           },
           "fixture-recording": {
             "policyId": "provider-processing-policy",
@@ -43,7 +43,7 @@
             "policyType": "provider-processing",
             "version": "v28",
             "canonicalPath": "docs/policies/provider-processing-policy.v28.json",
-            "sha256": "b674cb863edfce7499b18731f7c317aada54732782c851ad0d6a3b6859a0604a"
+            "sha256": "39b4b1702ffb63f950b287ea8eff918bc4b266521329ba745ae72d0503a2f4c3"
           },
           "developer-live": {
             "policyId": "provider-processing-policy",
