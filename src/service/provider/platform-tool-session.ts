@@ -1,6 +1,6 @@
 import type { ProviderModelProfile } from './model-profile.js';
 import { RetrievalError, type RetrievalIndex } from '../retrieval/index.js';
-import { LOCAL_TOOL_BREAKER_END, LOCAL_TOOL_ROUND_TRIP_BREAKER, localToolParallelBound } from './local-tools.js';
+import { LOCAL_TOOL_BREAKER_END, LOCAL_TOOL_RESULT_MAX_BYTES, LOCAL_TOOL_ROUND_TRIP_BREAKER, localToolParallelBound } from './local-tools.js';
 import type { DevelopmentValidationIntent } from '../../shared/protocol.js';
 import type { CredentialBroker } from './credential-broker.js';
 import type { PlatformToolCallItem, PlatformToolCallResult } from './live-transmission.js';
@@ -310,7 +310,7 @@ export class PlatformToolSession implements PlatformToolOwner {
       }
       if (call.signal.aborted || this.#base.currentBindingDigest() !== this.#binding.bindingDigest) return refuse('检索未完成');
       const text = JSON.stringify(value);
-      return Buffer.byteLength(text, 'utf8') > 65_536 ? refuse('检索未完成：结果超过字节上限。') : { text, sourceUrl: null };
+      return Buffer.byteLength(text, 'utf8') > LOCAL_TOOL_RESULT_MAX_BYTES ? refuse('检索未完成：结果超过字节上限。') : { text, sourceUrl: null };
     } catch (error) {
       return refuse(error instanceof RetrievalError ? error.code : '检索未完成');
     } finally { this.#localInFlight -= 1; }

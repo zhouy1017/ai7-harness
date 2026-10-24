@@ -16,6 +16,8 @@ export const LOCAL_TOOL_CANDIDATES_PER_CALL = 8;
 export const LOCAL_TOOL_ROUND_TRIP_BREAKER = 128;
 /** How a unit the breaker ends is disclosed. */
 export const LOCAL_TOOL_BREAKER_END = '检索未完成';
+/** The byte cap on one local tool result: the session refuses a larger result and the Egress Gate admits none (Issue #1090). */
+export const LOCAL_TOOL_RESULT_MAX_BYTES = 65_536;
 /** The closed local capability vocabulary; registration selects the verified rule's exact named subset. */
 export const LOCAL_TOOL_DECLARATION_NAMES = ['retrieve', 'exact_fetch', 'read_blocks', 'baseline_facts', 'guideline_clause', 'term_table', 'search_manuscript'] as const;
 

@@ -77,7 +77,11 @@ export interface HarnessCompositionDescriptor {
    * selected Provider Processing rule names them — keeps its descriptor and its digest byte-identical.
    */
   readonly platformTools?: { readonly names: typeof PLATFORM_TOOL_NAMES; readonly schemaDigest: string };
-  readonly localTools?: { readonly names: readonly string[]; readonly schemaDigest: string; readonly callsPerUnit?: number };
+  /**
+   * v2 records the bound's derivation beside the resolved `maxParallelToolCalls` (Issue #1090 revision 4): the rule's
+   * `parallelCallsAllowed` permission resolves to its `callsPerUnit` cap, and its absence or `false` to 1.
+   */
+  readonly localTools?: { readonly names: readonly string[]; readonly schemaDigest: string; readonly callsPerUnit?: number; readonly parallelCallsAllowed?: boolean };
   readonly procedure?: ProcedureDefinitionPin;
   readonly stages?: readonly { readonly ordinal: number; readonly stageType: string; readonly digest: string }[];
   readonly sources?: PinnedLocalToolSources;
@@ -132,7 +136,7 @@ export function describeComposition(route: ExecutionRoute, model: string, prompt
     ...(withTools ? { platformTools: { names: PLATFORM_TOOL_NAMES, schemaDigest: PLATFORM_TOOL_SCHEMA_DIGEST } } : {}),
     ...(localSchemas.length > 0 ? { localTools: version === 1 ? { names: LOCAL_TOOL_NAMES, schemaDigest: LOCAL_TOOL_SCHEMA_DIGEST }
       : { names: localSchemas.map((schema) => schema.name), schemaDigest: sha256Hex(canonicalJson(localSchemas)),
-        ...(typeof local === 'object' ? { callsPerUnit: local.targetedRetrieval.callsPerUnit } : {}) } } : {}),
+        ...(typeof local === 'object' ? { callsPerUnit: local.targetedRetrieval.callsPerUnit, parallelCallsAllowed: local.parallelCallsAllowed === true } : {}) } } : {}),
   };
   const descriptor = { ...body, digest: sha256Hex(canonicalJson(body)) } as HarnessCompositionDescriptor;
   // v1's serialized bytes predate a version field; its implicit version remains accessible without changing those bytes.

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { CONTEXT_WINDOW_EXCEEDED_CODE, INVALID_CREDENTIAL_CODE, QUOTA_EXCEEDED_CODE } from '@deepseek-ai/dsh-llm';
@@ -8,6 +9,7 @@ import { Ai7LocalDeterministicAdapter } from '../../src/service/provider/local-d
 import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
 import { LOCAL_TOOL_DECLARATION_NAMES, readLocalToolsRule } from '../../src/service/provider/local-tools.js';
 import { PlatformToolSession } from '../../src/service/provider/platform-tool-session.js';
+import { toolResultOf, type AssembledModelPayload } from '../../src/service/provider/payload.js';
 import { evaluateEgress, LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from '../../src/service/provider/egress-gate.js';
 import { RetrievalIndex } from '../../src/service/retrieval/index.js';
 import { installNodeNetworkDenial } from '../../src/shared/network-denial.js';
@@ -21,7 +23,9 @@ import { liveKindAdmission } from '../../src/service/analysis/live-kind-admissio
 import { withModelClarification } from '../../src/service/provider/clarification-contract.js';
 
 installNodeNetworkDenial();
-const rule = readLocalToolsRule({ localTools: { declarations: LOCAL_TOOL_DECLARATION_NAMES.map((name) => ({ name, readOnly: true, concurrencySafe: true })),
+// @ts-expect-error tools/*.mjs carry no declarations; the generator is exercised as the plain module it is.
+const generator = (await import('../../tools/generate-model-fixture.mjs')) as unknown as { authoredToolScriptEntries: (input: Record<string, unknown>) => unknown[] };
+const rule =readLocalToolsRule({ localTools: { declarations: LOCAL_TOOL_DECLARATION_NAMES.map((name) => ({ name, readOnly: true, concurrencySafe: true })),
   parallelCallsAllowed: true, targetedRetrieval: { allowed: true, source: 'authorized-pinned-sources-only', callsPerUnit: 5, candidatesPerCall: 8,
     exactFetchRequiredBeforeCitation: true, scope: 'no-egress' }, breaker: { roundTrips: 128, end: '检索未完成' } } })!;
 
@@ -78,6 +82,13 @@ describe('declared local-tool turns', () => {
     expect(next.localTools?.names).toEqual(['read_blocks']);
     expect(next.agentLoop.maxParallelToolCalls).toBe(1);
     expect(next.localTools?.callsPerUnit).toBe(5);
+    expect(next.localTools?.parallelCallsAllowed).toBe(false);
+    // The permission resolves to the per-unit cap; the descriptor pins both the bound and what it was derived from.
+    const parallel = describeComposition(LOCAL_DETERMINISTIC_ROUTE, LOCAL_DETERMINISTIC_MODEL, 'a'.repeat(64), { version: 2, localTools: { ...subset, parallelCallsAllowed: true } });
+    expect(parallel.agentLoop.maxParallelToolCalls).toBe(5);
+    expect(parallel.tools.maxParallelSubCalls).toBe(5);
+    expect(parallel.localTools?.parallelCallsAllowed).toBe(true);
+    expect(parallel.digest).not.toBe(next.digest);
   });
 
   it('replays an authored two-call review through real DSH parallel dispatch and exact result admission', async () => {
@@ -101,10 +112,11 @@ describe('declared local-tool turns', () => {
         try { return await session.execute(call); } finally { active--; }
       } };
     const decisions: string[] = [];
+    const payloads: AssembledModelPayload[] = [];
     const handle = await prepareExecution({ sessionId: randomUUID(), route: LOCAL_DETERMINISTIC_ROUTE, model: LOCAL_DETERMINISTIC_MODEL,
       systemPrompt: binding.systemPrompt, promptContractDigest: digest, compositionOptions: { version: 2, localTools: rule }, localToolsRule: rule,
       localTools: owner, adapterFactory: () => adapter, onTransmitTicket: () => { throw new Error('NO_EGRESS'); },
-      gate: (payload) => { const decision = evaluateEgress(payload, binding, session.egressScope); decisions.push(decision.decision); return decision; } });
+      gate: (payload) => { payloads.push(payload); const decision = evaluateEgress(payload, binding, session.egressScope); decisions.push(decision.decision); return decision; } });
     try {
       handle.bindExecution({ harnessSessionId: handle.sessionId, behaviorCompositionDigest: handle.composition.digest, promptContractDigest: digest });
       const turn = await handle.submitUnit(message);
@@ -113,6 +125,15 @@ describe('declared local-tool turns', () => {
       expect(decisions).toEqual(['transmit-local', 'transmit-local']);
       expect(turn.signals.find((signal) => signal.kind === 'usage')).toMatchObject({ usage: { inputTokens: 24, outputTokens: 12 } });
       expect(session.usage.localToolCalls).toEqual({ read_blocks: 1, search_manuscript: 1 });
+      // The generator authors exactly these entries from the same script and the admitted results: the next entry is keyed
+      // on the ordered result bytes, never on the call ids minted per replay.
+      const results = payloads.at(-1)!.messages.flatMap((entry) => { const result = toolResultOf(entry); return result === null ? [] : [{ text: result.text, isError: result.isError }]; });
+      expect(results).toHaveLength(2);
+      const authored = JSON.parse(await readFile(resolve('tests/fixtures/model/synthetic-local-tool-turn.json'), 'utf8')) as { entries: Array<{ requestDigest: string; response: Record<string, unknown> }> };
+      const script = authored.entries[0]!.response as { calls: unknown[]; usage: unknown };
+      const reply = authored.entries[1]!.response as { text: string; usage: unknown };
+      expect(generator.authoredToolScriptEntries({ unitOrdinal: 1, requestDigest: authored.entries[0]!.requestDigest, calls: script.calls, results,
+        text: reply.text, usage: script.usage })).toEqual(authored.entries);
     } finally { await handle.finish(); index.dispose(); }
   });
 });

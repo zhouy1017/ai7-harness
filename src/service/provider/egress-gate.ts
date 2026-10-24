@@ -1,5 +1,5 @@
 import { SEARCH_BACKENDS } from './search-backends.js';
-import type { LocalToolsRule } from './local-tools.js';
+import { LOCAL_TOOL_RESULT_MAX_BYTES, type LocalToolsRule } from './local-tools.js';
 import { randomUUID } from 'node:crypto';
 import type { OrdinaryProductionProviderProcessingVersion } from '../../shared/protocol.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from '../../shared/provider-configuration.generated.js';
@@ -456,7 +456,7 @@ export function toolResultKey(callId: string, tool: PlatformToolName): string {
 /** Whether a tool result's URL is one its tool may have read: the rule's search host, or a cited public page. */
 function toolResultSourceAdmitted(admitted: AdmittedToolResult, rule: PlatformToolsRule | null, scope: EgressAttemptScope, binding: EgressBindingFacts): boolean {
   if (ruleNamedToolSchemas(false, binding.localTools).some((schema) => schema.name === admitted.tool)) {
-    return admitted.sourceUrl === null && admitted.byteCount <= 65_536 &&
+    return admitted.sourceUrl === null && admitted.byteCount <= LOCAL_TOOL_RESULT_MAX_BYTES &&
       (admitted.tool !== 'guideline_clause' || binding.policy.operationalScope !== 'ordinary-production' ||
         binding.ruleOutboundCategories?.has('house-review-guideline-clause') === true || admitted.sha256 === sha256Hex('[]'));
   }
