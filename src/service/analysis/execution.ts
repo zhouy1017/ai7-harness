@@ -3495,3 +3495,195 @@ function withRelationCitations<T extends { findingId: string; basis: string }>(
     return named.length === 0 ? finding : { ...finding, basis: `${finding.basis} ${named.join(' ')}` };
   });
 }
+
+export type ModelRequestProducerKind = 'analysis-unit' | 'analysis-stage' | 'dialogue' | 'fast-role' | 'connection-test';
+export type ModelRequestLane = 'foreground' | 'background';
+
+const MODEL_REQUEST_PRODUCER_IDENTITY: unique symbol = Symbol('model-request-producer');
+
+/** An opaque registration in exactly one governor; registration reserves no request capacity. */
+export interface ModelRequestProducer {
+  readonly [MODEL_REQUEST_PRODUCER_IDENTITY]: true;
+}
+
+export interface ModelRequestPermit {
+  release(): void;
+}
+
+export interface ModelRequestGovernorOptions {
+  /** Trusted construction may lower the reviewed defaults; these are not runtime settings. */
+  readonly globalCapacity?: number;
+  readonly backgroundCapacity?: number;
+}
+
+export interface ModelRequestGovernorSnapshot {
+  readonly registered: number;
+  readonly waiting: number;
+  readonly inFlight: number;
+  readonly backgroundInFlight: number;
+}
+
+interface ModelRequestProducerState {
+  readonly key: string;
+  readonly lane: ModelRequestLane;
+  closing: boolean;
+  active: boolean;
+  waiter: ModelRequestWaiter | null;
+}
+
+interface ModelRequestWaiter {
+  readonly producer: ModelRequestProducerState;
+  readonly signal: AbortSignal;
+  readonly abort: () => void;
+  readonly resolve: (permit: ModelRequestPermit) => void;
+  readonly reject: (reason: unknown) => void;
+}
+
+/**
+ * Physical model-request capacity only (Issue #1131). The Run/consumer owns authorization,
+ * cancellation after grant, transport/body cleanup and finally release. A tool gap keeps only its
+ * producer registration: each later request joins the eligible FIFO again.
+ */
+export class ModelRequestGovernor {
+  readonly #globalCapacity: number;
+  readonly #backgroundCapacity: number;
+  // Two Runs × three units, one dialogue, one singleton Fast operation and one connection test.
+  // Lower request capacities do not change this admitted-producer bound.
+  readonly #producerCapacity = 9;
+  readonly #producers = new WeakMap<ModelRequestProducer, ModelRequestProducerState>();
+  readonly #registered = new Map<string, ModelRequestProducerState>();
+  readonly #waiting: ModelRequestWaiter[] = [];
+  #inFlight = 0;
+  #backgroundInFlight = 0;
+  #closed = false;
+  #idle: { readonly promise: Promise<void>; readonly resolve: () => void } | null = null;
+
+  constructor(options: ModelRequestGovernorOptions = {}) {
+    const globalCapacity = options.globalCapacity ?? 4;
+    const backgroundCapacity = options.backgroundCapacity ?? 1;
+    if (!Number.isSafeInteger(globalCapacity) || globalCapacity < 1 || globalCapacity > 4
+      || !Number.isSafeInteger(backgroundCapacity) || backgroundCapacity < 1 || backgroundCapacity > 1
+      || backgroundCapacity > globalCapacity) {
+      throw new Error('MODEL_REQUEST_CAPACITY_INVALID');
+    }
+    this.#globalCapacity = globalCapacity;
+    this.#backgroundCapacity = backgroundCapacity;
+  }
+
+  registerProducer(input: { readonly key: string; readonly kind: ModelRequestProducerKind; readonly lane: ModelRequestLane }): ModelRequestProducer {
+    if (this.#closed) throw new Error('MODEL_REQUEST_GOVERNOR_CLOSED');
+    if (this.#registered.has(input.key)) throw new Error('MODEL_REQUEST_PRODUCER_DUPLICATE');
+    if (this.#registered.size >= this.#producerCapacity) throw new Error('MODEL_REQUEST_PRODUCER_CAPACITY');
+    const producer = Object.freeze<ModelRequestProducer>({ [MODEL_REQUEST_PRODUCER_IDENTITY]: true });
+    const state: ModelRequestProducerState = { key: input.key, lane: input.lane, closing: false, active: false, waiter: null };
+    this.#producers.set(producer, state);
+    this.#registered.set(input.key, state);
+    return producer;
+  }
+
+  async acquire(producer: ModelRequestProducer, signal: AbortSignal): Promise<ModelRequestPermit> {
+    if (this.#closed) throw new Error('MODEL_REQUEST_GOVERNOR_CLOSED');
+    const state = this.#producerState(producer);
+    if (state.closing) throw new Error('MODEL_REQUEST_PRODUCER_CLOSED');
+    if (state.active || state.waiter !== null) throw new Error('MODEL_REQUEST_PRODUCER_BUSY');
+    signal.throwIfAborted();
+    return new Promise<ModelRequestPermit>((resolve, reject) => {
+      const waiter: ModelRequestWaiter = {
+        producer: state, signal, resolve, reject,
+        abort: () => this.#rejectWaiter(waiter, signal.reason),
+      };
+      state.waiter = waiter;
+      this.#waiting.push(waiter);
+      signal.addEventListener('abort', waiter.abort, { once: true });
+      // Cover cancellation between the first check and listener registration, before any grant.
+      if (signal.aborted) this.#rejectWaiter(waiter, signal.reason);
+      else this.#drain();
+    });
+  }
+
+  unregisterProducer(producer: ModelRequestProducer): void {
+    const state = this.#producerState(producer);
+    if (state.closing) return;
+    state.closing = true;
+    if (state.waiter !== null) this.#rejectWaiter(state.waiter, new Error('MODEL_REQUEST_PRODUCER_CLOSED'));
+    if (!state.active) this.#registered.delete(state.key);
+    this.#settleIdle();
+  }
+
+  close(): void {
+    if (this.#closed) return;
+    this.#closed = true;
+    for (const state of this.#registered.values()) {
+      state.closing = true;
+      if (state.waiter !== null) this.#rejectWaiter(state.waiter, new Error('MODEL_REQUEST_GOVERNOR_CLOSED'));
+      if (!state.active) this.#registered.delete(state.key);
+    }
+    this.#settleIdle();
+  }
+
+  whenIdle(): Promise<void> {
+    if (this.#waiting.length === 0 && this.#inFlight === 0) return Promise.resolve();
+    if (this.#idle === null) this.#idle = Promise.withResolvers<void>();
+    return this.#idle.promise;
+  }
+
+  snapshot(): ModelRequestGovernorSnapshot {
+    return Object.freeze({
+      registered: this.#registered.size,
+      waiting: this.#waiting.length,
+      inFlight: this.#inFlight,
+      backgroundInFlight: this.#backgroundInFlight,
+    });
+  }
+
+  #producerState(producer: ModelRequestProducer): ModelRequestProducerState {
+    const state = this.#producers.get(producer);
+    if (state === undefined) throw new Error('MODEL_REQUEST_PRODUCER_ALIEN');
+    return state;
+  }
+
+  #rejectWaiter(waiter: ModelRequestWaiter, reason: unknown): void {
+    if (waiter.producer.waiter !== waiter) return;
+    this.#waiting.splice(this.#waiting.indexOf(waiter), 1);
+    waiter.producer.waiter = null;
+    waiter.signal.removeEventListener('abort', waiter.abort);
+    waiter.reject(reason);
+    this.#drain();
+  }
+
+  #drain(): void {
+    while (!this.#closed && this.#inFlight < this.#globalCapacity) {
+      const index = this.#waiting.findIndex((waiter) => waiter.producer.lane === 'foreground'
+        || this.#backgroundInFlight < this.#backgroundCapacity);
+      if (index === -1) break;
+      const waiter = this.#waiting.splice(index, 1)[0]!;
+      const state = waiter.producer;
+      // Grant transfers ownership atomically. Late aborts belong to the caller, even before its
+      // await resumes: a body/iterator may still be unwinding and must remain counted.
+      state.waiter = null;
+      state.active = true;
+      this.#inFlight += 1;
+      if (state.lane === 'background') this.#backgroundInFlight += 1;
+      waiter.signal.removeEventListener('abort', waiter.abort);
+      let released = false;
+      waiter.resolve(Object.freeze({
+        release: () => {
+          if (released) return;
+          released = true;
+          state.active = false;
+          this.#inFlight -= 1;
+          if (state.lane === 'background') this.#backgroundInFlight -= 1;
+          if (state.closing) this.#registered.delete(state.key);
+          this.#drain();
+        },
+      }));
+    }
+    this.#settleIdle();
+  }
+
+  #settleIdle(): void {
+    if (this.#waiting.length !== 0 || this.#inFlight !== 0) return;
+    this.#idle?.resolve();
+    this.#idle = null;
+  }
+}
