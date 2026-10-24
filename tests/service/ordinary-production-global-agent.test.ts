@@ -247,6 +247,27 @@ describe('v27 Book-less Global Agent', () => {
     expect(usage().totals.inputTokens).toBe(210);
   });
 
+  it('removes listed revisions independently for continue and regenerate, and refuses additions outside the original pins', async () => {
+    governance('保留短句。'); governance('先分清用语与文风。');
+    transport = async (signal) => heldResponse(signal);
+    const first = start();
+    await waitFor(() => (inspect(first.dialogueId).attempts[0]?.fragments.length ?? 0) > 0);
+    await owner.stop(first.attemptId);
+    const action = { kind: 'continue' as const, dialogueId: first.dialogueId, attemptId: first.attemptId };
+    const disclosure = prepareGlobalAgentDisclosure(store, owner, policy, action);
+    expect(disclosure.sources).toHaveLength(2);
+    expect(() => prepareGlobalAgentDisclosure(store, owner, policy,
+      { ...action, sources: [{ itemId: randomUUID(), revisionId: randomUUID() }] })).toThrow('记忆版本已经变化');
+    transport = async () => response();
+    const continued = start({ ...action, sources: [pinOf(disclosure.sources[0]!)] });
+    await waitFor(() => inspect(first.dialogueId).attempts.at(-1)?.state === 'completed');
+    start({ kind: 'regenerate', dialogueId: first.dialogueId, attemptId: continued.attemptId, sources: [] });
+    await waitFor(() => inspect(first.dialogueId).attempts.at(-1)?.state === 'completed');
+    expect(calls).toHaveLength(3);
+    expect(inspect(first.dialogueId).submissions?.map((entry) => entry.sources.length)).toEqual([2, 1, 0]);
+    expect(JSON.parse(calls[2]!.body).messages.at(-1).content).toContain('"sources":[]');
+  });
+
   it.each([402, 400])('records provider %s without a resend, retains the failure cause and permits only an explicit new attempt', async (status) => {
     transport = async () => new Response(JSON.stringify({ error: { message: status === 402 ? 'quota exceeded' : 'provider refused request' } }), { status });
     const turn = start(); await waitFor(() => inspect(turn.dialogueId).attempts[0]?.state === 'failed');

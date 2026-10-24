@@ -13328,7 +13328,10 @@ export class EditorialStore {
         requireStore(last.outcome === null, 'DIALOGUE_NOT_ANSWERING', '回答已结束。');
         return last.attemptId;
       }
-      requireStore(this.globalAgentSourcesCurrent(task.sources), 'GLOBAL_AGENT_SCOPE_CHANGED', '记忆版本已经变化，请重新提问。');
+      const pins = input.sources ?? task.sources;
+      requireStore(pins.length <= 12 && new Set(pins.map((pin) => pin.itemId)).size === pins.length &&
+        pins.every((pin) => task.sources.some((original) => original.itemId === pin.itemId && original.revisionId === pin.revisionId)) &&
+        this.globalAgentSourcesCurrent(pins), 'GLOBAL_AGENT_SCOPE_CHANGED', '记忆版本已经变化，请重新提问。');
       const resolved = resolveAttempts(attempts, this.#dialogueHistory, () => null);
       requireStore(resolved.first?.globalSources !== undefined, 'DIALOGUE_HISTORY_MISSING', '对话记录无法读取。');
       const answer = resolved.attempts.at(-1)!;
@@ -13337,7 +13340,8 @@ export class EditorialStore {
       const attemptId = preview ? last.attemptId : this.#transaction(this.#authority, () => this.#dialogues.nextAttempt(task.dialogueId, kind, () => answer.fragments.length, now));
       return { dialogueId: task.dialogueId, attemptId, message: { ...resolved.first, kind: kind === 'continue' ? 'continue' : 'ask',
         question: this.globalAgentRedact(resolved.first.question),
-        globalSources: resolved.first.globalSources.map((source) => ({ ...source, text: this.globalAgentRedact(source.text) })),
+        globalSources: pins.map((pin) => ({ ...pin, text: this.globalAgentRedact(resolved.first!.globalSources!
+          .find((source) => source.itemId === pin.itemId && source.revisionId === pin.revisionId)!.text) })),
         kept: kind === 'continue' ? this.globalAgentRedact(fragmentsText(answer.fragments)) : null } };
     });
   }

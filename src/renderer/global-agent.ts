@@ -153,12 +153,15 @@ export function mountGlobalAgent(options: {
       if (prepared.sources.length === 0) disclosure.append(el('p', '本次没有选用记忆版本。'));
       for (const entry of prepared.sources) {
         const row = el('div'); row.append(el('p', `${entry.title} · ${entry.revisionId}`), el('p', entry.text));
-        if (input.kind === 'ask') {
+        {
           const remove = el('button', '本次移除'); remove.type = 'button';
           remove.addEventListener('click', () => {
-            selectedSources.delete(entry.itemId);
-            for (const checkbox of sourceRows.querySelectorAll<HTMLInputElement>('input')) if (checkbox.dataset['sourceItem'] === entry.itemId) checkbox.checked = false;
-            void preview(askInput());
+            if (input.kind === 'ask') {
+              selectedSources.delete(entry.itemId);
+              for (const checkbox of sourceRows.querySelectorAll<HTMLInputElement>('input')) if (checkbox.dataset['sourceItem'] === entry.itemId) checkbox.checked = false;
+              void preview(askInput());
+            } else void preview({ ...input, sources: prepared.sources.filter((source) => source.itemId !== entry.itemId)
+              .map(({ itemId, revisionId }) => ({ itemId, revisionId })) });
           }); row.append(remove);
         }
         disclosure.append(row);
@@ -169,8 +172,8 @@ export function mountGlobalAgent(options: {
         if (sending || generation !== previewGeneration) return;
         sending = true; send.disabled = true;
         const action = input.kind === 'ask' ? options.api.askGlobalAgent({ question: input.question, sources: input.sources, disclosureSha256: prepared.sha256 })
-          : input.kind === 'continue' ? options.api.continueGlobalAgentAnswer({ dialogueId: input.dialogueId, attemptId: input.attemptId, disclosureSha256: prepared.sha256 })
-            : options.api.regenerateGlobalAgentAnswer({ dialogueId: input.dialogueId, attemptId: input.attemptId, disclosureSha256: prepared.sha256 });
+          : input.kind === 'continue' ? options.api.continueGlobalAgentAnswer({ dialogueId: input.dialogueId, attemptId: input.attemptId, sources: prepared.sources.map(({ itemId, revisionId }) => ({ itemId, revisionId })), disclosureSha256: prepared.sha256 })
+            : options.api.regenerateGlobalAgentAnswer({ dialogueId: input.dialogueId, attemptId: input.attemptId, sources: prepared.sources.map(({ itemId, revisionId }) => ({ itemId, revisionId })), disclosureSha256: prepared.sha256 });
         void action.then(async (dialogue) => {
           foreground = dialogue.dialogueId; invalidatePreview(); selectedSources.clear();
           for (const checkbox of sourceRows.querySelectorAll<HTMLInputElement>('input')) checkbox.checked = false;

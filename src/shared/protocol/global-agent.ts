@@ -77,7 +77,7 @@ export interface GlobalAgentSourceCandidate extends GlobalMemoryPin {
 }
 export type PrepareGlobalAgentTurnInput =
   | { readonly kind: 'ask'; readonly question: string; readonly sources: ReadonlyArray<GlobalMemoryPin> }
-  | { readonly kind: 'continue' | 'regenerate'; readonly dialogueId: string; readonly attemptId: string };
+  | { readonly kind: 'continue' | 'regenerate'; readonly dialogueId: string; readonly attemptId: string; readonly sources?: ReadonlyArray<GlobalMemoryPin> };
 export interface GlobalAgentDisclosure {
   readonly question: string;
   readonly sources: ReadonlyArray<GlobalAgentSourceCandidate>;
@@ -85,7 +85,7 @@ export interface GlobalAgentDisclosure {
   readonly provider: { readonly route: string; readonly model: string; readonly policyRuleId: string };
   readonly sha256: string;
 }
-export interface GlobalAgentAttemptInput { readonly dialogueId: string; readonly attemptId: string; readonly disclosureSha256?: string }
+export interface GlobalAgentAttemptInput { readonly dialogueId: string; readonly attemptId: string; readonly disclosureSha256?: string; readonly sources?: ReadonlyArray<GlobalMemoryPin> }
 export interface GlobalAgentOperations {
   prepareGlobalAgentTurn: { input: PrepareGlobalAgentTurnInput; output: GlobalAgentDisclosure };
   inspectGlobalAgentDialogue: { input: { dialogueId: string }; output: GlobalAgentDialogueProjection };
