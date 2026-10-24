@@ -3030,7 +3030,9 @@ async function main() {
     // #1084: this v2 fixture first returns an invalid envelope, then valid siblings and one invalid finding.
     // The declared retry closes the unit; its rejected finding is readable and never becomes a mark.
     requireJourney(reviewed.run.excluded.some((entry) => entry.reasonCode === 'contract-schema-invalid') &&
-      reviewed.run.findings.every((entry) => entry.quote !== '合成的无效发现'), 'review-v2-rejected-sibling');
+      reviewed.run.findings.every((entry) => entry.quote !== '合成的无效发现') &&
+      reviewed.run.findings.some((entry) => entry.categoryId === 'typos-and-usage' && entry.blockPosition !== null && entry.blockPosition <= SAMPLE1_UNIT_RANGES[0][1]),
+    'review-v2-rejected-sibling');
     await assertRenderer(renderer, `(() => { const details=document.querySelector('details.review-excluded'); if(!(details instanceof HTMLDetailsElement))return false; details.open=true; return details.querySelector('summary')?.textContent==='未列为发现的 4 条' && details.textContent.includes('contract-schema-invalid') && details.textContent.includes('合成的无效发现'); })()`, 'review-v2-visible-excluded');
     await assertRenderer(renderer, `document.querySelectorAll('ol.review-progress > li[data-category-state="settled"]').length===3 && document.querySelectorAll('section.review-group[data-review-category]').length>=2`, 'review-groups');
     // The drawer beside ②B read the plan again as the Run moved; it now states the Run's end.

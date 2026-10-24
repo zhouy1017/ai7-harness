@@ -1158,6 +1158,10 @@ async function main() {
       blockedBoundary?.launchPolicy?.providerProcessing?.version === 'v1' && blockedBoundary?.launchPolicy?.providerProcessing?.decision === 'deny' &&
       blockedBoundary?.launchPolicy?.providerProcessing?.authorizedLiveTransmissionCount === 0 &&
       blockedBoundary?.launchPolicy?.providerProcessing?.liveTransmissionAllowed === false &&
+      blockedBoundary.launchPolicy.providerProcessing.admittedRules?.length === 0 &&
+      blockedBoundary.launchPolicy.providerProcessing.execution === undefined &&
+      blockedBoundary.launchPolicy.providerProcessing.transport === undefined &&
+      blockedBoundary.launchPolicy.providerProcessing.research === undefined &&
       blockedBoundary?.requiresNewPlanEnvelope === true && blockedBoundary?.requiresRenewedRunAuthorization === true &&
       JSON.stringify(blockedBoundary?.reasons) === JSON.stringify([
         '现有 Run 权限仅为 record-only-no-dispatch，不能派发。',

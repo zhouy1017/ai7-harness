@@ -127,7 +127,7 @@ import type { PublicSampleBookSourceDigest } from './public-samplebooks.js';
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 165 as const;
+export const SERVICE_PROTOCOL_VERSION = 166 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 export interface BookFindingProjection {
@@ -2608,6 +2608,8 @@ export function parseTrustedLaunchForm(raw: RawTrustedLaunchForm): TrustedLaunch
  * research.
  */
 export type OutboundDataCategoryId =
+  | 'editor-task-instruction'
+  | 'house-review-guideline-clause'
   | 'public-or-synthetic'
   | 'editor-selected-manuscript-excerpt'
   | 'editor-authored-evaluation-text'
@@ -2631,6 +2633,21 @@ export type OutboundDataCategoryId =
  * it permits. Eligibility only — a rule authorizes no Run, dispatch or Apply on its own.
  */
 export interface AdmittedProviderRule {
+  readonly taskKindOverrides?: Readonly<Record<string, { readonly webSearch: boolean }>>;
+  readonly editorTaskInstruction?: {
+    readonly category: 'editor-task-instruction';
+    readonly maxGraphemes: number;
+    readonly attributedToProcedureVersion: true;
+    readonly personNamesAllowed: false;
+    readonly contractFramingOverrideAllowed: false;
+  };
+  readonly houseReviewGuidelineClause?: {
+    readonly category: 'house-review-guideline-clause';
+    readonly maxClauses: number;
+    readonly maxGraphemesPerClause: number;
+    readonly attributedToImportedDocumentVersion: true;
+    readonly personNamesAllowed: false;
+  };
   readonly plusDeclaredContractRetryAdaptations?: boolean;
   /** `true` on the v22/v23 review rule alone (`source.seriesKnowledgeAllowed`); absent on every other rule and policy, which refuses Series knowledge. */
   readonly seriesKnowledgeAllowed?: boolean;
@@ -2644,8 +2661,8 @@ export interface AdmittedProviderRule {
   readonly outboundDataCategories: readonly OutboundDataCategoryId[];
   /**
    * Whether the rule names the kind's one book-level synthesis turn (全书综合 / 综合) as a transmission (Provider Processing
-   * v11). `true` only for writing and the three evaluation contracts; `false` for every rule that does not name the turn,
-   * including the v10 rules, which name their own reduction and reflection steps instead.
+   * v11). Writing and evaluation name it; v26 also declares review eligibility. Review's bounded synthesis consumer
+   * arrives with F-19b and its successor transmission bound. A rule that does not name the turn carries `false`.
    */
   readonly crossUnitSynthesisAllowed: boolean;
   /**
@@ -2739,6 +2756,9 @@ export interface AdmittedSearchBackend {
  * citation needs an Exact Fetch of the pinned revision. Executing the tool belongs to the retrieval slice.
  */
 export interface AdmittedLocalTools {
+  /** Eligibility only; registration belongs to the consuming composition. */
+  readonly declarations?: ReadonlyArray<{ readonly name: string; readonly readOnly: true; readonly concurrencySafe: true }>;
+  readonly parallelCallsAllowed?: boolean;
   readonly targetedRetrieval: {
     /** `false` exactly for enrolled background analysis and material translation: neither may initiate retrieval. */
     readonly allowed: boolean;
@@ -2763,6 +2783,17 @@ export interface LaunchPolicyProjection {
   operationalScope: TrustedOperationalScope | null;
   activePolicySetVersion: ActivePolicySetVersion | null;
   providerProcessing: {
+    /** Configurable defaults, not immutable numeric execution caps (ADR 0095 §2). */
+    readonly execution?: {
+      readonly maxInFlightRequests: { readonly configurable: true; readonly default: number };
+      readonly perRunUnitParallelism: { readonly configurable: true; readonly default: number };
+      readonly backgroundShare: { readonly configurable: true; readonly default: number };
+    };
+    readonly transport?: {
+      readonly requestDeadlineSeconds: number;
+      readonly rateLimitRetry: { readonly honourRetryAfter: boolean; readonly maxRetries: number };
+    };
+    readonly research?: { readonly searchesPerClaim: number };
     version: ProviderProcessingVersion | null;
     decision: 'deny' | 'eligible-only';
     /** `0` under development-ci; the verbatim token `bounded-by-run` under developer-live. */
