@@ -25,6 +25,7 @@ import { DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, type ExportFidelityRowProjection } f
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx, sourceSpanText, type SourceSpan } from '../support/composed-fixture.js';
 import { buildSyntheticDocx } from '../support/synthetic-docx.js';
 import { planWordManuscriptExport, requireWordExportBinding } from '../../src/service/manuscript-export.js';
+import { buildCorpusSource } from '../fixtures/docx-fidelity/builder.js';
 
 // DOCX export (Issue #413, plan slice S64) over composed documents: every word of every input is a span of exact
 // `sample1`, and every mark body and author is a neutral authored phrase. Each written file is read back with the
@@ -189,6 +190,41 @@ describe('Word graph mapped export (#1132)', () => {
       expect((xml.match(/<w:tc>/gu) ?? []).length).toBe(2);
       if (mode === 'accepted-baseline') expect(xml).not.toContain('removed');
     }
+  });
+
+  it('discloses formatting lost from every paragraph participating in a regenerated join', () => {
+    const input = makeInput('<w:p><w:pPr><w:rPr><w:del w:id="1"/></w:rPr></w:pPr><w:r><w:t>A</w:t></w:r></w:p>' +
+      '<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>B</w:t></w:r></w:p>', 'accepted-baseline');
+    const output = renderDocxExport(input, { emit: true });
+    expect(strFromU8(unzipSync(output.bytes!)['word/document.xml']!)).not.toContain('<w:b/>');
+    expect(output.fidelity.find((row) => row.key === 'inline-styles')!.status).toBe('degraded');
+  });
+
+  it('measures retained note movement against the selected accepted reading', async () => {
+    const parts = unzipSync(await buildCorpusSource('synthetic'));
+    const originalXml = strFromU8(parts['word/document.xml']!);
+    const afterNotes = '<w:endnoteReference w:id="1"/></w:r>';
+    expect(originalXml).toContain(afterNotes);
+    parts['word/document.xml'] = strToU8(originalXml.replace(afterNotes, afterNotes +
+      '<w:ins w:id="99" w:author="A"><w:r><w:t>tail</w:t></w:r></w:ins>'));
+    const original = zipSync(parts, { level: 6, mtime: fixedArchiveTime() });
+    const compiled = compileWordTrackedDocxBytes(original);
+    if (compiled.kind !== 'ready') throw new Error('expected supported retained-note source');
+    const input: DocxExportInput = { title: 'technical note positions', blocks: compiled.readings.accepted.blocks, marks: [],
+      options: DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, source: wordMappedDocxSource(original, compiled, 'accepted-baseline') };
+    const output = renderDocxExport(input, { emit: true });
+    expect(output.fidelity.find((row) => row.key === 'notes')!.status).toBe('degraded');
+    expect(output.fidelity.find((row) => row.key === 'file-revisions')!.count).toBeGreaterThan(0);
+  });
+
+  it.each(['suggestions', 'accepted-baseline'] as const)('keeps foreign revision lookalike text when another paragraph activates Word intake (%s)', async (mode) => {
+    const body = '<w:p><x:ins xmlns:x="urn:foreign"><w:r><w:t>plain</w:t></w:r></x:ins></w:p>' +
+      '<w:p><w:r><w:t>base</w:t></w:r><w:ins w:id="1"><w:r><w:t>new</w:t></w:r></w:ins></w:p>';
+    const input = makeInput(body, mode);
+    const output = renderDocxExport(input, { emit: true });
+    const reread = await parseBytes(output.bytes!);
+    expect(reread.blocks.map((block) => block.text)).toEqual(input.blocks.map((block) => block.text));
+    expect(reread.parsed.importedMarks).toEqual([]);
   });
 });
 

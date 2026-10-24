@@ -190,6 +190,18 @@ describe('successor exact source correspondence (#1132)', () => {
     expect(compiled.readings.accepted.marks).toEqual([]);
     expect(compiled.previewReading).toBe('accepted');
   });
+
+  it('keeps a hidden nested event non-visible when its shared hunk also contains a visible sibling', () => {
+    const compiled = compileWordTrackedDocxBytes(buildSyntheticTrackedDocx('<w:p><w:r><w:t>base</w:t></w:r><w:ins w:id="1" w:author="A">' +
+      '<w:del w:id="2" w:author="B"><w:r><w:delText>hidden</w:delText></w:r></w:del>' +
+      '<w:r><w:t>visible</w:t></w:r></w:ins></w:p>'));
+    if (compiled.kind !== 'ready') throw new Error('expected supported mixed nested graph');
+    expect(compiled.templates).toHaveLength(1);
+    expect(compiled.templates[0]!.eventMembership).toEqual(compiled.graph.events.map((event) => event.eventId));
+    expect(compiled.graph.events.map((event) => event.disposition)).toEqual(['visible-transition', 'no-visible-transition']);
+    expect(compiled.graph.atoms.find((atom) => compiled.decodedAtoms.get(atom.atomOrdinal) === 'hidden')).toMatchObject({ accepted: false, rejected: false });
+    expect(compiled.readings.rejected.marks[0]!.mark.authorLabel).toBe('A');
+  });
 });
 
 beforeEach(async () => {

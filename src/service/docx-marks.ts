@@ -782,7 +782,8 @@ export function wordSampleTemplates(graph: WordRevisionGraph, decoded: ReadonlyM
     const b = right.sourceLocation ?? right.destinationLocation!;
     return a.atomOrdinal - b.atomOrdinal || left.templateKey.localeCompare(right.templateKey);
   });
-  const visibleEvents = new Set(templates.flatMap((template) => template.eventMembership));
+  const visibleEvents = new Set(graph.atoms.filter((atom) => atom.rejected !== atom.accepted &&
+    (atom.kind === 'paragraph-boundary' || atom.codeUnits > 0)).flatMap((atom) => atom.eventMembership));
   for (const event of graph.events) {
     if (event.context === 'run' || event.context === 'paragraph-boundary') {
       event.disposition = visibleEvents.has(event.eventId) ? 'visible-transition' : 'no-visible-transition';
@@ -1176,7 +1177,8 @@ function wordRevisionMarks(graph: WordRevisionGraph, blocks: readonly WordReadin
   for (const template of templates) {
     signal?.throwIfAborted();
     const location = template.sourceLocation ?? template.destinationLocation!;
-    const rawAuthors = template.eventMembership.map((id) => events.get(id)!).filter((event) => event.context === 'run' || event.context === 'paragraph-boundary');
+    const rawAuthors = template.eventMembership.map((id) => events.get(id)!).filter((event) => event.disposition === 'visible-transition' &&
+      (event.context === 'run' || event.context === 'paragraph-boundary'));
     const authors = [...new Set(rawAuthors.map((event) => authorLabel(event.rawAuthor ?? undefined)))];
     const label = truncateToFit(authors.join(' / ') || UNNAMED_AUTHOR_LABEL, MAX_AUTHOR_LABEL_CODE_UNITS, '');
     const block = byParagraph.get(location.paragraphIndex);

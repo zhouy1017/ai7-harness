@@ -274,7 +274,7 @@ interface ParagraphRetention {
 const NO_RETENTION: ParagraphRetention = { runs: [], anchors: '', text: '', moved: { images: 0, textBoxes: 0, notes: 0 } };
 
 /** Non-text content stays attached to its source paragraph even when that paragraph's text changes. */
-function paragraphRetention(paragraph: XmlElement): ParagraphRetention {
+function paragraphRetention(paragraph: XmlElement, selectedWord = false): ParagraphRetention {
   const runs: RetainedRun[] = [];
   let offset = 0;
   let anchors = '';
@@ -304,10 +304,10 @@ function paragraphRetention(paragraph: XmlElement): ParagraphRetention {
         const length = graphemesOf(words).length;
         if (length > 0) runs.push({ from: offset, to: offset + length, properties });
         offset += length;
-      } else walk(readableChildren(node), properties, attributes);
+      } else walk(selectedWord ? node.children : readableChildren(node), properties, attributes);
     }
   };
-  walk(stripped(paragraph).children, '', []);
+  walk(selectedWord ? paragraph.children : stripped(paragraph).children, '', []);
   // An anchor written at the paragraph's end has moved only when some of the paragraph's text stood after it.
   const moved: MovedAnchors = { images: 0, textBoxes: 0, notes: 0 };
   for (const { at, counts } of placed) {
@@ -574,7 +574,7 @@ function readableChildren(element: XmlElement): XmlNode[] {
   return choice === undefined ? [] : [choice];
 }
 
-function* readableElements(nodes: ReadonlyArray<XmlNode>): Generator<{ element: XmlElement; ancestors: ReadonlyArray<XmlElement> }> {
+function* readableElements(nodes: ReadonlyArray<XmlNode>, selectedWord = false): Generator<{ element: XmlElement; ancestors: ReadonlyArray<XmlElement> }> {
   const stack: Array<{ nodes: ReadonlyArray<XmlNode>; index: number; owner: XmlElement | null }> = [{ nodes, index: 0, owner: null }];
   const ancestors: XmlElement[] = [];
   while (stack.length > 0) {
@@ -588,7 +588,7 @@ function* readableElements(nodes: ReadonlyArray<XmlNode>): Generator<{ element: 
     if (!isElement(node)) continue;
     yield { element: node, ancestors };
     ancestors.push(node);
-    stack.push({ nodes: readableChildren(node), index: 0, owner: node });
+    stack.push({ nodes: selectedWord ? node.children : readableChildren(node), index: 0, owner: node });
   }
 }
 
@@ -629,7 +629,7 @@ function styled(properties: XmlElement): boolean {
  * inline style. Revision and comment markup inside a text box, and every formatting revision, count as the
  * file's own revisions that did not become marks.
  */
-function countClasses(nodes: ReadonlyArray<XmlNode>): ClassCounts {
+function countClasses(nodes: ReadonlyArray<XmlNode>, selectedWord = false): ClassCounts {
   const counts = emptyCounts();
   let instruction: string | undefined;
   const settle = (): void => {
@@ -639,7 +639,8 @@ function countClasses(nodes: ReadonlyArray<XmlNode>): ClassCounts {
     else counts.fields += 1;
     instruction = undefined;
   };
-  for (const { element, ancestors } of readableElements(nodes)) {
+  for (const { element, ancestors } of readableElements(nodes, selectedWord)) {
+    if (selectedWord && !isWordElement(element)) continue;
     const parent = ancestors.at(-1);
     const inTextBox = ancestors.some((ancestor) => ancestor.local === 'txbxContent');
     const inChange = ancestors.some((ancestor) => FORMATTING_REVISIONS.has(ancestor.local));
@@ -1471,12 +1472,16 @@ function usedIdentities(documentXml: string): { nextId: number; paraIds: Set<str
 }
 
 /** The properties a regenerated paragraph keeps, and its first run's, stripped of revision markup. */
-function sourceProperties(paragraph: XmlElement): { paragraph: string; run: string } {
-  const pPr = paragraph.children.find((child): child is XmlElement => isElement(child) && child.local === 'pPr');
+function sourceProperties(paragraph: XmlElement, selectedWord = false): { paragraph: string; run: string } {
+  const pPr = paragraph.children.find((child): child is XmlElement => isElement(child) && child.local === 'pPr' && (!selectedWord || isWordElement(child)));
   let runProperties: XmlElement | undefined;
   const walk = (nodes: ReadonlyArray<XmlNode>, deleted: boolean): boolean => {
     for (const node of nodes) {
       if (!isElement(node)) continue;
+      if (selectedWord && !isWordElement(node)) {
+        if (walk(node.children, deleted)) return true;
+        continue;
+      }
       if (node.local === 'ins' || node.local === 'moveTo' || node.local === 'txbxContent' || node.local === 'pPr' ||
           FORMATTING_REVISIONS.has(node.local)) continue;
       if (node.local === 'r') {
@@ -1488,14 +1493,14 @@ function sourceProperties(paragraph: XmlElement): { paragraph: string; run: stri
         }
         continue;
       }
-      if (walk(readableChildren(node), deleted || node.local === 'del' || node.local === 'moveFrom')) return true;
+      if (walk(selectedWord ? node.children : readableChildren(node), deleted || node.local === 'del' || node.local === 'moveFrom')) return true;
     }
     return false;
   };
   walk(paragraph.children, false);
   return {
-    paragraph: pPr === undefined ? '' : serialize([stripped(pPr)]),
-    run: runProperties === undefined ? '' : serialize([stripped(runProperties)]),
+    paragraph: pPr === undefined ? '' : serialize([selectedWord ? pPr : stripped(pPr)]),
+    run: runProperties === undefined ? '' : serialize([selectedWord ? runProperties : stripped(runProperties)]),
   };
 }
 
@@ -1746,6 +1751,32 @@ function rewriteDocument(
  * emitted block belongs to the selected reading (or its edited descendant), and every pin is replayed
  * through the actual compiler before any bytes are written.
  */
+function isWordElement(element: Pick<XmlElement, 'uri'>): boolean {
+  return element.uri === WORD_MAIN || element.uri === 'http://purl.oclc.org/ooxml/wordprocessingml/main';
+}
+
+/** Build the selected run view before measuring retained anchors or choosing a source run's properties. */
+function selectedWordParagraph(paragraph: XmlElement, reading: WordReadingKind): XmlElement {
+  const children = (nodes: readonly XmlNode[], inProperties: boolean): XmlNode[] => nodes.flatMap((node): XmlNode[] => {
+    if (!isElement(node)) return [node];
+    const word = isWordElement(node);
+    if (word && (COMMENT_MARKERS.has(node.local) || FORMATTING_REVISIONS.has(node.local) || REVISION_MARKERS.has(node.local))) return [];
+    if (word && ['ins', 'del', 'moveFrom', 'moveTo'].includes(node.local)) {
+      if (inProperties) return [];
+      const accepted = node.local === 'ins' || node.local === 'moveTo';
+      return accepted === (reading === 'accepted') ? children(node.children, false) : [];
+    }
+    let source = node.children;
+    if (node.uri === 'http://schemas.openxmlformats.org/markup-compatibility/2006' && node.local === 'AlternateContent') {
+      const choice = node.children.find((child): child is XmlElement => isElement(child) && child.uri === node.uri && child.local === 'Choice');
+      source = choice === undefined ? [] : [choice];
+    }
+    const projected = { ...node, children: children(source, inProperties || (word && PROPERTY_PARENTS.has(node.local))) };
+    return [word && node.local === 'delText' ? renamed(projected, 't') : word && node.local === 'delInstrText' ? renamed(projected, 'instrText') : projected];
+  });
+  return { ...paragraph, children: children(paragraph.children, false) };
+}
+
 function rewriteWordDocument(documentXml: string, input: DocxExportInput, source: WordMappedDocxSource, plan: MarkPlan,
   facts: ReviewFacts, makeWriter: (prefix: string) => MarkupWriter): MappedWalk & { writer: MarkupWriter; mainUri: string; sideStoryParts: string[] } {
   const compiled = compileWordTrackedDocxBytes(source.original, { textBoxDisposition: source.textBoxes });
@@ -1797,18 +1828,18 @@ function rewriteWordDocument(documentXml: string, input: DocxExportInput, source
     const tally = facts.tallies[key]; tally.total += total; tally.lost += lost;
     if (lost > 0 && position !== null) tally.positions.push(position);
   };
-  const countParagraph = (paragraph: XmlElement, regenerated: boolean, position: number | null, retained: ParagraphRetention): void => {
-    const counts = countClasses(paragraph.children);
+  const countParagraph = (paragraph: XmlElement, regenerated: boolean, position: number | null, retained: ParagraphRetention, original: XmlElement): void => {
+    const counts = countClasses(paragraph.children, true);
     note('inline-styles', counts.inlineStyles, regenerated ? counts.inlineStyles : 0, position);
     note('notes', counts.notes, regenerated ? retained.moved.notes : 0, position);
     note('images-captions', counts.images, regenerated ? retained.moved.images : 0, position);
     note('sections', counts.sections, 0, null);
     note('fields', counts.fields, regenerated ? counts.fields : 0, position);
     note('text-boxes', counts.textBoxes, regenerated ? retained.moved.textBoxes : 0, position);
-    note('file-revisions', counts.fileRevisions, 0, null);
+    note('file-revisions', countClasses(original.children, true).fileRevisions, 0, null);
   };
   const regenerate = (block: DocxExportBlock, paragraph: XmlElement | null, retain: ParagraphRetention): RawXml => {
-    const properties = paragraph === null ? { paragraph: freshParagraphProperties(block, writer), run: '' } : sourceProperties(paragraph);
+    const properties = paragraph === null ? { paragraph: freshParagraphProperties(block, writer), run: '' } : sourceProperties(paragraph, true);
     const name = paragraph?.name ?? writer.w('p');
     emitted.add(block.blockId); regeneratedBlocks += 1;
     const bookmarks = paragraph === null ? { starts: '', ends: '' } : paragraphBookmarks(paragraph);
@@ -1826,22 +1857,26 @@ function rewriteWordDocument(documentXml: string, input: DocxExportInput, source
   const paragraph = (element: XmlElement): XmlNode[] => {
     const owner = owners.get(element.paragraphIndex);
     const block = owner === undefined ? undefined : current.get(owner.blockId);
-    const retained = paragraphRetention(element);
+    const projected = selectedWordParagraph(element, binding.reading);
+    const retained = paragraphRetention(projected, true);
     if (owner === undefined || block === undefined || owner.sourceParagraphIndices[0] !== element.paragraphIndex) {
-      countParagraph(element, false, null, retained);
+      const joined = owner !== undefined && block !== undefined;
+      countParagraph(projected, joined, joined ? block.position : null, retained, element);
       // Preserve non-text anchors and section properties, while dropping every unmatched original word.
-      const properties = element.children.filter((child): child is XmlElement => isElement(child) && child.local === 'pPr');
+      const properties = projected.children.filter((child): child is XmlElement => isElement(child) && child.local === 'pPr' && isWordElement(child));
       const keep = retained.anchors.length > 0 || properties.some((property) => contains(property, 'sectPr'));
-      return keep ? [{ ...element, children: [...properties.map((property) => stripped(property)), ...(retained.anchors ? [{ raw: retained.anchors }] : [])] }] : [];
+      return keep ? [{ ...projected, children: [...properties, ...(retained.anchors ? [{ raw: retained.anchors }] : [])] }] : [];
     }
     const lead = flushPending(block.position);
     const single = owner.sourceParagraphIndices.length === 1;
-    const unchanged = single && block.digest === owner.digest && !revisedParagraphs.has(element.paragraphIndex) &&
+    const foreignLookalike = [...readableElements(projected.children, true)].some(({ element }) => !isWordElement(element) &&
+      (['ins', 'del', 'moveFrom', 'moveTo', 'AlternateContent'].includes(element.local) || COMMENT_MARKERS.has(element.local) || FORMATTING_REVISIONS.has(element.local)));
+    const unchanged = single && block.digest === owner.digest && !revisedParagraphs.has(element.paragraphIndex) && !foreignLookalike &&
       blockComments(plan, block).length === 0 && blockSuggestions(plan, block).length === 0;
-    countParagraph(element, !unchanged, block.position, retained);
-    if (unchanged) { emitted.add(block.blockId); restoredBlocks += 1; return [...lead, stripped(element)]; }
+    countParagraph(projected, !unchanged, block.position, retained, element);
+    if (unchanged) { emitted.add(block.blockId); restoredBlocks += 1; return [...lead, projected]; }
     // A join uses the projected block's properties, rather than choosing one source paragraph's style.
-    return [...lead, regenerate(block, single ? element : null, single ? retained : NO_RETENTION)];
+    return [...lead, regenerate(block, single ? projected : null, single ? retained : NO_RETENTION)];
   };
   const transform = (element: XmlElement): XmlNode[] => {
     if (element.uri === mainUri && element.local === 'p' && graphParagraphs.has(element.paragraphIndex)) {

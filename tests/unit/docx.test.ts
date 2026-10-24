@@ -223,6 +223,25 @@ describe('explicit tracked Word successor compiler (#1132)', () => {
     expect(math.kind).toBe('unsupported');
     expect(math.inventory.locations[0]!.code).toBe('custom-xml-or-math-revision');
   });
+
+  it.each(['footnoteReference', 'endnoteReference'])('refuses joins across retained %s and splits adjacent edit hunks at that payload', async (reference) => {
+    const note = `<w:r><w:${reference} w:id="1"/></w:r>`;
+    const joined = (await compileTrackedBody('<w:p><w:pPr><w:rPr><w:del w:id="1"/></w:rPr></w:pPr>' +
+      `<w:r><w:t>A</w:t></w:r>${note}</w:p><w:p><w:r><w:t>B</w:t></w:r></w:p>`)).compiled;
+    expect(joined.kind).toBe('unsupported');
+    expect(joined.inventory.locations.some((location) => location.code === 'incompatible-paragraph-join')).toBe(true);
+    const split = (await compileTrackedBody('<w:p><w:r><w:t>base</w:t></w:r><w:del w:id="1"><w:r><w:delText>old</w:delText></w:r></w:del>' +
+      `${note}<w:ins w:id="2"><w:r><w:t>new</w:t></w:r></w:ins></w:p>`)).compiled;
+    if (split.kind !== 'ready') throw new Error('expected supported note-separated text edits');
+    expect(split.templates.map((template) => template.operationKind)).toEqual(['delete', 'insert']);
+  });
+
+  it('refuses textual revisions inherited by a text box from an outer run revision', async () => {
+    const compiled = (await compileTrackedBody('<w:p><w:r><w:t>base</w:t></w:r><w:ins w:id="1">' +
+      '<w:r><w:drawing><w:txbxContent><w:p><w:r><w:t>box</w:t></w:r></w:p></w:txbxContent></w:drawing></w:r></w:ins></w:p>')).compiled;
+    expect(compiled.kind).toBe('unsupported');
+    expect(compiled.inventory.locations.some((location) => location.code === 'story-or-text-box-revision')).toBe(true);
+  });
 });
 
 beforeEach(async () => {

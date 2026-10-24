@@ -1679,6 +1679,9 @@ function createWordPartParser(part: string, inventory: WordInventoryDraft,
   const addAtom = (kind: RawWordAtom['kind'], text: string, ordinal: number, membership: number[]): void => {
     const paragraph = activeParagraph();
     if (paragraph === undefined) return;
+    if (paragraph.sourcePart === 'text-box' && kind === 'text' && text.length > 0 && membership.length > 0) {
+      refuse('story-or-text-box-revision', ordinal, paragraph.paragraphIndex);
+    }
     signal?.throwIfAborted();
     const atomOrdinal = atoms.length;
     const rejected = !membership.some((index) => events[index]!.kind === 'ins' || events[index]!.kind === 'moveTo');
@@ -1736,12 +1739,13 @@ function createWordPartParser(part: string, inventory: WordInventoryDraft,
         atomOrdinals: [], boundaryAtomOrdinal: -1, nonTextBoundary: false, sectionBoundary: false };
       paragraphs.push(frame.paragraph);
     }
-    if (word && tag.local === 'pStyle' && parent?.local === 'pPr' && !ancestors('pPrChange')) {
+    if (word && tag.local === 'pStyle' && parent !== undefined && isWord(parent) && parent.local === 'pPr' && !ancestors('pPrChange')) {
       const paragraph = activeParagraph();
       if (paragraph !== undefined) Object.assign(paragraph, blockShape(wordAttribute(tag, 'val') ?? undefined));
     }
-    const boundaryRevision = word && WORD_RUN_EVENTS.has(tag.local as WordEventKind) && parent?.local === 'rPr' &&
-      frames.at(-2)?.local === 'pPr' && !ancestors('pPrChange');
+    const grandparent = frames.at(-2);
+    const boundaryRevision = word && WORD_RUN_EVENTS.has(tag.local as WordEventKind) && parent !== undefined && isWord(parent) && parent.local === 'rPr' &&
+      grandparent !== undefined && isWord(grandparent) && grandparent.local === 'pPr' && !ancestors('pPrChange');
     const tableRevision = word && (['cellIns', 'cellDel', 'cellMerge'].includes(tag.local) ||
       (WORD_RUN_EVENTS.has(tag.local as WordEventKind) && (ancestors('trPr') || ancestors('tcPr'))));
     const customRevision = word && (/^customXml(?:Ins|Del|MoveFrom|MoveTo)Range(?:Start|End)$/u.test(tag.local) ||
@@ -1803,7 +1807,7 @@ function createWordPartParser(part: string, inventory: WordInventoryDraft,
         }
       }
     }
-    if (word && ['drawing', 'pict', 'object', 'fldChar', 'sectPr', 'tbl'].includes(tag.local)) {
+    if (word && ['drawing', 'pict', 'object', 'fldChar', 'footnoteReference', 'endnoteReference', 'sectPr', 'tbl'].includes(tag.local)) {
       payloadBoundary = true;
       const paragraph = activeParagraph() ?? paragraphs.at(-1);
       if (paragraph !== undefined) {
