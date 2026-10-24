@@ -59,7 +59,8 @@ export function validateHouseWordListDocument(value: unknown): asserts value is 
   const previous = value.previous;
   requireRecord(value.ordinal === 1 ? previous === null : isRecord(previous) && hasExactKeys(previous, ['versionId', 'digest']) &&
     typeof previous.versionId === 'string' && UUID_PATTERN.test(previous.versionId) && previous.versionId !== value.versionId && typeof previous.digest === 'string' && DIGEST_PATTERN.test(previous.digest));
-  validateHouseEntries(value.entries, true);
+  try { validateHouseEntries(value.entries, true); }
+  catch (error) { if (!(error instanceof HouseWordListError)) throw error; requireRecord(false); }
   requireRecord(houseUtf8Bytes(canonicalJson(value)) <= MAX_HOUSE_BYTES);
 }
 export function houseWordListPin(document: HouseWordListDocument): HouseWordListPin {
@@ -151,10 +152,12 @@ export class HouseWordLists {
       const document: HouseWordListDocument = { schema: HOUSE_WORD_LIST_SCHEMA, listId: current?.listId ?? randomUUID(), versionId: randomUUID(),
         ordinal: (current?.ordinal ?? 0) + 1, previous: expected, createdAt: new Date().toISOString(), source: { kind: input.sourceKind },
         entries: input.entries.map((entry) => ({ ...entry, entryId: entry.entryId ?? randomUUID() })) };
+      const json = canonicalJson(document);
+      houseRequire(houseUtf8Bytes(json) <= MAX_HOUSE_BYTES, 'HOUSE_DOCUMENT_TOO_LARGE', '词表内容须在128KiB以内。');
       validateHouseWordListDocument(document);
       const pin = houseWordListPin(document);
       this.db.prepare('INSERT INTO house_word_list_versions VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(document.versionId, document.listId, document.ordinal,
-        document.previous?.versionId ?? null, document.previous?.digest ?? null, document.createdAt, canonicalJson(document), pin.digest);
+        document.previous?.versionId ?? null, document.previous?.digest ?? null, document.createdAt, json, pin.digest);
       validateHouseWordListStore(this.db);
       return { pin, ordinal: document.ordinal, created: true };
     });

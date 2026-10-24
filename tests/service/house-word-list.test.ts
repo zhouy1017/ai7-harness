@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 import {
-  HouseWordLists, houseWordListPin, initializeHouseWordListSchema, validateHouseWordListSnapshot, validateHouseWordListStore,
+  HouseWordLists, HOUSE_WORD_LIST_TRIGGER_SQL, initializeHouseWordListSchema, validateHouseWordListSnapshot, validateHouseWordListStore,
 } from '../../src/service/review/house-word-list.js';
 import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
 import { validateSaveHouseWordListInput, type HouseWordListDraftEntry, type HouseWordListPin } from '../../src/shared/protocol/house-word-list.js';
@@ -91,8 +91,10 @@ describe('immutable local House owner on disposable SQLite', () => {
       // This input fits its draft bound, but canonical service-created UUIDs make the full document exceed it.
       const nearLimit = Array.from({ length: 500 }, (_, index) => ({ ...entry(`边界${index}`), note: '注'.repeat(60) }));
       expect(() => validateSaveHouseWordListInput({ expectedCurrent: expected(saved.pin), sourceKind: 'editor-entry', entries: nearLimit })).not.toThrow();
-      expect(() => owner.save({ expectedCurrent: expected(saved.pin), sourceKind: 'editor-entry', entries: nearLimit })).toThrow();
-      expect(owner.inspect().selected?.ordinal).toBe(52);
+      expect(() => owner.save({ expectedCurrent: expected(saved.pin), sourceKind: 'editor-entry', entries: nearLimit })).toThrowError(expect.objectContaining({
+        code: 'HOUSE_DOCUMENT_TOO_LARGE', message: '词表内容须在128KiB以内。',
+      }));
+      expect(owner.inspect().selected?.ordinal).toBe(52); expect(owner.inspect().current).toEqual(saved.pin);
     } finally { db.close(); }
   });
   it('refuses missing immutable triggers and historical row/canonical/chain corruption instead of repairing it', () => {
@@ -117,6 +119,24 @@ describe('immutable local House owner on disposable SQLite', () => {
           db.exec("CREATE TRIGGER house_word_list_versions_no_update BEFORE UPDATE ON house_word_list_versions BEGIN SELECT RAISE(ABORT, 'HOUSE_WORD_LIST_IMMUTABLE'); END");
         }
         expect(() => owner.inspect()).toThrow(); expect(() => initializeHouseWordListSchema(db)).toThrow();
+      } finally { db.close(); }
+    }
+  });
+  it('still classifies oversized or malformed persisted canonical documents as corrupt history', () => {
+    for (const damage of ['oversize', 'entry'] as const) {
+      const { db, owner } = setup();
+      try {
+        const saved = owner.save({ expectedCurrent: null, sourceKind: 'editor-entry', entries: [entry('原版')] });
+        const document = owner.selectCurrent(saved.pin);
+        const damaged = { ...document, entries: damage === 'oversize'
+          ? Array.from({ length: 500 }, (_, index) => ({ ...entry(`边界${index}`), entryId: randomUUID(), note: '注'.repeat(60) }))
+          : [{ ...document.entries[0]!, literal: ' 首尾空白' }] };
+        const json = canonicalJson(damaged);
+        db.exec('DROP TRIGGER house_word_list_versions_no_update');
+        db.prepare('UPDATE house_word_list_versions SET canonical_json = ?, sha256 = ?').run(json, sha256Hex(json));
+        db.exec(HOUSE_WORD_LIST_TRIGGER_SQL.house_word_list_versions_no_update);
+        expect(() => owner.inspect()).toThrowError(expect.objectContaining({ code: 'HOUSE_RECORD_INVALID', message: expect.stringContaining('损坏') }));
+        expect(() => initializeHouseWordListSchema(db)).toThrowError(expect.objectContaining({ code: 'HOUSE_RECORD_INVALID' }));
       } finally { db.close(); }
     }
   });
