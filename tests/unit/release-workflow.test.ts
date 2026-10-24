@@ -21,9 +21,10 @@ const passedJob = (name: string, start: number, end: number) => ({ name, run_id:
   status: 'completed', conclusion: 'success', started_at: time(start), completed_at: time(end),
   steps: ['Require the selected immutable checkout', 'Run every admitted Journey'].map((name) => ({ name, conclusion: 'success' })) });
 const jobs = [passedJob('Resolve final dev once', 0, 1),
-  ...['Windows Server 2025 x64 CI', 'macOS 15 arm64'].map((label) => passedJob(`Full Gate over the final dev / J-01 + admitted set (${label})`, 2, 20)),
-  ...['win-x64', 'mac-arm64'].map((label) => passedJob(`Package final dev (${label})`, 21, 30))];
-const artifacts = ['win32', 'darwin'].map((platform, index) => ({ id: index + 10, name: artifactName(candidate, run, platform),
+  passedJob('Full Gate over the final dev / J-01 + admitted set (Windows Server 2025 x64 CI)', 2, 20),
+  passedJob('Package final dev (win-x64)', 21, 30)];
+// ADR 0097: the queue builds one Windows artifact; no macOS artifact exists to select or verify.
+const artifacts = ['win32'].map((platform, index) => ({ id: index + 10, name: artifactName(candidate, run, platform),
   expired: false, expires_at: '2099-01-01T00:00:00Z', digest: `sha256:${'d'.repeat(64)}`,
   workflow_run: { id: 123, repository_id: 7, head_repository_id: 7, head_branch: 'dev', head_sha: run.head_sha } }));
 const tagObject = 'e'.repeat(40);
@@ -84,7 +85,7 @@ describe('nightly source and artifact admission', () => {
     }
   });
 
-  it('requires both exact final-dev jobs, even when the enclosing queue failed a candidate', () => {
+  it('requires the exact final-dev Windows Gate and package jobs, even when the enclosing queue failed a candidate', () => {
     expect(() => verifyGate(candidate, run, jobs)).not.toThrow();
     const extraCandidate = passedJob('Candidate #9 / J-01 + admitted set (macOS 15 arm64)', 1, 2);
     expect(() => verifyGate(candidate, run, [...jobs, { ...extraCandidate, conclusion: 'failure' }])).not.toThrow();
@@ -95,23 +96,30 @@ describe('nightly source and artifact admission', () => {
     }
     expect(() => verifyGate(candidate, run, jobs.slice(0, -1))).toThrow(/gate/);
     expect(() => verifyGate(candidate, run, [...jobs, jobs[1]])).toThrow(/gate/);
-    for (const status of ['failure', 'skipped', 'cancelled']) {
-      expect(() => verifyGate(candidate, run, jobs.map((job, index) => index === 2 ? { ...job, conclusion: status } : job))).toThrow(/gate/);
+    // ADR 0097: the Windows Gate job (index 1) and the Windows package job (index 2) are each required.
+    for (const at of [1, 2]) {
+      for (const status of ['failure', 'skipped', 'cancelled']) {
+        expect(() => verifyGate(candidate, run, jobs.map((job, index) => index === at ? { ...job, conclusion: status } : job))).toThrow(/gate/);
+      }
     }
+    const windowsCandidate = passedJob('Candidate #9 / J-01 + admitted set (Windows Server 2025 x64 CI)', 2, 20);
+    expect(() => verifyGate(candidate, run, jobs.map((job, index) => index === 1 ? windowsCandidate : job))).toThrow(/gate/);
     expect(() => verifyGate(candidate, run, jobs.map((job, index) => index === 2 ? extraCandidate : job))).toThrow(/gate/);
     expect(() => verifyGate(candidate, run, jobs.map((job, index) => index === 1 ? { ...job, steps: [] } : job))).toThrow(/gate/);
-    expect(() => verifyGate(candidate, run, jobs.map((job, index) => index === 3 ? { ...job, started_at: time(3) } : job))).toThrow(/gate-order/);
+    expect(() => verifyGate(candidate, run, jobs.map((job, index) => index === 1 ? { ...job, started_at: time(0) } : job))).toThrow(/gate-order/);
+    expect(() => verifyGate(candidate, run, jobs.map((job, index) => index === 2 ? { ...job, started_at: time(3) } : job))).toThrow(/gate-order/);
   });
 
-  it('selects exactly two unexpired artifacts from the exact run/attempt, never PR or older-attempt files', () => {
+  it('selects exactly one unexpired Windows artifact from the exact run/attempt, never PR, macOS or older-attempt files', () => {
     expect(selectArtifacts(candidate, run, artifacts)).toEqual(artifacts);
-    expect(() => selectArtifacts(candidate, run, artifacts.slice(0, 1))).toThrow(/artifact-set/);
+    expect(() => selectArtifacts(candidate, run, [])).toThrow(/artifact-set/);
+    expect(() => selectArtifacts(candidate, run, [{ ...artifacts[0], name: artifactName(candidate, run, 'darwin') }])).toThrow(/artifact-set/);
     expect(() => selectArtifacts(candidate, run, [...artifacts, artifacts[0]])).toThrow(/artifact-set/);
     expect(() => selectArtifacts(candidate, { ...run, run_attempt: 3 }, artifacts)).toThrow(/artifact-set/);
     for (const patch of [{ expired: true }, { expires_at: time(0) }, { digest: null },
       { workflow_run: { ...artifacts[0]!.workflow_run, head_sha: candidate.sha } },
       { workflow_run: { ...artifacts[0]!.workflow_run, head_repository_id: 8 } }]) {
-      expect(() => selectArtifacts(candidate, run, [{ ...artifacts[0], ...patch }, artifacts[1]])).toThrow(/artifact-provenance/);
+      expect(() => selectArtifacts(candidate, run, [{ ...artifacts[0], ...patch }])).toThrow(/artifact-provenance/);
     }
   });
 
@@ -284,7 +292,7 @@ describe('explicit packaging and byte verification', () => {
   it('stages complete fresh assets and rejects run/source/input drift, tampering, missing or extra files', async () => withFixture(async (root) => {
     const download = join(root, 'download');
     await mkdir(download);
-    for (const platform of ['win32', 'darwin']) {
+    for (const platform of ['win32']) {
       const source = join(root, platform);
       await mkdir(source);
       await fixture(source, platform);
@@ -294,7 +302,7 @@ describe('explicit packaging and byte verification', () => {
     const source = join(root, 'win32');
     const verify = (selectedRun = workflowRun) => verifyDownloads(source, download, candidate, selectedRun, identityReader);
     const files = await verify();
-    expect(files).toHaveLength(7);
+    expect(files).toHaveLength(4);
     for (const patch of [{ attempt: '1' }, { id: '124' }, { workflowSha: candidate.sha }]) {
       await expect(verify({ ...workflowRun, ...patch })).rejects.toThrow(/provenance/);
     }
@@ -334,7 +342,7 @@ describe('explicit packaging and byte verification', () => {
 
 describe('workflow delivery structure', () => {
   const workflows = new URL('../../.github/workflows/', import.meta.url);
-  it('packages only after the final two-platform Gate using its one resolved SHA', async () => {
+  it('packages Windows only, after the final Windows Gate, using its one resolved SHA', async () => {
     const queue = await readFile(new URL('e2e-nightly-queue.yml', workflows), 'utf8');
     const resolution = queue.split('\n  resolve:')[1]!.split('\n  dev:')[0]!;
     const gate = queue.split('\n  dev:')[1]!.split('\n  package:')[0]!;
@@ -352,6 +360,8 @@ describe('workflow delivery structure', () => {
     expect(packages).not.toMatch(/: write/);
     expect(packages).toContain('overwrite: false');
     expect(packages).toContain('${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.platform }}');
+    expect(packages).not.toContain('mac-arm64'); // ADR 0097
+    expect(packages).not.toContain('macos-15');
   });
 
   it('publishes without a build, provider secret, tag creation, or PR-candidate trigger', async () => {

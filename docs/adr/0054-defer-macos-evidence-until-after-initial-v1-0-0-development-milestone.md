@@ -2,6 +2,8 @@
 status: accepted
 ---
 
+> [ADR 0097](0097-defer-the-macos-platform-indefinitely-and-deliver-windows-only.md) defers the consolidated Windows/macOS re-entry below indefinitely with the macOS platform (2026-10-24); the Windows-only lifecycle is the current release path. The milestone definition, historical disclosures and evidence limits are unchanged.
+
 # Defer macOS evidence until after the initial v1.0.0 development milestone
 
 > [ADR 0093](0093-automate-nightly-packages-and-windows-version-tag-releases.md) narrowly amends the re-entry restriction for automatic native nightly packaging and Windows releases after a paired nightly Gate. macOS publication, `main` promotion and historical evidence limits below remain unchanged.

@@ -554,9 +554,8 @@ describe('the orchestrator grants every scope the workflows it calls ask for', (
   it('keeps candidate tests read-only and privileged code on trusted dev', async () => {
     const { readFile } = await import('node:fs/promises');
     const candidate = await readFile(new URL('e2e-candidate.yml', WORKFLOWS), 'utf8');
-    const windows = candidate.split('\n  windows:')[1]!.split('\n  macos:')[0]!;
-    const macos = candidate.split('\n  macos:')[1]!.split('\n  merge:')[0]!;
-    for (const platform of [windows, macos]) {
+    const windows = candidate.split('\n  windows:')[1]!.split('\n  merge:')[0]!;
+    for (const platform of [windows]) {
       expect(platform).toContain('permissions:\n      contents: read');
       expect(platform).toContain('persist-credentials: false');
       expect(platform).not.toContain('statuses: write');
@@ -621,6 +620,23 @@ describe('the orchestrator grants every scope the workflows it calls ask for', (
       const body = gate.split(`\n  ${job}:`)[1]!.split(/\n {2}[a-z]+:\n/u)[0]!;
       expect(body).toContain("(github.event.action != 'edited' || github.event.changes.base)");
     }
+  });
+
+  it('runs the full Gate, every candidate and native packaging on Windows only (ADR 0097)', async () => {
+    const { readFile } = await import('node:fs/promises');
+    for (const file of ['e2e-nightly.yml', 'e2e-candidate.yml', 'e2e-nightly-queue.yml']) {
+      const text = await readFile(new URL(file, WORKFLOWS), 'utf8');
+      expect(text, file).not.toContain('macos-15');
+      expect(text, file).not.toContain('(macOS 15 arm64)');
+      expect(text, file).not.toContain('mac-arm64');
+    }
+    const candidate = await readFile(new URL('e2e-candidate.yml', WORKFLOWS), 'utf8');
+    expect(candidate.split('\n  macos:')).toHaveLength(1);
+    expect(candidate).toContain("if: ${{ inputs.merge && needs.windows.result == 'success' }}");
+    expect(candidate).toContain('needs: [prepare, windows]');
+    const nightly = await readFile(new URL('e2e-nightly.yml', WORKFLOWS), 'utf8');
+    expect(nightly.match(/- label: /g)).toHaveLength(1);
+    expect(nightly).toContain('- label: Windows Server 2025 x64 CI');
   });
 
   it('requires an immutable commit for both direct dispatch and queue-called final dev', async () => {

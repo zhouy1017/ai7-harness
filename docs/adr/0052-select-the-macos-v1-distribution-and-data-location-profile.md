@@ -2,6 +2,8 @@
 status: accepted
 ---
 
+> [ADR 0097](0097-defer-the-macos-platform-indefinitely-and-deliver-windows-only.md) widens the hold to the whole macOS platform (2026-10-24): this profile is retained for a later resumption only; no macOS Gate job, nightly inspection package or verification runs until the Owner explicitly resumes macOS.
+
 # Select the macOS V1 distribution and data-location profile
 
 > [ADR 0093](0093-automate-nightly-packages-and-windows-version-tag-releases.md) defers macOS releases indefinitely until the Owner explicitly requests resumption; unsigned macOS builds remain nightly inspection artifacts only. The signing, hardened-runtime and notarization requirements below still apply after resumption, and their readiness does not lift the hold.

@@ -2,7 +2,7 @@
 
 AI7 是面向中文文学编辑的本地桌面工作台：把长篇稿件、审校建议、参考资料、事实考据和出版交付放在同一条可追溯的工作流里。你决定哪些修改进入稿件；模型输出先成为建议或证据线索。
 
-当前可从源码构建 Windows 与 macOS 工作台。Windows 是本轮 v3.2 产品方向的首发重点；v3.2 是规划名称，不是已发布的软件版本。[PROGRESS](PROGRESS.md) 记录实际集成能力与证据，已完成的 Initial v1.0.0 Development Milestone 不代表公开发行或平台认证。
+当前面向 Windows 交付并从源码构建。依 [ADR 0097](docs/adr/0097-defer-the-macos-platform-indefinitely-and-deliver-windows-only.md)，macOS 平台的全部 gate 与目标（托管 Gate 作业、nightly 打包、发布与再入验证）无限期后置，源码中的 macOS 适配保留但不再验证，直到 Owner 明确要求恢复。v3.2 是规划名称，不是已发布的软件版本。[PROGRESS](PROGRESS.md) 记录实际集成能力与证据，已完成的 Initial v1.0.0 Development Milestone 不代表公开发行或平台认证。
 
 ## 现在可以怎样工作
 
@@ -35,14 +35,14 @@ AI 输出需要编辑判断。确定性测试证明程序行为，一次模型�
 
 Word 插件集成、OCR、独立稿件窗口、结构调整模式、可执行外来 Skill 与自动更新仍在演进池。DOCX 修订导入是桌面文件工作流，不等于 Word 插件集成；默认学习、全域智能体和真实本地语义模型尚未交付。
 
-已有未签名 Windows 安装包/便携包构建与便携程序自检记录；这不等于安装卸载或完整打包环境验收。依据[自动交付约定](docs/adr/0093-automate-nightly-packages-and-windows-version-tag-releases.md)，配对 nightly Gate 与原生构建通过后，匹配版本标签发布对应 Windows 产物并披露未签名状态。macOS 公开发布无限期后置，直到 Owner 明确恢复；nightly macOS 包仅供检查。签名准备与 `main` 晋升仍需各自授权。打包版目前不附赠示例书。
+已有未签名 Windows 安装包/便携包构建与便携程序自检记录；这不等于安装卸载或完整打包环境验收。依据[自动交付约定](docs/adr/0093-automate-nightly-packages-and-windows-version-tag-releases.md)，Windows nightly Gate 与原生构建通过后，匹配版本标签发布对应 Windows 产物并披露未签名状态。macOS 平台整体依 [ADR 0097](docs/adr/0097-defer-the-macos-platform-indefinitely-and-deliver-windows-only.md) 无限期后置：不运行 macOS Gate，不构建 macOS 包。签名准备与 `main` 晋升仍需各自授权。打包版目前不附赠示例书。
 
 <details>
 <summary>开发者：从源码构建、打开与配置生产连接</summary>
 
 ## Getting started from source
 
-Use Windows 11 24H2+ on x64 or macOS 15+ on Apple Silicon. Install Git, Node **24.18.1** and Corepack; the repository selects pnpm **11.24.0**. Microsoft Office, Python and a model credential are not required to build and open the local workbench.
+Use Windows 11 24H2+ on x64; macOS 15+ on Apple Silicon remains a declared but unverified host while the macOS platform is deferred under ADR 0097. Install Git, Node **24.18.1** and Corepack; the repository selects pnpm **11.24.0**. Microsoft Office, Python and a model credential are not required to build and open the local workbench.
 
 From the repository root:
 
@@ -67,7 +67,7 @@ Choose the product data location when prompted. In 设置 › 模型服务, conf
 ## Documentation and contributions
 
 - [Documentation index](docs/README.md) — current guides, design owners and evidence.
-- [Nightly builds and Windows version-tag releases](docs/development/releasing.md) — native package builds, unsigned Windows releases and macOS inspection artifacts.
+- [Nightly builds and Windows version-tag releases](docs/development/releasing.md) — Windows nightly package builds and unsigned Windows releases.
 - [Version identity](docs/development/versioning.md) — matching software version, Data Version, build number and source commit across the app and its packages.
 - [PROGRESS](PROGRESS.md) — exact integrated checkpoint and remaining risks.
 - [Development plan](docs/development/development-plan.md) — next fixes, features and decision blockers.

@@ -2,6 +2,8 @@
 status: accepted
 ---
 
+> [ADR 0097](0097-defer-the-macos-platform-indefinitely-and-deliver-windows-only.md) widens the macOS release hold to the whole platform (2026-10-24): the nightly queue's Gate and packaging run on Windows only and no macOS inspection DMG is built; "both platforms" and "both native package jobs" below read Windows-only. Windows publication is unchanged.
+
 # Automate nightly packages and Windows version-tag releases
 
 On 2026-10-21 the Owner requested automatic builds after the nightly Gate passes, releases triggered by version tags, and consistent software version, Data Version and build number in GitHub and the running executable. The Owner selected **Windows releases only** and then deferred macOS releases **indefinitely, until the Owner explicitly requests resumption**. This replaces the earlier signing-readiness condition; configuring signing does not lift the hold. [#1009](https://github.com/zhouy1017/ai7-harness/issues/1009) implements delivery and [#1015](https://github.com/zhouy1017/ai7-harness/issues/1015) implements identity. This replaces the manual draft-only workflow and the initial unsigned-inspection-prerelease assumption in the same unmerged documentation/build wave.
