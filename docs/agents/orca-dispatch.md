@@ -77,7 +77,7 @@ Completion: the exact validated candidate is merged into the assigned wave, with
 
 ## 5. Commander integrates the wave into dev
 
-The Commander checks cumulative behavior, dependency completion, outstanding findings and integration conflicts, then opens the wave-to-`dev` PR. It owns final integration readiness and acceptance of the cumulative diff, including integration-only corrections.
+The Commander checks cumulative behavior, dependency completion, outstanding findings and integration conflicts, then opens the wave-to-`dev` PR, which raises `package.json` to the wave's version and adds the version-ledger row ([ADR 0098](../adr/0098-adopt-one-x-y-z-version-across-releases-and-internal-management.md)). It owns final integration readiness and acceptance of the cumulative diff, including integration-only corrections.
 
 The final integration candidate passes the appropriate checks and existing provider-free dev Gate at its current head/base. Any cumulative or base-changing correction invalidates earlier candidate evidence and is revalidated. The Commander releases and merges this final PR, records the resulting dev commit, updates the plan/PROGRESS and closes implemented slices. A slice merged only into a wave is not yet integrated into dev.
 
