@@ -200,6 +200,35 @@ describe('v27 Book-less Global Agent', () => {
     expect(store.inspectGlobalAgent().directives).toHaveLength(1);
   });
 
+  it('rechecks current disclosed sources after shared capacity waits and sends nothing stale (#1131)', async () => {
+    governance('合成的固定监督来源。');
+    const producers = Array.from({ length: 4 }, (_, index) => requestGovernor.registerProducer({
+      key: `source-guard-blocker:${index}`, kind: 'fast-role', lane: 'foreground',
+    }));
+    const permits = await Promise.all(producers.map((producer) => requestGovernor.acquire(producer, new AbortController().signal)));
+    let reachedCapacity!: () => void;
+    const queued = new Promise<void>((resolve) => { reachedCapacity = resolve; });
+    const acquire = requestGovernor.acquire.bind(requestGovernor);
+    vi.spyOn(requestGovernor, 'acquire').mockImplementation((producer, signal) => {
+      const pending = acquire(producer, signal);
+      reachedCapacity();
+      return pending;
+    });
+    try {
+      const turn = start();
+      await queued;
+      expect(requestGovernor.snapshot()).toMatchObject({ waiting: 1, inFlight: 4 });
+      governance('等待容量期间新增的监督来源。');
+      permits[0]!.release();
+      await waitFor(() => inspect(turn.dialogueId).attempts[0]?.state === 'failed');
+      expect(calls).toEqual([]);
+      expect(usage().totals).toMatchObject({ inputTokens: 0, outputTokens: 0 });
+    } finally {
+      for (const permit of permits) permit.release();
+      for (const producer of producers) requestGovernor.unregisterProducer(producer);
+    }
+  });
+
   it('lists eligible editorial-memory version ids without reading their example references, and stops using an excluded source', async () => {
     const book = await importSample1Book(store, roots.codeRoot, '合成记忆版本');
     const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
