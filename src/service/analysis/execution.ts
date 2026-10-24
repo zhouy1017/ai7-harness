@@ -2743,11 +2743,14 @@ export class BaselineAnalysisExecutionOwner {
         }
       }
 
-      if (accountLimit === null && !active.cancelRequested && !active.interrupted) stages.reduction = {
+      // A settled reduction — a gap, or a sent request whose result cannot be known, included — is kept before a pause or
+      // AI7 stopping, and continuation never sends it again (ADR 0095 §2). Only one AI7 stopping cut off before anything
+      // of it settled is formed again by 续行, as a unit cut off there is read again (CONT-014).
+      const cutOff = active.interrupted && active.resumableOnInterrupt && crossUnit.state === 'gap' && crossUnit.code === 'interrupted';
+      if (accountLimit === null && !active.cancelRequested && !cutOff) stages.reduction = {
         inputDigest: reductionInput, contractDigest: reductionContract,
         requestDigest: crossUnit.state === 'not-run' ? null : crossUnit.requestDigest, outcome: crossUnit,
       };
-      // A settled reduction, including a gap, is kept before pausing; continuation never sends it again.
       if (stopWithoutEnding()) return;
 
       // The kind's reducers run over the complete new unit set: reused plus recomputed. This is the
@@ -2944,10 +2947,13 @@ export class BaselineAnalysisExecutionOwner {
     const { active, definition, harness, reduction, manifest, live, policy } = context;
     if (definition.assurance === null) return assuranceSampleNotRun(definition.assuranceAbsentReason);
     if (active.cancelRequested) {
+      // A sample a pause kept stays as far as it settled; only the turn it had not sent is the cancellation's gap.
       const kept = context.stages.sampling;
-      return kept === undefined ? assuranceSampleNotRun(ASSURANCE_SAMPLING_CANCELLED)
-        : assuranceSampleOutcome(kept.draw, kept.dispositions, kept.sampled.turnsWithUsage === 0 ? null : kept.sampled,
-          [...kept.gapReasons, ASSURANCE_SAMPLING_CANCELLED]);
+      if (kept === undefined) return assuranceSampleNotRun(ASSURANCE_SAMPLING_CANCELLED);
+      const next = kept.ended ? undefined : assuranceSamplingTurns(kept.draw.sampled)[kept.nextTurn - 1];
+      return assuranceSampleOutcome(kept.draw, kept.dispositions,
+        kept.sampled.turnsWithUsage === 0 ? null : { inputTokens: kept.sampled.inputTokens, outputTokens: kept.sampled.outputTokens },
+        next === undefined ? kept.gapReasons : [...kept.gapReasons, assuranceSamplingTurnGapReason(next.unitOrdinal, '运行已按你的要求取消，本轮未派发。')]);
     }
     if (context.stopped || active.interrupted) return assuranceSampleNotRun(context.stoppedReason ?? '运行在单元阶段结束前停止，保证抽样未发起。');
     if (context.removedByEditor) return assuranceSampleNotRun(ASSURANCE_SAMPLING_REMOVED);
@@ -2956,10 +2962,14 @@ export class BaselineAnalysisExecutionOwner {
     const inputDigest = canonicalRecord({ manifest, candidates }).digest;
     const contractDigest = definition.assurance.promptContractDigest;
     const prior = context.stages.sampling;
-    if (prior !== undefined && (prior.inputDigest !== inputDigest || prior.contractDigest !== contractDigest)) {
-      throw new ExecutionAdmissionError('EXECUTION_CHECKPOINT_INVALID', '已保存的抽样输入或契约无法核对；未发送。');
+    // The draw is a function of the manifest and the candidates, so a kept one must be exactly that draw: its unsent
+    // turns are formed from it.
+    const drawn = drawAssuranceSample(manifest, candidates);
+    if (prior !== undefined && (prior.inputDigest !== inputDigest || prior.contractDigest !== contractDigest ||
+        canonicalRecord(prior.draw).digest !== canonicalRecord(drawn).digest)) {
+      throw new ExecutionAdmissionError('EXECUTION_CHECKPOINT_INVALID', '已保存的抽样输入、契约或抽取的样本无法核对；未发送。');
     }
-    const draw = prior?.draw ?? drawAssuranceSample(manifest, candidates);
+    const draw = prior?.draw ?? drawn;
     const dispositions = [...(prior?.dispositions ?? [])];
     const gapReasons = [...(prior?.gapReasons ?? [])];
     const sampled = { ...(prior?.sampled ?? { inputTokens: 0, outputTokens: 0, turnsWithUsage: 0 }) };
@@ -2974,13 +2984,13 @@ export class BaselineAnalysisExecutionOwner {
       context.stages.sampling = { inputDigest, contractDigest, draw, nextTurn, ended,
         turns: [...settledTurns], dispositions: [...dispositions], gapReasons: [...gapReasons], sampled: { ...sampled } };
     };
-    if (prior === undefined) save(1, false);
     if (live !== null && policy.providerProcessing.assuranceSamplingAllowed !== true) {
       // The sampling turns are transmissions the active Provider Processing policy does not name, so
       // none of them forms a request. The verified developer-live document names them; a projection that does not
       // is exactly the policy-bounded case this guard exists for.
       return assuranceSampleOutcome(draw, [], null, [ASSURANCE_SAMPLING_POLICY_BOUNDED]);
     }
+    if (prior === undefined) save(1, false);
     let sampleTurn = 0;
     for (const turn of turns) {
       sampleTurn += 1;
@@ -3046,7 +3056,8 @@ export class BaselineAnalysisExecutionOwner {
       const candidate = result.signals.find((signal) => signal.kind === 'contentCandidate');
       let ended = false;
       let settledState: 'closed' | 'gap' | 'outcome-unknown' = 'gap';
-      let refused = false;
+      // A turn the account limit refused, or one AI7 stopping cut off, is not kept settled: 续行 sends it again.
+      let unsettled = false;
       try {
         if (result.terminal === 'completed' && candidate?.kind === 'contentCandidate') {
           context.acceptedOutputDigests.add(candidate.digest);
@@ -3083,7 +3094,7 @@ export class BaselineAnalysisExecutionOwner {
           // keeps its progress stops there, before retrying the refused turn with 续行 (Issue #51, S16b).
           if (failure?.kind === 'failed' && failure.failure.failureClass === 'provider-account-limit') {
             context.onAccountLimit(`${failure.failure.reason}（${failure.failure.code}）`);
-            refused = true;
+            unsettled = true;
             break;
           }
         } else {
@@ -3093,10 +3104,13 @@ export class BaselineAnalysisExecutionOwner {
           gap(unknown ?? (failure?.kind === 'interrupted' ? failure.failure.reason : '保证抽样被中断。'));
           ended = true;
           if (unknown !== null) settledState = 'outcome-unknown';
+          // AI7 stopping cut the turn off before anything of it settled: as a unit cut off there is read again (CONT-014),
+          // 续行 sends it. A sent request whose result cannot be known stays settled and is never sent again.
+          else if (active.interrupted && active.resumableOnInterrupt) unsettled = true;
           break;
         }
       } finally {
-        if (!refused) {
+        if (!unsettled) {
           settledTurns.push({ requestDigest: canonicalRecord(message).digest, unitOrdinal: turn.unitOrdinal, usage: turnUsage, state: settledState });
           save(sampleTurn + 1, ended);
         }

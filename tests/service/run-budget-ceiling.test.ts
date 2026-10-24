@@ -495,6 +495,9 @@ describe('the editor\'s Run Budget Ceiling over the real store', () => {
       expect(stopped.resultSetRevision?.crossUnitReduction?.state).toBe('closed');
       expect(stopped.resultSetRevision?.assuranceSample?.state).toBe('closed');
       const report = stopped.taskOutcome!.report!;
+      // The kept reduction still counts toward the ceiling: with it the sample's one turn spends the ceiling, and the
+      // reflection after it is kept back; counted for less, the reflection would have been sent.
+      expect(report.ifRedone).toEqual({ state: 'not-run', items: [], reason: '任务运行预算上限已达到；运行反思未派发。' });
       expect(report.usagePerStage['cross-unit-reduction'].requests).toBe(1);
       expect(report.usagePerStage['cross-unit-reduction'].inputTokens + report.usagePerStage['cross-unit-reduction'].outputTokens).toBe(reduction);
       expect(runReportUsageReconciles(report, stopped.resultSetRevision!.usage)).toBe(true);

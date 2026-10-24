@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { RECONCILED_PAUSED_DETAIL, RECONCILED_RESUMABLE_DETAIL } from '../../src/service/analysis/baseline-analysis-store.js';
-import { BaselineAnalysisExecutionOwner, CANCELLED_WITHOUT_REVISION, pausedDetail, resumableDetail } from '../../src/service/analysis/execution.js';
+import { ASSURANCE_SAMPLING_CANCELLED, BaselineAnalysisExecutionOwner, CANCELLED_WITHOUT_REVISION, pausedDetail, resumableDetail } from '../../src/service/analysis/execution.js';
 import type { TaskPlanConnectivity } from '../../src/service/connectivity.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
@@ -522,14 +522,20 @@ class BoundaryDispatches extends Map<string, ModelFixtureEntry> {
   }
 }
 
+// The two-turn sample with its first turn answered: that turn's entry key, and the synthetic answer it is given.
+const FIRST_TURN_ANSWER = { kind: 'unit-result' as const, text: JSON.stringify({ schema: 'ai7.analysis.assurance-sampling-result/1',
+  dispositions: [{ ref: '{{ref:1}}', disposition: '成立', reason: '合成抽样依据。' }] }), usage: { inputTokens: 100, outputTokens: 10 } };
+async function twoTurnSample(firstTurn: ModelFixtureEntry['response'] = FIRST_TURN_ANSWER): Promise<{ entries: BoundaryDispatches; firstTurnKey: string }> {
+  const original = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-sampling-two-turns');
+  const firstTurnKey = [...original.entries].find(([, entry]) => entry.response.kind === 'outcome-unknown')![0];
+  const entries = new BoundaryDispatches([...original.entries].map(([key, entry]) => [key, key === firstTurnKey ? { ...entry, response: firstTurn } : entry]));
+  fixture = { ...original, entries };
+  return { entries, firstTurnKey };
+}
+
 describe('settled stage continuation at a manual pause boundary (#1114)', () => {
   it('keeps reduction and a multi-turn draw through repeated pauses and restart, without repeating a dispatch or usage', async () => {
-    const original = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-sampling-two-turns');
-    const entries = new BoundaryDispatches([...original.entries].map(([key, entry]) => [key, entry.response.kind === 'outcome-unknown'
-      ? { ...entry, response: { kind: 'unit-result' as const, text: JSON.stringify({ schema: 'ai7.analysis.assurance-sampling-result/1',
-        dispositions: [{ ref: '{{ref:1}}', disposition: '成立', reason: '合成抽样依据。' }] }), usage: { inputTokens: 100, outputTokens: 10 } } }
-      : entry]));
-    fixture = { ...original, entries };
+    const { entries } = await twoTurnSample();
     let store = await openWithRoute();
     let runRecordId = '';
     let taskIntentId = '';
@@ -632,6 +638,139 @@ describe('settled stage continuation at a manual pause boundary (#1114)', () => 
       const result = store.inspectBaselineAnalysis(bookId, () => null);
       expect(result.run?.state).toMatch(/^completed/);
       expect(result.taskOutcome?.report?.failures.some((failure) => failure.reason.includes('结果待确认'))).toBe(true);
+    } finally { await execution.dispose(); store.close(); }
+  });
+
+  // An owner that pauses the Run once its first sampling turn is back.
+  function pausingAtSample(store: EditorialStore, run: () => { bookId: string; taskIntentId: string; runRecordId: string }): BaselineAnalysisExecutionOwner {
+    let paused = false;
+    const execution = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture,
+      secretResolver: { resolve: async () => null }, stageHold: async (stage) => {
+        if (paused || stage !== 'assurance-sampling') return;
+        paused = true;
+        store.requestBaselineAnalysisPause(run().bookId, run().taskIntentId);
+        execution.pauseRun(run().runRecordId);
+      } });
+    return execution;
+  }
+
+  it('cancels a Run paused inside its sample, keeping the settled turn and naming only the turn it never sent', async () => {
+    const { entries } = await twoTurnSample();
+    const store = await openWithRoute();
+    const { bookId, taskIntentId, digest } = await preparedBook(store, '合成抽样暂停后取消');
+    const runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, digest).dispatchRunRecordId!;
+    const execution = pausingAtSample(store, () => ({ bookId, taskIntentId, runRecordId }));
+    try {
+      execution.admitAndDispatch(runRecordId); await execution.whenIdle();
+      expect(store.baselineAnalysisLedger.stageContinuationOf(runRecordId)?.sampling).toMatchObject({ nextTurn: 2, ended: false });
+      const before = entries.sent.length;
+      store.requestBaselineAnalysisCancel(bookId, taskIntentId);
+      expect(execution.cancelRun(runRecordId)).toBe('stopping');
+      await execution.whenIdle();
+      expect(entries.sent).toHaveLength(before);
+      const cancelled = store.inspectBaselineAnalysis(bookId, () => null);
+      expect(cancelled.run?.state).toBe('cancelled');
+      expect(cancelled.resultSetRevision?.crossUnitReduction?.state).toBe('closed');
+      const sample = cancelled.resultSetRevision!.assuranceSample!;
+      expect(sample).toMatchObject({ state: 'closed-with-gaps', dispositions: [{ disposition: '成立' }] });
+      expect(sample.usage).toEqual({ inputTokens: 100, outputTokens: 10 });
+      expect(sample.reason).toContain('运行已按你的要求取消，本轮未派发。');
+      expect(sample.reason).not.toContain(ASSURANCE_SAMPLING_CANCELLED);
+      expect(cancelled.taskOutcome!.report!.usagePerStage['assurance-sampling']).toMatchObject({ requests: 1, inputTokens: 100, outputTokens: 10 });
+    } finally { await execution.dispose(); store.close(); }
+  });
+
+  it('refuses a kept draw that is not the Run\'s own deterministic draw before its next turn is sent', async () => {
+    const { entries } = await twoTurnSample();
+    const store = await openWithRoute();
+    const { bookId, taskIntentId, digest } = await preparedBook(store, '合成抽样样本核对');
+    const runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, digest).dispatchRunRecordId!;
+    const execution = pausingAtSample(store, () => ({ bookId, taskIntentId, runRecordId }));
+    try {
+      execution.admitAndDispatch(runRecordId); await execution.whenIdle();
+      const before = entries.sent.length;
+      // The unsent second turn's finding is rewritten, every digest recomputed: the settled first turn still reads back.
+      withDatabase(false, (db) => {
+        const row = db.prepare("SELECT sequence, canonical_json FROM analysis_run_states WHERE run_record_id = ? AND state = 'paused' ORDER BY sequence DESC LIMIT 1").get(runRecordId)!;
+        const record = JSON.parse(String(row.canonical_json));
+        const sampled = record.stageContinuation.data.sampling.draw.sampled as Array<{ unitOrdinal: number; text: string }>;
+        const last = Math.max(...sampled.map((candidate) => candidate.unitOrdinal));
+        sampled.find((candidate) => candidate.unitOrdinal === last)!.text = '合成：改写的抽样发现。';
+        record.stageContinuation.digest = canonicalRecord(record.stageContinuation.data).digest;
+        const canonical = canonicalRecord(record);
+        db.exec('DROP TRIGGER analysis_run_states_no_update');
+        db.prepare('UPDATE analysis_run_states SET canonical_json = ?, sha256 = ? WHERE run_record_id = ? AND sequence = ?').run(canonical.json, canonical.digest, runRecordId, Number(row.sequence));
+      });
+      execution.admitAndDispatch(runRecordId, store.baselineAnalysisLedger, { resume: true }); await execution.whenIdle();
+      expect(entries.sent).toHaveLength(before);
+      expect(store.inspectBaselineAnalysis(bookId, () => null).run?.state).toBe('failed');
+    } finally { await execution.dispose(); store.close(); }
+  });
+
+  it('sends again only the sampling turn AI7 closing cut off, keeping the reduction it settled (CONT-014)', async () => {
+    const { entries, firstTurnKey } = await twoTurnSample({ kind: 'interrupted', message: '合成：AI7 关闭时本轮被中断。' });
+    let store = await openWithRoute();
+    const { bookId, taskIntentId, digest } = await preparedBook(store, '合成抽样时关闭');
+    const runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, digest).dispatchRunRecordId!;
+    let closing = false;
+    let execution: BaselineAnalysisExecutionOwner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture,
+      secretResolver: { resolve: async () => null }, stageHold: async (stage) => {
+        // AI7 closes while the first sampling turn is out, and the turn comes back cut off.
+        if (!closing && stage === 'assurance-sampling') { closing = true; void execution.dispose(); }
+      } });
+    try {
+      execution.admitAndDispatch(runRecordId); await execution.whenIdle();
+      expect(store.inspectBaselineAnalysis(bookId, () => null).run?.state).toBe('resumable');
+      expect(store.baselineAnalysisLedger.stageContinuationOf(runRecordId)?.sampling).toMatchObject({ nextTurn: 1, ended: false, turns: [] });
+      const cutOff = entries.sent.at(-1)!;
+      entries.set(firstTurnKey, { ...entries.get(firstTurnKey)!, response: FIRST_TURN_ANSWER });
+      store.markCleanShutdown(); store.close();
+      store = await openWithRoute();
+      execution = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+      execution.admitAndDispatch(runRecordId, store.baselineAnalysisLedger, { resume: true }); await execution.whenIdle();
+      const settled = store.inspectBaselineAnalysis(bookId, () => null);
+      expect(settled.run?.state).toBe('completed');
+      expect(settled.resultSetRevision?.assuranceSample).toMatchObject({ state: 'closed', size: 2 });
+      expect(settled.taskOutcome!.report!.usagePerStage['cross-unit-reduction'].requests).toBe(1);
+      // The cut-off turn is sent once more; no unit, no reduction and no other turn is.
+      expect(entries.sent.filter((key) => key === cutOff)).toHaveLength(2);
+      expect(new Set(entries.sent).size).toBe(entries.sent.length - 1);
+    } finally { await execution.dispose(); store.close(); }
+  });
+
+  it.each(['settled', 'outcome-unknown', 'cut-off'] as const)('AI7 closing during a %s reduction keeps what settled and sends again only what it cut off (ADR 0095 §2, CONT-014)', async (reduction) => {
+    const happy = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-happy');
+    const original = reduction === 'settled' ? happy : await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-reduction-unknown');
+    const unknownKey = [...original.entries].find(([, entry]) => entry.response.kind === 'outcome-unknown')?.[0];
+    const entries = new BoundaryDispatches([...original.entries].map(([key, entry]) => [key, reduction === 'cut-off' && key === unknownKey
+      ? { ...entry, response: { kind: 'interrupted' as const, message: '合成：AI7 关闭时归纳被中断。' } } : entry]));
+    fixture = { ...original, entries };
+    let store = await openWithRoute();
+    const { bookId, taskIntentId, digest } = await preparedBook(store, '合成归纳时关闭');
+    const runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, digest).dispatchRunRecordId!;
+    let reductionSent: string | null = null;
+    let execution: BaselineAnalysisExecutionOwner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture,
+      secretResolver: { resolve: async () => null }, stageHold: async (stage) => {
+        // AI7 closes while the reduction's request is out, and the turn comes back as the case says.
+        if (reductionSent === null && stage === 'cross-unit-reduction') { reductionSent = entries.sent.at(-1)!; void execution.dispose(); }
+      } });
+    try {
+      execution.admitAndDispatch(runRecordId); await execution.whenIdle();
+      expect(store.inspectBaselineAnalysis(bookId, () => null).run?.state).toBe('resumable');
+      const kept = store.baselineAnalysisLedger.stageContinuationOf(runRecordId);
+      if (reduction === 'cut-off') expect(kept).toBeNull();
+      else expect(kept?.reduction?.outcome).toMatchObject(reduction === 'settled' ? { state: 'closed' } : { state: 'gap', code: 'outcome-unknown' });
+      if (reduction === 'cut-off') entries.set(unknownKey!, happy.entries.get(unknownKey!)!);
+      store.markCleanShutdown(); store.close();
+      store = await openWithRoute();
+      execution = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+      execution.admitAndDispatch(runRecordId, store.baselineAnalysisLedger, { resume: true }); await execution.whenIdle();
+      const settled = store.inspectBaselineAnalysis(bookId, () => null);
+      expect(settled.run?.state).toMatch(/^completed/);
+      expect(settled.resultSetRevision?.crossUnitReduction).toMatchObject(reduction === 'outcome-unknown' ? { state: 'gap', reason: expect.stringContaining('结果待确认') } : { state: 'closed' });
+      // A reduction that settled — or was sent with its result unknown — is never sent again; only the cut-off one is.
+      expect(entries.sent.filter((key) => key === reductionSent)).toHaveLength(reduction === 'cut-off' ? 2 : 1);
+      expect(new Set(entries.sent).size).toBe(entries.sent.length - (reduction === 'cut-off' ? 1 : 0));
     } finally { await execution.dispose(); store.close(); }
   });
 });
