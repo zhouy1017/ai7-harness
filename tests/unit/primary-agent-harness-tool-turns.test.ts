@@ -105,7 +105,7 @@ describe('declared local-tool turns', () => {
     const session = new PlatformToolSession({ binding, scope: { currentBindingDigest: () => digest, acceptedOutputDigests: new Set() }, retrieval: index, purpose: 'authored-unit' });
     const signal = new AbortController().signal;
     const call = async (callId: string, tool: 'baseline_facts' | 'term_table', args: Record<string, unknown>) => {
-      const result = await session.execute({ callId, tool, arguments: args, signal });
+      const result = await session.execute({ callId, tool, arguments: args, signal, dispatch: { token: Symbol(), active: () => !signal.aborted } });
       expect(Buffer.byteLength(result.text)).toBeLessThanOrEqual(LOCAL_TOOL_RESULT_MAX_BYTES);
       return result.text;
     };

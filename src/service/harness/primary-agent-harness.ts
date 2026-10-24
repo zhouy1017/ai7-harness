@@ -4,7 +4,7 @@ import type { AgentHandle } from '@deepseek-ai/dsh-agent';
 import type { GenerateOptions, LlmAdapter, LlmRuntime, StreamChunk, TokenUsage } from '@deepseek-ai/dsh-llm';
 import type { SessionEvent, SessionHeader, SessionId } from '@deepseek-ai/dsh-session';
 import type { SessionInspection, SessionPersistenceRevision } from '@deepseek-ai/dsh-session-persistence';
-import type { ToolDefinition } from '@deepseek-ai/dsh-tools';
+import type { ToolDefinition, ToolExecution } from '@deepseek-ai/dsh-tools';
 import { canonicalJson, sha256Hex } from '../analysis/canonical.js';
 import { AI7_FAILURE_CODES, classifyModelFailure, type ClassifiedModelFailure, type DshFailureCodes } from '../provider/classification.js';
 import { assistantToolCallDigest, type EgressDecision, type EgressRefusalReason, type ExecutionRoute, type TransmitTicket } from '../provider/egress-gate.js';
@@ -144,12 +144,20 @@ export function describeComposition(route: ExecutionRoute, model: string, prompt
   return descriptor;
 }
 
+/** In-process correlation only: neither the token nor its turn lifetime is persisted or grants provider authority. */
+export interface PlatformToolDispatch {
+  readonly token: symbol;
+  readonly active: () => boolean;
+}
+
 /** One platform-tool call the harness hands its owner: the model's call id, the tool, and the arguments as the model sent them. */
 export interface PlatformToolExecution {
   readonly callId: string;
   readonly tool: PlatformToolName;
   readonly arguments: unknown;
   readonly signal: AbortSignal;
+  /** The DSH execution this call is: its finalizer admits the result under the same identity. */
+  readonly dispatch: PlatformToolDispatch;
 }
 
 /**
@@ -164,7 +172,7 @@ export interface PlatformToolOwner {
    * Admit the exact text the model will read for one call, immediately before DSH materializes it: the gate admits a tool
    * result back into the payload only by this call id, URL, digest, and byte count.
    */
-  admit(result: { readonly callId: string; readonly tool: PlatformToolName; readonly sourceUrl: string | null; readonly text: string }): void;
+  admit(result: { readonly callId: string; readonly tool: PlatformToolName; readonly sourceUrl: string | null; readonly text: string; readonly dispatch: PlatformToolDispatch }): void;
   /** Accept one assistant tool-call message this attempt's adapter returned, by `assistantToolCallDigest`. */
   acceptToolCallMessage(digest: string): void;
 }
@@ -318,6 +326,18 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
   // The Interactive Answer Stream's reader for the turn in flight, if one streams (Issue #52, S17a).
   let streamReader: ((delta: string) => void) | null = null;
   let disposed = false;
+  let toolTurn: { active: boolean } | null = null;
+  const toolTurns = new WeakMap<AbortSignal, { active: boolean }>();
+  const dispatches = new WeakMap<symbol, PlatformToolDispatch>();
+  const dispatchOf = (exec: ToolExecution): PlatformToolDispatch => {
+    let dispatch = dispatches.get(exec.token);
+    if (dispatch === undefined) {
+      const turn = toolTurns.get(exec.signal);
+      dispatch = { token: exec.token, active: () => turn?.active === true && !disposed && !exec.signal.aborted };
+      dispatches.set(exec.token, dispatch);
+    }
+    return dispatch;
+  };
   let handle: AgentHandle | undefined;
   const spans: HarnessExecutionSpan[] = [];
   try {
@@ -327,7 +347,7 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
     await context.plugin(llm.LlmRuntime);
     await context.plugin(prompt.SystemPrompt, { includeHarnessIdentity: false, includeRuntimeContext: false, persona: '' });
     await context.plugin(tools.ToolRuntime, { mode: 'native', maxParallelSubCalls: composition.tools.maxParallelSubCalls });
-    if (toolOwner !== null) registerPlatformTools(context, toolOwner, schemas, request.localTools, typeof selectedLocal === 'object' ? selectedLocal : undefined);
+    if (toolOwner !== null) registerPlatformTools(context, toolOwner, schemas, sessions.isJsonValue, dispatchOf, request.localTools, typeof selectedLocal === 'object' ? selectedLocal : undefined);
     await context.plugin(loop.AgentLoop, { maxParallelToolCalls: composition.agentLoop.maxParallelToolCalls, agents: [] });
     context.systemPrompt.suppressRuntimeContext();
     context.systemPrompt.section({ name: PROMPT_SECTION_NAME, order: 0, text: request.systemPrompt, complete: true });
@@ -347,6 +367,7 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
     });
     context.on('llm/stream', function (this: LlmRuntime, options: GenerateOptions, next: () => AsyncIterable<StreamChunk>) {
       if (!bound) return refusalStream('执行绑定尚未核对；未发送任何内容。');
+      if (options.signal !== undefined && toolTurn !== null) toolTurns.set(options.signal, toolTurn);
       const decision = request.gate(options);
       if (decision.decision === 'refuse') return refusalStream(decision.detail, decision.reason);
       if (decision.decision === 'transmit-remote') request.onTransmitTicket(decision.ticket);
@@ -476,10 +497,14 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
     const session = live.agent.session;
     const startSeq = session.seq;
     streamReader = onText;
+    const turn = { active: true };
+    toolTurn = turn;
     try {
       live.agent.followup(llm.createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } }));
       await live.agent.whenIdle();
     } finally {
+      turn.active = false;
+      toolTurn = null;
       streamReader = null;
     }
     // A persisted log holds the turn once it is flushed: the span names exactly what the Harness Session Ledger keeps.
@@ -543,13 +568,15 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
  * success, refusal, or a pipeline failure — immediately before materializing it, fixes the one text the model will read
  * and has the owner admit it, so no result can reach the payload that the owner did not admit.
  */
-function registerPlatformTools(context: Context, owner: PlatformToolOwner, schemas: ReadonlyArray<PlatformToolSchema>, localOwner?: PlatformToolOwner, localRule?: LocalToolsRule): void {
+function registerPlatformTools(context: Context, owner: PlatformToolOwner, schemas: ReadonlyArray<PlatformToolSchema>, canMaterializeArguments: (args: unknown) => boolean, dispatchOf: (exec: ToolExecution) => PlatformToolDispatch, localOwner?: PlatformToolOwner, localRule?: LocalToolsRule): void {
   for (const schema of schemas) {
     const tool = schema.name;
     const selectedOwner = isLocalToolName(tool) ? localOwner ?? owner : owner;
     const definition: ToolDefinition = {
       name: tool,
-      isConcurrencySafe: () => isLocalToolName(tool) && localRule?.declarations?.some((entry) => entry.name === tool && entry.concurrencySafe) === true,
+      // A pre-body error must finalize before later siblings spend the remaining local quota. DSH's lossless boundary
+      // supplies the scheduling barrier; valid declared calls keep their existing parallel width and result order.
+      isConcurrencySafe: (args) => isLocalToolName(tool) && localRule?.declarations?.some((entry) => entry.name === tool && entry.concurrencySafe) === true && canMaterializeArguments(args),
       description: schema.description,
       parameters: JSON.parse(JSON.stringify(schema.parameters)) as Record<string, unknown>,
       output: {
@@ -557,7 +584,7 @@ function registerPlatformTools(context: Context, owner: PlatformToolOwner, schem
         render: (_args, value) => [{ type: 'text', text: (value as { text: string }).text }],
       },
       async execute(args, exec) {
-        const outcome = await selectedOwner.execute({ callId: exec.callId, tool, arguments: args, signal: exec.signal });
+        const outcome = await selectedOwner.execute({ callId: exec.callId, tool, arguments: args, signal: exec.signal, dispatch: dispatchOf(exec) });
         return { text: outcome.text, sourceUrl: outcome.sourceUrl ?? '' };
       },
       finalizeContent(exec, result) {
@@ -570,7 +597,7 @@ function registerPlatformTools(context: Context, owner: PlatformToolOwner, schem
           text = typeof value.text === 'string' ? value.text : '';
           sourceUrl = typeof value.sourceUrl === 'string' && value.sourceUrl.length > 0 ? value.sourceUrl : null;
         }
-        selectedOwner.admit({ callId: exec.callId, tool, sourceUrl, text });
+        selectedOwner.admit({ callId: exec.callId, tool, sourceUrl, text, dispatch: dispatchOf(exec) });
         return [{ type: 'text', text }];
       },
     };

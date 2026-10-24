@@ -162,11 +162,11 @@ describe('registered local tools without egress', () => {
       retrieval: new RetrievalIndex([source('one', 'alpha')]), purpose: 'synthetic',
       fetch: async () => { socketSeamCalls += 1; throw new Error('socket seam reached'); }, admitHost: () => { socketSeamCalls += 1; throw new Error('host seam reached'); } });
     const signal = new AbortController().signal;
-    const first = await session.execute({ callId: '1', tool: 'retrieve', arguments: { query: 'alpha' }, signal });
+    const first = await session.execute({ callId: '1', tool: 'retrieve', arguments: { query: 'alpha' }, signal, dispatch: { token: Symbol(), active: () => !signal.aborted } });
     const candidates = JSON.parse(first.text) as Array<{ candidateId: string }>;
     expect(first.sourceUrl).toBeNull();
-    expect((await session.execute({ callId: '2', tool: 'exact_fetch', arguments: { candidateId: candidates[0]!.candidateId }, signal })).sourceUrl).toBeNull();
-    for (let i = 3; i <= 129; i += 1) await session.execute({ callId: String(i), tool: 'retrieve', arguments: { query: 'alpha' }, signal });
+    expect((await session.execute({ callId: '2', tool: 'exact_fetch', arguments: { candidateId: candidates[0]!.candidateId }, signal, dispatch: { token: Symbol(), active: () => !signal.aborted } })).sourceUrl).toBeNull();
+    for (let i = 3; i <= 129; i += 1) await session.execute({ callId: String(i), tool: 'retrieve', arguments: { query: 'alpha' }, signal, dispatch: { token: Symbol(), active: () => !signal.aborted } });
     expect(session.usage).toMatchObject({ requests: 0, retrievalCalls: 128, exactFetchCalls: 1, refusedRetrievalCalls: 124 });
     expect(session.egressScope.localBreakerState?.()).toBe('tripped');
     expect(socketSeamCalls).toBe(0);
