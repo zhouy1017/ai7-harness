@@ -2635,7 +2635,7 @@ export type OutboundDataCategoryId =
 export interface AdmittedProviderRule {
   /** v27 review names the same bounded synthesis turn as writing/evaluation; eligibility only. */
   readonly plusOneCrossUnitSynthesisTurn?: boolean;
-  /** Book-less dialogue: category labels record what is sent and do not restrict transmission. */
+  /** Book-less dialogue: category labels record what is sent and do not restrict transmission; ADR 0079 §4.4 redaction still applies. */
   readonly globalAgentDialogue?: {
     readonly source: {
       readonly bookRequired: false;
@@ -2647,8 +2647,8 @@ export interface AdmittedProviderRule {
     readonly outboundCategoryRestriction: 'none';
     readonly outboundDataDisclosureRequired: true;
     readonly redaction: {
-      readonly housePeopleNamesAndRolesStripped: false;
-      readonly remarksAndInternalNotesStripped: false;
+      readonly housePeopleNamesAndRolesStripped: true;
+      readonly remarksAndInternalNotesStripped: true;
       readonly authorInformationAllowed: true;
       readonly houseNameAllowed: true;
     };

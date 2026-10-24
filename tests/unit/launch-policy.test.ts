@@ -43,7 +43,7 @@ const CARRIED_PATHS = [
 const EXPECTED_PINS = {
   'development-ci': ['v1', 'docs/policies/provider-processing-policy.v1.json', 'd9dfe8c13a58649d8d9f607364030468ae71832b94c9436291d29000795d725a'],
   'fixture-recording': ['v2', 'docs/policies/provider-processing-policy.v2.json', 'd0e3996ce7ba091200d83178b48fb578090bf73b509406182a2d5403ab2a4ebc'],
-  'ordinary-production': ['v27', 'docs/policies/provider-processing-policy.v27.json', '582ee4cad9298612a5468cbfca44b56eacb8fd3d04c2cdf69ff2b2e6ef712ad6'],
+  'ordinary-production': ['v27', 'docs/policies/provider-processing-policy.v27.json', '8d0eaedb28454c9f923501991e0b4130d7ed5f9b267905cd30d3f7a434db1a12'],
   'developer-live': ['v24', 'docs/policies/provider-processing-policy.v24.json', '1522e203f3ead6a259f93494e25c34526a024f93a757b1c7d22568e219f4a6b6'],
 } as const;
 /** Every immutable predecessor asset keeps its exact bytes: v6, v13, v15, v17, v19 and v21 (the old ordinary-production), v11, v12, v14, v16, v18, v20 and v22 (the old developer-live), and sets v9 to v15. */
@@ -81,7 +81,7 @@ const RETAINED_PREDECESSOR_DIGESTS = {
 } as const;
 /** ADR 0079 §3 decides External Export v2; active-set v16 pins its exact bytes, unchanged since v7. */
 const EXPECTED_EXTERNAL_PIN = ['v2', 'docs/policies/external-export-policy.v2.json', '162441cc3e5d30b0cafb00a0d04ca5ab32b64c5039baafc8952a9925bd7984b6'] as const;
-const ACTIVE_SET_SHA256 = 'd769b5ed4a087c4d6d96c26087595a754d2f63ac08f4e149c5c93ac677f16fb3';
+const ACTIVE_SET_SHA256 = '5b551888903b629c700fea7d358e57e1474b1f7984fe73f6605cd85619726f3e';
 
 const GO_BINDING = {
   route: 'opencode-go',
@@ -483,7 +483,7 @@ describe('Provider Processing v27 Owner decisions', () => {
       globalAgentDialogue: { source: { bookRequired: false, explicitlyListedEligibleMemoryAndPreferenceRevisionsOnly: true,
         eligibleRevisionPinsRequired: true, editorOwnWordsAllowed: true, unlistedSourcesAllowed: false },
         outboundCategoryRestriction: 'none', outboundDataDisclosureRequired: true,
-        redaction: { housePeopleNamesAndRolesStripped: false, remarksAndInternalNotesStripped: false } },
+        redaction: { housePeopleNamesAndRolesStripped: true, remarksAndInternalNotesStripped: true, authorInformationAllowed: true, houseNameAllowed: true } },
     });
     expect(global.outboundDataCategories).toEqual(Object.keys(document.outboundDataCategories as object));
     expect(reading.backgroundProcessingEnrollment!.enrollableKinds).toEqual([

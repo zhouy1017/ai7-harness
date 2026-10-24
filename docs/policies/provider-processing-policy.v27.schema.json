@@ -1862,8 +1862,8 @@
             "house-review-guideline-clause"
           ],
           "redaction": {
-            "housePeopleNamesAndRolesStripped": false,
-            "remarksAndInternalNotesStripped": false,
+            "housePeopleNamesAndRolesStripped": true,
+            "remarksAndInternalNotesStripped": true,
             "authorInformationAllowed": true,
             "houseNameAllowed": true
           },

@@ -29,7 +29,7 @@ const CARRIER_PATH = 'config/source-checkout-launch-authority.json';
 const CARRIER_VERSION = 2;
 export const ACTIVE_SET_VERSION = 'v19' as const;
 const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v19.json';
-const ACTIVE_SET_SHA256 = 'd769b5ed4a087c4d6d96c26087595a754d2f63ac08f4e149c5c93ac677f16fb3';
+const ACTIVE_SET_SHA256 = '5b551888903b629c700fea7d358e57e1474b1f7984fe73f6605cd85619726f3e';
 const PROVIDER_PINS = {
   'development-ci': {
     version: 'v1',
@@ -44,7 +44,7 @@ const PROVIDER_PINS = {
   'ordinary-production': {
     version: 'v27',
     canonicalPath: 'docs/policies/provider-processing-policy.v27.json',
-    sha256: '582ee4cad9298612a5468cbfca44b56eacb8fd3d04c2cdf69ff2b2e6ef712ad6',
+    sha256: '8d0eaedb28454c9f923501991e0b4130d7ed5f9b267905cd30d3f7a434db1a12',
   },
   'developer-live': {
     version: 'v24',
@@ -1609,10 +1609,6 @@ const GLOBAL_AGENT_SOURCE = {
   bookRequired: false, explicitlyListedEligibleMemoryAndPreferenceRevisionsOnly: true,
   eligibleRevisionPinsRequired: true, editorOwnWordsAllowed: true, unlistedSourcesAllowed: false,
 } as const;
-const GLOBAL_AGENT_REDACTION = {
-  housePeopleNamesAndRolesStripped: false, remarksAndInternalNotesStripped: false,
-  authorInformationAllowed: true, houseNameAllowed: true,
-} as const;
 const GLOBAL_AGENT_READING: OrdinaryProductionRuleReading = {
   ...productionReading('Fast Interaction Role', ['global-agent-dialogue'], [], {
     ...FOREGROUND_BLOCKS,
@@ -1687,7 +1683,8 @@ function readWave21Eligibility(policy: Record<string, unknown>): Record<string, 
     ruleId: GLOBAL_AGENT_RULE_ID, policyResult: 'eligible-only', purpose: 'ordinary-production-model-processing',
     authorityOrigin: blocks.authorityOrigin, executionMode: blocks.executionMode, source: blocks.source,
     allowedOutboundDataCategories: GLOBAL_AGENT_READING.policyCategories, outboundCategoryRestriction: 'none',
-    redaction: GLOBAL_AGENT_REDACTION,
+    // ADR 0079 §4.4 binds this rule too: no ADR amendment lifts house-people redaction (#1071, #1104).
+    redaction: HOUSE_PEOPLE_REDACTION,
     providerBinding: {
       modelRole: 'Fast Interaction Role', bindingSource: 'user-configured-role-binding',
       allowedRoutes: ['opencode-go', 'deepseek-open-platform'], exactProviderBindingRequired: true,
@@ -1900,7 +1897,7 @@ export function verifyOrdinaryProductionPolicy(policy: Record<string, unknown>):
       allowedRoutes: [...new Set(ORDINARY_PRODUCTION_ALLOWED_BINDINGS.map((binding) => binding.route))],
       platformTools: null, localTools: expectedLocalTools(false),
       projection: { globalAgentDialogue: {
-        source: GLOBAL_AGENT_SOURCE, redaction: GLOBAL_AGENT_REDACTION,
+        source: GLOBAL_AGENT_SOURCE, redaction: HOUSE_PEOPLE_REDACTION,
         outboundCategoryRestriction: 'none', outboundDataDisclosureRequired: true,
       } },
     }, {
