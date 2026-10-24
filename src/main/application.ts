@@ -4429,6 +4429,11 @@ function registerRendererHandlers(
     requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
     return serializeEffect(async () => { requireAuthority(); return service.call('deactivateEditorialMemory', input); });
   }));
+  ipcMain.handle(IPC_CHANNELS.acceptEditorialMemory, (event, input: ServiceOperationMap['acceptEditorialMemory']['input']) => envelope(async () => {
+    requireSender(event);
+    requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+    return serializeEffect(async () => { requireAuthority(); return service.call('acceptEditorialMemory', input); });
+  }));
   ipcMain.handle(IPC_CHANNELS.inspectGlobalAgentDialogue, (event, input: ServiceOperationMap['inspectGlobalAgentDialogue']['input']) => envelope(async () => {
     requireSender(event); requireAuthority();
     return service.call('inspectGlobalAgentDialogue', input);

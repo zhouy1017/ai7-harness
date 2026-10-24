@@ -990,8 +990,8 @@ async function readAudit(renderer, predicate, name) {
 const auditRow = (key) => `[data-screen="quality-learning"] li.learning-audit-material[data-material-key="${key}"]`;
 // Issue #912: 审阅 Runs read 本社审阅偏好 versions now, so the audit no longer says no Task reads learning material; with no
 // Run having read any in this Journey, every count stays 0 and every empty stage keeps its own words.
-const AUDIT_LATER = '记忆候选、已启用记忆、后续使用和历史影响暂不能筛选：AI7 还没有从学习材料生成记忆候选或记忆；每条材料被哪些任务使用过，在它的来源链里查看。';
-const AUDIT_WHY_EMPTY = '学习信号是这条材料参与生成的本社审阅偏好版本，使用过的任务是实际参考过这些版本的审阅；AI7 目前还没有生成记忆候选或记忆的功能，这两步因此是空的，并非被隐藏。';
+const AUDIT_LATER = '记忆候选、已启用记忆、后续使用和历史影响暂不能筛选；每条材料的编辑记忆状态和实际使用过的任务，在它的来源链里查看。模型自动归纳尚未提供。';
+const AUDIT_WHY_EMPTY = '学习信号是这条材料参与生成的本社审阅偏好版本，使用过的任务是实际参考过这些版本的审阅；这条材料目前没有编辑撰写的候选或已启用记忆，并非被隐藏。模型自动归纳尚未提供。';
 const AUDIT_STALE = '预览之后，这些学习材料或它们的准入决定有了变化；请重新查看影响，再决定。';
 
 async function main() {
@@ -1199,6 +1199,7 @@ async function main() {
     const unitHoldPath = resolve(runRoot, 'j11-unit-hold.txt');
     const sample1Bytes = await readFile(SAMPLE1_PATH);
     const sample1 = { sha256: createHash('sha256').update(sample1Bytes).digest('hex'), bytes: sample1Bytes.length };
+    let modelFixtureIdentity = FIXTURE_IDENTITY;
     const launch = async ({ forCleanup = false } = {}) => {
       const args = [
         '--disable-background-networking', '--disable-component-update', '--disable-default-apps', '--disable-domain-reliability',
@@ -1211,7 +1212,7 @@ async function main() {
       if (!forCleanup) {
         // The calibration gate lowered to two Books (Issue #429, EVAL-011a; the Commander's ruling of 2026-10-10): the house offset
         // is proven over 评估旅程丙 and one more Book, with the product's own ten untouched in every other launch.
-        args.push('--j11-picker-path', SAMPLE1_PATH, '--j04-model-adapter', FIXTURE_IDENTITY, '--j10-unit-hold-path', unitHoldPath, '--j11-save-path', draftExportPath,
+        args.push('--j11-picker-path', SAMPLE1_PATH, '--j04-model-adapter', modelFixtureIdentity, '--j10-unit-hold-path', unitHoldPath, '--j11-save-path', draftExportPath,
           '--j11-calibration-min-books', '2');
       }
       requireJourney(!args.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
@@ -3275,6 +3276,78 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-memory-item]')?.textContent.includes('已停用') && document.querySelector('[data-learning-enabled]')?.checked === false`, 'editorial-memory-restart-state');
     const restartedMemory = await renderer.evaluate(`window.ai7.inspectEditorialLearning({signalOffset:0,itemOffset:0}).then(page => ({enabled:page.enabled,excluded:page.excludedBooks.some(book=>book.bookId===${JSON.stringify(createdMemory.bookId)}),history:page.items[0].history.map(version=>version.activation),itemId:page.items[0].current.itemId,usable:page.items[0].usable}))`);
     requireJourney(!restartedMemory.enabled && restartedMemory.excluded && !restartedMemory.usable && restartedMemory.itemId === createdMemory.itemId && JSON.stringify(restartedMemory.history) === JSON.stringify(['active','inactive']), 'editorial-memory-persisted');
+
+    // C0 keeps the /1 proof above. Source setup reuses the already admitted J-04 review fixture unchanged;
+    // development-ci v1 still admits no preference payload, and no model request is made by memory governance.
+    at('editorial-memory-governance');
+    await waitForMemoryControl(`document.querySelector('[data-learning-enabled]')`, 'memory-governance-enable-ready', false);
+    await clickSelector(renderer, '[data-learning-enabled]', 'memory-governance-enable');
+    await waitFor(renderer, `document.querySelector('[data-learning-enabled]')?.checked === true && document.querySelector('[data-learning-enabled]')?.disabled === false`, 'memory-governance-enabled');
+    await close(); modelFixtureIdentity = 'sample1-review-authored'; await launch();
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'memory-governance-source-launch');
+    const memorySourceBook = await importSample1(renderer, '编辑记忆来源旅程', sample1, 'memory-governance-source', true);
+    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'memory-governance-profile-ready');
+    await click(renderer, '审阅并为本图书启用 Revision 2', 'memory-governance-profile-enable');
+    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision === '2'`, 'memory-governance-profile-enabled');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('review')), 'memory-governance-review');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-review"] [data-review-action="new-review"]')`, 'memory-governance-review-ready');
+    await clickSelector(renderer, '[data-review-action="new-review"]', 'memory-governance-review-new');
+    await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open === true`, 'memory-governance-review-sheet');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); sheet.querySelector('input[name="review-category"][value="typos-and-usage"]').click(); sheet.querySelector('input[name="review-scope"][value="whole"]').click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(prepare.disabled)return false; prepare.click();return true; })()`, 'memory-governance-review-prepare');
+    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState === 'prepared'`, 'memory-governance-review-prepared', 120_000);
+    await clickSelector(renderer, '[data-review-action="view-plan"]', 'memory-governance-review-plan');
+    await waitFor(renderer, `document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled === false`, 'memory-governance-review-start-ready');
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'memory-governance-review-start');
+    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState === 'settled'`, 'memory-governance-review-settled', 180_000);
+    const memorySources = await renderer.evaluate(`(async () => { const run=(await window.ai7.inspectReviewWorkspace()).run; const findings=run.findings.filter(finding=>finding.categoryId==='typos-and-usage' && finding.markId!==null).slice(0,2); if(findings.length!==2)return null; for(const finding of findings) await window.ai7.recordChangeSuggestionDecision({manuscriptId:run.manuscript.manuscriptId,branchId:run.manuscript.branchId,windowStartBlockId:finding.blockId,markId:finding.markId,clientDecisionId:crypto.randomUUID(),disposition:'accepted-with-edit',editedText:'合成编辑记忆来源修订',reason:'保留有意的表达节奏'}); const page=await window.ai7.inspectEditorialLearning({signalOffset:0,itemOffset:0}); return {ids:page.signals.filter(signal=>signal.source.bookId===${JSON.stringify(memorySourceBook)} && signal.memoryCandidate?.editorialDimension==='typos-and-usage').map(signal=>signal.signalId),influence:run.influence.length}; })()`);
+    requireJourney(memorySources?.ids?.length === 2 && memorySources.influence === 0, 'memory-governance-real-sources');
+    const openMemory = async (name) => {
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), `${name}-knowledge`);
+      await click(renderer, '社级编辑记忆', `${name}-tab`);
+      await waitFor(renderer, `document.querySelector('[data-memory-candidate-form]') && document.querySelector('[data-learning-enabled]')?.disabled === false`, `${name}-ready`);
+    };
+    const createCandidate = async (title, name) => {
+      await assertRenderer(renderer, `(() => { for(const id of ${JSON.stringify(memorySources.ids)}) { const checkbox=document.querySelector('[data-memory-source="'+id+'"]'); if(!(checkbox instanceof HTMLInputElement)||checkbox.disabled)return false; if(!checkbox.checked)checkbox.click(); }return true; })()`, `${name}-select`);
+      await fill(renderer, '[data-memory-candidate-form] [name="candidate-title"]', title, `${name}-title`);
+      await clickSelector(renderer, '[data-memory-candidate-form] button[type="submit"]', `${name}-create`);
+      await waitFor(renderer, `Array.from(document.querySelectorAll('[data-memory-item]')).some(item=>item.textContent.includes(${JSON.stringify(title)}) && item.textContent.includes('待接受')) && document.querySelector('[data-learning-enabled]')?.disabled === false`, `${name}-proposed`);
+      const itemId = await renderer.evaluate(`window.ai7.inspectEditorialLearning({signalOffset:0,itemOffset:0}).then(page=>page.items.find(item=>item.current.schema==='ai7.global-editorial-memory/2' && item.current.title===${JSON.stringify(title)}).current.itemId)`);
+      await assertRenderer(renderer, `(() => {const item=document.querySelector('[data-memory-item="${itemId}"]');const button=Array.from(item.querySelectorAll('button')).find(button=>button.textContent==='接受记忆');if(!button||button.disabled)return false;button.click();return true;})()`, `${name}-accept`);
+      await waitFor(renderer, `document.querySelector('[data-memory-item="${itemId}"]')?.textContent.includes('已启用') && document.querySelector('[data-learning-enabled]')?.disabled === false`, `${name}-active`);
+      return itemId;
+    };
+    await openMemory('memory-governance-local');
+    const firstGovernedMemory = await createCandidate('合成记忆：保持术语一致。', 'memory-governance-first');
+    const secondGovernedMemory = await createCandidate('合成记忆：保留表达节奏。', 'memory-governance-second');
+    const lineOwners = await renderer.evaluate(`window.ai7.inspectHouseReviewPreference().then(page=>page.current.lines.filter(line=>line.owner?.kind==='editorial-memory').map(line=>line.owner.itemId))`);
+    requireJourney(lineOwners.includes(firstGovernedMemory) && lineOwners.includes(secondGovernedMemory) && new Set(lineOwners).size === lineOwners.length, 'memory-governance-distinct-lines');
+    const governMemory = async (ids, operation, text, effect, name) => {
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('global-agent')), `${name}-global`);
+      await waitFor(renderer, `document.querySelector('[data-global-agent-governance] [data-global-agent-save]')?.disabled === false`, `${name}-ready`);
+      await assertRenderer(renderer, `(() => {for(const id of ${JSON.stringify(ids)}) {const checkbox=document.querySelector('[data-global-agent-item="'+id+'"]');if(!(checkbox instanceof HTMLInputElement))return false;checkbox.click();}return true;})()`, `${name}-targets`);
+      await choose(renderer, '[data-global-agent-operation]', operation, `${name}-operation`);
+      if (operation === 'supervise') await choose(renderer, '[data-global-agent-effect]', effect, `${name}-effect`);
+      await fill(renderer, '[data-global-agent-text]', text, `${name}-text`);
+      await clickSelector(renderer, '[data-global-agent-save]', `${name}-save`);
+      await waitFor(renderer, `document.querySelector('[data-global-agent-save]')?.disabled === false && document.querySelector('[data-global-agent-text]')?.value === ''`, `${name}-saved`);
+    };
+    await governMemory([firstGovernedMemory], 'correct', '合成记忆：统一术语并保留作者节奏。', 'guide', 'memory-governance-correct');
+    await governMemory([firstGovernedMemory, secondGovernedMemory], 'merge', '合成记忆：统一术语，保留节奏。', 'guide', 'memory-governance-merge');
+    const mergedMemoryId = await renderer.evaluate(`window.ai7.inspectGlobalAgent().then(page=>page.items.find(item=>item.kind==='memory' && item.state==='active').itemId)`);
+    requireJourney(mergedMemoryId !== firstGovernedMemory && mergedMemoryId !== secondGovernedMemory, 'memory-governance-merged-owner');
+    await governMemory([mergedMemoryId], 'supervise', '冻结这条合成记忆。', 'freeze', 'memory-governance-freeze');
+    await openMemory('memory-governance-return');
+    const deactivatedMemoryId = await createCandidate('合成记忆：仅供停止使用回归。', 'memory-governance-third');
+    await assertRenderer(renderer, `(() => {const item=document.querySelector('[data-memory-item="${deactivatedMemoryId}"]');const button=Array.from(item.querySelectorAll('button')).find(button=>button.textContent==='停用');if(!button||button.disabled)return false;button.click();return true;})()`, 'memory-governance-deactivate');
+    await waitFor(renderer, `document.querySelector('[data-memory-item="${deactivatedMemoryId}"]')?.textContent.includes('已停用') && document.querySelector('[data-learning-enabled]')?.disabled === false`, 'memory-governance-inactive');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'memory-governance-leave');
+    await openMemory('memory-governance-reopen');
+    await waitFor(renderer, `document.querySelector('[data-memory-item="${mergedMemoryId}"]')?.textContent.includes('已冻结') && document.querySelector('[data-memory-item="${deactivatedMemoryId}"]')?.textContent.includes('已停用')`, 'memory-governance-reopened-state');
+    await close(); await launch();
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'memory-governance-restart');
+    await openMemory('memory-governance-restarted');
+    const governedRestart = await renderer.evaluate(`window.ai7.inspectEditorialLearning({signalOffset:0,itemOffset:0}).then(page=>({frozen:page.items.find(item=>item.current.itemId===${JSON.stringify(mergedMemoryId)})?.current.state,inactive:page.items.find(item=>item.current.itemId===${JSON.stringify(deactivatedMemoryId)})?.current.state,legacy:page.items.find(item=>item.current.itemId===${JSON.stringify(createdMemory.itemId)})?.history.map(version=>version.activation)}))`);
+    requireJourney(governedRestart.frozen === 'frozen' && governedRestart.inactive === 'inactive' && JSON.stringify(governedRestart.legacy) === JSON.stringify(['active','inactive']), 'memory-governance-restart-persisted');
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');

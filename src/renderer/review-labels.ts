@@ -533,8 +533,8 @@ export function reviewInfluenceLine(entry: { readonly categoryLabel: string; rea
 }
 
 /** One material behind a version, by its Book and kind; one 停止今后使用 since says so, and when. */
-export function reviewInfluenceMaterialLine(material: { readonly bookTitle: string; readonly withdrawnAt: string | null }, kindLabel: string, instant: (iso: string) => string): string {
-  return `《${material.bookTitle}》 · ${kindLabel}${material.withdrawnAt === null ? '' : ` · ${instant(material.withdrawnAt)} 已停止今后使用`}`;
+export function reviewInfluenceMaterialLine(material: { readonly bookTitle: string; readonly withdrawnAt: string | null; readonly provenanceAvailability?: 'available' | 'unavailable' }, kindLabel: string, instant: (iso: string) => string): string {
+  return `《${material.bookTitle}》 · ${kindLabel}${material.provenanceAvailability === 'unavailable' ? ' · 原社记忆来源在本社不可用' : ''}${material.withdrawnAt === null ? '' : ` · ${instant(material.withdrawnAt)} 已停止今后使用`}`;
 }
 
 export function reviewInfluenceMore(count: number): string {

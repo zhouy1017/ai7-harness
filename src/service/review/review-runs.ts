@@ -3786,7 +3786,7 @@ export class ReviewRunStore {
       if (category.task === null || !this.#preferenceConsumed(category.task.taskIntentId)) return [];
       let influence: ReturnType<HouseReviewPreferenceLedger['pinnedInfluence']>;
       try {
-        influence = this.#influenceOf(category);
+        influence = new HouseReviewPreferenceLedger(this.#db).pinnedInfluence(category.task.taskIntentId, { historical: true });
       } catch (error) {
         if (!(error instanceof LearningEligibilityError)) throw error;
         return [];
@@ -3803,6 +3803,7 @@ export class ReviewRunStore {
           bookTitle: source.bookTitle,
           materialKey: source.materialKey,
           kind: materialKindOf(source.materialKey),
+          ...(source.provenanceAvailability === undefined ? {} : { provenanceAvailability: source.provenanceAvailability }),
           withdrawnAt: source.withdrawnAt,
         })),
         moreMaterials: Math.max(0, influence.sources.length - MAX_REVIEW_RUN_INFLUENCE_MATERIALS),

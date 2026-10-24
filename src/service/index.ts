@@ -875,6 +875,8 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.changeEditorialLearning(request.input) };
     case 'createEditorialMemory':
       return { id: request.id, ok: true, op: request.op, result: store.createEditorialMemory(request.input) };
+    case 'acceptEditorialMemory':
+      return { id: request.id, ok: true, op: request.op, result: store.acceptEditorialMemory(request.input) };
     case 'deactivateEditorialMemory':
       return { id: request.id, ok: true, op: request.op, result: store.deactivateEditorialMemory(request.input) };
     case 'inspectHouseReviewPreference':

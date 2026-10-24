@@ -673,6 +673,7 @@ export function learningRemediationPreview(
   standing: (materialKey: string) => null | {
     readonly candidate: Pick<LearningMaterialCandidate, 'kind' | 'originLabel'>;
     readonly projection: Pick<LearningMaterialProjection, 'digest' | 'decisions' | 'state' | 'decision'>;
+    readonly automaticEligibility?: 'house';
   },
   reach: LearningRemediationReach = NO_REACH,
 ): LearningRemediationPreviewProjection {
@@ -693,7 +694,9 @@ export function learningRemediationPreview(
       continue;
     }
     const { candidate, projection } = found;
-    const now = learningAuditStanding(projection);
+    const now = projection.digest === item.materialDigest && projection.decisions === item.expectedDecisions &&
+      projection.state === 'pending' && projection.decisions === 0 && projection.decision === null && found.automaticEligibility === 'house'
+      ? 'house' : learningAuditStanding(projection);
     const reason = projection.digest !== item.materialDigest || projection.decisions !== item.expectedDecisions ? 'changed'
       : now !== 'book' && now !== 'house' ? 'not-included'
         : scope !== null && now !== scope ? 'different-scope'

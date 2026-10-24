@@ -35,7 +35,7 @@ export function mountGlobalAgent(options: {
   form.dataset['globalAgentGovernance'] = 'form';
   const operation = el('select');
   operation.dataset['globalAgentOperation'] = 'select';
-  for (const [value, label] of [['create', '新建记忆'], ['merge', '合并'], ['correct', '修正'], ['deactivate', '停用'], ['supervise', '记录学习监督指令']]) {
+  for (const [value, label] of [['create', '新建偏好'], ['merge', '合并'], ['correct', '修正'], ['deactivate', '停用'], ['supervise', '记录学习监督指令']]) {
     const option = el('option', label); option.value = value!; operation.append(option);
   }
   const scope = el('select');
@@ -230,7 +230,7 @@ export function mountGlobalAgent(options: {
       const checkbox = el('input'); checkbox.type = 'checkbox';
       checkbox.dataset['globalAgentItem'] = item.itemId;
       checkbox.addEventListener('change', () => { if (checkbox.checked) selected.set(item.itemId, item); else selected.delete(item.itemId); });
-      const row = field(`${item.text} · ${item.state === 'active' ? '已启用' : item.state === 'frozen' ? '已冻结' : '已停用'}`, checkbox);
+      const row = field(`${item.text} · ${item.state === 'proposed' ? '待接受' : item.state === 'active' ? '已启用' : item.state === 'frozen' ? '已冻结' : '已停用'}`, checkbox);
       list.append(row);
     }
     category.replaceChildren(...projection.categories.map((entry) => { const option = el('option', entry.label); option.value = entry.categoryId; return option; }));
@@ -253,6 +253,7 @@ export function mountGlobalAgent(options: {
     event.preventDefault();
     if (busy || current === null || !root.isConnected) return;
     const input: RecordLearningSupervisionInput = {
+      ...([...selected.values()].some((item) => item.kind === 'memory') ? { actionId: crypto.randomUUID() } : {}),
       operation: operation.value as RecordLearningSupervisionInput['operation'],
       targets: [...selected.values()].map(({ itemId, revisionId }) => ({ itemId, revisionId })),
       scope: scope.value === 'book' ? { kind: 'book', bookId: book.value } : scope.value === 'category'
