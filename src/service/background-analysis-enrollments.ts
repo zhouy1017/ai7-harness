@@ -868,6 +868,8 @@ export function backgroundQuietReason(quietMs: number): string {
   return `稿件刚改动过；停下 ${Math.round(quietMs / 1000)} 秒后开始。`;
 }
 export const BACKGROUND_PLACE_BUSY = '运行名额已满；有空位后再开始。';
+/** The lane waits for the network as well as for quiet (Issue #1089): nothing starts offline, and ②A says so. */
+export const BACKGROUND_OFFLINE = '现在没有联网；联网后再开始。';
 export function backgroundShareFullReason(share: number): string {
   return `后台分析最多同时占用 ${share} 个运行名额，总给你留一个；有空位后再开始。`;
 }
