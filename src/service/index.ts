@@ -522,6 +522,20 @@ async function dispatch(
         result: store.inspectBaselineAnalysis(request.input.bookId, analysisProgress),
       };
     }
+    // 空闲时处理 (Issue #1089, F-17a; ADR 0095 §3): the kind's own Run Authorization recorded to start when idle — a ledger
+    // Task's queued on the governor, a Review Run's approval driven once AI7 is idle. The answer is the plan.
+    case 'startTaskWhenIdle': {
+      background.nudge();
+      const started = store.startTaskWhenIdle(request.input);
+      if (started?.dispatchRunRecordId != null) analysisExecution.admitOrQueue(started.dispatchRunRecordId, started.ledger);
+      if (request.input.kind === 'review-run') {
+        const reviewRunId = request.input.ref;
+        // A refused admission leaves the approval waiting as recorded; 取消任务 still ends it.
+        void analysisExecution.whenBackgroundIdle().then(() => store.admitIdleReview(reviewRunId, () => driveReviewRun(reviewRuns, reviewRunId))).catch(() => {});
+      }
+      return { id: request.id, ok: true, op: request.op,
+        result: await store.inspectTaskPlan({ bookId: request.input.bookId, kind: request.input.kind, ref: request.input.ref }, analysisProgress) };
+    }
     // 联网后开始任务 for every other kind with a plan (Issue #760, S74c; AUTH-004, OFF-005): the kind's own Run Authorization is
     // recorded waiting, and Reconnect Preflight looks at once — so a start made just as the network came back begins now. The
     // answer is the plan, read as the drawer reads it.
@@ -1102,10 +1116,10 @@ async function dispatch(
     // 后台分析登记 (Issue #95, plan slice S39; ADR 0048): read with what it would do now; `登记` and `撤销登记` are the editor's
     // two decisions, and the dispatcher looks at once after either, so a backfill starts without waiting for the next tick.
     case 'inspectBackgroundAnalysisEnrollment':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectBackgroundAnalysisEnrollment(request.input.bookId, background.runtime()) };
+      return { id: request.id, ok: true, op: request.op, result: store.inspectBackgroundAnalysisEnrollment(request.input.bookId, background.runtime(), request.input.kind) };
     case 'enrollBackgroundAnalysis': {
       const result = store.enrollBackgroundAnalysis(request.input.bookId, request.input.disclosureDigest, request.input.startingPoint,
-        request.input.scope, request.input.ceilingTokens, background.runtime());
+        request.input.scope, request.input.ceilingTokens, background.runtime(), request.input.kind);
       background.nudge();
       return { id: request.id, ok: true, op: request.op, result };
     }
@@ -2360,7 +2374,7 @@ async function run(): Promise<void> {
     // waits in a queue of its own — and after a restart it starts only what an Enrollment in force matches anew.
     const ownedJobs = jobs;
     background = new BackgroundAnalysisDispatcherClass({
-      store: openStore, execution: owner, launchPolicy, editorWorkBusy: () => ownedJobs.busy,
+      store: openStore, execution: owner, launchPolicy, editorWorkBusy: () => ownedJobs.busy, dispatchReady: () => reading() !== 'offline',
       // J-09's pace (Issue #95, S39): its quiet period, and a look four times as often, never less than a quarter second.
       ...(backgroundQuietMs === undefined ? {} : { quietMs: backgroundQuietMs, tickMs: Math.max(250, Math.round(backgroundQuietMs / 4)) }),
     });
@@ -2402,6 +2416,7 @@ async function run(): Promise<void> {
         stop();
         throw new Error('E2E interruption before foreground boundary response.');
       }
+      if (response.ok && (request.op === 'flushJournalEdit' || request.op.startsWith('authorize') || request.op.startsWith('prepare'))) background.nudge();
       await writeResponse(response);
       if (request.op === 'flushJournalEdit' && response.ok && recoveryControl === 'interrupt-after-journal-ack') {
         stop();

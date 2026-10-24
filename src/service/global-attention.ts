@@ -123,6 +123,8 @@ export interface AnalysisTaskAttentionReading {
   readonly run: null | {
     readonly runRecordId: string;
     readonly state: BaselineAnalysisRunState;
+    readonly waitingIdle?: boolean;
+    readonly idleYield?: boolean;
     /** When the Run's last recorded state was recorded. */
     readonly stateAt: string;
     /** When the Run was recorded. */
@@ -222,6 +224,7 @@ export interface ReviewRunAttentionReading {
   readonly createdAt: string;
   readonly authorizedAt: string | null;
   readonly state: ReviewRunState;
+  readonly waitingIdle?: boolean;
   readonly canContinue: boolean;
   readonly categories: ReadonlyArray<{
     readonly categoryId: string;
@@ -524,7 +527,7 @@ function analysisTaskItem(reading: AnalysisTaskAttentionReading, waitingFor: Wai
   // 等待运行名额 (Issue #49, S14; CONC-007): a start waiting on the governor for a place — 运行中与已暂停's, never an
   // exception, and never a ceiling's or an account limit's.
   if (run.state === 'authorized') {
-    return item('active', 'analysis-waiting-capacity', { itemId, blocked: false, at: run.stateAt, book, object, nextStep: 'view-run', target, technical });
+    return item('active', run.waitingIdle === true ? 'analysis-waiting-idle' : 'analysis-waiting-capacity', { itemId, blocked: false, at: run.stateAt, book, object, nextStep: 'view-run', target, technical });
   }
   if (ACTIVE_RUN_STATES.has(run.state)) {
     if (run.progress !== null) {
@@ -590,7 +593,7 @@ function analysisTaskItem(reading: AnalysisTaskAttentionReading, waitingFor: Wai
       }
       // 运行中与已暂停 (Issue #422, S76b): a paused Run, and one AI7 stopped under, wait for the editor's 续行 or 取消任务; one
       // answered waits its turn in the slot to go on (S76d).
-      const state = run.state === 'paused' ? 'analysis-paused' : run.state === 'resumable' ? 'analysis-resumable' : 'analysis-queued';
+      const state = run.idleYield === true ? 'analysis-yielded' : run.state === 'paused' ? 'analysis-paused' : run.state === 'resumable' ? 'analysis-resumable' : 'analysis-queued';
       return item('active', state, { itemId, blocked: false, at: run.stateAt, book, object, nextStep: 'view-run', target, technical });
     }
     default:
@@ -675,8 +678,8 @@ function reviewRunItem(reading: ReviewRunAttentionReading, waitingFor: WaitingFo
   // A Run waiting to start once online (Issue #760, S74c; ATTN-004): 运行中与已暂停's, in the words of what it waits for, exactly
   // as a waiting baseline Run reads; only a missing model connection asks the editor to act.
   if (reading.state === 'waiting') {
-    return item('active', WAITING_STATES[waitingFor], {
-      itemId, blocked: waitingFor === 'connection', at: started, book, object, nextStep: 'view-review', target, technical: reviewTechnical(reading, started),
+    return item('active', reading.waitingIdle === true ? 'analysis-waiting-idle' : WAITING_STATES[waitingFor], {
+      itemId, blocked: reading.waitingIdle !== true && waitingFor === 'connection', at: started, book, object, nextStep: 'view-review', target, technical: reviewTechnical(reading, started),
     });
   }
   // 需要重新确认计划 (OFF-008): its plan moved while it waited, so it never started — the editor's plan decision, as a baseline's is.

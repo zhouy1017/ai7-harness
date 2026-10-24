@@ -3094,6 +3094,31 @@ function registerRendererHandlers(
         });
       }),
   );
+  // 空闲时处理 (Issue #1089): the same exact authorization as 开始任务 within the route's Book, started when AI7 is idle.
+  ipcMain.handle(
+    IPC_CHANNELS.startTaskWhenIdle,
+    (event, input: Omit<ServiceOperationMap['startTaskWhenIdle']['input'], 'bookId'>) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('startTaskWhenIdle', {
+            kind: input.kind,
+            ref: input.ref,
+            planEnvelopeDigest: input.planEnvelopeDigest,
+            planDigests: input.planDigests,
+            bookId: route.bookId,
+          });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          if (result.bookId !== route.bookId || result.kind !== input.kind || result.ref !== input.ref) {
+            throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '空闲时处理的结果不属于当前图书工作台。');
+          }
+          return result;
+        });
+      }),
+  );
   ipcMain.handle(
     IPC_CHANNELS.cancelWaitingTask,
     (event, input: Omit<ServiceOperationMap['cancelWaitingTask']['input'], 'bookId'>) =>
@@ -3331,14 +3356,14 @@ function registerRendererHandlers(
   );
   // 后台分析登记 (Issue #95, S39) is the route's Book's: read, `登记` and `撤销登记`, the two decisions serialized with every other
   // effect of this window's authority.
-  ipcMain.handle(IPC_CHANNELS.inspectBackgroundAnalysisEnrollment, (event) =>
+  ipcMain.handle(IPC_CHANNELS.inspectBackgroundAnalysisEnrollment, (event, input?: { kind?: string }) =>
     envelope(async () => {
       const owned = requireSender(event);
       requireAuthority();
       const route = requireCurrentBookRoute(owned);
       const routeGeneration = owned.routeGeneration;
       const routeRequestSequence = owned.routeRequestSequence;
-      const result = await service.call('inspectBackgroundAnalysisEnrollment', { bookId: route.bookId });
+      const result = await service.call('inspectBackgroundAnalysisEnrollment', { bookId: route.bookId, ...(input?.kind === undefined ? {} : { kind: input.kind }) });
       requireCurrentRouteReadEpoch(owned, routeGeneration, routeRequestSequence);
       if (result.bookId !== route.bookId) {
         throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '后台分析登记不属于当前图书工作台。');
@@ -3356,6 +3381,7 @@ function registerRendererHandlers(
           const route = requireCurrentBookRoute(owned);
           const routeGeneration = owned.routeGeneration;
           const result = await service.call('enrollBackgroundAnalysis', {
+            ...(input.kind === undefined ? {} : { kind: input.kind }),
             disclosureDigest: input.disclosureDigest,
             startingPoint: input.startingPoint,
             // The scope and the required tokens ceiling (Issue #864), copied field by field.
@@ -6514,7 +6540,7 @@ export async function runApplication(): Promise<void> {
     await requireSameCanonicalDataDirectory(shellRoot, app.getPath('userData'));
     // The Data Version (数据版本) and the store's schema revision (数据库修订) apart (Issue #967): the unit suite holds each to its owner.
     const crashFacts = () => ({
-      appVersion: softwareVersion, buildIdentity, dataVersion: buildIdentity.dataVersion, schemaRevision: 88, protocol: SERVICE_PROTOCOL_VERSION,
+      appVersion: softwareVersion, buildIdentity, dataVersion: buildIdentity.dataVersion, schemaRevision: 89, protocol: SERVICE_PROTOCOL_VERSION,
       platform: process.platform, arch: process.arch, electron: process.versions.electron ?? 'unknown',
       uptimeSeconds: process.uptime(),
     });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { BackgroundAnalysisDispatcher, type BackgroundAnalysisDispatcherDependencies } from '../../src/service/background-analysis.js';
-import { BACKGROUND_CHECKPOINT_PREEMPTED, BACKGROUND_RECOVERY_PENDING, type BackgroundAnalysisDecision } from '../../src/service/background-analysis-enrollments.js';
+import { BACKGROUND_CHECKPOINT_PREEMPTED, BACKGROUND_OFFLINE, BACKGROUND_RECOVERY_PENDING, type BackgroundAnalysisDecision } from '../../src/service/background-analysis-enrollments.js';
 import type { LaunchPolicyProjection } from '../../src/shared/protocol.js';
 
 // Unit suite for the 后台分析登记 dispatcher (Issue #95, plan slice S39; #713 review): it asks the store, prepares a Task of its
@@ -19,6 +19,8 @@ interface Calls {
   notes: string[];
   started: string[];
   admitted: string[];
+  /** What each pass told the governor about the idle lane (Issue #1089). */
+  lane: boolean[];
 }
 
 interface Options {
@@ -29,15 +31,18 @@ interface Options {
   guard?: (step: number) => string | null;
   /** The step whose advance throws. */
   throwAt?: number;
+  /** The application-wide quiet fact the store reports (Issue #1089); absent, the store says nothing. */
+  idle?: boolean;
 }
 
 function harness(decisions: Readonly<Record<string, BackgroundAnalysisDecision>>, options: Options = {}) {
-  const calls: Calls = { decided: [], prepared: [], advanced: 0, cancelled: [], guards: [], notes: [], started: [], admitted: [] };
+  const calls: Calls = { decided: [], prepared: [], advanced: 0, cancelled: [], guards: [], notes: [], started: [], admitted: [], lane: [] };
   const remaining = new Map<string, number>();
   let guardStep = 0;
   const projection = (bookId: string) => ({ taskIntent: { taskIntentId: `task-${bookId}` }, planEnvelope: { digest: `digest-${bookId}` } });
   const store = {
     replacementFrozen: () => options.frozen ?? false,
+    ...(options.idle === undefined ? {} : { backgroundIdleFacts: () => ({ sinceLastEditMs: 0, editorJobRunning: false, idle: options.idle }) }),
     backgroundAnalysisBooks: () => Object.keys(decisions),
     backgroundAnalysisDecisionFor: (bookId: string) => {
       calls.decided.push(bookId);
@@ -83,6 +88,7 @@ function harness(decisions: Readonly<Record<string, BackgroundAnalysisDecision>>
     full: options.busy ?? false,
     routeExecutable: true,
     capacity: 2,
+    setBackgroundIdle: (idle: boolean) => { calls.lane.push(idle); },
     admitOrQueue: (runRecordId: string, _ledger?: unknown, origin?: string) => {
       // The dispatcher's start always asks for the background place (Issue #864).
       calls.admitted.push(origin === 'background' ? runRecordId : `${runRecordId}:${origin ?? 'foreground'}`);
@@ -209,5 +215,21 @@ describe('the 后台分析登记 dispatcher', () => {
     dispatcher.nudge();
     await dispatcher.settled();
     expect(calls.admitted).toEqual(['run-b']);
+  });
+
+  it('keeps looking at every Book while the editor works, so ②A says why, and starts nothing until quiet (#1089)', async () => {
+    const { calls, store, execution } = harness({ a: START, b: { kind: 'wait', reason: 'quiet' } }, { idle: false });
+    const dispatcher = new BackgroundAnalysisDispatcher({ store, execution, launchPolicy: POLICY });
+    dispatcher.nudge();
+    await dispatcher.settled();
+    expect([calls.lane, calls.decided, calls.prepared, calls.started, calls.notes]).toEqual([[false], ['a', 'b'], [], [], []]);
+  });
+
+  it('tells the governor the lane waits offline, and says so on a Book it would otherwise start (#1089)', async () => {
+    const { calls, store, execution } = harness({ a: START }, { idle: true });
+    const dispatcher = new BackgroundAnalysisDispatcher({ store, execution, launchPolicy: POLICY, dispatchReady: () => false });
+    dispatcher.nudge();
+    await dispatcher.settled();
+    expect([calls.lane, calls.decided, calls.prepared, calls.started, calls.notes]).toEqual([[false], ['a'], [], [], [`a:${BACKGROUND_OFFLINE}`]]);
   });
 });

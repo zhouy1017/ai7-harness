@@ -27,7 +27,7 @@ import {
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
-// Service-integration suite (L2) for Issue #864 (1.0.0 decision 12) over 后台分析登记 (S39): the real store on a temporary Agent
+// Service-integration suite (L2) for Issue #864 (1.0.0 decision 12) over 后台处理登记 (S39): the real store on a temporary Agent
 // Data Root, exact `sample1` imported through the supported path, the J-04 deterministic route, and no Provider, socket or
 // credential value. 登记 requires a tokens ceiling; a Series or all-Books Enrollment schedules per Book in the scope's order, its
 // ceiling split equally with the remainder to the first Book, and the dispatcher's look names the Books it skipped; 暂停 holds
@@ -149,7 +149,7 @@ function enroll(
   return store.enrollBackgroundAnalysis(bookId, shown.offer.disclosureDigest!, startingPoint, scope, ceilingTokens, runtime());
 }
 
-describe('后台分析登记 with a mandatory ceiling, Series and all-Books scopes (Issue #864)', () => {
+describe('后台处理登记 with a mandatory ceiling, Series and all-Books scopes (Issue #864)', () => {
   it('refuses 登记 without a tokens ceiling, and an Enrollment binds the ceiling it was given as its budget', async () => {
     const store = await openWithRoute();
     try {
@@ -192,7 +192,7 @@ describe('后台分析登记 with a mandatory ceiling, Series and all-Books scop
       expect(after.planVersion!.materialInputs.runBudgetCeiling).toEqual({ kind: 'tokens', maxTotalTokens: 777_777 });
       expect(after.taskIntent!.preparedByEnrollmentVersionId).not.toBeNull();
       const lines = after.taskOutcome!.report!.background!;
-      expect(lines.slice(0, 2)).toEqual(['由后台分析登记开始 · 按第 1 版登记', '范围：《L2 后台运行报告》这一本书；登记上限 777777 tokens']);
+      expect(lines.slice(0, 2)).toEqual(['由后台处理登记开始 · 按第 1 版登记', '范围：《L2 后台运行报告》这一本书；登记上限 777777 tokens']);
       expect(lines[2]).toMatch(/^没有达到上限：用了 \d+ tokens，这次运行的上限 777777 tokens$/u);
       // The report's own record and digest are what they were: the lines are read beside it.
       expect(Object.keys(after.taskOutcome!.report!)).toContain('reportDigest');

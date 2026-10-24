@@ -353,6 +353,7 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   series_retrieval_exclusions: 'house',
   // 后台分析登记 (Issue #95, S39; ADR 0048): a standing decision of this house's editor. A Book merged in never brings one — no
   // merge makes AI7 start anything by itself — while its Runs keep naming the enrollment version they were started under.
+  // Per-kind enrollment stays this house's standing authority; importing a Book grants none.
   background_analysis_enrollments: 'house',
   background_analysis_enrollment_versions: 'house',
   background_analysis_enrollment_states: 'house',

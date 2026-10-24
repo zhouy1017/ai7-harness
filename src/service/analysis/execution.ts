@@ -55,7 +55,7 @@ import {
   type AssuranceSamplingParseFailureCode,
 } from './assurance-sampling-contract.js';
 import { canonicalRecord, sha256Hex } from './canonical.js';
-import { assuranceContractMoved, CARRIED_STAGES, OUTCOME_UNKNOWN_NO_RESUME, type BaselineAnalysisStore, type CarriedStages, type ExecutionBindingRecord, type ExecutionPlanFacts, type PredecessorUnitResult, type RunProgress, type RunProgressStage, type UnitCheckpoint, type UnitResultRecord } from './baseline-analysis-store.js';
+import { assuranceContractMoved, CARRIED_STAGES, OUTCOME_UNKNOWN_NO_RESUME, RUN_IDLE_YIELD_LABEL, type BaselineAnalysisStore, type CarriedStages, type ExecutionBindingRecord, type ExecutionPlanFacts, type PredecessorUnitResult, type RunProgress, type RunProgressStage, type UnitCheckpoint, type UnitResultRecord } from './baseline-analysis-store.js';
 import type { BaselineUnitResult } from './contract.js';
 import type { ManifestBlockInput } from './coverage-manifest.js';
 import { ExecutionAdmissionError } from './execution-error.js';
@@ -156,8 +156,8 @@ function materialInterruptionMessage(refusal: MaterialGuardRefusal): string {
  */
 export const EXECUTION_RUN_CAPACITY = 2;
 /** v26 supplies the configured default; predecessors retain their existing share. */
-export function executionBackgroundShare(policy: LaunchPolicyProjection, capacity: number): number {
-  return policy.providerProcessing.execution?.backgroundShare.default ?? backgroundAnalysisShare(capacity);
+export function executionBackgroundShare(policy: LaunchPolicyProjection | undefined, capacity: number): number {
+  return policy?.providerProcessing.execution?.backgroundShare.default ?? backgroundAnalysisShare(capacity);
 }
 
 /** Predecessors keep the single safe retry; policy projection cannot widen the declared adaptation. */
@@ -280,6 +280,7 @@ interface ActiveRun {
   cancelRequested: boolean;
   /** 暂停 (Issue #422, S76b): read between units like a cancellation; the Run then waits, keeping what it read. */
   pauseRequested: boolean;
+  idleYieldRequested: boolean;
   /**
    * Whether AI7 stopping under this Run leaves it 可续行 rather than ending it (CONT-014): a baseline analysis Run, whose
    * settled units are kept as they settle. A review category's Run keeps ending 已中断, which its drive loop reads.
@@ -521,6 +522,43 @@ export class BaselineAnalysisExecutionOwner {
    */
   readonly #queued: Array<{ runRecordId: string; ledger: BaselineAnalysisStore }> = [];
   #disposed = false;
+  readonly #stateWaiters = new Set<() => void>();
+  #backgroundIdle = true;
+  #idleConfirmed = false;
+  #foregroundPlaceWaiters = 0;
+  readonly #yielded = new Map<string, BaselineAnalysisStore>();
+
+  /** The existing dispatcher supplies application facts, never manuscript text. */
+  setBackgroundIdle(idle: boolean): void {
+    this.#backgroundIdle = idle;
+    this.#idleConfirmed = true;
+    // A background Run yields only while every place is taken and an editor-started Run waits for one (#1089; ADR 0095 §3).
+    if (!idle && this.busy && (this.#foregroundPlaceWaiters > 0 || this.#queued.some(({ runRecordId, ledger }) => {
+      const facts = ledger.loadExecutionPlan(runRecordId);
+      return facts.origin !== 'background-analysis-enrollment' && facts.startWhen !== 'idle';
+    }))) {
+      for (const runRecordId of this.#backgroundActive) {
+        const active = this.#active.get(runRecordId);
+        if (active === undefined || active.pauseRequested || active.cancelRequested || active.progress.stage !== 'units') continue;
+        active.ledger.recordRunState(runRecordId, 'pausing', { detail: RUN_IDLE_YIELD_LABEL, idleYield: true });
+        this.#yielded.set(runRecordId, active.ledger);
+        this.pauseRun(runRecordId, active.ledger, 'idle-yield');
+      }
+    }
+    this.#drain();
+    if (idle) {
+      for (const [runRecordId, ledger] of this.#yielded) {
+        const state = ledger.currentRunState(runRecordId);
+        if (this.#active.has(runRecordId)) continue;
+        if (state !== 'paused') { this.#yielded.delete(runRecordId); continue; }
+        if (!this.#placeForRun(runRecordId, ledger)) break;
+        this.#yielded.delete(runRecordId);
+        try { this.admitAndDispatch(runRecordId, ledger, { resume: true }); } catch { /* Existing continuation guards retain the pause. */ }
+      }
+    }
+    this.#changed();
+  }
+
   /**
    * Stopped Runs whose cancellation waits for a place to finish them (Issue #422, S76b), each with what it reads
    * meanwhile: stopped between two ranges, with what it kept.
@@ -553,6 +591,17 @@ export class BaselineAnalysisExecutionOwner {
       throw new ExecutionAdmissionError('EXECUTION_CAPACITY_INVALID', '等待运行的名额设置无效。');
     }
     this.#waitingCapacity = waitingCapacity;
+  }
+
+  async whenBackgroundIdle(): Promise<void> {
+    while (!this.#disposed && (!this.#idleConfirmed || !this.#backgroundIdle)) {
+      await new Promise<void>((resolve) => this.#stateWaiters.add(resolve));
+    }
+  }
+
+  #changed(): void {
+    for (const resolve of this.#stateWaiters) resolve();
+    this.#stateWaiters.clear();
   }
 
   /** The live runtime this launch carries: developer-live's or ordinary production's; `null` under development-ci. */
@@ -606,12 +655,22 @@ export class BaselineAnalysisExecutionOwner {
   /** Starts and continuations consume the same origin's share; a waiting Run owns no place (Issue #864 revision 5). */
   #placeForOrigin(origin: ExecutionPlanFacts['origin']): boolean {
     return origin === 'background-analysis-enrollment'
-      ? !this.full && this.#occupiedPlaces().filter((run) => this.#backgroundActive.has(run.runRecordId)).length < executionBackgroundShare(this.#policy(), this.#capacity)
+      ? this.#backgroundIdle && !this.full && this.#occupiedPlaces().filter((run) => this.#backgroundActive.has(run.runRecordId)).length < executionBackgroundShare(this.#policy(), this.#capacity)
       : !this.busy;
   }
 
   #placeForRun(runRecordId: string, ledger: BaselineAnalysisStore): boolean {
-    return this.#placeForOrigin(ledger.loadExecutionPlan(runRecordId).origin);
+    const facts = ledger.loadExecutionPlan(runRecordId);
+    return facts.startWhen === 'idle'
+      ? this.#idleConfirmed && this.#placeForOrigin('background-analysis-enrollment')
+      : this.#placeForOrigin(facts.origin);
+  }
+
+  #placeForCancellation(runRecordId: string, ledger: BaselineAnalysisStore): boolean {
+    const facts = ledger.loadExecutionPlan(runRecordId);
+    return facts.origin === 'background-analysis-enrollment' || facts.startWhen === 'idle'
+      ? !this.full && this.#occupiedPlaces().filter((run) => this.#backgroundActive.has(run.runRecordId)).length < executionBackgroundShare(this.#policy(), this.#capacity)
+      : !this.busy;
   }
 
   /** Whether nothing runs, waits for a place, or waits to finish its cancellation: no Run will write until another starts. */
@@ -660,7 +719,10 @@ export class BaselineAnalysisExecutionOwner {
       }
     });
     this.#queued.push({ runRecordId, ledger });
-    return 'queued';
+    // An idle-deferred start ahead waits for quiet, not for a place: a start behind it still takes a free one now (#1089).
+    if (!this.#backgroundIdle) this.setBackgroundIdle(false);
+    else this.#drain();
+    return this.#active.has(runRecordId) ? 'admitted' : 'queued';
   }
 
   /**
@@ -816,8 +878,8 @@ export class BaselineAnalysisExecutionOwner {
     const live = this.#requireLaunchOf(ledger);
     const facts = ledger.loadExecutionPlan(runRecordId);
     // The background place takes only a Run a 后台分析登记 started; the editor's take their own (Issue #864).
-    const background = facts.origin === 'background-analysis-enrollment';
-    if (!this.#placeForOrigin(facts.origin)) throw new ExecutionAdmissionError('EXECUTION_BUSY', background
+    const background = facts.origin === 'background-analysis-enrollment' || facts.startWhen === 'idle';
+    if (!this.#placeForRun(runRecordId, ledger) && options.cancel !== true) throw new ExecutionAdmissionError('EXECUTION_BUSY', background
       ? backgroundShareFullReason(executionBackgroundShare(this.#policy(), this.#capacity))
       : `运行名额已满：本实例一次执行 ${this.#capacity} 个运行。`);
     this.#requireTransmittable(facts, live);
@@ -893,6 +955,7 @@ export class BaselineAnalysisExecutionOwner {
       interrupted: false,
       cancelRequested: options.cancel === true,
       pauseRequested: false,
+      idleYieldRequested: false,
       resumableOnInterrupt: ledger.definition.kind === BASELINE_ANALYSIS_KIND,
       done: Promise.resolve(),
     };
@@ -906,6 +969,7 @@ export class BaselineAnalysisExecutionOwner {
         this.#backgroundActive.delete(runRecordId);
       }
       this.#drain();
+      this.#changed();
     });
   }
 
@@ -965,7 +1029,7 @@ export class BaselineAnalysisExecutionOwner {
           this.#pendingCancels.splice(index, 1);
           continue;
         }
-        if (!this.#placeForRun(next.runRecordId, next.ledger)) { index += 1; continue; }
+        if (!this.#placeForCancellation(next.runRecordId, next.ledger)) { index += 1; continue; }
         this.#pendingCancels.splice(index, 1);
         this.admitAndDispatch(next.runRecordId, next.ledger, { resume: true, cancel: true });
       } catch {
@@ -1033,15 +1097,24 @@ export class BaselineAnalysisExecutionOwner {
    * Resolve once the governor has a place (Issue #49, S14): a Review Run's next category waits for one, never for every
    * other Book's Run to end. A queued start admitted as a place frees takes it first, and this waits on.
    */
-  async whenPlaceFree(): Promise<void> {
-    while (this.busy) {
-      await Promise.race([...this.#active.values()].map((active) => active.done));
-    }
+  async whenPlaceFree(origin: 'foreground' | 'background' = 'foreground'): Promise<void> {
+    if (origin === 'foreground') this.#foregroundPlaceWaiters += 1;
+    try {
+      if (!this.#backgroundIdle) this.setBackgroundIdle(false);
+      while (this.busy && !this.#disposed) {
+        await Promise.race([...this.#active.values()].map((active) => active.done));
+      }
+    } finally { if (origin === 'foreground') this.#foregroundPlaceWaiters -= 1; }
   }
 
   /** Resolve once this Run no longer executes (Issue #49, S14): a Review Run's category is waited for alone. */
-  whenDone(runRecordId: string): Promise<void> {
-    return this.#active.get(runRecordId)?.done ?? Promise.resolve();
+  async whenDone(runRecordId: string): Promise<void> {
+    while (!this.#disposed) {
+      const active = this.#active.get(runRecordId);
+      if (active !== undefined) { await active.done; continue; }
+      if (!this.#queued.some((entry) => entry.runRecordId === runRecordId) && !this.#yielded.has(runRecordId)) return;
+      await new Promise<void>((resolve) => this.#stateWaiters.add(resolve));
+    }
   }
 
   /**
@@ -1052,6 +1125,8 @@ export class BaselineAnalysisExecutionOwner {
    * settled here at once.
    */
   cancelRun(runRecordId: string, ledger: BaselineAnalysisStore = this.#deps.ledger): 'stopping' | 'settled' {
+    this.#yielded.delete(runRecordId);
+    this.#changed();
     const active = this.#active.get(runRecordId);
     if (active !== undefined) {
       active.cancelRequested = true;
@@ -1082,7 +1157,7 @@ export class BaselineAnalysisExecutionOwner {
     // AI7 is closing: the Run stays 正在取消, and the next start's reconciliation finishes it.
     if (this.#disposed) return 'stopping';
     try {
-      if (this.#placeForRun(runRecordId, ledger)) {
+      if (this.#placeForCancellation(runRecordId, ledger)) {
         this.admitAndDispatch(runRecordId, ledger, { resume: true, cancel: true });
       } else if (!this.#pendingCancels.some((entry) => entry.runRecordId === runRecordId)) {
         this.#pendingCancels.push({ runRecordId, ledger, progress: stoppedRunProgress(ledger.loadExecutionPlan(runRecordId), checkpoints) });
@@ -1099,11 +1174,14 @@ export class BaselineAnalysisExecutionOwner {
    * boundary — a sent aborted request becomes an unknown gap — and records `paused` with what it read kept. A pause recorded for a Run
    * nothing executes has reached its boundary already, and settles here.
    */
-  pauseRun(runRecordId: string, ledger: BaselineAnalysisStore = this.#deps.ledger): 'pausing' | 'settled' {
+  pauseRun(runRecordId: string, ledger: BaselineAnalysisStore = this.#deps.ledger, mode: 'manual' | 'idle-yield' = 'manual'): 'pausing' | 'settled' {
+    if (mode === 'idle-yield' && !this.#backgroundActive.has(runRecordId)) throw new ExecutionAdmissionError('EXECUTION_ORIGIN_INVALID', '只有后台运行可以让位。');
+    if (mode === 'manual') this.#yielded.delete(runRecordId);
     const active = this.#active.get(runRecordId);
     if (active !== undefined) {
       active.pauseRequested = true;
-      active.requestAbort.abort();
+      active.idleYieldRequested = mode === 'idle-yield';
+      if (mode === 'manual') active.requestAbort.abort();
       return 'pausing';
     }
     if (ledger.currentRunState(runRecordId) !== 'pausing') {
@@ -1115,6 +1193,7 @@ export class BaselineAnalysisExecutionOwner {
 
   async dispose(): Promise<void> {
     this.#disposed = true;
+    this.#changed();
     // A queued start stays `authorized` in its ledger, and the next start queues it again in its order.
     this.#queued.length = 0;
     const running = [...this.#active.values()];
@@ -1578,7 +1657,7 @@ export class BaselineAnalysisExecutionOwner {
       }
       // 暂停 before the next unit began: the Run waits here, keeping what it had kept (Issue #422, S76b).
       if (active.pauseRequested && !active.cancelRequested) {
-        ledger.recordRunState(facts.runRecordId, 'paused', { detail: pausedDetail(checkpoints.length, submittedUnits.length), unitsSettled: checkpoints.length, unitsTotal: submittedUnits.length });
+        ledger.recordRunState(facts.runRecordId, 'paused', { detail: active.idleYieldRequested ? RUN_IDLE_YIELD_LABEL : pausedDetail(checkpoints.length, submittedUnits.length), ...(active.idleYieldRequested ? { idleYield: true } : {}), unitsSettled: checkpoints.length, unitsTotal: submittedUnits.length });
         return;
       }
       if (!active.cancelRequested) {
@@ -2007,7 +2086,7 @@ export class BaselineAnalysisExecutionOwner {
             searchSnapshotDigest: lastSearch === undefined ? null : researchSnapshotDigest(lastSearch),
             searchState: session.breakerState === 'tripped' || session.unitDisclosure === '联网核查未完成' ? 'incomplete' : captures.searchCalls > 0 ? 'completed' : 'not-searched',
             searchCalls: captures.searchCalls,
-            fetchAllowed: () => !active.cancelRequested && !active.interrupted && !active.pauseRequested && liveInterruption === null && ceilingState() !== 'reached',
+            fetchAllowed: () => !active.cancelRequested && !active.interrupted && (!active.pauseRequested || active.idleYieldRequested) && liveInterruption === null && ceilingState() !== 'reached',
             fetch: async (url) => {
               const got = await session.retain(url);
               return 'failed' in got ? got : retainedPageOf(got) ?? { failed: '取回的页面没有可读的正文。' };
@@ -2435,7 +2514,8 @@ export class BaselineAnalysisExecutionOwner {
         }
         if (stopping) {
           ledger.recordRunState(facts.runRecordId, active.pauseRequested ? 'paused' : 'resumable', {
-            detail: proxyFailure ?? (active.pauseRequested ? pausedDetail(settled, submittedUnits.length) : resumableDetail(settled, submittedUnits.length)),
+            ...(active.idleYieldRequested ? { idleYield: true } : {}),
+            detail: active.idleYieldRequested ? RUN_IDLE_YIELD_LABEL : proxyFailure ?? (active.pauseRequested ? pausedDetail(settled, submittedUnits.length) : resumableDetail(settled, submittedUnits.length)),
             ...(proxyFailure === null ? {} : { connectivityClassification: 'proxy-unreachable', stopReason: 'proxy-unreachable' }),
             unitsSettled: settled,
             unitsTotal: submittedUnits.length,

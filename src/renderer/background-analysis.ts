@@ -21,6 +21,7 @@ import {
   BACKGROUND_ENROLLED_STATUS,
   BACKGROUND_ENROLL_OPEN,
   BACKGROUND_HEADING,
+  BACKGROUND_KIND_LABEL,
   BACKGROUND_HISTORY_SUMMARY,
   BACKGROUND_LOADING,
   BACKGROUND_NOT_GRANTED_LABEL,
@@ -47,7 +48,7 @@ import {
 /**
  * ②A's 后台分析 (Issue #95, plan slice S39; ADR 0048; V2-UX-ANALYSIS-016 to 021): the Book's Background Analysis Enrollment
  * beside its analysis — whether there is one, what it would do now and why, the Runs it started, and the two decisions it
- * offers. `登记后台分析…` opens the disclosure first, consequence before decision, with no starting point chosen for the editor;
+ * offers. `登记后台处理…` opens the disclosure first, consequence before decision, with no starting point chosen for the editor;
  * `撤销登记…` says what revoking keeps. While an Enrollment is in force the block reads again every two seconds, never while the
  * editor is in one of its two forms, and tells the card beside it when a Run it started has begun. A new answer redraws the block
  * with the keyboard focus and every open `<details>` kept where the editor left them (#713 review, P2-6).
@@ -107,6 +108,7 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
   const { root, api } = options;
   root.classList.add('source-card', 'background-analysis');
   root.replaceChildren(el('h3', undefined, BACKGROUND_HEADING), el('p', 'field-note', BACKGROUND_LOADING));
+  let selectedKind = 'baseline-analysis';
   let last: BackgroundAnalysisEnrollmentProjection | null = null;
   let lastJson = '';
   let engaged = false;
@@ -156,7 +158,7 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
 
   const load = async (): Promise<void> => {
     try {
-      const projection = await api.inspectBackgroundAnalysisEnrollment();
+      const projection = await api.inspectBackgroundAnalysisEnrollment({ kind: selectedKind });
       if (!root.isConnected || projection.bookId !== root.dataset['bookId']) return;
       draw(projection);
     } catch (error) {
@@ -196,7 +198,15 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
     const heading = el('div', 'background-analysis-heading');
     const pill = el('span', `status-pill background-analysis-state background-analysis-state-${projection.state}`, projection.stateLabel);
     heading.append(el('h3', undefined, BACKGROUND_HEADING), pill);
-    const nodes: HTMLElement[] = [heading, el('p', 'field-note background-analysis-statement', projection.statement)];
+    const kindChoice = el('select');
+    kindChoice.setAttribute('aria-label', BACKGROUND_KIND_LABEL);
+    for (const offered of projection.kinds ?? []) {
+      const option = el('option', undefined, offered.label + (offered.reason === null ? '' : ` · ${offered.reason}`));
+      option.value = offered.kind; option.disabled = !offered.enabled; option.selected = offered.kind === selectedKind;
+      kindChoice.append(option);
+    }
+    kindChoice.addEventListener('change', () => { selectedKind = kindChoice.value; lastJson = ''; void load(); });
+    const nodes: HTMLElement[] = [heading, kindChoice, el('p', 'field-note background-analysis-statement', projection.statement)];
     if (projection.enrollment !== null) {
       const line = el('p', 'background-analysis-enrollment', backgroundEnrollmentLine(projection.enrollment, localInstantLabel));
       line.dataset['enrollmentVersionId'] = projection.enrollment.enrollmentVersionId;
@@ -300,7 +310,7 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
 
   const submitHold = async (control: HTMLButtonElement, enrollmentId: string, hold: 'pause' | 'resume'): Promise<void> => {
     control.disabled = true;
-    options.setStatus(hold === 'pause' ? '正在暂停后台分析登记…' : '正在续行后台分析登记…', 'busy');
+    options.setStatus(hold === 'pause' ? '正在暂停后台处理登记…' : '正在续行后台处理登记…', 'busy');
     try {
       const projectionAfter = await api.holdBackgroundAnalysisEnrollment({ enrollmentId, hold });
       options.setStatus(hold === 'pause' ? BACKGROUND_PAUSED_STATUS : BACKGROUND_RESUMED_STATUS, 'success');
@@ -309,7 +319,7 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
       root.querySelector<HTMLButtonElement>(`[data-background-action="${hold === 'pause' ? 'resume' : 'pause'}"]`)?.focus();
     } catch (error) {
       control.disabled = false;
-      options.setStatus(options.errorMessage(error, hold === 'pause' ? '无法暂停后台分析登记。' : '无法续行后台分析登记。'), 'error');
+      options.setStatus(options.errorMessage(error, hold === 'pause' ? '无法暂停后台处理登记。' : '无法续行后台处理登记。'), 'error');
     }
   };
 
@@ -420,9 +430,9 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
       const ceilingTokens = ceilingNow();
       if (chosen === null || ceilingTokens === null || offer.disclosureDigest === null) return;
       confirm.disabled = true;
-      options.setStatus('正在登记后台分析…', 'busy');
+      options.setStatus('正在登记后台处理…', 'busy');
       try {
-        const projectionAfter = await api.enrollBackgroundAnalysis({
+        const projectionAfter = await api.enrollBackgroundAnalysis({ kind: selectedKind,
           disclosureDigest: offer.disclosureDigest, startingPoint: chosen, scope: { kind: scope.kind, seriesId: scope.seriesId }, ceilingTokens,
         });
         engaged = false;
@@ -432,7 +442,7 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
         root.querySelector<HTMLButtonElement>('[data-background-action="revoke-open"]')?.focus();
       } catch (error) {
         confirm.disabled = false;
-        options.setStatus(options.errorMessage(error, '无法登记后台分析。'), 'error');
+        options.setStatus(options.errorMessage(error, '无法登记后台处理。'), 'error');
       }
     };
     const buttons = el('div', 'button-row');
@@ -452,7 +462,7 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
     const confirm = action(BACKGROUND_REVOKE_CONFIRM, 'primary', 'revoke-confirm', () => void submit());
     const submit = async (): Promise<void> => {
       confirm.disabled = true;
-      options.setStatus('正在撤销后台分析登记…', 'busy');
+      options.setStatus('正在撤销后台处理登记…', 'busy');
       try {
         const projectionAfter = await api.revokeBackgroundAnalysisEnrollment({ enrollmentId });
         engaged = false;
@@ -462,7 +472,7 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
         root.querySelector<HTMLButtonElement>('[data-background-action="enroll-open"]')?.focus();
       } catch (error) {
         confirm.disabled = false;
-        options.setStatus(options.errorMessage(error, '无法撤销后台分析登记。'), 'error');
+        options.setStatus(options.errorMessage(error, '无法撤销后台处理登记。'), 'error');
       }
     };
     const buttons = el('div', 'button-row');

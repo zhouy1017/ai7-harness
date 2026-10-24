@@ -191,6 +191,10 @@ function activeRunWords(kind: string): { readonly task: string; readonly next: s
 }
 /** A queued Run's own words (Issue #49, S14; CONC-007): what it waits for, and that nothing has begun. */
 export const RUN_QUEUED_LABEL = '等待运行名额' as const;
+/** A start the editor deferred to idle time (Issue #1089; ADR 0095 §3): authorized, holding no place until quiet. */
+export const RUN_WAITING_IDLE_LABEL = '等待空闲' as const;
+/** A background Run AI7 paused at a unit boundary for the editor's waiting Run (Issue #1089); it goes on at the next quiet. */
+export const RUN_IDLE_YIELD_LABEL = '让位给你的任务' as const;
 /** The waiting state's own words (Issue #502, OFF-005): recorded, and nothing has been sent or begun. */
 const CONNECTIVITY_WAIT_DETAIL = '已记录授权；联网并通过重新联网预检后开始。此前不调用模型、不产生用量。' as const;
 
@@ -259,6 +263,8 @@ export const RUN_PAUSING_DETAIL = '编辑暂停了这项任务；正在进行的
 /** What reconciliation records for a Run AI7 stopped under (CONT-014): nothing of it runs, and nothing is sent until 续行. */
 export const RECONCILED_RESUMABLE_DETAIL = 'AI7 上次关闭时这项任务正在运行；已读完的阅读范围都已保存。点「续行」从下一个阅读范围接着读；在此之前不会发送任何内容。' as const;
 export const RECONCILED_PAUSED_DETAIL = 'AI7 上次关闭时这项任务正在暂停；已读完的阅读范围都已保存，任务已暂停。' as const;
+/** A Run left yielded at a restart (Issue #1089; ADR 0034): it no longer goes on by itself at the next quiet. */
+export const RECONCILED_YIELDED_DETAIL = 'AI7 上次关闭时这项任务正让位给你的任务；已读完的阅读范围都已保存，任务已暂停，点「续行」接着处理。' as const;
 /**
  * A start AI7 closed on while it waited for a place (Issue #49 review; ADR 0034): it never began, and a restart starts
  * nothing by itself, so it is blocked before dispatch with why, and the editor starts it again when they choose.
@@ -697,6 +703,7 @@ export interface ExecutionPlanFacts {
    * Who started the Run, as its Run Authorization records it (Issue #864): a Run a 后台分析登记 started is admitted live only
    * under the selected policy's enrolled-background rule.
    */
+  readonly startWhen?: 'now' | 'idle';
   readonly origin: 'standard-direct' | 'default-execution-rule' | 'background-analysis-enrollment';
   readonly checkpoint: ManuscriptCheckpointBinding;
   readonly manifest: CoverageManifestProjection;
@@ -1462,12 +1469,12 @@ export class BaselineAnalysisStore {
       // and one stopping at the editor's word 正在取消 (Issue #422).
       stateLabel: state === 'prepared' ? '计划已冻结 · 待授权'
         : state === 'authorized-blocked' ? (run?.blockedBy === 'plan-moved' ? PLAN_MOVED_LABEL : '已授权 · 派发前阻止')
-          : state === 'queued' ? RUN_QUEUED_LABEL
+          : state === 'queued' ? (authorization?.start_when === 'idle' ? RUN_WAITING_IDLE_LABEL : RUN_QUEUED_LABEL)
           : state === 'waiting' ? RUN_STATE_LABELS['awaiting-connectivity']
             : state === 'cancelled' ? (run !== null && runBegan(run.transitions) ? RUN_CANCELLED_AFTER_START_LABEL : RUN_STATE_LABELS.cancelled)
               : state === 'cancelling' ? RUN_STATE_LABELS.cancelling
                 : state === 'pausing' ? RUN_STATE_LABELS.pausing
-                  : state === 'paused' ? RUN_STATE_LABELS.paused
+                  : state === 'paused' ? (run?.stateLabel ?? RUN_STATE_LABELS.paused)
                     : state === 'resumable' ? (run !== null && this.accountLimitOf(run.runRecordId) !== null ? ACCOUNT_LIMIT_RUN_LABEL
                       : run !== null && this.outcomeUnknownOf(run.runRecordId) !== null ? OUTCOME_UNKNOWN_RUN_LABEL : RUN_STATE_LABELS.resumable)
                       : state === 'awaiting-clarification' ? RUN_STATE_LABELS['awaiting-clarification']
@@ -1515,6 +1522,7 @@ export class BaselineAnalysisStore {
         planEnvelopeDigest: asString(authorization.plan_envelope_sha256),
         planVersionOrdinal: boundVersion?.ordinal ?? null,
         ...authorizationOrigin(authorization),
+        startWhen: authorization.start_when === 'idle' ? 'idle' : 'now',
         authority: asString(authorization.authority) as 'standard-direct-dispatch' | 'record-only-no-dispatch',
         authorizedAt: asString(authorization.authorized_at),
       },
@@ -1700,6 +1708,8 @@ export class BaselineAnalysisStore {
           run: {
             runRecordId,
             state,
+            waitingIdle: state === 'authorized' && this.loadExecutionPlan(runRecordId).startWhen === 'idle',
+            idleYield: (state === 'paused' || state === 'pausing') && this.#idleYielded(runRecordId),
             stateAt: asString(row.last_state_at),
             recordedAt: asString(row.run_recorded_at),
             progress: state === 'admitted' || state === 'executing' || state === 'cancelling' || state === 'pausing' ? progress(runRecordId) : null,
@@ -2670,7 +2680,7 @@ export class BaselineAnalysisStore {
       runRecordId,
       procedure: (parseCanonicalJson(asString(runRecord.canonical_json)) as { procedure?: ProcedureDefinitionPin }).procedure ?? null,
       state: current.state,
-      stateLabel: current.state === 'cancelled' && runBegan(transitions) ? RUN_CANCELLED_AFTER_START_LABEL
+      stateLabel: currentRecord.idleYield === true ? RUN_IDLE_YIELD_LABEL : current.state === 'cancelled' && runBegan(transitions) ? RUN_CANCELLED_AFTER_START_LABEL
         : current.state === 'interrupted' && this.#runStop(runRecordId) !== null ? BUDGET_REACHED_RUN_LABEL
           : current.state === 'resumable' && this.accountLimitOf(runRecordId) !== null ? ACCOUNT_LIMIT_RUN_LABEL
             : current.state === 'resumable' && this.outcomeUnknownOf(runRecordId) !== null ? OUTCOME_UNKNOWN_RUN_LABEL
@@ -4029,7 +4039,7 @@ export class BaselineAnalysisStore {
     bookId: string,
     taskIntentId: string,
     planEnvelopeDigest: string,
-    start: 'now' | 'when-online' = 'now',
+    start: 'now' | 'when-online' | 'idle' = 'now',
     origin: AnalysisAuthorizationOrigin = STANDARD_DIRECT,
   ): { projection: AnalysisProjection; dispatchRunRecordId: string | null } {
     // The baseline rule of the selected Provider Processing admits one kind and one origin, each refused under its own code, as preparation refuses them.
@@ -4079,6 +4089,7 @@ export class BaselineAnalysisStore {
     const authorization = canonicalRecord({
       authorizationId,
       origin: origin.kind,
+      startWhen: start === 'idle' ? 'idle' : 'now',
       planEnvelopeDigest,
       planVersionId: prepared.planVersion.planVersionId,
       planVersionOrdinal: prepared.planVersion.ordinal,
@@ -4092,9 +4103,9 @@ export class BaselineAnalysisStore {
       ...(procedure === null ? {} : { procedure }) });
     transact(this.#db, () => {
       this.#db.prepare(
-        `INSERT INTO analysis_run_authorizations(authorization_id, task_intent_id, plan_envelope_sha256, origin, authority, authorized_at, canonical_json, sha256)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(authorizationId, taskIntentId, planEnvelopeDigest, origin.kind, authority, instant, authorization.json, authorization.digest);
+        `INSERT INTO analysis_run_authorizations(authorization_id, task_intent_id, plan_envelope_sha256, origin, authority, authorized_at, canonical_json, sha256, start_when)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(authorizationId, taskIntentId, planEnvelopeDigest, origin.kind, authority, instant, authorization.json, authorization.digest, start === 'idle' ? 'idle' : 'now');
       this.#db.prepare(
         'INSERT INTO analysis_run_records(run_record_id, task_intent_id, authorization_id, recorded_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?)',
       ).run(runRecordId, taskIntentId, authorizationId, instant, run.json, run.digest);
@@ -4110,7 +4121,7 @@ export class BaselineAnalysisStore {
         this.#insertRunState(runRecordId, 2, 'awaiting-connectivity', { detail: CONNECTIVITY_WAIT_DETAIL }, instant);
       }
     });
-    return { projection: this.inspect(bookId), dispatchRunRecordId: dispatchAllowed && start === 'now' ? runRecordId : null };
+    return { projection: this.inspect(bookId), dispatchRunRecordId: dispatchAllowed && start !== 'when-online' ? runRecordId : null };
   }
 
   // ---- Connectivity Wait (Issue #502, plan slice S74b) -------------------------------------------------
@@ -4662,6 +4673,10 @@ export class BaselineAnalysisStore {
       if (state === 'pausing') {
         this.recordRunState(runRecordId, 'paused', { detail: RECONCILED_PAUSED_DETAIL, reconciled: true });
         settled += 1;
+      } else if (state === 'paused' && this.#idleYielded(runRecordId)) {
+        // Yielding lasts only while this lifetime runs (Issue #1089): afterwards the Run waits for 续行 like any paused Run.
+        this.recordRunState(runRecordId, 'paused', { detail: RECONCILED_YIELDED_DETAIL, reconciled: true });
+        settled += 1;
       } else if (state === 'admitted' || state === 'executing') {
         this.recordRunState(runRecordId, 'resumable', { detail: RECONCILED_RESUMABLE_DETAIL, reconciled: true });
         settled += 1;
@@ -4803,6 +4818,12 @@ export class BaselineAnalysisStore {
     this.#insertRunState(runRecordId, last + 1, state, detail, new Date().toISOString());
   }
 
+  /** Whether the Run's latest state is AI7's yield to the editor's waiting Run (Issue #1089), not the editor's own 暂停. */
+  #idleYielded(runRecordId: string): boolean {
+    const row = this.#db.prepare('SELECT canonical_json FROM analysis_run_states WHERE run_record_id = ? ORDER BY sequence DESC LIMIT 1').get(runRecordId) as SqlRow | undefined;
+    return row !== undefined && (parseCanonicalJson(asString(row.canonical_json)) as { idleYield?: unknown }).idleYield === true;
+  }
+
   currentRunState(runRecordId: string): BaselineAnalysisRunState {
     const row = this.#db.prepare('SELECT state FROM analysis_run_states WHERE run_record_id = ? ORDER BY sequence DESC LIMIT 1').get(runRecordId) as SqlRow | undefined;
     requireAnalysis(row !== undefined, 'ANALYSIS_RUN_INVALID', '运行记录不存在。');
@@ -4931,6 +4952,7 @@ export class BaselineAnalysisStore {
       planVersionId: version.planVersionId,
       planVersionOrdinal: version.ordinal,
       origin: origin.origin,
+      startWhen: (parseCanonicalJson(asString(run.canonical_json)) as { startWhen?: 'now' | 'idle' }).startWhen ?? 'now',
       checkpoint: {
         bookId: intent.bookId,
         manuscriptId: asString(checkpointRow.manuscript_id),

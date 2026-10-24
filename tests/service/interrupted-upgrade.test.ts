@@ -178,7 +178,7 @@ const REVISIONS: ReadonlyArray<Revision> = [
     undo: (database) => drop(database, Object.keys(MATERIAL_INDEX_SCHEMA_SQL).reverse()),
   },
   {
-    // Revision 66 (Issue #95, S39): each Book's 后台分析登记, created before the stamp, and the Run Authorizations' origin widened
+    // Revision 66 (Issue #95, S39): each Book's 后台处理登记, created before the stamp, and the Run Authorizations' origin widened
     // for it — a widening the next open performs again from revision 65's text.
     revision: 66,
     step: initializeBackgroundAnalysisEnrollmentSchema,

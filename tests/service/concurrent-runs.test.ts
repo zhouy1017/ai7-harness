@@ -4,7 +4,8 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BaselineAnalysisExecutionOwner, EXECUTION_RUN_CAPACITY, type UnitHold } from '../../src/service/analysis/execution.js';
-import { RECONCILED_QUEUED_DETAIL, RUN_QUEUED_LABEL } from '../../src/service/analysis/baseline-analysis-store.js';
+import { RECONCILED_QUEUED_DETAIL, RECONCILED_YIELDED_DETAIL, RUN_IDLE_YIELD_LABEL, RUN_QUEUED_LABEL } from '../../src/service/analysis/baseline-analysis-store.js';
+import { ProtocolError, decodeRequest } from '../../src/service/request-frames.js';
 import { DEVELOPER_LIVE_POLICY_BINDING, ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
@@ -590,6 +591,7 @@ describe('live foreground places and request aborts (#1080)', () => {
       await until(() => calls.length === 2, 'both Books requests in flight');
       expect(calls.every((call) => !call.signal.aborted)).toBe(true);
       expect(execution.busy).toBe(true);
+      expect(() => execution.pauseRun(ar.runRecordId, store.baselineAnalysisLedger, 'idle-yield')).toThrowError(/只有后台运行/u);
       store.requestBaselineAnalysisPause(a.bookId, a.taskIntentId);
       execution.pauseRun(ar.runRecordId);
       await execution.whenDone(ar.runRecordId);
@@ -611,4 +613,185 @@ describe('live foreground places and request aborts (#1080)', () => {
       await execution.whenDone(cr.runRecordId);
     } finally { await execution.dispose(); store.close(); }
   }, 60_000);
+});
+
+
+/**
+ * Ordinary production over a synthetic transport whose every request waits until the suite releases it (#1089): a unit in
+ * flight stays sent, so a yield is seen to wait for it and never to abort it.
+ */
+async function heldProductionLaunch(): Promise<{ store: EditorialStore; owner: BaselineAnalysisExecutionOwner; calls: Array<{ signal: AbortSignal; release: () => void }> }> {
+  const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { baselineAnalysisRoute: null,
+    induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
+    induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false });
+  const route = ORDINARY_PRODUCTION_ALLOWED_BINDINGS.find((binding) => binding.route === 'deepseek-open-platform')!;
+  const pending = store.saveModelServiceConnection('合成空闲运行', null, 'needs-attention', route.route);
+  store.saveModelServiceConnection('合成空闲运行', pending.credentialReference, 'ready', route.route);
+  store.selectModelServiceRoute(route.route);
+  const configured = { ...route, credentialReference: pending.credentialReference };
+  launchPolicy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', configured);
+  store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy: launchPolicy,
+    live: { scope: 'ordinary-production', ...configured, runBudgetCeiling: 'unset' } });
+  const calls: Array<{ signal: AbortSignal; release: () => void }> = [];
+  const nativeFetch: typeof fetch = async (_url, init) => {
+    const message = (JSON.parse(String(init!.body)) as { messages: Array<{ content: string }> }).messages.at(-1)!.content;
+    const ordinal = Number(/^分析单元 (\d+)/u.exec(message)?.[1] ?? 1);
+    return new Promise<Response>((resolveResponse, reject) => {
+      const signal = init!.signal!;
+      signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+      calls.push({ signal, release: () => resolveResponse(new Response(JSON.stringify({ model: configured.model,
+        choices: [{ message: { content: JSON.stringify({ schema: 'ai7.baseline-manuscript-analysis.unit-result/1', unitOrdinal: ordinal,
+          synopsis: '合成单元结果。', entities: [], events: [], relationships: [], settingClaims: [], conflicts: [], unresolved: [], confidence: 'high' }) }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 40, completion_tokens: 20 } }), { status: 200 })) });
+    });
+  };
+  const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture: null,
+    production: { scope: 'ordinary-production', nativeFetch }, secretResolver: { resolve: async () => 'synthetic-placeholder-key' } });
+  return { store, owner, calls };
+}
+
+it('defers an exact authorization, yields after the sent unit without aborting, and resumes the same bounded Run (#1089)', async () => {
+  const { store, owner, calls } = await heldProductionLaunch();
+  try {
+    const background = await preparedBook(store, '合成空闲甲', false);
+    const foreground = await preparedBook(store, '合成即时乙', false);
+    const waiting = await preparedBook(store, '合成即时丙', false);
+    const ceiling = { kind: 'tokens' as const, maxTotalTokens: 5_000 };
+    const plan = store.inspectBaselineAnalysis(background.bookId, () => null);
+    const edited = store.editBaselineAnalysisPlan({ bookId: background.bookId, taskIntentId: background.taskIntentId, planEnvelopeDigest: plan.planEnvelope!.digest, removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: ceiling });
+    const started = store.authorizeBaselineAnalysis(background.bookId, background.taskIntentId, edited.planEnvelope!.digest, 'idle');
+    const runRecordId = started.dispatchRunRecordId!;
+    owner.setBackgroundIdle(false);
+    expect(owner.admitOrQueue(runRecordId)).toBe('queued');
+    expect(calls).toHaveLength(0);
+    const deferred = store.inspectBaselineAnalysis(background.bookId, () => null);
+    expect(deferred.authorization?.startWhen).toBe('idle');
+    expect(deferred.stateLabel).toBe('等待空闲');
+    const attention = store.inspectGlobalAttention(() => null, false, 'admitting');
+    expect(attention.groups.find((group) => group.key === 'active')!.items.some((item) => item.state === 'analysis-waiting-idle')).toBe(true);
+    owner.setBackgroundIdle(true);
+    await until(() => calls.length === 1, 'idle dispatch');
+    // The editor returns while a place is still free: nothing of theirs waits for one, so the background Run keeps going.
+    owner.setBackgroundIdle(false);
+    await owner.whenPlaceFree();
+    expect(start(store, owner, foreground).admission).toBe('admitted');
+    await until(() => calls.length === 2, 'foreground beside idle Run');
+    expect(store.baselineAnalysisLedger.currentRunState(runRecordId)).toBe('executing');
+    expect(start(store, owner, waiting).admission).toBe('queued');
+    expect(calls[0]!.signal.aborted).toBe(false);
+    calls[0]!.release();
+    await until(() => store.inspectBaselineAnalysis(background.bookId, () => null).state === 'paused', 'unit-boundary yield');
+    expect(calls[0]!.signal.aborted).toBe(false);
+    expect(store.baselineAnalysisLedger.unitCheckpoints(runRecordId)).toHaveLength(1);
+    expect(store.baselineAnalysisLedger.unconfirmedRangesOf(runRecordId)).toEqual([]);
+    expect(store.inspectBaselineAnalysis(background.bookId, () => null).run?.stateLabel).toBe('让位给你的任务');
+    expect(store.inspectGlobalAttention(() => null, false, 'admitting').groups.find((group) => group.key === 'active')!.items.some((item) => item.state === 'analysis-yielded')).toBe(true);
+    await until(() => calls.length === 3, 'foreground uses yielded place');
+    for (const book of [foreground, waiting]) {
+      const run = store.inspectBaselineAnalysis(book.bookId, () => null).run!;
+      store.requestBaselineAnalysisCancel(book.bookId, book.taskIntentId);
+      owner.cancelRun(run.runRecordId);
+    }
+    await until(() => !owner.full, 'foreground cancelled');
+    owner.setBackgroundIdle(true);
+    await until(() => calls.length === 4, 'same Run resumes on idle');
+    const resumed = store.inspectBaselineAnalysis(background.bookId, owner.progressFor.bind(owner));
+    expect(resumed.run?.runRecordId).toBe(runRecordId);
+    expect(resumed.authorization?.authorizationId).toBe(deferred.authorization?.authorizationId);
+    expect(resumed.planVersion?.materialInputs.runBudgetCeiling).toEqual(ceiling);
+    expect(resumed.run?.progress?.currentUnitOrdinal).toBe(2);
+    store.requestBaselineAnalysisCancel(background.bookId, background.taskIntentId);
+    owner.cancelRun(runRecordId);
+    await owner.whenDone(runRecordId);
+  } finally { await owner.dispose(); store.close(); }
+}, 60_000);
+
+
+it('cancels a deferred start without dispatch and reconciles an unstarted idle authorization without restarting it (#1089)', async () => {
+  const store = await openWithRoute();
+  const owner = ownerOf(store, null);
+  let survivingBook = '';
+  let survivingRun = '';
+  try {
+    owner.setBackgroundIdle(false);
+    for (const [index, title] of ['等待取消', '等待恢复'].entries()) {
+      const book = await preparedBook(store, title, index === 0);
+      const authorized = store.authorizeBaselineAnalysis(book.bookId, book.taskIntentId, book.planEnvelopeDigest, 'idle');
+      const runRecordId = authorized.dispatchRunRecordId!;
+      expect(owner.admitOrQueue(runRecordId)).toBe('queued');
+      if (index === 0) {
+        store.cancelWaitingBaselineAnalysis(book.bookId, book.taskIntentId);
+        owner.dequeue(runRecordId);
+        expect(store.inspectBaselineAnalysis(book.bookId).state).toBe('cancelled');
+      } else { survivingBook = book.bookId; survivingRun = runRecordId; }
+      expect(store.inspectBaselineAnalysis(book.bookId).run?.attempt).toBeNull();
+    }
+    store.markCleanShutdown();
+  } finally { await owner.dispose(); store.close(); }
+  const reopened = await openWithRoute();
+  try {
+    expect(reopened.reconcileStoppedBaselineAnalysisRuns().settled).toBe(1);
+    const reading = reopened.inspectBaselineAnalysis(survivingBook);
+    expect(reading.authorization?.startWhen).toBe('idle');
+    expect(reading.run?.runRecordId).toBe(survivingRun);
+    expect(reading.state).toBe('authorized-blocked');
+    expect(reading.run?.attempt).toBeNull();
+    reopened.markCleanShutdown();
+  } finally { reopened.close(); }
+});
+
+
+it('reads a Run AI7 yielded as an ordinary paused Run after a restart, which nothing resumes by itself (#1089; ADR 0034)', async () => {
+  const { store, owner, calls } = await heldProductionLaunch();
+  let bookId = '';
+  let runRecordId = '';
+  try {
+    const background = await preparedBook(store, '合成重启让位甲', false);
+    const foreground = await preparedBook(store, '合成重启即时乙', false);
+    const waiting = await preparedBook(store, '合成重启即时丙', false);
+    bookId = background.bookId;
+    runRecordId = store.authorizeBaselineAnalysis(bookId, background.taskIntentId, background.planEnvelopeDigest, 'idle').dispatchRunRecordId!;
+    owner.setBackgroundIdle(true);
+    expect(owner.admitOrQueue(runRecordId)).toBe('admitted');
+    await until(() => calls.length === 1, 'idle dispatch');
+    start(store, owner, foreground);
+    await until(() => calls.length === 2, 'foreground beside idle Run');
+    owner.setBackgroundIdle(false);
+    expect(start(store, owner, waiting).admission).toBe('queued');
+    calls[0]!.release();
+    await until(() => store.baselineAnalysisLedger.currentRunState(runRecordId) === 'paused', 'unit-boundary yield');
+    expect(store.inspectBaselineAnalysis(bookId, () => null).run?.stateLabel).toBe(RUN_IDLE_YIELD_LABEL);
+    for (const book of [foreground, waiting]) {
+      const run = store.inspectBaselineAnalysis(book.bookId, () => null).run!;
+      store.requestBaselineAnalysisCancel(book.bookId, book.taskIntentId);
+      owner.cancelRun(run.runRecordId);
+    }
+    await until(() => !owner.full, 'foreground cancelled');
+    store.markCleanShutdown();
+  } finally { await owner.dispose(); store.close(); }
+  const reopened = await openWithRoute();
+  try {
+    expect(reopened.reconcileStoppedBaselineAnalysisRuns().settled).toBe(1);
+    const reading = reopened.inspectBaselineAnalysis(bookId, () => null);
+    expect([reading.run?.runRecordId, reading.state, reading.run?.stateLabel]).toEqual([runRecordId, 'paused', '已暂停']);
+    expect(reopened.baselineAnalysisLedger.unitCheckpoints(runRecordId)).toHaveLength(1);
+    const items = reopened.inspectGlobalAttention(() => null, false, 'admitting').groups.find((group) => group.key === 'active')!.items;
+    expect(items.filter((item) => item.book.bookId === bookId).map((item) => item.state)).toEqual(['analysis-paused']);
+    expect(reopened.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: reading.taskIntent!.taskIntentId }).state.label).toBe('已暂停');
+    expect(RECONCILED_YIELDED_DETAIL).toContain('续行');
+    reopened.markCleanShutdown();
+  } finally { reopened.close(); }
+}, 60_000);
+
+it('decodes 空闲时处理 for every kind that dispatches, the baseline included, and never for the record-only fixed Task (#1089)', () => {
+  const frame = (request: unknown): Uint8Array => new TextEncoder().encode(JSON.stringify(request));
+  const ledger = { id: randomUUID(), op: 'startTaskWhenIdle', input: { bookId: randomUUID(), kind: 'baseline-analysis', ref: randomUUID(), planEnvelopeDigest: 'c'.repeat(64), planDigests: [] } };
+  for (const kind of ['baseline-analysis', 'initial-evaluation', 'readers-report', 'evaluation-rewrite', 'writing']) {
+    expect(decodeRequest(frame({ ...ledger, input: { ...ledger.input, kind } }))).toEqual({ ...ledger, input: { ...ledger.input, kind } });
+  }
+  const review = { ...ledger, input: { ...ledger.input, kind: 'review-run', planEnvelopeDigest: null, planDigests: [{ categoryId: 'typos-and-usage', planEnvelopeDigest: 'd'.repeat(64) }] } };
+  expect(decodeRequest(frame(review))).toEqual(review);
+  expect(() => decodeRequest(frame({ ...ledger, input: { ...ledger.input, kind: 'fixed-task' } }))).toThrow(ProtocolError);
+  // 联网后开始任务 keeps the baseline on its own operation, as before.
+  expect(() => decodeRequest(frame({ ...ledger, op: 'startTaskWhenOnline' }))).toThrow(ProtocolError);
 });

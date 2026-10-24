@@ -1569,15 +1569,15 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     // 后台分析登记 (Issue #95, S39): the route's Book; `登记` names the disclosure it confirmed and one of the two starting points,
     // and `撤销登记` the Enrollment it revokes.
     case 'inspectBackgroundAnalysisEnrollment': {
-      const input = requireInput(value.input, ['bookId'], tentativeId);
-      if (!validUuid(input.bookId)) throw new ProtocolError(tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId'], ['kind'], tentativeId);
+      if (!validUuid(input.bookId) || (input.kind !== undefined && !isBoundedString(input.kind, 120))) throw new ProtocolError(tentativeId);
       break;
     }
     case 'enrollBackgroundAnalysis': {
       // The scope it covers and the tokens ceiling, which 登记 requires (Issue #864).
-      const input = requireInput(value.input, ['bookId', 'disclosureDigest', 'startingPoint', 'scope', 'ceilingTokens'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'disclosureDigest', 'startingPoint', 'scope', 'ceilingTokens'], ['kind'], tentativeId);
       const scope = requireInput(input.scope, ['kind', 'seriesId'], tentativeId);
-      if (!validUuid(input.bookId) || !isBoundedString(input.disclosureDigest, 64) || !HEX_DIGEST_PATTERN.test(input.disclosureDigest) ||
+      if ((input.kind !== undefined && !isBoundedString(input.kind, 120)) || !validUuid(input.bookId) || !isBoundedString(input.disclosureDigest, 64) || !HEX_DIGEST_PATTERN.test(input.disclosureDigest) ||
           (input.startingPoint !== 'prospective' && input.startingPoint !== 'backfill') ||
           !(scope.kind === 'series' ? validUuid(scope.seriesId) : (scope.kind === 'book' || scope.kind === 'all-books') && scope.seriesId === null) ||
           typeof input.ceilingTokens !== 'number' || !Number.isSafeInteger(input.ceilingTokens) || input.ceilingTokens < 1 ||
@@ -1600,10 +1600,14 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     // 联网后开始任务 for every other kind with a plan (Issue #760, S74c): the kind, its Task — a Task Intent or a Review Run —
     // and exactly the digests 开始任务 would bind: one plan envelope's for a ledger Task, every Task-backed category's for a
     // Review Run; never both. Whether they still stand is the store's to decide.
+    // 空闲时处理 (Issue #1089) takes the same shape and also starts a baseline analysis, which 联网后开始任务 leaves to its own
+    // operation; J-03's fixed Task only records an authorization, so it never waits for either.
+    case 'startTaskWhenIdle':
     case 'startTaskWhenOnline': {
       const input = requireInput(value.input, ['bookId', 'kind', 'ref', 'planEnvelopeDigest', 'planDigests'], tentativeId);
       const review = input.kind === 'review-run';
-      if (!validUuid(input.bookId) || !START_WHEN_ONLINE_TASK_KINDS.includes(input.kind as never) || !validUuid(input.ref) ||
+      const kindAdmitted = START_WHEN_ONLINE_TASK_KINDS.includes(input.kind as never) || (value.op === 'startTaskWhenIdle' && input.kind === 'baseline-analysis');
+      if (!validUuid(input.bookId) || !kindAdmitted || !validUuid(input.ref) ||
           !Array.isArray(input.planDigests) ||
           (review
             ? input.planEnvelopeDigest !== null ||

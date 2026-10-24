@@ -299,7 +299,7 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
       expect(after.authorization!.origin).toBe('background-analysis-enrollment');
       expect(after.planVersion!.materialInputs.runBudgetCeiling).toEqual({ kind: 'tokens', maxTotalTokens: ceiling });
       expect(store.baselineAnalysisLedger.loadExecutionPlan(after.run!.runRecordId).runBudgetCeiling).toEqual({ kind: 'tokens', maxTotalTokens: ceiling });
-      expect(after.taskOutcome!.report!.background![0]).toBe('由后台分析登记开始 · 按第 1 版登记');
+      expect(after.taskOutcome!.report!.background![0]).toBe('由后台处理登记开始 · 按第 1 版登记');
       if (ceiling === 1) {
         expect(calls).toHaveLength(1);
         expect(after.taskOutcome!.stop?.reason).toBe('run-budget-ceiling-reached');
@@ -908,7 +908,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
         const prepared = await restarted.prepareDatabaseExport(destination, true);
         expect((await restarted.approveDatabaseExport(prepared.preparationId, true)).outcome).toBe('created');
         const preview = await restarted.inspectDatabaseImport(destination);
-        expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 88, dataVersion: 1 });
+        expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 89, dataVersion: 1 });
         await restarted.prepareDatabaseReplacement(preview.previewId);
         restarted.close();
         const replaced = await EditorialStore.open(roots.dataRoot, roots.codeRoot); opened.push(replaced);

@@ -1389,7 +1389,7 @@ async function enrolledLive(policy: LaunchPolicyProjection, ceilingTokens: numbe
   return { store, bookId: imported.bookId, answers };
 }
 
-describe('后台分析登记 under developer-live with a stub transport (Issue #864)', { timeout: 60_000 }, () => {
+describe('后台处理登记 under developer-live with a stub transport (Issue #864)', { timeout: 60_000 }, () => {
   it('holds two foreground places under a live launch and refuses any other capacity', async () => {
     const calls: StubCall[] = [];
     const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
@@ -1433,7 +1433,7 @@ describe('后台分析登记 under developer-live with a stub transport (Issue #
       expect(store.baselineAnalysisLedger.loadExecutionPlan(after.run!.runRecordId).runBudgetCeiling).toEqual(frozen);
       expect(['completed', 'completed-with-gaps']).toContain(after.run!.state);
       expect(calls.length).toBeGreaterThan(0);
-      expect(after.taskOutcome!.report!.background!.slice(0, 2)).toEqual(['由后台分析登记开始 · 按第 1 版登记', `范围：《developer-live 后台分析》这一本书；登记上限 ${share} tokens`]);
+      expect(after.taskOutcome!.report!.background!.slice(0, 2)).toEqual(['由后台处理登记开始 · 按第 1 版登记', `范围：《developer-live 后台分析》这一本书；登记上限 ${share} tokens`]);
       expect(after.taskOutcome!.report!.background![2]).toContain(`这次运行的上限 ${frozen.maxTotalTokens} tokens`);
       // The loader independently re-checks the lower bound; changing the launch cannot silently execute the old plan.
       store.baselineAnalysisLedger.bindLaunch({ ...liveBinding({ kind: 'tokens', maxTotalTokens: 100 }), policy: v14 });

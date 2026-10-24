@@ -1,5 +1,5 @@
 import type { LaunchPolicyProjection } from '../shared/protocol.js';
-import { BACKGROUND_ANALYSIS_QUIET_MS, BACKGROUND_ANALYSIS_TICK_MS, backgroundStepFailureReason } from './background-analysis-enrollments.js';
+import { BACKGROUND_ANALYSIS_QUIET_MS, BACKGROUND_ANALYSIS_TICK_MS, BACKGROUND_OFFLINE, backgroundStepFailureReason } from './background-analysis-enrollments.js';
 import type { BackgroundAnalysisRuntime, EditorialStore } from './store.js';
 import type { BaselineAnalysisExecutionOwner } from './analysis/execution.js';
 
@@ -22,10 +22,12 @@ export interface BackgroundAnalysisDispatcherDependencies {
   readonly store: Pick<EditorialStore,
     'backgroundAnalysisBooks' | 'backgroundAnalysisDecisionFor' | 'createBackgroundBaselineAnalysisPreparationWork' |
     'advanceBaselineAnalysisPreparationWork' | 'cancelBaselineAnalysisPreparationWork' | 'backgroundMayContinue' |
-    'startEnrolledBaselineAnalysis' | 'noteBackgroundNotStarted' | 'replacementFrozen'>;
-  readonly execution: Pick<BaselineAnalysisExecutionOwner, 'full' | 'routeExecutable' | 'admitOrQueue' | 'capacity'>;
+    'startEnrolledBaselineAnalysis' | 'noteBackgroundNotStarted' | 'replacementFrozen'> & Partial<Pick<EditorialStore, 'backgroundIdleFacts'>>;
+  readonly execution: Pick<BaselineAnalysisExecutionOwner, 'full' | 'routeExecutable' | 'admitOrQueue' | 'capacity'> & Partial<Pick<BaselineAnalysisExecutionOwner, 'setBackgroundIdle'>>;
   /** Whether a job the editor asked for is queued or under way: the dispatcher never steps in beside one. */
   readonly editorWorkBusy?: () => boolean;
+  /** Deferred starts wait for connectivity as well as quiet. */
+  readonly dispatchReady?: () => boolean;
   readonly launchPolicy: LaunchPolicyProjection;
   readonly tickMs?: number;
   readonly quietMs?: number;
@@ -105,17 +107,24 @@ export class BackgroundAnalysisDispatcher {
     do {
       this.#again = false;
       let books: ReadonlyArray<string>;
+      let lane: { idle: boolean; online: boolean };
       try {
         // Nothing starts while a replacement of the local data waits: what it wrote would be lost with the data.
         if (this.#deps.store.replacementFrozen()) return;
+        const runtime = this.runtime();
+        const facts = this.#deps.store.backgroundIdleFacts?.(runtime);
+        const online = this.#deps.dispatchReady?.() ?? true;
+        lane = { idle: (facts?.idle ?? true) && online, online };
+        this.#deps.execution.setBackgroundIdle?.(lane.idle);
         books = this.#deps.store.backgroundAnalysisBooks();
       } catch {
         return;
       }
+      // Every Book is still looked at while the editor works, so ②A keeps saying why nothing starts (#1089 review).
       for (const bookId of books) {
         if (this.#disposed) return;
         try {
-          await this.#consider(bookId);
+          await this.#consider(bookId, lane);
         } catch {
           // A Book whose look or start failed is looked at again on the next pass; its records say what was recorded.
         }
@@ -123,10 +132,15 @@ export class BackgroundAnalysisDispatcher {
     } while (this.#again && !this.#disposed);
   }
 
-  async #consider(bookId: string): Promise<void> {
+  async #consider(bookId: string, lane: { idle: boolean; online: boolean }): Promise<void> {
     const store = this.#deps.store;
     const { decision, enrollmentVersionId } = store.backgroundAnalysisDecisionFor(bookId, this.runtime());
     if (decision.kind !== 'start' || enrollmentVersionId === null) return;
+    // The decision already waits for quiet and for the editor's jobs; the lane also waits for the network.
+    if (!lane.idle) {
+      if (!lane.online) store.noteBackgroundNotStarted(bookId, BACKGROUND_OFFLINE, this.runtime().now);
+      return;
+    }
     const mode = decision.mode;
     const before = store.backgroundMayContinue(bookId, enrollmentVersionId, null, this.runtime());
     if (before !== null) {

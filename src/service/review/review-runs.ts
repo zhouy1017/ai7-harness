@@ -68,7 +68,7 @@ import {
   type ReviewWorkspaceCategoryProjection,
   type ReviewWorkspaceProjection,
 } from '../../shared/protocol.js';
-import type { BaselineAnalysisStore, ProgressReader } from '../analysis/baseline-analysis-store.js';
+import { RUN_WAITING_IDLE_LABEL, type BaselineAnalysisStore, type ProgressReader } from '../analysis/baseline-analysis-store.js';
 import { UNREAD_WALK_BOUND, type UnreadWalkCut } from '../analysis/unread-changes.js';
 import {
   AnalysisError,
@@ -804,7 +804,7 @@ interface CategoryView {
 interface RunView {
   readonly snapshot: RunSnapshot;
   /** `whenOnline` for an approval made with 联网后开始任务 (Issue #760, S74c), which the Run waits under until it begins. */
-  readonly authorization: null | { readonly authorizedAt: string; readonly approvals: ReadonlyMap<string, string>; readonly whenOnline: boolean; readonly ruleVersionId: string | null };
+  readonly authorization: null | { readonly authorizedAt: string; readonly approvals: ReadonlyMap<string, string>; readonly whenOnline: boolean; readonly startWhen: 'now' | 'idle'; readonly ruleVersionId: string | null };
   readonly driving: boolean;
   readonly categories: ReadonlyArray<CategoryView>;
   readonly findings: ReadonlyArray<FindingView>;
@@ -819,12 +819,22 @@ interface RunView {
   readonly historicallyAffected: ReadonlyMap<string, string>;
 }
 
+/** An approval made 「空闲时处理」 that has not begun (Issue #1089): it waits for quiet, not for the network. */
+function waitsForIdleStart(view: Pick<RunView, 'state' | 'authorization'>): boolean {
+  return view.state === 'waiting' && view.authorization?.startWhen === 'idle';
+}
+
+function runViewStateLabel(view: Pick<RunView, 'state' | 'authorization' | 'canContinue' | 'scopeStop'>): string {
+  return waitsForIdleStart(view) ? RUN_WAITING_IDLE_LABEL : reviewRunStateLabel(view.state, view.canContinue, view.scopeStop);
+}
+
 /**
  * What the Task Drawer reads of one Review Run (Issue #418, plan slice S72): the Run as it was prepared,
  * where it stands, each category with the plan its own ledger froze, and — while the Run waits for its one
  * approval — why that approval would now be refused, in the words the refusal itself uses (D8).
  */
 export interface ReviewRunPlanFacts {
+  readonly waitingIdle?: boolean;
   /** Each category that reads 本社审阅偏好 with the version it reads; empty when the selected rule is closed to them. */
   readonly housePreferences?: ReadonlyArray<{ readonly categoryLabel: string; readonly preference: HouseReviewPreferenceUse }>;
   readonly materials?: ReadonlyArray<Pick<TaskMaterialReading, 'source' | 'refusal'> & { readonly settledNote?: string }>;
@@ -1378,7 +1388,7 @@ export class ReviewRunStore {
     bookId: string,
     reviewRunId: string,
     planDigests: ReadonlyArray<{ categoryId: string; planEnvelopeDigest: string }>,
-    start: 'now' | 'when-online' = 'now',
+    start: 'now' | 'when-online' | 'idle' = 'now',
     ruleVersionId: string | null = null,
   ): void {
     const snapshot = this.#runOfBook(bookId, reviewRunId);
@@ -1439,6 +1449,7 @@ export class ReviewRunStore {
       // 联网后开始任务 (OFF-005): the same one approval, which the Run waits under. An approval that starts now carries no key,
       // so every record written before this one reads exactly as it did.
       ...(start === 'when-online' ? { start: 'when-online' } : {}),
+      startWhen: start === 'idle' ? 'idle' : 'now',
       approvals: tasks.map((category) => ({
         categoryId: category.categoryId,
         taskIntentId: category.task!.taskIntentId,
@@ -1683,9 +1694,10 @@ export class ReviewRunStore {
       label: `第 ${snapshot.ordinal} 次`,
       createdAt: snapshot.createdAt,
       state: view.state,
-      stateLabel: reviewRunStateLabel(view.state, view.canContinue, view.scopeStop),
+      stateLabel: runViewStateLabel(view),
       canContinue: view.canContinue,
       authorizedAt: view.authorization?.authorizedAt ?? null,
+      waitingIdle: waitsForIdleStart(view),
       manuscript: snapshot.manuscript,
       scope: snapshot.scope,
       configuration: snapshot.configuration,
@@ -1758,7 +1770,7 @@ export class ReviewRunStore {
       bookId: snapshot.bookId,
       ordinal: snapshot.ordinal,
       state: view.state,
-      stateLabel: reviewRunStateLabel(view.state, view.canContinue, view.scopeStop),
+      stateLabel: runViewStateLabel(view),
       authorized: view.authorization !== null,
       canContinue: view.canContinue,
       newestOfBook: text(newest.review_run_id) === reviewRunId,
@@ -1811,6 +1823,12 @@ export class ReviewRunStore {
     return record;
   }
 
+  backgroundOrigin(reviewRunId: string): boolean { return this.#authorizationOf(reviewRunId)?.startWhen === 'idle'; }
+
+  waitsForIdle(reviewRunId: string): boolean {
+    return this.#authorizationOf(reviewRunId)?.startWhen === 'idle' && this.#waits(this.#run(reviewRunId));
+  }
+
   #authorizationOf(reviewRunId: string): RunView['authorization'] {
     const row = this.#db.prepare('SELECT * FROM review_run_authorizations WHERE review_run_id = ?').get(reviewRunId) as SqlRow | undefined;
     if (row === undefined) return null;
@@ -1821,6 +1839,7 @@ export class ReviewRunStore {
       authorizedAt: text(row.authorized_at),
       approvals: new Map((approvals as ReadonlyArray<{ categoryId: string; planEnvelopeDigest: string }>).map((entry) => [entry.categoryId, entry.planEnvelopeDigest] as const)),
       whenOnline: record.start === 'when-online',
+      startWhen: record.startWhen === 'idle' ? 'idle' : 'now',
       ruleVersionId: record.origin === 'default-execution-rule' && typeof record.ruleVersionId === 'string' ? record.ruleVersionId : null,
     };
   }
@@ -1832,7 +1851,7 @@ export class ReviewRunStore {
    * was authorized on its ledger is no longer waiting, and 继续审阅 takes it on as it does after any restart (Issue #657).
    */
   #waits(snapshot: RunSnapshot, authorization: RunView['authorization'] = this.#authorizationOf(snapshot.reviewRunId)): boolean {
-    if (authorization === null || !authorization.whenOnline || this.#driving.has(snapshot.reviewRunId)) return false;
+    if (authorization === null || (!authorization.whenOnline && authorization.startWhen !== 'idle') || this.#driving.has(snapshot.reviewRunId)) return false;
     return !this.#begun(snapshot);
   }
 
@@ -2155,7 +2174,7 @@ export class ReviewRunStore {
     let dispatchRunRecordId: string | null;
     try {
       const ruleVersionId = this.defaultRuleVersion(reviewRunId);
-      dispatchRunRecordId = ledger.authorize(snapshot.bookId, category.task.taskIntentId, approved, 'now',
+      dispatchRunRecordId = ledger.authorize(snapshot.bookId, category.task.taskIntentId, approved, this.#authorizationOf(reviewRunId)?.startWhen === 'idle' ? 'idle' : 'now',
         ruleVersionId === null ? { kind: 'standard-direct' } : { kind: 'default-execution-rule', ruleVersionId }).dispatchRunRecordId;
     } catch (error) {
       if (!(error instanceof AnalysisError)) throw error;
@@ -2296,6 +2315,12 @@ export class ReviewRunStore {
    * not read back is passed over, so one damaged record never stops the service starting. Returns how many it settled.
    */
   reconcileStoppedCategoryRuns(): number {
+    // An idle approval stranded before its first category follows the governor's queued-start recovery: no automatic restart.
+    for (const approval of this.#db.prepare("SELECT review_run_id FROM review_run_authorizations WHERE json_extract(canonical_json, '$.startWhen') = 'idle'").all()) {
+      const reviewRunId = text(approval.review_run_id);
+      if (this.waitsForIdle(reviewRunId)) this.blockWaiting(reviewRunId,
+        ['AI7 上次关闭时这项任务还在等待空闲，没有开始；请重新准备并开始。'], 'launch');
+    }
     const rows = this.#db.prepare(
       `SELECT i.kind, rr.review_run_id, json_extract(c.value, '$.categoryId') AS category_id
        FROM analysis_run_records r
@@ -3882,6 +3907,7 @@ export class ReviewRunStore {
         ...(selection === null ? {} : { selection }),
         createdAt: view.snapshot.createdAt,
         authorizedAt: view.authorization?.authorizedAt ?? null,
+        waitingIdle: waitsForIdleStart(view),
         state: view.state,
         canContinue: view.canContinue,
         categories: view.categories.map((category) => {
@@ -4026,7 +4052,7 @@ export class ReviewRunStore {
       scopeLabel: view.snapshot.scope.label,
       categoryLabels: view.snapshot.categories.map((category) => category.entry.label),
       state: view.state,
-      stateLabel: reviewRunStateLabel(view.state, view.canContinue, view.scopeStop),
+      stateLabel: runViewStateLabel(view),
       findingCounts: reviewFindingCounts(view.findings),
       reportVersion: reports.latest === null ? null : integer(reports.latest),
       historicalMarker: [...view.historicallyAffected.values()][0] ?? null,
@@ -4155,7 +4181,7 @@ export class ReviewRunStore {
         label: `第 ${snapshot.ordinal} 次`,
         createdAt: snapshot.createdAt,
         state: view.state,
-        stateLabel: reviewRunStateLabel(view.state, view.canContinue, view.scopeStop),
+        stateLabel: runViewStateLabel(view),
         canContinue: view.canContinue,
         scope: {
           kind: snapshot.scope.kind,

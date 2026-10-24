@@ -271,6 +271,8 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['startBaselineAnalysisWhenOnline']['output']>(IPC_CHANNELS.startBaselineAnalysisWhenOnline, input),
   cancelWaitingBaselineAnalysis: (input: Omit<ServiceOperationMap['cancelWaitingBaselineAnalysis']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['cancelWaitingBaselineAnalysis']['output']>(IPC_CHANNELS.cancelWaitingBaselineAnalysis, input),
+  startTaskWhenIdle: (input: Omit<ServiceOperationMap['startTaskWhenIdle']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['startTaskWhenIdle']['output']>(IPC_CHANNELS.startTaskWhenIdle, input),
   startTaskWhenOnline: (input: Omit<ServiceOperationMap['startTaskWhenOnline']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['startTaskWhenOnline']['output']>(IPC_CHANNELS.startTaskWhenOnline, input),
   cancelWaitingTask: (input: Omit<ServiceOperationMap['cancelWaitingTask']['input'], 'bookId'>) =>
@@ -303,8 +305,8 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['inspectDefaultExecutionRules']['output']>(IPC_CHANNELS.inspectDefaultExecutionRules),
   deactivateDefaultExecutionRule: (input: ServiceOperationMap['deactivateDefaultExecutionRule']['input']) =>
     invoke<ServiceOperationMap['deactivateDefaultExecutionRule']['output']>(IPC_CHANNELS.deactivateDefaultExecutionRule, input),
-  inspectBackgroundAnalysisEnrollment: () =>
-    invoke<ServiceOperationMap['inspectBackgroundAnalysisEnrollment']['output']>(IPC_CHANNELS.inspectBackgroundAnalysisEnrollment),
+  inspectBackgroundAnalysisEnrollment: (input?: { kind?: string }) =>
+    invoke<ServiceOperationMap['inspectBackgroundAnalysisEnrollment']['output']>(IPC_CHANNELS.inspectBackgroundAnalysisEnrollment, input),
   enrollBackgroundAnalysis: (input: Omit<ServiceOperationMap['enrollBackgroundAnalysis']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['enrollBackgroundAnalysis']['output']>(IPC_CHANNELS.enrollBackgroundAnalysis, input),
   revokeBackgroundAnalysisEnrollment: (input: Omit<ServiceOperationMap['revokeBackgroundAnalysisEnrollment']['input'], 'bookId'>) =>
