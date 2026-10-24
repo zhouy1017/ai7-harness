@@ -170,15 +170,17 @@ describe('single-writer exact-candidate merge release', () => {
 describe('real hosted Gate results independent of role receipts', () => {
   const run = { id: 100, repository: { full_name: 'owner/repo' }, head_branch: 'dev', head_sha: BASE,
     path: '.github/workflows/e2e-nightly-queue.yml', event: 'schedule', status: 'in_progress' };
-  const jobs = ['Windows Server 2025 x64 CI', 'macOS 15 arm64'].map((platform) => ({
-    name: `Candidate #806 / Journeys (${platform})`, status: 'completed', conclusion: 'success',
-  }));
+  // ADR 0097: the queue and the full Gate have one Windows job; a macOS job is neither required nor counted.
+  const jobs = [{ name: 'Candidate #806 / Journeys (Windows Server 2025 x64 CI)', status: 'completed', conclusion: 'success' }];
+  const macJob = { name: 'Candidate #806 / Journeys (macOS 15 arm64)', status: 'completed', conclusion: 'success' };
   const input = { run, jobs, pr: 806, candidate: HEAD, currentRun: '100', candidateRefHead: HEAD };
-  it('requires both platforms in the current trusted serial queue occurrence', () => {
+  it('requires exactly the Windows job in the current trusted serial queue occurrence', () => {
     expect(release.hostedGatePassed(input)).toBe(true);
-    expect(release.hostedGatePassed({ ...input, jobs: jobs.slice(1) })).toBe(false);
+    expect(release.hostedGatePassed({ ...input, jobs: [] })).toBe(false);
+    expect(release.hostedGatePassed({ ...input, jobs: [macJob] })).toBe(false);
     expect(release.hostedGatePassed({ ...input, jobs: [jobs[0], jobs[0]] })).toBe(false);
-    expect(release.hostedGatePassed({ ...input, jobs: [jobs[0], { ...jobs[1], conclusion: 'failure' }] })).toBe(false);
+    expect(release.hostedGatePassed({ ...input, jobs: [{ ...jobs[0], conclusion: 'failure' }] })).toBe(false);
+    expect(release.hostedGatePassed({ ...input, jobs: [{ ...jobs[0], status: 'in_progress', conclusion: null }] })).toBe(false);
     expect(release.hostedGatePassed({ ...input, candidateRefHead: CORRECTED })).toBe(false);
     expect(release.hostedGatePassed({ ...input, currentRun: '101' })).toBe(false);
     expect(release.hostedGatePassed({ ...input, run: { ...run, head_branch: 'codex/806-orca-ci' } })).toBe(false);

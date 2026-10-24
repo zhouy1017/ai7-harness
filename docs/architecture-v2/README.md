@@ -14,7 +14,7 @@ This package describes one simple architecture:
 - Ranked retrieval plus Exact Fetch remains distinct from comprehensive manuscript analysis. Whole-manuscript claims require deterministic Coverage Manifests, completely enumerated Analysis Units, typed provenance-preserving reduction, durable immutable Result Set Revisions, explicit gaps, and independent coverage/closure/freshness/assurance state.
 - Provider Processing uses one trusted operational scope per launch: immutable v1 for development/CI, v2 for exact fixture recording, and v3 for ordinary production. The selection is not a user, environment, Provider, artifact, Plugin, or cross-scope fallback toggle and claims no executable selector.
 - Unknown DSH behavior is an implementation assumption with a design response, never a capability-closure or proof blocker.
-- The only standing engineering CI surface is one logical provider-free E2E Functional Gate, executed on Windows and macOS, covering complete supported journeys and regressions for observed bugs.
+- The only standing engineering CI surface is one logical provider-free E2E Functional Gate, executed on Windows (macOS deferred indefinitely under [ADR 0097](../adr/0097-defer-the-macos-platform-indefinitely-and-deliver-windows-only.md)), covering complete supported journeys and regressions for observed bugs.
 
 The Owner accepted the original package into the `dev` development baseline through the exact Issue #20 allowlist and accepted the bounded successor normalization through Issue #86. It retains ADR 0020's exact DSH version baseline but selects no final package list, catalog-source set, Plugin, provider endpoint, credential, sidecar schema, or launch selector. Acceptance does not itself authorize adjacent implementation, GitHub search, artifact/dependency installation, source copy, fork, external action, release, or promotion to `main`.
 
@@ -47,7 +47,7 @@ The original rewrite consumed Clarification 0005 — `docs/architecture-explorat
 
 Issue #86 supersedes the old development-only/threshold Plugin lifecycle with native DSH ecosystem compatibility behind AI7 authority seams, and adds covered manuscript analysis, durable Result Sets, distinct Default Execution Rule/Background Analysis Enrollment origins, production Provider Processing v3, and the one exact AI7 Apply boundary. Beyond the exact built-in Manuscript Profile mapping recorded by Issue #38, the supported catalog sources, adapters, trust tiers, sandbox mechanics, other carrier mappings, and general artifact persistence schemas remain deferred implementation detail.
 
-Clarification 0004's minimal-validation decision remains active, so ADR 0027 and `kick-in/35-minimal-e2e-validation.md` keep one provider-free E2E functional/regression surface on Windows and macOS as the only standing engineering verification. ADR 0028 supplies the accepted two-platform product contract. Clarifications 0001–0003 and the Codex-first clauses of Clarification 0004 are historical evidence only.
+Clarification 0004's minimal-validation decision remains active, so ADR 0027 and `kick-in/35-minimal-e2e-validation.md` keep one provider-free E2E functional/regression surface — on Windows only while [ADR 0097](../adr/0097-defer-the-macos-platform-indefinitely-and-deliver-windows-only.md) holds — as the only standing engineering verification. ADR 0028 supplies the two-platform product contract whose macOS half ADR 0097 suspends. Clarifications 0001–0003 and the Codex-first clauses of Clarification 0004 are historical evidence only.
 
 ## Decision state
 

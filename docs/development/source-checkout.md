@@ -7,7 +7,7 @@ This guide owns operating the source checkout. [Source-checkout buildability](..
 | Host | Architecture | Toolchain | Native archive adapter |
 | --- | --- | --- | --- |
 | Windows 11 24H2+, NT build 26100+ | x64 | Node 24.18.1, pnpm 11.24.0 | Canonical `%SystemRoot%\System32\tar.exe` |
-| macOS 15+, Darwin 24+ | arm64 | Node 24.18.1, pnpm 11.24.0 | Canonical `/usr/bin/ditto` |
+| macOS 15+, Darwin 24+ — declared only; unverified while the macOS platform is deferred under [ADR 0097](../adr/0097-defer-the-macos-platform-indefinitely-and-deliver-windows-only.md) | arm64 | Node 24.18.1, pnpm 11.24.0 | Canonical `/usr/bin/ditto` |
 | GitHub Actions Windows Server 2025 | x64 | Same pins | CI-only carrier, admitted by the workflow marker |
 
 Git and Corepack are prerequisites. The SRI-bearing `packageManager` in [package.json](../../package.json) selects pnpm. [Dependency artifacts](../../config/dependency-artifacts.json) and the [provenance ledger](dependency-provenance.md) own exact acquisition URLs, digests and licenses. At this checkpoint Electron is 43.4.1 and TypeScript is 6.0.3. Office, Python, another checkout, a prefilled package store and a Provider credential are not build inputs.
@@ -108,7 +108,7 @@ Debug/repeat mode keeps failure details and screenshots only in ignored local te
 
 ## Unsigned host-native distribution (Issue #966)
 
-After bootstrap, `pnpm run package -- --list` lists outputs and `pnpm run package` builds host-native unsigned packages offline under ignored `release/`. Windows emits a per-user NSIS installer and portable zip; macOS emits an unsigned, unnotarized DMG only on a macOS host. Missing declared packager archives require bootstrap; package time does not fetch substitutes.
+After bootstrap, `pnpm run package -- --list` lists outputs and `pnpm run package` builds host-native unsigned packages offline under ignored `release/`. Windows emits a per-user NSIS installer and portable zip; the macOS DMG command stays in the tree but serves no delivery while the macOS platform is deferred ([ADR 0097](../adr/0097-defer-the-macos-platform-indefinitely-and-deliver-windows-only.md)). Missing declared packager archives require bootstrap; package time does not fetch substitutes.
 
 The portable zip has a pristine `AI7/` folder with `app/` and sibling `data/`: replace the application and preserve data. Credentials remain in the OS store. Channel-specific data resolution, first-run choice and fallback disclosures are product behavior; Chromium's disposable OS state is separate from the product records. Sources, tests, development tools, credentials and SampleBooks are excluded from packages.
 
@@ -116,7 +116,7 @@ The packaged `--self-check` verifies runtime, keyring carrier loading without re
 
 Data Version 1 is frozen. Later data changes need their recorded additive/breaking classification, pre-upgrade backup where required and named rollback steps. The [version-identity contract](versioning.md) requires this compatibility value, the software version and the deterministic Git build number to agree in the running app and native package metadata. It requires full Git history, visible modified-source labeling for local inspection and a clean checkout for release packaging; [PROGRESS](../../PROGRESS.md) records integration status.
 
-[ADR 0093](../adr/0093-automate-nightly-packages-and-windows-version-tag-releases.md) defines automatic native packaging after the paired nightly Gate and Windows-only publication from matching version tags: stable tags produce normal releases and RC tags prereleases, disclosing unsigned Windows packages. macOS releases are deferred indefinitely until the Owner explicitly requests resumption; unsigned macOS packages remain nightly inspection artifacts, excluded from GitHub Releases. The [release guide](releasing.md) owns the operator procedure. Implementing that workflow is not evidence that a release has run and does not implement #974's installed-product updater. Signing/notarization, macOS publication and main promotion remain separately scoped.
+[ADR 0093](../adr/0093-automate-nightly-packages-and-windows-version-tag-releases.md) defines automatic native packaging after the Windows nightly Gate and Windows-only publication from matching version tags: stable tags produce normal releases and RC tags prereleases, disclosing unsigned Windows packages. Under [ADR 0097](../adr/0097-defer-the-macos-platform-indefinitely-and-deliver-windows-only.md) the macOS platform as a whole is deferred indefinitely — no macOS Gate job, nightly package or release runs until the Owner explicitly resumes it. The [release guide](releasing.md) owns the operator procedure. Implementing that workflow is not evidence that a release has run and does not implement #974's installed-product updater. Signing/notarization, macOS publication and main promotion remain separately scoped.
 
 ## Operational owners
 

@@ -5,6 +5,9 @@ const SHA = /^[a-f0-9]{40}$/u;
 const WAVE = /^codex\/integration-[a-z0-9][a-z0-9-]*$/u;
 const SLICE = /^codex\/[1-9][0-9]*-[a-z0-9-]+$/u;
 const LADDER = ['doctor', 'bootstrap', 'check', 'test', 'service', 'build', 'e2e:all'];
+// ADR 0097: the hosted full Gate and every nightly candidate run on Windows Server 2025 only. A macOS
+// job is admitted again only when a new Owner decision re-adds it here and in the workflows.
+const GATE_PLATFORMS = ['Windows Server 2025 x64 CI'];
 // A Windows publisher may send CRLF. A trusted comment that starts with the marker in any other
 // shape is a malformed receipt, never ordinary prose: ignoring it could silently drop a revoke.
 const RECEIPT_MARK = 'AI7_ORCA_V1';
@@ -171,17 +174,19 @@ export function hostedGatePassed({ run, jobs, pr, candidate, head, base, docs = 
   }
   if (run.head_branch !== 'dev') return false;
   if (run.path === '.github/workflows/e2e-nightly.yml' && run.event === 'workflow_dispatch') {
+    const gateJobs = jobs.filter((job) => GATE_PLATFORMS.some((label) => job.name.includes(`(${label})`)));
     return run.status === 'completed' && run.conclusion === 'success' &&
       run.display_title === `E2E Nightly Full Gate · ${candidate}` &&
-      jobs.filter((job) => job.name.includes('(Windows Server 2025 x64 CI)') || job.name.includes('(macOS 15 arm64)')).length === 2 &&
+      gateJobs.length === GATE_PLATFORMS.length &&
+      GATE_PLATFORMS.every((label) => gateJobs.some((job) => job.name.includes(`(${label})`))) &&
       jobs.every((job) => job.status === 'completed' && job.conclusion === 'success');
   }
   if (run.path !== '.github/workflows/e2e-nightly-queue.yml' || !['schedule', 'workflow_dispatch'].includes(run.event) ||
       run.status !== 'in_progress' || String(run.id) !== String(currentRun) || candidateRefHead !== candidate) return false;
   const platformJobs = jobs.filter((job) => job.name.startsWith(`Candidate #${pr} / `) &&
-    (job.name.endsWith('(Windows Server 2025 x64 CI)') || job.name.endsWith('(macOS 15 arm64)')));
-  return platformJobs.length === 2 && platformJobs.some((job) => job.name.endsWith('(Windows Server 2025 x64 CI)')) &&
-    platformJobs.some((job) => job.name.endsWith('(macOS 15 arm64)')) &&
+    GATE_PLATFORMS.some((label) => job.name.endsWith(`(${label})`)));
+  return platformJobs.length === GATE_PLATFORMS.length &&
+    GATE_PLATFORMS.every((label) => platformJobs.some((job) => job.name.endsWith(`(${label})`))) &&
     platformJobs.every((job) => job.status === 'completed' && job.conclusion === 'success');
 }
 

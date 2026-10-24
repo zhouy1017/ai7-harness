@@ -14,7 +14,9 @@ const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const SHA = /^[a-f0-9]{40}$/u;
 const VERSION = /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-rc\.[1-9][0-9]*)?$/u;
 const REPO = 'zhouy1017/ai7-harness';
-const PLATFORMS = ['win32', 'darwin'];
+// ADR 0097: the nightly builds, and the publication verifies, Windows x64 only; the macOS platform is
+// deferred indefinitely and its `darwin` entry returns here only through a new Owner decision.
+const PLATFORMS = ['win32'];
 const QUEUE = '.github/workflows/e2e-nightly-queue.yml';
 const HELP = `pnpm run release:prepare -- --sha <40-hex-commit> --version <X.Y.Z[-rc.N]> --gate-run <run-id>
 
@@ -22,7 +24,7 @@ Requires a clean, bootstrapped supported host and an empty/absent release/.
 Builds unsigned native packages with the existing packager, without running
 the packaged product; stages only named assets plus checksums/provenance.
 Does not sign, notarize, create a tag, upload or publish. The automatic nightly
-lane packages only after the existing two-platform final-dev Gate succeeds.
+lane packages only after the existing Windows final-dev Gate succeeds (ADR 0097).
 Local preparation records the supplied Gate ID without claiming remote proof.
 Workflow-only commands: resolve, select, publish.
 `;
@@ -190,7 +192,7 @@ export function verifyGate(candidate, run, jobs) {
     return matches[0];
   };
   const resolved = one((job) => job.name === 'Resolve final dev once');
-  const gates = ['Windows Server 2025 x64 CI', 'macOS 15 arm64'].map((label) =>
+  const gates = ['Windows Server 2025 x64 CI'].map((label) =>
     one((job) => job.name.startsWith('Full Gate over the final dev / J-01 + ') && job.name.endsWith(`(${label})`)));
   for (const gate of gates) {
     for (const name of ['Require the selected immutable checkout', 'Run every admitted Journey']) {
@@ -264,7 +266,7 @@ export function selectArtifacts(candidate, run, artifacts, now = Date.now()) {
       artifact.workflow_run.head_sha === run.head_sha, 'artifact-provenance');
     return artifact;
   });
-  requireRelease(new Set(selected.map((artifact) => artifact.id)).size === 2, 'artifact-set');
+  requireRelease(new Set(selected.map((artifact) => artifact.id)).size === PLATFORMS.length, 'artifact-set');
   return selected;
 }
 
@@ -366,7 +368,7 @@ export async function selectTags(event, eventName, request = github, versionAt =
     verifyQueueRun(run);
     requireRelease(run.run_attempt === event.workflow_run.run_attempt, 'stale-event');
     const artifacts = await list(`actions/runs/${run.id}/artifacts`, 'artifacts', request);
-    const pattern = new RegExp(`^inspection-([a-f0-9]{40})-${run.id}-${run.run_attempt}-(?:win-x64|mac-arm64)$`, 'u');
+    const pattern = new RegExp(`^inspection-([a-f0-9]{40})-${run.id}-${run.run_attempt}-(?:${PLATFORMS.map(platformId).join('|')})$`, 'u');
     const sources = [...new Set(artifacts.map((artifact) => pattern.exec(artifact.name)?.[1]).filter(Boolean))];
     requireRelease(sources.length <= 1, 'artifact-source');
     if (sources.length === 0) return [];
@@ -428,7 +430,7 @@ export function verifyPublicationRecord(record, candidate, identity) {
     positiveId(record.runId) && positiveId(record.attempt) && record.assets?.length === 4 &&
     equal(record.assets.map((asset) => asset.name).sort(), publicationNames(candidate.version)) &&
     record.assets.every((asset) => Number.isSafeInteger(asset.size) && asset.size > 0 && /^[a-f0-9]{64}$/u.test(asset.sha256)) &&
-    record.artifacts?.length === 2 && new Set(record.artifacts.map((artifact) => artifact.id)).size === 2 &&
+    record.artifacts?.length === PLATFORMS.length && new Set(record.artifacts.map((artifact) => artifact.id)).size === PLATFORMS.length &&
     record.artifacts.every((artifact, index) => positiveId(artifact.id) && digestPattern.test(artifact.digest ?? '') &&
       artifact.name === artifactName(candidate, { id: record.runId, run_attempt: record.attempt }, PLATFORMS[index])), 'publication-record');
 }
@@ -522,7 +524,7 @@ async function publish(selection) {
       `Nightly Gate and packages: https://github.com/${REPO}/actions/runs/${run.id}/attempts/${run.run_attempt}\n` +
       `Workflow head (before queue merges): ${run.head_sha}\n\n` +
       `Windows code signing is deferred; Windows may show SmartScreen warnings. ` +
-      `macOS releases are deferred indefinitely until the project Owner explicitly requests resumption. ` +
+      `The macOS platform is deferred indefinitely under ADR 0097; no macOS package is built. ` +
       `No packaged launch verification was performed. Provenance and checksums are descriptive, not signed attestations.\n\n` +
       `${RECORD_PREFIX}${JSON.stringify(record)} -->\n`, { flag: 'wx' });
     command('gh', draftArguments(candidate, [], notes));
@@ -556,8 +558,7 @@ async function main(args) {
     if (candidate.help) { console.log(HELP); return; }
     if (process.env.GITHUB_ACTIONS === 'true') workflowPackageCandidate(process.env, candidate);
     await verifyCheckout(ROOT, candidate);
-    requireRelease((process.platform === 'win32' && process.arch === 'x64') ||
-      (process.platform === 'darwin' && process.arch === 'arm64'), 'host');
+    requireRelease(process.platform === 'win32' && process.arch === 'x64', 'host');
     verifyIdentity(await readIdentity(ROOT), candidate);
     await requireEmptyRelease(ROOT);
     command(process.execPath, [resolve(ROOT, 'tools/package.mjs'), '--build-only'], { inherit: true });
