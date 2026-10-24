@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -41,6 +42,12 @@ import {
   recordMissingCredentialConnection,
   requireExactSample1,
 } from '../support/sample1-baseline.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for Issue #826: a Book whose baseline was read under prompt contract /1 — unit 1 a gap for
 // answering its notes as bare strings — is read again under /2 on the real store, as the existing product data will be.
@@ -182,6 +189,7 @@ async function until(condition: () => boolean, label: string): Promise<void> {
 async function pausedRun(store: EditorialStore, bookId: string, promptContractDigest: string): Promise<string> {
   const prepared = prepare(store, bookId);
   const owner = new BaselineAnalysisExecutionOwner({
+    requestGovernor,
     ledger: store.baselineAnalysisLedger, launchPolicy, fixture: syntheticFixture(prepared.coverageManifest!, promptContractDigest, new Set()),
     secretResolver: fakeSecretResolver(), unitHold: controlledUnitHold(holdPath, { pollMs: 5 }),
   });
@@ -257,6 +265,7 @@ describe('baseline prompt contract /1 → /2 on the real store (Issue #826)', ()
       // Sampling /1, as the recorded Run sampled: the plan records no pin, so its bytes are those of every plan before #826.
       expect(prepared.executionPlan).not.toHaveProperty('assurancePromptContractDigest');
       const owner = new BaselineAnalysisExecutionOwner({
+        requestGovernor,
         ledger: store.baselineAnalysisLedger, launchPolicy, fixture: syntheticFixture(manifest, BASELINE_PROMPT_CONTRACT_V1_DIGEST, new Set([1])),
         secretResolver: fakeSecretResolver(),
       });
@@ -288,7 +297,7 @@ describe('baseline prompt contract /1 → /2 on the real store (Issue #826)', ()
       expect(store.baselineAnalysisLedger.unreadChanges(bookId)).toMatchObject({ units: 0, cut: null });
 
       const v2Fixture = syntheticFixture(manifest, BASELINE_PROMPT_CONTRACT_DIGEST, new Set());
-      const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture: v2Fixture, secretResolver: fakeSecretResolver() });
+      const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture: v2Fixture, secretResolver: fakeSecretResolver() });
       // The Run /1 froze is not carried by a launch asking /2: its composition drifted, and nothing is sent.
       owner.admitAndDispatch(staleRunRecordId);
       await owner.whenIdle();
@@ -346,6 +355,7 @@ describe('the sampling contract a baseline plan froze (Issue #826 stage pin)', (
       expect(recordedBinding).not.toBeNull();
       expect(facts.assurancePromptContractDigest).toBe(ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST);
       owner = new BaselineAnalysisExecutionOwner({
+        requestGovernor,
         ledger, launchPolicy, fixture: syntheticFixture(facts.manifest, BASELINE_PROMPT_CONTRACT_DIGEST, new Set()),
         secretResolver: fakeSecretResolver(),
       });
@@ -401,6 +411,7 @@ describe('the sampling contract a baseline plan froze (Issue #826 stage pin)', (
 
     store = await open(HISTORICAL_ROUTE);
     const owner = new BaselineAnalysisExecutionOwner({
+      requestGovernor,
       ledger: store.baselineAnalysisLedger, launchPolicy, fixture: syntheticFixture(authorized.manifest, BASELINE_PROMPT_CONTRACT_DIGEST, new Set()),
       secretResolver: fakeSecretResolver(),
     });
@@ -456,6 +467,7 @@ describe('the sampling contract a baseline plan froze (Issue #826 stage pin)', (
     }
     store = await open(HISTORICAL_ROUTE);
     const owner = new BaselineAnalysisExecutionOwner({
+      requestGovernor,
       ledger: store.baselineAnalysisLedger, launchPolicy, fixture: syntheticFixture(manifest, BASELINE_PROMPT_CONTRACT_DIGEST, new Set()),
       secretResolver: fakeSecretResolver(),
     });

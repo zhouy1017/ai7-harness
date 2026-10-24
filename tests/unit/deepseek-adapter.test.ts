@@ -16,6 +16,7 @@ import {
   assembleDeepSeekRequest,
   assembleProviderRequest,
   classifyTransportError,
+  modelRequestNotSent,
   parseProviderResponse,
   type DeepSeekTransport,
 } from '../../src/service/provider/deepseek-adapter.js';
@@ -915,12 +916,24 @@ describe('classification', () => {
     expect(retryBackoffMs('invalid', now)).toBe(5_000);
     expect(retryBackoffMs('-1', now)).toBe(5_000);
     expect(classifyTransportError(new TypeError('fetch failed', { cause: { code: 'UND_ERR_BODY_TIMEOUT' } }), true).code).toBe(AI7_FAILURE_CODES.OUTCOME_UNKNOWN);
-    expect(classifyTransportError(new TypeError('fetch failed', { cause: { code: 'UND_ERR_CONNECT_TIMEOUT' } }), true).code).toBe(AI7_FAILURE_CODES.TRANSPORT_FAILED);
+    expect(classifyTransportError(new TypeError('fetch failed', { cause: { code: 'UND_ERR_CONNECT_TIMEOUT' } }), true).code).toBe(AI7_FAILURE_CODES.OUTCOME_UNKNOWN);
     for (const name of ['AbortError', 'TimeoutError']) {
       const error = new DOMException('private', name);
       expect(classifyTransportError(error, false).code).toBe(AI7_FAILURE_CODES.TRANSPORT_FAILED);
       expect(classifyTransportError(error, true).code).toBe(AI7_FAILURE_CODES.OUTCOME_UNKNOWN);
     }
+  });
+
+  it('requires opaque proof for the exact transport call before treating an admitted rejection as unsent (#1131)', () => {
+    const request: Parameters<DeepSeekTransport>[1] = { method: 'POST', headers: {}, body: '{}', signal: new AbortController().signal };
+    const cause = Object.assign(new Error('held before native transport'), { code: 'TRANSPORT_FAILED', requestSent: false });
+    for (const error of [cause, new Error('generic rejection'), Object.assign(new Error('connect'), { code: 'UND_ERR_CONNECT_TIMEOUT' })]) {
+      expect(classifyTransportError(error, true, request).code).toBe(AI7_FAILURE_CODES.OUTCOME_UNKNOWN);
+    }
+    const exact = modelRequestNotSent(request, cause);
+    expect(classifyTransportError(exact, true, request).code).toBe(AI7_FAILURE_CODES.TRANSPORT_FAILED);
+    expect(classifyTransportError(exact, true, { ...request }).code).toBe(AI7_FAILURE_CODES.OUTCOME_UNKNOWN);
+    expect(classifyTransportError(Object.assign(new Error(exact.message), { requestSent: false }), true, request).code).toBe(AI7_FAILURE_CODES.OUTCOME_UNKNOWN);
   });
 
   it('keys failure classes on the DSH constants and the AI7 codes', () => {

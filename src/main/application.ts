@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { registerModelConnectionTestHandler } from './model-connection-test-handler.js';
 import { release } from 'node:os';
 import { readFile, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, resolve } from 'node:path';
@@ -628,7 +629,10 @@ function registerRendererHandlers(
   saveModelServiceProxy: (input: ServiceOperationMap['saveModelServiceProxy']['input']) => Promise<ModelServiceSettingsProjection>,
   saveModelServiceCredential: (input: ModelServiceCredentialInput) => Promise<ModelServiceSettingsProjection>,
   removeModelServiceCredential: (input?: { route: ModelServiceRouteId }) => Promise<ModelServiceSettingsProjection>,
-  modelOps: Pick<RendererApi, 'selectFastRoleModel' | 'testModelServiceConnection'>,
+  modelOps: Pick<RendererApi, 'selectFastRoleModel'> & {
+    startConnectionTest(input: Parameters<RendererApi['testModelServiceConnection']>[0]): Promise<unknown>;
+    connectionTestSettings(): Promise<ModelServiceSettingsProjection>;
+  },
   searchOps: Pick<RendererApi, 'selectSearchBackend' | 'probeSearchBackend' | 'saveSearchBackendCredential' | 'removeSearchBackendCredential'>,
   consumeLostApplyAcknowledgement: () => boolean,
   consumeInjectedSavePath: () => string | undefined,
@@ -2579,12 +2583,16 @@ function registerRendererHandlers(
       return serializeEffect(() => saveModelServiceProxy(input));
     }),
   );
-  for (const op of ['selectFastRoleModel', 'testModelServiceConnection'] as const) {
+  for (const op of ['selectFastRoleModel'] as const) {
     ipcMain.handle(IPC_CHANNELS[op], (event, input: Parameters<RendererApi[typeof op]>[0]) => envelope(async () => {
       requireSender(event); requireAuthority();
       return serializeEffect(() => modelOps[op](input));
     }));
   }
+  const disposeConnectionTest = registerModelConnectionTestHandler<IpcMainInvokeEvent, ModelServiceSettingsProjection>({
+    ipc: ipcMain, requireSender, requireAuthority, serializeEffect, envelope,
+    start: modelOps.startConnectionTest, project: modelOps.connectionTestSettings,
+  });
   ipcMain.handle(IPC_CHANNELS.getModelServiceSettings, (event) =>
     envelope(async () => {
       requireSender(event);
@@ -6219,9 +6227,10 @@ function registerRendererHandlers(
   );
 
   return () => {
+    disposeConnectionTest();
     nativeTheme.removeListener('updated', broadcastAppearance);
     ipcMain.removeHandler(APPEARANCE_IPC_CHANNEL);
-    for (const channel of Object.values(IPC_CHANNELS)) ipcMain.removeHandler(channel);
+    for (const channel of Object.values(IPC_CHANNELS)) if (channel !== IPC_CHANNELS.testModelServiceConnection) ipcMain.removeHandler(channel);
     for (const channel of Object.values(PREFERENCE_IPC_CHANNELS)) ipcMain.removeHandler(channel);
     ipcMain.removeHandler(NOTIFICATION_CHANNELS.notify);
     notifier.dispose();
@@ -7138,7 +7147,8 @@ export async function runApplication(): Promise<void> {
       removeModelServiceCredential,
       {
         selectFastRoleModel: async (input) => { await service!.call('selectFastRoleModel', input); return settingsProjection(); },
-        testModelServiceConnection: async (input) => { await service!.call('testModelServiceConnection', input); return settingsProjection(); },
+        startConnectionTest: (input) => service!.call('testModelServiceConnection', input),
+        connectionTestSettings: settingsProjection,
       },
       searchOps,
       (() => {

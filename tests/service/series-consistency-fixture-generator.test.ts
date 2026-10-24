@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 // The generator of the authored fixture `sample1-series-consistency-authored` (Issue #64, plan slice S29a). The findings below
 // are the authored part: each was written after reading one Analysis Unit of exact `sample1` (ADR 0043) against the one clause
 // J-13's Series Knowledge gives 书系一致性 — 地点「海边小城」, whose name the trilogy writes as its first book does — and each
@@ -34,6 +35,12 @@ import type { LaunchPolicyProjection, ReviewCategoryProjection } from '../../src
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 import { J13_EDITOR_WORDS, J13_PLACE, J13_SERIES_TITLE, makeJ13Series } from '../support/series-consistency.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 const IDENTITY = 'sample1-series-consistency-authored';
 const FIXTURE_PATH = resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url)), `${IDENTITY}.json`);
@@ -155,7 +162,7 @@ async function pass(): Promise<boolean> {
     interruptAfterAbandonObjectRemoval: false,
     baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
   });
-  const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+  const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
   const driver = new ReviewRunDriver(store.reviewRunDriveSteps, owner);
   try {
     const { bookId, manuscriptId, revisionId } = await importSample1Book(store, scenarioRoots.codeRoot, '星河之三');

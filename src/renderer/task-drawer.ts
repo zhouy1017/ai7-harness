@@ -2175,6 +2175,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const now = Date.now();
     section.dataset['taskPlanActivityProgress'] = `${activity.unitsSettled}/${activity.unitsTotal}`;
     if (activity.currentUnitOrdinal !== null) section.dataset['taskPlanActivityUnit'] = String(activity.currentUnitOrdinal);
+    if (activity.inFlightUnits !== undefined) section.dataset['taskPlanActivityUnits'] = activity.inFlightUnits.map((unit) => unit.unitOrdinal).join(',');
     if (taskPlanActivityIsStale(activity, now)) {
       section.dataset['runLiveness'] = 'stale';
       section.append(el('p', 'attention-note', TASK_PLAN_ACTIVITY_STALE));

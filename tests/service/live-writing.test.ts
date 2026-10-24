@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 // #810: reference-free writing on the real selected Provider Processing v11 projection and the shared admission (#429), over a
 // synthetic socket-free transport; no credential, key or manuscript text beyond exact sample1.
 import { join } from 'node:path';
@@ -24,6 +25,12 @@ import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-d
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { WRITING_REQUEST } from '../support/writing-task.js';
 import { SET_RULE_DEVELOPER_LIVE, SET_RULE_FIRST_BASELINE } from '../../src/service/default-execution-rules.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 const FIXTURES_ROOT = fileURLToPath(new URL('../fixtures/model/', import.meta.url));
 let roots: ServiceTestRoots;
@@ -80,7 +87,7 @@ beforeEach(async () => {
     return new Response(JSON.stringify({ model: launch.live.model, choices: [{ message: { content: JSON.stringify(result), reasoning_content: '合成回归。' }, finish_reason: 'stop' }],
       usage: { prompt_tokens: 40, completion_tokens: 20 } }), { status: 200 });
   };
-  owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
+  owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
     secretResolver: { resolve: async () => 'placeholder-development-key' }, developerLive: {
       launch: { runBudgetCeiling: launch.live.runBudgetCeiling, providerCacheRoot: join(roots.inputRoot, 'cache'), validation: { family: 'live-writing', case: 'sample1-draft', delta: null } }, nativeFetch,
     } });

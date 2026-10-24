@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
@@ -51,6 +52,12 @@ import {
   answerWriting,
   answerWritingReflection,
 } from '../support/writing-task.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for 写作任务 (Issue #432, plan slice S84a; V2-UX-DELIV-007, KB-004; editor-surfaces §9): the writing
 // kind over the real store and ledger, the one execution owner and the AI7 local deterministic adapter — over the authored fixture
@@ -111,7 +118,7 @@ async function openAt(dataRoot: string, fixture: ResolvedModelFixture, control: 
 async function withSession(fixture: ResolvedModelFixture, body: (session: Session) => Promise<void>, control: SuiteControl = {}): Promise<void> {
   await requireExactSample1(roots.codeRoot);
   const store = await openStore(fixture, control);
-  const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+  const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
   try {
     await body({ store, owner });
     store.markCleanShutdown();

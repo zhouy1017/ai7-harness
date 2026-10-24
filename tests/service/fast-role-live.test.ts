@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -28,6 +29,12 @@ import {
   typoBlock,
   type Sample1Book,
 } from '../support/fast-role.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for 润色这段 and 基于当前稿件重新生成建议 on the live route (Issue #842; ADR 0089; ADR 0067):
 // the real store, PrimaryAgentHarness composition, Egress Gate, Credential Broker, Provider Test Ledger and Result Cache, under
@@ -92,7 +99,7 @@ function live(nativeFetch: typeof fetch, options: { validation?: DevelopmentVali
 }
 
 function requests(routes: FastRoleLiveRoutes): FastRoleRequests {
-  return new FastRoleRequests(new FastRoleExecutionOwner({ fixture: null, live: routes }), store);
+  return new FastRoleRequests(new FastRoleExecutionOwner({ requestGovernor, fixture: null, live: routes }), store);
 }
 
 async function ledgerLines(): Promise<ProviderLedgerLine[]> {
@@ -124,7 +131,7 @@ describe('the fast-role routes under developer-live', () => {
     const unadmitted = live(stubTransport(calls, () => AUTHORED_POLISH_ANSWER), {
       policy: { ...livePolicy, providerProcessing: { ...livePolicy.providerProcessing, admittedRules: withoutFastRules } },
     });
-    const owner = new FastRoleExecutionOwner({ fixture: null, live: unadmitted });
+    const owner = new FastRoleExecutionOwner({ requestGovernor, fixture: null, live: unadmitted });
     expect(fastInteractionRoutes(owner, book.bookId)).toEqual({
       bookId: book.bookId,
       editorialPolish: { available: false, reason: '当前运行范围未允许润色这段：选定的模型处理规则没有准许它使用实时模型。' },

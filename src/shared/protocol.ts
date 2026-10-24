@@ -4739,6 +4739,14 @@ export interface BaselineAnalysisHistoryProjection {
  */
 export type RunAttemptState = 'dispatched' | 'awaiting-response' | 'retrying';
 
+/** Bounded activity for an isolated unit; queued time is never reported as model response time. */
+export interface AnalysisInFlightUnitProjection {
+  unitOrdinal: number;
+  attemptState: RunAttemptState;
+  requestState: 'waiting-for-capacity' | 'admitted' | 'between-requests';
+  admittedRequestStartedAt: string | null;
+}
+
 export interface BaselineAnalysisProjection {
   readonly historicalMarker?: string;
   bookId: string;
@@ -4883,6 +4891,8 @@ export interface BaselineAnalysisProjection {
       /** The instant the current unit's attempt started; `null` between units. */
       currentUnitStartedAt: string | null;
       attemptState: RunAttemptState | null;
+      /** Present on governed live execution; at most three entries in manifest order. */
+      inFlightUnits?: ReadonlyArray<AnalysisInFlightUnitProjection>;
       /** Model turns this Run has completed, live, replayed, or deterministic alike. */
       completedAttempts: number;
       /** The longest step this Run has actually settled, which the stale case is measured against. */

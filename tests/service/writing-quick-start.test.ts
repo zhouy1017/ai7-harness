@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
@@ -30,6 +31,12 @@ import { WRITING_LIVE_UNAVAILABLE, type LaunchPolicyProjection, type WritingProj
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { WRITING_BOOK_TITLE, WRITING_FIXTURE_IDENTITY, WRITING_REQUEST } from '../support/writing-task.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for 快速开始 of a writing Task under a writing 默认执行规则 (Issue #432, plan slice S84b; S75's
 // design, #421): the real store and ledger, the one execution owner and the AI7 local deterministic adapter over the authored
@@ -81,7 +88,7 @@ async function withSession(body: (session: Session) => Promise<void>): Promise<v
     interruptAfterAbandonObjectRemoval: false,
     baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
   });
-  const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+  const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
   try {
     await body({ store, owner });
     store.markCleanShutdown();
@@ -284,7 +291,7 @@ describe('快速开始 of a writing Task (S84b; TASK-017, TASK-020, TASK-026, TA
         : entry])),
     };
     await withSession(async (session) => {
-      const owner = new BaselineAnalysisExecutionOwner({ ledger: session.store.baselineAnalysisLedger, launchPolicy, fixture: dropped, secretResolver: { resolve: async () => null } });
+      const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: session.store.baselineAnalysisLedger, launchPolicy, fixture: dropped, secretResolver: { resolve: async () => null } });
       try {
         const { store } = session;
         const { bookId, rule } = await ruledBook({ store, owner }, WRITING_BOOK_TITLE);

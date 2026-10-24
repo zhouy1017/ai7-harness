@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { withHouseReviewPreferenceFor } from '../support/policy-rules.js';
 import { HouseReviewPreferenceLedger } from '../../src/service/house-review-preference.js';
 import { HOUSE_PREFERENCE_CLOSED, HOUSE_PREFERENCE_NOT_RULE } from '../../src/service/task-plan.js';
@@ -61,6 +62,12 @@ import { LITERARY_EXPRESSION, STYLE_AND_FORMAT, TYPOS_AND_USAGE } from '../suppo
 import { makeJ13Series } from '../support/series-consistency.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
+
 // Service-integration suite (L2) for Review Runs (Issue #417, plan slice S69, Stage B): the real store,
 // the Review Run ledger and its drive loop, every category ledger, the one execution owner, and the AI7
 // local deterministic adapter over the authored fixtures — `sample1-review-authored`, layered over the
@@ -117,7 +124,7 @@ async function open(fixtureIdentity: string, owner?: (inner: BaselineAnalysisExe
     interruptAfterAbandonObjectRemoval: false,
     baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage, reviewContractVersion: reviewFixtureContractVersion(fixture) },
   });
-  const executionOwner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+  const executionOwner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
   const driver = new ReviewRunDriver(store.reviewRunDriveSteps, owner === undefined ? executionOwner : owner(executionOwner));
   return { store, owner: executionOwner, driver, fixture };
 }
@@ -2118,6 +2125,7 @@ async function openLayeredSelection(): Promise<Session> {
     baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage, reviewContractVersion: reviewFixtureContractVersion(fixture) },
   });
   const owner = new BaselineAnalysisExecutionOwner({
+    requestGovernor,
     ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null },
     seriesScopeGuard: (runRecordId) => store.seriesScopeGuard(runRecordId),
   });

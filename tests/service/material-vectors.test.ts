@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -24,6 +25,12 @@ import { malformedPdf, sampleTextPdf, syntheticPdf } from '../fixtures/material-
 import { dropFactualVerificationRelations, FACTUAL_VERIFICATION_SCHEMA_NAMES, dropMaterialIndexLayerRelations, restoreProposalReviewPredecessor, pre77SchemaRows, restoreTaskIntentDraftPredecessor, pre80SchemaRows } from '../support/pre74-schema.js';
 import { withoutRuleFor } from '../support/policy-rules.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for the Material Index's similarity vectors, PDF text layer and 来源译文 (Issue #892) over the
 // real store on a temporary Agent Data Root. Every file is the suite's own synthetic words or the authored public passage —
@@ -416,7 +423,7 @@ describe('来源译文 over the real store', () => {
       const routes = productionFastRoleRoutes({ scope: 'ordinary-production', nativeFetch: transport }, () => policy, () => go.credentialReference,
         { resolve: async () => 'placeholder-production-key' });
       expect(routes.routes[MATERIAL_TRANSLATION_KIND]?.ruleId).toBe('ordinary-production-material-translation');
-      const owner = new FastRoleExecutionOwner({ fixture: null, live: routes });
+      const owner = new FastRoleExecutionOwner({ requestGovernor, fixture: null, live: routes });
       store.useMaterialTranslator(materialTranslator(owner, 'ordinary-production', () => 1));
       // The house's own material: no public-passage list applies in production.
       const mill = await put(store, file('mill.txt', 'The mill turns.'), 'Mill notes');
@@ -464,7 +471,7 @@ describe('来源译文 over the real store', () => {
       // A policy without this kind has no route; only the refusal case changes its rules in memory.
       expect(fastRoleLiveRoutes({ launch: { runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 1 }, providerCacheRoot: cacheRoot, validation: null }, nativeFetch: transport }, withoutRuleFor(verified, MATERIAL_TRANSLATION_KIND), { resolve: async () => null })
         .routes[MATERIAL_TRANSLATION_KIND]).toBeNull();
-      const owner = new FastRoleExecutionOwner({ fixture: null, live: routes });
+      const owner = new FastRoleExecutionOwner({ requestGovernor, fixture: null, live: routes });
       const rules = (): number => policy.providerProcessing.admittedRules.filter((rule) => rule.taskKinds.includes(MATERIAL_TRANSLATION_KIND)).length;
       store.useMaterialTranslator(materialTranslator(owner, 'developer-live', rules));
       const passage = await put(store, file('public-passage-en.txt', readFileSync(join(roots.codeRoot, 'tests', 'fixtures', 'material-formats', 'public-passage-en.txt'))), 'The Small Bindery');

@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
@@ -37,6 +38,12 @@ import type { DevelopmentValidationIntent, DialogueProjection, DialogueSelection
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, requireExactSample1, sample1Path } from '../support/sample1-baseline.js';
 import { withLocalRetrievalFor } from '../support/policy-rules.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for the live editorial dialogue (Issue #52, plan slice S17c; ADR 0088; ADR 0089) over the
 // real store, the real PrimaryAgentHarness composition, Egress Gate, Credential Broker, Provider Test Ledger and Result Cache,
@@ -174,7 +181,7 @@ function liveRoute(nativeFetch: typeof fetch, options: { validation?: Developmen
 }
 
 function liveOwner(store: EditorialStore, live: DialogueLiveRoute | null): DialogueExecutionOwner {
-  return new DialogueExecutionOwner({ records: store, fixture: null, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live });
+  return new DialogueExecutionOwner({ requestGovernor, records: store, fixture: null, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live });
 }
 
 function selectionOf(store: EditorialStore, book: { manuscriptId: string; branchId: string }): DialogueSelectionInput {
@@ -277,7 +284,7 @@ describe('the admitted dialogue route, read from the selected policy', () => {
         controller.close();
       } }), { headers: { 'content-type': 'text/event-stream' } });
     }) as unknown as typeof fetch;
-    const dialogues = new DialogueExecutionOwner({ records: store, fixture: null,
+    const dialogues = new DialogueExecutionOwner({ requestGovernor, records: store, fixture: null,
       sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY),
       live: liveRoute(nativeFetch),
       retrievalIndex: (id) => store.dialogueRetrievalIndex(id) });
@@ -309,7 +316,7 @@ describe('the admitted dialogue route, read from the selected policy', () => {
     const selection = selectionOf(store, book);
     const { loadModelFixture } = await import('../../src/service/provider/model-fixture.js');
     const fixture = await loadModelFixture(join(roots.codeRoot, 'tests', 'fixtures', 'model'), 'sample1-dialogue');
-    const local = new DialogueExecutionOwner({ records: store, fixture, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live: null });
+    const local = new DialogueExecutionOwner({ requestGovernor, records: store, fixture, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live: null });
     const { dialogueId } = await ask(store, local, book.bookId, selection);
     await local.dispose();
 
@@ -663,6 +670,7 @@ describe('就这段提问… on the live route (provider-free)', () => {
     const fixture = await loadModelFixture(resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url))), 'sample1-dialogue');
     let streamed = 0;
     const local = new Owner({
+      requestGovernor,
       records: store, fixture, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live: null,
       answerHold: async (count, interrupted) => {
         streamed = count;
@@ -729,7 +737,7 @@ describe('the recorded live answer (Issue #52, S17c fixture)', () => {
     const answer = (recordedEntry.response as unknown as { chunks: string[] }).chunks.join('');
     const store = await openStore();
     const book = await importSample1Book(store, roots.codeRoot, '实录回放');
-    const local = new DialogueExecutionOwner({ records: store, fixture: recorded, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live: null, answerHold: null });
+    const local = new DialogueExecutionOwner({ requestGovernor, records: store, fixture: recorded, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live: null, answerHold: null });
     try {
       const { dialogueId, projection } = await ask(store, local, book.bookId, selectionOf(store, book));
       expect(projection.attempts[0]!.state).toBe('completed');
@@ -771,7 +779,7 @@ describe('revision 71', () => {
     const { fileURLToPath } = await import('node:url');
     const fixture = await loadModelFixture(resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url))), 'sample1-dialogue');
     let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    const local = new Owner({ records: store, fixture, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live: null, answerHold: null });
+    const local = new Owner({ requestGovernor, records: store, fixture, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live: null, answerHold: null });
     const book = await importSample1Book(store, roots.codeRoot, '修订71');
     const turn = store.askAboutSelection(book.bookId, { selection: selectionOf(store, book), question: QUESTION });
     local.begin(turn);
@@ -834,7 +842,7 @@ describe('revision 72 (Issue #811)', () => {
     const { fileURLToPath } = await import('node:url');
     const fixture = await loadModelFixture(resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url))), 'sample1-dialogue');
     let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    const local = new Owner({ records: store, fixture, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live: null, answerHold: null });
+    const local = new Owner({ requestGovernor, records: store, fixture, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live: null, answerHold: null });
     const book = await importSample1Book(store, roots.codeRoot, '修订72');
     const turn = store.askAboutSelection(book.bookId, { selection: selectionOf(store, book), question: QUESTION });
     local.begin(turn);

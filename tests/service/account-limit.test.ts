@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { writeFileSync } from 'node:fs';
@@ -10,6 +11,12 @@ import { BASELINE_ANALYSIS_TASK_GOAL, type BaselineAnalysisProjection, type Laun
 import { SAMPLE1_UNITS, importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { accountLimitReached } from '../../src/service/task-plan.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for 模型服务账户限额 (Issue #51, plan slice S16b; V2-UX-MODEL-018, RUN-012): the real store on
 // a temporary Agent Data Root, exact `sample1` imported through the supported path, and J-04's deterministic route over
@@ -47,7 +54,7 @@ function openWithRoute(): Promise<EditorialStore> {
 }
 
 function owner(store: EditorialStore): BaselineAnalysisExecutionOwner {
-  return new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+  return new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
 }
 
 function prepare(store: EditorialStore, bookId: string): BaselineAnalysisProjection {
@@ -195,7 +202,7 @@ describe('backoff before the safe retry on the declared retryable route', () => 
     ('waits before the single $status retry and repeats the exact request', async ({ status, retryAfter, minimum }) => {
       const { store, bookId, policy, prepared } = await retryableLaunch();
       const calls: Array<{ at: number; body: string }> = [];
-      const execution = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
+      const execution = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
         secretResolver: { resolve: async () => 'placeholder-production-key' },
         production: { scope: 'ordinary-production', nativeFetch: async (_url, init) => {
           calls.push({ at: Date.now(), body: String(init?.body) });
@@ -218,7 +225,7 @@ describe('backoff before the safe retry on the declared retryable route', () => 
     let sent!: () => void;
     const first = new Promise<void>((resolve) => { sent = resolve; });
     let calls = 0;
-    const execution = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
+    const execution = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
       secretResolver: { resolve: async () => 'placeholder-production-key' },
       production: { scope: 'ordinary-production', nativeFetch: async () => {
         calls += 1;

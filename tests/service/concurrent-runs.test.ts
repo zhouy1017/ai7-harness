@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { randomUUID } from 'node:crypto';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../src/shared/protected-secret-identity.js';
 import { resolve } from 'node:path';
@@ -21,6 +22,12 @@ import {
 } from '../../src/shared/protocol.js';
 import { SAMPLE1_UNITS, importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for concurrent Book work (Issue #49, plan slice S14; ADR 0021, V2-UX-CONC-001 to 009):
 // the real store on a temporary Agent Data Root, exact `sample1` imported through the supported path as several Books,
@@ -78,6 +85,7 @@ function ownerOf(
   options: { capacity?: number; waitingCapacity?: number; route?: boolean; fixture?: ResolvedModelFixture } = {},
 ): BaselineAnalysisExecutionOwner {
   return new BaselineAnalysisExecutionOwner({
+    requestGovernor,
     ledger: store.baselineAnalysisLedger,
     launchPolicy,
     fixture: options.route === false ? null : options.fixture ?? fixture,
@@ -157,6 +165,27 @@ function active(projection: GlobalAttentionProjection): Array<[string | null, st
 }
 
 describe('the execution owner\'s concurrency governor over the real store on exact sample1', () => {
+  it('keeps the admitted v1 fixture serial when an unrelated top-level execution declaration says three (#1131)', async () => {
+    const selectedProduction = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production');
+    launchPolicy = { ...launchPolicy, providerProcessing: { ...launchPolicy.providerProcessing,
+      execution: structuredClone(selectedProduction.providerProcessing.execution!),
+    } };
+    const store = await openWithRoute(); const book = await preparedBook(store, 'v1 与声明边界', true);
+    let entered!: () => void; let release!: () => void; let first = true;
+    const reached = new Promise<void>((done) => { entered = done; }); const held = new Promise<void>((done) => { release = done; });
+    const execution = ownerOf(store, async () => { if (first) { first = false; entered(); await held; } });
+    try {
+      const runId = store.authorizeBaselineAnalysis(book.bookId, book.taskIntentId, book.planEnvelopeDigest).dispatchRunRecordId!;
+      execution.admitAndDispatch(runId); await reached;
+      expect(execution.progressFor(runId)).toMatchObject({ currentUnitOrdinal: 1, unitsSettled: 0, completedAttempts: 0 });
+      expect(store.baselineAnalysisLedger.unitCheckpoints(runId)).toHaveLength(0);
+      expect(store.baselineAnalysisLedger.requestAdmissionOf(runId)).toBeNull();
+      expect(requestGovernor.snapshot()).toEqual({ registered: 0, waiting: 0, inFlight: 0, backgroundInFlight: 0 });
+      release(); await execution.whenIdle();
+      expect(store.inspectBaselineAnalysis(book.bookId).run?.state).toBe('completed');
+    } finally { release(); await execution.dispose(); store.close(); }
+  });
+
   it('refuses overflow without an attempt, preserves admitted waiting starts and reuses a cancelled waiting place', async () => {
     const gate = sharedHold();
     const store = await openWithRoute();
@@ -580,7 +609,7 @@ describe('live foreground places and request aborts (#1080)', () => {
           synopsis: '合成边界结果。', entities: [], events: [], relationships: [], settingClaims: [], conflicts: [], unresolved: [], confidence: 'high' }) }, finish_reason: 'stop' }],
         usage: { prompt_tokens: 40, completion_tokens: 20 } }), { status: 200 })) });
     });
-    const execution = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture: null,
+    const execution = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture: null,
       secretResolver: { resolve: async () => 'placeholder-key' },
       ...(scope === 'ordinary-production' ? { production: { scope, nativeFetch } }
         : { developerLive: { launch: { runBudgetCeiling: ceiling, providerCacheRoot: roots.dataRoot, validation: null }, nativeFetch } }) });
@@ -653,7 +682,7 @@ async function heldProductionLaunch(): Promise<{ store: EditorialStore; owner: B
         usage: { prompt_tokens: 40, completion_tokens: 20 } }), { status: 200 })) });
     });
   };
-  const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture: null,
+  const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture: null,
     production: { scope: 'ordinary-production', nativeFetch }, secretResolver: { resolve: async () => 'synthetic-placeholder-key' } });
   return { store, owner, calls };
 }

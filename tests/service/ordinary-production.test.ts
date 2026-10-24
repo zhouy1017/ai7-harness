@@ -1,16 +1,22 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { MODEL_SERVICE_CONNECTION_REVISION_72_SQL } from '../../src/service/bounded-manuscript.js';
 import { FastRoleExecutionOwner, productionFastRoleRoutes, testModelServiceConnection } from '../../src/service/fast-role/fast-role-execution.js';
 import { materialTranslator, MATERIAL_TRANSLATION_RESULT_SCHEMA } from '../../src/service/fast-role/material-translation-contract.js';
 import { randomUUID } from 'node:crypto';
+import { PassThrough, Writable } from 'node:stream';
+import { ServiceRequestLoop } from '../../src/service/service-request-loop.js';
+import * as harnessExecution from '../../src/service/harness/primary-agent-harness.js';
+import { adaptationMode } from '../../src/service/analysis/plan-edits.js';
 import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { cpSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
+import { BaselineAnalysisExecutionOwner, type ExecutionOwnerDependencies } from '../../src/service/analysis/execution.js';
 import { BackgroundAnalysisDispatcher } from '../../src/service/background-analysis.js';
 import { liveKindRule } from '../../src/service/analysis/live-kind-admission.js';
 import type { LaunchBinding, OrdinaryProductionLaunchBinding } from '../../src/service/analysis/baseline-analysis-store.js';
@@ -47,11 +53,18 @@ import {
   type BaselineAnalysisProjection,
   type LaunchPolicyProjection,
   type ModelServiceRouteId,
+  type ServiceResponse,
 } from '../../src/shared/protocol.js';
 import { CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES } from '../../src/shared/provider-configuration.generated.js';
 import { ADMITTED_BASELINE_DOCX, composeManuscriptDocx } from '../support/composed-fixture.js';
 import { SAMPLE1_UNITS, importSample1Book, pinEditorialWorkspaceProfileRevision2 } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for the local ordinary-production launch (Issue #811): the real store, plan, execution owner,
 // DSH composition, Egress Gate and Credential Broker over exact `sample1`, with the editor's model service configured in the
@@ -157,8 +170,10 @@ async function configure(store: EditorialStore, production: ProductionLaunch, ro
   return pending.credentialReference;
 }
 
-function owner(store: EditorialStore, production: ProductionLaunch, nativeFetch: typeof fetch, reads: string[] = []): BaselineAnalysisExecutionOwner {
+function owner(store: EditorialStore, production: ProductionLaunch, nativeFetch: typeof fetch, reads: string[] = [],
+  controls: Pick<ExecutionOwnerDependencies, 'stageHold' | 'unitHold'> = {}): BaselineAnalysisExecutionOwner {
   const execution = new BaselineAnalysisExecutionOwner({
+    requestGovernor,
     ledger: store.baselineAnalysisLedger,
     launchPolicy: production.policy,
     currentLaunchPolicy: () => production.policy,
@@ -167,6 +182,7 @@ function owner(store: EditorialStore, production: ProductionLaunch, nativeFetch:
     // A local placeholder for the editor's own credential: the broker releases it to the transmit step alone.
     secretResolver: { resolve: async (reference) => { reads.push(reference); return 'placeholder-production-key'; } },
     production: { scope: 'ordinary-production', nativeFetch },
+    ...controls,
   });
   owners.push(execution);
   return execution;
@@ -257,6 +273,343 @@ function code(operation: () => unknown): string {
   }
   return 'no-error';
 }
+
+function deferred<Value = void>() {
+  let resolve!: (value: Value | PromiseLike<Value>) => void;
+  const promise = new Promise<Value>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
+/** Synchronous fault boundary: public-sample test data only, with a consistent SQLite snapshot. */
+function snapshotAtBoundary(name: string): string {
+  const target = join(roots.dataRoot, '..', name);
+  cpSync(roots.dataRoot, target, { recursive: true,
+    filter: (source) => !['ai7.sqlite', 'ai7.sqlite-wal', 'ai7.sqlite-shm'].includes(basename(source)) });
+  const source = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+  try { source.prepare('VACUUM INTO ?').run(join(target, 'store', 'ai7.sqlite')); } finally { source.close(); }
+  return target;
+}
+
+it.each(['cross-unit-reduction', 'assurance-sampling'] as const)('reconciles a returned %s response lost before its checkpoint without a paused row or resend (#1131)', async (stage) => {
+  const { store, production } = await openProductionStore(); await configure(store, production, 'opencode-go');
+  const bookId = await sample1Book(store, '公开样书的阶段中断'); const prepared = prepare(store, bookId, production.policy);
+  const calls: StubCall[] = []; const transport = stubTransport(calls, await chainAnswers(prepared));
+  const reached = deferred(); const release = deferred();
+  const execution = owner(store, production, transport, [], { stageHold: async (current) => { if (current === stage) { reached.resolve(); await release.promise; } } });
+  const running = run(store, execution, bookId, prepared); void running.catch(() => undefined); await reached.promise;
+  const runRecordId = store.inspectBaselineAnalysis(bookId).run!.runRecordId;
+  expect(store.baselineAnalysisLedger.currentRunState(runRecordId)).toBe('executing');
+  expect([...store.baselineAnalysisLedger.requestAdmissionOf(runRecordId)!.open.values()].map((request) => request.stage)).toEqual([stage]);
+  const snapshot = snapshotAtBoundary(`crash-returned-${stage}`);
+  const stopped = execution.dispose(); release.resolve(); await stopped; await running;
+  const reopened = await openProductionStore(snapshot); reopened.store.reconcileStoppedBaselineAnalysisRuns();
+  const kept = reopened.store.baselineAnalysisLedger; const stages = kept.stageContinuationOf(runRecordId)!;
+  if (stage === 'cross-unit-reduction') expect(stages.reduction?.outcome).toMatchObject({ state: 'gap', code: 'outcome-unknown' });
+  else expect(stages.sampling?.turns.at(-1)?.state).toBe('outcome-unknown');
+  expect(kept.requestAdmissionOf(runRecordId)!.open.size).toBe(0);
+  const count = () => calls.filter((call) => {
+    const message = (JSON.parse(call.body) as { messages: Array<{ role: string; content: string }> }).messages.findLast((entry) => entry.role === 'user')!.content;
+    return stage === 'cross-unit-reduction' ? parseCrossUnitMessageHeader(message) !== null : parseAssuranceSamplingMessageHeader(message) !== null;
+  }).length;
+  const before = count(); const continued = owner(reopened.store, reopened.production, transport);
+  continued.admitAndDispatch(runRecordId, kept, { resume: true }); await continued.whenIdle();
+  expect(count()).toBe(before); expect(kept.currentRunState(runRecordId)).toMatch(/^completed/u);
+  expect(kept.requestAdmissionOf(runRecordId)!.open.size).toBe(0);
+});
+
+it('reuses immediate completed reduction evidence and its exact usage after restart without a preceding pause (#1131)', async () => {
+  const { store, production } = await openProductionStore(); await configure(store, production, 'opencode-go');
+  const bookId = await sample1Book(store, '公开样书的归纳结算'); const prepared = prepare(store, bookId, production.policy);
+  const ledger = store.baselineAnalysisLedger; const checkpoint = ledger.checkpointStageRequests.bind(ledger); let snapshot: string | undefined;
+  vi.spyOn(ledger, 'checkpointStageRequests').mockImplementation((runId, stage, stages, usage) => {
+    checkpoint(runId, stage, stages, usage);
+    if (stage === 'cross-unit-reduction' && stages.reduction?.outcome.state === 'closed' && snapshot === undefined) snapshot = snapshotAtBoundary('crash-after-reduction-settlement');
+  });
+  const calls: StubCall[] = []; const transport = stubTransport(calls, await chainAnswers(prepared));
+  const settled = await run(store, owner(store, production, transport), bookId, prepared); const runId = settled.run!.runRecordId;
+  expect(snapshot).toBeDefined();
+  const reopened = await openProductionStore(snapshot!); reopened.store.reconcileStoppedBaselineAnalysisRuns();
+  const kept = reopened.store.baselineAnalysisLedger; const saved = kept.stageContinuationOf(runId)!;
+  expect(saved.reduction?.outcome.state).toBe('closed');
+  const usage = kept.carriedUsageOf(runId)!.stages!['cross-unit-reduction']; expect(usage.requests).toBe(1);
+  const before = calls.filter((call) => parseCrossUnitMessageHeader((JSON.parse(call.body).messages as Array<{ content: string }>).at(-1)!.content) !== null).length;
+  const continued = owner(reopened.store, reopened.production, transport); continued.admitAndDispatch(runId, kept, { resume: true }); await continued.whenIdle();
+  expect(calls.filter((call) => parseCrossUnitMessageHeader((JSON.parse(call.body).messages as Array<{ content: string }>).at(-1)!.content) !== null)).toHaveLength(before);
+  const db = new DatabaseSync(join(snapshot!, 'store', 'ai7.sqlite'), { readOnly: true });
+  try {
+    const outcome = JSON.parse(String(db.prepare('SELECT canonical_json FROM analysis_task_outcomes WHERE run_record_id = ?').get(runId)!.canonical_json));
+    expect(outcome.report.usagePerStage['cross-unit-reduction']).toEqual(usage);
+  } finally { db.close(); }
+});
+
+it('keeps an actually selected finite-ceiling production v2 Run serial with free global capacity (#1131)', async () => {
+  const { store, production } = await openProductionStore(); await configure(store, production, 'opencode-go');
+  const bookId = await sample1Book(store, '公开样书的有限预算'); const initial = prepare(store, bookId, production.policy);
+  const prepared = store.editBaselineAnalysisPlan({ bookId, taskIntentId: initial.taskIntent!.taskIntentId, planEnvelopeDigest: initial.planEnvelope!.digest,
+    removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 500_000 },
+  });
+  const calls: StubCall[] = []; const normal = stubTransport(calls, await chainAnswers(prepared));
+  const entered = deferred(); const release = deferred(); let first = true;
+  const transport = (async (url: Parameters<typeof fetch>[0], init: RequestInit) => {
+    const response = await normal(url, init);
+    if (!first) return response; first = false;
+    return { status: response.status, json: async () => { entered.resolve(); await release.promise; return response.json(); } };
+  }) as unknown as typeof fetch;
+  const execution = owner(store, production, transport); const running = run(store, execution, bookId, prepared); void running.catch(() => undefined);
+  try {
+    await entered.promise; const runId = store.inspectBaselineAnalysis(bookId).run!.runRecordId;
+    expect(store.baselineAnalysisLedger.executionBindingOf(runId)!.binding.compositionVersion).toBe(2);
+    expect(store.baselineAnalysisLedger.requestAdmissionOf(runId)!.width).toBe(1);
+    expect(requestGovernor.snapshot()).toMatchObject({ registered: 1, inFlight: 1, waiting: 0 }); expect(calls).toHaveLength(1);
+    release.resolve(); expect((await running).run!.state).toBe('completed');
+  } finally { release.resolve(); await execution.dispose(); await running; }
+});
+
+it('keeps a historical v2 binding without an execution receipt serial on explicit resume (#1131)', async () => {
+  const { store, production } = await openProductionStore(); await configure(store, production, 'opencode-go');
+  const bookId = await sample1Book(store, '公开样书的历史绑定'); const prepared = prepare(store, bookId, production.policy);
+  const ledger = store.baselineAnalysisLedger; const begin = ledger.beginRequestAdmissions.bind(ledger); let snapshot: string | undefined;
+  vi.spyOn(ledger, 'beginRequestAdmissions').mockImplementation((runId, width, rule) => {
+    if (snapshot === undefined) snapshot = snapshotAtBoundary('historical-v2-binding-without-receipt');
+    return begin(runId, width, rule);
+  });
+  const answers = await chainAnswers(prepared); const firstCalls: StubCall[] = [];
+  const original = await run(store, owner(store, production, stubTransport(firstCalls, answers)), bookId, prepared); const runId = original.run!.runRecordId;
+  const reopened = await openProductionStore(snapshot!); reopened.store.reconcileStoppedBaselineAnalysisRuns();
+  const kept = reopened.store.baselineAnalysisLedger;
+  expect(kept.requestAdmissionOf(runId)).toBeNull(); const binding = kept.executionBindingOf(runId)!;
+  expect(binding.binding.compositionVersion).toBe(2);
+  const calls: StubCall[] = []; const normal = stubTransport(calls, answers); const entered = deferred(); const release = deferred(); let first = true;
+  const transport = (async (url: Parameters<typeof fetch>[0], init: RequestInit) => {
+    const response = await normal(url, init);
+    if (!first) return response; first = false;
+    return { status: response.status, json: async () => { entered.resolve(); await release.promise; return response.json(); } };
+  }) as unknown as typeof fetch;
+  const capacity = new ModelRequestGovernor(); const execution = new BaselineAnalysisExecutionOwner({ requestGovernor: capacity,
+    ledger: kept, launchPolicy: reopened.production.policy, fixture: null, production: { scope: 'ordinary-production', nativeFetch: transport },
+    productionPolicyFor: (frozen) => resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', frozen),
+    secretResolver: { resolve: async () => 'public-synthetic-placeholder' } });
+  try {
+    execution.admitAndDispatch(runId, kept, { resume: true }); await entered.promise;
+    expect(kept.requestAdmissionOf(runId)!.width).toBe(1); expect(calls).toHaveLength(1);
+    expect(capacity.snapshot()).toMatchObject({ registered: 1, inFlight: 1, waiting: 0 });
+    release.resolve(); await execution.whenIdle();
+    expect(kept.currentRunState(runId)).toBe('completed'); expect(kept.executionBindingOf(runId)!.bindingDigest).toBe(binding.bindingDigest);
+  } finally { release.resolve(); await execution.dispose(); capacity.close(); await capacity.whenIdle(); }
+});
+
+it('claims a live clarification answer only with its granted fence and preserves a pause plus queued restart evidence (#1131)', async () => {
+  const { store, production } = await openProductionStore(); await configure(store, production, 'opencode-go');
+  const bookId = await sample1Book(store, '公开样书的排队澄清'); const prepared = prepare(store, bookId, production.policy);
+  const answers = await chainAnswers(prepared); const calls: StubCall[] = []; let asked = false;
+  const transport = stubTransport(calls, answers, (ordinal) => {
+    if (ordinal !== 1 || asked) return null; asked = true;
+    return { status: 200, body: { model: GO.model, choices: [{ message: { content: JSON.stringify({ question: '本范围按哪个阅读重点处理？', options: ['人物', '事件'], freeTextAllowed: true }) }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 10, completion_tokens: 5 } } };
+  });
+  const execution = owner(store, production, transport); const initial = await run(store, execution, bookId, prepared);
+  const ledger = store.baselineAnalysisLedger; const runId = initial.run!.runRecordId; const question = ledger.clarificationsOf(runId)[0]!;
+  expect(initial.run!.state).toBe('awaiting-clarification'); expect(ledger.unitCheckpoints(runId)).toHaveLength(7);
+  expect(ledger.requestAdmissionOf(runId)!.open.size).toBe(0);
+  store.answerBaselineAnalysisClarification({ bookId, taskIntentId: prepared.taskIntent!.taskIntentId, requestId: question.requestId, optionId: 'model-option-0', note: null });
+  const occupiers = Array.from({ length: 4 }, (_, index) => requestGovernor.registerProducer({ key: `clarification-occupier:${index}`, kind: 'analysis-unit', lane: 'foreground' }));
+  const permits = await Promise.all(occupiers.map((producer) => requestGovernor.acquire(producer, new AbortController().signal)));
+  const queued = deferred(); const acquire = requestGovernor.acquire.bind(requestGovernor);
+  vi.spyOn(requestGovernor, 'acquire').mockImplementation((producer, signal) => { const result = acquire(producer, signal); queued.resolve(); return result; });
+  let stateAtClaim: string | undefined; const admit = ledger.admitModelRequest.bind(ledger);
+  vi.spyOn(ledger, 'admitModelRequest').mockImplementation((id, request, claim) => { admit(id, request, claim); if (claim !== null && claim !== undefined) stateAtClaim = ledger.currentRunState(id); });
+  try {
+    execution.continueAnswered(runId); await queued.promise;
+    expect(ledger.modelClarificationAnswerClaimed(runId, question.requestId)).toBe(false);
+    expect(ledger.requestAdmissionOf(runId)!.open.size).toBe(0);
+    const snapshot = snapshotAtBoundary('queued-unsent-clarification-answer');
+    ledger.requestPause(bookId, prepared.taskIntent!.taskIntentId); execution.pauseRun(runId);
+    for (const permit of permits) permit.release();
+    await execution.whenIdle(); expect(stateAtClaim).toBe('pausing'); expect(ledger.currentRunState(runId)).toBe('paused');
+    expect(ledger.unitCheckpoints(runId)).toHaveLength(8); expect(ledger.requestAdmissionOf(runId)!.open.size).toBe(0);
+    for (const producer of occupiers) requestGovernor.unregisterProducer(producer);
+    execution.admitAndDispatch(runId, ledger, { resume: true }); await execution.whenIdle(); expect(ledger.currentRunState(runId)).toBe('completed');
+    const reopened = await openProductionStore(snapshot); reopened.store.reconcileStoppedBaselineAnalysisRuns();
+    const kept = reopened.store.baselineAnalysisLedger;
+    expect(kept.unitCheckpoints(runId)).toHaveLength(7); expect(kept.modelClarificationAnswerClaimed(runId, question.requestId)).toBe(false);
+    const restartedCalls: StubCall[] = []; const restarted = owner(reopened.store, reopened.production, stubTransport(restartedCalls, answers));
+    restarted.admitAndDispatch(runId, kept, { resume: true }); await restarted.whenIdle();
+    expect(kept.currentRunState(runId)).toBe('completed'); expect(kept.unitCheckpoints(runId)).toHaveLength(8);
+    expect(restartedCalls.filter((call) => /^分析单元 1\//u.test((JSON.parse(call.body).messages as Array<{ role: string; content: string }>).findLast((entry) => entry.role === 'user')!.content))).toHaveLength(1);
+  } finally { for (const permit of permits) permit.release(); for (const producer of occupiers) requestGovernor.unregisterProducer(producer); }
+});
+
+it.each(['generic', 'AbortError', 'TimeoutError', 'forged-no-send'] as const)('never resends a possibly-sent production %s rejection during settlement, continuation or reopen (#1131)', async (kind) => {
+  const { store, production } = await openProductionStore(); await configure(store, production, 'opencode-go');
+  const bookId = await sample1Book(store, '公开样书的未知结果回归');
+  const prepared = prepare(store, bookId, production.policy); const calls: StubCall[] = [];
+  const normal = stubTransport(calls, await chainAnswers(prepared)); let firstUnitCalls = 0;
+  const transport: typeof fetch = async (url, init) => {
+    const body = JSON.parse(String(init?.body)) as { messages: Array<{ role: string; content: string }> };
+    const message = body.messages.findLast((entry) => entry.role === 'user')!.content;
+    if (/^分析单元 1\//u.test(message)) {
+      firstUnitCalls += 1;
+      if (kind === 'AbortError' || kind === 'TimeoutError') throw new DOMException('synthetic admitted rejection', kind);
+      throw kind === 'forged-no-send' ? Object.assign(new Error('synthetic admitted rejection'), { requestSent: false, code: 'UND_ERR_CONNECT_TIMEOUT' }) : new Error('synthetic admitted rejection');
+    }
+    return normal(url, init);
+  };
+  const execution = owner(store, production, transport); const settled = await run(store, execution, bookId, prepared);
+  expect(firstUnitCalls).toBe(1);
+  expect(settled.resultSetRevision?.gaps).toEqual(expect.arrayContaining([expect.objectContaining({ unitOrdinal: 1, code: 'outcome-unknown' })]));
+  const runRecordId = settled.run!.runRecordId;
+  expect(adaptationMode(store.baselineAnalysisLedger.loadExecutionPlan(runRecordId).editorEdits, 'safe-retry')).toBe('automatic');
+  expect(store.baselineAnalysisLedger.requestAdmissionOf(runRecordId)!.open.size).toBe(0);
+  expect(() => execution.admitAndDispatch(runRecordId, store.baselineAnalysisLedger, { resume: true })).toThrow();
+  expect(firstUnitCalls).toBe(1); await execution.dispose(); store.close();
+  const reopened = await openProductionStore();
+  reopened.store.reconcileStoppedBaselineAnalysisRuns();
+  const restarted = owner(reopened.store, reopened.production, transport);
+  expect(() => restarted.admitAndDispatch(runRecordId, reopened.store.baselineAnalysisLedger, { resume: true })).toThrow();
+  expect(reopened.store.inspectBaselineAnalysis(bookId).resultSetRevision?.gaps).toEqual(expect.arrayContaining([expect.objectContaining({ unitOrdinal: 1, code: 'outcome-unknown' })]));
+  expect(firstUnitCalls).toBe(1);
+});
+
+it('preserves the committed production outcome when real harness cleanup subsequently rejects (#1131 rev8)', async () => {
+  const prepareHarness = harnessExecution.prepareExecution;
+  let preparations = 0; let cleanups = 0;
+  vi.spyOn(harnessExecution, 'prepareExecution').mockImplementation(async (request) => {
+    const terminalContext = preparations++ === 0;
+    const handle = await prepareHarness(request);
+    if (terminalContext) {
+      const finish = handle.finish.bind(handle);
+      vi.spyOn(handle, 'finish').mockImplementation(async () => { cleanups += 1; await finish(); throw new Error('synthetic cleanup rejection after real disposal'); });
+    }
+    return handle;
+  });
+  const { store, production } = await openProductionStore(); await configure(store, production, 'opencode-go');
+  const bookId = await sample1Book(store, '公开样书的清理回归'); const prepared = prepare(store, bookId, production.policy);
+  const calls: StubCall[] = []; const execution = owner(store, production, stubTransport(calls, await chainAnswers(prepared)));
+  const settled = await run(store, execution, bookId, prepared); const runRecordId = settled.run!.runRecordId;
+  expect(cleanups).toBe(1);
+  expect(settled.run?.state).toMatch(/^completed/u); expect(settled.resultSetRevision).not.toBeNull();
+  expect(store.baselineAnalysisLedger.hasCommittedOutcome(runRecordId)).toBe(true);
+  const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+  try {
+    expect(db.prepare('SELECT classification FROM analysis_task_outcomes WHERE run_record_id = ?').all(runRecordId)).toEqual([{ classification: settled.run!.state }]);
+    expect(db.prepare("SELECT 1 FROM analysis_run_states WHERE run_record_id = ? AND state = 'failed'").all(runRecordId)).toEqual([]);
+  } finally { db.close(); }
+  expect(store.baselineAnalysisLedger.requestAdmissionOf(runRecordId)!.open.size).toBe(0);
+  expect(requestGovernor.snapshot()).toMatchObject({ registered: 0, inFlight: 0 });
+});
+
+it.each(['queued', 'body', 'current-projection'] as const)('orders real-store settings and current projection through the framed probe loop at %s (#1131)', async (phase) => {
+  const { store, production } = await openProductionStore();
+  const reference = await configure(store, production, 'opencode-go');
+  const initial = store.getModelServiceRouteConnection('opencode-go')!;
+  if (phase === 'current-projection') store.saveModelServiceConnection('Other Fast route', null, 'ready', 'deepseek-open-platform');
+  requestGovernor.close(); requestGovernor = new ModelRequestGovernor({ globalCapacity: 1 });
+  const blocker = requestGovernor.registerProducer({ key: 'other-live-consumer', kind: 'dialogue', lane: 'foreground' });
+  const permit = await requestGovernor.acquire(blocker, new AbortController().signal);
+  const queued = deferred(); const acquire = requestGovernor.acquire.bind(requestGovernor);
+  vi.spyOn(requestGovernor, 'acquire').mockImplementation((producer, signal) => { const result = acquire(producer, signal); queued.resolve(); return result; });
+  const input = new PassThrough(); const body = deferred<unknown>(); const consuming = deferred();
+  const replies = new Map<string, ReturnType<typeof deferred<ServiceResponse>>>();
+  const reply = (id: string): ReturnType<typeof deferred<ServiceResponse>> => {
+    let pending = replies.get(id);
+    if (pending === undefined) { pending = deferred<ServiceResponse>(); replies.set(id, pending); }
+    return pending;
+  };
+  const output = new Writable({ write: (chunk: Buffer, _encoding, done) => {
+    expect(chunk.readUInt32BE(0)).toBe(chunk.length - 4);
+    const response = JSON.parse(chunk.subarray(4).toString('utf8')) as ServiceResponse;
+    reply(response.id).resolve(response); done();
+  } });
+  const send = (op: string, value: unknown = {}) => {
+    const id = randomUUID(); const bytes = Buffer.from(JSON.stringify({ id, op, input: value }));
+    const frame = Buffer.alloc(4 + bytes.length); frame.writeUInt32BE(bytes.length); bytes.copy(frame, 4); input.write(frame); return id;
+  };
+  let sends = 0; let refreshed = 0; let finalFastRoute: string | undefined;
+  const loop = new ServiceRequestLoop({ input, output, requestGovernor,
+    probe: (selection, execution) => testModelServiceConnection(store, roots.codeRoot, {
+      scope: 'ordinary-production', nativeFetch: (async () => { sends += 1; return { status: 200, json: async () => { consuming.resolve(); return body.promise; } }; }) as unknown as typeof fetch,
+    }, selection, { resolve: async () => 'public-synthetic-placeholder' }, execution),
+    probeCompleted: async () => { refreshed += 1; await production.rebind(store); finalFastRoute = store.getConfiguredModelRoleBinding('fast-interaction')?.route; },
+    dispatch: async (request) => {
+      if (request.op === 'saveModelServiceConnection') {
+        const value = store.saveModelServiceConnection(request.input.connectionName, request.input.credentialReference,
+          request.input.credentialOperationState, request.input.route);
+        await production.rebind(store); return { id: request.id, ok: true, op: request.op, result: value };
+      }
+      if (request.op === 'getModelServiceStoredState') return { id: request.id, ok: true, op: request.op,
+        result: { connection: store.getModelServiceConnection(), connections: store.getModelServiceConnections(), launchPolicy: production.policy, proxy: await store.getModelServiceProxy() } };
+      if (request.op === 'selectFastRoleModel') {
+        store.selectFastRoleModel(request.input.route, request.input.modelId); await production.rebind(store);
+        return { id: request.id, ok: true, op: request.op, result: undefined };
+      }
+      throw new Error('unexpected ordinary operation');
+    },
+    failure: (id, error) => ({ id, ok: false, error: { code: error instanceof StoreError || error instanceof Error && 'code' in error ? String(error.code) : 'SERVICE_REQUEST_FAILED', message: '请求未完成。' } }),
+    onFatal: () => input.end(),
+  });
+  const running = loop.run(); void running.catch(() => undefined);
+  try {
+    const p = send('testModelServiceConnection', { route: 'opencode-go', modelId: 'deepseek-v4.1-flash' }); await queued.promise;
+    if (phase !== 'queued') { permit.release(); await consuming.promise; }
+    const m = phase === 'current-projection' ? send('selectFastRoleModel', { route: 'deepseek-open-platform', modelId: 'deepseek-flash' })
+      : send('saveModelServiceConnection', { route: 'opencode-go', connectionName: 'New generation', credentialReference: reference, credentialOperationState: 'ready' });
+    expect(await reply(m).promise).toMatchObject({ ok: true });
+    const c = send('getModelServiceStoredState');
+    expect(await reply(c).promise).toMatchObject({ ok: true, result: { connections: expect.arrayContaining([
+      expect.objectContaining({ credentialReference: reference, connectionTest: null }),
+    ]) } });
+    if (phase !== 'current-projection') expect(store.getModelServiceRouteConnection('opencode-go')!.credentialUpdatedAt).not.toBe(initial.credentialUpdatedAt);
+    permit.release(); body.resolve({ model: GO.model, choices: [{ message: { content: 'AI7_OK' }, finish_reason: 'stop' }], usage: { prompt_tokens: 12, completion_tokens: 3 } });
+    expect(await reply(p).promise).toMatchObject(phase === 'current-projection' ? { ok: true, result: { outcome: 'passed' } }
+      : { ok: false, error: { code: 'MODEL_SERVICE_CONNECTION_CONFLICT' } });
+    input.end(); await running;
+    expect(sends).toBe(phase === 'queued' ? 0 : 1); expect(refreshed).toBe(phase === 'current-projection' ? 1 : 0);
+    if (phase === 'current-projection') {
+      expect(finalFastRoute).toBe('deepseek-open-platform');
+      expect(store.getModelServiceRouteConnection('opencode-go')!.connectionTest).toMatchObject({ outcome: 'passed', credentialUpdatedAt: initial.credentialUpdatedAt });
+    } else {
+      expect(store.getModelServiceRouteConnection('opencode-go')!.connectionTest).toBeNull();
+      expect(store.getModelServiceRouteConnection('opencode-go')!.connectionName).toBe('New generation');
+    }
+    expect(requestGovernor.snapshot()).toMatchObject({ registered: 1, inFlight: 0, waiting: 0 });
+  } finally {
+    body.resolve({}); permit.release(); requestGovernor.unregisterProducer(blocker); loop.close(); input.end(); await running;
+  }
+});
+
+it('starts the selected finite model deadline only after real shared capacity grants a queued probe (#1131)', async () => {
+  const { store, production } = await openProductionStore(); await configure(store, production, 'opencode-go');
+  requestGovernor.close(); requestGovernor = new ModelRequestGovernor({ globalCapacity: 1 });
+  const foreign = requestGovernor.registerProducer({ key: 'deadline-occupier', kind: 'dialogue', lane: 'foreground' });
+  const permit = await requestGovernor.acquire(foreign, new AbortController().signal);
+  const queued = deferred(); const acquire = requestGovernor.acquire.bind(requestGovernor);
+  vi.spyOn(requestGovernor, 'acquire').mockImplementation((producer, signal) => { const waiting = acquire(producer, signal); queued.resolve(); return waiting; });
+  const cancellation = new AbortController(); const consuming = deferred(); let sends = 0; let settled = false;
+  vi.useFakeTimers();
+  const deadlineMs = production.policy.providerProcessing.transport!.requestDeadlineSeconds * 1000;
+  const probe = testModelServiceConnection(store, roots.codeRoot, { scope: 'ordinary-production', nativeFetch: (async (_url: unknown, init: RequestInit) => {
+    sends += 1;
+    return { status: 200, json: () => new Promise<never>((_resolve, reject) => {
+      const signal = init.signal!;
+      const abort = (): void => { signal.removeEventListener('abort', abort); reject(signal.reason); };
+      signal.addEventListener('abort', abort, { once: true }); consuming.resolve(); if (signal.aborted) abort();
+    }) };
+  }) as unknown as typeof fetch }, { route: 'opencode-go', modelId: 'deepseek-v4.1-flash' },
+  { resolve: async () => 'public-synthetic-placeholder' }, { requestGovernor, signal: cancellation.signal });
+  void probe.then(() => { settled = true; }, () => { settled = true; });
+  try {
+    await queued.promise; await vi.advanceTimersByTimeAsync(deadlineMs + 1);
+    expect(sends).toBe(0); expect(settled).toBe(false); expect(requestGovernor.snapshot().waiting).toBe(1);
+    permit.release(); await consuming.promise;
+    await vi.advanceTimersByTimeAsync(deadlineMs - 1); expect(settled).toBe(false); expect(requestGovernor.snapshot().inFlight).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect((await probe).outcome).toBe('outcome-unknown'); expect(sends).toBe(1);
+    expect(requestGovernor.snapshot()).toMatchObject({ registered: 1, waiting: 0, inFlight: 0 });
+  } finally {
+    cancellation.abort(); permit.release(); requestGovernor.unregisterProducer(foreign);
+    await vi.advanceTimersByTimeAsync(0); await probe.catch(() => undefined); vi.useRealTimers();
+  }
+});
 
 describe('ordinary production over exact sample1 with a stub transport (Issue #811)', { timeout: 120_000 }, () => {
   it.each(['opencode-go', 'deepseek-open-platform'] as const)('dispatches an enrolled background Run under v23 on %s with its mandatory frozen ceiling (#864)', async (route) => {
@@ -632,7 +985,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
     const resolver = { resolve: async (reference: string) => { reads.push(reference); return 'public-synthetic-placeholder'; } };
     for (const modelId of ['gpt-5.6-sol', 'gpt-5.6-luna']) {
       const tested = await testModelServiceConnection(store, roots.codeRoot,
-        { scope: 'ordinary-production', nativeFetch: responsesTransport(calls, 'AI7_OK') }, { route: 'openai-platform', modelId }, resolver);
+        { scope: 'ordinary-production', nativeFetch: responsesTransport(calls, 'AI7_OK') }, { route: 'openai-platform', modelId }, resolver, { requestGovernor });
       expect(tested).toMatchObject({ modelId, outcome: 'passed', verified: 'buffered-text-only' });
       store.selectFastRoleModel('openai-platform', modelId);
       expect(store.getConfiguredModelRoleBinding('main-editorial')?.credentialReference).toBe(official.credentialReference);
@@ -644,7 +997,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
       credentialSlot: 'openai-platform', credentialReference: openai.credentialReference });
     const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', store.getConfiguredModelRoleBinding('main-editorial'), fast);
     expect(policy.integrityState).toBe('verified');
-    const owner = new FastRoleExecutionOwner({ fixture: null, live: productionFastRoleRoutes(
+    const owner = new FastRoleExecutionOwner({ requestGovernor, fixture: null, live: productionFastRoleRoutes(
       { scope: 'ordinary-production', nativeFetch: responsesTransport(calls, JSON.stringify({ schema: MATERIAL_TRANSLATION_RESULT_SCHEMA,
         translations: [{ n: 1, text: '公开连接测试的合成译文。' }] })) }, () => policy, () => fast.credentialReference, resolver) });
     try {
@@ -691,7 +1044,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
     const resolver = { resolve: vi.fn(async () => 'public-placeholder') };
     for (const [runtime, modelId] of [[null, 'gpt-5.6-luna'], [{ scope: 'ordinary-production', nativeFetch: vi.fn() }, 'gpt-6-astra'],
       [{ scope: 'ordinary-production', nativeFetch: vi.fn() }, 'gpt-5.6-luna']] as const) {
-      await expect(testModelServiceConnection(store, roots.codeRoot, runtime, { route: 'openai-platform', modelId }, resolver)).rejects.toThrow();
+      await expect(testModelServiceConnection(store, roots.codeRoot, runtime, { route: 'openai-platform', modelId }, resolver, { requestGovernor })).rejects.toThrow();
     }
     expect(resolver.resolve).not.toHaveBeenCalled();
   });
@@ -708,7 +1061,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
     });
     const status = await testModelServiceConnection(store, roots.codeRoot,
       { scope: 'ordinary-production', nativeFetch: transport as unknown as typeof fetch },
-      { route: 'openai-platform', modelId: 'gpt-5.6-luna' }, { resolve: async () => 'public-placeholder' });
+      { route: 'openai-platform', modelId: 'gpt-5.6-luna' }, { resolve: async () => 'public-placeholder' }, { requestGovernor });
     expect(status.outcome).toBe(failure === 'unknown' ? 'outcome-unknown' : 'failed');
     expect(transport).toHaveBeenCalledTimes(1);
     if (failure === 'malformed' || failure === 'refusal' || failure === 'unexpected-text') expect(status.provenance?.usage).toMatchObject({ inputTokens: 12, outputTokens: failure === 'malformed' ? 0 : 1 });
@@ -723,7 +1076,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
     const { store } = await openProductionStore();
     store.saveModelServiceConnection('Retained probe', null, 'ready', 'openai-platform');
     const status = await testModelServiceConnection(store, roots.codeRoot, { scope: 'ordinary-production', nativeFetch: responsesTransport([], 'AI7_OK') },
-      { route: 'openai-platform', modelId: 'gpt-5.6-luna' }, { resolve: async () => 'public-placeholder' });
+      { route: 'openai-platform', modelId: 'gpt-5.6-luna' }, { resolve: async () => 'public-placeholder' }, { requestGovernor });
     expect(status).toMatchObject({ outcome: 'passed', provenance: { policyVersion: 'v27' } });
     store.close();
     for (const policyVersion of ['v25', 'v26', 'v24']) {
@@ -747,7 +1100,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
     const resolver = { resolve: vi.fn(async () => 'public-placeholder') };
     const transport = vi.fn(); const controller = new AbortController(); controller.abort();
     const result = await testModelServiceConnection(store, roots.codeRoot, { scope: 'ordinary-production', nativeFetch: transport },
-      { route: 'openai-platform', modelId: 'gpt-5.6-luna' }, resolver, controller.signal);
+      { route: 'openai-platform', modelId: 'gpt-5.6-luna' }, resolver, { requestGovernor, signal: controller.signal });
     expect(result.outcome).toBe('cancelled'); expect(resolver.resolve).not.toHaveBeenCalled(); expect(transport).not.toHaveBeenCalled();
   });
   it('keeps a probe cancelled after its key resolves but before it is sent cancelled, never outcome-unknown (#1080 review)', async () => {
@@ -757,7 +1110,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
     const resolver = { resolve: vi.fn(async () => { controller.abort(); return 'public-placeholder'; }) };
     const transport = vi.fn();
     const result = await testModelServiceConnection(store, roots.codeRoot, { scope: 'ordinary-production', nativeFetch: transport },
-      { route: 'openai-platform', modelId: 'gpt-5.6-luna' }, resolver, controller.signal);
+      { route: 'openai-platform', modelId: 'gpt-5.6-luna' }, resolver, { requestGovernor, signal: controller.signal });
     expect(resolver.resolve).toHaveBeenCalled();
     expect(transport).not.toHaveBeenCalled();
     expect(result.outcome).toBe('cancelled');
@@ -769,12 +1122,12 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
     const calls: Array<{ url: string; model: string; cap: number }> = [];
     const resolver = { resolve: async () => 'public-placeholder' };
     await testModelServiceConnection(store, roots.codeRoot, { scope: 'ordinary-production', nativeFetch: responsesTransport(calls, 'AI7_OK') },
-      { route: 'openai-platform', modelId: 'gpt-5.6-luna' }, resolver);
+      { route: 'openai-platform', modelId: 'gpt-5.6-luna' }, resolver, { requestGovernor });
     store.selectFastRoleModel('openai-platform', 'gpt-5.6-luna');
     const fast = store.getConfiguredModelRoleBinding('fast-interaction')!;
     const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', null, fast);
     const forbiddenReads: string[] = []; const transport = vi.fn();
-    const owner = new FastRoleExecutionOwner({ fixture: null, live: productionFastRoleRoutes({ scope: 'ordinary-production', nativeFetch: transport },
+    const owner = new FastRoleExecutionOwner({ requestGovernor, fixture: null, live: productionFastRoleRoutes({ scope: 'ordinary-production', nativeFetch: transport },
       () => policy, () => fast.credentialReference, { resolve: async (reference) => { forbiddenReads.push(reference); return 'public-placeholder'; } }, () => false) });
     try {
       const result = await owner.ask('material-translation', 'Public synthetic stale request.', 'stale');
@@ -820,7 +1173,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
     const probes: Array<{ url: string; model: string; cap: number }> = [];
     const runtime = { scope: 'ordinary-production' as const, nativeFetch: responsesTransport(probes, 'AI7_OK') };
     const selection = { route: 'openai-platform' as const, modelId: 'gpt-5.6-luna' };
-    const retest = () => testModelServiceConnection(store, roots.codeRoot, runtime, selection, { resolve: async () => 'public-synthetic-probe' });
+    const retest = () => testModelServiceConnection(store, roots.codeRoot, runtime, selection, { resolve: async () => 'public-synthetic-probe' }, { requestGovernor });
     await retest();
     store.selectFastRoleModel(selection.route, selection.modelId);
     const fast = store.getConfiguredModelRoleBinding('fast-interaction')!;
@@ -840,7 +1193,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
       (reference, route) => { const current = store.getConfiguredModelRoleBinding('fast-interaction');
         return current?.credentialReference === reference && current.route === route.profile.route && current.model === route.modelProfile.model; },
       () => store.getModelServiceRouteConnection(selection.route)!.credentialUpdatedAt);
-    const owner = new FastRoleExecutionOwner({ fixture: null, live: routes });
+    const owner = new FastRoleExecutionOwner({ requestGovernor, fixture: null, live: routes });
     try {
       const result = await owner.ask('material-translation', 'Public synthetic replacement-race input.', 'generation-race');
       expect(result.kind).toBe('failed');
@@ -857,7 +1210,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
     const probes: Array<{ url: string; model: string; cap: number }> = [];
     const resolver = { resolve: async () => 'public-synthetic-placeholder' };
     await testModelServiceConnection(store, roots.codeRoot, { scope: 'ordinary-production', nativeFetch: responsesTransport(probes, 'AI7_OK') },
-      { route: 'openai-platform', modelId: 'gpt-5.6-luna' }, resolver);
+      { route: 'openai-platform', modelId: 'gpt-5.6-luna' }, resolver, { requestGovernor });
     store.selectFastRoleModel('openai-platform', 'gpt-5.6-luna');
     const fast = store.getConfiguredModelRoleBinding('fast-interaction')!;
     const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', null, fast);
@@ -870,7 +1223,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
           : { type: 'output_text', text: 'public synthetic invalid translation contract' }] }],
       } };
     });
-    const owner = new FastRoleExecutionOwner({ fixture: null, live: productionFastRoleRoutes(
+    const owner = new FastRoleExecutionOwner({ requestGovernor, fixture: null, live: productionFastRoleRoutes(
       { scope: 'ordinary-production', nativeFetch: transport as unknown as typeof fetch }, () => policy, () => fast.credentialReference, resolver) });
     try {
       store.useMaterialTranslator(materialTranslator(owner, 'ordinary-production', () => 1));

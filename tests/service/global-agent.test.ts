@@ -1,8 +1,9 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, beforeEach } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { DialogueExecutionOwner } from '../../src/service/dialogue/dialogue-execution.js';
@@ -19,6 +20,12 @@ import { admittedDialogueRoute } from '../../src/service/dialogue/dialogue-route
 import { OPENCODE_GO_ROUTE_PROFILE } from '../../src/service/provider/deepseek-adapter.js';
 import { OPENCODE_GO_MODEL } from '../../src/service/provider/egress-gate.js';
 import { sha256Hex } from '../../src/service/analysis/canonical.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 let roots: ServiceTestRoots | undefined;
 let store: EditorialStore | undefined;
@@ -104,7 +111,7 @@ describe('the Book-less Global Agent', () => {
 
   it('refuses a model attempt before recording anything when no Book-less rule is admitted', async () => {
     const subject = await open();
-    const owner = new DialogueExecutionOwner({ records: subject, fixture: null, live: null, sessionLogRoot: subject.harnessSessionLogRoot });
+    const owner = new DialogueExecutionOwner({ requestGovernor, records: subject, fixture: null, live: null, sessionLogRoot: subject.harnessSessionLogRoot });
     try {
       // A runtime with no live binding cannot turn public/synthetic classification into an admission.
       const policy = await resolveSourceCheckoutLaunchPolicy(roots!.codeRoot, 'development-ci');

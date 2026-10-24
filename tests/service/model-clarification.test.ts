@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,6 +15,12 @@ import { fixtureEntryKey, loadModelFixture, type ModelFixtureEntry, type Resolve
 import { buildClarificationAnswerMessage, clarificationMessageRequestDigest } from '../../src/service/provider/clarification-contract.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 const QUESTION = { question: '本范围按哪个阅读重点处理？', options: ['人物', '事件'], freeTextAllowed: true };
 let roots: ServiceTestRoots;
@@ -50,7 +57,7 @@ async function start(allowed = true): Promise<{ bookId: string; taskIntentId: st
   }
   const taskIntentId = prepared.taskIntent!.taskIntentId;
   const runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!;
-  owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture,
+  owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture,
     secretResolver: { resolve: async () => null }, capacity: 1 });
   owner.admitAndDispatch(runRecordId);
   await owner.whenIdle();
@@ -250,7 +257,7 @@ describe('one model question per Run unit', () => {
         : entry?.response.kind === 'unit-result' ? entry.response.text : '{"schema":"ai7.analysis.run-report-reflection-result/1","items":[]}';
       return new Response(JSON.stringify({ choices: [{ message: { content: answer }, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 5 } }));
     };
-    owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy: livePolicy, fixture: null,
+    owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy: livePolicy, fixture: null,
       secretResolver: { resolve: async () => 'synthetic-provider-free-key' },
       developerLive: { launch: { runBudgetCeiling: ceiling, providerCacheRoot: resolve(roots.inputRoot, 'cache'),
         validation: { family: 'model-clarification-initial', case: allowed ? 'allowed' : 'denied', delta: null } }, nativeFetch },

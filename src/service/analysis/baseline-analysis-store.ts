@@ -73,6 +73,7 @@ import {
   type ReviewScopePlanCounts,
   type ReviewScopePlanProjection,
   type RunAttemptState,
+  type AnalysisInFlightUnitProjection,
   type RunBudgetCeilingState,
   type SafeRetryRepetition,
 } from '../../shared/protocol.js';
@@ -160,7 +161,7 @@ import {
 } from './run-report.js';
 import { assuranceSampleNotRun, type CrossUnitOutcome } from './reducers.js';
 import { baselineAnalysisKindDefinition } from './kind-definition.js';
-import { ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, type AssuranceSampleDraw } from './assurance-sampling-contract.js';
+import { ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, assuranceSamplingTurns, buildAssuranceSamplingMessage, type AssuranceSampleDraw } from './assurance-sampling-contract.js';
 import { describeComposition } from '../harness/primary-agent-harness.js';
 import { kindLocalTools } from './live-kind-admission.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from '../provider/egress-gate.js';
@@ -635,6 +636,7 @@ export interface RunProgress {
   readonly currentUnitOrdinal: number | null;
   readonly currentUnitStartedAt: string | null;
   readonly attemptState: RunAttemptState | null;
+  readonly inFlightUnits?: ReadonlyArray<AnalysisInFlightUnitProjection>;
   readonly completedAttempts: number;
   readonly longestSettledUnitMs: number | null;
   /** Which declared step of the Run is in flight: the unit loop, the cross-unit reduction, or the sample. */
@@ -1077,6 +1079,59 @@ export interface StageContinuation {
     dispositions: AnalysisAssuranceSampleDispositionProjection[]; gapReasons: string[];
     sampled: { inputTokens: number; outputTokens: number; turnsWithUsage: number };
   };
+}
+
+/** Payload-free identities for physical model admissions; tool dispatch tokens never cross this boundary. */
+export interface AnalysisRequestIdentity {
+  readonly requestId: string;
+  readonly producerId: string;
+  readonly requestOrdinal: number;
+  readonly sessionId: string;
+  readonly unitOrdinal: number | null;
+  readonly stage: RunProgressStage;
+  readonly attemptIndex: number;
+  readonly adaptationId: string | null;
+  readonly payloadDigest: string;
+  readonly messageDigest: string;
+  readonly requestDigest: string;
+  readonly inputDigest: string;
+  readonly contractDigest: string;
+}
+
+interface RequestAdmissionPins {
+  readonly runRecordId: string;
+  readonly attemptId: string;
+  readonly bindingDigest: string;
+  readonly planEnvelopeDigest: string;
+  readonly manifestDigest: string;
+  readonly compositionDigest: string;
+  readonly promptContractDigest: string;
+  readonly policyVersion: string;
+  readonly policyRuleId: string;
+}
+
+type RequestAdmissionEvent =
+  | { readonly kind: 'execution'; readonly width: 1 | 3; readonly limits: { readonly requests: 4; readonly units: 3; readonly backgroundRequests: 1 } }
+  | { readonly kind: 'admit'; readonly request: AnalysisRequestIdentity }
+  | { readonly kind: 'resolve'; readonly requests: readonly string[]; readonly evidence: {
+      readonly kind: 'no-send' | 'unit-checkpoint' | 'clarification-checkpoint' | 'stage-checkpoint' | 'reflection-outcome' | 'refused-turn' | 'unavailable';
+      readonly digest: string;
+    } };
+
+interface RequestAdmissionData extends RequestAdmissionPins {
+  readonly sequence: number;
+  readonly predecessorDigest: string | null;
+  readonly event: RequestAdmissionEvent;
+}
+
+export interface RequestAdmissionReading {
+  readonly pins: RequestAdmissionPins;
+  readonly width: 1 | 3;
+  readonly sequence: number;
+  readonly digest: string;
+  readonly open: ReadonlyMap<string, AnalysisRequestIdentity>;
+  readonly unavailable: ReadonlyArray<AnalysisRequestIdentity>;
+  readonly notSent: ReadonlyArray<AnalysisRequestIdentity>;
 }
 
 /**
@@ -2675,6 +2730,8 @@ export class BaselineAnalysisStore {
           unitMessageDigest: typeof record.unitMessageDigest === 'string' ? record.unitMessageDigest : null,
         };
       });
+      if (this.requestAdmissionOf(runRecordId)?.width === 3) spans.sort((left, right) =>
+        (left.unitOrdinal ?? Number.MAX_SAFE_INTEGER) - (right.unitOrdinal ?? Number.MAX_SAFE_INTEGER) || left.ordinal - right.ordinal);
       attempt = {
         attemptId,
         ordinal: 1,
@@ -4293,8 +4350,12 @@ export class BaselineAnalysisStore {
             !Array.isArray(sample.draw?.sampled) || !count(sample.sampled?.inputTokens) || !count(sample.sampled?.outputTokens) || !count(sample.sampled?.turnsWithUsage)) invalid();
       }
       // A newer snapshot may only follow all submitted units; no corrupt stage pin can send unfinished units first.
-      const facts = this.loadExecutionPlan(runRecordId);
-      const expected = facts.update === null ? facts.manifest.units.length : facts.update.reusePlan.units.filter((unit) => unit.disposition === 'recomputed').length;
+      const governed = this.requestAdmissionOf(runRecordId) !== null;
+      const plan = governed ? this.#planRecords(stored!.binding.taskIntentId, 'any', stored!.binding.planVersion) : null;
+      const reuse = plan?.['reuse-plan'] as { units: Array<{ disposition: string }> } | undefined;
+      const facts = governed ? null : this.loadExecutionPlan(runRecordId);
+      const expected = governed ? reuse === undefined ? this.#requestManifest(stored!).units.length : reuse.units.filter((unit) => unit.disposition === 'recomputed').length
+        : facts!.update === null ? facts!.manifest.units.length : facts!.update.reusePlan.units.filter((unit) => unit.disposition === 'recomputed').length;
       if (this.unitCheckpoints(runRecordId).length !== expected) invalid();
       const usage = this.carriedUsageOf(runRecordId)?.stages;
       if (usage == null || data.reduction?.outcome.state === 'closed' && usage['cross-unit-reduction'].requests < 1) invalid();
@@ -4312,6 +4373,7 @@ export class BaselineAnalysisStore {
     attemptId: string;
     unit: UnitResultRecord;
     observation: UnitCheckpoint['observation'];
+    requests?: readonly string[];
   }): void {
     const recordedAt = new Date().toISOString();
     const record = canonicalRecord({
@@ -4320,6 +4382,7 @@ export class BaselineAnalysisStore {
       attemptId: input.attemptId,
       unit: input.unit,
       observation: input.observation,
+      ...(input.requests === undefined ? {} : { requests: input.requests }),
       recordedAt,
     });
     this.#db.prepare(
@@ -4333,11 +4396,19 @@ export class BaselineAnalysisStore {
    */
   carriedUsageOf(runRecordId: string): { inputTokens: number; outputTokens: number; stages: CarriedStages | null } | null {
     const rows = this.#db.prepare(
-      "SELECT canonical_json FROM analysis_run_states WHERE run_record_id = ? AND state IN ('paused', 'resumable', 'awaiting-clarification') ORDER BY sequence DESC",
+      `SELECT canonical_json, sha256 FROM analysis_run_states WHERE run_record_id = ? AND
+       (state IN ('paused', 'resumable', 'awaiting-clarification') OR
+        json_extract(canonical_json, '$.requestAdmission.schema') = 'ai7.analysis.request-admission/1' AND json_type(canonical_json, '$.carriedUsage') IS NOT NULL)
+       ORDER BY sequence DESC`,
     ).all(runRecordId) as SqlRow[];
     const count = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
     for (const row of rows) {
-      const carried = (parseCanonicalJson(asString(row.canonical_json)) as { carriedUsage?: unknown }).carriedUsage;
+      const record = parseCanonicalJson(asString(row.canonical_json)) as { carriedUsage?: unknown; requestAdmission?: unknown };
+      if (record.requestAdmission !== undefined) {
+        requireAnalysis(canonicalRecord(record).digest === row.sha256, 'ANALYSIS_RECORD_INVALID', '阶段用量记录无法核对。');
+        this.requestAdmissionOf(runRecordId);
+      }
+      const carried = record.carriedUsage;
       if (carried === undefined) continue;
       const usage = carried as { inputTokens?: unknown; outputTokens?: unknown; stages?: unknown };
       requireAnalysis(carried !== null && typeof carried === 'object' && count(usage.inputTokens) && count(usage.outputTokens),
@@ -4419,6 +4490,8 @@ export class BaselineAnalysisStore {
     const requestId = randomUUID();
     const raisedAt = input.raisedAt ?? new Date().toISOString();
     const modelJson = input.modelQuestion === undefined ? null : canonicalJson(input.modelQuestion);
+    const requests = this.requestAdmissionOf(input.runRecordId);
+    const covered = requests === null ? undefined : [...requests.open.values()].filter((request) => request.stage === 'units' && request.unitOrdinal === input.unitOrdinal).map((request) => request.requestId);
     requireAnalysis(modelJson === null || parseModelClarification(modelJson) !== null, 'ANALYSIS_RECORD_INVALID', '模型澄清问题无效。');
     const record = canonicalRecord({
       schema: CLARIFICATION_REQUEST_SCHEMA,
@@ -4440,10 +4513,12 @@ export class BaselineAnalysisStore {
       firstUsage: input.firstUsage,
       firstWallMs: Math.max(0, Math.round(input.firstWallMs)),
       raisedAt,
+      ...(covered === undefined ? {} : { requests: covered }),
     });
     this.#db.prepare(
       'INSERT INTO analysis_clarification_requests(request_id, run_record_id, unit_ordinal, kind, raised_at, canonical_json, sha256, model_question_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
     ).run(requestId, input.runRecordId, input.unitOrdinal, 'ask-first-adaptation', raisedAt, record.json, record.digest, modelJson);
+    this.checkpointClarificationRequests(input.runRecordId, input.unitOrdinal);
     return requestId;
   }
 
@@ -4575,10 +4650,16 @@ export class BaselineAnalysisStore {
     return expired;
   }
 
-  claimModelClarificationAnswer(runRecordId: string, requestId: string): boolean {
+  modelClarificationAnswerClaimed(runRecordId: string, requestId: string): boolean {
     const rows = this.#db.prepare('SELECT canonical_json FROM analysis_run_states WHERE run_record_id = ?').all(runRecordId);
-    if (rows.some((row) => (parseCanonicalJson(asString(row.canonical_json)) as Record<string, unknown>).modelClarificationAnswerClaim === requestId)) return false;
-    this.recordRunState(runRecordId, 'executing', { detail: '按澄清回答接着处理这个阅读范围。', modelClarificationAnswerClaim: requestId });
+    return rows.some((row) => (parseCanonicalJson(asString(row.canonical_json)) as Record<string, unknown>).modelClarificationAnswerClaim === requestId);
+  }
+
+  claimModelClarificationAnswer(runRecordId: string, requestId: string, preserveState = false): boolean {
+    if (this.modelClarificationAnswerClaimed(runRecordId, requestId)) return false;
+    const detail = { detail: '按澄清回答接着处理这个阅读范围。', modelClarificationAnswerClaim: requestId };
+    if (preserveState) this.#appendExecutionEvidence(runRecordId, { modelClarificationAnswerClaim: requestId });
+    else this.recordRunState(runRecordId, 'executing', detail);
     return true;
   }
 
@@ -4737,6 +4818,7 @@ export class BaselineAnalysisStore {
     const cancelling: string[] = [];
     for (const row of rows) {
       const runRecordId = asString(row.run_record_id);
+      this.reconcileRequestAdmissions(runRecordId);
       const state = row.last_state === null ? null : asString(row.last_state);
       if (state === 'pausing') {
         this.recordRunState(runRecordId, 'paused', { detail: RECONCILED_PAUSED_DETAIL, reconciled: true });
@@ -4877,6 +4959,316 @@ export class BaselineAnalysisStore {
   }
 
   // ---- execution persistence -------------------------------------------------------------------
+
+  /** Immutable request pins remain readable after this Run publishes its successor revision. */
+  #requestManifest(stored: NonNullable<ReturnType<BaselineAnalysisStore['executionBindingOf']>>): CoverageManifestProjection {
+    const manifest = this.#planRecords(stored.binding.taskIntentId, 'any', stored.binding.planVersion)['coverage-manifest'] as CoverageManifestProjection;
+    requireAnalysis(manifestDigestIsExact(manifest) && manifest.digest === stored.binding.coverageManifestDigest &&
+      manifest.manuscript.revisionId === stored.binding.manuscriptPin.revisionId && manifest.manuscript.revisionDigest === stored.binding.manuscriptPin.revisionDigest,
+    'ANALYSIS_RECORD_INVALID', '请求准入的固定覆盖清单无法核对。');
+    return manifest;
+  }
+
+  /** An absent receipt is historical evidence, never an inferred admission. */
+  requestAdmissionOf(runRecordId: string): RequestAdmissionReading | null {
+    const rows = this.#db.prepare(`SELECT canonical_json, sha256 FROM analysis_run_states WHERE run_record_id = ?
+      AND json_type(canonical_json, '$.requestAdmission') IS NOT NULL ORDER BY sequence`).all(runRecordId) as SqlRow[];
+    if (rows.length === 0) return null;
+    const exact = (value: unknown, keys: readonly string[]): value is Record<string, unknown> => isRecord(value) &&
+      Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
+    const invalid = (): never => { throw new AnalysisError('ANALYSIS_RECORD_INVALID', '模型请求准入记录无法核对；不能续行。'); };
+    const state: { reading: RequestAdmissionReading | null } = { reading: null };
+    const open = new Map<string, AnalysisRequestIdentity>();
+    const unavailable: AnalysisRequestIdentity[] = [];
+    const notSent: AnalysisRequestIdentity[] = [];
+    const seen = new Set<string>();
+    const ordinals = new Map<string, number>();
+    const stored = this.executionBindingOf(runRecordId);
+    let requestManifest: CoverageManifestProjection | undefined;
+    let adaptations: ReturnType<BaselineAnalysisStore['adaptationsOf']> | undefined;
+    for (const row of rows) {
+      const record = parseCanonicalJson(asString(row.canonical_json)) as Record<string, unknown>;
+      const receipt = record.requestAdmission;
+      if (receipt === undefined) continue;
+      if (canonicalRecord(record).digest !== row.sha256 || !exact(receipt, ['schema', 'data', 'digest']) ||
+          receipt.schema !== 'ai7.analysis.request-admission/1' || !isRecord(receipt.data) || canonicalRecord(receipt.data).digest !== receipt.digest) return invalid();
+      const data = receipt.data as unknown as RequestAdmissionData;
+      if (!exact(data, ['runRecordId', 'attemptId', 'bindingDigest', 'planEnvelopeDigest', 'manifestDigest', 'compositionDigest',
+        'promptContractDigest', 'policyVersion', 'policyRuleId', 'sequence', 'predecessorDigest', 'event']) ||
+          data.sequence !== (state.reading?.sequence ?? 0) + 1 || data.predecessorDigest !== (state.reading?.digest ?? null)) return invalid();
+      const { sequence, predecessorDigest, event, ...pins } = data;
+      if (stored === null || pins.runRecordId !== runRecordId || pins.attemptId !== stored.attemptId || pins.bindingDigest !== stored.bindingDigest ||
+          pins.planEnvelopeDigest !== stored.binding.planEnvelopeDigest || pins.manifestDigest !== stored.binding.coverageManifestDigest ||
+          pins.compositionDigest !== stored.binding.behaviorCompositionDigest || pins.promptContractDigest !== stored.binding.promptContractDigest ||
+          pins.policyVersion !== stored.binding.policyPin.providerProcessingVersion || !/^[a-z][a-z0-9-]{0,159}$/u.test(pins.policyRuleId) ||
+          state.reading !== null && canonicalJson(pins) !== canonicalJson(state.reading.pins)) return invalid();
+      let width: 1 | 3 = state.reading?.width ?? 1;
+      if (state.reading === null) {
+        if (!exact(event, ['kind', 'width', 'limits']) || event.kind !== 'execution' || (event.width !== 1 && event.width !== 3) ||
+            !exact(event.limits, ['requests', 'units', 'backgroundRequests']) || event.limits.requests !== 4 || event.limits.units !== 3 || event.limits.backgroundRequests !== 1 ||
+            event.width === 3 && (stored!.binding.compositionVersion !== 2 || stored!.binding.policyPin.operationalScope !== 'ordinary-production' || stored!.binding.runBudgetCeiling !== 'unset')) return invalid();
+        width = event.width;
+      } else if (event.kind === 'admit') {
+        if (!exact(event, ['kind', 'request'])) return invalid();
+        const request = event.request;
+        if (!exact(request, ['requestId', 'producerId', 'requestOrdinal', 'sessionId', 'unitOrdinal', 'stage', 'attemptIndex', 'adaptationId',
+          'payloadDigest', 'messageDigest', 'requestDigest', 'inputDigest', 'contractDigest']) ||
+            ![request.requestId, request.producerId, request.sessionId].every((id) => typeof id === 'string' && UUID_PATTERN.test(id)) ||
+            seen.has(request.requestId) || !Number.isSafeInteger(request.requestOrdinal) || request.requestOrdinal !== (ordinals.get(request.producerId) ?? 0) + 1 ||
+            !Number.isSafeInteger(request.attemptIndex) || request.attemptIndex < 1 || request.attemptIndex > 4 ||
+            request.adaptationId !== null && !UUID_PATTERN.test(request.adaptationId) ||
+            ![request.payloadDigest, request.messageDigest, request.requestDigest, request.inputDigest, request.contractDigest].every((digest) => typeof digest === 'string' && DIGEST_PATTERN.test(digest)) ||
+            !['units', 'cross-unit-reduction', 'assurance-sampling', 'run-report-reflection'].includes(request.stage) ||
+            request.stage === 'units' && (!Number.isSafeInteger(request.unitOrdinal) || request.unitOrdinal! < 1) ||
+            request.stage !== 'units' && request.unitOrdinal !== null) return invalid();
+        const manifest = requestManifest ??= this.#requestManifest(stored);
+        if (request.unitOrdinal !== null && manifest.units[request.unitOrdinal - 1]?.ordinal !== request.unitOrdinal) return invalid();
+        if (request.adaptationId !== null && !(adaptations ??= this.adaptationsOf(runRecordId)).some((adaptation) => adaptation.adaptationId === request.adaptationId && adaptation.unitOrdinal === request.unitOrdinal)) return invalid();
+        seen.add(request.requestId); ordinals.set(request.producerId, request.requestOrdinal); open.set(request.requestId, request);
+      } else if (event.kind === 'resolve') {
+        if (!exact(event, ['kind', 'requests', 'evidence']) || !Array.isArray(event.requests) || new Set(event.requests).size !== event.requests.length ||
+            !event.requests.every((id) => typeof id === 'string' && open.has(id)) || !exact(event.evidence, ['kind', 'digest']) || !DIGEST_PATTERN.test(event.evidence.digest)) return invalid();
+        const requests = event.requests.map((id) => open.get(id)!);
+        const evidence = event.evidence;
+        if (evidence.kind === 'no-send') {
+          if (requests.length !== 1 || canonicalRecord(requests[0]).digest !== evidence.digest) return invalid();
+          notSent.push(requests[0]!);
+        } else if (evidence.kind === 'unit-checkpoint') {
+          const unit = requests[0]?.unitOrdinal;
+          const checkpoint = this.#db.prepare('SELECT canonical_json, sha256 FROM analysis_unit_checkpoints WHERE run_record_id = ? AND unit_ordinal = ?').get(runRecordId, unit ?? -1) as SqlRow | undefined;
+          if (checkpoint === undefined || checkpoint.sha256 !== evidence.digest || requests.some((request) => request.stage !== 'units' || request.unitOrdinal !== unit)) return invalid();
+          const kept = parseCanonicalJson(asString(checkpoint!.canonical_json)) as { requests?: unknown };
+          if (canonicalRecord(kept).digest !== evidence.digest || !Array.isArray(kept.requests) || !event.requests.every((id) => (kept.requests as unknown[]).includes(id))) return invalid();
+        } else if (evidence.kind === 'clarification-checkpoint') {
+          const unit = requests[0]?.unitOrdinal;
+          const checkpoint = this.#db.prepare('SELECT canonical_json, sha256 FROM analysis_clarification_requests WHERE run_record_id = ? AND unit_ordinal = ?').get(runRecordId, unit ?? -1) as SqlRow | undefined;
+          if (checkpoint === undefined || checkpoint.sha256 !== evidence.digest || sha256Hex(asString(checkpoint.canonical_json)) !== evidence.digest ||
+              requests.some((request) => request.stage !== 'units' || request.unitOrdinal !== unit)) return invalid();
+          const kept = parseCanonicalJson(asString(checkpoint!.canonical_json)) as { requests?: unknown };
+          if (!Array.isArray(kept.requests) || !event.requests.every((id) => (kept.requests as unknown[]).includes(id))) return invalid();
+        } else if (evidence.kind === 'stage-checkpoint') {
+          if (record.stageContinuation === undefined || record.carriedUsage === undefined ||
+              canonicalRecord({ stageContinuation: record.stageContinuation, carriedUsage: record.carriedUsage }).digest !== evidence.digest ||
+              requests.some((request) => request.stage === 'units' || request.stage === 'run-report-reflection')) return invalid();
+          const stages = (record.stageContinuation as { data?: StageContinuation }).data;
+          if (stages === undefined || requests.some((request) => request.stage === 'cross-unit-reduction'
+            ? stages.reduction?.inputDigest !== request.inputDigest || stages.reduction.requestDigest !== request.requestDigest
+            : stages.sampling?.inputDigest !== request.inputDigest || !stages.sampling.turns.some((turn) => turn.requestDigest === request.requestDigest))) return invalid();
+        } else if (evidence.kind === 'reflection-outcome') {
+          const outcome = this.#db.prepare('SELECT canonical_json, sha256 FROM analysis_task_outcomes WHERE run_record_id = ?').get(runRecordId) as SqlRow | undefined;
+          if (outcome === undefined || outcome.sha256 !== evidence.digest || sha256Hex(asString(outcome.canonical_json)) !== evidence.digest ||
+              requests.some((request) => request.stage !== 'run-report-reflection')) return invalid();
+        } else if (evidence.kind === 'refused-turn') {
+          const refused = record.requestRefusal;
+          if (!exact(refused, ['state', 'stage', 'unitOrdinal', 'observation']) || refused.state !== 'provider-account-limit' ||
+              canonicalRecord(refused).digest !== evidence.digest || requests.some((request) => request.stage !== refused.stage || request.unitOrdinal !== refused.unitOrdinal)) return invalid();
+          const observed = refused.observation;
+          if (!exact(observed, ['attempts', 'usage']) || !Number.isSafeInteger(observed.attempts) || (observed.attempts as number) < 1 ||
+              observed.usage !== null && (!exact(observed.usage, ['inputTokens', 'outputTokens']) ||
+                ![observed.usage.inputTokens, observed.usage.outputTokens].every((count) => Number.isSafeInteger(count) && (count as number) >= 0))) return invalid();
+        } else if (evidence.kind === 'unavailable') {
+          if (canonicalRecord({ requests, reason: 'possible-send-without-durable-result' }).digest !== evidence.digest) return invalid();
+          unavailable.push(...requests);
+        } else return invalid();
+        for (const id of event.requests) open.delete(id);
+      } else return invalid();
+      state.reading = { pins, width, sequence, digest: receipt.digest as string, open, unavailable, notSent };
+    }
+    return state.reading;
+  }
+
+  /** Preserve the latest stop, detail and idle-yield marker when appending private execution evidence. */
+  #appendExecutionEvidence(runRecordId: string, detail: Record<string, unknown>): void {
+    const row = this.#db.prepare('SELECT canonical_json, sha256 FROM analysis_run_states WHERE run_record_id = ? ORDER BY sequence DESC LIMIT 1').get(runRecordId) as SqlRow | undefined;
+    requireAnalysis(row !== undefined && sha256Hex(asString(row.canonical_json)) === row.sha256, 'ANALYSIS_RECORD_INVALID', '运行状态无法核对。');
+    const { runRecordId: _run, sequence: _sequence, state, recordedAt: _at, requestAdmission: _receipt, ...kept } = parseCanonicalJson(asString(row.canonical_json)) as Record<string, unknown>;
+    this.recordRunState(runRecordId, state as BaselineAnalysisRunState, { ...kept, ...detail });
+  }
+
+  #appendRequestAdmission(runRecordId: string, pins: RequestAdmissionPins, event: RequestAdmissionEvent, detail: Record<string, unknown> = {}): void {
+    transact(this.#db, () => {
+      const prior = this.requestAdmissionOf(runRecordId);
+      const data: RequestAdmissionData = { ...pins, sequence: (prior?.sequence ?? 0) + 1, predecessorDigest: prior?.digest ?? null, event };
+      this.#appendExecutionEvidence(runRecordId, { ...detail, requestAdmission: { schema: 'ai7.analysis.request-admission/1', data, digest: canonicalRecord(data).digest } });
+      this.requestAdmissionOf(runRecordId);
+    });
+  }
+
+  beginRequestAdmissions(runRecordId: string, width: 1 | 3, policyRuleId: string): 1 | 3 {
+    const prior = this.requestAdmissionOf(runRecordId);
+    if (prior !== null) return prior.width;
+    const stored = this.executionBindingOf(runRecordId);
+    requireAnalysis(stored !== null, 'ANALYSIS_RECORD_INVALID', '请求准入前必须保存执行绑定。');
+    const binding = stored.binding;
+    this.#appendRequestAdmission(runRecordId, { runRecordId, attemptId: stored.attemptId, bindingDigest: stored.bindingDigest,
+      planEnvelopeDigest: binding.planEnvelopeDigest, manifestDigest: binding.coverageManifestDigest, compositionDigest: binding.behaviorCompositionDigest,
+      promptContractDigest: binding.promptContractDigest, policyVersion: binding.policyPin.providerProcessingVersion, policyRuleId },
+    { kind: 'execution', width, limits: { requests: 4, units: 3, backgroundRequests: 1 } });
+    return this.requestAdmissionOf(runRecordId)!.width;
+  }
+
+  admitModelRequest(runRecordId: string, request: AnalysisRequestIdentity, clarificationRequestId: string | null = null): void {
+    transact(this.#db, () => {
+      const reading = this.requestAdmissionOf(runRecordId);
+      requireAnalysis(reading !== null, 'ANALYSIS_RECORD_INVALID', '请求准入缺少执行收据。');
+      if (clarificationRequestId !== null) requireAnalysis(this.claimModelClarificationAnswer(runRecordId, clarificationRequestId, true),
+        'ANALYSIS_CLARIFICATION_ALREADY_CLAIMED', '澄清回答回合已经提交；没有再次发送。');
+      this.#appendRequestAdmission(runRecordId, reading.pins, { kind: 'admit', request });
+    });
+  }
+
+  recordModelRequestNotSent(runRecordId: string, requestId: string): void {
+    const reading = this.requestAdmissionOf(runRecordId);
+    const request = reading?.open.get(requestId);
+    requireAnalysis(reading !== null && request !== undefined, 'ANALYSIS_RECORD_INVALID', '未发送证明缺少精确的请求标识。');
+    this.#appendRequestAdmission(runRecordId, reading.pins, { kind: 'resolve', requests: [requestId], evidence: { kind: 'no-send', digest: canonicalRecord(request).digest } });
+  }
+
+  checkpointModelRequests(runRecordId: string, unitOrdinal: number): void {
+    const reading = this.requestAdmissionOf(runRecordId);
+    if (reading === null) return;
+    const requests = [...reading.open.values()].filter((request) => request.stage === 'units' && request.unitOrdinal === unitOrdinal).map((request) => request.requestId);
+    if (requests.length === 0) return;
+    const checkpoint = this.#db.prepare('SELECT sha256 FROM analysis_unit_checkpoints WHERE run_record_id = ? AND unit_ordinal = ?').get(runRecordId, unitOrdinal) as SqlRow | undefined;
+    requireAnalysis(checkpoint !== undefined, 'ANALYSIS_RECORD_INVALID', '请求结算前必须保存对应的单元结果。');
+    this.#appendRequestAdmission(runRecordId, reading.pins, { kind: 'resolve', requests, evidence: { kind: 'unit-checkpoint', digest: asString(checkpoint.sha256) } });
+    this.requestAdmissionOf(runRecordId);
+  }
+
+  checkpointClarificationRequests(runRecordId: string, unitOrdinal: number): void {
+    const reading = this.requestAdmissionOf(runRecordId);
+    if (reading === null) return;
+    const row = this.#db.prepare('SELECT canonical_json, sha256 FROM analysis_clarification_requests WHERE run_record_id = ? AND unit_ordinal = ?').get(runRecordId, unitOrdinal) as SqlRow | undefined;
+    if (row === undefined) return;
+    const checkpoint = parseCanonicalJson(asString(row.canonical_json)) as { requests?: string[] };
+    const requests = [...reading.open.values()].filter((request) => request.stage === 'units' && request.unitOrdinal === unitOrdinal && checkpoint.requests?.includes(request.requestId)).map((request) => request.requestId);
+    if (requests.length === 0) return;
+    this.#appendRequestAdmission(runRecordId, reading.pins, { kind: 'resolve', requests,
+      evidence: { kind: 'clarification-checkpoint', digest: asString(row.sha256) } });
+  }
+
+  modelClarificationAnswerNotSent(runRecordId: string, clarificationRequestId: string, unitOrdinal: number): boolean {
+    const reading = this.requestAdmissionOf(runRecordId);
+    if (reading === null) return false;
+    const claims = this.#db.prepare(`SELECT sequence FROM analysis_run_states WHERE run_record_id = ? AND
+      json_extract(canonical_json, '$.modelClarificationAnswerClaim') = ? ORDER BY sequence LIMIT 1`).get(runRecordId, clarificationRequestId) as SqlRow | undefined;
+    if (claims === undefined) return false;
+    const rows = this.#db.prepare(`SELECT canonical_json FROM analysis_run_states WHERE run_record_id = ? AND sequence >= ? AND
+      json_extract(canonical_json, '$.requestAdmission.data.event.kind') = 'admit' AND
+      json_extract(canonical_json, '$.requestAdmission.data.event.request.unitOrdinal') = ?`).all(runRecordId, claims.sequence!, unitOrdinal) as SqlRow[];
+    const ids = rows.map((row) => (parseCanonicalJson(asString(row.canonical_json)) as { requestAdmission: { data: { event: { request: AnalysisRequestIdentity } } } }).requestAdmission.data.event.request.requestId);
+    return ids.length > 0 && ids.every((id) => reading.notSent.some((request) => request.requestId === id));
+  }
+
+  checkpointStageRequests(runRecordId: string, stage: 'cross-unit-reduction' | 'assurance-sampling', stages: StageContinuation, carriedUsage: { inputTokens: number; outputTokens: number; stages: CarriedStages }): void {
+    const reading = this.requestAdmissionOf(runRecordId);
+    if (reading === null) return;
+    const detail = { stageContinuation: { schema: 'ai7.analysis.stage-continuation/1', data: stages, digest: canonicalRecord(stages).digest }, carriedUsage };
+    this.#appendRequestAdmission(runRecordId, reading.pins, { kind: 'resolve',
+      requests: [...reading.open.values()].filter((request) => request.stage === stage && (stage === 'cross-unit-reduction'
+        ? stages.reduction?.requestDigest === request.requestDigest && stages.reduction.inputDigest === request.inputDigest
+        : stages.sampling?.inputDigest === request.inputDigest && stages.sampling.turns.some((turn) => turn.requestDigest === request.requestDigest))).map((request) => request.requestId),
+      evidence: { kind: 'stage-checkpoint', digest: canonicalRecord(detail).digest } }, detail);
+  }
+
+  checkpointReflectionRequests(runRecordId: string): void {
+    const reading = this.requestAdmissionOf(runRecordId);
+    if (reading === null) return;
+    const requests = [...reading.open.values()].filter((request) => request.stage === 'run-report-reflection').map((request) => request.requestId);
+    if (requests.length === 0) return;
+    const outcome = this.#db.prepare('SELECT sha256 FROM analysis_task_outcomes WHERE run_record_id = ?').get(runRecordId) as SqlRow | undefined;
+    requireAnalysis(outcome !== undefined, 'ANALYSIS_RECORD_INVALID', '反思请求结算前必须保存运行结果。');
+    this.#appendRequestAdmission(runRecordId, reading.pins, { kind: 'resolve', requests, evidence: { kind: 'reflection-outcome', digest: asString(outcome.sha256) } });
+  }
+
+  hasCommittedOutcome(runRecordId: string): boolean {
+    return this.#db.prepare('SELECT 1 FROM analysis_task_outcomes WHERE run_record_id = ?').get(runRecordId) !== undefined;
+  }
+
+  checkpointRefusedRequests(runRecordId: string, stage: RunProgressStage, unitOrdinal: number | null,
+    observation: { attempts: number; usage: { inputTokens: number; outputTokens: number } | null }): void {
+    const reading = this.requestAdmissionOf(runRecordId);
+    if (reading === null) return;
+    const requests = [...reading.open.values()].filter((request) => request.stage === stage && request.unitOrdinal === unitOrdinal).map((request) => request.requestId);
+    if (requests.length === 0) return;
+    const requestRefusal = { state: 'provider-account-limit', stage, unitOrdinal, observation };
+    this.#appendRequestAdmission(runRecordId, reading.pins, { kind: 'resolve', requests,
+      evidence: { kind: 'refused-turn', digest: canonicalRecord(requestRefusal).digest } }, { requestRefusal });
+  }
+
+  /** Startup only: a possible send without an exact committed result is never re-executed. */
+  reconcileRequestAdmissions(runRecordId: string): void {
+    let reading = this.requestAdmissionOf(runRecordId);
+    if (reading === null || reading.open.size === 0) return;
+    const stored = this.executionBindingOf(runRecordId);
+    requireAnalysis(stored !== null, 'ANALYSIS_RECORD_INVALID', '准入记录缺少执行绑定。');
+    const manifest = this.#requestManifest(stored);
+    const ordinals = [...new Set([...reading.open.values()].filter((request) => request.stage === 'units').map((request) => request.unitOrdinal!))].sort((left, right) => left - right);
+    for (const ordinal of ordinals) {
+      this.checkpointClarificationRequests(runRecordId, ordinal);
+      reading = this.requestAdmissionOf(runRecordId)!;
+      const requests = [...reading.open.values()].filter((request) => request.stage === 'units' && request.unitOrdinal === ordinal);
+      if (requests.length === 0) continue;
+      const existing = this.unitCheckpoints(runRecordId).find((checkpoint) => checkpoint.unit.unitOrdinal === ordinal);
+      if (existing === undefined) {
+        const unit = manifest.units[ordinal - 1]!;
+        const reason = '本次请求已准入，AI7 关闭前没有保存可核对的单元结果；结果未知，这次运行不会再次发送。';
+        const question = this.clarificationsOf(runRecordId).find((entry) => entry.unitOrdinal === ordinal);
+        this.recordUnitCheckpoint({ runRecordId, attemptId: reading.pins.attemptId, requests: requests.map((request) => request.requestId),
+          unit: { unitOrdinal: ordinal, requestDigest: this.#definition.requestDigest(ordinal, unit.digest), lineage: { kind: 'recomputed' },
+            closed: { state: 'gap', gap: { unitOrdinal: ordinal, code: 'outcome-unknown', reason, startPosition: unit.startPosition, endPosition: unit.endPosition, blockIds: [...unit.blockIds] } } },
+          observation: { unitOrdinal: ordinal, attempts: (question?.firstAttempts ?? (question === undefined ? 0 : 1)) + new Set(requests.map((request) => `${request.sessionId}:${request.attemptIndex}:${request.adaptationId ?? ''}`)).size,
+            usage: question?.firstUsage ?? null, wallMs: question?.firstWallMs ?? 0 } });
+      }
+      this.checkpointModelRequests(runRecordId, ordinal);
+      reading = this.requestAdmissionOf(runRecordId)!;
+    }
+    const stageRequests = [...reading.open.values()].filter((request) => request.stage === 'cross-unit-reduction' || request.stage === 'assurance-sampling');
+    if (stageRequests.length > 0) {
+      const kept = this.stageContinuationOf(runRecordId);
+      const stages: StageContinuation = kept ?? { runRecordId, attemptId: reading.pins.attemptId, bindingDigest: reading.pins.bindingDigest,
+        manifestDigest: reading.pins.manifestDigest, promptContractDigest: reading.pins.promptContractDigest };
+      const usage = this.carriedUsageOf(runRecordId);
+      const carried: CarriedStages = structuredClone(usage?.stages ?? {
+        'cross-unit-reduction': { requests: 0, inputTokens: 0, outputTokens: 0 }, 'assurance-sampling': { requests: 0, inputTokens: 0, outputTokens: 0 },
+      });
+      const reduction = stageRequests.find((request) => request.stage === 'cross-unit-reduction');
+      if (reduction !== undefined && stages.reduction === undefined) {
+        stages.reduction = { inputDigest: reduction.inputDigest, contractDigest: reduction.contractDigest, requestDigest: reduction.requestDigest,
+          outcome: { state: 'gap', code: 'outcome-unknown', requestDigest: reduction.requestDigest,
+            reason: '归纳请求可能已经发出，关闭前没有保存可核对的结果；本次运行不会再次发送。' } };
+        carried['cross-unit-reduction'].requests += 1;
+      }
+      const sampling = stageRequests.find((request) => request.stage === 'assurance-sampling');
+      if (sampling !== undefined) {
+        const sample = stages.sampling;
+        requireAnalysis(sample !== undefined && sample.inputDigest === sampling.inputDigest && sample.contractDigest === sampling.contractDigest,
+          'ANALYSIS_RECORD_INVALID', '抽样准入缺少可核对的抽取记录；不能续行。');
+        if (!sample.turns.some((turn) => turn.requestDigest === sampling.requestDigest)) {
+          const turn = assuranceSamplingTurns(sample.draw.sampled)[sample.nextTurn - 1];
+          const definition = this.definitionForRun(runRecordId, reading.pins.promptContractDigest);
+          const blocks = new Map(this.readRevisionBlocks(manifest.manuscript.manuscriptId, manifest.manuscript.revisionId).map((block) => [block.blockId, block] as const));
+          requireAnalysis(turn !== undefined && definition.assurance !== null && canonicalRecord(buildAssuranceSamplingMessage(manifest.units[turn.unitOrdinal - 1]!,
+            manifest.units.length, blocks, turn.findings, definition.assurance.prompt)).digest === sampling.requestDigest,
+          'ANALYSIS_RECORD_INVALID', '抽样请求与抽取记录不一致；不能续行。');
+          sample.turns.push({ requestDigest: sampling.requestDigest, unitOrdinal: turn.unitOrdinal, usage: null, state: 'outcome-unknown' });
+          sample.nextTurn += 1; sample.ended = true;
+          sample.gapReasons.push(`第 ${turn.unitOrdinal} 个阅读范围的抽样请求可能已经发出，关闭前没有保存结果；本次运行不会再次发送。`);
+          carried['assurance-sampling'].requests += 1;
+        }
+      }
+      const totals = { inputTokens: usage?.inputTokens ?? 0, outputTokens: usage?.outputTokens ?? 0, stages: carried };
+      if (reduction !== undefined) this.checkpointStageRequests(runRecordId, 'cross-unit-reduction', stages, totals);
+      if (sampling !== undefined) this.checkpointStageRequests(runRecordId, 'assurance-sampling', stages, totals);
+      reading = this.requestAdmissionOf(runRecordId)!;
+    }
+    const reflection = [...reading.open.values()].filter((request) => request.stage === 'run-report-reflection');
+    if (reflection.length > 0) {
+      if (this.hasCommittedOutcome(runRecordId)) this.checkpointReflectionRequests(runRecordId);
+      else this.#appendRequestAdmission(runRecordId, reading.pins, { kind: 'resolve', requests: reflection.map((request) => request.requestId),
+        evidence: { kind: 'unavailable', digest: canonicalRecord({ requests: reflection, reason: 'possible-send-without-durable-result' }).digest } });
+    }
+  }
 
   recordRunState(runRecordId: string, state: BaselineAnalysisRunState, detail: Record<string, unknown>): void {
     requireAnalysis(UUID_PATTERN.test(runRecordId), 'ANALYSIS_RUN_INVALID', '运行记录标识无效。');

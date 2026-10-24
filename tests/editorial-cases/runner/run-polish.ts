@@ -10,7 +10,7 @@ import {
 import type { ResolvedModelFixture } from '../../../src/service/provider/model-fixture.js';
 import { graphemesOf } from '../../../src/shared/mark-anchor.js';
 import type { EditorialCase } from './case-file.js';
-import type { ImportedBook } from './session.js';
+import { caseRequestGovernor, type ImportedBook } from './session.js';
 import { applyAndReverse, type EditingEffort, type FindingCounts, scoreTextFindings, type TextResolution } from './text-cases.js';
 
 /**
@@ -53,30 +53,34 @@ export async function runPolishCase(
   const words = polishWordsOf(block.text, fromGrapheme, toGrapheme);
   const requestDigest = editorialPolishRequestDigest(EDITORIAL_POLISH_PROMPT_CONTRACT_DIGEST, editorialPolishSelectionDigest(words.text),
     editorialPolishContextDigest(words.before, words.after));
-  const owner = new FastRoleExecutionOwner({ fixture, live: null });
-  const requests = new FastRoleRequests(owner, store);
-  const started = requests.polish(book.bookId, { selection });
-  await requests.settled();
-  const read = requests.inspect(book.bookId, started.taskId);
-  if (read.kind !== 'editorial-polish') throw new Error('EDITORIAL_CASE/polish-projection-unexpected');
-  const polish = read.polish;
-  const positions = new Map(resolution.blocks.map((candidate) => [candidate.blockId, candidate.position]));
-  const findings = polish.markIds.map((markId) => {
-    const card = store.getEditorialMarkCard(book.manuscriptId, book.branchId, markId);
-    return { key: markId, categoryId: 'polish', paragraph: positions.get(card.blockId) ?? null, from: card.fromGrapheme, to: card.toGrapheme,
-      quote: card.pinnedText, replacement: card.suggestion?.proposedText ?? null, markId };
-  });
-  const scored = scoreTextFindings(findings, resolution);
-  const effort = await applyAndReverse(store, book, scored, resolution, {
-    resolveAnnotation: () => { throw new Error('EDITORIAL_CASE/polish-annotation'); },
-    ignoreAnnotation: () => { throw new Error('EDITORIAL_CASE/polish-annotation'); },
-  });
-  return {
-    outcome: { state: polish.state, outcomeUnknown: polish.outcomeUnknown },
-    findings: { listed: polish.markIds.length + polish.withheld.length, located: polish.markIds.length, excluded: polish.withheld.length, ...scored.counts },
-    concerns: scored.concerns,
-    checks: scored.checks,
-    effort,
-    requestDigest,
-  };
+  const owner = new FastRoleExecutionOwner({ requestGovernor: caseRequestGovernor(store), fixture, live: null });
+  try {
+    const requests = new FastRoleRequests(owner, store);
+    const started = requests.polish(book.bookId, { selection });
+    await requests.settled();
+    const read = requests.inspect(book.bookId, started.taskId);
+    if (read.kind !== 'editorial-polish') throw new Error('EDITORIAL_CASE/polish-projection-unexpected');
+    const polish = read.polish;
+    const positions = new Map(resolution.blocks.map((candidate) => [candidate.blockId, candidate.position]));
+    const findings = polish.markIds.map((markId) => {
+      const card = store.getEditorialMarkCard(book.manuscriptId, book.branchId, markId);
+      return { key: markId, categoryId: 'polish', paragraph: positions.get(card.blockId) ?? null, from: card.fromGrapheme, to: card.toGrapheme,
+        quote: card.pinnedText, replacement: card.suggestion?.proposedText ?? null, markId };
+    });
+    const scored = scoreTextFindings(findings, resolution);
+    const effort = await applyAndReverse(store, book, scored, resolution, {
+      resolveAnnotation: () => { throw new Error('EDITORIAL_CASE/polish-annotation'); },
+      ignoreAnnotation: () => { throw new Error('EDITORIAL_CASE/polish-annotation'); },
+    });
+    return {
+      outcome: { state: polish.state, outcomeUnknown: polish.outcomeUnknown },
+      findings: { listed: polish.markIds.length + polish.withheld.length, located: polish.markIds.length, excluded: polish.withheld.length, ...scored.counts },
+      concerns: scored.concerns,
+      checks: scored.checks,
+      effort,
+      requestDigest,
+    };
+  } finally {
+    owner.dispose();
+  }
 }

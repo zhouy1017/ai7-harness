@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -30,6 +31,12 @@ import {
   type Sample1Book,
 } from '../support/fast-role.js';
 
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
+
 // Service-integration suite (L2) for 润色这段 and 稿件冲突 › 基于当前稿件重新生成建议 on the deterministic route (Issue #842):
 // the real store, PrimaryAgentHarness composition, Egress Gate and local deterministic adapter under development-ci, answered by
 // the authored fixtures `sample1-polish-authored` and `sample1-conflict-regenerate-authored` or by one-entry fixtures held in
@@ -54,7 +61,7 @@ afterEach(async () => {
 });
 
 function requests(fixture: ResolvedModelFixture | null): { owner: FastRoleExecutionOwner; requests: FastRoleRequests } {
-  const owner = new FastRoleExecutionOwner({ fixture, live: null });
+  const owner = new FastRoleExecutionOwner({ requestGovernor, fixture, live: null });
   return { owner, requests: new FastRoleRequests(owner, store, () => new Date('2026-10-14T00:00:00.000Z')) };
 }
 

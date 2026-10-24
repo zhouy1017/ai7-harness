@@ -17,7 +17,7 @@ import { prepareRetrievalResult, markRetrievalResult } from '../retrieval/result
 import { liveMaterialContract } from '../task-material-references.js';
 import { buildClarificationAnswerMessage } from '../provider/clarification-contract.js';
 import type { AnalysisAssuranceSampleDispositionProjection, AnalysisGapProjection, AnalysisReusePlanUnitProjection, CoverageManifestProjection, CoverageManifestUnitProjection, ExecutionRouteId, LaunchPolicyProjection, ReviewScopePlanUnitProjection, RunAttemptState, RunReportStageId } from '../../shared/protocol.js';
-import { PLATFORM_TOOL_CALL_PROGRESS, describeComposition, prepareExecution, type HarnessExecutionSpan, type HarnessSignal, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
+import { PLATFORM_TOOL_CALL_PROGRESS, describeComposition, prepareExecution, type HarnessSignal, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../shared/protected-secret-identity.js';
 import {
   ACTIVE_SET_VERSION,
@@ -32,7 +32,7 @@ import {
 } from '../launch-policy.js';
 import { CredentialBroker, type CredentialSlotBinding, type SecretResolver } from '../provider/credential-broker.js';
 import { evaluateRunBudgetCeiling, totalTokens, type ClassifiedModelFailure, type RunBudgetCeiling, type UsageFacts } from '../provider/classification.js';
-import { DeepSeekOpenAiCompatibleAdapter, OPENCODE_GO_ROUTE_PROFILE, PROVIDER_ROUTE_PROFILES, type ProviderRouteProfile } from '../provider/deepseek-adapter.js';
+import { DeepSeekOpenAiCompatibleAdapter, modelRequestNotSent, OPENCODE_GO_ROUTE_PROFILE, PROVIDER_ROUTE_PROFILES, type ProviderRouteProfile } from '../provider/deepseek-adapter.js';
 import { transmitOnce } from '../provider/live-transmission.js';
 import { OPENCODE_GO_V41_FLASH_PROFILE, modelProfileFor, type ProviderModelProfile } from '../provider/model-profile.js';
 import {
@@ -55,7 +55,7 @@ import {
   type AssuranceSamplingParseFailureCode,
 } from './assurance-sampling-contract.js';
 import { canonicalRecord, sha256Hex } from './canonical.js';
-import { assuranceContractMoved, CARRIED_STAGES, OUTCOME_UNKNOWN_NO_RESUME, RUN_IDLE_YIELD_LABEL, type BaselineAnalysisStore, type CarriedStages, type StageContinuation, type ExecutionBindingRecord, type ExecutionPlanFacts, type PredecessorUnitResult, type RunProgress, type RunProgressStage, type UnitCheckpoint, type UnitResultRecord } from './baseline-analysis-store.js';
+import { assuranceContractMoved, CARRIED_STAGES, OUTCOME_UNKNOWN_NO_RESUME, RUN_IDLE_YIELD_LABEL, type AnalysisRequestIdentity, type BaselineAnalysisStore, type CarriedStages, type StageContinuation, type ExecutionBindingRecord, type ExecutionPlanFacts, type PredecessorUnitResult, type RunProgress, type RunProgressStage, type UnitCheckpoint, type UnitResultRecord } from './baseline-analysis-store.js';
 import type { BaselineUnitResult } from './contract.js';
 import type { ManifestBlockInput } from './coverage-manifest.js';
 import { ExecutionAdmissionError } from './execution-error.js';
@@ -173,6 +173,7 @@ export const EXECUTION_WAITING_CAPACITY = 64;
 export { remapReusedResult } from './reused-result.js';
 
 export interface ExecutionOwnerDependencies {
+  readonly requestGovernor: ModelRequestGovernor;
   /** The Run's disposable retrieval index over exactly its pinned sources (#893); a manuscript-only index when absent. */
   readonly retrievalIndex?: (runRecordId: string, ledger: BaselineAnalysisStore) => RetrievalIndex;
   /** Trusted composition may lower, but never exceed, the fixed waiting-memory bound. */
@@ -246,6 +247,7 @@ interface ActiveRun {
   readonly runRecordId: string;
   /** The ledger this Run was dispatched from; every read and write of the Run goes through it. */
   readonly ledger: BaselineAnalysisStore;
+  readonly unitActivities: Map<number, import('../../shared/protocol.js').AnalysisInFlightUnitProjection>;
   readonly progress: {
     unitsTotal: number;
     unitsSettled: number;
@@ -264,12 +266,6 @@ interface ActiveRun {
   transmissions: (() => number) | null;
   /** What that counter read when the attempt in flight was dispatched. */
   transmissionsAtDispatch: number;
-  /**
-   * The turn in flight as a development validation step (Issue #808): `unit-<n>`, `reduction`, `sampling-<k>-unit-<n>` or
-   * `reflection`, set before each turn is submitted. The transport files a live call under the Task mode and this, which no
-   * import, Run or attempt renumbers, so evidence of one turn is never mistaken for another's.
-   */
-  validationStep: string;
   harness: PrimaryAgentHarnessHandle | null;
   readonly requestAbort: AbortController;
   interrupted: boolean;
@@ -288,6 +284,8 @@ interface ActiveRun {
   readonly resumableOnInterrupt: boolean;
   done: Promise<void>;
 }
+
+type AnalysisTurnIdentity = Omit<AnalysisRequestIdentity, 'requestId' | 'producerId' | 'requestOrdinal' | 'sessionId' | 'payloadDigest' | 'messageDigest'> & { readonly message: string };
 
 /** What 续行 goes on from: the attempt and Execution Binding the Run persisted, when it had persisted them. */
 type Continuation = { readonly stored: ReturnType<BaselineAnalysisStore['executionBindingOf']> };
@@ -616,7 +614,13 @@ export class BaselineAnalysisExecutionOwner {
 
   progressFor(runRecordId: string): RunProgress | null {
     const active = this.#active.get(runRecordId);
-    if (active !== undefined) return { ...active.progress, attemptState: attemptStateOf(active) };
+    if (active !== undefined) {
+      const inFlightUnits = [...active.unitActivities.values()].sort((left, right) => left.unitOrdinal - right.unitOrdinal).map((unit) => ({ ...unit }));
+      const first = inFlightUnits[0];
+      return { ...active.progress, attemptState: first?.attemptState ?? attemptStateOf(active),
+        ...(this.#live() === null ? {} : { inFlightUnits,
+          ...(active.progress.stage === 'units' ? { currentUnitOrdinal: first?.unitOrdinal ?? null, currentUnitStartedAt: first?.admittedRequestStartedAt ?? null } : {}) }) };
+    }
     // A stopped Run whose cancellation waits for a place is held as well: every read has it 正在取消 with what it
     // kept, never as a Run nothing holds (Issue #422, S76b; CTRL-005).
     return this.#pendingCancels.find((entry) => entry.runRecordId === runRecordId)?.progress ?? null;
@@ -649,7 +653,9 @@ export class BaselineAnalysisExecutionOwner {
 
   /** The same waiting-state predicate governs total, foreground and background admission (Issues #864, #865). */
   #occupiedPlaces(): readonly ActiveRun[] {
-    return [...this.#active.values()].filter((run) => holdsGovernorSlot(run.ledger.currentRunState(run.runRecordId)));
+    // A stopped/clarifying Run may still own a body, composition or registration while it unwinds.
+    // The finally which removes this entry is the release boundary, not its earlier ledger label.
+    return [...this.#active.values()];
   }
 
   /** Starts and continuations consume the same origin's share; a waiting Run owns no place (Issue #864 revision 5). */
@@ -897,6 +903,8 @@ export class BaselineAnalysisExecutionOwner {
           ? '等待中的运行只有通过重新联网预检后才能进入调度。'
           : '只有刚记录授权的运行可以进入调度。');
     }
+    if (resuming) ledger.reconcileRequestAdmissions(runRecordId);
+    else ledger.requestAdmissionOf(runRecordId);
     // A start not yet begun is refused here. A continuation — 续行, or a Run the editor answered — is asked by its execution
     // before its first request instead, so a reference withdrawn meanwhile ends it 任务已中断 with its kept units formed into
     // the partial revision, never one that drops them (Issue #759).
@@ -938,6 +946,7 @@ export class BaselineAnalysisExecutionOwner {
     const active: ActiveRun = {
       runRecordId,
       ledger,
+      unitActivities: new Map(),
       progress: {
         unitsTotal: submitted,
         unitsSettled: kept,
@@ -950,7 +959,6 @@ export class BaselineAnalysisExecutionOwner {
       },
       transmissions: null,
       transmissionsAtDispatch: 0,
-      validationStep: '',
       harness: null,
       requestAbort: new AbortController(),
       interrupted: false,
@@ -1042,6 +1050,7 @@ export class BaselineAnalysisExecutionOwner {
     for (let index = 0; !this.full && !this.#disposed && index < this.#pendingAnswers.length;) {
       const next = this.#pendingAnswers[index]!;
       try {
+        if (this.#active.has(next.runRecordId)) { index += 1; continue; }
         if (next.ledger.currentRunState(next.runRecordId) !== 'awaiting-clarification') {
           this.#pendingAnswers.splice(index, 1);
           continue;
@@ -1079,7 +1088,7 @@ export class BaselineAnalysisExecutionOwner {
    * envelope — a new span of the same attempt, as 续行 is — at once when the governor has a place, or as soon as it has.
    */
   continueAnswered(runRecordId: string, ledger: BaselineAnalysisStore = this.#deps.ledger): 'continuing' | 'queued' {
-    if (!this.#disposed && this.#placeForRun(runRecordId, ledger)) {
+    if (!this.#disposed && !this.#active.has(runRecordId) && this.#placeForRun(runRecordId, ledger)) {
       this.admitAndDispatch(runRecordId, ledger, { resume: true });
       return 'continuing';
     }
@@ -1210,6 +1219,9 @@ export class BaselineAnalysisExecutionOwner {
     const code = error !== null && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : 'EXECUTION_FAILED';
     const reason = `运行在形成结果集修订版前失败（${code}）。`;
     try {
+      // Reflection and teardown run after immutable revision/terminal publication. Their failures
+      // cannot invent a contradictory pre-revision outcome or replace an already committed one.
+      if (ledger.hasCommittedOutcome(facts.runRecordId) || ['completed', 'completed-with-gaps', 'failed', 'interrupted', 'cancelled'].includes(ledger.currentRunState(facts.runRecordId))) return;
       ledger.recordRunState(facts.runRecordId, 'failed', { detail: `运行在形成结果前失败（${code}）。`, code });
       ledger.recordOutcome({
         taskIntentId: facts.taskIntentId,
@@ -1279,11 +1291,13 @@ export class BaselineAnalysisExecutionOwner {
     // other refusal — route, model, system prompt, tools, prior outputs — is untouched.
     context.admittedUserMessages.add(message);
     active.progress.stage = 'run-report-reflection';
-    active.validationStep = 'reflection';
+    context.validationStep('reflection');
     active.progress.currentUnitOrdinal = null;
     active.progress.currentUnitStartedAt = new Date().toISOString();
     active.progress.attemptState = 'dispatched';
     active.transmissionsAtDispatch = active.transmissions?.() ?? 0;
+    context.beginTurn({ stage: 'run-report-reflection', unitOrdinal: null, attemptIndex: 1, adaptationId: null, message,
+      requestDigest: sha256Hex(message), inputDigest: canonicalRecord(context.accounting).digest, contractDigest: RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST });
     const result = await harness.submitUnit(message);
     const canonical = context.liveAdapter.instance?.lastCanonicalResult ?? null;
     const usageSignal = result.signals.find((signal) => signal.kind === 'usage');
@@ -1294,7 +1308,7 @@ export class BaselineAnalysisExecutionOwner {
     // revision this reflects on was persisted before the turn was dispatched.
     if (turnUsage !== null) context.accumulated.push(turnUsage);
     const usage: RunReportUsage = {
-      requests: 1,
+      requests: 1 + result.signals.filter((signal) => signal.kind === 'progress' && signal.label === PLATFORM_TOOL_CALL_PROGRESS).length,
       inputTokens: turnUsage?.inputTokens ?? 0,
       outputTokens: turnUsage?.outputTokens ?? 0,
     };
@@ -1386,12 +1400,6 @@ export class BaselineAnalysisExecutionOwner {
     // The Provider Test Ledger and Result Cache serve development validation only (ADR 0089, Issue #808). A live Run outside it
     // is business: every model step reaches the transport itself, and nothing reads or writes the developer cache or ledger.
     const validation = live === null || production !== null ? null : (live as DeveloperLiveRuntime).launch.validation;
-    const validationContractOf = (): string => {
-      if (active.validationStep === 'reflection') return RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST;
-      if (active.validationStep === 'reduction') return definition.crossUnit!.promptContractDigest;
-      if (active.validationStep.startsWith('sampling-')) return definition.assurance!.promptContractDigest;
-      return promptContractDigest;
-    };
     const bootstrap = production === null && validation?.family === 'policy-selection' && validation.case === 'wave6-tool-evidence-bootstrap';
     if (webTools) liveModelProfile = platformToolModelProfile(liveModelProfile, production === null ? 'developer-live' : 'ordinary-production', validation);
     let cache: ProviderResultCache | null = null;
@@ -1407,11 +1415,6 @@ export class BaselineAnalysisExecutionOwner {
       { targetedRetrieval: admittedLocalRule.targetedRetrieval, breaker: admittedLocalRule.breaker };
     const scopedUnitOrdinals = facts.update === null ? null : new Set(facts.update.reusePlan.units.filter((unit) => unit.disposition === 'recomputed').map((unit) => unit.unitOrdinal));
     const readableBlocks = new Set(facts.manifest.units.filter((unit) => scopedUnitOrdinals === null || scopedUnitOrdinals.has(unit.ordinal)).flatMap((unit) => [...unit.blockIds, ...unit.overlapBlockIds]));
-    const retrieval = localRule === null ? null : this.#deps.retrievalIndex?.(facts.runRecordId, ledger) ?? new RetrievalIndex([{
-      sourceKind: 'manuscript', sourceId: facts.checkpoint.manuscriptId, digest: facts.checkpoint.revisionDigest,
-      read: () => ({ digest: facts.checkpoint.revisionDigest, segments: ledger.readRevisionBlocks(facts.checkpoint.manuscriptId, facts.checkpoint.revisionId)
-        .filter((block) => facts.compositionOptions?.version !== 2 || readableBlocks.has(block.blockId)).map((block) => ({ blockId: block.blockId, text: block.text })) }),
-    }], null, null, ledger.pinnedToolSourcesForRun(facts.runRecordId));
     const blocksById = new Map(blocks.map((block) => [block.blockId, block] as const));
     const manifest = facts.manifest;
     const update = facts.update;
@@ -1424,14 +1427,11 @@ export class BaselineAnalysisExecutionOwner {
       : planUnits.filter((unit) => unit.disposition === 'recomputed').map((unit) => unit.unitOrdinal));
     const submittedUnits = manifest.units.filter((unit) => recomputedOrdinals.has(unit.ordinal));
     const unitMessages = new Map(submittedUnits.map((unit) => [unit.ordinal, definition.buildUnitMessage(unit, manifest.units.length, blocksById)] as const));
-    const admittedUserMessages = new Set(unitMessages.values());
     // A range-bound first Task has a plan and no predecessor, so there is nothing to load or to reuse.
     const predecessorFacts = update?.predecessor ?? null;
     const predecessorResults: ReadonlyMap<number, PredecessorUnitResult> = predecessorFacts === null
       ? new Map()
       : ledger.loadPredecessorUnitResults(predecessorFacts.revisionId);
-    const acceptedOutputDigests = new Set<string>();
-    let currentBindingDigest: string | null = null;
     // 续行 goes on under the attempt, Harness session and binding instant the Run persisted (CONT-015): a new span of
     // the same attempt, never a Retry attempt created merely because AI7 stopped.
     const stored = continuation?.stored ?? null;
@@ -1441,119 +1441,296 @@ export class BaselineAnalysisExecutionOwner {
     // What the Run kept before it stopped, read back against their digests; nothing on a first execution.
     const checkpoints: UnitCheckpoint[] = continuation === null ? [] : ledger.unitCheckpoints(facts.runRecordId);
     const checkpointed = new Set(checkpoints.map((checkpoint) => checkpoint.unit.unitOrdinal));
-    let bindingFacts: EgressBindingFacts | null = null;
-    // The payload digest the gate admitted for the turn in flight; recorded by reference, never the payload.
-    let admittedPayloadDigest: string | null = null;
     // Usage accumulated so far, in the shape the ceiling evaluator reads. Every attempt counts, so the
     // ceiling sees exactly what the Run has spent at the instant the gate asks, before each dispatch.
     const accumulated: UsageFacts[] = [];
-    const pendingLoopUsage: UsageFacts[] = [];
-    // Every tool-call result counted once for the whole Run, even when a unit ended on one (a tripped breaker).
-    const seenLoopResults = new Set<object>();
-    let platformSession: PlatformToolSession | null = null;
-    // The tool loop's model turns spend tokens before the unit's turn ends: each is counted the moment anything asks the ceiling —
-    // the next model call and also the tool call it asked for, so no search leaves past a reached ceiling (#473).
-    const capturePendingLoopUsage = (): void => {
-      const last = liveAdapter.instance?.lastCanonicalResult;
-      if (platformSession !== null && last !== null && last !== undefined && last.kind === 'tool-calls' && last.usage !== null && !seenLoopResults.has(last)) {
-        pendingLoopUsage.push(last.usage); seenLoopResults.add(last);
-      }
-    };
-    const ceilingState = (): EgressCeilingState => {
-      if (runBudgetCeiling.kind === 'unset') return 'unset';
-      capturePendingLoopUsage();
-      return evaluateRunBudgetCeiling([...accumulated, ...pendingLoopUsage], runBudgetCeiling).state === 'reached' ? 'reached' : 'within';
-    };
-    // The single-use ticket the gate issued for the step in flight; the adapter takes it or refuses.
-    let pendingTicket: TransmitTicket | null = null;
-    let bindingDigestForSlot = '';
-    // The live adapter, kept so each turn's canonical result can be read out of band immediately
-    // after `submitUnit`. It stays absent on the deterministic route, which has no Provider response
-    // to normalize and no empty answer to distinguish from a contract failure.
-    const liveAdapter: { instance: DeepSeekOpenAiCompatibleAdapter | null } = { instance: null };
-    // The same counter the liveness signal reads to tell a dispatched attempt from one already in the
-    // transport. Nothing but the count crosses this closure.
-    active.transmissions = () => liveAdapter.instance?.transmissions ?? 0;
-    const harness = await prepareExecution({
-      compositionOptions: { ...facts.compositionOptions, ...(localRule === null ? {} : { localTools: localRule }) },
-      ...(localRule === null ? {} : { localToolsRule: localRule }),
-      ...(localRule === null ? {} : { localTools: {
-        execute: (call: import('../harness/primary-agent-harness.js').PlatformToolExecution) => platformSession!.execute(call),
-        admit: (result: Parameters<PlatformToolSession['admit']>[0]) => platformSession!.admit(result),
-        acceptToolCallMessage: (digest: string) => platformSession!.acceptToolCallMessage(digest),
-      } }),
-      ...(!webTools ? {} : { platformTools: {
-        execute: (call: import('../harness/primary-agent-harness.js').PlatformToolExecution) => platformSession!.execute(call),
-        admit: (result: Parameters<PlatformToolSession['admit']>[0]) => platformSession!.admit(result),
-        acceptToolCallMessage: (digest: string) => platformSession!.acceptToolCallMessage(digest),
-      } }),
-      sessionId: harnessSessionId,
-      route,
-      model,
-      systemPrompt: definition.systemPrompt,
-      promptContractDigest,
-      // One technical Session per Analysis Unit under developer-live; the deterministic route keeps its single
-      // accumulating Session, so J-04's proven composition is untouched.
-      ...(live === null ? {} : { sessionMode: 'per-unit' as const }),
-      adapterFactory: (codes) => {
-        // A continuation's retry is the unit's second attempt however many executions it took to reach it (Issue #422,
-        // S76d): the deterministic fixture serves attempts in order, so it is told what each unit attempted before.
-        if (live === null) {
-          // Sampling turns are keyed by the sampling contract this kind binds (Issue #826), as the unit turns are by its prompt.
-          const assurance = definition.assurance === null ? {} : { assurancePromptContractDigest: definition.assurance.promptContractDigest };
-          return new Ai7LocalDeterministicAdapter(fixture!, promptContractDigest, codes,
-            continuation === null ? assurance : { ...assurance, attemptsBefore: ledger.unitAttemptsOf(facts.runRecordId) });
+    const contexts = new Set<{ finish(): Promise<void> }>();
+    let requestScopeChanged = (): boolean => false;
+    const createContext = async (technicalSessionId: string, firstUnitSessionId?: string, unitOrdinal?: number) => {
+      const broker = new CredentialBroker(this.#deps.secretResolver, { developmentReferences: production === null ? 'admitted' : 'refused' });
+      const admittedUserMessages = new Set(unitOrdinal === undefined ? unitMessages.values() : [unitMessages.get(unitOrdinal)!]);
+      const acceptedOutputDigests = new Set<string>();
+      let currentBindingDigest: string | null = null;
+      let validationStep = '';
+      let producer: ModelRequestProducer | null = null;
+      let producerId = randomUUID();
+      let requestOrdinal = 0;
+      let transmissionsAtDispatch = 0;
+      let currentRequestId: string | null = null;
+      let clarificationRequestId: string | null = null;
+      let turnIdentity: AnalysisTurnIdentity | null = null;
+      let nextUnitSessionId = firstUnitSessionId;
+      let firstTurn = true;
+      const closeProducer = (): void => {
+        if (producer !== null) this.#deps.requestGovernor.unregisterProducer(producer);
+        producer = null;
+      };
+      const beginTurn = (identity: NonNullable<typeof turnIdentity>, claim: string | null = null): void => {
+        if (firstUnitSessionId !== undefined) {
+          if (!firstTurn) nextUnitSessionId = randomUUID();
+          firstTurn = false;
         }
-        liveAdapter.instance = new DeepSeekOpenAiCompatibleAdapter({
-          broker: this.#broker,
-          get slotBinding(): CredentialSlotBinding {
-            return { bindingDigest: bindingDigestForSlot, modelRole, slot: credentialSlot, credentialReference };
-          },
-          tickets: { take: () => { const current = pendingTicket; pendingTicket = null; return current; } },
-          attribution: () => ({}),
-          promptContractDigest,
-          codes,
-          signal: active.requestAbort.signal,
-          ...(policy.providerProcessing.transport === undefined ? {} : { transportSettings: policy.providerProcessing.transport }),
-          profile: routeProfile,
-          modelProfile: liveModelProfile,
-          sessionId: () => harness.currentSessionId(),
-          // Under development validation the captured native `fetch` is reached only through the cache: an identical request
-          // replays without transmitting, evidence that already answers the purpose refuses the send, and a live call happens
-          // at most once. The bound route profile travels with the call, so the cache step reads a limit the way this route
-          // declares limits are read rather than by knowing which route it is serving. Outside it, the call goes straight out.
-          transport: validation === null
-            ? (url, init) => live.nativeFetch(url, init)
-            : (url, init) => transmitOnce(cache!, live.nativeFetch, {
-              // S40 unless the kind names its own slice (S84 for writing, #810).
-              purpose: testItemPurpose, ...(definition.liveItemSlice === undefined ? {} : { slice: definition.liveItemSlice }),
-              promptContractDigest: validationContractOf(), taskPromptContractDigest: promptContractDigest,
-            }, {
-              intent: validation,
-              step: `${testItemPurpose}/${active.validationStep}`,
-              requestShape: OPENCODE_GO_V41_FLASH_PROFILE.capabilities.requestShape,
-            }, routeProfile, model, url, init),
+        if (live !== null && producer === null) {
+          producerId = randomUUID(); requestOrdinal = 0;
+          producer = this.#deps.requestGovernor.registerProducer({
+            key: `analysis:${facts.runRecordId}:${producerId}`,
+            kind: identity.stage === 'units' ? 'analysis-unit' : 'analysis-stage',
+            lane: facts.origin === 'background-analysis-enrollment' || facts.startWhen === 'idle' ? 'background' : 'foreground'
+          });
+        }
+        turnIdentity = identity;
+        clarificationRequestId = claim;
+        if (live !== null && identity.stage === 'units' && identity.unitOrdinal !== null) active.unitActivities.set(identity.unitOrdinal, {
+          unitOrdinal: identity.unitOrdinal, attemptState: identity.attemptIndex > 1 ? 'retrying' : 'dispatched',
+          requestState: 'between-requests', admittedRequestStartedAt: null,
         });
-        return liveAdapter.instance;
-      },
-      gate: (payload) => {
-        if (bindingFacts === null) return { decision: 'refuse', reason: 'binding-stale', detail: '执行绑定尚未持久化；未发送任何内容。' };
-        capturePendingLoopUsage();
-        const decision = evaluateEgress(payload, { ...bindingFacts, seriesScopeGuard: () => this.#deps.seriesScopeGuard === undefined || this.#deps.seriesScopeGuard === null
-          ? definition.seriesScopes === undefined ? null : '无法核对书系检索范围'
-          : this.#deps.seriesScopeGuard(facts.runRecordId) }, platformSession?.egressScope ?? { currentBindingDigest: () => currentBindingDigest, acceptedOutputDigests, ceilingState });
-        admittedPayloadDigest = decision.decision === 'refuse' ? null : decision.payloadDigest;
-        return decision;
-      },
-      onTransmitTicket: (ticket) => {
-        if (live === null) {
-          throw new ExecutionAdmissionError('EXECUTION_REMOTE_TICKET_FORBIDDEN', 'Provider Processing v1 下不得签发 transmit-remote。');
+      };
+      const requireRequestCurrent = (): void => {
+        active.requestAbort.signal.throwIfAborted();
+        if (active.cancelRequested || active.interrupted || currentBindingDigest === null || requestScopeChanged()) {
+          throw new ExecutionAdmissionError('EXECUTION_BINDING_STALE', '运行或固定来源已变化；没有发送本次请求。');
         }
-        pendingTicket = ticket;
-      },
-    });
+      };
+      const unitActivity = () => turnIdentity?.unitOrdinal == null ? undefined : active.unitActivities.get(turnIdentity.unitOrdinal);
+      const retrieval = localRule === null ? null : this.#deps.retrievalIndex?.(facts.runRecordId, ledger) ?? new RetrievalIndex([{
+        sourceKind: 'manuscript', sourceId: facts.checkpoint.manuscriptId, digest: facts.checkpoint.revisionDigest,
+        read: () => ({
+          digest: facts.checkpoint.revisionDigest, segments: ledger.readRevisionBlocks(facts.checkpoint.manuscriptId, facts.checkpoint.revisionId)
+            .filter((block) => facts.compositionOptions?.version !== 2 || readableBlocks.has(block.blockId)).map((block) => ({ blockId: block.blockId, text: block.text }))
+        }),
+      }], null, null, ledger.pinnedToolSourcesForRun(facts.runRecordId));
+      const validationContractOf = (): string => {
+        if (validationStep === 'reflection') return RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST;
+        if (validationStep === 'reduction') return definition.crossUnit!.promptContractDigest;
+        if (validationStep.startsWith('sampling-')) return definition.assurance!.promptContractDigest;
+        return promptContractDigest;
+      };
+      let bindingFacts: EgressBindingFacts | null = null;
+      // The payload digest the gate admitted for the turn in flight; recorded by reference, never the payload.
+      let admittedPayloadDigest: string | null = null;
+      const pendingLoopUsage: UsageFacts[] = [];
+      // Every tool-call result counted once for the whole Run, even when a unit ended on one (a tripped breaker).
+      const seenLoopResults = new Set<object>();
+      let platformSession: PlatformToolSession | null = null;
+      // The tool loop's model turns spend tokens before the unit's turn ends: each is counted the moment anything asks the ceiling —
+      // the next model call and also the tool call it asked for, so no search leaves past a reached ceiling (#473).
+      const capturePendingLoopUsage = (): void => {
+        const last = liveAdapter.instance?.lastCanonicalResult;
+        if (platformSession !== null && last !== null && last !== undefined && last.kind === 'tool-calls' && last.usage !== null && !seenLoopResults.has(last)) {
+          pendingLoopUsage.push(last.usage); seenLoopResults.add(last);
+        }
+      };
+      const ceilingState = (): EgressCeilingState => {
+        if (runBudgetCeiling.kind === 'unset') return 'unset';
+        capturePendingLoopUsage();
+        return evaluateRunBudgetCeiling([...accumulated, ...pendingLoopUsage], runBudgetCeiling).state === 'reached' ? 'reached' : 'within';
+      };
+      // The single-use ticket the gate issued for the step in flight; the adapter takes it or refuses.
+      let pendingTicket: TransmitTicket | null = null;
+      let bindingDigestForSlot = '';
+      // The live adapter, kept so each turn's canonical result can be read out of band immediately
+      // after `submitUnit`. It stays absent on the deterministic route, which has no Provider response
+      // to normalize and no empty answer to distinguish from a contract failure.
+      const liveAdapter: { instance: DeepSeekOpenAiCompatibleAdapter | null } = { instance: null };
+      // The same counter the liveness signal reads to tell a dispatched attempt from one already in the
+      // transport. Nothing but the count crosses this closure.
+      let harness: PrimaryAgentHarnessHandle;
+      try {
+        harness = await prepareExecution({
+          ...(live === null ? {} : {
+            acquireRequest: async (_payload: import('../provider/payload.js').AssembledModelPayload, signal: AbortSignal) => {
+              if (producer === null || turnIdentity === null) throw new ExecutionAdmissionError('EXECUTION_REQUEST_IDENTITY_ABSENT', '模型请求没有当前单元或阶段标识。');
+              const combined = AbortSignal.any([active.requestAbort.signal, signal]);
+              const activity = unitActivity();
+              if (activity !== undefined) { activity.requestState = 'waiting-for-capacity'; activity.admittedRequestStartedAt = null; }
+              else active.progress.currentUnitStartedAt = null;
+              const permit = await this.#deps.requestGovernor.acquire(producer, combined);
+              try {
+                combined.throwIfAborted(); requireRequestCurrent();
+                return {
+                  admit: (decision: import('../provider/egress-gate.js').EgressDecision) => {
+                    if (decision.decision !== 'transmit-remote') return;
+                    requireRequestCurrent();
+                    const { message, ...identity } = turnIdentity!;
+                    currentRequestId = randomUUID();
+                    ledger.admitModelRequest(facts.runRecordId, {
+                      ...identity, requestId: currentRequestId, producerId,
+                      requestOrdinal: ++requestOrdinal, sessionId: harness.currentSessionId(), payloadDigest: decision.payloadDigest, messageDigest: sha256Hex(message)
+                    }, clarificationRequestId);
+                    clarificationRequestId = null;
+                    const admittedAt = new Date().toISOString();
+                    if (activity !== undefined) { activity.requestState = 'admitted'; activity.admittedRequestStartedAt = admittedAt; }
+                    else active.progress.currentUnitStartedAt = admittedAt;
+                  },
+                  release: () => {
+                    currentRequestId = null; pendingTicket = null;
+                    if (activity !== undefined) { activity.requestState = 'between-requests'; activity.admittedRequestStartedAt = null; activity.attemptState = turnIdentity!.attemptIndex > 1 ? 'retrying' : 'dispatched'; }
+                    else active.progress.currentUnitStartedAt = null;
+                    permit.release();
+                  },
+                };
+              } catch (error) { permit.release(); throw error; }
+            }
+          }),
+          compositionOptions: { ...facts.compositionOptions, ...(localRule === null ? {} : { localTools: localRule }) },
+          ...(localRule === null ? {} : { localToolsRule: localRule }),
+          ...(localRule === null ? {} : {
+            localTools: {
+              execute: (call: import('../harness/primary-agent-harness.js').PlatformToolExecution) => platformSession!.execute(call),
+              admit: (result: Parameters<PlatformToolSession['admit']>[0]) => platformSession!.admit(result),
+              acceptToolCallMessage: (digest: string) => platformSession!.acceptToolCallMessage(digest),
+            }
+          }),
+          ...(!webTools ? {} : {
+            platformTools: {
+              execute: (call: import('../harness/primary-agent-harness.js').PlatformToolExecution) => platformSession!.execute(call),
+              admit: (result: Parameters<PlatformToolSession['admit']>[0]) => platformSession!.admit(result),
+              acceptToolCallMessage: (digest: string) => platformSession!.acceptToolCallMessage(digest),
+            }
+          }),
+          sessionId: technicalSessionId,
+          route,
+          model,
+          systemPrompt: definition.systemPrompt,
+          promptContractDigest,
+          // One technical Session per Analysis Unit under developer-live; the deterministic route keeps its single
+          // accumulating Session, so J-04's proven composition is untouched.
+          ...(live === null ? {} : { sessionMode: 'per-unit' as const }),
+          ...(firstUnitSessionId === undefined ? {} : { nextSessionId: () => nextUnitSessionId! }),
+          adapterFactory: (codes) => {
+            // A continuation's retry is the unit's second attempt however many executions it took to reach it (Issue #422,
+            // S76d): the deterministic fixture serves attempts in order, so it is told what each unit attempted before.
+            if (live === null) {
+              // Sampling turns are keyed by the sampling contract this kind binds (Issue #826), as the unit turns are by its prompt.
+              const assurance = definition.assurance === null ? {} : { assurancePromptContractDigest: definition.assurance.promptContractDigest };
+              return new Ai7LocalDeterministicAdapter(fixture!, promptContractDigest, codes,
+                continuation === null ? assurance : { ...assurance, attemptsBefore: ledger.unitAttemptsOf(facts.runRecordId) });
+            }
+            liveAdapter.instance = new DeepSeekOpenAiCompatibleAdapter({
+              broker: broker,
+              get slotBinding(): CredentialSlotBinding {
+                return { bindingDigest: bindingDigestForSlot, modelRole, slot: credentialSlot, credentialReference };
+              },
+              tickets: { take: () => { const current = pendingTicket; pendingTicket = null; return current; } },
+              attribution: () => ({}),
+              promptContractDigest,
+              codes,
+              signal: active.requestAbort.signal,
+              beforeSend: () => { requireRequestCurrent(); const activity = unitActivity(); if (activity !== undefined) activity.attemptState = 'awaiting-response'; },
+              onRequestNotSent: () => {
+                if (currentRequestId !== null) ledger.recordModelRequestNotSent(facts.runRecordId, currentRequestId);
+              },
+              ...(policy.providerProcessing.transport === undefined ? {} : { transportSettings: policy.providerProcessing.transport }),
+              profile: routeProfile,
+              modelProfile: liveModelProfile,
+              sessionId: () => harness.currentSessionId(),
+              // Under development validation the captured native `fetch` is reached only through the cache: an identical request
+              // replays without transmitting, evidence that already answers the purpose refuses the send, and a live call happens
+              // at most once. The bound route profile travels with the call, so the cache step reads a limit the way this route
+              // declares limits are read rather than by knowing which route it is serving. Outside it, the call goes straight out.
+              transport: async (url, init) => {
+                requireRequestCurrent();
+                if (validation === null) return live.nativeFetch(url, init);
+                let nativeEntered = false;
+                const send: import('../provider/deepseek-adapter.js').DeepSeekTransport = (target, request) => {
+                  requireRequestCurrent(); nativeEntered = true; return live.nativeFetch(target, request);
+                };
+                try {
+                  return await transmitOnce(cache!, send, {
+                    // S40 unless the kind names its own slice (S84 for writing, #810).
+                    purpose: testItemPurpose, ...(definition.liveItemSlice === undefined ? {} : { slice: definition.liveItemSlice }),
+                    promptContractDigest: validationContractOf(), taskPromptContractDigest: promptContractDigest,
+                  }, {
+                    intent: validation,
+                    step: `${testItemPurpose}/${validationStep}`,
+                    requestShape: OPENCODE_GO_V41_FLASH_PROFILE.capabilities.requestShape,
+                  }, routeProfile, model, url, init);
+                }
+                catch (error) { if (!nativeEntered) throw modelRequestNotSent(init, error); throw error; }
+              },
+            });
+            return liveAdapter.instance;
+          },
+          gate: (payload) => {
+            if (bindingFacts === null) return { decision: 'refuse', reason: 'binding-stale', detail: '执行绑定尚未持久化；未发送任何内容。' };
+            capturePendingLoopUsage();
+            const decision = evaluateEgress(payload, {
+              ...bindingFacts, seriesScopeGuard: () => this.#deps.seriesScopeGuard === undefined || this.#deps.seriesScopeGuard === null
+                ? definition.seriesScopes === undefined ? null : '无法核对书系检索范围'
+                : this.#deps.seriesScopeGuard(facts.runRecordId)
+            }, platformSession?.egressScope ?? { currentBindingDigest: () => currentBindingDigest, acceptedOutputDigests, ceilingState });
+            admittedPayloadDigest = decision.decision === 'refuse' ? null : decision.payloadDigest;
+            return decision;
+          },
+          onTransmitTicket: (ticket) => {
+            if (live === null) {
+              throw new ExecutionAdmissionError('EXECUTION_REMOTE_TICKET_FORBIDDEN', 'Provider Processing v1 下不得签发 transmit-remote。');
+            }
+            pendingTicket = ticket;
+          },
+        });
+      } catch (error) { closeProducer(); retrieval?.dispose(); throw error; }
+      const bind = async (bindingDigest: string, template: EgressBindingFacts): Promise<void> => {
+        currentBindingDigest = bindingDigest;
+        bindingDigestForSlot = bindingDigest;
+        bindingFacts = { ...template, admittedUserMessages };
+        if (webTools && facts.webToolsBackend !== undefined && live !== null) {
+          const selectedRule = liveKindRule(policy, definition.kind);
+          const tools = platformToolsFromProjection(selectedRule);
+          if (tools === null) throw new ExecutionAdmissionError('PLATFORM_TOOLS_NOT_NAMED', '本任务的规则未声明联网工具。');
+          const backend = searchBackend(facts.webToolsBackend.backendId);
+          if (backend.declaration.host !== facts.webToolsBackend.host || searchBackendConfigurationDigest(backend.declaration.id) !== facts.webToolsBackend.configurationDigest || facts.searchCredentialReference === undefined) throw new ExecutionAdmissionError('PLATFORM_TOOL_BACKEND_DRIFT', '冻结的联网检索配置无效。');
+          bindingFacts = {
+            ...bindingFacts, platformTools: tools, searchBackend: {
+              backendId: facts.webToolsBackend.backendId,
+              host: facts.webToolsBackend.host, endpoint: backend.declaration.endpoint!, credentialSlot: backend.declaration.credentialSlot, credentialReference: facts.searchCredentialReference
+            }
+          };
+          const snapshots = cache === null ? null : new ResearchSnapshotCache((live as DeveloperLiveRuntime).launch.providerCacheRoot);
+          if (snapshots !== null) await snapshots.open();
+          const ready = await broker.checkPlanReadiness(backend.declaration.credentialSlot, facts.searchCredentialReference);
+          if (ready !== 'present') throw new ExecutionAdmissionError('SEARCH_CREDENTIAL_MISSING', `${backend.declaration.displayName} 缺少密钥；请在 设置 › 模型服务 › 联网检索 配置。`);
+          platformSession = new PlatformToolSession({
+            binding: bindingFacts, scope: { currentBindingDigest: () => currentBindingDigest, acceptedOutputDigests, ceilingState },
+            ...(retrieval === null ? {} : { retrieval }),
+            fetch: live.nativeFetch, admitHost: admitTicketHost, broker: broker, cache, snapshots, purpose: testItemPurpose, evidenceSearchRoundTripOnly: bootstrap,
+            onUsage: (usage) => accumulated.push(usage),
+          });
+        }
+        if (platformSession === null && retrieval !== null) platformSession = new PlatformToolSession({
+          binding: bindingFacts,
+          scope: { currentBindingDigest: () => currentBindingDigest, acceptedOutputDigests, ceilingState }, retrieval, purpose: testItemPurpose
+        });
+        harness.bindExecution({ harnessSessionId: technicalSessionId, behaviorCompositionDigest: harness.composition.digest, promptContractDigest });
+      };
+      let finishing: Promise<void> | null = null;
+      const finish = (): Promise<void> => finishing ??= (async () => {
+        currentBindingDigest = null;
+        try { await harness.finish(); } finally { closeProducer(); retrieval?.dispose(); }
+      })();
+      const context = {
+        harness, retrieval, liveAdapter, admittedUserMessages, acceptedOutputDigests, pendingLoopUsage,
+        ceilingState, bind, finish, beginTurn, closeProducer,
+        get currentBindingDigest() { return currentBindingDigest; },
+        get bindingFacts() { return bindingFacts; },
+        set bindingFacts(value: EgressBindingFacts | null) { bindingFacts = value; },
+        get platformSession() { return platformSession; },
+        get admittedPayloadDigest() { return admittedPayloadDigest; },
+        set admittedPayloadDigest(value: string | null) { admittedPayloadDigest = value; },
+        get validationStep() { return validationStep; },
+        set validationStep(value: string) { validationStep = value; },
+        get transmissionsAtDispatch() { return transmissionsAtDispatch; },
+        set transmissionsAtDispatch(value: number) { transmissionsAtDispatch = value; },
+      };
+      contexts.add(context);
+      return context;
+    };
+    type AnalysisContext = Awaited<ReturnType<typeof createContext>>;
+    const stageContext = await createContext(harnessSessionId);
+    const context = stageContext;
+    const { harness, liveAdapter, admittedUserMessages, acceptedOutputDigests, pendingLoopUsage, ceilingState, retrieval } = context;
+    active.transmissions = () => liveAdapter.instance?.transmissions ?? 0;
     active.harness = harness;
-    const spans: HarnessExecutionSpan[] = [];
     let terminalClassification: 'completed' | 'completed-with-gaps' | 'failed' | 'interrupted' | 'cancelled' = 'completed';
     // Which of the two developer-live interruptions settled this Run, when one did; the closed CHECK
     // sets record both as `interrupted`, so the distinction lives in the detail, summary, and action.
@@ -1602,6 +1779,13 @@ export class BaselineAnalysisExecutionOwner {
       } else if (stored.bindingDigest !== bindingDigest) {
         throw new ExecutionAdmissionError('EXECUTION_BINDING_DIGEST_DRIFT', '续行时的执行绑定与这次运行持久化的不一致。');
       }
+      const selectedRule = liveKindRule(policy, definition.kind, [], facts.origin === 'background-analysis-enrollment' ? 'background' : 'foreground');
+      const execution = policy.providerProcessing.execution;
+      const parallelEligible = stored === null && production !== null && runBudgetCeiling.kind === 'unset' && facts.compositionOptions?.version === 2 &&
+        policy.integrityState === 'verified' && selectedRule !== null && selectedRule.ruleId === (admitted?.ruleId ?? productionRule?.ruleId) &&
+        selectedRule.route === route && selectedRule.model === model && selectedRule.credentialSlot === credentialSlot &&
+        execution?.maxInFlightRequests.default === 4 && execution.perRunUnitParallelism.default === 3 && execution.backgroundShare.default === 1;
+      const unitWidth = live === null ? 1 : ledger.beginRequestAdmissions(facts.runRecordId, parallelEligible ? 3 : 1, selectedRule?.ruleId ?? admitted?.ruleId ?? 'legacy-serial-analysis');
       // A live Run cannot start without its credential: the broker would refuse the release anyway,
       // and refusing here keeps the Run from spending Sessions to reach the same conclusion. A cancellation sends
       // nothing, so a stopped Run the editor cancelled still forms the partial revision of what it kept.
@@ -1610,10 +1794,8 @@ export class BaselineAnalysisExecutionOwner {
           ? `受保护凭据库中没有你为 ${route} 保存的凭据；请在 设置 › 模型服务 重新输入。未发起任何传输。`
           : '受保护凭据库中没有 opencode-go 开发凭据；未发起任何传输。');
       }
-      currentBindingDigest = bindingDigest;
-      bindingDigestForSlot = bindingDigest;
       const frozenMaterial = liveMaterialContract(definition.clarificationBase ?? definition);
-      bindingFacts = {
+      const bindingFactsForRun: EgressBindingFacts = {
         bindingDigest,
         route,
         model,
@@ -1637,30 +1819,10 @@ export class BaselineAnalysisExecutionOwner {
           : production !== null
             ? { operationalScope: 'ordinary-production', providerProcessingVersion: ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' }
             : { operationalScope: 'developer-live', providerProcessingVersion: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
-        admittedUserMessages,
+        admittedUserMessages: new Set(unitMessages.values()),
         ...(localRule === null ? {} : { localTools: localRule }),
       };
-      if (webTools && facts.webToolsBackend !== undefined && live !== null) {
-        const selectedRule = liveKindRule(policy, definition.kind);
-        const tools = platformToolsFromProjection(selectedRule);
-        if (tools === null) throw new ExecutionAdmissionError('PLATFORM_TOOLS_NOT_NAMED', '本任务的规则未声明联网工具。');
-        const backend = searchBackend(facts.webToolsBackend.backendId);
-        if (backend.declaration.host !== facts.webToolsBackend.host || searchBackendConfigurationDigest(backend.declaration.id) !== facts.webToolsBackend.configurationDigest || facts.searchCredentialReference === undefined) throw new ExecutionAdmissionError('PLATFORM_TOOL_BACKEND_DRIFT', '冻结的联网检索配置无效。');
-        bindingFacts = { ...bindingFacts, platformTools: tools, searchBackend: { backendId: facts.webToolsBackend.backendId,
-          host: facts.webToolsBackend.host, endpoint: backend.declaration.endpoint!, credentialSlot: backend.declaration.credentialSlot, credentialReference: facts.searchCredentialReference } };
-        const snapshots = cache === null ? null : new ResearchSnapshotCache((live as DeveloperLiveRuntime).launch.providerCacheRoot);
-        if (snapshots !== null) await snapshots.open();
-        const ready = await this.#broker.checkPlanReadiness(backend.declaration.credentialSlot, facts.searchCredentialReference);
-        if (ready !== 'present') throw new ExecutionAdmissionError('SEARCH_CREDENTIAL_MISSING', `${backend.declaration.displayName} 缺少密钥；请在 设置 › 模型服务 › 联网检索 配置。`);
-        platformSession = new PlatformToolSession({ binding: bindingFacts, scope: { currentBindingDigest: () => currentBindingDigest, acceptedOutputDigests, ceilingState },
-          ...(retrieval === null ? {} : { retrieval }),
-          fetch: live.nativeFetch, admitHost: admitTicketHost, broker: this.#broker, cache, snapshots, purpose: testItemPurpose, evidenceSearchRoundTripOnly: bootstrap,
-          onUsage: (usage) => accumulated.push(usage),
-        });
-      }
-      if (platformSession === null && retrieval !== null) platformSession = new PlatformToolSession({ binding: bindingFacts,
-        scope: { currentBindingDigest: () => currentBindingDigest, acceptedOutputDigests, ceilingState }, retrieval, purpose: testItemPurpose });
-      harness.bindExecution({ harnessSessionId, behaviorCompositionDigest: harness.composition.digest, promptContractDigest });
+      await context.bind(bindingDigest, bindingFactsForRun);
       // 取消任务 before the Run kept any unit (CTRL-008): nothing of it is left to gather, so it ends here without
       // provider work and without a revision. A stopped Run that kept units — or whose units asked the editor, their first
       // attempts sent (Issue #422, S76d) — is finished below, sending nothing.
@@ -1709,6 +1871,14 @@ export class BaselineAnalysisExecutionOwner {
         stageUsage[stage].outputTokens += turnUsage.outputTokens;
         // The ceiling counts every attempt, including a safe retry's, from this instant onward.
         accumulated.push(turnUsage);
+      };
+      const checkpointStage = (stage: 'cross-unit-reduction' | 'assurance-sampling'): void => {
+        if (live === null || stages.reduction === undefined) return;
+        const carried = Object.fromEntries(CARRIED_STAGES.map((name) => [name, { ...stageUsage[name] }])) as CarriedStages;
+        ledger.checkpointStageRequests(facts.runRecordId, stage, stages, {
+          inputTokens: CARRIED_STAGES.reduce((sum, name) => sum + carried[name].inputTokens, 0),
+          outputTokens: CARRIED_STAGES.reduce((sum, name) => sum + carried[name].outputTokens, 0), stages: carried,
+        });
       };
       const clock = new RunStageClock();
       // What the owner saw while it settled each unit; a reused unit and one never reached have none.
@@ -1867,19 +2037,26 @@ export class BaselineAnalysisExecutionOwner {
       // One technical turn for one unit attempt: the span is recorded by reference with the attempt index, the admitted
       // payload digest and the digest of the unit message it submitted — and a safe retry's, the adaptation it carries out
       // (Issue #286) — and every attempt's usage counts toward the Run.
-      const submitAttempt = async (unit: CoverageManifestUnitProjection, attemptIndex: number, attemptState: RunAttemptState, adaptationId: string | null = null, answerMessage?: string) => {
-        admittedPayloadDigest = null;
+      const submitAttempt = async (unit: CoverageManifestUnitProjection, attemptIndex: number, attemptState: RunAttemptState, adaptationId: string | null = null, answerMessage?: string, context: AnalysisContext = stageContext, clarificationRequestId: string | null = null) => {
+        const { harness, liveAdapter, admittedUserMessages, pendingLoopUsage } = context;
+        context.admittedPayloadDigest = null;
         // The baseline this attempt's `awaiting-response` is derived against, taken before the harness
         // can enter the transport, so the reading belongs to this attempt and not the previous one.
-        active.transmissionsAtDispatch = active.transmissions?.() ?? 0;
-        active.progress.attemptState = attemptState;
-        active.validationStep = `unit-${unit.ordinal}${answerMessage === undefined ? '' : '-clarification-answer'}`;
+        context.transmissionsAtDispatch = liveAdapter.instance?.transmissions ?? 0;
+        if (unitWidth === 1) active.transmissionsAtDispatch = context.transmissionsAtDispatch;
+        if (live === null) active.progress.attemptState = attemptState;
+        context.validationStep = `unit-${unit.ordinal}${answerMessage === undefined ? '' : '-clarification-answer'}`;
         const message = answerMessage ?? unitMessages.get(unit.ordinal)!;
         admittedUserMessages.add(message);
         const unitMessageDigest = sha256Hex(message);
-        platformSession?.startUnit();
+        context.beginTurn({ stage: 'units', unitOrdinal: unit.ordinal, attemptIndex, adaptationId, message,
+          requestDigest: definition.requestDigest(unit.ordinal, unit.digest), inputDigest: unit.digest, contractDigest: promptContractDigest }, clarificationRequestId);
+        // Allocate this span's journal identity before launching the turn. Its public join is
+        // ordered by unit, while the journal ordinal stays unique across explicit continuations.
+        const recordedSpanOrdinal = ++spanOrdinal;
+        context.platformSession?.startUnit();
         const turn = await harness.submitUnit(message);
-        if (platformSession?.evidenceNeedsCommander === true) throw new ExecutionAdmissionError('PLATFORM_TOOL_EVIDENCE_MORE_SEARCH_REQUIRED', '本证据项需要第二次新检索；等待 Commander。');
+        if (context.platformSession?.evidenceNeedsCommander === true) throw new ExecutionAdmissionError('PLATFORM_TOOL_EVIDENCE_MORE_SEARCH_REQUIRED', '本证据项需要第二次新检索；等待 Commander。');
         pendingLoopUsage.length = 0;
         // Read before anything else can start a turn: the adapter clears this at the start of every
         // stream, so it is this attempt's result or nothing.
@@ -1887,12 +2064,10 @@ export class BaselineAnalysisExecutionOwner {
         const retryDelayMs = liveAdapter.instance?.lastRetryDelayMs ?? null;
         // J-10's unit hold (Issue #422): the turn is back and the unit stays in flight until the Journey lets it settle.
         if (this.#deps.unitHold) await this.#deps.unitHold(active.progress.unitsSettled, () => active.interrupted);
-        const payloadDigest = admittedPayloadDigest;
-        spanOrdinal += 1;
-        spans.push(turn.span);
-        ledger.recordSpan(attemptId, spanOrdinal, turn.span, unit.ordinal, { attemptIndex, payloadDigest, unitMessageDigest, adaptationId });
+        const payloadDigest = context.admittedPayloadDigest;
+        ledger.recordSpan(attemptId, recordedSpanOrdinal, turn.span, unit.ordinal, { attemptIndex, payloadDigest, unitMessageDigest, adaptationId });
         const usageSignal = turn.signals.find((signal) => signal.kind === 'usage');
-        const unitUsage = usageSignal?.kind === 'usage' ? (platformSession === null ? { inputTokens: usageSignal.usage.inputTokens, outputTokens: usageSignal.usage.outputTokens } : { ...usageSignal.usage }) : null;
+        const unitUsage = usageSignal?.kind === 'usage' ? (context.platformSession === null ? { inputTokens: usageSignal.usage.inputTokens, outputTokens: usageSignal.usage.outputTokens } : { ...usageSignal.usage }) : null;
         countTurn('units', unitUsage, turn.signals);
         // One model turn came back. It counts whether it transmitted, replayed from the Provider Result
         // Cache, or read the deterministic fixture: what the reader learns is that the Run is moving.
@@ -1905,17 +2080,22 @@ export class BaselineAnalysisExecutionOwner {
       const keepSettled = (unit: CoverageManifestUnitProjection, wallMs: number): void => {
         const settledRecord = unitRecords.find((record) => record.unitOrdinal === unit.ordinal);
         if (settledRecord !== undefined) {
-          ledger.recordUnitCheckpoint({ runRecordId: facts.runRecordId, attemptId, unit: settledRecord, observation: unitObservations.get(unit.ordinal) ?? null });
+          const requests = live === null ? undefined : [...(ledger.requestAdmissionOf(facts.runRecordId)?.open.values() ?? [])]
+            .filter((request) => request.stage === 'units' && request.unitOrdinal === unit.ordinal).map((request) => request.requestId);
+          ledger.recordUnitCheckpoint({ runRecordId: facts.runRecordId, attemptId, unit: settledRecord, observation: unitObservations.get(unit.ordinal) ?? null,
+            ...(requests === undefined ? {} : { requests }) });
+          ledger.checkpointModelRequests(facts.runRecordId, unit.ordinal);
         }
         active.progress.unitsSettled += 1;
+        active.unitActivities.delete(unit.ordinal);
         // The bar the stale case is measured against is this Run's own longest settled step, so a model
         // that answers in ninety seconds and one that answers in ten are each judged by their own pace.
         // A unit that settled as a gap took real time too, and counts.
         active.progress.longestSettledUnitMs = Math.max(active.progress.longestSettledUnitMs ?? 0, wallMs);
         // Between two units nothing is in flight, so the reader sees the count and not the unit that just settled.
-        active.progress.currentUnitOrdinal = null;
-        active.progress.currentUnitStartedAt = null;
-        active.progress.attemptState = null;
+        if (live === null) active.progress.currentUnitOrdinal = null;
+        if (live === null) active.progress.currentUnitStartedAt = null;
+        if (live === null) active.progress.attemptState = null;
       };
       // A unit that settles as a gap, with what the Run Report records about it.
       const settleGap = (unit: CoverageManifestUnitProjection, requestDigest: string, observation: RunReportUnitObservation, code: AnalysisGapProjection['code'], reason: string): void => {
@@ -1943,7 +2123,8 @@ export class BaselineAnalysisExecutionOwner {
         readonly wallMs: number;
         readonly firstFailure: { readonly reason: string; readonly code: string } | null;
         readonly withheld: string | null;
-      }): 'settled' | 'end' | 'stop' | 'waiting' => {
+      }, context: AnalysisContext = stageContext): 'settled' | 'end' | 'stop' | 'waiting' => {
+        const { retrieval, acceptedOutputDigests, ceilingState } = context;
         const { unit, requestDigest } = s;
         const { turn, unitUsage } = s.attempt;
         const candidate = turn.signals.find((signal) => signal.kind === 'contentCandidate');
@@ -1976,9 +2157,9 @@ export class BaselineAnalysisExecutionOwner {
               firstUnitMessageDigest: s.attempt.unitMessageDigest, firstUsage: s.usage, firstWallMs: s.wallMs });
             waiting.set(unit.ordinal, { unit, requestDigest, failure, firstPayloadDigest: s.attempt.payloadDigest,
               firstUnitMessageDigest: s.attempt.unitMessageDigest, attempts: s.attempts, usage: s.usage, wallMs: s.wallMs });
-            active.progress.currentUnitOrdinal = null;
-            active.progress.currentUnitStartedAt = null;
-            active.progress.attemptState = null;
+            if (live === null) active.progress.currentUnitOrdinal = null;
+            if (live === null) active.progress.currentUnitStartedAt = null;
+            if (live === null) active.progress.attemptState = null;
             return 'waiting';
           }
           const validated = prepareRetrievalResult(candidate.text, retrieval);
@@ -2013,13 +2194,14 @@ export class BaselineAnalysisExecutionOwner {
           gap('contract-invalid', '技术回合完成但没有模型输出。');
         } else if (turn.terminal === 'failed') {
           const failure = turn.signals.find((signal) => signal.kind === 'failed');
-          const breakerEnd = platformSession?.unitEnd(turn);
+          const breakerEnd = context.platformSession?.unitEnd(turn);
           const reason = breakerEnd !== undefined && breakerEnd !== null ? breakerEnd.disclosure : failure?.kind === 'failed' ? `${failure.failure.reason}（${failure.failure.code}）` : '适配器失败。';
           // 模型服务账户限额 (Issue #51, S16b; MODEL-018): a Run that keeps its progress stops here with the unit unsettled —
           // no gap, no retry, no fallback, no second model — and 续行 reads it again once the limit clears.
           if (failure?.kind === 'failed' && failure.failure.failureClass === 'provider-account-limit' && active.resumableOnInterrupt &&
               (live === null || production !== null)) {
             accountLimit = { unitOrdinal: unit.ordinal, condition: reason, refused: { attempts: s.attempts, wallMs: s.wallMs, usage: s.usage } };
+            ledger.checkpointRefusedRequests(facts.runRecordId, 'units', unit.ordinal, { attempts: s.attempts, usage: s.usage });
             return 'stop';
           }
           // A second failure names both attempts; the unit is never retried again. One the plan did not let AI7
@@ -2071,9 +2253,10 @@ export class BaselineAnalysisExecutionOwner {
        * with the unit's search outcome. A cancellation, a pause, AI7 stopping or a reached ceiling sends nothing more: what was
        * already captured is kept. A failure to keep it never ends the Run; the unit simply has no retained evidence.
        */
-      const retainUnit = async (unit: CoverageManifestUnitProjection): Promise<void> => {
+      const retainUnit = async (unit: CoverageManifestUnitProjection, context: AnalysisContext = stageContext): Promise<void> => {
+        const { ceilingState } = context;
         const sink = this.#deps.researchEvidence;
-        const session = platformSession;
+        const session = context.platformSession;
         // A session that carries only the local tools retains no external evidence (#893).
         if (session === null || facts.webToolsBackend === undefined || sink === undefined || sink === null || (definition.platformToolBase ?? definition).kind !== FACTUAL_REVIEW_KIND) return;
         const outcome = outcomes.find((entry) => entry.unitOrdinal === unit.ordinal);
@@ -2105,7 +2288,7 @@ export class BaselineAnalysisExecutionOwner {
               return 'failed' in got ? got : retainedPageOf(got) ?? { failed: '取回的页面没有可读的正文。' };
             },
             // No Provider Processing policy names a translation step yet: the rule reads its scope alone, and 来源译文 refuses.
-            rule: { operationalScope: bindingFacts?.policy.operationalScope ?? 'unbound' },
+            rule: { operationalScope: context.bindingFacts?.policy.operationalScope ?? 'unbound' },
             translator: null,
             now: () => new Date(),
           });
@@ -2120,9 +2303,9 @@ export class BaselineAnalysisExecutionOwner {
             } });
         }
       };
-      const settleAndRetain = async (input: Parameters<typeof settleFromTurn>[0]): Promise<ReturnType<typeof settleFromTurn>> => {
-        const settled = settleFromTurn(input);
-        if (settled === 'settled') await retainUnit(input.unit);
+      const settleAndRetain = async (input: Parameters<typeof settleFromTurn>[0], context: AnalysisContext = stageContext): Promise<ReturnType<typeof settleFromTurn>> => {
+        const settled = settleFromTurn(input, context);
+        if (settled === 'settled') await retainUnit(input.unit, context);
         return settled;
       };
       /**
@@ -2160,6 +2343,7 @@ export class BaselineAnalysisExecutionOwner {
         terminalClassification = 'interrupted';
         return true;
       };
+      requestScopeChanged = () => liveInterruption !== null || accountLimit !== null || scopeChanged();
       const safeRetry = async (
         unit: CoverageManifestUnitProjection,
         requestDigest: string,
@@ -2167,6 +2351,7 @@ export class BaselineAnalysisExecutionOwner {
         first: { readonly payloadDigest: string | null; readonly unitMessageDigest: string | null },
         answerId: string | null,
         retryDelayMs: number | null = null,
+        context: AnalysisContext = stageContext,
       ): Promise<SubmittedAttempt | null> => {
         if (failure.code === 'RATE_LIMIT' && !rateLimitRetryAllowed(policy)) return null;
         if (live !== null && routeProfile.limitPolicy === 'rate-limit-retryable' &&
@@ -2205,8 +2390,8 @@ export class BaselineAnalysisExecutionOwner {
           ...(answerId === null ? {} : { clarificationAnswerId: answerId }),
         });
         adaptedUnitOrdinals.push(unit.ordinal);
-        if (currentBindingDigest !== bindingDigest) throw new ExecutionAdmissionError('EXECUTION_BINDING_DIGEST_DRIFT', '计划内调整期间执行绑定发生变化。');
-        return submitAttempt(unit, 2, 'retrying', adaptation.adaptationId);
+        if (context.currentBindingDigest !== bindingDigest) throw new ExecutionAdmissionError('EXECUTION_BINDING_DIGEST_DRIFT', '计划内调整期间执行绑定发生变化。');
+        return submitAttempt(unit, 2, 'retrying', adaptation.adaptationId, undefined, context);
       };
       /**
        * An answer the editor gave, applied at a unit boundary (CLAR-006): 再试一次 makes the safe retry now, inside the
@@ -2232,17 +2417,21 @@ export class BaselineAnalysisExecutionOwner {
             }
             waiting.delete(entry.unitOrdinal);
             // An append-only pre-send claim prevents a restart or a repeated answer from sending this turn twice.
-            if (!ledger.claimModelClarificationAnswer(facts.runRecordId, entry.requestId)) {
+            if (ledger.modelClarificationAnswerClaimed(facts.runRecordId, entry.requestId)) {
+              const notSent = ledger.modelClarificationAnswerNotSent(facts.runRecordId, entry.requestId, w.unit.ordinal);
               settleGap(w.unit, w.requestDigest, { unitOrdinal: w.unit.ordinal, attempts: w.attempts, wallMs: w.wallMs, usage: w.usage },
-                'outcome-unknown', '澄清回答回合已提交，结果尚未确认；这次运行不会再次发送。');
+                notSent ? 'interrupted' : 'outcome-unknown', notSent ? '澄清回答回合在发送前已停止；这次运行没有再次发送。' : '澄清回答回合已提交，结果尚未确认；这次运行不会再次发送。');
               keepSettled(w.unit, w.wallMs);
               continue;
             }
-            active.progress.currentUnitOrdinal = w.unit.ordinal;
-            active.progress.currentUnitStartedAt = new Date().toISOString();
+            // The historical fixture keeps its original claim. A live claim is committed with
+            // the exact physical fence after capacity grant, preserving a concurrent pause/cancel.
+            if (live === null) ledger.claimModelClarificationAnswer(facts.runRecordId, entry.requestId);
+            if (live === null) active.progress.currentUnitOrdinal = w.unit.ordinal;
+            if (live === null) active.progress.currentUnitStartedAt = new Date().toISOString();
             const startedAt = Date.now();
             const attempt = await submitAttempt(w.unit, w.attempts + 1, 'dispatched', null,
-              buildClarificationAnswerMessage(unitMessages.get(w.unit.ordinal)!, entry));
+              buildClarificationAnswerMessage(unitMessages.get(w.unit.ordinal)!, entry), stageContext, live === null ? null : entry.requestId);
             const settled = await settleAndRetain({ unit: w.unit, requestDigest: w.requestDigest, attempt, attempts: w.attempts + 1,
               usage: addUsage(w.usage, attempt.unitUsage), wallMs: w.wallMs + Date.now() - startedAt, firstFailure: null, withheld: null });
             if (settled === 'end' || settled === 'stop') return 'end';
@@ -2275,8 +2464,8 @@ export class BaselineAnalysisExecutionOwner {
           // applied too — a 再试一次 later in unit order is kept back in the ceiling's words, never left to read 未接着做.
           if (active.interrupted || (active.pauseRequested && ceilingState() !== 'reached')) return spent ? 'end' : 'stopped';
           waiting.delete(entry.unitOrdinal);
-          active.progress.currentUnitOrdinal = w.unit.ordinal;
-          active.progress.currentUnitStartedAt = new Date().toISOString();
+          if (live === null) active.progress.currentUnitOrdinal = w.unit.ordinal;
+          if (live === null) active.progress.currentUnitStartedAt = new Date().toISOString();
           if (!retry) {
             settleGap(w.unit, w.requestDigest, { unitOrdinal: w.unit.ordinal, attempts: w.attempts, wallMs: w.wallMs, usage: w.usage },
               'adapter-failure', `${w.failure.reason}（${w.failure.code}）；${CLARIFICATION_RECORD_GAP}`);
@@ -2316,22 +2505,25 @@ export class BaselineAnalysisExecutionOwner {
       // unit was reused by lineage submits nothing and opens no segment at all.
       if (remainingUnits.length > 0 || waiting.size > 0) clock.open('units');
       let unitsEnded = false;
-      for (const unit of remainingUnits) {
+      const executeUnit = async (unit: CoverageManifestUnitProjection, context: AnalysisContext): Promise<void> => {
+        const { acceptedOutputDigests, ceilingState } = context;
+        if (unitWidth === 1) {
         // An answer the editor gave meanwhile takes its unit on first (CLAR-006).
         const answers = await applyAnswers();
         if (answers === 'end' || answers === 'stopped') {
           unitsEnded = true;
-          break;
+          return;
+        }
         }
         // 取消任务 (CTRL-005): the Run stops at this unit boundary, and the unit before it has finished.
-        if (active.cancelRequested) break;
+        if (active.cancelRequested) return;
         // The current-read guard (Issue #64, S29b; SER-023): an exclusion recorded since the last range stops the Run before this
         // one forms a request — before a pause or AI7 stopping, which would leave it to be continued past the exclusion.
         // A scope stop decided anywhere since — a retry it kept back included — ends the ranges too (Issue #64 review).
         if ((liveInterruption as LiveInterruption | null) === 'series-retrieval-scope-changed' || (liveInterruption as LiveInterruption | null) === 'material-reference-changed' ||
             (liveInterruption as LiveInterruption | null) === 'learning-influence-withdrawn' || scopeChanged()) {
           unitsEnded = true;
-          break;
+          return;
         }
         // The ceiling is evaluated before every dispatch, not only inside the gate: reaching it ends
         // the Run here, before the next unit forms a request at all — and before a pause or AI7 stopping is honoured,
@@ -2340,20 +2532,20 @@ export class BaselineAnalysisExecutionOwner {
           liveInterruption = 'run-budget-ceiling-reached';
           terminalClassification = 'interrupted';
           unitsEnded = true;
-          break;
+          return;
         }
-        if (active.interrupted) break;
+        if (active.interrupted) return;
         // 暂停 (CTRL-001): the Run waits at this boundary, keeping every unit it settled.
-        if (active.pauseRequested) break;
-        active.progress.currentUnitOrdinal = unit.ordinal;
+        if (active.pauseRequested) return;
+        if (live === null) active.progress.currentUnitOrdinal = unit.ordinal;
         // The instant the reader computes elapsed time from; the product itself estimates nothing.
-        active.progress.currentUnitStartedAt = new Date().toISOString();
+        if (live === null) active.progress.currentUnitStartedAt = new Date().toISOString();
         const unitStartedAtMs = Date.now();
         const requestDigest = definition.requestDigest(unit.ordinal, unit.digest);
-        let attempt = await submitAttempt(unit, 1, 'dispatched');
+        let attempt = await submitAttempt(unit, 1, 'dispatched', null, undefined, context);
         // AI7 stopping under a Run it can continue cut this turn off: the unit is not settled, and 续行 reads it again
         // (CONT-014). A turn that came back whole settles, and is kept, as any other.
-        if (attempt.turn.terminal === 'interrupted' && active.interrupted && active.resumableOnInterrupt) break;
+        if (attempt.turn.terminal === 'interrupted' && active.interrupted && active.resumableOnInterrupt) return;
         let attempts = 1;
         let unitUsageTotal = attempt.unitUsage;
         let firstFailure: ClassifiedModelFailure | null = null;
@@ -2395,10 +2587,10 @@ export class BaselineAnalysisExecutionOwner {
                 unit, requestDigest, failure, firstPayloadDigest: attempt.payloadDigest, firstUnitMessageDigest: attempt.unitMessageDigest,
                 attempts: 1, usage: attempt.unitUsage, wallMs,
               });
-              active.progress.currentUnitOrdinal = null;
-              active.progress.currentUnitStartedAt = null;
-              active.progress.attemptState = null;
-              continue;
+              if (live === null) active.progress.currentUnitOrdinal = null;
+              if (live === null) active.progress.currentUnitStartedAt = null;
+              if (live === null) active.progress.attemptState = null;
+              return;
             }
             // An exclusion recorded while the first attempt was out keeps the retry back (Issue #64, S29b).
             if (withheld === null && mode === 'automatic' && scopeChanged()) {
@@ -2407,10 +2599,10 @@ export class BaselineAnalysisExecutionOwner {
             }
             if (withheld === null && mode === 'automatic') {
               firstFailure = failed.failure;
-              const retried = await safeRetry(unit, requestDigest, failed.failure, attempt, null, attempt.retryDelayMs);
+              const retried = await safeRetry(unit, requestDigest, failed.failure, attempt, null, attempt.retryDelayMs, context);
               if (retried !== null) {
                 attempt = retried;
-                if (attempt.turn.terminal === 'interrupted' && active.interrupted && active.resumableOnInterrupt) break;
+                if (attempt.turn.terminal === 'interrupted' && active.interrupted && active.resumableOnInterrupt) return;
                 attempts = 2;
                 // Both attempts cost the Run, so the unit's row carries what the unit cost, not what its
                 // last attempt cost.
@@ -2444,10 +2636,10 @@ export class BaselineAnalysisExecutionOwner {
             failureStatus: null, requestDigest, firstPayloadDigest: attempt.payloadDigest, firstUnitMessageDigest: attempt.unitMessageDigest,
             planEnvelopeDigest: facts.planEnvelopeDigest, bindingDigest });
           adaptedUnitOrdinals.push(unit.ordinal);
-          if (currentBindingDigest !== bindingDigest) throw new ExecutionAdmissionError('EXECUTION_BINDING_DIGEST_DRIFT', '契约重试期间执行绑定发生变化。');
+          if (context.currentBindingDigest !== bindingDigest) throw new ExecutionAdmissionError('EXECUTION_BINDING_DIGEST_DRIFT', '契约重试期间执行绑定发生变化。');
           acceptedOutputDigests.add(contractCandidate.digest);
-          attempt = await submitAttempt(unit, contractAttemptIndex, 'retrying', adaptation.adaptationId);
-          if (attempt.turn.terminal === 'interrupted' && active.interrupted && active.resumableOnInterrupt) break;
+          attempt = await submitAttempt(unit, contractAttemptIndex, 'retrying', adaptation.adaptationId, undefined, context);
+          if (attempt.turn.terminal === 'interrupted' && active.interrupted && active.resumableOnInterrupt) return;
           attempts = contractAttemptIndex;
           unitUsageTotal = addUsage(unitUsageTotal, attempt.unitUsage);
         }
@@ -2459,18 +2651,61 @@ export class BaselineAnalysisExecutionOwner {
           usage: prior === null ? unitUsageTotal : addUsage(unitUsageTotal, prior.usage),
           wallMs: Date.now() - unitStartedAtMs + (prior?.wallMs ?? 0),
           firstFailure: firstFailure === null ? null : { reason: firstFailure.reason, code: firstFailure.code }, withheld,
-        });
+        }, context);
         if (settled === 'end' || settled === 'stop') {
           unitsEnded = true;
-          break;
+          return;
         }
+      };
+      if (unitWidth === 1) {
+        for (const unit of remainingUnits) {
+          await executeUnit(unit, stageContext);
+          if (unitsEnded || active.interrupted || active.cancelRequested || active.pauseRequested || accountLimit !== null) break;
+        }
+      } else {
+        // Three workers own at most three contexts and promises. Each unit receives its technical
+        // lineage before launch; all required siblings settle before any reducer or later stage.
+        let nextUnit = 0;
+        const workers = Array.from({ length: Math.min(unitWidth, remainingUnits.length) }, async () => {
+          while (nextUnit < remainingUnits.length && !unitsEnded && !active.cancelRequested && !active.pauseRequested &&
+              !active.interrupted && accountLimit === null && liveInterruption === null && !scopeChanged()) {
+            const unit = remainingUnits[nextUnit++]!;
+            const sessionId = randomUUID();
+            let isolated: AnalysisContext | null = null;
+            try {
+              isolated = await createContext(harnessSessionId, sessionId, unit.ordinal);
+              requireCompositionMatch(isolated.harness.composition.digest, expectedComposition);
+              await isolated.bind(bindingDigest, bindingFactsForRun);
+              await executeUnit(unit, isolated);
+              for (const digest of isolated.acceptedOutputDigests) acceptedOutputDigests.add(digest);
+            } catch (error) {
+              unitsEnded = true;
+              active.requestAbort.abort();
+              throw error;
+            } finally {
+              if (isolated !== null) {
+                try { await isolated.finish(); }
+                catch (error) { unitsEnded = true; active.requestAbort.abort(); throw error; }
+                finally { contexts.delete(isolated); active.unitActivities.delete(unit.ordinal); }
+              }
+            }
+          }
+        });
+        const settled = await Promise.allSettled(workers);
+        const failed = settled.find((result) => result.status === 'rejected');
+        if (failed?.status === 'rejected') throw failed.reason;
       }
+      // The reducers and persisted revision always receive the same manifest order, regardless of
+      // response completion order. Each unit was already checkpointed at its own settlement.
+      outcomes.sort((left, right) => left.unitOrdinal - right.unitOrdinal);
+      unitRecords.sort((left, right) => left.unitOrdinal - right.unitOrdinal);
       // Every unit the Run could read is read: answers already given are applied now, one after another as they come.
       if (!unitsEnded && !active.interrupted && !active.cancelRequested && !active.pauseRequested) {
         let answers = await applyAnswers();
         while (answers === 'applied') answers = await applyAnswers();
         if (answers === 'end') unitsEnded = true;
       }
+      stageContext.closeProducer();
       clock.close();
       // What follows the ranges — the reduction, the sample, the reflection — reads the same material; an exclusion recorded while
       // the last range was out stops the Run before any of it (Issue #64, S29b; SER-023).
@@ -2613,6 +2848,8 @@ export class BaselineAnalysisExecutionOwner {
         liveInterruption = null;
       }
 
+      outcomes.sort((left, right) => left.unitOrdinal - right.unitOrdinal);
+      unitRecords.sort((left, right) => left.unitOrdinal - right.unitOrdinal);
       // The one declared cross-unit suboperation (ADR 0066), inside this Run's unchanged envelope and
       // Execution Binding: one message admitted through the same gate, one turn, one attempt, no
       // adaptation. It runs only after a unit loop that reached its end — an interrupted Run, a spent
@@ -2669,7 +2906,7 @@ export class BaselineAnalysisExecutionOwner {
           const message = step === null ? buildCrossUnitMessage(closedOutcomes, manifest.units.length) : step.buildMessage(closedOutcomes, manifest.units.length);
           // A kind's book-level synthesis turn under ordinary production carries the whole Book's words (Issue #811): the gate
           // reads it as unpublished full content, which the kind's rule must name; every other turn keeps the Run's category.
-          if (production !== null && step !== null && bindingFacts !== null) bindingFacts = { ...bindingFacts, outboundDataCategory: 'unpublished-full-content' };
+          if (production !== null && step !== null && context.bindingFacts !== null) context.bindingFacts = { ...context.bindingFacts, outboundDataCategory: 'unpublished-full-content' };
           // The same set the gate reads: exactly one further user message becomes admissible, and every
           // other refusal — route, model, system prompt, tools, prior outputs — is untouched.
           admittedUserMessages.add(message);
@@ -2677,17 +2914,19 @@ export class BaselineAnalysisExecutionOwner {
           // ceiling never dispatched, and a stage that never ran reports no time at all.
           clock.open('cross-unit-reduction');
           active.progress.stage = 'cross-unit-reduction';
-          active.validationStep = 'reduction';
+          context.validationStep = 'reduction';
           active.progress.currentUnitOrdinal = null;
           active.progress.currentUnitStartedAt = new Date().toISOString();
           active.progress.attemptState = 'dispatched';
           active.transmissionsAtDispatch = active.transmissions?.() ?? 0;
-          platformSession?.startUnit();
+          context.beginTurn({ stage: 'cross-unit-reduction', unitOrdinal: null, attemptIndex: 1, adaptationId: null, message,
+            requestDigest, inputDigest: reductionInput, contractDigest: reductionContract });
+          context.platformSession?.startUnit();
           const turn = await harness.submitUnit(message);
-          if (platformSession?.evidenceNeedsCommander === true) throw new ExecutionAdmissionError('PLATFORM_TOOL_EVIDENCE_MORE_SEARCH_REQUIRED', '本证据项需要第二次新检索；等待 Commander。');
+          if (context.platformSession?.evidenceNeedsCommander === true) throw new ExecutionAdmissionError('PLATFORM_TOOL_EVIDENCE_MORE_SEARCH_REQUIRED', '本证据项需要第二次新检索；等待 Commander。');
           pendingLoopUsage.length = 0;
           // Every later turn of the Run keeps the Run's own category again.
-          if (production !== null && step !== null && bindingFacts !== null) bindingFacts = { ...bindingFacts, outboundDataCategory: 'unpublished-excerpts' };
+          if (production !== null && step !== null && context.bindingFacts !== null) context.bindingFacts = { ...context.bindingFacts, outboundDataCategory: 'unpublished-excerpts' };
           if (this.#deps.stageHold) await this.#deps.stageHold('cross-unit-reduction');
           const canonical = liveAdapter.instance?.lastCanonicalResult ?? null;
           // The reduction's turn is a model turn like any other: it counts as a request, its usage
@@ -2731,6 +2970,10 @@ export class BaselineAnalysisExecutionOwner {
             if (failure?.kind === 'failed' && failure.failure.failureClass === 'provider-account-limit' && active.resumableOnInterrupt &&
                 (live === null || production !== null)) {
               accountLimit = { unitOrdinal: null, condition: `${failure.failure.reason}（${failure.failure.code}）` };
+              ledger.checkpointRefusedRequests(facts.runRecordId, 'cross-unit-reduction', null, {
+                attempts: 1 + turn.signals.filter((signal) => signal.kind === 'progress' && signal.label === PLATFORM_TOOL_CALL_PROGRESS).length,
+                usage: crossUnitUsage,
+              });
             }
           } else if (ambiguousTurnReason(turn.signals) !== null) {
             // 结果待确认 (Issue #51, S16c): its own code and words, never 被中断 — and never sent again.
@@ -2751,6 +2994,7 @@ export class BaselineAnalysisExecutionOwner {
         inputDigest: reductionInput, contractDigest: reductionContract,
         requestDigest: crossUnit.state === 'not-run' ? null : crossUnit.requestDigest, outcome: crossUnit,
       };
+      if (stages.reduction !== undefined) checkpointStage('cross-unit-reduction');
       if (stopWithoutEnding()) return;
 
       // The kind's reducers run over the complete new unit set: reused plus recomputed. This is the
@@ -2784,6 +3028,8 @@ export class BaselineAnalysisExecutionOwner {
       const sample = await this.#drawAndJudge({
         active, definition, harness, reduction: reduced, manifest, blocksById, admittedUserMessages, stages,
         acceptedOutputDigests, liveAdapter, countTurn, clock, ceilingState, live, policy,
+        beginTurn: context.beginTurn, checkpoint: () => checkpointStage('assurance-sampling'),
+        validationStep: (step) => { context.validationStep = step; },
         stopped: terminalClassification === 'interrupted' || terminalClassification === 'cancelled',
         stoppedReason: liveInterruption === 'run-budget-ceiling-reached' ? ASSURANCE_SAMPLING_BUDGET_REACHED : null,
         removedByEditor: !assuranceSamplingKept(facts.editorEdits),
@@ -2791,8 +3037,11 @@ export class BaselineAnalysisExecutionOwner {
           liveInterruption = 'run-budget-ceiling-reached';
           terminalClassification = 'interrupted';
         },
-        onAccountLimit: (condition) => {
-          if (active.resumableOnInterrupt && (live === null || production !== null)) accountLimit = { unitOrdinal: null, condition };
+        onAccountLimit: (condition, observation) => {
+          if (active.resumableOnInterrupt && (live === null || production !== null)) {
+            accountLimit = { unitOrdinal: null, condition };
+            ledger.checkpointRefusedRequests(facts.runRecordId, 'assurance-sampling', null, observation);
+          }
         },
         materialChanged: scopeChanged,
       });
@@ -2813,10 +3062,10 @@ export class BaselineAnalysisExecutionOwner {
         }
       }
       unitRecords.sort((left, right) => left.unitOrdinal - right.unitOrdinal);
-      if (platformSession !== null) {
-        usage.requests += platformSession.usage.requests;
-        usage.inputTokens += platformSession.usage.inputTokens;
-        usage.outputTokens += platformSession.usage.outputTokens;
+      if (context.platformSession !== null) {
+        usage.requests += context.platformSession.usage.requests;
+        usage.inputTokens += context.platformSession.usage.inputTokens;
+        usage.outputTokens += context.platformSession.usage.outputTokens;
       }
       const revision = ledger.persistRevision({
         facts,
@@ -2870,12 +3119,12 @@ export class BaselineAnalysisExecutionOwner {
         recordedAt: new Date().toISOString(),
         spans: clock.spans(),
         usage: stageUsage,
-        ...(platformSession === null ? {} : { platformTools: platformSession.usage, webToolsBackend: facts.webToolsBackend }),
+        ...(context.platformSession === null ? {} : { platformTools: context.platformSession.usage, webToolsBackend: facts.webToolsBackend }),
         unitRows: runReportUnitRows(unitRecords, unitObservations),
         submitted: submittedUnits.length,
         // Exactly the three fields decision 4 names; the adaptation's own digests, codes, and
         // identities stay in the ledger row a reader can already open.
-        adaptations: ledger.adaptationsOf(facts.runRecordId).map((entry) => ({
+        adaptations: ledger.adaptationsOf(facts.runRecordId).sort((left, right) => left.unitOrdinal - right.unitOrdinal || left.ordinal - right.ordinal).map((entry) => ({
           unitOrdinal: entry.unitOrdinal,
           classifiedReason: entry.classifiedReason,
           recordedAt: entry.recordedAt,
@@ -2919,18 +3168,20 @@ export class BaselineAnalysisExecutionOwner {
         report: { ...buildRunReport(reportFacts, await this.#reflect({
           active, harness, runRecordId: facts.runRecordId, accounting: runReportAccounting(reportFacts),
           admittedUserMessages, acceptedOutputDigests, liveAdapter, accumulated, ceilingState, live, policy,
+          beginTurn: context.beginTurn,
+          validationStep: (step) => { context.validationStep = step; },
           // An exclusion recorded since the revision was persisted keeps the reflection back too (Issue #64, S29b).
           stopped: terminalClassification === 'interrupted' || terminalClassification === 'cancelled' ||
             (!active.cancelRequested && (this.#deps.seriesScopeGuard?.(facts.runRecordId) != null || this.#deps.influenceGuard?.(facts.runRecordId) != null)),
         })), ...(factualAssurance === null ? {} : { factualAssurance }) },
       });
+      ledger.checkpointReflectionRequests(facts.runRecordId);
     } finally {
-      currentBindingDigest = null;
+      active.unitActivities.clear();
       active.progress.currentUnitOrdinal = null;
       active.progress.currentUnitStartedAt = null;
       active.progress.attemptState = null;
-      await harness.finish();
-      retrieval?.dispose();
+      await Promise.all([...contexts].map((entry) => entry.finish()));
     }
   }
 
@@ -2983,6 +3234,7 @@ export class BaselineAnalysisExecutionOwner {
     const save = (nextTurn: number, ended: boolean): void => {
       context.stages.sampling = { inputDigest, contractDigest, draw, nextTurn, ended,
         turns: [...settledTurns], dispositions: [...dispositions], gapReasons: [...gapReasons], sampled: { ...sampled } };
+      context.checkpoint();
     };
     if (live !== null && policy.providerProcessing.assuranceSamplingAllowed !== true) {
       // The sampling turns are transmissions the active Provider Processing policy does not name, so
@@ -3028,13 +3280,15 @@ export class BaselineAnalysisExecutionOwner {
       // per turn keeps the segments contiguous from the first dispatch to the last turn's settlement.
       context.clock.open('assurance-sampling');
       active.progress.stage = 'assurance-sampling';
-      active.validationStep = `sampling-${sampleTurn}-unit-${turn.unitOrdinal}`;
+      context.validationStep(`sampling-${sampleTurn}-unit-${turn.unitOrdinal}`);
       // The unit loop is over; a sampling turn is about a unit but is not one of its attempts, so the
       // reader sees the stage rather than a unit ordinal, exactly as it does for the reduction.
       active.progress.currentUnitOrdinal = null;
       active.progress.currentUnitStartedAt = new Date().toISOString();
       active.progress.attemptState = 'dispatched';
       active.transmissionsAtDispatch = active.transmissions?.() ?? 0;
+      context.beginTurn({ stage: 'assurance-sampling', unitOrdinal: null, attemptIndex: 1, adaptationId: null, message,
+        requestDigest: canonicalRecord(message).digest, inputDigest, contractDigest });
       const result = await harness.submitUnit(message);
       if (this.#deps.stageHold) await this.#deps.stageHold('assurance-sampling');
       const canonical = context.liveAdapter.instance?.lastCanonicalResult ?? null;
@@ -3093,7 +3347,9 @@ export class BaselineAnalysisExecutionOwner {
           // A Provider Account Limit ends the suboperation outright: no retry, no fallback, no second model — and a Run that
           // keeps its progress stops there, before retrying the refused turn with 续行 (Issue #51, S16b).
           if (failure?.kind === 'failed' && failure.failure.failureClass === 'provider-account-limit') {
-            context.onAccountLimit(`${failure.failure.reason}（${failure.failure.code}）`);
+            context.onAccountLimit(`${failure.failure.reason}（${failure.failure.code}）`, {
+              attempts: 1 + result.signals.filter((signal) => signal.kind === 'progress' && signal.label === PLATFORM_TOOL_CALL_PROGRESS).length, usage: turnUsage,
+            });
             unsettled = true;
             break;
           }
@@ -3323,6 +3579,8 @@ export function unparsableRunReportReflectionAnswerGapReason(
 
 /** Exactly what the reflection suboperation may read or move; no finding and no block is among them. */
 interface RunReportReflectionContext {
+  readonly beginTurn: (identity: AnalysisTurnIdentity) => void;
+  readonly validationStep: (step: string) => void;
   readonly active: ActiveRun;
   readonly harness: PrimaryAgentHarnessHandle;
   readonly runRecordId: string;
@@ -3341,6 +3599,9 @@ interface RunReportReflectionContext {
 
 /** Exactly what the sampling suboperation may read or move; the finding components are not among them. */
 interface AssuranceSamplingContext {
+  readonly beginTurn: (identity: AnalysisTurnIdentity) => void;
+  readonly checkpoint: () => void;
+  readonly validationStep: (step: string) => void;
   readonly stages: StageContinuation;
   readonly active: ActiveRun;
   readonly definition: AnalysisKindDefinition;
@@ -3367,7 +3628,7 @@ interface AssuranceSamplingContext {
   /** The ceiling stopped a sampling turn: the Run ends as the Run Budget Ceiling reached (Issue #51, S16a). */
   readonly onCeilingReached: () => void;
   /** The provider refused a sampling turn on the account's limit (Issue #51, S16b), in its own words. */
-  readonly onAccountLimit: (condition: string) => void;
+  readonly onAccountLimit: (condition: string, observation: { attempts: number; usage: { inputTokens: number; outputTokens: number } | null }) => void;
   /** The material guard (Issue #759), asked before each turn: a reference no longer readable as pinned sends no further turn. */
   readonly materialChanged: () => boolean;
 }

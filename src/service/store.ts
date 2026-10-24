@@ -6918,21 +6918,35 @@ export class EditorialStore {
   /** Reconcile stranded Runs to their kept continuation points; queued starts still require an explicit new start. */
   reconcileStoppedReviewCategoryRuns(): { settled: number } {
     this.#assertAvailable();
-    return { settled: this.#reviewCall(() => this.#analysisCall(() => this.#reviewRuns.reconcileStoppedCategoryRuns())) };
+    const settled = this.#reviewCall(() => this.#analysisCall(() => this.#reviewRuns.reconcileStoppedCategoryRuns()));
+    // The category router's existing active-state query excludes terminal reflection and already
+    // paused Runs. Their optional physical-request evidence still requires local settlement.
+    for (const row of this.#authority.prepare(`SELECT DISTINCT r.run_record_id FROM analysis_run_records r
+      JOIN analysis_task_intents i ON i.task_intent_id = r.task_intent_id JOIN analysis_run_states s ON s.run_record_id = r.run_record_id
+      WHERE substr(i.kind, 1, 17) = 'editorial-review/' AND json_type(s.canonical_json, '$.requestAdmission') IS NOT NULL`).all() as SqlRow[]) {
+      try { this.#analysisCall(() => this.executionLedgerForRun(asString(row.run_record_id)).reconcileRequestAdmissions(asString(row.run_record_id))); }
+      catch (error) {
+        if (error instanceof StoreFatalError) throw error;
+        // As with the existing category router, a damaged snapshot is its surface's refusal. Its
+        // continuation validates the same receipt before admission and cannot silently send again.
+      }
+    }
+    return { settled };
   }
 
   /** Exact recorded ranges for a live Run's cancellation disclosure; no stopped-Run authority is inferred. */
   #liveCancellationRanges(projection: BaselineAnalysisProjection, ledger: BaselineAnalysisStore): BaselineCancellationRanges | null {
     const run = projection.run;
     if (run === null || run.progress === null) return null;
-    const inFlight = run.progress.stage === 'units' ? run.progress.currentUnitOrdinal : null;
+    const inFlight = new Set(run.progress.stage !== 'units' ? [] : run.progress.inFlightUnits?.map((unit) => unit.unitOrdinal) ??
+      (run.progress.currentUnitOrdinal === null ? [] : [run.progress.currentUnitOrdinal]));
     return this.#analysisCall(() => {
       const checkpoints = ledger.unitCheckpoints(run.runRecordId);
       const settled = new Set(checkpoints.map((checkpoint) => checkpoint.unit.unitOrdinal));
       return {
         // An answered range already in flight is being continued, not waiting to be continued.
         waiting: ledger.clarificationsOf(run.runRecordId)
-          .filter((request) => !settled.has(request.unitOrdinal) && request.unitOrdinal !== inFlight)
+          .filter((request) => !settled.has(request.unitOrdinal) && !inFlight.has(request.unitOrdinal))
           .map((request) => ({ unitOrdinal: request.unitOrdinal, answered: request.answer !== null })),
         unconfirmed: checkpoints.filter((checkpoint) => checkpoint.unit.closed.state === 'gap' && checkpoint.unit.closed.gap.code === 'outcome-unknown')
           .map((checkpoint) => checkpoint.unit.unitOrdinal),

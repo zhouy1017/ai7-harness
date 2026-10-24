@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -19,6 +20,12 @@ import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
 import { parseReviewCategoryUnitMessageHeader } from '../../src/service/review/review-category-contract.js';
 import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/assurance-sampling-contract.js';
 import { pinEditorialWorkspaceProfileRevision2 } from '../support/sample1-baseline.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Real ordinary-production policy, store, Harness, gate, broker and session log. Only the provider stream is synthetic.
 let roots: ServiceTestRoots;
@@ -81,7 +88,7 @@ beforeEach(async () => {
   const nativeFetch = (async (url: string, init: { body: string; signal?: AbortSignal }) => {
     calls.push({ url, body: init.body }); return transport(init.signal);
   }) as unknown as typeof fetch;
-  owner = new DialogueExecutionOwner({ records: store, fixture: null, sessionLogRoot: store.harnessSessionLogRoot,
+  owner = new DialogueExecutionOwner({ requestGovernor, records: store, fixture: null, sessionLogRoot: store.harnessSessionLogRoot,
     live: productionDialogueRoute({ scope: 'ordinary-production', nativeFetch }, () => policy, () => credentialReference,
       { resolve: async (reference) => { expect(reference).toBe(credentialReference); return 'synthetic-test-placeholder'; } }) });
 });

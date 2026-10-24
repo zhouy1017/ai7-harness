@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { IMPORTED_SKILL_RELATIONS, CUSTOM_ANALYSIS_RELATIONS, HOUSE_REVIEW_PREFERENCE_RELATIONS, TASK_INTENT_DRAFT_RELATIONS } from '../support/pre74-schema.js';
 import { execPre74Fixture, FACTUAL_VERIFICATION_RELATIONS, MATERIAL_INDEX_LAYER_RELATIONS, PROPOSAL_REVIEW_RELATIONS, RESEARCH_EVIDENCE_RELATIONS } from '../support/pre74-schema.js';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
@@ -24,6 +25,12 @@ import { RUN_CHECKPOINT_RELATIONS_DROP_ORDER, plantRevision32Relations, runState
 import { SAMPLE1_UNITS, importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for 暂停 and 续行 (Issue #422, plan slice S76b): the real store on a temporary Agent
 // Data Root, exact `sample1` imported through the supported path, J-04's deterministic route, and no Provider, socket
@@ -67,6 +74,7 @@ function openWithRoute(): Promise<EditorialStore> {
 
 function owner(store: EditorialStore): BaselineAnalysisExecutionOwner {
   return new BaselineAnalysisExecutionOwner({
+    requestGovernor,
     ledger: store.baselineAnalysisLedger,
     launchPolicy,
     fixture,
@@ -541,7 +549,7 @@ describe('settled stage continuation at a manual pause boundary (#1114)', () => 
     let taskIntentId = '';
     let bookId = '';
     let remainingPauses = 2;
-    const makeOwner = () => new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture,
+    const makeOwner = () => new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture,
       secretResolver: { resolve: async () => null }, stageHold: async () => {
         if (remainingPauses-- > 0) {
           store.requestBaselineAnalysisPause(bookId, taskIntentId);
@@ -589,7 +597,7 @@ describe('settled stage continuation at a manual pause boundary (#1114)', () => 
     const prepared = await preparedBook(store, '合成阶段核对');
     const { bookId, taskIntentId } = prepared;
     const runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, prepared.digest).dispatchRunRecordId!;
-    const execution = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture,
+    const execution = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture,
       secretResolver: { resolve: async () => null }, stageHold: async () => {
         store.requestBaselineAnalysisPause(bookId, taskIntentId); execution.pauseRun(runRecordId);
       } });
@@ -622,7 +630,7 @@ describe('settled stage continuation at a manual pause boundary (#1114)', () => 
     const { bookId, taskIntentId } = prepared;
     const runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, prepared.digest).dispatchRunRecordId!;
     let paused = false;
-    const execution = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture,
+    const execution = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture,
       secretResolver: { resolve: async () => null }, stageHold: async (stage) => {
         if (!paused && stage === (identity.includes('reduction') ? 'cross-unit-reduction' : 'assurance-sampling')) {
           paused = true; store.requestBaselineAnalysisPause(bookId, taskIntentId); execution.pauseRun(runRecordId);
@@ -644,7 +652,7 @@ describe('settled stage continuation at a manual pause boundary (#1114)', () => 
   // An owner that pauses the Run once its first sampling turn is back.
   function pausingAtSample(store: EditorialStore, run: () => { bookId: string; taskIntentId: string; runRecordId: string }): BaselineAnalysisExecutionOwner {
     let paused = false;
-    const execution = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture,
+    const execution = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture,
       secretResolver: { resolve: async () => null }, stageHold: async (stage) => {
         if (paused || stage !== 'assurance-sampling') return;
         paused = true;
@@ -713,7 +721,7 @@ describe('settled stage continuation at a manual pause boundary (#1114)', () => 
     const { bookId, taskIntentId, digest } = await preparedBook(store, '合成抽样时关闭');
     const runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, digest).dispatchRunRecordId!;
     let closing = false;
-    let execution: BaselineAnalysisExecutionOwner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture,
+    let execution: BaselineAnalysisExecutionOwner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture,
       secretResolver: { resolve: async () => null }, stageHold: async (stage) => {
         // AI7 closes while the first sampling turn is out, and the turn comes back cut off.
         if (!closing && stage === 'assurance-sampling') { closing = true; void execution.dispose(); }
@@ -726,7 +734,7 @@ describe('settled stage continuation at a manual pause boundary (#1114)', () => 
       entries.set(firstTurnKey, { ...entries.get(firstTurnKey)!, response: FIRST_TURN_ANSWER });
       store.markCleanShutdown(); store.close();
       store = await openWithRoute();
-      execution = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+      execution = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
       execution.admitAndDispatch(runRecordId, store.baselineAnalysisLedger, { resume: true }); await execution.whenIdle();
       const settled = store.inspectBaselineAnalysis(bookId, () => null);
       expect(settled.run?.state).toBe('completed');
@@ -749,7 +757,7 @@ describe('settled stage continuation at a manual pause boundary (#1114)', () => 
     const { bookId, taskIntentId, digest } = await preparedBook(store, '合成归纳时关闭');
     const runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, digest).dispatchRunRecordId!;
     let reductionSent: string | null = null;
-    let execution: BaselineAnalysisExecutionOwner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture,
+    let execution: BaselineAnalysisExecutionOwner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture,
       secretResolver: { resolve: async () => null }, stageHold: async (stage) => {
         // AI7 closes while the reduction's request is out, and the turn comes back as the case says.
         if (reductionSent === null && stage === 'cross-unit-reduction') { reductionSent = entries.sent.at(-1)!; void execution.dispose(); }
@@ -763,7 +771,7 @@ describe('settled stage continuation at a manual pause boundary (#1114)', () => 
       if (reduction === 'cut-off') entries.set(unknownKey!, happy.entries.get(unknownKey!)!);
       store.markCleanShutdown(); store.close();
       store = await openWithRoute();
-      execution = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+      execution = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
       execution.admitAndDispatch(runRecordId, store.baselineAnalysisLedger, { resume: true }); await execution.whenIdle();
       const settled = store.inspectBaselineAnalysis(bookId, () => null);
       expect(settled.run?.state).toMatch(/^completed/);

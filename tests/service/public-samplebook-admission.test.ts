@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -21,6 +22,12 @@ import { ADMITTED_BASELINE_DOCX, composeManuscriptDocx } from '../support/compos
 import { pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { installNodeNetworkDenial } from '../../src/shared/network-denial.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Issue #990: the four ADR 0091 Public SampleBooks pass the two gates exact sample1 passes — the analysis lineage check under
 // development-ci and developer-live, and the developer-live transmittable set the execution owner checks before dispatch.
@@ -122,6 +129,7 @@ function refusingTransport(calls: string[]): typeof fetch {
 
 function executionOwner(store: EditorialStore, calls: string[], policy: LaunchPolicyProjection = livePolicy): BaselineAnalysisExecutionOwner {
   return new BaselineAnalysisExecutionOwner({
+    requestGovernor,
     ledger: store.baselineAnalysisLedger,
     launchPolicy: policy,
     fixture: null,

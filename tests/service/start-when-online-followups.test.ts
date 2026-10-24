@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
@@ -17,6 +18,12 @@ import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissing
 import { J13_PLACE, J13_SERIES_TITLE, makeJ13Series } from '../support/series-consistency.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { WRITING_REQUEST } from '../support/writing-task.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for the follow-ups of 联网后开始任务 (Issue #764, from the review of #762): the real store, every
 // kind's ledger, the Review Run ledger and its drive loop, the one execution owner and the AI7 local deterministic adapter over
@@ -60,6 +67,7 @@ async function withSession(fixtureIdentity: string, body: (session: Session) => 
     baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
   });
   const owner = new BaselineAnalysisExecutionOwner({
+    requestGovernor,
     ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null },
     seriesScopeGuard: (runRecordId) => store.seriesScopeGuard(runRecordId), ...(capacity === undefined ? {} : { capacity }),
   });

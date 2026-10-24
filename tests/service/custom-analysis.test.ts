@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
@@ -16,6 +17,12 @@ import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-d
 import { CUSTOM_DIMENSION_TEMPLATE, CUSTOM_DIMENSION_TITLE } from '../support/custom-analysis.js';
 import { execPre74Fixture, restoreCustomAnalysisPredecessor } from '../support/pre74-schema.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for 自定义分析维度 (Issue #922, slice 7f): the real store and ledger, the one execution owner and the
 // AI7 local deterministic adapter over the authored fixture `sample1-custom-analysis-authored`, and a fake secret resolver. The
@@ -57,7 +64,7 @@ async function withBook(body: (book: Book) => Promise<void>): Promise<void> {
     interruptAfterAbandonObjectRemoval: false,
     baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
   });
-  const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+  const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
   try {
     const imported = await importSample1Book(store, roots.codeRoot, 'L2 sample1 自定义分析');
     await pinEditorialWorkspaceProfileRevision2(store, imported.bookId);

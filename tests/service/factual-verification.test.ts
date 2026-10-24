@@ -1,8 +1,9 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { Socket } from 'node:net';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { DEVELOPER_LIVE_POLICY_BINDING, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
@@ -23,6 +24,12 @@ import {
 } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Issue #901 (wave 8, slice 8a): 事实核查 at its three Evidence Assurance Levels through the real store, Review Run, frozen plan,
 // execution owner, harness tool loop, Egress Gate, retention and the factual verification ledger, on a socket-free transport.
@@ -134,6 +141,7 @@ async function setup(initial: Scenario): Promise<void> {
     return answer({ content: JSON.stringify(result) });
   };
   owner = new BaselineAnalysisExecutionOwner({
+    requestGovernor,
     ledger: store.factualReviewLedger, launchPolicy: policy, fixture: null,
     secretResolver: { resolve: async () => 'placeholder-development-key' },
     // A business Run (no development validation): no live-once cache stands between Books that read the same sample1 units.

@@ -7,7 +7,6 @@ import { fileURLToPath } from 'node:url';
 import { resolveDevelopmentSampleBook } from '../shared/data-root.js';
 import {
   J04_MODEL_ADAPTER_CONTROL_PATTERN,
-  MAX_FRAME_BYTES,
   PROVIDER_CACHE_ROOT_ARGUMENT,
   RUN_BUDGET_CEILING_ARGUMENT,
   TRUSTED_SCOPE_ARGUMENT,
@@ -48,7 +47,7 @@ import {
 import { DATA_VERSION } from './data-version.js';
 import { readBuiltIdentity } from '../shared/read-build-identity.js';
 import { BACKUP_CHECK_INTERVAL_MS } from './scheduled-backups.js';
-import { decodeRequest, encodeServiceResponse, isSafeInteger, ProtocolError } from './request-frames.js';
+import { isSafeInteger, ProtocolError } from './request-frames.js';
 import { controlledConnectivity, hostConnectivity, type TaskPlanConnectivity } from './connectivity.js';
 import type { WaitingFor } from './task-plan.js';
 import { controlledAnswerHold, controlledUnitHold } from './unit-hold.js';
@@ -73,44 +72,6 @@ import type { LaunchBinding, OrdinaryProductionLaunchBinding } from './analysis/
 import type { ReviewRunDriver } from './review/review-run-driver.js';
 import type { BackgroundAnalysisDispatcher } from './background-analysis.js';
 
-async function* readFrames(): AsyncGenerator<Uint8Array> {
-  const header = Buffer.allocUnsafe(4);
-  let headerOffset = 0;
-  let payload: Buffer | undefined;
-  let payloadOffset = 0;
-
-  for await (const incoming of process.stdin) {
-    const chunk = Buffer.isBuffer(incoming) ? incoming : Buffer.from(incoming as Uint8Array);
-    let chunkOffset = 0;
-    while (chunkOffset < chunk.length) {
-      if (!payload) {
-        const headerBytes = Math.min(4 - headerOffset, chunk.length - chunkOffset);
-        chunk.copy(header, headerOffset, chunkOffset, chunkOffset + headerBytes);
-        headerOffset += headerBytes;
-        chunkOffset += headerBytes;
-        if (headerOffset < 4) continue;
-        const length = header.readUInt32BE(0);
-        if (length === 0 || length > MAX_FRAME_BYTES) throw new ProtocolError();
-        payload = Buffer.allocUnsafe(length);
-        payloadOffset = 0;
-      }
-
-      const payloadBytes = Math.min(payload.length - payloadOffset, chunk.length - chunkOffset);
-      chunk.copy(payload, payloadOffset, chunkOffset, chunkOffset + payloadBytes);
-      payloadOffset += payloadBytes;
-      chunkOffset += payloadBytes;
-      if (payloadOffset === payload.length) {
-        yield payload;
-        payload = undefined;
-        payloadOffset = 0;
-        headerOffset = 0;
-      }
-    }
-  }
-
-  if (headerOffset !== 0 || payload !== undefined) throw new ProtocolError();
-}
-
 function failureResponse(
   requestId: string,
   error: unknown,
@@ -120,13 +81,6 @@ function failureResponse(
     return { id: requestId, ok: false, error: { code: error.code, message: error.message } };
   }
   return { id: requestId, ok: false, error: { code: 'SERVICE_REQUEST_FAILED', message: '服务请求失败。' } };
-}
-
-async function writeResponse(response: ServiceResponse): Promise<void> {
-  const frame = encodeServiceResponse(response);
-  await new Promise<void>((resolve, reject) => {
-    process.stdout.write(frame, (error) => (error ? reject(error) : resolve()));
-  });
 }
 
 /**
@@ -193,7 +147,7 @@ async function dispatch(
   dialogues: DialogueExecutionOwner,
   fastRole: FastRoleContext,
   agentWorkspace: AgentWorkspace,
-  request: ServiceRequest,
+  request: Exclude<ServiceRequest, { op: 'testModelServiceConnection' }>,
   importControl: J01ImportControl | undefined,
   launchPolicy: LaunchPolicyProjection,
   connectivity: ConnectivityContext,
@@ -203,7 +157,6 @@ async function dispatch(
    * results: under ordinary-production the route new Tasks use; under every other scope the launch's own, unchanged.
    */
   modelServiceChanged: () => Promise<LaunchPolicyProjection> = async () => launchPolicy,
-  testConnection: (input: import('../shared/protocol.js').FastModelSelectionInput) => Promise<import('../shared/protocol.js').ModelConnectionTestStatus> = async () => { throw new Error('MODEL_CONNECTION_TEST_UNAVAILABLE'); },
   probeBackend: (id: string) => Promise<import('../shared/protocol.js').SearchBackendProbeProjection> = async () => { throw new Error('SEARCH_PROBE_UNAVAILABLE'); },
 ): Promise<ServiceSuccessResponse> {
   const analysisProgress = (runRecordId: string) => analysisExecution.progressFor(runRecordId);
@@ -246,11 +199,6 @@ async function dispatch(
       store.selectFastRoleModel(request.input.route, request.input.modelId);
       await modelServiceChanged();
       return { id: request.id, ok: true, op: request.op, result: undefined };
-    case 'testModelServiceConnection': {
-      const result = await testConnection(request.input);
-      await modelServiceChanged();
-      return { id: request.id, ok: true, op: request.op, result };
-    }
     case 'getModelServiceStoredState':
       return {
         id: request.id,
@@ -1992,7 +1940,7 @@ async function run(): Promise<void> {
     { mountDormantHarness },
     { CooperativeJobOwner },
     { resolveSourceCheckoutLaunchPolicy },
-    { BaselineAnalysisExecutionOwner },
+    { BaselineAnalysisExecutionOwner, ModelRequestGovernor },
     { loadLaunchFixture },
     { createKeyringSecretResolver },
     { ReviewRunDriver },
@@ -2003,6 +1951,7 @@ async function run(): Promise<void> {
     { baselinePromptContractForLaunch },
     { materialTranslator, MATERIAL_TRANSLATION_KIND },
     { AgentWorkspace: AgentWorkspaceClass },
+    { ServiceRequestLoop },
   ] =
     await Promise.all([
       import('./store.js'),
@@ -2020,16 +1969,20 @@ async function run(): Promise<void> {
       import('./analysis/kind-definition.js'),
       import('./fast-role/material-translation-contract.js'),
       import('./agent-workspace/workspace.js'),
+      import('./service-request-loop.js'),
     ]);
   StoreErrorClass = StoreError;
   // The Edit Journal write-failure injection (Issue #951, T0-1): armed only by J-02's armed launch, refused everywhere else.
   const { EditJournalFaultInjection } = await import('./bounded-manuscript.js');
   editJournalFault = new EditJournalFaultInjection(journalFaultArmed);
   fastInteractionRoutesOf = fastInteractionRoutes;
+  const requestGovernor = new ModelRequestGovernor();
   let stopping = false;
+  let requestLoop: InstanceType<typeof ServiceRequestLoop> | undefined;
   const stop = (): void => {
     if (stopping) return;
     stopping = true;
+    requestLoop?.close();
     process.stdin.destroy();
   };
   const parentLease = setInterval(() => {
@@ -2180,6 +2133,7 @@ async function run(): Promise<void> {
     };
     const guardedStore = store;
     analysisExecution = new BaselineAnalysisExecutionOwner({
+      requestGovernor,
       ledger: store.baselineAnalysisLedger,
       launchPolicy,
       fixture,
@@ -2256,6 +2210,7 @@ async function run(): Promise<void> {
     // under the Agent Data Root. An answer the predecessor left in flight settles 回答中断 before any request is read.
     store.reconcileDialogueAttempts();
     dialogues = new DialogueExecutionOwner({
+      requestGovernor,
       records: store,
       retrievalIndex: (dialogueId) => guardedStore.dialogueRetrievalIndex(dialogueId),
       fixture,
@@ -2272,6 +2227,7 @@ async function run(): Promise<void> {
     // 润色这段 and 基于当前稿件重新生成建议 (Issue #842): the launch's fixture under development-ci, and under developer-live the
     // route the selected policy admits for each kind, if any.
     const fastRoleOwner = new FastRoleExecutionOwner({
+      requestGovernor,
       fixture,
       live: developerLive !== null
         ? fastRoleLiveRoutes(developerLive, launchPolicy, createKeyringSecretResolver())
@@ -2382,50 +2338,50 @@ async function run(): Promise<void> {
     });
     background.start();
     reachServiceStartup('serving');
-    for await (const frame of readFrames()) {
-      let request: ServiceRequest;
-      try {
-        request = decodeRequest(frame);
-      } catch (error) {
-        const requestId = error instanceof ProtocolError ? error.requestId : 'invalid';
-        await writeResponse(failureResponse(requestId, error, StoreError));
-        continue;
-      }
-      let response: ServiceResponse;
-      try {
-        response = await dispatch(store, harness, jobs, analysisExecution, reviewRuns, dialogues, fastRole, agentWorkspace, request, importControl, launchPolicy, connectivity,
-          background, modelServiceChanged, (input) => testModelServiceConnection(openedStore, codeRoot, production, input, createKeyringSecretResolver()), probeBackend);
-      } catch (error) {
-        if (error instanceof StoreFatalError) {
-          stop();
-          throw error;
+    // Only the guarded connection probe may wait outside the ordinary effect lane.
+    const serving = { store, harness, jobs, analysisExecution, reviewRuns, dialogues, fastRole, agentWorkspace, background };
+    requestLoop = new ServiceRequestLoop({
+      input: process.stdin, output: process.stdout, requestGovernor,
+      failure: (id, error) => {
+        if (error instanceof StoreFatalError) throw error;
+        return failureResponse(id, error, StoreError);
+      },
+      onFatal: () => stop(),
+      probe: (input, execution) => testModelServiceConnection(openedStore, codeRoot, production, input, createKeyringSecretResolver(), execution),
+      probeCompleted: async () => { await modelServiceChanged(); },
+      dispatch: async (request) => {
+        let response: ServiceResponse;
+        try {
+          response = await dispatch(serving.store, serving.harness, serving.jobs, serving.analysisExecution, serving.reviewRuns,
+            serving.dialogues, serving.fastRole, serving.agentWorkspace, request, importControl, launchPolicy, connectivity,
+            serving.background, modelServiceChanged, probeBackend);
+        } catch (error) {
+          if (error instanceof StoreFatalError) throw error;
+          response = failureResponse(request.id, error, StoreError);
         }
-        response = failureResponse(request.id, error, StoreError);
-      }
-      if ((request.op === 'commitNewBookImport' || request.op === 'commitSourceImport') &&
-          importControl === 'after-commit-before-response') {
-        stop();
-        throw new Error('E2E interruption after committed import and before response.');
-      }
-      if (request.op === 'commitSourceImport' && response.ok &&
-          importControl === 'legacy-result-json-without-receipt') {
-        store.rewriteCommittedResultWithoutPresentationForTest(request.input.commitId);
-        stop();
-        throw new Error('E2E interruption after legacy source result_json rewrite.');
-      }
-      if (request.op === 'inspectForegroundExecutionBoundary' && response.ok &&
-          foregroundExecutionControl === 'interrupt-before-foreground-boundary-response') {
-        stop();
-        throw new Error('E2E interruption before foreground boundary response.');
-      }
-      if (response.ok && (request.op === 'flushJournalEdit' || request.op.startsWith('authorize') || request.op.startsWith('prepare'))) background.nudge();
-      await writeResponse(response);
-      if (request.op === 'flushJournalEdit' && response.ok && recoveryControl === 'interrupt-after-journal-ack') {
-        stop();
-        throw new Error('E2E interruption after acknowledged journal edit.');
-      }
-      if (request.op === 'shutdown') break;
-    }
+        if ((request.op === 'commitNewBookImport' || request.op === 'commitSourceImport') &&
+            importControl === 'after-commit-before-response') {
+          throw new Error('E2E interruption after committed import and before response.');
+        }
+        if (request.op === 'commitSourceImport' && response.ok &&
+            importControl === 'legacy-result-json-without-receipt') {
+          serving.store.rewriteCommittedResultWithoutPresentationForTest(request.input.commitId);
+          throw new Error('E2E interruption after legacy source result_json rewrite.');
+        }
+        if (request.op === 'inspectForegroundExecutionBoundary' && response.ok &&
+            foregroundExecutionControl === 'interrupt-before-foreground-boundary-response') {
+          throw new Error('E2E interruption before foreground boundary response.');
+        }
+        if (response.ok && (request.op === 'flushJournalEdit' || request.op.startsWith('authorize') || request.op.startsWith('prepare'))) serving.background.nudge();
+        return response;
+      },
+      afterResponse: (request, response) => {
+        if (request.op === 'flushJournalEdit' && response.ok && recoveryControl === 'interrupt-after-journal-ack') {
+          throw new Error('E2E interruption after acknowledged journal edit.');
+        }
+      },
+    });
+    await requestLoop.run();
   } finally {
     clearInterval(parentLease);
     if (preflightTimer !== undefined) clearInterval(preflightTimer);
@@ -2452,6 +2408,8 @@ async function run(): Promise<void> {
       await analysisExecution?.dispose();
       await reviewRunsStopped;
       await harness?.dispose();
+      requestGovernor.close();
+      await requestGovernor.whenIdle();
       await backupsStopped;
       await exportsStopped;
     } finally {

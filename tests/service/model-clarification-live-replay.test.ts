@@ -1,7 +1,8 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { DatabaseSync } from 'node:sqlite';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { expect, it } from 'vitest';
+import { expect, it, beforeEach, afterEach } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import { BoundedManuscriptStore } from '../../src/service/bounded-manuscript.js';
 import { BaselineAnalysisStore } from '../../src/service/analysis/baseline-analysis-store.js';
@@ -13,6 +14,12 @@ import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
 import { BASELINE_ANALYSIS_TASK_GOAL } from '../../src/shared/protocol.js';
 import { createServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Original result-cache captures only: fresh Book/block identities, no credential, cache or Provider access.
 it.each(['baseline', 'ambiguous'] as const)('replays the recorded /2 %s Run and each recorded answer on a fresh sample1 import', async (mode) => {
@@ -39,7 +46,7 @@ it.each(['baseline', 'ambiguous'] as const)('replays the recorded /2 %s Run and 
     const prepared = work.projection!;
     const taskIntentId = prepared.taskIntent!.taskIntentId;
     const runId = ledger.authorize(bookId, taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!;
-    owner = new BaselineAnalysisExecutionOwner({ ledger, launchPolicy: policy, fixture,
+    owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger, launchPolicy: policy, fixture,
       secretResolver: { resolve: async () => null } });
     owner.admitAndDispatch(runId);
     await owner.whenIdle();

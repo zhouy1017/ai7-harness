@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -27,6 +28,12 @@ import {
 import { SAMPLE1_UNITS, importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { CLARIFICATION_UNANSWERABLE_ENDED } from '../../src/service/task-plan.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for the editor's Run Budget Ceiling (Issue #51, plan slice S16a; V2-UX-MODEL-013 to
 // MODEL-017): the real store on a temporary Agent Data Root, exact `sample1` imported through the supported path, J-04's
@@ -71,6 +78,7 @@ function openWithRoute(route: ResolvedModelFixture = fixture): Promise<Editorial
 
 function owner(store: EditorialStore, route: ResolvedModelFixture = fixture): BaselineAnalysisExecutionOwner {
   return new BaselineAnalysisExecutionOwner({
+    requestGovernor,
     ledger: store.baselineAnalysisLedger,
     launchPolicy,
     fixture: route,
@@ -454,6 +462,7 @@ describe('the editor\'s Run Budget Ceiling over the real store', () => {
     let heldAt: string | null = null;
     const store = await openWithRoute();
     const execution = new BaselineAnalysisExecutionOwner({
+      requestGovernor,
       ledger: store.baselineAnalysisLedger,
       launchPolicy,
       fixture,
@@ -517,6 +526,7 @@ describe('the editor\'s Run Budget Ceiling over the real store', () => {
       let pause: () => void = () => undefined;
       let samplingTurns = 0;
       const execution = new BaselineAnalysisExecutionOwner({
+        requestGovernor,
         ledger: store.baselineAnalysisLedger,
         launchPolicy,
         fixture,

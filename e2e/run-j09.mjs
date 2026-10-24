@@ -1211,10 +1211,11 @@ async function main() {
       runningOf(twoAtOnce, bookId).progress?.unitsSettled === 1) && runA !== runC,
     'two-runs-at-once', twoAtOnce?.items?.map((item) => [item.group, item.state, item.progress?.unitsSettled ?? null]));
 
-    // #1080: both active Books retain a distinct reading range in flight, each with its own attempt start instant.
+    // #1080/#1131: these admitted development-ci v1 fixtures keep one held unit per Run and
+    // their legacy scalar activity; this Journey grants no production/fixture unit parallelism.
     const simultaneous = [heldA, heldC];
     requireJourney(simultaneous.every((analysis) => analysis.run?.progress?.currentUnitOrdinal === 2 &&
-      typeof analysis.run.progress.currentUnitStartedAt === 'string') && heldA.run.runRecordId !== heldC.run.runRecordId,
+      typeof analysis.run.progress.currentUnitStartedAt === 'string' && analysis.run.progress.inFlightUnits === undefined) && heldA.run.runRecordId !== heldC.run.runRecordId,
     'two-editor-books-with-units-in-flight');
 
     at('concurrent-queued-run');

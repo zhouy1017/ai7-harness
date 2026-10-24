@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
@@ -70,6 +71,12 @@ import { TYPOS_AND_USAGE } from '../support/review-categories.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, sample1Path } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
+
 // Service-integration suite (L2) for 后台处理登记 (Issue #95, plan slice S39; ADR 0048; ADR 0046; V2-UX-ANALYSIS-016 to 021): the
 // real store on a temporary Agent Data Root, exact `sample1` imported through the supported path, the J-04 deterministic route,
 // and no Provider, socket or credential value. Schema revision 66 adds the enrollment ledger and widens the Run Authorization
@@ -110,7 +117,7 @@ function openWithRoute(route = true): Promise<EditorialStore> {
 }
 
 function ownerOf(store: EditorialStore): BaselineAnalysisExecutionOwner {
-  return new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+  return new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
 }
 
 /** The facts the dispatcher hands the store: a route, a free place of two, no job of the editor's, a clock well past the quiet period. */
@@ -959,6 +966,7 @@ describe('后台处理登记 over the real store on exact sample1', () => {
     const owner = ownerOf(store);
     const holdPath = join(roots.inputRoot, 'unit-hold.txt');
     const held = new BaselineAnalysisExecutionOwner({
+      requestGovernor,
       ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null },
       unitHold: controlledUnitHold(holdPath, { pollMs: 5 }),
     });
