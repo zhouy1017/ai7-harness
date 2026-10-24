@@ -197,14 +197,43 @@ function toolCallsOf(profile: ProviderModelProfile, body: Record<string, unknown
  * the array carries no text block or a text block that is empty, because both hand the contract layer
  * the same `''` it must never be handed.
  *
- * `stop_reason` is deliberately not carried: a truncated answer is one the contract layer already
- * reads as unparsable, and the canonical result gains no field a single vendor needs. Reasoning is
- * read as presence only, since the declared channel establishes that the model thought and nothing
- * has established what the block's text field is called.
+ * Text-only reading retains its legacy stop/reasoning semantics. Client-function turns instead
+ * validate every block and the stop reason before exposing anything executable: only leading text
+ * followed by contiguous client calls fits the aggregate canonical result (Issue #1056).
  */
-function normalizeContentBlocks(profile: ProviderModelProfile, body: unknown): CanonicalModelResult {
+function normalizeContentBlocks(profile: ProviderModelProfile, body: unknown, options: NormalizeOptions): CanonicalModelResult {
   if (!isRecord(body)) return { kind: 'malformed', reason: 'response-not-a-record' };
   if (!Array.isArray(body.content)) return { kind: 'malformed', reason: 'content-absent' };
+  const functionsOffered = options.toolCallsOffered === true && profile.capabilities.toolCalling === 'function';
+  if (functionsOffered || body.stop_reason === 'tool_use' || body.content.some((block) => isBlockOfType(block, 'tool_use'))) {
+    if (!functionsOffered) return { kind: 'malformed', reason: 'tool-calls-malformed' };
+    const calls: CanonicalToolCall[] = [];
+    let text = '';
+    for (const block of body.content) {
+      if (isBlockOfType(block, 'text') && typeof block.text === 'string' && calls.length === 0 &&
+          Object.keys(block).every((key) => key === 'type' || key === 'text')) {
+        text += block.text;
+        continue;
+      }
+      // Opaque blocks/fields (including thinking, signatures, server tools and toolsets) cannot round-trip.
+      if (!isBlockOfType(block, 'tool_use') || Object.keys(block).some((key) => !['type', 'id', 'name', 'input'].includes(key)) ||
+          typeof block.id !== 'string' || block.id.length === 0 || typeof block.name !== 'string' ||
+          !(options.offeredToolNames ?? []).includes(block.name) || !isRecord(block.input) || calls.some((call) => call.id === block.id)) {
+        return { kind: 'malformed', reason: 'tool-calls-malformed' };
+      }
+      let argumentsJson: string;
+      try { argumentsJson = JSON.stringify(block.input); } catch { return { kind: 'malformed', reason: 'tool-calls-malformed' }; }
+      calls.push({ id: block.id, name: block.name, arguments: argumentsJson });
+    }
+    if (calls.length > 0) {
+      if (body.stop_reason !== 'tool_use') return { kind: 'malformed', reason: 'tool-calls-malformed' };
+      return { kind: 'tool-calls', text, calls, reasoningText: null, usage: contentBlockUsageOf(body) };
+    }
+    // No tool_use blocks with a tool stop, and no truncated/unfinished final answer masquerading as completion.
+    if (body.stop_reason !== 'end_turn' && body.stop_reason !== 'stop_sequence') return { kind: 'malformed', reason: 'tool-calls-malformed' };
+    const usage = contentBlockUsageOf(body);
+    return text.length === 0 ? { kind: 'empty-answer', reasoningPresent: false, usage } : { kind: 'answer', text, reasoningText: null, usage };
+  }
   const text = body.content
     .filter((block): block is Record<string, unknown> => isBlockOfType(block, 'text') && typeof block.text === 'string')
     .map((block) => block.text as string)
@@ -310,7 +339,7 @@ function normalizeCandidateParts(profile: ProviderModelProfile, body: unknown): 
  */
 export function normalizeModelResponse(profile: ProviderModelProfile, body: unknown, options: NormalizeOptions = {}): CanonicalModelResult {
   if (profile.capabilities.answerChannel === 'none') return { kind: 'malformed', reason: 'answer-channel-not-declared' };
-  if (profile.capabilities.answerChannel === 'content-text-blocks') return normalizeContentBlocks(profile, body);
+  if (profile.capabilities.answerChannel === 'content-text-blocks') return normalizeContentBlocks(profile, body, options);
   if (profile.capabilities.answerChannel === 'output-message-text') return normalizeOutputItems(profile, body, options);
   if (profile.capabilities.answerChannel === 'candidate-parts-text') return normalizeCandidateParts(profile, body);
   return normalizeMessageContentString(profile, body, options);
@@ -319,4 +348,6 @@ export function normalizeModelResponse(profile: ProviderModelProfile, body: unkn
 /** What the request a response answers offered: tools, or not (Issue #473). Absent, as for every replay, it offered none. */
 export interface NormalizeOptions {
   readonly toolCallsOffered?: boolean;
+  /** Messages client calls must name a function actually declared by this request. Other shapes retain their existing reading. */
+  readonly offeredToolNames?: ReadonlyArray<string>;
 }
