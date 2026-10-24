@@ -34,6 +34,9 @@ describe('one x.y.z version across package.json, the ledger, PROGRESS and the pl
     expect(checkVersionConsistency(agreeing)).toEqual([]);
     const released = { ...agreeing, ledgerMarkdown: ledger.replace('| 0.1.0 | integrated |', '| 0.1.0 | released |') };
     expect(checkVersionConsistency(released)).toEqual([]);
+    // Windows working trees check out CRLF; the records still agree.
+    const crlf = (text: string) => text.replace(/\n/gu, '\r\n');
+    expect(checkVersionConsistency({ ...agreeing, ledgerMarkdown: crlf(ledger), progressMarkdown: crlf(progress), planMarkdown: crlf(plan) })).toEqual([]);
   });
 
   it('names each disagreement instead of guessing', () => {
@@ -53,5 +56,13 @@ describe('one x.y.z version across package.json, the ledger, PROGRESS and the pl
     expect(checkVersionConsistency({ ...agreeing, ledgerMarkdown: badStatus })).toContain('ledger-status-invalid:0.2.0');
     const onlyPlanned = ledger.replace('| 0.1.0 | integrated |', '| 0.1.0 | planned |');
     expect(checkVersionConsistency({ ...agreeing, ledgerMarkdown: onlyPlanned })).toContain('ledger-no-integrated-row');
+    const badVersion = ledger.replace('| 0.2.0 | planned |', '| v0.2.0 | planned |');
+    expect(checkVersionConsistency({ ...agreeing, ledgerMarkdown: badVersion })).toContain('ledger-version-invalid:v0.2.0');
+    const empty = ledger.split('\n').filter((line) => !/^[|] [0-9]/u.test(line)).join('\n');
+    expect(checkVersionConsistency({ ...agreeing, ledgerMarkdown: empty })).toContain('ledger-empty');
+    const plannedBehind = ledger.replace('| 0.1.0 | integrated |', '| 0.1.0 | planned |').replace('| 0.2.0 | planned |', '| 0.2.0 | integrated |');
+    expect(checkVersionConsistency({ ...agreeing, ledgerMarkdown: plannedBehind })).toContain('ledger-planned-not-after-integrated');
+    const nothingPlanned = ledger.split('\n').filter((line) => !line.includes('| planned |')).join('\n');
+    expect(checkVersionConsistency({ ...agreeing, ledgerMarkdown: nothingPlanned })).toContain('progress-next-without-planned-row');
   });
 });
