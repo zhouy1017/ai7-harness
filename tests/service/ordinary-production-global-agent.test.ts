@@ -252,7 +252,7 @@ describe('v27 Book-less Global Agent', () => {
       return new Response(JSON.stringify({ model: binding.model, choices: [{ message: { content, reasoning_content: '合成推理。' }, finish_reason: 'stop' }],
         usage: { prompt_tokens: 40, completion_tokens: 20 } }), { status: 200 });
     };
-    const reviewOwner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
+    const reviewOwner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
       production: { scope: 'ordinary-production', nativeFetch }, secretResolver: { resolve: async () => 'synthetic-test-placeholder' },
       productionPolicyFor: (current) => resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', current, current) });
     const reviewDriver = new ReviewRunDriver(store.reviewRunDriveSteps, reviewOwner);

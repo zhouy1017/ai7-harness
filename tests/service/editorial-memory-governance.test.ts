@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, expect, it, vi } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
-import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
+import { BaselineAnalysisExecutionOwner, ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
 import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { parseReviewCategoryUnitMessageHeader } from '../../src/service/review/review-category-contract.js';
@@ -20,13 +20,16 @@ let roots: ServiceTestRoots | undefined;
 let store: EditorialStore | undefined;
 let owner: BaselineAnalysisExecutionOwner | undefined;
 let driver: ReviewRunDriver | undefined;
+let requestGovernor: ModelRequestGovernor | undefined;
 afterEach(async () => {
   const stopped = driver?.dispose(); await owner?.dispose(); await stopped;
-  store?.close(); await roots?.dispose(); roots = undefined; store = undefined; owner = undefined; driver = undefined;
+  requestGovernor?.close(); await requestGovernor?.whenIdle();
+  await store?.close(); await roots?.dispose(); roots = undefined; store = undefined; owner = undefined; driver = undefined; requestGovernor = undefined;
 });
 
 /** Actual selected production policy/store/gate; only transport is synthetic. Nothing is sent to a provider. */
 async function sourceDecisions() {
+  requestGovernor = new ModelRequestGovernor();
   roots = await createServiceTestRoots('ai7-memory-governance-');
   store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
     induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
@@ -58,7 +61,7 @@ async function sourceDecisions() {
     return new Response(JSON.stringify({ model: choice.model, choices: [{ message: { content, reasoning_content: '合成推理。' }, finish_reason: 'stop' }],
       usage: { prompt_tokens: 40, completion_tokens: 20 } }), { status: 200 });
   };
-  owner = new BaselineAnalysisExecutionOwner({ ledger: subject.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
+  owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: subject.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
     production: { scope: 'ordinary-production', nativeFetch }, secretResolver: { resolve: async () => 'placeholder-production-key' },
     productionPolicyFor: (selected) => resolveSourceCheckoutLaunchPolicy(roots!.codeRoot, 'ordinary-production', selected),
   });
