@@ -12,7 +12,7 @@ export const STARTUP_LOCATION_LABELS = Object.freeze({
   cancel: '取消',
   folderTitle: '选择产品数据位置',
   refusedTitle: '此位置不可用',
-  refusedMessage: '请选择开发目录以外的本机文件夹。',
+  refusedMessage: '此位置无法用于保存数据。返回后可选择默认位置，或换一个可以保存文件的本机文件夹。',
   refusedBack: '返回选择',
 });
 
