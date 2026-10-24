@@ -59,14 +59,15 @@ describe('frozen backend egress and per-Run tool accounting', () => {
       },
     });
     const search = { tool: 'websearch' as const, arguments: { query: 'public fact' }, signal: new AbortController().signal };
-    const first = await session.execute({ ...search, callId: 'one' });
+    const dispatch = { token: Symbol(), active: () => !search.signal.aborted };
+    const first = await session.execute({ ...search, callId: 'one', dispatch });
     expect(await session.execute({ ...search, callId: 'repeat' })).toEqual(first);
     const second = await session.execute({ ...search, callId: 'different', arguments: { query: 'a different public fact' } });
     expect(second).toMatchObject({ sourceUrl: null, text: expect.stringContaining('本单元的检索次数已用完') });
     expect(session.breakerState).toBe('intact');
     expect(session.unitDisclosure).toBe('联网核查已完成');
     expect(session.usage.refusedSearchCalls).toBe(1);
-    session.admit({ ...first, tool: 'websearch', callId: 'one' });
+    session.admit({ ...first, tool: 'websearch', callId: 'one', dispatch });
     expect([...session.egressScope.admittedToolResults!.values()][0]).toMatchObject({ sourceKind: 'tool', backendId: frozen.id, host: frozen.host });
     session.startUnit();
     expect(await session.execute({ ...search, callId: 'two' })).toEqual(first);

@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CallId, GenerateOptions, LlmAdapter, LlmProviderInfo, LlmResolvedModelInfo, StreamChunk } from '@deepseek-ai/dsh-llm';
 import { BASELINE_PROMPT_CONTRACT_DIGEST } from '../../src/service/analysis/contract.js';
 import { describeComposition, prepareExecution, type HarnessTurnOutcome } from '../../src/service/harness/primary-agent-harness.js';
@@ -12,6 +12,8 @@ import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE, evaluateEgress, t
 import { PLATFORM_TOOL_SCHEMAS, PLATFORM_TOOL_SCHEMA_DIGEST, PlatformToolBreaker, readPlatformToolsRule, type PlatformToolsRule } from '../../src/service/provider/platform-tools.js';
 import type { PlatformToolFetch } from '../../src/service/provider/platform-tool-http.js';
 import { PlatformToolSession } from '../../src/service/provider/platform-tool-session.js';
+import { LOCAL_TOOL_DECLARATION_NAMES, readLocalToolsRule } from '../../src/service/provider/local-tools.js';
+import { RetrievalIndex } from '../../src/service/retrieval/index.js';
 import { PROVIDER_LEDGER_FILE, ProviderResultCache, isItemLine } from '../../src/service/provider/provider-result-cache.js';
 import { ResearchSnapshotCache } from '../../src/service/provider/research-snapshot-cache.js';
 import { installNodeNetworkDenial } from '../../src/shared/network-denial.js';
@@ -103,6 +105,415 @@ class SearchingModel implements LlmAdapter {
     yield { type: 'finish', reason: { kind: 'tool-calls' } };
   }
 }
+
+/** Raw wire arguments deliberately bypass the object-only fixture serializer; 133 is a finite incoming-bug sentinel. */
+class RawToolModel extends SearchingModel {
+  constructor(readonly calls: (request: number) => Array<{ name: string; arguments: string; id?: string }>) { super(); }
+
+  override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+    this.requests.push(options);
+    const calls = this.requests.length < 133 ? this.calls(this.requests.length) : [];
+    if (calls.length === 0) {
+      yield { type: 'block-end', index: 0, block: { type: 'text', text: ANSWER } };
+      yield { type: 'finish', reason: { kind: 'stop' } };
+      return;
+    }
+    for (const [index, call] of calls.entries()) {
+      const id = (call.id ?? `raw_${this.requests.length}_${index}`) as CallId;
+      yield { type: 'block-start', index, blockType: 'tool-call' };
+      yield { type: 'tool-call-delta', index, id, name: call.name, argumentsDelta: call.arguments };
+      yield { type: 'block-end', index, block: { type: 'tool-call', id, name: call.name, arguments: call.arguments } };
+    }
+    yield { type: 'finish', reason: { kind: 'tool-calls' } };
+  }
+}
+
+const LOCAL_RULE = readLocalToolsRule({ localTools: {
+  targetedRetrieval: { allowed: true, source: 'authorized-pinned-sources-only', callsPerUnit: 5, candidatesPerCall: 8, exactFetchRequiredBeforeCitation: true, scope: 'no-egress' },
+  breaker: { roundTrips: 128, end: '检索未完成' },
+} })!;
+
+async function rawHarness(session: PlatformToolSession, binding: EgressBindingFacts, model: RawToolModel, parallel = false) {
+  const decisions: string[] = [];
+  const receipts: number[] = [];
+  const handle = await prepareExecution({
+    sessionId: randomUUID(), route: LOCAL_DETERMINISTIC_ROUTE, model: LOCAL_DETERMINISTIC_MODEL,
+    systemPrompt: SYSTEM, promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST, adapterFactory: () => model,
+    ...(binding.platformTools == null ? {} : { platformTools: session }),
+    ...(binding.localTools == null ? {} : { localTools: session }),
+    ...(parallel ? { compositionOptions: { version: 2 as const, localTools: binding.localTools! }, localToolsRule: binding.localTools! } : {}),
+    onTransmitTicket: () => { throw new Error('NO_REMOTE_MODEL'); },
+    gate: (payload) => {
+      const decision = evaluateEgress(payload, binding, session.egressScope);
+      decisions.push(decision.decision === 'refuse' ? `refuse:${decision.reason}` : decision.decision);
+      receipts.push(session.egressScope.admittedToolResults!.size);
+      return decision;
+    },
+  });
+  handle.bindExecution({ harnessSessionId: handle.sessionId, behaviorCompositionDigest: handle.composition.digest, promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST });
+  return { handle, decisions, receipts };
+}
+
+describe('registered raw-wire failures before the DSH body', () => {
+  it.each(['{"query":"x","k":-0}', '{"query":"x","k":1e309}'])('counts local pre-body arguments %s before continuation', async (argumentsText) => {
+    const binding = { ...bindingOf(null, 'b'.repeat(64)), localTools: LOCAL_RULE };
+    const read = vi.fn(() => { throw new Error('NO_SOURCE_READ'); });
+    const retrieval = new RetrievalIndex([{ sourceKind: 'manuscript', sourceId: 'synthetic', digest: 'a'.repeat(64), read }]);
+    const session = new PlatformToolSession({ binding, scope: { currentBindingDigest: () => binding.bindingDigest, acceptedOutputDigests: new Set() }, retrieval, purpose: 'raw-wire' });
+    const body = vi.spyOn(session, 'execute');
+    const model = new RawToolModel(() => [{ name: 'retrieve', arguments: argumentsText }]);
+    const { handle, decisions, receipts } = await rawHarness(session, binding, model);
+    try {
+      session.startUnit();
+      const outcome = await handle.submitUnit(UNIT);
+      expect(model.requests).toHaveLength(129);
+      expect(decisions).toEqual([...Array<string>(129).fill('transmit-local'), 'refuse:circuit-breaker-tripped']);
+      expect(receipts.at(-2)).toBe(128);
+      expect(receipts.at(-1)).toBe(129);
+      expect(body).not.toHaveBeenCalled();
+      expect(read).not.toHaveBeenCalled();
+      expect(session.usage).toMatchObject({ retrievalCalls: 129, refusedRetrievalCalls: 129 });
+      expect(outcome.terminal).toBe('failed');
+      expect(outcome.signals.at(-1)).toMatchObject({ kind: 'failed', failure: { code: AI7_FAILURE_CODES.PLATFORM_TOOL_BREAKER_TRIPPED, failureClass: 'platform-tool-breaker-tripped', retrySafe: false } });
+      expect(session.unitEnd(outcome)).toEqual({ reason: 'circuit-breaker-tripped', disclosure: '检索未完成', retry: 'never', settles: 'unit-only' });
+      session.startUnit();
+      expect(session.egressScope.localBreakerState!()).toBe('intact');
+      expect(session.unitEnd(outcome)).toBeNull();
+    } finally { await handle.finish(); retrieval.dispose(); }
+  });
+
+  it.each([
+    ['websearch', '{"query":"x","k":-0}'], ['websearch', '{"query":"x","k":1e309}'],
+    ['webfetch', '{"url":"https://example.org/source","k":-0}'], ['webfetch', '{"url":"https://example.org/source","k":1e309}'],
+  ])('counts %s pre-body arguments %s without transport or host admission', async (name, argumentsText) => {
+    const binding = bindingOf((await ruleOf('v7'))!, 'b'.repeat(64));
+    const fetch = vi.fn(async () => { throw new Error('NO_TRANSPORT'); });
+    const admitHost = vi.fn(() => { throw new Error('NO_HOST_ADMISSION'); });
+    const breaker = new PlatformToolBreaker();
+    const observations = vi.spyOn(breaker, 'observe');
+    const session = new PlatformToolSession({ binding, scope: { currentBindingDigest: () => binding.bindingDigest, acceptedOutputDigests: new Set() }, fetch, admitHost, breaker, purpose: 'raw-wire' });
+    const body = vi.spyOn(session, 'execute');
+    const model = new RawToolModel(() => [{ name, arguments: argumentsText }]);
+    const { handle, decisions, receipts } = await rawHarness(session, binding, model);
+    try {
+      session.startUnit();
+      const outcome = await handle.submitUnit(UNIT);
+      expect(model.requests).toHaveLength(129);
+      expect(decisions.at(-1)).toBe('refuse:circuit-breaker-tripped');
+      expect(receipts.slice(-2)).toEqual([128, 129]);
+      expect(observations).toHaveBeenCalledTimes(129);
+      expect(body).not.toHaveBeenCalled();
+      expect(fetch).not.toHaveBeenCalled();
+      expect(admitHost).not.toHaveBeenCalled();
+      expect(session.egressScope.localBreakerState!()).toBe('intact');
+      expect(outcome.terminal).toBe('failed');
+      expect(session.unitDisclosure).toBe('联网核查未完成');
+      expect(session.unitEnd(outcome)).toEqual({ reason: 'circuit-breaker-tripped', disclosure: '联网核查未完成', retry: 'never', settles: 'unit-only' });
+    } finally { await handle.finish(); }
+  });
+
+  it('charges a pre-body refusal before the remaining local calls in the same response', async () => {
+    const binding = { ...bindingOf(null, 'b'.repeat(64)), localTools: LOCAL_RULE };
+    const retrieval = new RetrievalIndex([{ sourceKind: 'manuscript', sourceId: 'synthetic', digest: 'a'.repeat(64),
+      read: () => ({ digest: 'a'.repeat(64), segments: [{ blockId: 'one', text: 'x' }] }) }]);
+    const reads = vi.spyOn(retrieval, 'retrieve');
+    const session = new PlatformToolSession({ binding, scope: { currentBindingDigest: () => binding.bindingDigest, acceptedOutputDigests: new Set() }, retrieval, purpose: 'raw-wire' });
+    const model = new RawToolModel((request) => request === 1 ? [
+      { name: 'retrieve', arguments: '{"query":"x","k":-0}' },
+      ...Array.from({ length: 6 }, () => ({ name: 'retrieve', arguments: '{"query":"x","k":1}' })),
+    ] : []);
+    const { handle } = await rawHarness(session, binding, model);
+    try {
+      session.startUnit();
+      expect((await handle.submitUnit(UNIT)).terminal).toBe('completed');
+      expect(session.usage).toMatchObject({ retrievalCalls: 7, refusedRetrievalCalls: 3 });
+      expect(reads).toHaveBeenCalledTimes(4);
+      const results = model.requests[1]!.messages.filter((message) => message.source.kind === 'tool');
+      expect(results.map((message) => message.source)).toEqual(Array.from({ length: 7 }, (_, index) => ({ kind: 'tool', callId: `raw_1_${index}` })));
+      expect(JSON.stringify(results.slice(-2))).toContain('调用次数已用完');
+    } finally { await handle.finish(); retrieval.dispose(); }
+  });
+
+  it.each(['{', '[]', '{"query":"x","k":1}'])('counts each body/finalizer pair once for %s', async (argumentsText) => {
+    const binding = { ...bindingOf(null, 'b'.repeat(64)), localTools: LOCAL_RULE };
+    const retrieval = new RetrievalIndex([{ sourceKind: 'manuscript', sourceId: 'synthetic', digest: 'a'.repeat(64),
+      read: () => ({ digest: 'a'.repeat(64), segments: [{ blockId: 'one', text: 'x' }] }) }]);
+    const reads = vi.spyOn(retrieval, 'retrieve');
+    const session = new PlatformToolSession({ binding, scope: { currentBindingDigest: () => binding.bindingDigest, acceptedOutputDigests: new Set() }, retrieval, purpose: 'raw-wire' });
+    const model = new RawToolModel(() => [{ name: 'retrieve', arguments: argumentsText }]);
+    const { handle, decisions } = await rawHarness(session, binding, model);
+    try {
+      session.startUnit();
+      const outcome = await handle.submitUnit(UNIT);
+      expect(model.requests).toHaveLength(129);
+      expect(session.usage.retrievalCalls).toBe(129);
+      expect(session.usage.refusedRetrievalCalls).toBe(argumentsText === '{"query":"x","k":1}' ? 124 : 129);
+      expect(reads).toHaveBeenCalledTimes(argumentsText === '{"query":"x","k":1}' ? 5 : 0);
+      expect(decisions.at(-1)).toBe('refuse:circuit-breaker-tripped');
+      expect(session.unitEnd(outcome)?.retry).toBe('never');
+    } finally { await handle.finish(); retrieval.dispose(); }
+  });
+
+  it.each([false, true])('preserves the first five and model ordering in parallel batches (pre-body error: %s)', async (preBody) => {
+    const localTools: NonNullable<EgressBindingFacts['localTools']> = { ...LOCAL_RULE, declarations: LOCAL_TOOL_DECLARATION_NAMES.map((name) => ({ name, readOnly: true, concurrencySafe: true })), parallelCallsAllowed: true };
+    const binding = { ...bindingOf(null, 'b'.repeat(64)), localTools };
+    const retrieval = new RetrievalIndex([{ sourceKind: 'manuscript', sourceId: 'synthetic', digest: 'a'.repeat(64),
+      read: () => ({ digest: 'a'.repeat(64), segments: [{ blockId: 'one', text: 'x' }] }) }]);
+    const retrieve = retrieval.retrieve.bind(retrieval);
+    let active = 0; let peak = 0;
+    const reads = vi.spyOn(retrieval, 'retrieve').mockImplementation(async (...args) => {
+      active++; peak = Math.max(peak, active);
+      await new Promise<void>((done) => setImmediate(done));
+      try { return await retrieve(...args); } finally { active--; }
+    });
+    const session = new PlatformToolSession({ binding, scope: { currentBindingDigest: () => binding.bindingDigest, acceptedOutputDigests: new Set() }, retrieval, purpose: 'raw-wire' });
+    const model = new RawToolModel((request) => request === 1 ? Array.from({ length: 7 }, (_, index) => ({ name: 'retrieve',
+      arguments: preBody && index === 1 ? '{"query":"x","k":-0}' : '{"query":"x","k":1}' })) : []);
+    const { handle } = await rawHarness(session, binding, model, true);
+    try {
+      session.startUnit();
+      expect((await handle.submitUnit(UNIT)).terminal).toBe('completed');
+      expect(handle.composition.agentLoop.maxParallelToolCalls).toBe(5);
+      expect(reads).toHaveBeenCalledTimes(preBody ? 4 : 5);
+      if (!preBody) expect(peak).toBe(5);
+      expect(session.usage.retrievalCalls).toBe(7);
+      expect(session.usage.refusedRetrievalCalls).toBe(preBody ? 3 : 2);
+      const results = model.requests[1]!.messages.filter((message) => message.source.kind === 'tool');
+      expect(results.map((message) => message.source)).toEqual(Array.from({ length: 7 }, (_, index) => ({ kind: 'tool', callId: `raw_1_${index}` })));
+      expect(JSON.stringify(results.slice(5))).toContain('调用次数已用完');
+    } finally { await handle.finish(); retrieval.dispose(); }
+  });
+
+  it.each(['{"query":"x","k":-0}', '{}'])('counts a reused id with %s before result deduplication and leaves its first receipt intact', async (argumentsText) => {
+    const binding = { ...bindingOf(null, 'b'.repeat(64)), localTools: LOCAL_RULE };
+    const session = new PlatformToolSession({ binding, scope: { currentBindingDigest: () => binding.bindingDigest, acceptedOutputDigests: new Set() }, purpose: 'raw-wire' });
+    const model = new RawToolModel((request) => [{ name: 'retrieve', id: 'reused', arguments: request === 1 ? '{}' : argumentsText }]);
+    const { handle, decisions } = await rawHarness(session, binding, model);
+    try {
+      session.startUnit();
+      const outcome = await handle.submitUnit(UNIT);
+      expect(model.requests).toHaveLength(2);
+      expect(decisions.at(-1)).toBe('refuse:payload-out-of-scope');
+      expect(session.usage).toMatchObject({ retrievalCalls: 2, refusedRetrievalCalls: 2 });
+      expect(session.egressScope.admittedToolResults!.size).toBe(1);
+      expect(outcome.terminal).toBe('interrupted');
+    } finally { await handle.finish(); }
+  });
+
+  it('shares the local quota across declared names after a pre-body error', async () => {
+    const localTools: NonNullable<EgressBindingFacts['localTools']> = { ...LOCAL_RULE,
+      declarations: LOCAL_TOOL_DECLARATION_NAMES.map((name) => ({ name, readOnly: true, concurrencySafe: true })), parallelCallsAllowed: false };
+    const binding = { ...bindingOf(null, 'b'.repeat(64)), localTools };
+    const retrieval = new RetrievalIndex([{ sourceKind: 'manuscript', sourceId: 'synthetic', digest: 'a'.repeat(64),
+      read: () => ({ digest: 'a'.repeat(64), segments: [{ blockId: 'one', text: 'x' }] }) }]);
+    const blocks = vi.spyOn(retrieval, 'readBlocks');
+    const search = vi.spyOn(retrieval, 'searchManuscript');
+    const records = vi.spyOn(retrieval, 'pinnedRecords');
+    const session = new PlatformToolSession({ binding, scope: { currentBindingDigest: () => binding.bindingDigest, acceptedOutputDigests: new Set() }, retrieval, purpose: 'raw-wire' });
+    const model = new RawToolModel((request) => request === 1 ? [
+      { name: 'retrieve', arguments: '{"query":"x","k":-0}' },
+      { name: 'read_blocks', arguments: '{"blockId":"one","radius":0}' },
+      { name: 'search_manuscript', arguments: '{"query":"x","mode":"exact"}' },
+      { name: 'baseline_facts', arguments: '{"query":"x"}' }, { name: 'term_table', arguments: '{}' },
+      { name: 'read_blocks', arguments: '{"blockId":"one","radius":0}' },
+      { name: 'search_manuscript', arguments: '{"query":"x","mode":"exact"}' },
+    ] : []);
+    const { handle } = await rawHarness(session, binding, model, true);
+    try {
+      session.startUnit();
+      expect((await handle.submitUnit(UNIT)).terminal).toBe('completed');
+      expect(blocks).toHaveBeenCalledTimes(1);
+      expect(search).toHaveBeenCalledTimes(1);
+      expect(records).toHaveBeenCalledTimes(2);
+      expect(session.usage.refusedRetrievalCalls).toBe(3);
+      expect(session.usage.localToolCalls).toEqual({ retrieve: 1, read_blocks: 2, search_manuscript: 2, baseline_facts: 1, term_table: 1 });
+    } finally { await handle.finish(); retrieval.dispose(); }
+  });
+
+  it('refuses an unknown name before a second submission without giving it a counter owner', async () => {
+    const binding = { ...bindingOf(null, 'b'.repeat(64)), localTools: LOCAL_RULE };
+    const session = new PlatformToolSession({ binding, scope: { currentBindingDigest: () => binding.bindingDigest, acceptedOutputDigests: new Set() }, purpose: 'raw-wire' });
+    const body = vi.spyOn(session, 'execute');
+    const model = new RawToolModel(() => [{ name: 'unknown', arguments: '{}' }]);
+    const { handle, decisions } = await rawHarness(session, binding, model);
+    try {
+      session.startUnit();
+      const outcome = await handle.submitUnit(UNIT);
+      expect(model.requests).toHaveLength(1);
+      expect(decisions).toEqual(['transmit-local', 'refuse:payload-out-of-scope']);
+      expect(body).not.toHaveBeenCalled();
+      expect(session.egressScope.admittedToolResults!.size).toBe(0);
+      expect(session.usage.retrievalCalls).toBe(0);
+      expect(session.egressScope.localBreakerState!()).toBe('intact');
+      expect(outcome.terminal).toBe('interrupted');
+      expect(outcome.signals.at(-1)).toMatchObject({ kind: 'interrupted', failure: { code: AI7_FAILURE_CODES.EGRESS_REFUSED, failureClass: 'egress-refused' } });
+      expect(session.unitEnd(outcome)).toBeNull();
+    } finally { await handle.finish(); }
+  });
+
+  it.each(['retrieve', 'websearch'] as const)('counts %s body throws and invalid output once, including failures before observation', async (name) => {
+    for (const failure of ['before', 'after', 'output']) {
+      const binding = name === 'retrieve' ? { ...bindingOf(null, 'b'.repeat(64)), localTools: LOCAL_RULE } : bindingOf((await ruleOf('v7'))!, 'b'.repeat(64));
+      const retrieval = new RetrievalIndex([{ sourceKind: 'manuscript', sourceId: 'synthetic', digest: 'a'.repeat(64),
+        read: () => ({ digest: 'a'.repeat(64), segments: [{ blockId: 'one', text: 'x' }] }) }]);
+      const reads = vi.spyOn(retrieval, 'retrieve');
+      const fetch = vi.fn(async () => new Response(JSON.stringify({ result: { content: [{ type: 'text', text: SEARCH_TEXT }] } }), { status: 200, headers: { 'content-type': 'application/json' } }));
+      const breaker = new PlatformToolBreaker();
+      const observations = vi.spyOn(breaker, 'observe');
+      const session = new PlatformToolSession({ binding, scope: { currentBindingDigest: () => binding.bindingDigest, acceptedOutputDigests: new Set(), ceilingState: () => 'within' },
+        retrieval, fetch, admitHost: () => { throw new Error('NO_HOST'); }, breaker, purpose: 'raw-wire' });
+      const execute = session.execute.bind(session);
+      vi.spyOn(session, 'execute').mockImplementation(async (call) => {
+        if (failure === 'before') throw new Error('synthetic pre-observation failure');
+        const result = await execute(call);
+        if (failure === 'after') throw new Error('synthetic post-observation failure');
+        // Make DSH's real output materialization fail after the body observed the dispatch.
+        Reflect.set(result, 'text', Number.NaN);
+        return result;
+      });
+      const model = new RawToolModel((request) => request === 1 ? [{ name, arguments: '{"query":"x"}' }] : []);
+      const { handle, decisions } = await rawHarness(session, binding, model);
+      try {
+        session.startUnit();
+        expect((await handle.submitUnit(UNIT)).terminal).toBe('completed');
+        expect(decisions).toEqual(['transmit-local', 'transmit-local']);
+        expect(model.requests).toHaveLength(2);
+        expect(JSON.stringify(model.requests[1]!.messages.at(-1))).toContain('工具调用未完成');
+        expect(session.egressScope.admittedToolResults!.size).toBe(1);
+        if (name === 'retrieve') {
+          expect(session.usage.retrievalCalls).toBe(1);
+          expect(reads).toHaveBeenCalledTimes(failure === 'before' ? 0 : 1);
+          expect(observations).not.toHaveBeenCalled();
+        } else {
+          expect(observations).toHaveBeenCalledTimes(1);
+          expect(fetch).toHaveBeenCalledTimes(failure === 'before' ? 0 : 1);
+          expect(session.egressScope.localBreakerState!()).toBe('intact');
+        }
+      } finally { await handle.finish(); retrieval.dispose(); }
+    }
+  });
+
+  it('keeps canonical web deduplication at one send and one observation per body/finalizer pair', async () => {
+    const binding = bindingOf((await ruleOf('v7'))!, 'b'.repeat(64));
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ result: { content: [{ type: 'text', text: SEARCH_TEXT }] } }), { status: 200, headers: { 'content-type': 'application/json' } }));
+    const breaker = new PlatformToolBreaker();
+    const observations = vi.spyOn(breaker, 'observe');
+    const session = new PlatformToolSession({ binding, scope: { currentBindingDigest: () => binding.bindingDigest, acceptedOutputDigests: new Set(), ceilingState: () => 'within' }, fetch, admitHost: () => { throw new Error('NO_HOST'); }, breaker, purpose: 'raw-wire' });
+    const model = new RawToolModel((request) => [{ name: 'websearch', arguments: request % 2 === 0 ? '{"query":" x "}' : '{"query":"x"}' }]);
+    const { handle, decisions } = await rawHarness(session, binding, model);
+    try {
+      session.startUnit();
+      const outcome = await handle.submitUnit(UNIT);
+      expect(model.requests).toHaveLength(129);
+      expect(observations).toHaveBeenCalledTimes(129);
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(decisions.at(-1)).toBe('refuse:circuit-breaker-tripped');
+      expect(session.unitEnd(outcome)?.retry).toBe('never');
+      expect(JSON.stringify(model.requests[2]!.messages.at(-1))).toContain('不再重复');
+    } finally { await handle.finish(); }
+  });
+
+  it('keeps the local and web breakers independent when one owner carries both', async () => {
+    const binding = { ...bindingOf((await ruleOf('v7'))!, 'b'.repeat(64)), localTools: LOCAL_RULE };
+    const fetch = vi.fn(async () => { throw new Error('NO_TRANSPORT'); });
+    const breaker = new PlatformToolBreaker();
+    const observations = vi.spyOn(breaker, 'observe');
+    const session = new PlatformToolSession({ binding, scope: { currentBindingDigest: () => binding.bindingDigest, acceptedOutputDigests: new Set() }, fetch,
+      admitHost: () => { throw new Error('NO_HOST'); }, breaker, purpose: 'raw-wire' });
+    const model = new RawToolModel(() => [
+      { name: 'retrieve', arguments: '{"query":"x","k":-0}' }, { name: 'websearch', arguments: '{"query":"x","k":1e309}' },
+    ]);
+    const { handle, decisions } = await rawHarness(session, binding, model);
+    try {
+      session.startUnit();
+      const outcome = await handle.submitUnit(UNIT);
+      expect(model.requests).toHaveLength(129);
+      expect(observations).toHaveBeenCalledTimes(129);
+      expect(session.usage.retrievalCalls).toBe(129);
+      expect(session.breakerState).toBe('tripped');
+      expect(session.egressScope.localBreakerState!()).toBe('tripped');
+      expect(fetch).not.toHaveBeenCalled();
+      expect(decisions.at(-1)).toBe('refuse:circuit-breaker-tripped');
+      expect(outcome.terminal).toBe('failed');
+    } finally { await handle.finish(); }
+  });
+
+  it('does not charge or admit late finalized results to a successor unit, or accept a missing dispatch', async () => {
+    const binding = { ...bindingOf(null, 'b'.repeat(64)), localTools: LOCAL_RULE };
+    const retrieval = new RetrievalIndex([{ sourceKind: 'manuscript', sourceId: 'synthetic', digest: 'a'.repeat(64),
+      read: () => ({ digest: 'a'.repeat(64), segments: [{ blockId: 'one', text: 'x' }] }) }]);
+    const reads = vi.spyOn(retrieval, 'retrieve');
+    const session = new PlatformToolSession({ binding, scope: { currentBindingDigest: () => binding.bindingDigest, acceptedOutputDigests: new Set() }, retrieval, purpose: 'raw-wire' });
+    const controller = new AbortController();
+    const dispatch = { token: Symbol(), active: () => !controller.signal.aborted };
+    try {
+      session.startUnit();
+      const first = await session.execute({ callId: 'old', tool: 'retrieve', arguments: {}, signal: controller.signal, dispatch });
+      expect(session.usage.retrievalCalls).toBe(1);
+      session.startUnit();
+      session.admit({ ...first, callId: 'old', tool: 'retrieve', dispatch });
+      expect(session.egressScope.admittedToolResults!.size).toBe(0);
+      expect(session.usage.retrievalCalls).toBe(1);
+      controller.abort();
+      // No body observation ever happened for this canceled pre-body dispatch.
+      session.admit({ ...first, callId: 'canceled', tool: 'retrieve', dispatch: { ...dispatch, token: Symbol() } });
+      expect(session.egressScope.admittedToolResults!.size).toBe(0);
+      expect(session.usage.retrievalCalls).toBe(1);
+      const missing = { ...first, callId: 'missing', tool: 'retrieve' as const, dispatch };
+      Reflect.deleteProperty(missing, 'dispatch');
+      expect(() => session.admit(missing)).toThrow();
+      expect(session.usage.retrievalCalls).toBe(1);
+      for (let index = 0; index < 5; index++) {
+        await session.execute({ callId: `new_${index}`, tool: 'retrieve', arguments: { query: 'x', k: 1 }, signal: new AbortController().signal });
+      }
+      expect(reads).toHaveBeenCalledTimes(5);
+      expect(session.usage.retrievalCalls).toBe(6);
+      expect(session.egressScope.localBreakerState!()).toBe('intact');
+      const sixth = { token: Symbol(), active: () => true };
+      const refused = await session.execute({ callId: 'new_6', tool: 'retrieve', arguments: { query: 'x', k: 1 }, signal: new AbortController().signal, dispatch: sixth });
+      session.admit({ ...refused, callId: 'new_6', tool: 'retrieve', dispatch: sixth });
+      session.admit({ ...refused, callId: 'new_6', tool: 'retrieve', dispatch: sixth });
+      expect(refused.text).toContain('调用次数已用完');
+      expect(reads).toHaveBeenCalledTimes(5);
+      expect(session.usage.retrievalCalls).toBe(7);
+      expect(session.egressScope.admittedToolResults!.size).toBe(1);
+    } finally { retrieval.dispose(); }
+  });
+
+  it.each(['interrupt', 'finish'] as const)('prevents late finalization from sending or charging after %s', async (action) => {
+    const binding = { ...bindingOf(null, 'b'.repeat(64)), localTools: LOCAL_RULE };
+    const session = new PlatformToolSession({ binding, scope: { currentBindingDigest: () => binding.bindingDigest, acceptedOutputDigests: new Set() }, purpose: 'raw-wire' });
+    let release!: () => void;
+    const held = new Promise<void>((resolveHeld) => { release = resolveHeld; });
+    let entered!: () => void;
+    const started = new Promise<void>((resolveStarted) => { entered = resolveStarted; });
+    let late: Parameters<PlatformToolSession['execute']>[0] | undefined;
+    vi.spyOn(session, 'execute').mockImplementation(async (call) => {
+      late = call; entered(); await held;
+      throw new Error('synthetic body failure before observation');
+    });
+    const model = new RawToolModel(() => [{ name: 'retrieve', arguments: '{}' }]);
+    const { handle } = await rawHarness(session, binding, model);
+    try {
+      session.startUnit();
+      const submitting = handle.submitUnit(UNIT);
+      await started;
+      const finishing = action === 'finish' ? handle.finish() : undefined;
+      if (action === 'interrupt') handle.interrupt();
+      release();
+      const outcome = await submitting;
+      if (finishing !== undefined) await finishing;
+      expect(outcome.terminal).toBe('interrupted');
+      expect(model.requests).toHaveLength(1);
+      expect(session.usage.retrievalCalls).toBe(0);
+      expect(session.egressScope.admittedToolResults!.size).toBe(0);
+      session.startUnit();
+      session.admit({ callId: late!.callId, tool: late!.tool, sourceUrl: null, text: 'late', dispatch: late!.dispatch! });
+      expect(session.usage.retrievalCalls).toBe(0);
+      expect(session.egressScope.admittedToolResults!.size).toBe(0);
+    } finally { release(); await handle.finish(); }
+  });
+});
 
 describe('the platform tools inside the composition', () => {
   it('keeps every composition without an owner at zero tools and its digest unchanged', () => {
@@ -302,11 +713,13 @@ describe('the platform tools inside the composition', () => {
     await new ResearchSnapshotCache(root).open();
     const signal = new AbortController().signal;
     session.startUnit();
-    expect(await session.execute({ callId: 'call_0', tool: 'websearch', arguments: { query: '甲' }, signal })).toMatchObject({ sourceUrl: 'https://search.parallel.ai/mcp' });
-    expect(await session.execute({ callId: 'call_0', tool: 'websearch', arguments: { query: '乙' }, signal })).toEqual({ text: expect.stringContaining('调用标识'), sourceUrl: null });
-    session.admit({ callId: 'call_0', tool: 'websearch', sourceUrl: 'https://search.parallel.ai/mcp', text: SEARCH_TEXT });
-    session.admit({ callId: 'call_0', tool: 'websearch', sourceUrl: null, text: '另一个结果' });
-    session.admit({ callId: 'call_0', tool: 'webfetch', sourceUrl: null, text: '另一个结果' });
+    const first = { token: Symbol(), active: () => !signal.aborted };
+    const second = { token: Symbol(), active: () => !signal.aborted };
+    expect(await session.execute({ callId: 'call_0', tool: 'websearch', arguments: { query: '甲' }, signal, dispatch: first })).toMatchObject({ sourceUrl: 'https://search.parallel.ai/mcp' });
+    expect(await session.execute({ callId: 'call_0', tool: 'websearch', arguments: { query: '乙' }, signal, dispatch: second })).toEqual({ text: expect.stringContaining('调用标识'), sourceUrl: null });
+    session.admit({ callId: 'call_0', tool: 'websearch', sourceUrl: 'https://search.parallel.ai/mcp', text: SEARCH_TEXT, dispatch: first });
+    session.admit({ callId: 'call_0', tool: 'websearch', sourceUrl: null, text: '另一个结果', dispatch: second });
+    session.admit({ callId: 'call_0', tool: 'webfetch', sourceUrl: null, text: '另一个结果', dispatch: { token: Symbol(), active: () => true } });
     expect([...session.egressScope.admittedToolResults!.values()]).toEqual([
       expect.objectContaining({ callId: 'call_0', tool: 'websearch', sourceUrl: 'https://search.parallel.ai/mcp' }),
     ]);
