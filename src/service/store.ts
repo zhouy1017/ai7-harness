@@ -13405,7 +13405,10 @@ export class EditorialStore {
       if (memoryTargets.length > 0) {
         this.#editorialMemoryGovernanceHooks().govern(directive, memoryTargets);
       }
-      new HouseReviewPreferenceLedger(this.#authority).refreshGovernance(current.operationalScope, this.#housePreferencePeopleNames(), true);
+      // Only an action that adds text is refused at the bound; a guide, freeze or deactivation lets derived lines yield as a rebuild does.
+      const addsText = input.operation === 'create' || input.operation === 'merge' || input.operation === 'correct' ||
+        input.operation === 'supervise' && input.effect === 'correct';
+      new HouseReviewPreferenceLedger(this.#authority).refreshGovernance(current.operationalScope, this.#housePreferencePeopleNames(), addsText);
     }));
     return this.inspectGlobalAgent();
   }
@@ -13629,8 +13632,8 @@ export class EditorialStore {
     const decisionIds = new Set([...this.#learningEligibility.history(bookId, materialKey).map((entry) => entry.decisionId),
       ...new EditorialLearningLedger(this.#authority).sourceKeys(bookId, [materialKey])]);
     const uses = influence.usesOf(decisionIds).flatMap((pin) => {
-      const withdrawn = pin.version.lines.some((line) => line.sources.some((source) => decisionIds.has(preferenceSourceIdentity(source)) &&
-        preferenceSourceWithdrawal(this.#authority, source).withdrawnAt !== null));
+      const withdrawn = pin.sources.some((source) => decisionIds.has(preferenceSourceIdentity(source)) &&
+        preferenceSourceWithdrawal(this.#authority, source).withdrawnAt !== null);
       return this.#reviewRuns.influenceUses([pin]).map((use) => ({ ...use, versionOrdinal: pin.version.ordinal, withdrawn }));
     });
     return { signals: influence.signalsOf(decisionIds), uses, tasks: uses.filter((use) => use.consumed) };

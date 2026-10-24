@@ -260,7 +260,10 @@ export class HouseReviewPreferenceLedger {
         attribution: source.attribution, captured: source, currentAdmission: current.get(source.sourceKey)!.admission,
         currentEligibility: current.get(source.sourceKey)!.eligibility }));
       const text = withoutNames(memory.title, preferenceNames([{ text: memory.title, categoryId: memory.editorialDimension, bookId: null, sources }], stripped));
-      valid(text.length > 0 && !/[\r\n\p{Cc}\p{Zl}\p{Zp}]/u.test(text));
+      // As a legacy line left without words drops out of `#governed`, a memory whose words are all names publishes no line;
+      // it never fails the house's rebuild, a people change or another editor's action.
+      if (text.length === 0) continue;
+      valid(!/[\r\n\p{Cc}\p{Zl}\p{Zp}]/u.test(text));
       lines.push({ lineId: `memory:${memory.itemId}`, owner: { kind: 'editorial-memory', itemId: memory.itemId, versionId: memory.versionId },
         text, categoryId: memory.editorialDimension, bookId: memory.applicability.kind === 'book' ? memory.applicability.bookId : null, sources });
     }
@@ -460,14 +463,34 @@ export class HouseReviewPreferenceLedger {
    * line; `null` where neither is readable. Selection and its revalidation both read these same facts.
    */
   #dated(scope: TrustedOperationalScope, baseLines: HouseReviewPreferenceVersion['lines'], names: Iterable<string>):
-    { lines: HouseReviewPreferenceVersion['lines']; at: Array<string | null> } {
+    { lines: HouseReviewPreferenceVersion['lines']; at: Array<string | null>; itemIds: string[] } {
     const derivedAt = (line: HouseReviewPreferenceVersion['lines'][number]): string | null => line.sources
       .map((source) => source.kind === 'editorial-memory' ? null : admissionOf(this.db, source.eligibilityDecisionId)?.admitted.recordedAt ?? null)
       .reduce<string | null>((newest, at) => at !== null && (newest === null || Date.parse(at) > Date.parse(newest)) ? at : newest, null);
     const governed = this.#governed(scope, baseLines, names);
-    if (governed === null) return { lines: baseLines, at: baseLines.map(derivedAt) };
-    return { lines: governed.entries.map((entry) => entry.line),
+    if (governed === null) return { lines: baseLines, at: baseLines.map(derivedAt),
+      itemIds: baseLines.map((line) => line.owner?.itemId ?? `preference:${line.bookId ?? 'house'}:${line.categoryId}`) };
+    return { lines: governed.entries.map((entry) => entry.line), itemIds: governed.entries.map((entry) => entry.itemId),
       at: governed.entries.map((entry) => entry.derived ? derivedAt(entry.line) : governed.directiveAt.get(entry.revisionId) ?? null) };
+  }
+
+  /**
+   * A /2 version's lines dated by the same facts as their /1 predecessors: a legacy line by `#dated` over the version's own legacy
+   * basis, matched by its owner while it still replays as recorded, and a memory line by its memory version; otherwise `null`.
+   */
+  #publicationAt(scope: TrustedOperationalScope, version: HouseReviewPreferenceVersion, names: Iterable<string>): Array<string | null> {
+    const legacy = this.#dated(scope, version.legacyBasis?.lines ?? [], names);
+    const replayed = new Map(legacy.itemIds.map((itemId, index) => [itemId, index] as const));
+    const learning = new EditorialLearningLedger(this.db);
+    return version.lines.map((line) => {
+      if (line.owner?.kind === 'editorial-memory') return learning.version(line.owner.itemId, line.owner.versionId).recordedAt;
+      const index = line.owner === undefined ? undefined : replayed.get(line.owner.itemId);
+      if (index === undefined) return null;
+      const now = legacy.lines[index]!;
+      const recorded = { text: line.text, categoryId: line.categoryId, bookId: line.bookId,
+        sources: line.sources.map((source) => { const { kind: _kind, feedbackKey: _key, ...rest } = source as HouseReviewPreferenceSource & { feedbackKey?: string }; return rest; }) };
+      return canonicalJson({ text: now.text, categoryId: now.categoryId, bookId: now.bookId, sources: now.sources }) === canonicalJson(recorded) ? legacy.at[index] ?? null : null;
+    });
   }
 
   /**
@@ -509,6 +532,10 @@ export class HouseReviewPreferenceLedger {
     const task = this.db.prepare('SELECT book_id, kind FROM analysis_task_intents WHERE task_intent_id = ?').get(taskIntentId);
     valid(task !== undefined && String(task.kind).startsWith(EDITORIAL_REVIEW_KIND_PREFIX));
     const categoryId = String(task.kind).slice(EDITORIAL_REVIEW_KIND_PREFIX.length);
+    const controls = learningControlsOf(this.db);
+    // Learning authority stands over a prepared pin of either schema: disabled learning, an excluded Book or an excluded source stops it.
+    if (controls !== null && (!controls.enabled || controls.excludedBooks.has(String(task.book_id)) ||
+      linesOfUse(version, preference, String(task.book_id), String(task.kind)).some((line) => line.sources.some((source) => controls.excludedBooks.has(source.bookId))))) return true;
     if (version.schema === 'ai7.house-review-preference/2') {
       const pinnedLines = linesOfUse(version, preference, String(task.book_id), String(task.kind));
       if (pinnedLines.some((line) => !this.#lineCurrent(line))) return true;
@@ -516,10 +543,6 @@ export class HouseReviewPreferenceLedger {
         version.legacyBasis?.materialSetDigest ?? sha256Hex(canonicalJson([])), names());
       return pinnedLines.some((line) => !now.lines.some((entry) => entry.lineId === line.lineId && canonicalJson(entry) === canonicalJson(line)));
     }
-    const controls = learningControlsOf(this.db);
-    // Learning authority stands over a prepared pin: disabled learning, an excluded Book or an excluded source stops it.
-    if (controls !== null && (!controls.enabled || controls.excludedBooks.has(String(task.book_id)) ||
-      linesOfUse(version, preference, String(task.book_id), String(task.kind)).some((line) => line.sources.some((source) => controls.excludedBooks.has(source.bookId))))) return true;
     if (preference.selection === undefined) {
       const { lines } = this.#govern(version.operationalScope, version.governance?.baseLines ?? version.lines,
         version.governance?.baseMaterialSetDigest ?? version.materialSetDigest, names());
@@ -542,8 +565,7 @@ export class HouseReviewPreferenceLedger {
     const controls = learningControlsOf(this.db);
     if (controls !== null && (!controls.enabled || controls.excludedBooks.has(bookId))) return null;
     // The version's own lines, dated by the facts revalidation reads; lines that no longer replay keep the version's instant.
-    const dated = current.schema === 'ai7.house-review-preference/2' ? { lines: current.lines, at: current.lines.map((line) =>
-      line.owner?.kind === 'editorial-memory' ? new EditorialLearningLedger(this.db).version(line.owner.itemId, line.owner.versionId).recordedAt : current.recordedAt) }
+    const dated = current.schema === 'ai7.house-review-preference/2' ? { lines: current.lines, at: this.#publicationAt(scope, current, names) }
       : current.governance === undefined ? this.#dated(scope, current.lines, [])
       : this.#dated(scope, current.governance.baseLines, names);
     const at = canonicalJson(dated.lines) === canonicalJson(current.lines) ? dated.at : current.lines.map(() => null);
@@ -732,6 +754,8 @@ export interface PreferencePinUse {
   readonly taskIntentId: string;
   readonly bookId: string;
   readonly version: HouseReviewPreferenceVersion;
+  /** The sources of the lines this pin actually read, not every line of its version. */
+  readonly sources: ReadonlyArray<HouseReviewPreferenceSource>;
   readonly sourceIdentities: ReadonlySet<string>;
 }
 
@@ -751,12 +775,16 @@ export class HousePreferenceInfluence {
     const pins: PreferencePinUse[] = [];
     for (const row of db.prepare(`SELECT p.review_run_id, p.task_intent_id, p.version_id, t.book_id, t.kind FROM review_run_preference_pins p
         JOIN analysis_task_intents t ON t.task_intent_id = p.task_intent_id ORDER BY p.rowid`).iterate()) {
+      const local = byId.get(String(row.version_id));
+      // Another scope's record stays its own; only a version absent from this house may be read from the pin's carried copy.
+      if (local === undefined && db.prepare('SELECT 1 FROM house_review_preference_versions WHERE version_id = ?').get(String(row.version_id))) continue;
       const preference = ledger.pinned(String(row.task_intent_id));
       valid(preference !== null);
-      const version = byId.get(String(row.version_id)) ?? ledger.pinnedVersion(String(row.task_intent_id), preference);
-      if (version === null) continue;
-      const sourceIdentities = new Set(linesOfUse(version, preference, String(row.book_id), String(row.kind)).flatMap((line) => line.sources.map(preferenceSourceIdentity)));
-      pins.push({ reviewRunId: String(row.review_run_id), taskIntentId: String(row.task_intent_id), bookId: String(row.book_id), version, sourceIdentities });
+      const version = local ?? ledger.pinnedVersion(String(row.task_intent_id), preference);
+      if (version === null || version.operationalScope !== scope) continue;
+      const sources = linesOfUse(version, preference, String(row.book_id), String(row.kind)).flatMap((line) => line.sources);
+      pins.push({ reviewRunId: String(row.review_run_id), taskIntentId: String(row.task_intent_id), bookId: String(row.book_id), version,
+        sources, sourceIdentities: new Set(sources.map(preferenceSourceIdentity)) });
     }
     this.pins = pins;
   }

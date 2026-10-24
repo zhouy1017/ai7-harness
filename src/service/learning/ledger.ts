@@ -610,6 +610,8 @@ export class EditorialLearningLedger {
       'applicability', 'editorialDimension', 'title', 'confidence', 'state', 'actor', 'actionId', 'action', 'signalIds', 'positiveExamples',
       'negativeExamples', 'sources', 'parentVersions', 'supervisionDirectiveRefs'].sort().join(',') &&
       UUID_PATTERN.test(version.actionId) && reviewCategoryEntry(version.editorialDimension) !== null &&
+      typeof version.title === 'string' && version.title.trim().length > 0 && version.title.length <= 160 && version.title.isWellFormed() &&
+      !/[\r\n\p{Cc}\p{Zl}\p{Zp}]/u.test(version.title) &&
       ['development-ci', 'developer-live', 'ordinary-production'].includes(version.operationalScope) &&
       ['create', 'accept', 'merge', 'correct', 'deactivate', 'freeze'].includes(version.action) &&
       isRecord(version.applicability) && (version.applicability.kind === 'house' && Object.keys(version.applicability).length === 1 ||
@@ -834,6 +836,8 @@ export class EditorialLearningLedger {
   }
 
   #append(version: GlobalEditorialMemoryVersion): void {
+    // Every /2 successor is held to the reader's own contract before it is written, not only when it is read back.
+    if (version.schema === 'ai7.global-editorial-memory/2') this.#validateMemory(version);
     const record = canonicalRecord({ ...version, schema: version.schema ?? 'ai7.global-editorial-memory/1' });
     requireLearning(Buffer.byteLength(record.json, 'utf8') <= MAX_FRAME_BYTES / 2);
     this.db.prepare('INSERT INTO global_editorial_memory_item_versions VALUES (?, ?, ?, ?, ?, ?, ?)')

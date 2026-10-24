@@ -64,6 +64,10 @@ import {
   reviewRunLine,
   reviewSendConsequence,
 } from '../../src/renderer/review-labels.js';
+import type { ReviewChapterOptionProjection, ReviewFindingCountsProjection, ReviewRunCategoryProjection } from '../../src/shared/protocol.js';
+
+// Unit suite for the words of 审阅 (Issue #417; editor-surfaces §4). Every string is compared byte for
+// byte, so a wording change is a decision made here and never a drift noticed in a Journey.
 
 it('labels missing historical /2 ancestry separately from a real withdrawal and preserves legacy labels', () => {
   const legacy = { bookTitle: '原始图书标题', withdrawnAt: null };
@@ -73,10 +77,6 @@ it('labels missing historical /2 ancestry separately from a real withdrawal and 
   expect(reviewInfluenceMaterialLine({ ...legacy, withdrawnAt: '2026-10-01T00:00:00Z', provenanceAvailability: 'unavailable' }, '修改建议', () => '真实日期'))
     .toBe('《原始图书标题》 · 修改建议 · 原社记忆来源在本社不可用 · 真实日期 已停止今后使用');
 });
-import type { ReviewChapterOptionProjection, ReviewFindingCountsProjection, ReviewRunCategoryProjection } from '../../src/shared/protocol.js';
-
-// Unit suite for the words of 审阅 (Issue #417; editor-surfaces §4). Every string is compared byte for
-// byte, so a wording change is a decision made here and never a drift noticed in a Journey.
 
 const counts: ReviewFindingCountsProjection = { must: 2, should: 5, note: 1, pending: 6, handled: 1, ignored: 1 };
 const manuscript = { manuscriptId: 'm', branchId: 'b', revisionId: 'r', revisionLabel: 'r2', journalSequence: 3, workingDigest: 'd', totalBlocks: 97 };

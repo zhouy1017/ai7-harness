@@ -9,7 +9,8 @@ import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy
 import { parseReviewCategoryUnitMessageHeader } from '../../src/service/review/review-category-contract.js';
 import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/assurance-sampling-contract.js';
 import { EditorialLearningLedger, EDITORIAL_LEARNING_TRIGGER_SQL } from '../../src/service/learning/ledger.js';
-import { HouseReviewPreferenceLedger, HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL } from '../../src/service/house-review-preference.js';
+import { HousePreferenceInfluence, HouseReviewPreferenceLedger, HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL } from '../../src/service/house-review-preference.js';
+import { SupervisionDirectives } from '../../src/service/learning/supervision-directives.js';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import type { CreateEditorialMemoryInput, EditorialMemoryVersion, GlobalMemoryPin, RecordLearningSupervisionInput } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
@@ -458,4 +459,144 @@ it.each(['parent', 'directive'] as const)('refuses a rehashed corrupt %s referen
     db.exec(EDITORIAL_LEARNING_TRIGGER_SQL['global_editorial_memory_item_versions_no_update']!);
   } finally { db.close(); }
   await expect(EditorialStore.open(roots!.dataRoot, roots!.codeRoot)).rejects.toThrow();
+});
+
+it('stops a prepared /2 pin of legacy lines at learning-off or Book exclusion, exactly as a /1 pin stops', async () => {
+  const { subject, book, signals, make, create, accept, govern, current, prepare } = await sourceDecisions();
+  const memory = accept(make(create([signals[0]!.signalId], '冻结后只留旧版偏好。')));
+  govern([current(memory.itemId)], 'supervise', '冻结这条合成记忆。', 'freeze');
+  const published = subject.inspectHouseReviewPreference().current!;
+  expect(published.schema).toBe('ai7.house-review-preference/2');
+  expect(published.lines.length).toBeGreaterThan(0);
+  expect(published.lines.every((line) => line.owner?.kind === 'legacy-preference')).toBe(true);
+  const task = prepare().categories.find((entry) => entry.categoryId === 'typos-and-usage')!.taskIntentId!;
+  const db = new DatabaseSync(join(roots!.dataRoot, 'store', 'ai7.sqlite'));
+  try {
+    const ledger = new HouseReviewPreferenceLedger(db);
+    expect(ledger.pinned(task)!.versionId).toBe(published.versionId);
+    expect(ledger.governanceChanged(task, () => [])).toBe(false);
+    subject.changeEditorialLearning({ kind: 'switch', enabled: false, expectedEntries: 0 });
+    expect(ledger.governanceChanged(task, () => [])).toBe(true);
+    // A legacy line's own basis is its admitting decision: as for the #1116 /1 regression, re-enabling makes it usable again.
+    subject.changeEditorialLearning({ kind: 'switch', enabled: true, expectedEntries: 1 });
+    expect(ledger.governanceChanged(task, () => [])).toBe(false);
+    subject.changeEditorialLearning({ kind: 'book', bookId: book.bookId, excluded: true, expectedEntries: 2 });
+    expect(ledger.governanceChanged(task, () => [])).toBe(true);
+  } finally { db.close(); }
+});
+
+it('keeps no-growth governance usable while derived lines yield to memory lines, and still refuses added text past the bound', async () => {
+  const { subject, book, signals, make, create, accept, govern, current } = await sourceDecisions();
+  const memory = accept(make(create([signals[0]!.signalId], '合成保留记忆。')));
+  const preference = (text: string) => subject.recordLearningSupervision({ operation: 'create', targets: [], scope: { kind: 'house' },
+    categoryId: 'style-and-format', text, effect: 'guide' });
+  for (let index = 0; index < 10; index += 1) preference(`合成偏好${index}`);
+  const other = subject.inspectLearningMaterial(book.bookId, signals[3]!.source.materialKey);
+  subject.decideLearningMaterial({ bookId: book.bookId, materialKey: other.materialKey, materialDigest: other.digest, expectedDecisions: 0, choice: 'book', note: null });
+  const trimmed = subject.inspectHouseReviewPreference().current!;
+  expect(trimmed.legacyBasis!.lines).toHaveLength(2);
+  expect(trimmed.lines).toHaveLength(12);
+  expect(trimmed.lines.some((line) => line.owner?.kind === 'editorial-memory' && line.owner.itemId === memory.itemId)).toBe(true);
+  expect(trimmed.lines.some((line) => line.bookId === book.bookId)).toBe(false);
+  govern([current(memory.itemId)], 'supervise', '只记录方向，不加文字。', 'guide');
+  const legacy = subject.inspectGlobalAgent().items.find((entry) => entry.kind === 'preference' && entry.categoryId === 'style-and-format')!;
+  subject.recordLearningSupervision({ operation: 'supervise', targets: [{ itemId: legacy.itemId, revisionId: legacy.revisionId }], scope: { kind: 'house' },
+    categoryId: 'style-and-format', text: '旧版条目也只记录方向。', effect: 'guide' });
+  expect(subject.inspectHouseReviewPreference().current!.lines.map((line) => line.text)).toEqual(trimmed.lines.map((line) => line.text));
+  const before = subject.inspectHouseReviewPreference().current!.versionId;
+  expect(() => preference('超出界限的合成偏好')).toThrow(/12/u);
+  expect(subject.inspectHouseReviewPreference().current!.versionId).toBe(before);
+});
+
+it('reads one scope\'s preference influence only, never another scope\'s local pins', async () => {
+  const { signals, make, create, accept, prepare } = await sourceDecisions();
+  accept(make(create([signals[0]!.signalId], '只属于本范围的合成记忆。')));
+  prepare();
+  const db = new DatabaseSync(join(roots!.dataRoot, 'store', 'ai7.sqlite'));
+  try {
+    expect(new HousePreferenceInfluence(db, 'ordinary-production').pins.length).toBeGreaterThan(0);
+    expect(new HousePreferenceInfluence(db, 'developer-live').pins).toEqual([]);
+    expect(new HousePreferenceInfluence(db, 'development-ci').pins).toEqual([]);
+  } finally { db.close(); }
+});
+
+it('marks a completed Task withdrawn only by the lines it actually read', async () => {
+  const { subject, book, signals, explicit, make, accept, prepare } = await sourceDecisions();
+  const unread = accept(make({ schema: 'ai7.global-editorial-memory/2', actionId: randomUUID(), signalIds: [explicit.signalId],
+    applicability: { kind: 'house' }, title: '未被读取的合成记忆。', editorialDimension: 'typos-and-usage', confidence: 0 }));
+  const later = subject.inspectLearningMaterial(book.bookId, signals[3]!.source.materialKey);
+  subject.decideLearningMaterial({ bookId: book.bookId, materialKey: later.materialKey, materialDigest: later.digest, expectedDecisions: 0, choice: 'house', note: null });
+  for (let index = 1; index <= 4; index += 1) subject.recordLearningSupervision({ operation: 'create', targets: [], scope: { kind: 'house' },
+    categoryId: 'typos-and-usage', text: `合成较新偏好${index}`, effect: 'guide' });
+  const run = prepare();
+  const task = run.categories.find((entry) => entry.categoryId === 'typos-and-usage')!.taskIntentId!;
+  const db = new DatabaseSync(join(roots!.dataRoot, 'store', 'ai7.sqlite'));
+  try { expect(new HouseReviewPreferenceLedger(db).pinned(task)!.lines).not.toContain(unread.title); } finally { db.close(); }
+  subject.authorizeReviewRun(book.bookId, run.reviewRunId, run.categories.filter((entry) => entry.planEnvelopeDigest !== null)
+    .map((entry) => ({ categoryId: entry.categoryId, planEnvelopeDigest: entry.planEnvelopeDigest! })));
+  await driver!.drive(run.reviewRunId);
+  // A Book exclusion after the unread memory's control basis withdraws only that memory's source; the read legacy line stands.
+  subject.changeEditorialLearning({ kind: 'book', bookId: book.bookId, excluded: true, expectedEntries: 0 });
+  subject.changeEditorialLearning({ kind: 'book', bookId: book.bookId, excluded: false, expectedEntries: 1 });
+  const lineage = subject.inspectLearningLineage(book.bookId, explicit.source.materialKey);
+  expect(lineage.tasks.find((entry) => entry.reviewRunId === run.reviewRunId)).toMatchObject({ use: 'completed', marked: false });
+});
+
+it('refuses an over-bound memory title inside the owner before anything is appended', async () => {
+  const { subject, signals, make, create, accept } = await sourceDecisions();
+  const memory = accept(make(create([signals[0]!.signalId], '合成标题界限。')));
+  const items = subject.inspectGlobalAgent().items;
+  const pin = { itemId: memory.itemId, revisionId: memory.versionId };
+  const db = new DatabaseSync(join(roots!.dataRoot, 'store', 'ai7.sqlite'));
+  try {
+    const versions = () => Number(db.prepare('SELECT count(*) n FROM global_editorial_memory_item_versions').get()!.n);
+    const before = versions();
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const directive = new SupervisionDirectives(db).record('ordinary-production', { actionId: randomUUID(), operation: 'correct', targets: [pin],
+        scope: { kind: 'house' }, categoryId: 'typos-and-usage', text: '合'.repeat(170), effect: 'guide' }, items);
+      expect(() => new EditorialLearningLedger(db).govern(directive, [pin])).toThrow();
+      expect(versions()).toBe(before);
+    } finally { db.exec('ROLLBACK'); }
+  } finally { db.close(); }
+});
+
+it('publishes no line for a memory whose words become a recorded name, without failing the people change or a later rebuild', async () => {
+  const { subject, book, signals, make, create, accept } = await sourceDecisions();
+  const memory = accept(make(create([signals[0]!.signalId], '合成甲乙')));
+  subject.recordLearningSupervision({ operation: 'create', targets: [], scope: { kind: 'house' }, categoryId: 'style-and-format', text: '合成的另一条偏好。', effect: 'guide' });
+  expect(subject.inspectHouseReviewPreference().current!.lines.some((line) => line.owner?.itemId === memory.itemId)).toBe(true);
+  const people = subject.getBookOverview(book.bookId).people;
+  subject.updateBookPeople({ bookId: book.bookId, expectedVersion: people.version, authors: ['合成甲乙'], editors: [], related: [] });
+  const published = subject.inspectHouseReviewPreference().current!;
+  expect(published.lines.some((line) => line.owner?.itemId === memory.itemId)).toBe(false);
+  expect(published.lines.some((line) => line.text.includes('合成甲乙'))).toBe(false);
+  const other = subject.inspectLearningMaterial(book.bookId, signals[3]!.source.materialKey);
+  subject.decideLearningMaterial({ bookId: book.bookId, materialKey: other.materialKey, materialDigest: other.digest, expectedDecisions: 0, choice: 'house', note: null });
+  expect(subject.inspectLearningMaterial(book.bookId, other.materialKey).decisions).toBe(1);
+});
+
+it('refuses a line-breaking memory title before the candidate is written', async () => {
+  const { subject, signals, create, inspect } = await sourceDecisions();
+  const count = inspect().items.length;
+  expect(() => subject.createEditorialMemory(create([signals[0]!.signalId], '合成第一行\n合成第二行'))).toThrow();
+  expect(inspect().items).toHaveLength(count);
+});
+
+it('ranks a /2 version\'s legacy lines by their /1 dating, not by array position', async () => {
+  const { subject, book, signals, make, create, accept, govern, current } = await sourceDecisions();
+  const memory = accept(make(create([signals[0]!.signalId], '冻结后仍保持 /2。')));
+  govern([current(memory.itemId)], 'supervise', '冻结这条合成记忆。', 'freeze');
+  const newer = Array.from({ length: 5 }, (_, index) => `合成新偏好${index + 1}`);
+  for (const text of newer) subject.recordLearningSupervision({ operation: 'create', targets: [], scope: { kind: 'house' },
+    categoryId: 'typos-and-usage', text, effect: 'guide' });
+  const published = subject.inspectHouseReviewPreference().current!;
+  expect(published.schema).toBe('ai7.house-review-preference/2');
+  expect(published.lines.find((line) => line.owner?.kind === 'legacy-preference' && line.owner.itemId.startsWith('preference:'))!.categoryId).toBe('typos-and-usage');
+  const db = new DatabaseSync(join(roots!.dataRoot, 'store', 'ai7.sqlite'));
+  try {
+    // The derived line dates from its older admitting decision, as in /1; the five newer editor lines take the Top-5.
+    const used = new HouseReviewPreferenceLedger(db).use('ordinary-production', book.bookId, 'typos-and-usage')!;
+    expect([...used.lines].sort()).toEqual([...newer].sort());
+  } finally { db.close(); }
 });
