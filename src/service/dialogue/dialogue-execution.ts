@@ -557,7 +557,10 @@ export class DialogueExecutionOwner {
       settled = 'failed';
       cause = failure ?? 'DIALOGUE_EXECUTION_FAILED';
     } else if (outcome.terminal === 'completed') {
-      settled = 'completed';
+      // The body may already be complete when a recorded usage chunk asks to stop. The
+      // adapter cannot abort that finished body, but this unpublished attempt still stops.
+      settled = active.stopRequested ? 'stopped' : this.#disposed ? 'interrupted' : 'completed';
+      cause = !active.stopRequested && this.#disposed ? DIALOGUE_CLOSED_CAUSE : null;
     } else if ((active.stopRequested || this.#disposed) && outcome.terminal === 'ambiguous') {
       // Keep the existing stopped/interrupted record contract. The adapter/cache independently
       // retains the possibly billed request; a stop never turns it into positive no-send evidence.
