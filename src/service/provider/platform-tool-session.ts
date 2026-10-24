@@ -36,6 +36,7 @@ import { authorizeSearchCall, sendSearchCall } from './search-service.js';
 
 interface DispatchAccounting {
   readonly unit: object;
+  readonly callId: string;
   readonly tool: PlatformToolName;
   observation: BreakerVerdict | null;
 }
@@ -265,7 +266,7 @@ export class PlatformToolSession implements PlatformToolOwner {
   }
 
   admit(result: { readonly callId: string; readonly tool: PlatformToolName; readonly sourceUrl: string | null; readonly text: string; readonly dispatch: PlatformToolDispatch }): void {
-    const state = this.#dispatchState(result.tool, result.dispatch);
+    const state = this.#dispatchState(result, result.dispatch);
     if (!result.dispatch.active() || state.unit !== this.#unit) return;
     // DSH can finalize a registered error before entering its body, or after a pipeline/body failure before observation.
     // Supply that missing observation synchronously, before either result-id deduplication or the next model gate.
@@ -292,8 +293,9 @@ export class PlatformToolSession implements PlatformToolOwner {
 
   async execute(call: PlatformToolExecution): Promise<{ readonly text: string; readonly sourceUrl: string | null }> {
     const dispatch = call.dispatch ?? { token: Symbol(), active: () => !call.signal.aborted };
-    const state = this.#dispatchState(call.tool, dispatch);
-    if (!dispatch.active() || state.unit !== this.#unit) return refusal('工具调用未完成。');
+    const state = this.#dispatchState(call, dispatch);
+    // DSH enters a body at most once, before its finalizer: a token already observed is a replay, never another read or send.
+    if (!dispatch.active() || state.unit !== this.#unit || state.observation !== null) return refusal('工具调用未完成。');
     const execution = { ...call, dispatch };
     if (isLocalToolName(call.tool)) return this.#executeLocal(execution);
     if (this.#inFlight) return this.#refuseCounted(execution, '平台工具必须顺序调用。');
@@ -302,13 +304,14 @@ export class PlatformToolSession implements PlatformToolOwner {
     finally { this.#inFlight = false; }
   }
 
-  #dispatchState(tool: PlatformToolName, dispatch: PlatformToolDispatch): DispatchAccounting {
+  #dispatchState(call: { readonly callId: string; readonly tool: PlatformToolName }, dispatch: PlatformToolDispatch): DispatchAccounting {
     let state = this.#dispatches.get(dispatch.token);
     if (state === undefined) {
-      state = { unit: this.#unit, tool, observation: null };
+      state = { unit: this.#unit, callId: call.callId, tool: call.tool, observation: null };
       this.#dispatches.set(dispatch.token, state);
     }
-    if (state.tool !== tool) throw new Error('PLATFORM_TOOL_DISPATCH_MISMATCH');
+    // One token is one occurrence: it never answers, or is charged for, another call.
+    if (state.callId !== call.callId || state.tool !== call.tool) throw new Error('PLATFORM_TOOL_DISPATCH_MISMATCH');
     return state;
   }
 
@@ -331,7 +334,7 @@ export class PlatformToolSession implements PlatformToolOwner {
   async #executeLocal(call: CorrelatedToolExecution): Promise<{ readonly text: string; readonly sourceUrl: null }> {
     const refuse = (text: string): { text: string; sourceUrl: null } => { this.usage.refusedRetrievalCalls = (this.usage.refusedRetrievalCalls ?? 0) + 1; return refusal(text); };
     // Every local request counts, including malformed, concurrent, duplicate and over-cap refusals.
-    if (this.#observeLocal(call.tool, this.#dispatchState(call.tool, call.dispatch)) === 'tripped') return refuse('检索未完成：本单元的工具往返已达到熔断上限。');
+    if (this.#observeLocal(call.tool, this.#dispatchState(call, call.dispatch)) === 'tripped') return refuse('检索未完成：本单元的工具往返已达到熔断上限。');
     const rule = this.#binding.localTools;
     if (rule?.targetedRetrieval.allowed !== true || this.#retrieval === null) return refuse('RETRIEVAL_SOURCE_NOT_AUTHORIZED');
     if (this.#base.currentBindingDigest() !== this.#binding.bindingDigest || call.signal.aborted) return refuse('RETRIEVAL_SOURCE_NOT_AUTHORIZED');
@@ -369,7 +372,7 @@ export class PlatformToolSession implements PlatformToolOwner {
    */
   #refuseCounted(call: CorrelatedToolExecution, text: string): { readonly text: string; readonly sourceUrl: null } {
     this.#refusedRoundTrips += 1;
-    return this.#observeWeb(this.#dispatchState(call.tool, call.dispatch), `refused:${this.#refusedRoundTrips}`) === 'tripped' ? refusal('联网核查未完成：本单元的工具往返已达到熔断上限。') : refusal(text);
+    return this.#observeWeb(this.#dispatchState(call, call.dispatch), `refused:${this.#refusedRoundTrips}`) === 'tripped' ? refusal('联网核查未完成：本单元的工具往返已达到熔断上限。') : refusal(text);
   }
 
   async #settle<Authorized>(item: PlatformToolCallItem, call: { authorize(): Authorized; send(authorized: Authorized): Promise<PlatformToolCallResult> }): Promise<{ snapshot: ResearchSnapshot | null; status: number; replayed: boolean }> {
@@ -425,14 +428,14 @@ export class PlatformToolSession implements PlatformToolOwner {
       this.#unitSearchQuery = digest;
       const reused = this.#runResults.get(digest);
       if (reused !== undefined) {
-        if (this.#observeWeb(this.#dispatchState(call.tool, call.dispatch), digest) === 'tripped') return refusal('联网核查未完成：本单元的工具往返已达到熔断上限。');
+        if (this.#observeWeb(this.#dispatchState(call, call.dispatch), digest) === 'tripped') return refusal('联网核查未完成：本单元的工具往返已达到熔断上限。');
         this.#unitSearchHasResult = reused.sourceUrl !== null && reused.text !== '[]';
         const kept = this.#searchSnapshots.get(digest);
         if (kept !== undefined) { this.#unitCaptures.push({ tool: 'websearch', snapshot: kept }); this.#unitSearches = 1; }
         return reused;
       }
     }
-    const verdict = this.#observeWeb(this.#dispatchState(call.tool, call.dispatch), toolArgumentsDigest(args));
+    const verdict = this.#observeWeb(this.#dispatchState(call, call.dispatch), toolArgumentsDigest(args));
     if (verdict === 'duplicate') return refusal('同一工具调用已在本单元内执行过；不再重复。请使用已有结果。');
     if (verdict === 'tripped') return refusal('联网核查未完成：本单元的工具往返已达到熔断上限。');
     if (args.tool === 'webfetch') {

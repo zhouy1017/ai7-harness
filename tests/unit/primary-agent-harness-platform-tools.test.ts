@@ -513,6 +513,110 @@ describe('registered raw-wire failures before the DSH body', () => {
       expect(session.egressScope.admittedToolResults!.size).toBe(0);
     } finally { release(); await handle.finish(); }
   });
+
+  it('spends a rejected position exactly as the in-body refusal does when parallel reads finish out of order', async () => {
+    // The quota counts every local call in model order: a call DSH rejects before the body spends its position just as one the
+    // body refuses ('{'), so both spellings read the same positions however the pending reads settle.
+    const localTools: NonNullable<EgressBindingFacts['localTools']> = { ...LOCAL_RULE, declarations: LOCAL_TOOL_DECLARATION_NAMES.map((name) => ({ name, readOnly: true, concurrencySafe: true })), parallelCallsAllowed: true };
+    const binding = { ...bindingOf(null, 'b'.repeat(64)), localTools };
+    for (const rejected of ['{', '{"query":"x","k":-0}', '{"query":"x","k":1e309}']) {
+      const retrieval = new RetrievalIndex([{ sourceKind: 'manuscript', sourceId: 'synthetic', digest: 'a'.repeat(64),
+        read: () => ({ digest: 'a'.repeat(64), segments: [{ blockId: 'one', text: 'x' }] }) }]);
+      const retrieve = retrieval.retrieve.bind(retrieval);
+      const started: string[] = []; const settled: string[] = [];
+      let active = 0; let peak = 0;
+      vi.spyOn(retrieval, 'retrieve').mockImplementation(async (...args) => {
+        // A read that starts earlier settles later, so completion runs against model order.
+        const delay = (8 - started.push(args[0])) * 4;
+        active++; peak = Math.max(peak, active);
+        await new Promise<void>((done) => setTimeout(done, delay));
+        try { return await retrieve(...args); } finally { active--; settled.push(args[0]); }
+      });
+      const session = new PlatformToolSession({ binding, scope: { currentBindingDigest: () => binding.bindingDigest, acceptedOutputDigests: new Set() }, retrieval, purpose: 'raw-wire' });
+      const model = new RawToolModel((request) => request === 1 ? Array.from({ length: 8 }, (_, index) => ({ name: 'retrieve',
+        arguments: index === 1 || index === 4 ? rejected : `{"query":"q${index}","k":1}` })) : []);
+      const { handle } = await rawHarness(session, binding, model, true);
+      try {
+        session.startUnit();
+        expect((await handle.submitUnit(UNIT)).terminal).toBe('completed');
+        const results = model.requests[1]!.messages.filter((message) => message.source.kind === 'tool');
+        expect(results.map((message) => message.source)).toEqual(Array.from({ length: 8 }, (_, index) => ({ kind: 'tool', callId: `raw_1_${index}` })));
+        expect(results.map((message, index) => started.includes(`q${index}`) ? 'read' : JSON.stringify(message).includes('调用次数已用完') ? 'quota' : 'rejected'))
+          .toEqual(['read', 'rejected', 'read', 'read', 'rejected', 'quota', 'quota', 'quota']);
+        expect(started).toEqual(['q0', 'q2', 'q3']);
+        expect(settled).not.toEqual(started);
+        expect(peak).toBeLessThanOrEqual(5);
+        expect(session.usage).toMatchObject({ retrievalCalls: 8, refusedRetrievalCalls: 5 });
+        expect(session.egressScope.admittedToolResults!.size).toBe(8);
+      } finally { await handle.finish(); retrieval.dispose(); }
+    }
+  });
+
+  it('keeps one web breaker when pre-body failures alternate between websearch and webfetch', async () => {
+    const binding = bindingOf((await ruleOf('v7'))!, 'b'.repeat(64));
+    const fetch = vi.fn(async () => { throw new Error('NO_TRANSPORT'); });
+    const breaker = new PlatformToolBreaker();
+    const observations = vi.spyOn(breaker, 'observe');
+    const session = new PlatformToolSession({ binding, scope: { currentBindingDigest: () => binding.bindingDigest, acceptedOutputDigests: new Set() }, fetch,
+      admitHost: () => { throw new Error('NO_HOST'); }, breaker, purpose: 'raw-wire' });
+    const model = new RawToolModel((request) => [request % 2 === 0
+      ? { name: 'webfetch', arguments: '{"url":"https://example.org/source","k":-0}' } : { name: 'websearch', arguments: '{"query":"x","k":1e309}' }]);
+    const { handle, decisions } = await rawHarness(session, binding, model);
+    try {
+      session.startUnit();
+      const outcome = await handle.submitUnit(UNIT);
+      expect(model.requests).toHaveLength(129);
+      expect(observations).toHaveBeenCalledTimes(129);
+      expect(fetch).not.toHaveBeenCalled();
+      expect(decisions.at(-1)).toBe('refuse:circuit-breaker-tripped');
+      expect(session.unitEnd(outcome)).toEqual({ reason: 'circuit-breaker-tripped', disclosure: '联网核查未完成', retry: 'never', settles: 'unit-only' });
+    } finally { await handle.finish(); }
+  });
+
+  it('lets the next unit of the same Session proceed after pre-body failures ended the previous one', async () => {
+    const binding = { ...bindingOf(null, 'b'.repeat(64)), localTools: LOCAL_RULE };
+    const session = new PlatformToolSession({ binding, scope: { currentBindingDigest: () => binding.bindingDigest, acceptedOutputDigests: new Set() }, purpose: 'raw-wire' });
+    const model = new RawToolModel((request) => request <= 129 ? [{ name: 'retrieve', arguments: '{"query":"x","k":-0}' }] : []);
+    const { handle, decisions } = await rawHarness(session, binding, model);
+    try {
+      session.startUnit();
+      expect(session.unitEnd(await handle.submitUnit(UNIT))?.retry).toBe('never');
+      session.startUnit();
+      const next = await handle.submitUnit(UNIT);
+      expect(next.terminal).toBe('completed');
+      expect(model.requests).toHaveLength(130);
+      expect(decisions.slice(-2)).toEqual(['refuse:circuit-breaker-tripped', 'transmit-local']);
+      // The ended unit's results stay admitted for the Session's history; the next unit charges nothing new.
+      expect(session.egressScope.admittedToolResults!.size).toBe(129);
+      expect(session.usage.retrievalCalls).toBe(129);
+      expect(session.egressScope.localBreakerState!()).toBe('intact');
+    } finally { await handle.finish(); }
+  });
+
+  it('binds a dispatch token to its first call, so a replayed token neither reads, charges nor admits another result', async () => {
+    const binding = { ...bindingOf(null, 'b'.repeat(64)), localTools: LOCAL_RULE };
+    const retrieval = new RetrievalIndex([{ sourceKind: 'manuscript', sourceId: 'synthetic', digest: 'a'.repeat(64),
+      read: () => ({ digest: 'a'.repeat(64), segments: [{ blockId: 'one', text: 'x' }] }) }]);
+    const reads = vi.spyOn(retrieval, 'retrieve');
+    const session = new PlatformToolSession({ binding, scope: { currentBindingDigest: () => binding.bindingDigest, acceptedOutputDigests: new Set() }, retrieval, purpose: 'raw-wire' });
+    const read = { tool: 'retrieve' as const, arguments: { query: 'x', k: 1 }, signal: new AbortController().signal };
+    const dispatch = { token: Symbol(), active: () => true };
+    try {
+      session.startUnit();
+      const first = await session.execute({ ...read, callId: 'first', dispatch });
+      expect(await session.execute({ ...read, callId: 'first', dispatch })).toEqual({ text: '工具调用未完成。', sourceUrl: null });
+      await expect(session.execute({ ...read, callId: 'other', dispatch })).rejects.toThrow('PLATFORM_TOOL_DISPATCH_MISMATCH');
+      session.admit({ ...first, callId: 'first', tool: 'retrieve', dispatch });
+      expect(() => session.admit({ ...first, callId: 'other', tool: 'retrieve', dispatch })).toThrow('PLATFORM_TOOL_DISPATCH_MISMATCH');
+      // A token first seen at its finalizer (a pre-body failure) is charged there and never enters a body afterwards.
+      const preBody = { token: Symbol(), active: () => true };
+      session.admit({ callId: 'pre-body', tool: 'retrieve', sourceUrl: null, text: '工具调用未完成：synthetic', dispatch: preBody });
+      expect(await session.execute({ ...read, callId: 'pre-body', dispatch: preBody })).toEqual({ text: '工具调用未完成。', sourceUrl: null });
+      expect(reads).toHaveBeenCalledTimes(1);
+      expect(session.usage).toMatchObject({ retrievalCalls: 2, refusedRetrievalCalls: 1 });
+      expect([...session.egressScope.admittedToolResults!.values()].map((entry) => entry.callId)).toEqual(['first', 'pre-body']);
+    } finally { retrieval.dispose(); }
+  });
 });
 
 describe('the platform tools inside the composition', () => {
