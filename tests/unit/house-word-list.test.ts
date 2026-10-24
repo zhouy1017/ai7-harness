@@ -62,6 +62,31 @@ describe('editor-authored House input bounds', () => {
 });
 
 describe('standalone House panel through its two-operation interface', () => {
+  it('keeps a known committed save truthful after a failed read and retries only the read', async () => {
+    const restore = installMiniDom(); const db = new DatabaseSync(':memory:'); initializeHouseWordListSchema(db);
+    const owner = new HouseWordLists(db); const status = vi.fn(); let failRead = false;
+    const api: HouseWordListApi = {
+      inspectHouseWordList: vi.fn(async (value) => { if (failRead) { failRead = false; throw new Error('synthetic read failure'); } return owner.inspect(value); }),
+      saveHouseWordList: vi.fn(async (value) => { const saved = owner.save(value); failRead = true; return saved; }),
+    };
+    const root = document.createElement('div'); document.body.append(root);
+    const panel = mountHouseWordList({ root, api, setStatus: status });
+    const click = async (name: string) => { miniDocument.body.querySelector(`[data-house-action="${name}"]`)!.click(); await setImmediate(); };
+    try {
+      await panel.load(); await click('edit'); await click('add');
+      const literal = miniDocument.body.querySelector('[data-house-field="literal"]')!;
+      literal.value = '已保存的合成词'; literal.dispatchEvent({ type: 'input' });
+      await click('save');
+      expect(owner.inspect().selected?.ordinal).toBe(1); expect(api.saveHouseWordList).toHaveBeenCalledTimes(1);
+      expect(status).toHaveBeenLastCalledWith(expect.stringContaining('已保存本社敏感词表 第1版；读取未完成'), 'error');
+      expect(root.textContent).toContain('第1版已保存'); expect(root.textContent).not.toContain('尚未保存');
+      expect(root.textContent).not.toContain('草稿'); expect(miniDocument.body.querySelector('[data-house-action="save"]')).toBeNull();
+      await click('retry-read');
+      expect(root.textContent).toContain('已保存的合成词'); expect(api.saveHouseWordList).toHaveBeenCalledTimes(1);
+      expect(owner.inspect().history).toHaveLength(1);
+      expect(status).toHaveBeenLastCalledWith('已保存本社敏感词表 第1版。', 'success');
+    } finally { panel.destroy(); db.close(); restore(); }
+  });
   it('authors/pastes/saves immutable versions, preserves a stale draft and shows historical versions read-only', async () => {
     const restore = installMiniDom(); const db = new DatabaseSync(':memory:'); initializeHouseWordListSchema(db);
     const owner = new HouseWordLists(db); const status = vi.fn();

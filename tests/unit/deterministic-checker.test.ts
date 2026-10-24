@@ -107,6 +107,15 @@ function housePlan(texts: string[], entries: readonly { literal: string; enabled
   } finally { db.close(); }
 }
 describe('unselected local v2 House literal contract', () => {
+  it('retains exact overlapping matches that cross or start on the 16384 UTF16 search boundary', async () => {
+    const frozen = housePlan([`${'甲'.repeat(16383)}ababa`], [{ literal: 'aba' }, { literal: 'ba' }]);
+    const result = await checkLocalPlan(frozen);
+    expect(result.candidates.map((candidate) => [candidate.from, candidate.to, candidate.quote])).toEqual([
+      [16383, 16386, 'aba'], [16384, 16386, 'ba'], [16385, 16388, 'aba'], [16386, 16388, 'ba'],
+    ]);
+    expect(new Set(result.candidates.map((candidate) => candidate.id)).size).toBe(4);
+    expect(result.candidates.every((candidate) => candidateHasExactAnchor(frozen, candidate))).toBe(true);
+  });
   it('keeps exact overlaps/repetitions, metacharacters, case and NFC distinctions with P/N off', async () => {
     const frozen = housePlan(['ababa a.* A.* é e\u0301 🟦'], ['aba', 'ba', 'a.*', 'é', 'e\u0301', '🟦', 'e', '\u0301'].map((literal) => ({ literal })));
     const result = await checkLocalPlan(frozen); validateLocalResultV2(result, frozen);

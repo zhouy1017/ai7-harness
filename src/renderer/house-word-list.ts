@@ -1,7 +1,7 @@
 import {
   HOUSE_DISCLOSURE, HOUSE_PAGE_SIZE, MAX_HOUSE_ENTRIES, HouseWordListError, previewHousePaste, validateSaveHouseWordListInput,
   type HousePastePreview, type HouseWordListApi, type HouseWordListDraftEntry, type HouseWordListPage,
-  type HouseWordListSourceKind, type InspectHouseWordListInput, type SaveHouseWordListInput,
+  type HouseWordListSourceKind, type InspectHouseWordListInput, type SaveHouseWordListInput, type SaveHouseWordListResult,
 } from '../shared/protocol/house-word-list.js';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string): HTMLElementTagNameMap[K] {
@@ -17,6 +17,8 @@ export function mountHouseWordList(options: {
   let expectedCurrent: SaveHouseWordListInput['expectedCurrent'] = null; let sourceKind: HouseWordListSourceKind = 'editor-entry';
   let request: InspectHouseWordListInput = { versionId: null, entryOffset: 0, historyOffset: 0 };
   let preview: HousePastePreview | null = null; let pastedText = ''; let draftOffset = 0;
+  /** A successful save is durable even when the following read fails; retrying this state never saves again. */
+  let committedRead: SaveHouseWordListResult | null = null;
   let busy = false; let destroyed = false;
   const button = (label: string, name: string, run: () => void, disabled = false): HTMLButtonElement => {
     const node = el('button', label); node.type = 'button'; node.className = 'button secondary'; node.dataset['houseAction'] = name;
@@ -27,12 +29,22 @@ export function mountHouseWordList(options: {
     busy = true; paint();
     try { await work(); }
     catch (error) {
-      if (!destroyed) setStatus(error instanceof HouseWordListError ? error.message : '词表操作未完成；草稿已保留，请重试。', 'error');
+      if (!destroyed) setStatus(committedRead !== null
+        ? `${committedRead.created ? '已保存本社敏感词表' : '词条未变，仍为'} 第${committedRead.ordinal}版；读取未完成，请重试读取。`
+        : error instanceof HouseWordListError ? error.message : draft === null ? '词表读取未完成，请重试。' : '词表操作未完成；草稿已保留，请重试。', 'error');
     } finally { if (!destroyed) { busy = false; paint(); } }
   };
   const inspect = async (next: InspectHouseWordListInput): Promise<void> => {
     const result = await api.inspectHouseWordList(next);
     if (!destroyed) { page = result; request = next; }
+  };
+  const readCommitted = async (): Promise<void> => {
+    const saved = committedRead; if (saved === null) return;
+    await inspect({ versionId: saved.pin.versionId, entryOffset: 0, historyOffset: 0 });
+    if (!destroyed) {
+      committedRead = null;
+      setStatus(saved.created ? `已保存本社敏感词表 第${saved.ordinal}版。` : `词条未变，仍为第${saved.ordinal}版。`, 'success');
+    }
   };
   const beginDraft = (): Promise<void> => run(async () => {
     const first = await api.inspectHouseWordList({ versionId: null, entryOffset: 0, historyOffset: 0 });
@@ -57,13 +69,18 @@ export function mountHouseWordList(options: {
     const saved = await api.saveHouseWordList(input);
     if (destroyed) return;
     draft = null; preview = null; pastedText = '';
-    await inspect({ versionId: saved.pin.versionId, entryOffset: 0, historyOffset: 0 });
-    if (!destroyed) setStatus(saved.created ? `已保存本社敏感词表 第${saved.ordinal}版。` : `词条未变，仍为第${saved.ordinal}版。`, 'success');
+    committedRead = saved; page = null;
+    await readCommitted();
   });
   const paint = (): void => {
     if (destroyed) return;
     const panel = el('section'); panel.className = 'guideline-card'; panel.dataset['houseWordList'] = 'panel';
     panel.append(el('h3', '本社敏感词表'), el('p', HOUSE_DISCLOSURE));
+    if (committedRead !== null) {
+      panel.append(el('p', `第${committedRead.ordinal}版已保存；${busy ? '正在读取词条。' : '读取未完成，请重试读取。'}`),
+        button('重新读取已保存版本', 'retry-read', () => void run(readCommitted)));
+      root.replaceChildren(panel); return;
+    }
     if (draft !== null) {
       panel.append(el('p', '编辑草稿；保存后成为新版本。打开、编辑和保存词表都不会开始检查。'));
       const list = el('ol');
@@ -128,5 +145,5 @@ export function mountHouseWordList(options: {
     root.replaceChildren(panel);
   };
   paint();
-  return { load: () => run(() => inspect({ versionId: null, entryOffset: 0, historyOffset: 0 })), destroy: () => { destroyed = true; root.replaceChildren(); } };
+  return { load: () => run(() => committedRead === null ? inspect({ versionId: null, entryOffset: 0, historyOffset: 0 }) : readCommitted()), destroy: () => { destroyed = true; root.replaceChildren(); } };
 }
