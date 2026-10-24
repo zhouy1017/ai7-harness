@@ -1,5 +1,5 @@
 ---
-status: proposed — drafted on 2026-10-24 from the Owner's instruction of that day in the Commander session (「在开发计划把 macOS 平台 gate 和目标全部无限期推迟，目前只考虑 Windows 平台」); it becomes `accepted` when the Owner confirms this record, and the nightly queue refuses to merge it before then
+status: accepted — drafted on 2026-10-24 from the Owner's instruction of that day in the Commander session (「在开发计划把 macOS 平台 gate 和目标全部无限期推迟，目前只考虑 Windows 平台」) and accepted by the Owner on 2026-10-24 in the same session (「确认如你。」), which this record names as its acceptance
 date: 2026-10-24
 deciders: Owner
 amends: ADR 0028 (the macOS half of the one-product contract is suspended, not revoked); ADR 0052 (the selected macOS profile is kept for a later resumption only); ADR 0054 §Boundary expiry and macOS re-entry (the consolidated Windows/macOS re-entry is deferred with the platform); ADR 0027 and ADR 0075 §1, §2, §4 and Consequences (the full Gate runs on Windows Server 2025 only); ADR 0081 retained boundaries (paired-platform wording); ADR 0083 §macOS; ADR 0093 §Automatic delivery boundary (one Gate job, one package job, no macOS inspection artifact); the runbook, context and architecture clauses named in §Clauses amended
