@@ -363,6 +363,15 @@ export const TASK_BAR_WAITING_NOTE = '已记录这次授权。联网、并确认
  */
 export const TASK_BAR_WAITING_FOR_SLOT = '已联网 · 名额已满';
 export const TASK_BAR_WAITING_SLOT_NOTE = '已记录这次授权。已经联网，但运行名额已满：有名额空出时，AI7 先核对计划再开始，之后开始的任务可能先开始；在此之前不会发送任何内容';
+/** 空闲时处理 (Issue #1089; ADR 0095 §3): the start choice beside 开始任务, and what a deferred or yielded Run says. */
+export const TASK_BAR_START_WHEN_LABEL = '开始时间';
+export const TASK_BAR_START_WHEN_OPTIONS: ReadonlyArray<readonly ['now' | 'idle', string]> = [['now', '立即'], ['idle', '空闲时处理']];
+export const TASK_BAR_IDLE_RECORDING = '正在记录空闲时处理…';
+export const TASK_BAR_IDLE_RECORDED = '已记录授权；等待空闲';
+export const TASK_BAR_WAITING_FOR_IDLE = '等待空闲';
+export const TASK_BAR_WAITING_IDLE_NOTE = '停下编辑 30 秒且没有编辑操作运行后开始；预算上限不变，可以取消任务';
+export const TASK_BAR_YIELDED = '让位给你的任务';
+export const TASK_BAR_YIELDED_NOTE = '下次空闲后接着处理；运行授权与预算上限不变';
 /** AUTH-010's three controls of a Run under way (Issue #422): 暂停 and 改计划重做 are shown with why they wait. */
 export const TASK_BAR_PAUSE = '暂停';
 export const TASK_BAR_CANCEL_RUN = '停止任务';
@@ -726,7 +735,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
         readiness,
         summary,
         statement: null,
-        note: plan.state.label === '等待空闲' ? '停下编辑 30 秒且没有编辑操作运行后开始；预算上限不变，可以取消任务' : TASK_BAR_QUEUED_NOTE,
+        note: plan.state.label === TASK_BAR_WAITING_FOR_IDLE ? TASK_BAR_WAITING_IDLE_NOTE : TASK_BAR_QUEUED_NOTE,
         status: plan.state.label,
         actions: [{ name: 'cancel-wait', label: TASK_BAR_CANCEL_WAIT, tone: 'secondary', disabledReason: null }, runLink],
       };
@@ -736,7 +745,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
         readiness,
         summary,
         statement: null,
-        note: plan.state.label === '等待空闲' ? '停下编辑 30 秒且没有编辑操作运行后开始；可以取消任务' : plan.state.label === TASK_BAR_WAITING_FOR_SLOT ? TASK_BAR_WAITING_SLOT_NOTE : TASK_BAR_WAITING_NOTE,
+        note: plan.state.label === TASK_BAR_WAITING_FOR_IDLE ? TASK_BAR_WAITING_IDLE_NOTE : plan.state.label === TASK_BAR_WAITING_FOR_SLOT ? TASK_BAR_WAITING_SLOT_NOTE : TASK_BAR_WAITING_NOTE,
         status: plan.state.label,
         actions: [
           ...(plan.state.label === TASK_BAR_WAITING_FOR_CONNECTION
@@ -832,7 +841,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
           readiness,
           summary,
           statement: null,
-          note: plan.state.label === '让位给你的任务' ? '下次空闲后接着处理；运行授权与预算上限不变' : continuation === null ? null : taskBarContinuationNote(continuation.unitsSettled, continuation.unitsTotal, continuation.pendingAnswerUnits,
+          note: plan.state.label === TASK_BAR_YIELDED ? TASK_BAR_YIELDED_NOTE : continuation === null ? null : taskBarContinuationNote(continuation.unitsSettled, continuation.unitsTotal, continuation.pendingAnswerUnits,
             plan.listPages?.['runControl.continuation.pendingAnswerUnits']?.total),
           status: plan.state.label,
           actions: [

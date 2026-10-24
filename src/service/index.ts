@@ -522,20 +522,23 @@ async function dispatch(
         result: store.inspectBaselineAnalysis(request.input.bookId, analysisProgress),
       };
     }
-    // 联网后开始任务 for every other kind with a plan (Issue #760, S74c; AUTH-004, OFF-005): the kind's own Run Authorization is
-    // recorded waiting, and Reconnect Preflight looks at once — so a start made just as the network came back begins now. The
-    // answer is the plan, read as the drawer reads it.
+    // 空闲时处理 (Issue #1089, F-17a; ADR 0095 §3): the kind's own Run Authorization recorded to start when idle — a ledger
+    // Task's queued on the governor, a Review Run's approval driven once AI7 is idle. The answer is the plan.
     case 'startTaskWhenIdle': {
       background.nudge();
       const started = store.startTaskWhenIdle(request.input);
       if (started?.dispatchRunRecordId != null) analysisExecution.admitOrQueue(started.dispatchRunRecordId, started.ledger);
       if (request.input.kind === 'review-run') {
         const reviewRunId = request.input.ref;
+        // A refused admission leaves the approval waiting as recorded; 取消任务 still ends it.
         void analysisExecution.whenBackgroundIdle().then(() => store.admitIdleReview(reviewRunId, () => driveReviewRun(reviewRuns, reviewRunId))).catch(() => {});
       }
       return { id: request.id, ok: true, op: request.op,
         result: await store.inspectTaskPlan({ bookId: request.input.bookId, kind: request.input.kind, ref: request.input.ref }, analysisProgress) };
     }
+    // 联网后开始任务 for every other kind with a plan (Issue #760, S74c; AUTH-004, OFF-005): the kind's own Run Authorization is
+    // recorded waiting, and Reconnect Preflight looks at once — so a start made just as the network came back begins now. The
+    // answer is the plan, read as the drawer reads it.
     case 'startTaskWhenOnline': {
       store.startTaskWhenOnline(request.input);
       // A look that fails leaves the Run waiting as recorded; the next look starts it.

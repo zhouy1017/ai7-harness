@@ -3094,6 +3094,7 @@ function registerRendererHandlers(
         });
       }),
   );
+  // 空闲时处理 (Issue #1089): the same exact authorization as 开始任务 within the route's Book, started when AI7 is idle.
   ipcMain.handle(
     IPC_CHANNELS.startTaskWhenIdle,
     (event, input: Omit<ServiceOperationMap['startTaskWhenIdle']['input'], 'bookId'>) =>
@@ -3112,7 +3113,7 @@ function registerRendererHandlers(
           });
           requireCurrentRouteGeneration(owned, routeGeneration);
           if (result.bookId !== route.bookId || result.kind !== input.kind || result.ref !== input.ref) {
-            throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '联网后开始任务的结果不属于当前图书工作台。');
+            throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '空闲时处理的结果不属于当前图书工作台。');
           }
           return result;
         });

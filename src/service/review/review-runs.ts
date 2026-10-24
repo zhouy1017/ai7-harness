@@ -68,7 +68,7 @@ import {
   type ReviewWorkspaceCategoryProjection,
   type ReviewWorkspaceProjection,
 } from '../../shared/protocol.js';
-import type { BaselineAnalysisStore, ProgressReader } from '../analysis/baseline-analysis-store.js';
+import { RUN_WAITING_IDLE_LABEL, type BaselineAnalysisStore, type ProgressReader } from '../analysis/baseline-analysis-store.js';
 import { UNREAD_WALK_BOUND, type UnreadWalkCut } from '../analysis/unread-changes.js';
 import {
   AnalysisError,
@@ -817,6 +817,15 @@ interface RunView {
    * version whose material was 停止今后使用 afterwards (Issue #912; LAUD-008), each with its marker.
    */
   readonly historicallyAffected: ReadonlyMap<string, string>;
+}
+
+/** An approval made 「空闲时处理」 that has not begun (Issue #1089): it waits for quiet, not for the network. */
+function waitsForIdleStart(view: Pick<RunView, 'state' | 'authorization'>): boolean {
+  return view.state === 'waiting' && view.authorization?.startWhen === 'idle';
+}
+
+function runViewStateLabel(view: Pick<RunView, 'state' | 'authorization' | 'canContinue' | 'scopeStop'>): string {
+  return waitsForIdleStart(view) ? RUN_WAITING_IDLE_LABEL : reviewRunStateLabel(view.state, view.canContinue, view.scopeStop);
 }
 
 /**
@@ -1685,10 +1694,10 @@ export class ReviewRunStore {
       label: `第 ${snapshot.ordinal} 次`,
       createdAt: snapshot.createdAt,
       state: view.state,
-      stateLabel: view.state === 'waiting' && view.authorization?.startWhen === 'idle' ? '等待空闲' : reviewRunStateLabel(view.state, view.canContinue, view.scopeStop),
+      stateLabel: runViewStateLabel(view),
       canContinue: view.canContinue,
       authorizedAt: view.authorization?.authorizedAt ?? null,
-      waitingIdle: view.state === 'waiting' && view.authorization?.startWhen === 'idle',
+      waitingIdle: waitsForIdleStart(view),
       manuscript: snapshot.manuscript,
       scope: snapshot.scope,
       configuration: snapshot.configuration,
@@ -1761,7 +1770,7 @@ export class ReviewRunStore {
       bookId: snapshot.bookId,
       ordinal: snapshot.ordinal,
       state: view.state,
-      stateLabel: view.state === 'waiting' && view.authorization?.startWhen === 'idle' ? '等待空闲' : reviewRunStateLabel(view.state, view.canContinue, view.scopeStop),
+      stateLabel: runViewStateLabel(view),
       authorized: view.authorization !== null,
       canContinue: view.canContinue,
       newestOfBook: text(newest.review_run_id) === reviewRunId,
@@ -3898,7 +3907,7 @@ export class ReviewRunStore {
         ...(selection === null ? {} : { selection }),
         createdAt: view.snapshot.createdAt,
         authorizedAt: view.authorization?.authorizedAt ?? null,
-        waitingIdle: view.state === 'waiting' && view.authorization?.startWhen === 'idle',
+        waitingIdle: waitsForIdleStart(view),
         state: view.state,
         canContinue: view.canContinue,
         categories: view.categories.map((category) => {
@@ -4043,7 +4052,7 @@ export class ReviewRunStore {
       scopeLabel: view.snapshot.scope.label,
       categoryLabels: view.snapshot.categories.map((category) => category.entry.label),
       state: view.state,
-      stateLabel: view.state === 'waiting' && view.authorization?.startWhen === 'idle' ? '等待空闲' : reviewRunStateLabel(view.state, view.canContinue, view.scopeStop),
+      stateLabel: runViewStateLabel(view),
       findingCounts: reviewFindingCounts(view.findings),
       reportVersion: reports.latest === null ? null : integer(reports.latest),
       historicalMarker: [...view.historicallyAffected.values()][0] ?? null,
@@ -4172,7 +4181,7 @@ export class ReviewRunStore {
         label: `第 ${snapshot.ordinal} 次`,
         createdAt: snapshot.createdAt,
         state: view.state,
-        stateLabel: view.state === 'waiting' && view.authorization?.startWhen === 'idle' ? '等待空闲' : reviewRunStateLabel(view.state, view.canContinue, view.scopeStop),
+        stateLabel: runViewStateLabel(view),
         canContinue: view.canContinue,
         scope: {
           kind: snapshot.scope.kind,

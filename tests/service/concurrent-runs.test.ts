@@ -4,7 +4,8 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BaselineAnalysisExecutionOwner, EXECUTION_RUN_CAPACITY, type UnitHold } from '../../src/service/analysis/execution.js';
-import { RECONCILED_QUEUED_DETAIL, RUN_QUEUED_LABEL } from '../../src/service/analysis/baseline-analysis-store.js';
+import { RECONCILED_QUEUED_DETAIL, RECONCILED_YIELDED_DETAIL, RUN_IDLE_YIELD_LABEL, RUN_QUEUED_LABEL } from '../../src/service/analysis/baseline-analysis-store.js';
+import { ProtocolError, decodeRequest } from '../../src/service/request-frames.js';
 import { DEVELOPER_LIVE_POLICY_BINDING, ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
@@ -615,7 +616,11 @@ describe('live foreground places and request aborts (#1080)', () => {
 });
 
 
-it('defers an exact authorization, yields after the sent unit without aborting, and resumes the same bounded Run (#1089)', async () => {
+/**
+ * Ordinary production over a synthetic transport whose every request waits until the suite releases it (#1089): a unit in
+ * flight stays sent, so a yield is seen to wait for it and never to abort it.
+ */
+async function heldProductionLaunch(): Promise<{ store: EditorialStore; owner: BaselineAnalysisExecutionOwner; calls: Array<{ signal: AbortSignal; release: () => void }> }> {
   const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { baselineAnalysisRoute: null,
     induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
     induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false });
@@ -642,6 +647,11 @@ it('defers an exact authorization, yields after the sent unit without aborting, 
   };
   const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture: null,
     production: { scope: 'ordinary-production', nativeFetch }, secretResolver: { resolve: async () => 'synthetic-placeholder-key' } });
+  return { store, owner, calls };
+}
+
+it('defers an exact authorization, yields after the sent unit without aborting, and resumes the same bounded Run (#1089)', async () => {
+  const { store, owner, calls } = await heldProductionLaunch();
   try {
     const background = await preparedBook(store, '合成空闲甲', false);
     const foreground = await preparedBook(store, '合成即时乙', false);
@@ -661,9 +671,12 @@ it('defers an exact authorization, yields after the sent unit without aborting, 
     expect(attention.groups.find((group) => group.key === 'active')!.items.some((item) => item.state === 'analysis-waiting-idle')).toBe(true);
     owner.setBackgroundIdle(true);
     await until(() => calls.length === 1, 'idle dispatch');
-    start(store, owner, foreground);
-    await until(() => calls.length === 2, 'foreground beside idle Run');
+    // The editor returns while a place is still free: nothing of theirs waits for one, so the background Run keeps going.
     owner.setBackgroundIdle(false);
+    await owner.whenPlaceFree();
+    expect(start(store, owner, foreground).admission).toBe('admitted');
+    await until(() => calls.length === 2, 'foreground beside idle Run');
+    expect(store.baselineAnalysisLedger.currentRunState(runRecordId)).toBe('executing');
     expect(start(store, owner, waiting).admission).toBe('queued');
     expect(calls[0]!.signal.aborted).toBe(false);
     calls[0]!.release();
@@ -725,4 +738,60 @@ it('cancels a deferred start without dispatch and reconciles an unstarted idle a
     expect(reading.run?.attempt).toBeNull();
     reopened.markCleanShutdown();
   } finally { reopened.close(); }
+});
+
+
+it('reads a Run AI7 yielded as an ordinary paused Run after a restart, which nothing resumes by itself (#1089; ADR 0034)', async () => {
+  const { store, owner, calls } = await heldProductionLaunch();
+  let bookId = '';
+  let runRecordId = '';
+  try {
+    const background = await preparedBook(store, '合成重启让位甲', false);
+    const foreground = await preparedBook(store, '合成重启即时乙', false);
+    const waiting = await preparedBook(store, '合成重启即时丙', false);
+    bookId = background.bookId;
+    runRecordId = store.authorizeBaselineAnalysis(bookId, background.taskIntentId, background.planEnvelopeDigest, 'idle').dispatchRunRecordId!;
+    owner.setBackgroundIdle(true);
+    expect(owner.admitOrQueue(runRecordId)).toBe('admitted');
+    await until(() => calls.length === 1, 'idle dispatch');
+    start(store, owner, foreground);
+    await until(() => calls.length === 2, 'foreground beside idle Run');
+    owner.setBackgroundIdle(false);
+    expect(start(store, owner, waiting).admission).toBe('queued');
+    calls[0]!.release();
+    await until(() => store.baselineAnalysisLedger.currentRunState(runRecordId) === 'paused', 'unit-boundary yield');
+    expect(store.inspectBaselineAnalysis(bookId, () => null).run?.stateLabel).toBe(RUN_IDLE_YIELD_LABEL);
+    for (const book of [foreground, waiting]) {
+      const run = store.inspectBaselineAnalysis(book.bookId, () => null).run!;
+      store.requestBaselineAnalysisCancel(book.bookId, book.taskIntentId);
+      owner.cancelRun(run.runRecordId);
+    }
+    await until(() => !owner.full, 'foreground cancelled');
+    store.markCleanShutdown();
+  } finally { await owner.dispose(); store.close(); }
+  const reopened = await openWithRoute();
+  try {
+    expect(reopened.reconcileStoppedBaselineAnalysisRuns().settled).toBe(1);
+    const reading = reopened.inspectBaselineAnalysis(bookId, () => null);
+    expect([reading.run?.runRecordId, reading.state, reading.run?.stateLabel]).toEqual([runRecordId, 'paused', '已暂停']);
+    expect(reopened.baselineAnalysisLedger.unitCheckpoints(runRecordId)).toHaveLength(1);
+    const items = reopened.inspectGlobalAttention(() => null, false, 'admitting').groups.find((group) => group.key === 'active')!.items;
+    expect(items.filter((item) => item.book.bookId === bookId).map((item) => item.state)).toEqual(['analysis-paused']);
+    expect(reopened.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: reading.taskIntent!.taskIntentId }).state.label).toBe('已暂停');
+    expect(RECONCILED_YIELDED_DETAIL).toContain('续行');
+    reopened.markCleanShutdown();
+  } finally { reopened.close(); }
+}, 60_000);
+
+it('decodes 空闲时处理 for every kind that dispatches, the baseline included, and never for the record-only fixed Task (#1089)', () => {
+  const frame = (request: unknown): Uint8Array => new TextEncoder().encode(JSON.stringify(request));
+  const ledger = { id: randomUUID(), op: 'startTaskWhenIdle', input: { bookId: randomUUID(), kind: 'baseline-analysis', ref: randomUUID(), planEnvelopeDigest: 'c'.repeat(64), planDigests: [] } };
+  for (const kind of ['baseline-analysis', 'initial-evaluation', 'readers-report', 'evaluation-rewrite', 'writing']) {
+    expect(decodeRequest(frame({ ...ledger, input: { ...ledger.input, kind } }))).toEqual({ ...ledger, input: { ...ledger.input, kind } });
+  }
+  const review = { ...ledger, input: { ...ledger.input, kind: 'review-run', planEnvelopeDigest: null, planDigests: [{ categoryId: 'typos-and-usage', planEnvelopeDigest: 'd'.repeat(64) }] } };
+  expect(decodeRequest(frame(review))).toEqual(review);
+  expect(() => decodeRequest(frame({ ...ledger, input: { ...ledger.input, kind: 'fixed-task' } }))).toThrow(ProtocolError);
+  // 联网后开始任务 keeps the baseline on its own operation, as before.
+  expect(() => decodeRequest(frame({ ...ledger, op: 'startTaskWhenOnline' }))).toThrow(ProtocolError);
 });

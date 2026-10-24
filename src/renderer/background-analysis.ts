@@ -21,6 +21,7 @@ import {
   BACKGROUND_ENROLLED_STATUS,
   BACKGROUND_ENROLL_OPEN,
   BACKGROUND_HEADING,
+  BACKGROUND_KIND_LABEL,
   BACKGROUND_HISTORY_SUMMARY,
   BACKGROUND_LOADING,
   BACKGROUND_NOT_GRANTED_LABEL,
@@ -198,7 +199,7 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
     const pill = el('span', `status-pill background-analysis-state background-analysis-state-${projection.state}`, projection.stateLabel);
     heading.append(el('h3', undefined, BACKGROUND_HEADING), pill);
     const kindChoice = el('select');
-    kindChoice.setAttribute('aria-label', '后台处理种类');
+    kindChoice.setAttribute('aria-label', BACKGROUND_KIND_LABEL);
     for (const offered of projection.kinds ?? []) {
       const option = el('option', undefined, offered.label + (offered.reason === null ? '' : ` · ${offered.reason}`));
       option.value = offered.kind; option.disabled = !offered.enabled; option.selected = offered.kind === selectedKind;

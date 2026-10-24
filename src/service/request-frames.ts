@@ -839,7 +839,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
         candidate.kind === 'tokens' && isSafeInteger(candidate.maxTotalTokens, 1) && candidate.maxTotalTokens <= 999_999_999_999;
       const identities = (list: unknown): boolean => Array.isArray(list) && list.length <= 8 &&
         list.every((entry) => isBoundedString(entry, 64) && /^[a-z][a-z-]*$/u.test(entry)) && new Set(list).size === list.length;
-      if (!validUuid(input.bookId) || (shared ? !(START_WHEN_ONLINE_TASK_KINDS.includes(input.kind as never) || (value.op === 'startTaskWhenIdle' && (input.kind === 'baseline-analysis' || input.kind === 'fixed-task'))) || !validUuid(input.ref) : !validUuid(input.taskIntentId)) ||
+      if (!validUuid(input.bookId) || (shared ? !START_WHEN_ONLINE_TASK_KINDS.includes(input.kind as never) || !validUuid(input.ref) : !validUuid(input.taskIntentId)) ||
           !isBoundedString(input.planEnvelopeDigest, 64) || !HEX_DIGEST_PATTERN.test(input.planEnvelopeDigest) ||
           !identities(input.removedSteps) || !identities(input.disallowedAdaptations) ||
           (Object.hasOwn(input, 'askFirstAdaptations') && !identities(input.askFirstAdaptations)) ||
@@ -1600,11 +1600,14 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     // 联网后开始任务 for every other kind with a plan (Issue #760, S74c): the kind, its Task — a Task Intent or a Review Run —
     // and exactly the digests 开始任务 would bind: one plan envelope's for a ledger Task, every Task-backed category's for a
     // Review Run; never both. Whether they still stand is the store's to decide.
+    // 空闲时处理 (Issue #1089) takes the same shape and also starts a baseline analysis, which 联网后开始任务 leaves to its own
+    // operation; J-03's fixed Task only records an authorization, so it never waits for either.
     case 'startTaskWhenIdle':
     case 'startTaskWhenOnline': {
       const input = requireInput(value.input, ['bookId', 'kind', 'ref', 'planEnvelopeDigest', 'planDigests'], tentativeId);
       const review = input.kind === 'review-run';
-      if (!validUuid(input.bookId) || !START_WHEN_ONLINE_TASK_KINDS.includes(input.kind as never) || !validUuid(input.ref) ||
+      const kindAdmitted = START_WHEN_ONLINE_TASK_KINDS.includes(input.kind as never) || (value.op === 'startTaskWhenIdle' && input.kind === 'baseline-analysis');
+      if (!validUuid(input.bookId) || !kindAdmitted || !validUuid(input.ref) ||
           !Array.isArray(input.planDigests) ||
           (review
             ? input.planEnvelopeDigest !== null ||

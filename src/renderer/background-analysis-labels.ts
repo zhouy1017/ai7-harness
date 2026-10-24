@@ -5,6 +5,8 @@ import type { BackgroundAnalysisEnrollmentProjection } from '../shared/protocol.
  * and why, and what revoking keeps are the service's words; these are the block's own.
  */
 export const BACKGROUND_HEADING = '后台处理登记';
+/** The kind the block reads and enrolls (Issue #1089): the selected policy's enrollable kinds, others shown disabled with why. */
+export const BACKGROUND_KIND_LABEL = '后台处理种类';
 export const BACKGROUND_ENROLL_OPEN = '登记后台处理…';
 export const BACKGROUND_REVOKE_OPEN = '撤销登记…';
 export const BACKGROUND_DISCLOSURE_HEADING = '登记后台处理';

@@ -63,6 +63,10 @@ import {
   TASK_BAR_QUEUED_STATUS,
   TASK_BAR_SLOT_BUSY,
   TASK_BAR_START_FAILED,
+  TASK_BAR_START_WHEN_LABEL,
+  TASK_BAR_START_WHEN_OPTIONS,
+  TASK_BAR_IDLE_RECORDED,
+  TASK_BAR_IDLE_RECORDING,
   TASK_BAR_SAVED,
   TASK_DRAWER_BACK,
   TASK_DRAWER_BACK_TITLE,
@@ -383,8 +387,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   let ticket = 0;
   let interrupted = false;
   let focusTitle = false;
-  /** A start or a reconfirmation is under way: every bar action waits for it. */
+  /** 立即 or 空闲时处理 (Issue #1089): the editor's explicit choice for this Task's start, back to 立即 on another Task. */
   let startWhen: 'now' | 'idle' = 'now';
+  /** A start or a reconfirmation is under way: every bar action waits for it. */
   let working = false;
   /** Why the last start or reconfirmation was refused, beside the actions until the next one or a new plan. */
   let refusal: string | null = null;
@@ -1271,11 +1276,13 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const actions = el('div', 'task-bar-actions');
     for (const action of view.actions) actions.append(barAction(action, noteId));
     const startAction = view.actions.find((action) => action.name === 'start' || action.name === 'start-when-online');
-    if (startAction !== undefined && startAction.disabledReason === null && (next.start.readiness === 'ready' || next.start.readiness === 'offline')) {
+    // J-03's fixed Task only records its authorization and never dispatches: it has nothing to start when idle.
+    if (startAction !== undefined && startAction.disabledReason === null && next.kind !== 'fixed-task' &&
+        (next.start.readiness === 'ready' || next.start.readiness === 'offline')) {
       const timing = el('select');
-      timing.setAttribute('aria-label', '开始时间');
+      timing.setAttribute('aria-label', TASK_BAR_START_WHEN_LABEL);
       timing.dataset['taskStartWhen'] = '';
-      for (const [value, label] of [['now', '立即'], ['idle', '空闲时处理']] as const) {
+      for (const [value, label] of TASK_BAR_START_WHEN_OPTIONS) {
         const option = el('option', undefined, label); option.value = value; option.selected = value === startWhen;
         timing.append(option);
       }
@@ -1898,19 +1905,18 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   }
 
   /**
-   * 联网后开始任务 (Issue #502; AUTH-002, AUTH-004, OFF-005): one activation records the exact Run Authorization and
-   * Run Record for the plan on show — the digest the bar read with it — and the Run waits in Connectivity Wait.
-   * Nothing is sent and nothing implies it began; the bar then says what it waits for, beside 取消.
+   * 空闲时处理 (Issue #1089; ADR 0095 §3): the same activation records the exact Run Authorization for the plan on show,
+   * marked to start when idle; nothing is sent and no place is taken until then, and the bar says 等待空闲 beside 取消.
    */
   async function startWhenIdle(): Promise<void> {
     const current = plan;
     const asked = request;
-    if (current === null || !beginWork()) return;
-    options.setStatus('正在记录空闲时处理…', 'busy');
+    if (current === null || current.kind === 'fixed-task' || !beginWork()) return;
+    options.setStatus(TASK_BAR_IDLE_RECORDING, 'busy');
     try {
       await api.startTaskWhenIdle({ kind: current.kind, ref: current.ref,
         planEnvelopeDigest: current.start.planEnvelopeDigest, planDigests: current.start.categoryDigests });
-      options.setStatus('已记录授权；等待空闲', 'success');
+      options.setStatus(TASK_BAR_IDLE_RECORDED, 'success');
       focusBar = true;
       options.onRecorded(current.kind, current.bookId, current.ref);
     } catch (error) {
@@ -1919,6 +1925,11 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     } finally { endWork(asked); }
   }
 
+  /**
+   * 联网后开始任务 (Issue #502; AUTH-002, AUTH-004, OFF-005): one activation records the exact Run Authorization and
+   * Run Record for the plan on show — the digest the bar read with it — and the Run waits in Connectivity Wait.
+   * Nothing is sent and nothing implies it began; the bar then says what it waits for, beside 取消.
+   */
   async function startWhenOnline(): Promise<void> {
     if (startWhen === 'idle') return startWhenIdle();
     const current = plan;

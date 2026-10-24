@@ -39,7 +39,7 @@ import { MODEL_SERVICE_ROUTES, BASELINE_ANALYSIS_MODE_GOALS, BASELINE_ANALYSIS_T
 import { EVIDENCE_ASSURANCE_LEVELS, EVIDENCE_ASSURANCE_LEVEL_CONSEQUENCES, EVIDENCE_ASSURANCE_LEVEL_LABELS, type EvidenceAssuranceLevel } from '../shared/protocol.js';
 import { CONFIGURED_PROVIDER_LABELS } from '../shared/provider-configuration.generated.js';
 import type { ClarificationFacts } from './analysis/clarifications.js';
-import { namedNonEffects } from './analysis/baseline-analysis-store.js';
+import { namedNonEffects, RUN_QUEUED_LABEL, RUN_WAITING_IDLE_LABEL } from './analysis/baseline-analysis-store.js';
 import type { ManifestBlockInput } from './analysis/coverage-manifest.js';
 import { PLAN_CEILING_LAUNCH_REASON, PLAN_EDITABLE_ADAPTATIONS, PLAN_EDIT_ADAPTATION_LABELS, PLAN_EDIT_STEP_LABELS } from './analysis/plan-edits.js';
 import type { Connectivity } from './connectivity.js';
@@ -741,7 +741,7 @@ function baselineState(projection: BaselineAnalysisProjection, stopped?: Baselin
       return { key: 'waiting', label: WAITING_LABELS.network };
     // 等待运行名额 (Issue #49, S14; CONC-007): authorized, and waiting on the governor for a place.
     case 'queued':
-      return { key: 'queued', label: projection.authorization?.startWhen === 'idle' ? '等待空闲' : '等待运行名额' };
+      return { key: 'queued', label: projection.authorization?.startWhen === 'idle' ? RUN_WAITING_IDLE_LABEL : RUN_QUEUED_LABEL };
     // A Run the editor cancelled before it ran anything keeps the dash of a cancelled wait (Issue #502); one it
     // cancelled after it began reading reads 已取消 in its own shape, and 正在取消 while it stops (Issue #422).
     case 'cancelled':
@@ -2392,7 +2392,7 @@ function reviewState(facts: ReviewRunPlanFacts): TaskPlanProjection['state'] {
       return { key: 'settled', label: '已完成' };
     // 联网后开始任务 (Issue #760, S74c): the label says what it waits for once the service has looked (`withWaitingReason`).
     case 'waiting':
-      return { key: 'waiting', label: facts.stateLabel === '等待空闲' ? '等待空闲' : WAITING_LABELS.network };
+      return { key: 'waiting', label: facts.waitingIdle === true ? RUN_WAITING_IDLE_LABEL : WAITING_LABELS.network };
     // Its plan moved while it waited (OFF-008): it never started.
     case 'plan-moved':
       return { key: 'plan-moved', label: PLAN_MOVED_LABEL };

@@ -282,8 +282,9 @@ export const IPC_CHANNELS = {
   authorizeBaselineAnalysis: 'ai7:j04:authorize-baseline-analysis',
   startBaselineAnalysisWhenOnline: 'ai7:j04:start-baseline-analysis-when-online',
   cancelWaitingBaselineAnalysis: 'ai7:j04:cancel-waiting-baseline-analysis',
-  // 联网后开始任务 and its 取消 for every other kind that has a plan (Issue #760, S74c): one pair, keyed by kind.
+  // 空闲时处理 for every kind that dispatches (Issue #1089, F-17a; ADR 0095 §3), keyed by kind.
   startTaskWhenIdle: 'ai7:j09:start-task-when-idle',
+  // 联网后开始任务 and its 取消 for every other kind that has a plan (Issue #760, S74c): one pair, keyed by kind.
   startTaskWhenOnline: 'ai7:j04:start-task-when-online',
   cancelWaitingTask: 'ai7:j04:cancel-waiting-task',
   cancelBaselineAnalysisRun: 'ai7:j04:cancel-baseline-analysis-run',
@@ -11697,11 +11698,15 @@ export interface ServiceOperationMap extends GlobalAgentOperations {
     output: ReconnectPreflightProjection;
   };
   /**
+   * 空闲时处理 (Issue #1089, F-17a; ADR 0095 §3): the kind's own exact Run Authorization, recorded to start when AI7 is idle;
+   * it holds no place and sends nothing until then. A fixed Task only records an authorization, so it is not a kind here.
+   */
+  startTaskWhenIdle: { input: Omit<StartTaskWhenOnlineInput, 'kind'> & { kind: Exclude<TaskPlanKind, 'fixed-task'> }; output: TaskPlanProjection };
+  /**
    * 联网后开始任务 for every kind but the baseline's (Issue #760, S74c; AUTH-004, OFF-005): the kind's own exact Run Authorization
    * — a ledger Task's Run Record, or a Review Run's one approval — and the Run waits in Connectivity Wait; nothing is sent, no
    * usage arises, and nothing implies it began. Reconnect Preflight then starts it as 开始任务 would. The answer is the plan.
    */
-  startTaskWhenIdle: { input: Omit<StartTaskWhenOnlineInput, 'kind'> & { kind: TaskPlanKind }; output: TaskPlanProjection };
   startTaskWhenOnline: { input: StartTaskWhenOnlineInput; output: TaskPlanProjection };
   /** 取消 while that Run waits (OFF-010), or while it waits on the governor for a place: terminal, before any dispatch. */
   cancelWaitingTask: { input: CancelWaitingTaskInput; output: TaskPlanProjection };
@@ -12588,8 +12593,9 @@ export interface RendererApi extends GlobalAgentRendererApi {
   authorizeBaselineAnalysis(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<BaselineAnalysisWireProjection>;
   startBaselineAnalysisWhenOnline(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<BaselineAnalysisWireProjection>;
   cancelWaitingBaselineAnalysis(input: { taskIntentId: string }): Promise<BaselineAnalysisWireProjection>;
-  /** 联网后开始任务 and its 取消 for every other kind with a plan (Issue #760, S74c), within the route's Book. */
+  /** 空闲时处理 for every kind that dispatches (Issue #1089), within the route's Book. */
   startTaskWhenIdle(input: Omit<ServiceOperationMap['startTaskWhenIdle']['input'], 'bookId'>): Promise<TaskPlanProjection>;
+  /** 联网后开始任务 and its 取消 for every other kind with a plan (Issue #760, S74c), within the route's Book. */
   startTaskWhenOnline(input: Omit<StartTaskWhenOnlineInput, 'bookId'>): Promise<TaskPlanProjection>;
   cancelWaitingTask(input: Omit<CancelWaitingTaskInput, 'bookId'>): Promise<TaskPlanProjection>;
   cancelBaselineAnalysisRun(input: { taskIntentId: string }): Promise<BaselineAnalysisWireProjection>;

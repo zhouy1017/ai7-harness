@@ -465,6 +465,7 @@ import {
 import {
   AnalysisError,
   BaselineAnalysisStore,
+  RUN_WAITING_IDLE_LABEL,
   activeRunReason,
   runIsActive,
   type AnalysisPreparationResult,
@@ -6521,7 +6522,7 @@ export class EditorialStore {
       if (reaches && connectivity.reading() === 'offline') blockers.push(ANSWER_BLOCKED_OFFLINE);
       plan = withAnswerBlockers(plan, blockers);
     }
-    if (plan.state.key !== 'waiting' || plan.state.label === '等待空闲') return plan;
+    if (plan.state.key !== 'waiting' || plan.state.label === RUN_WAITING_IDLE_LABEL) return plan;
     if (reaches && connectivity.reading() === 'offline') return withWaitingReason(plan, 'network');
     if ((await credentialReadiness(binding)) === 'missing') return withWaitingReason(plan, 'connection');
     return withWaitingReason(plan, connectivity.slotBusy() ? 'slot' : 'admitting');
@@ -6989,15 +6990,14 @@ export class EditorialStore {
     return this.#analysisCall(() => this.#baselineAnalysis.currentRunState(runRecordId)) === 'awaiting-connectivity';
   }
 
-  // ---- 联网后开始任务 for every kind (Issue #760, plan slice S74c) ----------------------------------------------
+  // ---- 空闲时处理 for every kind (Issue #1089, F-17a; ADR 0095 §3) -------------------------------------------
 
   /**
-   * 联网后开始任务 of a Task of any other kind with a plan (Issue #760, S74c; AUTH-004, OFF-005): exactly the Run Authorization
-   * its 开始任务 records — a ledger Task's Run Record, after every check its own start makes, or a Review Run's one approval —
-   * and the Run then waits in Connectivity Wait. Nothing is sent, no usage arises and no place is taken; Reconnect Preflight
-   * starts it as 开始任务 would. A repeat answers as the first did.
+   * 空闲时处理 (ADR 0095 §3): exactly the Run Authorization 开始任务 records, marked to start when idle — a ledger Task's Run
+   * Record, or a Review Run's one approval. Nothing is sent and no place is taken until the application is quiet.
    */
   startTaskWhenIdle(input: import('../shared/protocol.js').ServiceOperationMap['startTaskWhenIdle']['input']): { dispatchRunRecordId: string | null; ledger: BaselineAnalysisStore } | null {
+    this.#assertAvailable();
     if (input.kind === 'review-run') {
       this.#reviewCall(() => this.#reviewRuns.recordAuthorization(input.bookId, input.ref, input.planDigests, 'idle'));
       return null;
@@ -7010,10 +7010,10 @@ export class EditorialStore {
       case 'readers-report': return this.authorizeReadersReport(input.bookId, input.ref, digest, 'idle');
       case 'evaluation-rewrite': return this.authorizeEvaluationRewrite(input.bookId, input.ref, digest, 'idle');
       case 'writing': return this.authorizeWriting(input.bookId, input.ref, digest, 'idle');
-      case 'fixed-task': this.authorizeTaskAuthorization(input.bookId, input.ref, digest); return null;
     }
   }
 
+  /** A Review Run approved 「空闲时处理」 begins at the first quiet, after the same preflight 联网后开始任务 makes (OFF-008). */
   admitIdleReview(reviewRunId: string, drive: () => void): void {
     this.#reviewCall(() => {
       if (!this.#reviewRuns.waitsForIdle(reviewRunId)) return;
@@ -7023,6 +7023,14 @@ export class EditorialStore {
     });
   }
 
+  // ---- 联网后开始任务 for every kind (Issue #760, plan slice S74c) ----------------------------------------------
+
+  /**
+   * 联网后开始任务 of a Task of any other kind with a plan (Issue #760, S74c; AUTH-004, OFF-005): exactly the Run Authorization
+   * its 开始任务 records — a ledger Task's Run Record, after every check its own start makes, or a Review Run's one approval —
+   * and the Run then waits in Connectivity Wait. Nothing is sent, no usage arises and no place is taken; Reconnect Preflight
+   * starts it as 开始任务 would. A repeat answers as the first did.
+   */
   startTaskWhenOnline(input: StartTaskWhenOnlineInput): void {
     this.#assertAvailable();
     if (input.kind === 'review-run') {

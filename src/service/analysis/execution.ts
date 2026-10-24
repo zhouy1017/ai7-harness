@@ -55,7 +55,7 @@ import {
   type AssuranceSamplingParseFailureCode,
 } from './assurance-sampling-contract.js';
 import { canonicalRecord, sha256Hex } from './canonical.js';
-import { assuranceContractMoved, CARRIED_STAGES, OUTCOME_UNKNOWN_NO_RESUME, type BaselineAnalysisStore, type CarriedStages, type ExecutionBindingRecord, type ExecutionPlanFacts, type PredecessorUnitResult, type RunProgress, type RunProgressStage, type UnitCheckpoint, type UnitResultRecord } from './baseline-analysis-store.js';
+import { assuranceContractMoved, CARRIED_STAGES, OUTCOME_UNKNOWN_NO_RESUME, RUN_IDLE_YIELD_LABEL, type BaselineAnalysisStore, type CarriedStages, type ExecutionBindingRecord, type ExecutionPlanFacts, type PredecessorUnitResult, type RunProgress, type RunProgressStage, type UnitCheckpoint, type UnitResultRecord } from './baseline-analysis-store.js';
 import type { BaselineUnitResult } from './contract.js';
 import type { ManifestBlockInput } from './coverage-manifest.js';
 import { ExecutionAdmissionError } from './execution-error.js';
@@ -532,14 +532,15 @@ export class BaselineAnalysisExecutionOwner {
   setBackgroundIdle(idle: boolean): void {
     this.#backgroundIdle = idle;
     this.#idleConfirmed = true;
-    if (!idle && (this.#foregroundPlaceWaiters > 0 || this.#queued.some(({ runRecordId, ledger }) => {
+    // A background Run yields only while every place is taken and an editor-started Run waits for one (#1089; ADR 0095 §3).
+    if (!idle && this.busy && (this.#foregroundPlaceWaiters > 0 || this.#queued.some(({ runRecordId, ledger }) => {
       const facts = ledger.loadExecutionPlan(runRecordId);
       return facts.origin !== 'background-analysis-enrollment' && facts.startWhen !== 'idle';
     }))) {
       for (const runRecordId of this.#backgroundActive) {
         const active = this.#active.get(runRecordId);
         if (active === undefined || active.pauseRequested || active.cancelRequested || active.progress.stage !== 'units') continue;
-        active.ledger.recordRunState(runRecordId, 'pausing', { detail: '让位给你的任务', idleYield: true });
+        active.ledger.recordRunState(runRecordId, 'pausing', { detail: RUN_IDLE_YIELD_LABEL, idleYield: true });
         this.#yielded.set(runRecordId, active.ledger);
         this.pauseRun(runRecordId, active.ledger, 'idle-yield');
       }
@@ -718,8 +719,10 @@ export class BaselineAnalysisExecutionOwner {
       }
     });
     this.#queued.push({ runRecordId, ledger });
+    // An idle-deferred start ahead waits for quiet, not for a place: a start behind it still takes a free one now (#1089).
     if (!this.#backgroundIdle) this.setBackgroundIdle(false);
-    return 'queued';
+    else this.#drain();
+    return this.#active.has(runRecordId) ? 'admitted' : 'queued';
   }
 
   /**
@@ -1654,7 +1657,7 @@ export class BaselineAnalysisExecutionOwner {
       }
       // 暂停 before the next unit began: the Run waits here, keeping what it had kept (Issue #422, S76b).
       if (active.pauseRequested && !active.cancelRequested) {
-        ledger.recordRunState(facts.runRecordId, 'paused', { detail: active.idleYieldRequested ? '让位给你的任务' : pausedDetail(checkpoints.length, submittedUnits.length), ...(active.idleYieldRequested ? { idleYield: true } : {}), unitsSettled: checkpoints.length, unitsTotal: submittedUnits.length });
+        ledger.recordRunState(facts.runRecordId, 'paused', { detail: active.idleYieldRequested ? RUN_IDLE_YIELD_LABEL : pausedDetail(checkpoints.length, submittedUnits.length), ...(active.idleYieldRequested ? { idleYield: true } : {}), unitsSettled: checkpoints.length, unitsTotal: submittedUnits.length });
         return;
       }
       if (!active.cancelRequested) {
@@ -2512,7 +2515,7 @@ export class BaselineAnalysisExecutionOwner {
         if (stopping) {
           ledger.recordRunState(facts.runRecordId, active.pauseRequested ? 'paused' : 'resumable', {
             ...(active.idleYieldRequested ? { idleYield: true } : {}),
-            detail: active.idleYieldRequested ? '让位给你的任务' : proxyFailure ?? (active.pauseRequested ? pausedDetail(settled, submittedUnits.length) : resumableDetail(settled, submittedUnits.length)),
+            detail: active.idleYieldRequested ? RUN_IDLE_YIELD_LABEL : proxyFailure ?? (active.pauseRequested ? pausedDetail(settled, submittedUnits.length) : resumableDetail(settled, submittedUnits.length)),
             ...(proxyFailure === null ? {} : { connectivityClassification: 'proxy-unreachable', stopReason: 'proxy-unreachable' }),
             unitsSettled: settled,
             unitsTotal: submittedUnits.length,
