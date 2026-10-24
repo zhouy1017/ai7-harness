@@ -11,6 +11,7 @@ import {
   buildFidelityReport,
   deriveImportFidelityPlan,
   parseDocx,
+  compileWordTrackedDocxBytes,
   reimportFidelityReport,
   withTextBoxDisposition,
   type DocumentSignals,
@@ -34,6 +35,10 @@ import {
   type ComposedRevisedRequest,
   type SourceSpan,
 } from '../support/composed-fixture.js';
+import { buildSyntheticTrackedDocx } from '../support/synthetic-docx.js';
+import { buildWordProfileRecipe } from '../fixtures/docx-fidelity/builder.js';
+import { validateWordSampleCursor, wordSampleDetailDigest, wordTrackedSamples, type WordSampleDetailEntry } from '../../src/service/import-retention.js';
+import classification from '../fixtures/docx-fidelity/classification.json' with { type: 'json' };
 
 // Parser identity `ai7-docx-fflate-saxes/3` over composed documents (Issue #411): every word of every input is
 // a span of exact `sample1`, and every author is a neutral name. Assertions compare digests, counts and
@@ -45,6 +50,131 @@ const SOURCE = ADMITTED_BASELINE_DOCX;
 const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' });
 
 let sandbox: string;
+
+describe('successor exact source correspondence (#1132)', () => {
+  it('matches every additive technical recipe classification without changing the historical corpus pairs', () => {
+    for (const recipe of ['replacement', 'paragraph-join', 'named-move', 'all-inserted', 'all-deleted', 'normalization'] as const) {
+      const compiled = compileWordTrackedDocxBytes(buildWordProfileRecipe(recipe));
+      if (compiled.kind !== 'ready') throw new Error(`expected supported technical recipe ${recipe}`);
+      const expected = classification.wordTrackedProfile.recipes[recipe];
+      expect(compiled.templates).toHaveLength(expected.samples);
+      expect(compiled.readings.rejected.blocks.map((block) => block.text)).toEqual(expected.rejected);
+      expect(compiled.readings.accepted.blocks.map((block) => block.text)).toEqual(expected.accepted);
+    }
+    expect(compileWordTrackedDocxBytes(buildWordProfileRecipe('ordinary')).kind).toBe('ordinary');
+  });
+  it('normalizes whole NFC/whitespace groups across atom boundaries and retains removed source spans', () => {
+    const compiled = compileWordTrackedDocxBytes(buildWordProfileRecipe('normalization'));
+    if (compiled.kind !== 'ready') throw new Error('expected supported graph');
+    const block = compiled.readings.rejected.blocks[0]!;
+    expect(block.text).toBe('é B');
+    expect(block.groups.map((group) => group.normalizedText).join('')).toBe(block.text);
+    const nfc = block.groups.find((group) => group.normalizedText === 'é')!;
+    expect(nfc.fragments).toHaveLength(2);
+    expect([nfc.fromGrapheme, nfc.toGrapheme]).toEqual([0, 1]);
+    expect(block.groups.some((group) => group.fragments.length > 0 && group.fromGrapheme === group.toGrapheme)).toBe(true);
+    expect(compiled.readings.rejected.segments.every((segment, index, all) => index === 0 || segment.segmentOrdinal === all[index - 1]!.segmentOrdinal + 1)).toBe(true);
+  });
+
+  it('uses a whole-block counterfactual for a proposal whose insertion combines with surviving text', () => {
+    const compiled = compileWordTrackedDocxBytes(buildSyntheticTrackedDocx('<w:p><w:r><w:t>e</w:t></w:r>' +
+      '<w:ins w:id="1" w:author="A"><w:r><w:t>\u0301</w:t></w:r></w:ins></w:p>'));
+    if (compiled.kind !== 'ready') throw new Error('expected supported graph');
+    const plan = compiled.readings.rejected.marks[0]!;
+    expect([plan.mark.pinnedText, plan.mark.proposedText, plan.mark.fromGrapheme, plan.mark.toGrapheme]).toEqual(['e', 'é', 0, 1]);
+    expect(compiled.readings.accepted.marks).toEqual([]);
+    expect(compiled.templates[0]!.before).toEqual([]);
+    expect(compiled.templates[0]!.after[0]).toMatchObject({ kind: 'text', codeUnits: 1 });
+  });
+
+  it('maps a main-story comment independently into every exact surviving block in each reading', () => {
+    const word = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+    const originalBody = 'full 😀 comment';
+    const compiled = compileWordTrackedDocxBytes(buildSyntheticTrackedDocx('<w:p><w:commentRangeStart w:id="0"/>' +
+      '<w:r><w:t>A</w:t></w:r><w:ins w:id="1"><w:r><w:t>new</w:t></w:r></w:ins></w:p>' +
+      '<w:p><w:r><w:t>B</w:t></w:r><w:commentRangeEnd w:id="0"/><w:r><w:commentReference w:id="0"/></w:r></w:p>', {
+      'word/comments.xml': Buffer.from(`<w:comments xmlns:w="${word}"><w:comment w:id="0" w:author="Raw Author"><w:p><w:r><w:t>${originalBody}</w:t></w:r></w:p></w:comment></w:comments>`),
+    }));
+    if (compiled.kind !== 'ready') throw new Error('expected supported graph');
+    expect(compiled.graph.comments[0]!.bodySha256).toBe(digest(originalBody));
+    expect(compiled.decodedCommentBodies.get('0')).toBe(originalBody);
+    for (const reading of [compiled.readings.rejected, compiled.readings.accepted]) {
+      expect(reading.commentMarks).toHaveLength(2);
+      expect(reading.commentMarks.map((entry) => entry.commentId)).toEqual(['0', '0']);
+      expect(reading.commentMarks.every((entry) => entry.mark.body.includes(originalBody))).toBe(true);
+      expect(reading.commentMarks.map((entry) => entry.mark.pinnedText)).toEqual(reading.blocks.map((block) => block.text));
+    }
+    expect(compiled.templates[0]!.eventMembership).toHaveLength(1);
+    expect(compiled.readings.accepted.marks.every((entry) => entry.mark.origin === 'comment')).toBe(true);
+  });
+
+  it('makes only the reading that wholly removes a comment unavailable, and refuses point-only comments', () => {
+    const word = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+    const parts = { 'word/comments.xml': Buffer.from(`<w:comments xmlns:w="${word}"><w:comment w:id="0"><w:p><w:r><w:t>body</w:t></w:r></w:p></w:comment></w:comments>`) };
+    const compiled = compileWordTrackedDocxBytes(buildSyntheticTrackedDocx('<w:p><w:r><w:t>stable</w:t></w:r></w:p>' +
+      '<w:p><w:commentRangeStart w:id="0"/><w:del w:id="1"><w:r><w:delText>removed</w:delText></w:r></w:del>' +
+      '<w:commentRangeEnd w:id="0"/><w:r><w:commentReference w:id="0"/></w:r></w:p>', parts));
+    if (compiled.kind !== 'ready') throw new Error('expected one available reading');
+    expect(compiled.readings.rejected.usable).toBe(true);
+    expect(compiled.readings.accepted.usable).toBe(false);
+    expect(compiled.readings.accepted.refusals[0]!.code).toBe('unrepresentable-comment');
+    const point = compileWordTrackedDocxBytes(buildSyntheticTrackedDocx('<w:p><w:r><w:t>stable</w:t></w:r><w:commentReference w:id="0"/>' +
+      '<w:ins w:id="1"><w:r><w:t>new</w:t></w:r></w:ins></w:p>', parts));
+    expect(point.kind).toBe('unsupported');
+    expect(point.inventory.locations.every((location) => location.code === 'unrepresentable-comment')).toBe(true);
+  });
+
+  it('preserves the complete independent thousands-edit manifest without copying the graph into samples', () => {
+    const count = 4_000;
+    const body = Array.from({ length: count }, (_, index) => `<w:p><w:r><w:t>base</w:t></w:r>` +
+      `<w:del w:id="d${index}" w:author="A"><w:r><w:delText>old${index}</w:delText></w:r></w:del>` +
+      `<w:ins w:id="i${index}" w:author="B"><w:r><w:t>new${index}</w:t></w:r></w:ins></w:p>`).join('');
+    const compiled = compileWordTrackedDocxBytes(buildSyntheticTrackedDocx(body));
+    if (compiled.kind !== 'ready') throw new Error('expected complete supported graph');
+    expect(compiled.templates).toHaveLength(count);
+    expect(compiled.graph.events).toHaveLength(count * 2);
+    expect(compiled.readings.rejected.marks).toHaveLength(count);
+    const book = 'a5c38147-702d-447e-92d4-680c2b592740';
+    const samples = wordTrackedSamples(book, compiled.graph, compiled.templates);
+    const ids = new Set<string>();
+    for (let index = 0; index < count; index += 1) {
+      const template = compiled.templates[index]!;
+      expect(template.operationKind).toBe('replace');
+      expect(template.eventMembership).toEqual(compiled.graph.events.slice(index * 2, index * 2 + 2).map((event) => event.eventId));
+      expect(template.before[0]!.paragraphIndex).toBe(index);
+      expect(template.after[0]!.paragraphIndex).toBe(index);
+      const before = template.before[0]!;
+      const after = template.after[0]!;
+      expect(compiled.decodedAtoms.get(before.atomOrdinal)).toBe(`old${index}`);
+      expect(compiled.decodedAtoms.get(after.atomOrdinal)).toBe(`new${index}`);
+      ids.add(samples[index]!.sampleId);
+      expect(samples[index]!.sampleId).toBe(`wts_${digest(JSON.stringify({ bookId: book, schema: 'ai7.word-sample-id/1', templateKey: template.templateKey }))}`);
+      expect(samples[index]!.graphDigest).toBe(compiled.graphDigest);
+      expect('graph' in template).toBe(false);
+    }
+    expect(ids.size).toBe(count);
+  });
+
+  it('pins detail membership and validates flat UTF-16 cursors independently of grapheme anchors', () => {
+    const sampleDigest = 'a'.repeat(64);
+    const graphDigest = 'b'.repeat(64);
+    const sourceVersionId = '10000000-0000-4000-8000-000000000001';
+    const imports = [{ choiceDigest: 'c'.repeat(64), admissionDigest: 'd'.repeat(64) }];
+    const detailDigest = wordSampleDetailDigest(sampleDigest, graphDigest, sourceVersionId, imports);
+    expect(wordSampleDetailDigest(sampleDigest, graphDigest, sourceVersionId, [...imports, ...imports])).not.toBe(detailDigest);
+    const text = '😀e\u0301';
+    const entry: WordSampleDetailEntry = { kind: 'text', section: 'events', entryOrdinal: 7, sourceOrdinal: 1,
+      childOrdinal: null, field: 'rawAuthor', text, sha256: digest(text), fragment: null };
+    const lookup = (section: string, ordinal: number): WordSampleDetailEntry | null => section === 'events' && ordinal === 7 ? entry : null;
+    const cursor = { schema: 'ai7.word-sample-cursor/1', sampleDigest, detailDigest, section: 'events', entryOrdinal: 7, field: 'rawAuthor', codeUnitOffset: 3 };
+    // Offset 3 is inside the e + combining-accent grapheme, but on a valid Unicode scalar boundary.
+    expect(validateWordSampleCursor(cursor, { sampleDigest, detailDigest }, lookup)).toEqual(cursor);
+    for (const change of [{ codeUnitOffset: 1 }, { codeUnitOffset: 5 }, { entryOrdinal: 1 }, { field: 'rawId' },
+      { sampleDigest: graphDigest }, { detailDigest: graphDigest }, { extra: true }]) {
+      expect(() => validateWordSampleCursor({ ...cursor, ...change }, { sampleDigest, detailDigest }, lookup)).toThrow('Word');
+    }
+  });
+});
 
 beforeEach(async () => {
   sandbox = await mkdtemp(join(tmpdir(), 'ai7-docx-marks-'));

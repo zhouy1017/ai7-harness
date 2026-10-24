@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { parseDocx, type ParsedDocx, type ParsedDocxBlock } from '../../src/service/docx.js';
+import { compileWordTrackedDocxBytes, parseDocx, type ParsedDocx, type ParsedDocxBlock } from '../../src/service/docx.js';
 import { fixedArchiveTime } from '../../src/shared/archive-time.js';
 import {
   DocxExportError,
@@ -12,6 +12,9 @@ import {
   EDITOR_NOTE_AUTHOR_LABEL,
   exportRetentionDisclosure,
   renderDocxExport,
+  isWordMappedDocxSource,
+  wordMappedDocxSource,
+  WORD_DOCX_EXPORT_WRITER_IDENTITY,
   type DocxExportBlock,
   type DocxExportInput,
   type DocxExportMark,
@@ -20,6 +23,8 @@ import {
 import { renderMarkdownExport, renderPdfHtmlExport } from '../../src/service/text-export.js';
 import { DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, type ExportFidelityRowProjection } from '../../src/shared/protocol.js';
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx, sourceSpanText, type SourceSpan } from '../support/composed-fixture.js';
+import { buildSyntheticDocx } from '../support/synthetic-docx.js';
+import { planWordManuscriptExport, requireWordExportBinding } from '../../src/service/manuscript-export.js';
 
 // DOCX export (Issue #413, plan slice S64) over composed documents: every word of every input is a span of exact
 // `sample1`, and every mark body and author is a neutral authored phrase. Each written file is read back with the
@@ -52,6 +57,140 @@ function escapeXml(value: string): string {
 function blockDigest(kind: DocxExportBlock['kind'], level: number | null, text: string): string {
   return digest(JSON.stringify({ kind, level, text }));
 }
+
+// Technical graph/reading fixtures for #1132, containing only authored synthetic tokens.
+describe('Word graph mapped export (#1132)', () => {
+  const makeInput = (body: string, mode: 'suggestions' | 'accepted-baseline', unprefixed = false, textBoxes: 'retain' | 'merge' = 'retain', includeSourceMarks = false): DocxExportInput => {
+    let xml = `<w:document xmlns:w="${W}" xmlns:v="urn:schemas-microsoft-com:vml"><w:body>${body}<w:sectPr/></w:body></w:document>`;
+    if (unprefixed) xml = xml.replace('xmlns:w=', 'xmlns=').replace(/w:/gu, '');
+    const original = buildSyntheticDocx({ extraEntries: { 'word/document.xml': strToU8(xml) } });
+    const compiled = compileWordTrackedDocxBytes(original, { textBoxDisposition: textBoxes });
+    if (compiled.kind !== 'ready') throw new Error('expected supported Word graph');
+    const selected = compiled.readings[mode === 'suggestions' ? 'rejected' : 'accepted'];
+    const marks: DocxExportMark[] = includeSourceMarks ? selected.marks.map(({ mark }, index) => {
+      const block = selected.blocks.find((block) => block.position === mark.blockPosition);
+      if (block === undefined) throw new Error('compiler mark has no selected block');
+      return { markId: `source-mark-${index}`, blockId: block.blockId, kind: mark.kind,
+        standing: { state: 'exact', fromGrapheme: mark.fromGrapheme, toGrapheme: mark.toGrapheme }, authorLabel: mark.authorLabel,
+        createdAt: '2026-10-25T00:00:00Z', body: mark.body, replies: [], resolved: mark.status === 'resolved',
+        suggestion: mark.kind === 'change-suggestion' ? { currentText: mark.pinnedText, proposedText: mark.proposedText! } : null };
+    }) : [];
+    return { title: 'synthetic Word graph', blocks: selected.blocks,
+      marks, options: DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, source: wordMappedDocxSource(original, compiled, mode, textBoxes) };
+  };
+
+  it.each(['suggestions', 'accepted-baseline'] as const)('exports the selected replacement reading (%s), including an edited descendant', async (mode) => {
+    const input = makeInput('<w:p><w:r><w:t>stable </w:t></w:r><w:del w:id="1"><w:r><w:delText>old</w:delText></w:r></w:del>' +
+      '<w:ins w:id="2"><w:r><w:t>new</w:t></w:r></w:ins></w:p>', mode);
+    expect('rows' in input.source).toBe(false);
+    for (const edited of [false, true]) {
+      const blocks = input.blocks.map((block) => edited ? { ...block, text: `${block.text} edited`, digest: blockDigest(block.kind, block.level, `${block.text} edited`) } : block);
+      const output = renderDocxExport({ ...input, blocks }, { emit: true });
+      const reread = await parseBytes(output.bytes!);
+      expect(reread.blocks.map((block) => block.text)).toEqual(blocks.map((block) => block.text));
+      expect(reread.parsed.importedMarks).toEqual([]);
+    }
+  });
+
+  it.each(['ins', 'del'] as const)('round-trips both paragraph-boundary readings (%s) without restoring an unmatched source paragraph', async (kind) => {
+    const body = `<w:p><w:pPr><w:rPr><w:${kind} w:id="1"/></w:rPr></w:pPr><w:r><w:t>A</w:t></w:r></w:p>` +
+      '<w:p><w:r><w:t>B</w:t></w:r></w:p>';
+    for (const mode of ['suggestions', 'accepted-baseline'] as const) {
+      const input = makeInput(body, mode);
+      const output = renderDocxExport(input, { emit: true });
+      const reread = await parseBytes(output.bytes!);
+      expect(reread.blocks.map((block) => block.text)).toEqual(input.blocks.map((block) => block.text));
+    }
+  });
+
+  it('round-trips accepted all-inserted text and accepted/rejected multi-paragraph moves', async () => {
+    const inserted = makeInput('<w:p><w:ins w:id="1"><w:r><w:t>inserted</w:t></w:r></w:ins></w:p>', 'accepted-baseline');
+    expect((await parseBytes(renderDocxExport(inserted, { emit: true }).bytes!)).blocks.map((block) => block.text)).toEqual(['inserted']);
+    const body = '<w:p><w:moveFromRangeStart w:id="1" w:name="named"/><w:moveFrom w:id="2"><w:r><w:delText>A</w:delText></w:r></w:moveFrom></w:p>' +
+      '<w:p><w:moveFrom w:id="3"><w:r><w:delText>B</w:delText></w:r></w:moveFrom><w:moveFromRangeEnd w:id="1"/></w:p>' +
+      '<w:p><w:r><w:t>middle</w:t></w:r></w:p>' +
+      '<w:p><w:moveToRangeStart w:id="8" w:name="named"/><w:moveTo w:id="9"><w:r><w:t>A</w:t></w:r></w:moveTo></w:p>' +
+      '<w:p><w:moveTo w:id="10"><w:r><w:t>B</w:t></w:r></w:moveTo><w:moveToRangeEnd w:id="8"/></w:p>';
+    for (const mode of ['suggestions', 'accepted-baseline'] as const) {
+      const input = makeInput(body, mode);
+      expect((await parseBytes(renderDocxExport(input, { emit: true }).bytes!)).blocks.map((block) => block.text)).toEqual(input.blocks.map((block) => block.text));
+    }
+  });
+
+  it('replays graph, selected-reading and ordered-segment pins rather than accepting payload coincidence', () => {
+    const input = makeInput('<w:p><w:r><w:t>stable</w:t></w:r><w:ins w:id="1"><w:r><w:t>new</w:t></w:r></w:ins></w:p>', 'suggestions');
+    const source = input.source;
+    if (!isWordMappedDocxSource(source)) throw new Error('expected Word mapping');
+    for (const change of [{ readingDigest: '0'.repeat(64) }, { mappingDigest: '0'.repeat(64) }, { segments: [] }, { mode: 'accepted-baseline' as const }]) {
+      expect(() => renderDocxExport({ ...input, source: { ...source, mapping: { ...source.mapping, ...change } } }, { emit: true })).toThrow('Word');
+    }
+  });
+
+  it('supports an unprefixed Word namespace in its own writer and keeps common text-format projections truthful', async () => {
+    const input = makeInput('<w:p><w:r><w:t>old</w:t></w:r><w:ins w:id="1"><w:r><w:t>new</w:t></w:r></w:ins></w:p>', 'accepted-baseline', true);
+    expect((await parseBytes(renderDocxExport(input, { emit: true }).bytes!)).blocks.map((block) => block.text)).toEqual(input.blocks.map((block) => block.text));
+    expect(renderMarkdownExport(input, { emit: true }).bytes).not.toBeNull();
+    expect(renderPdfHtmlExport(input, { emit: true }).bytes).not.toBeNull();
+  });
+
+  it.each(['suggestions', 'accepted-baseline'] as const)('preserves ordinary retained or merged text boxes alongside tracked body text (%s)', async (mode) => {
+    const body = '<w:p><w:r><w:t>base</w:t></w:r><w:ins w:id="1"><w:r><w:t>new</w:t></w:r></w:ins>' +
+      '<w:r><w:pict><v:shape><v:textbox><w:txbxContent><w:p><w:r><w:t>box</w:t></w:r></w:p>' +
+      '</w:txbxContent></v:textbox></v:shape></w:pict></w:r></w:p>';
+    for (const textBoxes of ['retain', 'merge'] as const) {
+      const input = makeInput(body, mode, false, textBoxes);
+      const output = renderDocxExport(input, { emit: true });
+      const reread = await parseBytes(output.bytes!);
+      expect(reread.blocks.map((block) => block.text)).toEqual(input.blocks.map((block) => block.text));
+      expect(reread.parsed.textBoxes).toHaveLength(textBoxes === 'retain' ? 1 : 0);
+    }
+  });
+
+  it('exports actual compiler-planned proposals and structural annotations, with no already-incorporated suggestions in accepted mode', async () => {
+    const bodies = [
+      '<w:p><w:r><w:t>base </w:t></w:r><w:del w:id="1"><w:r><w:delText>old</w:delText></w:r></w:del><w:ins w:id="2"><w:r><w:t>new</w:t></w:r></w:ins></w:p>',
+      '<w:p><w:pPr><w:rPr><w:del w:id="1"/></w:rPr></w:pPr><w:r><w:t>A</w:t></w:r></w:p><w:p><w:r><w:t>B</w:t></w:r></w:p>',
+    ];
+    for (const body of bodies) for (const mode of ['suggestions', 'accepted-baseline'] as const) {
+      const input = makeInput(body, mode, false, 'retain', true);
+      const output = renderDocxExport(input, { emit: true });
+      const reread = await parseBytes(output.bytes!);
+      expect(reread.blocks.map((block) => block.text)).toEqual(input.blocks.map((block) => block.text));
+      expect(reread.parsed.importedMarks.filter((mark) => mark.kind === 'change-suggestion')).toHaveLength(mode === 'suggestions'
+        ? input.marks.filter((mark) => mark.kind === 'change-suggestion').length : 0);
+      expect(output.written.annotations).toBe(input.marks.filter((mark) => mark.kind === 'annotation').length);
+    }
+  });
+
+  it('derives a pure writer/binding/digest plan and refuses different pins even when rendering is identical', () => {
+    const input = makeInput('<w:p><w:r><w:t>base</w:t></w:r><w:ins w:id="1"><w:r><w:t>new</w:t></w:r></w:ins></w:p>', 'suggestions');
+    const pins = { sourceVersionId: '10000000-0000-4000-8000-000000000001', workingObjectDigest: null,
+      importCommitId: '10000000-0000-4000-8000-000000000002', importChoiceDigest: 'a'.repeat(64),
+      mappingAncestorRevisionId: '10000000-0000-4000-8000-000000000003', revisionId: '10000000-0000-4000-8000-000000000004', revisionDigest: 'b'.repeat(64) };
+    const plan = planWordManuscriptExport(input, 'docx', pins);
+    expect(plan.writer).toBe(WORD_DOCX_EXPORT_WRITER_IDENTITY);
+    expect(() => requireWordExportBinding(JSON.parse(JSON.stringify(plan.binding)), plan.binding)).not.toThrow();
+    const changed = planWordManuscriptExport(input, 'docx', { ...pins, mappingAncestorRevisionId: '10000000-0000-4000-8000-000000000005' });
+    expect(changed.inputDigest).not.toBe(plan.inputDigest);
+    expect(() => requireWordExportBinding(plan.binding, changed.binding)).toThrow('Word');
+    expect(() => requireWordExportBinding({ ...plan.binding, unknown: true }, plan.binding)).toThrow('Word');
+  });
+
+  it('preserves unchanged table containers while selecting tracked cell text and removing source-only paragraphs', async () => {
+    const body = '<w:p><w:r><w:t>stable</w:t></w:r></w:p><w:tbl><w:tr><w:tc><w:p>' +
+      '<w:del w:id="1"><w:r><w:delText>old</w:delText></w:r></w:del><w:ins w:id="2"><w:r><w:t>new</w:t></w:r></w:ins>' +
+      '</w:p></w:tc><w:tc><w:p><w:del w:id="3"><w:r><w:delText>removed</w:delText></w:r></w:del></w:p></w:tc></w:tr></w:tbl>';
+    for (const mode of ['suggestions', 'accepted-baseline'] as const) {
+      const input = makeInput(body, mode);
+      const output = renderDocxExport(input, { emit: true });
+      const reread = await parseBytes(output.bytes!);
+      expect(reread.blocks.map((block) => block.text)).toEqual(input.blocks.map((block) => block.text));
+      const xml = strFromU8(unzipSync(output.bytes!)['word/document.xml']!);
+      expect((xml.match(/<w:tc>/gu) ?? []).length).toBe(2);
+      if (mode === 'accepted-baseline') expect(xml).not.toContain('removed');
+    }
+  });
+});
 
 // ---- composing the source ------------------------------------------------------------------------------
 
@@ -776,9 +915,11 @@ describe('DOCX export of text boxes and fresh builds', () => {
   it('refuses a Revision without blocks and a mapping that names one source paragraph twice', async () => {
     const { input } = await richInput();
     expect(() => renderDocxExport({ ...input, blocks: [] }, { emit: true })).toThrow(DocxExportError);
-    const rows = [...(input.source as Extract<DocxExportInput['source'], { kind: 'mapped' }>).rows];
+    const source = input.source;
+    if (source.kind !== 'mapped' || isWordMappedDocxSource(source)) throw new Error('expected legacy paragraph mapping');
+    const rows = [...source.rows];
     rows[1] = { ...rows[1]!, sourceParagraphIndex: rows[0]!.sourceParagraphIndex };
-    expect(() => renderDocxExport({ ...input, source: { ...(input.source as Extract<DocxExportInput['source'], { kind: 'mapped' }>), rows } }, { emit: true }))
+    expect(() => renderDocxExport({ ...input, source: { ...source, rows } }, { emit: true }))
       .toThrow(DocxExportError);
   });
 });

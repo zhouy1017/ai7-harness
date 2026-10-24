@@ -11,6 +11,7 @@ import {
   deriveImportFidelityPlan,
   isCleanTracerFidelity,
   parseDocx,
+  compileWordTrackedDocx,
   withTextBoxDisposition,
   type DocumentSignals,
   type ParsedDocxBlock,
@@ -66,6 +67,159 @@ const NO_LOSS: ConversionLoss = {
 // has no such earlier gate and is covered below.
 
 let sandbox: string;
+
+const WORD_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+
+async function compileTrackedBody(body: string, extraEntries: Readonly<Record<string, Uint8Array>> = {}) {
+  const path = join(sandbox, 'word-revisions.docx');
+  await writeFile(path, buildSyntheticDocx({ extraEntries: { 'word/document.xml': Buffer.from(
+    `<w:document xmlns:w="${WORD_NS}" xmlns:x="urn:foreign"><w:body>${body}<w:sectPr/></w:body></w:document>`), ...extraEntries } }));
+  return { path, compiled: await compileWordTrackedDocx(path) };
+}
+
+describe('explicit tracked Word successor compiler (#1132)', () => {
+  it('leaves ordinary, formatting, comments and foreign lookalikes on the historical path', async () => {
+    for (const body of [
+      '<w:p><w:r><w:t>ordinary</w:t></w:r></w:p>',
+      '<w:p><w:pPr><w:pPrChange w:id="1"><w:pPr/></w:pPrChange></w:pPr><w:r><w:t>format</w:t></w:r></w:p>',
+      '<w:p><w:commentRangeStart w:id="0"/><w:r><w:t>comment</w:t></w:r><w:commentRangeEnd w:id="0"/></w:p>',
+      '<w:p><x:ins><w:r><w:t>foreign</w:t></w:r></x:ins></w:p>',
+    ]) expect((await compileTrackedBody(body)).compiled.kind).toBe('ordinary');
+  });
+
+  it('stages an honest accepted preview when all text was inserted, without choosing a baseline', async () => {
+    const { path, compiled } = await compileTrackedBody('<w:p><w:ins w:id="1" w:author=""><w:r><w:t>inserted</w:t></w:r></w:ins></w:p>');
+    expect(compiled.kind).toBe('ready');
+    if (compiled.kind !== 'ready') throw new Error('expected supported tracked input');
+    expect(compiled.previewReading).toBe('accepted');
+    expect(compiled.readings.rejected.blocks).toEqual([]);
+    expect(compiled.readings.accepted.blocks.map((block) => block.text)).toEqual(['inserted']);
+    expect(compiled.graph.events[0]!.rawAuthor).toBe('');
+    expect(compiled.templates).toHaveLength(1);
+    const chunked = await compileWordTrackedDocx(path, undefined, { xmlFeedBytes: 7 });
+    expect(chunked).toEqual(compiled);
+    await expect(parseDocx(path, 'all-inserted.docx', () => undefined)).rejects.toThrow('no editable text blocks');
+  });
+
+  it('keeps raw identities and mixed authors while separating hunks at unchanged whitespace', async () => {
+    const { compiled } = await compileTrackedBody('<w:p><w:r><w:t>start</w:t></w:r>' +
+      '<w:del w:id="1" w:author="A"><w:r><w:delText>old</w:delText></w:r></w:del>' +
+      '<w:ins w:id="2" w:author="B"><w:r><w:t>new</w:t></w:r></w:ins>' +
+      '<w:r><w:t xml:space="preserve"> </w:t></w:r>' +
+      '<w:ins w:id="3" w:author="B"><w:r><w:t>end</w:t></w:r></w:ins></w:p>');
+    if (compiled.kind !== 'ready') throw new Error('expected supported tracked input');
+    expect(compiled.templates.map((sample) => sample.operationKind)).toEqual(['replace', 'insert']);
+    expect(compiled.templates[0]!.eventMembership).toHaveLength(2);
+    expect(new Set(compiled.graph.events.map((event) => event.eventId)).size).toBe(3);
+    expect(compiled.graph.events.map((event) => event.rawId)).toEqual(['1', '2', '3']);
+    expect(compiled.readings.rejected.blocks[0]!.text).toBe('startold');
+    expect(compiled.readings.accepted.blocks[0]!.text).toBe('startnew end');
+  });
+
+  it('preserves contradictory nested run evidence without an empty sample', async () => {
+    const { compiled } = await compileTrackedBody('<w:p><w:r><w:t>plain</w:t></w:r><w:ins w:id="1"><w:del w:id="2">' +
+      '<w:r><w:delText>hidden</w:delText></w:r></w:del></w:ins></w:p>');
+    if (compiled.kind !== 'ready') throw new Error('expected supported tracked input');
+    expect(compiled.templates).toEqual([]);
+    expect(compiled.graph.events.map((event) => event.disposition)).toEqual(['no-visible-transition', 'no-visible-transition']);
+    expect(compiled.graph.events[1]!.parentEventIds).toEqual([compiled.graph.events[0]!.eventId]);
+    expect(compiled.readings.accepted.blocks[0]!.text).toBe('plain');
+    expect(compiled.readings.rejected.blocks[0]!.text).toBe('plain');
+  });
+
+  it.each(['ins', 'del'])('interprets a revised paragraph boundary (%s) independently of ordinary text', async (kind) => {
+    const { compiled } = await compileTrackedBody(`<w:p><w:pPr><w:rPr><w:${kind} w:id="1"/></w:rPr></w:pPr>` +
+      '<w:r><w:t>A</w:t></w:r></w:p><w:p><w:r><w:t>B</w:t></w:r></w:p>');
+    if (compiled.kind !== 'ready') throw new Error('expected supported tracked input');
+    expect(compiled.readings[kind === 'ins' ? 'accepted' : 'rejected'].blocks.map((block) => block.text)).toEqual(['A', 'B']);
+    const joined = compiled.readings[kind === 'ins' ? 'rejected' : 'accepted'];
+    expect(joined.blocks.map((block) => block.text)).toEqual(['AB']);
+    expect(joined.blocks[0]!.sourceParagraphIndices).toEqual([0, 1]);
+    expect(joined.segments.some((segment) => segment.fragment.kind === 'paragraph-boundary')).toBe(true);
+    expect(compiled.templates.map((sample) => sample.operationKind)).toEqual(['paragraph-boundary']);
+  });
+
+  it('pairs different range IDs by exact move name and leaves enclosed ordinary text ordinary', async () => {
+    const { compiled } = await compileTrackedBody('<w:p><w:moveFromRangeStart w:id="4" w:name="move"/>' +
+      '<w:moveFrom w:id="10"><w:r><w:delText>moved</w:delText></w:r></w:moveFrom>' +
+      '<w:r><w:t>stay</w:t></w:r><w:moveFromRangeEnd w:id="4"/></w:p>' +
+      '<w:p><w:moveToRangeStart w:id="9" w:name="move"/>' +
+      '<w:moveTo w:id="11"><w:r><w:t>moved</w:t></w:r></w:moveTo><w:moveToRangeEnd w:id="9"/></w:p>');
+    if (compiled.kind !== 'ready') throw new Error('expected supported tracked input');
+    expect(compiled.templates).toHaveLength(1);
+    expect(compiled.templates[0]!.operationKind).toBe('move');
+    expect(compiled.templates[0]!.eventMembership).toHaveLength(6);
+    expect(compiled.readings.rejected.blocks.map((block) => block.text)).toEqual(['movedstay']);
+    expect(compiled.readings.accepted.blocks.map((block) => block.text)).toEqual(['stay', 'moved']);
+  });
+
+  it('refuses activated unsupported stories and table revisions while retaining exact inventory locations', async () => {
+    const body = '<w:p><w:ins w:id="1"><w:r><w:t>new</w:t></w:r></w:ins></w:p>';
+    const { compiled } = await compileTrackedBody(body, { 'word/header1.xml': Buffer.from(
+      `<w:hdr xmlns:w="${WORD_NS}"><w:p><w:del w:id="2"><w:r><w:delText>old</w:delText></w:r></w:del></w:p></w:hdr>`) });
+    expect(compiled.kind).toBe('unsupported');
+    expect(compiled.inventory.locations.map((location) => location.code)).toContain('story-or-text-box-revision');
+    const table = await compileTrackedBody('<w:tbl><w:tr><w:trPr><w:ins w:id="1"/></w:trPr><w:tc><w:p><w:r><w:t>cell</w:t></w:r></w:p></w:tc></w:tr></w:tbl>');
+    expect(table.compiled.kind).toBe('unsupported');
+    expect(table.compiled.inventory.locations[0]!.code).toBe('table-revision');
+  });
+
+  it('inventories ordinary retained side-story text without imposing main-block text limits on it', async () => {
+    const side = { 'word/header1.xml': Buffer.from(`<w:hdr xmlns:w="${WORD_NS}"><w:p><w:r><w:t>${'a'.repeat(5_000)}</w:t></w:r></w:p></w:hdr>`) };
+    expect((await compileTrackedBody('<w:p><w:r><w:t>ordinary</w:t></w:r></w:p>', side)).compiled.kind).toBe('ordinary');
+    expect((await compileTrackedBody('<w:p><w:r><w:t>base</w:t></w:r><w:ins w:id="1"><w:r><w:t>new</w:t></w:r></w:ins></w:p>', side)).compiled.kind).toBe('ready');
+  });
+
+  it('interprets expanded namespaces consistently while preserving missing and empty raw metadata', async () => {
+    const body = '<w:p><w:r><w:t>base</w:t></w:r><w:del w:id="1" w:author="" w:date=""><w:r><w:delText>old</w:delText></w:r></w:del>' +
+      '<w:ins w:id="2"><w:r><w:t>new</w:t></w:r></w:ins></w:p>';
+    const first = (await compileTrackedBody(body)).compiled;
+    const second = (await compileTrackedBody(body.replace('<w:p>', `<w:p xmlns:q="${WORD_NS}">`).replace(/w:(del|ins|r|t|delText|id|author|date)(?=[\s/>=])/gu, 'q:$1'))).compiled;
+    if (first.kind !== 'ready' || second.kind !== 'ready') throw new Error('expected two namespace-equivalent graphs');
+    expect(second.sourceDigest).not.toBe(first.sourceDigest);
+    expect(second.graph.events.map(({ kind, elementOrdinal, rawId, rawAuthor, rawDate }) => ({ kind, elementOrdinal, rawId, rawAuthor, rawDate })))
+      .toEqual(first.graph.events.map(({ kind, elementOrdinal, rawId, rawAuthor, rawDate }) => ({ kind, elementOrdinal, rawId, rawAuthor, rawDate })));
+    expect(first.graph.events.map((event) => [event.rawAuthor, event.rawDate])).toEqual([['', ''], [null, null]]);
+    expect(second.readings.accepted.blocks.map((block) => block.text)).toEqual(first.readings.accepted.blocks.map((block) => block.text));
+    expect(second.templates.map((template) => template.operationKind)).toEqual(first.templates.map((template) => template.operationKind));
+  });
+
+  it('refuses ambiguous, overlapping and prematurely closed moves rather than returning an empty manifest', async () => {
+    const from = '<w:moveFromRangeStart w:id="1" w:name="n"/><w:moveFrom w:id="2"><w:r><w:delText>A</w:delText></w:r></w:moveFrom><w:moveFromRangeEnd w:id="1"/>';
+    const to = '<w:moveToRangeStart w:id="8" w:name="n"/><w:moveTo w:id="9"><w:r><w:t>A</w:t></w:r></w:moveTo><w:moveToRangeEnd w:id="8"/>';
+    for (const invalid of [from, from + to + to,
+      from.replace('<w:moveFrom w:id="2">', '<w:moveFromRangeStart w:id="3" w:name="other"/><w:moveFrom w:id="2">') + to,
+      from.replace('</w:moveFrom><w:moveFromRangeEnd w:id="1"/>', '<w:moveFromRangeEnd w:id="1"/></w:moveFrom>') + to]) {
+      const compiled = (await compileTrackedBody(`<w:p>${invalid}<w:r><w:t>stable</w:t></w:r></w:p>`)).compiled;
+      expect(compiled.kind).toBe('unsupported');
+      expect(compiled.inventory.locations.some((location) => location.code === 'invalid-move-graph')).toBe(true);
+    }
+  });
+
+  it('refuses mixed projected paragraph joins and observes cancellation through the real compiler', async () => {
+    const compiled = (await compileTrackedBody('<w:p><w:pPr><w:pStyle w:val="Heading1"/><w:rPr><w:del w:id="1"/></w:rPr></w:pPr>' +
+      '<w:r><w:t>A</w:t></w:r></w:p><w:p><w:r><w:t>B</w:t></w:r></w:p>')).compiled;
+    expect(compiled.kind).toBe('unsupported');
+    expect(compiled.inventory.locations[0]!.code).toBe('incompatible-paragraph-join');
+    const { path } = await compileTrackedBody('<w:p><w:r><w:t>base</w:t></w:r><w:ins w:id="1"><w:r><w:t>new</w:t></w:r></w:ins></w:p>');
+    const abort = new AbortController(); abort.abort();
+    await expect(compileWordTrackedDocx(path, undefined, { signal: abort.signal })).rejects.toThrow();
+  });
+
+  it('finds actual stories by expanded root/context and declared XML type rather than a word/ filename prefix', async () => {
+    const plain = '<w:p><w:r><w:t>base</w:t></w:r></w:p>';
+    const unrelated = { 'word/data.xml': Buffer.from(`<x:data xmlns:x="urn:data" xmlns:w="${WORD_NS}"><w:ins w:id="1"/></x:data>`) };
+    expect((await compileTrackedBody(plain, unrelated)).compiled.kind).toBe('ordinary');
+    const types = '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+      '<Default Extension="xml" ContentType="application/xml"/>' +
+      '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>' +
+      '<Override PartName="/custom/header.data" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/></Types>';
+    const compiled = (await compileTrackedBody(plain, { '[Content_Types].xml': Buffer.from(types),
+      'custom/header.data': Buffer.from(`<q:hdr xmlns:q="${WORD_NS}"><q:p><q:ins q:id="1"><q:r><q:t>new</q:t></q:r></q:ins></q:p></q:hdr>`) })).compiled;
+    expect(compiled.kind).toBe('unsupported');
+    expect(compiled.inventory.locations[0]).toMatchObject({ part: 'custom/header.data', code: 'story-or-text-box-revision' });
+  });
+});
 
 beforeEach(async () => {
   sandbox = await mkdtemp(join(tmpdir(), 'ai7-docx-test-'));

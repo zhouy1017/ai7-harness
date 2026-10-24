@@ -2,6 +2,7 @@ import { strToU8, zipSync } from 'fflate';
 import { fixedArchiveTime } from '../../../src/shared/archive-time.js';
 import { graphemesOf } from '../../../src/shared/mark-anchor.js';
 import { ADMITTED_BASELINE_DOCX, sourceSpanText } from '../../support/composed-fixture.js';
+import { buildSyntheticTrackedDocx } from '../../support/synthetic-docx.js';
 
 // Issue #814 explicitly admits this container corpus. Synthetic tokens exercise OOXML elements, not
 // editorial content. The sample1 case reads admitted spans at runtime; no prose or derivative is stored here.
@@ -14,6 +15,27 @@ const run = (text: string, props = ''): string => `<w:r>${props ? `<w:rPr>${prop
 
 export type CorpusSource = 'synthetic' | 'sample1';
 export type CorpusVariant = 'unchanged' | 'edited' | 'mark-exported';
+
+export type WordProfileRecipe = 'replacement' | 'paragraph-join' | 'named-move' | 'all-inserted' | 'all-deleted' | 'normalization' | 'ordinary';
+
+/** Additive compiler/export recipes; these do not change the six historical corpus pairs. */
+export function buildWordProfileRecipe(recipe: WordProfileRecipe): Uint8Array {
+  const text = (value: string): string => `<w:r><w:t xml:space="preserve">${escape(value)}</w:t></w:r>`;
+  const insert = (value: string): string => `<w:ins w:id="2" w:author="B">${text(value)}</w:ins>`;
+  const remove = (value: string): string => `<w:del w:id="1" w:author="A"><w:r><w:delText>${escape(value)}</w:delText></w:r></w:del>`;
+  const recipes: Record<WordProfileRecipe, string> = {
+    replacement: `<w:p>${text('base ')}${remove('old')}${insert('new')}</w:p>`,
+    'paragraph-join': `<w:p><w:pPr><w:rPr><w:del w:id="1"/></w:rPr></w:pPr>${text('A')}</w:p><w:p>${text('B')}</w:p>`,
+    'named-move': `<w:p><w:moveFromRangeStart w:id="3" w:name="named"/><w:moveFrom w:id="4">${remove('A')}</w:moveFrom>` +
+      `<w:moveFromRangeEnd w:id="3"/>${text('stay')}</w:p><w:p><w:moveToRangeStart w:id="8" w:name="named"/>` +
+      `<w:moveTo w:id="9">${text('A')}</w:moveTo><w:moveToRangeEnd w:id="8"/></w:p>`,
+    'all-inserted': `<w:p>${insert('new')}</w:p>`,
+    'all-deleted': `<w:p>${remove('old')}</w:p>`,
+    normalization: `<w:p>${text(' e')}${text('\u0301 \t')}${text(' B ')}${insert('C')}</w:p>`,
+    ordinary: `<w:p>${text('ordinary')}</w:p>`,
+  };
+  return buildSyntheticTrackedDocx(recipes[recipe]);
+}
 
 export async function buildCorpusSource(source: CorpusSource): Promise<Uint8Array> {
   const words = source === 'sample1'

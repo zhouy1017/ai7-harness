@@ -2,6 +2,374 @@ import { createHash } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import type { ManuscriptBlockProjection, TextBoxDisposition } from '../shared/protocol.js';
 import type { ParsedTextBox } from './docx.js';
+import type { ParsedImportedMark } from './docx-marks.js';
+import type { LOCAL_LEARNING_POLICY_BASIS } from './learning-eligibility.js';
+import { canonicalJson as wordCanonicalJson, sha256Hex, DIGEST_PATTERN, UUID_PATTERN, hasExactKeys, isRecord } from './analysis/canonical.js';
+
+/** Frozen local contracts for Issue #1132. None of these definitions activates a store or IPC arm. */
+export const WORD_INTAKE_PROFILE = 'ai7.word-tracked-intake-profile/1' as const;
+export const WORD_SOURCE_SCHEMA = 'ai7.word-revision-source/1' as const;
+export const WORD_EXTRACTOR_IDENTITY = 'ai7-word-tracked-extractor/1' as const;
+export type WordReadingKind = 'rejected' | 'accepted';
+export type WordImportMode = 'suggestions' | 'accepted-baseline';
+export type WordOperationKind = 'insert' | 'delete' | 'replace' | 'move' | 'paragraph-boundary';
+export type WordEventKind = 'ins' | 'del' | 'moveFrom' | 'moveTo' |
+  'moveFromRangeStart' | 'moveFromRangeEnd' | 'moveToRangeStart' | 'moveToRangeEnd' |
+  'commentRangeStart' | 'commentRangeEnd' | 'commentReference';
+
+export interface WordSourceLocation {
+  part: string;
+  paragraphIndex: number;
+  atomOrdinal: number;
+  codeUnitOffset: number;
+}
+
+/** Exact decoded-atom slices; a paragraph boundary is a typed token, never original-text whitespace. */
+export type WordSourceFragment =
+  | { kind: 'text'; part: string; paragraphIndex: number; atomOrdinal: number;
+      fromCodeUnit: number; toCodeUnit: number; codeUnits: number; sha256: string }
+  | { kind: 'paragraph-boundary'; part: string; paragraphIndex: number; atomOrdinal: number; sha256: string };
+
+export interface WordSourceEvent {
+  eventId: string;
+  part: string;
+  elementOrdinal: number;
+  kind: WordEventKind;
+  context: 'run' | 'paragraph-boundary' | 'range' | 'comment';
+  rawId: string | null;
+  rawAuthor: string | null;
+  rawDate: string | null;
+  rangeName: string | null;
+  parentEventIds: string[];
+  location: WordSourceLocation;
+  container: string;
+  linkedEventIds: string[];
+  disposition: 'visible-transition' | 'no-visible-transition' | 'range' | 'comment';
+}
+
+export interface WordSourceAtom {
+  kind: 'text' | 'paragraph-boundary';
+  part: string;
+  paragraphIndex: number;
+  atomOrdinal: number;
+  elementOrdinal: number;
+  codeUnits: number;
+  sha256: string;
+  eventMembership: string[];
+  rejected: boolean;
+  accepted: boolean;
+  /** A retained non-text payload separates mechanically adjacent hunks. */
+  hunkBoundaryBefore: boolean;
+}
+
+export interface WordSourceParagraph {
+  part: string;
+  paragraphIndex: number;
+  container: string;
+  sourcePart: 'body' | 'text-box';
+  boxOrdinal: number | null;
+  anchorParagraphIndex: number | null;
+  kind: 'title' | 'heading' | 'paragraph';
+  level: number | null;
+  atomOrdinals: number[];
+  boundaryAtomOrdinal: number;
+  nonTextBoundary: boolean;
+  sectionBoundary: boolean;
+}
+
+export interface WordSourceComment {
+  rawId: string;
+  rawAuthor: string | null;
+  rawDate: string | null;
+  bodyCodeUnits: number;
+  bodySha256: string;
+  parentId: string | null;
+  resolved: boolean;
+  markerEventIds: string[];
+}
+
+export interface WordRevisionGraph {
+  schema: typeof WORD_SOURCE_SCHEMA;
+  sourceDigest: string;
+  parserIdentity: string;
+  extractorIdentity: typeof WORD_EXTRACTOR_IDENTITY;
+  profile: typeof WORD_INTAKE_PROFILE;
+  events: WordSourceEvent[];
+  atoms: WordSourceAtom[];
+  paragraphs: WordSourceParagraph[];
+  comments: WordSourceComment[];
+}
+
+export interface WordSampleTemplate {
+  templateKey: string;
+  operationKind: WordOperationKind;
+  eventMembership: string[];
+  before: WordSourceFragment[];
+  after: WordSourceFragment[];
+  sourceLocation: WordSourceLocation | null;
+  destinationLocation: WordSourceLocation | null;
+}
+
+export interface WordTrackedEditSample extends Omit<WordSampleTemplate, 'templateKey'> {
+  sampleId: string;
+  bookId: string;
+  sourceDigest: string;
+  extractorIdentity: typeof WORD_EXTRACTOR_IDENTITY;
+  graphDigest: string;
+}
+
+/** A whole normalization group, including every atom participating in NFC or whitespace contraction. */
+export interface WordNormalizationGroup {
+  ordinal: number;
+  fragments: WordSourceFragment[];
+  fromGrapheme: number;
+  toGrapheme: number;
+  normalizedText: string;
+}
+
+export interface WordReadingBlock {
+  blockId: string;
+  position: number;
+  kind: 'title' | 'heading' | 'paragraph';
+  level: number | null;
+  text: string;
+  digest: string;
+  graphemeLength: number;
+  sourceParagraphIndices: number[];
+  groups: WordNormalizationGroup[];
+}
+
+export interface WordSourceSegment {
+  blockId: string;
+  segmentOrdinal: number;
+  groupOrdinal: number;
+  fragment: WordSourceFragment;
+  fromGrapheme: number;
+  toGrapheme: number;
+  normalizedSha256: string;
+}
+
+export interface WordCompiledReading {
+  reading: WordReadingKind;
+  textBoxes: 'retain' | 'merge';
+  usable: boolean;
+  blocks: WordReadingBlock[];
+  segments: WordSourceSegment[];
+  contentDigest: string;
+  structureDigest: string;
+  mappingDigest: string;
+  readingDigest: string;
+  characterCount: number;
+  commentMarks: WordSourceMark[];
+  marks: WordSourceMark[];
+  refusals: WordIncompatibility[];
+}
+
+export interface WordSourceMark {
+  mark: ParsedImportedMark;
+  eventMembership: string[];
+  templateKey: string | null;
+  commentId: string | null;
+  fragments: WordSourceFragment[];
+}
+
+export type WordIncompatibilityCode = 'table-revision' | 'custom-xml-or-math-revision' |
+  'story-or-text-box-revision' | 'incompatible-paragraph-join' | 'invalid-move-graph' |
+  'unrepresentable-comment' | 'unusable-reading';
+
+export interface WordIncompatibility {
+  code: WordIncompatibilityCode;
+  part: string;
+  elementOrdinal: number;
+  paragraphIndex: number | null;
+}
+
+export interface WordIntakeInventory {
+  schema: 'ai7.word-revision-inventory/1';
+  sourceDigest: string;
+  profile: typeof WORD_INTAKE_PROFILE;
+  activating: boolean;
+  eventCount: number;
+  storyParts: string[];
+  locations: WordIncompatibility[];
+}
+
+export interface WordTrackedChoiceInput {
+  mode: WordImportMode;
+  learnFromEdits: boolean;
+  acceptedBaselineConfirmed: boolean;
+}
+
+/** References historical control facts; this module neither selects controls nor overrides current exclusions. */
+export type WordControlReference = { kind: 'entry'; entryId: string; sha256: string } |
+  { kind: 'default'; basis: typeof LOCAL_LEARNING_POLICY_BASIS };
+export interface WordMaterialStandingSnapshot {
+  choice: 'book' | 'house' | 'excluded' | 'deferred';
+  decisionId: string | null;
+  decisionDigest: string | null;
+  basisVersion: number;
+}
+export interface WordImportControlsSnapshot {
+  global: { enabled: boolean; reference: WordControlReference };
+  book: { excluded: boolean; reference: WordControlReference };
+  materials: Array<{ templateKey: string; materialDigest: string; standing: WordMaterialStandingSnapshot }>;
+}
+export interface WordImportChoiceRecord extends WordTrackedChoiceInput {
+  schema: 'ai7.word-import-choice/1';
+  sourceVersionId: string;
+  originalDigest: string;
+  workingObjectDigest: string | null;
+  importReviewId: string;
+  fidelityReviewId: string;
+  commitId: string;
+  revisionId: string;
+  extractorIdentity: typeof WORD_EXTRACTOR_IDENTITY;
+  graphDigest: string;
+  readings: Record<WordReadingKind, { digest: string; blockCount: number; usable: boolean }>;
+  mappingDigest: string;
+  templateManifestDigest: string;
+  effectiveControls: WordImportControlsSnapshot;
+}
+export interface WordLocalImportAdmission {
+  schema: 'ai7.word-local-import-admission/1';
+  sampleId: string;
+  sampleDigest: string;
+  importChoiceDigest: string;
+  basis: typeof LOCAL_LEARNING_POLICY_BASIS;
+  reviewedLearnFromEdits: true;
+  global: { enabled: true; reference: WordControlReference };
+  book: { excluded: false; reference: WordControlReference };
+  standing: WordMaterialStandingSnapshot & { choice: 'book' | 'house' };
+}
+
+export type WordSampleDetailSection = 'before' | 'after' | 'events' | 'imports';
+export type WordSampleDetailField = 'text' | 'rawId' | 'rawAuthor' | 'rawDate' | 'rangeName' | 'record';
+export interface WordSampleCursor {
+  schema: 'ai7.word-sample-cursor/1';
+  sampleDigest: string;
+  detailDigest: string;
+  section: WordSampleDetailSection;
+  entryOrdinal: number;
+  field: WordSampleDetailField;
+  codeUnitOffset: number;
+}
+
+/** Scalar records stay closed and small; every potentially long source field is a separate text entry. */
+export type WordSampleDetailRecord =
+  | { type: 'fragment'; fragment: WordSourceFragment }
+  | { type: 'event'; eventId: string; kind: WordEventKind; context: WordSourceEvent['context'];
+      part: string; elementOrdinal: number; location: WordSourceLocation; disposition: WordSourceEvent['disposition'];
+      parentCount: number; rangeLinkCount: number }
+  | { type: 'event-link'; eventId: string; relation: 'parent' | 'range'; linkedEventId: string; ordinal: number }
+  | { type: 'import'; commitId: string; mode: WordImportMode; sourceVersionId: string; sourceDigest: string;
+      fidelityReviewId: string; revisionId: string; choiceDigest: string; admissionDigest: string }
+  | { type: 'import-admission'; commitId: string; basis: WordLocalImportAdmission };
+
+export type WordSampleDetailEntry = {
+  section: WordSampleDetailSection;
+  entryOrdinal: number;
+  sourceOrdinal: number;
+  childOrdinal: number | null;
+} & (
+  | { kind: 'text'; field: Exclude<WordSampleDetailField, 'record'>; text: string | null;
+      sha256: string | null; fragment: WordSourceFragment | null }
+  | { kind: 'record'; field: 'record'; record: WordSampleDetailRecord }
+);
+
+export type WordSampleDetailItem = Omit<Extract<WordSampleDetailEntry, { kind: 'text' }>, 'text'> & {
+  text: string | null; startCodeUnit: number; endCodeUnit: number; totalCodeUnits: number; complete: boolean;
+} | (Extract<WordSampleDetailEntry, { kind: 'record' }> & { complete: true });
+
+export interface WordSampleDetailPage {
+  bookId: string;
+  sampleId: string;
+  sampleDigest: string;
+  detailDigest: string;
+  sourceVersionId: string;
+  sourceDigest: string;
+  operationKind: WordOperationKind;
+  sectionCounts: Record<WordSampleDetailSection, number>;
+  items: WordSampleDetailItem[];
+  nextCursor: WordSampleCursor | null;
+}
+
+/** Membership is deliberately absent from sample identity and explicitly present in detail-stream identity. */
+export function wordSampleDetailDigest(sampleDigest: string, graphDigest: string, sourceVersionId: string,
+  imports: readonly { choiceDigest: string; admissionDigest: string }[]): string {
+  requireRetention(DIGEST_PATTERN.test(sampleDigest) && DIGEST_PATTERN.test(graphDigest) && UUID_PATTERN.test(sourceVersionId) &&
+    imports.every((entry) => DIGEST_PATTERN.test(entry.choiceDigest) && DIGEST_PATTERN.test(entry.admissionDigest)),
+  'WORD_SAMPLE_INVALID', 'Word 修改样本的详情身份无效。');
+  return sha256Hex(wordCanonicalJson({ schema: 'ai7.word-sample-detail/1', sampleDigest, graphDigest, sourceVersionId, imports }));
+}
+
+/** UTF-16 cursor identity is separate from a Manuscript grapheme anchor, including inside a combining cluster. */
+export function validateWordSampleCursor(value: unknown, identity: { sampleDigest: string; detailDigest: string },
+  entryAt: (section: WordSampleDetailSection, ordinal: number) => WordSampleDetailEntry | null): WordSampleCursor | null {
+  if (value === null) return null;
+  requireRetention(isRecord(value) && hasExactKeys(value, ['schema', 'sampleDigest', 'detailDigest', 'section', 'entryOrdinal', 'field', 'codeUnitOffset']) &&
+    value.schema === 'ai7.word-sample-cursor/1' && value.sampleDigest === identity.sampleDigest && value.detailDigest === identity.detailDigest,
+  'WORD_SAMPLE_CURSOR_INVALID', 'Word 修改样本详情的继续位置或身份无效。');
+  const { section, entryOrdinal, field, codeUnitOffset } = value;
+  requireRetention((section === 'before' || section === 'after' || section === 'events' || section === 'imports') &&
+    typeof entryOrdinal === 'number' && Number.isSafeInteger(entryOrdinal) && entryOrdinal >= 0 &&
+    (field === 'text' || field === 'rawId' || field === 'rawAuthor' || field === 'rawDate' || field === 'rangeName' || field === 'record') &&
+    typeof codeUnitOffset === 'number' && Number.isSafeInteger(codeUnitOffset) && codeUnitOffset >= 0,
+  'WORD_SAMPLE_CURSOR_INVALID', 'Word 修改样本详情的段落、字段或偏移无效。');
+  const entry = entryAt(section, entryOrdinal);
+  requireRetention(entry !== null && entry.section === section && entry.entryOrdinal === entryOrdinal && entry.field === field,
+    'WORD_SAMPLE_CURSOR_INVALID', 'Word 修改样本详情没有这一项或字段。');
+  if (entry.kind === 'record' || entry.text === null) requireRetention(codeUnitOffset === 0, 'WORD_SAMPLE_CURSOR_INVALID', '结构记录或空值不能带有文字偏移。');
+  else {
+    const text = entry.text;
+    requireRetention(codeUnitOffset <= text.length && !(codeUnitOffset > 0 && codeUnitOffset < text.length &&
+      /[\uD800-\uDBFF]/u.test(text[codeUnitOffset - 1]!) && /[\uDC00-\uDFFF]/u.test(text[codeUnitOffset]!)),
+    'WORD_SAMPLE_CURSOR_INVALID', 'Word 修改样本详情的偏移切开了 Unicode 字符。');
+  }
+  return { schema: 'ai7.word-sample-cursor/1', ...identity, section, entryOrdinal, field, codeUnitOffset };
+}
+
+/** The source-only key deliberately excludes mode, Book, commit, normalized block IDs and timestamps. */
+export function wordTemplateKey(sourceDigest: string, template: Omit<WordSampleTemplate, 'templateKey'>): string {
+  return sha256Hex(wordCanonicalJson({ schema: 'ai7.word-sample-key/1', sourceDigest,
+    extractorIdentity: WORD_EXTRACTOR_IDENTITY, ...template }));
+}
+
+export function wordTrackedSample(bookId: string, graph: WordRevisionGraph, template: WordSampleTemplate): WordTrackedEditSample {
+  return wordTrackedSamples(bookId, graph, [template])[0]!;
+}
+
+export function wordTrackedSampleRecord(sample: WordTrackedEditSample): { json: string; digest: string } {
+  const json = wordCanonicalJson({ schema: 'ai7.word-tracked-edit-sample/1', ...sample });
+  return { json, digest: sha256Hex(json) };
+}
+
+/** A whole admitted batch shares one graph digest; sample construction never rehashes the document per edit. */
+export function wordTrackedSamples(bookId: string, graph: WordRevisionGraph, templates: readonly WordSampleTemplate[]): WordTrackedEditSample[] {
+  requireRetention(UUID_PATTERN.test(bookId), 'WORD_SAMPLE_INVALID', 'Word 修改样本的图书标识无效。');
+  const graphDigest = sha256Hex(wordCanonicalJson(graph));
+  return templates.map((template) => {
+    const { templateKey, ...content } = template;
+    requireRetention(templateKey === wordTemplateKey(graph.sourceDigest, content), 'WORD_SAMPLE_INVALID', 'Word 修改样本与原始操作不一致。');
+    requireRetention(content.before.length + content.after.length > 0, 'WORD_SAMPLE_INVALID', 'Word 修改样本没有文字或段落边界。');
+    return { sampleId: `wts_${sha256Hex(wordCanonicalJson({ schema: 'ai7.word-sample-id/1', bookId, templateKey }))}`,
+      bookId, sourceDigest: graph.sourceDigest, extractorIdentity: WORD_EXTRACTOR_IDENTITY,
+      graphDigest, ...content };
+  });
+}
+
+export function validateWordChoice(value: unknown): WordTrackedChoiceInput {
+  requireRetention(value !== null && typeof value === 'object' && !Array.isArray(value), 'WORD_CHOICE_INVALID', '请选择 Word 修订的导入方式。');
+  const choice = Object.getOwnPropertyDescriptors(value);
+  requireRetention(Object.keys(choice).sort().join(',') === 'acceptedBaselineConfirmed,learnFromEdits,mode' &&
+    Object.values(choice).every((entry) => 'value' in entry), 'WORD_CHOICE_INVALID', 'Word 修订导入选择无效。');
+  const mode: unknown = choice.mode?.value;
+  const learnFromEdits: unknown = choice.learnFromEdits?.value;
+  const acceptedBaselineConfirmed: unknown = choice.acceptedBaselineConfirmed?.value;
+  requireRetention((mode === 'suggestions' || mode === 'accepted-baseline') && typeof learnFromEdits === 'boolean' &&
+    typeof acceptedBaselineConfirmed === 'boolean' && acceptedBaselineConfirmed === (mode === 'accepted-baseline'),
+  'WORD_CHOICE_INVALID', '直接并入正文须明确确认；修订建议不能携带定稿确认。');
+  return { mode, learnFromEdits, acceptedBaselineConfirmed };
+}
 
 /**
  * Import retention (Issue #410, plan slice S61; ADR 0086): what schema revision 27 records so that a

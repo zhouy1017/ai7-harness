@@ -32,11 +32,13 @@ import { WRITING_DRAFT_PARSER_IDENTITY } from './writing-tasks.js';
 import type { ManuscriptCheckpointBinding, ManuscriptCheckpointProgress, ManuscriptCheckpointPurpose } from './bounded-manuscript.js';
 import {
   DOCX_EXPORT_WRITER_IDENTITY,
+  WORD_DOCX_EXPORT_WRITER_IDENTITY,
   DocxExportError,
   EDITOR_AUTHOR_LABEL,
   EDITOR_NOTE_AUTHOR_LABEL,
   renderDocxExport,
   exportRetentionDisclosure,
+  isWordMappedDocxSource,
   type DocxExportBlock,
   type DocxExportInput,
   type DocxExportMark,
@@ -228,6 +230,72 @@ const FORMAT_WRITERS: Readonly<Record<ManuscriptExportFormat, string>> = {
   pdf: PDF_EXPORT_WRITER_IDENTITY,
   markdown: MARKDOWN_EXPORT_WRITER_IDENTITY,
 };
+
+/** Closed Word preparation pins. Phase B connects these pure helpers to the existing plan/replay owner. */
+export interface WordExportPreparationBinding {
+  schema: 'ai7.export.word-source-binding/1';
+  writer: string;
+  format: ManuscriptExportFormat;
+  sourceVersionId: string;
+  sourceDigest: string;
+  workingObjectDigest: string | null;
+  importCommitId: string;
+  importChoiceDigest: string;
+  mode: 'suggestions' | 'accepted-baseline';
+  graphDigest: string;
+  compilerIdentity: string;
+  extractorIdentity: string;
+  selectedReadingDigest: string;
+  mappingAncestorRevisionId: string;
+  orderedSegmentsDigest: string;
+  revisionId: string;
+  revisionDigest: string;
+  marksDigest: string;
+  optionsDigest: string;
+}
+
+export interface WordExportSourcePins {
+  sourceVersionId: string;
+  workingObjectDigest: string | null;
+  importCommitId: string;
+  importChoiceDigest: string;
+  mappingAncestorRevisionId: string;
+  revisionId: string;
+  revisionDigest: string;
+}
+
+/** One selected writer and one binding determine the Word input digest; legacy plans stay unchanged. */
+export function planWordManuscriptExport(input: DocxExportInput, format: ManuscriptExportFormat, pins: WordExportSourcePins): {
+  writer: string; binding: WordExportPreparationBinding; inputDigest: string;
+} {
+  const source = input.source;
+  requireExport(isWordMappedDocxSource(source), 'EXPORT_RECORD_INVALID', 'Word 导出计划缺少其独立来源映射。');
+  for (const id of [pins.sourceVersionId, pins.importCommitId, pins.mappingAncestorRevisionId, pins.revisionId]) {
+    requireExport(UUID_PATTERN.test(id), 'EXPORT_RECORD_INVALID', 'Word 导出计划的来源或版本标识无效。');
+  }
+  for (const digest of [pins.importChoiceDigest, pins.revisionDigest, source.mapping.graphDigest,
+    source.mapping.readingDigest, source.mapping.mappingDigest]) {
+    requireExport(DIGEST_PATTERN.test(digest), 'EXPORT_RECORD_INVALID', 'Word 导出计划的固定摘要无效。');
+  }
+  requireExport(pins.workingObjectDigest === null || DIGEST_PATTERN.test(pins.workingObjectDigest), 'EXPORT_RECORD_INVALID', 'Word 工作对象摘要无效。');
+  requireExport(sha256Hex(source.original) === source.mapping.graph.sourceDigest &&
+    sha256Hex(canonicalJson(source.mapping.graph)) === source.mapping.graphDigest &&
+    sha256Hex(canonicalJson(source.mapping.segments)) === source.mapping.mappingDigest,
+  'EXPORT_RECORD_INVALID', 'Word 导出来源、图或有序映射与其摘要不一致。');
+  const writer = format === 'docx' ? WORD_DOCX_EXPORT_WRITER_IDENTITY : FORMAT_WRITERS[format];
+  const binding: WordExportPreparationBinding = { schema: 'ai7.export.word-source-binding/1', writer, format,
+    ...pins, sourceDigest: source.mapping.graph.sourceDigest, mode: source.mapping.mode, graphDigest: source.mapping.graphDigest,
+    compilerIdentity: source.mapping.graph.parserIdentity, extractorIdentity: source.mapping.graph.extractorIdentity,
+    selectedReadingDigest: source.mapping.readingDigest, orderedSegmentsDigest: source.mapping.mappingDigest,
+    marksDigest: sha256Hex(canonicalJson(input.marks)), optionsDigest: sha256Hex(canonicalJson(input.options)) };
+  return { writer, binding, inputDigest: canonicalRecord({ schema: 'ai7.export.word-input/1', binding, title: input.title }).digest };
+}
+
+/** Replay compares the entire canonical pin set, even when newly rendered bytes happen to be identical. */
+export function requireWordExportBinding(recorded: unknown, current: WordExportPreparationBinding): void {
+  requireExport(isRecord(recorded) && canonicalJson(recorded) === canonicalJson(current),
+    'EXPORT_PREPARATION_INVALID', 'Word 导出准备的来源、选择、版本、标记或写入器已经变化。');
+}
 /** How a format laid out from the manuscript's words alone is written, in the editor's words. */
 export const EXPORT_TEXT_RESTORATION_LINES: Readonly<Record<'pdf' | 'markdown', string>> = {
   pdf: '这份 PDF 按稿件文字排版生成：书名、章节标题与段落按稿件写出，不从原文件恢复任何内容。',

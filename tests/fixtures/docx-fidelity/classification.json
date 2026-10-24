@@ -1,4 +1,20 @@
 {
+  "wordTrackedProfile": {
+    "profile": "ai7.word-tracked-intake-profile/1",
+    "evidence": "phase-a-compiler-graph-mapping-export",
+    "writer": "ai7-docx-word-export/1",
+    "recipes": {
+      "replacement": { "samples": 1, "rejected": ["base old"], "accepted": ["base new"] },
+      "paragraph-join": { "samples": 1, "rejected": ["A", "B"], "accepted": ["AB"] },
+      "named-move": { "samples": 1, "rejected": ["Astay"], "accepted": ["stay", "A"] },
+      "all-inserted": { "samples": 1, "rejected": [], "accepted": ["new"] },
+      "all-deleted": { "samples": 1, "rejected": ["old"], "accepted": [] },
+      "normalization": { "samples": 1, "rejected": ["é B"], "accepted": ["é B C"] }
+    },
+    "ordinaryCounterfactual": "historical-reader-unchanged",
+    "formatting": "retained-original-or-disclosed-paragraph-regeneration",
+    "productEvidence": "phase-b-held"
+  },
   "sources": [
     "synthetic",
     "sample1"
