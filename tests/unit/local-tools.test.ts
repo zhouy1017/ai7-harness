@@ -26,14 +26,15 @@ function block(): { targetedRetrieval: Record<string, unknown>; breaker: Record<
 }
 
 describe('readLocalToolsRule (Provider Processing v18 and v19, Issue #891)', () => {
-  it('preserves existing retrieval on v26 rules while leaving declaration metadata inert', () => {
+  it('retains verified v26 declarations while preserving the predecessor retrieval bounds', () => {
     const prior = rulesOf('v25');
     for (const rule of rulesOf('v26')) {
       const reading = readLocalToolsRule(rule);
       expect(reading).not.toBeNull();
-      expect(reading).toEqual(readLocalToolsRule(prior.find((entry) => entry.ruleId === rule.ruleId)));
-      expect(reading?.declarations).toBeUndefined();
-      expect(reading?.parallelCallsAllowed).toBeUndefined();
+      const previous = readLocalToolsRule(prior.find((entry) => entry.ruleId === rule.ruleId));
+      expect(reading?.targetedRetrieval).toEqual(previous?.targetedRetrieval);
+      expect(reading?.breaker).toEqual(previous?.breaker);
+      expect(reading?.declarations).toEqual((rule.localTools as { declarations?: unknown }).declarations);
     }
   });
 
@@ -42,8 +43,8 @@ describe('readLocalToolsRule (Provider Processing v18 and v19, Issue #891)', () 
       (value) => { value['unknown'] = true; },
       (value) => { delete value['parallelCallsAllowed']; },
       (value) => { delete value['declarations']; },
-      (value) => { value['parallelCallsAllowed'] = false; },
-      (value) => { value['declarations'] = []; },
+      (value) => { value['parallelCallsAllowed'] = 5; },
+      (value) => { value['declarations'] = [{ name: 'shell', readOnly: true, concurrencySafe: true }]; },
       (value) => { (value['declarations'] as Array<Record<string, unknown>>)[0]!['readOnly'] = false; },
       (value) => { (value['declarations'] as Array<Record<string, unknown>>)[0]!['unknown'] = true; },
       (value) => { (value['targetedRetrieval'] as Record<string, unknown>)['allowed'] = false; },

@@ -55,7 +55,7 @@ describe('publication-risk policy admission', () => {
     expect(liveReviewRule(policy, entry)).not.toBeNull();
     const retrieval = localToolsFromProjection(liveReviewRule(policy, entry));
     expect(retrieval?.targetedRetrieval.allowed).toBe(true);
-    expect(retrieval?.declarations).toBeUndefined();
+    expect(retrieval?.declarations).toHaveLength(7);
     expect(liveKindAdmission(policy, definition, binding)).not.toBeNull();
     expect(kindResearchDeclaration(policy, definition.kind, { webSearch: true, searchEngine: 'user-selected-backend' }))
       .toEqual({ webSearch: false, searchEngine: null });

@@ -919,9 +919,10 @@ export class BaselineAnalysisExecutionOwner {
     const definition = ledger.definitionForRun(facts.runRecordId, facts.promptContractDigest);
     const webTools = definition.evidenceAssuranceLevel !== 'quick' && facts.webToolsBackend !== undefined;
     const composition = describeComposition(route, model, definition.promptContractDigest, {
+      ...facts.compositionOptions,
       platformTools: webTools,
-      localTools: definition.evidenceAssuranceLevel !== 'quick' &&
-        kindLocalTools(this.#policy(), ledger.definition.kind, facts.origin === 'background-analysis-enrollment' ? 'background' : 'foreground') !== null,
+      localTools: definition.evidenceAssuranceLevel !== 'quick' ?
+        kindLocalTools(this.#policy(), ledger.definition.kind, facts.origin === 'background-analysis-enrollment' ? 'background' : 'foreground') ?? false : false,
       ...(definition.evidenceAssuranceLevel === 'quick' ? { researchDeclaration: definition.researchDeclaration } :
         webTools ? { researchDeclaration: { webSearch: true, searchEngine: 'user-selected-backend' } as const } : {}),
     });
@@ -1316,12 +1317,17 @@ export class BaselineAnalysisExecutionOwner {
     }
     const blocks = ledger.readRevisionBlocks(facts.checkpoint.manuscriptId, facts.checkpoint.revisionId);
     // 快速整理 registers no local tool (Issue #901; EASSURE-004): its Run lists and locates, and searches nothing.
-    const localRule = live === null || definition.evidenceAssuranceLevel === 'quick' ? null
+    const admittedLocalRule = live === null || definition.evidenceAssuranceLevel === 'quick' ? null
       : kindLocalTools(policy, definition.kind, facts.origin === 'background-analysis-enrollment' ? 'background' : 'foreground');
+    const localRule = facts.compositionOptions?.version === 2 || admittedLocalRule === null ? admittedLocalRule :
+      { targetedRetrieval: admittedLocalRule.targetedRetrieval, breaker: admittedLocalRule.breaker };
+    const scopedUnitOrdinals = facts.update === null ? null : new Set(facts.update.reusePlan.units.filter((unit) => unit.disposition === 'recomputed').map((unit) => unit.unitOrdinal));
+    const readableBlocks = new Set(facts.manifest.units.filter((unit) => scopedUnitOrdinals === null || scopedUnitOrdinals.has(unit.ordinal)).flatMap((unit) => [...unit.blockIds, ...unit.overlapBlockIds]));
     const retrieval = localRule === null ? null : this.#deps.retrievalIndex?.(facts.runRecordId, ledger) ?? new RetrievalIndex([{
       sourceKind: 'manuscript', sourceId: facts.checkpoint.manuscriptId, digest: facts.checkpoint.revisionDigest,
-      read: () => ({ digest: facts.checkpoint.revisionDigest, segments: ledger.readRevisionBlocks(facts.checkpoint.manuscriptId, facts.checkpoint.revisionId).map((block) => ({ blockId: block.blockId, text: block.text })) }),
-    }]);
+      read: () => ({ digest: facts.checkpoint.revisionDigest, segments: ledger.readRevisionBlocks(facts.checkpoint.manuscriptId, facts.checkpoint.revisionId)
+        .filter((block) => facts.compositionOptions?.version !== 2 || readableBlocks.has(block.blockId)).map((block) => ({ blockId: block.blockId, text: block.text })) }),
+    }], null, null, ledger.pinnedToolSourcesForRun(facts.runRecordId));
     const blocksById = new Map(blocks.map((block) => [block.blockId, block] as const));
     const manifest = facts.manifest;
     const update = facts.update;
@@ -1385,6 +1391,8 @@ export class BaselineAnalysisExecutionOwner {
     // transport. Nothing but the count crosses this closure.
     active.transmissions = () => liveAdapter.instance?.transmissions ?? 0;
     const harness = await prepareExecution({
+      compositionOptions: { ...facts.compositionOptions, ...(localRule === null ? {} : { localTools: localRule }) },
+      ...(localRule === null ? {} : { localToolsRule: localRule }),
       ...(localRule === null ? {} : { localTools: {
         execute: (call: import('../harness/primary-agent-harness.js').PlatformToolExecution) => platformSession!.execute(call),
         admit: (result: Parameters<PlatformToolSession['admit']>[0]) => platformSession!.admit(result),
@@ -1479,7 +1487,8 @@ export class BaselineAnalysisExecutionOwner {
     try {
       // The plan remains immutable. An offline-at-start row authorizes exactly the quick composition recorded for this Run.
       const expectedComposition = factualAssurance?.disclosure != null
-        ? describeComposition(route, model, definition.promptContractDigest, live === null ? {} : {
+        ? describeComposition(route, model, definition.promptContractDigest, live === null ? facts.compositionOptions : {
+          ...facts.compositionOptions,
           platformTools: false, localTools: false, researchDeclaration: { webSearch: false, searchEngine: null },
         }).digest : facts.behaviorCompositionDigest;
       requireCompositionMatch(harness.composition.digest, expectedComposition);
@@ -3031,6 +3040,7 @@ function executionBindingRecordOf(input: {
       sidecarSha256: facts.artifactPin.sidecarSha256,
     },
     behaviorCompositionDigest: input.compositionDigest,
+    ...(facts.compositionOptions?.version === 2 ? { compositionVersion: 2 as const } : {}),
     promptContractDigest: definition.promptContractDigest,
     contractVersion: definition.contractVersion,
     harnessSessionId: input.harnessSessionId,

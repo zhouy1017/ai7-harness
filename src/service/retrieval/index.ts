@@ -38,6 +38,13 @@ export const RETRIEVAL_CHUNK_SIZE = 1_200;
 export const RETRIEVAL_CHUNK_OVERLAP = 120;
 export const RETRIEVAL_PREVIEW_SIZE = 200;
 export const RETRIEVAL_MAX_CANDIDATES = 8;
+/** Bounded plan snapshots, never a callback to live ledger rows. Their digest is part of composition v2. */
+export interface PinnedLocalToolSources {
+  readonly baseline: { readonly revisionId: string; readonly digest: string; readonly entities: readonly unknown[];
+    readonly events: readonly unknown[]; readonly settingClaims: readonly unknown[] } | null;
+  readonly guidelines: readonly { readonly documentId: string; readonly version: string; readonly clauses: readonly { readonly clauseId: string; readonly text: string }[] }[];
+  readonly terms: readonly unknown[];
+}
 
 /** Runs of Han characters become adjacent bigrams; Latin words and numbers remain whole tokens. */
 export function retrievalTokens(text: string): string[] {
@@ -99,13 +106,40 @@ export class RetrievalIndex {
   readonly #embedding: RetrievalEmbeddingProvider | null;
   readonly #materialVectors: RetrievalMaterialVectorQuery | null;
   #disposed = false;
-  constructor(sources: readonly RetrievalSource[], embedding: RetrievalEmbeddingProvider | null = null, materialVectors: RetrievalMaterialVectorQuery | null = null) {
+  readonly #records: PinnedLocalToolSources | null;
+  constructor(sources: readonly RetrievalSource[], embedding: RetrievalEmbeddingProvider | null = null, materialVectors: RetrievalMaterialVectorQuery | null = null,
+    records: PinnedLocalToolSources | null = null) {
+    this.#records = records === null ? null : JSON.parse(canonicalJson(records)) as PinnedLocalToolSources;
     this.#sources = new Map(sources.map((source) => [this.#sourceKey(source.sourceKind, source.sourceId), Object.freeze({ ...source })]));
     if (this.#sources.size !== sources.length) throw new Error('RETRIEVAL_DUPLICATE_SOURCE');
     this.#embedding = embedding;
     this.#materialVectors = materialVectors;
   }
   #sourceKey(kind: RetrievalSourceKind, id: string): string { return `${kind}:${id}`; }
+  /** Whole pinned blocks only; the source reader already enforces Book, revision and Run scope. */
+  #manuscriptBlocks(): ReturnType<RetrievalSource['read']>['segments'] {
+    if (this.#disposed) throw new RetrievalError('RETRIEVAL_SOURCE_NOT_AUTHORIZED');
+    return [...this.#sources.values()].filter((source) => source.sourceKind === 'manuscript').flatMap((source) => [...this.#read(source).segments]);
+  }
+  readBlocks(blockId: string, radius: number): ReturnType<RetrievalSource['read']>['segments'] {
+    const blocks = this.#manuscriptBlocks();
+    const index = blocks.findIndex((block) => block.blockId === blockId);
+    if (index === -1) throw new RetrievalError('RETRIEVAL_SOURCE_NOT_AUTHORIZED');
+    return blocks.slice(Math.max(0, index - radius), index + radius + 1);
+  }
+  searchManuscript(query: string, mode: 'exact' | 'tokenized'): ReturnType<RetrievalSource['read']>['segments'] {
+    const tokens = retrievalTokens(query);
+    return this.#manuscriptBlocks().filter((block) => mode === 'exact' ? block.text.normalize('NFC').includes(query)
+      : tokens.length > 0 && tokens.every((token) => retrievalTokens(block.text).includes(token))).slice(0, RETRIEVAL_MAX_CANDIDATES);
+  }
+  pinnedRecords(tool: 'baseline_facts' | 'guideline_clause' | 'term_table', clauseId?: string): unknown {
+    if (this.#disposed) throw new RetrievalError('RETRIEVAL_SOURCE_NOT_AUTHORIZED');
+    if (tool === 'baseline_facts') return this.#records?.baseline ?? [];
+    if (tool === 'term_table') return this.#records?.terms ?? [];
+    return (this.#records?.guidelines ?? []).flatMap((document) => document.clauses
+      .filter((clause) => clauseId === undefined || clause.clauseId === clauseId)
+      .map((clause) => ({ documentId: document.documentId, version: document.version, ...clause })));
+  }
   #read(source: RetrievalSource): ReturnType<RetrievalSource['read']> {
     try {
       const reading = source.read();

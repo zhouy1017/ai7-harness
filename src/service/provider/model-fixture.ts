@@ -69,6 +69,8 @@ export type ModelFixtureProvenance = 'recorded' | 'authored';
 const FIXTURE_PROVENANCE: readonly ModelFixtureProvenance[] = ['recorded', 'authored'];
 
 export type ModelFixtureResponse =
+  | { readonly kind: 'tool-calls'; readonly calls: readonly { readonly name: string; readonly arguments: Readonly<Record<string, unknown>> }[];
+      readonly usage: { readonly inputTokens: number; readonly outputTokens: number } }
   | { readonly kind: 'unit-result'; readonly text: string; readonly usage: { readonly inputTokens: number; readonly outputTokens: number } }
   /**
    * An Interactive Editorial Dialogue answer (Issue #52, S17a): the text deltas the model streams, in order, so a test and
@@ -187,6 +189,16 @@ function wellFormed(value: unknown, maximum: number): value is string {
 function parseResponse(value: unknown): ModelFixtureResponse {
   requireFixture(isRecord(value), '夹具响应不是对象。');
   switch (value.kind) {
+    case 'tool-calls': {
+      requireFixture(hasExactKeys(value, ['kind', 'calls', 'usage']) && Array.isArray(value.calls) && value.calls.length > 0 && value.calls.length <= 5 &&
+        value.calls.every((call: unknown) => isRecord(call) && hasExactKeys(call, ['name', 'arguments']) &&
+          typeof call.name === 'string' && /^[a-z][a-z_]{0,63}$/u.test(call.name) && isRecord(call.arguments) && Buffer.byteLength(canonicalJson(call.arguments)) <= 4096) &&
+        isRecord(value.usage) && hasExactKeys(value.usage, ['inputTokens', 'outputTokens']) &&
+        Number.isSafeInteger(value.usage.inputTokens) && Number(value.usage.inputTokens) >= 0 &&
+        Number.isSafeInteger(value.usage.outputTokens) && Number(value.usage.outputTokens) >= 0, '夹具工具调用响应无效。');
+      return { kind: 'tool-calls', calls: value.calls as unknown as Extract<ModelFixtureResponse, { kind: 'tool-calls' }>['calls'],
+        usage: { inputTokens: value.usage.inputTokens as number, outputTokens: value.usage.outputTokens as number } };
+    }
     case 'unit-result': {
       requireFixture(hasExactKeys(value, ['kind', 'text', 'usage']) && wellFormed(value.text, 64 * 1024) && isRecord(value.usage) &&
         hasExactKeys(value.usage, ['inputTokens', 'outputTokens']) &&

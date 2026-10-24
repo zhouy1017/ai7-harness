@@ -1426,6 +1426,23 @@ async function main() {
   process.stdout.write(`${request.out}\n`);
 }
 
+/** Build an explicit authored local-tool turn; no captured fixture is rewritten or promoted to authored. */
+export function authoredToolScriptEntries({ unitOrdinal, requestDigest, calls, results, text, usage }) {
+  const names = ['retrieve', 'exact_fetch', 'read_blocks', 'baseline_facts', 'guideline_clause', 'term_table', 'search_manuscript'];
+  refuse(Number.isSafeInteger(unitOrdinal) && unitOrdinal > 0 && /^[0-9a-f]{64}$/u.test(requestDigest) &&
+    Array.isArray(calls) && calls.length > 0 && calls.length <= 5 && calls.every((call) => names.includes(call.name) &&
+      call.arguments !== null && typeof call.arguments === 'object' && !Array.isArray(call.arguments)) &&
+    Array.isArray(results) && results.length === calls.length && results.every((result) => typeof result.text === 'string' && typeof result.isError === 'boolean') &&
+    typeof text === 'string' && text.length <= 65536 && usage !== null && typeof usage === 'object' &&
+    Number.isSafeInteger(usage.inputTokens) && usage.inputTokens >= 0 && Number.isSafeInteger(usage.outputTokens) && usage.outputTokens >= 0,
+  'FIXTURE_GEN/tool-script-invalid', '编写的本机工具脚本无效。');
+  const digest = sha256Hex(canonicalJson(results.map(({ text: resultText, isError }) => ({ text: resultText, isError }))));
+  return [
+    { unitOrdinal, requestDigest, response: { kind: 'tool-calls', calls, usage } },
+    { unitOrdinal, requestDigest: digest, response: { kind: 'unit-result', text, usage } },
+  ];
+}
+
 const invokedDirectly = process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (invokedDirectly) {
   main().catch((error) => {

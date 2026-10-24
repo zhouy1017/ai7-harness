@@ -1276,7 +1276,7 @@ async function main() {
       prepared.executionPlan?.effects?.length === 0 && prepared.executionPlan?.unitCount === SAMPLE1_UNITS &&
       prepared.planEnvelope?.dispatchAllowed === true && prepared.planEnvelope?.providerStatus === 'remote-denied-local-deterministic' &&
       DIGEST_PATTERN.test(prepared.planEnvelope?.digest) && prepared.planEnvelope?.promptContractDigest === PROMPT_CONTRACT_DIGEST &&
-      DIGEST_PATTERN.test(prepared.planEnvelope?.behaviorCompositionDigest) &&
+      DIGEST_PATTERN.test(prepared.planEnvelope?.behaviorCompositionDigest) && prepared.planEnvelope?.compositionVersion === 2 &&
       prepared.authorization === null && prepared.run === null && prepared.resultSetRevision === null && prepared.taskOutcome === null &&
       prepared.actions?.canPrepare === false && prepared.actions?.canAuthorize === true,
     'prepared-exact-envelope', { fixtureDigest, plan, executionPlan: prepared.executionPlan, planEnvelope: prepared.planEnvelope, actions: prepared.actions });
@@ -1369,7 +1369,7 @@ async function main() {
       attempt.executionBinding?.model === 'ai7-deterministic-fixture' && attempt.executionBinding?.fixtureIdentity === FIXTURE_IDENTITY &&
       attempt.executionBinding?.fixtureSha256 === fixtureDigest && attempt.executionBinding?.promptContractDigest === PROMPT_CONTRACT_DIGEST &&
       attempt.executionBinding?.planEnvelopeDigest === prepared.planEnvelope.digest && attempt.executionBinding?.coverageManifestDigest === manifest.digest &&
-      attempt.executionBinding?.behaviorCompositionDigest === prepared.planEnvelope.behaviorCompositionDigest &&
+      attempt.executionBinding?.behaviorCompositionDigest === prepared.planEnvelope.behaviorCompositionDigest && attempt.executionBinding?.compositionVersion === 2 &&
       attempt.executionBinding?.nativeCarrierSha256 === NATIVE_CARRIER_DIGEST && attempt.executionBinding?.sidecarRevision === 2 &&
       attempt.spans?.length === SAMPLE1_UNITS &&
       JSON.stringify(attempt.spans.map((span) => span.unitOrdinal)) === JSON.stringify([1, 2, 3, 4, 5, 6, 7, 8]) &&

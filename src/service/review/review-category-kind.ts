@@ -37,6 +37,10 @@ import {
   REVIEW_CATEGORY_UNIT_RESULT_SCHEMA_V1,
 } from './review-category-contract.js';
 import { reduceReviewCategory, type ReviewUnitOutcome } from './review-category-reducers.js';
+import type { LocalToolsRule } from '../provider/local-tools.js';
+import { ruleNamedToolSchemas } from '../provider/platform-tools.js';
+import { mapTaskMaterialBase } from '../task-material-references.js';
+import { withModelClarification } from '../provider/clarification-contract.js';
 
 /**
  * One Review Category as an analysis kind (Issue #417, plan slice S69): `editorial-review/<categoryId>`,
@@ -98,8 +102,9 @@ export function reviewCategorySchemaDigest(promptContractDigest: string, version
   }));
 }
 
-export function reviewCategoryKindDefinition(input: ReviewCategoryContractInput, version: 1 | 2 = 2): AnalysisKindDefinition {
-  const contract = reviewCategoryContract(input, version);
+export function reviewCategoryKindDefinition(input: ReviewCategoryContractInput, version: 1 | 2 = 2, tools?: LocalToolsRule): AnalysisKindDefinition {
+  const names = tools?.declarations === undefined ? [] : ruleNamedToolSchemas(false, tools).map((schema) => schema.name);
+  const contract = reviewCategoryContract(input, version, names);
   const category = contract.category;
   const promptContractDigest = reviewCategoryContractDigest(contract);
   const clauseIds = category.clauses.map((clause) => clause.clauseId);
@@ -246,5 +251,35 @@ export function reviewCategoryKindDefinition(input: ReviewCategoryContractInput,
     conflictCountOf: () => 0,
     mode: modeIndex(modes),
   };
+  return Object.assign(definition, { reviewToolInput: input, reviewToolPromptDigest: promptContractDigest,
+    ...(names.length === 0 ? {} : { numberedReviewContract: reviewCategoryKindDefinition(input, 2) }) });
+}
+
+/** Policy selects prompt bytes only for new plans; both earlier prompt contracts remain reproducible. */
+export function withReviewLocalTools(definition: AnalysisKindDefinition, tools: LocalToolsRule | null): AnalysisKindDefinition {
+  if (definition.contractVersion === 'ai7.editorial-review/1') return definition;
+  const owned = definition as AnalysisKindDefinition & { reviewToolPromptDigest?: string; numberedReviewContract?: AnalysisKindDefinition; toolPromptPredecessor?: AnalysisKindDefinition };
+  if (tools?.declarations === undefined) return owned.toolPromptPredecessor ??
+    (owned.reviewToolPromptDigest === definition.promptContractDigest ? owned.numberedReviewContract ?? definition : definition);
+  const material = mapTaskMaterialBase(definition, (base) => withReviewLocalTools(base, tools));
+  if (material !== null) return material;
+  const input = (definition as AnalysisKindDefinition & { reviewToolInput?: ReviewCategoryContractInput }).reviewToolInput;
+  if (input === undefined) return definition;
+  const numbered = reviewCategoryKindDefinition(input, 2);
+  const next = reviewCategoryKindDefinition(input, 2, tools);
+  // Other wrappers retain their own proof; only this owner's exact base can be replaced here.
+  return owned.reviewToolPromptDigest === definition.promptContractDigest || definition.promptContractDigest === numbered.promptContractDigest ? next : definition;
+}
+export function pinnedReviewDefinition(definition: AnalysisKindDefinition, digest: string): AnalysisKindDefinition {
+  const numbered = (definition as AnalysisKindDefinition & { numberedReviewContract?: AnalysisKindDefinition }).numberedReviewContract;
+  const predecessor = (definition as AnalysisKindDefinition & { toolPromptPredecessor?: AnalysisKindDefinition }).toolPromptPredecessor;
+  for (const candidate of [definition, predecessor, numbered, definition.legacyReviewContract]) {
+    if (candidate === undefined) continue;
+    if (candidate.promptContractDigest === digest) return candidate;
+    if (candidate.clarificationBase === undefined) {
+      const clarified = withModelClarification(candidate);
+      if (clarified.promptContractDigest === digest) return clarified;
+    }
+  }
   return definition;
 }

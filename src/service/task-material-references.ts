@@ -30,6 +30,12 @@ export interface LiveMaterialContract {
 
 // Keep the wrapper's derivation with its actual definition. A copied/replaced definition cannot claim its proof.
 const liveMaterialContracts = new WeakMap<object, () => LiveMaterialContract | null>();
+const materialBaseMappers = new WeakMap<object, (map: (base: AnalysisKindDefinition) => AnalysisKindDefinition) => AnalysisKindDefinition>();
+
+/** Rebuild only a real wrapper through the frozen boundary/readings that originally proved it. */
+export function mapTaskMaterialBase(definition: AnalysisKindDefinition, map: (base: AnalysisKindDefinition) => AnalysisKindDefinition): AnalysisKindDefinition | null {
+  return materialBaseMappers.get(definition)?.(map) ?? null;
+}
 
 export function liveMaterialContract(definition: object): LiveMaterialContract | null {
   return liveMaterialContracts.get(definition)?.() ?? null;
@@ -217,6 +223,12 @@ export function taskMaterialKindDefinition(
       ? base.kind === 'evaluation' ? initialEvaluationRequestDigest(promptContractDigest, ordinal, unitDigest) : readersReportRequestDigest(promptContractDigest, ordinal, unitDigest)
       : sha256Hex(canonicalJson({ promptContractDigest, baseRequestDigest: base.requestDigest(ordinal, unitDigest) })),
   };
+  materialBaseMappers.set(definition, (map) => {
+    if (refusal !== null) return definition;
+    const mapped = map(base);
+    if (mapped.promptContractDigest === base.promptContractDigest) return definition;
+    return Object.assign(taskMaterialKindDefinition(mapped, boundary, readings), { toolPromptPredecessor: definition });
+  });
   return materialContractDefinition(definition, () => {
     if (refusal !== null) return null;
     const baseDigest = evaluation ? base.livePromptContractDigest?.() : base.promptContractDigest;

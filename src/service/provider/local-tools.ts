@@ -16,7 +16,7 @@ export const LOCAL_TOOL_CANDIDATES_PER_CALL = 8;
 export const LOCAL_TOOL_ROUND_TRIP_BREAKER = 128;
 /** How a unit the breaker ends is disclosed. */
 export const LOCAL_TOOL_BREAKER_END = '检索未完成';
-/** v26 eligibility only; the current reader still returns the existing targeted retrieval terms. */
+/** The closed local capability vocabulary; registration selects the verified rule's exact named subset. */
 export const LOCAL_TOOL_DECLARATION_NAMES = ['retrieve', 'exact_fetch', 'read_blocks', 'baseline_facts', 'guideline_clause', 'term_table', 'search_manuscript'] as const;
 
 /** The `localTools` block of one Provider Processing v18 or v19 rule, exactly as the policy states it (the shape the launch projects). */
@@ -61,9 +61,10 @@ export function readLocalToolsRule(rule: unknown): LocalToolsRule | null {
     'localTools 字段不完整或含有未知字段。');
   if (metadata) {
     const declarations = block['declarations'];
-    requireRule(block['parallelCallsAllowed'] === true && Array.isArray(declarations) && declarations.length === LOCAL_TOOL_DECLARATION_NAMES.length &&
-      declarations.every((entry, index) => isRecord(entry) && exactKeys(entry, ['name', 'readOnly', 'concurrencySafe']) &&
-        entry['name'] === LOCAL_TOOL_DECLARATION_NAMES[index] && entry['readOnly'] === true && entry['concurrencySafe'] === true),
+    requireRule(typeof block['parallelCallsAllowed'] === 'boolean' && Array.isArray(declarations) &&
+      new Set(declarations.map((entry: unknown) => isRecord(entry) ? entry.name : null)).size === declarations.length &&
+      declarations.every((entry) => isRecord(entry) && exactKeys(entry, ['name', 'readOnly', 'concurrencySafe']) &&
+        LOCAL_TOOL_DECLARATION_NAMES.includes(entry['name'] as typeof LOCAL_TOOL_DECLARATION_NAMES[number]) && entry['readOnly'] === true && entry['concurrencySafe'] === true),
     'localTools 工具声明无效。');
   }
   const retrieval = block['targetedRetrieval'];
@@ -80,6 +81,8 @@ export function readLocalToolsRule(rule: unknown): LocalToolsRule | null {
   requireRule(isRecord(breaker) && exactKeys(breaker, ['roundTrips', 'end']) && positiveInteger(breaker['roundTrips']) &&
     typeof breaker['end'] === 'string' && breaker['end'].length > 0, 'breaker 无效。');
   return Object.freeze({
+    ...(metadata ? { declarations: Object.freeze((block['declarations'] as NonNullable<LocalToolsRule['declarations']>).map((entry) => Object.freeze({ ...entry }))),
+      parallelCallsAllowed: block['parallelCallsAllowed'] as boolean } : {}),
     targetedRetrieval: Object.freeze({
       allowed: retrieval['allowed'],
       source: 'authorized-pinned-sources-only' as const,
@@ -90,4 +93,9 @@ export function readLocalToolsRule(rule: unknown): LocalToolsRule | null {
     }),
     breaker: Object.freeze({ roundTrips: breaker['roundTrips'], end: breaker['end'] }),
   });
+}
+
+/** A boolean permission never removes the existing numeric per-unit call cap. */
+export function localToolParallelBound(rule: LocalToolsRule | null | undefined): number {
+  return rule?.parallelCallsAllowed === true ? rule.targetedRetrieval.callsPerUnit : 1;
 }

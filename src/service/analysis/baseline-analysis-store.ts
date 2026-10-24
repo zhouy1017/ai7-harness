@@ -1,5 +1,9 @@
 import { procedureIdForKind } from '../procedures/preinstalled.js';
-import { recordProcedurePlanPin, readProcedurePlanPin } from '../procedures/definition-store.js';
+import { recordProcedurePlanPin, readProcedurePlanPin, resolveProcedureDefinition } from '../procedures/definition-store.js';
+import { withReviewLocalTools, pinnedReviewDefinition } from '../review/review-category-kind.js';
+import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION } from '../review/category-configuration.js';
+import type { CompositionOptions } from '../harness/primary-agent-harness.js';
+import type { PinnedLocalToolSources } from '../retrieval/index.js';
 import { kindResearchDeclaration } from './live-kind-admission.js';
 import { factualReviewDefinitionsByDigest, factualReviewKindDefinition, factualReviewLevelDefinition, withFactualResearch } from './kind-definition.js';
 import { FACTUAL_REVIEW_KIND, type EvidenceAssuranceLevel, type ProcedureDefinitionPin } from '../../shared/protocol.js';
@@ -714,6 +718,7 @@ export interface ExecutionPlanFacts {
   readonly artifactPin: { nativeCarrierSha256: string; sidecarRevision: 2; sidecarSha256: string };
   readonly promptContractDigest: string;
   readonly behaviorCompositionDigest: string;
+  readonly compositionOptions?: CompositionOptions;
   /** The assurance sampling contract the plan froze ({@link frozenAssurancePromptContractDigest}). */
   readonly assurancePromptContractDigest: string;
   /** The ceiling the frozen Provider Resolution Plan carries, already resolved against the frozen unit count. */
@@ -733,6 +738,7 @@ export interface ProductionPlanBinding {
 }
 
 export interface ExecutionBindingRecord {
+  readonly compositionVersion?: 2;
   readonly attemptId: string;
   readonly taskIntentId: string;
   readonly runRecordId: string;
@@ -1147,7 +1153,7 @@ export class BaselineAnalysisStore {
    */
   definitionForDigest(promptContractDigest: string): AnalysisKindDefinition {
     const current = this.definition;
-    if (current.kind.startsWith('editorial-review/')) return current.legacyReviewContract?.promptContractDigest === promptContractDigest ? current.legacyReviewContract : current;
+    if (current.kind.startsWith('editorial-review/')) return pinnedReviewDefinition(current, promptContractDigest);
     if (current.kind !== FACTUAL_REVIEW_KIND) return current;
     for (const level of ['standard', 'strict', 'quick'] as const) {
       const candidate = this.#factualDefinitionFor(level);
@@ -1192,6 +1198,59 @@ export class BaselineAnalysisStore {
     return this.#definition.kind;
   }
 
+  /** Resolve an immutable baseline revision by the authorized id/digest, never by latest at tool time. */
+  pinnedToolSourcesForRun(runRecordId: string): PinnedLocalToolSources | null {
+    const facts = this.loadExecutionPlan(runRecordId);
+    const sources = facts.compositionOptions?.sources;
+    if (sources === undefined) return null;
+    const pin = sources.baseline;
+    if (pin === null) return sources;
+    const row = this.#db.prepare(`SELECT r.* FROM analysis_result_set_revisions r JOIN analysis_result_sets s ON s.result_set_id = r.result_set_id
+      WHERE r.revision_id = ? AND s.book_id = ? AND s.kind = 'baseline-manuscript-analysis'`).get(pin.revisionId, facts.bookId);
+    requireAnalysis(row !== undefined && row.sha256 === pin.digest && sha256Hex(asString(row.canonical_json)) === pin.digest,
+      'ANALYSIS_RECORD_INVALID', '固定基线来源不可用。');
+    const body = parseCanonicalJson(asString(row.canonical_json)) as { synthesis?: { entities?: unknown[]; events?: unknown[]; settingClaims?: unknown[] } };
+    const baseline = { ...pin, entities: body.synthesis?.entities ?? [], events: body.synthesis?.events ?? [], settingClaims: body.synthesis?.settingClaims ?? [] };
+    return { ...sources, baseline, terms: baseline.entities.filter((entity) => isRecord(entity) && ['person', 'place', 'term'].includes(String(entity.kind))) };
+  }
+
+  #newCompositionOptions(bookId: string): CompositionOptions {
+    const id = procedureIdForKind(this.#definition.kind);
+    const resolved = id === null ? null : resolveProcedureDefinition(this.#db, id, this.#definition.contractVersion === 'ai7.editorial-review/1' ? 1 : undefined);
+    const procedureOptions = resolved === null ? {} : { procedure: resolved.pin, stages: resolved.document.stages.map((stage, index) =>
+      ({ ordinal: index + 1, stageType: stage.stageType, digest: sha256Hex(canonicalJson(stage)) })) };
+    const local = kindLocalTools(this.#launch.policy, this.#definition.kind);
+    if (local?.declarations === undefined) return { version: 2, ...procedureOptions };
+    const row = this.#db.prepare(`SELECT r.* FROM analysis_result_set_revisions r JOIN analysis_result_sets s ON s.result_set_id = r.result_set_id
+      WHERE s.book_id = ? AND s.kind = 'baseline-manuscript-analysis' ORDER BY r.ordinal DESC LIMIT 1`).get(bookId);
+    let baseline: PinnedLocalToolSources['baseline'] = null;
+    if (row !== undefined) {
+      const json = asString(row.canonical_json);
+      requireAnalysis(sha256Hex(json) === row.sha256, 'ANALYSIS_RECORD_INVALID', '基线记录摘要无效。');
+      baseline = { revisionId: asString(row.revision_id), digest: asString(row.sha256), entities: [], events: [], settingClaims: [] };
+    }
+    const documents = liveKindRule(this.#launch.policy, this.#definition.kind)?.outboundDataCategories.includes('house-review-guideline-clause') === true
+      ? BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.flatMap((category) => category.guidelineDocuments) : [];
+    let remaining = 40;
+    const guidelines = [...new Map(documents.map((document) => [document.documentId, document])).values()].flatMap((document) => {
+      if (remaining === 0) return [];
+      const latest = this.#db.prepare('SELECT * FROM review_guideline_versions WHERE document_id = ? ORDER BY ordinal DESC LIMIT 1').get(document.documentId);
+      let clauses = document.clauses;
+      let version = document.version;
+      if (latest !== undefined) {
+        const json = asString(latest.canonical_json);
+        requireAnalysis(sha256Hex(json) === latest.sha256, 'ANALYSIS_RECORD_INVALID', '规范文件版本摘要无效。');
+        const body = parseCanonicalJson(json) as { clauses: typeof clauses };
+        clauses = body.clauses;
+        version = asString(latest.version_id);
+      }
+      const admitted = clauses.filter((clause) => [...new Intl.Segmenter('zh', { granularity: 'grapheme' }).segment(clause.text)].length <= 300).slice(0, remaining);
+      remaining -= admitted.length;
+      return [{ documentId: document.documentId, version, clauses: admitted }];
+    });
+    return { version: 2, ...procedureOptions, sources: { baseline, guidelines, terms: [] } };
+  }
+
   get launch(): LaunchBinding {
     return this.#launch;
   }
@@ -1234,6 +1293,7 @@ export class BaselineAnalysisStore {
   #refreshClarificationDefinition(): void {
     const launch = this.#launch;
     const rule = liveKindRule(launch.policy, this.#definition.kind);
+    this.#definition = withReviewLocalTools(this.#definition, kindLocalTools(launch.policy, this.#definition.kind));
     const base = this.#definition.clarificationBase ?? this.#definition;
     // The factual kind's own definition is its default level's (Issue #901): 标准核查 where the levels apply, else v1 as before.
     if (base.kind === FACTUAL_REVIEW_KIND) this.#definition = this.#factualUnwrapped('standard', rule);
@@ -1442,6 +1502,7 @@ export class BaselineAnalysisStore {
         summary: asString(envelope.summary),
         promptContractDigest: asString(envelope.promptContractDigest),
         behaviorCompositionDigest: asString(envelope.behaviorCompositionDigest),
+        ...(envelope.compositionVersion === 2 ? { compositionVersion: 2 as const } : {}),
         planVersion: typeof envelope.planVersion === 'number' ? envelope.planVersion : null,
         boundary: isRecord(envelope.boundary) ? envelope.boundary as unknown as PlanBoundarySplitProjection : null,
       },
@@ -2631,6 +2692,7 @@ export class BaselineAnalysisStore {
       bindingDigest: asString(row.sha256),
       harnessSessionId: binding.harnessSessionId,
       behaviorCompositionDigest: binding.behaviorCompositionDigest,
+      ...(binding.compositionVersion === 2 ? { compositionVersion: 2 as const } : {}),
       promptContractDigest: binding.promptContractDigest,
       planEnvelopeDigest: binding.planEnvelopeDigest,
       runSourceScopeDigest: binding.runSourceScopeDigest,
@@ -3795,9 +3857,10 @@ export class BaselineAnalysisStore {
       searchCredentialReference = production === null ? CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES[adapter.declaration.credentialSlot] : asString(row.credential_reference);
     }
     const composition = live === null
-      ? describeComposition(LOCAL_DETERMINISTIC_ROUTE, LOCAL_DETERMINISTIC_MODEL, promptContractDigest)
+      ? describeComposition(LOCAL_DETERMINISTIC_ROUTE, LOCAL_DETERMINISTIC_MODEL, promptContractDigest, this.#newCompositionOptions(checkpoint.bookId))
       : describeComposition(live.route, live.model, promptContractDigest, { platformTools: webToolsBackend !== undefined, researchDeclaration,
-        localTools: intent.preparedByEnrollmentVersionId === null && definition.evidenceAssuranceLevel !== 'quick' && kindLocalTools(this.#launch.policy, this.#definition.kind) !== null });
+        ...this.#newCompositionOptions(checkpoint.bookId),
+        localTools: intent.preparedByEnrollmentVersionId === null && definition.evidenceAssuranceLevel !== 'quick' ? kindLocalTools(this.#launch.policy, this.#definition.kind) ?? false : false });
     const providerPlan = {
       ...(webToolsBackend === undefined ? {} : { webToolsBackend, searchCredentialReference }),
       role: 'Main Editorial Role',
@@ -3875,7 +3938,7 @@ export class BaselineAnalysisStore {
     const records: Record<string, { json: string; digest: string }> = {
       'manuscript-pin': canonicalRecord(manuscriptPin),
       'artifact-pin': canonicalRecord(artifactPin),
-      'run-source-scope': canonicalRecord(sourceScope),
+      'run-source-scope': canonicalRecord(composition.sources === undefined ? sourceScope : { ...sourceScope, localToolSources: composition.sources }),
       'coverage-manifest': canonicalRecord(manifest),
       'provider-resolution-plan': canonicalRecord(providerPlan),
       'execution-plan': canonicalRecord(this.#definition.materialReferences === undefined ? { ...executionPlan, ...samplingPin, ...clarificationPin } : {
@@ -3914,6 +3977,10 @@ export class BaselineAnalysisStore {
       promptContractDigest,
       ...(definition.contractIdentity === undefined ? {} : { contractIdentity: { ...definition.contractIdentity, digest: promptContractDigest } }),
       behaviorCompositionDigest: composition.digest,
+      compositionVersion: 2,
+      compositionOptions: { version: 2, ...(composition.procedure === undefined ? {} : { procedure: composition.procedure }),
+        ...(composition.stages === undefined ? {} : { stages: composition.stages }),
+        ...(composition.sources === undefined ? {} : { sources: composition.sources }) },
       // The plan version and the Plan Boundary Split are part of the canonical envelope (Issue #48).
       planVersion: ordinal,
       boundary: planBoundarySplit(edits.disallowedAdaptations, edits.askFirstAdaptations ?? [], definition.contractIdentity?.version === 2),
@@ -4888,6 +4955,7 @@ export class BaselineAnalysisStore {
       artifactPin: { nativeCarrierSha256: artifactPin.nativeCarrierSha256, sidecarRevision: 2, sidecarSha256: artifactPin.sidecarSha256 },
       promptContractDigest: asString(envelope.promptContractDigest),
       behaviorCompositionDigest: asString(envelope.behaviorCompositionDigest),
+      ...(envelope.compositionVersion === 2 ? { compositionOptions: envelope.compositionOptions as CompositionOptions } : {}),
       assurancePromptContractDigest: frozenAssurancePromptContractDigest(plan['execution-plan'] as Record<string, unknown>),
       runBudgetCeiling,
       update,

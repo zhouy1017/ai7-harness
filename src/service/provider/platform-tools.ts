@@ -1,5 +1,6 @@
 import { canonicalJson, isRecord, sha256Hex } from '../analysis/canonical.js';
 import { isPublicHostName } from '../../shared/network-denial.js';
+import { LOCAL_TOOL_DECLARATION_NAMES, type LocalToolsRule } from './local-tools.js';
 
 /**
  * AI7's platform tools, `websearch` and `webfetch` (ADR 0080 §7, Issue #473 S87-f3a): what a Provider Processing rule must
@@ -12,7 +13,11 @@ import { isPublicHostName } from '../../shared/network-denial.js';
 /** The two tool names, sorted: the exact set a payload's tools must equal (ADR 0080 §7.2). */
 export const PLATFORM_TOOL_NAMES = ['webfetch', 'websearch'] as const;
 export const LOCAL_TOOL_NAMES = ['exact_fetch', 'retrieve'] as const;
-export type PlatformToolName = (typeof PLATFORM_TOOL_NAMES)[number] | (typeof LOCAL_TOOL_NAMES)[number];
+export type LocalToolName = (typeof LOCAL_TOOL_DECLARATION_NAMES)[number];
+export type PlatformToolName = (typeof PLATFORM_TOOL_NAMES)[number] | LocalToolName;
+export function isLocalToolName(name: string): name is LocalToolName {
+  return (LOCAL_TOOL_DECLARATION_NAMES as readonly string[]).includes(name);
+}
 
 /**
  * The `platformTools` block of one Provider Processing rule naming one anonymous search service, exactly as ADR 0080 §7.5
@@ -243,18 +248,41 @@ export const PLATFORM_TOOL_SCHEMAS: ReadonlyArray<PlatformToolSchema> = Object.f
 /** SHA-256 over the canonical schema set; the composition descriptor pins it. */
 export const PLATFORM_TOOL_SCHEMA_DIGEST: string = sha256Hex(canonicalJson(PLATFORM_TOOL_SCHEMAS));
 
-export const LOCAL_TOOL_SCHEMAS: ReadonlyArray<PlatformToolSchema> = Object.freeze([
+export const LEGACY_LOCAL_TOOL_SCHEMAS: ReadonlyArray<PlatformToolSchema> = Object.freeze([
   Object.freeze({ name: 'exact_fetch' as const, description: '精确取回检索候选在已固定来源版本中的原文。引用前必须调用。',
     parameters: { type: 'object', properties: { candidateId: { type: 'string' } }, required: ['candidateId'], additionalProperties: false } }),
   Object.freeze({ name: 'retrieve' as const, description: '在这次任务已授权并固定的本机来源中检索候选；候选预览不是引文，引用前必须精确取文。',
     parameters: { type: 'object', properties: { query: { type: 'string', minLength: 1, maxLength: 1000 }, k: { type: 'integer', minimum: 1, maximum: 8 },
       sourceKinds: { type: 'array', minItems: 1, uniqueItems: true, items: { type: 'string', enum: ['manuscript', 'material', 'retained-source'] } } }, required: ['query'], additionalProperties: false } }),
 ]);
-export const LOCAL_TOOL_SCHEMA_DIGEST = sha256Hex(canonicalJson(LOCAL_TOOL_SCHEMAS));
+export const LOCAL_TOOL_SCHEMA_DIGEST = sha256Hex(canonicalJson(LEGACY_LOCAL_TOOL_SCHEMAS));
+export const LOCAL_TOOL_SCHEMAS: ReadonlyArray<PlatformToolSchema> = Object.freeze([
+  ...LEGACY_LOCAL_TOOL_SCHEMAS,
+  { name: 'read_blocks', description: '读取固定稿件中指定内容块及其相邻段落；只在本次授权范围内读取。',
+    parameters: { type: 'object', properties: { blockId: { type: 'string' }, radius: { type: 'integer', minimum: 0, maximum: 3 } }, required: ['blockId', 'radius'], additionalProperties: false } },
+  { name: 'baseline_facts', description: '读取本次计划固定的本书基线实体、设定与事件；未固定来源时返回空结果。',
+    parameters: { type: 'object', properties: {}, additionalProperties: false } },
+  { name: 'guideline_clause', description: '读取本次计划固定的规范文件条款；未固定来源时返回空结果。',
+    parameters: { type: 'object', properties: { clauseId: { type: 'string', maxLength: 200 } }, additionalProperties: false } },
+  { name: 'term_table', description: '读取本次计划固定的本书术语、人名和地名表；未固定来源时返回空结果。',
+    parameters: { type: 'object', properties: {}, additionalProperties: false } },
+  { name: 'search_manuscript', description: '在本次授权固定稿件中精确或分词检索；只返回匹配段落。',
+    parameters: { type: 'object', properties: { query: { type: 'string', minLength: 1, maxLength: 1000 }, mode: { type: 'string', enum: ['exact', 'tokenized'] } }, required: ['query', 'mode'], additionalProperties: false } },
+]);
+// Schema objects are immutable through every nested property; freezing changes none of the legacy canonical bytes.
+function freezeSchema(value: unknown): void {
+  if (value === null || typeof value !== 'object') return;
+  for (const child of Object.values(value)) freezeSchema(child);
+  Object.freeze(value);
+}
+for (const schema of LOCAL_TOOL_SCHEMAS) freezeSchema(schema);
 
 /** Preserve the exact web schemas, adding only the subset the selected rule names. */
-export function ruleNamedToolSchemas(web: boolean, local: boolean): ReadonlyArray<PlatformToolSchema> {
-  return [...(web ? PLATFORM_TOOL_SCHEMAS : []), ...(local ? LOCAL_TOOL_SCHEMAS : [])].sort((a, b) => a.name.localeCompare(b.name, 'en'));
+export function ruleNamedToolSchemas(web: boolean, local: boolean | LocalToolsRule | null | undefined): ReadonlyArray<PlatformToolSchema> {
+  const names = typeof local === 'object' && local?.targetedRetrieval.allowed === true ? local.declarations?.map((entry) => entry.name) : undefined;
+  const schemas = local === true || (typeof local === 'object' && local?.targetedRetrieval.allowed === true)
+    ? names === undefined ? LEGACY_LOCAL_TOOL_SCHEMAS : LOCAL_TOOL_SCHEMAS.filter((schema) => names.includes(schema.name)) : [];
+  return [...(web ? PLATFORM_TOOL_SCHEMAS : []), ...schemas].sort((a, b) => a.name.localeCompare(b.name, 'en'));
 }
 
 /**
@@ -283,7 +311,11 @@ export type PlatformToolArguments =
   | { readonly tool: 'websearch'; readonly query: string }
   | { readonly tool: 'webfetch'; readonly url: string }
   | { readonly tool: 'retrieve'; readonly query: string; readonly k: number; readonly sourceKinds?: ReadonlyArray<'manuscript' | 'material' | 'retained-source'> }
-  | { readonly tool: 'exact_fetch'; readonly candidateId: string };
+  | { readonly tool: 'exact_fetch'; readonly candidateId: string }
+  | { readonly tool: 'read_blocks'; readonly blockId: string; readonly radius: number }
+  | { readonly tool: 'baseline_facts' | 'term_table' }
+  | { readonly tool: 'guideline_clause'; readonly clauseId?: string }
+  | { readonly tool: 'search_manuscript'; readonly query: string; readonly mode: 'exact' | 'tokenized' };
 
 /** The longest query AI7 forwards; a longer one is a refusal returned to the model, never a truncation. */
 export const WEBSEARCH_QUERY_MAX_CHARACTERS = 1_000;
@@ -295,6 +327,18 @@ export const WEBSEARCH_QUERY_MAX_CHARACTERS = 1_000;
  */
 export function canonicalToolArguments(name: string, args: unknown): PlatformToolArguments | null {
   if (!isRecord(args)) return null;
+  if (name === 'baseline_facts' || name === 'term_table') return exactKeys(args, []) ? { tool: name } : null;
+  if (name === 'guideline_clause') return Object.keys(args).every((key) => key === 'clauseId') &&
+    (args.clauseId === undefined || (typeof args.clauseId === 'string' && args.clauseId.length > 0 && args.clauseId.length <= 200))
+    ? { tool: name, ...(args.clauseId === undefined ? {} : { clauseId: args.clauseId }) } : null;
+  if (name === 'read_blocks') return exactKeys(args, ['blockId', 'radius']) && typeof args.blockId === 'string' && args.blockId.length <= 200 &&
+    Number.isSafeInteger(args.radius) && Number(args.radius) >= 0 && Number(args.radius) <= 3
+    ? { tool: name, blockId: args.blockId, radius: args.radius as number } : null;
+  if (name === 'search_manuscript') {
+    if (!exactKeys(args, ['query', 'mode']) || typeof args.query !== 'string' || !args.query.isWellFormed() ||
+      args.query.trim().length === 0 || args.query.length > 1000 || (args.mode !== 'exact' && args.mode !== 'tokenized')) return null;
+    return { tool: name, query: args.query.normalize('NFC').trim(), mode: args.mode };
+  }
   if (name === 'exact_fetch') return exactKeys(args, ['candidateId']) && typeof args.candidateId === 'string' && /^[0-9a-f]{64}$/u.test(args.candidateId)
     ? { tool: 'exact_fetch', candidateId: args.candidateId } : null;
   if (name === 'retrieve') {

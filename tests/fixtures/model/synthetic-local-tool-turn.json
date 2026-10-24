@@ -1,0 +1,50 @@
+{
+  "schema": "ai7.model-fixture/1",
+  "identity": "synthetic-local-tool-turn",
+  "description": "Authored synthetic parallel local-tool review turn.",
+  "basedOn": null,
+  "provenance": "authored",
+  "provider": "ai7-local-deterministic",
+  "model": "ai7-deterministic-fixture",
+  "entries": [
+    {
+      "unitOrdinal": 1,
+      "requestDigest": "9d0d81a2cbb3592c5b0c44296673235c927261316572766d92395afa0afe6886",
+      "response": {
+        "kind": "tool-calls",
+        "calls": [
+          {
+            "name": "read_blocks",
+            "arguments": {
+              "blockId": "{{block:1}}",
+              "radius": 0
+            }
+          },
+          {
+            "name": "search_manuscript",
+            "arguments": {
+              "query": "合成",
+              "mode": "exact"
+            }
+          }
+        ],
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 6
+        }
+      }
+    },
+    {
+      "unitOrdinal": 1,
+      "requestDigest": "361d9ff14c2fdf938bacb2212f2b0035ede5dd605e91b2429e0ed39ce84015c4",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[]}",
+        "usage": {
+          "inputTokens": 12,
+          "outputTokens": 6
+        }
+      }
+    }
+  ]
+}
