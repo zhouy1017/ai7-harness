@@ -10,6 +10,9 @@ import { fixedArchiveTime } from '../../src/shared/archive-time.js';
 import {
   IMPORT_FIDELITY_CATEGORIES_REVISION_26_SQL,
   importFidelityCategoriesShape,
+  initializeWordImportRetentionSchema,
+  validateWordImportRetentionSchema,
+  WORD_IMPORT_RETENTION_SCHEMA_SQL,
 } from '../../src/service/import-retention.js';
 import { EditorialStore, SOURCE_VERSION_PARSER_CHANGED_MESSAGE, StoreError } from '../../src/service/store.js';
 import { CLARIFICATION_SCHEMA_VERSION, LATEST_SCHEMA_VERSION, PROPOSAL_CONFLICT_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
@@ -60,6 +63,55 @@ const TEXT_BOX_EXCERPT: ComposedManuscriptRequest = {
 function databasePath(): string {
   return join(roots.dataRoot, 'store', 'ai7.sqlite');
 }
+
+// Definition/transaction proof only: these call the layer owner directly over genuine existing
+// parents, before its global migration activation. They are not a migrated-store or public-intake proof.
+describe('closed Word retention definitions (#1132)', () => {
+  it('adds the complete empty layer once while preserving existing source and retention records', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try { await importSample1Book(store, roots.codeRoot, 'Word 层保留校验'); store.markCleanShutdown(); } finally { store.close(); }
+    withDatabase(false, (db) => {
+      const tables = ['source_versions', 'source_provenance', 'manuscript_block_sources', 'import_fidelity_categories', 'import_fidelity_choices'];
+      const prior = tables.map((table) => db.prepare(`SELECT rowid, * FROM ${table} ORDER BY rowid`).all());
+      const version = db.prepare('PRAGMA user_version').get();
+      initializeWordImportRetentionSchema(db);
+      initializeWordImportRetentionSchema(db);
+      validateWordImportRetentionSchema(db);
+      expect(tables.map((table) => db.prepare(`SELECT rowid, * FROM ${table} ORDER BY rowid`).all())).toEqual(prior);
+      expect(db.prepare('PRAGMA user_version').get()).toEqual(version);
+      expect(Object.keys(WORD_IMPORT_RETENTION_SCHEMA_SQL).map((table) => db.prepare(`SELECT count(*) total FROM ${table}`).get()?.total))
+        .toEqual(Array(7).fill(0));
+      expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+    });
+  }, 120_000);
+
+  it('refuses a partial layer without healing it or stamping a revision', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try { store.markCleanShutdown(); } finally { store.close(); }
+    withDatabase(false, (db) => {
+      db.exec('CREATE TABLE word_revision_sources (source_version_id TEXT PRIMARY KEY) STRICT');
+      const schema = db.prepare('SELECT name, sql FROM sqlite_schema ORDER BY name').all();
+      const version = db.prepare('PRAGMA user_version').get();
+      expect(() => initializeWordImportRetentionSchema(db)).toThrow('Word');
+      expect(db.prepare('SELECT name, sql FROM sqlite_schema ORDER BY name').all()).toEqual(schema);
+      expect(db.prepare('PRAGMA user_version').get()).toEqual(version);
+    });
+  });
+
+  it('rolls back all seven definitions when a trigger collision interrupts initialization', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try { store.markCleanShutdown(); } finally { store.close(); }
+    withDatabase(false, (db) => {
+      db.exec('CREATE TRIGGER word_revision_sources_no_update BEFORE UPDATE ON books BEGIN SELECT 1; END');
+      const schema = db.prepare('SELECT name, sql FROM sqlite_schema ORDER BY name').all();
+      const version = db.prepare('PRAGMA user_version').get();
+      expect(() => initializeWordImportRetentionSchema(db)).toThrow();
+      expect(db.prepare('SELECT name, sql FROM sqlite_schema ORDER BY name').all()).toEqual(schema);
+      expect(db.prepare('PRAGMA user_version').get()).toEqual(version);
+      expect(db.isTransaction).toBe(false);
+    });
+  });
+});
 
 /**
  * Plant revision 26 exactly as a build before ADR 0086 left it, over a store holding one imported sample1 Book: its

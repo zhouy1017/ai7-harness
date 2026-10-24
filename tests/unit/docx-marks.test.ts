@@ -37,7 +37,8 @@ import {
 } from '../support/composed-fixture.js';
 import { buildSyntheticTrackedDocx } from '../support/synthetic-docx.js';
 import { buildWordProfileRecipe, wordParagraphMoveBody } from '../fixtures/docx-fidelity/builder.js';
-import { validateWordSampleCursor, wordSampleDetailDigest, wordTrackedSamples, type WordSampleDetailEntry } from '../../src/service/import-retention.js';
+import { pageWordSampleDetail, validateWordSampleCursor, wordSampleDetailDigest, wordSampleDetailEntries, wordTrackedSampleRecord,
+  wordTrackedSamples, type WordSampleDetailEntry } from '../../src/service/import-retention.js';
 import classification from '../fixtures/docx-fidelity/classification.json' with { type: 'json' };
 
 // Parser identity `ai7-docx-fflate-saxes/3` over composed documents (Issue #411): every word of every input is
@@ -172,6 +173,65 @@ describe('successor exact source correspondence (#1132)', () => {
     for (const change of [{ codeUnitOffset: 1 }, { codeUnitOffset: 5 }, { entryOrdinal: 1 }, { field: 'rawId' },
       { sampleDigest: graphDigest }, { detailDigest: graphDigest }, { extra: true }]) {
       expect(() => validateWordSampleCursor({ ...cursor, ...change }, { sampleDigest, detailDigest }, lookup)).toThrow('Word');
+    }
+  });
+
+  it('reconstructs complete compiler fragments and raw metadata across bounded UTF-16 detail pages', () => {
+    const author = '"\\😀e\u0301'.repeat(300);
+    const originalText = `😀e${'\u0301'.repeat(3000)}`;
+    const compiled = compileWordTrackedDocxBytes(buildSyntheticTrackedDocx('<w:p><w:r><w:t>base</w:t></w:r>' +
+      `<w:ins w:id="1" w:author="${author.replace(/"/gu, '&quot;')}" w:date=""><w:r><w:t>${originalText}</w:t></w:r></w:ins></w:p>`));
+    if (compiled.kind !== 'ready') throw new Error('expected valid long-field compiler graph');
+    const sample = wordTrackedSamples('a5601f3a-083c-474a-a2db-c3cf6d3d15cd', compiled.graph, compiled.templates)[0]!;
+    const source = { sourceVersionId: '10000000-0000-4000-8000-000000000001', sample,
+      sampleDigest: wordTrackedSampleRecord(sample).digest, graph: compiled.graph, graphDigest: compiled.graphDigest,
+      decodedAtoms: compiled.decodedAtoms, imports: [] };
+    const expected = wordSampleDetailEntries(source);
+    const observed = new Map<string, string | null>();
+    const cursors = new Set<string>();
+    const records: WordSampleDetailEntry[] = [];
+    let cursor: unknown = null;
+    let pages = 0;
+    let splitCombiningCluster = false;
+    do {
+      const page = pageWordSampleDetail(source, cursor, 2400);
+      expect(Buffer.byteLength(JSON.stringify(page), 'utf8')).toBeLessThanOrEqual(2400);
+      expect(page.items.length).toBeLessThanOrEqual(40);
+      expect(page.sectionCounts.before).toBe(0);
+      for (const item of page.items) {
+        if (item.kind === 'record') { records.push(item); continue; }
+        const key = `${item.section}/${item.entryOrdinal}`;
+        const previous = observed.get(key);
+        expect(item.startCodeUnit).toBe(typeof previous === 'string' ? previous.length : 0);
+        observed.set(key, item.text === null ? null : `${previous ?? ''}${item.text}`);
+        if (item.complete && item.text !== null) {
+          const reconstructed = observed.get(key);
+          if (typeof reconstructed !== 'string') throw new Error('expected reconstructed text field');
+          expect(digest(reconstructed)).toBe(item.sha256);
+        }
+      }
+      if (page.nextCursor !== null) {
+        const key = JSON.stringify(page.nextCursor);
+        expect(cursors.has(key)).toBe(false);
+        cursors.add(key);
+        if (page.nextCursor.section === 'after' && page.nextCursor.codeUnitOffset > 3 &&
+          page.nextCursor.codeUnitOffset < originalText.length) splitCombiningCluster = true;
+      }
+      cursor = page.nextCursor;
+      pages += 1;
+    } while (cursor !== null);
+    expect(pages).toBeGreaterThan(3);
+    expect(splitCombiningCluster).toBe(true);
+    for (const section of Object.values(expected)) for (const entry of section) {
+      if (entry.kind === 'text') expect(observed.get(`${entry.section}/${entry.entryOrdinal}`)).toBe(entry.text);
+    }
+    expect(records).toEqual(Object.values(expected).flat().filter((entry) => entry.kind === 'record').map((entry) => ({ ...entry, complete: true })));
+    expect(observed.get('after/0')).toBe(originalText);
+    const first = pageWordSampleDetail(source, null, 2400);
+    if (first.nextCursor === null) throw new Error('expected multi-page detail');
+    for (const change of [{ codeUnitOffset: 1, section: 'after', entryOrdinal: 0, field: 'text' },
+      { sampleDigest: '0'.repeat(64) }, { detailDigest: '0'.repeat(64) }, { entryOrdinal: 9999 }]) {
+      expect(() => pageWordSampleDetail(source, { ...first.nextCursor, ...change }, 2400)).toThrow('Word');
     }
   });
 

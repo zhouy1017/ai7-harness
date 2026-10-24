@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import type { ManuscriptBlockProjection, TextBoxDisposition } from '../shared/protocol.js';
+import { MAX_FRAME_BYTES } from '../shared/protocol.js';
 import type { ParsedTextBox } from './docx.js';
 import type { ParsedImportedMark } from './docx-marks.js';
 import type { LOCAL_LEARNING_POLICY_BASIS } from './learning-eligibility.js';
@@ -262,7 +263,10 @@ export type WordSampleDetailRecord =
       parentCount: number; rangeLinkCount: number }
   | { type: 'event-link'; eventId: string; relation: 'parent' | 'range'; linkedEventId: string; ordinal: number }
   | { type: 'import'; commitId: string; mode: WordImportMode; sourceVersionId: string; sourceDigest: string;
-      fidelityReviewId: string; revisionId: string; choiceDigest: string; admissionDigest: string }
+      importReviewId: string; fidelityReviewId: string; revisionId: string; choiceDigest: string; admissionDigest: string;
+      workingObjectDigest: string | null; compilerIdentity: string; extractorIdentity: typeof WORD_EXTRACTOR_IDENTITY;
+      graphDigest: string; readings: WordImportChoiceRecord['readings']; mappingDigest: string; templateManifestDigest: string;
+      learnFromEdits: boolean; acceptedBaselineConfirmed: boolean }
   | { type: 'import-admission'; commitId: string; basis: WordLocalImportAdmission };
 
 export type WordSampleDetailEntry = {
@@ -291,6 +295,158 @@ export interface WordSampleDetailPage {
   sectionCounts: Record<WordSampleDetailSection, number>;
   items: WordSampleDetailItem[];
   nextCursor: WordSampleCursor | null;
+}
+
+export interface WordSampleDetailSource {
+  sourceVersionId: string;
+  graph: WordRevisionGraph;
+  graphDigest: string;
+  decodedAtoms: ReadonlyMap<number, string>;
+  sample: WordTrackedEditSample;
+  sampleDigest: string;
+  imports: ReadonlyArray<{ choice: WordImportChoiceRecord; choiceDigest: string;
+    admission: WordLocalImportAdmission; admissionDigest: string }>;
+}
+
+/** Resolve a pinned exact fragment, never a normalized manuscript excerpt. */
+export function wordSourceFragmentText(graph: WordRevisionGraph, decoded: ReadonlyMap<number, string>, fragment: WordSourceFragment): string | null {
+  const atom = graph.atoms[fragment.atomOrdinal];
+  requireRetention(atom !== undefined && atom.atomOrdinal === fragment.atomOrdinal && atom.kind === fragment.kind &&
+    atom.part === fragment.part && atom.paragraphIndex === fragment.paragraphIndex,
+  'WORD_SOURCE_CORRUPT', 'Word 修改样本的原始片段位置无效。');
+  if (fragment.kind === 'paragraph-boundary') {
+    requireRetention(fragment.sha256 === atom.sha256, 'WORD_SOURCE_CORRUPT', 'Word 修改样本的段落边界已变化。');
+    return null;
+  }
+  const text = decoded.get(atom.atomOrdinal);
+  requireRetention(text !== undefined && text.isWellFormed() && text.length === atom.codeUnits && sha256Hex(text) === atom.sha256,
+    'WORD_SOURCE_CORRUPT', 'Word 修改样本的原始文字已变化。');
+  const boundary = (offset: number): boolean => Number.isSafeInteger(offset) && offset >= 0 && offset <= text.length &&
+    !(offset > 0 && offset < text.length && /[\uD800-\uDBFF]/u.test(text[offset - 1]!) && /[\uDC00-\uDFFF]/u.test(text[offset]!));
+  requireRetention(boundary(fragment.fromCodeUnit) && boundary(fragment.toCodeUnit) && fragment.fromCodeUnit <= fragment.toCodeUnit &&
+    fragment.codeUnits === fragment.toCodeUnit - fragment.fromCodeUnit, 'WORD_SOURCE_CORRUPT', 'Word 修改样本的文字边界无效。');
+  const result = text.slice(fragment.fromCodeUnit, fragment.toCodeUnit);
+  requireRetention(sha256Hex(result) === fragment.sha256, 'WORD_SOURCE_CORRUPT', 'Word 修改样本的原始文字摘要不一致。');
+  return result;
+}
+
+/** Flat entry ordinals are local to each section; original evidence ordinals remain explicit. */
+export function wordSampleDetailEntries(source: WordSampleDetailSource): Record<WordSampleDetailSection, WordSampleDetailEntry[]> {
+  requireRetention(source.graphDigest === source.sample.graphDigest && source.graph.sourceDigest === source.sample.sourceDigest &&
+    wordTrackedSampleRecord(source.sample).digest === source.sampleDigest,
+  'WORD_SOURCE_CORRUPT', 'Word 修改样本的来源身份不一致。');
+  const sections: Record<WordSampleDetailSection, WordSampleDetailEntry[]> = { before: [], after: [], events: [], imports: [] };
+  const record = (section: WordSampleDetailSection, sourceOrdinal: number, childOrdinal: number | null, value: WordSampleDetailRecord): void => {
+    sections[section].push({ section, entryOrdinal: sections[section].length, sourceOrdinal, childOrdinal,
+      kind: 'record', field: 'record', record: value });
+  };
+  for (const section of ['before', 'after'] as const) source.sample[section].forEach((fragment, sourceOrdinal) => {
+    const text = wordSourceFragmentText(source.graph, source.decodedAtoms, fragment);
+    if (text === null) record(section, sourceOrdinal, null, { type: 'fragment', fragment });
+    else sections[section].push({ section, entryOrdinal: sections[section].length, sourceOrdinal, childOrdinal: null,
+      kind: 'text', field: 'text', text, sha256: fragment.sha256, fragment });
+  });
+  const events = new Map(source.graph.events.map((event) => [event.eventId, event]));
+  source.sample.eventMembership.forEach((eventId, sourceOrdinal) => {
+    const event = events.get(eventId);
+    requireRetention(event !== undefined, 'WORD_SOURCE_CORRUPT', 'Word 修改样本的原始事件缺失。');
+    record('events', sourceOrdinal, null, { type: 'event', eventId, kind: event.kind, context: event.context,
+      part: event.part, elementOrdinal: event.elementOrdinal, location: event.location, disposition: event.disposition,
+      parentCount: event.parentEventIds.length, rangeLinkCount: event.linkedEventIds.length });
+    for (const field of ['rawId', 'rawAuthor', 'rawDate', 'rangeName'] as const) {
+      const text = event[field];
+      sections.events.push({ section: 'events', entryOrdinal: sections.events.length, sourceOrdinal, childOrdinal: null,
+        kind: 'text', field, text, sha256: text === null ? null : sha256Hex(text), fragment: null });
+    }
+    for (const [relation, links] of [['parent', event.parentEventIds], ['range', event.linkedEventIds]] as const) {
+      links.forEach((linkedEventId, ordinal) => {
+        requireRetention(events.has(linkedEventId), 'WORD_SOURCE_CORRUPT', 'Word 修改样本的父事件或移动关联缺失。');
+        record('events', sourceOrdinal, ordinal, { type: 'event-link', eventId, relation, linkedEventId, ordinal });
+      });
+    }
+  });
+  source.imports.forEach(({ choice, choiceDigest, admission, admissionDigest }, sourceOrdinal) => {
+    requireRetention(choice.sourceVersionId === source.sourceVersionId && choice.originalDigest === source.sample.sourceDigest &&
+      choice.graphDigest === source.graphDigest && admission.sampleId === source.sample.sampleId &&
+      admission.sampleDigest === source.sampleDigest && admission.importChoiceDigest === choiceDigest &&
+      sha256Hex(wordCanonicalJson(choice)) === choiceDigest && sha256Hex(wordCanonicalJson(admission)) === admissionDigest,
+    'WORD_SOURCE_CORRUPT', 'Word 修改样本的导入或准入身份不一致。');
+    record('imports', sourceOrdinal, null, { type: 'import', commitId: choice.commitId, mode: choice.mode,
+      sourceVersionId: choice.sourceVersionId, sourceDigest: choice.originalDigest, fidelityReviewId: choice.fidelityReviewId,
+      importReviewId: choice.importReviewId, revisionId: choice.revisionId, choiceDigest, admissionDigest,
+      workingObjectDigest: choice.workingObjectDigest, compilerIdentity: source.graph.parserIdentity,
+      extractorIdentity: choice.extractorIdentity, graphDigest: choice.graphDigest, readings: choice.readings,
+      mappingDigest: choice.mappingDigest, templateManifestDigest: choice.templateManifestDigest,
+      learnFromEdits: choice.learnFromEdits, acceptedBaselineConfirmed: choice.acceptedBaselineConfirmed });
+    record('imports', sourceOrdinal, null, { type: 'import-admission', commitId: choice.commitId, basis: admission });
+  });
+  return sections;
+}
+
+/** Forty entries and an encoded whole-frame bound; a grapheme need never fit in one chunk. */
+export function pageWordSampleDetail(source: WordSampleDetailSource, after: unknown,
+  budget = MAX_FRAME_BYTES - 8192): WordSampleDetailPage {
+  requireRetention(Number.isSafeInteger(budget) && budget > 0 && budget <= MAX_FRAME_BYTES - 8192,
+    'WORD_SAMPLE_INVALID', 'Word 修改样本详情的传输边界无效。');
+  const sections = wordSampleDetailEntries(source);
+  const sectionOrder = ['before', 'after', 'events', 'imports'] as const;
+  const entries = sectionOrder.flatMap((section) => sections[section]);
+  const detailDigest = wordSampleDetailDigest(source.sampleDigest, source.graphDigest, source.sourceVersionId, source.imports);
+  const identity = { sampleDigest: source.sampleDigest, detailDigest };
+  const afterCursor = validateWordSampleCursor(after, identity, (section, ordinal) => sections[section][ordinal] ?? null);
+  let index = afterCursor === null ? 0 : entries.findIndex((entry) =>
+    entry.section === afterCursor.section && entry.entryOrdinal === afterCursor.entryOrdinal);
+  let offset = afterCursor?.codeUnitOffset ?? 0;
+  const page: WordSampleDetailPage = { bookId: source.sample.bookId, sampleId: source.sample.sampleId, ...identity,
+    sourceVersionId: source.sourceVersionId, sourceDigest: source.sample.sourceDigest, operationKind: source.sample.operationKind,
+    sectionCounts: { before: sections.before.length, after: sections.after.length, events: sections.events.length, imports: sections.imports.length },
+    items: [], nextCursor: null };
+  const cursor = (at: number, codeUnitOffset: number): WordSampleCursor | null => {
+    const entry = entries[at];
+    return entry === undefined ? null : { schema: 'ai7.word-sample-cursor/1', ...identity, section: entry.section,
+      entryOrdinal: entry.entryOrdinal, field: entry.field, codeUnitOffset };
+  };
+  const fits = (item: WordSampleDetailItem, next: WordSampleCursor | null): boolean =>
+    Buffer.byteLength(JSON.stringify({ ...page, items: [...page.items, item], nextCursor: next }), 'utf8') <= budget;
+  while (index < entries.length && page.items.length < 40) {
+    const entry = entries[index]!;
+    if (entry.kind === 'record') {
+      const item = { ...entry, complete: true as const };
+      if (!fits(item, cursor(index + 1, 0))) break;
+      page.items.push(item); index += 1; offset = 0; continue;
+    }
+    const field = entry.text;
+    const itemAt = (end: number): WordSampleDetailItem => ({ ...entry, text: field?.slice(offset, end) ?? null,
+      startCodeUnit: offset, endCodeUnit: end, totalCodeUnits: field?.length ?? 0, complete: end === (field?.length ?? 0) });
+    if (field === null || offset === field.length) {
+      const item = itemAt(offset);
+      if (!fits(item, cursor(index + 1, 0))) break;
+      page.items.push(item); index += 1; offset = 0; continue;
+    }
+    const full = itemAt(field.length);
+    if (fits(full, cursor(index + 1, 0))) {
+      page.items.push(full); index += 1; offset = 0; continue;
+    }
+    const ends = [offset];
+    for (const scalar of field.slice(offset)) ends.push(ends.at(-1)! + scalar.length);
+    ends.pop(); // A complete field has a different continuation envelope and was checked separately.
+    let low = 0; let high = ends.length - 1;
+    while (low < high) {
+      const middle = Math.ceil((low + high) / 2);
+      const end = ends[middle]!;
+      if (fits(itemAt(end), end === field.length ? cursor(index + 1, 0) : cursor(index, end))) low = middle;
+      else high = middle - 1;
+    }
+    if (low === 0) break;
+    const end = ends[low]!;
+    page.items.push(itemAt(end));
+    if (end < field.length) { offset = end; break; }
+    index += 1; offset = 0;
+  }
+  page.nextCursor = cursor(index, offset);
+  requireRetention(page.items.length > 0 || page.nextCursor === null, 'WORD_SOURCE_CORRUPT', 'Word 修改样本详情的一个字符或结构记录无法放入传输边界。');
+  requireRetention(Buffer.byteLength(JSON.stringify(page), 'utf8') <= budget, 'WORD_SOURCE_CORRUPT', 'Word 修改样本详情超出完整传输边界。');
+  return page;
 }
 
 /** Membership is deliberately absent from sample identity and explicitly present in detail-stream identity. */
@@ -498,6 +654,162 @@ export const IMPORT_RETENTION_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArra
     'source_version_id>source_versions.source_version_id:NO ACTION/NO ACTION/NONE',
   ],
 };
+
+/** Issue #1132's closed Word layer; the historical revision-27 relations keep their exact SQL. */
+export const WORD_IMPORT_RETENTION_SCHEMA_SQL = {
+  staged_word_revision_intakes: `CREATE TABLE staged_word_revision_intakes (
+  draft_id TEXT PRIMARY KEY REFERENCES staged_import_snapshots(draft_id) ON DELETE CASCADE,
+  source_digest TEXT NOT NULL CHECK(length(source_digest) = 64),
+  compiler_identity TEXT NOT NULL,
+  inventory_digest TEXT NOT NULL CHECK(length(inventory_digest) = 64),
+  compatibility TEXT NOT NULL CHECK(compatibility IN ('ready', 'unsupported')),
+  preview_reading TEXT CHECK(preview_reading IN ('rejected', 'accepted')),
+  canonical_json TEXT NOT NULL CHECK(json_valid(canonical_json)),
+  sha256 TEXT NOT NULL CHECK(length(sha256) = 64),
+  reviewed_json TEXT CHECK(reviewed_json IS NULL OR json_valid(reviewed_json)),
+  reviewed_sha256 TEXT CHECK(reviewed_sha256 IS NULL OR length(reviewed_sha256) = 64),
+  CHECK((reviewed_json IS NULL) = (reviewed_sha256 IS NULL)),
+  CHECK(compatibility <> 'ready' OR preview_reading IS NOT NULL)
+) STRICT`,
+  word_revision_sources: `CREATE TABLE word_revision_sources (
+  source_version_id TEXT PRIMARY KEY REFERENCES source_versions(source_version_id),
+  book_id TEXT NOT NULL REFERENCES books(book_id),
+  object_digest TEXT NOT NULL REFERENCES content_objects(object_digest),
+  compiler_identity TEXT NOT NULL,
+  extractor_identity TEXT NOT NULL,
+  graph_json TEXT NOT NULL CHECK(json_valid(graph_json)),
+  graph_digest TEXT NOT NULL CHECK(length(graph_digest) = 64)
+) STRICT`,
+  word_revision_imports: `CREATE TABLE word_revision_imports (
+  commit_id TEXT PRIMARY KEY REFERENCES import_commits(commit_id),
+  source_version_id TEXT NOT NULL REFERENCES word_revision_sources(source_version_id),
+  book_id TEXT NOT NULL REFERENCES books(book_id),
+  fidelity_review_id TEXT NOT NULL REFERENCES import_fidelity_reviews(fidelity_review_id),
+  revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+  mode TEXT NOT NULL CHECK(mode IN ('suggestions', 'accepted-baseline')),
+  canonical_json TEXT NOT NULL CHECK(json_valid(canonical_json)),
+  sha256 TEXT NOT NULL CHECK(length(sha256) = 64),
+  created_at TEXT NOT NULL,
+  UNIQUE(revision_id)
+) STRICT`,
+  word_manuscript_source_segments: `CREATE TABLE word_manuscript_source_segments (
+  revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
+  block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),
+  segment_ordinal INTEGER NOT NULL CHECK(segment_ordinal > 0),
+  source_version_id TEXT NOT NULL REFERENCES word_revision_sources(source_version_id),
+  commit_id TEXT NOT NULL REFERENCES word_revision_imports(commit_id),
+  canonical_json TEXT NOT NULL CHECK(json_valid(canonical_json)),
+  sha256 TEXT NOT NULL CHECK(length(sha256) = 64),
+  PRIMARY KEY(revision_id, block_id, segment_ordinal)
+) STRICT`,
+  word_tracked_edit_samples: `CREATE TABLE word_tracked_edit_samples (
+  sample_id TEXT PRIMARY KEY CHECK(length(sample_id) = 68 AND substr(sample_id, 1, 4) = 'wts_'),
+  book_id TEXT NOT NULL REFERENCES books(book_id),
+  source_version_id TEXT NOT NULL REFERENCES word_revision_sources(source_version_id),
+  template_key TEXT NOT NULL CHECK(length(template_key) = 64),
+  canonical_json TEXT NOT NULL CHECK(json_valid(canonical_json)),
+  sha256 TEXT NOT NULL CHECK(length(sha256) = 64),
+  UNIQUE(book_id, source_version_id, template_key)
+) STRICT`,
+  word_tracked_edit_sample_imports: `CREATE TABLE word_tracked_edit_sample_imports (
+  sample_id TEXT NOT NULL REFERENCES word_tracked_edit_samples(sample_id),
+  commit_id TEXT NOT NULL REFERENCES word_revision_imports(commit_id),
+  sample_digest TEXT NOT NULL CHECK(length(sample_digest) = 64),
+  choice_digest TEXT NOT NULL CHECK(length(choice_digest) = 64),
+  canonical_json TEXT NOT NULL CHECK(json_valid(canonical_json)),
+  sha256 TEXT NOT NULL CHECK(length(sha256) = 64),
+  captured_at TEXT NOT NULL,
+  PRIMARY KEY(sample_id, commit_id)
+) STRICT`,
+  word_import_mark_sources: `CREATE TABLE word_import_mark_sources (
+  commit_id TEXT NOT NULL REFERENCES word_revision_imports(commit_id),
+  mark_id TEXT NOT NULL REFERENCES editorial_marks(mark_id),
+  source_ordinal INTEGER NOT NULL CHECK(source_ordinal > 0),
+  canonical_json TEXT NOT NULL CHECK(json_valid(canonical_json)),
+  sha256 TEXT NOT NULL CHECK(length(sha256) = 64),
+  PRIMARY KEY(commit_id, mark_id, source_ordinal)
+) STRICT`,
+} as const;
+
+export const WORD_IMPORT_RETENTION_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
+  Object.keys(WORD_IMPORT_RETENTION_SCHEMA_SQL).filter((table) => table !== 'staged_word_revision_intakes').flatMap((table) => [
+    [`${table}_no_update`, `CREATE TRIGGER ${table}_no_update BEFORE UPDATE ON ${table}
+    BEGIN SELECT RAISE(ABORT, 'WORD_IMPORT_RECORD_IMMUTABLE'); END`],
+    [`${table}_no_delete`, `CREATE TRIGGER ${table}_no_delete BEFORE DELETE ON ${table}
+    BEGIN SELECT RAISE(ABORT, 'WORD_IMPORT_RECORD_IMMUTABLE'); END`],
+  ]),
+);
+
+export const WORD_IMPORT_RETENTION_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
+  staged_word_revision_intakes: ['draft_id>staged_import_snapshots.draft_id:NO ACTION/CASCADE/NONE'],
+  word_revision_sources: [
+    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
+    'object_digest>content_objects.object_digest:NO ACTION/NO ACTION/NONE',
+    'source_version_id>source_versions.source_version_id:NO ACTION/NO ACTION/NONE',
+  ],
+  word_revision_imports: [
+    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
+    'commit_id>import_commits.commit_id:NO ACTION/NO ACTION/NONE',
+    'fidelity_review_id>import_fidelity_reviews.fidelity_review_id:NO ACTION/NO ACTION/NONE',
+    'revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
+    'source_version_id>word_revision_sources.source_version_id:NO ACTION/NO ACTION/NONE',
+  ],
+  word_manuscript_source_segments: [
+    'block_id>manuscript_blocks.block_id:NO ACTION/NO ACTION/NONE',
+    'commit_id>word_revision_imports.commit_id:NO ACTION/NO ACTION/NONE',
+    'revision_id>manuscript_revisions.revision_id:NO ACTION/NO ACTION/NONE',
+    'source_version_id>word_revision_sources.source_version_id:NO ACTION/NO ACTION/NONE',
+  ],
+  word_tracked_edit_samples: [
+    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
+    'source_version_id>word_revision_sources.source_version_id:NO ACTION/NO ACTION/NONE',
+  ],
+  word_tracked_edit_sample_imports: [
+    'commit_id>word_revision_imports.commit_id:NO ACTION/NO ACTION/NONE',
+    'sample_id>word_tracked_edit_samples.sample_id:NO ACTION/NO ACTION/NONE',
+  ],
+  word_import_mark_sources: [
+    'commit_id>word_revision_imports.commit_id:NO ACTION/NO ACTION/NONE',
+    'mark_id>editorial_marks.mark_id:NO ACTION/NO ACTION/NONE',
+  ],
+};
+
+/** Refuse a partial or altered layer instead of healing a damaged schema around existing records. */
+export function validateWordImportRetentionSchema(db: DatabaseSync): void {
+  for (const [name, expected] of Object.entries({ ...WORD_IMPORT_RETENTION_SCHEMA_SQL, ...WORD_IMPORT_RETENTION_TRIGGER_SQL })) {
+    const row = db.prepare('SELECT sql FROM sqlite_schema WHERE name = ?').get(name);
+    requireRetention(row !== undefined && typeof row.sql === 'string' && canonicalTableSql(row.sql) === canonicalTableSql(expected),
+      'SCHEMA_UNSUPPORTED', 'Word 修订导入层结构不完整或不兼容。');
+  }
+  for (const [name, expected] of Object.entries(WORD_IMPORT_RETENTION_FOREIGN_KEYS)) {
+    const actual = db.prepare('SELECT * FROM pragma_foreign_key_list(?)').all(name).map((row) =>
+      `${text(row.from)}>${text(row.table)}.${text(row.to)}:${text(row.on_update)}/${text(row.on_delete)}/${text(row.match)}`).sort();
+    requireRetention(JSON.stringify(actual) === JSON.stringify([...expected].sort()), 'SCHEMA_UNSUPPORTED', 'Word 修订导入层引用结构无效。');
+  }
+}
+
+/** Separate from revision 27: existing retention tables never cause the new layer to be skipped. */
+export function initializeWordImportRetentionSchema(db: DatabaseSync): void {
+  const existing = Object.keys(WORD_IMPORT_RETENTION_SCHEMA_SQL).filter((name) =>
+    db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?").get(name) !== undefined);
+  if (existing.length > 0) {
+    validateWordImportRetentionSchema(db);
+    return;
+  }
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    for (const sql of Object.values(WORD_IMPORT_RETENTION_SCHEMA_SQL)) db.exec(sql);
+    for (const sql of Object.values(WORD_IMPORT_RETENTION_TRIGGER_SQL)) db.exec(sql);
+    validateWordImportRetentionSchema(db);
+    requireRetention(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', 'Word 修订导入层引用校验失败。');
+    db.exec('COMMIT');
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch (rollbackError) {
+      throw new AggregateError([error, rollbackError], 'Word import retention schema rollback failed.');
+    }
+    throw error;
+  }
+}
 
 export class ImportRetentionError extends Error {
   constructor(readonly code: string, message: string) {
