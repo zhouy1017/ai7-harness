@@ -21,7 +21,14 @@ export interface LearningSourceReference {
 
 export interface LearningSignal {
   signalId: string;
-  kind: 'accepted' | 'accepted-with-edit' | 'rejected' | 'review-finding-ignored';
+  kind: 'accepted' | 'accepted-with-edit' | 'rejected' | 'review-finding-ignored' | 'proactive-reason';
+  ask?: {
+    askId: string;
+    state: 'offered' | 'suppressed' | 'answered' | 'dismissed';
+    disposition: string;
+    choice: string | null;
+    text: string | null;
+  };
   source: LearningSourceReference;
   rewriteDistance: number | null;
   attribution: { peopleVersion: number; authors: ReadonlyArray<string>; editors: ReadonlyArray<string> };
@@ -75,3 +82,47 @@ export interface CreateEditorialMemoryInput {
   confidence: number;
 }
 export interface DeactivateEditorialMemoryInput { itemId: string; expectedVersionId: string }
+
+export interface LearningReasonAskProjection {
+  askId: string;
+  decisionId: string;
+  question: string;
+  options: ReadonlyArray<string>;
+}
+export type LearningReasonAskFrequency = 'often' | 'occasionally' | 'off';
+export const LEARNING_REASON_OPTIONS: Readonly<Record<string, readonly string[]>> = {
+  rejected: ['证据不足', '方向不合适', '保持作者风格'],
+  'accepted-with-edit': ['语言更准确', '保持作者风格'],
+  accepted: ['语言更准确', '保持作者风格'],
+  ignored: ['证据不足', '方向不合适', '保持作者风格'],
+};
+/** The shell supplies the persisted frequency; a renderer cannot override it. */
+export type LearningReasonAskInput =
+  | { action: 'offer'; decisionId: string }
+  | { action: 'answer'; askId: string; choice: string | null; text: string | null }
+  | { action: 'dismiss'; askId: string };
+
+export interface PreferenceAdoptionCounts {
+  findings: number;
+  accepted: number;
+  rejected: number;
+  rate: number | null;
+}
+export interface PreferenceAdoptionProjection {
+  bookId: string;
+  bookTitle: string;
+  versionId: string | null;
+  ordinal: number | null;
+  referenced: PreferenceAdoptionCounts;
+  unreferenced: PreferenceAdoptionCounts;
+  mostlyRejected: boolean;
+}
+export interface PreferenceAdoptionCursor { bookId: string; versionId: string | null }
+
+/** Exact local rule snapshot from the request producing the finding; no examples or names. */
+export interface ReferencedRuleVersion {
+  versionId: string;
+  ordinal: number;
+  lineIndex: number;
+  text: string;
+}

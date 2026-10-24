@@ -1,4 +1,5 @@
 import { reviewExcludedHeading } from './review-labels.js';
+import { learningReasonAskCard } from './analysis-feedback.js';
 import { taskMaterialSelection, taskMaterialSelectionReason, taskMaterialSizeText, similarMaterialsField } from './task-material-selection.js';
 import { appendTaskPlanPage, retainTaskPlanPages } from './analysis-paging.js';
 import { TASK_PAGE_FAILED, TASK_SELECTED_CHAPTER_NOT_LOADED, taskPageMore } from './analysis-paging-labels.js';
@@ -236,7 +237,7 @@ export interface ReviewWorkspaceSurface {
 
 type ReviewApi = Partial<Pick<RendererApi, 'inspectBookSeries'>> & Pick<
   RendererApi,
-  'inspectReviewWorkspace' | 'prepareReviewRun' | 'continueReviewRun' | 'cancelReviewRun' | 'recordReviewFindingDisposition' |
+  'inspectReviewWorkspace' | 'prepareReviewRun' | 'continueReviewRun' | 'cancelReviewRun' | 'recordReviewFindingDisposition' | 'recordLearningReasonAsk' |
   'inspectTaskPlan' | 'getTaskPlanPage' | 'quickStartReviewRun' | 'searchReferableMaterials' |
   'generateReviewReport' | 'cancelServiceJob' | 'applyChangeSuggestion' | 'applyChangeSuggestionBatch' | 'getManuscriptApplyOutcome' | 'inspectApplyReceipt' |
   'updateEditorialMark' | 'getEditorialMarkCard' |
@@ -371,6 +372,17 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   return node;
 }
 
+/** The finding card discloses the recorded rules on demand through native details/summary. */
+export function findingReferencedRules(finding: Pick<ReviewFindingProjection, 'referencedRuleVersions'>): HTMLDetailsElement | null {
+  if ((finding.referencedRuleVersions?.length ?? 0) === 0) return null;
+  const disclosure = el('details', 'review-referenced-rules');
+  disclosure.dataset['referencedRules'] = '';
+  disclosure.append(el('summary', 'status-pill', '已参考规则'));
+  for (const rule of finding.referencedRuleVersions ?? []) disclosure.append(el('p', 'field-note',
+    `${rule.text}（本社审阅偏好 v${rule.ordinal} · ${rule.versionId} · 行 ${rule.lineIndex + 1}）`));
+  return disclosure;
+}
+
 let identities = 0;
 function uid(prefix: string): string {
   identities += 1;
@@ -479,6 +491,15 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
    * lists the sources retained for it, or why there is none. A read that fails leaves the cards as they were.
    */
   let research = new Map<string, ResearchEvidenceBookProjection>();
+  const reasonAsks = new Map<string, HTMLElement>();
+  const offerReasonAsk = (findingId: string, decisionId: string | null | undefined): void => {
+    if (!decisionId) return;
+    void api.recordLearningReasonAsk({ action: 'offer', decisionId }).then((ask) => {
+      if (ask === null || destroyed) return;
+      reasonAsks.set(findingId, learningReasonAskCard(ask, api));
+      refresh(true);
+    }).catch(() => {});
+  };
   /**
    * The Fact-check Lens (Issue #901; FACT-004/005/007): the 事实核查 category's Versioned Verification Results, a bounded page at a
    * time over the service's cursor, with its own filters; and the Evidence Workspace each open row holds, kept across repaints.
@@ -1377,6 +1398,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     article.append(heading, el('blockquote', 'review-finding-quote', reviewQuote(finding.quote)));
     if (finding.replacement !== null) article.append(el('p', 'review-finding-replacement', reviewReplacementLine(finding.replacement)));
     article.append(el('p', 'review-finding-note', finding.note));
+    const referencedRules = findingReferencedRules(finding);
+    if (referencedRules !== null) article.append(referencedRules);
     if (finding.clauseRefs.length === 0) article.append(el('p', 'review-finding-basis', category.basisStatement));
     for (const clause of finding.clauseRefs) article.append(el('p', 'review-finding-basis', reviewClauseLine(clause)));
     const lines = [finding.stateLine, finding.anchorState === 'anchor-changed' ? REVIEW_ANCHOR_CHANGED : null]
@@ -1389,6 +1412,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     if (finding.ignoreReason !== null) article.append(el('p', 'review-finding-ignore-reason', reviewIgnoreReasonLine(finding.ignoreReason)));
     if (finding.historicalMarker !== null) article.append(el('p', 'review-historical-marker-label review-finding-marker', finding.historicalMarker));
     article.append(renderFindingActions(run, finding));
+    const reasonAsk = reasonAsks.get(finding.findingId);
+    if (reasonAsk !== undefined && reasonAsk.dataset['learningAskState'] !== 'dismissed') article.append(reasonAsk);
     if (ui.capabilityFindingId === finding.findingId) article.append(capabilityNote());
     if (ui.ignore?.findingId === finding.findingId) article.append(renderIgnoreForm(run, finding, ui.ignore));
     if (ui.convert?.findingId === finding.findingId) article.append(renderConvertForm(run, finding, ui.convert));
@@ -1798,6 +1823,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       );
       if (applied.acknowledged) {
         options.setStatus(REVIEW_STATUS_LINES.applied, 'success');
+        offerReasonAsk(finding.findingId, applied.result.card?.suggestion?.decision?.decisionId);
       } else if (isCapabilityRefusal(applied.failure)) {
         throw applied.failure;
       } else if (applied.outcome?.state === 'committed') {
@@ -1875,7 +1901,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       return;
     }
     await act(REVIEW_STATUS_LINES.ignoring, REVIEW_STATUS_LINES.ignoreFailed, async () => {
-      await api.recordReviewFindingDisposition({ reviewRunId: run.reviewRunId, findingId: finding.findingId, disposition: 'ignored', reason: form.reason.trim() });
+      const updated = await api.recordReviewFindingDisposition({ reviewRunId: run.reviewRunId, findingId: finding.findingId, disposition: 'ignored', reason: form.reason.trim() });
+      offerReasonAsk(finding.findingId, updated.run?.findings.find((entry) => entry.findingId === finding.findingId)?.learningDecisionId);
       ui.ignore = null;
       options.setStatus(REVIEW_STATUS_LINES.ignored, 'success');
     }, (error) => {
@@ -1943,6 +1970,21 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       if (applied.acknowledged || applied.outcome?.state === 'committed') {
         ui.batch = null;
         options.setStatus(reviewBatchAppliedLine(strip.items.length, !applied.acknowledged), 'success');
+        // The Apply is finished. Read its decisions in bounded pages; optional asks never hold the batch or its next action.
+        void (async () => {
+          const remaining = new Set(strip.items.map((item) => item.markId));
+          let after: number | null = null;
+          while (remaining.size > 0 && !destroyed) {
+            const page = await api.inspectReviewWorkspace({ reviewRunId: run.reviewRunId, findingsAfterOrdinal: after });
+            const settled = page.run;
+            if (settled === null) return;
+            for (const finding of settled.findings) {
+              if (finding.markId !== null && remaining.delete(finding.markId)) offerReasonAsk(finding.findingId, finding.learningDecisionId);
+            }
+            if (!settled.findingsTruncated || settled.findings.length === 0) return;
+            after = settled.findings.at(-1)!.ordinal;
+          }
+        })().catch(() => {});
         return;
       }
       // Refused — a suggestion drifted, or was decided meanwhile — or its outcome is unknown: the same

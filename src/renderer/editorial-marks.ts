@@ -23,6 +23,7 @@ import {
   knowledgeMenuLabel,
 } from './series-knowledge-labels.js';
 import type { BoundedEditor } from './editor.js';
+import { learningReasonAskCard } from './analysis-feedback.js';
 import type {
   EditorClipboardCommand,
   EditorialMarkAnchorProjection,
@@ -40,7 +41,6 @@ import {
   DECISION_REASON_ADD,
   DECISION_REASON_CANCEL,
   DECISION_REASON_CHIPS,
-  DECISION_REASON_DISMISS,
   DECISION_REASON_OWN,
   DECISION_REASON_PROMPTS,
   DECISION_REASON_REVISE,
@@ -134,7 +134,7 @@ interface MountOptions {
   api: Pick<
     RendererApi,
     'createEditorialMark' | 'getEditorialMarkCard' | 'updateEditorialMark' | 'recordChangeSuggestionDecision' |
-    'recordProposalDecisionReason' | 'recordProposalDecisionFeedback' | 'runEditorClipboardCommand' | 'applyChangeSuggestion' | 'reverseAppliedChangeSuggestion' |
+    'recordProposalDecisionReason' | 'recordProposalDecisionFeedback' | 'recordLearningReasonAsk' | 'runEditorClipboardCommand' | 'applyChangeSuggestion' | 'reverseAppliedChangeSuggestion' |
     'inspectProposalWorkspace' | 'saveProposalDecisionDraft' | 'inspectApplyReceipt' | 'prepareReverseApply' | 'getManuscriptApplyOutcome' | 'inspectReviewFindingOfMark'
   >;
   /**
@@ -399,10 +399,12 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   let floatingRefresh: (() => void) | undefined;
   let openCardId: string | undefined;
   /**
-   * The one reason row open on the card (Issue #61, S26a): the prompt a decision just recorded asks once, or the editor's
-   * own `补充原因…` / `改原因…`. Leaving the card ends it; reopening the card never asks again (FDBK-001).
+   * The one reason row open on the card (Issue #61, S26a): the editor's own `补充原因…` / `改原因…`. Leaving the card ends it.
+   * A decision no longer opens it by itself (Issue #1109): the learning ask below follows 经常 / 偶尔 / 关闭 instead.
    */
-  let promptFor: { readonly markId: string; readonly decisionId: string; readonly mode: 'prompt' | 'add' | 'revise' } | null = null;
+  let promptFor: { readonly markId: string; readonly decisionId: string; readonly mode: 'add' | 'revise' } | null = null;
+  /** Offered learning asks by mark (Issue #1109), drawn again with their card until answered or dismissed; never re-requested. */
+  const learningAsks = new Map<string, { readonly decisionId: string; readonly node: HTMLElement }>();
   let collapsedBeforeContextClick = true;
   const recoveryCards = new Map<string, ApplyReceiptProjection>();
   let working = false;
@@ -963,6 +965,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     panel.setAttribute('role', 'dialog');
     panel.setAttribute('aria-label', `${MARK_KIND_LABELS[card.kind]}浮卡`);
     panel.dataset['markCard'] = card.markId;
+    panel.dataset['learningDecisionId'] = card.suggestion?.decision?.decisionId ?? '';
     panel.dataset['markKind'] = card.kind;
     panel.dataset['markAnchor'] = card.anchorState;
 
@@ -1305,10 +1308,13 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       }));
       nodes.push(later);
     }
+    const ask = learningAsks.get(card.markId);
+    if (ask !== undefined && (ask.decisionId !== decision.decisionId || ask.node.dataset['learningAskState'] !== undefined)) learningAsks.delete(card.markId);
+    else if (ask !== undefined) nodes.push(ask.node);
     return nodes;
   }
 
-  function reasonChips(card: EditorialMarkCardProjection, decision: ProposalItemDecisionProjection, mode: 'prompt' | 'add' | 'revise'): HTMLElement {
+  function reasonChips(card: EditorialMarkCardProjection, decision: ProposalItemDecisionProjection, mode: 'add' | 'revise'): HTMLElement {
     const disposition = decision.disposition;
     const wrap = el('div', 'editorial-mark-reasons');
     wrap.dataset['markReasons'] = disposition;
@@ -1348,28 +1354,30 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       submit: async (values) => record(values.reason, 'free-text'),
       cancel,
     }))));
-    // The prompt a decision raised ends with 不说明, recorded as no more than that; the editor's own row just closes.
-    row.append(mode === 'prompt'
-      ? actionButton('reason-dismiss', DECISION_REASON_DISMISS, 'quiet', () => void command(async () => {
-          finish(await api.recordProposalDecisionFeedback({
-            ...binding(), markId: card.markId, decisionId: decision.decisionId, expectedFeedback: decision.feedbackEntries, action: 'dismiss', reason: null, reasonSource: null,
-          }), DECISION_REASON_STATUS.dismissed);
-        }, DECISION_REASON_STATUS.failed))
-      : actionButton('reason-cancel', DECISION_REASON_CANCEL, 'quiet', () => {
-          promptFor = null;
-          showCard(card);
-          floating?.querySelector<HTMLElement>(`[data-mark-action="${mode === 'revise' ? 'reason-revise' : 'reason-add'}"]`)?.focus({ preventScroll: true });
-        }));
+    row.append(actionButton('reason-cancel', DECISION_REASON_CANCEL, 'quiet', () => {
+      promptFor = null;
+      showCard(card);
+      floating?.querySelector<HTMLElement>(`[data-mark-action="${mode === 'revise' ? 'reason-revise' : 'reason-add'}"]`)?.focus({ preventScroll: true });
+    }));
     wrap.append(row);
     return wrap;
   }
 
-  /** A decision just recorded, and not already carrying a reason, is asked why once (FDBK-001, MARK-005). */
+  /**
+   * A decision just recorded may raise the learning ask (Issue #1109; ADR 0095 §7), which the service offers or withholds by the
+   * persisted 经常 / 偶尔 / 关闭. The decision is already complete: a slow or failed ask delays no repaint, Apply or decision.
+   */
   function notePrompt(before: string | null, after: EditorialMarkCardProjection | null): void {
     const decision = after?.suggestion?.decision ?? null;
-    promptFor = after !== null && decision !== null && decision.decisionId !== before && decision.reasonState === 'none'
-      ? { markId: after.markId, decisionId: decision.decisionId, mode: 'prompt' }
-      : null;
+    promptFor = null;
+    if (after === null || decision === null || decision.decisionId === before) return;
+    void api.recordLearningReasonAsk({ action: 'offer', decisionId: decision.decisionId }).then((ask) => {
+      if (ask === null || destroyed) return;
+      const node = learningReasonAskCard(ask, api);
+      learningAsks.set(after.markId, { decisionId: decision.decisionId, node });
+      if (openCardId !== after.markId || floating?.dataset['learningDecisionId'] !== decision.decisionId) return;
+      floating?.querySelector<HTMLElement>('[data-mark-region="disposition"]')?.append(node);
+    }).catch(() => {});
   }
 
   async function decide(

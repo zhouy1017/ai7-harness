@@ -2936,6 +2936,14 @@ async function main() {
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const boxes=Array.from(sheet.querySelectorAll('input[type=checkbox][name="review-category"]')); const scopes=Array.from(sheet.querySelectorAll('input[name="review-scope"]')); const disabled=boxes.filter((box)=>box.disabled); const quick=sheet.querySelector('[data-review-action="quick-start"]'); const terms=Array.from(sheet.querySelectorAll('dl.review-consequences dt')).map((term)=>term.textContent); return boxes.length===9 && boxes.every((box)=>!box.checked) && JSON.stringify(disabled.map((box)=>box.value).sort())===JSON.stringify(['cross-deliverable-consistency','series-consistency']) && disabled.every((box)=>(box.dataset.unavailableReason??'').length>0) && scopes.length===4 && scopes.every((scope)=>!scope.checked) && quick instanceof HTMLButtonElement && quick.disabled && sheet.querySelector('.review-quick-start-reason')?.textContent==='快速开始先准备所选类别的计划；只有匹配这本书的默认执行规则才会开始，否则先看计划。' && JSON.stringify(terms)===JSON.stringify(['会读取','会发送','不会做','费用']); })()`, 'review-sheet-contract');
 
     at('review-prepare');
+    // F-05 part 2a (Issue #1109 revisions 6-7): a real governed house rule for this category exists before the review, made through
+    // the public governance action. Fixture requests keep the development-ci v1 policy, which admits no preference excerpt, so the
+    // Run must pin none and disclose none; only the local ask is exercised, at 经常.
+    await renderer.evaluate(`window.ai7.recordLearningSupervision({operation:'create',targets:[],scope:{kind:'house'},categoryId:'typos-and-usage',text:'统一编辑用语，保留有意的节奏。',effect:'guide'}).then(() => true)`);
+    const governedPreference = await renderer.evaluate(`window.ai7.inspectHouseReviewPreference()`);
+    requireJourney(governedPreference?.current?.lines?.some((line) => line.categoryId === 'typos-and-usage' && line.bookId === null && line.text === '统一编辑用语，保留有意的节奏。') === true,
+      'review-governed-preference-exists', governedPreference?.current?.lines);
+    await renderer.evaluate(`window.ai7.savePreference({key:'learning.askFrequency',value:'often'})`);
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for (const id of ['typos-and-usage','style-and-format','plot-consistency']) { const box=sheet.querySelector('input[name="review-category"][value="'+id+'"]'); if(!(box instanceof HTMLInputElement)||box.disabled)return false; box.click(); } const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'review-prepare-start');
     // Synchronized delta with Issue #418 (S72 D4): the prepared Run is one line on ②B; its plan opens in the
     // Task Drawer. Synchronized delta with Issue #420 (S74a A5): the Run's one approval left ②B for the
@@ -3055,8 +3063,17 @@ async function main() {
     // names the category that produced it (MARK-008, MARK-010).
     const typosFinding = reviewed.run.findings.find((finding) => finding.categoryId === 'typos-and-usage' && finding.markId !== null);
     requireJourney(typosFinding !== undefined, 'review-typos-finding-marked');
+    // development-ci v1 admits no preference excerpt: the governed rule above was pinned by no category, and neither lineage nor a
+    // chip may imply it was sent.
+    requireJourney(reviewed.run.influence.length === 0 && reviewed.run.findings.every((finding) => (finding.referencedRuleVersions?.length ?? 0) === 0),
+      'review-no-preference-references-under-ci', reviewed.run.influence);
+    await assertRenderer(renderer, `document.querySelectorAll('article.review-finding [data-referenced-rules]').length===0`, 'review-no-referenced-rules-chip-under-ci');
     await reviewAction(renderer, `article.review-finding[data-finding-id="${typosFinding.findingId}"] [data-review-action="go-to-text"]`, 'review-go-to-text');
     await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] [data-mark-id="${typosFinding.markId}"]')?.dataset.markSource==='ai7' && (document.querySelector('[data-mark-card]')?.textContent??'').includes('AI7 · 审阅「错别字与规范用语」')`, 'review-mark-and-card', 30_000);
+    await assertRenderer(renderer, `(() => {const reject=document.querySelector('[data-mark-card] [data-mark-action="reject"]');if(!(reject instanceof HTMLButtonElement)||reject.disabled)return false;reject.click();return true;})()`, 'review-learning-reject');
+    await waitFor(renderer, `document.querySelector('[data-mark-card] [data-learning-reason-ask]') !== null`, 'review-learning-ask');
+    await assertRenderer(renderer, `(() => {const ask=document.querySelector('[data-learning-reason-ask]');return ask.querySelectorAll('input[type="radio"]').length===3&&ask.querySelectorAll('input:checked').length===0&&ask.querySelector('textarea')?.value===''&&ask.querySelector('[data-learning-ask-answer]')?.disabled===true&&document.querySelector('[data-mark-action="withdraw"]')?.disabled===false;})()`, 'review-learning-ask-unselected-nonblocking');
+    await assertRenderer(renderer, `(() => {document.querySelector('[data-learning-ask-dismiss]').click();return !document.querySelector('[data-learning-reason-ask]');})()`, 'review-learning-ask-dismiss');
     await openReviewDestination(renderer, 'review-destination-again');
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, 'review-destination-again-settled');
 

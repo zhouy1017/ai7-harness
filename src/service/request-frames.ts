@@ -1449,6 +1449,16 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       if (![input.signalOffset, input.itemOffset, input.exclusionOffset ?? 0].every((offset) => Number.isSafeInteger(offset) && Number(offset) >= 0 && Number(offset) <= 1_000_000)) throw new ProtocolError(tentativeId);
       break;
     }
+    case 'recordLearningReasonAsk': {
+      if (!isRecord(value.input)) throw new ProtocolError(tentativeId);
+      const action = value.input.action;
+      const input = requireInput(value.input, action === 'offer' ? ['action', 'decisionId', 'frequency']
+        : action === 'answer' ? ['action', 'askId', 'choice', 'text', 'frequency'] : ['action', 'askId', 'frequency'], tentativeId);
+      if (!['often', 'occasionally', 'off'].includes(String(input.frequency)) ||
+        !(action === 'offer' ? validUuid(input.decisionId) : (action === 'answer' || action === 'dismiss') && validUuid(input.askId)) ||
+        action === 'answer' && (!(input.choice === null || isBoundedString(input.choice, 80)) || !(input.text === null || isBoundedString(input.text, 2_048)))) throw new ProtocolError(tentativeId);
+      break;
+    }
     case 'changeEditorialLearning': {
       if (!isRecord(value.input)) throw new ProtocolError(tentativeId);
       const kind = value.input.kind;
@@ -1479,8 +1489,10 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     case 'inspectEditQualitySignals': {
-      const input = requireInput(value.input, ['bookId'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId'], ['preferenceAfter'], tentativeId);
       if (!(input.bookId === null || validUuid(input.bookId))) throw new ProtocolError(tentativeId);
+      const after = input.preferenceAfter;
+      if (!(after == null || isRecord(after) && hasExactKeys(after, ['bookId', 'versionId']) && validUuid(after.bookId) && (after.versionId === null || validUuid(after.versionId)))) throw new ProtocolError(tentativeId);
       break;
     }
     // 质量与学习 › 学习准入 (Issue #61, S26b): every Book's Learning Material, or one Book's.

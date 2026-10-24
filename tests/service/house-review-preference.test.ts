@@ -110,7 +110,7 @@ describe('house review preference ledger', () => {
       expect(typos).toContain('采纳1、未采纳0；应用后常再改，注意编辑改写偏好');
       expect(typos).toContain('校对认为应统一');
       expect(typos).not.toContain('王四');
-      expect(ledger.use('ordinary-production', bookId, 'typos-and-usage')!.lines).toEqual([typos, version.lines[2]!.text]);
+      expect(ledger.use('ordinary-production', bookId, 'typos-and-usage')!.lines).toEqual([version.lines[2]!.text, typos]);
       expect(ledger.use('ordinary-production', randomUUID(), 'typos-and-usage')!.lines).toEqual([typos]);
       expect(ledger.use('ordinary-production', bookId, 'style-and-format')!).toMatchObject({ lines: [version.lines[0]!.text], sourceCount: 1 });
       expect(ledger.use('ordinary-production', bookId, 'literary-expression')).toBeNull();

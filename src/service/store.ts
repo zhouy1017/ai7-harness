@@ -2,7 +2,7 @@ import { backgroundEnrollmentKinds } from './analysis/live-kind-admission.js';
 import { executionBackgroundShare } from './analysis/execution.js';
 import { initializeProcedureDefinitionSchema } from './procedures/definition-store.js';
 import { EditorialLearningLedger, initializeEditorialLearningSchema } from './learning/ledger.js';
-import type { ChangeEditorialLearningInput, CreateEditorialMemoryInput, DeactivateEditorialMemoryInput, InspectEditorialLearningInput, EditorialLearningProjection } from '../shared/protocol/learning.js';
+import type { ChangeEditorialLearningInput, CreateEditorialMemoryInput, DeactivateEditorialMemoryInput, InspectEditorialLearningInput, EditorialLearningProjection, LearningReasonAskInput, LearningReasonAskProjection } from '../shared/protocol/learning.js';
 import { dialogueQuestionDigest } from './dialogue/contract.js';
 import { fragmentsText } from './dialogue/fragments.js';
 import { globalAgentDialogueProjection } from './dialogue/global-agent-session.js';
@@ -4931,7 +4931,7 @@ export class EditorialStore {
     this.#reviewRuns = new ReviewRunStore(authority, this.#editorialMarks, {
       ledgerOf: (entry, materials, digest, bookId, preference, version) => this.#reviewLedgerOf(entry, materials, digest, bookId, preference, version),
       housePreference: (bookId, categoryId, kind, policy) => {
-        const use = new HouseReviewPreferenceLedger(this.#authority).use(this.#baselineAnalysis.launch.operationalScope, bookId, categoryId);
+        const use = new HouseReviewPreferenceLedger(this.#authority).use(this.#baselineAnalysis.launch.operationalScope, bookId, categoryId, this.#housePreferencePeopleNames());
         if (use === null) return null;
         // The kind's one foreground rule must name the category; the live admission asks the same again before any dispatch.
         const rules = policy.providerProcessing.admittedRules.filter((rule) => rule.backgroundOrigin !== true && rule.taskKinds.includes(kind));
@@ -13200,16 +13200,20 @@ export class EditorialStore {
     return this.inspectLearningMaterial(input.bookId, input.materialKey);
   }
 
-  inspectEditQualitySignals(bookId: string | null): EditQualitySignalsProjection {
+  inspectEditQualitySignals(bookId: string | null, after: import('../shared/protocol/learning.js').PreferenceAdoptionCursor | null = null): EditQualitySignalsProjection {
     return this.#learningCall(() => {
       requireStore(bookId === null || UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
       if (bookId !== null) requireStore(this.#authority.prepare('SELECT 1 FROM books WHERE book_id = ?').get(bookId) !== undefined, 'BOOK_NOT_FOUND', '图书不存在。');
-      return readEditQualitySignals(this.#authority, bookId);
+      return { ...readEditQualitySignals(this.#authority, bookId), ...new EditorialLearningLedger(this.#authority).adoption(bookId, after) };
     });
   }
 
   inspectEditorialLearning(input: InspectEditorialLearningInput): EditorialLearningProjection {
     return this.#learningCall(() => new EditorialLearningLedger(this.#authority).inspect(input));
+  }
+
+  recordLearningReasonAsk(input: LearningReasonAskInput, frequency: import('../shared/protocol/learning.js').LearningReasonAskFrequency): LearningReasonAskProjection | null {
+    return this.#learningCall(() => this.#transaction(this.#authority, () => new EditorialLearningLedger(this.#authority).reasonAsk(input, frequency)));
   }
 
   changeEditorialLearning(input: ChangeEditorialLearningInput): EditorialLearningProjection {

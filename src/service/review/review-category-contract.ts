@@ -34,6 +34,11 @@ import type { ReviewDeliverableParticipant } from '../production-documents.js';
 export const REVIEW_CATEGORY_UNIT_RESULT_SCHEMA_V1 = 'ai7.editorial-review.unit-result/1' as const;
 export const REVIEW_CATEGORY_UNIT_RESULT_SCHEMA = 'ai7.editorial-review.unit-result/2' as const;
 export const REVIEW_CATEGORY_PROMPT_CONTRACT_SCHEMA = 'ai7.editorial-review.prompt-contract/2' as const;
+/**
+ * The prompt identity of a review request carrying a Top-5 本社审阅偏好 selection (Issue #1109, F-05 part 2a): the /2 or /3
+ * base contract wrapped with the selected lines and their record version. Pins without a selection keep their /1–/3 bytes.
+ */
+export const REVIEW_CATEGORY_SELECTED_PREFERENCE_PROMPT_SCHEMA = 'ai7.editorial-review.prompt-contract/4' as const;
 export const REVIEW_CATEGORY_RESULT_SET_REVISION_SCHEMA = 'ai7.editorial-review.result-set-revision/1' as const;
 /** The shape that carries scope-plan facts and per-unit lineage: every update, and a first review of one range. */
 export const REVIEW_CATEGORY_SUCCESSOR_REVISION_SCHEMA = 'ai7.editorial-review.result-set-revision/2' as const;

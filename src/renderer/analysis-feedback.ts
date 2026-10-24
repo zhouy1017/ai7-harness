@@ -21,6 +21,7 @@ import {
   analysisQualityMetricLines,
 } from './analysis-feedback-labels.js';
 import { localInstantLabel } from './plan-preview-labels.js';
+import type { LearningReasonAskProjection } from '../shared/protocol/learning.js';
 
 /**
  * ②A 分析反馈 (Issue #94, plan slice S38; V2-UX-ANALYSIS-023, ANALYSIS-024, FDBK-005 to FDBK-008): beside the synopsis and
@@ -82,6 +83,47 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
   return node;
+}
+
+/** A local learning ask lives beside the completed decision. It takes no focus or lock from the next decision. */
+export function learningReasonAskCard(ask: LearningReasonAskProjection, api: Pick<RendererApi, 'recordLearningReasonAsk'>): HTMLElement {
+  const card = el('section', 'learning-reason-ask');
+  card.dataset['learningReasonAsk'] = ask.askId;
+  card.dataset['decisionId'] = ask.decisionId;
+  const choices = el('fieldset'); choices.append(el('legend', undefined, ask.question));
+  let choice: string | null = null;
+  const text = el('textarea'); text.rows = 2; text.maxLength = 2_048;
+  text.dataset['learningAskText'] = '';
+  const own = el('label', undefined, '补充说明（可选）'); own.append(text);
+  const status = el('p', 'field-note'); status.setAttribute('role', 'status');
+  const save = el('button', 'button secondary', '记下原因'); save.type = 'button'; save.dataset['learningAskAnswer'] = ''; save.disabled = true;
+  const update = () => { save.disabled = choice === null && text.value.trim().length === 0; };
+  for (const option of ask.options) {
+    const label = el('label', 'analysis-feedback-choice');
+    const radio = el('input'); radio.type = 'radio'; radio.name = `learning-ask-${ask.askId}`; radio.value = option;
+    radio.addEventListener('change', () => { if (radio.checked) choice = option; update(); });
+    label.append(radio, el('span', undefined, option)); choices.append(label);
+  }
+  text.addEventListener('input', update);
+  const dismiss = el('button', 'button quiet', '暂不说明'); dismiss.type = 'button'; dismiss.dataset['learningAskDismiss'] = '';
+  let saving = false;
+  save.addEventListener('click', () => {
+    if (saving || save.disabled) return;
+    saving = true; save.disabled = true;
+    void api.recordLearningReasonAsk({ action: 'answer', askId: ask.askId, choice, text: text.value.trim() || null }).then(() => {
+      card.dataset['learningAskState'] = 'answered';
+      card.replaceChildren(el('p', 'field-note', '已记下你的原因。'));
+    }, () => { saving = false; update(); status.textContent = '原因未能记录，可以稍后再试。'; });
+  });
+  dismiss.addEventListener('click', () => {
+    if (saving) return;
+    card.dataset['learningAskState'] = 'dismissed';
+    card.remove();
+    void api.recordLearningReasonAsk({ action: 'dismiss', askId: ask.askId }).catch(() => {});
+  });
+  card.addEventListener('keydown', (event) => { if (event.key === 'Escape' && !event.isComposing && !saving) { event.preventDefault(); event.stopPropagation(); dismiss.click(); } });
+  card.append(choices, own, save, dismiss, status);
+  return card;
 }
 
 function action(label: string, tone: 'primary' | 'secondary' | 'quiet', name: string, run: () => void): HTMLButtonElement {
