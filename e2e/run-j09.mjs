@@ -1679,10 +1679,16 @@ async function main() {
     await openAnalysisOf(renderer, bookB, 'idle-resume-b');
     await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((reading)=>reading.run?.runRecordId===${JSON.stringify(idleRunId)} && reading.state==='settled')`, 'idle-resumed-on-quiet', 120000);
     const idleFinished = await renderer.evaluate('window.ai7.inspectBaselineAnalysis()');
+    // The resumed span of the same attempt sends only the units the yield left: the unit kept before it is never sent again.
+    const yieldedUnits = yieldedIdle.run.attempt.spans.map((span) => span.unitOrdinal);
+    const finishedUnits = idleFinished.run?.attempt?.spans?.map((span) => span.unitOrdinal) ?? [];
     requireJourney(idleFinished.authorization.authorizationId === idleAuthorizationId && idleFinished.authorization.startWhen === 'idle' &&
       idleFinished.planVersion.materialInputs.runBudgetCeiling.maxTotalTokens === 100000 &&
       idleFinished.run.transitions.filter((transition)=>transition.state==='admitted').length === 2 &&
-      idleFinished.run.attempt.spans.length === 1, 'idle-same-run-no-resend');
+      idleFinished.run.attempt.attemptId === yieldedIdle.run.attempt.attemptId &&
+      finishedUnits.length > yieldedUnits.length && JSON.stringify(finishedUnits.slice(0, yieldedUnits.length)) === JSON.stringify(yieldedUnits) &&
+      new Set(finishedUnits).size === finishedUnits.length, 'idle-same-run-no-resend',
+    { admitted: idleFinished.run?.transitions?.filter((transition)=>transition.state==='admitted').length, yielded: yieldedUnits, finished: finishedUnits });
 
     // #865 synchronized delta: the same clarification family carries one model-originated question, only its unit waits.
     at('model-question-launch');
