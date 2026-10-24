@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { canonicalRecord, parseCanonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
+import { canonicalJson, canonicalRecord, parseCanonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
 import {
   DATABASE_MERGE_TRIGGER_SQL,
   DatabaseMergeError,
@@ -22,6 +22,7 @@ import { writeDatabasePackage } from '../../src/service/database-exports.js';
 import { EDITORIAL_WORKSPACE_PROFILE_DIGEST } from '../../src/service/editorial-workspace-profile.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { preMergeBackupFileName, replacementStagingFor, writeMergeReceipt, type ReplacementIntent } from '../../src/service/database-replacement.js';
+import { EDITORIAL_LEARNING_SCHEMA_SQL, EditorialLearningLedger, importBookLearningControls } from '../../src/service/learning/ledger.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { MAX_DATABASE_REPLACEMENTS_LISTED } from '../../src/shared/protocol.js';
 import { fixedArchiveTime } from '../../src/shared/archive-time.js';
@@ -465,14 +466,17 @@ describe('Book learning controls across database merge (#1115)', () => {
       for (const [index, row] of carried.slice(destinationControls.length).entries()) {
         const original = selected[index]!;
         const ordinal = destinationControls.length + index + 1;
-        const record = canonicalRecord({ ...JSON.parse(String(original.canonical_json)), ordinal,
-          importedFrom: { canonicalJson: original.canonical_json, sha256: original.sha256 } });
+        const source = JSON.parse(String(original.canonical_json));
+        const record = canonicalRecord({ ...source, ordinal, importedFrom: { record: source, sha256: original.sha256 } });
         expect(row).toEqual({ ...original, ordinal, canonical_json: record.json, sha256: record.digest });
+        // The embedded source is the source row's exact bytes, held to its digest.
+        expect(canonicalJson(JSON.parse(String(row.canonical_json)).importedFrom.record)).toBe(original.canonical_json);
       }
       const memory = (signalId: string) => target.createEditorialMemory({ clientMemoryId: randomUUID(), signalId,
         title: '合并后记忆', editorialDimension: '语言', confidence: 0.5 });
-      expect(() => memory(excludedSignal.signalId)).toThrow();
-      expect(() => memory(materialSignal.signalId)).toThrow();
+      const refusal = (signalId: string): unknown => { try { memory(signalId); return null; } catch (error) { return code(error); } };
+      expect(refusal(excludedSignal.signalId)).toBe('EDITORIAL_LEARNING_INVALID');
+      expect(refusal(materialSignal.signalId)).toBe('EDITORIAL_LEARNING_INVALID');
       memory(comparisonSignal.signalId);
       expect(learning(target).items[0]!.usable).toBe(true);
       learningDecision(target, excluded);
@@ -514,14 +518,50 @@ describe('Book learning controls across database merge (#1115)', () => {
     const third = await EditorialStore.open(thirdRoot, roots.codeRoot); third.markCleanShutdown(); third.close();
     withAttached(thirdRoot, otherRoot, (db) => mergeBooks(db, [selected], { source: otherRoot, target: thirdRoot }));
     const carried = learningRows(thirdRoot)[0]!;
-    expect(JSON.parse(String(carried.canonical_json)).importedFrom).toEqual({
-      canonicalJson: learningRows(otherRoot)[2]!.canonical_json, sha256: learningRows(otherRoot)[2]!.sha256 });
+    const firstHop = learningRows(otherRoot)[2]!;
+    const origin = learningRows(roots.dataRoot).find((row) => row.book_id === selected)!;
+    const provenance = JSON.parse(String(carried.canonical_json)).importedFrom;
+    expect(provenance.sha256).toBe(firstHop.sha256);
+    expect(canonicalJson(provenance.record)).toBe(firstHop.canonical_json);
+    expect(provenance.record.importedFrom.sha256).toBe(origin.sha256);
+    expect(canonicalJson(provenance.record.importedFrom.record)).toBe(origin.canonical_json);
     const reopened = await EditorialStore.open(thirdRoot, roots.codeRoot);
     try { expect(learning(reopened)).toMatchObject({ enabled: true, excludedBooks: [{ bookId: selected, title: '所选图书' }] }); }
     finally { reopened.close(); }
   });
 
-  it.each(['digest', 'gap', 'provenance', 'collision', 'destination'] as const)('fails closed and rolls back Book/control rows for %s corruption', async (damage) => {
+  it('adds each hop’s source once, so a long merge chain grows linearly and still verifies back to the editor’s entry', () => {
+    const bookId = randomUUID();
+    const hops = 12;
+    const sizes: number[] = [];
+    let first: Record<string, import('node:sqlite').SQLOutputValue> | undefined;
+    for (let hop = 0; hop <= hops; hop += 1) {
+      const db = new DatabaseSync(join(dirname(otherRoot), `controls-hop-${hop}.sqlite`));
+      try {
+        db.exec(`CREATE TABLE books (book_id TEXT PRIMARY KEY); ${EDITORIAL_LEARNING_SCHEMA_SQL.editorial_learning_controls}`);
+        db.prepare('INSERT INTO books VALUES (?)').run(bookId);
+        if (hop === 0) new EditorialLearningLedger(db).change({ kind: 'book', bookId, excluded: true, expectedEntries: 0 });
+        else {
+          db.prepare('ATTACH DATABASE ? AS src').run(join(dirname(otherRoot), `controls-hop-${hop - 1}.sqlite`));
+          expect(importBookLearningControls(db, (id) => id === bookId)).toBe(1);
+          db.exec('DETACH DATABASE src');
+        }
+        const [row] = db.prepare('SELECT * FROM editorial_learning_controls').all();
+        first ??= row;
+        sizes.push(Buffer.byteLength(String(row!.canonical_json)));
+        expect([...new EditorialLearningLedger(db).controls().excludedBooks]).toEqual([bookId]);
+        if (hop === hops) {
+          let origin = JSON.parse(String(row!.canonical_json));
+          for (let step = 0; step < hops; step += 1) origin = origin.importedFrom.record;
+          expect(canonicalJson(origin)).toBe(first!.canonical_json);
+        }
+      } finally { db.close(); }
+    }
+    // Escaped text would double every hop (seven megabytes at sixteen); an embedded record adds the same bytes each time.
+    expect(new Set(sizes.slice(1).map((size, index) => size - sizes[index]!)).size).toBe(1);
+  });
+
+  it.each(['digest', 'gap', 'provenance', 'provenance-digest', 'collision', 'destination'] as const)('fails closed and rolls back Book/control rows for %s corruption', async (damage) => {
     const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     const bookId = emptyBook(source, '待合并图书'); excludeBook(source, bookId, true);
     source.markCleanShutdown(); source.close();
@@ -537,8 +577,8 @@ describe('Book learning controls across database merge (#1115)', () => {
         if (damage === 'gap') original.ordinal = 2;
         if (damage === 'collision') original.entryId = learningRows(otherRoot)[0]!.entry_id;
         if (damage === 'provenance') original.importedFrom = {
-          canonicalJson: canonicalRecord({ ...original, value: false }).json,
-          sha256: canonicalRecord({ ...original, value: false }).digest };
+          record: { ...original, value: false }, sha256: canonicalRecord({ ...original, value: false }).digest };
+        if (damage === 'provenance-digest') original.importedFrom = { record: { ...original }, sha256: '0'.repeat(64) };
         const changed = canonicalRecord(original);
         db.prepare('UPDATE editorial_learning_controls SET entry_id = ?, ordinal = ?, canonical_json = ?, sha256 = ?')
           .run(original.entryId, original.ordinal, changed.json, changed.digest);

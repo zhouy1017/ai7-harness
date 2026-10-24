@@ -94,14 +94,12 @@ interface LearningControl {
   schema: 'ai7.editorial-learning-control/1';
   entryId: string; ordinal: number; kind: 'switch' | 'book'; bookId: string | null;
   value: boolean; actor: 'editor'; recordedAt: string; basis: typeof LOCAL_LEARNING_POLICY_BASIS;
-  importedFrom?: { canonicalJson: string; sha256: string };
+  importedFrom?: { record: LearningControl; sha256: string };
 }
 
-/** The embedded source bytes preserve the original editor attribution, ordinal and any earlier merge provenance. */
-function controlRecord(json: string, digest: string): LearningControl {
-  requireLearning(sha256Hex(json) === digest);
-  const record: unknown = JSON.parse(json);
-  requireLearning(isRecord(record) && canonicalJson(record) === json && record.schema === 'ai7.editorial-learning-control/1' &&
+/** One control as `change` writes it, with the provenance a merge adds. */
+function controlRecord(record: unknown): LearningControl {
+  requireLearning(isRecord(record) && record.schema === 'ai7.editorial-learning-control/1' &&
     typeof record.entryId === 'string' && record.entryId.length > 0 && Number.isSafeInteger(record.ordinal) && Number(record.ordinal) > 0 &&
     (record.kind === 'switch' || record.kind === 'book') &&
     (record.kind === 'book' ? typeof record.bookId === 'string' && record.bookId.length > 0 : record.bookId === null) &&
@@ -113,19 +111,23 @@ function controlRecord(json: string, digest: string): LearningControl {
   return record as unknown as LearningControl;
 }
 
+/**
+ * A carried control embeds its source control whole: the embedded record's canonical JSON is the source row's exact bytes, held
+ * to that row's digest, so the original entry, editor attribution, time, ordinal and any earlier merge provenance stay
+ * verifiable. Embedded as a record rather than as escaped text, each merge adds the source once instead of doubling its escapes.
+ */
 function readControl(row: Row): LearningControl {
-  requireLearning(typeof row.canonical_json === 'string' && typeof row.sha256 === 'string');
-  const record = controlRecord(row.canonical_json, row.sha256);
-  requireLearning(record.entryId === row.entry_id && record.ordinal === row.ordinal && record.kind === row.kind &&
-    record.bookId === row.book_id && Number(record.value) === row.value && record.recordedAt === row.recorded_at);
+  const record = controlRecord(read<unknown>(row));
+  requireLearning(canonicalJson(record) === row.canonical_json && record.entryId === row.entry_id && record.ordinal === row.ordinal &&
+    record.kind === row.kind && record.bookId === row.book_id && Number(record.value) === row.value && record.recordedAt === row.recorded_at);
   // Walk rather than recurse: repeated Book merges retain the whole provenance chain without growing the call stack.
   let current = record;
   while (current.importedFrom !== undefined) {
-    const origin = current.importedFrom;
-    requireLearning(current.kind === 'book' && isRecord(origin) && Object.keys(origin).length === 2 &&
-      typeof origin.canonicalJson === 'string' && typeof origin.sha256 === 'string');
-    const source = controlRecord(origin.canonicalJson, origin.sha256);
-    requireLearning(canonicalJson(current) === canonicalJson({ ...source, ordinal: current.ordinal, importedFrom: origin }));
+    const origin: unknown = current.importedFrom;
+    requireLearning(current.kind === 'book' && isRecord(origin) && Object.keys(origin).length === 2 && typeof origin.sha256 === 'string');
+    const source = controlRecord(origin.record);
+    requireLearning(sha256Hex(canonicalJson(source)) === origin.sha256 &&
+      canonicalJson(current) === canonicalJson({ ...source, ordinal: current.ordinal, importedFrom: origin }));
     current = source;
   }
   return record;
@@ -149,8 +151,7 @@ export function importBookLearningControls(db: DatabaseSync, selectedBook: (book
   for (const { row, record } of controlHistory(db, 'src')) {
     if (record.kind !== 'book' || !selectedBook(record.bookId!)) continue;
     const ordinal = destinationEntries + ++imported;
-    const carried = canonicalRecord({ ...record, ordinal,
-      importedFrom: { canonicalJson: String(row.canonical_json), sha256: String(row.sha256) } });
+    const carried = canonicalRecord({ ...record, ordinal, importedFrom: { record, sha256: String(row.sha256) } });
     insert.run(record.entryId, ordinal, record.kind, record.bookId, Number(record.value), record.recordedAt, carried.json, carried.digest);
   }
   return imported;

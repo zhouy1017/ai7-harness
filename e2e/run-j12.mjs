@@ -1656,7 +1656,9 @@ async function main() {
     manager = await launch(resolve(backupLocation, replaceBackup));
     [primary] = await waitForRendererCount(manager, 1, 'database-merge-window');
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'database-merge-landing');
+    // The data replaced from the export never turned learning off, so the file's 本机学习 off can be seen not to travel.
     const destinationLearningEnabled = await primary.evaluate(`window.ai7.inspectEditorialLearning({signalOffset:0,itemOffset:0}).then(page=>page.enabled)`);
+    requireJourney(destinationLearningEnabled === true, 'database-merge-destination-learning-on', destinationLearningEnabled);
     await openDataAndStorage('database-merge');
     await click(primary, '导入数据库…', 'database-merge-choose');
     await waitFor(primary, `document.querySelector('.database-import-preview')?.dataset.previewId !== undefined`, 'database-merge-previewed');
