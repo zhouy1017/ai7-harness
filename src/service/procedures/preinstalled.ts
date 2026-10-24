@@ -10,6 +10,12 @@ import { REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, REVIEW_CATEGORY_UNIT_RESULT_SCHEMA_
 import { BASELINE_ANALYSIS_KIND, FACTUAL_REVIEW_KIND, reviewCategoryIdOfKind } from '../../shared/protocol.js';
 
 export const BASELINE_PROCEDURE_ID = 'ai7-procedure/baseline-analysis';
+export function localCheckProcedureDefinition(): ProcedureDefinitionDocument {
+  return { schema: PROCEDURE_DEFINITION_SCHEMA, id: 'ai7-procedure/local-text-check', version: 1,
+    title: '本地文字检查', role: '以五项有限规则生成供编辑复核的精确批注', editorInstruction: '',
+    stages: [stage('deterministic-check', ['frozen-local-plan'], 'ai7.review.local-result/1'),
+      stage('derived-report', ['review-findings'], 'ai7.review.report/1')], outputKinds: ['annotation'] };
+}
 
 /** The pre-installed procedure one built-in review category runs (ADR 0095 §1). */
 export function reviewProcedureId(categoryId: string): string {
@@ -63,12 +69,13 @@ export function reviewProcedureDefinition(entry: ReviewCategoryConfigurationEntr
 }
 
 export function preinstalledProcedureDefinitions(version: 1 | 2 = 2): readonly ProcedureDefinitionDocument[] {
-  return [...BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.map((entry) => reviewProcedureDefinition(entry, version)), baselineProcedureDefinition()];
+  return [...BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.map((entry) => reviewProcedureDefinition(entry, version)), baselineProcedureDefinition(),
+    ...(version === 2 ? [localCheckProcedureDefinition()] : [])];
 }
 
 /** Immutable predecessors remain admitted beside the current versions. */
 export function allPreinstalledProcedureDefinitions(): readonly ProcedureDefinitionDocument[] {
-  return [...preinstalledProcedureDefinitions(1), ...preinstalledProcedureDefinitions(2).filter((document) => document.version === 2)];
+  return [...preinstalledProcedureDefinitions(1), ...preinstalledProcedureDefinitions(2).filter((document) => document.version === 2 || document.id === 'ai7-procedure/local-text-check')];
 }
 
 /** Only the ten pre-installed definitions are admitted in F-26a. */

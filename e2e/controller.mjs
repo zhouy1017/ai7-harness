@@ -988,6 +988,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'proposal-workspace-offer',
     'proposal-decision-draft-batch',
     'proposal-decision-record',
+    'local-check-exact-sample1',
     'completion-browser-close',
     'completion-cleanup',
   ]),

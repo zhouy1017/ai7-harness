@@ -1157,7 +1157,7 @@ async function dispatch(
         ok: true,
         op: request.op,
         result: jobs.startReviewRunPreparation(request.input.bookId, request.input.categoryIds, request.input.scope, launchPolicy,
-          request.input.capturedProcedure ?? null, request.input.materialIds ?? [], null, null, request.input.seriesId ?? null),
+          request.input.capturedProcedure ?? null, request.input.materialIds ?? [], null, null, request.input.seriesId ?? null, request.input.localCheck),
       };
     case 'authorizeReviewRun':
       // The one approval, then the drive loop at once: an approved Run nobody drives reads `partial`, so
