@@ -684,12 +684,19 @@ describe('the ledger across slices and kinds', () => {
     expect(cache.foreignRows.every((row) => row.itemId.length === 160 && Object.keys(row).sort().join(',') === 'itemId,kind,outcome,position')).toBe(true);
   });
 
-  it.each(['S40', 'Future7'])('rejects duplicate non-stale identities in %s across item kinds', async (slice) => {
+  it.each(['S40', 'Future7'])('rejects duplicate non-stale #808 model-call identities in %s', async (slice) => {
     const model = { ...foreignModel(), itemId: `${slice}/same/1` };
     await ledger(model, model);
     await expect(opened()).rejects.toMatchObject({ code: 'PROVIDER_LEDGER_CORRUPT' });
-    await ledger(model, { ...foreignTool(), itemId: model.itemId });
-    await expect(opened()).rejects.toMatchObject({ code: 'PROVIDER_LEDGER_CORRUPT' });
+  });
+
+  it.each(['S40', 'Future7'])('keeps %s tool and pre-#808 duplicate identities readable, since only #808 model calls reserve theirs', async (slice) => {
+    const model = { ...foreignModel(), itemId: `${slice}/same/1` };
+    const { route: _route, endpoint: _endpoint, requestShape: _shape, cacheKey: _cacheKey, claimKey: _claimKey, semanticDigest: _semantic,
+      generation: _generation, evidencePosition: _position, validation: _validation, ...legacy } = model;
+    const tool = { ...foreignTool(), itemId: model.itemId };
+    await ledger(model, tool, tool, legacy, legacy);
+    expect((await opened()).lines).toEqual([model, tool, tool, legacy, legacy]);
   });
 
   it('keeps explicit stale history readable and allocates past every stale ordinal', async () => {
@@ -984,6 +991,21 @@ describe('platformToolCallOnce', () => {
     await expect(platformToolCallOnce(cache, snapshots, item, { authorize: () => null, send: async () => { throw new Error('boom'); } })).rejects.toThrowError('boom');
     expect(cache.lines.filter(isItemLine).map((line) => [line.itemId, line.outcome])).toEqual([['S87/factual-review/1', 'failed'], ['S87/factual-review/2', 'failed']]);
     expect(await snapshots.lookup('fetch', 'webfetch', item.argumentsDigest)).toBeNull();
+  });
+
+  it('keeps the shared ledger readable after two checkouts number different tool calls alike', async () => {
+    // A tool id is numbered from each checkout's own view of the ledger, so both record S87/factual-review/1 (#1054 review).
+    const first = await opened();
+    const second = await opened();
+    const bytes = new TextEncoder().encode('{}');
+    const call = { authorize: () => null, send: async () => ({ url: 'https://example.org/', status: 200, contentType: 'application/json', bytes, text: '结果' }) };
+    const item = (digest: string) => ({ kind: 'fetch' as const, purpose: 'factual-review', argumentsDigest: digest.repeat(64), host: 'example.org', origin: 'webfetch' });
+    await platformToolCallOnce(first.cache, first.snapshots, item('b'), call);
+    await platformToolCallOnce(second.cache, second.snapshots, item('c'), call);
+    const reader = await opened();
+    expect(reader.cache.lines.filter(isItemLine).map((line) => [line.itemId, line.outcome])).toEqual([
+      ['S87/factual-review/1', 'transmitted'], ['S87/factual-review/1', 'transmitted'],
+    ]);
   });
 });
 

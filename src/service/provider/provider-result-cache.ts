@@ -562,7 +562,9 @@ export class ProviderResultCache {
       const line = parseLedgerLine(text);
       requireCache(!isModelCallLine(line) || line.evidencePosition === undefined || line.evidencePosition <= index,
         'PROVIDER_LEDGER_CORRUPT', 'Provider Test Ledger 证据顺序无效。');
-      if (isItemLine(line) && line.stale !== true) {
+      // Only #808 model calls reserve their identity exclusively. A tool id or a pre-#808 model id is numbered from one
+      // checkout's view of the shared ledger, so two checkouts can record the same id; that history stays readable.
+      if (isModelCallLine(line) && line.cacheKey !== undefined && line.stale !== true) {
         requireCache(!occupied.has(line.itemId), 'PROVIDER_LEDGER_CORRUPT', 'Provider Test Ledger 含有重复的有效测试项。');
         occupied.add(line.itemId);
       }
