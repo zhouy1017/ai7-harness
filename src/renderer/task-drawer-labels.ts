@@ -397,7 +397,7 @@ export const TASK_BAR_CANCELLING_NOTE = '已记下你的取消；正在进行的
 /** 取消任务 of a Run nothing was running — one waiting in the queue, or one AI7 left behind when it closed — settles at once. */
 export const TASK_BAR_CANCELLED_NOTE = '已取消这项任务；此后不会再发送任何内容';
 /** CTRL-001: what 正在暂停 says until the Run has reached its boundary — never 已暂停 early. */
-export const TASK_BAR_PAUSING_NOTE = '已记下你的暂停；正在进行的这一步完成后停下，已完成的部分都会保存';
+export const TASK_BAR_PAUSING_NOTE = '已记下你的暂停；正在进行的这一步完成后停下，不再开始下一步，结果与用量都会保存';
 /** CONT-015: 续行 continues the same Run from where it stopped, under its own authorization. */
 export const TASK_BAR_RESUME = '续行';
 /** The fallbacks when 暂停 or 续行 is refused for a reason the service does not word. */
@@ -503,7 +503,7 @@ export function taskBarContinuationNote(unitsSettled: number | null, unitsTotal:
     return `已读完 ${unitsSettled} / ${unitsTotal} 个阅读范围，结果都已保存；续行时先按你的回答处理${which}，再继续未完成的部分，不重复已读完的部分`;
   }
   return unitsSettled >= unitsTotal
-    ? `已读完全部 ${unitsTotal} 个阅读范围，结果都已保存；续行时接着做之后的归纳与抽样`
+    ? `已读完全部 ${unitsTotal} 个阅读范围，结果都已保存；续行时只处理尚未完成的步骤，已保存的步骤不会重做`
     : `已读完 ${unitsSettled} / ${unitsTotal} 个阅读范围，结果都已保存；续行时从第 ${unitsSettled + 1} 个接着读，不重复已读完的部分`;
 }
 

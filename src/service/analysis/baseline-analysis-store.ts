@@ -23,6 +23,7 @@ import {
   INITIAL_EVALUATION_KIND,
   READERS_REPORT_KIND,
   WRITING_KIND,
+  type AnalysisAssuranceSampleDispositionProjection,
   type AnalysisGoal,
   type AnalysisKindId,
   type AnalysisProjection,
@@ -157,9 +158,9 @@ import {
   runReportReflectionNotRun,
   type RunReportRecord,
 } from './run-report.js';
-import { assuranceSampleNotRun } from './reducers.js';
+import { assuranceSampleNotRun, type CrossUnitOutcome } from './reducers.js';
 import { baselineAnalysisKindDefinition } from './kind-definition.js';
-import { ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST } from './assurance-sampling-contract.js';
+import { ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, type AssuranceSampleDraw } from './assurance-sampling-contract.js';
 import { describeComposition } from '../harness/primary-agent-harness.js';
 import { kindLocalTools } from './live-kind-admission.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from '../provider/egress-gate.js';
@@ -258,7 +259,7 @@ export const RUN_CANCELLED_AFTER_START_LABEL = '已取消' as const;
 export const RUN_CANCELLING_DETAIL = '编辑取消了这项任务；正在进行的这一步会被中止，此后不再发送任何内容。' as const;
 
 /** What `pausing` records (CTRL-001): the editor's word, and where the Run stops to wait. */
-export const RUN_PAUSING_DETAIL = '编辑暂停了这项任务；正在进行的阅读范围读完后停下，已完成的部分都会保存。' as const;
+export const RUN_PAUSING_DETAIL = '编辑暂停了这项任务；正在进行的这一步完成后停下，不再开始下一步，已完成的结果与用量都会保存。' as const;
 
 /** What reconciliation records for a Run AI7 stopped under (CONT-014): nothing of it runs, and nothing is sent until 续行. */
 export const RECONCILED_RESUMABLE_DETAIL = 'AI7 上次关闭时这项任务正在运行；已读完的阅读范围都已保存。点「续行」从下一个阅读范围接着读；在此之前不会发送任何内容。' as const;
@@ -1055,11 +1056,28 @@ export function providerConsequence(live: LiveReading, unitCount: number | null 
 }
 
 /**
- * The stages a stop keeps its usage for (Issue #541): a reduction or a sample 续行 forms again was spent all the same. A unit
+ * The stages a stop keeps its usage for (Issue #541): settled or refused stage work was spent all the same. A unit
  * a stop kept carries its own usage in its checkpoint.
  */
 export const CARRIED_STAGES = ['cross-unit-reduction', 'assurance-sampling'] as const;
 export type CarriedStages = Record<(typeof CARRIED_STAGES)[number], { requests: number; inputTokens: number; outputTokens: number }>;
+
+/** Private continuation evidence, nested in existing Run states; never a public protocol or a new binding. */
+export interface StageContinuation {
+  readonly runRecordId: string;
+  readonly attemptId: string;
+  readonly bindingDigest: string;
+  readonly manifestDigest: string;
+  readonly promptContractDigest: string;
+  reduction?: { inputDigest: string; contractDigest: string; requestDigest: string | null; outcome: CrossUnitOutcome };
+  sampling?: {
+    inputDigest: string; contractDigest: string; draw: AssuranceSampleDraw;
+    nextTurn: number; ended: boolean;
+    turns: Array<{ requestDigest: string; unitOrdinal: number; usage: { inputTokens: number; outputTokens: number } | null; state: 'closed' | 'gap' | 'outcome-unknown' }>;
+    dispositions: AnalysisAssuranceSampleDispositionProjection[]; gapReasons: string[];
+    sampled: { inputTokens: number; outputTokens: number; turnsWithUsage: number };
+  };
+}
 
 /**
  * The append-only ledger of one analysis kind of one Book database. The kind it serves is the
@@ -4232,10 +4250,60 @@ export class BaselineAnalysisStore {
     const reasons = drift.length === 0 ? [] : [`计划的关键内容已经变化：${drift.join('、')}。这次运行不能照原计划续行；请改计划重做。`];
     try {
       this.unitCheckpoints(runRecordId);
+      this.stageContinuationOf(runRecordId);
     } catch {
       reasons.push('已保存的阅读进度无法核对，这次运行不能续行；请取消它，再重新开始。');
     }
     return reasons;
+  }
+
+  /** Read the latest optional stage evidence, refusing corrupt or incompatible evidence before admission. */
+  stageContinuationOf(runRecordId: string): StageContinuation | null {
+    const rows = this.#db.prepare('SELECT canonical_json, sha256 FROM analysis_run_states WHERE run_record_id = ? ORDER BY sequence DESC').all(runRecordId) as SqlRow[];
+    for (const row of rows) {
+      const record = parseCanonicalJson(asString(row.canonical_json)) as { stageContinuation?: { schema?: unknown; data?: StageContinuation; digest?: unknown }; carriedUsage?: unknown };
+      const kept = record.stageContinuation;
+      if (kept === undefined) continue;
+      const invalid = (): never => { throw new AnalysisError('ANALYSIS_RECORD_INVALID', '已保存的阶段进度无法核对；不能续行。'); };
+      if (canonicalRecord(record).digest !== row.sha256 || kept === null || kept.schema !== 'ai7.analysis.stage-continuation/1' ||
+          kept.data === undefined || canonicalRecord(kept.data).digest !== kept.digest || JSON.stringify(kept).length > 16_777_216) invalid();
+      const data = kept.data!;
+      const stored = this.executionBindingOf(runRecordId);
+      if (stored === null || data.runRecordId !== runRecordId || data.attemptId !== stored.attemptId || data.bindingDigest !== stored.bindingDigest ||
+          data.manifestDigest !== stored.binding.coverageManifestDigest || data.promptContractDigest !== stored.binding.promptContractDigest || record.carriedUsage === undefined || data.reduction === undefined) invalid();
+      const definition = this.definitionForRun(runRecordId, data.promptContractDigest);
+      const count = (value: number): boolean => Number.isSafeInteger(value) && value >= 0;
+      if (data.reduction !== undefined) {
+        const reduction = data.reduction;
+        if (!DIGEST_PATTERN.test(reduction.inputDigest) || reduction.contractDigest !== (definition.crossUnit?.promptContractDigest ?? data.promptContractDigest) ||
+            !['closed', 'gap', 'not-run'].includes(reduction.outcome?.state) ||
+            (reduction.requestDigest === null) !== (reduction.outcome.state === 'not-run') ||
+            reduction.requestDigest !== null && (!DIGEST_PATTERN.test(reduction.requestDigest) || reduction.outcome.state === 'not-run' || reduction.outcome.requestDigest !== reduction.requestDigest) ||
+            reduction.outcome.state === 'closed' && (!Array.isArray(reduction.outcome.findings) || reduction.outcome.usage !== null &&
+              (!count(reduction.outcome.usage.inputTokens) || !count(reduction.outcome.usage.outputTokens)))) invalid();
+      }
+      if (data.sampling !== undefined) {
+        const sample = data.sampling;
+        if (data.reduction === undefined || !DIGEST_PATTERN.test(sample.inputDigest) || sample.contractDigest !== definition.assurance?.promptContractDigest ||
+            !count(sample.nextTurn) || sample.nextTurn < 1 || !Array.isArray(sample.turns) || sample.turns.length !== sample.nextTurn - 1 ||
+            !sample.turns.every((turn) => DIGEST_PATTERN.test(turn.requestDigest) && count(turn.unitOrdinal) && turn.unitOrdinal > 0 &&
+              ['closed', 'gap', 'outcome-unknown'].includes(turn.state) && (turn.usage === null || count(turn.usage.inputTokens) && count(turn.usage.outputTokens))) ||
+            typeof sample.ended !== 'boolean' || sample.turns.some((turn) => turn.state === 'outcome-unknown') && !sample.ended ||
+            !Array.isArray(sample.dispositions) || !Array.isArray(sample.gapReasons) || !sample.gapReasons.every((reason) => typeof reason === 'string') ||
+            !Array.isArray(sample.draw?.sampled) || !count(sample.sampled?.inputTokens) || !count(sample.sampled?.outputTokens) || !count(sample.sampled?.turnsWithUsage)) invalid();
+      }
+      // A newer snapshot may only follow all submitted units; no corrupt stage pin can send unfinished units first.
+      const facts = this.loadExecutionPlan(runRecordId);
+      const expected = facts.update === null ? facts.manifest.units.length : facts.update.reusePlan.units.filter((unit) => unit.disposition === 'recomputed').length;
+      if (this.unitCheckpoints(runRecordId).length !== expected) invalid();
+      const usage = this.carriedUsageOf(runRecordId)?.stages;
+      if (usage == null || data.reduction?.outcome.state === 'closed' && usage['cross-unit-reduction'].requests < 1) invalid();
+      if (data.sampling !== undefined && (usage!['assurance-sampling'].requests < data.sampling.nextTurn - 1 ||
+          data.sampling.sampled.turnsWithUsage > data.sampling.nextTurn - 1 ||
+          usage!['assurance-sampling'].inputTokens < data.sampling.sampled.inputTokens || usage!['assurance-sampling'].outputTokens < data.sampling.sampled.outputTokens)) invalid();
+      return data;
+    }
+    return null;
   }
 
   /** One settled unit of a Run, kept the moment it settles: the continuation point 续行 goes on from (CONT-015). */
@@ -4260,7 +4328,7 @@ export class BaselineAnalysisStore {
   }
 
   /**
-   * What a stopped Run spent beyond its units before it stopped — a reduction or a sample 续行 forms again — as its latest
+   * What a stopped Run spent beyond its units before it stopped — settled or refused stage work — as its latest
    * stop kept it (Issue #51, S16a): the ceiling counts it after 续行 as it did before. `null` when no stop kept any.
    */
   carriedUsageOf(runRecordId: string): { inputTokens: number; outputTokens: number; stages: CarriedStages | null } | null {

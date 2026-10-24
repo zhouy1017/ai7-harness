@@ -1469,3 +1469,73 @@ describe('后台处理登记 under developer-live with a stub transport (Issue #
     }
   });
 });
+
+
+describe('manual pause at a live bounded-turn boundary (#1114)', () => {
+  it.each(['unit', 'reduction', 'sampling', 'reflection', 'cancel-over-pause'] as const)('%s waits without abort, or lets explicit cancel override it', async (stage) => {
+    const calls: StubCall[] = [];
+    const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
+    const { units: responses, named } = await unitAnswers(prepared);
+    const inner = stubTransport({ calls, responses, named });
+    let release = () => {};
+    let arrived = () => {};
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const ready = new Promise<void>((resolve) => { arrived = resolve; });
+    const observed: { signal: AbortSignal | null; held: boolean } = { signal: null, held: false };
+    const nativeFetch: typeof fetch = async (url, init) => {
+      const body = JSON.parse(String(init?.body)) as { messages: Array<{ content: string }> };
+      const message = body.messages.at(-1)!.content;
+      const matches = stage === 'reflection' ? message.startsWith('运行反思 ') : stage === 'reduction' ? parseCrossUnitMessageHeader(message) !== null
+        : stage === 'sampling' ? parseAssuranceSamplingMessageHeader(message) !== null : message.startsWith('分析单元 1/');
+      if (matches && !observed.held) {
+        observed.held = true; observed.signal = init?.signal ?? null; arrived();
+        await new Promise<void>((resolve, reject) => {
+          const abort = () => reject(new DOMException('synthetic cancelled request', 'AbortError'));
+          observed.signal?.addEventListener('abort', abort, { once: true });
+          held.then(() => { observed.signal?.removeEventListener('abort', abort); resolve(); }, reject);
+        });
+      }
+      return inner(url, init);
+    };
+    const execution = owner(store, nativeFetch, CEILING, launchPolicy, null);
+    const taskIntentId = prepared.taskIntent!.taskIntentId;
+    const runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!;
+    try {
+      execution.admitAndDispatch(runRecordId); await ready;
+      const attemptId = store.baselineAnalysisLedger.executionBindingOf(runRecordId)!.attemptId;
+      const before = calls.length;
+      if (stage === 'reflection') {
+        expect(store.inspectBaselineAnalysis(bookId, () => null).run?.state).toBe('completed');
+        expect(() => store.requestBaselineAnalysisPause(bookId, taskIntentId)).toThrow();
+        expect(observed.signal?.aborted).toBe(false);
+        release(); await execution.whenIdle();
+        expect(calls).toHaveLength(FULL_CHAIN_TURNS);
+        expect(() => execution.admitAndDispatch(runRecordId, store.baselineAnalysisLedger, { resume: true })).toThrow();
+        return;
+      }
+      store.requestBaselineAnalysisPause(bookId, taskIntentId); execution.pauseRun(runRecordId);
+      expect(store.inspectBaselineAnalysis(bookId, (id) => execution.progressFor(id)).state).toBe('pausing');
+      expect(observed.signal?.aborted).toBe(false);
+      expect(calls).toHaveLength(before);
+      if (stage === 'cancel-over-pause') {
+        store.requestBaselineAnalysisCancel(bookId, taskIntentId); execution.cancelRun(runRecordId);
+        expect(observed.signal?.aborted).toBe(true);
+        await execution.whenIdle();
+        const cancelled = store.inspectBaselineAnalysis(bookId, () => null);
+        expect(cancelled.state).toBe('cancelled');
+        expect(cancelled.resultSetRevision?.gaps[0]?.code).toBe('outcome-unknown');
+        expect(calls).toHaveLength(before);
+      } else {
+        release(); await execution.whenIdle();
+        expect(store.inspectBaselineAnalysis(bookId, () => null).state).toBe('paused');
+        expect(calls).toHaveLength(before + 1);
+        execution.admitAndDispatch(runRecordId, store.baselineAnalysisLedger, { resume: true }); await execution.whenIdle();
+        const settled = store.inspectBaselineAnalysis(bookId, () => null);
+        expect(settled.run?.state).toBe('completed');
+        expect(store.baselineAnalysisLedger.executionBindingOf(runRecordId)!.attemptId).toBe(attemptId);
+        expect(calls).toHaveLength(FULL_CHAIN_TURNS);
+        expect(new Set(calls.map((call) => call.body)).size).toBe(FULL_CHAIN_TURNS);
+      }
+    } finally { release(); await execution.dispose(); }
+  });
+});

@@ -117,7 +117,7 @@ const THIRD_HOLD = 1;
 // their unit suites.
 const REDO_REASON = '先暂停，再改计划重做';
 const CANCELLING_NOTE = '已记下你的取消；正在进行的这一步会被中止，此后不会再发送任何内容';
-const PAUSING_NOTE = '已记下你的暂停；正在进行的这一步完成后停下，已完成的部分都会保存';
+const PAUSING_NOTE = '已记下你的暂停；正在进行的这一步完成后停下，不再开始下一步，结果与用量都会保存';
 const PAUSED_NOTE = '已读完 3 / 8 个阅读范围，结果都已保存；续行时从第 4 个接着读，不重复已读完的部分';
 const RESUMABLE_NOTE = '已读完 2 / 8 个阅读范围，结果都已保存；续行时从第 3 个接着读，不重复已读完的部分';
 const THIRD_PAUSED_NOTE = '已读完 2 / 8 个阅读范围，结果都已保存；续行时从第 3 个接着读，不重复已读完的部分';
@@ -867,6 +867,7 @@ async function main() {
     const pausing = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(pausing?.state === 'pausing' && pausing.stateLabel === '正在暂停' && pausing.run?.state === 'pausing' &&
       JSON.stringify(pausing.run.transitions.map((transition) => transition.state)) === JSON.stringify(['authorized', 'admitted', 'executing', 'pausing']) &&
+      pausing.run.transitions.at(-1)?.detail === '编辑暂停了这项任务；正在进行的这一步完成后停下，不再开始下一步，已完成的结果与用量都会保存。' &&
       pausing.run.progress?.unitsSettled === FIRST_HOLD && pausing.run.progress.currentUnitOrdinal === FIRST_HOLD + 1,
     'pausing-record', { state: pausing?.state, run: pausing?.run?.state, progress: pausing?.run?.progress });
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='正在暂停'`, 'pausing-card-label', 30_000);
