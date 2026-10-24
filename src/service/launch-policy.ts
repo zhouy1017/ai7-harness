@@ -1655,6 +1655,10 @@ const BACKGROUND_PROCESSING_READING = productionReading('Main Editorial Role', B
 
 /** Verify the Owner's Wave 21 additions before reading the unchanged v26 declarations. */
 function readWave21Eligibility(policy: Record<string, unknown>): Record<string, unknown> {
+  // Both new rules name the Main bindings' routes, read from the document as every inherited rule's are, never source constants.
+  const roles = policy['roleBindings'];
+  requirePolicy(isRecord(roles));
+  const routes = [...new Set(allowedBindingsOf(roles['Main Editorial Role']).map((binding) => binding.route))];
   const declaredDecision = policy['decision'];
   requirePolicy(isRecord(declaredDecision) && Array.isArray(declaredDecision['providerAllowRules']));
   const backgroundRules = declaredDecision['providerAllowRules'].filter((rule: unknown) => isRecord(rule) && rule['ruleId'] === BACKGROUND_PROCESSING_RULE_ID);
@@ -1687,7 +1691,7 @@ function readWave21Eligibility(policy: Record<string, unknown>): Record<string, 
     redaction: HOUSE_PEOPLE_REDACTION,
     providerBinding: {
       modelRole: 'Fast Interaction Role', bindingSource: 'user-configured-role-binding',
-      allowedRoutes: ['opencode-go', 'deepseek-open-platform'], exactProviderBindingRequired: true,
+      allowedRoutes: routes, exactProviderBindingRequired: true,
       fallbackAllowed: false, approvedFallbackChainMaximumItems: 0, secondModelAllowed: false, productionDefaultsChanged: false,
     },
     transmissions: blocks.transmissions, localTools: expectedLocalTools(false), clarification: blocks.clarification,
@@ -1705,7 +1709,7 @@ function readWave21Eligibility(policy: Record<string, unknown>): Record<string, 
     allowedOutboundDataCategories: BACKGROUND_PROCESSING_READING.policyCategories, redaction: HOUSE_PEOPLE_REDACTION,
     providerBinding: {
       modelRole: 'Main Editorial Role', bindingSource: 'user-configured-role-binding',
-      allowedRoutes: ['opencode-go', 'deepseek-open-platform'], exactProviderBindingRequired: true,
+      allowedRoutes: routes, exactProviderBindingRequired: true,
       fallbackAllowed: false, approvedFallbackChainMaximumItems: 0, secondModelAllowed: false, productionDefaultsChanged: false,
     },
     transmissions: backgroundBlocks.transmissions, localTools: expectedLocalTools(false), clarification: backgroundBlocks.clarification,
