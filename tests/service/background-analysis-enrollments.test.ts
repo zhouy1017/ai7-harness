@@ -1243,11 +1243,17 @@ it('reads v27 enrollment eligibility per kind, isolates holds/revocation and nev
     for (const permission of selected.providerProcessing.backgroundProcessingEnrollment!.enrollableKinds) {
       const offer = store.inspectBackgroundAnalysisEnrollment(book.bookId, runtime(), permission.kind);
       expect(offer.offer.canEnroll).toBe(true);
+      const label = offer.kinds!.find((entry) => entry.kind === permission.kind)!.label;
+      expect(offer.offer.binds.find((row) => row.label === '工序')?.value).toContain(label);
+      expect(offer.offer.binds.find((row) => row.label === '会得到')?.value).toContain(label);
       expect(() => store.enrollBackgroundAnalysis(book.bookId, offer.offer.disclosureDigest!, 'backfill', { kind: 'book', seriesId: null }, 0, runtime(), permission.kind)).toThrowError(/上限/u);
       const recorded = store.enrollBackgroundAnalysis(book.bookId, offer.offer.disclosureDigest!, 'backfill', { kind: 'book', seriesId: null }, 1_000, runtime(), permission.kind);
       expect(recorded.kind).toBe(permission.kind);
       expect(recorded.enrollment?.shareTokens).toBe(1_000);
       expect(recorded.next.kind).toBe('none');
+      expect(recorded.enrollment!.binds.find((row) => row.label === '工序')?.value).toContain(label);
+      const canonical = withDatabase(false, (db) => db.prepare('SELECT canonical_json FROM background_analysis_enrollment_versions WHERE enrollment_version_id = ?').get(recorded.enrollment!.enrollmentVersionId));
+      expect(JSON.parse(String(canonical!.canonical_json)).modes).toEqual([]);
       enrolled.push(recorded.enrollment!.enrollmentId);
     }
     expect(new Set(enrolled).size).toBe(enrolled.length);

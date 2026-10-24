@@ -7672,12 +7672,12 @@ export class EditorialStore {
     const record = read === 'damaged' ? null : read;
     const state = read === 'damaged' ? 'damaged' : record === null ? 'none' : record.state === 'active' && record.paused ? 'paused' : record.state;
     const next = this.#analysisCall(() => kind === BACKGROUND_ANALYSIS_KIND ? this.#backgroundDecision(bookId, read, runtime) : { kind: 'none' as const, reason: '登记已保留；相应工序接入后台处理后，才会按登记开始。' });
-    const binding = this.#enrollmentBinding(bookId);
+    const binding = this.#enrollmentBinding(bookId, kind);
     const nextOrdinal = record === null ? 1 : record.version.ordinal + 1;
     const reason = state === 'damaged'
       ? BACKGROUND_RECORD_DAMAGED
       : state === 'active' || state === 'paused'
-        ? '这本书已经登记了后台分析；要改，请先撤销登记再重新登记。'
+        ? '这本书已经登记了这类后台处理；要改，请先撤销登记再重新登记。'
         : !this.#backgroundKindEnrollable(kind)
           ? BACKGROUND_ENROLL_NO_RULE
           : !runtime.routeExecutable
@@ -7695,9 +7695,11 @@ export class EditorialStore {
       '不超过登记的预算上限，每次派发前检查；达到上限后停止',
     ];
     const kinds = this.#backgroundKindOffers();
-    const what = kind === BACKGROUND_ANALYSIS_KIND ? BACKGROUND_ANALYSIS_WHAT : `${kinds.find((entry) => entry.kind === kind)?.label ?? kind}：只按这类工序的计划处理；每次派发仍需精确计划、模型绑定与运行授权。`;
+    const kindLabel = kinds.find((entry) => entry.kind === kind)?.label ?? kind;
+    const procedure = kind === BACKGROUND_ANALYSIS_KIND ? DEFAULT_EXECUTION_RULE_PROCEDURES['baseline-analysis'] : kindLabel;
+    const what = kind === BACKGROUND_ANALYSIS_KIND ? BACKGROUND_ANALYSIS_WHAT : `${kindLabel}：只按这类工序的计划处理；每次派发仍需精确计划、模型绑定与运行授权。`;
     // The ceiling is the editor's to set at 登记, never the Book's own setting (Issue #864).
-    const binds = binding === null ? [] : defaultRuleBindingRows(binding, DEFAULT_EXECUTION_RULE_PROCEDURES['baseline-analysis'])
+    const binds = binding === null ? [] : defaultRuleBindingRows(binding, procedure)
       .map((row) => (row.label === '预算上限' ? { label: row.label, value: BACKGROUND_CEILING_REQUIRED } : row));
     const startingPoints = (['prospective', 'backfill'] as const).map((value) => ({
       value, label: BACKGROUND_STARTING_POINT_LABELS[value], note: BACKGROUND_STARTING_POINT_NOTES[value],
@@ -7757,7 +7759,7 @@ export class EditorialStore {
         enrolledBy: '本机编辑',
         enrolledAt: record.version.createdAt,
         stateRecordedAt: record.stateRecordedAt,
-        binds: defaultRuleBindingRows(record.version.binding, DEFAULT_EXECUTION_RULE_PROCEDURES['baseline-analysis']),
+        binds: defaultRuleBindingRows(record.version.binding, procedure),
         ceilingTokens: record.version.ceiling?.maxTotalTokens ?? null,
         shareTokens: record.version.share?.maxTotalTokens ?? null,
         scope: enrolledScope,
@@ -7839,7 +7841,7 @@ export class EditorialStore {
       const memberRead = this.#enrollmentRead(member.bookId, kind);
       requireStore(member.bookId === bookId || (memberRead !== 'damaged' && (memberRead === null || memberRead.state !== 'active')),
         'BACKGROUND_ANALYSIS_ENROLLMENT_ACTIVE', backgroundScopeMemberActiveReason(member.title));
-      const memberBinding = this.#enrollmentBinding(member.bookId);
+      const memberBinding = this.#enrollmentBinding(member.bookId, kind);
       requireStore(memberBinding !== null, 'BACKGROUND_ANALYSIS_ENROLLMENT_UNAVAILABLE', backgroundScopeMemberUnreadableReason(member.title));
       const point = this.#analysisCall(() => this.#baselineAnalysis.workingPointOf(member.bookId));
       const share = { kind: 'tokens' as const, maxTotalTokens: shares[index]! };
@@ -8163,10 +8165,13 @@ export class EditorialStore {
   }
 
   /** What the Book's Enrollment binds, read from its facts now; `null` when this launch admits no background Run or they cannot be read. */
-  #enrollmentBinding(bookId: string): DefaultExecutionRuleBinding | null {
+  #enrollmentBinding(bookId: string, kind: string = BACKGROUND_ANALYSIS_KIND): DefaultExecutionRuleBinding | null {
     if (!this.#backgroundRuleAdmits()) return null;
     try {
-      return defaultExecutionRuleBindingOf(this.#baselineAnalysis.currentRuleFacts(bookId, 'first-baseline'));
+      const binding = defaultExecutionRuleBindingOf(this.#baselineAnalysis.currentRuleFacts(bookId, 'first-baseline'));
+      if (kind === BACKGROUND_ANALYSIS_KIND) return binding;
+      const label = this.#backgroundKindOffers().find((entry) => entry.kind === kind)?.label ?? kind;
+      return { ...binding, expectedOutcome: `${label}的处理结果；相应工序接入后，每次仍以精确计划为准。` };
     } catch (error) {
       if (error instanceof AnalysisError || error instanceof StoreError) return null;
       throw error;

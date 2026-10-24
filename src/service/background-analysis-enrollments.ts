@@ -395,7 +395,7 @@ export class BackgroundAnalysisEnrollmentLedger {
       const ordinal = current === null ? 1 : current.version.ordinal + 1;
       const version = canonicalRecord({
         schema: VERSION_SCHEMA_CEILING, enrollmentVersionId, enrollmentId, ordinal, kind, analysisKind: kind,
-        modes: [...BACKGROUND_ANALYSIS_MODES], startingPoint: input.startingPoint, binding: input.binding, enrolledAt: input.enrolledAt,
+        modes: kind === BACKGROUND_ANALYSIS_KIND ? [...BACKGROUND_ANALYSIS_MODES] : [], startingPoint: input.startingPoint, binding: input.binding, enrolledAt: input.enrolledAt,
         disclosureDigest: input.disclosureDigest, actor: ACTOR, createdAt: now,
         ceiling: input.ceiling, share: input.share, scope: input.scope,
       });
@@ -600,7 +600,7 @@ export class BackgroundAnalysisEnrollmentLedger {
     const record = requireRecord(row, { schema: withCeiling ? VERSION_SCHEMA_CEILING : VERSION_SCHEMA, ...facts });
     const bookId = (this.#db.prepare('SELECT book_id FROM background_analysis_enrollments WHERE enrollment_id = ?').get(facts.enrollmentId) as SqlRow | undefined)?.book_id;
     requireEnrollment(record.analysisKind === row.kind && (record.kind ?? BACKGROUND_ANALYSIS_KIND) === row.kind && Array.isArray(record.modes) &&
-      JSON.stringify(record.modes) === JSON.stringify(BACKGROUND_ANALYSIS_MODES) &&
+      JSON.stringify(record.modes) === JSON.stringify(row.kind === BACKGROUND_ANALYSIS_KIND ? BACKGROUND_ANALYSIS_MODES : []) &&
       (withCeiling ? isEnrollmentBinding(record.binding) : isDefaultExecutionRuleBinding(record.binding)) && isWorkingPoint(record.enrolledAt) &&
       (!withCeiling || (isTokens(record.ceiling) && isTokens(record.share) && record.share.maxTotalTokens <= record.ceiling.maxTotalTokens &&
         typeof bookId === 'string' && isScope(record.scope, bookId) &&
