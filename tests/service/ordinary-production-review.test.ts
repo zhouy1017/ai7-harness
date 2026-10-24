@@ -7,6 +7,7 @@ import { parseReviewCategoryUnitMessageHeader } from '../../src/service/review/r
 import { reviewCategoryEntry, reviewCategoryContractInput } from '../../src/service/review/category-configuration.js';
 import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
 import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/assurance-sampling-contract.js';
+import type { LaunchPolicyProjection } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2 } from '../support/sample1-baseline.js';
 
@@ -22,8 +23,18 @@ afterEach(async () => {
   await roots?.dispose();
 });
 
-// Real store, review driver, harness, gate and broker; a local transport over admitted sample1 only.
-it('admits one byte-identical contract retry under v26 and publishes risk points with 未联网核查', async () => {
+interface ReviewRequest { readonly category: string; readonly ordinal: number; readonly body: string; readonly tools: string[]; readonly sentAt: number; abortedAt?: number; abortReason?: unknown }
+
+/**
+ * Real store, review driver, harness, gate and broker; a local transport over admitted sample1 only. `answer` says how the transport
+ * treats one unit request (`prior` earlier requests for the same unit): a valid envelope, an invalid one, or a stall that ends only
+ * when the request's signal aborts. `project` adjusts the selected v26 launch projection the Run executes under.
+ */
+async function productionReview(
+  categories: readonly string[],
+  answer: (category: string, ordinal: number, prior: number) => 'valid' | 'invalid' | 'stall',
+  project: (policy: LaunchPolicyProjection) => LaunchPolicyProjection = (policy) => policy,
+) {
   roots = await createServiceTestRoots('ai7-production-review-');
   store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
     induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
@@ -34,19 +45,30 @@ it('admits one byte-identical contract retry under v26 and publishes risk points
   store.saveModelServiceConnection('合成生产连接', pending.credentialReference, 'ready', choice.route);
   store.selectModelServiceRoute(choice.route);
   const binding = { ...choice, credentialReference: pending.credentialReference };
-  const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', binding);
+  const policy = project(await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', binding));
   store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy,
     live: { scope: 'ordinary-production', ...binding, runBudgetCeiling: 'unset' } });
-  const requests: Array<{ category: string; ordinal: number; body: string; tools: string[] }> = [];
+  const requests: ReviewRequest[] = [];
   const nativeFetch: typeof fetch = async (_url, init) => {
     const body = JSON.parse(String(init?.body)) as { messages: Array<{ content: string }>; tools?: Array<{ function: { name: string } }> };
     const message = body.messages.at(-1)!.content;
     const header = parseReviewCategoryUnitMessageHeader(message);
     let content: string;
     if (header !== null) {
-      const prior = requests.filter((entry) => entry.category === header.categoryId && entry.ordinal === header.ordinal);
-      requests.push({ category: header.categoryId, ordinal: header.ordinal, body: String(init?.body), tools: body.tools?.map((tool) => tool.function.name) ?? [] });
-      if (header.categoryId === 'typos-and-usage' && header.ordinal === 1 && prior.length === 0) content = '{invalid';
+      const prior = requests.filter((entry) => entry.category === header.categoryId && entry.ordinal === header.ordinal).length;
+      const request: ReviewRequest = { category: header.categoryId, ordinal: header.ordinal, body: String(init?.body), tools: body.tools?.map((tool) => tool.function.name) ?? [], sentAt: Date.now() };
+      requests.push(request);
+      const shape = answer(header.categoryId, header.ordinal, prior);
+      if (shape === 'stall') {
+        // Answers nothing: only the request's own signal ends it, as the native fetch rejects on abort.
+        return new Promise<Response>((_resolve, reject) => {
+          const signal = init?.signal;
+          const abort = (): void => { request.abortedAt = Date.now(); request.abortReason = signal?.reason; reject(signal?.reason); };
+          if (signal?.aborted === true) abort();
+          else signal?.addEventListener('abort', abort, { once: true });
+        });
+      }
+      if (shape === 'invalid') content = '{invalid';
       else {
         const blocks = message.split('\n').flatMap((line) => {
           const match = /^\[([1-9][0-9]*)\] \[blk_[0-9a-f]{24}\] \((?:title|heading|paragraph)(?: h[1-6])?\) (.*)$/u.exec(line);
@@ -66,19 +88,27 @@ it('admits one byte-identical contract retry under v26 and publishes risk points
   };
   owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
     production: { scope: 'ordinary-production', nativeFetch }, secretResolver: { resolve: async () => 'placeholder-production-key' },
-    productionPolicyFor: (selected) => resolveSourceCheckoutLaunchPolicy(roots!.codeRoot, 'ordinary-production', selected),
+    productionPolicyFor: async (selected) => project(await resolveSourceCheckoutLaunchPolicy(roots!.codeRoot, 'ordinary-production', selected)),
   });
   driver = new ReviewRunDriver(store.reviewRunDriveSteps, owner);
   const book = await importSample1Book(store, roots.codeRoot, '合成生产审阅');
   await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
-  let work = store.createReviewRunPreparationWork(book.bookId, ['typos-and-usage', 'publication-risk'],
+  let work = store.createReviewRunPreparationWork(book.bookId, [...categories],
     { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy);
   while (!work.done) work = store.advanceReviewRunPreparationWork(work.workId!);
   const run = work.projection!.run!;
   store.authorizeReviewRun(book.bookId, run.reviewRunId, run.categories.filter((category) => category.planEnvelopeDigest !== null)
     .map((category) => ({ categoryId: category.categoryId, planEnvelopeDigest: category.planEnvelopeDigest! })));
   await driver.drive(run.reviewRunId);
-  const result = store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(reviewCategoryContractInput(reviewCategoryEntry('typos-and-usage')!)));
+  return { store, bookId: book.bookId, reviewRunId: run.reviewRunId, requests };
+}
+
+const typosDefinition = () => reviewCategoryKindDefinition(reviewCategoryContractInput(reviewCategoryEntry('typos-and-usage')!));
+
+it('admits one byte-identical contract retry under v26 and publishes risk points with 未联网核查', async () => {
+  const { store: opened, bookId, reviewRunId, requests } = await productionReview(['typos-and-usage', 'publication-risk'],
+    (category, ordinal, prior) => (category === 'typos-and-usage' && ordinal === 1 && prior === 0 ? 'invalid' : 'valid'));
+  const result = opened.inspectReviewCategory(bookId, typosDefinition());
   expect(result.run!.adaptations?.map((entry) => [entry.adaptationClass, entry.attemptIndex, entry.repetition]))
     .toEqual([['contract-retry', 2, 'byte-identical']]);
   const retried = requests.filter((entry) => entry.category === 'typos-and-usage' && entry.ordinal === 1);
@@ -88,9 +118,25 @@ it('admits one byte-identical contract retry under v26 and publishes risk points
   expect(riskRequests.length).toBeGreaterThan(0);
   // Existing retrieval remains available; no web tool or newly declared F-18a tool registers.
   expect(riskRequests.every((entry) => [...entry.tools].sort().join(',') === 'exact_fetch,retrieve')).toBe(true);
-  const settled = store.inspectReviewWorkspace(book.bookId, run.reviewRunId).run!;
+  const settled = opened.inspectReviewWorkspace(bookId, reviewRunId).run!;
   expect(settled.categories.every((category) => category.state === 'settled')).toBe(true);
   const risk = settled.findings.filter((finding) => finding.categoryId === 'publication-risk');
   expect(risk).toHaveLength(1);
   expect(risk.every((finding) => finding.riskPoint && finding.stateLine === '未联网核查' && finding.note.includes('未联网核查'))).toBe(true);
+}, 60_000);
+
+// The Run hands the projected `transport.requestDeadlineSeconds` to the adapter (#1103): v26 states the fallback's 180 s, so only a
+// projection that says otherwise shows the read. Under the fallback this stalled request would outlive the test's own timeout.
+it('ends a stalled sent request at the projected deadline as that unit\'s unknown outcome, never resent', async () => {
+  const { store: opened, bookId, requests } = await productionReview(['typos-and-usage'],
+    (_category, ordinal, prior) => (ordinal === 1 && prior === 0 ? 'stall' : 'valid'),
+    (policy) => ({ ...policy, providerProcessing: { ...policy.providerProcessing,
+      transport: { ...policy.providerProcessing.transport!, requestDeadlineSeconds: 1 } } }));
+  const stalled = requests.filter((entry) => entry.ordinal === 1);
+  expect(stalled).toHaveLength(1);
+  expect(stalled[0]!.abortReason).toMatchObject({ name: 'TimeoutError' });
+  expect(stalled[0]!.abortedAt! - stalled[0]!.sentAt).toBeGreaterThanOrEqual(900);
+  expect(stalled[0]!.abortedAt! - stalled[0]!.sentAt).toBeLessThan(30_000);
+  expect(opened.inspectReviewCategory(bookId, typosDefinition()).resultSetRevision!.gaps)
+    .toEqual([expect.objectContaining({ unitOrdinal: 1, code: 'outcome-unknown' })]);
 }, 60_000);

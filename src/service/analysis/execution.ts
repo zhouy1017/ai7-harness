@@ -151,7 +151,8 @@ function materialInterruptionMessage(refusal: MaterialGuardRefusal): string {
 /**
  * How many Runs the governor executes at once (Issue #49, S14; ADR 0021): two. Under development-ci either place takes any
  * Run. Live launches also admit foreground Runs across Books into both places. Background enrollments remain bounded by
- * their existing share (`backgroundAnalysisShare`: capacity − 1) and never reserve an otherwise free foreground place.
+ * their share (`executionBackgroundShare`: v26's projected default, else capacity − 1) and never reserve an otherwise free
+ * foreground place.
  */
 export const EXECUTION_RUN_CAPACITY = 2;
 /** v26 supplies the configured default; predecessors retain their existing share. */
