@@ -16,7 +16,7 @@ describe('Top-5 preference retrieval', () => {
     const policy = await resolveSourceCheckoutLaunchPolicy(fileURLToPath(new URL('../../', import.meta.url)), 'developer-live');
     const input = reviewCategoryContractInput(reviewCategoryEntry('typos-and-usage')!);
     const tools = kindLocalTools(policy, 'editorial-review/typos-and-usage')!;
-    const current = reviewCategoryKindDefinition(input, 2, tools);
+    const current = reviewCategoryKindDefinition(input, 2, tools, 4);
     const binding = policy.providerProcessing.admittedRules.find((rule) => rule.taskKinds.includes(current.kind))!;
     for (const historical of [reviewCategoryKindDefinition(input, 1), reviewCategoryKindDefinition(input, 2, undefined, 2), reviewCategoryKindDefinition(input, 2, tools, 3)]) {
       expect(pinnedReviewDefinition(current, historical.promptContractDigest).promptContractDigest).toBe(historical.promptContractDigest);
@@ -38,6 +38,8 @@ describe('Top-5 preference retrieval', () => {
     const snapshot = structuredClone(candidates);
     expect(selectPreferenceLines(candidates, unit)).toEqual([line(0)]);
     expect(candidates).toEqual(snapshot);
+    const attributed = { ...line(0), sources: [{ author: '本机人员' }] };
+    expect(selectPreferenceLines([attributed], unit)[0]).not.toHaveProperty('sources');
   });
   it('keeps complete grapheme-bounded lines, skips an oversized line, and never drops its identity', () => {
     const emoji = '👨‍👩‍👦';

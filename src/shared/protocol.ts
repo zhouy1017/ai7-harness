@@ -119,7 +119,7 @@ import type {
   DeactivateEditorialMemoryInput,
   EditorialLearningProjection,
   InspectEditorialLearningInput,
-  LearningReasonAskInput, LearningReasonAskProjection, PreferenceAdoptionProjection, ReferencedRuleVersion,
+  LearningReasonAskInput, LearningReasonAskProjection, PreferenceAdoptionProjection, PreferenceAdoptionCursor, ReferencedRuleVersion,
 } from './protocol/learning.js';
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
@@ -6909,6 +6909,7 @@ export interface EditQualitySignalsProjection {
   editVolume: number;
   lineageDigest: string;
   preferenceAdoption?: ReadonlyArray<PreferenceAdoptionProjection>;
+  preferenceAdoptionNext?: PreferenceAdoptionCursor | null;
   categories: ReadonlyArray<{ categoryId: string; applied: number; surviving: number; editVolume: number; lineageDigest: string }>;
 }
 
@@ -12219,7 +12220,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations {
   deactivateEditorialMemory: { input: DeactivateEditorialMemoryInput; output: EditorialLearningProjection };
   inspectHouseReviewPreference: { input: Record<string, never>; output: HouseReviewPreferenceProjection };
   rebuildHouseReviewPreference: { input: Record<string, never>; output: HouseReviewPreferenceProjection };
-  inspectEditQualitySignals: { input: { bookId: string | null }; output: EditQualitySignalsProjection };
+  inspectEditQualitySignals: { input: { bookId: string | null; preferenceAfter?: PreferenceAdoptionCursor | null }; output: EditQualitySignalsProjection };
   inspectLearningMaterials: { input: { bookId: string | null; after: LearningMaterialCursor | null }; output: LearningMaterialsProjection };
   /** One material as its Review Card reads it, by its Book and place. */
   inspectLearningMaterial: { input: { bookId: string; materialKey: string }; output: LearningMaterialProjection };
@@ -12817,7 +12818,7 @@ export interface RendererApi extends GlobalAgentRendererApi {
   deactivateEditorialMemory(input: DeactivateEditorialMemoryInput): Promise<EditorialLearningProjection>;
   inspectHouseReviewPreference(): Promise<HouseReviewPreferenceProjection>;
   rebuildHouseReviewPreference(): Promise<HouseReviewPreferenceProjection>;
-  inspectEditQualitySignals(input: { bookId: string | null }): Promise<EditQualitySignalsProjection>;
+  inspectEditQualitySignals(input: { bookId: string | null; preferenceAfter?: PreferenceAdoptionCursor | null }): Promise<EditQualitySignalsProjection>;
   inspectLearningMaterials(input: { bookId: string | null; after?: LearningMaterialCursor | null }): Promise<LearningMaterialsProjection>;
   inspectLearningMaterial(input: { bookId: string; materialKey: string }): Promise<LearningMaterialProjection>;
   decideLearningMaterial(input: DecideLearningMaterialInput): Promise<LearningMaterialProjection>;

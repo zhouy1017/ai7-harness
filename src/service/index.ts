@@ -882,7 +882,7 @@ async function dispatch(
     case 'rebuildHouseReviewPreference':
       return { id: request.id, ok: true, op: request.op, result: store.rebuildHouseReviewPreference() };
     case 'inspectEditQualitySignals':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectEditQualitySignals(request.input.bookId) };
+      return { id: request.id, ok: true, op: request.op, result: store.inspectEditQualitySignals(request.input.bookId, request.input.preferenceAfter ?? null) };
     case 'inspectLearningMaterials':
       return { id: request.id, ok: true, op: request.op, result: store.inspectLearningMaterials(request.input.bookId, request.input.after) };
     case 'inspectLearningMaterial':

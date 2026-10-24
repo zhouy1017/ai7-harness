@@ -172,8 +172,8 @@ function liveKindExpectation(definition: LiveKindDefinition, policy?: LaunchPoli
     if (review.executor !== 'review-category-contract' || review.seriesKnowledge !== undefined) return null;
     const input = reviewCategoryContractInput(review);
     const tools = kindLocalTools(policy, definition.kind) ?? undefined;
-    const candidates = [reviewCategoryKindDefinition(input, 1), reviewCategoryKindDefinition(input, 2),
-      reviewCategoryKindDefinition(input, 2, tools), reviewCategoryKindDefinition(input, 2, undefined, 2),
+    const candidates = [reviewCategoryKindDefinition(input, 1), reviewCategoryKindDefinition(input, 2, undefined, 4),
+      reviewCategoryKindDefinition(input, 2, tools, 4), reviewCategoryKindDefinition(input, 2, undefined, 2),
       reviewCategoryKindDefinition(input, 2, tools, 3)];
     const expectedBase = liveMaterialContract(definition)?.basePromptContractDigest ?? definition.promptContractDigest;
     return {

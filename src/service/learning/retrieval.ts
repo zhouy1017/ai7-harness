@@ -20,6 +20,7 @@ export function selectPreferenceLines(
   unit: { bookId: string; categoryId: string },
 ): PreferenceLineCandidate[] {
   const ranked = candidates.filter((line) => line.active && line.versionId.length > 0 &&
+    Number.isSafeInteger(line.ordinal) && line.ordinal >= 1 && Number.isSafeInteger(line.lineIndex) && line.lineIndex >= 0 &&
     line.categoryId === unit.categoryId && (line.bookId === null || line.bookId === unit.bookId) &&
     line.text.trim().length > 0 && line.text.isWellFormed() && !/[\r\n\p{Cc}\p{Zl}\p{Zp}]/u.test(line.text) &&
     Number.isFinite(line.confidence) && line.confidence >= 0 && line.confidence <= 1 &&
@@ -35,7 +36,8 @@ export function selectPreferenceLines(
     const length = graphemesOf(line.text).length;
     if (seen.has(key) || characters + length > 200) continue;
     seen.add(key);
-    selected.push({ ...line });
+    selected.push({ versionId: line.versionId, ordinal: line.ordinal, lineIndex: line.lineIndex, text: line.text,
+      bookId: line.bookId, categoryId: line.categoryId, active: line.active, confidence: line.confidence, recordedAt: line.recordedAt });
     characters += length;
     if (selected.length === 5) break;
   }

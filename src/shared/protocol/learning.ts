@@ -117,6 +117,7 @@ export interface PreferenceAdoptionProjection {
   unreferenced: PreferenceAdoptionCounts;
   mostlyRejected: boolean;
 }
+export interface PreferenceAdoptionCursor { bookId: string; versionId: string | null }
 
 /** Exact local rule snapshot from the request producing the finding; no examples or names. */
 export interface ReferencedRuleVersion {

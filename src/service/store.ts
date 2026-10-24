@@ -13200,11 +13200,11 @@ export class EditorialStore {
     return this.inspectLearningMaterial(input.bookId, input.materialKey);
   }
 
-  inspectEditQualitySignals(bookId: string | null): EditQualitySignalsProjection {
+  inspectEditQualitySignals(bookId: string | null, after: import('../shared/protocol/learning.js').PreferenceAdoptionCursor | null = null): EditQualitySignalsProjection {
     return this.#learningCall(() => {
       requireStore(bookId === null || UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
       if (bookId !== null) requireStore(this.#authority.prepare('SELECT 1 FROM books WHERE book_id = ?').get(bookId) !== undefined, 'BOOK_NOT_FOUND', '图书不存在。');
-      return { ...readEditQualitySignals(this.#authority, bookId), preferenceAdoption: new EditorialLearningLedger(this.#authority).adoption(bookId) };
+      return { ...readEditQualitySignals(this.#authority, bookId), ...new EditorialLearningLedger(this.#authority).adoption(bookId, after) };
     });
   }
 

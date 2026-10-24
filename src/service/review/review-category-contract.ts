@@ -226,7 +226,7 @@ export interface ReviewCategoryPromptContract {
   readonly blockLine: string;
 }
 
-export function reviewCategoryContract(input: ReviewCategoryContractInput, version: 1 | 2 = 2, toolNames: readonly string[] = [], promptGeneration: 2 | 3 | 4 = 4): ReviewCategoryPromptContract {
+export function reviewCategoryContract(input: ReviewCategoryContractInput, version: 1 | 2 = 2, toolNames: readonly string[] = [], promptGeneration: 2 | 3 | 4 = 2): ReviewCategoryPromptContract {
   const category = frozenCategory(input);
   const contract: ReviewCategoryPromptContract = {
     schema: version === 1 ? 'ai7.editorial-review.prompt-contract/1' : promptGeneration === 4 ? REVIEW_CATEGORY_PROMPT_CONTRACT_SCHEMA : 'ai7.editorial-review.prompt-contract/2',

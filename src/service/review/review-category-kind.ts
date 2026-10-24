@@ -102,7 +102,7 @@ export function reviewCategorySchemaDigest(promptContractDigest: string, version
   }));
 }
 
-export function reviewCategoryKindDefinition(input: ReviewCategoryContractInput, version: 1 | 2 = 2, tools?: LocalToolsRule, promptGeneration: 2 | 3 | 4 = 4): AnalysisKindDefinition {
+export function reviewCategoryKindDefinition(input: ReviewCategoryContractInput, version: 1 | 2 = 2, tools?: LocalToolsRule, promptGeneration: 2 | 3 | 4 = 2): AnalysisKindDefinition {
   const names = tools?.declarations === undefined ? [] : ruleNamedToolSchemas(false, tools).map((schema) => schema.name);
   const contract = reviewCategoryContract(input, version, names, promptGeneration);
   const category = contract.category;
@@ -251,7 +251,7 @@ export function reviewCategoryKindDefinition(input: ReviewCategoryContractInput,
     conflictCountOf: () => 0,
     mode: modeIndex(modes),
   };
-  return Object.assign(definition, { reviewToolInput: input, reviewToolPromptDigest: promptContractDigest,
+  return Object.assign(definition, { reviewToolInput: input, reviewToolPromptDigest: promptContractDigest, reviewPromptGeneration: promptGeneration,
     ...(version === 1 ? {} : { reviewPromptPredecessors: promptGeneration === 4
       ? [reviewCategoryKindDefinition(input, 2, tools, 3), reviewCategoryKindDefinition(input, 2, undefined, 2), reviewCategoryKindDefinition(input, 1)]
       : [] }),
@@ -268,8 +268,9 @@ export function withReviewLocalTools(definition: AnalysisKindDefinition, tools: 
   if (material !== null) return material;
   const input = (definition as AnalysisKindDefinition & { reviewToolInput?: ReviewCategoryContractInput }).reviewToolInput;
   if (input === undefined) return definition;
-  const numbered = reviewCategoryKindDefinition(input, 2);
-  const next = reviewCategoryKindDefinition(input, 2, tools);
+  const generation = (definition as AnalysisKindDefinition & { reviewPromptGeneration?: 2 | 3 | 4 }).reviewPromptGeneration ?? 2;
+  const numbered = reviewCategoryKindDefinition(input, 2, undefined, generation);
+  const next = reviewCategoryKindDefinition(input, 2, tools, generation);
   // Other wrappers retain their own proof; only this owner's exact base can be replaced here.
   return owned.reviewToolPromptDigest === definition.promptContractDigest || definition.promptContractDigest === numbered.promptContractDigest ? next : definition;
 }

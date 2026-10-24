@@ -4459,8 +4459,8 @@ function registerRendererHandlers(
   }));
   ipcMain.handle(IPC_CHANNELS.inspectEditQualitySignals, (event, input: ServiceOperationMap['inspectEditQualitySignals']['input']) => envelope(async () => {
     requireSender(event); requireAuthority();
-    requireDesktop(input !== null && typeof input === 'object' && Object.keys(input).length === 1 && (input.bookId === null || (typeof input.bookId === 'string' && UUID_PATTERN.test(input.bookId))), 'AI7_RENDERER_BOUNDARY_INVALID');
-    return service.call('inspectEditQualitySignals', { bookId: input.bookId });
+    requireDesktop(input !== null && typeof input === 'object' && Object.keys(input).every((key) => key === 'bookId' || key === 'preferenceAfter') && (input.bookId === null || (typeof input.bookId === 'string' && UUID_PATTERN.test(input.bookId))), 'AI7_RENDERER_BOUNDARY_INVALID');
+    return service.call('inspectEditQualitySignals', input);
   }));
   // 质量与学习 › 学习准入 (Issue #61, S26b): a house-wide destination like 知识库, bound to no Book route; each decision names
   // its Book and is serialized with every other effect.

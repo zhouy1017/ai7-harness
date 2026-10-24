@@ -37,7 +37,7 @@ interface ReviewRequest { readonly category: string; readonly ordinal: number; r
  */
 async function productionReview(
   categories: readonly string[],
-  answer: (category: string, ordinal: number, prior: number) => 'valid' | 'invalid' | 'stall' | 'tools',
+  answer: (category: string, ordinal: number, prior: number) => 'valid' | 'invalid' | 'stall' | 'tools' | 'three',
   project: (policy: LaunchPolicyProjection) => LaunchPolicyProjection = (policy) => policy,
   useMaterial = false,
   usePreferences = false,
@@ -88,9 +88,12 @@ async function productionReview(
           const match = /^\[([1-9][0-9]*)\] \[blk_[0-9a-f]{24}\] \((?:title|heading|paragraph)(?: h[1-6])?\) (.*)$/u.exec(line);
           return match === null ? [] : [{ ordinal: Number(match[1]), text: match[2]! }];
         });
-        const block = blocks.find((entry) => entry.text.length >= 10 && entry.text.length <= 80);
+        const bounded = blocks.filter((entry) => entry.text.length >= 10 && entry.text.length <= 80);
+        const block = bounded[0];
         content = JSON.stringify({ schema: 'ai7.editorial-review.unit-result/2', unitOrdinal: header.ordinal,
-          findings: header.ordinal === 1 && block !== undefined && (header.categoryId === 'publication-risk' || body.messages.some((entry) => entry.role === 'tool'))
+          findings: shape === 'three' && header.ordinal === 1 ? bounded.slice(0, 3).map((entry) => ({ quote: entry.text,
+            blockOrdinal: entry.ordinal, severity: 'should', note: '合成同类修改建议。', replacement: `${entry.text}合成` }))
+            : header.ordinal === 1 && block !== undefined && (header.categoryId === 'publication-risk' || body.messages.some((entry) => entry.role === 'tool'))
             ? [{ quote: block.text, blockOrdinal: block.ordinal, severity: 'should', note: '合成审阅发现；请人工复核。',
               ...(header.categoryId === 'publication-risk' ? { clauseId: 'publication-risk/1' } : { replacement: `${block.text}合成` }) }] : [],
         });
@@ -122,6 +125,22 @@ async function productionReview(
 }
 
 const typosDefinition = () => reviewCategoryKindDefinition(reviewCategoryContractInput(reviewCategoryEntry('typos-and-usage')!));
+
+it('offers a local ask on the third same-category accepted edit within a Run, with no new model request', async () => {
+  const { store: opened, bookId, reviewRunId, requests } = await productionReview(['typos-and-usage'], () => 'three');
+  const result = opened.inspectReviewWorkspace(bookId, reviewRunId).run!;
+  expect(result.findings).toHaveLength(3);
+  const count = requests.length;
+  for (const [index, finding] of result.findings.entries()) {
+    const applied = opened.applyChangeSuggestion({ manuscriptId: result.manuscript.manuscriptId, branchId: result.manuscript.branchId,
+      windowStartBlockId: finding.blockId, markId: finding.markId!, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null });
+    const decisionId = applied.card!.suggestion!.decision!.decisionId;
+    const ask = opened.recordLearningReasonAsk({ action: 'offer', decisionId }, 'often');
+    if (index < 2) expect(ask).toBeNull();
+    else expect(ask).toMatchObject({ decisionId, options: ['语言更准确', '保持作者风格'] });
+  }
+  expect(requests).toHaveLength(count);
+});
 
 it('sends only selected preference lines, records exact unit/finding versions, exports them and measures adoption from decisions', async () => {
   const { store: opened, bookId, reviewRunId, requests } = await productionReview(['typos-and-usage', 'publication-risk'],
@@ -206,10 +225,10 @@ it('admits a two-tool turn under the verified ordinary-production policy and set
 // The Run hands the projected `transport.requestDeadlineSeconds` to the adapter (#1103): v26 states the fallback's 180 s, so only a
 // projection that says otherwise shows the read. Under the fallback this stalled request would outlive the test's own timeout.
 it('ends a stalled sent request at the projected deadline as that unit\'s unknown outcome, never resent', async () => {
-  const { store: opened, bookId, requests } = await productionReview(['typos-and-usage'],
+  const { store: opened, bookId, reviewRunId, requests } = await productionReview(['typos-and-usage'],
     (_category, ordinal, prior) => (ordinal === 1 && prior === 0 ? 'stall' : 'valid'),
     (policy) => ({ ...policy, providerProcessing: { ...policy.providerProcessing,
-      transport: { ...policy.providerProcessing.transport!, requestDeadlineSeconds: 1 } } }));
+      transport: { ...policy.providerProcessing.transport!, requestDeadlineSeconds: 1 } } }), false, true);
   const stalled = requests.filter((entry) => entry.ordinal === 1);
   expect(stalled).toHaveLength(1);
   expect(stalled[0]!.abortReason).toMatchObject({ name: 'TimeoutError' });
@@ -217,4 +236,10 @@ it('ends a stalled sent request at the projected deadline as that unit\'s unknow
   expect(stalled[0]!.abortedAt! - stalled[0]!.sentAt).toBeLessThan(30_000);
   expect(opened.inspectReviewCategory(bookId, typosDefinition()).resultSetRevision!.gaps)
     .toEqual([expect.objectContaining({ unitOrdinal: 1, code: 'outcome-unknown' })]);
+  const db = new DatabaseSync(join(roots!.dataRoot, 'store', 'ai7.sqlite'));
+  try {
+    const event = db.prepare("SELECT canonical_json FROM review_run_category_events WHERE review_run_id = ? AND state = 'settled'").get(reviewRunId)!;
+    const references = (JSON.parse(String(event.canonical_json)) as { unitPreferenceReferences: Array<{ unitOrdinal: number; referencedRuleVersions: unknown[] }> }).unitPreferenceReferences;
+    expect(references.find((unit) => unit.unitOrdinal === 1)?.referencedRuleVersions).toHaveLength(1);
+  } finally { db.close(); }
 }, 60_000);

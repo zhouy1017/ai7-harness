@@ -1489,8 +1489,10 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     case 'inspectEditQualitySignals': {
-      const input = requireInput(value.input, ['bookId'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId'], ['preferenceAfter'], tentativeId);
       if (!(input.bookId === null || validUuid(input.bookId))) throw new ProtocolError(tentativeId);
+      const after = input.preferenceAfter;
+      if (!(after == null || isRecord(after) && hasExactKeys(after, ['bookId', 'versionId']) && validUuid(after.bookId) && (after.versionId === null || validUuid(after.versionId)))) throw new ProtocolError(tentativeId);
       break;
     }
     // 质量与学习 › 学习准入 (Issue #61, S26b): every Book's Learning Material, or one Book's.

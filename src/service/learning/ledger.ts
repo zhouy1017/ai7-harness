@@ -4,11 +4,11 @@ import type {
   ChangeEditorialLearningInput, CreateEditorialMemoryInput, DeactivateEditorialMemoryInput,
   EditorialLearningProjection, GlobalEditorialMemoryVersion, InspectEditorialLearningInput,
   LearningSignal, LearningSignalStanding, LearningSourceReference,
-  LearningReasonAskInput, LearningReasonAskProjection, LearningReasonAskFrequency, PreferenceAdoptionProjection, ReferencedRuleVersion,
+  LearningReasonAskInput, LearningReasonAskProjection, LearningReasonAskFrequency, PreferenceAdoptionProjection, PreferenceAdoptionCursor, ReferencedRuleVersion,
 } from '../../shared/protocol/learning.js';
 import { LEARNING_REASON_OPTIONS } from '../../shared/protocol/learning.js';
 import { graphemesOf } from '../../shared/mark-anchor.js';
-import { canonicalJson, canonicalRecord, sha256Hex } from '../analysis/canonical.js';
+import { canonicalJson, canonicalRecord, sha256Hex, UUID_PATTERN } from '../analysis/canonical.js';
 import { BookPeople } from '../book-people.js';
 import { DecisionFeedbackLedger } from '../decision-feedback.js';
 import { graphemeEditVolume } from '../edit-quality-signals.js';
@@ -186,7 +186,17 @@ export class EditorialLearningLedger {
     const proactive = signal.kind === 'proactive-reason';
     if (proactive) requireLearning(signal.ask &&
       ['offered', 'suppressed', 'answered', 'dismissed'].includes(signal.ask.state) &&
+      UUID_PATTERN.test(signal.ask.askId) && LEARNING_REASON_OPTIONS[signal.ask.disposition] !== undefined &&
+      (signal.ask.choice === null || LEARNING_REASON_OPTIONS[signal.ask.disposition]!.includes(signal.ask.choice)) &&
+      (signal.ask.text === null || typeof signal.ask.text === 'string' && signal.ask.text.isWellFormed() && graphemesOf(signal.ask.text).length <= 200) &&
+      (signal.ask.state === 'answered' ? signal.ask.choice !== null || signal.ask.text !== null : signal.ask.choice === null && signal.ask.text === null) &&
       row.source_key === `ask:${source.decisionId}:${signal.ask.state}`);
+    if (proactive && (signal.ask!.state === 'answered' || signal.ask!.state === 'dismissed')) {
+      const offered = this.db.prepare('SELECT * FROM learning_signals WHERE source_key = ?').get(`ask:${source.decisionId}:offered`) as Row | undefined;
+      requireLearning(offered);
+      const original = read<LearningSignal>(offered);
+      requireLearning(original.ask?.askId === signal.ask!.askId && canonicalJson(original.source) === canonicalJson(source));
+    }
     if (source.reviewRunId === null) {
       const decision = this.db.prepare(`SELECT d.*, m.book_id, m.manuscript_id, m.branch_id, m.mark_id FROM proposal_item_decisions d
         JOIN proposal_change_items i ON i.item_id = d.item_id JOIN editorial_marks m ON m.mark_id = i.mark_id WHERE d.decision_id = ?`).get(source.decisionId);
@@ -269,8 +279,8 @@ export class EditorialLearningLedger {
       if (settled) return null;
       const current = this.#askDecision(offer.source.decisionId);
       requireLearning(current && current.source.materialDigest === offer.source.materialDigest);
-      this.#capture(`ask:${offer.source.decisionId}:${answer ? 'answered' : 'dismissed'}`, 'proactive-reason', offer.source, null, now,
-        { ...offer.ask, state: answer ? 'answered' : 'dismissed', choice, text: own });
+      requireLearning(this.#capture(`ask:${offer.source.decisionId}:${answer ? 'answered' : 'dismissed'}`, 'proactive-reason', offer.source, null, now,
+        { ...offer.ask, state: answer ? 'answered' : 'dismissed', choice, text: own }) !== null);
       return null;
     }
     if (frequency === 'off') return null;
@@ -299,7 +309,7 @@ export class EditorialLearningLedger {
   }
 
   /** Passive comparisons from finding/decision records; pending findings remain in the denominator. */
-  adoption(bookId: string | null): PreferenceAdoptionProjection[] {
+  adoption(bookId: string | null, after: PreferenceAdoptionCursor | null = null): { preferenceAdoption: PreferenceAdoptionProjection[]; preferenceAdoptionNext: PreferenceAdoptionCursor | null } {
     const rows = this.db.prepare(`SELECT f.*, r.book_id, b.title book_title, m.status mark_status,
       (SELECT d.disposition FROM proposal_change_items i JOIN proposal_item_decisions d ON d.item_id = i.item_id
        WHERE i.mark_id = f.mark_id ORDER BY d.ordinal DESC LIMIT 1) decision,
@@ -332,7 +342,12 @@ export class EditorialLearningLedger {
           referenced, unreferenced: counts(false), mostlyRejected: referenced.rejected > referenced.findings / 2 });
       }
     }
-    return result;
+    const key = (row: PreferenceAdoptionCursor) => `${row.bookId}/${row.versionId ?? ''}`;
+    const ordered = result.sort((a, b) => key(a).localeCompare(key(b), 'en'))
+      .filter((row) => after === null || key(row).localeCompare(key(after), 'en') > 0);
+    const preferenceAdoption = ordered.slice(0, 40);
+    const last = preferenceAdoption.at(-1);
+    return { preferenceAdoption, preferenceAdoptionNext: ordered.length <= 40 || last === undefined ? null : { bookId: last.bookId, versionId: last.versionId } };
   }
 
   change(input: ChangeEditorialLearningInput): void {
@@ -401,7 +416,8 @@ export class EditorialLearningLedger {
       input.editorialDimension.length <= 80 && Number.isFinite(input.confidence) && input.confidence >= 0 && input.confidence <= 1);
     const itemId = randomUUID(); const recordedAt = new Date().toISOString();
     this.db.prepare('INSERT INTO global_editorial_memory_items VALUES (?, ?, ?, ?)').run(itemId, input.clientMemoryId, input.signalId, recordedAt);
-    const positive = signal.kind === 'accepted' || signal.kind === 'accepted-with-edit';
+    const disposition = signal.kind === 'proactive-reason' ? signal.ask!.disposition : signal.kind;
+    const positive = disposition === 'accepted' || disposition === 'accepted-with-edit';
     this.#append({ itemId, versionId: randomUUID(), ordinal: 1, supersedes: null, title: input.title.trim(), editorialDimension: input.editorialDimension.trim(),
       positiveExamples: positive ? [signal.source] : [], negativeExamples: positive ? [] : [signal.source], confidence: input.confidence,
       activation: 'active', signalIds: [signal.signalId], supervisionDirectiveRefs: [], actor: 'editor', recordedAt });

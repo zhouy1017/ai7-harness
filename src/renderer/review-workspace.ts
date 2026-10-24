@@ -1965,6 +1965,21 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       if (applied.acknowledged || applied.outcome?.state === 'committed') {
         ui.batch = null;
         options.setStatus(reviewBatchAppliedLine(strip.items.length, !applied.acknowledged), 'success');
+        // The Apply is finished. Read its decisions in bounded pages; optional asks never hold the batch or its next action.
+        void (async () => {
+          const remaining = new Set(strip.items.map((item) => item.markId));
+          let after: number | null = null;
+          while (remaining.size > 0 && !destroyed) {
+            const page = await api.inspectReviewWorkspace({ reviewRunId: run.reviewRunId, findingsAfterOrdinal: after });
+            const settled = page.run;
+            if (settled === null) return;
+            for (const finding of settled.findings) {
+              if (finding.markId !== null && remaining.delete(finding.markId)) offerReasonAsk(finding.findingId, finding.learningDecisionId);
+            }
+            if (!settled.findingsTruncated || settled.findings.length === 0) return;
+            after = settled.findings.at(-1)!.ordinal;
+          }
+        })().catch(() => {});
         return;
       }
       // Refused — a suggestion drifted, or was decided meanwhile — or its outcome is unknown: the same

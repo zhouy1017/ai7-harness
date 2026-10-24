@@ -2034,6 +2034,7 @@ export class ReviewRunStore {
       const recordedAt = new Date().toISOString();
       const runRecordId = facts.runRecordId ?? null;
       const resultSetRevisionId = facts.resultSetRevisionId ?? null;
+      const unitPreferenceReferences = state === 'dispatched' || runRecordId === null ? undefined : this.#unitPreferenceReferences(runRecordId);
       const record = canonicalRecord({
         schema: EVENT_SCHEMA,
         eventId,
@@ -2046,6 +2047,7 @@ export class ReviewRunStore {
         resultSetRevisionId,
         recordedAt,
         ...(facts.extra ?? {}),
+        ...(unitPreferenceReferences === undefined ? {} : { unitPreferenceReferences }),
       });
       this.#db.prepare(
         `INSERT INTO review_run_category_events(
@@ -2053,6 +2055,24 @@ export class ReviewRunStore {
          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(eventId, reviewRunId, categoryId, sequence, state, detail, runRecordId, resultSetRevisionId, recordedAt, record.json, record.digest);
     });
+  }
+
+  /** The actual unit turns, including failed requests, joined to this Task's immutable selection. No span means no use. */
+  #unitPreferenceReferences(runRecordId: string): ReadonlyArray<{ unitOrdinal: number; referencedRuleVersions: ReadonlyArray<ReferencedRuleVersion> }> | undefined {
+    const run = this.#db.prepare('SELECT task_intent_id FROM analysis_run_records WHERE run_record_id = ?').get(runRecordId);
+    if (run === undefined) return undefined;
+    const preference = new HouseReviewPreferenceLedger(this.#db).pinned(String(run.task_intent_id));
+    if (preference?.selection === undefined) return undefined;
+    const referencedRuleVersions = preference.lines.map((text, index) => ({ versionId: preference.versionId, ordinal: preference.ordinal,
+      lineIndex: preference.selection!.lineIndexes[index]!, text }));
+    const ordinals = new Set<number>();
+    for (const row of this.#db.prepare(`SELECT s.* FROM analysis_harness_spans s JOIN analysis_execution_attempts a ON a.attempt_id = s.attempt_id
+      WHERE a.run_record_id = ? AND s.unit_ordinal IS NOT NULL ORDER BY s.unit_ordinal, s.ordinal`).iterate(runRecordId) as IterableIterator<SqlRow>) {
+      const span = recordOf(text(row.canonical_json), text(row.sha256));
+      requireReview(span.unitOrdinal === row.unit_ordinal, 'REVIEW_RECORD_INVALID', '单元请求的引用记录无法核对。');
+      ordinals.add(integer(row.unit_ordinal));
+    }
+    return [...ordinals].map((unitOrdinal) => ({ unitOrdinal, referencedRuleVersions }));
   }
 
   /** The ledger Run of a category's Task, once one was authorized. */
@@ -4023,7 +4043,8 @@ export class ReviewRunStore {
         toGrapheme: markId === null || mark.to === null ? integer(row.to_grapheme) : mark.to,
         quote: text(row.quote),
         note: text(row.note),
-        referencedRuleVersions: (recordOf(text(row.canonical_json), text(row.sha256)).referencedRuleVersions ?? []) as ReadonlyArray<ReferencedRuleVersion>,
+        referencedRuleVersions: text(row.canonical_json).includes('"referencedRuleVersions"')
+          ? (recordOf(text(row.canonical_json), text(row.sha256)).referencedRuleVersions ?? []) as ReadonlyArray<ReferencedRuleVersion> : [],
         learningDecisionId: nullableText(row.learning_decision_id),
         replacement: nullableText(row.replacement),
         clauseRef: nullableText(row.clause_ref),
