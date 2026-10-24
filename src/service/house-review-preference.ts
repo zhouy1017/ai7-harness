@@ -1,6 +1,6 @@
 import { SupervisionDirectives, governedMemoryItems, preferenceItems } from './learning/supervision-directives.js';
 import { selectPreferenceLines, type PreferenceLineCandidate } from './learning/retrieval.js';
-import { EditorialLearningLedger, validateEditorialMemorySourceShape } from './learning/ledger.js';
+import { EditorialLearningLedger, LearningReads, validateEditorialMemorySourceShape } from './learning/ledger.js';
 import { REVIEW_CATEGORY_SELECTED_PREFERENCE_PROMPT_SCHEMA } from './review/review-category-contract.js';
 import type { ReferencedRuleVersion } from '../shared/protocol/learning.js';
 import { liveMaterialContract, materialContractDefinition } from './task-material-references.js';
@@ -98,9 +98,8 @@ function feedbackKeyOf(db: DatabaseSync, source: HouseReviewPreferenceSource): s
   valid(admission !== null);
   return sha256Hex(canonicalJson({ bookId: source.bookId, materialKey: admission.materialKey, materialDigest: source.materialDigest }));
 }
-export function preferenceSourceWithdrawal(db: DatabaseSync, source: HouseReviewPreferenceSource): { materialKey: string | null; withdrawnAt: string | null } {
+export function preferenceSourceWithdrawal(db: DatabaseSync, source: HouseReviewPreferenceSource, learning = new EditorialLearningLedger(db)): { materialKey: string | null; withdrawnAt: string | null } {
   if (source.kind !== 'editorial-memory') return withdrawalOf(db, source.eligibilityDecisionId);
-  const learning = new EditorialLearningLedger(db);
   return { materialKey: source.captured.source.materialKey, withdrawnAt: learning.sourceWithdrawalAt({ ...source.captured,
     admission: source.currentAdmission, eligibility: source.currentEligibility }) };
 }
@@ -215,10 +214,25 @@ export function withoutNames(text: string, names: ReadonlyArray<string>): string
 }
 
 export class HouseReviewPreferenceLedger {
+  #reads: LearningReads | null = null;
   constructor(readonly db: DatabaseSync) {}
 
+  /**
+   * One outer read or publication with one validated-result context for every lineage it checks (Issue #1128 revision 7); the
+   * context ends when the call returns, so no later call, open or mutation sees it.
+   */
+  #read<T>(operation: () => T): T {
+    if (this.#reads !== null) return operation();
+    this.#reads = new LearningReads();
+    try { return operation(); } finally { this.#reads = null; }
+  }
+
+  #learning(): EditorialLearningLedger { return new EditorialLearningLedger(this.db, this.#reads ?? undefined); }
+
   /** Additive reader preflight; the store's revision/open wiring is integrated only at the released landing base. */
-  validate(): void {
+  validate(): void { this.#read(() => this.#validateAll()); }
+
+  #validateAll(): void {
     for (const scope of ['development-ci', 'developer-live', 'ordinary-production'] as const) this.history(scope);
     for (const row of this.db.prepare(`SELECT p.task_intent_id, t.book_id, t.kind FROM review_run_preference_pins p
       JOIN analysis_task_intents t ON t.task_intent_id = p.task_intent_id ORDER BY p.rowid`).iterate()) {
@@ -228,7 +242,9 @@ export class HouseReviewPreferenceLedger {
     }
   }
 
-  history(scope: TrustedOperationalScope): HouseReviewPreferenceVersion[] {
+  history(scope: TrustedOperationalScope): HouseReviewPreferenceVersion[] { return this.#read(() => this.#history(scope)); }
+
+  #history(scope: TrustedOperationalScope): HouseReviewPreferenceVersion[] {
     let previous: string | null = null;
     let ordinal = 0;
     return this.db.prepare('SELECT * FROM house_review_preference_versions WHERE operational_scope = ? ORDER BY ordinal').all(scope).map((row) => {
@@ -241,7 +257,11 @@ export class HouseReviewPreferenceLedger {
         // Governance (Issue #1083): the derived lines it was replayed over, their material set and the directive it read up to.
         (record.governance === undefined || Array.isArray(record.governance.baseLines) && record.governance.baseLines.length <= HOUSE_REVIEW_PREFERENCE_MAX_LINES &&
           DIGEST_PATTERN.test(record.governance.baseMaterialSetDigest) && UUID_PATTERN.test(record.governance.headDirectiveId)));
-      if (record.schema === 'ai7.house-review-preference/2') this.#validatePublication(record);
+      // A /2 record already proved in this read, by its exact digest, is not walked again.
+      if (record.schema === 'ai7.house-review-preference/2' && !this.#reads!.publications.has(String(row.sha256))) {
+        this.#validatePublication(record);
+        this.#reads!.publications.add(String(row.sha256));
+      }
       previous = record.versionId;
       return record;
     });
@@ -249,7 +269,7 @@ export class HouseReviewPreferenceLedger {
 
   #memoryLines(scope: TrustedOperationalScope, names: Iterable<string>): HouseReviewPreferenceVersion['lines'] {
     if (!this.db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'global_editorial_memory_items'").get()) return [];
-    const learning = new EditorialLearningLedger(this.db);
+    const learning = this.#learning();
     const lines: HouseReviewPreferenceVersion['lines'][number][] = [];
     const stripped = [...names];
     for (const row of this.db.prepare('SELECT item_id FROM global_editorial_memory_items ORDER BY item_id').iterate()) {
@@ -310,13 +330,14 @@ export class HouseReviewPreferenceLedger {
    * make an accepted line overflow. The unredacted words are only counted here, never sent.
    */
   #reserve(scope: TrustedOperationalScope, explicit: ReadonlyArray<string>): void {
-    const reserved = [...explicit, ...new EditorialLearningLedger(this.db).activeTitles(scope)];
+    const memories = this.db.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'global_editorial_memory_items'").get() ? this.#learning().activeTitles(scope) : [];
+    const reserved = [...explicit, ...memories];
     if (reserved.length > HOUSE_REVIEW_PREFERENCE_MAX_LINES ||
       reserved.reduce((total, text) => total + graphemesOf(text.trim()).length, 0) > HOUSE_REVIEW_PREFERENCE_MAX_GRAPHEMES) memoryLimit();
   }
 
   #validatePublication(record: HouseReviewPreferenceVersion, historical = false): void {
-    const learning = new EditorialLearningLedger(this.db);
+    const learning = this.#learning();
     const exact = (value: object, keys: string[]) => Object.keys(value).sort().join(',') === keys.sort().join(',');
     valid(record.schema === 'ai7.house-review-preference/2' && UUID_PATTERN.test(record.versionId) && Number.isSafeInteger(record.ordinal) && record.ordinal > 0 &&
       exact(record, ['schema', 'versionId', 'ordinal', 'supersedes', 'operationalScope', 'materialSetDigest', 'recordedAt', 'sourceCount', 'lines', 'legacyBasis',
@@ -380,7 +401,7 @@ export class HouseReviewPreferenceLedger {
 
   #lineCurrent(line: HouseReviewPreferenceVersion['lines'][number]): boolean {
     if (line.owner?.kind !== 'editorial-memory') return line.sources.every((source) => preferenceSourceWithdrawal(this.db, source).withdrawnAt === null);
-    const learning = new EditorialLearningLedger(this.db);
+    const learning = this.#learning();
     const memory = learning.version(line.owner.itemId);
     if (memory.schema !== 'ai7.global-editorial-memory/2' || memory.versionId !== line.owner.versionId || !learning.usable(memory)) return false;
     const current = new Map(learning.currentSources(memory).map((source) => [source.sourceKey, source]));
@@ -393,6 +414,10 @@ export class HouseReviewPreferenceLedger {
    * under another scope is refused here too, so no caller can mix development judgments with production, in either direction.
    */
   rebuild(scope: TrustedOperationalScope, sources: readonly HousePreferenceSource[], names: Iterable<string> = []): HouseReviewPreferenceVersion | null {
+    return this.#read(() => this.#rebuild(scope, sources, names));
+  }
+
+  #rebuild(scope: TrustedOperationalScope, sources: readonly HousePreferenceSource[], names: Iterable<string>): HouseReviewPreferenceVersion | null {
     const eligible = sources.filter((source) => source.operationalScope === scope && (source.eligibility === 'book' || source.eligibility === 'house'))
       .sort((a, b) => a.bookId.localeCompare(b.bookId) || a.materialDigest.localeCompare(b.materialDigest));
     const materialSetDigest = sha256Hex(canonicalJson(eligible.map(({ bookId, categoryId, materialDigest, decisionId, eligibilityDecisionId, eligibility }) =>
@@ -502,7 +527,7 @@ export class HouseReviewPreferenceLedger {
   #publicationAt(scope: TrustedOperationalScope, version: HouseReviewPreferenceVersion, names: Iterable<string>): Array<string | null> {
     const legacy = this.#dated(scope, version.legacyBasis?.lines ?? [], names);
     const replayed = new Map(legacy.itemIds.map((itemId, index) => [itemId, index] as const));
-    const learning = new EditorialLearningLedger(this.db);
+    const learning = this.#learning();
     return version.lines.map((line) => {
       if (line.owner?.kind === 'editorial-memory') return learning.version(line.owner.itemId, line.owner.versionId).recordedAt;
       const index = line.owner === undefined ? undefined : replayed.get(line.owner.itemId);
@@ -519,6 +544,10 @@ export class HouseReviewPreferenceLedger {
    * source lineage; `strict` for the editor's own action, refused when the text it adds cannot fit.
    */
   refreshGovernance(scope: TrustedOperationalScope, names: Iterable<string> = [], strict: boolean | 'memory' = false): void {
+    this.#read(() => this.#refreshGovernance(scope, names, strict));
+  }
+
+  #refreshGovernance(scope: TrustedOperationalScope, names: Iterable<string>, strict: boolean | 'memory'): void {
     const prior = this.history(scope).at(-1);
     const baseLines = prior?.legacyBasis?.lines ?? prior?.governance?.baseLines ?? prior?.lines ?? [];
     const materialSetDigest = prior?.legacyBasis?.materialSetDigest ?? prior?.governance?.baseMaterialSetDigest ?? prior?.materialSetDigest ?? sha256Hex(canonicalJson([]));
@@ -545,7 +574,9 @@ export class HouseReviewPreferenceLedger {
    * prepared (Issue #1083): the pinned version's own derived lines governed by every directive now, against the pin's lines. A
    * version in a scope no directive governs reads as it did, so this never stops a Run the derived path alone prepared.
    */
-  governanceChanged(taskIntentId: string, names: () => Iterable<string>): boolean {
+  governanceChanged(taskIntentId: string, names: () => Iterable<string>): boolean { return this.#read(() => this.#governanceChanged(taskIntentId, names)); }
+
+  #governanceChanged(taskIntentId: string, names: () => Iterable<string>): boolean {
     const preference = this.pinned(taskIntentId);
     if (preference === null) return false;
     const version = this.version(preference.versionId);
@@ -581,6 +612,10 @@ export class HouseReviewPreferenceLedger {
    * that follows every 停止今后使用 makes such a version current only in a scope not rebuilt since, and there it reads as none.
    */
   use(scope: TrustedOperationalScope, bookId: string, categoryId: string, names: Iterable<string> = []): HouseReviewPreferenceUse | null {
+    return this.#read(() => this.#use(scope, bookId, categoryId, names));
+  }
+
+  #use(scope: TrustedOperationalScope, bookId: string, categoryId: string, names: Iterable<string>): HouseReviewPreferenceUse | null {
     const current = this.history(scope).at(-1);
     if (current === undefined) return null;
     const controls = learningControlsOf(this.db);
@@ -593,7 +628,7 @@ export class HouseReviewPreferenceLedger {
     const candidates = preferenceCandidates(current, current.lines, at, controls?.excludedBooks).map((candidate) => {
       const owner = current.lines[candidate.lineIndex]!.owner;
       if (owner?.kind !== 'editorial-memory') return candidate;
-      const memory = new EditorialLearningLedger(this.db).version(owner.itemId, owner.versionId);
+      const memory = this.#learning().version(owner.itemId, owner.versionId);
       valid(memory.schema === 'ai7.global-editorial-memory/2'); return { ...candidate, confidence: memory.confidence };
     });
     const selected = selectPreferenceLines(candidates, { bookId, categoryId });
@@ -676,6 +711,10 @@ export class HouseReviewPreferenceLedger {
    * since it was admitted. `null` for a Task that read none.
    */
   pinnedInfluence(taskIntentId: string, options?: { historical: true }): PinnedInfluence | null {
+    return this.#read(() => this.#pinnedInfluence(taskIntentId, options));
+  }
+
+  #pinnedInfluence(taskIntentId: string, options?: { historical: true }): PinnedInfluence | null {
     const preference = this.pinned(taskIntentId);
     if (preference === null) return null;
     const version = options?.historical === true ? this.pinnedVersion(taskIntentId, preference) : this.version(preference.versionId);
@@ -690,8 +729,8 @@ export class HouseReviewPreferenceLedger {
         if (sources.has(identity)) continue;
         const available = source.kind !== 'editorial-memory' || this.db.prepare('SELECT 1 FROM global_editorial_memory_item_versions WHERE item_id = ? AND version_id = ?').get(source.itemId, source.versionId) !== undefined;
         valid(available || options?.historical === true);
-        const withdrawal = available || source.kind === 'editorial-memory' && new EditorialLearningLedger(this.db).validateHistoricalSource(source.captured)
-          ? preferenceSourceWithdrawal(this.db, source) : { materialKey: null, withdrawnAt: null };
+        const withdrawal = available || source.kind === 'editorial-memory' && this.#learning().validateHistoricalSource(source.captured)
+          ? preferenceSourceWithdrawal(this.db, source, this.#learning()) : { materialKey: null, withdrawnAt: null };
         sources.set(identity, { bookId: source.bookId, bookTitle: source.bookTitle,
           eligibilityDecisionId: source.kind === 'editorial-memory' ? null : source.eligibilityDecisionId,
           sourceKey: source.kind === 'editorial-memory' ? source.sourceKey : null,

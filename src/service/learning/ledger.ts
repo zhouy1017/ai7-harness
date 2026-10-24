@@ -193,13 +193,52 @@ export function importBookLearningControls(db: DatabaseSync, selectedBook: (book
   return imported;
 }
 
+/**
+ * One synchronous read's proved results (Issue #1128 revision 7): complete item chains by their exact row identities and digests,
+ * effective sources by version digest, and the signals, origins, snapshots and publications already validated. Only success is
+ * kept, and the owner that opens it discards it when that read returns: standing, controls, decisions and directives are read
+ * afresh by every operation, and nothing survives a request, a database open or a mutation.
+ */
+export class LearningReads {
+  readonly chains = new Map<string, { readonly fingerprint: string; readonly versions: GlobalEditorialMemoryVersion[] }>();
+  readonly effective = new Map<string, EditorialMemorySourceSnapshot[]>();
+  readonly signals = new Map<string, { readonly sha256: string; readonly signal: LearningSignal }>();
+  readonly origins = new Map<string, { operationalScope: TrustedOperationalScope; editorialDimension: string }>();
+  readonly snapshots = new Set<string>();
+  readonly eligibility = new Map<string, ReturnType<LearningEligibilityLedger['history']>>();
+  readonly publications = new Set<string>();
+  controls: Array<{ row: Row; record: LearningControl }> | null = null;
+}
+
 /** Local capture only: no provider, scheduler, retrieval or composition dependency. The caller owns the transaction. */
 export class EditorialLearningLedger {
-  constructor(readonly db: DatabaseSync) {}
+  #reads: LearningReads | null;
+  constructor(readonly db: DatabaseSync, reads?: LearningReads) { this.#reads = reads ?? null; }
+
+  /** One read inside the caller's validated-result context, or inside one discarded as soon as this read returns. */
+  #read<T>(operation: () => T): T {
+    if (this.#reads !== null) return operation();
+    this.#reads = new LearningReads();
+    try { return operation(); } finally { this.#reads = null; }
+  }
+
+  #controlRows(): Array<{ row: Row; record: LearningControl }> {
+    if (this.#reads === null) return [...controlHistory(this.db, 'main')];
+    return this.#reads.controls ??= [...controlHistory(this.db, 'main')];
+  }
+
+  #eligibilityHistory(bookId: string, materialKey: string): ReturnType<LearningEligibilityLedger['history']> {
+    const key = `${bookId}\u0000${materialKey}`;
+    const known = this.#reads?.eligibility.get(key);
+    if (known !== undefined) return known;
+    const history = new LearningEligibilityLedger(this.db).history(bookId, materialKey);
+    this.#reads?.eligibility.set(key, history);
+    return history;
+  }
 
   controls(): Controls {
     const result: Controls = { enabled: true, entries: 0, excludedBooks: new Set() };
-    for (const { record } of controlHistory(this.db, 'main')) {
+    for (const { record } of this.#controlRows()) {
       result.entries += 1;
       if (record.kind === 'switch') result.enabled = record.value;
       else if (record.value) result.excludedBooks.add(record.bookId!);
@@ -214,7 +253,7 @@ export class EditorialLearningLedger {
   }
 
   #standing(bookId: string, materialKey: string): LearningSignal['eligibility'] {
-    const last = new LearningEligibilityLedger(this.db).history(bookId, materialKey).at(-1);
+    const last = this.#eligibilityHistory(bookId, materialKey).at(-1);
     return { choice: last?.choice ?? 'house', decisionId: last?.decisionId ?? null, basisVersion: last?.basis.version ?? 2 };
   }
 
@@ -280,6 +319,14 @@ export class EditorialLearningLedger {
   #signal(id: string): LearningSignal {
     const row = this.db.prepare('SELECT * FROM learning_signals WHERE signal_id = ?').get(id) as Row | undefined;
     requireLearning(row);
+    const known = this.#reads?.signals.get(id);
+    if (known !== undefined && known.sha256 === row.sha256 && typeof row.canonical_json === 'string' && sha256Hex(row.canonical_json) === row.sha256) return known.signal;
+    const signal = this.#provedSignal(row);
+    this.#reads?.signals.set(id, { sha256: String(row.sha256), signal });
+    return signal;
+  }
+
+  #provedSignal(row: Row): LearningSignal {
     const signal = read<LearningSignal & { schema: string; basis: unknown }>(row);
     requireLearning(signal.schema === 'ai7.learning-signal/1' && canonicalJson(signal.basis) === canonicalJson(LOCAL_LEARNING_POLICY_BASIS) &&
       signal.signalId === row.signal_id && signal.source.bookId === row.book_id && signal.recordedAt === row.recorded_at);
@@ -484,7 +531,7 @@ export class EditorialLearningLedger {
   /** Relevant control identities only: another Book's control cannot invalidate this source. */
   #controlSnapshot(bookId: string): EditorialMemoryAdmission['controls'] {
     let switchEntryId: string | null = null; let bookEntryId: string | null = null;
-    for (const { record } of controlHistory(this.db, 'main')) {
+    for (const { record } of this.#controlRows()) {
       if (record.kind === 'switch') switchEntryId = record.entryId;
       else if (record.bookId === bookId) bookEntryId = record.entryId;
     }
@@ -495,6 +542,14 @@ export class EditorialLearningLedger {
   #reviewOrigin(signal: LearningSignal): { operationalScope: TrustedOperationalScope; editorialDimension: string };
   #reviewOrigin(signal: LearningSignal, allowMissing: true): { operationalScope: TrustedOperationalScope; editorialDimension: string } | null;
   #reviewOrigin(signal: LearningSignal, allowMissing = false): { operationalScope: TrustedOperationalScope; editorialDimension: string } | null {
+    const known = this.#reads?.origins.get(signal.signalId);
+    if (known !== undefined) return known;
+    const origin = this.#provedOrigin(signal, allowMissing);
+    if (origin !== null) this.#reads?.origins.set(signal.signalId, origin);
+    return origin;
+  }
+
+  #provedOrigin(signal: LearningSignal, allowMissing: boolean): { operationalScope: TrustedOperationalScope; editorialDimension: string } | null {
     if (!['accepted', 'accepted-with-edit', 'rejected'].includes(signal.kind) || signal.source.reviewRunId !== null) {
       requireLearning(allowMissing); return null;
     }
@@ -515,7 +570,7 @@ export class EditorialLearningLedger {
 
   /** A current proved source, not an inference from old keys or memory existence. Corruption is never swallowed. */
   automaticAdmissionFor(bookId: string, materialKey: string, materialDigest: string, scope: TrustedOperationalScope): { choice: 'house'; sourceKeys: string[] } | null {
-    if (new LearningEligibilityLedger(this.db).history(bookId, materialKey).length > 0) return null;
+    if (this.#eligibilityHistory(bookId, materialKey).length > 0) return null;
     const controls = this.controls();
     if (!controls.enabled || controls.excludedBooks.has(bookId)) return null;
     const sourceKeys: string[] = [];
@@ -535,7 +590,7 @@ export class EditorialLearningLedger {
     const eligibility = this.#currentEligibility(signal, this.controls());
     requireLearning(eligibility === 'book' || eligibility === 'house');
     const origin = this.#reviewOrigin(signal);
-    const last = new LearningEligibilityLedger(this.db).history(signal.source.bookId, signal.source.materialKey).at(-1);
+    const last = this.#eligibilityHistory(signal.source.bookId, signal.source.materialKey).at(-1);
     const controls = this.#controlSnapshot(signal.source.bookId);
     if (last !== undefined) requireLearning(last.materialDigest === signal.source.materialDigest);
     const admission: EditorialMemoryAdmission = last === undefined
@@ -551,6 +606,13 @@ export class EditorialLearningLedger {
 
   #validateSource(snapshot: EditorialMemorySourceSnapshot): void {
     validateEditorialMemorySourceShape(snapshot);
+    const key = this.#reads === null ? null : sha256Hex(canonicalJson(snapshot));
+    if (key !== null && this.#reads!.snapshots.has(key)) return;
+    this.#provedSource(snapshot);
+    if (key !== null) this.#reads?.snapshots.add(key);
+  }
+
+  #provedSource(snapshot: EditorialMemorySourceSnapshot): void {
     const signal = this.#signal(snapshot.signalId);
     requireLearning(canonicalJson(snapshot.source) === canonicalJson(signal.source) &&
       canonicalJson(snapshot.attribution) === canonicalJson(signal.attribution) &&
@@ -560,13 +622,13 @@ export class EditorialLearningLedger {
     const admission = snapshot.admission;
     requireLearning(isRecord(admission) && admission.materialDigest === signal.source.materialDigest && isRecord(admission.controls));
     if (admission.kind === 'explicit') {
-      const decision = new LearningEligibilityLedger(this.db).history(signal.source.bookId, signal.source.materialKey).find((entry) => entry.decisionId === admission.decisionId);
+      const decision = this.#eligibilityHistory(signal.source.bookId, signal.source.materialKey).find((entry) => entry.decisionId === admission.decisionId);
       requireLearning(decision && decision.ordinal === admission.ordinal && decision.materialDigest === admission.materialDigest &&
         (decision.choice === 'book' || decision.choice === 'house') && decision.choice === snapshot.eligibility && canonicalJson(decision.basis) === canonicalJson(admission.basis));
     } else requireLearning(admission.kind === 'automatic' && admission.signalId === signal.signalId && canonicalJson(admission.basis) ===
       canonicalJson({ policy: LOCAL_LEARNING_POLICY_BASIS.policy, mode: LOCAL_LEARNING_POLICY_BASIS.mode, version: 2 }) && snapshot.eligibility === 'house');
     for (const [kind, id] of [['switch', admission.controls.switchEntryId], ['book', admission.controls.bookEntryId]] as const) {
-      requireLearning(id === null || [...controlHistory(this.db, 'main')].some(({ record }) => record.entryId === id && record.kind === kind &&
+      requireLearning(id === null || this.#controlRows().some(({ record }) => record.entryId === id && record.kind === kind &&
         (kind === 'switch' ? record.value : record.bookId === signal.source.bookId && !record.value)));
     }
   }
@@ -587,7 +649,7 @@ export class EditorialLearningLedger {
   sourceWithdrawalAt(snapshot: EditorialMemorySourceSnapshot): string | null {
     requireLearning(this.validateHistoricalSource(snapshot));
     const events: string[] = [];
-    const controls = [...controlHistory(this.db, 'main')].map((entry) => entry.record);
+    const controls = this.#controlRows().map((entry) => entry.record);
     for (const [kind, id] of [['switch', snapshot.admission.controls.switchEntryId], ['book', snapshot.admission.controls.bookEntryId]] as const) {
       const basis = id === null ? 0 : controls.find((entry) => entry.entryId === id)?.ordinal;
       // A missing source-House switch cannot be guessed from this House's unrelated control sequence.
@@ -596,7 +658,7 @@ export class EditorialLearningLedger {
         (kind === 'switch' ? !entry.value : entry.bookId === snapshot.source.bookId && entry.value));
       if (stopped !== undefined) events.push(stopped.recordedAt);
     }
-    const chain = new LearningEligibilityLedger(this.db).history(snapshot.source.bookId, snapshot.source.materialKey);
+    const chain = this.#eligibilityHistory(snapshot.source.bookId, snapshot.source.materialKey);
     const admission = snapshot.admission;
     const basis = admission.kind === 'automatic' ? 0 : chain.find((entry) => entry.decisionId === admission.decisionId)?.ordinal;
     requireLearning(basis !== undefined);
@@ -647,13 +709,26 @@ export class EditorialLearningLedger {
   }
 
   version(itemId: string, versionId?: string): GlobalEditorialMemoryVersion {
-    const versions = this.#versions(itemId);
-    const version = versionId === undefined ? versions.at(-1) : versions.find((entry) => entry.versionId === versionId);
-    requireLearning(version); return version;
+    return this.#read(() => {
+      const versions = this.#versions(itemId);
+      const version = versionId === undefined ? versions.at(-1) : versions.find((entry) => entry.versionId === versionId);
+      requireLearning(version); return version;
+    });
   }
 
-  /** Walk all immutable parents, never just the item anchor or the first visible history page. */
+  /** Walk all immutable parents, never just the item anchor or the first visible history page; once per exact version in a read. */
   effectiveSources(version: EditorialMemoryVersion): EditorialMemorySourceSnapshot[] {
+    return this.#read(() => {
+      const key = sha256Hex(canonicalJson(version));
+      const known = this.#reads!.effective.get(key);
+      if (known !== undefined) return known;
+      const sources = this.#walkSources(version);
+      this.#reads!.effective.set(key, sources);
+      return sources;
+    });
+  }
+
+  #walkSources(version: EditorialMemoryVersion): EditorialMemorySourceSnapshot[] {
     const sources = new Map<string, EditorialMemorySourceSnapshot>();
     const histories = new Map<string, GlobalEditorialMemoryVersion[]>();
     const visiting = new Set<string>(); const visited = new Set<string>();
@@ -688,26 +763,30 @@ export class EditorialLearningLedger {
   }
 
   currentSources(version: EditorialMemoryVersion): EditorialMemorySourceSnapshot[] {
-    return this.effectiveSources(version).map((source) => {
+    return this.#read(() => this.effectiveSources(version).map((source) => {
       const current = this.sourceSnapshot(source.signalId);
       requireLearning(current.sourceKey === source.sourceKey && current.operationalScope === version.operationalScope &&
         (version.applicability.kind === 'house' ? current.eligibility === 'house'
           : current.source.bookId === version.applicability.bookId));
       return current;
-    });
+    }));
   }
 
   usable(version: EditorialMemoryVersion): boolean {
-    if (version.state !== 'active' || this.version(version.itemId).versionId !== version.versionId) return false;
-    try { this.currentSources(version); return true; } catch (error) { if (error instanceof LearningEligibilityError) return false; throw error; }
+    return this.#read(() => {
+      if (version.state !== 'active' || this.version(version.itemId).versionId !== version.versionId) return false;
+      try { this.currentSources(version); return true; } catch (error) { if (error instanceof LearningEligibilityError) return false; throw error; }
+    });
   }
 
   /** Existing opaque read-pin field, binding this memory version to its relevant current source/control basis only. */
   sourcePinRevision(itemId: string, versionId: string): string {
-    const version = this.version(itemId, versionId);
-    requireLearning(version.schema === 'ai7.global-editorial-memory/2' && version.state === 'active' && this.version(itemId).versionId === versionId);
-    const sources = this.currentSources(version).map(({ sourceKey, admission, eligibility }) => ({ sourceKey, admission, eligibility }));
-    return `${version.versionId}@${sha256Hex(canonicalJson(sources))}`;
+    return this.#read(() => {
+      const version = this.version(itemId, versionId);
+      requireLearning(version.schema === 'ai7.global-editorial-memory/2' && version.state === 'active' && this.version(itemId).versionId === versionId);
+      const sources = this.currentSources(version).map(({ sourceKey, admission, eligibility }) => ({ sourceKey, admission, eligibility }));
+      return `${version.versionId}@${sha256Hex(canonicalJson(sources))}`;
+    });
   }
 
   #createMemory(input: Extract<CreateEditorialMemoryInput, { schema: string }>, scope: TrustedOperationalScope): void {
@@ -806,8 +885,14 @@ export class EditorialLearningLedger {
   }
 
   #versions(itemId: string): GlobalEditorialMemoryVersion[] {
+    // A chain this read already proved is reused only while its exact rows are unchanged; otherwise it is read and proved again.
+    const known = this.#reads?.chains.get(itemId);
+    if (known !== undefined && known.fingerprint === this.db.prepare('SELECT version_id, sha256 FROM global_editorial_memory_item_versions WHERE item_id = ? ORDER BY ordinal')
+      .all(itemId).map((row) => `${String(row.version_id)}:${String(row.sha256)}`).join(',')) return known.versions;
     const versions: GlobalEditorialMemoryVersion[] = [];
+    const rows: string[] = [];
     for (const row of this.db.prepare('SELECT * FROM global_editorial_memory_item_versions WHERE item_id = ? ORDER BY ordinal').iterate(itemId) as Iterable<Row>) {
+      rows.push(`${String(row.version_id)}:${String(row.sha256)}`);
       const version = read<GlobalEditorialMemoryVersion>(row);
       requireLearning(isRecord(version) && canonicalJson(version) === row.canonical_json);
       requireLearning(version.itemId === itemId && version.versionId === row.version_id && version.ordinal === versions.length + 1 &&
@@ -832,6 +917,7 @@ export class EditorialLearningLedger {
       }
     }
     requireLearning(versions.length > 0);
+    this.#reads?.chains.set(itemId, { fingerprint: rows.join(','), versions });
     return versions;
   }
 
@@ -885,7 +971,9 @@ export class EditorialLearningLedger {
   }
 
   /** Existing 学习回溯 and remediation readers include explicitly created memory without changing house preference use. */
-  activeMemoryCount(bookId: string, materialKeys: ReadonlyArray<string>): number {
+  activeMemoryCount(bookId: string, materialKeys: ReadonlyArray<string>): number { return this.#read(() => this.#activeMemoryCount(bookId, materialKeys)); }
+
+  #activeMemoryCount(bookId: string, materialKeys: ReadonlyArray<string>): number {
     const wanted = new Set(materialKeys);
     let count = 0;
     for (const row of this.db.prepare('SELECT item_id FROM global_editorial_memory_items').iterate()) {
@@ -906,7 +994,9 @@ export class EditorialLearningLedger {
     });
   }
 
-  revisions(scope: TrustedOperationalScope): Array<{ current: EditorialMemoryVersion; usable: boolean }> {
+  revisions(scope: TrustedOperationalScope): Array<{ current: EditorialMemoryVersion; usable: boolean }> { return this.#read(() => this.#revisions(scope)); }
+
+  #revisions(scope: TrustedOperationalScope): Array<{ current: EditorialMemoryVersion; usable: boolean }> {
     const revisions: Array<{ current: EditorialMemoryVersion; usable: boolean }> = [];
     for (let itemOffset: number | null = 0; itemOffset !== null;) {
       const page = this.inspect({ signalOffset: 0, itemOffset }, scope);
@@ -921,7 +1011,9 @@ export class EditorialLearningLedger {
    * The immutable titles of every still-active /2 owner of one scope, whatever their sources, controls or names allow now: an
    * accepted memory keeps its place in the house's bounded block through a reversible suppression (Issue #1128 revision 7).
    */
-  activeTitles(scope: TrustedOperationalScope): string[] {
+  activeTitles(scope: TrustedOperationalScope): string[] { return this.#read(() => this.#activeTitles(scope)); }
+
+  #activeTitles(scope: TrustedOperationalScope): string[] {
     const titles: string[] = [];
     for (const row of this.db.prepare('SELECT item_id FROM global_editorial_memory_items ORDER BY item_id').iterate()) {
       const current = this.version(String(row.item_id));
@@ -930,7 +1022,9 @@ export class EditorialLearningLedger {
     return titles;
   }
 
-  candidateMemoryCount(bookId: string, materialKey: string): number {
+  candidateMemoryCount(bookId: string, materialKey: string): number { return this.#read(() => this.#candidateMemoryCount(bookId, materialKey)); }
+
+  #candidateMemoryCount(bookId: string, materialKey: string): number {
     let count = 0;
     for (const row of this.db.prepare('SELECT item_id FROM global_editorial_memory_items').iterate()) {
       const current = this.version(String(row.item_id));
@@ -940,7 +1034,9 @@ export class EditorialLearningLedger {
     return count;
   }
 
-  affectedMemoryCount(bookId: string, materialKeys: ReadonlyArray<string>): number {
+  affectedMemoryCount(bookId: string, materialKeys: ReadonlyArray<string>): number { return this.#read(() => this.#affectedMemoryCount(bookId, materialKeys)); }
+
+  #affectedMemoryCount(bookId: string, materialKeys: ReadonlyArray<string>): number {
     const wanted = new Set(materialKeys); let count = 0;
     for (const row of this.db.prepare('SELECT item_id FROM global_editorial_memory_items').iterate()) {
       const current = this.version(String(row.item_id));
@@ -952,6 +1048,10 @@ export class EditorialLearningLedger {
   }
 
   inspect(input: InspectEditorialLearningInput, scope?: TrustedOperationalScope): EditorialLearningProjection {
+    return this.#read(() => this.#inspect(input, scope));
+  }
+
+  #inspect(input: InspectEditorialLearningInput, scope?: TrustedOperationalScope): EditorialLearningProjection {
     const controls = this.controls();
     // An ask's own bookkeeping (offered, suppressed, dismissed) only paces later asks; the editor's list shows what they told AI7.
     const rows = this.db.prepare(`SELECT signal_id FROM learning_signals WHERE coalesce(json_extract(canonical_json, '$.ask.state'), 'answered') = 'answered'
@@ -1004,7 +1104,9 @@ export class EditorialLearningLedger {
   }
 
   /** Validate append-only records on open, including history beyond the visible page. */
-  validate(): void {
+  validate(): void { this.#read(() => this.#validateAll()); }
+
+  #validateAll(): void {
     this.controls();
     for (const row of this.db.prepare('SELECT signal_id FROM learning_signals').iterate()) this.#signal(String(row.signal_id));
     for (const row of this.db.prepare('SELECT * FROM global_editorial_memory_items').iterate()) {

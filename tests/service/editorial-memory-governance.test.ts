@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
@@ -702,6 +702,47 @@ it('holds the 200-grapheme reservation across exclusion, active correction, expl
   expect(() => accept(make(fromB('乙'.repeat(21))))).toThrow(/200 字/u);
   accept(make(fromB('乙'.repeat(20))));
 });
+
+it('validates each immutable memory chain once per read, afresh on the next read, and never serves a mutated or corrupt record', async () => {
+  const { subject, signals, current, make, create, accept, govern } = await sourceDecisions();
+  const first = accept(make(create([signals[0]!.signalId], '合成计数记忆。')));
+  const second = accept(make(create([signals[2]!.signalId], '合成第二条计数记忆。')));
+  for (let index = 0; index < 8; index += 1) govern([current(first.itemId)], 'correct', `合成计数原则${index}。`);
+  const merged = govern([current(first.itemId), current(second.itemId)], 'merge', '合成计数合并。').items
+    .find((entry) => entry.kind === 'memory' && entry.state === 'active')!.itemId;
+  const dbPath = join(roots!.dataRoot, 'store', 'ai7.sqlite');
+  const db = new DatabaseSync(dbPath);
+  try {
+    // Deterministic work: complete reads of one item's immutable version chain, the unit every lineage check starts from.
+    const chainReads = (operation: () => unknown): number => {
+      const prepare = db.prepare.bind(db); let reads = 0;
+      const spy = vi.spyOn(db, 'prepare').mockImplementation((sql: string) => {
+        if (sql === 'SELECT * FROM global_editorial_memory_item_versions WHERE item_id = ? ORDER BY ordinal') reads += 1;
+        return prepare(sql);
+      });
+      try { operation(); } finally { spy.mockRestore(); }
+      return reads;
+    };
+    const items = Number(db.prepare('SELECT count(*) n FROM global_editorial_memory_items').get()!.n);
+    expect(items).toBe(3);
+    const ledger = new HouseReviewPreferenceLedger(db);
+    expect(ledger.history('ordinary-production').filter((version) => version.schema === 'ai7.house-review-preference/2').length).toBeGreaterThanOrEqual(10);
+    expect(chainReads(() => ledger.history('ordinary-production'))).toBeLessThanOrEqual(items);
+    expect(chainReads(() => new EditorialLearningLedger(db).validate())).toBeLessThanOrEqual(items);
+    // Nothing is kept between operations: the next read validates again.
+    expect(chainReads(() => ledger.history('ordinary-production'))).toBeGreaterThan(0);
+    govern([current(merged)], 'correct', '合成计数最新原则。');
+    expect(ledger.history('ordinary-production').at(-1)!.lines.some((line) => line.text === '合成计数最新原则。')).toBe(true);
+    const latest = current(merged);
+    const row = db.prepare('SELECT canonical_json FROM global_editorial_memory_item_versions WHERE version_id = ?').get(latest.versionId)!;
+    const tampered = canonicalRecord({ ...(JSON.parse(String(row.canonical_json)) as EditorialMemoryVersion), confidence: 0.1 });
+    db.exec('DROP TRIGGER global_editorial_memory_item_versions_no_update');
+    db.prepare('UPDATE global_editorial_memory_item_versions SET canonical_json = ?, sha256 = ? WHERE version_id = ?').run(tampered.json, tampered.digest, latest.versionId);
+    db.exec(EDITORIAL_LEARNING_TRIGGER_SQL['global_editorial_memory_item_versions_no_update']!);
+    expect(() => ledger.history('ordinary-production')).toThrow();
+    expect(() => new EditorialLearningLedger(db).validate()).toThrow();
+  } finally { db.close(); }
+}, 60_000);
 
 it('ranks a /2 version\'s legacy lines by their /1 dating, not by array position', async () => {
   const { subject, book, signals, make, create, accept, govern, current } = await sourceDecisions();
