@@ -5050,6 +5050,8 @@ function registerRendererHandlers(
             bookId: route.bookId,
             // A sheet pre-filled from a Captured Procedure (Issue #65, S30) names the version it was filled from.
             ...(input.capturedProcedure === undefined || input.capturedProcedure === null ? {} : { capturedProcedure: input.capturedProcedure }),
+            // 本地文字检查 (Issue #1119) carries the editor's explicit options, which the service's request frame validates.
+            ...(input.localCheck === undefined ? {} : { localCheck: input.localCheck }),
           });
           // A Run of the leads alone is prepared by the job's first step, so its answer may already carry the workspace.
           const prepared = result.result;

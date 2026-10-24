@@ -942,6 +942,8 @@ async function main() {
     const exactBytes = await readFile(exactSample);
     requireJourney(exactBytes.length === 29_550 && createHash('sha256').update(exactBytes).digest('hex') === 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483', 'local-exact-admitted-input');
     await close(); renderer = await launch({ picker: exactSample });
+    // The launch's J-14 dark pass names its own locations; a failure from here on is the local sequence's.
+    at('local-check-exact-sample1');
     await importAndOpen(renderer, '本地文字检查旅程');
     await assertRenderer(renderer, PAGE_HELPERS, 'local-page-helpers');
     await assertRenderer(renderer, `(() => { const block=document.querySelector('[data-testid="manuscript-editor"] > p[data-block-id]'); if(!block)return false; window.__j05LocalBlock=block.dataset.blockId; return window.__j05.place(window.__j05LocalBlock,0,0) && document.execCommand('insertText',false,'本地检查…保留原文。'); })()`, 'local-tester-edit');

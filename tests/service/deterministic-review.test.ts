@@ -16,6 +16,7 @@ import * as broker from '../../src/service/provider/credential-broker.js';
 import * as harness from '../../src/service/harness/primary-agent-harness.js';
 import * as transport from '../../src/service/provider/live-transmission.js';
 import { EditorialMarkStore } from '../../src/service/editorial-marks.js';
+import { decodeRequest, ProtocolError } from '../../src/service/request-frames.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book } from '../support/sample1-baseline.js';
 import type { LocalCheckOptions } from '../../src/shared/protocol/procedures.js';
@@ -200,6 +201,15 @@ describe('provider-free local ReviewRun', () => {
     expect(run.localCheck!.state).toBe('refused'); expect(run.findings).toEqual([]); expect(run.canContinue).toBe(false); expect(execution).toHaveBeenCalledTimes(1);
     const db = database(); expect(readLocalStageArtifacts(db, run.reviewRunId).map(({ record }) => record.state)).toEqual(['started', 'completed', 'refused']);
     expect(db.prepare("SELECT count(*) n FROM editorial_marks WHERE source_origin = 'review-category'").get()!.n).toBe(0); db.close();
+  });
+
+  it('needs the explicit options on the wire: a local check without them is refused, and exact options decode unchanged', () => {
+    const frame = (input: Record<string, unknown>) => new TextEncoder().encode(JSON.stringify({ id: randomUUID(), op: 'prepareReviewRun', input }));
+    const local = { bookId: randomUUID(), categoryIds: ['local-text-check'], scope: WHOLE };
+    expect(() => decodeRequest(frame(local))).toThrow(ProtocolError);
+    expect(() => decodeRequest(frame({ ...local, localCheck: null }))).toThrow(ProtocolError);
+    const decoded = decodeRequest(frame({ ...local, localCheck: OPTIONS }));
+    expect(decoded).toMatchObject({ op: 'prepareReviewRun', input: { categoryIds: ['local-text-check'], localCheck: OPTIONS } });
   });
 
   it('freezes explicit exclusions into the plan and refuses one outside the frozen paragraphs in its own words', async () => {
