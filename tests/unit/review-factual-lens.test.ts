@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mountReviewWorkspace, type MountReviewWorkspaceOptions, type ReviewWorkspaceSurface } from '../../src/renderer/review-workspace.js';
-import type { EvidenceWorkspaceProjection, FactualVerificationLensProjection, FactualVerificationResultProjection, RendererApi, ReviewRunCategoryState, ReviewWorkspaceProjection } from '../../src/shared/protocol.js';
+import type { EvidenceWorkspaceProjection, FactualVerificationLensProjection, FactualVerificationResultProjection, RendererApi, ReviewFindingProjection, ReviewRunCategoryState, ReviewWorkspaceProjection } from '../../src/shared/protocol.js';
 import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.js';
 
 // #1058 / J04: mount the actual surface/loader/Workspace controls. All browser additions stay local to this test.
@@ -32,6 +32,14 @@ function result(run = RUN, id = RESULT): FactualVerificationResultProjection {
     anchor: { state: 'current', label: null }, decision: null, pendingReview: true, correctionAvailable: false };
 }
 
+// The category's stored finding row: the production render path lists the 事实核查 group, and its Lens, only beside it.
+function finding(): ReviewFindingProjection {
+  return { findingId: 'rvf_000000000000000000000001', categoryId: 'factual-review', categoryLabel: '事实核查', ordinal: 1, severity: 'must', severityLabel: '必须处理',
+    output: 'annotation', riskPoint: false, status: 'pending', statusLabel: '待处理', statusDetail: '公开合成状态', blockId: 'blk_777777777777777777777777',
+    fromGrapheme: 0, toGrapheme: 8, blockPosition: 0, chapterBlockId: null, chapterTitle: null, quote: '公开合成核查文字', note: '公开合成核查问题',
+    replacement: null, clauseRefs: [], stateLine: '未外部复核', markId: RESULT, markStatus: 'open', anchorState: 'exact', ignoreReason: null, historicalMarker: null };
+}
+
 function workspace(id = RUN, state: ReviewRunCategoryState = 'failed', findingsCount = 1): ReviewWorkspaceProjection {
   return { bookId: BOOK, manuscript: { ...MANUSCRIPT, totalBlocks: 1 }, configuration: { schema: 'ai7.review/1', version: '1', digest: PIN.digest },
     categories: [], coverage: [], scopeOptions: { whole: unavailable, changed: unavailable, selection: unavailable, chapters: { ...unavailable, basis: 'outline', chapters: [] } },
@@ -43,7 +51,7 @@ function workspace(id = RUN, state: ReviewRunCategoryState = 'failed', findingsC
       authorization: { authorizedAt: AT }, categories: [{ categoryId: 'factual-review', label: '事实核查', position: 1, output: 'annotation', riskPointsOnly: false,
         batchApply: false, basisStatement: '公开合成依据', state, stateLabel: state === 'failed' ? '运行失败' : '已中断', detail: '真实终态缺口说明',
         taskIntentId: null, planEnvelopeDigest: PIN.digest, modeLabel: null, plan: null, progress: null, findingsCount, excludedCount: 0 }],
-      findings: [], findingsTotal: findingsCount, findingsTruncated: false, findingCounts: COUNTS, report: null, reportVersions: [], historicalMarker: null,
+      findings: findingsCount > 0 ? [finding()] : [], findingsTotal: findingsCount, findingsTruncated: false, findingCounts: COUNTS, report: null, reportVersions: [], historicalMarker: null,
       influence: [], scopeStop: null, procedure: null, capture: unavailable } };
 }
 
@@ -161,6 +169,30 @@ describe('terminal factual results through the mounted review workspace (#1058 /
     view.inspectFactualVerification.mockResolvedValue(lens(OTHER)); view.surface.refresh(); await flush();
     view.root.querySelector('[data-fact-action="fact-workspace"]')!.click(); await flush();
     expect(view.root.querySelector('.evidence-workspace')).not.toBe(original);
+    expect(view.unexpected).not.toHaveBeenCalled();
+  });
+
+  it('withdraws the previous Run\'s Lens rows and Workspace while the next Run\'s workspace read is pending or rejected', async () => {
+    const view = mount(); await flush();
+    view.root.querySelector('[data-fact-action="fact-workspace"]')!.click(); await flush();
+    const original = view.root.querySelector('.evidence-workspace')!;
+    expect(original.dataset['resultId']).toBe(RESULT);
+    const stale = '.fact-lens, [data-fact-result-id], [data-fact-action], [data-fact-filter], .evidence-workspace';
+    const pending = deferred<ReviewWorkspaceProjection>();
+    view.inspectReviewWorkspace.mockReturnValueOnce(pending.promise);
+    view.root.querySelectorAll('[data-review-action="open-run"]')[1]!.click(); await flush();
+    expect(original.isConnected).toBe(false);
+    expect(view.root.querySelectorAll(stale).map((node) => node.className)).toEqual([]);
+    view.inspectReviewWorkspace.mockRejectedValueOnce(new Error('synthetic workspace read failure'));
+    view.surface.refresh(); await flush();
+    pending.resolve(workspace(OTHER)); await flush();
+    expect(view.status).toHaveBeenLastCalledWith(expect.any(String), 'error');
+    expect(view.root.querySelectorAll(stale).map((node) => node.className)).toEqual([]);
+    expect(view.inspectFactualVerification.mock.calls.every(([input]) => input.reviewRunId === RUN)).toBe(true);
+    view.inspectFactualVerification.mockImplementation(async (input) => lens(input.reviewRunId ?? RUN, [result(input.reviewRunId ?? RUN, SECOND)]));
+    view.surface.refresh(); await flush();
+    expect(view.root.querySelectorAll('[data-fact-result-id]').map((row) => row.dataset['factResultId'])).toEqual([SECOND]);
+    expect(view.inspectFactualVerification.mock.calls.at(-1)?.[0]).toMatchObject({ reviewRunId: OTHER, after: null });
     expect(view.unexpected).not.toHaveBeenCalled();
   });
 

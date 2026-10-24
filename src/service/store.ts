@@ -6914,7 +6914,9 @@ export class EditorialStore {
     this.#assertAvailable();
     const result = this.#analysisCall(() =>
       this.#factualReview.reconcileStoppedRuns({ leaveAuthorized: (runRecordId) => this.#reviewRuns.ownsCategoryRun(runRecordId) }));
-    for (const reviewRunId of this.#reviewCall(() => this.#reviewRuns.retainStoppedFactualRuns())) this.materializeFactualVerification(reviewRunId);
+    for (const reviewRunId of this.#reviewCall(() => this.#reviewRuns.retainStoppedFactualRuns())) {
+      try { this.materializeFactualVerification(reviewRunId); } catch { /* one Run never stops startup; the next open records what is still missing */ }
+    }
     return { settled: result.settled };
   }
 
@@ -6922,7 +6924,9 @@ export class EditorialStore {
   reconcileStoppedReviewCategoryRuns(): { settled: number } {
     this.#assertAvailable();
     const settled = this.#reviewCall(() => this.#analysisCall(() => this.#reviewRuns.reconcileStoppedCategoryRuns()));
-    for (const reviewRunId of this.#reviewCall(() => this.#reviewRuns.retainStoppedFactualRuns())) this.materializeFactualVerification(reviewRunId);
+    for (const reviewRunId of this.#reviewCall(() => this.#reviewRuns.retainStoppedFactualRuns())) {
+      try { this.materializeFactualVerification(reviewRunId); } catch { /* one Run never stops startup; the next open records what is still missing */ }
+    }
     return { settled };
   }
 

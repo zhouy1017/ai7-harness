@@ -514,6 +514,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     fact.lens = null;
     fact.results = [];
     fact.next = null;
+    // A Lens painted for the cleared identity goes with it, even when no repaint follows: a pending or rejected read keeps the card.
+    for (const section of Array.from(host.querySelectorAll<HTMLElement>('.fact-lens'))) section.remove();
     if (reset) {
       fact.reviewRunId = null;
       fact.pages = 1;
@@ -1268,7 +1270,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     }
     for (const category of run.categories) {
       const findings = run.findings.filter((finding) => finding.categoryId === category.categoryId);
-      if (findings.length === 0 && ui.batch?.categoryId !== category.categoryId && !(category.categoryId === 'factual-review' && fact.lens !== null)) continue;
+      if (findings.length === 0 && ui.batch?.categoryId !== category.categoryId) continue;
       section.append(renderGroup(run, category, findings));
     }
     if (run.findingsTruncated) {

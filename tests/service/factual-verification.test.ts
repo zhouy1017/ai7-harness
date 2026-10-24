@@ -463,10 +463,37 @@ describe('Evidence Assurance Levels on 事实核查 (Issue #901)', () => {
     if (kind === 'no-outcome') store.reviewRunDriveSteps.fail(reviewRunId, 'factual-review', 'SYNTHETIC_STOP', '合成孤立类别终态。');
     const eventsBefore = retentionRows(reviewRunId).events;
     if (kind === 'corrupt-outcome') {
-      expect(storeError(() => store.reconcileStoppedFactualReviewRuns())).toBe('REVIEW_RECORD_INVALID');
+      // Opening already refuses a damaged digest; reconciliation refuses retention for that Run only, and another eligible Run converges.
+      const other = await newBook('完好终态核查');
+      const healthy = (await review(other, undefined, hooks)).reviewRunId;
+      expect(storeError(() => store.reconcileStoppedFactualReviewRuns())).toBe('no-error');
+      expect(storeError(() => store.reconcileStoppedReviewCategoryRuns())).toBe('no-error');
+      expect(lens(other, healthy).results.length).toBe(1);
     } else await reopen();
     expect(lens(book, reviewRunId).results.length).toBe(0);
     expect(retentionRows(reviewRunId).events).toEqual(eventsBefore);
+  });
+
+  it('isolates one Run\'s failed version recording at startup and fills it at the next open (#1058)', async () => {
+    await setup({ relations: [], maxTotalTokens: 180 });
+    const hooks = { steps: (steps: ReviewRunDriveSteps): ReviewRunDriveSteps => ({ ...steps, settle: () => { throw new Error('synthetic crash'); }, fail: () => undefined }) };
+    const first = await newBook('核查恢复隔离甲');
+    const failing = (await review(first, undefined, hooks)).reviewRunId;
+    const second = await newBook('核查恢复隔离乙');
+    const kept = (await review(second, undefined, hooks)).reviewRunId;
+    const original = EditorialStore.prototype.materializeFactualVerification;
+    const fail = vi.spyOn(EditorialStore.prototype, 'materializeFactualVerification').mockImplementation(function (this: EditorialStore, reviewRunId: string) {
+      if (reviewRunId === failing) throw new Error('synthetic version failure');
+      original.call(this, reviewRunId);
+    });
+    try { await reopen(); } finally { fail.mockRestore(); }
+    expect(store.inspectReviewWorkspace(first.bookId, failing).run?.categories[0]).toMatchObject({ state: 'interrupted', findingsCount: 1 });
+    expect(lens(first, failing).results.length).toBe(0);
+    expect(lens(second, kept).results.length).toBe(1);
+    const sendsBefore = structuredClone(sends);
+    await reopen();
+    expect(lens(first, failing).results.length).toBe(1);
+    expect(sends).toEqual(sendsBefore);
   });
 
   it.each(['quick', 'strict'] as const)('keeps %s evidence gates on retained findings (#1058)', async (level) => {

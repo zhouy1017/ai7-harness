@@ -2351,11 +2351,17 @@ export class ReviewRunStore {
       WHERE json_extract(c.value, '$.partialFactualRetentionVersion') = 1
         AND o.classification IN ('failed', 'interrupted') AND o.result_set_revision_id IS NOT NULL`).all() as SqlRow[];
     for (const row of rows) {
-      const snapshot = this.#snapshotOf(row);
-      const category = snapshot.categories.find((entry) => entry.categoryId === 'factual-review');
-      if (category === undefined || this.#driving.has(snapshot.reviewRunId) || this.#terminalFactualRevision(snapshot, category) === null) continue;
-      this.settle(snapshot.reviewRunId, category.categoryId);
-      if (this.retainedFactualRevision(snapshot.reviewRunId) !== null) retained.push(snapshot.reviewRunId);
+      try {
+        const snapshot = this.#snapshotOf(row);
+        const category = snapshot.categories.find((entry) => entry.categoryId === 'factual-review');
+        if (category === undefined || this.#driving.has(snapshot.reviewRunId) || this.#terminalFactualRevision(snapshot, category) === null) continue;
+        this.settle(snapshot.reviewRunId, category.categoryId);
+        if (this.retainedFactualRevision(snapshot.reviewRunId) !== null) retained.push(snapshot.reviewRunId);
+      } catch {
+        // A Run whose records do not read back keeps its terminal state without retained output, and its own surface reports
+        // the refusal; it never stops startup or another Run's retention.
+        continue;
+      }
     }
     return retained;
   }
