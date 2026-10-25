@@ -1873,6 +1873,7 @@ async function main() {
       pausedWorkspace.run?.categories?.[1]?.state==='waiting', 'review-controls-checkpoint');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="resume"]', 'review-controls-resume');
     await waitFor(renderer, `window.ai7.inspectTaskPlan({kind:'review-run',ref:${JSON.stringify(reviewRef)}}).then((plan)=>plan.runControl?.activity?.currentUnitOrdinal===2 && plan.runControl.runRecordId===${JSON.stringify(reviewStarted.runControl.runRecordId)})`, 'review-controls-same-run');
+    await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); if(drawer?.dataset.taskPlanKind!=='review-run'||drawer.dataset.taskPlanRef!==${JSON.stringify(reviewRef)})return false; const button=drawer.querySelector('[data-task-drawer-control="cancel-run"]'); return button instanceof HTMLButtonElement && !button.disabled; })()`, 'review-controls-cancel-ready');
 
     at('review-controls-cancel-impact');
     await assertRenderer(renderer, `document.querySelector('#task-drawer [data-task-drawer-control="cancel-run"]')?.textContent==='停止任务'`, 'review-controls-stop-wording');
