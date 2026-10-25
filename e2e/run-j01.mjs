@@ -1337,7 +1337,16 @@ async function collectEditorBlockIdentitySequence(renderer, scenario) {
   for (;;) {
     const page = await renderer.evaluate(`Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] [data-block-id]'), (block) => ({ id: block.dataset.blockId, text: block.textContent }))`);
     requireJourney(Array.isArray(page) && page.length > 0 && page.length <= 32, `${scenario}-bounded-editor-page`);
-    identities.push(...page);
+    const overlapStart = identities.findIndex(block => block.id === page[0].id);
+    const overlapLength = overlapStart < 0 ? 0 : identities.length - overlapStart;
+    requireJourney(identities.length === 0 || overlapStart >= 0, `${scenario}-editor-window-source-continuity`);
+    requireJourney(overlapLength <= page.length && page.slice(0, overlapLength).every((block, index) =>
+      block.id === identities[overlapStart + index].id && block.text === identities[overlapStart + index].text),
+      `${scenario}-editor-window-overlap-consistent`);
+    const additions = page.slice(overlapLength);
+    requireJourney(additions.length > 0 && new Set([...identities, ...additions].map(block => block.id)).size === identities.length + additions.length,
+      `${scenario}-editor-window-progress`);
+    identities.push(...additions);
     const nextDisabled = await renderer.evaluate(`Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '向后浏览')?.disabled !== false`);
     if (nextDisabled) break;
     const firstBlockId = page[0].id;
