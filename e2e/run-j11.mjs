@@ -6,6 +6,8 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { strToU8, zipSync } from 'fflate';
+import { admittedSpanText, ADMITTED_BASELINE_DOCX, fixedArchiveTime } from './composed-docx.mjs';
 import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, SIDEBAR_ICONS_ONLY, runJ14DarkPass } from './controller.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
@@ -1200,7 +1202,7 @@ async function main() {
     const sample1Bytes = await readFile(SAMPLE1_PATH);
     const sample1 = { sha256: createHash('sha256').update(sample1Bytes).digest('hex'), bytes: sample1Bytes.length };
     let modelFixtureIdentity = FIXTURE_IDENTITY;
-    const launch = async ({ forCleanup = false } = {}) => {
+    const launch = async ({ forCleanup = false, pickerPath = SAMPLE1_PATH } = {}) => {
       const args = [
         '--disable-background-networking', '--disable-component-update', '--disable-default-apps', '--disable-domain-reliability',
         '--disable-sync', '--metrics-recording-only', '--no-first-run', '--remote-debugging-pipe', `--user-data-dir=${shellRoot}`,
@@ -1212,7 +1214,7 @@ async function main() {
       if (!forCleanup) {
         // The calibration gate lowered to two Books (Issue #429, EVAL-011a; the Commander's ruling of 2026-10-10): the house offset
         // is proven over 评估旅程丙 and one more Book, with the product's own ten untouched in every other launch.
-        args.push('--j11-picker-path', SAMPLE1_PATH, '--j04-model-adapter', modelFixtureIdentity, '--j10-unit-hold-path', unitHoldPath, '--j11-save-path', draftExportPath,
+        args.push('--j11-picker-path', pickerPath, '--j04-model-adapter', modelFixtureIdentity, '--j10-unit-hold-path', unitHoldPath, '--j11-save-path', draftExportPath,
           '--j11-calibration-min-books', '2');
       }
       requireJourney(!args.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
@@ -3354,6 +3356,76 @@ async function main() {
     await openMemory('memory-governance-restarted');
     const governedRestart = await renderer.evaluate(`window.ai7.inspectEditorialLearning({signalOffset:0,itemOffset:0}).then(page=>({frozen:page.items.find(item=>item.current.itemId===${JSON.stringify(mergedMemoryId)})?.current.state,inactive:page.items.find(item=>item.current.itemId===${JSON.stringify(deactivatedMemoryId)})?.current.state,legacy:page.items.find(item=>item.current.itemId===${JSON.stringify(createdMemory.itemId)})?.history.map(version=>version.activation)}))`);
     requireJourney(governedRestart.frozen === 'frozen' && governedRestart.inactive === 'inactive' && JSON.stringify(governedRestart.legacy) === JSON.stringify(['active','inactive']), 'memory-governance-restart-persisted');
+
+    // Word local retention is a separate source family. Keep every preceding C0 assertion and compare its real owners again.
+    at('word-local-source-inspection');
+    const c0BeforeWord = await renderer.evaluate(`window.ai7.inspectEditorialLearning({signalOffset:0,itemOffset:0}).then(page=>({enabled:page.enabled,items:JSON.stringify(page.items.map(item=>item.current))}))`);
+    requireJourney(c0BeforeWord.enabled === true, 'word-current-learning-enabled');
+    const wordPath = resolve(runRoot, 'word-source-detail.docx');
+    const escapeWord = (text) => text.replace(/&/gu, '&amp;').replace(/</gu, '&lt;').replace(/>/gu, '&gt;').replace(/"/gu, '&quot;');
+    const wordText = escapeWord(await admittedSpanText(ADMITTED_BASELINE_DOCX, { block: 9, from: 0, to: 5 }));
+    const moveParagraphs = (kind) => Array.from({ length: 24 }, (_, index) => `<w:p><w:${kind} w:id="${(kind === 'moveFrom' ? 1000 : 2000) + index}" w:author="原作者${index}" w:date=""><w:r>` +
+      (kind === 'moveFrom' ? `<w:delText>${wordText}</w:delText>` : `<w:t>${wordText}</w:t>`) + `</w:r></w:${kind}></w:p>`).join('');
+    const wordBody = '<w:moveFromRangeStart w:id="1" w:name="named-move"/>' + moveParagraphs('moveFrom') +
+      '<w:moveFromRangeEnd w:id="1"/>' + `<w:p><w:r><w:t>${wordText}</w:t></w:r></w:p>` +
+      '<w:moveToRangeStart w:id="2" w:name="named-move"/>' + moveParagraphs('moveTo') + '<w:moveToRangeEnd w:id="2"/>';
+    await writeFile(wordPath, zipSync({
+      '[Content_Types].xml': [strToU8('<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/></Types>'), { mtime: fixedArchiveTime() }],
+      '_rels/.rels': [strToU8('<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rDoc" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>'), { mtime: fixedArchiveTime() }],
+      'docProps/core.xml': [strToU8('<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>001 Word 来源详情</dc:title></cp:coreProperties>'), { mtime: fixedArchiveTime() }],
+      'word/document.xml': [strToU8(`<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${wordBody}</w:body></w:document>`), { mtime: fixedArchiveTime() }],
+    }));
+    await close(); await launch({ pickerPath: wordPath });
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'word-import-landing');
+    await click(renderer, '导入稿件', 'word-import-stage');
+    await waitFor(renderer, `document.querySelector('[data-import-target-choice="new-book"]')`, 'word-import-target');
+    await assertRenderer(renderer, `(() => { const input=document.querySelector('[data-import-target-choice="new-book"]'); if(!(input instanceof HTMLInputElement)||input.checked)return false;input.click();return true;})()`, 'word-import-new-book');
+    await waitFor(renderer, `document.querySelector('[data-import-relationship="first-manuscript"]')`, 'word-import-relationship');
+    await assertRenderer(renderer, `(() => { const input=document.querySelector('[data-import-relationship="first-manuscript"]'); if(!(input instanceof HTMLInputElement)||input.checked)return false;input.click();return true;})()`, 'word-import-first-manuscript');
+    await waitFor(renderer, `document.querySelector('[data-word-import-controls="ready"] [data-word-learn-from-edits]')?.checked === true`, 'word-learning-default-visible');
+    await click(renderer, '确认书名并复核', 'word-import-prepare');
+    await waitFor(renderer, `document.querySelector('[data-word-reviewed-mode="suggestions"][data-word-reviewed-learning="true"]')`, 'word-import-reviewed');
+    await click(renderer, '新建图书并导入稿件', 'word-import-commit');
+    await waitFor(renderer, `document.querySelector('[data-screen="imported"]') && document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true'`, 'word-imported');
+    const wordSignal = await renderer.evaluate(`window.ai7.inspectEditorialLearning({signalOffset:0,itemOffset:0}).then(page=>page.signals.find(signal=>signal.kind==='word-tracked-edit'))`);
+    requireJourney(wordSignal?.currentEligibility === 'house' && wordSignal.memoryCandidate === null && !Object.hasOwn(wordSignal.source, 'decisionId'), 'word-distinct-source-currentness');
+    await openMemory('word-memory-source');
+    const wordRow = `[data-learning-signal="${wordSignal.signalId}"]`;
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(wordRow)})?.textContent.includes('尚未用于编辑记忆、审阅偏好或模型任务')`, 'word-pending-consumer-words');
+    await assertRenderer(renderer, `!document.querySelector(${JSON.stringify(`${wordRow} [data-memory-source], ${wordRow} form`)})`, 'word-no-memory-create-affordance');
+    await click(renderer, '查看完整 Word 修改对', 'word-open-full-detail');
+    await waitFor(renderer, `document.querySelector('[data-word-detail-page] > article')`, 'word-full-detail-ready');
+    const readWordPage = () => renderer.evaluate(`(() => { const host=document.querySelector('[data-word-detail-page]'); const items=Array.from(host?.children??[]);return {count:items.length,signature:JSON.stringify(items.map(item=>[item.dataset.wordDetailSection,item.dataset.wordDetailOrdinal,item.dataset.wordDetailField,item.dataset.wordDetailStart])),more:document.querySelector('[data-learning-action="word-detail-next"]')?.disabled===false};})()`);
+    const wordPages = new Set();
+    for (;;) {
+      const page = await readWordPage();
+      requireJourney(page.count > 0 && page.count <= 40 && !wordPages.has(page.signature), 'word-detail-page-replaced-and-progresses'); wordPages.add(page.signature);
+      if (!page.more) break;
+      await clickSelector(renderer, '[data-learning-action="word-detail-next"]', 'word-detail-next');
+      await waitFor(renderer, `JSON.stringify(Array.from(document.querySelector('[data-word-detail-page]')?.children??[],item=>[item.dataset.wordDetailSection,item.dataset.wordDetailOrdinal,item.dataset.wordDetailField,item.dataset.wordDetailStart]))!==${JSON.stringify(page.signature)}`, 'word-detail-next-page');
+    }
+    requireJourney(wordPages.size > 3, 'word-complete-detail-traversal');
+    await clickSelector(renderer, '[data-learning-action="word-detail-source"]', 'word-retained-source-link');
+    await waitFor(renderer, `document.querySelector('.record-detail[data-record-kind="source"]')?.textContent.includes(${JSON.stringify(wordSignal.source.sourceVersionId)})`, 'word-retained-source-exact');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('quality')), 'word-materials-open');
+    await clickSelector(renderer, '#quality-tab-learning', 'word-materials-tab');
+    const wordMaterial = `[data-material-key="${wordSignal.source.materialKey}"]`;
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${wordMaterial} [data-learning-action="open"]`)})`, 'word-material-card');
+    await clickSelector(renderer, `${wordMaterial} [data-learning-action="open"]`, 'word-material-inspect');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(wordMaterial)})?.textContent.includes('当前默认纳入本机学习；没有人工纳入决定')`, 'word-actual-automatic-basis');
+    await assertRenderer(renderer, `!document.querySelector(${JSON.stringify(`${wordMaterial} input[value="book"], ${wordMaterial} input[value="house"]`)})`, 'word-no-human-inclusion-affordance');
+    await assertRenderer(renderer, `(() => { const input=document.querySelector(${JSON.stringify(`${wordMaterial} input[value="excluded"]`)}); if(!(input instanceof HTMLInputElement)||input.disabled)return false;input.click();return input.checked;})()`, 'word-exclusion-select');
+    await clickSelector(renderer, `${wordMaterial} [data-learning-action="record"]`, 'word-exclusion-record');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(wordMaterial)})?.textContent.includes('当前已排除学习')`, 'word-current-exclusion');
+    await clickSelector(renderer, `${wordMaterial} [data-learning-action="word-detail"]`, 'word-excluded-historical-inspection');
+    await waitFor(renderer, `document.querySelector('[data-word-detail-page] > article')`, 'word-excluded-detail-readable');
+    await clickSelector(renderer, '#quality-tab-audit', 'word-audit-tab');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${wordMaterial} [data-learning-audit-action="open"]`)})`, 'word-audit-row');
+    await clickSelector(renderer, `${wordMaterial} [data-learning-audit-action="open"]`, 'word-audit-lineage');
+    await waitFor(renderer, `document.querySelector('.learning-lineage')?.textContent.includes('Word 原始修改对尚未用于编辑记忆、审阅偏好或模型任务')`, 'word-audit-pending-consumer');
+    const wordAfter = await renderer.evaluate(`Promise.all([window.ai7.inspectEditorialLearning({signalOffset:0,itemOffset:0}),window.ai7.inspectLearningLineage({bookId:${JSON.stringify(wordSignal.source.bookId)},materialKey:${JSON.stringify(wordSignal.source.materialKey)}})]).then(([page,lineage])=>({items:JSON.stringify(page.items.map(item=>item.current)),standing:page.signals.find(signal=>signal.signalId===${JSON.stringify(wordSignal.signalId)})?.currentEligibility,downstream:lineage.downstream}))`);
+    requireJourney(wordAfter.items === c0BeforeWord.items && wordAfter.standing === 'excluded' &&
+      JSON.stringify(wordAfter.downstream) === JSON.stringify({ signals: 0, memoryCandidates: 0, activeMemories: 0, tasks: 0 }), 'word-preserves-c0-memory-owners-and-counts');
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');

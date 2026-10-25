@@ -6,7 +6,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { strToU8, zipSync } from 'fflate';
-import { fixedArchiveTime } from './composed-docx.mjs';
+import { ADMITTED_BASELINE_DOCX, composeRevisedAdmittedDocx, fixedArchiveTime } from './composed-docx.mjs';
 import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, SIDEBAR_ICONS_ONLY, runJ14DarkPass } from './controller.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -466,9 +466,17 @@ async function constructPredecessorV12(dataRoot, bookId) {
     // Synchronized delta with Issue #423 (slice 7a): revision 80's three Task Intent Draft relations follow them.
     // Synchronized delta with Issue #1084: revision 88's review_excluded_findings goes with the Review Run relations it extends.
     // Synchronized delta with Issue #1119: revision 90's review_local_stage_artifacts, a child of review_runs, goes just before it.
+    // Word's revision-93 layer did not exist in this genuine v12 predecessor fixture.
     database.exec(`
       PRAGMA foreign_keys = OFF;
       BEGIN IMMEDIATE;
+      DROP TABLE word_import_mark_sources;
+      DROP TABLE word_tracked_edit_sample_imports;
+      DROP TABLE word_tracked_edit_samples;
+      DROP TABLE word_manuscript_source_segments;
+      DROP TABLE word_revision_imports;
+      DROP TABLE word_revision_sources;
+      DROP TABLE staged_word_revision_intakes;
       DROP TABLE imported_skill_update_candidates;
       DROP TABLE imported_skill_current_selections;
       DROP TABLE imported_skill_update_rules;
@@ -847,6 +855,13 @@ async function main() {
     manager = await launch();
     renderer = await waitForRenderer(manager, 'restart-window');
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'restart-ready');
+    const wordMigration = new DatabaseSync(resolve(dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+    try {
+      for (const table of ['staged_word_revision_intakes', 'word_revision_sources', 'word_revision_imports', 'word_manuscript_source_segments',
+        'word_tracked_edit_samples', 'word_tracked_edit_sample_imports', 'word_import_mark_sources']) {
+        requireJourney(wordMigration.prepare(`SELECT count(*) AS total FROM ${table}`).get().total === 0, 'word-predecessor-no-backfill');
+      }
+    } finally { wordMigration.close(); }
     at('restart-open-book-a');
     await clickBook(renderer, bookA, 'open-book-a-after-restart');
     await waitFor(
@@ -1629,6 +1644,43 @@ async function main() {
       const read=await window.ai7.inspectImportedSkills({revisionId:null,before:null});
       return read.skills.length===1 && read.skills[0].revisionId===${JSON.stringify(firstRevision)} && read.skills[0].state==='installed-disabled' && document.querySelector('.imported-skill-list li')?.dataset.skillState==='installed-disabled';
     })()`, 'skill-rollback-survives-restart');
+
+    at('word-persisted-source-lineage');
+    const wordPath = resolve(runRoot, 'word-persisted-lineage.docx');
+    await composeRevisedAdmittedDocx(wordPath, { source: ADMITTED_BASELINE_DOCX, title: 'Word 来源沿袭旅程', paragraphs: [
+      { runs: [{ text: { block: 8, from: 0, to: 10 } },
+        { text: { block: 9, from: 0, to: 5 }, revision: { kind: 'del', author: '作者甲', date: '2026-10-25T00:00:00Z' } },
+        { text: { block: 10, from: 0, to: 6 }, revision: { kind: 'ins', author: '作者乙', date: '2026-10-25T00:00:01Z' } }] },
+    ] });
+    await closeBrowser(); manager = await launch(wordPath);
+    renderer = await waitForRenderer(manager, 'word-lineage-window');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'word-lineage-landing');
+    await click(renderer, '导入稿件', 'word-lineage-pick');
+    await waitFor(renderer, `document.querySelector('[data-import-target-choice="new-book"]')`, 'word-lineage-target');
+    await assertRenderer(renderer, `(() => { const input=document.querySelector('[data-import-target-choice="new-book"]');if(!(input instanceof HTMLInputElement)||input.checked)return false;input.click();return true;})()`, 'word-lineage-new-book');
+    await waitFor(renderer, `document.querySelector('[data-import-relationship="first-manuscript"]')`, 'word-lineage-relationship');
+    await assertRenderer(renderer, `(() => { const input=document.querySelector('[data-import-relationship="first-manuscript"]');if(!(input instanceof HTMLInputElement)||input.checked)return false;input.click();return true;})()`, 'word-lineage-first-manuscript');
+    await waitFor(renderer, `document.querySelector('[data-word-import-controls="ready"]')`, 'word-lineage-controls');
+    await assertRenderer(renderer, `(() => {const mode=document.querySelector('[data-word-import-mode="accepted-baseline"]');if(!(mode instanceof HTMLInputElement)||mode.disabled)return false;mode.click();const confirm=document.querySelector('[data-word-accepted-baseline-confirmation]');if(!(confirm instanceof HTMLInputElement)||confirm.checked)return false;confirm.click();return document.querySelector('[data-word-learn-from-edits]')?.checked===true;})()`, 'word-lineage-explicit-accepted-choice');
+    await click(renderer, '确认书名并复核', 'word-lineage-prepare');
+    await waitFor(renderer, `document.querySelector('[data-word-reviewed-mode="accepted-baseline"][data-word-reviewed-learning="true"]')`, 'word-lineage-reviewed');
+    await click(renderer, '新建图书并导入稿件', 'word-lineage-commit');
+    await waitFor(renderer, `document.querySelector('[data-screen="imported"]')&&document.documentElement.dataset.ai7ImportCompletionAcknowledged==='true'`, 'word-lineage-committed');
+    const wordSignal = await renderer.evaluate(`window.ai7.inspectEditorialLearning({signalOffset:0,itemOffset:0}).then(page=>page.signals.find(signal=>signal.kind==='word-tracked-edit'))`);
+    requireJourney(wordSignal?.currentEligibility==='house'&&wordSignal.memoryCandidate===null, 'word-lineage-real-admission');
+    const wordRead = `(async()=>{const lineage=await window.ai7.inspectLearningLineage({bookId:${JSON.stringify(wordSignal.source.bookId)},materialKey:${JSON.stringify(wordSignal.source.materialKey)}});const detail=await window.ai7.inspectWordTrackedEditSample({bookId:${JSON.stringify(wordSignal.source.bookId)},sampleId:${JSON.stringify(wordSignal.source.sampleId)},sampleDigest:${JSON.stringify(wordSignal.source.sampleDigest)},after:null});return {lineage,detail};})()`;
+    const wordBefore = await renderer.evaluate(wordRead);
+    requireJourney(wordBefore.lineage.automaticAdmission?.choice==='house'&&wordBefore.lineage.decisions.length===0&&
+      wordBefore.detail.sourceVersionId===wordSignal.source.sourceVersionId&&wordBefore.detail.sourceDigest===wordSignal.source.sourceDigest, 'word-lineage-exact-source-before-restart');
+    await closeBrowser(); manager = await launch();
+    renderer = await waitForRenderer(manager, 'word-lineage-restart-window');
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true'&&document.querySelector('[data-screen="landing"]')`, 'word-lineage-restart-product-ready');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'word-lineage-restart-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'word-lineage-restart-ready');
+    await clickBook(renderer, wordSignal.source.bookId, 'word-lineage-restart-book');
+    await waitFor(renderer, `document.querySelector('.book-overview[data-book-id="${wordSignal.source.bookId}"]')`, 'word-lineage-restart-book-ready');
+    const wordAfter = await renderer.evaluate(wordRead);
+    requireJourney(JSON.stringify(wordAfter)===JSON.stringify(wordBefore), 'word-lineage-and-full-source-survive-restart');
 
     at('zero-activity');
     await assertRenderer(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && !Object.keys(window.ai7).some((key)=>/provider|session/i.test(key))`, 'exact-service-readiness-remained-zero');
