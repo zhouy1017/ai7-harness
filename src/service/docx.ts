@@ -1577,6 +1577,12 @@ export async function parseDocx(
 ): Promise<ParsedDocx> {
   const displayName = safeDisplayName(displayNameInput, options.formatIdentified !== true);
   const archive = await readStreamingArchive(path, onBlock, options);
+  return finishParsedDocx(archive, displayName, expectedSource);
+}
+
+/** The unchanged historical reader's result, shared by file and verified-byte native intake. */
+function finishParsedDocx(archive: ReadDocxArchive<DocumentParseResult>, displayName: string,
+  expectedSource?: { digest: string; bytes: number }): ParsedDocx {
   if (expectedSource) {
     requireDocx(archive.sourceDigest === expectedSource.digest && archive.archiveBytes === expectedSource.bytes, 'selected file changed during staging');
   }
@@ -1694,6 +1700,43 @@ export async function parseNativeDocxIntake(path: string, displayNameInput: stri
     createDocumentParser(() => undefined, { reading: preview, textBoxes: wordRetainedTextBoxes(compiled, options.signal) }), readOptions);
   requireDocx(archive.sourceDigest === compiled.sourceDigest && archive.archiveBytes === compiled.archiveBytes,
     'selected file changed during Word preview metadata read');
+  const legacy = await wordLegacyIntakeView(path, displayNameInput, expected, readOptions);
+  for (const block of preview.blocks) { options.signal?.throwIfAborted(); blocks.wordPreview(block); }
+  return wordNativePreviewResult(compiled, archive, displayName, legacy);
+}
+
+/** Same archive/parser/compiler owners for synchronous preparation from an already verified retained original. */
+export function parseNativeDocxIntakeBytes(original: Uint8Array, displayNameInput: string,
+  options: { signal?: AbortSignal; formatIdentified?: boolean; textBoxDisposition?: TextBoxDisposition } = {}): NativeDocxIntakeParse {
+  const displayName = safeDisplayName(displayNameInput, options.formatIdentified !== true);
+  const compiled = compileWordTrackedDocxBytes(original, options);
+  const read = (parser: ReturnType<typeof createDocumentParser>): ReadDocxArchive<DocumentParseResult> => {
+    const reader = createDocxArchiveReader(parser, options);
+    for (let offset = 0; offset < original.byteLength; offset += 64 * 1024) reader.write(original.subarray(offset, offset + 64 * 1024));
+    return reader.finish();
+  };
+  const expected = { digest: compiled.sourceDigest, bytes: compiled.archiveBytes };
+  if (compiled.kind !== 'ready') return { kind: 'legacy', word: compiled.kind === 'ordinary' ? null : compiled,
+    parsed: finishParsedDocx(read(createDocumentParser(() => undefined)), displayName, expected) };
+  const blocks: ParsedDocxBlock[] = [];
+  let legacy: WordLegacyIntakeView;
+  try { legacy = { kind: 'ready', parsed: finishParsedDocx(read(createDocumentParser((block) => blocks.push(block))), displayName, expected), blocks }; }
+  catch (error) {
+    options.signal?.throwIfAborted();
+    if (!(error instanceof Error) || !error.message.startsWith('DOCX_REJECTED:')) throw error;
+    blocks.length = 0;
+    legacy = { kind: 'unavailable', code: 'DOCX_REJECTED', reason: error.message.slice('DOCX_REJECTED:'.length) };
+  }
+  const preview = compiled.readings[compiled.previewReading];
+  return wordNativePreviewResult(compiled, read(createDocumentParser(() => undefined,
+    { reading: preview, textBoxes: wordRetainedTextBoxes(compiled, options.signal) })), displayName, legacy);
+}
+
+function wordNativePreviewResult(compiled: Extract<WordTrackedCompilation, { kind: 'ready' }>,
+  archive: ReadDocxArchive<DocumentParseResult>, displayName: string, legacy: WordLegacyIntakeView): Extract<NativeDocxIntakeParse, { kind: 'word' }> {
+  requireDocx(archive.sourceDigest === compiled.sourceDigest && archive.archiveBytes === compiled.archiveBytes,
+    'Word preview metadata does not match the original');
+  const preview = compiled.readings[compiled.previewReading];
   const coreTitle = archive.metadata.get('docProps/core.xml');
   const metadataTitle = parseCoreTitle(coreTitle ? decodeMetadataXml(coreTitle) : undefined);
   const fallbackTitle = displayName.slice(0, -extname(displayName).length).trim();
@@ -1705,8 +1748,6 @@ export async function parseNativeDocxIntake(path: string, displayNameInput: stri
     archive.entryNames.filter((entry) => /^word\/(?:header|footer)[^/]*\.xml$/i.test(entry)).length, 'retain', 'word-preview');
   requireDocx(deriveImportFidelityPlan(fidelity, compiled.sourceDigest, compiled.archiveBytes, undefined, WORD_DOCX_PARSER_IDENTITY) !== undefined,
     'Word preview fidelity report is malformed');
-  const legacy = await wordLegacyIntakeView(path, displayNameInput, expected, readOptions);
-  for (const block of preview.blocks) { options.signal?.throwIfAborted(); blocks.wordPreview(block); }
   return { kind: 'word', word: compiled, legacy, parsed: { parserIdentity: WORD_DOCX_PARSER_IDENTITY, sourceDigest: compiled.sourceDigest,
     archiveBytes: compiled.archiveBytes, contentDigest: preview.contentDigest, structureDigest: preview.structureDigest,
     blockCount: preview.blocks.length, characterCount: preview.characterCount, fidelity, textBoxes: archive.document.textBoxes,

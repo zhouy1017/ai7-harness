@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,6 +15,7 @@ import {
   isCleanTracerFidelity,
   parseDocx,
   parseNativeDocxIntake,
+  parseNativeDocxIntakeBytes,
   wordImportFidelityReport,
   compileWordTrackedDocx,
   withTextBoxDisposition,
@@ -142,6 +143,7 @@ describe('explicit tracked Word successor compiler (#1132)', () => {
       legacy: (block) => legacy.push(block), wordPreview: (block) => preview.push(block.text),
     });
     if (result.kind !== 'word') throw new Error('expected supported Word staging preview');
+    expect(parseNativeDocxIntakeBytes(await readFile(path), 'word-preview.docx')).toEqual(result);
     expect(result.word.previewReading).toBe('accepted');
     expect(result.legacy).toEqual({ kind: 'unavailable', code: 'DOCX_REJECTED', reason: 'DOCX contains no editable text blocks' });
     const staged = wordStagedIntakeRecord('10000000-0000-4000-8000-000000000001', result)!;
@@ -175,6 +177,7 @@ describe('explicit tracked Word successor compiler (#1132)', () => {
         legacy: (block) => legacy.push(block), wordPreview: (block) => preview.push(block.text),
       });
       expect(result.kind).toBe('legacy');
+      expect(parseNativeDocxIntakeBytes(await readFile(path), 'ordinary.docx')).toEqual(result);
       expect(result.word?.kind ?? null).toBe(unsupported ? 'unsupported' : null);
       expect(preview).toEqual([]);
       expect(legacy.map((block) => block.text)).toEqual(['base']);
@@ -195,6 +198,7 @@ describe('explicit tracked Word successor compiler (#1132)', () => {
     });
     expect(result.kind).toBe('word');
     if (result.kind !== 'word') throw new Error('expected supported Word preview');
+    expect(parseNativeDocxIntakeBytes(await readFile(path), 'normalized.docx')).toEqual(result);
     expect(result.legacy.kind).toBe('unavailable');
     expect(preview).toEqual(['base']);
     await expect(parseDocx(path, 'normalized.docx', () => undefined)).rejects.toThrow('paragraph exceeds');
