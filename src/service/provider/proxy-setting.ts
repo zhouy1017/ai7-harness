@@ -83,8 +83,11 @@ export class ProxyConnectionEvidence {
 }
 
 /** Factory injection makes construction and physical-stage failures observable without real networking. */
-export type ProxyDispatcherFactory = (uri: string, failed: () => void, evidence?: ProxyConnectionEvidence) => Dispatcher;
-export const createProxyDispatcher: ProxyDispatcherFactory = (uri, failed, evidence) => new ProxyAgent({
+export type ProxyDispatcherFactory = (uri: string, failed: () => void) => Dispatcher;
+export const createProxyDispatcher: ProxyDispatcherFactory = (uri, failed) => observedProxyDispatcher(uri, failed, null);
+
+/** The production connector; only proxyAwareFetch's own per-call record is ever handed to it. */
+const observedProxyDispatcher = (uri: string, failed: () => void, evidence: ProxyConnectionEvidence | null): Dispatcher => new ProxyAgent({
   uri, proxyTunnel: true, connections: 1,
   clientFactory: (origin, options) => {
     const connector = (options as { connect: ReturnType<typeof buildConnector> }).connect;
@@ -153,11 +156,13 @@ export function proxyAwareFetch(nativeFetch: typeof fetch, read: () => Promise<M
     const proxy = new URL(`${setting.protocol}://${setting.hostPort}`);
     const token = admittedProxyRequest(url, { host: proxy.hostname.replace(/^\[|\]$/gu, ''), port: Number(proxy.port || (proxy.protocol === 'https:' ? 443 : 80)) });
     let proxyFailed = false;
-    const evidence = new ProxyConnectionEvidence();
+    // Physical evidence exists only for the owned production connector; an injected factory never receives it.
+    const evidence = factory === createProxyDispatcher ? new ProxyConnectionEvidence() : null;
     let dispatcher: Dispatcher | undefined;
     const finish = (): void => { token.revoke(); void dispatcher?.destroy().catch(() => undefined); };
     try {
-      dispatcher = factory(proxy.href, () => { proxyFailed = true; }, evidence);
+      const failed = (): void => { proxyFailed = true; };
+      dispatcher = evidence === null ? factory(proxy.href, failed) : observedProxyDispatcher(proxy.href, failed, evidence);
       const response = await token.run(() => nativeFetch(input, { ...init, redirect: 'manual', dispatcher } as RequestInit));
       if (response.status === 407) { proxyFailed = true; throw new Error(PROXY_UNREACHABLE); }
       report(null);
@@ -181,11 +186,11 @@ export function proxyAwareFetch(nativeFetch: typeof fetch, read: () => Promise<M
       const cause = error instanceof Error ? error.cause : null;
       const refused = cause instanceof Error && /Proxy response \(407\)/u.test(cause.message);
       // The pinned fetch nests a refused CONNECT below its cancellation cause; the owned proxy client observed it directly.
-      if (proxyFailed || refused || evidence.proxyRefused) {
+      if (proxyFailed || refused || evidence?.proxyRefused === true) {
         report('proxy-unreachable');
         const unreachable = Object.assign(new Error('代理不可达：请检查网络代理设置。'), { code: PROXY_UNREACHABLE });
         // Codes, statuses and messages prove nothing; only this call's own connector proves that no tunnel ever existed.
-        throw init !== undefined && evidence.provesNoModelRequest ? modelRequestNotSent(init, unreachable) : unreachable;
+        throw init !== undefined && evidence?.provesNoModelRequest === true ? modelRequestNotSent(init, unreachable) : unreachable;
       }
       const timedOut = responseTimedOut(error);
       if (timedOut !== null) throw timedOut;

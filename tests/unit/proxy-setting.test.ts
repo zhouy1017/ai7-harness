@@ -254,6 +254,70 @@ describe('physical proxy no-send proof through the production connector (#1131)'
     expect(classifyTransportError(failure, true, init).code).toBe('AI7_OUTCOME_UNKNOWN');
   });
 
+  it('gives an injected factory no evidence to forge: a fake dispatcher plus a native failure after a possible send stays unknown', async () => {
+    const forged = new ProxyConnectionEvidence(); forged.connectFailed();
+    const received: unknown[][] = [];
+    const factory = vi.fn<ProxyDispatcherFactory>((...args: unknown[]) => {
+      received.push(args); (args[1] as () => void)(); (args[2] as ProxyConnectionEvidence | undefined)?.connectFailed();
+      return { destroy: async () => undefined } as unknown as ReturnType<ProxyDispatcherFactory>;
+    });
+    const init = modelRequest();
+    const fetch = proxyAwareFetch(async () => { throw new TypeError('sent, then failed'); }, async () => parseProxyUrl('http://127.0.0.1:9'), factory);
+    const failure = await fetch(modelUrl, init).then(() => null, (error: unknown) => error);
+    expect(classifyTransportError(failure).code).toBe('AI7_PROXY_UNREACHABLE');
+    expect(classifyTransportError(failure, true, init).code).toBe('AI7_OUTCOME_UNKNOWN');
+    expect(received).toHaveLength(1); expect(received[0]).toHaveLength(2);
+    expect(forged.provesNoModelRequest).toBe(true);
+  });
+
+  it('accepts physical evidence only from the owned connector, never from a factory that delegates to it', async () => {
+    const init = modelRequest(); const reports: Array<string | null> = [];
+    const delegating: ProxyDispatcherFactory = (uri, failed) => createProxyDispatcher(uri, failed);
+    const port = await closedPort();
+    const fetch = proxyAwareFetch(globalThis.fetch, async () => parseProxyUrl(`http://127.0.0.1:${port}`), delegating, (value) => { reports.push(value); });
+    const failure = await fetch(modelUrl, init).then(() => null, (error: unknown) => error);
+    expect(reports).toEqual(['proxy-unreachable']);
+    expect(classifyTransportError(failure, true, init).code).toBe('AI7_OUTCOME_UNKNOWN');
+  });
+
+  it('keeps each concurrent call\'s evidence and request identity its own', async () => {
+    const refusedPort = await closedPort();
+    const tunnelPort = await listen((socket) => socket.once('data', () => {
+      socket.write('HTTP/1.1 200 Connection Established\r\n\r\n'); setImmediate(() => socket.destroy());
+    }));
+    const ports = [refusedPort, tunnelPort];
+    const fetch = proxyAwareFetch(globalThis.fetch, async () => parseProxyUrl(`http://127.0.0.1:${ports.shift()!}`), createProxyDispatcher);
+    const [refusedInit, tunnelledInit] = [modelRequest(), modelRequest()];
+    const [refused, tunnelled] = await Promise.all([refusedInit, tunnelledInit].map((init) => fetch(modelUrl, init).then(() => null, (error: unknown) => error)));
+    expect(classifyTransportError(refused, true, refusedInit).code).toBe('AI7_PROXY_UNREACHABLE');
+    expect(classifyTransportError(refused, true, tunnelledInit).code).toBe('AI7_OUTCOME_UNKNOWN');
+    expect(classifyTransportError(tunnelled, true, tunnelledInit).code).toBe('AI7_OUTCOME_UNKNOWN');
+  });
+
+  it('keeps a failure of the response body after a tunnelled request unknown', async () => {
+    const bodyUrl = 'http://model.invalid:443/v1/messages'; const init = modelRequest(); const reports: Array<string | null> = [];
+    const port = await listen((socket) => {
+      let tunnelled = false; let buffered = '';
+      socket.on('data', (chunk: Buffer) => {
+        buffered += chunk.toString('latin1');
+        if (!tunnelled) {
+          const end = buffered.indexOf('\r\n\r\n'); if (end === -1) return;
+          buffered = buffered.slice(end + 4); tunnelled = true; socket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+        }
+        if (/\r\n\r\n\{\}$/u.test(buffered)) {
+          buffered = '';
+          socket.write('HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 64\r\n\r\n{"choices":');
+          setImmediate(() => socket.destroy());
+        }
+      });
+    });
+    const response = await proxiedFetch(port, reports)(bodyUrl, init);
+    expect(response.status).toBe(200); expect(reports).toEqual([null]);
+    const failure = await response.text().then(() => null, (error: unknown) => error);
+    expect(failure).not.toBeNull();
+    expect(classifyTransportError(failure, true, init).code).toBe('AI7_OUTCOME_UNKNOWN');
+  });
+
   it('keeps any established tunnel decisive for the whole call, a later reconnect failure included', () => {
     const reconnected = new ProxyConnectionEvidence(); reconnected.connectAnswered(200); reconnected.connectFailed();
     const tunnelledAfterRefusal = new ProxyConnectionEvidence(); tunnelledAfterRefusal.connectAnswered(407); tunnelledAfterRefusal.connectAnswered(200);
