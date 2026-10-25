@@ -15,8 +15,7 @@ import {
   backgroundShareFullReason,
 } from '../../src/service/background-analysis-enrollments.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
-import { fixtureEntryKey, loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
-import { buildClarificationAnswerMessage, clarificationMessageRequestDigest } from '../../src/service/provider/clarification-contract.js';
+import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { controlledUnitHold } from '../../src/service/unit-hold.js';
 import { EditorialStore, StoreError, type BackgroundAnalysisRuntime } from '../../src/service/store.js';
 import {
@@ -431,10 +430,8 @@ describe('后台处理登记 with a mandatory ceiling, Series and all-Books scop
     { clarification: 'safe-retry', action: 'answer' }, { clarification: 'safe-retry', action: 'cancel' },
     { clarification: 'model', action: 'answer' }, { clarification: 'model', action: 'cancel' },
   ] as const)('retains a background $clarification $action while its share is full, including after a foreground Run frees its place', async ({ clarification, action }) => {
-    fixture = await loadModelFixture(FIXTURES_ROOT, clarification === 'model' ? 'sample1-baseline-happy' : 'sample1-baseline-transient-retry');
-    const entries = new Map(fixture.entries);
-    const baseEntries = [...fixture.entries.values()];
-    if (clarification === 'model') fixture = { ...fixture, identity: 'sample1-model-clarification-background-restack', entries };
+    // The unchanged admitted question fixture already owns the exact first question and 人物 answer key used here.
+    fixture = await loadModelFixture(FIXTURES_ROOT, clarification === 'model' ? 'sample1-model-clarification' : 'sample1-baseline-transient-retry');
     const store = await openWithRoute();
     let holdNext = false;
     let held = false;
@@ -464,15 +461,6 @@ describe('后台处理登记 with a mandatory ceiling, Series and all-Books scop
       const asking = clarification === 'model' ? prepared : store.editBaselineAnalysisPlan({
         bookId: first.bookId, taskIntentId, planEnvelopeDigest: prepared.planEnvelope!.digest,
         removedSteps: [], disallowedAdaptations: [], askFirstAdaptations: ['safe-retry'] });
-      if (clarification === 'model') {
-        for (const unit of prepared.coverageManifest!.units) {
-          const base = baseEntries.find((entry) => entry.unitOrdinal === unit.ordinal)!;
-          const digest = store.baselineAnalysisLedger.definition.requestDigest(unit.ordinal, unit.digest);
-          entries.set(fixtureEntryKey(unit.ordinal, digest), { ...base, requestDigest: digest,
-            response: unit.ordinal === 1 ? { kind: 'unit-result', usage: { inputTokens: 10, outputTokens: 5 },
-              text: JSON.stringify({ question: '本范围按哪个阅读重点处理？', options: ['人物', '事件'], freeTextAllowed: true }) } : base.response });
-        }
-      }
       const firstRun = store.startEnrolledBaselineAnalysis(first.bookId, taskIntentId, asking.planEnvelope!.digest, version, 'first-baseline', runtime()).dispatchRunRecordId!;
       owner.admitAndDispatch(firstRun);
       await owner.whenIdle();
@@ -493,16 +481,6 @@ describe('后台处理登记 with a mandatory ceiling, Series and all-Books scop
         expect(request.origin === 'model').toBe(clarification === 'model');
         store.answerBaselineAnalysisClarification({ bookId: first.bookId, taskIntentId, requestId: request.requestId,
           optionId: clarification === 'model' ? 'model-option-0' : 'retry', note: null });
-        if (clarification === 'model') {
-          const ledger = store.baselineAnalysisLedger;
-          const facts = ledger.loadExecutionPlan(firstRun);
-          const unit = facts.manifest.units[0]!;
-          const blocks = ledger.readRevisionBlocks(facts.checkpoint.manuscriptId, facts.checkpoint.revisionId);
-          const message = buildClarificationAnswerMessage(ledger.definition.buildUnitMessage(unit, facts.manifest.units.length,
-            new Map(blocks.map((block) => [block.blockId, block]))), ledger.clarificationsOf(firstRun)[0]!);
-          const digest = clarificationMessageRequestDigest(message)!;
-          entries.set(fixtureEntryKey(1, digest), { ...baseEntries.find((entry) => entry.unitOrdinal === 1)!, requestDigest: digest });
-        }
         expect(owner.continueAnswered(firstRun)).toBe('queued');
       } else {
         store.requestBaselineAnalysisCancel(first.bookId, taskIntentId);

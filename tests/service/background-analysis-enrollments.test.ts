@@ -442,12 +442,12 @@ describe('后台处理登记 over the real store on exact sample1', () => {
       edit(store, book, '〔改动〕');
       expect(store.backgroundAnalysisDecisionFor(book.bookId, runtime({ routeExecutable: false })).decision).toEqual({ kind: 'stopped', reason: BACKGROUND_NO_ROUTE });
       // Developer-live under a policy with no enrolled-background rule (Provider Processing v12; Issue #864): neither an Enrollment nor a start.
-store.baselineAnalysisLedger.bindLaunch({ ...LIVE, localFixtureRuntime: () => store.localFixtureRuntime() });
+      store.baselineAnalysisLedger.bindLaunch({ ...LIVE, localFixtureRuntime: () => store.localFixtureRuntime() });
       const live = store.inspectBackgroundAnalysisEnrollment(book.bookId, runtime());
       expect(live.next).toEqual({ kind: 'stopped', reason: BACKGROUND_NO_RULE });
       expect(store.startEnrolledBaselineAnalysis(book.bookId, randomUUID(), 'a'.repeat(64), live.enrollment!.enrollmentVersionId, 'sync-current', runtime()))
         .toEqual({ dispatchRunRecordId: null, reason: BACKGROUND_NO_RULE });
-store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'development-ci', live: null, policy: launchPolicy,
+      store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'development-ci', live: null, policy: launchPolicy,
         localFixtureRuntime: () => store.localFixtureRuntime() });
 
       // A plan the editor prepared and has not started is theirs: the Enrollment waits, and never starts it.
@@ -1397,6 +1397,7 @@ it('recovers only the exact pre-stamp authorization shape and refuses an unexpec
 
 
 it('defers a Review approval on the same driver, propagates idle to its categories and recovers an unstarted approval (#1089)', async () => {
+  fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-authored');
   const store = await openWithRoute();
   const owner = ownerOf(store);
   const driver = new ReviewRunDriver(store.reviewRunDriveSteps, owner);

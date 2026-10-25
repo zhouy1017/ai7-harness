@@ -1,4 +1,7 @@
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
+import { capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
+import { parseReviewCategoryUnitMessageHeader } from '../../src/service/review/review-category-contract.js';
+import { ruleFor, withRuleFor } from '../support/policy-rules.js';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -7,14 +10,12 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
-import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
+import { DEVELOPER_LIVE_POLICY_BINDING, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { MATERIAL_INDEX_TRIGGER_SQL } from '../../src/service/material-index.js';
 import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
-import { fixtureEntryKey, loadModelFixture, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
+import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
-import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
-import { reviewCategoryContractInput, reviewCategoryEntry } from '../../src/service/review/category-configuration.js';
-import { taskMaterialKindDefinition, taskMaterialWords, TASK_MATERIAL_LIVE_UNAVAILABLE, REVIEW_MATERIAL_CATEGORY_REQUIRED, type TaskMaterialSource } from '../../src/service/task-material-references.js';
+import { TASK_MATERIAL_LIVE_UNAVAILABLE, REVIEW_MATERIAL_CATEGORY_REQUIRED, type TaskMaterialSource } from '../../src/service/task-material-references.js';
 import type { LaunchPolicyProjection, ReviewRunProjection } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
@@ -33,17 +34,34 @@ let launchPolicy: LaunchPolicyProjection;
 let store: EditorialStore;
 let owner: BaselineAnalysisExecutionOwner;
 let driver: ReviewRunDriver;
-let entries: Map<string, ModelFixtureEntry>;
-let fixture: ResolvedModelFixture;
+let capture: ReturnType<typeof capturedOrdinaryExecution> | undefined;
+let localReadFixture: ResolvedModelFixture | null = null;
 let bookId: string;
 let opened = false;
 let unitBoundary: (() => void) | null = null;
 
 async function open(): Promise<void> {
-  store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false, induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false, baselineAnalysisRoute: {
-    fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage,
-  } });
-  owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null }, materialGuard: (id, ledger) => store.materialGuard(id, ledger), unitHold: async () => { unitBoundary?.(); } });
+  store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { induceUnprovableReconciliation: false,
+    persistLegacyReviewedDraft: false, induceReimportProofTamper: false, induceAbandonObjectRemovalFailure: false,
+    interruptAfterAbandonObjectRemoval: false, baselineAnalysisRoute: localReadFixture === null ? null : {
+      fixtureIdentity: localReadFixture.identity, fixtureSha256: localReadFixture.sha256, fixtureLineage: localReadFixture.lineage } });
+  if (localReadFixture !== null) {
+    launchPolicy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot);
+    capture = undefined;
+    owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy,
+      fixture: localReadFixture, secretResolver: { resolve: async () => null } });
+    driver = new ReviewRunDriver(store.reviewRunDriveSteps, owner); opened = true; return;
+  }
+  const search = store.saveSearchBackendCredential('search-tinyfish', null, 'needs-attention');
+  store.saveSearchBackendCredential('search-tinyfish', search.credentialReference, 'ready'); store.selectSearchBackend('search-tinyfish');
+  capture = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, requestGovernor, (request, message) => {
+    const header = parseReviewCategoryUnitMessageHeader(message);
+    const content = request.stage === 'units' && header !== null
+      ? { schema: 'ai7.editorial-review.unit-result/2', unitOrdinal: header.ordinal, findings: [] }
+      : request.stage === 'run-report-reflection' ? { schema: 'ai7.analysis.run-report-reflection-result/1', items: [] } : null;
+    return content === null ? undefined : { kind: 'unit-result', text: JSON.stringify(content), usage: { inputTokens: 10, outputTokens: 10 } };
+  }, { materialGuard: (id, ledger) => store.materialGuard(id, ledger), unitHold: async () => { unitBoundary?.(); } });
+  owner = capture.owner; launchPolicy = capture.policy;
   driver = new ReviewRunDriver(store.reviewRunDriveSteps, owner);
   opened = true;
 }
@@ -53,15 +71,17 @@ async function close(): Promise<void> {
   const stopped = driver.dispose();
   await owner.dispose();
   await stopped;
-  store.markCleanShutdown();
-  store.close();
+  try { capture?.assertMatched(); store.markCleanShutdown(); } finally { store.close(); }
+}
+async function selectLocalReadRoute(): Promise<void> {
+  await close();
+  localReadFixture = await loadModelFixture(resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url))), 'sample1-review-authored');
+  await open();
 }
 beforeEach(async () => {
   roots = await createServiceTestRoots('ai7-review-library-');
+  localReadFixture = null;
   launchPolicy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot);
-  const base = await loadModelFixture(resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url))), 'sample1-review-authored');
-  entries = new Map(base.entries);
-  fixture = { ...base, entries };
   await open();
   const book = await importSample1Book(store, roots.codeRoot, '合成参考边界测试');
   bookId = book.bookId;
@@ -84,10 +104,16 @@ async function material(text = TEXT, scope: 'book' | 'house' = 'book', choice: '
   await store.settleMaterialIndexing();
   return item.materialId;
 }
-function prepare(ids: ReadonlyArray<string> = [], categories = ['typos-and-usage']): ReviewRunProjection {
+function prepare(ids: ReadonlyArray<string> = [], categories = ['typos-and-usage'], serial = false): ReviewRunProjection {
   let work = store.createReviewRunPreparationWork(bookId, categories, WHOLE, launchPolicy, null, ids);
   while (!work.done) work = store.advanceReviewRunPreparationWork(work.workId!);
-  return work.projection!.run!;
+  const run = work.projection!.run!;
+  if (!serial) return run;
+  const input = { bookId, kind: 'review-run' as const, ref: run.reviewRunId };
+  const plan = store.inspectTaskPlan(input);
+  store.editTaskPlan({ ...input, planEnvelopeDigest: plan.edit.planEnvelopeDigest!, removedSteps: [], disallowedAdaptations: [],
+    runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 500_000 } });
+  return store.inspectReviewWorkspace(bookId, run.reviewRunId).run!;
 }
 function plan(run: ReviewRunProjection) {
   return store.inspectTaskPlan({ bookId, kind: 'review-run', ref: run.reviewRunId });
@@ -115,28 +141,19 @@ function removeBuild(id: string): void {
     for (const sql of Object.values(MATERIAL_INDEX_TRIGGER_SQL)) db.exec(sql);
   }, true);
 }
-/** Fixture answers, with no findings, for every unit of every referenced category of `run`. */
-function answerEveryUnit(run: ReviewRunProjection, id: string): void {
-  const pins = recordPins(run);
-  const reading = store.readMaterialIndexForTask({ bookId, references: pins }, id, 1);
-  for (const category of run.categories) {
-    const entry = reviewCategoryEntry(category.categoryId)!;
-    const definition = taskMaterialKindDefinition(reviewCategoryKindDefinition(reviewCategoryContractInput(entry)), { bookId, references: pins },
-      pins.map((pin) => taskMaterialWords(pin, reading.segments.map((segment) => segment.text))));
-    const manifest = database((db) => JSON.parse(String(db.prepare("SELECT canonical_json FROM analysis_plan_records WHERE component = 'coverage-manifest' AND task_intent_id = (SELECT json_extract(value, '$.task.taskIntentId') FROM review_runs, json_each(review_runs.canonical_json, '$.categories') WHERE review_run_id = ? AND json_extract(value, '$.categoryId') = ?)").get(run.reviewRunId, category.categoryId)!.canonical_json)));
-    for (const unit of manifest.units) {
-      const digest = definition.requestDigest(unit.ordinal, unit.digest);
-      entries.set(fixtureEntryKey(unit.ordinal, digest), { unitOrdinal: unit.ordinal, requestDigest: digest, attempt: null, contentDigest: null,
-        response: { kind: 'unit-result', text: JSON.stringify({ schema: definition.unitResultSchema, unitOrdinal: unit.ordinal, findings: [] }), usage: { inputTokens: 10, outputTokens: 10 } } });
-    }
-  }
+/** A deny-only material guard on the actual selected developer-live rule; current-policy positives live in live-material-references. */
+async function denyLiveMaterials(): Promise<void> {
+  const selected = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live');
+  expect(ruleFor(selected, 'editorial-review/typos-and-usage').materialReferencesAllowed).toBe(true);
+  launchPolicy = withRuleFor(selected, 'editorial-review/typos-and-usage', { materialReferencesAllowed: false });
+  store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'developer-live', policy: launchPolicy,
+    live: { ...DEVELOPER_LIVE_POLICY_BINDING, credentialReference: randomUUID(), runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 100_000 } } });
 }
 
-describe('review categories reference exact local library versions', () => {
+describe('review categories reference exact library versions over ordinary captured transport', () => {
   it('interrupts review consumption after withdrawal and keeps the completed unit', async () => {
     const id = await material();
-    const run = prepare([id]);
-    answerEveryUnit(run, id);
+    const run = prepare([id], ['typos-and-usage'], true);
     store.authorizeReviewRun(bookId, run.reviewRunId, approvals(run));
     unitBoundary = () => {
       unitBoundary = null;
@@ -155,8 +172,7 @@ describe('review categories reference exact local library versions', () => {
     ['MATERIAL_INDEX_RECORD_INVALID', '在任务运行中的索引记录已损坏', '的索引记录已损坏；先在资料库处理这份资料'],
   ] as const)('interrupts under way on %s with that reason and its own next step, not the withdrawal wording (Issue #759)', async (code, detail, next) => {
     const id = await material();
-    const run = prepare([id]);
-    answerEveryUnit(run, id);
+    const run = prepare([id], ['typos-and-usage'], true);
     store.authorizeReviewRun(bookId, run.reviewRunId, approvals(run));
     unitBoundary = () => {
       unitBoundary = null;
@@ -203,7 +219,7 @@ describe('review categories reference exact local library versions', () => {
     const run = prepare([id], ['typos-and-usage', 'style-and-format']);
     const first = plan(run);
     expect(first.scope.reference.some((line) => line.includes('资料库资料') && line.includes('按计划冻结的索引版本读取'))).toBe(true);
-    expect(first.scope.send).toContain('资料库资料也只在本机读取');
+    expect(first.scope.send).toContain('以及上面列出的资料库资料原文');
     expect(first.technical.find((row) => row.key === 'material-references')?.value).toContain(id);
     expect(first.start.readiness).toBe('ready');
     const pins = recordPins(run);
@@ -226,7 +242,6 @@ describe('review categories reference exact local library versions', () => {
       const frozen = plan(run).technical.find((row) => row.key === `category:${category.categoryId}`)!;
       expect(frozen.value).toContain(category.planEnvelopeDigest!);
     }
-    answerEveryUnit(run, id);
     const before = indexRows();
     store.authorizeReviewRun(bookId, run.reviewRunId, approvals(run));
     await driver.drive(run.reviewRunId);
@@ -269,7 +284,6 @@ describe('review categories reference exact local library versions', () => {
   it('runs a plan read while its reference was withdrawn once the reference is admitted again', async () => {
     const id = await material();
     const run = prepare([id]);
-    answerEveryUnit(run, id);
     store.decideLibraryMaterial({ materialId: id, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
     // A fresh start, so the plan is first read while the pin cannot be: that unreadable contract must not be the one kept.
     await close();
@@ -301,6 +315,8 @@ describe('review categories reference exact local library versions', () => {
   });
 
   it('prepares under a changed guideline contract without misclassifying the old references as corrupt', async () => {
+    // Imported house clauses are a local read-only preparation case, not admitted ordinary egress.
+    await selectLocalReadRoute();
     const id = await material();
     const earlier = prepare([id]);
     const originalPins = recordPins(earlier);
@@ -319,8 +335,10 @@ describe('review categories reference exact local library versions', () => {
   });
 
   it('refuses references for factual-review-only and leads-only selections without changing their contracts', async () => {
+    await selectLocalReadRoute();
     const id = await material();
     for (const category of ['factual-review', 'plot-consistency']) expect(() => prepare([id], [category])).toThrow(REVIEW_MATERIAL_CATEGORY_REQUIRED);
+    await close(); localReadFixture = null; await open();
     const plain = prepare([], ['factual-review']);
     expect(plan(plain).scope.reference.some((line) => line.includes('资料库资料'))).toBe(false);
     expect(database((db) => String(db.prepare('SELECT canonical_json FROM review_runs WHERE review_run_id = ?').get(plain.reviewRunId)!.canonical_json))).not.toContain('materialReferences');
@@ -367,11 +385,12 @@ describe('review categories reference exact local library versions', () => {
     expect(() => prepare([pending.materialId])).toThrow(StoreError);
   });
 
-  it('does not send reference text under developer-live, including a plan prepared before the scope changed', async () => {
+  it('does not send reference text when developer-live material permission is denied, including a previously prepared plan', async () => {
     const id = await material();
     const run = prepare([id]);
     const free = store.baselineAnalysisLedger.launch;
-    store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'developer-live', localFixtureRuntime: () => store.localFixtureRuntime(), live: { route: 'opencode-go', model: 'deepseek-v4.1-flash', endpoint: 'https://example.invalid/v1', credentialSlot: 'opencode-go', credentialReference: randomUUID(), runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 100_000 } } });
+    const actual = launchPolicy;
+    await denyLiveMaterials();
     try {
       const offers = store.inspectReviewWorkspace(bookId, null).materials!;
       expect(offers.statement).toBe(TASK_MATERIAL_LIVE_UNAVAILABLE);
@@ -380,7 +399,7 @@ describe('review categories reference exact local library versions', () => {
       expect(plan(run).drift?.reasons).toContain(TASK_MATERIAL_LIVE_UNAVAILABLE);
       expect(() => prepare([id])).toThrow(TASK_MATERIAL_LIVE_UNAVAILABLE);
       expect(() => store.authorizeReviewRun(bookId, run.reviewRunId, approvals(run))).toThrow(TASK_MATERIAL_LIVE_UNAVAILABLE);
-    } finally { store.baselineAnalysisLedger.bindLaunch(free); }
+    } finally { store.baselineAnalysisLedger.bindLaunch(free); launchPolicy = actual; }
   });
 
   it('refuses corrupt index records by their material-specific reason', async () => {
@@ -398,18 +417,19 @@ describe('review categories reference exact local library versions', () => {
     expect(blocked.scope.reference.join(' ')).toContain('索引记录已损坏');
   });
 
-  it('says nothing would be sent when a plan listing library items is read under developer-live', async () => {
+  it('says nothing would be sent when developer-live material permission is denied', async () => {
     const id = await material();
     const run = prepare([id]);
-    expect(plan(run).scope.send).toContain('也只在本机读取');
+    expect(plan(run).scope.send).toContain('以及上面列出的资料库资料原文');
     const free = store.baselineAnalysisLedger.launch;
-    store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'developer-live', localFixtureRuntime: () => store.localFixtureRuntime(), live: { route: 'opencode-go', model: 'deepseek-v4.1-flash', endpoint: 'https://example.invalid/v1', credentialSlot: 'opencode-go', credentialReference: randomUUID(), runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 100_000 } } });
+    const actual = launchPolicy;
+    await denyLiveMaterials();
     try {
       const send = plan(run).scope.send;
       expect(send.startsWith('不发送任何内容')).toBe(true);
       expect(send).not.toContain('原文');
-      expect(send).not.toContain('也只在本机读取');
-    } finally { store.baselineAnalysisLedger.bindLaunch(free); }
+      expect(send).not.toContain('提取文字随稿件一并发往');
+    } finally { store.baselineAnalysisLedger.bindLaunch(free); launchPolicy = actual; }
   });
 
   it('reads each pinned item whole once, then only re-checks its first page on later workspace reads', async () => {
@@ -450,6 +470,7 @@ describe('review categories reference exact local library versions', () => {
   });
 
   it('checks the category executor from the configuration without building the whole workspace', async () => {
+    await selectLocalReadRoute();
     const id = await material();
     const workspace = vi.spyOn(store, 'inspectReviewWorkspace');
     try {

@@ -1,6 +1,8 @@
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { copyFile, mkdir, readdir } from 'node:fs/promises';
+import { capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
+import { parseReviewCategoryUnitMessageHeader } from '../../src/service/review/review-category-contract.js';
+import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/assurance-sampling-contract.js';
 import { dirname, join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
@@ -41,8 +43,6 @@ const STYLE = STYLE_AND_FORMAT.categoryId;
 const LITERARY = LITERARY_EXPRESSION.categoryId;
 const PLOT = 'plot-consistency';
 const SERIES = 'series-consistency';
-const SERIES_FIXTURE = 'sample1-series-consistency-authored';
-const LAYERED_FIXTURE = 'l2-review-and-series-consistency';
 
 let roots: ServiceTestRoots;
 let launchPolicy: LaunchPolicyProjection;
@@ -60,6 +60,7 @@ interface Session {
   readonly store: EditorialStore;
   readonly owner: BaselineAnalysisExecutionOwner;
   readonly driver: ReviewRunDriver;
+  readonly capture?: ReturnType<typeof capturedOrdinaryExecution>;
 }
 
 /** The one owner, refusing its first hand-off as a launch without a route would: that category fails, the rest go on. */
@@ -106,8 +107,7 @@ async function close(session: Session): Promise<void> {
   const stopped = session.driver.dispose();
   await session.owner.dispose();
   await stopped;
-  session.store.markCleanShutdown();
-  session.store.close();
+  try { session.capture?.assertMatched(); session.store.markCleanShutdown(); } finally { session.store.close(); }
 }
 
 async function importBook(session: Session, title: string, connection = true): Promise<string> {
@@ -836,42 +836,24 @@ describe('a Book merged from another house (Issue #65 review)', () => {
   }, 300_000);
 });
 
-/**
- * A fixtures root holding every authored fixture and one layered over the review fixture with the 书系一致性 fixture's answers
- * (Issue #66, S31b): one Review Run of 体例与格式 and 书系一致性 in J-13's Series Book is answered whole. It is written for this
- * suite only, under its scratch input root, from the two admitted fixtures' own entries.
- */
-async function layeredFixturesRoot(): Promise<string> {
-  const root = join(roots.inputRoot, 'fixtures');
-  await mkdir(root);
-  for (const name of await readdir(FIXTURES_ROOT)) if (name.endsWith('.json')) await copyFile(join(FIXTURES_ROOT, name), join(root, name));
-  const read = (name: string) => JSON.parse(readFileSync(join(FIXTURES_ROOT, `${name}.json`), 'utf8')) as { entries: unknown[] } & Record<string, unknown>;
-  const review = read('sample1-review-authored');
-  // The review fixture's own entries and base, with the 书系一致性 fixture's entries beside them: no deeper a base chain.
-  writeFileSync(join(root, `${LAYERED_FIXTURE}.json`), JSON.stringify({
-    ...review, identity: LAYERED_FIXTURE, entries: [...review.entries, ...read(SERIES_FIXTURE).entries],
-    description: 'L2 套件专用：审阅夹具的条目之外加上书系一致性夹具的条目，使一次审阅同时覆盖体例与格式和书系一致性。',
-  }));
-  return root;
-}
-
+/** Mixed review/Series business assertions use the admitted ordinary route, without a union fixture partition. */
 async function openLayered(): Promise<Session> {
-  const fixturesRoot = await layeredFixturesRoot();
-  const fixture = await loadModelFixture(fixturesRoot, LAYERED_FIXTURE);
   const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
-    induceUnprovableReconciliation: false,
-    persistLegacyReviewedDraft: false,
-    induceReimportProofTamper: false,
-    induceAbandonObjectRemovalFailure: false,
-    interruptAfterAbandonObjectRemoval: false,
-    baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
+    induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
+    induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false, baselineAnalysisRoute: null,
   });
-  const owner = new BaselineAnalysisExecutionOwner({
-    requestGovernor,
-    ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null },
-    seriesScopeGuard: (runRecordId) => store.seriesScopeGuard(runRecordId),
-  });
-  return { store, owner, driver: new ReviewRunDriver(store.reviewRunDriveSteps, owner) };
+  const capture = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, requestGovernor, (request, message) => {
+    const header = parseReviewCategoryUnitMessageHeader(message);
+    const content = request.stage === 'units' && header !== null
+      ? { schema: 'ai7.editorial-review.unit-result/2', unitOrdinal: header.ordinal, findings: [] }
+      : request.stage === 'assurance-sampling'
+        ? { schema: 'ai7.analysis.assurance-sampling-result/1', dispositions: parseAssuranceSamplingListedRefs(message)
+          .map((ref) => ({ ref, disposition: '成立', reason: '合成回归抽样。' })) }
+        : request.stage === 'run-report-reflection' ? { schema: 'ai7.analysis.run-report-reflection-result/1', items: [] } : null;
+    return content === null ? undefined : { kind: 'unit-result', text: JSON.stringify(content), usage: { inputTokens: 10, outputTokens: 5 } };
+  }, { seriesScopeGuard: (id) => store.seriesScopeGuard(id) });
+  launchPolicy = capture.policy;
+  return { store, owner: capture.owner, driver: new ReviewRunDriver(store.reviewRunDriveSteps, capture.owner), capture };
 }
 
 describe('Series material chosen apart, and how each procedure fits a Book (Issue #66, plan slice S31b; REUSE-046, REUSE-049, REUSE-050, REUSE-053)', () => {
