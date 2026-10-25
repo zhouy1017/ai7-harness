@@ -296,7 +296,7 @@ export function mountLearningMaterials(options: MountLearningMaterialsOptions): 
     card.append(heading, facts);
     if (material.target.kind === 'word-tracked-edit') {
       const target = material.target;
-      if (material.wordCurrentEligibility !== undefined) card.append(el('p', 'field-note', wordLearningStandingLine(material.wordCurrentEligibility)));
+      if (material.wordCurrentEligibility !== undefined) card.append(el('p', 'field-note', wordLearningStandingLine(material.wordCurrentEligibility, material.decision !== null)));
       const detail = el('div');
       const view = action('查看完整 Word 修改对', 'secondary', 'word-detail', () => {
         detail.replaceChildren();

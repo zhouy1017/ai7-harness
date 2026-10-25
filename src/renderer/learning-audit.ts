@@ -439,7 +439,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
       el('span', `status-pill learning-state learning-audit-standing learning-audit-standing-${material.standing}`, LEARNING_AUDIT_STANDING_LABELS[material.standing]),
     );
     item.append(head);
-    if (material.wordCurrentEligibility !== undefined) item.append(el('p', 'field-note', wordLearningStandingLine(material.wordCurrentEligibility)));
+    if (material.wordCurrentEligibility !== undefined) item.append(el('p', 'field-note', wordLearningStandingLine(material.wordCurrentEligibility, material.standing !== 'pending')));
     const reason = material.excerpt.at(-1);
     if (reason !== undefined) item.append(el('p', 'learning-audit-excerpt', reason));
     const use = el('p', 'field-note learning-audit-use', learningAuditUse(material.downstreamTasks));
@@ -758,7 +758,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     if (material.target.kind === 'word-tracked-edit') {
       const target = material.target;
       const detail = el('div');
-      if (material.wordCurrentEligibility !== undefined) materialBody.push(el('p', 'field-note', wordLearningStandingLine(material.wordCurrentEligibility)));
+      if (material.wordCurrentEligibility !== undefined) materialBody.push(el('p', 'field-note', wordLearningStandingLine(material.wordCurrentEligibility, material.decision !== null)));
       materialBody.push(el('p', 'field-note', 'Word 原始修改对尚未用于编辑记忆、审阅偏好或模型任务。'),
         action('查看完整 Word 修改对', 'secondary', 'word-detail', () => {
           detail.replaceChildren();
