@@ -547,6 +547,10 @@ describe('native Word reading preparation over the real store', () => {
           { kind: 'existing-book', bookId, relationship: 'first-manuscript' }, false, 'retain',
           { mode, learnFromEdits: true, acceptedBaselineConfirmed: mode === 'accepted-baseline' });
         if (review.reviewDigest === null) throw new Error('expected complete preserved-source Word review');
+        // The review says it reuses the retained Source Version and maps blocks through Word segments, not new legacy rows.
+        expect(review.recordsToCreate).toContain(`沿用本书已保留的同一来源版本 ${sourceVersionId}（不新建来源版本）`);
+        expect(review.recordsToCreate).toContain('Word 修订来源、导入选择与稿件来源片段对应');
+        expect(review.recordsToCreate.filter((record) => record === '源材料版本与来源记录' || record === '来源段落对应')).toEqual([]);
         const commitId = randomUUID();
         const committed = await store.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: review.draftVersion,
           reviewDigest: review.reviewDigest, commitId });
@@ -675,6 +679,10 @@ describe('native Word reading preparation over the real store', () => {
       const capture = learnFromEdits && globalEnabled && !bookExcluded;
       expect(review.wordLearning).toEqual({ globalEnabled, bookExcluded, sourceTemplateCount: compiled.templates.length,
         eligibleSampleCount: capture ? compiled.templates.length : 0 });
+      expect(review.recordsToCreate).toContain('源材料版本与来源记录');
+      expect(review.recordsToCreate).toContain('Word 修订来源、导入选择与稿件来源片段对应');
+      expect(review.recordsToCreate).not.toContain('来源段落对应');
+      expect(review.recordsToCreate.includes(`Word 修改样本、导入准入与本机学习信号 ${compiled.templates.length} 条`)).toBe(capture);
       const input = { draftId: staged.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest, commitId: randomUUID() };
       const committed = await store.commitNewBookImport(input);
       expect((await store.commitNewBookImport(input)).revisionId).toBe(committed.revisionId);

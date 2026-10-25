@@ -3919,6 +3919,16 @@ interface WordIntakePlan {
   prepared: WordPreparedIntake;
 }
 
+/** What a reviewed Word intake creates beside the ordinary import records: its eligible samples and any reused Source Version. */
+function wordIntakeRecords(word: WordIntakePlan | undefined): { reusedSourceVersionId: string | null; eligibleSamples: number } | undefined {
+  if (word === undefined) return undefined;
+  const { choice, target } = word.prepared;
+  const eligibleSamples = !choice.learnFromEdits || !target.controls.global.enabled || target.controls.book.excluded ? 0
+    : target.kind === 'new-book' ? word.compiled.templates.length
+      : target.controls.materials.filter(({ standing }) => standing.choice === 'book' || standing.choice === 'house').length;
+  return { reusedSourceVersionId: target.kind === 'existing-book' ? target.parentSourcePin?.sourceVersionId ?? null : null, eligibleSamples };
+}
+
 interface CommitAttempt {
   attemptId: string;
   draftId: string;
@@ -4005,10 +4015,21 @@ export function importedMarksRecord(count: number): string {
 function recordsToCreate(
   plan: ImportFidelityPlan,
   targetKind: 'new-book' | 'existing-book' = 'new-book',
+  word?: { reusedSourceVersionId: string | null; eligibleSamples: number },
 ): ReadonlyArray<string> {
-  const base = targetKind === 'existing-book' ? BASE_RECORDS_TO_CREATE.slice(2) : BASE_RECORDS_TO_CREATE;
+  let base: ReadonlyArray<string> = targetKind === 'existing-book' ? BASE_RECORDS_TO_CREATE.slice(2) : BASE_RECORDS_TO_CREATE;
+  if (word !== undefined) {
+    // A Word intake maps blocks through its own source segments, never the one-paragraph rows, and may reuse
+    // the exact same-byte Source Version this empty Book already retains instead of creating one.
+    base = base.flatMap((record) => record === '源材料版本与来源记录' && word.reusedSourceVersionId !== null
+      ? [`沿用本书已保留的同一来源版本 ${word.reusedSourceVersionId}（不新建来源版本）`]
+      : record === '来源段落对应'
+        ? ['Word 修订来源、导入选择与稿件来源片段对应',
+          ...(word.eligibleSamples > 0 ? [`Word 修改样本、导入准入与本机学习信号 ${word.eligibleSamples} 条`] : [])]
+        : [record]);
+  }
   // The marks stand on r1's blocks, so they follow the block-source mapping.
-  const sourcesIndex = base.indexOf('来源段落对应');
+  const sourcesIndex = base.indexOf(word === undefined ? '来源段落对应' : 'Word 修订来源、导入选择与稿件来源片段对应');
   const records = plan.importedMarks === 0
     ? base
     : [...base.slice(0, sourcesIndex + 1), importedMarksRecord(plan.importedMarks), ...base.slice(sourcesIndex + 1)];
@@ -4599,7 +4620,7 @@ function createImportReviewDigestV6(
           state: 'accepted-complete-set',
           items: plan.degradations,
         },
-    recordsToCreate: recordsToCreate(plan, target.kind),
+    recordsToCreate: recordsToCreate(plan, target.kind, wordIntakeRecords(reviewed.word)),
     nonEffects: nonEffects(plan),
     workflowProfile: {
       projection: profile.projection,
@@ -13719,8 +13740,8 @@ export class EditorialStore {
 
   /** Each of one Book's Learning Materials where it stands, a decided one with the newest decision of its chain. */
   *#standingMaterials(bookId: string): IterableIterator<StandingReviewMaterial> {
-    for (const [candidate, projection] of this.#learningEligibility.projectCandidates(bookId, this.#learningCandidates(bookId, false))) {
-      if (candidate.kind === 'word-tracked-edit') continue; // Word retention grants no preference-source admission.
+    // Word retention grants no preference-source admission, so its pairs are not even enumerated here.
+    for (const [candidate, projection] of this.#learningEligibility.projectCandidates(bookId, this.#learningCandidates(bookId, false, false))) {
       const latest = projection.state === 'decided' ? this.#learningEligibility.history(bookId, candidate.materialKey).at(-1) ?? null : null;
       yield { candidate, state: projection.state, materialDigest: projection.digest,
         decision: latest === null ? null : { decisionId: latest.decisionId, choice: latest.choice, attribution: latest.attribution } };
@@ -14250,7 +14271,7 @@ export class EditorialStore {
    * carries the editor's reason or their own wording, each analysis item whose latest judgment says why, and each 审阅
    * finding the editor last ignored with a reason. Nothing is asked of the editor to find them.
    */
-  *#learningCandidates(bookId: string, withExcerpt: boolean): IterableIterator<LearningMaterialCandidate> {
+  *#learningCandidates(bookId: string, withExcerpt: boolean, includeWord = true): IterableIterator<LearningMaterialCandidate> {
     const reasons = new DecisionFeedbackLedger(this.#authority);
     const decisions = this.#authority.prepare(
       `SELECT i.current_text, i.proposed_text, d.decision_id, d.disposition, d.edited_text, d.recorded_at, r.reason, r.reason_source
@@ -14318,7 +14339,8 @@ export class EditorialStore {
         recordedAt: asString(row.recorded_at),
       }, withExcerpt);
     }
-    yield* this.#learningLedger().wordCandidates(bookId);
+    // Retained Word pairs verify their original before projecting; a consumer that never uses them skips that read.
+    if (includeWord) yield* this.#learningLedger().wordCandidates(bookId);
   }
 
   /** Each Book whose Learning Material waits: how many wait for a decision or changed since one, and how many were deferred. */
@@ -14329,8 +14351,8 @@ export class EditorialStore {
       let pending = 0;
       let deferred = 0;
       let at = '';
-      for (const material of this.#learningEligibility.projectEntries(bookId, this.#learningCandidates(bookId, false))) {
-        if (material.kind === 'word-tracked-edit') continue; // Retention waits for a future consumer, not a required human inclusion.
+      // Word retention waits for a future consumer, not a required human inclusion, so it is not enumerated here.
+      for (const material of this.#learningEligibility.projectEntries(bookId, this.#learningCandidates(bookId, false, false))) {
         if (material.state === 'pending' || material.state === 'changed') pending += 1;
         else if (material.state === 'deferred') deferred += 1;
         else continue;
@@ -24244,7 +24266,7 @@ export class EditorialStore {
     'WORD_READING_UNAVAILABLE', 'Word 阅读或来源图无法准确重建。');
     const reading = compiled.readings[choice.mode === 'suggestions' ? 'rejected' : 'accepted'];
     requireStore(reading.usable && reading.blocks.length > 0, 'WORD_READING_UNAVAILABLE',
-      choice.mode === 'suggestions' ? '撤销原修订后没有可编辑的非空稿件；请明确选择并确认接受修订后的基线。' : '接受修订后的阅读没有可编辑的非空稿件。');
+      choice.mode === 'suggestions' ? '撤销原修订后没有可编辑的非空稿件；请明确选择并确认「直接并入正文（作为定稿基线）」。' : '接受修订后的阅读没有可编辑的非空稿件。');
     const fidelity = wordImportFidelityReport(native.parsed.fidelity, choice.mode, reading.marks.length, disposition);
     requireStore(fidelity !== undefined, 'WORD_READING_UNAVAILABLE', '所选 Word 阅读没有完整保真计划。');
     const ledger = this.#learningLedger();
@@ -24527,12 +24549,9 @@ export class EditorialStore {
         globalEnabled: reviewed.word.prepared.target.controls.global.enabled,
         bookExcluded: reviewed.word.prepared.target.controls.book.excluded,
         sourceTemplateCount: reviewed.word.compiled.templates.length,
-        eligibleSampleCount: !reviewed.word.prepared.choice.learnFromEdits || !reviewed.word.prepared.target.controls.global.enabled ||
-          reviewed.word.prepared.target.controls.book.excluded ? 0 : reviewed.word.prepared.target.kind === 'new-book'
-          ? reviewed.word.compiled.templates.length : reviewed.word.prepared.target.controls.materials
-            .filter(({ standing }) => standing.choice === 'book' || standing.choice === 'house').length,
+        eligibleSampleCount: wordIntakeRecords(reviewed.word)!.eligibleSamples,
       } }),
-      recordsToCreate: recordsToCreate(plan, target.kind),
+      recordsToCreate: recordsToCreate(plan, target.kind, wordIntakeRecords(reviewed.word)),
       nonEffects: nonEffects(plan),
       workflowProfile: {
         id: this.#workflowProfile.projection.id,
@@ -25364,7 +25383,10 @@ export class EditorialStore {
     try {
       return await operation();
     } catch (error) {
-      if (error instanceof ExportLedgerError || error instanceof AnalysisError) throw new StoreError(error.code, error.message);
+      // A missing or changed Word source mapping is a refusal of this export, never a fallback.
+      if (error instanceof ExportLedgerError || error instanceof AnalysisError || error instanceof ImportRetentionError) {
+        throw new StoreError(error.code, error.message);
+      }
       if (error instanceof BoundedStoreFatalError) {
         this.#poisoned = true;
         throw new StoreFatalError(error);
