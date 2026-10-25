@@ -22,7 +22,7 @@ import {
   type TransmitTicket,
 } from '../provider/egress-gate.js';
 import { transmitOnce } from '../provider/live-transmission.js';
-import type { ResolvedModelFixture } from '../provider/model-fixture.js';
+import { localFixtureRegisteredProfile, type LocalFixtureExecutionContext, type LocalFixtureRuntimeContext, type ResolvedModelFixture } from '../provider/model-fixture.js';
 import { ProviderResultCache, ProviderResultCacheError, type ProviderTestItemSlice } from '../provider/provider-result-cache.js';
 import {
   CONFLICT_REGENERATE_KIND,
@@ -177,6 +177,7 @@ export function productionFastRoleRoutes(
 }
 
 export interface FastRoleExecutionDeps {
+  readonly localFixtureRuntime?: () => LocalFixtureRuntimeContext | null;
   readonly requestGovernor: ModelRequestGovernor;
   /** The service probe keeps this registration through its final publication/write cleanup. */
   readonly producer?: ModelRequestProducer;
@@ -309,6 +310,13 @@ export class FastRoleExecutionOwner {
     const { promptContractDigest, systemPrompt } = kind;
     const sessionId = randomUUID();
     const composition = describeComposition(executionRoute, model, promptContractDigest);
+    const localRuntime = live === null ? this.#deps.localFixtureRuntime?.() : null;
+    const localProfile = localRuntime == null ? undefined : localRuntime.catalog.profile(localRuntime.selectedPolicyIdentity,
+      this.#deps.fixture!, localFixtureRegisteredProfile(kind.kindId, null));
+    const localFixture = localRuntime == null || localProfile === undefined ? undefined : { catalog: localRuntime.catalog,
+      execution: { selectedPolicyIdentity: localRuntime.selectedPolicyIdentity, profile: localProfile, kind: kind.kindId, purpose: null,
+        contractId: kind.kindId === 'editorial-polish' ? 'ai7.editorial-polish/1' : kind.kindId === 'conflict-regenerate' ? 'ai7.conflict-regenerate/1' : null,
+        composition, categories: [kind.category] } satisfies LocalFixtureExecutionContext };
     const bindingDigest = sha256Hex(`${kind.kindId}\u0000${sessionId}\u0000${composition.digest}`);
     const slotBinding: CredentialSlotBinding | null = live === null || route === null ? null : {
       bindingDigest, modelRole: route.modelRole, slot: route.profile.credentialSlot, credentialReference, isCurrent,
@@ -321,7 +329,7 @@ export class FastRoleExecutionOwner {
       // The editor's own manuscript words, under the kind's own category: the local route, or a remote one whose rule names it.
       outboundDataCategory: route === null ? kind.category : categoryIn(kind, route.operationalScope),
       policy: route === null
-        ? { operationalScope: 'development-ci', providerProcessingVersion: 'v1', liveTransmissionAllowed: false, authorizedLiveTransmissionCount: 0 }
+        ? { operationalScope: 'development-ci', providerProcessingVersion: localRuntime == null ? 'v1' : 'v29', liveTransmissionAllowed: false, authorizedLiveTransmissionCount: 0 }
         : route.operationalScope === 'ordinary-production'
           ? { operationalScope: 'ordinary-production', providerProcessingVersion: route.providerProcessingVersion as OrdinaryProductionProviderProcessingVersion, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' }
           : { operationalScope: 'developer-live', providerProcessingVersion: route.providerProcessingVersion as DeveloperLiveProviderProcessingVersion, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
@@ -373,7 +381,8 @@ export class FastRoleExecutionOwner {
         systemPrompt,
         promptContractDigest,
         adapterFactory: (codes) => {
-          if (live === null || route === null || slotBinding === null) return new Ai7LocalDeterministicAdapter(this.#deps.fixture!, promptContractDigest, codes);
+          if (live === null || route === null || slotBinding === null) return new Ai7LocalDeterministicAdapter(this.#deps.fixture!, promptContractDigest, codes,
+            localFixture === undefined ? {} : { localFixture });
           const nativeFetch = live.runtime.nativeFetch;
           // Before the adapter enters its sender (`beforeSend`) the refusal is an observed no-send. Inside the transport the
           // adapter cannot tell it apart from a sent request's rejection, so it stays unknown unless the wrapper proves no-send.

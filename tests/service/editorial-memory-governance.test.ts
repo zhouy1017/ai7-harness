@@ -945,7 +945,7 @@ it('advances to the current reader over a revision-90 store of /1 records withou
   store.markCleanShutdown(); store.close(); store = undefined;
   const stamped = new DatabaseSync(dbPath);
   try {
-    expect(stamped.prepare('PRAGMA user_version').get()!.user_version).toBe(93); expect(learningRows(stamped)).toEqual(before);
+    expect(stamped.prepare('PRAGMA user_version').get()!.user_version).toBe(94); expect(learningRows(stamped)).toEqual(before);
     expect(historicalFixtureRows(stamped).filter((entry) => constructed.rows.some((prior) => prior.table === entry.table))).toEqual(constructed.rows);
     expect(stamped.prepare("SELECT name, tbl_name, sql FROM sqlite_schema WHERE type = 'trigger' ORDER BY name").all()).toEqual(constructed.triggers);
   } finally { stamped.close(); }
@@ -976,7 +976,7 @@ it.each(['partial-stamp', 'publication'] as const)('refuses to open over a %s in
   if (legacyRead !== null) expect(legacyRead).toHaveBeenCalledWith(false);
   const after = new DatabaseSync(join(roots!.dataRoot, 'store', 'ai7.sqlite'));
   try {
-    expect(after.prepare('PRAGMA user_version').get()!.user_version).toBe(damage === 'partial-stamp' ? 90 : 93);
+    expect(after.prepare('PRAGMA user_version').get()!.user_version).toBe(damage === 'partial-stamp' ? 90 : 94);
     if (beforePartial !== undefined) expect(historicalFixtureRows(after)).toEqual(beforePartial);
   } finally { after.close(); }
 });

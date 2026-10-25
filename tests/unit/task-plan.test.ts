@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ManifestBlockInput } from '../../src/service/analysis/coverage-manifest.js';
-import type { BaselineAnalysisProjection, TaskPlanProjection, TaskPlanStartProjection } from '../../src/shared/protocol.js';
+import type { BaselineAnalysisProjection, LocalFixtureProfile, SelectedPolicyIdentity, TaskPlanProjection, TaskPlanStartProjection } from '../../src/shared/protocol.js';
 import {
   ACCOUNT_LIMIT_UNKNOWN,
   BUDGET_NOT_SET,
@@ -63,6 +63,31 @@ const BLOCKS: ReadonlyArray<ManifestBlockInput> = [
   block(7, 'heading', 3, '第三章'),
   block(8, 'paragraph', 250),
 ];
+
+describe('selected policy drift display (#1161)', () => {
+  const selected: SelectedPolicyIdentity = { providerProcessingVersion: 'v29', providerProcessingSha256: 'c9545a5f461a7791115c1f4664bbd731757775951f814d39c28b12c85af88c9d',
+    activePolicySetVersion: 'v21', activePolicySetSha256: '4b845e924df777f440b07d53ba6e31447e0fe0b004e86efa89bf76554fb05392' };
+  const common = { schema: 'ai7.local-fixture-profile/1', policyVersion: 'v29', policySha256: selected.providerProcessingSha256,
+    activePolicySetVersion: 'v21', activePolicySetSha256: selected.activePolicySetSha256 } as const;
+  const legacy: LocalFixtureProfile = { ...common, kind: 'legacy', profileId: 'development-ci-legacy-local-fixture-809c96f2',
+    manifestSha256: '2572c1b5aa05d6ccc9a60a2a8a03ba2cefc10d5f48c1a85377d53797360bc0d2', registeredProfile: 'review' };
+  const rule: LocalFixtureProfile = { ...common, kind: 'rule', ruleId: 'development-ci-fixture-review' };
+  it('labels frozen identity transitions and historical absence through driftEntry', () => {
+    expect(driftEntry({ field: 'selectedPolicyIdentity', label: 'old label', prior: '历史记录未保存', proposed: selected,
+      materiality: 'material' }, BLOCKS)).toEqual({ field: 'selectedPolicyIdentity', label: '已选处理策略身份', prior: '历史记录未保存',
+      proposed: 'Provider Processing v29 · 策略集 v21', materiality: 'material' });
+    const production: SelectedPolicyIdentity = { ...selected, providerProcessingVersion: 'v30', providerProcessingSha256: 'f12df1d43cfc9f52b999c2cc8a6e9bac419177d42210d3bbe8c5008ba8d6a59e' };
+    expect(driftEntry({ field: 'selectedPolicyIdentity', label: '', prior: selected, proposed: production, materiality: 'material' }, BLOCKS))
+      .toMatchObject({ prior: 'Provider Processing v29 · 策略集 v21', proposed: 'Provider Processing v30 · 策略集 v21' });
+  });
+  it('keeps legacy and rule profile arms distinct from budgets and reuse counts', () => {
+    expect(driftEntry({ field: 'localFixtureProfile', label: 'old label', prior: legacy, proposed: rule, materiality: 'material' }, BLOCKS))
+      .toMatchObject({ label: '本地夹具配置', prior: '本地夹具 v29 · 策略集 v21 · 兼容配置 review',
+        proposed: '本地夹具 v29 · 策略集 v21 · 规则 development-ci-fixture-review' });
+    expect(driftEntry({ field: 'localFixtureProfile', label: '', prior: rule, proposed: '历史记录未保存', materiality: 'material' }, BLOCKS))
+      .toMatchObject({ prior: '本地夹具 v29 · 策略集 v21 · 规则 development-ci-fixture-review', proposed: '历史记录未保存' });
+  });
+});
 
 describe('the range a plan reads', () => {
   it('sums the graphemes of the range, or of the whole revision', () => {

@@ -4,7 +4,13 @@ import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import {
   J03_TASK_GOAL,
   isTrustedOperationalScope,
+  isSupportedProviderProcessingVersion,
+  selectedPolicyIdentityOf,
+  localFixtureProfileOf,
+  isResultSetPolicyPin,
+  type SelectedPolicyIdentity,
   type DeveloperLiveProviderProcessingVersion,
+  type OrdinaryProductionProviderProcessingVersion,
   type ForegroundExecutionBoundaryProjection,
   type LaunchPolicyProjection,
   type ProviderProcessingPin,
@@ -39,6 +45,8 @@ import {
   MAX_TASK_INTENT_GOAL_LENGTH,
 } from '../shared/protocol.js';
 import { isRecord, canonicalRecord as analysisCanonicalRecord } from './analysis/canonical.js';
+import { providerPlanPolicyMetadata } from './analysis/plan-boundary.js';
+import { DialogueLedger } from './dialogue/dialogue-ledger.js';
 import { ACTIVE_SET_VERSION, DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION } from './launch-policy.js';
 import {
   ANALYSIS_RESULT_SET_REVISION_58_SQL,
@@ -512,7 +520,9 @@ export const EDITORIAL_MEMORY_SCHEMA_VERSION = 91;
 export const MODEL_REQUEST_ADMISSION_SCHEMA_VERSION = 92;
 /** Additive Word source/choice/sample layer; authoring successor under Issue #1132 revision 13. */
 export const WORD_TRACKED_IMPORT_SCHEMA_VERSION = 93;
-export const LATEST_SCHEMA_VERSION = WORD_TRACKED_IMPORT_SCHEMA_VERSION;
+/** First reader of selected original-field identity and local-fixture profile records; no SQL shape change. */
+export const POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION = 94;
+export const LATEST_SCHEMA_VERSION = POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION;
 /** The custom analysis kind family slice 7f brings (ADR 0090 item 4): admitted here so it needs no second rebuild. */
 const CUSTOM_ANALYSIS_KIND_GLOB = 'custom-analysis/[a-z0-9-]*' as const;
 const CUSTOM_ANALYSIS_CONTRACT_VERSION_GLOB = 'ai7.custom-analysis*/[0-9]*' as const;
@@ -1516,7 +1526,7 @@ function transact<T>(db: DatabaseSync, body: () => T): T {
  * that used to spell `development-ci`, `v1`, and `0` out for themselves.
  */
 const PROVIDER_PROCESSING_PINS: Readonly<Record<TrustedOperationalScope, ProviderProcessingPin>> = {
-  'development-ci': { operationalScope: 'development-ci', version: 'v1', decision: 'deny', authorizedLiveTransmissionCount: 0 },
+  'development-ci': { operationalScope: 'development-ci', version: 'v29', decision: 'deny', authorizedLiveTransmissionCount: 0 },
   'developer-live': { operationalScope: 'developer-live', version: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' },
   // The editor's own model service under the local production launch (Issue #811): Provider Processing v19, bounded by the Run.
   'ordinary-production': { operationalScope: 'ordinary-production', version: ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION, decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' },
@@ -1524,6 +1534,7 @@ const PROVIDER_PROCESSING_PINS: Readonly<Record<TrustedOperationalScope, Provide
 
 /** The developer-live versions earlier launches selected, whose retained records stay readable after a successor is selected. */
 const RETAINED_DEVELOPER_LIVE_VERSIONS: readonly DeveloperLiveProviderProcessingVersion[] = ['v5', 'v9', 'v10', 'v11', 'v12', 'v14', 'v16', 'v18', 'v20', 'v22'];
+const RETAINED_ORDINARY_PRODUCTION_VERSIONS: readonly OrdinaryProductionProviderProcessingVersion[] = ['v13', 'v15', 'v17', 'v19', 'v21', 'v23', 'v25', 'v26', 'v27'];
 
 /**
  * The pin a stored value carries, or `null` when it is not exactly the pin of the scope it names.
@@ -1536,13 +1547,15 @@ function providerProcessingPinOf(value: unknown): ProviderProcessingPin | null {
   if (typeof scope !== 'string' || !isTrustedOperationalScope(scope)) return null;
   const pin = PROVIDER_PROCESSING_PINS[scope];
   if (canonicalJson(value) === canonicalJson(pin)) return pin;
-  // Retained records keep their original immutable policy identity; only new plans use the current pin.
-  if (scope !== 'developer-live') return null;
-  for (const version of RETAINED_DEVELOPER_LIVE_VERSIONS) {
-    const predecessor: ProviderProcessingPin = { operationalScope: 'developer-live', version, decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' };
-    if (canonicalJson(value) === canonicalJson(predecessor)) return predecessor;
-  }
-  return null;
+  // A closed historical version keeps its exact recorded decision/count; it never acquires today's identity.
+  const retained: ProviderProcessingPin[] = [
+    { operationalScope: 'development-ci', version: 'v1', decision: 'deny', authorizedLiveTransmissionCount: 0 },
+    ...RETAINED_DEVELOPER_LIVE_VERSIONS.map((version) => ({ operationalScope: 'developer-live' as const, version,
+      decision: 'eligible-only' as const, authorizedLiveTransmissionCount: 'bounded-by-run' as const })),
+    ...RETAINED_ORDINARY_PRODUCTION_VERSIONS.map((version) => ({ operationalScope: 'ordinary-production' as const, version,
+      decision: 'eligible-only' as const, authorizedLiveTransmissionCount: 'bounded-by-run' as const })),
+  ];
+  return retained.find((candidate) => canonicalJson(value) === canonicalJson(candidate)) ?? null;
 }
 
 /**
@@ -1597,8 +1610,9 @@ export function foregroundDenialReasons(pin: ProviderProcessingPin): readonly [s
  * two can never drift. Everything else about the plan — the denied production binding, the fixed
  * steps, the frozen digests — is what it always was.
  */
-export function providerResolutionPlanValue(credentialReference: string, pin: ProviderProcessingPin) {
+export function providerResolutionPlanValue(credentialReference: string, pin: ProviderProcessingPin, selectedPolicyIdentity?: SelectedPolicyIdentity) {
   return {
+    ...(selectedPolicyIdentity === undefined ? {} : { selectedPolicyIdentity }),
     role: 'Main Editorial Role',
     capabilities: [],
     providerId: 'deepseek-open-platform',
@@ -1778,7 +1792,8 @@ function validateStoredCanonicalRows(db: DatabaseSync): void {
       // of that same pin. Under `development-ci` this is byte for byte the check it always was.
       const pin = providerProcessingPinOf(plan.providerProcessing);
       requireTask(pin !== null, 'TASK_RECORD_INVALID', 'Provider Resolution Plan 的 Provider Processing pin 无效。');
-      requireTask(row.provider_plan_json === canonicalJson(providerResolutionPlanValue(credentialReference, pin)),
+      const selected = providerPlanPolicyMetadata(plan);
+      requireTask(row.provider_plan_json === canonicalJson(providerResolutionPlanValue(credentialReference, pin, selected.selectedPolicyIdentity)),
         'TASK_RECORD_INVALID', 'Provider Resolution Plan 无效。');
       requireTask(row.execution_plan_json === canonicalJson(executionPlanValue(pin)),
         'TASK_RECORD_INVALID', 'Execution Plan 无效。');
@@ -2943,7 +2958,9 @@ export class TaskAuthorizationStore {
       sourceVersionEvidence: { sourceVersionId: facts.sourceVersionId, readable: false },
     } as const;
     const pin = planProviderProcessingPin(launchPolicy);
-    const providerPlan = providerResolutionPlanValue(facts.credentialReference, pin);
+    const selected = launchPolicy.selectedPolicyIdentity === undefined ? undefined : selectedPolicyIdentityOf(launchPolicy.selectedPolicyIdentity);
+    requireTask(selected !== null && (pin.version !== 'v29' || selected !== undefined), 'TASK_POLICY_UNAVAILABLE', '当前计划缺少已选处理策略身份。');
+    const providerPlan = providerResolutionPlanValue(facts.credentialReference, pin, selected);
     const executionPlan = executionPlanValue(pin);
     const records = {
       manuscriptPin: canonicalRecord(manuscriptPin),
@@ -3031,10 +3048,10 @@ export class TaskAuthorizationStore {
   #requireDeniedPolicy(policy: LaunchPolicyProjection): void {
     requireTask(policy.integrityState === 'verified' && policy.denialReason === null &&
       policy.operationalScope === 'development-ci' && policy.activePolicySetVersion === ACTIVE_SET_VERSION &&
-      policy.providerProcessing.version === 'v1' && policy.providerProcessing.decision === 'deny' &&
+      policy.providerProcessing.version === 'v29' && policy.providerProcessing.decision === 'deny' &&
       policy.providerProcessing.authorizedLiveTransmissionCount === 0 &&
       policy.providerProcessing.liveTransmissionAllowed === false,
-    'TASK_POLICY_UNAVAILABLE', '无法建立可信的 development-ci Provider Processing v1 拒绝记录。');
+    'TASK_POLICY_UNAVAILABLE', '无法建立可信的 development-ci Provider Processing v29 拒绝记录。');
   }
 
   #available(bookId: string): TaskAuthorizationProjection {
@@ -3072,10 +3089,57 @@ export const IDLE_RUN_AUTHORIZATIONS_SQL = ANALYSIS_LEDGER_SCHEMA_SQL.analysis_r
   "sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64),\n    start_when TEXT NOT NULL DEFAULT 'now' CHECK(start_when IN ('now', 'idle'))",
 );
 
+/** Reader 94 semantics are checked before backup, reconstruction, migration or package use. No external log is needed to open retained data. */
+export function validatePolicyOriginalFieldRecords(db: DatabaseSync): void {
+  const revision = Number(db.prepare('PRAGMA user_version').get()?.user_version);
+  const admitted = revision >= POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION;
+  const exists = (table: string): boolean => db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) !== undefined;
+  const metadata = (value: unknown): void => {
+    if (Array.isArray(value)) { value.forEach(metadata); return; }
+    if (!isRecord(value)) return;
+    const hasIdentity = Object.hasOwn(value, 'selectedPolicyIdentity');
+    const hasProfile = Object.hasOwn(value, 'localFixtureProfile');
+    const variant = value.schema === 'ai7.dialogue-attempt/2' || value.schema === 'ai7.dialogue-execution-binding/2';
+    requireTask(admitted || (!hasIdentity && !hasProfile && !variant), 'SCHEMA_UNSUPPORTED', '此处理策略记录需要 Reader 94；没有修改数据。');
+    if (hasIdentity || hasProfile) {
+      const selected = selectedPolicyIdentityOf(value.selectedPolicyIdentity);
+      requireTask(selected !== null && (!hasProfile || localFixtureProfileOf(value.localFixtureProfile, selected) !== null),
+        'TASK_RECORD_INVALID', '处理策略或本地夹具配置记录无效。');
+    }
+    Object.values(value).forEach(metadata);
+  };
+  for (const table of ['provider_resolution_plans', 'analysis_plan_records', 'analysis_plan_revisions', 'analysis_execution_bindings', 'analysis_result_set_revisions',
+    'dialogue_attempts', 'dialogue_execution_bindings']) {
+    if (!exists(table)) continue;
+    for (const row of db.prepare(`SELECT * FROM ${table}`).all()) {
+      const json = asString(row.canonical_json);
+      requireTask(sha256(json) === row.sha256, 'TASK_RECORD_INVALID', '处理策略记录摘要不一致。');
+      const value = parseCanonicalJson(json);
+      metadata(value);
+      if ((table === 'analysis_execution_bindings' || table === 'analysis_result_set_revisions') && isRecord(value)) {
+        requireTask(isResultSetPolicyPin(value.policyPin) && (admitted || value.policyPin.providerProcessingVersion !== 'v29' && value.policyPin.providerProcessingVersion !== 'v30'),
+          'TASK_RECORD_INVALID', '结果或执行绑定的策略 pin 与读者版本不一致。');
+      }
+      if ((table === 'provider_resolution_plans' || table === 'analysis_plan_records' && row.component === 'provider-resolution-plan') && isRecord(value)) {
+        providerPlanPolicyMetadata(value);
+      }
+    }
+  }
+  if (exists('dialogue_tasks')) {
+    const ledger = new DialogueLedger(db);
+    for (const row of db.prepare('SELECT dialogue_id FROM dialogue_tasks').all()) {
+      const id = asString(row.dialogue_id);
+      requireTask(ledger.globalTask(id) !== null || ledger.task(id) !== null, 'TASK_RECORD_INVALID', '对话任务记录无效。');
+      ledger.attempts(id);
+    }
+  }
+}
+
 export function validateTaskAuthorizationSchema(db: DatabaseSync): void {
   requireTask(Number(db.prepare('PRAGMA user_version').get()?.user_version) === LATEST_SCHEMA_VERSION, 'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');
   validateJ03TaskAuthorizationSchema(db);
   validateAnalysisLedgerSchema(db);
+  validatePolicyOriginalFieldRecords(db);
   for (const row of db.prepare('SELECT start_when, canonical_json FROM analysis_run_authorizations').all()) {
     const record = parseCanonicalJson(asString(row.canonical_json));
     requireTask(isRecord(record) && (record.startWhen ?? 'now') === row.start_when, 'TASK_RECORD_INVALID', '任务开始时机与授权记录不一致。');
@@ -3083,7 +3147,13 @@ export function validateTaskAuthorizationSchema(db: DatabaseSync): void {
 }
 
 export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
+  validatePolicyOriginalFieldRecords(db);
   if (Number(db.prepare('PRAGMA user_version').get()?.user_version) === LATEST_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  if (Number(db.prepare('PRAGMA user_version').get()?.user_version) === WORD_TRACKED_IMPORT_SCHEMA_VERSION) {
+    validateRequestAdmissionRecords(db, true);
+    transact(db, () => { db.exec(`PRAGMA user_version = ${LATEST_SCHEMA_VERSION}`); validateTaskAuthorizationSchema(db); });
+    return;
+  }
   // The genuine governed predecessor is proved by its own reader before the legacy refusal below.
   if (Number(db.prepare('PRAGMA user_version').get()?.user_version) === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION) {
     validateRequestAdmissionRecords(db, true);

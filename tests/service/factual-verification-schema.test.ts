@@ -27,7 +27,7 @@ function dropFactualVerificationRelations(db: DatabaseSync): void {
 describe('revision 78', () => {
   it('migrates an exact revision-77 store by adding its four relations, moving nothing else, and refuses a 78 without them', async () => {
     expect(FACTUAL_VERIFICATION_SCHEMA_VERSION).toBe(78);
-    expect(LATEST_SCHEMA_VERSION).toBe(FACTUAL_VERIFICATION_SCHEMA_VERSION + 15);
+    expect(LATEST_SCHEMA_VERSION).toBe(FACTUAL_VERIFICATION_SCHEMA_VERSION + 16);
     expect(PROPOSAL_REVIEW_SCHEMA_VERSION).toBe(77);
     roots = await createServiceTestRoots('ai7-factual-verification-schema-');
     const path = join(roots.dataRoot, 'store', 'ai7.sqlite');

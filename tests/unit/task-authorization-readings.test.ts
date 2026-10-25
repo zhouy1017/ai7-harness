@@ -11,7 +11,7 @@ import {
   providerResolutionPlanValue,
 } from '../../src/service/task-authorization.js';
 import { ACTIVE_SET_VERSION, DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION } from '../../src/service/launch-policy.js';
-import type { LaunchPolicyProjection } from '../../src/shared/protocol.js';
+import type { LaunchPolicyProjection, ProviderProcessingPin } from '../../src/shared/protocol.js';
 
 // Unit suite (L1) for the readings the provider-denied Task kind derives from its bound launch.
 // `#requireDeniedPolicy` admits only the `development-ci` denial, so a Run under a second scope
@@ -28,7 +28,7 @@ function launch(scope: 'development-ci' | 'developer-live'): LaunchPolicyProject
     operationalScope: scope,
     activePolicySetVersion: ACTIVE_SET_VERSION,
     providerProcessing: {
-      version: live ? DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION : 'v1',
+      version: live ? DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION : 'v29',
       decision: live ? 'eligible-only' : 'deny',
       authorizedLiveTransmissionCount: live ? 'bounded-by-run' : 0,
       liveTransmissionAllowed: live,
@@ -56,8 +56,17 @@ const frozen = {
 };
 
 describe('the denied Task kind reads its statements from the bound launch', () => {
-  it('states the development-ci denial exactly as it always has', () => {
-    const pin = planProviderProcessingPin(launch('development-ci'));
+  it('states new development-ci v29 denial without relabeling the retained v1 reading', () => {
+    const selected = launch('development-ci');
+    const pin = planProviderProcessingPin(selected);
+    expect(pin).toEqual({ operationalScope: 'development-ci', version: 'v29', decision: 'deny', authorizedLiveTransmissionCount: 0 });
+    expect(planStopCondition(pin)).toBe('Provider Processing v29 denies dispatch');
+    expect(() => planProviderProcessingPin({ ...selected, providerProcessing: { ...selected.providerProcessing, version: 'v1' } }))
+      .toThrowError(TaskAuthorizationError);
+  });
+
+  it('states a retained development-ci v1 pin exactly as it always has', () => {
+    const pin: ProviderProcessingPin = { operationalScope: 'development-ci', version: 'v1', decision: 'deny', authorizedLiveTransmissionCount: 0 };
     expect(pin).toEqual({
       operationalScope: 'development-ci',
       version: 'v1',
@@ -117,12 +126,12 @@ describe('the denied Task kind reads its statements from the bound launch', () =
     expect(() => planProviderProcessingPin({ ...forged, operationalScope: null })).toThrowError(TaskAuthorizationError);
   });
 
-  it('pins an ordinary-production plan to Provider Processing v27, bounded by the Run (Issues #811, #1044)', () => {
+  it('pins a new ordinary-production plan to Provider Processing v30, bounded by the Run', () => {
     const production: LaunchPolicyProjection = {
       ...launch('development-ci'),
       operationalScope: 'ordinary-production',
       providerProcessing: {
-        version: 'v27',
+        version: 'v30',
         decision: 'eligible-only',
         authorizedLiveTransmissionCount: 'bounded-by-run',
         liveTransmissionAllowed: true,
@@ -132,8 +141,8 @@ describe('the denied Task kind reads its statements from the bound launch', () =
       },
     };
     const pin = planProviderProcessingPin(production);
-    expect(pin).toEqual({ operationalScope: 'ordinary-production', version: 'v27', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' });
-    expect(planStopCondition(pin)).toBe('Provider Processing v27 admits dispatch bounded by the Run');
+    expect(pin).toEqual({ operationalScope: 'ordinary-production', version: 'v30', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' });
+    expect(planStopCondition(pin)).toBe('Provider Processing v30 admits dispatch bounded by the Run');
     // A launch whose stated version disagrees with its scope is still refused rather than pinned.
     expect(() => planProviderProcessingPin({ ...production, providerProcessing: { ...production.providerProcessing, version: 'v13' } }))
       .toThrowError(TaskAuthorizationError);

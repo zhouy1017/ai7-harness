@@ -1,11 +1,12 @@
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { randomUUID } from 'node:crypto';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { Session } from '@deepseek-ai/dsh-session';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
-import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy, resolveSourceCheckoutLaunchPolicySync } from '../../src/service/launch-policy.js';
+import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, readRetainedBoundAnalysisPolicySync, resolveSourceCheckoutLaunchPolicy, resolveSourceCheckoutLaunchPolicySync } from '../../src/service/launch-policy.js';
 import { DialogueExecutionOwner, productionDialogueRoute } from '../../src/service/dialogue/dialogue-execution.js';
 import { admittedGlobalAgentRoute, prepareGlobalAgentDisclosure, startGlobalAgentTurn } from '../../src/service/dialogue/global-agent-session.js';
 import { buildDialogueMessage } from '../../src/service/dialogue/contract.js';
@@ -20,6 +21,7 @@ import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
 import { parseReviewCategoryUnitMessageHeader } from '../../src/service/review/review-category-contract.js';
 import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/assurance-sampling-contract.js';
 import { pinEditorialWorkspaceProfileRevision2 } from '../support/sample1-baseline.js';
+import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
 
 // One explicit model-request capability per test application.
 // Registered first: the stack-ordered final hook runs after existing consumer teardown.
@@ -30,11 +32,13 @@ afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(
 // Real ordinary-production policy, store, Harness, gate, broker and session log. Only the provider stream is synthetic.
 let roots: ServiceTestRoots;
 let store: EditorialStore;
+let closedForNativeRejection = false;
 let owner: DialogueExecutionOwner;
 let policy: LaunchPolicyProjection;
 let credentialReference: string;
 const calls: Array<{ url: string; body: string }> = [];
 let transport: (signal?: AbortSignal) => Promise<Response>;
+let resolveCredential: (reference: string) => Promise<string | null>;
 const binding = ORDINARY_PRODUCTION_ALLOWED_BINDINGS.find((entry) => entry.route === 'opencode-go')!;
 const encoder = new TextEncoder();
 const sse = (value: unknown): Uint8Array => encoder.encode(`data: ${JSON.stringify(value)}\n\n`);
@@ -75,26 +79,224 @@ function inspect(dialogueId: string) { return store.inspectGlobalAgentDialogue(d
 function usage() { return store.inspectUsage({ range: 'all', groupBy: 'book' }); }
 async function open(): Promise<void> {
   store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  let connection = store.getModelServiceRouteConnection(binding.route);
+  if (connection?.credentialOperationState !== 'ready') connection = store.saveModelServiceConnection('合成全域对话连接', null, 'ready', binding.route);
+  credentialReference = connection.credentialReference;
+  store.selectModelServiceRoute(binding.route);
+  store.selectFastRoleModel(binding.route, binding.model);
+  const selected = { ...binding, credentialReference };
+  policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', selected, selected);
   store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy,
     live: { scope: 'ordinary-production', ...binding, credentialReference, runBudgetCeiling: 'unset' } });
 }
 beforeEach(async () => {
+  closedForNativeRejection = false;
   roots = await createServiceTestRoots('ai7-global-production-');
   credentialReference = randomUUID(); calls.length = 0;
   policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', { ...binding, credentialReference }, { ...binding, credentialReference });
   expect(policy.integrityState).toBe('verified');
   await open();
   transport = async () => response();
+  resolveCredential = async () => 'synthetic-test-placeholder';
   const nativeFetch = (async (url: string, init: { body: string; signal?: AbortSignal }) => {
     calls.push({ url, body: init.body }); return transport(init.signal);
   }) as unknown as typeof fetch;
   owner = new DialogueExecutionOwner({ requestGovernor, records: store, fixture: null, sessionLogRoot: store.harnessSessionLogRoot,
     live: productionDialogueRoute({ scope: 'ordinary-production', nativeFetch }, () => policy, () => credentialReference,
-      { resolve: async (reference) => { expect(reference).toBe(credentialReference); return 'synthetic-test-placeholder'; } }) });
+      { resolve: async (reference) => { expect(reference).toBe(credentialReference); return resolveCredential(reference); } }) });
 });
-afterEach(async () => { vi.restoreAllMocks(); await owner?.dispose(); await store?.close(); await roots?.dispose(); });
+afterEach(async () => { vi.restoreAllMocks(); await owner?.dispose(); if (!closedForNativeRejection) store?.close(); await roots?.dispose(); });
 
-describe('v27 Book-less Global Agent', () => {
+describe('v30 Book-less Global Agent', () => {
+  it.each(['extra', 'missing', 'null', 'scope', 'reader'] as const)('original-field native reader refuses closed /2 %s corruption without mutation', async (damage) => {
+    const turn = start({ kind: 'ask', question: '合成原文问题。', sources: [] });
+    await waitFor(() => inspect(turn.dialogueId).attempts[0]?.state === 'completed');
+    await owner.dispose(); store.markCleanShutdown(); store.close(); closedForNativeRejection = true;
+    const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
+    const db = new DatabaseSync(path);
+    try {
+      if (damage === 'reader') db.exec('PRAGMA user_version = 93');
+      else {
+        const table = damage === 'scope' ? 'dialogue_tasks' : 'dialogue_attempts';
+        const key = damage === 'scope' ? 'dialogue_id' : 'attempt_id';
+        const id = damage === 'scope' ? turn.dialogueId : turn.attemptId;
+        const value = JSON.parse(String(db.prepare(`SELECT canonical_json FROM ${table} WHERE ${key} = ?`).get(id)!.canonical_json));
+        if (damage === 'extra') value.extra = false;
+        if (damage === 'missing') delete value.credentialUpdatedAt;
+        if (damage === 'null') value.retainedAncestrySha256 = null;
+        if (damage === 'scope') value.operationalScope = 'development-ci';
+        const json = canonicalJson(value);
+        db.exec(`DROP TRIGGER ${table}_no_update`);
+        db.prepare(`UPDATE ${table} SET canonical_json = ?, sha256 = ? WHERE ${key} = ?`).run(json, sha256Hex(json), id);
+      }
+    } finally { db.close(); }
+    const before = readFileSync(path);
+    await expect(EditorialStore.open(roots.dataRoot, roots.codeRoot)).rejects.toThrow();
+    expect(readFileSync(path)).toEqual(before);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('original-field qualification carries authentic predecessor /1 words into a new /2 without de-redaction or restamping', async () => {
+    // Build the predecessor through its real pinned interpreter and Store/transport owners, never by inserting success rows.
+    const selected = { ...binding, credentialReference };
+    const current = policy;
+    const legacy = readRetainedBoundAnalysisPolicySync(roots.codeRoot, { operationalScope: 'ordinary-production', providerProcessingVersion: 'v27',
+      activePolicySetVersion: 'v19', liveTransmissions: 'bounded-by-run' }, selected);
+    expect(legacy?.selectedPolicyIdentity).toBeUndefined(); expect(legacy?.providerProcessing.version).toBe('v27');
+    if (legacy === null) throw new Error('accepted predecessor unavailable');
+    policy = legacy;
+    store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy, live: { scope: 'ordinary-production', ...selected, runBudgetCeiling: 'unset' } });
+    const creation = store.prepareBookCreation('合成旧记录人员', null);
+    const bookId = store.commitBookCreation({ ...creation.proposed, reviewDigest: creation.reviewDigest }).overview.book.bookId;
+    store.updateBookPeople({ bookId, expectedVersion: 0, authors: [], editors: ['合成责编甲'], related: [] });
+    governance('合成责编甲建议保留短句。');
+    transport = async (signal) => heldResponse(signal);
+    const first = start({ ...input(), question: '合成责编甲的建议适用于何处？' });
+    await waitFor(() => (inspect(first.dialogueId).attempts[0]?.fragments.length ?? 0) > 0);
+    await owner.stop(first.attemptId);
+    expect(first.message.question).toBe('的建议适用于何处？'); expect(first.message.globalSources![0]!.text).not.toContain('合成责编甲');
+    const rawAttempt = (): string => {
+      const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+      try { return String(db.prepare('SELECT canonical_json FROM dialogue_attempts WHERE attempt_id = ?').get(first.attemptId)!.canonical_json); }
+      finally { db.close(); }
+    };
+    const historical = rawAttempt(); expect(JSON.parse(historical).schema).toBe('ai7.dialogue-attempt/1');
+    policy = current;
+    store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy, live: { scope: 'ordinary-production', ...selected, runBudgetCeiling: 'unset' } });
+    transport = async () => response();
+    const continued = start({ kind: 'continue', dialogueId: first.dialogueId, attemptId: first.attemptId });
+    await waitFor(() => inspect(first.dialogueId).attempts[1]?.state === 'completed');
+    expect(continued.qualification?.providerProcessingVersion).toBe('v30');
+    expect(continued.message.question).toBe(first.message.question); expect(continued.message.globalSources).toEqual(first.message.globalSources);
+    expect(calls[1]!.body).not.toContain('合成责编甲'); expect(rawAttempt()).toBe(historical);
+  });
+  it('original-field qualification preserves exact existing fields and records prepared /2 truth through real Store controls', async () => {
+    const created = store.prepareBookCreation('合成人员边界', null);
+    const bookId = store.commitBookCreation({ ...created.proposed, reviewDigest: created.reviewDigest }).overview.book.bookId;
+    store.updateBookPeople({ bookId, expectedVersion: 0, authors: [], editors: ['合成责编甲'], related: [] });
+    governance('合成责编甲建议保留短句。');
+    const ask = { ...input(), question: '合成责编甲的建议适用于何处？' };
+    const prepared = prepareGlobalAgentDisclosure(store, owner, policy, ask);
+    expect(prepared).toMatchObject({ textProcessing: 'qualified-original-fields', question: ask.question,
+      selectedPolicyIdentity: { providerProcessingVersion: 'v30', activePolicySetVersion: 'v21' } });
+    expect(prepared.sources[0]!.text).toBe('合成责编甲建议保留短句。');
+    const turn = startGlobalAgentTurn(store, owner, () => policy, ask, prepared.sha256);
+    const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try {
+      const raw = db.prepare('SELECT canonical_json FROM dialogue_attempts WHERE attempt_id = ?').get(turn.attemptId)!;
+      expect(JSON.parse(String(raw.canonical_json))).toMatchObject({ schema: 'ai7.dialogue-attempt/2', textProcessing: 'qualified-original-fields',
+        credentialReference, credentialUpdatedAt: store.getModelServiceRouteConnection(binding.route)!.credentialUpdatedAt,
+        messageSha256: expect.stringMatching(/^[0-9a-f]{64}$/u) });
+      expect(new DialogueLedger(db).attempt(turn.attemptId)).toMatchObject({ binding: null, span: null, outcome: null });
+    } finally { db.close(); }
+    await waitFor(() => inspect(turn.dialogueId).attempts[0]?.state === 'completed');
+    expect(calls).toHaveLength(1);
+    const sent = JSON.parse(calls[0]!.body);
+    expect(sent.messages.at(-1).content).toBe(buildDialogueMessage(turn.message));
+    expect(sent.messages.at(-1).content).toContain('合成责编甲的建议适用于何处？');
+    expect(sent.tools).toBeUndefined();
+  });
+
+  it('original-field qualification refuses same-reference generation rotation after preview', () => {
+    const ask = input(); const prepared = prepareGlobalAgentDisclosure(store, owner, policy, ask);
+    const previous = store.getModelServiceRouteConnection(binding.route)!;
+    const current = store.setModelServiceCredentialState(credentialReference, 'ready');
+    expect(current.credentialReference).toBe(previous.credentialReference);
+    expect(current.credentialUpdatedAt).not.toBe(previous.credentialUpdatedAt);
+    expect(() => startGlobalAgentTurn(store, owner, () => policy, ask, prepared.sha256)).toThrow('已经变化');
+    expect(store.inspectGlobalAgent().history).toEqual([]); expect(calls).toEqual([]);
+  });
+
+  it('original-field qualification rechecks generation inside the actual asynchronous credential interval', async () => {
+    let entered!: () => void; let release!: () => void; let reads = 0;
+    const waiting = new Promise<void>((resolve) => { entered = resolve; });
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    resolveCredential = async () => { if (++reads === 2) { entered(); await released; } return 'synthetic-test-placeholder'; };
+    const turn = start();
+    await waiting;
+    store.setModelServiceCredentialState(credentialReference, 'ready');
+    release();
+    await waitFor(() => inspect(turn.dialogueId).attempts[0]?.state === 'failed');
+    expect(reads).toBe(2); expect(calls).toEqual([]);
+    expect(usage().totals).toMatchObject({ inputTokens: 0, outputTokens: 0 });
+  });
+
+  it('original-field continuation retains the whole contributing source union after a checkbox removal', async () => {
+    governance('合成偏好甲。');
+    // Supervision edits invalidate the whole preference-head pin. A real reference-only memory supplies an independent B.
+    const book = await importSample1Book(store, roots.codeRoot, '合成独立记忆乙');
+    const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+    const block = window.blocks.find((entry) => entry.kind === 'paragraph' && graphemesOf(entry.text).length > 10)!;
+    const mark = store.createEditorialMark({ manuscriptId: book.manuscriptId, branchId: book.branchId,
+      windowStartBlockId: window.blocks[0]!.blockId, clientMarkId: randomUUID(), baseRevisionId: window.revisionId,
+      expectedJournalSequence: window.journalSequence, blockId: block.blockId, baseBlockDigest: block.digest, fromGrapheme: 0, toGrapheme: 2,
+      selectedText: graphemesOf(block.text).slice(0, 2).join(''), kind: 'change-suggestion', highlightColor: null, body: '',
+      proposedText: '合成建议', rationale: '合成理由' });
+    store.recordChangeSuggestionDecision({ manuscriptId: book.manuscriptId, branchId: book.branchId,
+      windowStartBlockId: window.blocks[0]!.blockId, markId: mark.markId, clientDecisionId: randomUUID(),
+      disposition: 'accepted-with-edit', editedText: '合成的编辑改写', reason: null });
+    const signal = store.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }).signals[0]!;
+    store.createEditorialMemory({ clientMemoryId: randomUUID(), signalId: signal.signalId, title: '合成独立记忆乙', editorialDimension: '语言', confidence: 0.5 });
+    transport = async (signal) => heldResponse(signal);
+    const candidates = store.inspectGlobalAgent().sourceCandidates!;
+    const selected = [pinOf(candidates.find((item) => item.kind === 'preference')!), pinOf(candidates.find((item) => item.kind === 'memory')!)];
+    expect(selected).toHaveLength(2);
+    const first = start({ kind: 'ask', question: '合成偏好有哪些边界？', sources: selected });
+    await waitFor(() => (inspect(first.dialogueId).attempts[0]?.fragments.length ?? 0) > 0);
+    await owner.stop(first.attemptId);
+    const pins = first.message.globalSources!.map(pinOf);
+    const secondInput = { kind: 'continue' as const, dialogueId: first.dialogueId, attemptId: first.attemptId, sources: [pins[1]!] };
+    const preview = prepareGlobalAgentDisclosure(store, owner, policy, secondInput);
+    expect(preview.sources.map(pinOf)).toEqual([pins[1]!]);
+    expect(preview.retainedInfluences?.map(pinOf)).toEqual([...pins].sort((a, b) => a.itemId < b.itemId ? -1 : 1));
+    const second = startGlobalAgentTurn(store, owner, () => policy, secondInput, preview.sha256);
+    await waitFor(() => (inspect(first.dialogueId).attempts[1]?.fragments.length ?? 0) > 1);
+    await owner.stop(second.attemptId);
+    const removed = store.inspectGlobalAgent().items.find((item) => item.itemId === pins[0]!.itemId)!;
+    store.recordLearningSupervision({ operation: 'deactivate', targets: [pinOf(removed)], scope: { kind: 'house' },
+      categoryId: 'typos-and-usage', text: '', effect: 'guide' });
+    expect(store.globalAgentSourcesCurrent([pins[1]!])).toBe(true);
+    expect(() => prepareGlobalAgentDisclosure(store, owner, policy, { kind: 'continue', dialogueId: first.dialogueId,
+      attemptId: second.attemptId, sources: [pins[1]!] })).toThrow('来源已经变化');
+    const regenerate = { kind: 'regenerate' as const, dialogueId: first.dialogueId, attemptId: second.attemptId, sources: [pins[1]!] };
+    const regenerated = prepareGlobalAgentDisclosure(store, owner, policy, regenerate);
+    expect(regenerated.kept).toBeNull(); expect(regenerated.retainedInfluences?.map(pinOf)).toEqual([pins[1]!]);
+    transport = async () => response();
+    const third = startGlobalAgentTurn(store, owner, () => policy, regenerate, regenerated.sha256);
+    await waitFor(() => inspect(first.dialogueId).attempts[2]?.state === 'completed');
+    expect(third.message.kept).toBeNull(); expect(third.message.globalSources!.map(pinOf)).toEqual([pins[1]!]);
+    expect(calls).toHaveLength(3);
+  });
+
+  it('original-field qualification fresh-reads same-length log corruption and never substitutes a later repeated question', async () => {
+    transport = async (signal) => heldResponse(signal);
+    const first = start();
+    await waitFor(() => (inspect(first.dialogueId).attempts[0]?.fragments.length ?? 0) > 0);
+    await owner.stop(first.attemptId);
+    const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+    let sessionId: string;
+    try { sessionId = new DialogueLedger(db).attempt(first.attemptId)!.binding!.harnessSessionId; }
+    finally { db.close(); }
+    const path = join(store.harnessSessionLogRoot, `${sessionId}.jsonl`);
+    const bytes = readFileSync(path, 'utf8');
+    const warmed = inspect(first.dialogueId); expect(warmed.attempts[0]!.fragments.length).toBeGreaterThan(0);
+    const corrupted = bytes.replace('"seq":0', '"SEQ":0');
+    expect(Buffer.byteLength(corrupted)).toBe(Buffer.byteLength(bytes)); expect(corrupted).not.toBe(bytes);
+    writeFileSync(path, corrupted);
+    expect(inspect(first.dialogueId).attempts[0]!.fragments).toEqual(warmed.attempts[0]!.fragments);
+    expect(() => prepareGlobalAgentDisclosure(store, owner, policy, { kind: 'continue', dialogueId: first.dialogueId,
+      attemptId: first.attemptId })).toThrow('损坏');
+    writeFileSync(path, bytes);
+    transport = async () => response();
+    const second = start({ kind: 'continue', dialogueId: first.dialogueId, attemptId: first.attemptId });
+    await waitFor(() => inspect(first.dialogueId).attempts[1]?.state === 'completed');
+    expect(second.message.question).toBe(first.message.question);
+    rmSync(path);
+    expect(inspect(first.dialogueId).attempts[1]!.state).toBe('completed');
+    expect(() => prepareGlobalAgentDisclosure(store, owner, policy, { kind: 'regenerate', dialogueId: first.dialogueId,
+      attemptId: second.attemptId })).toThrow('无法核实');
+    expect(calls).toHaveLength(2);
+  });
   it('accepts exact disclosure frames and refuses caller-injected source text, actions and invalid receipts', () => {
     const frame = (op: string, value: unknown) => encoder.encode(JSON.stringify({ id: randomUUID(), op, input: value }));
     const ask = input();
@@ -108,7 +310,7 @@ describe('v27 Book-less Global Agent', () => {
   it('refuses a disclosure after the configured provider credential reference changes, before creating a turn', () => {
     const ask = input(); const preview = prepareGlobalAgentDisclosure(store, owner, policy, ask);
     credentialReference = randomUUID();
-    expect(() => startGlobalAgentTurn(store, owner, () => policy, ask, preview.sha256)).toThrow('发送内容或模型服务已经变化');
+    expect(() => startGlobalAgentTurn(store, owner, () => policy, ask, preview.sha256)).toThrow('模型服务已经变化');
     expect(store.inspectGlobalAgent().history).toEqual([]); expect(calls).toEqual([]);
   });
 
@@ -141,12 +343,12 @@ describe('v27 Book-less Global Agent', () => {
     try {
       expect(db.prepare('SELECT book_id, manuscript_id FROM dialogue_tasks').get()).toEqual({ book_id: null, manuscript_id: null });
       expect(new DialogueLedger(db).attempts(turn.dialogueId)[0]!.binding).toMatchObject({
-        operationalScope: 'ordinary-production', providerProcessingVersion: 'v27', policyRuleId: full.provider.policyRuleId,
+        operationalScope: 'ordinary-production', providerProcessingVersion: 'v30', policyRuleId: full.provider.policyRuleId,
       });
     } finally { db.close(); }
   });
 
-  it('strips a known house person from sources and editor words and never assembles internal notes or unlisted sources', async () => {
+  it('preserves a known house person in existing fields and never assembles internal notes or unlisted sources', async () => {
     const book = await importSample1Book(store, roots.codeRoot, '合成人员与备注边界');
     store.updateBookPeople({ bookId: book.bookId, expectedVersion: 0, authors: [], editors: ['合成责编甲'], related: [] });
     const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
@@ -158,10 +360,13 @@ describe('v27 Book-less Global Agent', () => {
     governance('合成责编甲建议保留短句。');
     const ask = { ...input(), kind: 'ask' as const, question: '合成责编甲的建议适用于何处？' };
     const disclosure = prepareGlobalAgentDisclosure(store, owner, policy, ask);
-    expect(JSON.stringify(disclosure)).not.toMatch(/合成责编甲|合成合同尚未确定/u);
+    expect(disclosure.question).toBe(ask.question);
+    expect(disclosure.sources[0]!.text).toContain('合成责编甲');
+    expect(JSON.stringify(disclosure)).not.toContain('合成合同尚未确定');
     const turn = start(ask); await waitFor(() => inspect(turn.dialogueId).attempts[0]?.state === 'completed');
-    expect(calls[0]!.body).not.toMatch(/合成责编甲|合成合同尚未确定/u);
-    expect(inspect(turn.dialogueId).question).toBe('的建议适用于何处？');
+    expect(calls[0]!.body).toContain('合成责编甲');
+    expect(calls[0]!.body).not.toContain('合成合同尚未确定');
+    expect(inspect(turn.dialogueId).question).toBe(ask.question);
     // Book dialogue uses its own Task/span; the new Book-less usage join must not count it again.
     const bookTurn = store.askAboutSelection(book.bookId, { question: '合成的图书问题。', selection: {
       manuscriptId: book.manuscriptId, branchId: book.branchId, windowStartBlockId: window.blocks[0]!.blockId,
@@ -174,13 +379,13 @@ describe('v27 Book-less Global Agent', () => {
     expect(usage().totals).toMatchObject({ runCount: 0, inputTokens: 210, outputTokens: 48 });
   });
 
-  it('rechecks a changed name filter and eligible pins at the final gate, after disclosure and before credential release', async () => {
+  it('keeps qualified original words stable across name-list changes and refuses stale source pins before credential release', async () => {
     governance('未来责编建议保留短句。');
     const prepared = input(); const disclosure = prepareGlobalAgentDisclosure(store, owner, policy, prepared);
     const book = store.prepareBookCreation('合成人员边界', null);
     const bookId = store.commitBookCreation({ ...book.proposed, reviewDigest: book.reviewDigest }).overview.book.bookId;
     store.updateBookPeople({ bookId, expectedVersion: 0, authors: [], editors: ['未来责编'], related: [] });
-    expect(() => startGlobalAgentTurn(store, owner, () => policy, prepared, disclosure.sha256)).toThrow('已经变化');
+    expect(prepareGlobalAgentDisclosure(store, owner, policy, prepared).sha256).toBe(disclosure.sha256);
     expect(calls).toEqual([]);
     // Invalidated during asynchronous Harness setup: a fresh gate check must still refuse it.
     const turn = start(input());
@@ -200,7 +405,7 @@ describe('v27 Book-less Global Agent', () => {
     expect(store.inspectGlobalAgent().directives).toHaveLength(1);
   });
 
-  it('rechecks current disclosed sources after shared capacity waits and sends nothing stale (#1131)', async () => {
+  it('original-field rechecks current disclosed sources after shared capacity waits and sends nothing stale (#1131)', async () => {
     governance('合成的固定监督来源。');
     const producers = Array.from({ length: 4 }, (_, index) => requestGovernor.registerProducer({
       key: `source-guard-blocker:${index}`, kind: 'fast-role', lane: 'foreground',
@@ -257,7 +462,7 @@ describe('v27 Book-less Global Agent', () => {
   });
 
   it('sends only the title and exact current pin of accepted /2 memory from real production review decisions', async () => {
-    const pending = store.saveModelServiceConnection('合成来源审阅', null, 'needs-attention', binding.route);
+    const pending = store.saveModelServiceConnection('合成来源审阅', credentialReference, 'needs-attention', binding.route);
     store.saveModelServiceConnection('合成来源审阅', pending.credentialReference, 'ready', binding.route);
     store.selectModelServiceRoute(binding.route); credentialReference = pending.credentialReference;
     const selected = { ...binding, credentialReference };

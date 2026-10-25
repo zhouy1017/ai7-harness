@@ -545,7 +545,7 @@ describe('revision 76', () => {
     const migrated = new DatabaseSync(storePath());
     expect(['material_index_builds', 'material_index_segments'].map((table) =>
       migrated.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all())).toEqual(earlierLayers);
-    expect((migrated.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(93);
+    expect((migrated.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(94);
     dropMaterialIndexLayerRelations(migrated);
     migrated.close();
     await expect(EditorialStore.open(roots.dataRoot, roots.codeRoot)).rejects.toThrow();

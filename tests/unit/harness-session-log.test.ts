@@ -8,6 +8,12 @@ import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from '../../src/
 import { describeComposition, prepareExecution } from '../../src/service/harness/primary-agent-harness.js';
 import { HarnessSessionLogBackend, readHarnessSessionLog } from '../../src/service/harness/session-log.js';
 import { installNodeNetworkDenial } from '../../src/shared/network-denial.js';
+import { GLOBAL_AGENT_PROMPT_CONTRACT, GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST, proveGlobalHistory } from '../../src/service/dialogue/global-agent-session.js';
+import { buildDialogueMessage, type DialogueMessageInput } from '../../src/service/dialogue/contract.js';
+import { harnessHistoryReader } from '../../src/service/dialogue/dialogue-history.js';
+import type { StoredDialogueAttempt, StoredGlobalDialogueTask } from '../../src/service/dialogue/dialogue-ledger.js';
+import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
+import { OPENCODE_GO_MODEL, OPENCODE_GO_ROUTE } from '../../src/service/provider/egress-gate.js';
 
 // The Harness Session Ledger made durable (Issue #52, S17a): the composition persists its DSH Session log through DSH's own
 // persistence seam into AI7's JSONL storage, and streams each text delta to a reader while the turn is in flight.
@@ -67,6 +73,55 @@ async function compose(root: string | undefined, adapter: LlmAdapter, sessionId 
   handle.bindExecution({ harnessSessionId: sessionId, behaviorCompositionDigest: handle.composition.digest, promptContractDigest: DIGEST });
   return handle;
 }
+
+describe('fresh Global ancestry reading (#1161)', () => {
+  it('joins an actual interrupted Harness log and refuses same-length damage despite the display cache', async () => {
+    const root = tempRoot();
+    const sources = [{ itemId: 'synthetic-A', revisionId: 'revision-A', text: '合成偏好甲。' },
+      { itemId: 'synthetic-B', revisionId: 'revision-B', text: '合成偏好乙。' }];
+    const message: DialogueMessageInput = { kind: 'ask', selection: '', question: '合成问题？', globalSources: sources, kept: null };
+    const sessionId = randomUUID();
+    const handle = await prepareExecution({ sessionId, route: OPENCODE_GO_ROUTE, model: OPENCODE_GO_MODEL,
+      systemPrompt: GLOBAL_AGENT_PROMPT_CONTRACT.systemPrompt, promptContractDigest: GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST,
+      adapterFactory: () => streamingAdapter(['完整的合成句子。', '不会完成'], (index, signal) => index === 0 ? Promise.resolve()
+        : new Promise<void>((resolve) => signal?.addEventListener('abort', () => resolve(), { once: true }))),
+      // This unit checks log/fragment reading, not service admission or provider currentness.
+      gate: () => ({ decision: 'transmit-local', payloadDigest: 'a'.repeat(64) }), onTransmitTicket: () => undefined,
+      sessionLogRoot: root });
+    handle.bindExecution({ harnessSessionId: sessionId, behaviorCompositionDigest: handle.composition.digest,
+      promptContractDigest: GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST });
+    const outcome = await handle.submitStreaming(buildDialogueMessage(message), () => setTimeout(() => handle.interrupt(), 0));
+    expect(outcome.terminal).toBe('interrupted');
+    await handle.finish();
+    const now = new Date().toISOString(), dialogueId = randomUUID();
+    const pins = sources.map(({ itemId, revisionId }) => ({ itemId, revisionId }));
+    const task: StoredGlobalDialogueTask = { dialogueId, bookId: null, sources: pins, operationalScope: 'ordinary-production',
+      sourcesSha256: sha256Hex(canonicalJson(pins)), questionSha256: sha256Hex(message.question), askedAt: now };
+    const attempt: StoredDialogueAttempt = { attemptId: randomUUID(), dialogueId, ordinal: 1, kind: 'ask', priorAttemptId: null,
+      createdAt: now, binding: { route: OPENCODE_GO_ROUTE, model: OPENCODE_GO_MODEL, operationalScope: 'ordinary-production',
+        providerProcessingVersion: 'v27', policyRuleId: 'ordinary-production-global-agent-dialogue', harnessSessionId: sessionId,
+        promptContractSha256: GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST, behaviorCompositionSha256: handle.composition.digest, boundAt: now },
+      span: { harnessSessionId: sessionId, startSeq: outcome.span.startSeq, openedAt: now },
+      outcome: { outcome: 'interrupted', endSeq: outcome.span.endSeq, causeCode: 'synthetic-interruption', settledAt: now }, conversions: [] };
+    const proof = proveGlobalHistory(task, [attempt], root, 'continue');
+    expect(proof.actualAsk).toEqual({ attemptId: attempt.attemptId, messageSha256: sha256Hex(buildDialogueMessage(message)) });
+    expect(proof.kept).toBe('完整的合成句子。'); expect(proof.completeFragmentCount).toBe(1);
+    expect(proof.retainedInfluences).toEqual(sources.map(({ itemId, revisionId, text }) => ({ itemId, revisionId, textSha256: sha256Hex(text) })));
+    expect(proveGlobalHistory(task, [attempt], root, 'regenerate')).toMatchObject({ kept: null, retainedInfluences: [] });
+    const display = harnessHistoryReader(root);
+    expect(display.turn(attempt)).toMatchObject({ message });
+    const path = join(root, `${sessionId}.jsonl`), original = readFileSync(path, 'utf8');
+    const damaged = original.replace('"seq":0', '"SEQ":0');
+    expect(Buffer.byteLength(damaged)).toBe(Buffer.byteLength(original)); expect(damaged).not.toBe(original);
+    writeFileSync(path, damaged);
+    expect(display.turn(attempt)).toMatchObject({ message });
+    expect(() => proveGlobalHistory(task, [attempt], root, 'continue')).toThrowError(/损坏/u);
+    writeFileSync(path, original);
+    expect(() => proveGlobalHistory(task, [{ ...attempt, ordinal: 2 }], root, 'continue')).toThrow();
+    rmSync(path);
+    expect(() => proveGlobalHistory(task, [attempt], root, 'regenerate')).toThrow();
+  });
+});
 
 describe('Harness Session Ledger', () => {
   it('leaves every composition without a log exactly as it was, and names the log in the one that has it', () => {

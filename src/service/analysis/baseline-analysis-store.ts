@@ -14,6 +14,9 @@ import { platformToolsFromProjection } from '../provider/search-service.js';
 import { searchBackend, searchBackendConfigurationDigest } from '../provider/search-backends/index.js';
 import { CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES } from '../../shared/provider-configuration.generated.js';
 import type { FrozenWebToolsBackend } from '../../shared/protocol.js';
+import { isResultSetPolicyPin, selectedPolicyIdentityOf, type LocalFixtureProfile, type SelectedPolicyIdentity } from '../../shared/protocol.js';
+import { localFixtureRegisteredProfile, type LocalFixtureRuntimeContext } from '../provider/model-fixture.js';
+import { providerPlanPolicyMetadata } from './plan-boundary.js';
 import { randomUUID } from 'node:crypto';
 import { liveKindAdmission, liveKindRule } from './live-kind-admission.js';
 import { withModelClarification } from '../provider/clarification-contract.js';
@@ -695,6 +698,11 @@ export interface PlanAdaptationInput {
 
 /** Everything the execution owner needs from the frozen plan before the first model call. */
 export interface ExecutionPlanFacts {
+  readonly retainedPolicyPin?: ResultSetPolicyPin;
+  readonly retainedPolicy?: LaunchPolicyProjection;
+  readonly selectedPolicyIdentity?: SelectedPolicyIdentity;
+  readonly localFixtureProfile?: LocalFixtureProfile;
+  readonly localFixtureRuntime?: LocalFixtureRuntimeContext;
   readonly webToolsBackend?: FrozenWebToolsBackend;
   readonly searchCredentialReference?: string;
   readonly bookId: string;
@@ -926,6 +934,8 @@ export function activeRunReason(state: BaselineAnalysisRunState | null, kind: st
  * authorization, not chosen at dispatch.
  */
 export interface LaunchBinding {
+  readonly retainedPolicyFor?: (pin: ResultSetPolicyPin, binding: import('../launch-policy.js').ConfiguredProviderBinding) => LaunchPolicyProjection | null;
+  readonly localFixtureRuntime?: () => LocalFixtureRuntimeContext | null;
   /** Verified runtime policy for review admission; never persisted as a new record or IPC member. */
   readonly policy?: LaunchPolicyProjection;
   readonly operationalScope: 'development-ci' | 'developer-live' | 'ordinary-production';
@@ -1676,7 +1686,8 @@ export class BaselineAnalysisStore {
         : Number.isSafeInteger(ceiling.tokensPerFrozenUnit) && ceiling.tokensPerFrozenUnit > 0)) &&
         UUID_PATTERN.test(live.credentialReference)),
     'ANALYSIS_LAUNCH_BINDING_INVALID', '开发者实时绑定缺少必需的运行预算上限或凭据引用。');
-    this.#launch = launch;
+    this.#launch = { ...launch, ...(launch.retainedPolicyFor !== undefined || this.#launch.retainedPolicyFor === undefined
+      ? {} : { retainedPolicyFor: this.#launch.retainedPolicyFor }) };
     this.#refreshClarificationDefinition();
   }
 
@@ -2383,6 +2394,7 @@ export class BaselineAnalysisStore {
     requireAnalysis(pin !== undefined, 'ANALYSIS_ARTIFACT_PIN_UNAVAILABLE', '当前图书尚未固定编辑工作区方案。');
     const latest = this.#isInitial(mode) ? undefined : this.#revisionRows(bookId).at(-1);
     return {
+      ...this.#selectedPlanMetadata(),
       providerBinding: frozenProductionBinding ?? (live === null
         ? {
             providerId: asString(connection!.provider_id),
@@ -2413,6 +2425,24 @@ export class BaselineAnalysisStore {
       outboundDataCategory: this.#launch.operationalScope === 'ordinary-production' ? 'unpublished-excerpts' : 'public-or-synthetic',
       expectedOutcome: this.#definition.expectedOutcome,
     };
+  }
+
+  #selectedPlanMetadata(policy = this.#launch.policy): Pick<MaterialPlanInputsProjection, 'selectedPolicyIdentity' | 'localFixtureProfile'> {
+    if (policy?.selectedPolicyIdentity === undefined) {
+      requireAnalysis(policy?.activePolicySetVersion !== 'v21' && policy?.providerProcessing.version !== 'v29' && policy?.providerProcessing.version !== 'v30',
+        'ANALYSIS_POLICY_UNAVAILABLE', '当前计划缺少已选处理策略身份。');
+      return {};
+    }
+    const selected = selectedPolicyIdentityOf(policy.selectedPolicyIdentity);
+    requireAnalysis(policy.integrityState === 'verified' && selected !== null && selected.providerProcessingVersion === policy.providerProcessing.version,
+      'ANALYSIS_POLICY_UNAVAILABLE', '已选处理策略身份无效。');
+    if (selected.providerProcessingVersion !== 'v29' || this.#route === null) return { selectedPolicyIdentity: selected };
+    const runtime = this.#launch.localFixtureRuntime?.();
+    requireAnalysis(runtime !== undefined && runtime !== null && canonicalJson(runtime.selectedPolicyIdentity) === canonicalJson(selected),
+      'ANALYSIS_POLICY_UNAVAILABLE', '本地夹具策略目录缺失或不一致。');
+    const profile = localFixtureRegisteredProfile(this.#definition.kind, null);
+    return { selectedPolicyIdentity: selected, localFixtureProfile: runtime.catalog.profile(selected,
+      { identity: this.#route.fixtureIdentity, sha256: this.#route.fixtureSha256, lineage: this.#route.fixtureLineage }, profile) };
   }
 
   /**
@@ -2967,6 +2997,8 @@ export class BaselineAnalysisStore {
     for (const component of required) {
       requireAnalysis(records[component] !== undefined, 'ANALYSIS_RECORD_INVALID', '任务计划记录图不完整。');
     }
+    requireAnalysis(isRecord(records['provider-resolution-plan']), 'ANALYSIS_RECORD_INVALID', '处理策略计划记录无效。');
+    providerPlanPolicyMetadata(records['provider-resolution-plan']);
     const envelope = records['plan-envelope'] as Record<string, unknown>;
     if (envelope.webToolsBackendDigest !== undefined) {
       const backend = records['web-tools-backend'];
@@ -4111,7 +4143,8 @@ export class BaselineAnalysisStore {
     ).run(taskIntentId, checkpoint.manuscriptId, checkpoint.branchId, checkpoint.revisionId, checkpoint.revisionLabel,
       checkpoint.revisionDigest, checkpoint.journalSequence, purpose, checkpoint.createdForDirtyJournal ? 1 : 0,
       checkpointRecord.json, checkpointRecord.digest, instant);
-    this.#writePlanVersion({ intent, checkpoint, checkpointDigest: checkpointRecord.digest, ordinal: 1, selectedRange: intent.selectedRange, planRevisionId: null, instant, edits: this.#redoPlanEdits(intent) });
+    this.#writePlanVersion({ intent, checkpoint, checkpointDigest: checkpointRecord.digest, ordinal: 1, selectedRange: intent.selectedRange,
+      planRevisionId: null, instant, edits: this.#redoPlanEdits(intent), policy: launchPolicy });
   }
 
   /**
@@ -4122,6 +4155,7 @@ export class BaselineAnalysisStore {
    * Version 1 is written with the checkpoint; a later version resolves a Plan Revision.
    */
   #writePlanVersion(input: {
+    policy?: LaunchPolicyProjection;
     intent: IntentFacts;
     checkpoint: ManuscriptCheckpointBinding;
     checkpointDigest: string;
@@ -4257,6 +4291,7 @@ export class BaselineAnalysisStore {
         ...this.#newCompositionOptions(checkpoint.bookId),
         localTools: intent.preparedByEnrollmentVersionId === null && definition.evidenceAssuranceLevel !== 'quick' ? kindLocalTools(this.#launch.policy, this.#definition.kind) ?? false : false });
     const providerPlan = {
+      ...this.#selectedPlanMetadata(input.policy),
       ...(webToolsBackend === undefined ? {} : { webToolsBackend, searchCredentialReference }),
       role: 'Main Editorial Role',
       capabilities: [],
@@ -4270,7 +4305,8 @@ export class BaselineAnalysisStore {
             credentialSlot: 'deepseek-api-key',
             credentialReference: facts.credentialReference,
             credentialReadiness: input.credentialReadiness ?? facts.credentialOperationState,
-            providerProcessing: { operationalScope: 'development-ci', version: 'v1', decision: 'deny', authorizedLiveTransmissionCount: 0 },
+            providerProcessing: { operationalScope: 'development-ci', version: this.#selectedPlanMetadata(input.policy).selectedPolicyIdentity?.providerProcessingVersion ?? 'v1',
+              decision: 'deny', authorizedLiveTransmissionCount: 0 },
           }
         : {
             providerId: live.route,
@@ -4378,7 +4414,8 @@ export class BaselineAnalysisStore {
         ...(composition.sources === undefined ? {} : { sources: composition.sources }) },
       // The plan version and the Plan Boundary Split are part of the canonical envelope (Issue #48).
       planVersion: ordinal,
-      boundary: planBoundarySplit(edits.disallowedAdaptations, edits.askFirstAdaptations ?? [], definition.contractIdentity?.version === 2),
+      boundary: planBoundarySplit(edits.disallowedAdaptations, edits.askFirstAdaptations ?? [], definition.contractIdentity?.version === 2,
+        providerPlan.selectedPolicyIdentity !== undefined),
     };
     const envelope = canonicalRecord(reusePlan === null ? envelopeBase : {
       ...envelopeBase,
@@ -5099,7 +5136,8 @@ export class BaselineAnalysisStore {
     const row = this.#db.prepare('SELECT * FROM analysis_execution_bindings WHERE attempt_id = ?').get(attemptId) as SqlRow | undefined;
     requireAnalysis(row !== undefined, 'ANALYSIS_RECORD_INVALID', '执行尝试缺少执行绑定。');
     const binding = parseCanonicalJson(asString(row.canonical_json)) as ExecutionBindingRecord;
-    requireAnalysis(canonicalRecord(binding).digest === asString(row.sha256) && binding.attemptId === attemptId, 'ANALYSIS_RECORD_INVALID', '执行绑定与其摘要不一致。');
+    requireAnalysis(canonicalRecord(binding).digest === asString(row.sha256) && binding.attemptId === attemptId && isResultSetPolicyPin(binding.policyPin),
+      'ANALYSIS_RECORD_INVALID', '执行绑定与其摘要或策略 pin 不一致。');
     const spans = this.#db.prepare('SELECT count(*) total, max(ordinal) last FROM analysis_harness_spans WHERE attempt_id = ?').get(attemptId) as SqlRow;
     return { attemptId, binding, bindingDigest: asString(row.sha256), spanCount: spans.last === null ? 0 : asNumber(spans.last) };
   }
@@ -5550,6 +5588,17 @@ export class BaselineAnalysisStore {
     const manifest = plan['coverage-manifest'] as CoverageManifestProjection;
     requireAnalysis(manifestDigestIsExact(manifest), 'ANALYSIS_RECORD_INVALID', '覆盖清单记录无效。');
     const providerPlan = plan['provider-resolution-plan'] as NonNullable<BaselineAnalysisProjection['providerResolutionPlan']>;
+    const selectedMetadata = providerPlanPolicyMetadata(providerPlan);
+    const retainedBinding = this.executionBindingOf(runRecordId);
+    if (retainedBinding !== null) requireAnalysis(
+      retainedBinding.binding.policyPin.operationalScope === providerPlan.remoteBinding.providerProcessing.operationalScope &&
+      retainedBinding.binding.policyPin.providerProcessingVersion === providerPlan.remoteBinding.providerProcessing.version &&
+      (selectedMetadata.selectedPolicyIdentity === undefined || retainedBinding.binding.policyPin.activePolicySetVersion === selectedMetadata.selectedPolicyIdentity.activePolicySetVersion),
+    'ANALYSIS_RECORD_INVALID', '执行绑定的策略 pin 与冻结计划不一致。');
+    const localFixtureRuntime = selectedMetadata.localFixtureProfile === undefined ? null : this.#launch.localFixtureRuntime?.();
+    requireAnalysis(selectedMetadata.localFixtureProfile === undefined || localFixtureRuntime !== undefined && localFixtureRuntime !== null &&
+      canonicalJson(localFixtureRuntime.selectedPolicyIdentity) === canonicalJson(selectedMetadata.selectedPolicyIdentity),
+    'ANALYSIS_RECORD_INVALID', '冻结计划的本地夹具策略目录缺失或不一致。');
     const runBudgetCeiling = runBudgetCeilingStateOf(providerPlan.runBudgetCeiling);
     // The route the plan froze must still be the route this launch binds. A developer-live plan
     // cannot execute under a provider-free launch, and a deterministic plan cannot execute live.
@@ -5576,6 +5625,12 @@ export class BaselineAnalysisStore {
       requireAnalysis(providerPlan.executionRoute.kind === LOCAL_DETERMINISTIC_ROUTE, 'ANALYSIS_ROUTE_ABSENT', '计划没有可执行的本地路由。');
       requireAnalysis(this.#route !== null && this.#route.fixtureIdentity === providerPlan.executionRoute.fixtureIdentity &&
         this.#route.fixtureSha256 === providerPlan.executionRoute.fixtureSha256, 'ANALYSIS_ROUTE_STALE', '当前启动的本地路由与冻结计划不一致。');
+    }
+    let retainedPolicy: LaunchPolicyProjection | null = null;
+    if (retainedBinding !== null && selectedMetadata.selectedPolicyIdentity === undefined && productionBinding !== null) {
+      retainedPolicy = this.#launch.retainedPolicyFor?.(retainedBinding.binding.policyPin,
+        { ...productionBinding, credentialReference: providerPlan.remoteBinding.credentialReference }) ?? null;
+      requireAnalysis(retainedPolicy !== null, 'ANALYSIS_RECORD_INVALID', '历史执行绑定缺少准确的已核实策略阅读。');
     }
     const envelope = plan['plan-envelope'] as Record<string, unknown>;
     const artifactPin = plan['artifact-pin'] as { nativeCarrierSha256: string; sidecarSha256: string };
@@ -5663,6 +5718,10 @@ export class BaselineAnalysisStore {
       sourceDigest: (plan['manuscript-pin'] as { sourceDigest: string }).sourceDigest,
       // The deterministic fixture facts; `null` on the live route, which replays no fixture.
       route: this.#route,
+      ...selectedMetadata,
+      ...(retainedBinding === null ? {} : { retainedPolicyPin: retainedBinding.binding.policyPin }),
+      ...(retainedPolicy === null ? {} : { retainedPolicy }),
+      ...(localFixtureRuntime == null ? {} : { localFixtureRuntime }),
       productionBinding,
       artifactPin: { nativeCarrierSha256: artifactPin.nativeCarrierSha256, sidecarRevision: 2, sidecarSha256: artifactPin.sidecarSha256 },
       promptContractDigest: asString(envelope.promptContractDigest),
@@ -5920,11 +5979,12 @@ export class BaselineAnalysisStore {
           behaviorCompositionDigest: facts.behaviorCompositionDigest,
           promptContractDigest: facts.promptContractDigest,
         },
-        policyPin: produced !== null
+        policyPin: this.executionBindingOf(facts.runRecordId)?.binding.policyPin ?? (produced !== null
           ? { operationalScope: 'ordinary-production', providerProcessingVersion: ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION, activePolicySetVersion: ACTIVE_SET_VERSION, liveTransmissions: 'bounded-by-run' }
           : live === null
-          ? { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: ACTIVE_SET_VERSION, liveTransmissions: 0 }
-          : { operationalScope: 'developer-live', providerProcessingVersion: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, activePolicySetVersion: ACTIVE_SET_VERSION, liveTransmissions: 'bounded-by-run' },
+          ? { operationalScope: 'development-ci', providerProcessingVersion: facts.selectedPolicyIdentity?.providerProcessingVersion === 'v29' ? 'v29' : 'v1',
+            activePolicySetVersion: facts.selectedPolicyIdentity?.activePolicySetVersion ?? ACTIVE_SET_VERSION, liveTransmissions: 0 }
+          : { operationalScope: 'developer-live', providerProcessingVersion: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, activePolicySetVersion: ACTIVE_SET_VERSION, liveTransmissions: 'bounded-by-run' }),
         provenance: {
           taskIntentId: facts.taskIntentId,
           runRecordId: facts.runRecordId,
@@ -6105,9 +6165,9 @@ export class BaselineAnalysisStore {
       'ANALYSIS_POLICY_UNAVAILABLE', `无法建立可信的 developer-live Provider Processing ${DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION} 记录。`);
       return;
     }
-    requireAnalysis(policy.providerProcessing.version === 'v1' && policy.providerProcessing.decision === 'deny' &&
+    requireAnalysis(policy.providerProcessing.version === 'v29' && policy.providerProcessing.decision === 'deny' &&
       policy.providerProcessing.authorizedLiveTransmissionCount === 0 && policy.providerProcessing.liveTransmissionAllowed === false,
-    'ANALYSIS_POLICY_UNAVAILABLE', '无法建立可信的 development-ci Provider Processing v1 拒绝记录。');
+    'ANALYSIS_POLICY_UNAVAILABLE', '无法建立可信的 development-ci Provider Processing v29 拒绝记录。');
   }
 }
 

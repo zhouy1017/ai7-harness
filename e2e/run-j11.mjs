@@ -3280,7 +3280,7 @@ async function main() {
     requireJourney(!restartedMemory.enabled && restartedMemory.excluded && !restartedMemory.usable && restartedMemory.itemId === createdMemory.itemId && JSON.stringify(restartedMemory.history) === JSON.stringify(['active','inactive']), 'editorial-memory-persisted');
 
     // C0 keeps the /1 proof above. Source setup reuses the already admitted J-04 review fixture unchanged;
-    // development-ci v1 still admits no preference payload, and no model request is made by memory governance.
+    // development-ci v29 legacy profiles still admit no preference payload, and no model request is made by memory governance.
     at('editorial-memory-governance');
     await waitForMemoryControl(`document.querySelector('[data-learning-enabled]')`, 'memory-governance-enable-ready', false);
     await assertRenderer(renderer, `(() => { const input=document.querySelector('[data-learning-enabled]'); if(!(input instanceof HTMLInputElement)||input.checked||input.disabled)return false;input.click();return true; })()`, 'memory-governance-enable');

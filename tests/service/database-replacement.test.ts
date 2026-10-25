@@ -24,6 +24,10 @@ import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-d
 import { MAX_DATABASE_REPLACEMENTS_LISTED } from '../../src/shared/protocol.js';
 import { fixedArchiveTime } from '../../src/shared/archive-time.js';
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx } from '../support/composed-fixture.js';
+import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
+import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
+import { FACTUAL_REVIEW_TASK_GOAL } from '../../src/shared/protocol.js';
+import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 
 const sourceRead = vi.hoisted(() => ({ path: null as string | null, atEnd: null as (() => Promise<void>) | null }));
 /** While set, every write into a file opened under this directory fails as a full disk fails. */
@@ -119,6 +123,49 @@ async function handmade(name: string, dataVersion: number, schemaRevision: numbe
 const backups = (): string => `${roots.dataRoot}-backups`;
 
 describe('导入数据库 over the real store', () => {
+  it.each(['hash', 'reader'] as const)('selected policy profile package rejects %s tampering and preserves exact metadata through real replacement', async (damage) => {
+    const fixture = await loadModelFixture(join(roots.codeRoot, 'tests/fixtures/model'), 'sample1-factual-authored');
+    const control = { induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
+      induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false,
+      baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage } };
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, control);
+    try {
+      const book = await importSample1Book(store, roots.codeRoot, '合成策略包');
+      await pinEditorialWorkspaceProfileRevision2(store, book.bookId); recordMissingCredentialConnection(store, '合成本地计划连接');
+      const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot);
+      let work = store.createFactualReviewPreparationWork(book.bookId, FACTUAL_REVIEW_TASK_GOAL, policy);
+      while (!work.done) work = store.advanceFactualReviewPreparationWork(work.workId!);
+      const original = work.projection!.providerResolutionPlan!;
+      expect(original.localFixtureProfile).toMatchObject({ kind: 'legacy', registeredProfile: 'factual', policyVersion: 'v29' });
+      const packagePath = await exported(store, `selected-${damage}.ai7db`);
+      expect(await store.inspectDatabaseImport(packagePath)).toMatchObject({ compatibility: 'compatible', schemaRevision: 94, dataVersion: 1 });
+      const entries = unzipSync(await readFile(packagePath));
+      const manifest = parseCanonicalJson(strFromU8(entries['manifest.json']!)) as { schemaRevision: number; members: { path: string; bytes: number; sha256: string }[] };
+      const member = manifest.members.find((entry) => entry.path === 'store/ai7.sqlite')!;
+      const scratch = join(roots.inputRoot, `selected-${damage}.sqlite`); await writeFile(scratch, entries[member.path]!);
+      const db = new DatabaseSync(scratch);
+      try {
+        if (damage === 'reader') { db.exec('PRAGMA user_version = 93'); manifest.schemaRevision = 93; }
+        else {
+          const row = db.prepare("SELECT rowid, canonical_json FROM analysis_plan_records WHERE component = 'provider-resolution-plan'").get()!;
+          const value = JSON.parse(String(row.canonical_json)); value.selectedPolicyIdentity.providerProcessingSha256 = '0'.repeat(64);
+          const changed = canonicalRecord(value); db.exec('DROP TRIGGER analysis_plan_records_no_update');
+          db.prepare('UPDATE analysis_plan_records SET canonical_json = ?, sha256 = ? WHERE rowid = ?').run(changed.json, changed.digest, row.rowid!);
+        }
+      } finally { db.close(); }
+      entries[member.path] = await readFile(scratch); member.bytes = entries[member.path]!.byteLength; member.sha256 = sha256Hex(entries[member.path]!);
+      entries['manifest.json'] = Buffer.from(canonicalRecord(manifest).json);
+      const damaged = join(roots.inputRoot, `selected-damaged-${damage}.ai7db`); await writeFile(damaged, zipSync(entries, { mtime: fixedArchiveTime() }));
+      const before = await readFile(join(roots.dataRoot, 'store/ai7.sqlite'));
+      await expect(store.inspectDatabaseImport(damaged)).rejects.toThrow();
+      expect(await readFile(join(roots.dataRoot, 'store/ai7.sqlite'))).toEqual(before);
+      expect((await store.inspectDatabaseReplacements()).pending).toBeNull(); expect(existsSync(backups())).toBe(false);
+      const preview = await store.inspectDatabaseImport(packagePath);
+      await store.prepareDatabaseReplacement(preview.previewId, T); await store.close();
+      store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, control);
+      expect(store.inspectFactualReview(book.bookId).providerResolutionPlan).toEqual(original);
+    } finally { await store.close(); }
+  });
   it.each(['suggestions', 'accepted-baseline'] as const)('preserves the whole Word %s layer and original through database export, pre-replace backup, replacement and rollback', async (mode) => {
     const path = join(roots.inputRoot, `word-database-${mode}.docx`);
     await composeRevisedDocx(path, { source: ADMITTED_BASELINE_DOCX, title: 'Word 数据库沿袭', paragraphs: [

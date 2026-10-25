@@ -38,6 +38,8 @@ import { ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authoriz
 import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { WRITING_REQUEST } from '../support/writing-task.js';
+import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
+import { FACTUAL_REVIEW_TASK_GOAL } from '../../src/shared/protocol.js';
 
 // Service-integration suite (L2) for merging a Book (Issue #434, plan slice S86d; V2-UX-DSTO-017; ADR 0079 §1.5) over two real
 // stores: a Book with a manuscript and its history, an edit, a mark, a milestone, a 发稿版本, a Production Document delivered
@@ -864,6 +866,49 @@ describe('Book learning controls across database merge (#1115)', () => {
 });
 
 describe('只导入其中的图书 over the store', () => {
+  it('selected policy profile merge preserves exact frozen Book metadata without importing House authority', async () => {
+    const fixture = await loadModelFixture(join(roots.codeRoot, 'tests/fixtures/model'), 'sample1-factual-authored');
+    const control = { induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
+      induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false,
+      baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage } };
+    let source = await EditorialStore.open(roots.dataRoot, roots.codeRoot, control);
+    const book = await importSample1Book(source, roots.codeRoot, '合成本地策略合并图书');
+    await pinEditorialWorkspaceProfileRevision2(source, book.bookId);
+    recordMissingCredentialConnection(source, '来源本社合成连接');
+    source.recordLearningSupervision({ operation: 'create', targets: [], scope: { kind: 'house' },
+      categoryId: 'typos-and-usage', text: '来源本社的合成偏好。', effect: 'guide' });
+    const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot);
+    let work = source.createFactualReviewPreparationWork(book.bookId, FACTUAL_REVIEW_TASK_GOAL, policy);
+    while (!work.done) work = source.advanceFactualReviewPreparationWork(work.workId!);
+    const original = work.projection!.providerResolutionPlan!;
+    expect(original.localFixtureProfile).toMatchObject({ kind: 'legacy', registeredProfile: 'factual', policyVersion: 'v29' });
+    const sourceRows = learningRows(roots.dataRoot, 'analysis_plan_records');
+    const packagePath = await exportedFrom(source, 'selected-policy-merge.ai7db');
+    source.close();
+    let target = await EditorialStore.open(otherRoot, roots.codeRoot, control);
+    recordMissingCredentialConnection(target, '目标本社独立的合成连接');
+    target.recordLearningSupervision({ operation: 'create', targets: [], scope: { kind: 'house' },
+      categoryId: 'typos-and-usage', text: '目标本社保留的合成偏好。', effect: 'guide' });
+    const targetHouse = target.inspectGlobalAgent();
+    const preview = await target.inspectDatabaseImport(packagePath);
+    expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 94, dataVersion: 1 });
+    await target.prepareDatabaseMerge(preview.previewId, T);
+    target.close();
+    target = await EditorialStore.open(otherRoot, roots.codeRoot, control);
+    try {
+      expect(target.inspectFactualReview(book.bookId).providerResolutionPlan).toEqual(original);
+      expect(learningRows(otherRoot, 'analysis_plan_records')).toEqual(sourceRows);
+      const global = target.inspectGlobalAgent();
+      expect(global.items).toEqual(targetHouse.items);
+      expect(global.sourceCandidates).toEqual(targetHouse.sourceCandidates);
+      expect(global.history).toEqual(targetHouse.history);
+      expect((await target.inspectDatabaseReplacements()).replacements[0]).toMatchObject({ outcome: 'applied', mergedCount: 1 });
+    } finally { target.close(); }
+    source = await EditorialStore.open(roots.dataRoot, roots.codeRoot, control);
+    try { expect(source.inspectFactualReview(book.bookId).providerResolutionPlan).toEqual(original); }
+    finally { source.close(); }
+  }, 120_000);
+
   it('previews each Book as the merge would take it, merges at the next open onto the data as it is then, and records it', async () => {
     const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     let book: { bookId: string; manuscriptId: string; branchId: string };

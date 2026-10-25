@@ -284,7 +284,7 @@ describe('task authorization over the real store on exact sample1', () => {
     // unverified checkout must fail here rather than as a confusing task-authorization error.
     expect(launchPolicy.integrityState).toBe('verified');
     expect(launchPolicy.operationalScope).toBe('development-ci');
-    expect(launchPolicy.providerProcessing.version).toBe('v1');
+    expect(launchPolicy.providerProcessing.version).toBe('v29');
     expect(launchPolicy.providerProcessing.decision).toBe('deny');
     expect(launchPolicy.providerProcessing.liveTransmissionAllowed).toBe(false);
 
@@ -345,15 +345,15 @@ describe('task authorization over the real store on exact sample1', () => {
       expect(prepared.providerResolutionPlan?.approvedFallbackChain).toEqual([]);
       expect(prepared.providerResolutionPlan?.providerProcessing).toEqual({
         operationalScope: 'development-ci',
-        version: 'v1',
+        version: 'v29',
         decision: 'deny',
         authorizedLiveTransmissionCount: 0,
       });
       expect(prepared.executionPlan?.effects).toEqual([]);
-      expect(prepared.executionPlan?.stopCondition).toBe('Provider Processing v1 denies dispatch');
+      expect(prepared.executionPlan?.stopCondition).toBe('Provider Processing v29 denies dispatch');
       expect(prepared.planEnvelope?.providerStatus).toBe('denied');
       expect(prepared.planEnvelope?.dispatchAllowed).toBe(false);
-      expect(prepared.planEnvelope?.summary).toBe('计划已冻结；Provider Processing v1 拒绝派发');
+      expect(prepared.planEnvelope?.summary).toBe('计划已冻结；Provider Processing v29 拒绝派发');
       expect(prepared.planEnvelope?.digest).toMatch(DIGEST_PATTERN);
       expect(prepared.authorization).toBeNull();
       expect(prepared.runRecord).toBeNull();
@@ -414,7 +414,7 @@ describe('task authorization over the real store on exact sample1', () => {
       expect(boundary.requiresRenewedRunAuthorization).toBe(true);
       expect(boundary.reasons).toEqual([
         '现有 Run 权限仅为 record-only-no-dispatch，不能派发。',
-        '当前可信启动范围为 development-ci，Provider Processing v1 允许 0 次实时传输。',
+        '当前可信启动范围为 development-ci，Provider Processing v29 允许 0 次实时传输。',
         '生产或录制尝试必须创建新 Plan Envelope 并重新记录 Run Authorization。',
       ]);
       // Reading the boundary records nothing: the projection is exactly what it was before.
@@ -482,12 +482,13 @@ describe('task authorization over the real store on exact sample1', () => {
         `"credentialReadiness":"missing","credentialReference":${JSON.stringify(credentialReference)},` +
         `"modelId":"deepseek-v4-pro","outboundDataCategory":"public-or-synthetic",` +
         `"providerId":"deepseek-open-platform","providerProcessing":{"authorizedLiveTransmissionCount":0,` +
-        `"decision":"deny","operationalScope":"development-ci","version":"v1"},"role":"Main Editorial Role",` +
-        `"runBudgetCeiling":"unset"}`,
+        `"decision":"deny","operationalScope":"development-ci","version":"v29"},"role":"Main Editorial Role",` +
+        `"runBudgetCeiling":"unset","selectedPolicyIdentity":{"activePolicySetSha256":"4b845e924df777f440b07d53ba6e31447e0fe0b004e86efa89bf76554fb05392",` +
+        `"activePolicySetVersion":"v21","providerProcessingSha256":"c9545a5f461a7791115c1f4664bbd731757775951f814d39c28b12c85af88c9d","providerProcessingVersion":"v29"}}`,
       );
       expect(jsonOf('execution_plans')).toBe(
         '{"effects":[],"steps":["分析结构","分析叙事连贯性","形成编辑复核重点"],' +
-        '"stopCondition":"Provider Processing v1 denies dispatch"}',
+        '"stopCondition":"Provider Processing v29 denies dispatch"}',
       );
       expect(jsonOf('plan_envelopes')).toBe(
         `{"artifactPinDigest":"${digestOf('task_artifact_pins')}",` +
@@ -496,7 +497,7 @@ describe('task authorization over the real store on exact sample1', () => {
         `"manuscriptPinDigest":"${digestOf('task_manuscript_pins')}",` +
         `"providerResolutionPlanDigest":"${digestOf('provider_resolution_plans')}",` +
         `"providerStatus":"denied","runSourceScopeDigest":"${digestOf('run_source_scopes')}",` +
-        `"summary":"计划已冻结；Provider Processing v1 拒绝派发","taskIntentId":"${taskIntentId}"}`,
+        `"summary":"计划已冻结；Provider Processing v29 拒绝派发","taskIntentId":"${taskIntentId}"}`,
       );
     } finally {
       database.close();
@@ -546,7 +547,7 @@ describe('task authorization over the real store on exact sample1', () => {
       if (pin.version === 'v18' || pin.version === 'v20' || pin.version === 'v22') {
         // #920 rev 4, #990, #1044: predecessor records retain their exact pin while active set v19 still selects developer-live v24.
         const selected = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live');
-        expect(selected.activePolicySetVersion).toBe('v19');
+        expect(selected.activePolicySetVersion).toBe('v21');
         expect(selected.providerProcessing.version).toBe('v24');
         const authorized = reopened.authorizeTaskAuthorization(bookId, live.taskIntent!.taskIntentId, live.planEnvelope!.digest);
         expect(authorized.state).toBe('authorized');

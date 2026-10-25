@@ -419,6 +419,8 @@ export function positionLabel(reading: RangeReading): string {
 
 /** The editor's name for each field a stored Plan Revision diff names; the stored label stays in the record. */
 export const DRIFT_FIELD_LABELS: Readonly<Record<string, string>> = {
+  selectedPolicyIdentity: '已选处理策略身份',
+  localFixtureProfile: '本地夹具配置',
   'providerBinding.providerId': '模型服务 · 提供方',
   'providerBinding.modelId': '模型服务 · 模型',
   'providerBinding.adapterRevision': '模型服务 · 接入修订',
@@ -483,6 +485,9 @@ function driftValue(field: string, value: PlanRevisionDiffValue, blocks: Readonl
     return `${positionLabel(reading)} · ${groupedCount(reading.graphemes)} 字`;
   }
   if ('revisionId' in value) return `第 ${value.ordinal} 份分析`;
+  if ('providerProcessingVersion' in value) return `Provider Processing ${value.providerProcessingVersion} · 策略集 ${value.activePolicySetVersion}`;
+  if ('schema' in value) return `本地夹具 ${value.policyVersion} · 策略集 ${value.activePolicySetVersion} · ${value.kind === 'legacy'
+    ? `兼容配置 ${value.registeredProfile}` : `规则 ${value.ruleId}`}`;
   if ('kind' in value) return budgetCeilingLabel(value);
   return countsReading(value);
 }

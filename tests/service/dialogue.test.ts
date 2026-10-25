@@ -8,7 +8,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DialogueExecutionOwner, dialogueRouteRefusal } from '../../src/service/dialogue/dialogue-execution.js';
-import { DIALOGUE_SCHEMA_SQL, DIALOGUE_TRIGGER_SQL } from '../../src/service/dialogue/dialogue-ledger.js';
+import { DIALOGUE_SCHEMA_SQL, DIALOGUE_TRIGGER_SQL, DialogueLedger } from '../../src/service/dialogue/dialogue-ledger.js';
 import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
 import { HARNESS_SESSION_LOG_DIRECTORY } from '../../src/service/harness/session-log.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
@@ -24,6 +24,8 @@ import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-d
 import { importSample1Book, requireExactSample1 } from '../support/sample1-baseline.js';
 import { DIALOGUE_PROMPT_CONTRACT_DIGEST, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST } from '../../src/service/dialogue/contract.js';
 import { dialogueReasoningLine } from '../../src/renderer/dialogue-labels.js';
+import { AgentWorkspace } from '../../src/service/agent-workspace/workspace.js';
+import { pinEditorialWorkspaceProfileRevision2 } from '../support/sample1-baseline.js';
 
 // One explicit model-request capability per test application.
 // Registered first: the stack-ordered final hook runs after existing consumer teardown.
@@ -139,6 +141,64 @@ function storeBytes(): Buffer {
 }
 
 describe('就这段提问… over the real store and harness', () => {
+  it('selected v29 profile keeps the actual workspace caller on its separate retained partition', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const workspaceFixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-agent-workspace');
+    const dialogues = new DialogueExecutionOwner({ requestGovernor, records: store, fixture: workspaceFixture, live: null,
+      sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY) });
+    const workspace = new AgentWorkspace(store, dialogues);
+    try {
+      const book = await importSample1Book(store, roots.codeRoot, '合成本地工作区配置');
+      await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
+      let cursor: string | null = null;
+      let selection: DialogueSelectionInput | null = null;
+      do {
+        const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, cursor);
+        const block = window.blocks.find((entry) => entry.kind === 'paragraph' && entry.text.includes('其存在的意义被视为国宝中的国宝'));
+        if (block !== undefined) selection = { manuscriptId: book.manuscriptId, branchId: book.branchId, windowStartBlockId: window.blocks[0]!.blockId,
+          baseRevisionId: window.revisionId, expectedJournalSequence: window.journalSequence, blockId: block.blockId, baseBlockDigest: block.digest,
+          fromGrapheme: 0, toGrapheme: graphemesOf(block.text).length, selectedText: block.text };
+        cursor = window.nextCursor;
+      } while (selection === null && cursor !== null);
+      if (selection === null) throw new Error('admitted workspace selection missing');
+      await workspace.propose(book.bookId, { selection, instruction: '请让这段的表达更凝练，给出一组修改。' });
+      const until = Date.now() + 10_000;
+      let projection = await workspace.inspect(book.bookId);
+      while (projection.proposal?.state === 'proposing' && Date.now() < until) {
+        await new Promise((resolveWait) => setTimeout(resolveWait, 10)); projection = await workspace.inspect(book.bookId);
+      }
+      expect(projection.proposal?.state).toBe('ready');
+      expect(store.inspectGlobalAgent().history).toEqual([]);
+      const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+      try {
+        const rows = db.prepare('SELECT canonical_json, provider_processing_version, policy_rule_id FROM dialogue_execution_bindings').all();
+        expect(rows).toHaveLength(1);
+        expect(JSON.parse(String(rows[0]!.canonical_json))).toMatchObject({ schema: 'ai7.dialogue-execution-binding/2',
+          localFixtureProfile: { kind: 'legacy', registeredProfile: 'workspace', policyVersion: 'v29' } });
+        expect(rows[0]!.provider_processing_version).toBeNull(); expect(rows[0]!.policy_rule_id).toBeNull();
+      } finally { db.close(); }
+    } finally { await dialogues.dispose(); await store.close(); }
+  });
+  it('selected v29 profile reaches the real dialogue adapter and keeps live columns NULL in binding /2', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const dialogues = owner(store, null);
+    try {
+      const book = await importSample1Book(store, roots.codeRoot, '合成本地对话配置');
+      const turn = store.askAboutSelection(book.bookId, { selection: selectionOf(store, book), question: QUESTION });
+      dialogues.begin(turn);
+      await waitFor(() => store.inspectDialogue(book.bookId, turn.dialogueId, 0, (id) => dialogues.liveText(id)).attempts[0]?.state,
+        (state) => state === 'completed', 'local profile completed');
+      expect(store.inspectDialogue(book.bookId, turn.dialogueId, 0, () => null).attempts[0]?.state).toBe('completed');
+      const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+      try {
+        const row = db.prepare('SELECT canonical_json, provider_processing_version, policy_rule_id FROM dialogue_execution_bindings WHERE attempt_id = ?').get(turn.attemptId)!;
+        expect(row.provider_processing_version).toBeNull(); expect(row.policy_rule_id).toBeNull();
+        expect(JSON.parse(String(row.canonical_json))).toMatchObject({ schema: 'ai7.dialogue-execution-binding/2',
+          selectedPolicyIdentity: { providerProcessingVersion: 'v29' }, localFixtureProfile: { kind: 'legacy', registeredProfile: 'dialogue' } });
+        expect(new DialogueLedger(db).attempt(turn.attemptId)!.binding).toMatchObject({ localFixtureProfile: { registeredProfile: 'dialogue' } });
+      } finally { db.close(); }
+    } finally { await dialogues.dispose(); await store.close(); }
+  });
   it('retrieves and exact-fetches the pinned revision locally and recovers jump anchors from its Session log (#893)', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     const retrievalFixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-dialogue-retrieval');

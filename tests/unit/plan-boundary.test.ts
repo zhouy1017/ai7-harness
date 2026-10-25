@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { AnalysisError, canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
 import {
   MATERIAL_PLAN_FIELDS,
+  SELECTED_POLICY_MATERIAL_PLAN_FIELDS,
   MATERIAL_PLAN_FIELD_LABELS,
   NO_PARTICIPATION_STATEMENT,
   PLAN_ADAPTATION_CLASSES,
@@ -17,7 +18,7 @@ import {
   reusePlanCountsDiffEntry,
   sameMaterialPlanInputs,
 } from '../../src/service/analysis/plan-boundary.js';
-import type { MaterialPlanField, MaterialPlanInputsProjection } from '../../src/shared/protocol.js';
+import type { LocalFixtureProfile, MaterialPlanField, MaterialPlanInputsProjection, SelectedPolicyIdentity } from '../../src/shared/protocol.js';
 
 // Drift detection is a pure comparison of the material plan inputs a version froze with the inputs
 // re-derived from durable state: every material field, and only a material field, produces a diff
@@ -29,6 +30,24 @@ const INTENT: Readonly<Record<string, unknown>> = { taskIntentId: randomUUID(), 
 const RANGE_A = { startPosition: 26, endPosition: 43 };
 const RANGE_B = { startPosition: 93, endPosition: 97 };
 const PREDECESSOR = { revisionId: randomUUID(), ordinal: 1, digest: 'c'.repeat(64) };
+const SELECTED_LOCAL: SelectedPolicyIdentity = {
+  providerProcessingVersion: 'v29', providerProcessingSha256: 'c9545a5f461a7791115c1f4664bbd731757775951f814d39c28b12c85af88c9d',
+  activePolicySetVersion: 'v21', activePolicySetSha256: '4b845e924df777f440b07d53ba6e31447e0fe0b004e86efa89bf76554fb05392',
+};
+const SELECTED_ORDINARY: SelectedPolicyIdentity = {
+  ...SELECTED_LOCAL, providerProcessingVersion: 'v30', providerProcessingSha256: 'f12df1d43cfc9f52b999c2cc8a6e9bac419177d42210d3bbe8c5008ba8d6a59e',
+};
+const LEGACY_LOCAL_PROFILE: LocalFixtureProfile = {
+  schema: 'ai7.local-fixture-profile/1', policyVersion: 'v29', policySha256: SELECTED_LOCAL.providerProcessingSha256,
+  activePolicySetVersion: 'v21', activePolicySetSha256: SELECTED_LOCAL.activePolicySetSha256,
+  kind: 'legacy', profileId: 'development-ci-legacy-local-fixture-809c96f2',
+  manifestSha256: '2572c1b5aa05d6ccc9a60a2a8a03ba2cefc10d5f48c1a85377d53797360bc0d2', registeredProfile: 'baseline',
+};
+const RULE_LOCAL_PROFILE: LocalFixtureProfile = {
+  schema: 'ai7.local-fixture-profile/1', policyVersion: 'v29', policySha256: SELECTED_LOCAL.providerProcessingSha256,
+  activePolicySetVersion: 'v21', activePolicySetSha256: SELECTED_LOCAL.activePolicySetSha256,
+  kind: 'rule', ruleId: 'development-ci-fixture-review',
+};
 
 function inputs(): MaterialPlanInputsProjection {
   return {
@@ -61,6 +80,8 @@ function drifted(field: MaterialPlanField): MaterialPlanInputsProjection {
     case 'runBudgetCeiling': return { ...base, runBudgetCeiling: 'tokens:1000' as unknown as 'unset' };
     case 'outboundDataCategory': return { ...base, outboundDataCategory: 'private' as unknown as 'public-or-synthetic' };
     case 'expectedOutcome': return { ...base, expectedOutcome: '其他结果类别' };
+    case 'selectedPolicyIdentity': return { ...base, selectedPolicyIdentity: SELECTED_LOCAL };
+    case 'localFixtureProfile': return { ...base, localFixtureProfile: LEGACY_LOCAL_PROFILE };
   }
 }
 
@@ -214,6 +235,113 @@ describe('material inputs of plan components', () => {
     (otherCategory['provider-resolution-plan'] as Record<string, unknown>)['outboundDataCategory'] = 'house-confidential';
     expect(() => materialPlanInputsOfComponents(otherCategory, INTENT)).toThrowError(AnalysisError);
     expect(() => materialPlanInputsOfComponents(components(null), {})).toThrowError(/任务意图记录无效/u);
+  });
+});
+
+describe('selected policy and local profile material identity (#1161)', () => {
+  const selectedInputs = (): MaterialPlanInputsProjection => ({ ...inputs(), selectedPolicyIdentity: SELECTED_LOCAL,
+    localFixtureProfile: LEGACY_LOCAL_PROFILE });
+  const components = (): Record<string, unknown> => ({
+    'provider-resolution-plan': {
+      selectedPolicyIdentity: SELECTED_LOCAL, localFixtureProfile: LEGACY_LOCAL_PROFILE,
+      remoteBinding: { ...inputs().providerBinding, providerProcessing: {
+        operationalScope: 'development-ci', version: 'v29', decision: 'deny', authorizedLiveTransmissionCount: 0,
+      } },
+      executionRoute: { kind: 'ai7-local-deterministic' }, outboundDataCategory: 'public-or-synthetic', runBudgetCeiling: 'unset',
+    },
+    'artifact-pin': inputs().artifactPin,
+  });
+  const provider = (value: Record<string, unknown>): Record<string, unknown> => {
+    const record = value['provider-resolution-plan'];
+    if (record === null || typeof record !== 'object' || Array.isArray(record)) throw new Error('Invalid synthetic component.');
+    return record as Record<string, unknown>;
+  };
+
+  it('keeps the original fifteen declarations and digest while new Plans declare the two metadata fields last', () => {
+    const historical = planBoundarySplit();
+    const current = planBoundarySplit([], [], false, true);
+    expect(historical.material).toHaveLength(15);
+    expect(current.material).toHaveLength(17);
+    expect(current.material.slice(0, 15)).toEqual(historical.material);
+    expect(current.material.slice(15).map((entry) => entry.field)).toEqual(['selectedPolicyIdentity', 'localFixtureProfile']);
+    expect(current.material.map((entry) => entry.field)).toEqual(SELECTED_POLICY_MATERIAL_PLAN_FIELDS);
+    expect({ ...current, material: current.material.slice(0, 15) }).toEqual(historical);
+    expect(sha256Hex(canonicalJson({ ...current, material: current.material.slice(0, 15) }))).toBe(sha256Hex(canonicalJson(historical)));
+    expect(sha256Hex(canonicalJson(current))).not.toBe(sha256Hex(canonicalJson(historical)));
+  });
+
+  it('reports identity and profile drift separately and preserves exact prior/proposed values', () => {
+    const before = selectedInputs();
+    expect(diffMaterialPlanInputs(before, structuredClone(before))).toEqual([]);
+    for (const [field, after] of [
+      ['selectedPolicyIdentity', { ...before, selectedPolicyIdentity: SELECTED_ORDINARY }],
+      ['localFixtureProfile', { ...before, localFixtureProfile: RULE_LOCAL_PROFILE }],
+    ] as const) {
+      expect(diffMaterialPlanInputs(before, after)).toEqual([{ field, label: MATERIAL_PLAN_FIELD_LABELS[field],
+        prior: before[field], proposed: after[field], materiality: 'material' }]);
+      expect(sameMaterialPlanInputs(before, after)).toBe(false);
+      expect(sha256Hex(canonicalJson(before))).not.toBe(sha256Hex(canonicalJson(after)));
+    }
+  });
+
+  it('keeps historical absence absent and distinguishes it from values in either direction', () => {
+    const historical = inputs();
+    expect(sameMaterialPlanInputs(historical, inputs())).toBe(true);
+    expect(canonicalJson(historical)).not.toContain('selectedPolicyIdentity');
+    expect(canonicalJson(historical)).not.toContain('localFixtureProfile');
+    for (const [before, after] of [[historical, selectedInputs()], [selectedInputs(), historical]]) {
+      expect(diffMaterialPlanInputs(before!, after!).map((entry) => entry.field)).toEqual(['selectedPolicyIdentity', 'localFixtureProfile']);
+      expect(sameMaterialPlanInputs(before!, after!)).toBe(false);
+    }
+  });
+
+  it('reads exact metadata from the real component reader and includes it in material comparison', () => {
+    const read = materialPlanInputsOfComponents(components(), INTENT);
+    expect(read.selectedPolicyIdentity).toEqual(SELECTED_LOCAL);
+    expect(read.localFixtureProfile).toEqual(LEGACY_LOCAL_PROFILE);
+    const changed = components();
+    provider(changed).localFixtureProfile = RULE_LOCAL_PROFILE;
+    expect(diffMaterialPlanInputs(read, materialPlanInputsOfComponents(changed, INTENT)).map((entry) => entry.field)).toEqual(['localFixtureProfile']);
+  });
+
+  it.each([
+    { ...SELECTED_LOCAL, providerProcessingSha256: 'f'.repeat(64) },
+    { ...SELECTED_LOCAL, providerProcessingVersion: 'v999' },
+    { ...SELECTED_LOCAL, activePolicySetSha256: 'f'.repeat(64) },
+    { ...SELECTED_LOCAL, extra: true },
+    null,
+  ])('refuses a malformed selected identity rather than rebuilding it', (identity) => {
+    const value = components(); provider(value).selectedPolicyIdentity = identity;
+    expect(() => materialPlanInputsOfComponents(value, INTENT)).toThrowError(AnalysisError);
+  });
+
+  it.each([
+    { ...LEGACY_LOCAL_PROFILE, ruleId: 'development-ci-fixture-review' },
+    { ...RULE_LOCAL_PROFILE, registeredProfile: 'review' },
+    { ...LEGACY_LOCAL_PROFILE, registeredProfile: 'unknown-profile' },
+    { ...LEGACY_LOCAL_PROFILE, manifestSha256: 'f'.repeat(64) },
+    { ...RULE_LOCAL_PROFILE, ruleId: 'missing-rule' },
+    { ...RULE_LOCAL_PROFILE, policySha256: 'f'.repeat(64) },
+    null,
+  ])('refuses mixed or invalid profile arms without legacy fallback', (profile) => {
+    const value = components(); provider(value).localFixtureProfile = profile;
+    expect(() => materialPlanInputsOfComponents(value, INTENT)).toThrowError(AnalysisError);
+  });
+
+  it('refuses missing current metadata and a profile on a live route, while historical absence reads without backfill', () => {
+    for (const field of ['selectedPolicyIdentity', 'localFixtureProfile']) {
+      const value = components(); delete provider(value)[field];
+      expect(() => materialPlanInputsOfComponents(value, INTENT)).toThrowError(AnalysisError);
+    }
+    const live = components(); provider(live).executionRoute = { kind: 'opencode-go' };
+    expect(() => materialPlanInputsOfComponents(live, INTENT)).toThrowError(AnalysisError);
+    const historical = components();
+    delete provider(historical).selectedPolicyIdentity; delete provider(historical).localFixtureProfile;
+    provider(historical).remoteBinding = { ...inputs().providerBinding, providerProcessing: {
+      operationalScope: 'development-ci', version: 'v1', decision: 'deny', authorizedLiveTransmissionCount: 0,
+    } };
+    const read = materialPlanInputsOfComponents(historical, INTENT);
+    expect(read).not.toHaveProperty('selectedPolicyIdentity'); expect(read).not.toHaveProperty('localFixtureProfile');
   });
 });
 

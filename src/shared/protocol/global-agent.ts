@@ -1,4 +1,4 @@
-import type { DialogueAttemptProjection, TrustedOperationalScope } from '../protocol.js';
+import type { DialogueAttemptProjection, SelectedPolicyIdentity, TrustedOperationalScope } from '../protocol.js';
 
 export const GLOBAL_AGENT_POLICY_BLOCKED = '当前处理策略未允许' as const;
 export const GLOBAL_AGENT_TITLE = '全域智能体（记忆与全局指导）' as const;
@@ -81,6 +81,10 @@ export type PrepareGlobalAgentTurnInput =
   | { readonly kind: 'ask'; readonly question: string; readonly sources: ReadonlyArray<GlobalMemoryPin> }
   | { readonly kind: 'continue' | 'regenerate'; readonly dialogueId: string; readonly attemptId: string; readonly sources?: ReadonlyArray<GlobalMemoryPin> };
 export interface GlobalAgentDisclosure {
+  readonly textProcessing?: 'qualified-original-fields';
+  readonly selectedPolicyIdentity?: SelectedPolicyIdentity;
+  readonly retainedInfluences?: ReadonlyArray<GlobalMemoryPin & { readonly textSha256: string; readonly title: string;
+    readonly kind: GlobalAgentSourceCandidate['kind'] }>;
   readonly question: string;
   readonly sources: ReadonlyArray<GlobalAgentSourceCandidate>;
   readonly kept: string | null;

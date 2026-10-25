@@ -9,6 +9,8 @@ import { MAX_WRITING_MATERIALS, MAX_WRITING_MATERIAL_GRAPHEMES, MAX_WRITING_MATE
 import { graphemeLength, writingMaterialDigest } from '../writing-tasks.js';
 import { DIGEST_PATTERN, canonicalJson, sha256Hex, isRecord } from '../analysis/canonical.js';
 import { assistantToolCalls, messageText, toolResultOf, seriesScopeRefusal, type AssembledContentBlock, type AssembledModelPayload } from './payload.js';
+import type { QualifiedGlobalAttemptMetadata } from '../dialogue/dialogue-ledger.js';
+import { ORIGINAL_FIELDS_ACTIVE_SET_SHA256, ORIGINAL_FIELDS_POLICY_SHA256, isSupportedProviderProcessingVersion } from '../../shared/protocol.js';
 import {
   PLATFORM_TOOL_NAMES,
   ruleNamedToolSchemas,
@@ -70,7 +72,7 @@ export type CredentialSlot = ConfiguredCredentialSlot;
 export type EgressPolicyPin =
   | {
       readonly operationalScope: 'development-ci';
-      readonly providerProcessingVersion: 'v1';
+      readonly providerProcessingVersion: 'v1' | 'v29';
       readonly liveTransmissionAllowed: false;
       readonly authorizedLiveTransmissionCount: 0;
     }
@@ -136,6 +138,7 @@ export interface SearchBackendBinding {
 export interface EgressBindingFacts {
   /** Book-less dialogue's exact listed revisions, disclosure and retained redaction, rechecked at the final gate. */
   readonly globalAgentScope?: {
+    readonly qualification?: QualifiedGlobalAttemptMetadata;
     readonly rule: NonNullable<AdmittedProviderRule['globalAgentDialogue']>;
     readonly payloadCurrent: () => boolean;
   };
@@ -490,7 +493,20 @@ export function evaluateEgress(
   binding: EgressBindingFacts,
   scope: EgressAttemptScope,
 ): EgressDecision {
+  if (!isSupportedProviderProcessingVersion(binding.policy.operationalScope, binding.policy.providerProcessingVersion))
+    return refuse('payload-out-of-scope', '处理策略版本无法识别；未发送任何内容。');
   const global = binding.globalAgentScope;
+  if (global !== undefined && binding.policy.providerProcessingVersion === 'v30') {
+    const qualified = global.qualification;
+    const messages = [...binding.admittedUserMessages];
+    if (qualified === undefined || qualified.providerProcessingVersion !== 'v30' || qualified.activePolicySetVersion !== 'v21' ||
+        qualified.providerProcessingSha256 !== ORIGINAL_FIELDS_POLICY_SHA256 || qualified.activePolicySetSha256 !== ORIGINAL_FIELDS_ACTIVE_SET_SHA256 ||
+        qualified.textProcessing !== 'qualified-original-fields' || qualified.policyRuleId !== 'ordinary-production-global-agent-dialogue' ||
+        qualified.modelRole !== 'Fast Interaction Role' || qualified.route !== binding.route || qualified.model !== binding.model ||
+        messages.length !== 1 || qualified.messageSha256 !== sha256Hex(messages[0]!) ||
+        !DIGEST_PATTERN.test(qualified.requestContextSha256) || !DIGEST_PATTERN.test(qualified.retainedAncestrySha256))
+      return refuse('payload-out-of-scope', '全域对话缺少与实际负载相符的原文字段身份；未发送任何内容。');
+  } else if (global?.qualification !== undefined) return refuse('payload-out-of-scope', '原文字段身份与当前处理策略不一致；未发送任何内容。');
   const globalAdmitted = global !== undefined && binding.policy.operationalScope === 'ordinary-production' &&
     global.rule.source.bookRequired === false && global.rule.source.explicitlyListedEligibleMemoryAndPreferenceRevisionsOnly === true &&
     global.rule.source.eligibleRevisionPinsRequired === true && global.rule.source.editorOwnWordsAllowed === true &&
@@ -584,7 +600,7 @@ export function evaluateEgress(
   const digest = payloadDigest(payload);
   if (binding.route === LOCAL_DETERMINISTIC_ROUTE) return { decision: 'transmit-local', payloadDigest: digest };
   if (binding.policy.operationalScope === 'development-ci') {
-    return refuse('remote-route-denied-under-v1', 'development-ci · Provider Processing v1 允许 0 次实时传输；未发送任何内容。');
+    return refuse('remote-route-denied-under-v1', `development-ci · Provider Processing ${binding.policy.providerProcessingVersion} 允许 0 次实时传输；未发送任何内容。`);
   }
   // Under v9 the ceiling is a precondition of the decision itself, evaluated here from accumulated
   // usage, so no dispatch can precede it and no ceiling state can be assumed from an earlier turn.
