@@ -241,6 +241,70 @@ function relationTruth(database: DatabaseSync): Map<string, { sql: string; conte
 }
 
 describe('selected native Word reading through the actual export service', () => {
+  it.each(['suggestions', 'accepted-baseline'] as const)('exports %s joins, multi-paragraph moves and a removed paragraph through edited ancestry after restart', async (mode) => {
+    const path = join(roots.inputRoot, `word-structural-export-${mode}.docx`);
+    const spans = await Promise.all([8, 9, 10, 11, 12, 13, 14].map((block) => sourceSpanText(ADMITTED_BASELINE_DOCX, { block, from: 0, to: 8 })));
+    const [left, right, movedA, movedB, middle, removed, tail] = spans;
+    const xml = (value: string): string => value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+    await composeRevisedDocx(path, { source: ADMITTED_BASELINE_DOCX, title: '结构修订导出', paragraphs: [
+      { runs: [{ text: { block: 8, from: 0, to: 8 } }], markRevision: { kind: 'del', author: '作者', date: '2026-10-25T00:00:00Z' } },
+      { runs: [{ text: { block: 9, from: 0, to: 8 } }] },
+    ] });
+    const entries = unzipSync(new Uint8Array(await readFile(path)));
+    const run = (value: string, deleted: boolean): string => `<w:r><w:${deleted ? 'delText' : 't'} xml:space="preserve">${xml(value)}</w:${deleted ? 'delText' : 't'}></w:r>`;
+    const extra = `<w:p><w:moveFromRangeStart w:id="1" w:name="named-pair"/><w:moveFrom w:id="2">${run(movedA!, true)}</w:moveFrom></w:p>` +
+      `<w:p><w:moveFrom w:id="3">${run(movedB!, true)}</w:moveFrom><w:moveFromRangeEnd w:id="1"/></w:p>` +
+      `<w:p>${run(middle!, false)}</w:p>` +
+      `<w:p><w:moveToRangeStart w:id="8" w:name="named-pair"/><w:moveTo w:id="9">${run(movedA!, false)}</w:moveTo></w:p>` +
+      `<w:p><w:moveTo w:id="10">${run(movedB!, false)}</w:moveTo><w:moveToRangeEnd w:id="8"/></w:p>` +
+      `<w:p><w:pPr><w:rPr><w:del w:id="30"/></w:rPr></w:pPr><w:del w:id="31">${run(removed!, true)}</w:del></w:p>` +
+      `<w:p>${run(tail!, false)}</w:p>`;
+    const original = strFromU8(entries['word/document.xml']!);
+    const changed = original.replace('<w:sectPr/>', `${extra}<w:sectPr/>`);
+    expect(changed === original).toBe(false);
+    entries['word/document.xml'] = strToU8(changed);
+    await writeFile(path, zipSync(entries, { mtime: fixedArchiveTime() }));
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const staged = await store.stageSelectedManuscript(randomUUID(), path);
+      expect(staged.wordTrackedChanges?.compatibility === 'unsupported' ? staged.wordTrackedChanges.reasonCodes : []).toEqual([]);
+      const prepared = store.prepareNewBookReview(staged.draftId, staged.draftVersion,
+        { kind: 'new-book', choiceId: 'new-book', confirmedTitle: staged.titleSuggestion.value }, false, 'retain',
+        { mode, learnFromEdits: true, acceptedBaselineConfirmed: mode === 'accepted-baseline' });
+      if (prepared.reviewDigest === null) throw new Error('expected supported structural Word import');
+      const commitId = randomUUID();
+      const book = await store.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: prepared.draftVersion,
+        reviewDigest: prepared.reviewDigest, commitId });
+      await store.acknowledgeImportCompletion(commitId);
+      expect(allBlocks(store, book).map((block) => block.text)).toEqual(mode === 'suggestions'
+        ? [left, right, movedA, movedB, middle, removed, tail] : [`${left}${right}`, middle, movedA, movedB, tail]);
+      const originalAnnotations = window(store, book).marks.filter((entry) => entry.kind === 'annotation').length;
+      if (mode === 'suggestions') expect(originalAnnotations).toBeGreaterThanOrEqual(2);
+      else expect(originalAnnotations).toBe(0);
+      edit(store, book);
+      const viewed = window(store, book);
+      const block = viewed.blocks[0]!;
+      store.createEditorialMark({ manuscriptId: book.manuscriptId, branchId: book.branchId, windowStartBlockId: block.blockId,
+        clientMarkId: randomUUID(), baseRevisionId: viewed.revisionId, expectedJournalSequence: viewed.journalSequence,
+        blockId: block.blockId, baseBlockDigest: block.digest, fromGrapheme: 0, toGrapheme: 1,
+        selectedText: graphemesOf(block.text)[0]!, kind: 'annotation', highlightColor: null,
+        body: '请核对这一句。', proposedText: null, rationale: null });
+      const reviewed = await review(store, book);
+      expect(reviewed.technical.writerIdentity).toBe(WORD_DOCX_EXPORT_WRITER_IDENTITY);
+      const destination = join(outbox, `word-structural-${mode}.docx`);
+      const preparation = await store.prepareManuscriptExport({ bookId: book.bookId, revisionId: reviewed.target.revisionId,
+        target: CURRENT, options: DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, reviewDigest: reviewed.reviewDigest, destination }, true);
+      store.markCleanShutdown(); store.close();
+      store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      expect((await store.approveManuscriptExport({ bookId: book.bookId, preparationId: preparation.preparationId }, true)).outcome).toBe('created');
+      const written = await parseWritten(destination);
+      expect(written.blocks.map((entry) => entry.digest)).toEqual(allBlocks(store, book).map((entry) => entry.digest));
+      expect(written.parsed.importedMarks.filter((entry) => entry.kind === 'annotation')).toHaveLength(originalAnnotations + 1);
+      expect(digest(await readFile(destination))).toBe(preparation.technical.payloadDigest);
+      store.markCleanShutdown();
+    } finally { store.close(); }
+  });
+
   it.each(['suggestions', 'accepted-baseline'] as const)('exports %s after an edit and preparation restart with its full Word pins and actual writer', async (mode) => {
     const path = join(roots.inputRoot, `word-export-${mode}.docx`);
     await composeRevisedDocx(path, { source: ADMITTED_BASELINE_DOCX, title: '阅读导出', paragraphs: [
@@ -262,6 +326,24 @@ describe('selected native Word reading through the actual export service', () =>
         reviewDigest: importReview.reviewDigest, commitId: importCommitId });
       await store.acknowledgeImportCompletion(importCommitId);
       const book: Imported = imported;
+      if (mode === 'suggestions') {
+        const original = window(store, book);
+        const suggestion = original.marks.find((candidate) => candidate.kind === 'change-suggestion')!;
+        const locators = withDatabase(true, (db) => db.prepare('SELECT * FROM word_import_mark_sources ORDER BY mark_id').all());
+        const binding = { manuscriptId: book.manuscriptId, branchId: book.branchId };
+        const applied = store.applyChangeSuggestion({ ...binding, windowStartBlockId: original.blocks[0]!.blockId,
+          markId: suggestion.markId, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null });
+        expect(applied.card?.status).toBe('applied');
+        store.markCleanShutdown(); store.close();
+        store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+        const reversed = store.reverseAppliedChangeSuggestion({ ...binding, windowStartBlockId: window(store, book).blocks[0]!.blockId,
+          markId: suggestion.markId, clientEffectId: randomUUID() });
+        expect(reversed.card?.status).toBe('open');
+        expect(allBlocks(store, book).map((entry) => entry.digest)).toEqual(original.blocks.map((entry) => entry.digest));
+        expect(withDatabase(true, (db) => db.prepare('SELECT * FROM word_import_mark_sources ORDER BY mark_id').all())).toEqual(locators);
+        store.markCleanShutdown(); store.close();
+        store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      }
       edit(store, book);
       const viewed = window(store, book);
       const block = viewed.blocks[0]!;

@@ -7,7 +7,8 @@ import { graphemeCount } from './analysis/factual-review-contract.js';
 import { backgroundEnrollmentKinds } from './analysis/live-kind-admission.js';
 import { executionBackgroundShare } from './analysis/execution.js';
 import { initializeProcedureDefinitionSchema } from './procedures/definition-store.js';
-import { EditorialLearningLedger, initializeEditorialLearningSchema } from './learning/ledger.js';
+import { EditorialLearningLedger, LearningReads, initializeEditorialLearningSchema, type WordLearningProofs } from './learning/ledger.js';
+import type { WordTrackedEditLearningSource } from '../shared/protocol/learning.js';
 import type { ChangeEditorialLearningInput, CreateEditorialMemoryInput, DeactivateEditorialMemoryInput, InspectEditorialLearningInput, EditorialLearningProjection, LearningReasonAskInput, LearningReasonAskProjection } from '../shared/protocol/learning.js';
 import { dialogueQuestionDigest } from './dialogue/contract.js';
 import { fragmentsText } from './dialogue/fragments.js';
@@ -4879,6 +4880,10 @@ export class EditorialStore {
   readonly #learningEligibility: LearningEligibilityLedger;
   /** One bounded Word source context; actual original-file availability/hash is checked on every detail read. */
   #wordSampleDetailContext: WordSampleDetailContext | null = null;
+  #wordSampleDetailReads: { context: WordSampleDetailContext; reads: LearningReads } | null = null;
+  #wordLearningRead: { generation: string; reads: LearningReads } | null = null;
+  #wordLearningProofs: { context: WordSampleDetailContext; facts: WordLearningProofs } | null = null;
+  #learningCallDepth = 0;
   readonly #evaluationCalibration: EvaluationCalibrationLedger;
   readonly #series: SeriesLedger;
   readonly #usage: UsageLedger;
@@ -6329,7 +6334,7 @@ export class EditorialStore {
     return this.#reviewCall(() => {
       this.#transaction(this.#authority, () => {
         this.#reviewRuns.ignoreFinding(bookId, reviewRunId, findingId, reason);
-        new EditorialLearningLedger(this.#authority).captureIgnoredFinding(bookId, reviewRunId, findingId);
+        this.#learningLedger().captureIgnoredFinding(bookId, reviewRunId, findingId);
       });
       return this.#reviewRuns.workspace(bookId, reviewRunId, progress);
     });
@@ -13400,12 +13405,12 @@ export class EditorialStore {
     return this.#learningCall(() => {
       requireStore(bookId === null || UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
       if (bookId !== null) requireStore(this.#authority.prepare('SELECT 1 FROM books WHERE book_id = ?').get(bookId) !== undefined, 'BOOK_NOT_FOUND', '图书不存在。');
-      return { ...readEditQualitySignals(this.#authority, bookId), ...new EditorialLearningLedger(this.#authority).adoption(bookId, after) };
+      return { ...readEditQualitySignals(this.#authority, bookId), ...this.#learningLedger().adoption(bookId, after) };
     });
   }
 
   inspectEditorialLearning(input: InspectEditorialLearningInput): EditorialLearningProjection {
-    return this.#learningCall(() => new EditorialLearningLedger(this.#authority).inspect(input, this.#baselineAnalysis.launch.operationalScope));
+    return this.#learningCall(() => this.#learningLedger().inspect(input, this.#baselineAnalysis.launch.operationalScope));
   }
 
   /** Explicit-Book source detail; historical inspection remains available while current learning is excluded. */
@@ -13460,7 +13465,11 @@ export class EditorialStore {
       throw error;
     }
     requireStore(context !== null, 'WORD_SOURCE_INVALID', 'Word 详情缺少已验证的原始来源。');
-    const imports = this.#learningCall(() => new EditorialLearningLedger(this.#authority).wordSampleImports(input.bookId, input.sampleId, input.sampleDigest));
+    // Only this Word historical read reuses proofs across detail pages. The context binds the exact database generation,
+    // and actual original bytes were verified again above; controls/current eligibility never come from this cache.
+    if (this.#wordSampleDetailReads?.context !== context) this.#wordSampleDetailReads = { context, reads: new LearningReads() };
+    const imports = this.#learningCall(() => new EditorialLearningLedger(this.#authority, this.#wordSampleDetailReads!.reads)
+      .wordSampleImports(input.bookId, input.sampleId, input.sampleDigest));
     const source = this.#retentionCall(() => resolveWordSampleDetailSource(this.#authority, context, input.sampleId, input.sampleDigest, imports));
     const page = this.#retentionCall(() => pageWordSampleDetail(source, input.after));
     this.#wordSampleDetailContext = context;
@@ -13468,12 +13477,12 @@ export class EditorialStore {
   }
 
   recordLearningReasonAsk(input: LearningReasonAskInput, frequency: import('../shared/protocol/learning.js').LearningReasonAskFrequency): LearningReasonAskProjection | null {
-    return this.#learningCall(() => this.#transaction(this.#authority, () => new EditorialLearningLedger(this.#authority).reasonAsk(input, frequency)));
+    return this.#learningCall(() => this.#transaction(this.#authority, () => this.#learningLedger().reasonAsk(input, frequency)));
   }
 
   changeEditorialLearning(input: ChangeEditorialLearningInput): EditorialLearningProjection {
     return this.#learningCall(() => this.#transaction(this.#authority, () => {
-      new EditorialLearningLedger(this.#authority).change(input);
+      this.#learningLedger().change(input);
       this.#rebuildHouseReviewPreference();
       return this.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
     }));
@@ -13481,14 +13490,14 @@ export class EditorialStore {
 
   createEditorialMemory(input: CreateEditorialMemoryInput): EditorialLearningProjection {
     return this.#learningCall(() => this.#transaction(this.#authority, () => {
-      new EditorialLearningLedger(this.#authority).create(input, this.#baselineAnalysis.launch.operationalScope);
+      this.#learningLedger().create(input, this.#baselineAnalysis.launch.operationalScope);
       return this.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
     }));
   }
 
   acceptEditorialMemory(input: import('../shared/protocol/learning.js').AcceptEditorialMemoryInput): EditorialLearningProjection {
     return this.#learningCall(() => this.#transaction(this.#authority, () => {
-      new EditorialLearningLedger(this.#authority).accept(input, this.#baselineAnalysis.launch.operationalScope);
+      this.#learningLedger().accept(input, this.#baselineAnalysis.launch.operationalScope);
       new HouseReviewPreferenceLedger(this.#authority).refreshGovernance(this.#baselineAnalysis.launch.operationalScope, this.#housePreferencePeopleNames(), 'memory');
       return this.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
     }));
@@ -13496,14 +13505,14 @@ export class EditorialStore {
 
   deactivateEditorialMemory(input: DeactivateEditorialMemoryInput): EditorialLearningProjection {
     return this.#learningCall(() => this.#transaction(this.#authority, () => {
-      new EditorialLearningLedger(this.#authority).deactivate(input, this.#baselineAnalysis.launch.operationalScope);
+      this.#learningLedger().deactivate(input, this.#baselineAnalysis.launch.operationalScope);
       new HouseReviewPreferenceLedger(this.#authority).refreshGovernance(this.#baselineAnalysis.launch.operationalScope, this.#housePreferencePeopleNames());
       return this.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
     }));
   }
 
   #editorialMemoryGovernanceHooks(): EditorialMemoryGovernanceHooks {
-    const learning = new EditorialLearningLedger(this.#authority);
+    const learning = this.#learningLedger();
     return { revisions: () => learning.revisions(this.#baselineAnalysis.launch.operationalScope),
       govern: (directive, expected) => learning.govern(directive, expected) };
   }
@@ -13525,7 +13534,7 @@ export class EditorialStore {
         revisionId: `${item.revisionId}@${directives.at(-1)?.directiveId ?? 'base'}` }));
       const memories: GlobalAgentSourceCandidate[] = [];
       const mutableMemories: import('../shared/protocol.js').GlobalMemoryItem[] = [];
-      const learning = new EditorialLearningLedger(this.#authority);
+      const learning = this.#learningLedger();
       for (const entry of this.#editorialMemoryGovernanceHooks().revisions()) {
         mutableMemories.push({ ...editorialMemoryGovernanceItem(entry, entry.current.editorialDimension), text: withoutNames(entry.current.title, names) });
         if (entry.usable && entry.current.schema === 'ai7.global-editorial-memory/2') memories.push({ itemId: entry.current.itemId, revisionId: learning.sourcePinRevision(entry.current.itemId, entry.current.versionId), kind: 'memory',
@@ -13704,6 +13713,7 @@ export class EditorialStore {
   /** Each of one Book's Learning Materials where it stands, a decided one with the newest decision of its chain. */
   *#standingMaterials(bookId: string): IterableIterator<StandingReviewMaterial> {
     for (const [candidate, projection] of this.#learningEligibility.projectCandidates(bookId, this.#learningCandidates(bookId, false))) {
+      if (candidate.kind === 'word-tracked-edit') continue; // Word retention grants no preference-source admission.
       const latest = projection.state === 'decided' ? this.#learningEligibility.history(bookId, candidate.materialKey).at(-1) ?? null : null;
       yield { candidate, state: projection.state, materialDigest: projection.digest,
         decision: latest === null ? null : { decisionId: latest.decisionId, choice: latest.choice, attribution: latest.attribution } };
@@ -13861,7 +13871,9 @@ export class EditorialStore {
     const influence = kept.length === 0 ? null : new HousePreferenceInfluence(this.#authority, this.#baselineAnalysis.launch.operationalScope);
     return { page: kept.map(({ candidate, material }) => ({
       material: { ...material, downstreamTasks: this.#materialInfluence(bookId, material.materialKey, influence!).tasks.length,
-        automaticAdmission: new EditorialLearningLedger(this.#authority).automaticAdmissionFor(bookId, material.materialKey, material.digest, this.#baselineAnalysis.launch.operationalScope) },
+        ...(candidate.source.kind === 'word-tracked-edit' ? { wordCurrentEligibility: this.#learningLedger().wordCurrentEligibility(
+          bookId, candidate.source.sampleId, candidate.source.sampleDigest) } : {}),
+        automaticAdmission: this.#learningLedger().automaticAdmissionFor(bookId, material.materialKey, material.digest, this.#baselineAnalysis.launch.operationalScope) },
       orderedAt: candidate.orderedAt,
     })), count };
   }
@@ -13877,7 +13889,7 @@ export class EditorialStore {
     tasks: Array<ReturnType<ReviewRunStore['influenceUses']>[number] & { versionOrdinal: number; withdrawn: boolean }>;
   } {
     const decisionIds = new Set([...this.#learningEligibility.history(bookId, materialKey).map((entry) => entry.decisionId),
-      ...new EditorialLearningLedger(this.#authority).sourceKeys(bookId, [materialKey])]);
+      ...this.#learningLedger().sourceKeys(bookId, [materialKey])]);
     const uses = influence.usesOf(decisionIds).flatMap((pin) => {
       const withdrawn = pin.sources.some((source) => decisionIds.has(preferenceSourceIdentity(source)) &&
         preferenceSourceWithdrawal(this.#authority, source).withdrawnAt !== null);
@@ -13895,7 +13907,7 @@ export class EditorialStore {
   #remediationReach(bookId: string, materialKeys: ReadonlyArray<string>): ReturnType<LearningRemediationReach> & { approved: Array<{ reviewRunId: string; categoryId: string }> } {
     const influence = new HousePreferenceInfluence(this.#authority, this.#baselineAnalysis.launch.operationalScope);
     const decisionIds = new Set([...materialKeys.flatMap((key) => this.#learningEligibility.history(bookId, key).map((entry) => entry.decisionId)),
-      ...new EditorialLearningLedger(this.#authority).sourceKeys(bookId, materialKeys)]);
+      ...this.#learningLedger().sourceKeys(bookId, materialKeys)]);
     const current = influence.versions.at(-1) ?? null;
     const uses = this.#reviewRuns.influenceUses(influence.usesOf(decisionIds));
     const running = uses.filter((use) => use.state === 'running' || use.state === 'approved');
@@ -13903,7 +13915,7 @@ export class EditorialStore {
     return {
       currentVersion: current?.ordinal ?? null,
       linesAffected: current?.lines.filter((line) => line.sources.some((source) => decisionIds.has(preferenceSourceIdentity(source)))).length ?? 0,
-      memory: new EditorialLearningLedger(this.#authority).affectedMemoryCount(bookId, materialKeys),
+      memory: this.#learningLedger().affectedMemoryCount(bookId, materialKeys),
       running: running.length,
       prepared: uses.filter((use) => use.state === 'prepared').length,
       completed: completed.length,
@@ -13929,7 +13941,7 @@ export class EditorialStore {
         bookTitle: this.#evaluationBookTitle(bookId),
         material,
         standing: learningAuditStanding(material),
-        automaticAdmission: new EditorialLearningLedger(this.#authority).automaticAdmissionFor(bookId, materialKey, material.digest, this.#baselineAnalysis.launch.operationalScope),
+        automaticAdmission: this.#learningLedger().automaticAdmissionFor(bookId, materialKey, material.digest, this.#baselineAnalysis.launch.operationalScope),
         decisions: shown.map((entry) => ({
           decisionId: entry.decisionId,
           ordinal: entry.ordinal,
@@ -13955,8 +13967,8 @@ export class EditorialStore {
             .get(this.#baselineAnalysis.launch.operationalScope) as SqlRow | undefined;
           const listed = tasks.slice(-MAX_LEARNING_LINEAGE_TASKS);
           return {
-            downstream: { signals: signals.length, memoryCandidates: new EditorialLearningLedger(this.#authority).candidateMemoryCount(bookId, materialKey),
-              activeMemories: new EditorialLearningLedger(this.#authority).activeMemoryCount(bookId, [materialKey]), tasks: tasks.length },
+            downstream: { signals: signals.length, memoryCandidates: this.#learningLedger().candidateMemoryCount(bookId, materialKey),
+              activeMemories: this.#learningLedger().activeMemoryCount(bookId, [materialKey]), tasks: tasks.length },
             signals: signals.map(({ version, lines }) => ({ versionId: version.versionId, ordinal: version.ordinal, recordedAt: version.recordedAt,
               current: current !== undefined && asString(current.version_id) === version.versionId, lines })),
             tasks: listed.map((use) => ({ bookId: use.bookId, reviewRunId: use.reviewRunId, label: use.label, versionOrdinal: use.versionOrdinal,
@@ -14020,7 +14032,7 @@ export class EditorialStore {
       if (!wanted.has(candidate.materialKey)) continue;
       found.set(candidate.materialKey, candidate);
       const automatic = projection.state === 'pending' && projection.decisions === 0 && projection.decision === null
-        ? new EditorialLearningLedger(this.#authority).automaticAdmissionFor(input.bookId, candidate.materialKey, projection.digest, this.#baselineAnalysis.launch.operationalScope) : null;
+        ? this.#learningLedger().automaticAdmissionFor(input.bookId, candidate.materialKey, projection.digest, this.#baselineAnalysis.launch.operationalScope) : null;
       standings.set(candidate.materialKey, { candidate, projection, ...(automatic === null ? {} : { automaticEligibility: automatic.choice }) });
     }
     return { preview: learningRemediationPreview({ bookId: input.bookId, title }, input.items, (key) => standings.get(key) ?? null, (keys) => {
@@ -14181,8 +14193,10 @@ export class EditorialStore {
   }
 
   /** Resolve the exact source and its originating Task; neither display fact changes the material digest or eligibility. */
-  #learningMaterialSource(bookId: string, candidate: LearningMaterialCandidate): Pick<LearningMaterialProjection, 'target' | 'sourceTask'> {
+  #learningMaterialSource(bookId: string, candidate: LearningMaterialCandidate): Pick<LearningMaterialProjection, 'target' | 'sourceTask' | 'wordCurrentEligibility'> {
     const source = candidate.source;
+    if (source.kind === 'word-tracked-edit') return { target: { ...source, bookId }, sourceTask: null,
+      wordCurrentEligibility: this.#learningLedger().wordCurrentEligibility(bookId, source.sampleId, source.sampleDigest) };
     if (source.kind === 'analysis') {
       // The judged revision owns this Task, even after a newer analysis becomes current.
       const row = one(this.#authority.prepare(
@@ -14297,6 +14311,7 @@ export class EditorialStore {
         recordedAt: asString(row.recorded_at),
       }, withExcerpt);
     }
+    yield* this.#learningLedger().wordCandidates(bookId);
   }
 
   /** Each Book whose Learning Material waits: how many wait for a decision or changed since one, and how many were deferred. */
@@ -14308,6 +14323,7 @@ export class EditorialStore {
       let deferred = 0;
       let at = '';
       for (const material of this.#learningEligibility.projectEntries(bookId, this.#learningCandidates(bookId, false))) {
+        if (material.kind === 'word-tracked-edit') continue; // Retention waits for a future consumer, not a required human inclusion.
         if (material.state === 'pending' || material.state === 'changed') pending += 1;
         else if (material.state === 'deferred') deferred += 1;
         else continue;
@@ -14322,6 +14338,7 @@ export class EditorialStore {
 
   #learningCall<T>(operation: () => T): T {
     this.#assertAvailable();
+    this.#learningCallDepth += 1;
     try {
       return operation();
     } catch (error) {
@@ -14329,7 +14346,95 @@ export class EditorialStore {
         throw new StoreError(error.code, error.message);
       }
       throw error;
-    }
+    } finally { if (--this.#learningCallDepth === 0) this.#wordLearningRead = null; }
+  }
+
+  /** C0's existing per-read proofs, invalidated by any database write; no cache survives the outer local operation. */
+  #learningLedger(): EditorialLearningLedger {
+    const word = this.#wordLearningProofs !== null && wordSampleDetailContextCurrent(this.#authority, this.#wordLearningProofs.context)
+      ? this.#wordLearningProofs.facts : undefined;
+    if (this.#learningCallDepth === 0) return new EditorialLearningLedger(this.#authority, new LearningReads(word), (source) => this.#requireWordLearningSource(source));
+    const generation = JSON.stringify({ data: this.#authority.prepare('PRAGMA data_version').get(),
+      schema: this.#authority.prepare('PRAGMA schema_version').get(), changes: this.#authority.prepare('SELECT total_changes() changes').get() });
+    if (this.#wordLearningRead?.generation !== generation) this.#wordLearningRead = { generation, reads: new LearningReads(word) };
+    return new EditorialLearningLedger(this.#authority, this.#wordLearningRead.reads, (source) => this.#requireWordLearningSource(source));
+  }
+
+  /** Actual bounded original bytes and every saved sample meet the fresh compiler before current learning can use a pair. */
+  #requireWordLearningSource(source: WordTrackedEditLearningSource): WordLearningProofs {
+    const parent = this.#retentionCall(() => readWordParentSourcePin(this.#authority, source.bookId, source.sourceVersionId));
+    requireStore(parent.sourceDigest === source.sourceDigest && parent.sourceBytes > 0 && parent.sourceBytes <= MAX_ARCHIVE_BYTES,
+      'WORD_SOURCE_INVALID', 'Word 修改样本的原始来源固定记录无效。');
+    const object = this.#authority.prepare('SELECT relative_key, byte_length FROM content_objects WHERE object_digest = ?').get(parent.objectDigest);
+    requireStore(object && object.byte_length === parent.sourceBytes, 'WORD_SOURCE_UNAVAILABLE', 'Word 原文件对象记录不完整。');
+    const path = this.#contentObjectPath(parent.objectDigest, asString(object.relative_key));
+    let descriptor: number | null = null;
+    try {
+      const metadata = lstatSync(path);
+      requireStore(relative(path, realpathSync(path)) === '' && metadata.isFile() && !metadata.isSymbolicLink() && metadata.size === parent.sourceBytes,
+        'WORD_SOURCE_UNAVAILABLE', 'Word 原文件不再是完整的留存文件。');
+      descriptor = openSync(path, constants.O_RDONLY);
+      const opened = fstatSync(descriptor);
+      requireStore(opened.isFile() && opened.size === parent.sourceBytes && opened.dev === metadata.dev && opened.ino === metadata.ino,
+        'WORD_SOURCE_UNAVAILABLE', 'Word 原文件在打开时已变化。');
+      const bytes = Buffer.allocUnsafe(parent.sourceBytes);
+      for (let offset = 0; offset < bytes.byteLength;) {
+        const count = readSync(descriptor, bytes, offset, Math.min(64 * 1024, bytes.byteLength - offset), offset);
+        requireStore(count > 0, 'WORD_SOURCE_UNAVAILABLE', 'Word 原文件在读取时已不完整。'); offset += count;
+      }
+      requireStore(readSync(descriptor, Buffer.alloc(1), 0, 1, bytes.byteLength) === 0 && sha256(bytes) === parent.sourceDigest,
+        'WORD_SOURCE_UNAVAILABLE', 'Word 原文件与留存摘要不一致。');
+      let context = this.#wordSampleDetailContext;
+      let fresh: Extract<WordTrackedCompilation, { kind: 'ready' }> | null = null;
+      if (context === null || context.bookId !== source.bookId || context.sourceVersionId !== source.sourceVersionId ||
+        context.parentPinDigest !== wordParentSourcePinRecord(parent).digest || !wordSampleDetailContextCurrent(this.#authority, context)) {
+        const compiled = compileWordTrackedDocxBytes(bytes);
+        requireStore(compiled.kind === 'ready', 'WORD_SOURCE_INVALID', 'Word 原文件不再符合留存编译契约。');
+        fresh = compiled;
+        context = this.#retentionCall(() => createWordSampleDetailContext(this.#authority, source.bookId, source.sourceVersionId, compiled));
+      }
+      requireStore(context.graphDigest === source.graphDigest, 'WORD_SOURCE_INVALID', 'Word 来源图与原文件不一致。');
+      if (this.#wordLearningProofs?.context !== context) {
+        if (fresh === null) {
+          const compiled = compileWordTrackedDocxBytes(bytes);
+          requireStore(compiled.kind === 'ready', 'WORD_SOURCE_INVALID', 'Word 原文件不再符合留存编译契约。');
+          fresh = compiled;
+        }
+        const reads = new LearningReads();
+        const ledger = new EditorialLearningLedger(this.#authority, reads);
+        const imports = this.#authority.prepare('SELECT commit_id FROM word_revision_imports WHERE book_id = ? AND source_version_id = ?')
+          .all(source.bookId, source.sourceVersionId);
+        requireStore(imports.length > 0, 'WORD_SOURCE_INVALID', 'Word 修改来源没有完整的已提交导入。');
+        for (const imported of imports) ledger.validateWordImportSamples(source.bookId, asString(imported.commit_id), fresh);
+        const provedSamples = new Set([...reads.word.evidence.values()].map((evidence) => evidence.candidate.materialKey));
+        for (const row of this.#authority.prepare('SELECT sample_id, sha256, canonical_json FROM word_tracked_edit_samples WHERE book_id = ? AND source_version_id = ?')
+          .iterate(source.bookId, source.sourceVersionId)) {
+          const found = context.samples.get(asString(row.sample_id));
+          const expected = found === undefined ? null : wordTrackedSampleRecord(found.sample);
+          requireStore(expected !== null && row.sha256 === expected.digest && row.canonical_json === expected.json &&
+            provedSamples.has(`word-sample:${asString(row.sample_id)}`),
+          'WORD_SAMPLE_INVALID', 'Word 修改样本与原文件完整清单不一致。');
+        }
+        for (const row of this.#authority.prepare(`SELECT signal_id FROM learning_signals WHERE book_id = ?
+          AND json_extract(canonical_json, '$.source.sourceVersionId') = ? AND json_extract(canonical_json, '$.kind') = 'word-tracked-edit'`)
+          .iterate(source.bookId, source.sourceVersionId)) {
+          requireStore(reads.word.signals.has(asString(row.signal_id)), 'WORD_SAMPLE_INVALID', 'Word 修改信号不属于完整的历史准入清单。');
+        }
+        requireStore(wordSampleDetailContextCurrent(this.#authority, context), 'WORD_SOURCE_CHANGED', 'Word 学习来源在验证期间已经变化。');
+        this.#wordLearningProofs = { context, facts: reads.word };
+      }
+      const sample = context.samples.get(source.sampleId);
+      requireStore(sample !== undefined && wordTrackedSampleRecord(sample.sample).digest === source.sampleDigest,
+        'WORD_SAMPLE_INVALID', 'Word 修改样本不属于原文件的完整清单。');
+      this.#wordSampleDetailContext = context;
+      return this.#wordLearningProofs.facts;
+    } catch (error) {
+      if (error instanceof StoreError) throw error;
+      if (isRecord(error) && typeof error.code === 'string' && typeof error.syscall === 'string') {
+        throw new StoreError('WORD_SOURCE_UNAVAILABLE', 'Word 原文件无法读取，当前学习不能使用这条修改对。');
+      }
+      throw error;
+    } finally { if (descriptor !== null) closeSync(descriptor); }
   }
 
   /** The revision feedback binds: one of this Book's baseline Result Set Revisions, as ②A shows it, and its items. */
@@ -22313,7 +22418,7 @@ export class EditorialStore {
         const original = await readRetainedWordOriginal(this.#authority, this.#dataRoot, this.#objectsRoot, result.bookId, sourceVersionId);
         const { compiled } = readWordManuscriptExportSource(this.#authority, result.bookId, result.revisionId, sourceVersionId, original);
         this.#importedMarkCall(() => validateWordImportedMarkSources(this.#authority, result.bookId, result.commitId, compiled));
-        this.#learningCall(() => new EditorialLearningLedger(this.#authority).validateWordImportSamples(result.bookId, result.commitId, compiled));
+        this.#learningCall(() => this.#learningLedger().validateWordImportSamples(result.bookId, result.commitId, compiled));
       }
     }
   }
@@ -24135,7 +24240,7 @@ export class EditorialStore {
       choice.mode === 'suggestions' ? '撤销原修订后没有可编辑的非空稿件；请明确选择并确认接受修订后的基线。' : '接受修订后的阅读没有可编辑的非空稿件。');
     const fidelity = wordImportFidelityReport(native.parsed.fidelity, choice.mode, reading.marks.length, disposition);
     requireStore(fidelity !== undefined, 'WORD_READING_UNAVAILABLE', '所选 Word 阅读没有完整保真计划。');
-    const ledger = new EditorialLearningLedger(this.#authority);
+    const ledger = this.#learningLedger();
     let preparedTarget: WordPreparedIntake['target'];
     if (target.kind === 'new-book') preparedTarget = { kind: 'new-book', controls: ledger.wordImportControlPins(null) };
     else {
@@ -24229,7 +24334,7 @@ export class EditorialStore {
     const materials = samples.map((sample, index) => ({ templateKey: word.compiled.templates[index]!.templateKey,
       materialKey: `word-sample:${sample.sampleId}`, materialDigest: learningMaterialDigest(
         wordTrackedEditCandidate(sample, wordTrackedSampleRecord(sample).digest, createdAt)) }));
-    const ledger = new EditorialLearningLedger(this.#authority);
+    const ledger = this.#learningLedger();
     const controls = ledger.wordImportControls(bookId, materials);
     if (reviewedTarget.kind === 'existing-book') requireStore(canonicalJson(controls) === canonicalJson(reviewedTarget.controls),
       'WORD_ADMISSION_STALE', 'Word 相关学习设置或材料排除在审阅后已经变化。');
@@ -25144,7 +25249,7 @@ export class EditorialStore {
       this.#retentionCall(() => requireWordManuscriptSourceSegments(this.#authority, input.bookId, choice,
         word.compiled.readings[choice.mode === 'suggestions' ? 'rejected' : 'accepted']));
       this.#importedMarkCall(() => validateWordImportedMarkSources(this.#authority, input.bookId, word.commitId, word.compiled));
-      this.#learningCall(() => new EditorialLearningLedger(this.#authority).validateWordImportSamples(input.bookId, word.commitId, word.compiled));
+      this.#learningCall(() => this.#learningLedger().validateWordImportSamples(input.bookId, word.commitId, word.compiled));
     }
     const { plan: persistedPlan } = this.#persistedFidelityPlan(
       input.fidelityReviewId,

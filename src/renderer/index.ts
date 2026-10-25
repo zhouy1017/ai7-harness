@@ -113,7 +113,7 @@ import { SOURCES_LEDE, SOURCES_STATUS, SOURCES_TITLE } from './research-evidence
 import type { AnalysisFeedbackDimension } from '../shared/analysis-feedback.js';
 import { analysisFeedbackEngaged, mountAnalysisFeedback } from './analysis-feedback.js';
 import type { LearningMaterialTarget } from '../shared/protocol.js';
-import { mountLearningMaterials } from './quality-learning.js';
+import { mountLearningMaterials, mountWordTrackedEditDetail } from './quality-learning.js';
 import type { FeedbackHistoryTarget } from '../shared/protocol.js';
 import { mountFeedbackHistory } from './feedback-history.js';
 import { mountLearningAudit } from './learning-audit.js';
@@ -1379,9 +1379,34 @@ async function openLearningMaterialSource(bookId: string, materialKey: string): 
   await requestBookWorkbenchRoute({ kind: 'book', bookId, learningMaterialKey: materialKey });
 }
 
+/** Follow the existing bounded Book history to the exact retained Source Version. */
+async function openWordSourceVersion(bookId: string, sourceVersionId: string): Promise<void> {
+  await requestBookWorkbenchRoute({ kind: 'book', bookId }, async () => {
+    let overview = await window.ai7.getBookOverview({ bookId, historyCursor: null });
+    while (!overview.records.some((record) => record.kind === 'source' && record.sourceVersionId === sourceVersionId)) {
+      const cursor = overview.historyPage.nextCursor;
+      if (cursor === null) throw new Error('保留的 Word 来源版本不在这本图书的历史中。');
+      overview = await window.ai7.getBookOverview({ bookId, historyCursor: cursor });
+    }
+    renderBookOverview(overview);
+    const source = screen.querySelector<HTMLButtonElement>(`[data-record-kind="source"][data-record-id="${CSS.escape(sourceVersionId)}"]`);
+    if (source === null) throw new Error('原始来源版本的精确记录暂时无法打开。');
+    source.click();
+  });
+}
+
 /** The service-owned arrival travels with the route to whichever workbench owns the Book. */
 async function renderLearningMaterialTarget(target: LearningMaterialTarget, bookTitle: string): Promise<void> {
   switch (target.kind) {
+    case 'word-tracked-edit': {
+      const content = panel();
+      content.append(element('h2', undefined, `《${bookTitle}》 · Word 修改来源`));
+      const reader = mountWordTrackedEditDetail({ root: content, api: window.ai7, ...target, openSourceVersion: openWordSourceVersion });
+      content.append(button('查看学习准入与排除', 'secondary', () => void renderQualityLearning('learning', target.bookId)));
+      replaceScreen('word-import-detail', content, { bookId: target.bookId, title: bookTitle, section: 'history' });
+      await reader.load();
+      return;
+    }
     case 'mark': {
       const opened = await window.ai7.getManuscriptWindowAt({ manuscriptId: target.manuscriptId, branchId: target.branchId, target: { kind: 'block', blockId: target.blockId } });
       await openEditorWindow(opened, bookTitle, undefined, undefined, target.markId);
@@ -2265,6 +2290,16 @@ function renderImportRecovery(
     return;
   }
   if (recovery.staged) content.append(sourceCard(recovery.staged));
+  const recoveredWord = recovery.staged?.wordTrackedChanges;
+  if (recoveredWord?.compatibility === 'ready' && recoveredWord.savedChoice !== null) {
+    const choice = recoveredWord.savedChoice;
+    const saved = element('section', 'review-section');
+    saved.dataset['wordRecoveredMode'] = choice.mode; saved.dataset['wordRecoveredLearning'] = String(choice.learnFromEdits);
+    saved.append(element('h3', undefined, '已保存的 Word 导入选择'), element('p', undefined, choice.mode === 'suggestions'
+      ? '撤销原修订后的阅读作为基线，原修订保留为建议。' : '已单独确认：接受原修订后的阅读作为基线。'),
+    element('p', undefined, choice.learnFromEdits ? '已选择学习这些编辑改动；提交时仍会校验当前排除设置。' : '已关闭本次编辑改动学习。'));
+    content.append(saved);
+  }
 
   if (uncertain) {
     const support = element('section', 'uncertain-support');
@@ -5579,7 +5614,7 @@ async function renderKnowledgeBase(tab: KnowledgeBaseTab = 'guidelines', tabFocu
     try {
       renderHouseReviewPreference(preferenceHost, await window.ai7.inspectHouseReviewPreference(), window.ai7);
       // 编辑记忆 (Issue #1082, F-05 part 1): explicit memory and the learning controls beside the delivered 本社审阅偏好.
-      await mountEditorialMemory(memoryHost, window.ai7).catch((error: unknown) => {
+      await mountEditorialMemory(memoryHost, window.ai7, openWordSourceVersion).catch((error: unknown) => {
         memoryHost.replaceChildren(element('p', 'field-note', rendererErrorMessage(error, '无法读取编辑记忆。')));
       });
       if (content.isConnected) setStatus('本社审阅偏好已打开');
@@ -5841,8 +5876,8 @@ async function renderQualityLearning(tab: QualityLearningTab, bookId: string | n
   const surface = tab === 'feedback'
     ? mountFeedbackHistory({ root: host, api: window.ai7, open: openFeedbackTarget, setStatus, errorMessage: rendererErrorMessage })
     : tab === 'learning'
-      ? mountLearningMaterials({ root: host, bookId, api: window.ai7, openSource: openLearningMaterialSource, setStatus, errorMessage: rendererErrorMessage, technicalDetails })
-      : mountLearningAudit({ root: host, api: window.ai7, setStatus, errorMessage: rendererErrorMessage, openMaterial });
+      ? mountLearningMaterials({ root: host, bookId, api: window.ai7, openSource: openLearningMaterialSource, openSourceVersion: openWordSourceVersion, setStatus, errorMessage: rendererErrorMessage, technicalDetails })
+      : mountLearningAudit({ root: host, api: window.ai7, openSourceVersion: openWordSourceVersion, setStatus, errorMessage: rendererErrorMessage, openMaterial });
   try {
     await surface.load();
     if (tab === 'feedback') {

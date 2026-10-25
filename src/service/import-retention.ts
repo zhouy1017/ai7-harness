@@ -9,7 +9,7 @@ import type { ParsedImportedMark } from './docx-marks.js';
 import { LOCAL_LEARNING_POLICY_BASIS } from './learning-eligibility.js';
 import { canonicalJson as wordCanonicalJson, sha256Hex, DIGEST_PATTERN, UUID_PATTERN, hasExactKeys, isRecord } from './analysis/canonical.js';
 
-/** Frozen local contracts for Issue #1132. None of these definitions activates a store or IPC arm. */
+/** Frozen local contracts for Issue #1132; the existing open, intake and IPC owners activate them. */
 export const WORD_INTAKE_PROFILE = 'ai7.word-tracked-intake-profile/1' as const;
 export const WORD_SOURCE_SCHEMA = 'ai7.word-revision-source/1' as const;
 export const WORD_EXTRACTOR_IDENTITY = 'ai7-word-tracked-extractor/1' as const;

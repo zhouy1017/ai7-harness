@@ -1,5 +1,6 @@
 import type { EditorialLearningProjection, HouseReviewPreferenceProjection, LearningSignal, RendererApi } from '../shared/protocol.js';
 import { learningChoiceLabel } from './quality-learning-labels.js';
+import { mountWordTrackedEditDetail } from './quality-learning.js';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, text: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
@@ -22,7 +23,8 @@ function signalStandingLabel(signal: EditorialLearningProjection['signals'][numb
 }
 
 /** Explicit, reference-only memory management alongside the existing 本社审阅偏好. */
-export async function mountEditorialMemory(root: HTMLElement, api: RendererApi): Promise<void> {
+export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
+  openSourceVersion: (bookId: string, sourceVersionId: string) => Promise<void>): Promise<void> {
   const section = el('section', '');
   section.dataset['editorialMemory'] = '';
   section.className = 'learning-materials'; section.style.overflowWrap = 'anywhere';
@@ -94,7 +96,10 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi):
       itemOffset = page.nextItemOffset!;
       void api.inspectEditorialLearning({ signalOffset, itemOffset, exclusionOffset }).then((next) => { page = next; paint(); }).catch(() => { status.textContent = '无法读取更多记忆。'; });
     }));
-    section.append(el('h4', '学习信号 · 从处理记录新建记忆'), el('p', '勾选同一审阅类别的 1–10 条来源，撰写记忆候选；接受后，符合范围的审阅可参考它。原文与改写留在原处理记录中。'));
+    const wordOnly = page.signals.length > 0 && page.signals.every((signal) => signal.kind === 'word-tracked-edit');
+    section.append(el('h4', wordOnly ? '学习信号 · Word 原始修改对' : '学习信号 · 从处理记录新建记忆'), el('p', wordOnly
+      ? '查看原始修改对及其导入依据，或排除今后的学习使用；尚未用于编辑记忆、审阅偏好或模型任务。'
+      : '勾选同一审阅类别的 1–10 条来源，撰写记忆候选；接受后，符合范围的审阅可参考它。原文与改写留在原处理记录中。'));
     const batch = el('form', ''); batch.dataset['memoryCandidateForm'] = '';
     const title = el('input', ''); title.name = 'candidate-title'; title.maxLength = 160; title.required = true;
     const titleLabel = el('label', '候选记忆内容'); titleLabel.append(title);
@@ -113,7 +118,7 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi):
       run(() => api.createEditorialMemory({ schema: 'ai7.global-editorial-memory/2', actionId: crypto.randomUUID(), signalIds: sources.map((signal) => signal.signalId),
         applicability: scope.value === 'book' ? { kind: 'book', bookId: first.source.bookId } : { kind: 'house' },
         title: title.value, editorialDimension: first.memoryCandidate!.editorialDimension, confidence: Number(confidence.value) / 100 }));
-    }); section.append(batch);
+    }); if (!wordOnly) section.append(batch);
     if (page.signals.length === 0) section.append(el('p', '尚无符合准入的学习信号。'));
     for (const signal of page.signals) {
       const row = el('article', ''); row.className = 'learning-material'; row.dataset['learningSignal'] = signal.signalId;
@@ -123,6 +128,11 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi):
         row.append(el('p', 'Word 修改对已在本机保留；尚未用于编辑记忆、审阅偏好或模型任务。'));
         const provenance = el('details', ''); provenance.append(el('summary', '来源与导入记录'),
           el('p', `原始来源 ${signal.source.sourceVersionId} · 导入 ${signal.source.importCommitId}`)); row.append(provenance);
+        const detail = el('div', '');
+        row.append(action('查看完整 Word 修改对', () => {
+          detail.replaceChildren();
+          void mountWordTrackedEditDetail({ root: detail, api, ...signal.source, openSourceVersion }).load();
+        }), detail);
       } else row.append(el('p', `决定 ${signal.source.decisionId} · 修订 ${signal.source.revisionId} · 日志 ${signal.source.journalSequence}${signal.rewriteDistance === null ? '' : ` · 改写距离 ${signal.rewriteDistance}`}`));
       if (signal.kind !== 'word-tracked-edit' && signal.memoryCandidate != null) {
         const checkbox = el('input', ''); checkbox.type = 'checkbox'; checkbox.dataset['memorySource'] = signal.signalId; checkbox.checked = selected.has(signal.signalId); checkbox.disabled = busy;

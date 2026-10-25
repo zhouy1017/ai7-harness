@@ -9801,6 +9801,8 @@ export type LearningMaterialTarget =
 /** One Learning Material as its Review Card shows it (LEARN-003). */
 export interface LearningMaterialProjection {
   readonly target: LearningMaterialTarget;
+  /** Word's actual current local controls/standing, separate from its historical capture and any human decision. */
+  readonly wordCurrentEligibility?: LearningEligibilityChoice;
   /** The exact originating Task, when the source record has one (LEARN-003); editor-authored material has none. */
   readonly sourceTask: null | { readonly taskIntentId: string; readonly label: string };
   /** The material's place: its kind and the record it comes from. */
@@ -10004,6 +10006,7 @@ export interface LearningAuditInput {
 
 /** One material as 学习回溯 lists it: what it is, where it stands, and what used it (LAUD-001). */
 export interface LearningAuditMaterialProjection {
+  readonly wordCurrentEligibility?: LearningEligibilityChoice;
   readonly materialKey: string;
   readonly kind: LearningLedgerMaterialKind;
   readonly digest: string;

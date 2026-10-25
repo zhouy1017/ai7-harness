@@ -11,6 +11,8 @@ import type {
   RendererApi,
 } from '../shared/protocol.js';
 import { LEARNING_AUDIT_STANDINGS, LEARNING_MATERIAL_KINDS } from '../shared/protocol.js';
+import { mountWordTrackedEditDetail } from './quality-learning.js';
+import { wordLearningStandingLine } from './quality-learning-labels.js';
 import {
   LEARNING_AUDIT_ALL,
   LEARNING_AUDIT_BATCH_MISMATCH,
@@ -92,7 +94,8 @@ import { localInstantLabel } from './plan-preview-labels.js';
 export interface MountLearningAuditOptions {
   readonly root: HTMLElement;
   readonly api: Pick<RendererApi, 'inspectLearningAudit' | 'inspectLearningLineage' | 'previewLearningRemediation' | 'recordLearningRemediation' |
-    'decideLearningMaterial'>;
+    'decideLearningMaterial' | 'inspectWordTrackedEditSample'>;
+  readonly openSourceVersion: (bookId: string, sourceVersionId: string) => Promise<void>;
   readonly setStatus: (message: string, tone?: 'busy' | 'success' | 'error') => void;
   readonly errorMessage: (error: unknown, fallback: string) => string;
   /**
@@ -417,7 +420,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     item.dataset['materialKey'] = material.materialKey;
     item.dataset['learningStanding'] = material.standing;
     const head = el('div', 'learning-material-head');
-    if (material.standing === 'book' || material.standing === 'house') {
+    if (material.standing === 'book' || material.standing === 'house' || material.kind === 'word-tracked-edit' && material.automaticAdmission?.choice === 'house') {
       const check = el('input', 'learning-audit-select');
       check.type = 'checkbox';
       check.checked = selection.has(material.materialKey);
@@ -436,6 +439,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
       el('span', `status-pill learning-state learning-audit-standing learning-audit-standing-${material.standing}`, LEARNING_AUDIT_STANDING_LABELS[material.standing]),
     );
     item.append(head);
+    if (material.wordCurrentEligibility !== undefined) item.append(el('p', 'field-note', wordLearningStandingLine(material.wordCurrentEligibility)));
     const reason = material.excerpt.at(-1);
     if (reason !== undefined) item.append(el('p', 'learning-audit-excerpt', reason));
     const use = el('p', 'field-note learning-audit-use', learningAuditUse(material.downstreamTasks));
@@ -751,6 +755,16 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     const excerpt = el('ul', 'learning-excerpt');
     for (const line of material.excerpt) excerpt.append(el('li', undefined, line));
     const materialBody: HTMLElement[] = [excerpt, el('p', 'field-note', learningOriginLine(material, localInstantLabel))];
+    if (material.target.kind === 'word-tracked-edit') {
+      const target = material.target;
+      const detail = el('div');
+      if (material.wordCurrentEligibility !== undefined) materialBody.push(el('p', 'field-note', wordLearningStandingLine(material.wordCurrentEligibility)));
+      materialBody.push(el('p', 'field-note', 'Word 原始修改对尚未用于编辑记忆、审阅偏好或模型任务。'),
+        action('查看完整 Word 修改对', 'secondary', 'word-detail', () => {
+          detail.replaceChildren();
+          void mountWordTrackedEditDetail({ root: detail, api, ...target, openSourceVersion: options.openSourceVersion }).load();
+        }), detail);
+    }
     if (material.sourceTask !== null) materialBody.push(el('p', 'field-note', `来源任务：${material.sourceTask.label}`));
     backward.append(step(0, materialBody, null));
     const decisions = el('ol', 'learning-lineage-decisions');
@@ -814,7 +828,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
       stop.disabled = busy || open.panel !== null;
       actions.append(stop);
     }
-    if (read.standing === 'excluded') {
+    if (read.standing === 'excluded' && material.kind !== 'word-tracked-edit') {
       const again = action(LEARNING_LINEAGE_REINCLUDE, 'secondary', 'reinclude', () => {
         if (busy || open.panel !== null) return;
         open.panel = { kind: 'reinclude', choice: null };

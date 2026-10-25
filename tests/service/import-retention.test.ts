@@ -5,11 +5,12 @@ import { join } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { unzipSync, zipSync } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { parseDocx, parseNativeDocxIntake, compileWordTrackedDocx, WORD_DOCX_PARSER_IDENTITY,
+import { parseDocx, parseNativeDocxIntake, compileWordTrackedDocx, compileWordTrackedDocxBytes, WORD_DOCX_PARSER_IDENTITY,
   type ParsedDocx, type ParsedDocxBlock, type NativeDocxIntakeParse } from '../../src/service/docx.js';
 import { fixedArchiveTime } from '../../src/shared/archive-time.js';
 import {
   IMPORT_FIDELITY_CATEGORIES_REVISION_26_SQL,
+  IMPORT_RETENTION_TRIGGER_SQL,
   importFidelityCategoriesShape,
   initializeWordImportRetentionSchema,
   validateWordImportRetentionSchema,
@@ -55,7 +56,7 @@ import {
   composeRevisedDocx,
   type ComposedManuscriptRequest,
 } from '../support/composed-fixture.js';
-import { IMPORT_RETENTION_RELATIONS_DROP_ORDER, WORD_IMPORT_RETENTION_RELATIONS_DROP_ORDER, SAMPLE1_V1_REPORT } from '../support/import-retention.js';
+import { IMPORT_RETENTION_RELATIONS_DROP_ORDER, WORD_IMPORT_RETENTION_RELATIONS_DROP_ORDER, SAMPLE1_V1_REPORT, stageHistoricalTrackedDocxFixture } from '../support/import-retention.js';
 import { IMPORTED_MARK_RELATIONS_DROP_ORDER } from '../support/imported-marks.js';
 import { EXPORT_LEDGER_RELATIONS_DROP_ORDER } from '../support/manuscript-export.js';
 import { DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER } from '../support/default-execution-rules.js';
@@ -144,7 +145,14 @@ async function retainedWordParentFixture(paragraphs = 1) {
   const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
   let bookId: string;
   try {
-    bookId = (await importComposed(store, path)).bookId;
+    const staged = stageHistoricalTrackedDocxFixture(store, roots.dataRoot, await store.stageSelectedManuscript(randomUUID(), path));
+    const review = store.prepareNewBookReview(staged.draftId, staged.draftVersion,
+      { kind: 'new-book', choiceId: 'new-book', confirmedTitle: staged.titleSuggestion.value }, false);
+    if (review.reviewDigest === null) throw new Error('historical fixture unexpectedly requires degradation confirmation');
+    const commitId = randomUUID();
+    bookId = (await store.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: review.draftVersion,
+      reviewDigest: review.reviewDigest, commitId })).bookId;
+    await store.acknowledgeImportCompletion(commitId);
     store.getBookOverview(bookId); // Validate the original records through their existing historical reader.
     store.markCleanShutdown();
   } finally { store.close(); }
@@ -165,12 +173,25 @@ function wordChoiceFixture(db: DatabaseSync, bookId: string, compiled: Awaited<R
     VALUES (?, ?, 'native-file-picker', 'local-provider-free', ?, ?, ?)`).run(wordProvenanceId, sourceVersionId, pin.displayName, WORD_DOCX_PARSER_IDENTITY, recordedAt);
   db.prepare('UPDATE manuscript_import_records SET provenance_id = ? WHERE commit_id = ?').run(wordProvenanceId, commitId);
   retainWordRevisionSource(db, pin, compiled.graph);
-  const ledger = new EditorialLearningLedger(db);
+  const ledger = new EditorialLearningLedger(db, undefined, (source) => {
+    const row = db.prepare('SELECT relative_key FROM content_objects WHERE object_digest = ?').get(source.sourceDigest)!;
+    const bytes = readFileSync(join(roots.dataRoot, 'objects', ...String(row.relative_key).split('/')));
+    expect(createHash('sha256').update(bytes).digest('hex')).toBe(source.sourceDigest);
+    const fresh = compileWordTrackedDocxBytes(bytes);
+    if (fresh.kind !== 'ready') throw new Error('historical fixture source must still compile');
+    expect(fresh.graphDigest).toBe(source.graphDigest);
+    expect(wordTrackedSamples(bookId, fresh.graph, fresh.templates).some((sample) => sample.sampleId === source.sampleId &&
+      wordTrackedSampleRecord(sample).digest === source.sampleDigest)).toBe(true);
+  });
   const samples = wordTrackedSamples(bookId, compiled.graph, compiled.templates);
   const materials = samples.map((sample, index) => ({ templateKey: compiled.templates[index]!.templateKey,
     materialKey: `word-sample:${sample.sampleId}`,
     materialDigest: learningMaterialDigest(wordTrackedEditCandidate(sample, wordTrackedSampleRecord(sample).digest, recordedAt)) }));
   const controls = ledger.wordImportControls(bookId, materials);
+  // This isolated relation fixture installs a Word map over the old baseline; fake legacy rows cannot accompany that arm.
+  db.exec('DROP TRIGGER manuscript_block_sources_no_delete');
+  db.prepare('DELETE FROM manuscript_block_sources WHERE revision_id = ?').run(String(original.resulting_revision_id));
+  db.exec(IMPORT_RETENTION_TRIGGER_SQL.manuscript_block_sources_no_delete!);
   const bound = bindWordReadingToRevision(db, bookId, String(original.resulting_revision_id), sourceVersionId, compiled.readings.rejected);
   const choice: WordImportChoiceRecord = { schema: 'ai7.word-import-choice/1', sourceVersionId,
     parentSourcePinDigest: wordParentSourcePinRecord(pin).digest, originalDigest: compiled.sourceDigest, workingObjectDigest: null,
@@ -196,7 +217,7 @@ describe('closed Word retention definitions (#1132)', () => {
           { runs: [{ text: { block: 8, from: 0, to: 10 } }, { text: { block: 9, from: 0, to: 5 },
             revision: { kind: 'ins', author: '作者', date: '2026-10-25T00:00:00Z' } }] },
         ], ...(unsupported ? { footnoteRevision: { text: { block: 10, from: 0, to: 5 }, author: '作者', date: '2026-10-25T00:00:00Z' } } : {}) });
-        const staged = await store.stageSelectedManuscript(randomUUID(), path);
+        const staged = stageHistoricalTrackedDocxFixture(store, roots.dataRoot, await store.stageSelectedManuscript(randomUUID(), path));
         const result = await parseNativeDocxIntake(path, `word-staged-${unsupported}.docx`, { legacy: () => undefined, wordPreview: () => undefined });
         inputs.push({ draftId: staged.draftId, result });
       }

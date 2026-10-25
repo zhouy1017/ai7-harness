@@ -11,6 +11,7 @@ import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import { buildCorpusSource, type CorpusSource, type CorpusVariant } from '../fixtures/docx-fidelity/builder.js';
 import classification from '../fixtures/docx-fidelity/classification.json' with { type: 'json' };
 import { createServiceTestRoots } from '../support/temp-data-root.js';
+import { stageHistoricalTrackedDocxFixture } from '../support/import-retention.js';
 
 // Issue #814 / J-01 and J-07, L2: use the actual import, edit, review, preparation, approval,
 // atomic file and receipt owners. Assertions emit only digests, counts and container classifications.
@@ -102,7 +103,9 @@ describe('edited DOCX fidelity corpus (#814)', () => {
           const selected = join(roots.inputRoot, 'source.docx');
           await writeFile(selected, original);
           store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-          const staged = await store.stageSelectedManuscript(randomUUID(), selected);
+          const selectedDraft = await store.stageSelectedManuscript(randomUUID(), selected);
+          // #814's frozen old-reader/export bytes remain their own compatibility counterfactual.
+          const staged = selectedDraft.wordTrackedChanges === undefined ? selectedDraft : stageHistoricalTrackedDocxFixture(store, roots.dataRoot, selectedDraft);
           const importing = store.prepareNewBookReview(staged.draftId, staged.draftVersion,
             { kind: 'new-book', choiceId: 'new-book', confirmedTitle: '保真容器' }, true);
           const commitId = randomUUID();
