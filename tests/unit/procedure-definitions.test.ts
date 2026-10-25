@@ -1,14 +1,27 @@
 import { describe, expect, it } from 'vitest';
 import { baselineAnalysisKindDefinition } from '../../src/service/analysis/kind-definition.js';
 import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
-import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryConfigurationDigest } from '../../src/service/review/category-configuration.js';
-import { baselineProcedureDefinition, preinstalledProcedureDefinitions } from '../../src/service/procedures/preinstalled.js';
+import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, LOCAL_REVIEW_CATEGORY, LOCAL_REVIEW_CATEGORY_V2, reviewCategoryConfigurationDigest } from '../../src/service/review/category-configuration.js';
+import { allPreinstalledProcedureDefinitions, baselineProcedureDefinition, localCheckProcedureDefinition, localCheckProcedureDefinitionV2, preinstalledProcedureDefinitions } from '../../src/service/procedures/preinstalled.js';
 import { PROCEDURE_STAGE_LABELS, resolveProcedureStage } from '../../src/service/procedures/stage-types.js';
 import { PROCEDURE_STAGE_TYPES } from '../../src/shared/protocol/procedures.js';
 import { renderProcedureLibrary } from '../../src/renderer/procedure-library.js';
 import { installMiniDom } from '../support/mini-dom.js';
 
 describe('pre-installed procedures v1', () => {
+  it('freezes local@1 canonical bytes while declaring a distinct unselected annotation-only successor', () => {
+    const legacy = '{"editorInstruction":"","id":"ai7-procedure/local-text-check","outputKinds":["annotation"],"role":"以五项有限规则生成供编辑复核的精确批注","schema":"ai7.procedure-definition/2","stages":[{"budgetShare":0,"exemptionRules":[],"inputs":["frozen-local-plan"],"outputTemplateId":"ai7.review.local-result/1","parallelism":1,"stageType":"deterministic-check","toolWhitelist":[],"web":false},{"budgetShare":0,"exemptionRules":[],"inputs":["review-findings"],"outputTemplateId":"ai7.review.report/1","parallelism":1,"stageType":"derived-report","toolWhitelist":[],"web":false}],"title":"本地文字检查","version":1}';
+    expect(canonicalJson(localCheckProcedureDefinition())).toBe(legacy);
+    const successor = localCheckProcedureDefinitionV2();
+    expect(successor).toMatchObject({ id: 'ai7-procedure/local-text-check', version: 2, outputKinds: ['annotation'] });
+    expect(successor.stages.map((stage) => stage.stageType)).toEqual(['deterministic-check', 'derived-report']);
+    expect(successor.stages[0]?.outputTemplateId).toBe('ai7.review.local-result/2');
+    expect(successor.stages.every((stage) => !stage.web && stage.toolWhitelist.length === 0 && stage.budgetShare === 0)).toBe(true);
+    expect(preinstalledProcedureDefinitions().find((entry) => entry.id === successor.id)).toEqual(localCheckProcedureDefinition());
+    expect(allPreinstalledProcedureDefinitions().filter((entry) => entry.id === successor.id)).toEqual([localCheckProcedureDefinition()]);
+    expect(LOCAL_REVIEW_CATEGORY.procedure.version).toBe('1');
+    expect(LOCAL_REVIEW_CATEGORY_V2).toMatchObject({ categoryId: 'local-text-check', output: 'annotation', batchApply: false, searchEngine: false, procedure: { version: '2' } });
+  });
   it('admits the bounded local checker while other future stage types remain unavailable', () => {
     const kind = baselineAnalysisKindDefinition();
     const available = PROCEDURE_STAGE_TYPES.filter((type) => resolveProcedureStage(type, kind).state === 'available');

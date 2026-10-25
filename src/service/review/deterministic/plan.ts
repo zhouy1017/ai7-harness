@@ -1,9 +1,13 @@
 import type { LocalCheckOptions, ProcedureDefinitionPin } from '../../../shared/protocol/procedures.js';
 import { BLOCK_ID_PATTERN, canonicalJson, hasExactKeys, isRecord, sha256Hex } from '../../analysis/canonical.js';
 import { graphemeCount } from '../../analysis/factual-review-contract.js';
-import { LOCAL_CHECK_PROCEDURE, LOCAL_RULE_IDS } from './rules.js';
+import { LOCAL_CHECK_PROCEDURE, LOCAL_RULE_IDS, LOCAL_RULE_IDS_V2 } from './rules.js';
+import type { HouseWordListDocument, HouseWordListPin } from '../../../shared/protocol/house-word-list.js';
+import { validateHouseWordListSnapshot } from '../house-word-list.js';
+import { localCheckProcedureDefinitionV2 } from '../../procedures/preinstalled.js';
 
 export const LOCAL_PLAN_SCHEMA = 'ai7.review.local-plan/1' as const;
+export const LOCAL_PLAN_SCHEMA_V2 = 'ai7.review.local-plan/2' as const;
 export interface LocalCheckBlock { readonly blockId: string; readonly position: number; readonly text: string }
 export interface LocalCheckSource {
   readonly manuscriptId: string; readonly branchId: string; readonly revisionId: string;
@@ -20,6 +24,12 @@ export interface LocalCheckPlan {
   readonly options: LocalCheckOptions;
   readonly blocks: readonly LocalCheckBlock[];
   readonly digest: string;
+}
+export interface LocalCheckPlanV2 extends Omit<LocalCheckPlan, 'schema' | 'rules'> {
+  readonly schema: typeof LOCAL_PLAN_SCHEMA_V2;
+  readonly rules: readonly { readonly id: string; readonly version: number }[];
+  readonly grammarVersion: 1; readonly exclusionVersion: 1;
+  readonly houseWordList: { readonly pin: HouseWordListPin; readonly document: HouseWordListDocument };
 }
 export class LocalCheckError extends Error {
   constructor(readonly code: string, message: string) { super(message); this.name = 'LocalCheckError'; }
@@ -48,10 +58,14 @@ export function validateLocalPlan(value: unknown): asserts value is LocalCheckPl
   requireLocal(isRecord(value) && hasExactKeys(value, ['schema', 'procedure', 'rules', 'source', 'bookImportId', 'scope', 'options', 'blocks', 'digest']));
   const { digest, ...body } = value;
   requireLocal(value.schema === LOCAL_PLAN_SCHEMA && typeof digest === 'string' && digest === sha256Hex(canonicalJson(body)));
+  validateLocalFields(value, 1, LOCAL_RULE_IDS);
+}
+/** Same source/options validation, with genuine versioned owner data rather than a projected v1 record. */
+function validateLocalFields(value: Record<string, unknown>, version: 1 | 2, ruleIds: readonly string[]): void {
   requireLocal(value.bookImportId === null || typeof value.bookImportId === 'string' && /^[0-9a-f-]{36}$/i.test(value.bookImportId));
   requireLocal(isRecord(value.procedure) && hasExactKeys(value.procedure, ['procedureId', 'version', 'digest']) &&
-    value.procedure.procedureId === LOCAL_CHECK_PROCEDURE && value.procedure.version === 1 && typeof value.procedure.digest === 'string' && /^[0-9a-f]{64}$/.test(value.procedure.digest));
-  requireLocal(canonicalJson(value.rules) === canonicalJson(LOCAL_RULE_IDS.map((id) => ({ id, version: 1 }))));
+    value.procedure.procedureId === LOCAL_CHECK_PROCEDURE && value.procedure.version === version && typeof value.procedure.digest === 'string' && /^[0-9a-f]{64}$/.test(value.procedure.digest));
+  requireLocal(canonicalJson(value.rules) === canonicalJson(ruleIds.map((id) => ({ id, version: 1 }))));
   requireLocal(['whole', 'chapters', 'selection'].includes(String(value.scope)) && validLocalOptions(value.options));
   const source = value.source;
   requireLocal(isRecord(source) && hasExactKeys(source, ['manuscriptId', 'branchId', 'revisionId', 'journalSequence', 'workingDigest']) &&
@@ -71,6 +85,23 @@ export function validateLocalPlan(value: unknown): asserts value is LocalCheckPl
     requireLocal(block !== undefined && range.to <= graphemeCount(block.text));
   }
   requireLocal(value.options.doubledEllipsisBlockIds.every((id) => ids.has(id)));
+}
+
+export function freezeLocalPlanV2(input: Omit<LocalCheckPlanV2, 'schema' | 'rules' | 'digest' | 'grammarVersion' | 'exclusionVersion'>): LocalCheckPlanV2 {
+  const body = { schema: LOCAL_PLAN_SCHEMA_V2, ...structuredClone(input), grammarVersion: 1 as const, exclusionVersion: 1 as const,
+    rules: LOCAL_RULE_IDS_V2.map((id) => ({ id, version: 1 })) };
+  const plan = { ...body, digest: sha256Hex(canonicalJson(body)) };
+  validateLocalPlanV2(plan); return plan;
+}
+export function validateLocalPlanV2(value: unknown): asserts value is LocalCheckPlanV2 {
+  requireLocal(isRecord(value) && hasExactKeys(value, ['schema', 'procedure', 'rules', 'source', 'bookImportId', 'scope', 'options', 'blocks', 'digest', 'grammarVersion', 'exclusionVersion', 'houseWordList']));
+  const { digest, ...body } = value;
+  requireLocal(value.schema === LOCAL_PLAN_SCHEMA_V2 && typeof digest === 'string' && digest === sha256Hex(canonicalJson(body)) && value.grammarVersion === 1 && value.exclusionVersion === 1);
+  validateLocalFields(value, 2, LOCAL_RULE_IDS_V2);
+  requireLocal(isRecord(value.procedure) && value.procedure.digest === sha256Hex(canonicalJson(localCheckProcedureDefinitionV2())));
+  requireLocal(isRecord(value.houseWordList) && hasExactKeys(value.houseWordList, ['pin', 'document']));
+  validateHouseWordListSnapshot(value.houseWordList.document, value.houseWordList.pin);
+  requireLocal(value.houseWordList.document.entries.some((entry) => entry.enabled));
 }
 
 export function numeralBasis(options: LocalCheckOptions): 'disabled' | 'out-of-applicability' | 'national-standard' | 'editor-convention' {

@@ -99,6 +99,13 @@ export const LOCAL_REVIEW_CATEGORY: ReviewCategoryConfigurationEntry = {
   guidelineDocuments: [], procedure: { procedureId: 'ai7-procedure/local-text-check', title: '本地文字检查', version: '1' },
 };
 
+/** Explicit v2 projection, not the selected historical category. */
+export const LOCAL_REVIEW_CATEGORY_V2: ReviewCategoryConfigurationEntry = {
+  ...LOCAL_REVIEW_CATEGORY,
+  description: '按有限标点、数字规则和明确选定的本社字面词条提示可能问题；只生成批注，请编辑判断。',
+  procedure: { procedureId: 'ai7-procedure/local-text-check', title: '本地文字检查', version: '2' },
+};
+
 function builtinDocument(documentId: string, title: string, clauses: ReadonlyArray<ReviewGuidelineClause>): ReviewGuidelineDocument {
   return { documentId, title, issuer: BUILTIN_GUIDELINE_ISSUER, version: '1', clauses };
 }
