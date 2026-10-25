@@ -28,9 +28,11 @@ import {
   type LearningRemediationPreviewProjection,
 } from '../shared/protocol.js';
 import { graphemesOf } from '../shared/mark-anchor.js';
-import { canonicalJson, canonicalRecord, isRecord, sha256Hex } from './analysis/canonical.js';
+import { canonicalJson, canonicalRecord, isRecord, sha256Hex, UUID_PATTERN } from './analysis/canonical.js';
 import { graphemeCount } from './analysis/factual-review-contract.js';
 import { weighedPage } from './series.js';
+import { wordTrackedSampleRecord, wordTemplateKey, validateWordImportChoiceRecord, type WordTrackedEditSample,
+  type WordImportChoiceRecord, type WordImportControlsSnapshot, type WordLocalImportAdmission } from './import-retention.js';
 
 /**
  * 质量与学习 › 学习准入 (Issue #61, plan slice S26b; V2-UX-LEARN-001 to LEARN-012, ATTN-009, FDBK-013). A Learning Material is
@@ -168,6 +170,7 @@ export interface LearningMaterialCandidate {
     | { readonly kind: 'decision'; readonly decisionId: string }
     | Omit<Extract<LearningMaterialTarget, { kind: 'analysis' }>, 'bookId'>
     | Omit<Extract<LearningMaterialTarget, { kind: 'review' }>, 'bookId'>
+    | Omit<Extract<LearningMaterialTarget, { kind: 'word-tracked-edit' }>, 'bookId'>
     /** A 审稿意见 offered into 范例 at one exact version (Issue #429): 学习准入 lists no card for it; 范例 admits it. */
     | { readonly kind: 'readers-report-exemplar'; readonly documentId: string; readonly revisionId: string };
   readonly materialKey: string;
@@ -187,7 +190,70 @@ export interface LearningMaterialCandidate {
 }
 
 /** The page's order of a Book's materials (Issue #61 review): 修改建议 first, then analysis items, then 审阅 findings. */
-const KIND_ORDER: ReadonlyArray<string> = ['proposal-decision:', 'analysis-feedback:', 'review-disposition:'];
+const KIND_ORDER: ReadonlyArray<string> = ['proposal-decision:', 'analysis-feedback:', 'review-disposition:', 'word-sample:'];
+
+/** Full immutable evidence determines identity; card excerpts never determine admission. */
+export function wordTrackedEditCandidate(sample: WordTrackedEditSample, sampleDigest: string, recordedAt: string): LearningMaterialCandidate {
+  const record = wordTrackedSampleRecord(sample);
+  requireLearning(record.digest === sampleDigest, 'LEARNING_MATERIAL_CHANGED', 'Word 修改样本摘要无效。');
+  return { source: { kind: 'word-tracked-edit', sampleId: sample.sampleId, sampleDigest },
+    materialKey: `word-sample:${sample.sampleId}`, kind: 'word-tracked-edit', originLabel: 'Word 文件修订',
+    recordedAt, orderedAt: recordedAt, content: { schema: 'ai7.word-tracked-edit-sample/1', ...sample }, excerpt: [],
+    rationale: '导入时按本机学习设置保留的原始修改对；尚未用于编辑记忆、审阅偏好或模型任务。' };
+}
+
+/** Exact whole-manifest derivation under the current owner-provided controls, before any sample write. */
+export function wordLocalImportAdmissions(input: {
+  bookId: string;
+  samples: ReadonlyArray<{ templateKey: string; sample: WordTrackedEditSample }>;
+  choice: WordImportChoiceRecord;
+  choiceDigest: string;
+  currentControls: WordImportControlsSnapshot;
+  recordedAt: string;
+  signal?: AbortSignal;
+}): Array<{ templateKey: string; sample: WordTrackedEditSample; sampleDigest: string; materialKey: string;
+  materialDigest: string; admission: WordLocalImportAdmission; record: { json: string; digest: string } }> {
+  const { bookId, samples, choice, choiceDigest, currentControls, recordedAt } = input;
+  input.signal?.throwIfAborted();
+  validateWordImportChoiceRecord(choice);
+  requireLearning(UUID_PATTERN.test(bookId) && canonicalRecord(choice).digest === choiceDigest &&
+    canonicalJson(choice.effectiveControls) === canonicalJson(currentControls),
+  'WORD_ADMISSION_STALE', 'Word 导入选择或学习设置已变化，请重新审阅。');
+  const standings = new Map(currentControls.materials.map((material) => [material.templateKey, material]));
+  requireLearning(standings.size === samples.length && currentControls.materials.length === samples.length &&
+    new Set(samples.map((entry) => entry.templateKey)).size === samples.length,
+  'WORD_ADMISSION_MANIFEST_INVALID', 'Word 修改样本准入清单不完整。');
+  const templates = samples.map(({ templateKey, sample }) => {
+    input.signal?.throwIfAborted();
+    const { sampleId, bookId: sampleBookId, sourceDigest, extractorIdentity, graphDigest, ...template } = sample;
+    requireLearning(sampleBookId === bookId && sourceDigest === choice.originalDigest && extractorIdentity === choice.extractorIdentity &&
+      graphDigest === choice.graphDigest && templateKey === wordTemplateKey(sourceDigest, template) &&
+      sampleId === `wts_${sha256Hex(canonicalJson({ schema: 'ai7.word-sample-id/1', bookId, templateKey }))}`,
+    'WORD_ADMISSION_MANIFEST_INVALID', 'Word 修改样本与所选来源不一致。');
+    return { templateKey, ...template };
+  });
+  requireLearning(sha256Hex(canonicalJson({ schema: 'ai7.word-sample-template-manifest/1', sourceDigest: choice.originalDigest,
+    extractorIdentity: choice.extractorIdentity, templates })) === choice.templateManifestDigest,
+  'WORD_ADMISSION_MANIFEST_INVALID', 'Word 修改样本清单与完整编译结果不一致。');
+  const admitted: ReturnType<typeof wordLocalImportAdmissions> = [];
+  for (const { templateKey, sample } of samples) {
+    input.signal?.throwIfAborted();
+    const sampleDigest = wordTrackedSampleRecord(sample).digest;
+    const candidate = wordTrackedEditCandidate(sample, sampleDigest, recordedAt);
+    const materialDigest = learningMaterialDigest(candidate);
+    const material = standings.get(templateKey);
+    requireLearning(material?.materialDigest === materialDigest, 'WORD_ADMISSION_STALE', 'Word 修改样本的当前准入已变化。');
+    const standing = material.standing;
+    if (!choice.learnFromEdits || !currentControls.global.enabled || currentControls.book.excluded ||
+      standing.choice === 'excluded' || standing.choice === 'deferred') continue;
+    const admission: WordLocalImportAdmission = { schema: 'ai7.word-local-import-admission/1', sampleId: sample.sampleId,
+      sampleDigest, importChoiceDigest: choiceDigest, basis: LOCAL_LEARNING_POLICY_BASIS, reviewedLearnFromEdits: true,
+      global: { enabled: true, reference: currentControls.global.reference }, book: { excluded: false, reference: currentControls.book.reference },
+      standing: { ...standing, choice: standing.choice } };
+    admitted.push({ templateKey, sample, sampleDigest, materialKey: candidate.materialKey, materialDigest, admission, record: canonicalRecord(admission) });
+  }
+  return admitted;
+}
 
 /**
  * How two materials of one Book compare on the page — by kind, then by when each came to be, then by place — the cursor a

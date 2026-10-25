@@ -119,6 +119,64 @@ async function handmade(name: string, dataVersion: number, schemaRevision: numbe
 const backups = (): string => `${roots.dataRoot}-backups`;
 
 describe('导入数据库 over the real store', () => {
+  it.each(['suggestions', 'accepted-baseline'] as const)('preserves the whole Word %s layer and original through database export, pre-replace backup, replacement and rollback', async (mode) => {
+    const path = join(roots.inputRoot, `word-database-${mode}.docx`);
+    await composeRevisedDocx(path, { source: ADMITTED_BASELINE_DOCX, title: 'Word 数据库沿袭', paragraphs: [
+      { runs: [{ text: { block: 8, from: 0, to: 10 } },
+        { text: { block: 9, from: 0, to: 5 }, revision: { kind: 'del', author: '作者甲', date: '2026-10-25T00:00:00Z' } },
+        { text: { block: 10, from: 0, to: 6 }, revision: { kind: 'ins', author: '作者乙', date: '2026-10-25T00:00:01Z' } }] },
+    ] });
+    const wordRows = () => {
+      const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+      try { return Object.fromEntries(['word_revision_sources', 'word_revision_imports', 'word_manuscript_source_segments',
+        'word_tracked_edit_samples', 'word_tracked_edit_sample_imports', 'word_import_mark_sources']
+        .map((table) => [table, db.prepare(`SELECT rowid, * FROM ${table} ORDER BY rowid`).all()])); }
+      finally { db.close(); }
+    };
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const staged = await store.stageSelectedManuscript(randomUUID(), path);
+      const reviewed = store.prepareNewBookReview(staged.draftId, staged.draftVersion,
+        { kind: 'new-book', choiceId: 'new-book', confirmedTitle: staged.titleSuggestion.value }, false, 'retain',
+        { mode, learnFromEdits: true, acceptedBaselineConfirmed: mode === 'accepted-baseline' });
+      if (reviewed.reviewDigest === null) throw new Error('expected complete Word database fixture');
+      const commitId = randomUUID();
+      const imported = await store.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: reviewed.draftVersion,
+        reviewDigest: reviewed.reviewDigest, commitId });
+      await store.acknowledgeImportCompletion(commitId);
+      const signal = store.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }).signals[0]!;
+      if (signal.kind !== 'word-tracked-edit') throw new Error('expected actual Word database source');
+      const detailInput = { bookId: imported.bookId, sampleId: signal.source.sampleId, sampleDigest: signal.source.sampleDigest, after: null };
+      const detail = await store.inspectWordTrackedEditSample(detailInput);
+      const originalRows = wordRows();
+      const packagePath = await exported(store, `word-${mode}.ai7db`);
+      const localBookId = createBook(store, '替换前另一本空图书');
+      store.changeEditorialLearning({ kind: 'switch', enabled: false, expectedEntries: 0 });
+      expect(store.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }).signals[0]!.currentEligibility).toBe('excluded');
+      const preview = await store.inspectDatabaseImport(packagePath);
+      expect(preview).toMatchObject({ compatibility: 'compatible', contents: { books: 1, sourceVersions: 1 } });
+      const waiting = await store.prepareDatabaseReplacement(preview.previewId, T);
+      const replacementId = waiting.pending!.replacementId;
+      const backup = unzipSync(await readFile(join(backups(), preReplaceBackupFileName(T))));
+      expect(parseCanonicalJson(strFromU8(backup['manifest.json']!))).toMatchObject({ origin: 'pre-replace-backup', contents: { books: 2, sourceVersions: 1 } });
+      expect(Object.entries(backup).some(([name, bytes]) => name.startsWith('objects/') && sha256Hex(bytes) === signal.source.sourceDigest)).toBe(true);
+      store.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      expect(store.listBooks(null).items.map((book) => book.bookId)).toEqual([imported.bookId]);
+      expect(wordRows()).toEqual(originalRows);
+      expect(await store.inspectWordTrackedEditSample(detailInput)).toEqual(detail);
+      expect(store.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }).signals[0]!.currentEligibility).toBe('house');
+      expect((await store.inspectDatabaseReplacements()).replacements[0]).toMatchObject({ replacementId, outcome: 'applied', backupPresent: true });
+      await store.rollBackDatabaseReplacement(replacementId, LATER);
+      store.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      expect(store.listBooks(null).items.map((book) => book.bookId).sort()).toEqual([imported.bookId, localBookId].sort());
+      expect(wordRows()).toEqual(originalRows);
+      expect(await store.inspectWordTrackedEditSample(detailInput)).toEqual(detail);
+      expect(store.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }).signals[0]!.currentEligibility).toBe('excluded');
+      expect((await store.inspectDatabaseReplacements()).replacements[0]).toMatchObject({ kind: 'roll-back', outcome: 'applied' });
+      store.markCleanShutdown();
+    } finally { store.close(); }
+  });
+
   it('extracts the reviewed archive bytes when the selected file changes after its hash pass', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {

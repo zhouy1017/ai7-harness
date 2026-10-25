@@ -15,6 +15,7 @@ import type { ConversionLoss } from './text-manuscript.js';
 import {
   ImportedMarkCollector,
   MAX_COMMENT_PART_BYTES,
+  MAX_IMPORTED_MARKS,
   emptyParagraphRevisions,
   recordParagraphText,
   type CommentMarkerRole,
@@ -22,7 +23,16 @@ import {
   type ParsedImportedMark,
   type RevisionKind,
   type TextPlace,
+  compileWordReading,
+  wordSampleTemplates,
+  readWordSourceComments,
+  normalizeWordParagraph,
 } from './docx-marks.js';
+import { canonicalJson as wordCanonicalJson, sha256Hex } from './analysis/canonical.js';
+import { WORD_EXTRACTOR_IDENTITY, WORD_INTAKE_PROFILE, WORD_SOURCE_SCHEMA,
+  type WordCompiledReading, type WordEventKind, type WordImportMode, type WordIncompatibility, type WordIntakeInventory,
+  type WordRevisionGraph, type WordReadingBlock, type WordSampleTemplate, type WordSourceAtom, type WordSourceEvent,
+  type WordSourceParagraph } from './import-retention.js';
 
 export type { ParsedImportedMark };
 
@@ -409,6 +419,7 @@ function paragraphBlockText(open: OpenParagraph): string {
  */
 function createDocumentParser(
   onBlock: (block: ParsedDocxBlock) => void,
+  wordPreview?: { reading: WordCompiledReading; textBoxes: ParsedTextBox[] },
 ): {
   write(chunk: Uint8Array, final: boolean): void;
   finish(comments: { comments?: string; commentsExtended?: string }): DocumentParseResult;
@@ -437,7 +448,7 @@ function createDocumentParser(
   // A revision frame stands until the element it belongs to closes: the run container itself, or the table cell or
   // row a cell or row revision covers.
   const revisions: Array<{ kind: RevisionKind; identity: { author: string; date: string }; depth: number; closes: string }> = [];
-  const marks = new ImportedMarkCollector();
+  const marks = wordPreview === undefined ? new ImportedMarkCollector() : null;
   // A complex field's instruction follows its begin mark in `w:instrText`, possibly split across runs. It
   // is read only until its first word is known, and the field is counted then — or at its separate or end
   // mark, or at the end of the part, when the instruction never finished that word.
@@ -542,6 +553,9 @@ function createDocumentParser(
    * a move away holds; anywhere else it is dropped, as revision 2 dropped every `w:delText`.
    */
   const routeParagraphText = (addition: string, deleted: boolean): void => {
+    // The successor has already proved raw text, normalization and both readings.
+    // This pass reads only the original's retained-content/fidelity facts.
+    if (wordPreview !== undefined) return;
     const target = openParagraph();
     if (!target || addition.length === 0) return;
     const place = textPlace();
@@ -584,7 +598,7 @@ function createDocumentParser(
       (parent === 'rPr' && (tag.local === 'ins' || tag.local === 'del' || tag.local === 'moveFrom' || tag.local === 'moveTo'));
     if (runProperties && !revisionMarkup) runProperties.styled = true;
     if (SKIPPED_REVISION_ELEMENTS.has(tag.local)) {
-      marks.markPresent();
+      marks?.markPresent();
       skippedFrom = ancestors.length;
       ancestors.push(tag.local);
       return;
@@ -605,7 +619,8 @@ function createDocumentParser(
       case 'p':
         if (textBox === undefined) {
           requireDocx(paragraph === undefined, 'nested paragraph');
-          paragraph = { text: '', style: undefined, sourceParagraphIndex, revisions: emptyParagraphRevisions() };
+          paragraph = { text: '', style: undefined, sourceParagraphIndex,
+            revisions: wordPreview === undefined ? emptyParagraphRevisions() : undefined };
         } else {
           requireDocx(boxParagraph === undefined, 'nested paragraph');
           boxParagraph = { text: '', style: undefined, sourceParagraphIndex, revisions: undefined };
@@ -645,19 +660,19 @@ function createDocumentParser(
       case 'commentRangeEnd':
       case 'commentReference': {
         // A comment in a text box stays with the file; one in the body is anchored where its range lies.
-        marks.markPresent();
+        marks?.markPresent();
         const id = attributeValue(tag, 'id');
         if (id === undefined || textBox !== undefined) break;
         const role = COMMENT_MARKER_ROLES[tag.local]!;
-        if (paragraph !== undefined) paragraph.revisions!.commentMarkers.push({ id, role, raw: paragraph.text.length });
-        else marks.markerBetweenParagraphs(id, role);
+        if (paragraph?.revisions !== undefined) paragraph.revisions.commentMarkers.push({ id, role, raw: paragraph.text.length });
+        else marks?.markerBetweenParagraphs(id, role);
         break;
       }
       case 'ins':
       case 'del':
       case 'moveFrom':
       case 'moveTo': {
-        marks.markPresent();
+        marks?.markPresent();
         const identity = { author: attributeValue(tag, 'author') ?? '', date: attributeValue(tag, 'date') ?? '' };
         if (parent === 'trPr' && grandparent === 'tr' && (tag.local === 'ins' || tag.local === 'del')) {
           // A table row inserted or deleted: every paragraph of the row reads as inserted or deleted text does — an
@@ -665,8 +680,8 @@ function createDocumentParser(
           revisions.push({ kind: tag.local, identity, depth: ancestors.length - 2, closes: 'tr' });
         } else if (parent !== undefined && REVISION_PROPERTY_PARENTS.has(parent)) {
           // The paragraph mark's own revision: a paragraph inserted, deleted, split or joined.
-          if (parent === 'rPr' && grandparent === 'pPr' && textBox === undefined && paragraph !== undefined) {
-            paragraph.revisions!.markRevision = { kind: tag.local, identity };
+          if (parent === 'rPr' && grandparent === 'pPr' && textBox === undefined && paragraph?.revisions !== undefined) {
+            paragraph.revisions.markRevision = { kind: tag.local, identity };
           }
         } else {
           revisions.push({ kind: tag.local, identity, depth: ancestors.length, closes: tag.local });
@@ -676,7 +691,7 @@ function createDocumentParser(
       case 'cellIns':
       case 'cellDel': {
         // A table cell inserted or deleted, the same way for the cell: its own author and date, until the cell closes.
-        marks.markPresent();
+        marks?.markPresent();
         if (parent === 'tcPr' && grandparent === 'tc') {
           const identity = { author: attributeValue(tag, 'author') ?? '', date: attributeValue(tag, 'date') ?? '' };
           revisions.push({ kind: CELL_REVISIONS[tag.local]!, identity, depth: ancestors.length - 2, closes: 'tc' });
@@ -742,7 +757,7 @@ function createDocumentParser(
         else requireDocx(false, 'unsupported section properties');
         break;
       default:
-        if (REVISION_MARKER_ELEMENTS.has(tag.local)) marks.markPresent();
+        if (REVISION_MARKER_ELEMENTS.has(tag.local)) marks?.markPresent();
         break;
     }
     ancestors.push(tag.local);
@@ -842,7 +857,7 @@ function createDocumentParser(
       emitted = { position, text };
     }
     paragraph = undefined;
-    marks.closeParagraph(closing.revisions!, closing.text, emitted);
+    marks?.closeParagraph(closing.revisions!, closing.text, emitted);
   });
 
   return {
@@ -875,19 +890,21 @@ function createDocumentParser(
           terminalSection === undefined,
         'incomplete document XML state',
       );
-      requireDocx(blockCount > 0, 'DOCX contains no editable text blocks');
+      if (wordPreview === undefined) requireDocx(blockCount > 0, 'DOCX contains no editable text blocks');
+      else requireDocx(wordPreview.reading.usable && wordPreview.reading.blocks.length > 0, 'Word preview has no usable editable blocks');
       // A field left open at the end of the part is still one field.
       settleField();
-      const importedMarks = marks.finish(comments.comments, comments.commentsExtended);
+      const importedMarks = marks === null ? wordPreview!.reading.marks.map((entry) => entry.mark)
+        : marks.finish(comments.comments, comments.commentsExtended);
       signals.commentsRevisions = importedMarks.length;
-      signals.commentsRevisionsPresent = marks.present;
+      signals.commentsRevisionsPresent = marks === null || marks.present;
       return {
-        blockCount,
-        characterCount,
-        contentDigest: contentHash.digest('hex'),
-        structureDigest: structureHash.update(']').digest('hex'),
+        blockCount: wordPreview === undefined ? blockCount : wordPreview.reading.blocks.length,
+        characterCount: wordPreview === undefined ? characterCount : wordPreview.reading.characterCount,
+        contentDigest: wordPreview === undefined ? contentHash.digest('hex') : wordPreview.reading.contentDigest,
+        structureDigest: wordPreview === undefined ? structureHash.update(']').digest('hex') : wordPreview.reading.structureDigest,
         signals,
-        textBoxes,
+        textBoxes: wordPreview === undefined ? textBoxes : wordPreview.textBoxes,
         importedMarks,
       };
     },
@@ -898,15 +915,41 @@ async function readStreamingArchive(
   path: string,
   onBlock: (block: ParsedDocxBlock) => void,
   options: { signal?: AbortSignal; onArchiveProgress?: (bytes: number) => void } = {},
-): Promise<{
+) {
+  return readDocxArchive(path, createDocumentParser(onBlock), options);
+}
+
+interface StreamingDocxParser<T> {
+  write(chunk: Uint8Array, final: boolean): void;
+  finish(comments: { comments?: string; commentsExtended?: string }): T;
+}
+
+async function readDocxArchive<T>(
+  path: string,
+  documentParser: StreamingDocxParser<T>,
+  options: { signal?: AbortSignal; onArchiveProgress?: (bytes: number) => void },
+  observePart?: (part: string, chunk: Uint8Array, final: boolean) => void,
+) {
+  const reader = createDocxArchiveReader(documentParser, options, observePart);
+  for await (const chunk of createReadStream(path, { highWaterMark: 64 * 1024, signal: options.signal })) reader.write(chunk);
+  return reader.finish();
+}
+
+interface ReadDocxArchive<T> {
   sourceDigest: string;
   archiveBytes: number;
   entryNames: string[];
   metadata: Map<string, Uint8Array>;
-  document: DocumentParseResult;
+  document: T;
   /** Whether a note, header or footer holds a comment or a tracked change, which stays with the file. */
   sideMarkup: boolean;
-}> {
+}
+
+function createDocxArchiveReader<T>(documentParser: StreamingDocxParser<T>,
+  options: { signal?: AbortSignal; onArchiveProgress?: (bytes: number) => void },
+  observePart?: (part: string, chunk: Uint8Array, final: boolean) => void): {
+    write(chunk: Uint8Array): void; finish(): ReadDocxArchive<T>;
+  } {
   // The parts read whole, each under its own bound: the package metadata, and the comments (Issue #411).
   const keptLimits = new Map<string, number>([
     ['[Content_Types].xml', MAX_METADATA_XML_BYTES],
@@ -918,7 +961,6 @@ async function readStreamingArchive(
   const entryNames: string[] = [];
   const seen = new Set<string>();
   const sourceHash = createHash('sha256');
-  const documentParser = createDocumentParser(onBlock);
   let archiveBytes = 0;
   let expandedBytes = 0;
   let documentSeen = false;
@@ -963,6 +1005,7 @@ async function readStreamingArchive(
         file.ondata = (error, chunk, final) => {
           try {
             if (error) throw error;
+            observePart?.(name, chunk, final);
             expandedBytes += chunk.byteLength;
             requireDocx(expandedBytes <= MAX_EXPANDED_BYTES, 'expanded DOCX is too large');
             if (side !== undefined && !sideMarkup) {
@@ -985,6 +1028,7 @@ async function readStreamingArchive(
       file.ondata = (error, chunk, final) => {
         try {
             if (error) throw error;
+            observePart?.(name, chunk, final);
             received += chunk.byteLength;
             expandedBytes += chunk.byteLength;
             requireDocx(received <= keptLimit && expandedBytes <= MAX_EXPANDED_BYTES, 'metadata XML exceeded its bound');
@@ -1010,32 +1054,37 @@ async function readStreamingArchive(
   unzip.register(UnzipInflate);
   unzip.register(UnzipPassThrough);
 
-  for await (const chunk of createReadStream(path, { highWaterMark: 64 * 1024, signal: options.signal })) {
+  let finished = false;
+  const write = (chunk: Uint8Array): void => {
+    requireDocx(!finished, 'DOCX archive stream repeated');
+    options.signal?.throwIfAborted();
     archiveBytes += chunk.byteLength;
     options.onArchiveProgress?.(archiveBytes);
     requireDocx(archiveBytes <= MAX_ARCHIVE_BYTES, 'DOCX archive is too large');
     sourceHash.update(chunk);
     unzip.push(chunk, false);
     if (callbackFailure) throw callbackFailure;
-  }
-  requireDocx(archiveBytes > 0, 'empty DOCX');
-  unzip.push(new Uint8Array(0), true);
-  if (callbackFailure) throw callbackFailure;
-  if (expandedBytes > 1_048_576) requireDocx(expandedBytes / archiveBytes <= MAX_ZIP_RATIO, 'suspicious ZIP ratio');
-  requireDocx(metadata.has('[Content_Types].xml') && documentSeen, 'not a WordprocessingML DOCX');
-  const commentsPart = metadata.get(COMMENTS_PART);
-  const commentsExtendedPart = metadata.get(COMMENTS_EXTENDED_PART);
-  return {
-    sourceDigest: sourceHash.digest('hex'),
-    archiveBytes,
-    entryNames,
-    metadata,
-    document: documentParser.finish({
-      ...(commentsPart === undefined ? {} : { comments: decodeMetadataXml(commentsPart) }),
-      ...(commentsExtendedPart === undefined ? {} : { commentsExtended: decodeMetadataXml(commentsExtendedPart) }),
-    }),
-    sideMarkup,
   };
+  const finish = (): ReadDocxArchive<T> => {
+    requireDocx(!finished, 'DOCX archive stream repeated');
+    finished = true;
+    requireDocx(archiveBytes > 0, 'empty DOCX');
+    unzip.push(new Uint8Array(0), true);
+    if (callbackFailure) throw callbackFailure;
+    if (expandedBytes > 1_048_576) requireDocx(expandedBytes / archiveBytes <= MAX_ZIP_RATIO, 'suspicious ZIP ratio');
+    requireDocx(metadata.has('[Content_Types].xml') && documentSeen, 'not a WordprocessingML DOCX');
+    const commentsPart = metadata.get(COMMENTS_PART);
+    const commentsExtendedPart = metadata.get(COMMENTS_EXTENDED_PART);
+    return {
+      sourceDigest: sourceHash.digest('hex'), archiveBytes, entryNames, metadata,
+      document: documentParser.finish({
+        ...(commentsPart === undefined ? {} : { comments: decodeMetadataXml(commentsPart) }),
+        ...(commentsExtendedPart === undefined ? {} : { commentsExtended: decodeMetadataXml(commentsExtendedPart) }),
+      }),
+      sideMarkup,
+    };
+  };
+  return { write, finish };
 }
 
 function fidelityReport(signals: DocumentSignals, entryNames: string[]): FidelityCategoryProjection[] {
@@ -1078,6 +1127,37 @@ export const REIMPORT_COMMENTS_REVISIONS_DETAIL =
 
 /** Which form a revision-3 report's 批注与修订 row takes: none found, converted to marks, or a reimport's. */
 type CommentsRevisionsVariant = 'absent' | 'converted' | 'reimport';
+type WordFidelityVariant = 'word-preview' | 'word-suggestions' | 'word-accepted-baseline';
+
+const WORD_REVISION_DETAILS: Record<WordFidelityVariant, string> = {
+  'word-preview': '检测到原文件中的 Word 修订。这只是阅读预览，尚未选择稿件基线；确认导入方式后，按所选阅读对应文字、批注和修订。原始证据随来源版本保留。',
+  'word-suggestions': '以拒绝 Word 修订后的阅读作为稿件基线；能精确表示的文字编辑转为作者署名的修改建议，受支持的结构编辑采用来源关联批注。文件批注按此阅读精确对应，原始证据随来源版本保留。',
+  'word-accepted-baseline': '以接受 Word 修订后的阅读作为定稿基线；已并入的 Word 编辑不生成待处理修改建议。文件批注按所选阅读精确对应，原始修订和来源证据随来源版本保留。',
+};
+
+function buildWordFidelityReport(signals: DocumentSignalsV2, headersFooters: number,
+  disposition: TextBoxDisposition, variant: WordFidelityVariant): FidelityCategoryProjection[] {
+  return buildFidelityReportV2(signals, headersFooters, undefined, disposition).map((category) => {
+    if (category.key === 'comments-revisions') return { ...category, ...PRESERVED, detail: WORD_REVISION_DETAILS[variant] };
+    if (category.key === 'round-trip-export') return { ...category,
+      detail: '导出按最终确认的阅读和之后的稿件文字写出。原文件留存不代表版式往返保证；合段等无法原样恢复的部分，在导出保真审阅中说明。' };
+    return category;
+  });
+}
+
+/** The actual selected reading supplies its mark count; preview never chooses this mode. */
+export function wordImportFidelityReport(preview: unknown, mode: WordImportMode, markCount: number,
+  disposition: TextBoxDisposition): FidelityCategoryProjection[] | undefined {
+  if (matchingCandidate(preview, undefined, WORD_DOCX_PARSER_IDENTITY) === undefined ||
+    !Number.isSafeInteger(markCount) || markCount < 0 || markCount > MAX_IMPORTED_MARKS ||
+    (mode !== 'suggestions' && mode !== 'accepted-baseline')) return undefined;
+  const counts = candidateCounts(preview, 10)!;
+  const signals: DocumentSignalsV2 = { inlineStyles: counts[0]!, commentsRevisions: markCount,
+    notes: counts[2]!, tables: counts[3]!, imagesCaptions: counts[4]!, sections: counts[5]!, textBoxes: counts[7]!, fields: counts[8]! };
+  if (disposition === 'merge' && signals.textBoxes === 0) return undefined;
+  return buildWordFidelityReport(signals, counts[6]!, disposition,
+    mode === 'suggestions' ? 'word-suggestions' : 'word-accepted-baseline');
+}
 
 /**
  * The ten content classes with their counts, labels, and details (V2-UX-IMP-002 to 004, ADR 0086), as parser
@@ -1337,8 +1417,8 @@ function candidateCounts(value: unknown, rows: number): number[] | undefined {
 interface CandidateReport {
   report: FidelityCategoryProjection[];
   textBoxDisposition: TextBoxDisposition | null;
-  /** The form of a revision-3 report's 批注与修订 row; `absent` for every report before revision 3. */
-  commentsRevisions: CommentsRevisionsVariant;
+  /** Exact parser-owned wording, including the distinct Word preview and selected readings. */
+  commentsRevisions: CommentsRevisionsVariant | WordFidelityVariant;
 }
 
 function reportsForCandidateCounts(
@@ -1348,6 +1428,7 @@ function reportsForCandidateCounts(
 ): CandidateReport[] {
   // A converter this build cannot phrase is not one whose report this build can rebuild.
   if (conversion !== undefined && CONVERSION_LOSS_PHRASES[conversion.identity] === undefined) return [];
+  if (parserIdentity === WORD_DOCX_PARSER_IDENTITY && conversion !== undefined) return [];
   if (parserIdentity === DOCX_PARSER_IDENTITY_V1) {
     const counts = candidateCounts(value, 8);
     if (counts === undefined) return [];
@@ -1364,7 +1445,7 @@ function reportsForCandidateCounts(
       );
     return [{ report, textBoxDisposition: null, commentsRevisions: 'absent' }];
   }
-  if (parserIdentity !== DOCX_PARSER_IDENTITY && parserIdentity !== DOCX_PARSER_IDENTITY_V2) return [];
+  if (parserIdentity !== DOCX_PARSER_IDENTITY && parserIdentity !== DOCX_PARSER_IDENTITY_V2 && parserIdentity !== WORD_DOCX_PARSER_IDENTITY) return [];
   const counts = candidateCounts(value, 10);
   if (counts === undefined) return [];
   const signals: DocumentSignalsV2 = {
@@ -1382,6 +1463,11 @@ function reportsForCandidateCounts(
     }];
   }
   const dispositions: ReadonlyArray<TextBoxDisposition | null> = signals.textBoxes === 0 ? [null] : ['retain', 'merge'];
+  if (parserIdentity === WORD_DOCX_PARSER_IDENTITY) return dispositions.flatMap((disposition) =>
+    (['word-preview', 'word-suggestions', 'word-accepted-baseline'] as const).map((variant) => ({
+      report: buildWordFidelityReport(signals, counts[6]!, disposition ?? 'retain', variant),
+      textBoxDisposition: disposition, commentsRevisions: variant,
+    })));
   // Revision 3 rebuilds the 批注与修订 row in every form its count admits: with no mark it may be absent or
   // present (a formatting revision alone), and a reimport states it as its own.
   const variants: ReadonlyArray<CommentsRevisionsVariant> = !current
@@ -1439,7 +1525,7 @@ export function deriveImportFidelityPlan(
     outcome: degradations.length === 0 ? 'clean-import-no-round-trip' : 'degraded-import-no-round-trip',
     degradations,
     textBoxDisposition: match.textBoxDisposition,
-    importedMarks: match.commentsRevisions === 'converted'
+    importedMarks: match.commentsRevisions === 'converted' || match.commentsRevisions.startsWith('word-')
       ? match.report.find((category) => category.key === 'comments-revisions')!.count
       : 0,
   };
@@ -1491,6 +1577,12 @@ export async function parseDocx(
 ): Promise<ParsedDocx> {
   const displayName = safeDisplayName(displayNameInput, options.formatIdentified !== true);
   const archive = await readStreamingArchive(path, onBlock, options);
+  return finishParsedDocx(archive, displayName, expectedSource);
+}
+
+/** The unchanged historical reader's result, shared by file and verified-byte native intake. */
+function finishParsedDocx(archive: ReadDocxArchive<DocumentParseResult>, displayName: string,
+  expectedSource?: { digest: string; bytes: number }): ParsedDocx {
   if (expectedSource) {
     requireDocx(archive.sourceDigest === expectedSource.digest && archive.archiveBytes === expectedSource.bytes, 'selected file changed during staging');
   }
@@ -1521,4 +1613,664 @@ export async function parseDocx(
     importedMarks: archive.document.importedMarks,
     titleSuggestion,
   };
+}
+
+export type ParsedWordDocx = Omit<ParsedDocx, 'parserIdentity'> & { parserIdentity: typeof WORD_DOCX_PARSER_IDENTITY };
+export type WordLegacyIntakeView =
+  | { kind: 'ready'; parsed: ParsedDocx; blocks: ParsedDocxBlock[] }
+  | { kind: 'unavailable'; code: 'DOCX_REJECTED'; reason: string };
+export type NativeDocxIntakeParse =
+  | { kind: 'legacy'; parsed: ParsedDocx; word: Extract<WordTrackedCompilation, { kind: 'unsupported' }> | null }
+  | { kind: 'word'; parsed: ParsedWordDocx; word: Extract<WordTrackedCompilation, { kind: 'ready' }>; legacy: WordLegacyIntakeView };
+
+/**
+ * Source-only and reimport retain the real legacy result or its actual refusal. Neither may consume
+ * Word preview blocks as historical rows. A reader refusal is usable only while original bytes match.
+ */
+async function wordLegacyIntakeView(path: string, displayName: string, expected: { digest: string; bytes: number },
+  options: { signal?: AbortSignal; formatIdentified?: boolean }): Promise<WordLegacyIntakeView> {
+  const blocks: ParsedDocxBlock[] = [];
+  try {
+    const parsed = await parseDocx(path, displayName, (block) => blocks.push(block), expected, options);
+    return { kind: 'ready', parsed, blocks };
+  } catch (error) {
+    options.signal?.throwIfAborted();
+    if (!(error instanceof Error) || !error.message.startsWith('DOCX_REJECTED:')) throw error;
+    blocks.length = 0;
+    const hash = createHash('sha256');
+    let bytes = 0;
+    for await (const chunk of createReadStream(path, { highWaterMark: 64 * 1024, signal: options.signal })) {
+      bytes += chunk.length;
+      requireDocx(bytes <= MAX_ARCHIVE_BYTES && bytes <= expected.bytes, 'selected file changed during legacy capability read');
+      hash.update(chunk);
+    }
+    requireDocx(bytes === expected.bytes && hash.digest('hex') === expected.digest, 'selected file changed during legacy capability read');
+    return { kind: 'unavailable', code: 'DOCX_REJECTED', reason: error.message.slice('DOCX_REJECTED:'.length) };
+  }
+}
+
+/** The successor's own box projection, without inventing legacy paragraph mapping rows. */
+function wordRetainedTextBoxes(compiled: Extract<WordTrackedCompilation, { kind: 'ready' }>, signal?: AbortSignal): ParsedTextBox[] {
+  const boxes = new Map<number, ParsedTextBox>();
+  for (const paragraph of compiled.graph.paragraphs) {
+    signal?.throwIfAborted();
+    if (paragraph.sourcePart !== 'text-box') continue;
+    requireDocx(paragraph.boxOrdinal !== null && paragraph.anchorParagraphIndex !== null, 'Word text box has no source location');
+    let box = boxes.get(paragraph.boxOrdinal);
+    if (box === undefined) {
+      box = { boxOrdinal: paragraph.boxOrdinal, anchorParagraphIndex: paragraph.anchorParagraphIndex, paragraphs: [] };
+      boxes.set(paragraph.boxOrdinal, box);
+    }
+    let raw = '';
+    const pieces: Array<{ from: number; to: number; atom: WordSourceAtom }> = [];
+    for (const ordinal of paragraph.atomOrdinals) {
+      const atom = compiled.graph.atoms[ordinal]!;
+      const text = compiled.decodedAtoms.get(ordinal);
+      requireDocx(atom.kind === 'text' && atom.accepted && atom.rejected && text !== undefined, 'Word text box contains an unsupported revision');
+      pieces.push({ from: raw.length, to: raw.length + text.length, atom }); raw += text;
+    }
+    const { text } = normalizeWordParagraph(raw, pieces, compiled.decodedAtoms);
+    if (text.length > 0) box.paragraphs.push({ boxParagraphOrdinal: box.paragraphs.length + 1,
+      sourceParagraphIndex: paragraph.paragraphIndex, kind: paragraph.kind, level: paragraph.level, text,
+      digest: sha256Hex(wordCanonicalJson({ kind: paragraph.kind, level: paragraph.level, text })), graphemeLength: graphemeCount(text) });
+  }
+  return [...boxes.values()];
+}
+
+/**
+ * Native staging inventories Word independently. Ordinary/unsupported sources retain the actual
+ * historical reader; only a supported successor uses its tagged nonempty preview and its own blocks.
+ * No mode is selected here. The two callbacks keep Word segments out of legacy one-paragraph rows.
+ */
+export async function parseNativeDocxIntake(path: string, displayNameInput: string,
+  blocks: { legacy: (block: ParsedDocxBlock) => void; wordPreview: (block: WordReadingBlock) => void },
+  expectedSource?: { digest: string; bytes: number },
+  options: { signal?: AbortSignal; onArchiveProgress?: (bytes: number) => void; formatIdentified?: boolean } = {}): Promise<NativeDocxIntakeParse> {
+  const compiled = await compileWordTrackedDocx(path, expectedSource, options);
+  const expected = { digest: compiled.sourceDigest, bytes: compiled.archiveBytes };
+  const readOptions = { ...(options.signal === undefined ? {} : { signal: options.signal }),
+    ...(options.formatIdentified === undefined ? {} : { formatIdentified: options.formatIdentified }) };
+  if (compiled.kind !== 'ready') {
+    return { kind: 'legacy', parsed: await parseDocx(path, displayNameInput, blocks.legacy, expected, readOptions),
+      word: compiled.kind === 'ordinary' ? null : compiled };
+  }
+  const displayName = safeDisplayName(displayNameInput, options.formatIdentified !== true);
+  const preview = compiled.readings[compiled.previewReading];
+  const archive = await readDocxArchive(path,
+    createDocumentParser(() => undefined, { reading: preview, textBoxes: wordRetainedTextBoxes(compiled, options.signal) }), readOptions);
+  requireDocx(archive.sourceDigest === compiled.sourceDigest && archive.archiveBytes === compiled.archiveBytes,
+    'selected file changed during Word preview metadata read');
+  const legacy = await wordLegacyIntakeView(path, displayNameInput, expected, readOptions);
+  for (const block of preview.blocks) { options.signal?.throwIfAborted(); blocks.wordPreview(block); }
+  return wordNativePreviewResult(compiled, archive, displayName, legacy);
+}
+
+/** Same archive/parser/compiler owners for synchronous preparation from an already verified retained original. */
+export function parseNativeDocxIntakeBytes(original: Uint8Array, displayNameInput: string,
+  options: { signal?: AbortSignal; formatIdentified?: boolean; textBoxDisposition?: TextBoxDisposition } = {}): NativeDocxIntakeParse {
+  const displayName = safeDisplayName(displayNameInput, options.formatIdentified !== true);
+  const compiled = compileWordTrackedDocxBytes(original, options);
+  const read = (parser: ReturnType<typeof createDocumentParser>): ReadDocxArchive<DocumentParseResult> => {
+    const reader = createDocxArchiveReader(parser, options);
+    for (let offset = 0; offset < original.byteLength; offset += 64 * 1024) reader.write(original.subarray(offset, offset + 64 * 1024));
+    return reader.finish();
+  };
+  const expected = { digest: compiled.sourceDigest, bytes: compiled.archiveBytes };
+  if (compiled.kind !== 'ready') return { kind: 'legacy', word: compiled.kind === 'ordinary' ? null : compiled,
+    parsed: finishParsedDocx(read(createDocumentParser(() => undefined)), displayName, expected) };
+  const blocks: ParsedDocxBlock[] = [];
+  let legacy: WordLegacyIntakeView;
+  try { legacy = { kind: 'ready', parsed: finishParsedDocx(read(createDocumentParser((block) => blocks.push(block))), displayName, expected), blocks }; }
+  catch (error) {
+    options.signal?.throwIfAborted();
+    if (!(error instanceof Error) || !error.message.startsWith('DOCX_REJECTED:')) throw error;
+    blocks.length = 0;
+    legacy = { kind: 'unavailable', code: 'DOCX_REJECTED', reason: error.message.slice('DOCX_REJECTED:'.length) };
+  }
+  const preview = compiled.readings[compiled.previewReading];
+  return wordNativePreviewResult(compiled, read(createDocumentParser(() => undefined,
+    { reading: preview, textBoxes: wordRetainedTextBoxes(compiled, options.signal) })), displayName, legacy);
+}
+
+function wordNativePreviewResult(compiled: Extract<WordTrackedCompilation, { kind: 'ready' }>,
+  archive: ReadDocxArchive<DocumentParseResult>, displayName: string, legacy: WordLegacyIntakeView): Extract<NativeDocxIntakeParse, { kind: 'word' }> {
+  requireDocx(archive.sourceDigest === compiled.sourceDigest && archive.archiveBytes === compiled.archiveBytes,
+    'Word preview metadata does not match the original');
+  const preview = compiled.readings[compiled.previewReading];
+  const coreTitle = archive.metadata.get('docProps/core.xml');
+  const metadataTitle = parseCoreTitle(coreTitle ? decodeMetadataXml(coreTitle) : undefined);
+  const fallbackTitle = displayName.slice(0, -extname(displayName).length).trim();
+  const titleSuggestion = metadataTitle
+    ? { value: metadataTitle, sourceLabel: 'DOCX 标题元数据' as const }
+    : { value: fallbackTitle, sourceLabel: '文件名' as const };
+  requireDocx(titleSuggestion.value.length > 0, 'no usable title suggestion');
+  const fidelity = buildWordFidelityReport(archive.document.signals,
+    archive.entryNames.filter((entry) => /^word\/(?:header|footer)[^/]*\.xml$/i.test(entry)).length, 'retain', 'word-preview');
+  requireDocx(deriveImportFidelityPlan(fidelity, compiled.sourceDigest, compiled.archiveBytes, undefined, WORD_DOCX_PARSER_IDENTITY) !== undefined,
+    'Word preview fidelity report is malformed');
+  return { kind: 'word', word: compiled, legacy, parsed: { parserIdentity: WORD_DOCX_PARSER_IDENTITY, sourceDigest: compiled.sourceDigest,
+    archiveBytes: compiled.archiveBytes, contentDigest: preview.contentDigest, structureDigest: preview.structureDigest,
+    blockCount: preview.blocks.length, characterCount: preview.characterCount, fidelity, textBoxes: archive.document.textBoxes,
+    importedMarks: archive.document.importedMarks, titleSuggestion } };
+}
+
+/** Successor identities are separate from /1–/3; the historical default above is deliberately unchanged. */
+export const WORD_DOCX_PARSER_IDENTITY = 'ai7-docx-word-revisions/1' as const;
+const WORD_NAMESPACES = new Set(['http://schemas.openxmlformats.org/wordprocessingml/2006/main',
+  'http://purl.oclc.org/ooxml/wordprocessingml/main']);
+const MARKUP_COMPATIBILITY = 'http://schemas.openxmlformats.org/markup-compatibility/2006';
+const WORD_RUN_EVENTS = new Set<WordEventKind>(['ins', 'del', 'moveFrom', 'moveTo']);
+const WORD_RANGE_EVENTS = new Set<WordEventKind>(['moveFromRangeStart', 'moveFromRangeEnd', 'moveToRangeStart', 'moveToRangeEnd']);
+const WORD_COMMENT_EVENTS = new Set<WordEventKind>(['commentRangeStart', 'commentRangeEnd', 'commentReference']);
+const WORD_EVENT_KINDS = new Set<string>([...WORD_RUN_EVENTS, ...WORD_RANGE_EVENTS, ...WORD_COMMENT_EVENTS]);
+
+interface RawWordEvent extends Omit<WordSourceEvent, 'eventId' | 'parentEventIds' | 'linkedEventIds' | 'disposition'> {
+  parents: number[];
+  links: number[];
+}
+interface RawWordAtom extends Omit<WordSourceAtom, 'eventMembership'> { membership: number[] }
+interface RawWordPart {
+  events: RawWordEvent[];
+  atoms: RawWordAtom[];
+  paragraphs: WordSourceParagraph[];
+  decoded: Map<number, string>;
+  comments: { comments?: string; commentsExtended?: string };
+}
+interface RawWordRange { start: number; end: number | null; container: string }
+interface WordXmlFrame {
+  local: string;
+  uri: string;
+  ordinal: number;
+  skipped: boolean;
+  event: number | null;
+  paragraph: WordSourceParagraph | null;
+  text: string | null;
+  choiceRead: boolean;
+  box: { ordinal: number; anchorParagraphIndex: number } | null;
+}
+
+function wordAttribute(tag: SaxesTagNS, local: string): string | null {
+  return Object.values(tag.attributes).find((attribute) => WORD_NAMESPACES.has(attribute.uri) && attribute.local === local)?.value ?? null;
+}
+
+/** Same XML resource/security envelope as the old parser; text elements accumulate across feed callbacks. */
+function wordXmlStream(part: string, parser: SaxesParser<{ xmlns: true }>, feedBytes: number, signal?: AbortSignal): {
+  write(chunk: Uint8Array, final: boolean): void;
+} {
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  let token = 0;
+  let markup = false;
+  let quote: string | null = null;
+  let closed = false;
+  const feed = (text: string): void => {
+    for (const character of text) {
+      if (!markup && character === '<') { markup = true; token = 1; quote = null; }
+      else if (markup) {
+        token += character.length;
+        requireDocx(token <= MAX_XML_MARKUP_TOKEN_CODE_UNITS, `${part} markup token exceeds its bound`);
+        if (quote !== null) { if (character === quote) quote = null; }
+        else if (character === '"' || character === "'") quote = character;
+        else if (character === '>') { markup = false; token = 0; }
+      } else {
+        token += character.length;
+        // Retained side-story text is inventoried, not projected into bounded Manuscript blocks.
+        if (part === 'word/document.xml') requireDocx(token <= MAX_XML_TEXT_TOKEN_CODE_UNITS, `${part} text token exceeds its bound`);
+      }
+    }
+    parser.write(text);
+  };
+  parser.on('doctype', () => requireDocx(false, `DOCTYPE in ${part}`));
+  parser.on('processinginstruction', () => requireDocx(false, `processing instruction in ${part}`));
+  return { write(chunk, final) {
+    signal?.throwIfAborted();
+    requireDocx(!closed, 'Word XML stream repeated');
+    for (let offset = 0; offset < chunk.byteLength; offset += feedBytes) {
+      signal?.throwIfAborted();
+      feed(decoder.decode(chunk.subarray(offset, Math.min(offset + feedBytes, chunk.byteLength)), { stream: true }));
+    }
+    if (final) { feed(decoder.decode()); parser.close(); closed = true; }
+  } };
+}
+
+/** Inventory scans every Word XML story; only the main-body supported profile builds source atoms. */
+interface WordInventoryDraft { activating: boolean; eventCount: number; locations: WordIncompatibility[]; storyParts: string[] }
+
+function createWordPartParser(part: string, inventory: WordInventoryDraft,
+  feedBytes: number, signal?: AbortSignal): StreamingDocxParser<RawWordPart> {
+  const main = part === 'word/document.xml';
+  const frames: WordXmlFrame[] = [];
+  const events: RawWordEvent[] = [];
+  const atoms: RawWordAtom[] = [];
+  const paragraphs: WordSourceParagraph[] = [];
+  const decoded = new Map<number, string>();
+  const ranges = new Map<string, RawWordRange>();
+  const paragraphBoundaryEvents = new Map<number, number[]>();
+  const eventCloseOrdinals = new Map<number, number>();
+  const openRanges = new Map<'moveFrom' | 'moveTo', string>();
+  const deferredMarkMoves = new Set<number>();
+  const markMoveCloseOrdinals = new Map<number, number>();
+  let openFields = 0;
+  let elementOrdinal = 0;
+  let paragraphIndex = -1;
+  let sourceTextCodeUnits = 0;
+  let payloadBoundary = false;
+  let boxCount = 0;
+  let mainRootValid = false;
+  let bodyCount = 0;
+  let story = main;
+  const parser = new SaxesParser({ xmlns: true });
+  const isWord = (frame: Pick<WordXmlFrame, 'uri'>): boolean => WORD_NAMESPACES.has(frame.uri);
+  const activeParagraph = (): WordSourceParagraph | undefined => [...frames].reverse().find((frame) => isWord(frame) && frame.local === 'p')?.paragraph ?? undefined;
+  const container = (): string => {
+    const cell = [...frames].reverse().find((frame) => isWord(frame) && frame.local === 'tc');
+    return cell === undefined ? 'body' : `cell:${cell.ordinal}`;
+  };
+  const refuse = (code: WordIncompatibility['code'], ordinal: number, paragraph: number | null = activeParagraph()?.paragraphIndex ?? null): void => {
+    inventory.locations.push({ code, part, elementOrdinal: ordinal, paragraphIndex: paragraph });
+  };
+  const ancestors = (local: string): boolean => frames.some((frame) => isWord(frame) && frame.local === local);
+  const runAncestors = (): number[] => frames.flatMap((frame) => frame.event !== null && events[frame.event]?.context === 'run' ? [frame.event] : []);
+  const addAtom = (kind: RawWordAtom['kind'], text: string, ordinal: number, membership: number[]): void => {
+    const paragraph = activeParagraph();
+    if (paragraph === undefined) return;
+    if (paragraph.sourcePart === 'text-box' && kind === 'text' && text.length > 0 && membership.length > 0) {
+      refuse('story-or-text-box-revision', ordinal, paragraph.paragraphIndex);
+    }
+    signal?.throwIfAborted();
+    const atomOrdinal = atoms.length;
+    // Word ignores paragraph-mark move presence; retain its membership/location as evidence.
+    // Only run wrappers and paragraph ins/del constrain their respective atom's reading.
+    const presence = membership.map((index) => events[index]!).filter((event) =>
+      event.context === 'run' || event.kind === 'ins' || event.kind === 'del');
+    const rejected = !presence.some((event) => event.kind === 'ins' || event.kind === 'moveTo');
+    const accepted = !presence.some((event) => event.kind === 'del' || event.kind === 'moveFrom');
+    const sha = kind === 'text' ? sha256Hex(text) : sha256Hex(wordCanonicalJson({ schema: 'ai7.word-paragraph-boundary/1', part,
+      paragraphIndex: paragraph.paragraphIndex, atomOrdinal }));
+    atoms.push({ kind, part, paragraphIndex: paragraph.paragraphIndex, atomOrdinal, elementOrdinal: ordinal,
+      codeUnits: text.length, sha256: sha, membership: [...membership], rejected, accepted, hunkBoundaryBefore: payloadBoundary });
+    payloadBoundary = false;
+    if (kind === 'text') { paragraph.atomOrdinals.push(atomOrdinal); decoded.set(atomOrdinal, text); }
+    else paragraph.boundaryAtomOrdinal = atomOrdinal;
+  };
+  parser.on('opentag', (tag) => {
+    signal?.throwIfAborted();
+    const ordinal = elementOrdinal++;
+    requireDocx(frames.length < MAX_XML_NESTING_DEPTH, `${part} XML nesting exceeds its safe bound`);
+    const parent = frames.at(-1);
+    let skipped = parent?.skipped ?? false;
+    if (tag.uri === MARKUP_COMPATIBILITY && (tag.local === 'Choice' || tag.local === 'Fallback')) {
+      const alternate = frames.at(-1);
+      if (alternate?.uri === MARKUP_COMPATIBILITY && alternate.local === 'AlternateContent') {
+        if (tag.local === 'Fallback' || alternate.choiceRead) skipped = true;
+        else alternate.choiceRead = true;
+      }
+    }
+    const frame: WordXmlFrame = { local: tag.local, uri: tag.uri, ordinal, skipped, event: null, paragraph: null, text: null, choiceRead: false, box: null };
+    if (WORD_NAMESPACES.has(tag.uri) && tag.local === 'p') paragraphIndex += 1;
+    if (skipped) { frames.push(frame); return; }
+    const word = WORD_NAMESPACES.has(tag.uri);
+    if (ordinal === 0) {
+      const math = tag.uri === 'http://schemas.openxmlformats.org/officeDocument/2006/math' || tag.uri === 'http://purl.oclc.org/ooxml/officeDocument/math';
+      story = main || (word && ['document', 'hdr', 'ftr', 'footnotes', 'endnotes', 'comments', 'txbxContent', 'customXml'].includes(tag.local)) ||
+        (math && (tag.local === 'oMath' || tag.local === 'oMathPara'));
+      if (story) inventory.storyParts.push(part);
+    }
+    if (main && ordinal === 0) mainRootValid = word && tag.local === 'document';
+    if (main && word && tag.local === 'body' && frames.length === 1 && frames[0]!.local === 'document') bodyCount += 1;
+    const box = [...frames].reverse().find((ancestor) => ancestor.box !== null)?.box ?? undefined;
+    const inBox = box !== undefined;
+    const inBody = ancestors('body');
+    const supportedStory = main && inBody && !inBox;
+    const inProperties = frames.some((ancestor) => isWord(ancestor) &&
+      (ancestor.local.endsWith('Pr') || ancestor.local.endsWith('PrChange')));
+    if (word && tag.local === 'txbxContent' && main && inBody) {
+      const anchor = activeParagraph();
+      requireDocx(!inBox && anchor !== undefined && boxCount < MAX_TEXT_BOXES, 'invalid or excessive Word text boxes');
+      frame.box = { ordinal: ++boxCount, anchorParagraphIndex: anchor.paragraphIndex };
+    }
+    if (word && tag.local === 'p' && main && inBody) {
+      const outer = activeParagraph();
+      requireDocx(outer === undefined || (box !== undefined && outer.sourcePart === 'body'), 'nested Word paragraph outside a text box');
+      frame.paragraph = { part, paragraphIndex, container: box === undefined ? container() : `text-box:${box.ordinal}`,
+        sourcePart: box === undefined ? 'body' : 'text-box', boxOrdinal: box?.ordinal ?? null, anchorParagraphIndex: box?.anchorParagraphIndex ?? null,
+        kind: 'paragraph', level: null,
+        atomOrdinals: [], boundaryAtomOrdinal: -1, nonTextBoundary: false, sectionBoundary: false };
+      paragraphs.push(frame.paragraph);
+    }
+    if (word && tag.local === 'pStyle' && parent !== undefined && isWord(parent) && parent.local === 'pPr' && !ancestors('pPrChange')) {
+      const paragraph = activeParagraph();
+      if (paragraph !== undefined) Object.assign(paragraph, blockShape(wordAttribute(tag, 'val') ?? undefined));
+    }
+    const grandparent = frames.at(-2);
+    const boundaryRevision = word && WORD_RUN_EVENTS.has(tag.local as WordEventKind) && parent !== undefined && isWord(parent) && parent.local === 'rPr' &&
+      grandparent !== undefined && isWord(grandparent) && grandparent.local === 'pPr' && !ancestors('pPrChange');
+    const tableRevision = word && (['cellIns', 'cellDel', 'cellMerge'].includes(tag.local) ||
+      (WORD_RUN_EVENTS.has(tag.local as WordEventKind) && (ancestors('trPr') || ancestors('tcPr'))));
+    const customRevision = word && (/^customXml(?:Ins|Del|MoveFrom|MoveTo)Range(?:Start|End)$/u.test(tag.local) ||
+      (WORD_RUN_EVENTS.has(tag.local as WordEventKind) && frames.some((ancestor) =>
+        ((ancestor.uri === 'http://schemas.openxmlformats.org/officeDocument/2006/math' || ancestor.uri === 'http://purl.oclc.org/ooxml/officeDocument/math') &&
+          (ancestor.local === 'oMath' || ancestor.local === 'oMathPara')) ||
+        (isWord(ancestor) && ancestor.local.startsWith('customXml')))));
+    if (story && (tableRevision || customRevision)) {
+      inventory.activating = true; inventory.eventCount += 1;
+      refuse(tableRevision ? 'table-revision' : 'custom-xml-or-math-revision', ordinal);
+    } else if (story && word && WORD_EVENT_KINDS.has(tag.local)) {
+      const kind = tag.local as WordEventKind;
+      const textual = WORD_RUN_EVENTS.has(kind) && (!inProperties || boundaryRevision);
+      const range = WORD_RANGE_EVENTS.has(kind);
+      const comment = WORD_COMMENT_EVENTS.has(kind);
+      if (textual || range) { inventory.activating = true; inventory.eventCount += 1; }
+      if ((textual || range) && !supportedStory) refuse('story-or-text-box-revision', ordinal);
+      if (supportedStory && (textual || range || comment)) {
+        const paragraph = activeParagraph();
+        if (textual) requireDocx(paragraph !== undefined, 'Word run revision is outside an ordinary paragraph');
+        const priorAtom = atoms.at(-1);
+        const beginsRange = kind.endsWith('Start');
+        const location = paragraph !== undefined
+          ? { part, paragraphIndex: paragraph.paragraphIndex, atomOrdinal: atoms.length, codeUnitOffset: 0 }
+          : !beginsRange && priorAtom !== undefined
+            ? { part, paragraphIndex: priorAtom.paragraphIndex, atomOrdinal: priorAtom.atomOrdinal, codeUnitOffset: priorAtom.codeUnits }
+            : { part, paragraphIndex: paragraphIndex + 1, atomOrdinal: atoms.length, codeUnitOffset: 0 };
+        const event: RawWordEvent = { part, elementOrdinal: ordinal, kind,
+          context: comment ? 'comment' : range ? 'range' : boundaryRevision ? 'paragraph-boundary' : 'run',
+          rawId: wordAttribute(tag, 'id'), rawAuthor: wordAttribute(tag, 'author'), rawDate: wordAttribute(tag, 'date'),
+          rangeName: wordAttribute(tag, 'name'), parents: runAncestors(), links: [],
+          location,
+          container: container() };
+        const index = events.length;
+        events.push(event);
+        frame.event = index;
+        if (event.context === 'paragraph-boundary') {
+          const members = paragraphBoundaryEvents.get(event.location.paragraphIndex) ?? [];
+          members.push(index);
+          paragraphBoundaryEvents.set(event.location.paragraphIndex, members);
+        }
+        if (range) {
+          const moveKind = kind.startsWith('moveFrom') ? 'moveFrom' : 'moveTo';
+          const key = `${moveKind}:${event.rawId}`;
+          if (event.rawId === null || event.rawId.length === 0) refuse('invalid-move-graph', ordinal);
+          if (kind.endsWith('Start')) {
+            if (ranges.has(key) || openRanges.has(moveKind) || event.rangeName === null || event.rangeName.length === 0) refuse('invalid-move-graph', ordinal);
+            else { ranges.set(key, { start: index, end: null, container: event.container }); openRanges.set(moveKind, key); }
+          } else {
+            const opened = ranges.get(key);
+            if (opened === undefined || opened.end !== null || openRanges.get(moveKind) !== key || opened.container !== event.container) refuse('invalid-move-graph', ordinal);
+            else { opened.end = index; openRanges.delete(moveKind); }
+          }
+        } else if (kind === 'moveFrom' || kind === 'moveTo') {
+          const opened = ranges.get(openRanges.get(kind) ?? '');
+          // A paragraph mark stands at its paragraph's end, so Word may open the range after w:pPr.
+          if (opened === undefined && event.context === 'paragraph-boundary') deferredMarkMoves.add(index);
+          else if (opened === undefined || opened.container !== event.container || runAncestors().some((ancestor) =>
+            (events[ancestor]!.kind === 'moveFrom' || events[ancestor]!.kind === 'moveTo') && events[ancestor]!.kind !== kind)) refuse('invalid-move-graph', ordinal);
+          else event.links.push(opened.start);
+        }
+      }
+    }
+    // Math is a non-text payload like a drawing: it ends a hunk, and no paragraph join crosses it.
+    const mathPayload = (tag.uri === 'http://schemas.openxmlformats.org/officeDocument/2006/math' || tag.uri === 'http://purl.oclc.org/ooxml/officeDocument/math') &&
+      (tag.local === 'oMath' || tag.local === 'oMathPara');
+    if (mathPayload || (word && ['drawing', 'pict', 'object', 'fldChar', 'footnoteReference', 'endnoteReference', 'sectPr', 'tbl'].includes(tag.local))) {
+      payloadBoundary = true;
+      const paragraph = activeParagraph() ?? paragraphs.at(-1);
+      if (paragraph !== undefined) {
+        if (tag.local === 'sectPr') paragraph.sectionBoundary = true;
+        else if (tag.local !== 'fldChar') paragraph.nonTextBoundary = true;
+      }
+      if (main && word && tag.local === 'fldChar' && !inProperties) {
+        const type = wordAttribute(tag, 'fldCharType');
+        if (type === 'begin') openFields += 1;
+        else if (type === 'end' && openFields > 0) openFields -= 1;
+      }
+    }
+    if (main && word && (tag.local === 't' || tag.local === 'delText') && !inProperties) frame.text = '';
+    if (word && !inProperties && (tag.local === 'tab' || tag.local === 'br' || tag.local === 'cr')) {
+      sourceTextCodeUnits += 1;
+      addAtom('text', tag.local === 'tab' ? '\t' : '\n', ordinal, runAncestors());
+    }
+    frames.push(frame);
+  });
+  const consumeText = (text: string): void => {
+    const current = frames.at(-1);
+    if (current?.skipped || current?.text === null || current === undefined) return;
+    sourceTextCodeUnits += text.length;
+    requireDocx(sourceTextCodeUnits <= MAX_TEXT_CODE_UNITS, 'document text is too large');
+    current.text += text;
+  };
+  parser.on('text', consumeText);
+  parser.on('cdata', consumeText);
+  parser.on('closetag', () => {
+    const frame = frames.at(-1);
+    requireDocx(frame !== undefined, 'Word XML element stack mismatch');
+    if (!frame.skipped) {
+      if (frame.event !== null) eventCloseOrdinals.set(frame.event, elementOrdinal);
+      if (frame.text !== null) addAtom('text', frame.text, frame.ordinal, runAncestors());
+      if (frame.paragraph !== null) {
+        // A complex field still open at this paragraph's end spans its mark: no join may cross it.
+        if (openFields > 0) frame.paragraph.nonTextBoundary = true;
+        const boundaryEvents = paragraphBoundaryEvents.get(frame.paragraph.paragraphIndex) ?? [];
+        for (const index of boundaryEvents) {
+          if (!deferredMarkMoves.has(index)) continue;
+          const event = events[index]!;
+          const opened = ranges.get(openRanges.get(event.kind === 'moveFrom' ? 'moveFrom' : 'moveTo') ?? '');
+          if (opened === undefined || opened.container !== event.container) refuse('invalid-move-graph', event.elementOrdinal, frame.paragraph.paragraphIndex);
+          else { event.links.push(opened.start); markMoveCloseOrdinals.set(index, elementOrdinal); }
+        }
+        if (boundaryEvents.length > 1) refuse('incompatible-paragraph-join', events[boundaryEvents[0]!]!.elementOrdinal, frame.paragraph.paragraphIndex);
+        for (const index of boundaryEvents) events[index]!.location = { part, paragraphIndex: frame.paragraph.paragraphIndex,
+          atomOrdinal: atoms.length, codeUnitOffset: 0 };
+        addAtom('paragraph-boundary', '', frame.ordinal, boundaryEvents);
+      }
+    }
+    frames.pop();
+  });
+  const stream = wordXmlStream(part, parser, feedBytes, signal);
+  return { write: stream.write, finish(comments) {
+    requireDocx(frames.length === 0, 'incomplete Word XML state');
+    if (main) {
+      if (inventory.activating) requireDocx(mainRootValid && bodyCount === 1, 'invalid native Word document root or body');
+      const named = new Map<string, { from: RawWordRange[]; to: RawWordRange[] }>();
+      for (const range of ranges.values()) {
+        const start = events[range.start]!;
+        const pair = named.get(start.rangeName ?? '') ?? { from: [], to: [] };
+        pair[start.kind === 'moveFromRangeStart' ? 'from' : 'to'].push(range);
+        named.set(start.rangeName ?? '', pair);
+      }
+      for (const range of ranges.values()) {
+        const start = events[range.start]!;
+        if (range.end === null) { refuse('invalid-move-graph', start.elementOrdinal); continue; }
+        const pair = named.get(start.rangeName ?? '')!;
+        if (pair.from.length !== 1 || pair.to.length !== 1 || pair.from[0]!.end === null || pair.to[0]!.end === null) {
+          refuse('invalid-move-graph', start.elementOrdinal); continue;
+        }
+        const other = (start.kind === 'moveFromRangeStart' ? pair.to : pair.from)[0]!;
+        const links = [range.start, range.end, other.start, other.end!].sort((a, b) => events[a]!.elementOrdinal - events[b]!.elementOrdinal);
+        for (const index of links) events[index]!.links = links.filter((linked) => linked !== index);
+      }
+      const rangesByStart = new Map([...ranges.values()].map((range) => [range.start, range]));
+      const rangeMembers = new Set<number>();
+      for (let index = 0; index < events.length; index += 1) {
+        const event = events[index]!;
+        if (event.kind !== 'moveFrom' && event.kind !== 'moveTo') continue;
+        const range = event.links[0] === undefined ? undefined : rangesByStart.get(event.links[0]);
+        if (range !== undefined) rangeMembers.add(range.start);
+        // A paragraph mark linked at its paragraph's end lies inside the range when that end does.
+        const markEnd = markMoveCloseOrdinals.get(index);
+        if (range?.end === null || range === undefined || (markEnd === undefined
+          ? event.elementOrdinal <= events[range.start]!.elementOrdinal ||
+            (eventCloseOrdinals.get(index) ?? Number.POSITIVE_INFINITY) > events[range.end]!.elementOrdinal
+          : markEnd <= events[range.start]!.elementOrdinal || markEnd > events[range.end]!.elementOrdinal)) {
+          refuse('invalid-move-graph', event.elementOrdinal, event.location.paragraphIndex);
+        }
+      }
+      for (const range of ranges.values()) if (!rangeMembers.has(range.start)) refuse('invalid-move-graph', events[range.start]!.elementOrdinal);
+      for (const atom of atoms) {
+        const moved = atom.membership.map((index) => events[index]!).filter((event) => event.kind === 'moveFrom' || event.kind === 'moveTo');
+        const starts = moved.flatMap((event) => event.links).map((index) => events[index]!);
+        if (starts.some((start) => start.rangeName !== starts[0]?.rangeName)) refuse('invalid-move-graph', atom.elementOrdinal, atom.paragraphIndex);
+      }
+      for (let index = 0; index < paragraphs.length; index += 1) {
+        const paragraph = paragraphs[index]!;
+        const boundary = atoms[paragraph.boundaryAtomOrdinal]!;
+        if (boundary.rejected === boundary.accepted) continue;
+        const next = paragraphs[index + 1];
+        if (next === undefined || paragraph.container !== next.container || paragraph.kind !== next.kind || paragraph.level !== next.level ||
+          paragraph.sectionBoundary || paragraph.nonTextBoundary || next.nonTextBoundary) {
+          refuse('incompatible-paragraph-join', boundary.elementOrdinal, paragraph.paragraphIndex);
+        }
+      }
+    }
+    return { events, atoms, paragraphs, decoded, comments };
+  } };
+}
+
+export type WordTrackedCompilation = {
+  sourceDigest: string;
+  archiveBytes: number;
+  inventory: WordIntakeInventory;
+  inventoryDigest: string;
+} & (
+  | { kind: 'ordinary' }
+  | { kind: 'unsupported'; reasons: WordIncompatibility[] }
+  | { kind: 'ready'; graph: WordRevisionGraph; graphDigest: string; decodedAtoms: ReadonlyMap<number, string>;
+      decodedCommentBodies: ReadonlyMap<string, string>;
+      readings: { rejected: WordCompiledReading; accepted: WordCompiledReading }; previewReading: 'rejected' | 'accepted';
+      templates: WordSampleTemplate[]; templateManifestDigest: string }
+);
+
+/** Explicit, non-activating inventory/compiler. Callers must still review and commit an exact selected mode. */
+export async function compileWordTrackedDocx(path: string, expectedSource?: { digest: string; bytes: number },
+  options: { signal?: AbortSignal; onArchiveProgress?: (bytes: number) => void; xmlFeedBytes?: number; textBoxDisposition?: 'retain' | 'merge' } = {}): Promise<WordTrackedCompilation> {
+  const reader = createWordCompilationReader(options);
+  for await (const chunk of createReadStream(path, { highWaterMark: 64 * 1024, signal: options.signal })) reader.write(chunk);
+  const compiled = reader.finish();
+  if (expectedSource !== undefined) requireDocx(compiled.sourceDigest === expectedSource.digest && compiled.archiveBytes === expectedSource.bytes, 'selected file changed during Word compilation');
+  return compiled;
+}
+
+/** Same actual compiler and package bounds for retained-original readback/export; no temporary files. */
+export function compileWordTrackedDocxBytes(original: Uint8Array,
+  options: { signal?: AbortSignal; xmlFeedBytes?: number; textBoxDisposition?: 'retain' | 'merge' } = {}): WordTrackedCompilation {
+  const reader = createWordCompilationReader(options);
+  for (let offset = 0; offset < original.byteLength; offset += 64 * 1024) reader.write(original.subarray(offset, offset + 64 * 1024));
+  return reader.finish();
+}
+
+function createWordCompilationReader(options: { signal?: AbortSignal; onArchiveProgress?: (bytes: number) => void; xmlFeedBytes?: number; textBoxDisposition?: 'retain' | 'merge' }): {
+  write(chunk: Uint8Array): void; finish(): WordTrackedCompilation;
+} {
+  const feedBytes = options.xmlFeedBytes ?? MAX_XML_FEED_BYTES;
+  requireDocx(Number.isSafeInteger(feedBytes) && feedBytes > 0 && feedBytes <= MAX_XML_FEED_BYTES, 'invalid Word XML feed size');
+  const inventory: WordInventoryDraft = { activating: false, eventCount: 0, locations: [], storyParts: [] };
+  const main = createWordPartParser('word/document.xml', inventory, feedBytes, options.signal);
+  const sides = new Map<string, StreamingDocxParser<RawWordPart>>();
+  const deferred = new Map<string, Uint8Array[]>();
+  // The historical reader never parsed side parts with this envelope, so an unreadable side part (an SVG
+  // with a DOCTYPE, a UTF-16 custom XML item, a long VML attribute) cannot newly refuse an ordinary DOCX.
+  // Only an activated intake whose Word story part could not be inventoried refuses, as a resource limit.
+  const unreadable = new Set<string>();
+  const sideStep = (part: string, step: () => void): void => {
+    if (unreadable.has(part)) return;
+    try { step(); } catch (error) {
+      options.signal?.throwIfAborted();
+      if (error instanceof Error && error.name === 'AbortError') throw error;
+      unreadable.add(part); sides.delete(part);
+    }
+  };
+  const reader = createDocxArchiveReader(main, options, (part, chunk, final) => {
+    if (!part.toLowerCase().endsWith('.xml')) {
+      const chunks = deferred.get(part) ?? []; chunks.push(chunk); deferred.set(part, chunks);
+      return;
+    }
+    sideStep(part, () => {
+      let side = sides.get(part);
+      if (side === undefined) { side = createWordPartParser(part, inventory, feedBytes, options.signal); sides.set(part, side); }
+      side.write(chunk, final);
+    });
+  });
+  return { write: reader.write, finish() {
+    const archive = reader.finish();
+    for (const [part, side] of [...sides]) sideStep(part, () => side.finish({}));
+    const contentType = wordPackageContentTypes(decodeMetadataXml(archive.metadata.get('[Content_Types].xml')!));
+    for (const [part, chunks] of deferred) {
+      const type = contentType(part);
+      if (type === undefined || !(type.endsWith('+xml') || type.endsWith('/xml'))) continue;
+      sideStep(part, () => {
+        const side = createWordPartParser(part, inventory, feedBytes, options.signal);
+        chunks.forEach((chunk, index) => side.write(chunk, index === chunks.length - 1));
+        side.finish({});
+      });
+    }
+    if (inventory.activating) {
+      for (const part of [...unreadable].sort()) {
+        if (WORD_STORY_CONTENT_TYPES.has(contentType(part) ?? '')) inventory.locations.push({ code: 'resource-limit', part, elementOrdinal: 0, paragraphIndex: null });
+      }
+    }
+    inventory.storyParts.sort();
+    return finishWordCompilation(archive, inventory, options.textBoxDisposition ?? 'retain', options.signal);
+  } };
+}
+
+/** Declared WordprocessingML story parts beside the main document: their text could hold tracked revisions. */
+const WORD_STORY_CONTENT_TYPES: ReadonlySet<string> = new Set(['header', 'footer', 'footnotes', 'endnotes', 'comments', 'document.glossary']
+  .map((story) => `application/vnd.openxmlformats-officedocument.wordprocessingml.${story}+xml`));
+
+function wordPackageContentTypes(contentTypes: string): (part: string) => string | undefined {
+  const defaults = new Map<string, string>();
+  const overrides = new Map<string, string>();
+  const parser = new SaxesParser({ xmlns: true });
+  parser.on('opentag', (tag) => {
+    if (tag.uri !== 'http://schemas.openxmlformats.org/package/2006/content-types') return;
+    const value = (name: string): string | undefined => Object.values(tag.attributes).find((attribute) => attribute.uri === '' && attribute.local === name)?.value;
+    const type = value('ContentType');
+    if (type === undefined) return;
+    if (tag.local === 'Default') { const extension = value('Extension'); if (extension !== undefined) defaults.set(extension.toLowerCase(), type); }
+    if (tag.local === 'Override') { const name = value('PartName'); if (name !== undefined) overrides.set(name.replace(/^\//u, ''), type); }
+  });
+  parser.write(contentTypes).close();
+  return (part) => overrides.get(part) ?? defaults.get(part.slice(part.lastIndexOf('.') + 1).toLowerCase());
+}
+
+function finishWordCompilation(archive: ReadDocxArchive<RawWordPart>, inventory: WordInventoryDraft,
+  textBoxes: 'retain' | 'merge', signal?: AbortSignal): WordTrackedCompilation {
+  signal?.throwIfAborted();
+  requireDocx(decodeMetadataXml(archive.metadata.get('[Content_Types].xml')!).includes('wordprocessingml.document.main+xml'), 'package does not declare a WordprocessingML document');
+  const raw = archive.document;
+  const identity = (event: RawWordEvent): string => sha256Hex(wordCanonicalJson({ schema: 'ai7.word-revision-event/1',
+    sourceDigest: archive.sourceDigest, part: event.part, elementOrdinal: event.elementOrdinal, kind: event.kind }));
+  const eventIds = raw.events.map(identity);
+  const graph: WordRevisionGraph = { schema: WORD_SOURCE_SCHEMA, sourceDigest: archive.sourceDigest,
+    parserIdentity: WORD_DOCX_PARSER_IDENTITY, extractorIdentity: WORD_EXTRACTOR_IDENTITY, profile: WORD_INTAKE_PROFILE,
+    events: raw.events.map(({ parents, links, ...event }, index) => ({ ...event, eventId: eventIds[index]!,
+      parentEventIds: parents.map((parent) => eventIds[parent]!), linkedEventIds: links.map((linked) => eventIds[linked]!),
+      disposition: event.context === 'range' ? 'range' : event.context === 'comment' ? 'comment' : 'no-visible-transition' })),
+    atoms: raw.atoms.map(({ membership, ...atom }) => ({ ...atom, eventMembership: membership.map((event) => eventIds[event]!) })),
+    paragraphs: raw.paragraphs, comments: [] };
+  const base = (): Pick<WordTrackedCompilation, 'sourceDigest' | 'archiveBytes' | 'inventory' | 'inventoryDigest'> => {
+    const value: WordIntakeInventory = { schema: 'ai7.word-revision-inventory/1', sourceDigest: archive.sourceDigest,
+      profile: WORD_INTAKE_PROFILE, ...inventory };
+    return { sourceDigest: archive.sourceDigest, archiveBytes: archive.archiveBytes, inventory: value, inventoryDigest: sha256Hex(wordCanonicalJson(value)) };
+  };
+  if (!inventory.activating) return { ...base(), kind: 'ordinary' };
+  if (inventory.locations.length > 0) return { ...base(), kind: 'unsupported', reasons: inventory.locations };
+  const comments = readWordSourceComments(graph, raw.comments.comments, raw.comments.commentsExtended);
+  graph.comments = comments.comments;
+  if (comments.invalid) {
+    for (const event of graph.events) if (event.context === 'comment') inventory.locations.push({ code: 'unrepresentable-comment',
+      part: event.part, elementOrdinal: event.elementOrdinal, paragraphIndex: event.location.paragraphIndex });
+    return { ...base(), kind: 'unsupported', reasons: inventory.locations };
+  }
+  const templates = wordSampleTemplates(graph, raw.decoded, signal);
+  const readings = { rejected: compileWordReading(graph, raw.decoded, 'rejected', templates, comments.bodies, textBoxes, signal),
+    accepted: compileWordReading(graph, raw.decoded, 'accepted', templates, comments.bodies, textBoxes, signal) };
+  signal?.throwIfAborted();
+  if (!readings.rejected.usable && !readings.accepted.usable) {
+    inventory.locations.push(...readings.rejected.refusals, ...readings.accepted.refusals);
+    if (inventory.locations.length === 0) inventory.locations.push({ code: 'unusable-reading', part: 'word/document.xml', elementOrdinal: 0, paragraphIndex: null });
+    return { ...base(), kind: 'unsupported', reasons: inventory.locations };
+  }
+  return { ...base(), kind: 'ready', graph, graphDigest: sha256Hex(wordCanonicalJson(graph)), decodedAtoms: raw.decoded, decodedCommentBodies: comments.bodies,
+    readings, previewReading: readings.rejected.usable ? 'rejected' : 'accepted', templates,
+    templateManifestDigest: sha256Hex(wordCanonicalJson({ schema: 'ai7.word-sample-template-manifest/1', sourceDigest: archive.sourceDigest,
+      extractorIdentity: WORD_EXTRACTOR_IDENTITY, templates })) };
 }

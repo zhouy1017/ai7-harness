@@ -1444,6 +1444,20 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    case 'inspectWordTrackedEditSample': {
+      const input = requireInput(value.input, ['bookId', 'sampleId', 'sampleDigest', 'after'], tentativeId);
+      const after = input.after;
+      const cursorValid = after === null || isRecord(after) &&
+        hasExactKeys(after, ['schema', 'sampleDigest', 'detailDigest', 'section', 'entryOrdinal', 'field', 'codeUnitOffset']) &&
+        after.schema === 'ai7.word-sample-cursor/1' && after.sampleDigest === input.sampleDigest &&
+        typeof after.detailDigest === 'string' && HEX_DIGEST_PATTERN.test(after.detailDigest) &&
+        typeof after.section === 'string' && ['before', 'after', 'events', 'imports'].includes(after.section) &&
+        typeof after.field === 'string' && ['text', 'rawId', 'rawAuthor', 'rawDate', 'rangeName', 'record'].includes(after.field) &&
+        isSafeInteger(after.entryOrdinal, 0) && isSafeInteger(after.codeUnitOffset, 0) && (after.field !== 'record' || after.codeUnitOffset === 0);
+      if (!validUuid(input.bookId) || typeof input.sampleId !== 'string' || !/^wts_[0-9a-f]{64}$/u.test(input.sampleId) ||
+        typeof input.sampleDigest !== 'string' || !HEX_DIGEST_PATTERN.test(input.sampleDigest) || !cursorValid) throw new ProtocolError(tentativeId);
+      break;
+    }
     // 知识库 › 社级编辑记忆 (Issue #911): the house record takes no input; 质量与学习's edit signals, the house or one Book.
     case 'inspectEditorialLearning': {
       const input = requireInputWithOptional(value.input, ['signalOffset', 'itemOffset'], ['exclusionOffset', 'detailItemId', 'historyOffset', 'sourceOffset'], tentativeId);
@@ -1923,9 +1937,10 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     case 'prepareNewBookReview': {
-      const input = requireInput(
+      const input = requireInputWithOptional(
         value.input,
         ['draftId', 'expectedDraftVersion', 'target', 'acceptDegradation', 'textBoxDisposition'],
+        ['trackedChanges'],
         tentativeId,
       );
       const target = input.target;
@@ -1943,7 +1958,12 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
         !isSafeInteger(input.expectedDraftVersion, 1) ||
         !validTarget ||
         typeof input.acceptDegradation !== 'boolean' ||
-        (input.textBoxDisposition !== 'retain' && input.textBoxDisposition !== 'merge')
+        (input.textBoxDisposition !== 'retain' && input.textBoxDisposition !== 'merge') ||
+        (input.trackedChanges !== undefined && !(isRecord(input.trackedChanges) &&
+          hasExactKeys(input.trackedChanges, ['mode', 'learnFromEdits', 'acceptedBaselineConfirmed']) &&
+          typeof input.trackedChanges.learnFromEdits === 'boolean' &&
+          (input.trackedChanges.mode === 'suggestions' && input.trackedChanges.acceptedBaselineConfirmed === false ||
+            input.trackedChanges.mode === 'accepted-baseline' && input.trackedChanges.acceptedBaselineConfirmed === true)))
       ) {
         throw new ProtocolError(tentativeId);
       }

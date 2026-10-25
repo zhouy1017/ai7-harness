@@ -273,6 +273,7 @@ it('refuses changed sources at creation and acceptance and never restores inacti
   const prepared = prepare();
   const preparedTask = prepared.categories.find((entry) => entry.categoryId === 'typos-and-usage')!.taskIntentId!;
   const window = subject.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+  if (signal.kind === 'word-tracked-edit') throw new Error('expected a review decision signal');
   subject.recordProposalDecisionFeedback({ manuscriptId: book.manuscriptId, branchId: book.branchId, windowStartBlockId: window.blocks[0]!.blockId,
     markId: signal.source.markId!, decisionId: signal.source.decisionId, expectedFeedback: signal.source.reasonRevision,
     action: 'revise', reason: '修订后的合成原因。', reasonSource: 'free-text' });
@@ -420,11 +421,12 @@ it('never infers automatic remediation from missing/superseded keys or a candida
   make(create([stale.signalId], '旧来源的编辑候选。'));
   subject.changeEditorialLearning({ kind: 'switch', enabled: false, expectedEntries: 0 });
   const window = subject.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+  if (stale.kind === 'word-tracked-edit') throw new Error('expected a review decision signal');
   subject.recordProposalDecisionFeedback({ manuscriptId: book.manuscriptId, branchId: book.branchId, windowStartBlockId: window.blocks[0]!.blockId,
     markId: stale.source.markId!, decisionId: stale.source.decisionId, expectedFeedback: stale.source.reasonRevision,
     action: 'revise', reason: '停用期间的新合成原因。', reasonSource: 'free-text' });
   subject.changeEditorialLearning({ kind: 'switch', enabled: true, expectedEntries: 1 });
-  const preview = (signal: typeof stale) => {
+  const preview = (signal: (typeof signals)[number]) => {
     const material = subject.inspectLearningMaterial(book.bookId, signal.source.materialKey);
     return subject.previewLearningRemediation({ bookId: book.bookId, items: [{ materialKey: material.materialKey, materialDigest: material.digest, expectedDecisions: material.decisions }] });
   };
@@ -943,7 +945,7 @@ it('advances to the current reader over a revision-90 store of /1 records withou
   store.markCleanShutdown(); store.close(); store = undefined;
   const stamped = new DatabaseSync(dbPath);
   try {
-    expect(stamped.prepare('PRAGMA user_version').get()!.user_version).toBe(92); expect(learningRows(stamped)).toEqual(before);
+    expect(stamped.prepare('PRAGMA user_version').get()!.user_version).toBe(93); expect(learningRows(stamped)).toEqual(before);
     expect(historicalFixtureRows(stamped).filter((entry) => constructed.rows.some((prior) => prior.table === entry.table))).toEqual(constructed.rows);
     expect(stamped.prepare("SELECT name, tbl_name, sql FROM sqlite_schema WHERE type = 'trigger' ORDER BY name").all()).toEqual(constructed.triggers);
   } finally { stamped.close(); }
@@ -974,7 +976,7 @@ it.each(['partial-stamp', 'publication'] as const)('refuses to open over a %s in
   if (legacyRead !== null) expect(legacyRead).toHaveBeenCalledWith(false);
   const after = new DatabaseSync(join(roots!.dataRoot, 'store', 'ai7.sqlite'));
   try {
-    expect(after.prepare('PRAGMA user_version').get()!.user_version).toBe(damage === 'partial-stamp' ? 90 : 92);
+    expect(after.prepare('PRAGMA user_version').get()!.user_version).toBe(damage === 'partial-stamp' ? 90 : 93);
     if (beforePartial !== undefined) expect(historicalFixtureRows(after)).toEqual(beforePartial);
   } finally { after.close(); }
 });

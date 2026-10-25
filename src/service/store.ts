@@ -1,5 +1,5 @@
 import { validateRequestAdmissionRecords } from './analysis/baseline-analysis-store.js';
-import { MODEL_REQUEST_ADMISSION_SCHEMA_VERSION } from './task-authorization.js';
+import { MODEL_REQUEST_ADMISSION_SCHEMA_VERSION, WORD_TRACKED_IMPORT_SCHEMA_VERSION } from './task-authorization.js';
 import { IDLE_BACKGROUND_SCHEMA_VERSION, LOCAL_REVIEW_SCHEMA_VERSION, EDITORIAL_MEMORY_SCHEMA_VERSION } from './task-authorization.js';
 import { initializeLocalStageSchema } from './review/review-runs.js';
 import { sha256Hex } from './analysis/canonical.js';
@@ -7,7 +7,8 @@ import { graphemeCount } from './analysis/factual-review-contract.js';
 import { backgroundEnrollmentKinds } from './analysis/live-kind-admission.js';
 import { executionBackgroundShare } from './analysis/execution.js';
 import { initializeProcedureDefinitionSchema } from './procedures/definition-store.js';
-import { EditorialLearningLedger, initializeEditorialLearningSchema } from './learning/ledger.js';
+import { EditorialLearningLedger, LearningReads, initializeEditorialLearningSchema, type WordLearningProofs } from './learning/ledger.js';
+import type { WordTrackedEditLearningSource } from '../shared/protocol/learning.js';
 import type { ChangeEditorialLearningInput, CreateEditorialMemoryInput, DeactivateEditorialMemoryInput, InspectEditorialLearningInput, EditorialLearningProjection, LearningReasonAskInput, LearningReasonAskProjection } from '../shared/protocol/learning.js';
 import { dialogueQuestionDigest } from './dialogue/contract.js';
 import { fragmentsText } from './dialogue/fragments.js';
@@ -43,9 +44,9 @@ import { readProxySetting, writeProxySetting } from './provider/proxy-setting.js
 import { allowedProductionBindingOf, type ConfiguredProviderBinding } from './launch-policy.js';
 import { DEVELOPMENT_CREDENTIAL_REFERENCES } from '../shared/protected-secret-identity.js';
 import { MODEL_SERVICE_ROUTE_BINDINGS, MODEL_SERVICE_ROUTES, modelServiceModels, type ModelConnectionTestStatus } from '../shared/protocol.js';
-import { closeSync, constants, createReadStream, existsSync, fstatSync, lstatSync, openSync, readSync } from 'node:fs';
+import { closeSync, constants, createReadStream, existsSync, fstatSync, lstatSync, openSync, readSync, realpathSync } from 'node:fs';
 import { copyFile, lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
-import { basename, extname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
+import { basename, dirname, extname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { acceptedSourceImportRetainedBoundaryLabels, sourceImportRetainedBoundaryLabel, BASELINE_ANALYSIS_MODE_GOALS, BASELINE_ANALYSIS_MODE_LABELS, CAPTURED_PROCEDURE_CAPTURE_SLOTS, CAPTURED_PROCEDURE_STATE_LABELS, MAX_CAPTURED_PROCEDURE_RUNS_SHOWN, MAX_CAPTURED_PROCEDURE_TITLE_GRAPHEMES, MAX_CAPTURED_PROCEDURE_VERSIONS_PAGE, J03_TASK_GOAL, MAX_DIALOGUE_SELECTION_GRAPHEMES, MAX_EVALUATION_CALIBRATION_BOOKS, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_LEARNING_AUDIT_BOOK_CHOICES, MAX_LEARNING_AUDIT_PAGE, MAX_LEARNING_AUDIT_SERIES_CHOICES, MAX_LEARNING_LINEAGE_DECISIONS, MAX_LEARNING_LINEAGE_TASKS, MAX_LEARNING_REMEDIATION_ITEMS, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
 import type {
@@ -496,11 +497,20 @@ import {
   isCleanTracerFidelity,
   MAX_ARCHIVE_BYTES,
   parseDocx,
+  parseNativeDocxIntake,
+  parseNativeDocxIntakeBytes,
+  compileWordTrackedDocx,
+  compileWordTrackedDocxBytes,
+  WORD_DOCX_PARSER_IDENTITY,
+  wordImportFidelityReport,
   withTextBoxDisposition,
   type FidelityConversionIdentity,
   type ImportFidelityPlan,
   type ParsedDocx,
   type ParsedDocxBlock,
+  type ParsedWordDocx,
+  type NativeDocxIntakeParse,
+  type WordTrackedCompilation,
   type TextBoxDisposition,
 } from './docx.js';
 import {
@@ -577,22 +587,57 @@ import { decisionResolvesConflict, initializeProposalConflictSchema, ProposalCon
 import {
   ImportRetentionError,
   initializeImportRetentionSchema,
+  initializeWordImportRetentionSchema,
+  validateWordImportRetentionVersion,
+  validateWordImportRetentionClosure,
   recordTextBoxChoice,
   recordedTextBoxChoice,
   stageImportSources,
+  stageWordRevisionIntake,
+  requireWordStagedIntake,
+  bindWordReadingBlocks,
+  wordTrackedSamples,
+  wordTrackedSampleRecord,
+  validateWordChoice,
+  wordPreparedChoice,
+  wordPreparedSelection,
+  recordWordPreparedIntake,
+  requireWordPreparedIntake,
   stagedImportSourcesMatch,
   stagedTextBoxParagraphs,
+  readWordParentSourcePin,
+  requireWordParentSourcePin,
+  retainWordRevisionSource,
+  retainWordRevisionImport,
+  bindWordReadingToRevision,
+  retainWordManuscriptSourceSegments,
+  requireWordManuscriptSourceSegments,
+  readWordImportChoiceRecord,
+  wordParentSourcePinRecord,
+  createWordSampleDetailContext,
+  wordSampleDetailContextCurrent,
+  resolveWordSampleDetailSource,
+  pageWordSampleDetail,
+  type WordSampleDetailContext,
+  type WordSampleDetailPage,
+  type WordReadingKind,
+  type WordPreparedIntake,
+  type WordCompiledReading,
+  type WordTrackedChoiceInput,
+  type WordImportChoiceRecord,
   type StagedImportSources,
   type StagedTextBoxParagraph,
 } from './import-retention.js';
 import {
   ImportedMarkError,
   createImportedMarks,
+  createWordImportedMarks,
+  validateWordImportedMarkSources,
   initializeImportedMarkSchema,
   stageImportedMarks,
   stagedImportedMarksMatch,
 } from './imported-marks.js';
-import { ExportLedgerError, ManuscriptExportStore, initializeExportLedgerSchema } from './manuscript-export.js';
+import { ExportLedgerError, ManuscriptExportStore, initializeExportLedgerSchema, readWordManuscriptExportSource } from './manuscript-export.js';
 import {
   DEFAULT_EXECUTION_RULES_STATEMENT,
   DEFAULT_EXECUTION_RULE_PROCEDURES,
@@ -802,6 +847,7 @@ import {
   learningAuditChoices,
   learningAuditStanding,
   learningMaterialDigest,
+  wordTrackedEditCandidate,
   learningMaterialOrder,
   LEARNING_REMEDIATION_NAMED,
   learningRemediationPreview,
@@ -1712,6 +1758,7 @@ type StoredImportCommitProjection =
   | Omit<ManuscriptImportCommitProjection, 'firstWindow'>
   | SourceImportCommitProjection
   | ManuscriptReimportCommitProjection;
+type ImmutableManuscriptImportResult = Omit<ManuscriptImportCommitProjection, 'firstWindow' | 'overview'>;
 
 export class StoreError extends Error {
   constructor(
@@ -1928,10 +1975,67 @@ function fileNameTitleSuggestion(displayName: string): string {
   return withoutExtension.length > 0 ? withoutExtension : displayName;
 }
 
+function draftSourceProjection(snapshot: DraftSnapshot): StagedImportProjection['source'] {
+  return { displayName: snapshot.displayName, format: snapshot.sourceFormat, sourceSha256: snapshot.sourceDigest,
+    sourceBytes: snapshot.sourceBytes, provenanceLabel: '本机文件选择器 · 本地解析 · 未联网',
+    conversion: snapshot.conversion, workingObjectSha256: snapshot.workingObjectDigest };
+}
+
 async function digestFile(path: string): Promise<string> {
   const hash = createHash('sha256');
   for await (const chunk of createReadStream(path)) hash.update(chunk);
   return hash.digest('hex');
+}
+
+function contentObjectPath(objectsRoot: string, objectDigest: string, relativeKey: string): string {
+  requireStore(DIGEST_PATTERN.test(objectDigest) && isManuscriptObjectKey(objectDigest, relativeKey),
+    'OBJECT_PATH_INVALID', '对象摘要或相对路径无效。');
+  const path = resolve(objectsRoot, ...relativeKey.split('/'));
+  requireStore(isInside(objectsRoot, path), 'OBJECT_PATH_INVALID', '对象路径越界。');
+  return path;
+}
+
+/** Read one bounded immutable original, with canonical path and actual byte proof rather than a database generation. */
+async function readRetainedWordOriginal(db: DatabaseSync, dataRoot: string, objectsRoot: string, bookId: string,
+  sourceVersionId: string): Promise<Uint8Array> {
+  const parent = readWordParentSourcePin(db, bookId, sourceVersionId);
+  requireStore(parent.sourceBytes <= MAX_ARCHIVE_BYTES, 'WORD_SOURCE_INVALID', 'Word 原文件超过已支持的包大小。');
+  const object = db.prepare('SELECT relative_key, byte_length FROM content_objects WHERE object_digest = ?').get(parent.objectDigest);
+  requireStore(object && object.byte_length === parent.sourceBytes, 'WORD_SOURCE_INVALID', 'Word 原文件对象记录不完整。');
+  const path = contentObjectPath(objectsRoot, parent.objectDigest, asString(object.relative_key));
+  const inspected = await inspectCanonicalDataFile(dataRoot, dirname(path), basename(path));
+  requireStore(inspected.exists && inspected.path === path, 'WORD_SOURCE_UNAVAILABLE', 'Word 原文件无法读取。');
+  const metadata = await lstat(path);
+  requireStore(metadata.isFile() && !metadata.isSymbolicLink() && metadata.size === parent.sourceBytes,
+    'WORD_SOURCE_UNAVAILABLE', 'Word 原文件不再是完整的留存文件。');
+  const hash = createHash('sha256');
+  const chunks: Buffer[] = [];
+  let bytes = 0;
+  for await (const chunk of createReadStream(path, { highWaterMark: 64 * 1024 })) {
+    bytes += chunk.byteLength;
+    requireStore(bytes <= parent.sourceBytes, 'WORD_SOURCE_UNAVAILABLE', 'Word 原文件在读取时已经变化。');
+    hash.update(chunk); chunks.push(chunk);
+  }
+  requireStore(bytes === parent.sourceBytes && hash.digest('hex') === parent.sourceDigest,
+    'WORD_SOURCE_UNAVAILABLE', 'Word 原文件字节与留存摘要不一致。');
+  return Buffer.concat(chunks, bytes);
+}
+
+/** Before backup or migration, replay every committed Word source and every complete import manifest. */
+async function validateRetainedWordImports(db: DatabaseSync, dataRoot: string, objectsRoot: string): Promise<void> {
+  validateWordImportRetentionClosure(db);
+  const ledger = new EditorialLearningLedger(db);
+  for (const source of db.prepare('SELECT book_id, source_version_id FROM word_revision_sources').iterate()) {
+    const bookId = asString(source.book_id);
+    const sourceVersionId = asString(source.source_version_id);
+    const original = await readRetainedWordOriginal(db, dataRoot, objectsRoot, bookId, sourceVersionId);
+    for (const imported of db.prepare('SELECT commit_id, revision_id FROM word_revision_imports WHERE source_version_id = ?').iterate(sourceVersionId)) {
+      const commitId = asString(imported.commit_id);
+      const { compiled } = readWordManuscriptExportSource(db, bookId, asString(imported.revision_id), sourceVersionId, original);
+      validateWordImportedMarkSources(db, bookId, commitId, compiled);
+      ledger.validateWordImportSamples(bookId, commitId, compiled);
+    }
+  }
 }
 
 /**
@@ -2444,7 +2548,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === WRITING_TASK_SCHEMA_VERSION ||
       currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       currentVersion === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || currentVersion === PROPOSAL_REVIEW_SCHEMA_VERSION || currentVersion === FACTUAL_VERIFICATION_SCHEMA_VERSION || currentVersion === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || currentVersion === TASK_INTENT_DRAFT_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_SCHEMA_VERSION || currentVersion === CUSTOM_ANALYSIS_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || currentVersion === MODEL_SELECTION_SCHEMA_VERSION || currentVersion === PROCEDURE_DEFINITION_SCHEMA_VERSION || currentVersion === EDITORIAL_LEARNING_SCHEMA_VERSION || currentVersion === GLOBAL_AGENT_SCHEMA_VERSION || currentVersion === REVIEW_CONTRACT_SCHEMA_VERSION || currentVersion === IDLE_BACKGROUND_SCHEMA_VERSION || currentVersion === LOCAL_REVIEW_SCHEMA_VERSION || currentVersion === EDITORIAL_MEMORY_SCHEMA_VERSION || currentVersion === LATEST_SCHEMA_VERSION),
+      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || currentVersion === PROPOSAL_REVIEW_SCHEMA_VERSION || currentVersion === FACTUAL_VERIFICATION_SCHEMA_VERSION || currentVersion === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || currentVersion === TASK_INTENT_DRAFT_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_SCHEMA_VERSION || currentVersion === CUSTOM_ANALYSIS_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || currentVersion === MODEL_SELECTION_SCHEMA_VERSION || currentVersion === PROCEDURE_DEFINITION_SCHEMA_VERSION || currentVersion === EDITORIAL_LEARNING_SCHEMA_VERSION || currentVersion === GLOBAL_AGENT_SCHEMA_VERSION || currentVersion === REVIEW_CONTRACT_SCHEMA_VERSION || currentVersion === IDLE_BACKGROUND_SCHEMA_VERSION || currentVersion === LOCAL_REVIEW_SCHEMA_VERSION || currentVersion === EDITORIAL_MEMORY_SCHEMA_VERSION || currentVersion === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || currentVersion === LATEST_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2508,7 +2612,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === WRITING_TASK_SCHEMA_VERSION ||
       currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       currentVersion === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || currentVersion === PROPOSAL_REVIEW_SCHEMA_VERSION || currentVersion === FACTUAL_VERIFICATION_SCHEMA_VERSION || currentVersion === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || currentVersion === TASK_INTENT_DRAFT_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_SCHEMA_VERSION || currentVersion === CUSTOM_ANALYSIS_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || currentVersion === MODEL_SELECTION_SCHEMA_VERSION || currentVersion === PROCEDURE_DEFINITION_SCHEMA_VERSION || currentVersion === EDITORIAL_LEARNING_SCHEMA_VERSION || currentVersion === GLOBAL_AGENT_SCHEMA_VERSION || currentVersion === REVIEW_CONTRACT_SCHEMA_VERSION || currentVersion === IDLE_BACKGROUND_SCHEMA_VERSION || currentVersion === LOCAL_REVIEW_SCHEMA_VERSION || currentVersion === EDITORIAL_MEMORY_SCHEMA_VERSION || currentVersion === LATEST_SCHEMA_VERSION)
+      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || currentVersion === PROPOSAL_REVIEW_SCHEMA_VERSION || currentVersion === FACTUAL_VERIFICATION_SCHEMA_VERSION || currentVersion === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || currentVersion === TASK_INTENT_DRAFT_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_SCHEMA_VERSION || currentVersion === CUSTOM_ANALYSIS_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || currentVersion === MODEL_SELECTION_SCHEMA_VERSION || currentVersion === PROCEDURE_DEFINITION_SCHEMA_VERSION || currentVersion === EDITORIAL_LEARNING_SCHEMA_VERSION || currentVersion === GLOBAL_AGENT_SCHEMA_VERSION || currentVersion === REVIEW_CONTRACT_SCHEMA_VERSION || currentVersion === IDLE_BACKGROUND_SCHEMA_VERSION || currentVersion === LOCAL_REVIEW_SCHEMA_VERSION || currentVersion === EDITORIAL_MEMORY_SCHEMA_VERSION || currentVersion === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || currentVersion === LATEST_SCHEMA_VERSION)
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -2886,7 +2990,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === LATEST_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === LATEST_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2939,7 +3043,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === LATEST_SCHEMA_VERSION)) return;
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === LATEST_SCHEMA_VERSION)) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -3084,7 +3188,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === LATEST_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === LATEST_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -3136,7 +3240,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === LATEST_SCHEMA_VERSION)) return;
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === LATEST_SCHEMA_VERSION)) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -3678,7 +3782,7 @@ function initializeModelServiceSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === LATEST_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === LATEST_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -3730,7 +3834,7 @@ function initializeModelServiceSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === LATEST_SCHEMA_VERSION)) {
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === LATEST_SCHEMA_VERSION)) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -3799,9 +3903,30 @@ interface DraftSnapshot {
 
 interface IngestedDocx {
   ingestId: string;
-  parsed: ParsedDocx;
+  parsed: ParsedDocx | ParsedWordDocx;
   /** Which source paragraph each ingested block and text-box paragraph came from (ADR 0086 §3). */
-  sources: StagedImportSources;
+  sources: StagedImportSources | null;
+  /** Native evidence keeps its honest preview separate from an explicit reading or real legacy capability. */
+  native: NativeDocxIntakeParse | null;
+}
+
+interface WordIntakePlan {
+  original: Uint8Array;
+  native: Extract<NativeDocxIntakeParse, { kind: 'word' }>;
+  compiled: Extract<WordTrackedCompilation, { kind: 'ready' }>;
+  reading: WordCompiledReading;
+  parsed: ParsedWordDocx;
+  prepared: WordPreparedIntake;
+}
+
+/** What a reviewed Word intake creates beside the ordinary import records: its eligible samples and any reused Source Version. */
+function wordIntakeRecords(word: WordIntakePlan | undefined): { reusedSourceVersionId: string | null; eligibleSamples: number } | undefined {
+  if (word === undefined) return undefined;
+  const { choice, target } = word.prepared;
+  const eligibleSamples = !choice.learnFromEdits || !target.controls.global.enabled || target.controls.book.excluded ? 0
+    : target.kind === 'new-book' ? word.compiled.templates.length
+      : target.controls.materials.filter(({ standing }) => standing.choice === 'book' || standing.choice === 'house').length;
+  return { reusedSourceVersionId: target.kind === 'existing-book' ? target.parentSourcePin?.sourceVersionId ?? null : null, eligibleSamples };
 }
 
 interface CommitAttempt {
@@ -3890,10 +4015,21 @@ export function importedMarksRecord(count: number): string {
 function recordsToCreate(
   plan: ImportFidelityPlan,
   targetKind: 'new-book' | 'existing-book' = 'new-book',
+  word?: { reusedSourceVersionId: string | null; eligibleSamples: number },
 ): ReadonlyArray<string> {
-  const base = targetKind === 'existing-book' ? BASE_RECORDS_TO_CREATE.slice(2) : BASE_RECORDS_TO_CREATE;
+  let base: ReadonlyArray<string> = targetKind === 'existing-book' ? BASE_RECORDS_TO_CREATE.slice(2) : BASE_RECORDS_TO_CREATE;
+  if (word !== undefined) {
+    // A Word intake maps blocks through its own source segments, never the one-paragraph rows, and may reuse
+    // the exact same-byte Source Version this empty Book already retains instead of creating one.
+    base = base.flatMap((record) => record === '源材料版本与来源记录' && word.reusedSourceVersionId !== null
+      ? [`沿用本书已保留的同一来源版本 ${word.reusedSourceVersionId}（不新建来源版本）`]
+      : record === '来源段落对应'
+        ? ['Word 修订来源、导入选择与稿件来源片段对应',
+          ...(word.eligibleSamples > 0 ? [`Word 修改样本、导入准入与本机学习信号 ${word.eligibleSamples} 条`] : [])]
+        : [record]);
+  }
   // The marks stand on r1's blocks, so they follow the block-source mapping.
-  const sourcesIndex = base.indexOf('来源段落对应');
+  const sourcesIndex = base.indexOf(word === undefined ? '来源段落对应' : 'Word 修订来源、导入选择与稿件来源片段对应');
   const records = plan.importedMarks === 0
     ? base
     : [...base.slice(0, sourcesIndex + 1), importedMarksRecord(plan.importedMarks), ...base.slice(sourcesIndex + 1)];
@@ -4427,6 +4563,7 @@ function createSourceImportReviewDigest(
 interface ReviewedFidelity {
   fidelity: FidelityCategoryProjection[];
   plan: ImportFidelityPlan;
+  word?: WordIntakePlan;
 }
 
 /**
@@ -4473,6 +4610,7 @@ function createImportReviewDigestV6(
     },
     identityFindings,
     fidelity: reviewed.fidelity,
+    ...(reviewed.word === undefined ? {} : { word: reviewed.word.prepared }),
     textBoxDisposition: plan.textBoxDisposition,
     degradationDecision: plan.degradations.length === 0
       ? null
@@ -4482,7 +4620,7 @@ function createImportReviewDigestV6(
           state: 'accepted-complete-set',
           items: plan.degradations,
         },
-    recordsToCreate: recordsToCreate(plan, target.kind),
+    recordsToCreate: recordsToCreate(plan, target.kind, wordIntakeRecords(reviewed.word)),
     nonEffects: nonEffects(plan),
     workflowProfile: {
       projection: profile.projection,
@@ -4761,6 +4899,12 @@ export class EditorialStore {
   #translationRun: Promise<void> | null = null;
   readonly #translationFailures = new Map<string, string>();
   readonly #learningEligibility: LearningEligibilityLedger;
+  /** One bounded Word source context; actual original-file availability/hash is checked on every detail read. */
+  #wordSampleDetailContext: WordSampleDetailContext | null = null;
+  #wordSampleDetailReads: { context: WordSampleDetailContext; reads: LearningReads } | null = null;
+  #wordLearningRead: { generation: string; reads: LearningReads } | null = null;
+  #wordLearningProofs: { context: WordSampleDetailContext; facts: WordLearningProofs } | null = null;
+  #learningCallDepth = 0;
   readonly #evaluationCalibration: EvaluationCalibrationLedger;
   readonly #series: SeriesLedger;
   readonly #usage: UsageLedger;
@@ -5110,6 +5254,17 @@ export class EditorialStore {
     try {
       configureDatabase(authority, 'FILE');
       validateRequestAdmissionRecords(authority, Number(authority.prepare('PRAGMA user_version').get()?.user_version) >= MODEL_REQUEST_ADMISSION_SCHEMA_VERSION);
+      const beforeWordVersion = Number(authority.prepare('PRAGMA user_version').get()?.user_version);
+      // An unknown future schema belongs to the existing unsupported-version refusal, not this Word reader.
+      if (beforeWordVersion <= LATEST_SCHEMA_VERSION) {
+        try {
+          validateWordImportRetentionVersion(authority, beforeWordVersion >= WORD_TRACKED_IMPORT_SCHEMA_VERSION);
+          if (beforeWordVersion >= WORD_TRACKED_IMPORT_SCHEMA_VERSION) await validateRetainedWordImports(authority, dataRoot, objectsRoot);
+        } catch (error) {
+          if (error instanceof ImportRetentionError) throw new StoreError(error.code, error.message);
+          throw error;
+        }
+      }
       // 升级前备份 (Issue #433, S85b; DSTO-016): a store this software must move to a later Data Version is written whole into
       // the backup location before anything migrates it, and a backup that cannot be made opens nothing.
       const { upgrade, earlier } = await backUpBeforeUpgrade(authority, dataRoot, {
@@ -5156,6 +5311,7 @@ export class EditorialStore {
       initializePublicationVersionSchema(authority);
       initializeProposalConflictSchema(authority);
       initializeImportRetentionSchema(authority);
+      initializeWordImportRetentionSchema(authority);
       initializeImportedMarkSchema(authority);
       initializeExportLedgerSchema(authority);
       initializeDefaultExecutionRuleSchema(authority);
@@ -6206,7 +6362,7 @@ export class EditorialStore {
     return this.#reviewCall(() => {
       this.#transaction(this.#authority, () => {
         this.#reviewRuns.ignoreFinding(bookId, reviewRunId, findingId, reason);
-        new EditorialLearningLedger(this.#authority).captureIgnoredFinding(bookId, reviewRunId, findingId);
+        this.#learningLedger().captureIgnoredFinding(bookId, reviewRunId, findingId);
       });
       return this.#reviewRuns.workspace(bookId, reviewRunId, progress);
     });
@@ -8635,7 +8791,8 @@ export class EditorialStore {
               wi.profile_digest, wi.native_profile_id, wi.native_profile_version, wi.native_profile_digest,
               wp.projection_json,
               ir.import_record_id, ir.commit_id, ir.fidelity_review_id, ir.degradation_decision_id,
-              ir.provenance_id import_provenance_id, ir.imported_at, fr.outcome fidelity_outcome
+              ir.provenance_id import_provenance_id, ir.imported_at, fr.outcome fidelity_outcome,
+              sp.parser_identity derivation_parser_identity
        FROM manuscripts m
        JOIN manuscript_branches mb ON mb.manuscript_id = m.manuscript_id
        JOIN manuscript_revisions mr
@@ -8707,7 +8864,7 @@ export class EditorialStore {
       asString(row.source_digest),
       asNumber(row.source_bytes),
       sourceConversion,
-      asString(row.parser_identity),
+      this.#manuscriptImportParser(bookId, asString(row.commit_id), sourceVersionId, asString(row.parser_identity), asString(row.derivation_parser_identity)),
       'BOOK_RECORD_GRAPH_INVALID',
       '稿件导入记录的保真结果不完整。',
     );
@@ -13276,21 +13433,84 @@ export class EditorialStore {
     return this.#learningCall(() => {
       requireStore(bookId === null || UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
       if (bookId !== null) requireStore(this.#authority.prepare('SELECT 1 FROM books WHERE book_id = ?').get(bookId) !== undefined, 'BOOK_NOT_FOUND', '图书不存在。');
-      return { ...readEditQualitySignals(this.#authority, bookId), ...new EditorialLearningLedger(this.#authority).adoption(bookId, after) };
+      return { ...readEditQualitySignals(this.#authority, bookId), ...this.#learningLedger().adoption(bookId, after) };
     });
   }
 
   inspectEditorialLearning(input: InspectEditorialLearningInput): EditorialLearningProjection {
-    return this.#learningCall(() => new EditorialLearningLedger(this.#authority).inspect(input, this.#baselineAnalysis.launch.operationalScope));
+    return this.#learningCall(() => this.#learningLedger().inspect(input, this.#baselineAnalysis.launch.operationalScope));
+  }
+
+  /** Explicit-Book source detail; historical inspection remains available while current learning is excluded. */
+  async inspectWordTrackedEditSample(input: { bookId: string; sampleId: string; sampleDigest: string; after: unknown }): Promise<WordSampleDetailPage> {
+    this.#assertAvailable();
+    requireStore(isRecord(input) && hasExactKeys(input, ['bookId', 'sampleId', 'sampleDigest', 'after']) &&
+      typeof input.bookId === 'string' && typeof input.sampleId === 'string' && typeof input.sampleDigest === 'string' &&
+      UUID_PATTERN.test(input.bookId) && /^wts_[0-9a-f]{64}$/u.test(input.sampleId) && DIGEST_PATTERN.test(input.sampleDigest),
+    'WORD_SAMPLE_INVALID', 'Word 修改样本的图书或固定标识无效。');
+    const row = this.#authority.prepare(`SELECT source_version_id FROM word_tracked_edit_samples
+      WHERE book_id = ? AND sample_id = ? AND sha256 = ?`).get(input.bookId, input.sampleId, input.sampleDigest);
+    requireStore(row !== undefined, 'WORD_SAMPLE_INVALID', '这条 Word 修改样本不属于所选图书或摘要已经变化。');
+    const sourceVersionId = asString(row.source_version_id);
+    const parent = this.#retentionCall(() => readWordParentSourcePin(this.#authority, input.bookId, sourceVersionId));
+    requireStore(parent.sourceBytes <= MAX_ARCHIVE_BYTES, 'WORD_SOURCE_INVALID', 'Word 原文件超过已支持的包大小。');
+    const object = one(this.#authority.prepare('SELECT relative_key, byte_length FROM content_objects WHERE object_digest = ?')
+      .all(parent.objectDigest) as SqlRow[], 'WORD_SOURCE_UNAVAILABLE', 'Word 原文件对象记录缺失。');
+    requireStore(object.byte_length === parent.sourceBytes, 'WORD_SOURCE_INVALID', 'Word 原文件长度固定记录不一致。');
+    const path = this.#contentObjectPath(parent.objectDigest, asString(object.relative_key));
+    let context = this.#wordSampleDetailContext;
+    const reusable = context !== null && context.bookId === input.bookId && context.sourceVersionId === sourceVersionId &&
+      context.parentPinDigest === wordParentSourcePinRecord(parent).digest && wordSampleDetailContextCurrent(this.#authority, context);
+    try {
+      const info = await lstat(path);
+      requireStore(info.isFile() && !info.isSymbolicLink() && info.size === parent.sourceBytes,
+        'WORD_SOURCE_UNAVAILABLE', 'Word 原文件不再是完整的留存文件。');
+      if (reusable) {
+        const hash = createHash('sha256');
+        let bytes = 0;
+        for await (const chunk of createReadStream(path, { highWaterMark: 64 * 1024 })) {
+          bytes += chunk.byteLength;
+          requireStore(bytes <= parent.sourceBytes, 'WORD_SOURCE_UNAVAILABLE', 'Word 原文件在读取时已经变化。');
+          hash.update(chunk);
+        }
+        requireStore(bytes === parent.sourceBytes && hash.digest('hex') === parent.sourceDigest,
+          'WORD_SOURCE_UNAVAILABLE', 'Word 原文件字节与留存摘要不一致。');
+        this.#assertAvailable();
+        requireStore(context !== null && wordSampleDetailContextCurrent(this.#authority, context),
+          'WORD_SOURCE_CHANGED', 'Word 详情读取期间记录已变化，请重新查看。');
+      } else {
+        const compiled = await compileWordTrackedDocx(path, { digest: parent.sourceDigest, bytes: parent.sourceBytes });
+        this.#assertAvailable();
+        requireStore(compiled.kind === 'ready', 'WORD_SOURCE_INVALID', 'Word 原文件不再符合留存的修订编译契约。');
+        context = this.#retentionCall(() => createWordSampleDetailContext(this.#authority, input.bookId, sourceVersionId, compiled));
+      }
+    } catch (error) {
+      if (error instanceof StoreError) throw error;
+      if (error instanceof Error && error.message.startsWith('DOCX_REJECTED:')) throw new StoreError('WORD_SOURCE_INVALID', 'Word 原文件无法按留存的修订契约完整读取。');
+      if (isRecord(error) && typeof error.code === 'string' && typeof error.syscall === 'string') {
+        throw new StoreError('WORD_SOURCE_UNAVAILABLE', 'Word 原文件无法读取，无法查看完整修改详情。');
+      }
+      throw error;
+    }
+    requireStore(context !== null, 'WORD_SOURCE_INVALID', 'Word 详情缺少已验证的原始来源。');
+    // Only this Word historical read reuses proofs across detail pages. The context binds the exact database generation,
+    // and actual original bytes were verified again above; controls/current eligibility never come from this cache.
+    if (this.#wordSampleDetailReads?.context !== context) this.#wordSampleDetailReads = { context, reads: new LearningReads() };
+    const imports = this.#learningCall(() => new EditorialLearningLedger(this.#authority, this.#wordSampleDetailReads!.reads)
+      .wordSampleImports(input.bookId, input.sampleId, input.sampleDigest));
+    const source = this.#retentionCall(() => resolveWordSampleDetailSource(this.#authority, context, input.sampleId, input.sampleDigest, imports));
+    const page = this.#retentionCall(() => pageWordSampleDetail(source, input.after));
+    this.#wordSampleDetailContext = context;
+    return page;
   }
 
   recordLearningReasonAsk(input: LearningReasonAskInput, frequency: import('../shared/protocol/learning.js').LearningReasonAskFrequency): LearningReasonAskProjection | null {
-    return this.#learningCall(() => this.#transaction(this.#authority, () => new EditorialLearningLedger(this.#authority).reasonAsk(input, frequency)));
+    return this.#learningCall(() => this.#transaction(this.#authority, () => this.#learningLedger().reasonAsk(input, frequency)));
   }
 
   changeEditorialLearning(input: ChangeEditorialLearningInput): EditorialLearningProjection {
     return this.#learningCall(() => this.#transaction(this.#authority, () => {
-      new EditorialLearningLedger(this.#authority).change(input);
+      this.#learningLedger().change(input);
       this.#rebuildHouseReviewPreference();
       return this.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
     }));
@@ -13298,14 +13518,14 @@ export class EditorialStore {
 
   createEditorialMemory(input: CreateEditorialMemoryInput): EditorialLearningProjection {
     return this.#learningCall(() => this.#transaction(this.#authority, () => {
-      new EditorialLearningLedger(this.#authority).create(input, this.#baselineAnalysis.launch.operationalScope);
+      this.#learningLedger().create(input, this.#baselineAnalysis.launch.operationalScope);
       return this.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
     }));
   }
 
   acceptEditorialMemory(input: import('../shared/protocol/learning.js').AcceptEditorialMemoryInput): EditorialLearningProjection {
     return this.#learningCall(() => this.#transaction(this.#authority, () => {
-      new EditorialLearningLedger(this.#authority).accept(input, this.#baselineAnalysis.launch.operationalScope);
+      this.#learningLedger().accept(input, this.#baselineAnalysis.launch.operationalScope);
       new HouseReviewPreferenceLedger(this.#authority).refreshGovernance(this.#baselineAnalysis.launch.operationalScope, this.#housePreferencePeopleNames(), 'memory');
       return this.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
     }));
@@ -13313,14 +13533,14 @@ export class EditorialStore {
 
   deactivateEditorialMemory(input: DeactivateEditorialMemoryInput): EditorialLearningProjection {
     return this.#learningCall(() => this.#transaction(this.#authority, () => {
-      new EditorialLearningLedger(this.#authority).deactivate(input, this.#baselineAnalysis.launch.operationalScope);
+      this.#learningLedger().deactivate(input, this.#baselineAnalysis.launch.operationalScope);
       new HouseReviewPreferenceLedger(this.#authority).refreshGovernance(this.#baselineAnalysis.launch.operationalScope, this.#housePreferencePeopleNames());
       return this.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
     }));
   }
 
   #editorialMemoryGovernanceHooks(): EditorialMemoryGovernanceHooks {
-    const learning = new EditorialLearningLedger(this.#authority);
+    const learning = this.#learningLedger();
     return { revisions: () => learning.revisions(this.#baselineAnalysis.launch.operationalScope),
       govern: (directive, expected) => learning.govern(directive, expected) };
   }
@@ -13342,7 +13562,7 @@ export class EditorialStore {
         revisionId: `${item.revisionId}@${directives.at(-1)?.directiveId ?? 'base'}` }));
       const memories: GlobalAgentSourceCandidate[] = [];
       const mutableMemories: import('../shared/protocol.js').GlobalMemoryItem[] = [];
-      const learning = new EditorialLearningLedger(this.#authority);
+      const learning = this.#learningLedger();
       for (const entry of this.#editorialMemoryGovernanceHooks().revisions()) {
         mutableMemories.push({ ...editorialMemoryGovernanceItem(entry, entry.current.editorialDimension), text: withoutNames(entry.current.title, names) });
         if (entry.usable && entry.current.schema === 'ai7.global-editorial-memory/2') memories.push({ itemId: entry.current.itemId, revisionId: learning.sourcePinRevision(entry.current.itemId, entry.current.versionId), kind: 'memory',
@@ -13520,7 +13740,8 @@ export class EditorialStore {
 
   /** Each of one Book's Learning Materials where it stands, a decided one with the newest decision of its chain. */
   *#standingMaterials(bookId: string): IterableIterator<StandingReviewMaterial> {
-    for (const [candidate, projection] of this.#learningEligibility.projectCandidates(bookId, this.#learningCandidates(bookId, false))) {
+    // Word retention grants no preference-source admission, so its pairs are not even enumerated here.
+    for (const [candidate, projection] of this.#learningEligibility.projectCandidates(bookId, this.#learningCandidates(bookId, false, false))) {
       const latest = projection.state === 'decided' ? this.#learningEligibility.history(bookId, candidate.materialKey).at(-1) ?? null : null;
       yield { candidate, state: projection.state, materialDigest: projection.digest,
         decision: latest === null ? null : { decisionId: latest.decisionId, choice: latest.choice, attribution: latest.attribution } };
@@ -13678,7 +13899,9 @@ export class EditorialStore {
     const influence = kept.length === 0 ? null : new HousePreferenceInfluence(this.#authority, this.#baselineAnalysis.launch.operationalScope);
     return { page: kept.map(({ candidate, material }) => ({
       material: { ...material, downstreamTasks: this.#materialInfluence(bookId, material.materialKey, influence!).tasks.length,
-        automaticAdmission: new EditorialLearningLedger(this.#authority).automaticAdmissionFor(bookId, material.materialKey, material.digest, this.#baselineAnalysis.launch.operationalScope) },
+        ...(candidate.source.kind === 'word-tracked-edit' ? { wordCurrentEligibility: this.#learningLedger().wordCurrentEligibility(
+          bookId, candidate.source.sampleId, candidate.source.sampleDigest) } : {}),
+        automaticAdmission: this.#learningLedger().automaticAdmissionFor(bookId, material.materialKey, material.digest, this.#baselineAnalysis.launch.operationalScope) },
       orderedAt: candidate.orderedAt,
     })), count };
   }
@@ -13694,7 +13917,7 @@ export class EditorialStore {
     tasks: Array<ReturnType<ReviewRunStore['influenceUses']>[number] & { versionOrdinal: number; withdrawn: boolean }>;
   } {
     const decisionIds = new Set([...this.#learningEligibility.history(bookId, materialKey).map((entry) => entry.decisionId),
-      ...new EditorialLearningLedger(this.#authority).sourceKeys(bookId, [materialKey])]);
+      ...this.#learningLedger().sourceKeys(bookId, [materialKey])]);
     const uses = influence.usesOf(decisionIds).flatMap((pin) => {
       const withdrawn = pin.sources.some((source) => decisionIds.has(preferenceSourceIdentity(source)) &&
         preferenceSourceWithdrawal(this.#authority, source).withdrawnAt !== null);
@@ -13712,7 +13935,7 @@ export class EditorialStore {
   #remediationReach(bookId: string, materialKeys: ReadonlyArray<string>): ReturnType<LearningRemediationReach> & { approved: Array<{ reviewRunId: string; categoryId: string }> } {
     const influence = new HousePreferenceInfluence(this.#authority, this.#baselineAnalysis.launch.operationalScope);
     const decisionIds = new Set([...materialKeys.flatMap((key) => this.#learningEligibility.history(bookId, key).map((entry) => entry.decisionId)),
-      ...new EditorialLearningLedger(this.#authority).sourceKeys(bookId, materialKeys)]);
+      ...this.#learningLedger().sourceKeys(bookId, materialKeys)]);
     const current = influence.versions.at(-1) ?? null;
     const uses = this.#reviewRuns.influenceUses(influence.usesOf(decisionIds));
     const running = uses.filter((use) => use.state === 'running' || use.state === 'approved');
@@ -13720,7 +13943,7 @@ export class EditorialStore {
     return {
       currentVersion: current?.ordinal ?? null,
       linesAffected: current?.lines.filter((line) => line.sources.some((source) => decisionIds.has(preferenceSourceIdentity(source)))).length ?? 0,
-      memory: new EditorialLearningLedger(this.#authority).affectedMemoryCount(bookId, materialKeys),
+      memory: this.#learningLedger().affectedMemoryCount(bookId, materialKeys),
       running: running.length,
       prepared: uses.filter((use) => use.state === 'prepared').length,
       completed: completed.length,
@@ -13746,7 +13969,7 @@ export class EditorialStore {
         bookTitle: this.#evaluationBookTitle(bookId),
         material,
         standing: learningAuditStanding(material),
-        automaticAdmission: new EditorialLearningLedger(this.#authority).automaticAdmissionFor(bookId, materialKey, material.digest, this.#baselineAnalysis.launch.operationalScope),
+        automaticAdmission: this.#learningLedger().automaticAdmissionFor(bookId, materialKey, material.digest, this.#baselineAnalysis.launch.operationalScope),
         decisions: shown.map((entry) => ({
           decisionId: entry.decisionId,
           ordinal: entry.ordinal,
@@ -13772,8 +13995,8 @@ export class EditorialStore {
             .get(this.#baselineAnalysis.launch.operationalScope) as SqlRow | undefined;
           const listed = tasks.slice(-MAX_LEARNING_LINEAGE_TASKS);
           return {
-            downstream: { signals: signals.length, memoryCandidates: new EditorialLearningLedger(this.#authority).candidateMemoryCount(bookId, materialKey),
-              activeMemories: new EditorialLearningLedger(this.#authority).activeMemoryCount(bookId, [materialKey]), tasks: tasks.length },
+            downstream: { signals: signals.length, memoryCandidates: this.#learningLedger().candidateMemoryCount(bookId, materialKey),
+              activeMemories: this.#learningLedger().activeMemoryCount(bookId, [materialKey]), tasks: tasks.length },
             signals: signals.map(({ version, lines }) => ({ versionId: version.versionId, ordinal: version.ordinal, recordedAt: version.recordedAt,
               current: current !== undefined && asString(current.version_id) === version.versionId, lines })),
             tasks: listed.map((use) => ({ bookId: use.bookId, reviewRunId: use.reviewRunId, label: use.label, versionOrdinal: use.versionOrdinal,
@@ -13837,7 +14060,7 @@ export class EditorialStore {
       if (!wanted.has(candidate.materialKey)) continue;
       found.set(candidate.materialKey, candidate);
       const automatic = projection.state === 'pending' && projection.decisions === 0 && projection.decision === null
-        ? new EditorialLearningLedger(this.#authority).automaticAdmissionFor(input.bookId, candidate.materialKey, projection.digest, this.#baselineAnalysis.launch.operationalScope) : null;
+        ? this.#learningLedger().automaticAdmissionFor(input.bookId, candidate.materialKey, projection.digest, this.#baselineAnalysis.launch.operationalScope) : null;
       standings.set(candidate.materialKey, { candidate, projection, ...(automatic === null ? {} : { automaticEligibility: automatic.choice }) });
     }
     return { preview: learningRemediationPreview({ bookId: input.bookId, title }, input.items, (key) => standings.get(key) ?? null, (keys) => {
@@ -13998,8 +14221,10 @@ export class EditorialStore {
   }
 
   /** Resolve the exact source and its originating Task; neither display fact changes the material digest or eligibility. */
-  #learningMaterialSource(bookId: string, candidate: LearningMaterialCandidate): Pick<LearningMaterialProjection, 'target' | 'sourceTask'> {
+  #learningMaterialSource(bookId: string, candidate: LearningMaterialCandidate): Pick<LearningMaterialProjection, 'target' | 'sourceTask' | 'wordCurrentEligibility'> {
     const source = candidate.source;
+    if (source.kind === 'word-tracked-edit') return { target: { ...source, bookId }, sourceTask: null,
+      wordCurrentEligibility: this.#learningLedger().wordCurrentEligibility(bookId, source.sampleId, source.sampleDigest) };
     if (source.kind === 'analysis') {
       // The judged revision owns this Task, even after a newer analysis becomes current.
       const row = one(this.#authority.prepare(
@@ -14046,7 +14271,7 @@ export class EditorialStore {
    * carries the editor's reason or their own wording, each analysis item whose latest judgment says why, and each 审阅
    * finding the editor last ignored with a reason. Nothing is asked of the editor to find them.
    */
-  *#learningCandidates(bookId: string, withExcerpt: boolean): IterableIterator<LearningMaterialCandidate> {
+  *#learningCandidates(bookId: string, withExcerpt: boolean, includeWord = true): IterableIterator<LearningMaterialCandidate> {
     const reasons = new DecisionFeedbackLedger(this.#authority);
     const decisions = this.#authority.prepare(
       `SELECT i.current_text, i.proposed_text, d.decision_id, d.disposition, d.edited_text, d.recorded_at, r.reason, r.reason_source
@@ -14114,6 +14339,8 @@ export class EditorialStore {
         recordedAt: asString(row.recorded_at),
       }, withExcerpt);
     }
+    // Retained Word pairs verify their original before projecting; a consumer that never uses them skips that read.
+    if (includeWord) yield* this.#learningLedger().wordCandidates(bookId);
   }
 
   /** Each Book whose Learning Material waits: how many wait for a decision or changed since one, and how many were deferred. */
@@ -14124,7 +14351,8 @@ export class EditorialStore {
       let pending = 0;
       let deferred = 0;
       let at = '';
-      for (const material of this.#learningEligibility.projectEntries(bookId, this.#learningCandidates(bookId, false))) {
+      // Word retention waits for a future consumer, not a required human inclusion, so it is not enumerated here.
+      for (const material of this.#learningEligibility.projectEntries(bookId, this.#learningCandidates(bookId, false, false))) {
         if (material.state === 'pending' || material.state === 'changed') pending += 1;
         else if (material.state === 'deferred') deferred += 1;
         else continue;
@@ -14139,6 +14367,7 @@ export class EditorialStore {
 
   #learningCall<T>(operation: () => T): T {
     this.#assertAvailable();
+    this.#learningCallDepth += 1;
     try {
       return operation();
     } catch (error) {
@@ -14146,7 +14375,95 @@ export class EditorialStore {
         throw new StoreError(error.code, error.message);
       }
       throw error;
-    }
+    } finally { if (--this.#learningCallDepth === 0) this.#wordLearningRead = null; }
+  }
+
+  /** C0's existing per-read proofs, invalidated by any database write; no cache survives the outer local operation. */
+  #learningLedger(): EditorialLearningLedger {
+    const word = this.#wordLearningProofs !== null && wordSampleDetailContextCurrent(this.#authority, this.#wordLearningProofs.context)
+      ? this.#wordLearningProofs.facts : undefined;
+    if (this.#learningCallDepth === 0) return new EditorialLearningLedger(this.#authority, new LearningReads(word), (source) => this.#requireWordLearningSource(source));
+    const generation = JSON.stringify({ data: this.#authority.prepare('PRAGMA data_version').get(),
+      schema: this.#authority.prepare('PRAGMA schema_version').get(), changes: this.#authority.prepare('SELECT total_changes() changes').get() });
+    if (this.#wordLearningRead?.generation !== generation) this.#wordLearningRead = { generation, reads: new LearningReads(word) };
+    return new EditorialLearningLedger(this.#authority, this.#wordLearningRead.reads, (source) => this.#requireWordLearningSource(source));
+  }
+
+  /** Actual bounded original bytes and every saved sample meet the fresh compiler before current learning can use a pair. */
+  #requireWordLearningSource(source: WordTrackedEditLearningSource): WordLearningProofs {
+    const parent = this.#retentionCall(() => readWordParentSourcePin(this.#authority, source.bookId, source.sourceVersionId));
+    requireStore(parent.sourceDigest === source.sourceDigest && parent.sourceBytes > 0 && parent.sourceBytes <= MAX_ARCHIVE_BYTES,
+      'WORD_SOURCE_INVALID', 'Word 修改样本的原始来源固定记录无效。');
+    const object = this.#authority.prepare('SELECT relative_key, byte_length FROM content_objects WHERE object_digest = ?').get(parent.objectDigest);
+    requireStore(object && object.byte_length === parent.sourceBytes, 'WORD_SOURCE_UNAVAILABLE', 'Word 原文件对象记录不完整。');
+    const path = this.#contentObjectPath(parent.objectDigest, asString(object.relative_key));
+    let descriptor: number | null = null;
+    try {
+      const metadata = lstatSync(path);
+      requireStore(relative(path, realpathSync(path)) === '' && metadata.isFile() && !metadata.isSymbolicLink() && metadata.size === parent.sourceBytes,
+        'WORD_SOURCE_UNAVAILABLE', 'Word 原文件不再是完整的留存文件。');
+      descriptor = openSync(path, constants.O_RDONLY);
+      const opened = fstatSync(descriptor);
+      requireStore(opened.isFile() && opened.size === parent.sourceBytes && opened.dev === metadata.dev && opened.ino === metadata.ino,
+        'WORD_SOURCE_UNAVAILABLE', 'Word 原文件在打开时已变化。');
+      const bytes = Buffer.allocUnsafe(parent.sourceBytes);
+      for (let offset = 0; offset < bytes.byteLength;) {
+        const count = readSync(descriptor, bytes, offset, Math.min(64 * 1024, bytes.byteLength - offset), offset);
+        requireStore(count > 0, 'WORD_SOURCE_UNAVAILABLE', 'Word 原文件在读取时已不完整。'); offset += count;
+      }
+      requireStore(readSync(descriptor, Buffer.alloc(1), 0, 1, bytes.byteLength) === 0 && sha256(bytes) === parent.sourceDigest,
+        'WORD_SOURCE_UNAVAILABLE', 'Word 原文件与留存摘要不一致。');
+      let context = this.#wordSampleDetailContext;
+      let fresh: Extract<WordTrackedCompilation, { kind: 'ready' }> | null = null;
+      if (context === null || context.bookId !== source.bookId || context.sourceVersionId !== source.sourceVersionId ||
+        context.parentPinDigest !== wordParentSourcePinRecord(parent).digest || !wordSampleDetailContextCurrent(this.#authority, context)) {
+        const compiled = compileWordTrackedDocxBytes(bytes);
+        requireStore(compiled.kind === 'ready', 'WORD_SOURCE_INVALID', 'Word 原文件不再符合留存编译契约。');
+        fresh = compiled;
+        context = this.#retentionCall(() => createWordSampleDetailContext(this.#authority, source.bookId, source.sourceVersionId, compiled));
+      }
+      requireStore(context.graphDigest === source.graphDigest, 'WORD_SOURCE_INVALID', 'Word 来源图与原文件不一致。');
+      if (this.#wordLearningProofs?.context !== context) {
+        if (fresh === null) {
+          const compiled = compileWordTrackedDocxBytes(bytes);
+          requireStore(compiled.kind === 'ready', 'WORD_SOURCE_INVALID', 'Word 原文件不再符合留存编译契约。');
+          fresh = compiled;
+        }
+        const reads = new LearningReads();
+        const ledger = new EditorialLearningLedger(this.#authority, reads);
+        const imports = this.#authority.prepare('SELECT commit_id FROM word_revision_imports WHERE book_id = ? AND source_version_id = ?')
+          .all(source.bookId, source.sourceVersionId);
+        requireStore(imports.length > 0, 'WORD_SOURCE_INVALID', 'Word 修改来源没有完整的已提交导入。');
+        for (const imported of imports) ledger.validateWordImportSamples(source.bookId, asString(imported.commit_id), fresh);
+        const provedSamples = new Set([...reads.word.evidence.values()].map((evidence) => evidence.candidate.materialKey));
+        for (const row of this.#authority.prepare('SELECT sample_id, sha256, canonical_json FROM word_tracked_edit_samples WHERE book_id = ? AND source_version_id = ?')
+          .iterate(source.bookId, source.sourceVersionId)) {
+          const found = context.samples.get(asString(row.sample_id));
+          const expected = found === undefined ? null : wordTrackedSampleRecord(found.sample);
+          requireStore(expected !== null && row.sha256 === expected.digest && row.canonical_json === expected.json &&
+            provedSamples.has(`word-sample:${asString(row.sample_id)}`),
+          'WORD_SAMPLE_INVALID', 'Word 修改样本与原文件完整清单不一致。');
+        }
+        for (const row of this.#authority.prepare(`SELECT signal_id FROM learning_signals WHERE book_id = ?
+          AND json_extract(canonical_json, '$.source.sourceVersionId') = ? AND json_extract(canonical_json, '$.kind') = 'word-tracked-edit'`)
+          .iterate(source.bookId, source.sourceVersionId)) {
+          requireStore(reads.word.signals.has(asString(row.signal_id)), 'WORD_SAMPLE_INVALID', 'Word 修改信号不属于完整的历史准入清单。');
+        }
+        requireStore(wordSampleDetailContextCurrent(this.#authority, context), 'WORD_SOURCE_CHANGED', 'Word 学习来源在验证期间已经变化。');
+        this.#wordLearningProofs = { context, facts: reads.word };
+      }
+      const sample = context.samples.get(source.sampleId);
+      requireStore(sample !== undefined && wordTrackedSampleRecord(sample.sample).digest === source.sampleDigest,
+        'WORD_SAMPLE_INVALID', 'Word 修改样本不属于原文件的完整清单。');
+      this.#wordSampleDetailContext = context;
+      return this.#wordLearningProofs.facts;
+    } catch (error) {
+      if (error instanceof StoreError) throw error;
+      if (isRecord(error) && typeof error.code === 'string' && typeof error.syscall === 'string') {
+        throw new StoreError('WORD_SOURCE_UNAVAILABLE', 'Word 原文件无法读取，当前学习不能使用这条修改对。');
+      }
+      throw error;
+    } finally { if (descriptor !== null) closeSync(descriptor); }
   }
 
   /** The revision feedback binds: one of this Book's baseline Result Set Revisions, as ②A shows it, and its items. */
@@ -14620,7 +14937,7 @@ export class EditorialStore {
     displayName: string,
   ): Promise<IngestedDocx> {
     try {
-      return await this.#parseIntoIngest(draftId, workingPath, displayName);
+      return await this.#parseIntoIngest(draftId, workingPath, displayName, { workingRepresentation: true });
     } catch (error) {
       if (error instanceof StoreError || error instanceof StoreFatalError) throw error;
       if (error instanceof Error && error.message.startsWith('DOCX_REJECTED:')) {
@@ -15467,19 +15784,30 @@ export class EditorialStore {
     targetSelection: ImportTargetSelection,
     acceptDegradation: boolean,
     textBoxDisposition: TextBoxDisposition = 'retain',
+    trackedChanges?: WordTrackedChoiceInput,
   ): ReviewBeforeImportProjection {
     this.#assertAvailable();
     requireStore(UUID_PATTERN.test(draftId), 'DRAFT_INVALID', '导入草稿标识无效。');
     requireStore(textBoxDisposition === 'retain' || textBoxDisposition === 'merge', 'TEXT_BOX_CHOICE_INVALID', '文本框处理方式无效。');
     this.#requireNoAbandonmentCleanupIntent(draftId);
-    const snapshot = this.#loadDraftSnapshot(draftId);
+    let snapshot = this.#loadDraftSnapshot(draftId);
     requireStore(snapshot.state === 'staged', 'DRAFT_STATE_CHANGED', '导入草稿状态已变化。');
     requireStore(snapshot.version === expectedDraftVersion, 'DRAFT_VERSION_CHANGED', '导入草稿版本已变化。');
     const identityFindings = this.#identityFindings(snapshot);
     const target = this.#resolveImportTarget(targetSelection, identityFindings);
-    const reviewed = this.#reviewedFidelity(snapshot, textBoxDisposition);
+    const word = this.#wordIntakePlan(snapshot, target, textBoxDisposition, trackedChanges, expectedDraftVersion);
+    if (word !== null) {
+      snapshot = { ...snapshot, parserIdentity: word.parsed.parserIdentity, contentDigest: word.parsed.contentDigest,
+        structureDigest: word.parsed.structureDigest, blockCount: word.parsed.blockCount, characterCount: word.parsed.characterCount,
+        fidelity: word.parsed.fidelity, titleSuggestion: word.parsed.titleSuggestion.value, titleSource: word.parsed.titleSuggestion.sourceLabel };
+    }
+    const reviewed = this.#reviewedFidelity(snapshot, textBoxDisposition, word ?? undefined);
     const { plan } = reviewed;
     if (plan.degradations.length > 0 && !acceptDegradation) {
+      if (word !== null) this.#transaction(this.#authority, () => {
+        this.#replaceStagedReading(snapshot, word.parsed, word.reading.blocks, null);
+        this.#retentionCall(() => recordWordPreparedIntake(this.#authority, word.prepared));
+      });
       return this.#reviewProjection(snapshot, null, reviewed, false, target, identityFindings, null);
     }
     requireStore(
@@ -15488,6 +15816,7 @@ export class EditorialStore {
       '本次导入不需要降级接受。',
     );
     const nextVersion = expectedDraftVersion + 1;
+    if (word !== null) word.prepared = { ...word.prepared, draftVersion: nextVersion };
     requireStore(
       !this.#control.persistLegacyReviewedDraft ||
         (target.kind === 'new-book' && target.choiceId === 'new-book' && identityFindings.length === 0),
@@ -15503,6 +15832,7 @@ export class EditorialStore {
       : target.kind === 'new-book' ? target.choiceId : null;
     const reviewedAt = new Date().toISOString();
     this.#transaction(this.#authority, () => {
+      if (word !== null) this.#replaceStagedReading(snapshot, word.parsed, word.reading.blocks, null);
       const update = this.#authority
         .prepare(
           `UPDATE import_drafts
@@ -15526,6 +15856,7 @@ export class EditorialStore {
           expectedDraftVersion,
         );
       requireStore(update.changes === 1, 'DRAFT_VERSION_CHANGED', '导入草稿在复核时已变化。');
+      if (word !== null) this.#retentionCall(() => recordWordPreparedIntake(this.#authority, word.prepared));
     });
     return this.#reviewProjection(
       {
@@ -15557,9 +15888,10 @@ export class EditorialStore {
     this.#assertAvailable();
     requireStore(UUID_PATTERN.test(draftId), 'DRAFT_INVALID', '导入草稿标识无效。');
     this.#requireNoAbandonmentCleanupIntent(draftId);
-    const snapshot = this.#loadDraftSnapshot(draftId);
+    let snapshot = this.#loadDraftSnapshot(draftId);
     requireStore(snapshot.state === 'staged', 'DRAFT_STATE_CHANGED', '导入草稿状态已变化。');
     requireStore(snapshot.version === expectedDraftVersion, 'DRAFT_VERSION_CHANGED', '导入草稿版本已变化。');
+    snapshot = this.#selectLegacyWordStaging(snapshot);
     const identityFindings = this.#identityFindings(snapshot);
     const target = this.#resolveSourceImportTarget(targetSelection, snapshot, identityFindings);
     const nextVersion = expectedDraftVersion + 1;
@@ -15616,9 +15948,10 @@ export class EditorialStore {
     this.#assertAvailable();
     requireStore(UUID_PATTERN.test(draftId), 'DRAFT_INVALID', '导入草稿标识无效。');
     this.#requireNoAbandonmentCleanupIntent(draftId);
-    const snapshot = this.#loadDraftSnapshot(draftId);
+    let snapshot = this.#loadDraftSnapshot(draftId);
     requireStore(snapshot.state === 'staged', 'DRAFT_STATE_CHANGED', '导入草稿状态已变化。');
     requireStore(snapshot.version === expectedDraftVersion, 'DRAFT_VERSION_CHANGED', '导入草稿版本已变化。');
+    snapshot = this.#selectLegacyWordStaging(snapshot);
     // A reimport compares parsed blocks, so a format that was never parsed cannot begin one.
     this.#requireEditableFormat(snapshot);
     const binding = this.#reimportManuscriptBinding(targetSelection.bookId);
@@ -16499,10 +16832,11 @@ export class EditorialStore {
       requireStore(reconstructed !== null, 'REVIEW_CHANGED', '导入前复核摘要无法由当前权威状态重建。');
       const { target, reviewed } = reconstructed;
       const { plan, fidelity: reviewedFidelity } = reviewed;
+      const word = reviewed.word;
       this.#boundedCall(() => this.#boundedAuthority.assertStagedDraftIntegrity(input.draftId));
       // A merged review brings every text-box paragraph into r1 (ADR 0086 §2); any other review's r1 is
       // exactly the staged body.
-      const merged = plan.textBoxDisposition === 'merge'
+      const merged = word === undefined && plan.textBoxDisposition === 'merge'
         ? this.#retentionCall(() => stagedTextBoxParagraphs(this.#authority, input.draftId))
         : null;
       const blockCount = snapshot.blockCount + (merged?.length ?? 0);
@@ -16512,7 +16846,8 @@ export class EditorialStore {
       const now = new Date().toISOString();
       const bookId = target.kind === 'existing-book' ? target.bookId : randomUUID();
       const dimensionSetId = target.kind === 'existing-book' ? target.dimensionSetId : randomUUID();
-      const sourceVersionId = randomUUID();
+      const reusedParent = word?.prepared.target.kind === 'existing-book' ? word.prepared.target.parentSourcePin : null;
+      const sourceVersionId = reusedParent?.sourceVersionId ?? randomUUID();
       const provenanceId = randomUUID();
       const fidelityReviewId = randomUUID();
       const degradationDecisionId = plan.degradations.length > 0 ? randomUUID() : null;
@@ -16564,7 +16899,8 @@ export class EditorialStore {
           '所选图书身份、维度集或稿件状态已变化。',
         );
       }
-      this.#authority
+      if (reusedParent !== null) this.#retentionCall(() => requireWordParentSourcePin(this.#authority, reusedParent));
+      else this.#authority
         .prepare(
           `INSERT INTO source_versions(
              source_version_id, book_id, object_digest, source_digest, content_digest, structure_digest,
@@ -16576,8 +16912,8 @@ export class EditorialStore {
           bookId,
           snapshot.objectDigest,
           snapshot.sourceDigest,
-          snapshot.contentDigest,
-          snapshot.structureDigest,
+          word?.native.parsed.contentDigest ?? snapshot.contentDigest,
+          word?.native.parsed.structureDigest ?? snapshot.structureDigest,
           snapshot.parserIdentity,
           snapshot.sourceFormat,
           snapshot.displayName,
@@ -16658,7 +16994,7 @@ export class EditorialStore {
              FROM staged_import_blocks WHERE draft_id = ? ORDER BY position`,
         ).run(branchId, input.draftId);
         // ADR 0086 §3: every block of r1 is its staged body paragraph, which the staged sources name.
-        const mapped = this.#authority.prepare(
+        const mapped = word === undefined ? this.#authority.prepare(
           `INSERT INTO manuscript_block_sources(
              revision_id, block_id, source_version_id, source_part, source_paragraph_index,
              box_ordinal, box_paragraph_ordinal, source_paragraph_digest, created_at
@@ -16666,8 +17002,8 @@ export class EditorialStore {
              FROM staged_import_blocks b
              JOIN staged_import_block_sources s ON s.draft_id = b.draft_id AND s.position = b.position
              WHERE b.draft_id = ? ORDER BY b.position`,
-        ).run(revisionId, sourceVersionId, now, input.draftId);
-        requireStore(mapped.changes === snapshot.blockCount, 'IMPORT_POSTCONDITION_FAILED', '稿件内容块的来源段落对应不完整。');
+        ).run(revisionId, sourceVersionId, now, input.draftId) : null;
+        requireStore(mapped === null || mapped.changes === snapshot.blockCount, 'IMPORT_POSTCONDITION_FAILED', '稿件内容块的来源段落对应不完整。');
       } else {
         this.#insertMergedImportBlocks(input.draftId, manuscriptId, revisionId, branchId, sourceVersionId, merged, now);
       }
@@ -16732,6 +17068,14 @@ export class EditorialStore {
           this.#workflowProfile.projection.phases[0].label,
           now,
         );
+      const immutableResult: ImmutableManuscriptImportResult = { commitId: input.commitId, importedAt: now, completionLabel: '稿件已导入',
+        bookId, manuscriptId, branchId, revisionId, importRecordId, source: draftSourceProjection(snapshot),
+        fidelityReview: { fidelityReviewId, outcome: plan.outcome, categories: reviewedFidelity },
+        importRecord: { importRecordId, fidelityReviewId, degradationDecision: degradationDecisionId
+          ? { degradationDecisionId, summaryLabel: '含已接受的降级', acceptedItems: plan.degradations } : null } };
+      if (word !== undefined) this.#authority.prepare(`INSERT INTO import_commits(commit_id, draft_id, request_fingerprint,
+        expected_draft_version, review_digest, operation_kind, result_json, committed_at) VALUES (?, ?, ?, ?, ?, 'manuscript-import', ?, ?)`)
+        .run(input.commitId, input.draftId, requestFingerprint, input.expectedDraftVersion, input.reviewDigest, canonicalJson(immutableResult), now);
       this.#authority
         .prepare(
           `INSERT INTO manuscript_import_records(
@@ -16768,7 +17112,9 @@ export class EditorialStore {
       // transaction, whose source is the file's author — all of them, or no import. A staged body block keeps
       // its identity in r1 whether or not text boxes were merged.
       const stagedBlockId = this.#authority.prepare('SELECT staged_block_id FROM staged_import_blocks WHERE draft_id = ? AND position = ?');
-      const importedMarks = this.#importedMarkCall(() => createImportedMarks(this.#authority, this.#editorialMarks, input.draftId, {
+      const importedMarks = word !== undefined ? this.#commitWordEvidence(word, { bookId, sourceVersionId, commitId: input.commitId,
+        fidelityReviewId, revisionId, branchId, reviewDigest: input.reviewDigest, createdAt: now }) :
+        this.#importedMarkCall(() => createImportedMarks(this.#authority, this.#editorialMarks, input.draftId, {
         manuscriptId,
         branchId,
         blockIdOf: (position) => asString(one(stagedBlockId.all(input.draftId, position) as SqlRow[],
@@ -16776,35 +17122,8 @@ export class EditorialStore {
       }));
       requireStore(importedMarks === plan.importedMarks, 'IMPORT_POSTCONDITION_FAILED', '导入的批注与修改建议与保真审阅的数量不一致。');
 
-      result = {
-        commitId: input.commitId,
-        importedAt: now,
-        completionLabel: '稿件已导入',
-        bookId,
-        manuscriptId,
-        branchId,
-        revisionId,
-        importRecordId,
-        source: this.#stagedProjection(snapshot).source,
-        fidelityReview: {
-          fidelityReviewId,
-          outcome: plan.outcome,
-          categories: reviewedFidelity,
-        },
-        importRecord: {
-          importRecordId,
-          fidelityReviewId,
-          degradationDecision: degradationDecisionId
-            ? {
-                degradationDecisionId,
-                summaryLabel: '含已接受的降级',
-                acceptedItems: plan.degradations,
-              }
-            : null,
-        },
-        overview: this.getBookOverview(bookId),
-      };
-      this.#authority
+      result = { ...immutableResult, overview: this.getBookOverview(bookId) };
+      if (word === undefined) this.#authority
         .prepare(
           `INSERT INTO import_commits(
              commit_id, draft_id, request_fingerprint, expected_draft_version, review_digest,
@@ -16866,6 +17185,7 @@ export class EditorialStore {
         sourceBytes: snapshot.sourceBytes,
         conversion: snapshot.conversion,
         parserIdentity: snapshot.parserIdentity!,
+        ...(word === undefined ? {} : { word: { commitId: input.commitId, compiled: word.compiled } }),
       });
       this.#authority.prepare('DELETE FROM staged_import_snapshots WHERE draft_id = ?').run(input.draftId);
       this.#assertForeignKeys(this.#authority);
@@ -17350,6 +17670,9 @@ export class EditorialStore {
         : await this.#revalidateConversion(snapshotBeforeAttempt, objectPath);
       work.converted = converted;
       return this.#parseIntoIngest(input.draftId, converted?.path ?? objectPath, snapshotBeforeAttempt.displayName, {
+        ...(converted !== null ? { workingRepresentation: true } :
+          this.#authority.prepare('SELECT draft_id FROM staged_word_revision_intakes WHERE draft_id = ?').get(input.draftId) === undefined
+            ? { historicalReader: true } : { reading: 'legacy' }),
         signal: abortController.signal,
         onArchiveProgress: (bytes) => {
           if (this.#reimportCommitWork.get(workId) === work) {
@@ -17470,6 +17793,8 @@ export class EditorialStore {
         return { done: false, completed: work.parseBytes, total: work.total, result: null };
       }
       const parsed = work.parsedIngest.parsed;
+      const parsedSources = work.parsedIngest.sources;
+      requireStore(parsedSources !== null, 'SNAPSHOT_RESELECTION_REQUIRED', '重新导入缺少实际历史读法的来源对应。');
       // A converted source is checked against its reproduced working representation, and its fidelity is the
       // conversion's, as revalidation checks it (Issue #597).
       const converted = work.snapshot.conversion === null ? null : work.converted;
@@ -17484,7 +17809,7 @@ export class EditorialStore {
           canonicalJson(converted?.fidelity ?? parsed.fidelity) === canonicalJson(work.snapshot.fidelity) &&
           parsed.titleSuggestion.value === work.snapshot.titleSuggestion &&
           parsed.titleSuggestion.sourceLabel === work.snapshot.titleSource &&
-          this.#retentionCall(() => stagedImportSourcesMatch(this.#authority, work.input.draftId, work.parsedIngest!.sources)),
+          this.#retentionCall(() => stagedImportSourcesMatch(this.#authority, work.input.draftId, parsedSources)),
         'SNAPSHOT_RESELECTION_REQUIRED',
         '暂存来源身份或解析证据无法精确重建。',
       );
@@ -22111,6 +22436,20 @@ export class EditorialStore {
       'COMMIT_PROOF_INCONCLUSIVE',
       '导入提交来源对象摘要无效。',
     );
+    if (result.completionLabel === '稿件已导入') {
+      const imported = this.#authority.prepare(`SELECT mir.source_version_id, sp.parser_identity,
+        wi.commit_id word_commit_id FROM manuscript_import_records mir
+        JOIN source_provenance sp ON sp.provenance_id = mir.provenance_id
+        LEFT JOIN word_revision_imports wi ON wi.commit_id = mir.commit_id WHERE mir.commit_id = ?`).get(result.commitId);
+      requireStore(imported !== undefined, 'COMMIT_PROOF_INCONCLUSIVE', '导入提交来源记录缺失。');
+      if (imported.parser_identity === WORD_DOCX_PARSER_IDENTITY || imported.word_commit_id !== null) {
+        const sourceVersionId = asString(imported.source_version_id);
+        const original = await readRetainedWordOriginal(this.#authority, this.#dataRoot, this.#objectsRoot, result.bookId, sourceVersionId);
+        const { compiled } = readWordManuscriptExportSource(this.#authority, result.bookId, result.revisionId, sourceVersionId, original);
+        this.#importedMarkCall(() => validateWordImportedMarkSources(this.#authority, result.bookId, result.commitId, compiled));
+        this.#learningCall(() => this.#learningLedger().validateWordImportSamples(result.bookId, result.commitId, compiled));
+      }
+    }
   }
 
   async #originalFileAccess(snapshot: DraftSnapshot): Promise<OriginalFileAccessProjection> {
@@ -22198,7 +22537,13 @@ export class EditorialStore {
       // A converted draft was read through its working representation, so that is what the parse is
       // revalidated against, after the conversion itself is reproduced from the retained original.
       const converted = snapshot.conversion === null ? null : await this.#revalidateConversion(snapshot, objectPath);
-      const ingested = await this.#parseIntoIngest(snapshot.draftId, converted?.path ?? objectPath, snapshot.displayName);
+      const wordStaged = this.#authority.prepare('SELECT draft_id FROM staged_word_revision_intakes WHERE draft_id = ?').get(snapshot.draftId) !== undefined;
+      const selection = wordStaged ? this.#retentionCall(() => wordPreparedSelection(this.#authority, snapshot.draftId)) : null;
+      const ingested = await this.#parseIntoIngest(snapshot.draftId, converted?.path ?? objectPath, snapshot.displayName,
+        converted !== null ? { workingRepresentation: true } : !wordStaged ? { historicalReader: true } :
+          snapshot.reviewedRelationship === 'source-only' || snapshot.reviewedRelationship === 'reimport' ? { reading: 'legacy' } :
+            selection === null ? {} : { reading: selection.choice.mode === 'suggestions' ? 'rejected' : 'accepted',
+              textBoxDisposition: selection.textBoxDisposition });
       try {
         const { parsed } = ingested;
         requireStore(
@@ -22418,7 +22763,8 @@ export class EditorialStore {
     draftId: string,
     path: string,
     displayName: string,
-    options: { signal?: AbortSignal; onArchiveProgress?: (bytes: number) => void } = {},
+    options: { signal?: AbortSignal; onArchiveProgress?: (bytes: number) => void;
+      workingRepresentation?: true; historicalReader?: true; reading?: WordReadingKind | 'legacy'; textBoxDisposition?: TextBoxDisposition } = {},
   ): Promise<IngestedDocx> {
     requireStore(UUID_PATTERN.test(draftId), 'DRAFT_INVALID', '导入草稿标识无效。');
     const ingestId = randomUUID();
@@ -22472,7 +22818,7 @@ export class EditorialStore {
       }
     };
     try {
-      const parsed = await parseDocx(path, displayName, (block: ParsedDocxBlock) => {
+      const emit = (block: Pick<ParsedDocxBlock, 'position' | 'digest' | 'kind' | 'level' | 'text' | 'graphemeLength'>): void => {
         const stagedBlockId = `blk_${sha256(`${draftId}\u0000${block.position}\u0000${block.digest}`).slice(0, 24)}`;
         batch.push({
           stagedBlockId,
@@ -22485,18 +22831,54 @@ export class EditorialStore {
           graphemeLength: block.graphemeLength,
         });
         startOffset += block.graphemeLength;
-        blockSourceIndexes.push(block.sourceParagraphIndex);
         if (batch.length === INGEST_BATCH_SIZE) flushBatch();
-      // The router already identified the file as a DOCX from its content, so the display name is
-      // not asked to prove it: a DOCX under any other name is still a DOCX (ADR 0072 §1).
-      }, undefined, { ...options, formatIdentified: true });
+      };
+      const emitLegacy = (block: ParsedDocxBlock): void => { blockSourceIndexes.push(block.sourceParagraphIndex); emit(block); };
+      const parseOptions = { ...(options.signal === undefined ? {} : { signal: options.signal }),
+        ...(options.onArchiveProgress === undefined ? {} : { onArchiveProgress: options.onArchiveProgress }), formatIdentified: true };
+      // Converted working representations and native originals keep their existing, distinct routing.
+      const native = options.workingRepresentation === true || options.historicalReader === true ? null : await parseNativeDocxIntake(path, displayName,
+        { legacy: emitLegacy, wordPreview: () => undefined }, undefined, parseOptions);
+      let parsed: ParsedDocx | ParsedWordDocx;
+      let sources: StagedImportSources | null;
+      if (native === null) {
+        parsed = await parseDocx(path, displayName, emitLegacy, undefined, parseOptions);
+        sources = { blockSourceIndexes, textBoxes: parsed.textBoxes };
+      } else if (native.kind === 'legacy') {
+        parsed = native.parsed;
+        sources = { blockSourceIndexes, textBoxes: parsed.textBoxes };
+      } else if (options.reading === 'legacy') {
+        requireStore(native.legacy.kind === 'ready', 'DOCX_REJECTED', '该 DOCX 的历史读法无法形成现有来源导入或重新导入。');
+        parsed = native.legacy.parsed;
+        for (const block of native.legacy.blocks) { options.signal?.throwIfAborted(); emitLegacy(block); }
+        sources = { blockSourceIndexes, textBoxes: parsed.textBoxes };
+      } else {
+        const disposition = options.textBoxDisposition ?? 'retain';
+        const compiled = disposition === 'retain' ? native.word : await compileWordTrackedDocx(path,
+          { digest: native.word.sourceDigest, bytes: native.word.archiveBytes }, { ...parseOptions, textBoxDisposition: disposition });
+        requireStore(compiled.kind === 'ready' && compiled.graphDigest === native.word.graphDigest &&
+          compiled.templateManifestDigest === native.word.templateManifestDigest,
+        'WORD_READING_UNAVAILABLE', 'Word 阅读与原始来源的完整编译结果不一致。');
+        const reading = compiled.readings[options.reading ?? native.word.previewReading];
+        requireStore(reading.usable && reading.blocks.length > 0, 'WORD_READING_UNAVAILABLE', '所选 Word 阅读没有可用的非空稿件。');
+        let fidelity = native.parsed.fidelity;
+        if (options.reading !== undefined) {
+          const selected = wordImportFidelityReport(fidelity, options.reading === 'rejected' ? 'suggestions' : 'accepted-baseline', reading.marks.length, disposition);
+          requireStore(selected !== undefined, 'WORD_READING_UNAVAILABLE', '所选 Word 阅读没有完整保真计划。');
+          fidelity = selected;
+        }
+        parsed = { ...native.parsed, contentDigest: reading.contentDigest, structureDigest: reading.structureDigest,
+          blockCount: reading.blocks.length, characterCount: reading.characterCount, fidelity };
+        for (const block of reading.blocks) { options.signal?.throwIfAborted(); emit(block); }
+        sources = null;
+      }
       flushBatch();
       requireStore(
         parsed.blockCount === inserted && parsed.characterCount === startOffset && inserted > 0,
         'SNAPSHOT_INCOMPLETE',
         '暂存解析未形成完整有界摄入。',
       );
-      return { ingestId, parsed, sources: { blockSourceIndexes, textBoxes: parsed.textBoxes } };
+      return { ingestId, parsed, sources, native };
     } catch (error) {
       this.#discardIngest(ingestId);
       throw error;
@@ -22556,10 +22938,16 @@ export class EditorialStore {
          FROM import_ingest_blocks WHERE ingest_id = ? AND draft_id = ? ORDER BY position`,
     ).run(draftId, ingested.ingestId, draftId);
     requireStore(inserted.changes === parsed.blockCount, 'SNAPSHOT_INCOMPLETE', '暂存摄入无法完整提升为权威快照。');
-    requireStore(ingested.sources.blockSourceIndexes.length === parsed.blockCount, 'SNAPSHOT_INCOMPLETE', '暂存摄入的来源段落不完整。');
-    this.#retentionCall(() => stageImportSources(this.#authority, draftId, ingested.sources));
-    // The file's comments and tracked changes, pinned in the blocks just staged (Issue #411).
-    this.#importedMarkCall(() => stageImportedMarks(this.#authority, draftId, parsed.importedMarks));
+    if (ingested.sources !== null) {
+      const sources = ingested.sources;
+      requireStore(sources.blockSourceIndexes.length === parsed.blockCount, 'SNAPSHOT_INCOMPLETE', '暂存摄入的来源段落不完整。');
+      this.#retentionCall(() => stageImportSources(this.#authority, draftId, sources));
+      this.#importedMarkCall(() => stageImportedMarks(this.#authority, draftId, parsed.importedMarks));
+    }
+    if (ingested.native !== null) {
+      const native = ingested.native;
+      this.#retentionCall(() => stageWordRevisionIntake(this.#authority, draftId, native));
+    }
     const removed = this.#authority
       .prepare('DELETE FROM import_ingest_blocks WHERE ingest_id = ? AND draft_id = ?')
       .run(ingested.ingestId, draftId);
@@ -22571,8 +22959,14 @@ export class EditorialStore {
    * staged sources and marks.
    */
   #ingestMatchesSnapshot(ingested: IngestedDocx, draftId: string): boolean {
-    return this.#ingestBlocksMatchSnapshot(ingested.ingestId, draftId) &&
-      this.#retentionCall(() => stagedImportSourcesMatch(this.#authority, draftId, ingested.sources)) &&
+    if (!this.#ingestBlocksMatchSnapshot(ingested.ingestId, draftId)) return false;
+    if (ingested.native !== null) {
+      const native = ingested.native;
+      this.#retentionCall(() => requireWordStagedIntake(this.#authority, draftId, native));
+    }
+    if (ingested.sources === null) return true;
+    const sources = ingested.sources;
+    return this.#retentionCall(() => stagedImportSourcesMatch(this.#authority, draftId, sources)) &&
       this.#importedMarkCall(() => stagedImportedMarksMatch(this.#authority, draftId, ingested.parsed.importedMarks));
   }
 
@@ -22598,13 +22992,7 @@ export class EditorialStore {
   }
 
   #contentObjectPath(objectDigest: string, relativeKey: string): string {
-    requireStore(/^[0-9a-f]{64}$/.test(objectDigest), 'OBJECT_PATH_INVALID', '对象摘要无效。');
-    // The retained original keeps the extension of the format it was identified as, so the key is
-    // checked against every admitted one rather than against DOCX alone (ADR 0072 §2).
-    requireStore(isManuscriptObjectKey(objectDigest, relativeKey), 'OBJECT_PATH_INVALID', '对象相对路径无效。');
-    const path = resolve(this.#objectsRoot, ...relativeKey.split('/'));
-    requireStore(isInside(this.#objectsRoot, path), 'OBJECT_PATH_INVALID', '对象路径越界。');
-    return path;
+    return contentObjectPath(this.#objectsRoot, objectDigest, relativeKey);
   }
 
   #loadAbandonmentCleanupIntent(draftId: string): AbandonmentCleanupIntent | null {
@@ -22974,6 +23362,15 @@ export class EditorialStore {
   }
 
   #stagedProjection(snapshot: DraftSnapshot): StagedImportProjection {
+    const wordEvidence = this.#readWordIntake(snapshot);
+    const native = wordEvidence?.native;
+    const wordTrackedChanges: StagedImportProjection['wordTrackedChanges'] = native === undefined ? undefined : native.kind === 'word'
+      ? { compatibility: 'ready', previewReading: native.word.previewReading,
+          readings: { rejected: { usable: native.word.readings.rejected.usable, blockCount: native.word.readings.rejected.blocks.length },
+            accepted: { usable: native.word.readings.accepted.usable, blockCount: native.word.readings.accepted.blocks.length } },
+          savedChoice: this.#retentionCall(() => wordPreparedChoice(this.#authority, snapshot.draftId)) }
+      : { compatibility: 'unsupported', reasonCodes: [...new Set(native.word?.reasons.map((reason) => reason.code) ?? [])],
+          locationCount: native.word?.reasons.length ?? 0 };
     const identityFindings = this.#identityFindings(snapshot);
     const targetChoice = newBookTargetChoice(identityFindings);
     const bookPage = this.listBooks(null);
@@ -23011,6 +23408,7 @@ export class EditorialStore {
       nextBookCursor: bookPage.nextCursor,
       fidelity: snapshot.fidelity,
       detectedBlockCount: snapshot.blockCount,
+      ...(wordTrackedChanges === undefined ? {} : { wordTrackedChanges }),
     };
   }
 
@@ -23811,7 +24209,223 @@ export class EditorialStore {
    * The fidelity a review makes of the staged report with `disposition` for its text boxes. A choice the
    * report cannot state — merging a file that has no text box, or one a converter read — is refused.
    */
-  #reviewedFidelity(snapshot: DraftSnapshot, disposition: TextBoxDisposition): ReviewedFidelity {
+  /** A native Word row is always replayed from bounded original bytes before any reading is prepared. */
+  #readWordIntake(snapshot: DraftSnapshot): { native: NativeDocxIntakeParse; original: Uint8Array } | null {
+    if (this.#authority.prepare('SELECT draft_id FROM staged_word_revision_intakes WHERE draft_id = ?').get(snapshot.draftId) === undefined) return null;
+    requireStore(snapshot.sourceFormat === 'DOCX' && snapshot.conversion === null && snapshot.workingObjectDigest === null &&
+      snapshot.objectDigest === snapshot.sourceDigest && snapshot.sourceBytes > 0 && snapshot.sourceBytes <= MAX_ARCHIVE_BYTES,
+    'WORD_SOURCE_INVALID', 'Word 暂存不是受支持的原始本机 DOCX。');
+    const object = this.#authority.prepare('SELECT relative_key, byte_length FROM content_objects WHERE object_digest = ?').get(snapshot.objectDigest);
+    requireStore(object && object.byte_length === snapshot.sourceBytes, 'WORD_SOURCE_INVALID', 'Word 暂存对象记录不完整。');
+    const path = this.#contentObjectPath(snapshot.objectDigest, asString(object.relative_key));
+    let descriptor: number | null = null;
+    try {
+      requireStore(relative(path, realpathSync(path)) === '', 'WORD_SOURCE_UNAVAILABLE', 'Word 原文件路径已经变化。');
+      const metadata = lstatSync(path);
+      requireStore(metadata.isFile() && !metadata.isSymbolicLink() && metadata.size === snapshot.sourceBytes,
+        'WORD_SOURCE_UNAVAILABLE', 'Word 原文件不再完整。');
+      descriptor = openSync(path, constants.O_RDONLY);
+      const opened = fstatSync(descriptor);
+      requireStore(opened.isFile() && opened.size === snapshot.sourceBytes && opened.dev === metadata.dev && opened.ino === metadata.ino,
+        'WORD_SOURCE_UNAVAILABLE', 'Word 原文件在打开时已经变化。');
+      const bytes = Buffer.allocUnsafe(snapshot.sourceBytes);
+      let offset = 0;
+      while (offset < bytes.byteLength) {
+        const read = readSync(descriptor, bytes, offset, Math.min(64 * 1024, bytes.byteLength - offset), offset);
+        requireStore(read > 0, 'WORD_SOURCE_UNAVAILABLE', 'Word 原文件在读取时已不完整。');
+        offset += read;
+      }
+      requireStore(readSync(descriptor, Buffer.alloc(1), 0, 1, offset) === 0 && sha256(bytes) === snapshot.sourceDigest,
+        'WORD_SOURCE_UNAVAILABLE', 'Word 原文件字节与留存摘要不一致。');
+      const native = parseNativeDocxIntakeBytes(bytes, snapshot.displayName, { formatIdentified: true });
+      this.#retentionCall(() => requireWordStagedIntake(this.#authority, snapshot.draftId, native));
+      return { native, original: bytes };
+    } catch (error) {
+      if (error instanceof StoreError) throw error;
+      if (error instanceof Error && error.message.startsWith('DOCX_REJECTED:')) throw new StoreError('WORD_SOURCE_INVALID', 'Word 原文件无法按暂存契约重新读取。');
+      if (isRecord(error) && typeof error.code === 'string' && typeof error.syscall === 'string') {
+        throw new StoreError('WORD_SOURCE_UNAVAILABLE', 'Word 原文件当前无法读取，请恢复原始来源。');
+      }
+      throw error;
+    } finally { if (descriptor !== null) closeSync(descriptor); }
+  }
+
+  #wordIntakePlan(snapshot: DraftSnapshot, target: ResolvedImportTarget, disposition: TextBoxDisposition,
+    input: unknown, draftVersion: number): WordIntakePlan | null {
+    const evidence = this.#readWordIntake(snapshot);
+    if (evidence === null) {
+      requireStore(input === undefined, 'WORD_CHOICE_INVALID', '普通或转换导入不能选择 Word 修订模式。');
+      return null;
+    }
+    const { native } = evidence;
+    requireStore(native.kind === 'word', 'WORD_INTAKE_UNSUPPORTED', '此文件含当前不支持的 Word 修订；不能作为首份稿件导入。');
+    const choice = this.#retentionCall(() => validateWordChoice(input));
+    const compiled = disposition === 'retain' ? native.word : compileWordTrackedDocxBytes(evidence.original, { textBoxDisposition: disposition });
+    requireStore(compiled.kind === 'ready' && compiled.graphDigest === native.word.graphDigest &&
+      compiled.templateManifestDigest === native.word.templateManifestDigest,
+    'WORD_READING_UNAVAILABLE', 'Word 阅读或来源图无法准确重建。');
+    const reading = compiled.readings[choice.mode === 'suggestions' ? 'rejected' : 'accepted'];
+    requireStore(reading.usable && reading.blocks.length > 0, 'WORD_READING_UNAVAILABLE',
+      choice.mode === 'suggestions' ? '撤销原修订后没有可编辑的非空稿件；请明确选择并确认「直接并入正文（作为定稿基线）」。' : '接受修订后的阅读没有可编辑的非空稿件。');
+    const fidelity = wordImportFidelityReport(native.parsed.fidelity, choice.mode, reading.marks.length, disposition);
+    requireStore(fidelity !== undefined, 'WORD_READING_UNAVAILABLE', '所选 Word 阅读没有完整保真计划。');
+    const ledger = this.#learningLedger();
+    let preparedTarget: WordPreparedIntake['target'];
+    if (target.kind === 'new-book') preparedTarget = { kind: 'new-book', controls: ledger.wordImportControlPins(null) };
+    else {
+      const samples = wordTrackedSamples(target.bookId, compiled.graph, compiled.templates);
+      const materials = samples.map((sample, index) => ({ templateKey: compiled.templates[index]!.templateKey,
+        materialKey: `word-sample:${sample.sampleId}`, materialDigest: learningMaterialDigest(
+          wordTrackedEditCandidate(sample, wordTrackedSampleRecord(sample).digest, snapshot.stagedAt)) }));
+      const parent = this.#authority.prepare('SELECT source_version_id FROM source_versions WHERE book_id = ? AND source_digest = ?')
+        .get(target.bookId, snapshot.sourceDigest);
+      const parentSourcePin = parent === undefined ? null : this.#retentionCall(() => readWordParentSourcePin(this.#authority, target.bookId, asString(parent.source_version_id)));
+      if (parentSourcePin?.parserIdentity === DOCX_PARSER_IDENTITY) {
+        // A retained /3 parent is checked by that same reader's result over these verified bytes; /1 and /2 keep
+        // their recorded historical meaning and are never reparsed.
+        const legacy = native.legacy;
+        requireStore(legacy.kind === 'ready' && legacy.parsed.parserIdentity === DOCX_PARSER_IDENTITY &&
+          legacy.parsed.sourceDigest === parentSourcePin.sourceDigest && legacy.parsed.archiveBytes === parentSourcePin.sourceBytes &&
+          legacy.parsed.contentDigest === parentSourcePin.contentDigest && legacy.parsed.structureDigest === parentSourcePin.structureDigest,
+        'WORD_SOURCE_INVALID', 'Word 复用的历史来源与其 /3 读法的实际结果不一致。');
+      }
+      preparedTarget = { kind: 'existing-book', bookId: target.bookId, controls: ledger.wordImportControls(target.bookId, materials), parentSourcePin };
+    }
+    const bound = bindWordReadingBlocks(reading, reading.blocks.map((block) => ({ sourceBlockId: block.blockId,
+      blockId: `blk_${sha256(`${snapshot.draftId}\u0000${block.position}\u0000${block.digest}`).slice(0, 24)}` })));
+    const pin = (selected: WordCompiledReading) => ({ digest: selected.readingDigest, blockCount: selected.blocks.length, usable: selected.usable });
+    return { original: evidence.original, native, compiled, reading, parsed: { ...native.parsed, contentDigest: reading.contentDigest, structureDigest: reading.structureDigest,
+      blockCount: reading.blocks.length, characterCount: reading.characterCount, fidelity }, prepared: {
+      schema: 'ai7.word-import-preparation/1', draftId: snapshot.draftId, draftVersion, choice, originalDigest: snapshot.sourceDigest,
+      sourceBytes: snapshot.sourceBytes, inventoryDigest: native.word.inventoryDigest, graphDigest: compiled.graphDigest,
+      extractorIdentity: compiled.graph.extractorIdentity, readings: { rejected: pin(compiled.readings.rejected), accepted: pin(compiled.readings.accepted) },
+      mappingDigest: bound.mappingDigest, templateManifestDigest: compiled.templateManifestDigest, textBoxDisposition: disposition, target: preparedTarget } };
+  }
+
+  /** Replace only the transient parse rows; the original compatibility/preview record remains independently pinned. */
+  #replaceStagedReading(snapshot: DraftSnapshot, parsed: ParsedDocx | ParsedWordDocx,
+    blocks: ReadonlyArray<Pick<ParsedDocxBlock, 'position' | 'kind' | 'level' | 'text' | 'digest' | 'graphemeLength'>>,
+    sources: StagedImportSources | null): void {
+    requireStore(this.#authority.isTransaction && blocks.length === parsed.blockCount && blocks.length > 0,
+      'WORD_STAGING_INVALID', '阅读切换必须形成原子的非空暂存快照。');
+    for (const table of ['staged_import_block_sources', 'staged_import_text_box_paragraphs', 'staged_import_marks', 'staged_import_blocks']) {
+      this.#authority.prepare(`DELETE FROM ${table} WHERE draft_id = ?`).run(snapshot.draftId);
+    }
+    requireStore(this.#authority.prepare(`UPDATE staged_import_snapshots SET parser_identity = ?, content_digest = ?, structure_digest = ?,
+      block_count = ?, character_count = ?, fidelity_json = ?, title_suggestion = ?, title_source = ? WHERE draft_id = ?`)
+      .run(parsed.parserIdentity, parsed.contentDigest, parsed.structureDigest, parsed.blockCount, parsed.characterCount,
+        canonicalJson(parsed.fidelity), parsed.titleSuggestion.value, parsed.titleSuggestion.sourceLabel, snapshot.draftId).changes === 1,
+    'WORD_STAGING_INVALID', '阅读切换缺少原始暂存快照。');
+    const insert = this.#authority.prepare(`INSERT INTO staged_import_blocks(draft_id, staged_block_id, position, kind, level, text, digest, start_offset, grapheme_length)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    let offset = 0;
+    for (const block of blocks) {
+      const id = `blk_${sha256(`${snapshot.draftId}\u0000${block.position}\u0000${block.digest}`).slice(0, 24)}`;
+      insert.run(snapshot.draftId, id, block.position, block.kind, block.level, block.text, block.digest, offset, block.graphemeLength);
+      offset += block.graphemeLength;
+    }
+    requireStore(offset === parsed.characterCount, 'WORD_STAGING_INVALID', '所选阅读的完整字符数不一致。');
+    if (sources !== null) {
+      this.#retentionCall(() => stageImportSources(this.#authority, snapshot.draftId, sources));
+      this.#importedMarkCall(() => stageImportedMarks(this.#authority, snapshot.draftId, parsed.importedMarks));
+    }
+    this.#boundedCall(() => this.#boundedAuthority.assertStagedDraftIntegrity(snapshot.draftId));
+  }
+
+  #requireWordStagedReading(snapshot: DraftSnapshot, word: WordIntakePlan): void {
+    const { parsed, reading } = word;
+    requireStore(snapshot.parserIdentity === WORD_DOCX_PARSER_IDENTITY && snapshot.contentDigest === parsed.contentDigest &&
+      snapshot.structureDigest === parsed.structureDigest && snapshot.blockCount === parsed.blockCount && snapshot.characterCount === parsed.characterCount &&
+      canonicalJson(snapshot.fidelity) === canonicalJson(parsed.fidelity) && snapshot.titleSuggestion === parsed.titleSuggestion.value &&
+      snapshot.titleSource === parsed.titleSuggestion.sourceLabel,
+    'WORD_PREPARATION_INVALID', 'Word 暂存元数据与明确选择的阅读不一致。');
+    const rows = this.#authority.prepare('SELECT * FROM staged_import_blocks WHERE draft_id = ? ORDER BY position').all(snapshot.draftId);
+    let offset = 0;
+    requireStore(rows.length === reading.blocks.length && rows.every((row, index) => {
+      const block = reading.blocks[index]!;
+      const id = `blk_${sha256(`${snapshot.draftId}\u0000${block.position}\u0000${block.digest}`).slice(0, 24)}`;
+      const valid = row.staged_block_id === id && row.position === block.position && row.kind === block.kind && row.level === block.level &&
+        row.text === block.text && row.digest === block.digest && row.grapheme_length === block.graphemeLength && row.start_offset === offset;
+      offset += block.graphemeLength;
+      return valid;
+    }), 'WORD_PREPARATION_INVALID', 'Word 暂存没有完整对应已确认的阅读。');
+    for (const table of ['staged_import_block_sources', 'staged_import_text_box_paragraphs', 'staged_import_marks']) requireStore(
+      this.#authority.prepare(`SELECT 1 FROM ${table} WHERE draft_id = ? LIMIT 1`).get(snapshot.draftId) === undefined,
+      'WORD_PREPARATION_INVALID', 'Word 图与片段不能冒充历史段落或标记暂存。');
+  }
+
+  /** Called after the real commit, fidelity, baseline and provenance parents exist in this transaction. */
+  #commitWordEvidence(word: WordIntakePlan, input: { bookId: string; sourceVersionId: string; commitId: string;
+    fidelityReviewId: string; revisionId: string; branchId: string; reviewDigest: string; createdAt: string }): number {
+    requireStore(this.#authority.isTransaction, 'WORD_SOURCE_INVALID', 'Word 来源必须与稿件导入一并提交。');
+    const { bookId, sourceVersionId, commitId, createdAt } = input;
+    const parent = this.#retentionCall(() => readWordParentSourcePin(this.#authority, bookId, sourceVersionId));
+    const reviewedTarget = word.prepared.target;
+    if (reviewedTarget.kind === 'existing-book' && reviewedTarget.parentSourcePin !== null) {
+      this.#retentionCall(() => requireWordParentSourcePin(this.#authority, reviewedTarget.parentSourcePin!));
+      requireStore(reviewedTarget.parentSourcePin.sourceVersionId === sourceVersionId, 'WORD_SOURCE_CHANGED', 'Word 复用来源与已审阅的原始来源不同。');
+    }
+    this.#retentionCall(() => retainWordRevisionSource(this.#authority, parent, word.compiled.graph));
+    const bound = this.#retentionCall(() => bindWordReadingToRevision(this.#authority, bookId, input.revisionId, sourceVersionId, word.reading));
+    requireStore(bound.mappingDigest === word.prepared.mappingDigest, 'WORD_MAPPING_INVALID', 'Word 稿件基线没有按已审阅的对应建立。');
+    const samples = wordTrackedSamples(bookId, word.compiled.graph, word.compiled.templates);
+    const materials = samples.map((sample, index) => ({ templateKey: word.compiled.templates[index]!.templateKey,
+      materialKey: `word-sample:${sample.sampleId}`, materialDigest: learningMaterialDigest(
+        wordTrackedEditCandidate(sample, wordTrackedSampleRecord(sample).digest, createdAt)) }));
+    const ledger = this.#learningLedger();
+    const controls = ledger.wordImportControls(bookId, materials);
+    if (reviewedTarget.kind === 'existing-book') requireStore(canonicalJson(controls) === canonicalJson(reviewedTarget.controls),
+      'WORD_ADMISSION_STALE', 'Word 相关学习设置或材料排除在审阅后已经变化。');
+    else requireStore(canonicalJson({ global: controls.global, book: controls.book }) === canonicalJson(reviewedTarget.controls) &&
+      controls.materials.every(({ standing }) => standing.choice === 'house' && standing.decisionId === null && standing.decisionDigest === null &&
+        standing.basisVersion === LOCAL_LEARNING_POLICY_BASIS.version), 'WORD_ADMISSION_STALE', 'Word 新图书的学习设置或默认准入已变化。');
+    const choice: WordImportChoiceRecord = { schema: 'ai7.word-import-choice/1', sourceVersionId,
+      parentSourcePinDigest: wordParentSourcePinRecord(parent).digest, originalDigest: word.compiled.sourceDigest, workingObjectDigest: null,
+      importReviewId: input.reviewDigest, fidelityReviewId: input.fidelityReviewId, commitId, revisionId: input.revisionId,
+      extractorIdentity: word.compiled.graph.extractorIdentity, graphDigest: word.compiled.graphDigest, ...word.prepared.choice,
+      readings: word.prepared.readings, mappingDigest: bound.mappingDigest, templateManifestDigest: word.compiled.templateManifestDigest,
+      effectiveControls: controls };
+    this.#retentionCall(() => retainWordRevisionImport(this.#authority, bookId, choice, createdAt));
+    this.#retentionCall(() => retainWordManuscriptSourceSegments(this.#authority, bookId, choice, word.reading));
+    const importedMarks = this.#importedMarkCall(() => createWordImportedMarks(this.#authority, this.#editorialMarks, bookId, commitId,
+      word.compiled, input.branchId));
+    this.#learningCall(() => ledger.retainWordImportSamples(bookId, commitId, word.compiled));
+    this.#importedMarkCall(() => validateWordImportedMarkSources(this.#authority, bookId, commitId, word.compiled));
+    this.#learningCall(() => ledger.validateWordImportSamples(bookId, commitId, word.compiled));
+    return importedMarks;
+  }
+
+  /** Derivation has its own provenance; a preserved /1–/3 Source Version keeps its original parser. */
+  #manuscriptImportParser(bookId: string, commitId: string, sourceVersionId: string, parentParser: string, derivationParser: string): string {
+    if (derivationParser === WORD_DOCX_PARSER_IDENTITY) {
+      const { choice } = this.#retentionCall(() => readWordImportChoiceRecord(this.#authority, bookId, commitId));
+      requireStore(choice.sourceVersionId === sourceVersionId, 'WORD_SOURCE_INVALID', 'Word 稿件衍生来源与原始来源不一致。');
+      return WORD_DOCX_PARSER_IDENTITY;
+    }
+    requireStore(parentParser === derivationParser, 'BOOK_RECORD_GRAPH_INVALID', '历史稿件导入的来源解析器不一致。');
+    return parentParser;
+  }
+
+  /** Source-only/reimport consume the actual old reader, including its refusal, never Word preview rows. */
+  #selectLegacyWordStaging(snapshot: DraftSnapshot): DraftSnapshot {
+    const evidence = this.#readWordIntake(snapshot);
+    if (evidence === null || evidence.native.kind === 'legacy') return snapshot;
+    const legacy = evidence.native.legacy;
+    requireStore(legacy.kind === 'ready', 'DOCX_REJECTED', '该 DOCX 的历史读法没有可用于现有来源导入或重新导入的完整稿件。');
+    this.#transaction(this.#authority, () => {
+      this.#replaceStagedReading(snapshot, legacy.parsed, legacy.blocks,
+        { blockSourceIndexes: legacy.blocks.map((block) => block.sourceParagraphIndex), textBoxes: legacy.parsed.textBoxes });
+      this.#authority.prepare('UPDATE staged_word_revision_intakes SET reviewed_json = NULL, reviewed_sha256 = NULL WHERE draft_id = ?').run(snapshot.draftId);
+    });
+    return this.#loadDraftSnapshot(snapshot.draftId);
+  }
+
+  #reviewedFidelity(snapshot: DraftSnapshot, disposition: TextBoxDisposition, word?: WordIntakePlan): ReviewedFidelity {
+    if (word !== undefined) {
+      const plan = deriveImportFidelityPlan(word.parsed.fidelity, snapshot.sourceDigest, snapshot.sourceBytes, undefined, WORD_DOCX_PARSER_IDENTITY);
+      requireStore(plan !== undefined, 'WORD_READING_UNAVAILABLE', 'Word 所选阅读的保真计划无法重建。');
+      return { fidelity: word.parsed.fidelity, plan, word };
+    }
     this.#requireFidelityPlan(snapshot);
     const conversion = fidelityConversion(snapshot.conversion);
     const fidelity = withTextBoxDisposition(snapshot.fidelity, disposition, conversion, snapshot.parserIdentity!);
@@ -23830,6 +24444,19 @@ export class EditorialStore {
     snapshot: DraftSnapshot,
     identityFindings: ReadonlyArray<ImportIdentityFindingProjection>,
   ): { target: ResolvedImportTarget; reviewed: ReviewedFidelity } | null {
+    if (snapshot.parserIdentity === WORD_DOCX_PARSER_IDENTITY) {
+      try {
+        const selection = this.#retentionCall(() => wordPreparedSelection(this.#authority, snapshot.draftId));
+        const target = this.#recordedImportTarget(snapshot, identityFindings);
+        if (selection === null || target === null) return null;
+        const word = this.#wordIntakePlan(snapshot, target, selection.textBoxDisposition, selection.choice, snapshot.version);
+        requireStore(word !== null, 'WORD_PREPARATION_INVALID', 'Word 导入准备缺少完整的原始来源。');
+        this.#retentionCall(() => requireWordPreparedIntake(this.#authority, word.prepared));
+        this.#requireWordStagedReading(snapshot, word);
+        const reviewed = this.#reviewedFidelity(snapshot, selection.textBoxDisposition, word);
+        return this.#reconstructReviewedImportTarget(snapshot, reviewed, identityFindings) === null ? null : { target, reviewed };
+      } catch (error) { if (error instanceof StoreError) return null; throw error; }
+    }
     const staged = this.#requireFidelityPlan(snapshot);
     const dispositions: ReadonlyArray<TextBoxDisposition> = staged.textBoxDisposition === null ? ['retain'] : ['retain', 'merge'];
     for (const disposition of dispositions) {
@@ -23845,8 +24472,15 @@ export class EditorialStore {
     reviewed: ReviewedFidelity,
     identityFindings: ReadonlyArray<ImportIdentityFindingProjection>,
   ): ResolvedImportTarget | null {
-    const { plan } = reviewed;
     if (snapshot.reviewDigest === null) return null;
+    const target = this.#recordedImportTarget(snapshot, identityFindings);
+    if (target === null) return null;
+    if (createImportReviewDigestV6(snapshot, snapshot.version, reviewed, target, identityFindings, this.#workflowProfile) === snapshot.reviewDigest) return target;
+    if (target.kind !== 'new-book' || reviewed.word !== undefined) return null;
+    return reconstructReviewedTargetChoice(snapshot, target.confirmedTitle, reviewed.plan, identityFindings) === target.choiceId ? target : null;
+  }
+
+  #recordedImportTarget(snapshot: DraftSnapshot, identityFindings: ReadonlyArray<ImportIdentityFindingProjection>): ResolvedImportTarget | null {
     if (snapshot.reviewedTargetKind === 'existing-book') {
       if (
         snapshot.reviewedExistingBookId === null ||
@@ -23863,14 +24497,7 @@ export class EditorialStore {
         return null;
       }
       if (target.kind !== 'existing-book' || target.bookStateDigest !== snapshot.reviewedBookStateDigest) return null;
-      return createImportReviewDigestV6(
-        snapshot,
-        snapshot.version,
-        reviewed,
-        target,
-        identityFindings,
-        this.#workflowProfile,
-      ) === snapshot.reviewDigest ? target : null;
+      return target;
     }
     if (snapshot.reviewedTargetKind !== 'new-book' || snapshot.reviewedTitle === null) return null;
     let confirmedTitle: string;
@@ -23887,17 +24514,7 @@ export class EditorialStore {
       confirmedTitle,
       label: currentChoice.label,
     };
-    if (createImportReviewDigestV6(
-      snapshot,
-      snapshot.version,
-      reviewed,
-      target,
-      identityFindings,
-      this.#workflowProfile,
-    ) === snapshot.reviewDigest) return target;
-    return reconstructReviewedTargetChoice(snapshot, confirmedTitle, plan, identityFindings) === currentChoice.id
-      ? target
-      : null;
+    return target;
   }
 
   #reviewProjection(
@@ -23937,7 +24554,13 @@ export class EditorialStore {
       identityFindings,
       fidelity: reviewed.fidelity,
       textBoxDisposition: plan.textBoxDisposition,
-      recordsToCreate: recordsToCreate(plan, target.kind),
+      ...(reviewed.word === undefined ? {} : { trackedChanges: reviewed.word.prepared.choice, wordLearning: {
+        globalEnabled: reviewed.word.prepared.target.controls.global.enabled,
+        bookExcluded: reviewed.word.prepared.target.controls.book.excluded,
+        sourceTemplateCount: reviewed.word.compiled.templates.length,
+        eligibleSampleCount: wordIntakeRecords(reviewed.word)!.eligibleSamples,
+      } }),
+      recordsToCreate: recordsToCreate(plan, target.kind, wordIntakeRecords(reviewed.word)),
       nonEffects: nonEffects(plan),
       workflowProfile: {
         id: this.#workflowProfile.projection.id,
@@ -23959,6 +24582,11 @@ export class EditorialStore {
   }
 
   #identityFindings(snapshot: DraftSnapshot): ImportIdentityFindingProjection[] {
+    if (snapshot.parserIdentity === WORD_DOCX_PARSER_IDENTITY) {
+      const evidence = this.#readWordIntake(snapshot);
+      requireStore(evidence !== null && evidence.native.kind === 'word', 'WORD_SOURCE_INVALID', 'Word 身份提示缺少原始暂存。');
+      snapshot = { ...snapshot, contentDigest: evidence.native.parsed.contentDigest, structureDigest: evidence.native.parsed.structureDigest };
+    }
     const rows = this.#authority
       .prepare(
         `SELECT b.book_id, b.title, sv.source_version_id, sv.source_digest, sv.content_digest,
@@ -24330,12 +24958,15 @@ export class EditorialStore {
         .prepare(
           `SELECT ic.commit_id, ic.committed_at, ir.import_record_id, ir.book_id, ir.manuscript_id,
                   ir.fidelity_review_id, ir.degradation_decision_id, ir.resulting_revision_id,
-                  mr.branch_id, sv.display_name, sv.object_digest, sv.source_digest, sv.format,
+                  mr.branch_id, CASE WHEN sp.parser_identity = '${WORD_DOCX_PARSER_IDENTITY}' THEN d.display_name ELSE sv.display_name END display_name,
+                  sv.source_version_id, sv.object_digest, sv.source_digest, sv.format, sp.parser_identity derivation_parser_identity,
                   sv.working_object_digest, sv.converter_identity, sv.parser_identity, co.byte_length,
                   fr.outcome, fr.round_trip_guaranteed, dd.fidelity_review_id decision_fidelity_review_id,
                   dd.decision
            FROM import_commits ic
+           JOIN import_drafts d ON d.draft_id = ic.draft_id
            JOIN manuscript_import_records ir ON ir.commit_id = ic.commit_id
+           JOIN source_provenance sp ON sp.provenance_id = ir.provenance_id AND sp.source_version_id = ir.source_version_id
            JOIN manuscript_revisions mr
              ON mr.revision_id = ir.resulting_revision_id
             AND mr.manuscript_id = ir.manuscript_id
@@ -24363,7 +24994,8 @@ export class EditorialStore {
     requireStore(asString(row.object_digest) === sourceDigest, 'STORE_CORRUPT', '提交来源对象与来源摘要不一致。');
     const conversion = readConversionColumns(row, requireSourceFormat(asString(row.format)), '来源版本的转换记录不完整。');
     const { categories, plan } = this.#persistedFidelityPlan(
-      fidelityReviewId, sourceDigest, sourceBytes, conversion, asString(row.parser_identity),
+      fidelityReviewId, sourceDigest, sourceBytes, conversion,
+      this.#manuscriptImportParser(asString(row.book_id), commitId, asString(row.source_version_id), asString(row.parser_identity), asString(row.derivation_parser_identity)),
       'STORE_CORRUPT', '导入提交保真记录无效。',
     );
     requireStore(asString(row.outcome) === plan.outcome && asNumber(row.round_trip_guaranteed) === 0, 'STORE_CORRUPT', '导入保真结论无效。');
@@ -24543,6 +25175,7 @@ export class EditorialStore {
     sourceBytes: number;
     conversion: ManuscriptConversionProjection | null;
     parserIdentity: string;
+    word?: { commitId: string; compiled: Extract<WordTrackedCompilation, { kind: 'ready' }> };
   }): void {
     const counts = one(
       this.#authority
@@ -24639,12 +25272,20 @@ export class EditorialStore {
         asNumber(counts.degradation_decisions) === (input.degradationDecisionId === null ? 0 : 1) &&
         asNumber(counts.workflows) === 1 &&
         asNumber(counts.imports) === 1 &&
-        asNumber(counts.block_sources) === input.blockCount &&
+        asNumber(counts.block_sources) === (input.word === undefined ? input.blockCount : 0) &&
         // Issue #411: exactly the marks the review counted, every one pinned on r1.
         asNumber(counts.imported_marks) === input.fidelityPlan.importedMarks,
       'IMPORT_POSTCONDITION_FAILED',
       '导入提交未形成完整记录图。',
     );
+    if (input.word !== undefined) {
+      const word = input.word;
+      const { choice } = this.#retentionCall(() => readWordImportChoiceRecord(this.#authority, input.bookId, word.commitId));
+      this.#retentionCall(() => requireWordManuscriptSourceSegments(this.#authority, input.bookId, choice,
+        word.compiled.readings[choice.mode === 'suggestions' ? 'rejected' : 'accepted']));
+      this.#importedMarkCall(() => validateWordImportedMarkSources(this.#authority, input.bookId, word.commitId, word.compiled));
+      this.#learningCall(() => this.#learningLedger().validateWordImportSamples(input.bookId, word.commitId, word.compiled));
+    }
     const { plan: persistedPlan } = this.#persistedFidelityPlan(
       input.fidelityReviewId,
       input.sourceDigest,
@@ -24751,7 +25392,10 @@ export class EditorialStore {
     try {
       return await operation();
     } catch (error) {
-      if (error instanceof ExportLedgerError || error instanceof AnalysisError) throw new StoreError(error.code, error.message);
+      // A missing or changed Word source mapping is a refusal of this export, never a fallback.
+      if (error instanceof ExportLedgerError || error instanceof AnalysisError || error instanceof ImportRetentionError) {
+        throw new StoreError(error.code, error.message);
+      }
       if (error instanceof BoundedStoreFatalError) {
         this.#poisoned = true;
         throw new StoreFatalError(error);

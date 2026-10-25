@@ -11,6 +11,7 @@ import { BookDeliveryPackageArchiveWriter } from '../../src/service/book-deliver
 import { BookDeliveryPackages, BOOK_DELIVERY_PACKAGE_WORDS } from '../../src/service/book-delivery-packages.js';
 import { CooperativeJobOwner } from '../../src/service/cooperative-jobs.js';
 import { ManuscriptExportStore } from '../../src/service/manuscript-export.js';
+import { compileWordTrackedDocx, parseDocx } from '../../src/service/docx.js';
 import * as exportFiles from '../../src/service/manuscript-export.js';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
@@ -96,6 +97,10 @@ async function preparedPackage(
   formatted = false,
 ): Promise<{ bookId: string; manuscriptId: string; branchId: string; title: string; packageVersionId: string }> {
   const book = await importBook(store, await compose('交付包导出组稿', [1, 2, 3, 4], formatted));
+  return preparePackageOf(store, book);
+}
+
+async function preparePackageOf(store: EditorialStore, book: { bookId: string; manuscriptId: string; branchId: string }) {
   const milestone = await store.saveMilestone(book.manuscriptId, book.branchId, '一审稿', 'stage-archive', null, '');
   store.designatePublicationVersion({ bookId: book.bookId, milestoneId: milestone.milestoneId, scope: '纸质版首印', basis: '三审通过' });
   const sourceVersionId = await importSource(store, book.bookId, await compose('新闻稿初稿', [21, 22, 23]));
@@ -152,6 +157,48 @@ async function count(table: string): Promise<number> {
 }
 
 describe('图书交付包 · 导出 (S67b)', () => {
+  it.each(['suggestions', 'accepted-baseline'] as const)('replays the real Word %s source and writer for a frozen package member after restart', async (mode) => {
+    const path = join(roots.inputRoot, `package-word-${mode}.docx`);
+    await composeRevisedDocx(path, { source: SOURCE, title: 'Word 交付包', paragraphs: [
+      { runs: [{ text: { block: 8, from: 0, to: 10 } }, { text: { block: 9, from: 0, to: 5 },
+        revision: { kind: 'ins', author: '作者', date: '2026-10-25T00:00:00Z' } }] },
+    ] });
+    const compiled = await compileWordTrackedDocx(path);
+    if (compiled.kind !== 'ready') throw new Error('expected supported Word package source');
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const staged = await store.stageSelectedManuscript(randomUUID(), path);
+      const importReview = store.prepareNewBookReview(staged.draftId, staged.draftVersion,
+        { kind: 'new-book', choiceId: 'new-book', confirmedTitle: staged.titleSuggestion.value }, false, 'retain',
+        { mode, learnFromEdits: false, acceptedBaselineConfirmed: mode === 'accepted-baseline' });
+      if (importReview.reviewDigest === null) throw new Error('expected Word import preparation');
+      const commitId = randomUUID();
+      const book = await store.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: importReview.draftVersion,
+        reviewDigest: importReview.reviewDigest, commitId });
+      await store.acknowledgeImportCompletion(commitId);
+      const { bookId, packageVersionId } = await preparePackageOf(store, book);
+      const review = await store.reviewBookDeliveryPackageExport({ bookId, packageVersionId, options: NONE }, true);
+      const publication = review.files.find((file) => file.key === 'publication')!;
+      const folder = join(roots.inputRoot, `package-word-output-${mode}`); await mkdir(folder);
+      const prepared = await store.prepareBookDeliveryPackageExport({ bookId, packageVersionId, options: NONE,
+        memberKeys: ['publication'], reviewDigest: review.reviewDigest, folder }, true);
+      const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+      try {
+        const rows = db.prepare("SELECT canonical_json FROM export_preparations WHERE json_extract(canonical_json, '$.wordSource') IS NOT NULL").all();
+        expect(rows).toHaveLength(1);
+        expect(JSON.parse(String(rows[0]!.canonical_json))).toMatchObject({ writer: 'ai7-docx-word-export/1',
+          wordSource: { mode, importCommitId: commitId, mappingAncestorRevisionId: book.revisionId, writer: 'ai7-docx-word-export/1' } });
+      } finally { db.close(); }
+      store.markCleanShutdown(); store.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      const result = await store.approveBookDeliveryPackageExport({ bookId, exportId: prepared.exportId }, true);
+      expect(result.export.state).toBe('exported');
+      const written = await parseDocx(join(folder, publication.fileName), publication.fileName, () => undefined);
+      expect(written.contentDigest).toBe(compiled.readings[mode === 'suggestions' ? 'rejected' : 'accepted'].contentDigest);
+      expect((await store.approveBookDeliveryPackageExport({ bookId, exportId: prepared.exportId }, true)).export).toEqual(result.export);
+      store.markCleanShutdown();
+    } finally { store.close(); }
+  });
+
   it('keeps an ambiguous publication unconfirmed and never retries it', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
@@ -325,7 +372,7 @@ describe('图书交付包 · 导出 (S67b)', () => {
           expect(receipt.archive).toEqual(preparation.archive);
           expect(receipt.finalPath).toBe(destination);
         }
-        expect(db.prepare('PRAGMA user_version').get()!.user_version).toBe(92);
+        expect(db.prepare('PRAGMA user_version').get()!.user_version).toBe(93);
       } finally { db.close(); }
       history = JSON.stringify(store.inspectBookDeliveryPackage(bookId).versions);
       store.markCleanShutdown();

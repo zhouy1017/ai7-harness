@@ -1078,6 +1078,47 @@ describe('decodeRequest rejects malformed frames', () => {
     })).requestId).toBe(id);
   });
 
+  it('binds the Word detail read to an explicit Book/sample and exact code-unit cursor without coercion or extra authority', () => {
+    const input: InputOf<'inspectWordTrackedEditSample'> = { bookId: randomUUID(), sampleId: `wts_${'1'.repeat(64)}`,
+      sampleDigest: '2'.repeat(64), after: null };
+    const frame = { id: randomUUID(), op: 'inspectWordTrackedEditSample', input } satisfies ServiceRequest;
+    expect(decodeRequest(frameOf(frame))).toEqual(frame);
+    const after = { schema: 'ai7.word-sample-cursor/1', sampleDigest: input.sampleDigest, detailDigest: '3'.repeat(64),
+      section: 'events', entryOrdinal: 4, field: 'rawAuthor', codeUnitOffset: 1_500_000 } as const;
+    const continued = { ...frame, input: { ...input, after } } satisfies ServiceRequest;
+    expect(decodeRequest(frameOf(continued))).toEqual(continued);
+    for (const invalid of [null, {}, [], { ...input, bookId: null }, { ...input, sampleId: 'wts_1' },
+      { ...input, activeBookId: input.bookId }, { ...input, path: 'original.docx' },
+      ...[{ ...after, schema: 'ai7.word-sample-cursor/2' }, { ...after, sampleDigest: '4'.repeat(64) },
+        { ...after, section: ['events'] }, { ...after, field: ['rawAuthor'] }, { ...after, field: 'author' },
+        { ...after, entryOrdinal: -1 }, { ...after, codeUnitOffset: 0.5 }, { ...after, codeUnitOffset: Number.MAX_SAFE_INTEGER + 1 },
+        { ...after, field: 'record', codeUnitOffset: 1 }, { ...after, sourceVersionId: randomUUID() }].map((cursor) => ({ ...input, after: cursor }))]) {
+      expect(rejectionFor(frameOf({ ...frame, input: invalid })).requestId).toBe(frame.id);
+    }
+  });
+
+  it('decodes only the exact explicitly confirmed Word reading choice without changing ordinary preparation frames', () => {
+    const input: InputOf<'prepareNewBookReview'> = { draftId: randomUUID(), expectedDraftVersion: 1,
+      target: { kind: 'new-book', choiceId: 'new-book', confirmedTitle: '原始修订导入' }, acceptDegradation: false, textBoxDisposition: 'retain' };
+    const id = randomUUID();
+    const ordinary = { id, op: 'prepareNewBookReview', input } satisfies ServiceRequest;
+    expect(decodeRequest(frameOf(ordinary))).toEqual(ordinary);
+    for (const trackedChanges of [
+      { mode: 'suggestions', learnFromEdits: true, acceptedBaselineConfirmed: false },
+      { mode: 'accepted-baseline', learnFromEdits: false, acceptedBaselineConfirmed: true },
+    ] satisfies Array<NonNullable<InputOf<'prepareNewBookReview'>['trackedChanges']>>) {
+      const frame = { ...ordinary, input: { ...input, trackedChanges } } satisfies ServiceRequest;
+      expect(decodeRequest(frameOf(frame))).toEqual(frame);
+    }
+    for (const trackedChanges of [null, {}, [], { mode: 'suggestions', learnFromEdits: true },
+      { mode: 'suggestions', learnFromEdits: true, acceptedBaselineConfirmed: true },
+      { mode: 'accepted-baseline', learnFromEdits: true, acceptedBaselineConfirmed: false },
+      { mode: 'suggestions', learnFromEdits: 'true', acceptedBaselineConfirmed: false },
+      { mode: 'suggestions', learnFromEdits: true, acceptedBaselineConfirmed: false, approved: true }]) {
+      expect(rejectionFor(frameOf({ ...ordinary, input: { ...input, trackedChanges } })).requestId).toBe(id);
+    }
+  });
+
   it('rejects a baseline-analysis preparation whose goal, mode, or range is inconsistent, or whose digest is malformed', () => {
     const id = randomUUID();
     const bookId = randomUUID();
