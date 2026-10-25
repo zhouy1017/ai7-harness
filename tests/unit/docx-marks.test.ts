@@ -37,7 +37,7 @@ import {
 } from '../support/composed-fixture.js';
 import { buildSyntheticTrackedDocx } from '../support/synthetic-docx.js';
 import { buildWordProfileRecipe, wordParagraphMoveBody } from '../fixtures/docx-fidelity/builder.js';
-import { pageWordSampleDetail, validateWordSampleCursor, wordSampleDetailDigest, wordSampleDetailEntries, wordTrackedSampleRecord,
+import { pageWordSampleDetail, validateWordSampleCursor, wordSampleDetailDigest, wordSampleDetailStream, wordTrackedSampleRecord,
   wordTrackedSamples, type WordSampleDetailEntry } from '../../src/service/import-retention.js';
 import classification from '../fixtures/docx-fidelity/classification.json' with { type: 'json' };
 
@@ -185,8 +185,10 @@ describe('successor exact source correspondence (#1132)', () => {
     const sample = wordTrackedSamples('a5601f3a-083c-474a-a2db-c3cf6d3d15cd', compiled.graph, compiled.templates)[0]!;
     const source = { sourceVersionId: '10000000-0000-4000-8000-000000000001', sample,
       sampleDigest: wordTrackedSampleRecord(sample).digest, graph: compiled.graph, graphDigest: compiled.graphDigest,
-      decodedAtoms: compiled.decodedAtoms, imports: [] };
-    const expected = wordSampleDetailEntries(source);
+      decodedAtoms: compiled.decodedAtoms, eventIndex: new Map(compiled.graph.events.map((event) => [event.eventId, event])), imports: [] };
+    const stream = wordSampleDetailStream(source);
+    const expected = new Map<string, string | null>([['after/0', originalText], ['events/1', '1'],
+      ['events/2', author], ['events/3', ''], ['events/4', null]]);
     const observed = new Map<string, string | null>();
     const cursors = new Set<string>();
     const records: WordSampleDetailEntry[] = [];
@@ -194,7 +196,7 @@ describe('successor exact source correspondence (#1132)', () => {
     let pages = 0;
     let splitCombiningCluster = false;
     do {
-      const page = pageWordSampleDetail(source, cursor, 2400);
+      const page = pageWordSampleDetail(source, cursor, 2400, stream);
       expect(Buffer.byteLength(JSON.stringify(page), 'utf8')).toBeLessThanOrEqual(2400);
       expect(page.items.length).toBeLessThanOrEqual(40);
       expect(page.sectionCounts.before).toBe(0);
@@ -218,12 +220,12 @@ describe('successor exact source correspondence (#1132)', () => {
           page.nextCursor.codeUnitOffset < originalText.length) splitCombiningCluster = true;
         const last = page.items.at(-1);
         if (last?.kind === 'text' && !last.complete && last.text !== null) {
-          const entry = expected[last.section][last.entryOrdinal]!;
-          if (entry.kind !== 'text' || entry.text === null) throw new Error('expected complete source text field');
-          const end = last.endCodeUnit + (entry.text.codePointAt(last.endCodeUnit)! > 0xffff ? 2 : 1);
-          if (end < entry.text.length) {
+          const text = expected.get(`${last.section}/${last.entryOrdinal}`);
+          if (typeof text !== 'string') throw new Error('expected complete source text field');
+          const end = last.endCodeUnit + (text.codePointAt(last.endCodeUnit)! > 0xffff ? 2 : 1);
+          if (end < text.length) {
             const oneScalarMore = { ...page, items: [...page.items.slice(0, -1), { ...last,
-              text: entry.text.slice(last.startCodeUnit, end), endCodeUnit: end }],
+              text: text.slice(last.startCodeUnit, end), endCodeUnit: end }],
               nextCursor: { ...page.nextCursor, codeUnitOffset: end } };
             expect(Buffer.byteLength(JSON.stringify(oneScalarMore), 'utf8')).toBeGreaterThan(2400);
           }
@@ -234,10 +236,12 @@ describe('successor exact source correspondence (#1132)', () => {
     } while (cursor !== null);
     expect(pages).toBeGreaterThan(3);
     expect(splitCombiningCluster).toBe(true);
-    for (const section of Object.values(expected)) for (const entry of section) {
-      if (entry.kind === 'text') expect(observed.get(`${entry.section}/${entry.entryOrdinal}`)).toBe(entry.text);
-    }
-    expect(records).toEqual(Object.values(expected).flat().filter((entry) => entry.kind === 'record').map((entry) => ({ ...entry, complete: true })));
+    expect(observed).toEqual(expected);
+    const event = compiled.graph.events[0]!;
+    expect(records).toEqual([{ section: 'events', entryOrdinal: 0, sourceOrdinal: 0, childOrdinal: null,
+      kind: 'record', field: 'record', complete: true, record: { type: 'event', eventId: event.eventId,
+        kind: 'ins', context: 'run', part: event.part, elementOrdinal: event.elementOrdinal,
+        location: event.location, disposition: 'visible-transition', parentCount: 0, rangeLinkCount: 0 } }]);
     expect(observed.get('after/0')).toBe(originalText);
     const first = pageWordSampleDetail(source, null, 2400);
     if (first.nextCursor === null) throw new Error('expected multi-page detail');
@@ -245,6 +249,39 @@ describe('successor exact source correspondence (#1132)', () => {
       { sampleDigest: '0'.repeat(64) }, { detailDigest: '0'.repeat(64) }, { entryOrdinal: 9999 }]) {
       expect(() => pageWordSampleDetail(source, { ...first.nextCursor, ...change }, 2400)).toThrow('Word');
     }
+  });
+
+  it('resolves only requested fields of a large actual named move while paging its source-backed stream', () => {
+    const count = 400;
+    const runs = (kind: 'moveFrom' | 'moveTo'): string => Array.from({ length: count }, (_, index) =>
+      `<w:p><w:${kind} w:id="${index + 10}" w:author="source${index}"><w:r>` +
+      (kind === 'moveFrom' ? '<w:delText>X</w:delText>' : '<w:t>X</w:t>') + `</w:r></w:${kind}></w:p>`).join('');
+    const compiled = compileWordTrackedDocxBytes(buildSyntheticTrackedDocx('<w:moveFromRangeStart w:id="1" w:name="large"/>' +
+      runs('moveFrom') + '<w:moveFromRangeEnd w:id="1"/><w:p><w:r><w:t>M</w:t></w:r></w:p>' +
+      '<w:moveToRangeStart w:id="2" w:name="large"/>' + runs('moveTo') + '<w:moveToRangeEnd w:id="2"/>'));
+    if (compiled.kind !== 'ready') throw new Error('expected supported large named move');
+    const sample = wordTrackedSamples('a5601f3a-083c-474a-a2db-c3cf6d3d15cd', compiled.graph, compiled.templates)[0]!;
+    expect(sample.eventMembership).toHaveLength(count * 2 + 4);
+    let authorReads = 0;
+    for (const event of compiled.graph.events) {
+      const value = event.rawAuthor;
+      Object.defineProperty(event, 'rawAuthor', { get() { authorReads += 1; return value; } });
+    }
+    const source = { sourceVersionId: '10000000-0000-4000-8000-000000000001', sample,
+      sampleDigest: wordTrackedSampleRecord(sample).digest, graph: compiled.graph, graphDigest: compiled.graphDigest,
+      decodedAtoms: compiled.decodedAtoms, eventIndex: new Map(compiled.graph.events.map((event) => [event.eventId, event])), imports: [] };
+    const stream = wordSampleDetailStream(source);
+    expect(authorReads).toBe(0);
+    const first = pageWordSampleDetail(source, null, undefined, stream);
+    expect(first.items).toHaveLength(40);
+    expect(authorReads).toBe(0);
+    const eventPage = pageWordSampleDetail(source, { schema: 'ai7.word-sample-cursor/1', sampleDigest: source.sampleDigest,
+      detailDigest: stream.detailDigest, section: 'events', entryOrdinal: 0, field: 'record', codeUnitOffset: 0 }, undefined, stream);
+    expect(eventPage.items).toHaveLength(40);
+    expect(authorReads).toBeGreaterThan(0);
+    expect(authorReads).toBeLessThan(10);
+    expect(stream.sectionCounts.before).toBe(count);
+    expect(stream.sectionCounts.after).toBe(count);
   });
 
   it('does not turn the existing imported-mark bound into an accepted-baseline sample cap', () => {

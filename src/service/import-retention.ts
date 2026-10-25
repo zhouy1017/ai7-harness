@@ -302,6 +302,8 @@ export interface WordSampleDetailSource {
   graph: WordRevisionGraph;
   graphDigest: string;
   decodedAtoms: ReadonlyMap<number, string>;
+  /** Built once with the retained source, shared across samples/pages; no graph copy per sample. */
+  eventIndex: ReadonlyMap<string, WordSourceEvent>;
   sample: WordTrackedEditSample;
   sampleDigest: string;
   imports: ReadonlyArray<{ choice: WordImportChoiceRecord; choiceDigest: string;
@@ -330,86 +332,153 @@ export function wordSourceFragmentText(graph: WordRevisionGraph, decoded: Readon
   return result;
 }
 
-/** Flat entry ordinals are local to each section; original evidence ordinals remain explicit. */
-export function wordSampleDetailEntries(source: WordSampleDetailSource): Record<WordSampleDetailSection, WordSampleDetailEntry[]> {
+export interface WordSampleDetailStream {
+  sampleDigest: string;
+  detailDigest: string;
+  sourceVersionId: string;
+  sectionCounts: Record<WordSampleDetailSection, number>;
+  entryAt(section: WordSampleDetailSection, ordinal: number): WordSampleDetailEntry | null;
+  fieldAt(section: WordSampleDetailSection, ordinal: number): WordSampleDetailField;
+}
+
+/** Source-backed flat ordinals: counts/indexes inspect references, while fields resolve on demand. */
+export function wordSampleDetailStream(source: WordSampleDetailSource): WordSampleDetailStream {
   requireRetention(source.graphDigest === source.sample.graphDigest && source.graph.sourceDigest === source.sample.sourceDigest &&
     wordTrackedSampleRecord(source.sample).digest === source.sampleDigest,
   'WORD_SOURCE_CORRUPT', 'Word 修改样本的来源身份不一致。');
-  const sections: Record<WordSampleDetailSection, WordSampleDetailEntry[]> = { before: [], after: [], events: [], imports: [] };
-  const record = (section: WordSampleDetailSection, sourceOrdinal: number, childOrdinal: number | null, value: WordSampleDetailRecord): void => {
-    sections[section].push({ section, entryOrdinal: sections[section].length, sourceOrdinal, childOrdinal,
-      kind: 'record', field: 'record', record: value });
+  const eventOf = (ordinal: number): WordSourceEvent => {
+    const id = source.sample.eventMembership[ordinal];
+    const event = id === undefined ? undefined : source.eventIndex.get(id);
+    requireRetention(event !== undefined && event.eventId === id, 'WORD_SOURCE_CORRUPT', 'Word 修改样本的原始事件缺失。');
+    return event;
   };
-  for (const section of ['before', 'after'] as const) source.sample[section].forEach((fragment, sourceOrdinal) => {
-    const text = wordSourceFragmentText(source.graph, source.decodedAtoms, fragment);
-    if (text === null) record(section, sourceOrdinal, null, { type: 'fragment', fragment });
-    else sections[section].push({ section, entryOrdinal: sections[section].length, sourceOrdinal, childOrdinal: null,
-      kind: 'text', field: 'text', text, sha256: fragment.sha256, fragment });
-  });
-  const events = new Map(source.graph.events.map((event) => [event.eventId, event]));
-  source.sample.eventMembership.forEach((eventId, sourceOrdinal) => {
-    const event = events.get(eventId);
-    requireRetention(event !== undefined, 'WORD_SOURCE_CORRUPT', 'Word 修改样本的原始事件缺失。');
-    record('events', sourceOrdinal, null, { type: 'event', eventId, kind: event.kind, context: event.context,
-      part: event.part, elementOrdinal: event.elementOrdinal, location: event.location, disposition: event.disposition,
-      parentCount: event.parentEventIds.length, rangeLinkCount: event.linkedEventIds.length });
-    for (const field of ['rawId', 'rawAuthor', 'rawDate', 'rangeName'] as const) {
-      const text = event[field];
-      sections.events.push({ section: 'events', entryOrdinal: sections.events.length, sourceOrdinal, childOrdinal: null,
-        kind: 'text', field, text, sha256: text === null ? null : sha256Hex(text), fragment: null });
-    }
-    for (const [relation, links] of [['parent', event.parentEventIds], ['range', event.linkedEventIds]] as const) {
-      links.forEach((linkedEventId, ordinal) => {
-        requireRetention(events.has(linkedEventId), 'WORD_SOURCE_CORRUPT', 'Word 修改样本的父事件或移动关联缺失。');
-        record('events', sourceOrdinal, ordinal, { type: 'event-link', eventId, relation, linkedEventId, ordinal });
-      });
-    }
-  });
-  source.imports.forEach(({ choice, choiceDigest, admission, admissionDigest }, sourceOrdinal) => {
+  const eventSize = (event: WordSourceEvent): number => 5 + event.parentEventIds.length + event.linkedEventIds.length;
+  let eventCount = 0;
+  for (let ordinal = 0; ordinal < source.sample.eventMembership.length; ordinal += 1) eventCount += eventSize(eventOf(ordinal));
+  const sectionCounts = { before: source.sample.before.length, after: source.sample.after.length,
+    events: eventCount, imports: source.imports.length * 2 };
+  source.imports.forEach(({ choice, choiceDigest, admission, admissionDigest }) => {
     requireRetention(choice.sourceVersionId === source.sourceVersionId && choice.originalDigest === source.sample.sourceDigest &&
       choice.graphDigest === source.graphDigest && admission.sampleId === source.sample.sampleId &&
       admission.sampleDigest === source.sampleDigest && admission.importChoiceDigest === choiceDigest &&
       sha256Hex(wordCanonicalJson(choice)) === choiceDigest && sha256Hex(wordCanonicalJson(admission)) === admissionDigest,
     'WORD_SOURCE_CORRUPT', 'Word 修改样本的导入或准入身份不一致。');
-    record('imports', sourceOrdinal, null, { type: 'import', commitId: choice.commitId, mode: choice.mode,
-      sourceVersionId: choice.sourceVersionId, sourceDigest: choice.originalDigest, fidelityReviewId: choice.fidelityReviewId,
-      importReviewId: choice.importReviewId, revisionId: choice.revisionId, choiceDigest, admissionDigest,
-      workingObjectDigest: choice.workingObjectDigest, compilerIdentity: source.graph.parserIdentity,
-      extractorIdentity: choice.extractorIdentity, graphDigest: choice.graphDigest, readings: choice.readings,
-      mappingDigest: choice.mappingDigest, templateManifestDigest: choice.templateManifestDigest,
-      learnFromEdits: choice.learnFromEdits, acceptedBaselineConfirmed: choice.acceptedBaselineConfirmed });
-    record('imports', sourceOrdinal, null, { type: 'import-admission', commitId: choice.commitId, basis: admission });
   });
-  return sections;
+  let currentEvent: { event: WordSourceEvent; sourceOrdinal: number; start: number; end: number } | null = null;
+  const locateEvent = (ordinal: number, remember: boolean) => {
+    let sourceOrdinal = currentEvent !== null && ordinal >= currentEvent.start ? currentEvent.sourceOrdinal : 0;
+    let start = currentEvent !== null && ordinal >= currentEvent.start ? currentEvent.start : 0;
+    for (; sourceOrdinal < source.sample.eventMembership.length; sourceOrdinal += 1) {
+      const event = eventOf(sourceOrdinal);
+      const end = start + eventSize(event);
+      if (ordinal < end) {
+        const found = { event, sourceOrdinal, start, end };
+        if (remember) currentEvent = found;
+        return found;
+      }
+      start = end;
+    }
+    throw new ImportRetentionError('WORD_SOURCE_CORRUPT', 'Word 修改样本的事件详情位置无效。');
+  };
+  const fields = ['rawId', 'rawAuthor', 'rawDate', 'rangeName'] as const;
+  const record = (section: WordSampleDetailSection, entryOrdinal: number, sourceOrdinal: number,
+    value: WordSampleDetailRecord, childOrdinal: number | null = null): WordSampleDetailEntry =>
+    ({ section, entryOrdinal, sourceOrdinal, childOrdinal, kind: 'record', field: 'record', record: value });
+  return { sampleDigest: source.sampleDigest, sourceVersionId: source.sourceVersionId,
+    detailDigest: wordSampleDetailDigest(source.sampleDigest, source.graphDigest, source.sourceVersionId, source.imports), sectionCounts,
+    fieldAt(section, ordinal) {
+      if (section === 'before' || section === 'after') return source.sample[section][ordinal]?.kind === 'text' ? 'text' : 'record';
+      if (section === 'imports') return 'record';
+      const found = locateEvent(ordinal, false);
+      const relative = ordinal - found.start;
+      return relative > 0 && relative < 5 ? fields[relative - 1]! : 'record';
+    },
+    entryAt(section, ordinal) {
+      if (!Number.isSafeInteger(ordinal) || ordinal < 0 || ordinal >= sectionCounts[section]) return null;
+      if (section === 'before' || section === 'after') {
+        const fragment = source.sample[section][ordinal]!;
+        const text = wordSourceFragmentText(source.graph, source.decodedAtoms, fragment);
+        return text === null ? record(section, ordinal, ordinal, { type: 'fragment', fragment })
+          : { section, entryOrdinal: ordinal, sourceOrdinal: ordinal, childOrdinal: null,
+              kind: 'text', field: 'text', text, sha256: fragment.sha256, fragment };
+      }
+      if (section === 'imports') {
+        const sourceOrdinal = Math.floor(ordinal / 2);
+        const { choice, choiceDigest, admission, admissionDigest } = source.imports[sourceOrdinal]!;
+        return record(section, ordinal, sourceOrdinal, ordinal % 2 === 1
+          ? { type: 'import-admission', commitId: choice.commitId, basis: admission }
+          : { type: 'import', commitId: choice.commitId, mode: choice.mode, sourceVersionId: choice.sourceVersionId,
+              sourceDigest: choice.originalDigest, fidelityReviewId: choice.fidelityReviewId, importReviewId: choice.importReviewId,
+              revisionId: choice.revisionId, choiceDigest, admissionDigest, workingObjectDigest: choice.workingObjectDigest,
+              compilerIdentity: source.graph.parserIdentity, extractorIdentity: choice.extractorIdentity, graphDigest: choice.graphDigest,
+              readings: choice.readings, mappingDigest: choice.mappingDigest, templateManifestDigest: choice.templateManifestDigest,
+              learnFromEdits: choice.learnFromEdits, acceptedBaselineConfirmed: choice.acceptedBaselineConfirmed });
+      }
+      const { event, sourceOrdinal, start } = locateEvent(ordinal, true);
+      const relative = ordinal - start;
+      if (relative === 0) return record(section, ordinal, sourceOrdinal, { type: 'event', eventId: event.eventId,
+        kind: event.kind, context: event.context, part: event.part, elementOrdinal: event.elementOrdinal,
+        location: event.location, disposition: event.disposition, parentCount: event.parentEventIds.length, rangeLinkCount: event.linkedEventIds.length });
+      if (relative < 5) {
+        const field = fields[relative - 1]!;
+        const text = event[field];
+        return { section, entryOrdinal: ordinal, sourceOrdinal, childOrdinal: null, kind: 'text', field,
+          text, sha256: text === null ? null : sha256Hex(text), fragment: null };
+      }
+      const link = relative - 5;
+      const relation = link < event.parentEventIds.length ? 'parent' : 'range';
+      const childOrdinal = relation === 'parent' ? link : link - event.parentEventIds.length;
+      const linkedEventId = (relation === 'parent' ? event.parentEventIds : event.linkedEventIds)[childOrdinal]!;
+      requireRetention(source.eventIndex.has(linkedEventId), 'WORD_SOURCE_CORRUPT', 'Word 修改样本的父事件或移动关联缺失。');
+      return record(section, ordinal, sourceOrdinal, { type: 'event-link', eventId: event.eventId, relation,
+        linkedEventId, ordinal: childOrdinal }, childOrdinal);
+    },
+  };
 }
 
 /** Forty entries and an encoded whole-frame bound; a grapheme need never fit in one chunk. */
 export function pageWordSampleDetail(source: WordSampleDetailSource, after: unknown,
-  budget = MAX_FRAME_BYTES - 8192): WordSampleDetailPage {
+  budget = MAX_FRAME_BYTES - 8192, stream: WordSampleDetailStream = wordSampleDetailStream(source)): WordSampleDetailPage {
   requireRetention(Number.isSafeInteger(budget) && budget > 0 && budget <= MAX_FRAME_BYTES - 8192,
     'WORD_SAMPLE_INVALID', 'Word 修改样本详情的传输边界无效。');
-  const sections = wordSampleDetailEntries(source);
   const sectionOrder = ['before', 'after', 'events', 'imports'] as const;
-  const entries = sectionOrder.flatMap((section) => sections[section]);
   const detailDigest = wordSampleDetailDigest(source.sampleDigest, source.graphDigest, source.sourceVersionId, source.imports);
+  requireRetention(stream.sampleDigest === source.sampleDigest && stream.detailDigest === detailDigest && stream.sourceVersionId === source.sourceVersionId,
+    'WORD_SOURCE_CORRUPT', 'Word 修改样本的详情读取器身份已变化。');
   const identity = { sampleDigest: source.sampleDigest, detailDigest };
-  const afterCursor = validateWordSampleCursor(after, identity, (section, ordinal) => sections[section][ordinal] ?? null);
-  let index = afterCursor === null ? 0 : entries.findIndex((entry) =>
-    entry.section === afterCursor.section && entry.entryOrdinal === afterCursor.entryOrdinal);
+  const afterCursor = validateWordSampleCursor(after, identity, stream.entryAt);
+  const total = sectionOrder.reduce((sum, section) => sum + stream.sectionCounts[section], 0);
+  const position = (index: number): { section: WordSampleDetailSection; entryOrdinal: number } | null => {
+    for (const section of sectionOrder) {
+      if (index < stream.sectionCounts[section]) return { section, entryOrdinal: index };
+      index -= stream.sectionCounts[section];
+    }
+    return null;
+  };
+  let index = 0;
+  if (afterCursor !== null) {
+    for (const section of sectionOrder) {
+      if (section === afterCursor.section) break;
+      index += stream.sectionCounts[section];
+    }
+    index += afterCursor.entryOrdinal;
+  }
   let offset = afterCursor?.codeUnitOffset ?? 0;
   const page: WordSampleDetailPage = { bookId: source.sample.bookId, sampleId: source.sample.sampleId, ...identity,
     sourceVersionId: source.sourceVersionId, sourceDigest: source.sample.sourceDigest, operationKind: source.sample.operationKind,
-    sectionCounts: { before: sections.before.length, after: sections.after.length, events: sections.events.length, imports: sections.imports.length },
+    sectionCounts: { ...stream.sectionCounts },
     items: [], nextCursor: null };
   const cursor = (at: number, codeUnitOffset: number): WordSampleCursor | null => {
-    const entry = entries[at];
-    return entry === undefined ? null : { schema: 'ai7.word-sample-cursor/1', ...identity, section: entry.section,
-      entryOrdinal: entry.entryOrdinal, field: entry.field, codeUnitOffset };
+    const next = position(at);
+    return next === null ? null : { schema: 'ai7.word-sample-cursor/1', ...identity, ...next,
+      field: stream.fieldAt(next.section, next.entryOrdinal), codeUnitOffset };
   };
   const fits = (item: WordSampleDetailItem, next: WordSampleCursor | null): boolean =>
     Buffer.byteLength(JSON.stringify({ ...page, items: [...page.items, item], nextCursor: next }), 'utf8') <= budget;
-  while (index < entries.length && page.items.length < 40) {
-    const entry = entries[index]!;
+  while (index < total && page.items.length < 40) {
+    const at = position(index)!;
+    const entry = stream.entryAt(at.section, at.entryOrdinal);
+    requireRetention(entry !== null, 'WORD_SOURCE_CORRUPT', 'Word 修改样本的详情条目缺失。');
     if (entry.kind === 'record') {
       const item = { ...entry, complete: true as const };
       if (!fits(item, cursor(index + 1, 0))) break;
