@@ -100,7 +100,7 @@ describe('the production framed service loop', () => {
     vi.restoreAllMocks();
   });
 
-  function start(): void {
+  function start(admitProbe?: () => void): void {
     // Only storage and native I/O are stubs. Framing, dispatch branch, probe owner, harness,
     // gate, adapter, shared admission and conditional-settlement scheduling are production code.
     const store = {
@@ -122,6 +122,7 @@ describe('the production framed service loop', () => {
         }) as unknown as typeof fetch,
       }, selection, { resolve: async () => { secretReads += 1; return 'public-synthetic-placeholder'; } }, execution),
       probeCompleted: async () => { events.push('refresh'); },
+      ...(admitProbe === undefined ? {} : { admitProbe }),
       dispatch: async (request) => {
         events.push(request.op); await dispatch(request.op);
         return { id: request.id, ok: true, op: request.op, result: undefined } as ServiceResponse;
@@ -169,6 +170,22 @@ describe('the production framed service loop', () => {
     input.end(); await running;
     expect(records).toHaveLength(1); expect(sends).toBe(1);
     expect(governor.snapshot()).toMatchObject({ registered: 1, waiting: 0, inFlight: 0 });
+  });
+
+  it('applies the ordinary admission gate in order before a probe registers, and reports its registration lifetime', async () => {
+    let waiting = true;
+    start(() => { if (waiting) throw Object.assign(new Error('replacement waiting'), { code: 'DATABASE_REPLACEMENT_WAITING' }); });
+    send('a', 'getStartup'); send('p', 'testModelServiceConnection', probeInput);
+    expect(await output.response('p')).toMatchObject({ ok: false, error: { code: 'DATABASE_REPLACEMENT_WAITING' } });
+    expect(output.frames.map((response) => response.id)).toEqual(['a', 'p']);
+    expect(secretReads).toBe(0); expect(sends).toBe(0); expect(records).toEqual([]); expect(loop!.probing).toBe(false);
+    expect(governor.snapshot()).toMatchObject({ registered: 0, waiting: 0, inFlight: 0 });
+    waiting = false; await occupy(); const queued = nextAdmission();
+    send('p2', 'testModelServiceConnection', probeInput); await queued;
+    expect(loop!.probing).toBe(true);
+    held!.release(); expect(await output.response('p2')).toMatchObject({ ok: true, result: { outcome: 'passed' } });
+    input.end(); await running;
+    expect(loop!.probing).toBe(false); expect(sends).toBe(1); expect(records).toHaveLength(1);
   });
 
   it('refuses a stale credential generation after queued grant without sending or overwriting it', async () => {
@@ -274,7 +291,7 @@ describe('the production framed service loop', () => {
     const settled = events.slice(); await Promise.resolve(); expect(events).toEqual(settled);
   });
 
-  it('propagates pre-write and post-ack fault hooks at their original response boundaries', async () => {
+  it('propagates the post-acknowledgement fault hook at its original response boundary', async () => {
     responseFinished = () => { throw new Error('after acknowledgement'); };
     start(); send('a', 'getStartup'); await expect(running).rejects.toThrow('after acknowledgement');
     expect(output.frames.map((response) => response.id)).toEqual(['a']);

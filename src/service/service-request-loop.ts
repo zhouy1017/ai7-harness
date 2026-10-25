@@ -13,6 +13,8 @@ export interface ServiceRequestLoopOptions {
   readonly dispatch: (request: Exclude<ServiceRequest, { op: 'testModelServiceConnection' }>) => Promise<ServiceResponse>;
   readonly probe: (input: FastModelSelectionInput, execution: ModelConnectionTestExecution) => Promise<ModelConnectionTestStatus>;
   readonly probeCompleted: () => Promise<void>;
+  /** The ordinary lane's own admission gate, applied in order before a probe registers; throws to refuse it. */
+  readonly admitProbe?: () => void;
   readonly failure: (id: string, error: unknown) => ServiceFailureResponse;
   readonly afterResponse?: (request: ServiceRequest, response: ServiceResponse) => void;
   readonly onFatal: (error: unknown) => void;
@@ -70,6 +72,9 @@ export class ServiceRequestLoop {
   #failure: { readonly error: unknown } | null = null;
 
   constructor(options: ServiceRequestLoopOptions) { this.#options = options; }
+
+  /** Whether a probe is registered: from its ordered start through its final response write. */
+  get probing(): boolean { return this.#probe !== null; }
 
   close(): void {
     this.#closing = true;
@@ -153,6 +158,8 @@ export class ServiceRequestLoop {
         refusal = this.#options.failure(request.id, new FastRoleError('MODEL_CONNECTION_TEST_UNAVAILABLE', 'AI7 正在关闭；没有发送任何内容。'));
         return;
       }
+      // A probe outside the dispatcher still takes the dispatcher's gate, as it did inside it.
+      this.#options.admitProbe?.();
       if (this.#probe !== null) {
         refusal = this.#options.failure(request.id, new FastRoleError('MODEL_CONNECTION_TEST_BUSY', '另一项文本连接测试正在进行；请等它完成。'));
         return;

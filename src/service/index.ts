@@ -125,8 +125,10 @@ function requireNothingRunning(
 ): void {
   // A dialogue answering writes its outcome when it settles (Issue #52, S17a), so it holds a replacement back as a Run does;
   // so does a 润色这段 or 重新生成建议 request in flight, which writes its marks or draft when its answer arrives (Issue #842).
+  // A detached connection probe writes its result when it settles, as it did when it ran inside dispatch.
   const blocked = replacementBlockedBy({
-    runsIdle: analysisExecution.idle && !dialogues.answering && !fastRole.owner.busy, reviewRunsDriving: reviewRuns.driving, jobsBusy: jobs.busy,
+    runsIdle: analysisExecution.idle && !dialogues.answering && !fastRole.owner.busy && fastRole.connectionTesting?.() !== true,
+    reviewRunsDriving: reviewRuns.driving, jobsBusy: jobs.busy,
     exportRunning: store.databaseExportRunning(), backgroundBusy: background.busy, indexing: store.materialIndexing(),
   });
   if (blocked !== null) throw new StoreErrorClass('DATABASE_REPLACEMENT_BUSY', blocked);
@@ -136,6 +138,8 @@ function requireNothingRunning(
 interface FastRoleContext {
   readonly owner: FastRoleExecutionOwner;
   readonly requests: FastRoleRequests;
+  /** Whether the request loop's one temporary connection-test owner is registered (Issue #1131). */
+  readonly connectionTesting?: () => boolean;
 }
 
 async function dispatch(
@@ -2239,7 +2243,7 @@ async function run(): Promise<void> {
             () => openedStore.getModelServiceConnections().find((connection) => connection.credentialReference === productionState.fast?.credentialReference)?.credentialUpdatedAt ?? null)
           : null,
     });
-    fastRole = { owner: fastRoleOwner, requests: new FastRoleRequestsClass(fastRoleOwner, store) };
+    fastRole = { owner: fastRoleOwner, requests: new FastRoleRequestsClass(fastRoleOwner, store), connectionTesting: () => requestLoop?.probing === true };
     // Agent 工作区 (Issue #90, slice 13a): its rounds run on the dialogue's owner and are held in this service's memory only.
     agentWorkspace = new AgentWorkspaceClass(store, dialogues);
     // 生成来源译文 (Issue #892): the same owner, under the rule the selected policy names for the kind — none, under every
@@ -2349,6 +2353,10 @@ async function run(): Promise<void> {
       onFatal: () => stop(),
       probe: (input, execution) => testModelServiceConnection(openedStore, codeRoot, production, input, createKeyringSecretResolver(), execution),
       probeCompleted: async () => { await modelServiceChanged(); },
+      // 替换本机全部数据 waits for AI7's next start (Issue #434 review): the probe writes its result, so it is refused as dispatch refuses it.
+      admitProbe: () => {
+        if (serving.store.replacementWaiting()) throw new StoreErrorClass('DATABASE_REPLACEMENT_WAITING', REPLACEMENT_WAITING_MESSAGE);
+      },
       dispatch: async (request) => {
         let response: ServiceResponse;
         try {
