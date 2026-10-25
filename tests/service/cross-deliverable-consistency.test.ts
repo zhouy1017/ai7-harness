@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { reviewFixtureContractVersion } from '../../src/service/provider/model-fixture.js';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
@@ -24,6 +25,12 @@ import type { LaunchPolicyProjection, ReviewRunProjection, ReviewCategoryResultS
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../src/shared/protected-secret-identity.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 const CATEGORY = 'cross-deliverable-consistency';
 const WHOLE = { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null } as const;
@@ -140,7 +147,7 @@ async function execution(afterFirst?: () => Promise<void>, recorded?: ResolvedMo
     return new Response(JSON.stringify({ model: live.model, choices: [{ message: { content: JSON.stringify(result), reasoning_content: '合成回归。' }, finish_reason: 'stop' }],
       usage: { prompt_tokens: usage.inputTokens, completion_tokens: usage.outputTokens } }), { status: 200 });
   };
-  owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
+  owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
     materialGuard: (runRecordId, ledger) => store.materialGuard(runRecordId, ledger),
     secretResolver: { resolve: async () => 'placeholder-development-key' },
     developerLive: { launch: { runBudgetCeiling: live.runBudgetCeiling, providerCacheRoot: join(roots.inputRoot, 'cache'),

@@ -220,6 +220,12 @@ export interface HarnessTurnOutcome {
  */
 export type HarnessSessionMode = 'single' | 'per-unit';
 
+/** Caller-owned physical request lifetime; final admission runs before its ticket is exposed. */
+export interface HarnessRequestAdmission {
+  admit?(decision: EgressDecision): void;
+  release(): void;
+}
+
 export interface HarnessExecutionRequest {
   readonly compositionOptions?: CompositionOptions;
   readonly localToolsRule?: LocalToolsRule;
@@ -234,6 +240,8 @@ export interface HarnessExecutionRequest {
   readonly nextSessionId?: () => string;
   /** Builds the one bound adapter once the composition has resolved the DSH failure-code constants. */
   readonly adapterFactory: (codes: DshFailureCodes) => LlmAdapter;
+  /** Live owners await shared capacity here, before evaluating the final gate or minting a ticket. */
+  readonly acquireRequest?: (payload: AssembledModelPayload, signal: AbortSignal) => Promise<HarnessRequestAdmission>;
   /** The final gate, evaluated over the complete assembled payload immediately before every model call. */
   readonly gate: (payload: AssembledModelPayload) => EgressDecision;
   /** Receives a `transmit-remote` ticket for the adapter's transmit step; never called under v1. */
@@ -368,10 +376,28 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
     context.on('llm/stream', function (this: LlmRuntime, options: GenerateOptions, next: () => AsyncIterable<StreamChunk>) {
       if (!bound) return refusalStream('执行绑定尚未核对；未发送任何内容。');
       if (options.signal !== undefined && toolTurn !== null) toolTurns.set(options.signal, toolTurn);
-      const decision = request.gate(options);
-      if (decision.decision === 'refuse') return refusalStream(decision.detail, decision.reason);
-      if (decision.decision === 'transmit-remote') request.onTransmitTicket(decision.ticket);
-      return next();
+      // Keep the existing turn/signal correlation alive across the wait. The delegated iterator's
+      // return/finally finishes body cleanup before release, including early adapter refusals.
+      return (async function* (): AsyncGenerator<StreamChunk> {
+        let admission: HarnessRequestAdmission | undefined;
+        try {
+          if (request.acquireRequest !== undefined) admission = await request.acquireRequest(options, options.signal ?? new AbortController().signal);
+          if (!bound || disposed || options.signal?.aborted === true) {
+            yield* refusalStream('请求已取消或执行已结束；未发送任何内容。');
+            return;
+          }
+          const decision = request.gate(options);
+          if (decision.decision === 'refuse') {
+            yield* refusalStream(decision.detail, decision.reason);
+            return;
+          }
+          admission?.admit?.(decision);
+          if (decision.decision === 'transmit-remote') request.onTransmitTicket(decision.ticket);
+          yield* next();
+        } finally {
+          admission?.release();
+        }
+      })();
     });
     const assembly = await context.systemPrompt.assemble();
     // Zero tools, or exactly the two platform tool schemas when an owner was given: never anything in between or beyond.

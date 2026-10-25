@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -64,6 +65,12 @@ import {
   pinEditorialWorkspaceProfileRevision2,
   recordMissingCredentialConnection,
 } from '../support/sample1-baseline.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for the developer-live scope. Everything is real except the
 // transport: the store, the plan, the pinned DSH composition, the Egress Gate, the Credential
@@ -290,6 +297,7 @@ function owner(
   validation: DevelopmentValidationIntent | null = VALIDATION,
 ): BaselineAnalysisExecutionOwner {
   return new BaselineAnalysisExecutionOwner({
+    requestGovernor,
     ledger: store.baselineAnalysisLedger,
     launchPolicy: policy,
     fixture: null,
@@ -653,6 +661,7 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     const held = heldTransport({ calls, responses, named });
     let credential: string | null = 'placeholder-development-key';
     const execution = new BaselineAnalysisExecutionOwner({
+      requestGovernor,
       ledger: store.baselineAnalysisLedger,
       launchPolicy,
       fixture: null,
@@ -1281,6 +1290,7 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     const calls: StubCall[] = [];
     const present = owner(store, stubTransport({ calls, responses: new Map() }));
     const absent = new BaselineAnalysisExecutionOwner({
+      requestGovernor,
       ledger: store.baselineAnalysisLedger,
       launchPolicy,
       fixture: null,
@@ -1399,6 +1409,7 @@ describe('后台处理登记 under developer-live with a stub transport (Issue #
     try {
       expect(execution.capacity).toBe(2);
       expect(() => new BaselineAnalysisExecutionOwner({
+        requestGovernor,
         ledger: store.baselineAnalysisLedger, launchPolicy, fixture: null, capacity: 1, secretResolver: { resolve: async () => null },
         developerLive: { launch: { runBudgetCeiling: CEILING, providerCacheRoot: cacheRoot, validation: VALIDATION }, nativeFetch: held.transport },
       })).toThrowError(/运行名额设置无效/u);

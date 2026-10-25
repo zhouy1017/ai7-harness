@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -26,6 +27,12 @@ import { TYPOS_AND_USAGE } from '../support/review-categories.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { WRITING_BOOK_TITLE, WRITING_FIXTURE_IDENTITY, WRITING_REQUEST } from '../support/writing-task.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for 联网后开始任务 of every Task kind with a plan (Issue #760, plan slice S74c): the real store,
 // every kind's ledger, the Review Run ledger and its drive loop, the one execution owner and the AI7 local deterministic adapter
@@ -69,6 +76,7 @@ async function withSession(fixtureIdentity: string, body: (session: Session) => 
     baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
   });
   const owner = new BaselineAnalysisExecutionOwner({
+    requestGovernor,
     ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null }, ...(capacity === undefined ? {} : { capacity }),
   });
   const driver = new ReviewRunDriver(store.reviewRunDriveSteps, owner);
@@ -317,6 +325,7 @@ describe('取消 of a waiting or queued Run of another kind (Issue #760 review)'
           : entry])),
       };
       const owner = new BaselineAnalysisExecutionOwner({
+        requestGovernor,
         ledger: store.baselineAnalysisLedger, launchPolicy, fixture: dropped, secretResolver: { resolve: async () => null },
       });
       try {

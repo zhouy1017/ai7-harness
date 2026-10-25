@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { sha256Hex } from '../analysis/canonical.js';
-import { DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS } from '../analysis/execution.js';
+import { DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS, type ModelRequestGovernor, type ModelRequestProducer } from '../analysis/execution.js';
 import { admittedFastRoleRoute, type AdmittedFastRoleRoute } from '../dialogue/dialogue-route.js';
 import { describeComposition, prepareExecution, type HarnessTurnOutcome, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
 import { CONNECTION_TEST_KIND, CONNECTION_TEST_POLICY, ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy, isOrdinaryProductionRuntime, type DeveloperLiveRuntime, type LiveRuntime, type OrdinaryProductionRuntime } from '../launch-policy.js';
@@ -10,7 +10,7 @@ import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../shared/prote
 import { MODEL_SERVICE_SETUP_REQUIRED_REASON, type DeveloperLiveProviderProcessingVersion, type OrdinaryProductionProviderProcessingVersion } from '../../shared/protocol.js';
 import { AI7_FAILURE_CODES } from '../provider/classification.js';
 import { CredentialBroker, type CredentialSlotBinding, type SecretResolver } from '../provider/credential-broker.js';
-import { DeepSeekOpenAiCompatibleAdapter, type DeepSeekTransport } from '../provider/deepseek-adapter.js';
+import { DeepSeekOpenAiCompatibleAdapter, modelRequestNotSent, type DeepSeekTransport } from '../provider/deepseek-adapter.js';
 import { Ai7LocalDeterministicAdapter } from '../provider/local-deterministic-adapter.js';
 import {
   LOCAL_DETERMINISTIC_MODEL,
@@ -113,6 +113,7 @@ function categoryIn(kind: FastRoleKindDefinition, scope: 'developer-live' | 'ord
  * request, so a route switch reaches the next request.
  */
 export interface FastRoleLiveRoutes {
+  readonly transportSettings?: LaunchPolicyProjection['providerProcessing']['transport'];
   readonly runtime: LiveRuntime;
   readonly broker: CredentialBroker;
   readonly routes: Readonly<Record<Exclude<FastRoleKindId, typeof CONNECTION_TEST_KIND>, AdmittedFastRoleRoute | null> & Partial<Record<typeof CONNECTION_TEST_KIND, AdmittedFastRoleRoute | null>>>;
@@ -127,6 +128,7 @@ export function fastRoleLiveRoutes(runtime: DeveloperLiveRuntime, policy: Launch
   const route = (kind: FastRoleKindDefinition): AdmittedFastRoleRoute | null => admittedFastRoleRoute(policy, kind.kindId, categoryIn(kind, 'developer-live'));
   return {
     runtime,
+    transportSettings: policy.providerProcessing.transport,
     broker: new CredentialBroker(secretResolver),
     routes: {
       [CONNECTION_TEST_KIND]: null,
@@ -156,6 +158,7 @@ export function productionFastRoleRoutes(
   };
   return {
     runtime,
+    get transportSettings() { return policy().providerProcessing.transport; },
     broker: new CredentialBroker(secretResolver, { developmentReferences: 'refused' }),
     ...(current === undefined ? {} : { current }),
     ...(credentialGeneration === undefined ? {} : { credentialGeneration }),
@@ -174,6 +177,9 @@ export function productionFastRoleRoutes(
 }
 
 export interface FastRoleExecutionDeps {
+  readonly requestGovernor: ModelRequestGovernor;
+  /** The service probe keeps this registration through its final publication/write cleanup. */
+  readonly producer?: ModelRequestProducer;
   /** The J-04 adapter's fixture when the launch binds one; `null` binds no local route. */
   readonly fixture: ResolvedModelFixture | null;
   /** The live launch's routes — developer-live's, or ordinary production's (Issue #811); `null` under development-ci. */
@@ -184,7 +190,7 @@ export interface FastRoleExecutionDeps {
  * Why a kind cannot be asked under this launch, in the editor's words (service-owned, Issue #842); `null` when it can. Under
  * developer-live the Book's source digest, when read (`undefined` when not), must be an admitted Public SampleBook's.
  */
-export function fastRoleRouteRefusal(deps: FastRoleExecutionDeps, kindId: FastRoleKindId, sourceDigest?: string | null): string | null {
+export function fastRoleRouteRefusal(deps: Pick<FastRoleExecutionDeps, 'fixture' | 'live'>, kindId: FastRoleKindId, sourceDigest?: string | null): string | null {
   const kind = FAST_ROLE_KINDS[kindId];
   if (deps.live !== null) {
     const production = isOrdinaryProductionRuntime(deps.live.runtime);
@@ -234,6 +240,7 @@ export class FastRoleExecutionOwner {
   #active: PrimaryAgentHarnessHandle | null = null;
   #inFlight = false;
   #disposed = false;
+  #requestAbort: AbortController | null = null;
 
   constructor(deps: FastRoleExecutionDeps) {
     this.#deps = deps;
@@ -260,7 +267,8 @@ export class FastRoleExecutionOwner {
   /** AI7 is closing: the request in flight is interrupted. */
   dispose(): void {
     this.#disposed = true;
-    this.#active?.interrupt();
+    this.#requestAbort?.abort();
+    if (this.#deps.live === null) this.#active?.interrupt();
   }
 
   /**
@@ -271,15 +279,23 @@ export class FastRoleExecutionOwner {
     this.requireReady(kindId);
     if (kindId === CONNECTION_TEST_KIND && message !== CONNECTION_TEST_POLICY.message) throw new FastRoleError('MODEL_CONNECTION_TEST_INVALID', '连接测试只接受固定的公开合成消息。');
     this.#inFlight = true;
+    const cancellation = new AbortController();
+    this.#requestAbort = cancellation;
+    let producer: ModelRequestProducer | null = null;
     try {
-      return await this.#run(FAST_ROLE_KINDS[kindId], message, step);
+      if (this.#deps.live !== null) producer = this.#deps.producer ?? this.#deps.requestGovernor.registerProducer({
+        key: `fast-role:${randomUUID()}`, kind: kindId === CONNECTION_TEST_KIND ? 'connection-test' : 'fast-role', lane: 'foreground',
+      });
+      return await this.#run(FAST_ROLE_KINDS[kindId], message, step, producer, cancellation.signal);
     } finally {
+      if (producer !== null && this.#deps.producer === undefined) this.#deps.requestGovernor.unregisterProducer(producer);
+      this.#requestAbort = null;
       this.#inFlight = false;
       this.#active = null;
     }
   }
 
-  async #run(kind: FastRoleKindDefinition, message: string, step: string): Promise<FastRoleAnswer> {
+  async #run(kind: FastRoleKindDefinition, message: string, step: string, producer: ModelRequestProducer | null, signal: AbortSignal): Promise<FastRoleAnswer> {
     const live = this.#deps.live;
     const route = live === null ? null : live.routes[kind.kindId] ?? null;
     // Read once: under ordinary-production the configured reference may change while this request is in flight (Issue #811).
@@ -342,6 +358,15 @@ export class FastRoleExecutionOwner {
       }
       let pendingTicket: TransmitTicket | null = null;
       const harness: PrimaryAgentHarnessHandle = await prepareExecution({
+        ...(producer === null ? {} : { acquireRequest: async (_payload: import('../provider/payload.js').AssembledModelPayload, turnSignal: AbortSignal) => {
+          const combined = AbortSignal.any([signal, turnSignal]);
+          const permit = await this.#deps.requestGovernor.acquire(producer, combined);
+          try {
+            combined.throwIfAborted();
+            if (this.#disposed || !isCurrent()) throw new FastRoleError('FAST_ROLE_BINDING_STALE', '快速交互绑定已变化；未发送任何内容。');
+            return { release: () => { pendingTicket = null; permit.release(); } };
+          } catch (error) { permit.release(); throw error; }
+        } }),
         sessionId,
         route: executionRoute,
         model,
@@ -350,9 +375,10 @@ export class FastRoleExecutionOwner {
         adapterFactory: (codes) => {
           if (live === null || route === null || slotBinding === null) return new Ai7LocalDeterministicAdapter(this.#deps.fixture!, promptContractDigest, codes);
           const nativeFetch = live.runtime.nativeFetch;
-          // Nothing has left at either boundary, so the adapter reads it as a transport failure, never an unknown result (#1080).
+          // Before the adapter enters its sender (`beforeSend`) the refusal is an observed no-send. Inside the transport the
+          // adapter cannot tell it apart from a sent request's rejection, so it stays unknown unless the wrapper proves no-send.
           const requireRunning = (signal?: AbortSignal): void => {
-            if (this.#disposed || signal?.aborted === true) {
+            if (this.#disposed || !isCurrent() || signal?.aborted === true) {
               throw Object.assign(new DOMException('Fast-role request interrupted.', 'AbortError'), { requestSent: false });
             }
           };
@@ -370,19 +396,25 @@ export class FastRoleExecutionOwner {
             codes,
             profile: kind.kindId === CONNECTION_TEST_KIND ? { ...route.profile, maxOutputTokens: CONNECTION_TEST_POLICY.maxOutputTokens } : route.profile,
             modelProfile: route.modelProfile,
+            signal,
+            beforeSend: () => requireRunning(signal),
+            ...(live.transportSettings === undefined ? {} : { transportSettings: live.transportSettings }),
             sessionId: () => harness.currentSessionId(),
             transport: async (url, init) => {
               requireRunning(init.signal);
               // One request is its own task: its stage contract and its task contract are the kind's one contract.
               if (cache === null || validation === null) return send(url, init);
+              let nativeEntered = false;
+              const observedSend: DeepSeekTransport = (target, request) => { requireRunning(request.signal); nativeEntered = true; return send(target, request); };
               try {
-                return await transmitOnce(cache, send, { purpose: kind.kindId, slice: kind.slice, promptContractDigest, taskPromptContractDigest: promptContractDigest }, {
+                return await transmitOnce(cache, observedSend, { purpose: kind.kindId, slice: kind.slice, promptContractDigest, taskPromptContractDigest: promptContractDigest }, {
                   intent: validation,
                   step: `${kind.kindId}/${step}`,
                   requestShape: route.modelProfile.capabilities.requestShape,
                 }, route.profile, model, url, init);
               } catch (error) {
                 if (error instanceof ProviderResultCacheError) ledgerRefusal = { code: error.code, message: error.message };
+                if (!nativeEntered) throw modelRequestNotSent(init, error);
                 throw error;
               }
             },
@@ -471,10 +503,22 @@ export class FastRoleExecutionOwner {
 }
 
 /** Explicit Settings action only. No caller-supplied words or Book material can enter this path. */
+export interface ModelConnectionTestExecution {
+  readonly requestGovernor: ModelRequestGovernor;
+  readonly producer?: ModelRequestProducer;
+  readonly signal?: AbortSignal;
+  /** The real service supplies its ordinary effect lane for the conditional final write. */
+  readonly settle?: <Result>(operation: () => Result | Promise<Result>) => Promise<Result>;
+}
+
 export async function testModelServiceConnection(
   store: EditorialStore, codeRoot: string, runtime: OrdinaryProductionRuntime | null,
-  input: FastModelSelectionInput, secretResolver: SecretResolver, signal?: AbortSignal,
+  input: FastModelSelectionInput, secretResolver: SecretResolver, execution: ModelConnectionTestExecution,
 ): Promise<ModelConnectionTestStatus> {
+  const producer = execution.producer ?? execution.requestGovernor.registerProducer({ key: `connection-test:${randomUUID()}`, kind: 'connection-test', lane: 'foreground' });
+  const signal = execution.signal;
+  const settle = execution.settle ?? (async <Result>(operation: () => Result | Promise<Result>): Promise<Result> => operation());
+  try {
   const cancelled = (): boolean => signal?.aborted === true;
   if (runtime === null) throw new FastRoleError('MODEL_CONNECTION_TEST_UNAVAILABLE', '当前运行范围不允许实时连接测试；没有发送任何内容。');
   const connection = store.getModelServiceRouteConnection(input.route);
@@ -485,7 +529,7 @@ export async function testModelServiceConnection(
   if (cancelled()) {
     const cancelledStatus: ModelConnectionTestStatus = { modelId: input.modelId, credentialUpdatedAt: connection.credentialUpdatedAt,
       testedAt: new Date().toISOString(), outcome: 'cancelled', code: AI7_FAILURE_CODES.INTERRUPTED, verified: 'buffered-text-only' };
-    store.recordModelConnectionTest(connection, cancelledStatus);
+    await settle(() => store.recordModelConnectionTest(connection, cancelledStatus));
     return cancelledStatus;
   }
   const configured = { ...allowed, credentialReference: connection.credentialReference };
@@ -494,7 +538,7 @@ export async function testModelServiceConnection(
     const now = store.getModelServiceRouteConnection(input.route);
     return now?.credentialOperationState === 'ready' && now.credentialReference === connection.credentialReference && now.credentialUpdatedAt === connection.credentialUpdatedAt;
   };
-  const owner = new FastRoleExecutionOwner({ fixture: null, live: productionFastRoleRoutes(runtime, () => policy,
+  const owner = new FastRoleExecutionOwner({ requestGovernor: execution.requestGovernor, producer, fixture: null, live: productionFastRoleRoutes(runtime, () => policy,
     () => unchanged() ? connection.credentialReference : null, secretResolver, () => unchanged(),
     () => store.getModelServiceRouteConnection(input.route)?.credentialUpdatedAt ?? null) });
   const stop = (): void => owner.dispose();
@@ -515,6 +559,9 @@ export async function testModelServiceConnection(
     verified: 'buffered-text-only',
     ...(facts === undefined ? {} : { provenance: { ...facts, failureCode: code } }),
   };
-  store.recordModelConnectionTest(connection, status);
+  await settle(() => store.recordModelConnectionTest(connection, status));
   return status;
+  } finally {
+    if (execution.producer === undefined) execution.requestGovernor.unregisterProducer(producer);
+  }
 }

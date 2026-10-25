@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { execPre74Fixture, expectedSchema75 } from '../support/pre74-schema.js';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -30,6 +31,12 @@ import { OUTCOME_UNKNOWN_CARRIED } from '../../src/service/analysis/outcome-unkn
 import { OutcomeResolutionLedger } from '../../src/service/analysis/outcome-resolutions.js';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import { randomUUID } from 'node:crypto';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for 结果待确认 a completed Run left (Issue #757; V2-UX-ATTN-002, NOTIF-004, CTRL-007, CONT-011;
 // execution CONTEXT.md, Manual Outcome Resolution): the real store on a temporary Agent Data Root, exact `sample1` imported
@@ -69,7 +76,7 @@ function open(fixture: ResolvedModelFixture): Promise<EditorialStore> {
 }
 
 function ownerOf(store: EditorialStore, fixture: ResolvedModelFixture): BaselineAnalysisExecutionOwner {
-  return new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+  return new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
 }
 
 /** The fixture with every entry `drop` names answering 结果待确认 instead; identity and digest stay, as the route bound them. */

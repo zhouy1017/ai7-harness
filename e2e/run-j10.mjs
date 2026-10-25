@@ -837,7 +837,8 @@ async function main() {
     const executing = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     const taskIntentId = executing?.taskIntent?.taskIntentId ?? '';
     requireJourney(UUID_PATTERN.test(taskIntentId) && executing.bookId === bookId && executing.state === 'executing' && executing.run?.state === 'executing' &&
-      executing.run.progress?.unitsSettled === FIRST_HOLD && executing.run.progress.currentUnitOrdinal === FIRST_HOLD + 1 && executing.run.progress.unitsTotal === SAMPLE1_UNITS,
+      executing.run.progress?.unitsSettled === FIRST_HOLD && executing.run.progress.currentUnitOrdinal === FIRST_HOLD + 1 && executing.run.progress.unitsTotal === SAMPLE1_UNITS &&
+      executing.run.progress.inFlightUnits === undefined,
     'run-executing-record', { state: executing?.state, run: executing?.run?.state, progress: executing?.run?.progress });
     const running = await renderer.evaluate(READ_DRAWER);
     requireJourney(running?.ref === taskIntentId && running.kind === 'baseline-analysis' && running.start === 'started' && running.pill === '运行中' && running.status === '运行中', 'drawer-follows-the-run', running);
@@ -846,7 +847,8 @@ async function main() {
     // AUTH-011: the phase, the range in flight, the time on it and since the Run began, the attempt, the last
     // update and the milestones, each a fact the Run holds; nothing is estimated.
     const rows = running.activity?.rows ?? {};
-    requireJourney(running.activity?.title === '运行动态' && rows['阶段'] === '正在逐个阅读范围分析' && rows['当前'] === `第 3 个阅读范围（共 ${SAMPLE1_UNITS} 个）` &&
+    // #1131 retains the v1 fixture's six scalar rows. Governed production lists are service-stub proof, not this Journey's authority.
+    requireJourney(Object.keys(rows).length === 6 && running.activity?.title === '运行动态' && rows['阶段'] === '正在逐个阅读范围分析' && rows['当前'] === `第 3 个阅读范围（共 ${SAMPLE1_UNITS} 个）` &&
       /^本步 \d\d:\d\d · 运行 \d\d:\d\d$/u.test(rows['用时'] ?? '') && rows['尝试'] === '已派发' && typeof rows['上次更新'] === 'string' && rows['上次更新'].length > 0 &&
       rows['进展'] === `已读完 ${FIRST_HOLD} / ${SAMPLE1_UNITS} 个阅读范围 · 已完成模型回合 ${FIRST_HOLD} 次`,
     'activity-card-rows', running.activity);

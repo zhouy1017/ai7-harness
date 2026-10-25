@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { IMPORTED_SKILL_RELATIONS, CUSTOM_ANALYSIS_RELATIONS, HOUSE_REVIEW_PREFERENCE_RELATIONS, TASK_INTENT_DRAFT_RELATIONS } from '../support/pre74-schema.js';
 import { execPre74Fixture, FACTUAL_VERIFICATION_RELATIONS, MATERIAL_INDEX_LAYER_RELATIONS, PROPOSAL_REVIEW_RELATIONS, RESEARCH_EVIDENCE_RELATIONS } from '../support/pre74-schema.js';
 import { createHash } from 'node:crypto';
@@ -42,6 +43,12 @@ import { PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER } from '../support/production-
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for Clarification Requests (Issue #422, plan slice S76d; V2-UX-CLAR-001 to CLAR-007,
 // PLAN-011, PLAN-012): the real store on a temporary Agent Data Root, exact `sample1` imported through the supported path,
@@ -89,6 +96,7 @@ function openWithRoute(fixture: ResolvedModelFixture): Promise<EditorialStore> {
 /** `capacity` 1 is the governor with one place (Issue #49, S14), for the cases where another Run takes every place. */
 function owner(store: EditorialStore, fixture: ResolvedModelFixture, held = false, capacity?: number): BaselineAnalysisExecutionOwner {
   return new BaselineAnalysisExecutionOwner({
+    requestGovernor,
     ledger: store.baselineAnalysisLedger,
     launchPolicy,
     fixture,
@@ -334,6 +342,7 @@ describe('Clarification Requests over the real store', () => {
     const store = await openWithRoute(transient);
     let withdrawn = false;
     const execution = new BaselineAnalysisExecutionOwner({
+      requestGovernor,
       ledger: store.baselineAnalysisLedger, launchPolicy, fixture: transient, secretResolver: { resolve: async () => null },
       materialGuard: () => (withdrawn ? { code: 'MATERIAL_REFERENCE_UNAVAILABLE', materialTitle: '合成资料', message: '资料《合成资料》现在不能列进这本书任务的「允许参考」。' } : null),
     });

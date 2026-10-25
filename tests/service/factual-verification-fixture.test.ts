@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,6 +13,12 @@ import { FACTUAL_REVIEW_PROMPT_CONTRACT_V2_STANDARD_DIGEST } from '../../src/ser
 import { CORRECTION_ASSURANCE_INCOMPLETE_LABEL, FACTUAL_REVIEW_TASK_GOAL, type EvidenceAssuranceLevel, type LaunchPolicyProjection } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Issue #901 (wave 8, slice 8a): 事实核查's levels on the deterministic route J-04 drives, over the provider-free
 // `sample1-factual-verified` fixture layered on `sample1-factual-authored`. 标准核查 replays contract /2; 快速整理 replays v1's own
@@ -37,7 +44,7 @@ async function openVerified(): Promise<{ store: EditorialStore; owner: BaselineA
     induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false,
     baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
   });
-  const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+  const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
   return { store, owner, driver: new ReviewRunDriver(store.reviewRunDriveSteps, owner), fixture };
 }
 

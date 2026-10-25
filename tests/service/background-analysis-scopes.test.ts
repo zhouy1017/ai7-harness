@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -26,6 +27,12 @@ import {
 } from '../../src/shared/protocol.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for Issue #864 (1.0.0 decision 12) over 后台处理登记 (S39): the real store on a temporary Agent
 // Data Root, exact `sample1` imported through the supported path, the J-04 deterministic route, and no Provider, socket or
@@ -65,6 +72,7 @@ function openWithRoute(): Promise<EditorialStore> {
 
 function ownerOf(store: EditorialStore, holdPath: string | null = null): BaselineAnalysisExecutionOwner {
   return new BaselineAnalysisExecutionOwner({
+    requestGovernor,
     ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null },
     ...(holdPath === null ? {} : { unitHold: controlledUnitHold(holdPath, { pollMs: 5 }) }),
   });
@@ -386,7 +394,7 @@ describe('后台处理登记 with a mandatory ceiling, Series and all-Books scop
       writeFileSync(holdPath, '99');
       await owner.whenIdle();
       expect(store.baselineAnalysisLedger.currentRunState(firstRun)).toBe('paused');
-      const single = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, capacity: 1,
+      const single = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, capacity: 1,
         secretResolver: { resolve: async () => null } });
       try {
         expect(() => single.admitAndDispatch(firstRun, undefined, { resume: true })).toThrowError(/后台分析最多同时占用 0/u);
@@ -432,6 +440,7 @@ describe('后台处理登记 with a mandatory ceiling, Series and all-Books scop
     let held = false;
     let released = false;
     const owner = new BaselineAnalysisExecutionOwner({
+      requestGovernor,
       ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null },
       unitHold: async (_units, interrupted) => {
         if (!holdNext) return;

@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { randomUUID } from 'node:crypto';
 import { sha256Hex } from '../../src/service/analysis/canonical.js';
 import { join } from 'node:path';
@@ -27,6 +28,12 @@ import { makeJ13Series, J13_SERIES_TITLE } from '../support/series-consistency.j
 import { liveKindAdmission } from '../../src/service/analysis/live-kind-admission.js';
 import { HOUSE_PREFERENCE_CLOSED } from '../../src/service/task-plan.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // #809 / J-04, J-05: real store, broker, Go adapter, egress, accounting and review drive loop.
 // The transport supplies the real route's JSON shape without a socket or real credential. Quotes
@@ -119,6 +126,7 @@ beforeEach(async () => {
     return new Response(JSON.stringify({ model: launch.live.model, choices: [{ message: { content: capturedText ?? JSON.stringify(result), reasoning_content: '合成推理通道。' }, finish_reason: 'stop' }], usage: { prompt_tokens: responseUsage.inputTokens, completion_tokens: responseUsage.outputTokens } }), { status: 200 });
   };
   owner = new BaselineAnalysisExecutionOwner({
+    requestGovernor,
     ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
     currentLaunchPolicy: () => policy,
     seriesScopeGuard: (runRecordId) => store.seriesScopeGuard(runRecordId),

@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
@@ -28,6 +29,12 @@ import type {
 import { ADMITTED_BASELINE_DOCX, composeManuscriptDocx, type ComposedManuscriptRequest } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for 质量与学习 › 学习准入 (Issue #61, plan slice S26b; V2-UX-LEARN-001 to LEARN-012, ATTN-009,
 // FDBK-013) over the real store. The manuscript is composed from the one admitted SampleBook and no assertion prints its
@@ -556,7 +563,7 @@ describe('学习准入 over the real store', () => {
       interruptAfterAbandonObjectRemoval: false,
       baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
     });
-    const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+    const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
     const driver = new ReviewRunDriver(store.reviewRunDriveSteps, owner);
     try {
       const { bookId, manuscriptId, branchId } = await importSample1Book(store, roots.codeRoot, 'L2 审阅学习');

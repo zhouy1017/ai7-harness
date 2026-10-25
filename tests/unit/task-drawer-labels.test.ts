@@ -701,6 +701,21 @@ describe('the activity card (Issue #422, AUTH-011)', () => {
     expect(taskPlanActivityIsStale({ ...activity, currentUnitStartedAt: null }, at('2026-09-24T02:00:00.000Z'))).toBe(false);
     expect(TASK_PLAN_ACTIVITY_UNREPORTED).toBe('这项任务现在没有在运行：AI7 上次关闭时它没有结束。可以取消它，再准备新的任务。');
   });
+
+  it('shows every governed unit and starts stale timing at that request admission (#1131)', () => {
+    const governed = { ...activity, inFlightUnits: [
+      { unitOrdinal: 3, attemptState: 'dispatched' as const, requestState: 'waiting-for-capacity' as const, admittedRequestStartedAt: null },
+      { unitOrdinal: 4, attemptState: 'awaiting-response' as const, requestState: 'admitted' as const, admittedRequestStartedAt: '2026-09-24T01:01:00.000Z' },
+      { unitOrdinal: 5, attemptState: 'dispatched' as const, requestState: 'between-requests' as const, admittedRequestStartedAt: null },
+    ] };
+    const rows = Object.fromEntries(taskPlanActivityRows(governed, null, at('2026-09-24T01:01:05.000Z')));
+    expect(rows['阅读范围 3']).toBe('等待模型请求名额');
+    expect(rows['阅读范围 4']).toBe('等待模型响应 · 本次请求 00:05');
+    expect(rows['阅读范围 5']).toBe('正在处理工具或本地步骤');
+    expect(taskPlanActivityIsStale(governed, at('2026-09-24T01:01:11.000Z'))).toBe(false);
+    expect(taskPlanActivityIsStale(governed, at('2026-09-24T01:01:41.000Z'))).toBe(true);
+    expect(taskPlanActivityIsStale({ ...governed, inFlightUnits: [governed.inFlightUnits[0]!] }, at('2026-09-24T02:00:00.000Z'))).toBe(false);
+  });
 });
 
 // Issue #419 (plan slice S73; editor-surfaces §6 可编辑, V2-UX-PLAN-009, PLAN-011): the editable plan's words, and the

@@ -1,3 +1,4 @@
+import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { copyFileSync, cpSync, existsSync, mkdirSync } from 'node:fs';
@@ -1685,4 +1686,21 @@ describe('what a merge refuses, puts back and brings forward', () => {
       copy.close();
     }
   }, 240_000);
+});
+
+
+it('validates a historical reader91 source through the existing selected-Book merge callback (#1131)', async () => {
+  const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  const bookId = emptyBook(source, '合成历史来源'); await source.close();
+  const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite')); db.exec('PRAGMA user_version = 91');
+  const packagePath = join(roots.inputRoot, 'reader91.ai7db');
+  try { await writeDatabasePackage(db, roots.dataRoot, packagePath, () => ({ dataVersion: 1, schemaRevision: 91,
+    softwareVersion: '0.1.0', createdAt: T.toISOString(), origin: 'database-export' })); } finally { db.close(); }
+  let target = await EditorialStore.open(otherRoot, roots.codeRoot);
+  const preview = await target.inspectDatabaseImport(packagePath); await target.prepareDatabaseMerge(preview.previewId, T);
+  await target.close(); target = await EditorialStore.open(otherRoot, roots.codeRoot);
+  try {
+    expect(target.listBooks(null).items.map((book) => book.bookId)).toContain(bookId);
+    expect(target.inspectDataVersion()).toMatchObject({ dataVersion: 1, schemaRevision: LATEST_SCHEMA_VERSION });
+  } finally { await target.close(); }
 });

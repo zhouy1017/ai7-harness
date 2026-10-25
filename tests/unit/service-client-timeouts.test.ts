@@ -5,6 +5,13 @@ import { requestTimeoutMs } from '../../src/main/service-client.js';
 // that grows with a file or a manuscript has the long budget, and every other request the ordinary one.
 
 describe('the service request deadlines', () => {
+  it('leaves the model probe deadline to service admission without changing other watchdogs', () => {
+    expect(requestTimeoutMs('testModelServiceConnection')).toBeNull();
+    expect(requestTimeoutMs('inspectGlobalAttention')).toBe(30_000);
+    expect(requestTimeoutMs('getStartup')).toBe(600_000);
+    expect(requestTimeoutMs('ready')).toBe(120_000);
+    expect(requestTimeoutMs('shutdown')).toBe(30_000);
+  });
   it("gives 资料库's intake the long budget, since it reads a file of up to 1 GiB whole (Issue #427, S79c review)", () => {
     const ordinary = requestTimeoutMs('inspectLibraryMaterials');
     const long = requestTimeoutMs('approveManuscriptExport');

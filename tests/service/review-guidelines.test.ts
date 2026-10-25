@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, writeFileSync } from 'node:fs';
@@ -36,6 +37,12 @@ import { TYPOS_AND_USAGE } from '../support/review-categories.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for 知识库 › 审阅规范文件 (Issue #427, plan slice S79a; V2-UX-KB-001 to KB-003, REV-012): the
 // real store on a temporary Agent Data Root, exact `sample1` imported through the supported path, the Review Run drive loop
@@ -97,7 +104,7 @@ async function openStore(): Promise<{ store: EditorialStore; owner: BaselineAnal
     interruptAfterAbandonObjectRemoval: false,
     baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
   });
-  const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+  const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
   return { store, owner, driver: new ReviewRunDriver(store.reviewRunDriveSteps, owner) };
 }
 

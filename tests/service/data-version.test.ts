@@ -1,3 +1,4 @@
+import { dataVersionMarkerPath, readDataVersionMarker } from '../../src/service/data-version.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
@@ -15,6 +16,7 @@ import {
   readUpgrade,
 } from '../../src/service/data-version.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
+import { SUPERVISION_TRIGGER_SQL } from '../../src/service/learning/supervision-directives.js';
 import { SERIES_KNOWLEDGE_SCHEMA_VERSION, LATEST_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
@@ -437,4 +439,52 @@ describe('数据版本标记 over the real store (Issue #967; ADR 0023)', () => 
     await reopened(() => undefined);
     expect((await readMarker()).schemaRevision).toBe(LATEST_SCHEMA_VERSION);
   }, 120_000);
+});
+
+
+it.each([90, 91])('advances a valid historical reader%s without rewriting Book or version-history rows (#1131)', async (revision) => {
+  const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  const creation = store.prepareBookCreation('合成历史读取', null);
+  store.commitBookCreation({ ...creation.proposed, reviewDigest: creation.reviewDigest });
+  await store.close();
+  const db = new DatabaseSync(databasePath());
+  const before = db.prepare('SELECT rowid, * FROM books ORDER BY rowid').all();
+  new DataVersionLedger(db).recordOpen({ softwareVersion: '0.0.9', dataVersion: 1, schemaRevision: revision });
+  const history = db.prepare('SELECT rowid, * FROM store_versions ORDER BY rowid').all();
+  db.exec(`PRAGMA user_version = ${revision}`); db.close();
+  const marker = (await readDataVersionMarker(roots.dataRoot))!;
+  await writeFile(dataVersionMarkerPath(roots.dataRoot), JSON.stringify({ ...marker, schemaRevision: revision }));
+  const upgraded = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  expect(upgraded.inspectDataVersion()).toMatchObject({ dataVersion: 1, schemaRevision: LATEST_SCHEMA_VERSION });
+  await upgraded.close();
+  const read = new DatabaseSync(databasePath());
+  try {
+    expect(read.prepare('SELECT rowid, * FROM books ORDER BY rowid').all()).toEqual(before);
+    expect(read.prepare('SELECT rowid, * FROM store_versions ORDER BY rowid').all().slice(0, history.length)).toEqual(history);
+  } finally { read.close(); }
+});
+
+it('refuses a revision-91 store whose current-format learning records are damaged before any successor stamp (#1131)', async () => {
+  // A genuine revision-91 predecessor: an editor's House supervision directive, and no model Run or request evidence at all.
+  const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  store.recordLearningSupervision({ operation: 'create', targets: [], scope: { kind: 'house' }, categoryId: 'typos-and-usage', text: '合成本社原则。', effect: 'guide' });
+  await store.close();
+  const db = new DatabaseSync(databasePath());
+  try {
+    expect(db.prepare("SELECT count(*) count FROM analysis_run_states WHERE json_type(canonical_json, '$.requestAdmission') IS NOT NULL").get()!.count).toBe(0);
+    const row = db.prepare('SELECT directive_id, canonical_json FROM learning_supervision_directives ORDER BY ordinal LIMIT 1').get()!;
+    const tampered = canonicalRecord({ ...(JSON.parse(String(row.canonical_json)) as Record<string, unknown>), effect: 'not-an-effect' });
+    for (const name of Object.keys(SUPERVISION_TRIGGER_SQL)) db.exec(`DROP TRIGGER ${name}`);
+    db.prepare('UPDATE learning_supervision_directives SET canonical_json = ?, sha256 = ? WHERE directive_id = ?').run(tampered.json, tampered.digest, String(row.directive_id));
+    for (const sql of Object.values(SUPERVISION_TRIGGER_SQL)) db.exec(sql);
+    db.exec('PRAGMA user_version = 91');
+  } finally { db.close(); }
+  const marker = (await readDataVersionMarker(roots.dataRoot))!;
+  await writeFile(dataVersionMarkerPath(roots.dataRoot), JSON.stringify({ ...marker, schemaRevision: 91 }));
+  const written = await readFile(dataVersionMarkerPath(roots.dataRoot), 'utf8');
+  await expect(EditorialStore.open(roots.dataRoot, roots.codeRoot)).rejects.toThrow();
+  // Refused by its own revision-91 readers: neither the database nor the marker claims the successor.
+  const read = new DatabaseSync(databasePath());
+  try { expect(read.prepare('PRAGMA user_version').get()!.user_version).toBe(91); } finally { read.close(); }
+  expect(await readFile(dataVersionMarkerPath(roots.dataRoot), 'utf8')).toBe(written);
 });
