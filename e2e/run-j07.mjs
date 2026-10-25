@@ -1108,7 +1108,15 @@ async function main() {
         /^[0-9a-f]{64}$/.test(review.reviewDigest) && /^[0-9a-f]{64}$/.test(review.technical.inputDigest) &&
         JSON.stringify(review.options) === JSON.stringify({includeAnnotations:true,includeSuggestions:true,includeEditorNotes:false}) &&
         JSON.stringify(review.fidelity.filter(row => row.count > 0 || row.status !== 'preserved').map(row => `${row.key}:${row.status}:${row.count}`)) === JSON.stringify(rows) &&
-        review.fidelity.find(row => row.key === 'file-revisions')?.detail === originalMarkerDetail, `${name}-independent-native-review`);
+        review.fidelity.find(row => row.key === 'file-revisions')?.detail === originalMarkerDetail, `${name}-independent-native-review`, {
+          bookId: review.bookId, expectedBookId: nativeBookId, target: review.target, importedRevisionId: imported.revisionId,
+          format: review.format, degraded: review.degraded, restoration: review.restoration,
+          restorationLine: review.restorationLine, expectedRestorationLine: restoration, technical: review.technical,
+          reviewDigest: review.reviewDigest, options: review.options,
+          rows: review.fidelity.filter(row => row.count > 0 || row.status !== 'preserved').map(row => `${row.key}:${row.status}:${row.count}`),
+          expectedRows: rows, originalMarkerDetail: review.fidelity.find(row => row.key === 'file-revisions')?.detail,
+          expectedOriginalMarkerDetail: originalMarkerDetail,
+        });
       await assertRenderer(native, `(() => {const card=window.__j07.exportCard();const fidelity=card.querySelector('section.export-fidelity');
         return JSON.stringify(window.__j07.exportRows())===${JSON.stringify(JSON.stringify(rows))} && fidelity.dataset.exportDegraded==='true' && fidelity.dataset.exportRestoration==='from-original' &&
           fidelity.querySelector('.export-restoration-line')?.textContent===${JSON.stringify(restoration)} && fidelity.querySelector('.export-degraded-note')!==null &&
