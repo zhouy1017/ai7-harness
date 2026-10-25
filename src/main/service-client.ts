@@ -78,7 +78,13 @@ export function journeyClose(
  * How long one request may take before the service is treated as hung and stopped: startup's readiness, the operations
  * whose work grows with a file or a manuscript, and every other request, each as the reason beside it says.
  */
-export function requestTimeoutMs(operation: ServiceOperation): number {
+export function requestTimeoutMs(operation: 'testModelServiceConnection'): null;
+export function requestTimeoutMs(operation: Exclude<ServiceOperation, 'testModelServiceConnection'>): number;
+export function requestTimeoutMs(operation: ServiceOperation): number | null;
+export function requestTimeoutMs(operation: ServiceOperation): number | null {
+  // The unchanged single-response protocol has no permit-granted signal. The service owns this
+  // probe's post-grant model deadline; ordinary/startup/shutdown watchdogs remain independent.
+  if (operation === 'testModelServiceConnection') return null;
   if (operation === 'ready') return STARTUP_READY_TIMEOUT_MS;
   const long =
     operation === 'stageSelectedManuscript' || operation === 'commitNewBookImport' || operation === 'commitSourceImport' ||
@@ -112,7 +118,7 @@ interface PendingRequest {
   readonly operation: ServiceOperation;
   readonly resolve: (value: unknown) => void;
   readonly reject: (error: Error) => void;
-  readonly timeoutMs: number;
+  readonly timeoutMs: number | null;
   timeout: NodeJS.Timeout | undefined;
 }
 
@@ -184,7 +190,7 @@ function serviceEnvironment(
 
 function readinessIsExact(value: ServiceReadiness): boolean {
   return (
-    value.protocolVersion === 173 &&
+    value.protocolVersion === 174 &&
     value.state === 'ready' &&
     value.runtime.electron === '43.4.1' &&
     value.runtime.node === '24.18.1' &&
@@ -406,12 +412,12 @@ export class ServiceClient {
     });
   }
 
-  /** The service dispatches serially: queued time is not the next operation's execution time. */
+  /** Ordinary operations remain FIFO; the one detached model probe owns no ordinary deadline. */
   #armFirstDeadline(): void {
-    const first = this.#pending.entries().next().value;
+    const first = [...this.#pending.entries()].find(([, pending]) => pending.operation !== 'testModelServiceConnection');
     if (first === undefined) return;
     const [id, pending] = first;
-    if (pending.timeout !== undefined) return;
+    if (pending.timeout !== undefined || pending.timeoutMs === null) return;
     pending.timeout = setTimeout(() => {
       this.#pending.delete(id);
       pending.reject(new ServiceCallError('SERVICE_TIMEOUT', '本地业务服务响应超时。'));
@@ -481,7 +487,9 @@ export class ServiceClient {
         return;
       }
       const pending = this.#pending.get(response.id);
-      if (!pending || this.#pending.keys().next().value !== response.id) {
+      // Failure frames carry no trusted operation tag: only the pending entry selects this exception.
+      const firstOrdinary = [...this.#pending.entries()].find(([, entry]) => entry.operation !== 'testModelServiceConnection');
+      if (!pending || pending.operation !== 'testModelServiceConnection' && firstOrdinary?.[0] !== response.id) {
         this.#fault();
         return;
       }

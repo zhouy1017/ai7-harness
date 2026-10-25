@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { randomUUID } from 'node:crypto';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../src/shared/protected-secret-identity.js';
 import { resolve } from 'node:path';
@@ -6,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BaselineAnalysisExecutionOwner, EXECUTION_RUN_CAPACITY, type UnitHold } from '../../src/service/analysis/execution.js';
 import { RECONCILED_QUEUED_DETAIL, RECONCILED_YIELDED_DETAIL, RUN_IDLE_YIELD_LABEL, RUN_QUEUED_LABEL } from '../../src/service/analysis/baseline-analysis-store.js';
 import { ProtocolError, decodeRequest } from '../../src/service/request-frames.js';
-import { DEVELOPER_LIVE_POLICY_BINDING, ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
+import { DEVELOPER_LIVE_POLICY_BINDING, ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy, resolveSourceCheckoutLaunchPolicySync } from '../../src/service/launch-policy.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { RESUME_BLOCKED_SLOT } from '../../src/service/task-plan.js';
@@ -21,6 +22,12 @@ import {
 } from '../../src/shared/protocol.js';
 import { SAMPLE1_UNITS, importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for concurrent Book work (Issue #49, plan slice S14; ADR 0021, V2-UX-CONC-001 to 009):
 // the real store on a temporary Agent Data Root, exact `sample1` imported through the supported path as several Books,
@@ -78,6 +85,7 @@ function ownerOf(
   options: { capacity?: number; waitingCapacity?: number; route?: boolean; fixture?: ResolvedModelFixture } = {},
 ): BaselineAnalysisExecutionOwner {
   return new BaselineAnalysisExecutionOwner({
+    requestGovernor,
     ledger: store.baselineAnalysisLedger,
     launchPolicy,
     fixture: options.route === false ? null : options.fixture ?? fixture,
@@ -112,11 +120,14 @@ function prepare(store: EditorialStore, bookId: string, update: BaselineAnalysis
 }
 
 /** Exact `sample1` as a Book of its own, its first baseline prepared; one Main Editorial Role connection for the store. */
-async function preparedBook(store: EditorialStore, title: string, first: boolean): Promise<Book> {
+async function preparedBook(store: EditorialStore, title: string, first: boolean, ceiling?: { kind: 'tokens'; maxTotalTokens: number }): Promise<Book> {
   const imported = await importSample1Book(store, roots.codeRoot, title);
   await pinEditorialWorkspaceProfileRevision2(store, imported.bookId);
   if (first) recordMissingCredentialConnection(store, 'L2 主编辑连接');
-  const prepared = prepare(store, imported.bookId);
+  const initial = prepare(store, imported.bookId);
+  const prepared = ceiling === undefined ? initial : store.editBaselineAnalysisPlan({ bookId: imported.bookId,
+    taskIntentId: initial.taskIntent!.taskIntentId, planEnvelopeDigest: initial.planEnvelope!.digest,
+    removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: ceiling });
   return {
     bookId: imported.bookId,
     manuscriptId: imported.manuscriptId,
@@ -157,6 +168,27 @@ function active(projection: GlobalAttentionProjection): Array<[string | null, st
 }
 
 describe('the execution owner\'s concurrency governor over the real store on exact sample1', () => {
+  it('keeps the admitted v1 fixture serial when an unrelated top-level execution declaration says three (#1131)', async () => {
+    const selectedProduction = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production');
+    launchPolicy = { ...launchPolicy, providerProcessing: { ...launchPolicy.providerProcessing,
+      execution: structuredClone(selectedProduction.providerProcessing.execution!),
+    } };
+    const store = await openWithRoute(); const book = await preparedBook(store, 'v1 与声明边界', true);
+    let entered!: () => void; let release!: () => void; let first = true;
+    const reached = new Promise<void>((done) => { entered = done; }); const held = new Promise<void>((done) => { release = done; });
+    const execution = ownerOf(store, async () => { if (first) { first = false; entered(); await held; } });
+    try {
+      const runId = store.authorizeBaselineAnalysis(book.bookId, book.taskIntentId, book.planEnvelopeDigest).dispatchRunRecordId!;
+      execution.admitAndDispatch(runId); await reached;
+      expect(execution.progressFor(runId)).toMatchObject({ currentUnitOrdinal: 1, unitsSettled: 0, completedAttempts: 0 });
+      expect(store.baselineAnalysisLedger.unitCheckpoints(runId)).toHaveLength(0);
+      expect(store.baselineAnalysisLedger.requestAdmissionOf(runId)).toBeNull();
+      expect(requestGovernor.snapshot()).toEqual({ registered: 0, waiting: 0, inFlight: 0, backgroundInFlight: 0 });
+      release(); await execution.whenIdle();
+      expect(store.inspectBaselineAnalysis(book.bookId).run?.state).toBe('completed');
+    } finally { release(); await execution.dispose(); store.close(); }
+  });
+
   it('refuses overflow without an attempt, preserves admitted waiting starts and reuses a cancelled waiting place', async () => {
     const gate = sharedHold();
     const store = await openWithRoute();
@@ -551,7 +583,7 @@ describe('the execution owner\'s concurrency governor over the real store on exa
   });
 });
 
-describe('live foreground places and request aborts (#1080)', () => {
+describe('finite-ceiling serial live foreground places and request aborts (#1080)', () => {
   it.each(['ordinary-production', 'developer-live'] as const)('runs two Books under %s, queues the third, pauses at a boundary and aborts only on cancel', async (scope) => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { baselineAnalysisRoute: null, induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false, induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false });
     const ceiling = { kind: 'tokens' as const, maxTotalTokens: 500_000 };
@@ -580,14 +612,15 @@ describe('live foreground places and request aborts (#1080)', () => {
           synopsis: '合成边界结果。', entities: [], events: [], relationships: [], settingClaims: [], conflicts: [], unresolved: [], confidence: 'high' }) }, finish_reason: 'stop' }],
         usage: { prompt_tokens: 40, completion_tokens: 20 } }), { status: 200 })) });
     });
-    const execution = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture: null,
+    const execution = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture: null,
+      productionPolicyFor: (binding) => resolveSourceCheckoutLaunchPolicySync(roots.codeRoot, 'ordinary-production', binding),
       secretResolver: { resolve: async () => 'placeholder-key' },
       ...(scope === 'ordinary-production' ? { production: { scope, nativeFetch } }
         : { developerLive: { launch: { runBudgetCeiling: ceiling, providerCacheRoot: roots.dataRoot, validation: null }, nativeFetch } }) });
     try {
-      const a = await preparedBook(store, 'L2 实时甲', false);
-      const b = await preparedBook(store, 'L2 实时乙', false);
-      const c = await preparedBook(store, 'L2 实时丙', false);
+      const a = await preparedBook(store, 'L2 实时甲', false, scope === 'ordinary-production' ? ceiling : undefined);
+      const b = await preparedBook(store, 'L2 实时乙', false, scope === 'ordinary-production' ? ceiling : undefined);
+      const c = await preparedBook(store, 'L2 实时丙', false, scope === 'ordinary-production' ? ceiling : undefined);
       const ar = start(store, execution, a);
       const br = start(store, execution, b);
       const cr = start(store, execution, c);
@@ -625,7 +658,7 @@ describe('live foreground places and request aborts (#1080)', () => {
 
 
 /**
- * Ordinary production over a synthetic transport whose every request waits until the suite releases it (#1089): a unit in
+ * Finite-ceiling serial production over a synthetic transport whose every request waits for release (#1089): a unit in
  * flight stays sent, so a yield is seen to wait for it and never to abort it.
  */
 async function heldProductionLaunch(): Promise<{ store: EditorialStore; owner: BaselineAnalysisExecutionOwner; calls: Array<{ signal: AbortSignal; release: () => void }> }> {
@@ -653,7 +686,8 @@ async function heldProductionLaunch(): Promise<{ store: EditorialStore; owner: B
         usage: { prompt_tokens: 40, completion_tokens: 20 } }), { status: 200 })) });
     });
   };
-  const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture: null,
+  const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture: null,
+    productionPolicyFor: (binding) => resolveSourceCheckoutLaunchPolicySync(roots.codeRoot, 'ordinary-production', binding),
     production: { scope: 'ordinary-production', nativeFetch }, secretResolver: { resolve: async () => 'synthetic-placeholder-key' } });
   return { store, owner, calls };
 }
@@ -661,9 +695,9 @@ async function heldProductionLaunch(): Promise<{ store: EditorialStore; owner: B
 it.each([false, true])('yields at a sent unit boundary and honors manual pause=%s before idle resume (#1089, #1114)', async (manual) => {
   const { store, owner, calls } = await heldProductionLaunch();
   try {
-    const background = await preparedBook(store, '合成空闲甲', false);
-    const foreground = await preparedBook(store, '合成即时乙', false);
-    const waiting = await preparedBook(store, '合成即时丙', false);
+    const background = await preparedBook(store, '合成空闲甲', false, { kind: 'tokens', maxTotalTokens: 500_000 });
+    const foreground = await preparedBook(store, '合成即时乙', false, { kind: 'tokens', maxTotalTokens: 500_000 });
+    const waiting = await preparedBook(store, '合成即时丙', false, { kind: 'tokens', maxTotalTokens: 500_000 });
     const ceiling = { kind: 'tokens' as const, maxTotalTokens: 5_000 };
     const plan = store.inspectBaselineAnalysis(background.bookId, () => null);
     const edited = store.editBaselineAnalysisPlan({ bookId: background.bookId, taskIntentId: background.taskIntentId, planEnvelopeDigest: plan.planEnvelope!.digest, removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: ceiling });
@@ -764,9 +798,9 @@ it('reads a Run AI7 yielded as an ordinary paused Run after a restart, which not
   let bookId = '';
   let runRecordId = '';
   try {
-    const background = await preparedBook(store, '合成重启让位甲', false);
-    const foreground = await preparedBook(store, '合成重启即时乙', false);
-    const waiting = await preparedBook(store, '合成重启即时丙', false);
+    const background = await preparedBook(store, '合成重启让位甲', false, { kind: 'tokens', maxTotalTokens: 500_000 });
+    const foreground = await preparedBook(store, '合成重启即时乙', false, { kind: 'tokens', maxTotalTokens: 500_000 });
+    const waiting = await preparedBook(store, '合成重启即时丙', false, { kind: 'tokens', maxTotalTokens: 500_000 });
     bookId = background.bookId;
     runRecordId = store.authorizeBaselineAnalysis(bookId, background.taskIntentId, background.planEnvelopeDigest, 'idle').dispatchRunRecordId!;
     owner.setBackgroundIdle(true);

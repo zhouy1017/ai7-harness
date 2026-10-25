@@ -1,9 +1,10 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { spawnSync } from 'node:child_process';
 import { mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
@@ -20,6 +21,12 @@ import { generateSyntheticManuscript, SYNTHETIC_MANUSCRIPT_IDS } from '../editor
 import { validateCase } from '../editorial-cases/runner/case-file.js';
 import { classifyFinding, locateOnce, simulatedEditor, structuralMet, type TextAnchor } from '../editorial-cases/runner/scoring.js';
 import { createCaseRoots, importManuscript, openStore } from '../editorial-cases/runner/session.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Issue #812: the editorial case set and its provider-free harness. The harness run below replays every case through the product
 // path on its fixture with the global fetch refused; its metrics must equal the reviewed baseline, so a product change that moves
@@ -265,7 +272,7 @@ it.runIf(process.env['AI7_REGENERATE_EDITORIAL_SYNTHETIC_FIXTURE'] === '1')('aut
       const definition = reviewCategoryKindDefinition(category);
       const roots = await createCaseRoots();
       const store: EditorialStore = await openStore(roots, ROOT, fixture);
-      const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture, secretResolver: { resolve: async () => null } });
+      const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture, secretResolver: { resolve: async () => null } });
       try {
         const book = await importManuscript(store, ROOT, roots, { source: 'synthetic', id }, `合成稿 ${id}`);
         let progress = store.createReviewCategoryPreparationWork(book.bookId, definition, { mode: 'review-first', selectedRange: null }, policy);

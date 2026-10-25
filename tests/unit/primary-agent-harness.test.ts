@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { CONTEXT_WINDOW_EXCEEDED_CODE, INVALID_CREDENTIAL_CODE, QUOTA_EXCEEDED_CODE } from '@deepseek-ai/dsh-llm';
 import { BASELINE_PROMPT_CONTRACT, BASELINE_PROMPT_CONTRACT_DIGEST } from '../../src/service/analysis/contract.js';
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE, evaluateEgress, type EgressBindingFacts } from '../../src/service/provider/egress-gate.js';
 import { Ai7LocalDeterministicAdapter } from '../../src/service/provider/local-deterministic-adapter.js';
 import { fixtureEntryKey, loadModelFixture } from '../../src/service/provider/model-fixture.js';
@@ -160,6 +161,53 @@ describe('PrimaryAgentHarness', () => {
       expect(outcome.signals.at(-1)).toMatchObject({ kind: 'failed', failure: { failureClass: 'provider-account-limit', code: QUOTA_EXCEEDED_CODE } });
     } finally {
       await handle.finish();
+    }
+  });
+
+  // Issue #1131: capacity is awaited before the final gate, and the permit is released exactly once on every path — after
+  // the whole body, or at once when the gate refuses or throws or the owner's admission refuses — with nothing sent then.
+  it.each(['completed', 'gate-refused', 'gate-throws', 'admission-throws'] as const)('releases the shared request permit once when the turn is %s', async (path) => {
+    const fixture = await loadModelFixture(FIXTURES_ROOT, 'synthetic-usage-ceiling');
+    const adapter = new Ai7LocalDeterministicAdapter(fixture, BASELINE_PROMPT_CONTRACT_DIGEST, codes);
+    const governor = new ModelRequestGovernor({ globalCapacity: 1 });
+    const producer = governor.registerProducer({ key: `harness-${path}`, kind: 'analysis-unit', lane: 'foreground' });
+    const occupancy: number[] = [];
+    const observed = new Proxy(adapter, { get: (target, property) => property === 'stream'
+      ? async function* (options: Parameters<typeof adapter.stream>[0]) {
+        occupancy.push(governor.snapshot().inFlight); yield* target.stream(options); occupancy.push(governor.snapshot().inFlight);
+      }
+      : Reflect.get(target, property, target) });
+    const order: string[] = [];
+    const sessionId = randomUUID();
+    const handle = await prepareExecution({
+      sessionId, route: LOCAL_DETERMINISTIC_ROUTE, model: LOCAL_DETERMINISTIC_MODEL, systemPrompt: SYSTEM, promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST,
+      adapterFactory: () => observed,
+      acquireRequest: async (_payload, signal) => {
+        const permit = await governor.acquire(producer, signal); order.push('granted');
+        return {
+          admit: () => { order.push('admitted'); if (path === 'admission-throws') throw new Error('owner refused the admission'); },
+          release: () => { order.push('released'); permit.release(); },
+        };
+      },
+      gate: () => {
+        order.push('gate');
+        if (path === 'gate-throws') throw new Error('gate failed');
+        return path === 'gate-refused' ? { decision: 'refuse', reason: 'binding-stale', detail: '合成拒绝。' } : { decision: 'transmit-local', payloadDigest: 'a'.repeat(64) };
+      },
+      onTransmitTicket: () => { throw new Error('no remote ticket may be issued under v1'); },
+    });
+    try {
+      handle.bindExecution({ harnessSessionId: sessionId, behaviorCompositionDigest: handle.composition.digest, promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST });
+      const outcome = await handle.submitUnit(ZERO_UNIT);
+      expect(outcome.terminal).toBe(path === 'completed' ? 'completed' : path === 'gate-refused' ? 'interrupted' : 'failed');
+      expect(order).toEqual(path === 'completed' ? ['granted', 'gate', 'admitted', 'released']
+        : path === 'admission-throws' ? ['granted', 'gate', 'admitted', 'released'] : ['granted', 'gate', 'released']);
+      expect(adapter.servedRequests).toBe(path === 'completed' ? 1 : 0);
+      expect(occupancy).toEqual(path === 'completed' ? [1, 1] : []);
+      expect(governor.snapshot()).toMatchObject({ registered: 1, waiting: 0, inFlight: 0 });
+    } finally {
+      await handle.finish();
+      governor.unregisterProducer(producer); governor.close(); await governor.whenIdle();
     }
   });
 

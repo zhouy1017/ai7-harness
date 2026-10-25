@@ -1,15 +1,22 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { writeFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ACCOUNT_LIMIT_CANCELLED_UNREAD, BaselineAnalysisExecutionOwner, accountLimitDetail } from '../../src/service/analysis/execution.js';
-import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
+import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy, resolveSourceCheckoutLaunchPolicySync } from '../../src/service/launch-policy.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { BASELINE_ANALYSIS_TASK_GOAL, type BaselineAnalysisProjection, type LaunchPolicyProjection } from '../../src/shared/protocol.js';
 import { SAMPLE1_UNITS, importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { accountLimitReached } from '../../src/service/task-plan.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for 模型服务账户限额 (Issue #51, plan slice S16b; V2-UX-MODEL-018, RUN-012): the real store on
 // a temporary Agent Data Root, exact `sample1` imported through the supported path, and J-04's deterministic route over
@@ -47,7 +54,7 @@ function openWithRoute(): Promise<EditorialStore> {
 }
 
 function owner(store: EditorialStore): BaselineAnalysisExecutionOwner {
-  return new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+  return new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
 }
 
 function prepare(store: EditorialStore, bookId: string): BaselineAnalysisProjection {
@@ -172,7 +179,7 @@ describe('模型服务账户限额 over the real store', () => {
   }, 300_000);
 });
 
-// Real ordinary-production gate and DSH composition, with a payload-free refusing transport: no network or credential.
+// Finite-ceiling serial compatibility over the real production gate and DSH composition; no network or credential.
 async function retryableLaunch() {
   const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { baselineAnalysisRoute: null, induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false, induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false });
   const route = ORDINARY_PRODUCTION_ALLOWED_BINDINGS.find((binding) => binding.route === 'deepseek-open-platform')!;
@@ -187,15 +194,20 @@ async function retryableLaunch() {
   await pinEditorialWorkspaceProfileRevision2(store, bookId);
   let progress = store.createBaselineAnalysisPreparationWork(bookId, BASELINE_ANALYSIS_TASK_GOAL, null, policy);
   while (!progress.done) progress = store.advanceBaselineAnalysisPreparationWork(progress.workId!);
-  return { store, bookId, policy, prepared: progress.projection! };
+  const prepared = progress.projection!;
+  const finite = store.editBaselineAnalysisPlan({ bookId, taskIntentId: prepared.taskIntent!.taskIntentId,
+    planEnvelopeDigest: prepared.planEnvelope!.digest, removedSteps: [], disallowedAdaptations: [],
+    runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 500_000 } });
+  return { store, bookId, policy, prepared: finite };
 }
 
-describe('backoff before the safe retry on the declared retryable route', () => {
+describe('finite-ceiling serial backoff before the safe retry on the declared retryable route', () => {
   it.each([{ status: 429, retryAfter: '1', minimum: 1_000 }, { status: 503, retryAfter: null, minimum: 5_000 }])
     ('waits before the single $status retry and repeats the exact request', async ({ status, retryAfter, minimum }) => {
       const { store, bookId, policy, prepared } = await retryableLaunch();
       const calls: Array<{ at: number; body: string }> = [];
-      const execution = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
+      const execution = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
+        productionPolicyFor: (binding) => resolveSourceCheckoutLaunchPolicySync(roots.codeRoot, 'ordinary-production', binding),
         secretResolver: { resolve: async () => 'placeholder-production-key' },
         production: { scope: 'ordinary-production', nativeFetch: async (_url, init) => {
           calls.push({ at: Date.now(), body: String(init?.body) });
@@ -218,7 +230,8 @@ describe('backoff before the safe retry on the declared retryable route', () => 
     let sent!: () => void;
     const first = new Promise<void>((resolve) => { sent = resolve; });
     let calls = 0;
-    const execution = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
+    const execution = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
+      productionPolicyFor: (binding) => resolveSourceCheckoutLaunchPolicySync(roots.codeRoot, 'ordinary-production', binding),
       secretResolver: { resolve: async () => 'placeholder-production-key' },
       production: { scope: 'ordinary-production', nativeFetch: async () => {
         calls += 1;

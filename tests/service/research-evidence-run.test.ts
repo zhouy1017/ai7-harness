@@ -1,7 +1,8 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import { DEVELOPER_LIVE_POLICY_BINDING, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
@@ -18,6 +19,12 @@ import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../src/shared/p
 import { FACTUAL_REVIEW_TASK_GOAL, type LaunchPolicyProjection } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Issue #425 (S70): one research Run of 事实核查 on exact sample1 through the real store, frozen plan, execution owner, harness
 // tool loop, Egress Gate, per-ticket host admission, live-once ledger and Research Snapshot Cache, on a socket-free transport.
@@ -120,6 +127,7 @@ async function setup(options: { failedModelFetch?: boolean; failRetentionOnce?: 
     return answer({ content: JSON.stringify(result) });
   };
   owner = new BaselineAnalysisExecutionOwner({
+    requestGovernor,
     ledger: store.factualReviewLedger, launchPolicy: policy, fixture: null,
     secretResolver: { resolve: async () => 'placeholder-development-key' },
     developerLive: { launch: { runBudgetCeiling: launch.live.runBudgetCeiling, providerCacheRoot: join(roots.inputRoot, 'cache'), validation: { family: 'reference-free-review', case: 'sample1-whole-book', delta: null } }, nativeFetch },

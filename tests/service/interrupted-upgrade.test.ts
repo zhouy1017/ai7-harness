@@ -1,3 +1,4 @@
+import { initializeTaskAuthorizationSchema } from '../../src/service/task-authorization.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { OUTCOME_RESOLUTION_SCHEMA_SQL, initializeOutcomeResolutionSchema } from '../../src/service/analysis/outcome-resolutions.js';
 import { join } from 'node:path';
@@ -446,4 +447,16 @@ describe('an upgrade interrupted before its version stamp', () => {
     }, (error: unknown) => error);
     expect(refused instanceof BoundedStoreError || refused instanceof StoreError ? refused.code : refused).toBe('SCHEMA_MIGRATION_FAILED');
   }, 120_000);
+});
+
+
+it('reopens idempotently after the reader-only stamp commits before its open-history record (#1131)', async () => {
+  expect(await opened()).toBe(LATEST_SCHEMA_VERSION);
+  const before = tables();
+  withDatabase((db) => { db.exec('PRAGMA user_version = 91'); initializeTaskAuthorizationSchema(db);
+    expect(db.prepare('PRAGMA user_version').get()!.user_version).toBe(LATEST_SCHEMA_VERSION); });
+  expect(tables()).toEqual(before);
+  expect(await opened()).toBe(LATEST_SCHEMA_VERSION);
+  expect(await opened()).toBe(LATEST_SCHEMA_VERSION);
+  expect(tables()).toEqual(before);
 });

@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { reviewFixtureContractVersion } from '../../src/service/provider/model-fixture.js';
 import { randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
@@ -30,6 +31,12 @@ import { reviewCategoryContractInput, reviewCategoryEntry } from '../../src/serv
 import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
 import { withSeriesKnowledgeFor } from '../support/policy-rules.js';
 import { sheetProcedureOption, SHEET_PROCEDURE_NONE } from '../../src/renderer/captured-procedure-labels.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for the Series Retrieval Exclusion's reach into Review Runs (Issue #64, plan slice S29b;
 // V2-UX-SER-022 to SER-027): a prepared Run's approval refused, an approved Run stopped as the exclusion is recorded, one
@@ -88,6 +95,7 @@ async function withSession(body: (session: Session, bookId: string) => Promise<v
     baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage, reviewContractVersion: reviewFixtureContractVersion(fixture) },
   });
   const owner = new BaselineAnalysisExecutionOwner({
+    requestGovernor,
     ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null }, unitHold,
     seriesScopeGuard: (runRecordId) => store.seriesScopeGuard(runRecordId),
   });

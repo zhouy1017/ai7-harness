@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
+import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import { createServiceTestRoots } from '../support/temp-data-root.js';
 import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
@@ -7,6 +8,12 @@ import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execu
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { BASELINE_ANALYSIS_TASK_GOAL } from '../../src/shared/protocol.js';
 import { join } from 'node:path';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 describe('model-service proxy environment setting', () => {
   it('keeps a proxy-failed unit unsettled, displays the reason, and resumes the same Run', async () => {
@@ -29,7 +36,7 @@ describe('model-service proxy environment setting', () => {
         baselineAnalysisRoute: {
         fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage,
       } });
-      execution = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+      execution = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
       const { bookId } = await importSample1Book(store, roots.codeRoot, 'L2 proxy failure');
       await pinEditorialWorkspaceProfileRevision2(store, bookId);
       recordMissingCredentialConnection(store, 'L2 connection');

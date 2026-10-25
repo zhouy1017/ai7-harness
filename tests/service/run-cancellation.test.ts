@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { IMPORTED_SKILL_RELATIONS, CUSTOM_ANALYSIS_RELATIONS, HOUSE_REVIEW_PREFERENCE_RELATIONS, TASK_INTENT_DRAFT_RELATIONS } from '../support/pre74-schema.js';
 import { execPre74Fixture, FACTUAL_VERIFICATION_RELATIONS, MATERIAL_INDEX_LAYER_RELATIONS, PROPOSAL_REVIEW_RELATIONS, RESEARCH_EVIDENCE_RELATIONS } from '../support/pre74-schema.js';
 import { createHash } from 'node:crypto';
@@ -35,6 +36,12 @@ import { RUN_CHECKPOINT_RELATIONS_DROP_ORDER } from '../support/run-continuation
 import { SAMPLE1_UNITS, importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for 取消任务 (Issue #422, plan slice S76a): the real store on a temporary Agent
 // Data Root, exact `sample1` imported through the supported path, J-04's deterministic route, and no Provider,
@@ -76,6 +83,7 @@ function openWithRoute(): Promise<EditorialStore> {
 /** The owner as the service builds it for J-10: the deterministic route, and the unit hold read from `holdPath`. */
 function owner(store: EditorialStore, holdPath: string | null): BaselineAnalysisExecutionOwner {
   return new BaselineAnalysisExecutionOwner({
+    requestGovernor,
     ledger: store.baselineAnalysisLedger,
     launchPolicy,
     fixture,
@@ -263,6 +271,7 @@ describe('取消任务 over the real store', () => {
     let releaseHold!: () => void;
     const holding = new Promise<void>((resolve) => { releaseHold = resolve; });
     const execution = new BaselineAnalysisExecutionOwner({
+      requestGovernor,
       ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null },
       unitHold: async (settled) => { if (settled === 5) { held = true; await holding; } },
     });
@@ -431,6 +440,7 @@ describe('取消任务 over the real store', () => {
     let heldAt: string | null = null;
     const store = await openWithRoute();
     const execution = new BaselineAnalysisExecutionOwner({
+      requestGovernor,
       ledger: store.baselineAnalysisLedger,
       launchPolicy,
       fixture,

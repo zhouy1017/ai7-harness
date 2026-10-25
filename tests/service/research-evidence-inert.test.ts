@@ -1,6 +1,7 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, beforeEach } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import { DEVELOPER_LIVE_POLICY_BINDING, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
@@ -14,6 +15,12 @@ import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../src/shared/p
 import { FACTUAL_REVIEW_TASK_GOAL } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Issue #425 (S70): the retention hooks the brief admitted into the execution owner and the platform-tool session are inert
 // wherever no research unit of 事实核查 runs — the deterministic 事实核查 route has no platform tools, and a web-bearing review
@@ -47,7 +54,7 @@ describe('the retention hooks are inert without a research unit', () => {
       baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
     });
     const sunk: unknown[] = [];
-    owner = new BaselineAnalysisExecutionOwner({ ledger: store.factualReviewLedger, launchPolicy: policy, fixture,
+    owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.factualReviewLedger, launchPolicy: policy, fixture,
       secretResolver: { resolve: async () => null }, researchEvidence: (input) => { sunk.push(input); } });
     const book = await importSample1Book(store, roots.codeRoot, '惰性回归');
     await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
@@ -93,7 +100,7 @@ describe('the retention hooks are inert without a research unit', () => {
       return new Response(JSON.stringify({ model: DEVELOPER_LIVE_POLICY_BINDING.model, choices: [{ message: { content: JSON.stringify(result), reasoning_content: '合成。' }, finish_reason: 'stop' }], usage }), { status: 200 });
     };
     const sunk: unknown[] = [];
-    owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
+    owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
       secretResolver: { resolve: async () => 'placeholder-development-key' },
       developerLive: { launch: { runBudgetCeiling, providerCacheRoot: join(roots.inputRoot, 'cache'), validation: { family: 'reference-free-review', case: 'sample1-whole-book', delta: null } }, nativeFetch },
       researchEvidence: (input) => { sunk.push(input); } });

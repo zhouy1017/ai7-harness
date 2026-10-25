@@ -104,6 +104,22 @@ export function reviewCategorySchemaDigest(promptContractDigest: string, version
 
 export function reviewCategoryKindDefinition(input: ReviewCategoryContractInput, version: 1 | 2 = 2, tools?: LocalToolsRule): AnalysisKindDefinition {
   const names = tools?.declarations === undefined ? [] : ruleNamedToolSchemas(false, tools).map((schema) => schema.name);
+  return compileReviewCategory(input, version, names);
+}
+
+// Historical prompt grammar: adding a future tool must not change any of these contracts.
+const HISTORICAL_REVIEW_TOOL_NAMES = Object.freeze([
+  'baseline_facts', 'exact_fetch', 'guideline_clause', 'read_blocks', 'retrieve', 'search_manuscript', 'term_table',
+].sort((name, other) => name.localeCompare(other, 'en')));
+
+/** Reconstruct known prompt bytes only; none of these objects grants tool or transmission authority. */
+export function historicalReviewCategoryDefinitions(input: ReviewCategoryContractInput, version: 1 | 2): readonly AnalysisKindDefinition[] {
+  if (version === 1) return [compileReviewCategory(input, 1, [])];
+  if (version !== 2) throw new Error('REVIEW_CONTRACT_VERSION_UNSUPPORTED');
+  return [compileReviewCategory(input, 2, []), compileReviewCategory(input, 2, HISTORICAL_REVIEW_TOOL_NAMES)];
+}
+
+function compileReviewCategory(input: ReviewCategoryContractInput, version: 1 | 2, names: readonly string[]): AnalysisKindDefinition {
   const contract = reviewCategoryContract(input, version, names);
   const category = contract.category;
   const promptContractDigest = reviewCategoryContractDigest(contract);
@@ -268,7 +284,12 @@ export function withReviewLocalTools(definition: AnalysisKindDefinition, tools: 
   const numbered = reviewCategoryKindDefinition(input, 2);
   const next = reviewCategoryKindDefinition(input, 2, tools);
   // Other wrappers retain their own proof; only this owner's exact base can be replaced here.
-  return owned.reviewToolPromptDigest === definition.promptContractDigest || definition.promptContractDigest === numbered.promptContractDigest ? next : definition;
+  if (owned.reviewToolPromptDigest === definition.promptContractDigest || definition.promptContractDigest === numbered.promptContractDigest) {
+    return next.kind === definition.kind && next.contractVersion === definition.contractVersion
+      && next.promptContractDigest === definition.promptContractDigest && next.systemPrompt === definition.systemPrompt
+      && next.schemaDigest === definition.schemaDigest ? definition : next;
+  }
+  return definition;
 }
 export function pinnedReviewDefinition(definition: AnalysisKindDefinition, digest: string): AnalysisKindDefinition {
   const numbered = (definition as AnalysisKindDefinition & { numberedReviewContract?: AnalysisKindDefinition }).numberedReviewContract;

@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -23,6 +24,12 @@ import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-d
 import { importSample1Book, requireExactSample1 } from '../support/sample1-baseline.js';
 import { DIALOGUE_PROMPT_CONTRACT_DIGEST, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST } from '../../src/service/dialogue/contract.js';
 import { dialogueReasoningLine } from '../../src/renderer/dialogue-labels.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for 就这段提问… (Issue #52, plan slice S17a; UI ADR 0014; V2-UX-DIALOG-001 to 016) over the
 // real store, the real PrimaryAgentHarness composition and the AI7 local deterministic adapter: an answer streamed by
@@ -78,6 +85,7 @@ function steppedHold(): { hold: (streamed: number, interrupted: () => boolean) =
 
 function owner(store: EditorialStore, hold: ((streamed: number, interrupted: () => boolean) => Promise<void>) | null, withFixture = true): DialogueExecutionOwner {
   return new DialogueExecutionOwner({
+    requestGovernor,
     records: store,
     fixture: withFixture ? fixture : null,
     sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY),
@@ -134,7 +142,7 @@ describe('就这段提问… over the real store and harness', () => {
   it('retrieves and exact-fetches the pinned revision locally and recovers jump anchors from its Session log (#893)', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     const retrievalFixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-dialogue-retrieval');
-    const dialogues = new DialogueExecutionOwner({ records: store, fixture: retrievalFixture, live: null,
+    const dialogues = new DialogueExecutionOwner({ requestGovernor, records: store, fixture: retrievalFixture, live: null,
       sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), retrievalIndex: (id) => store.dialogueRetrievalIndex(id) });
     try {
       const book = await importSample1Book(store, roots.codeRoot, '本机检索回归');
@@ -633,6 +641,7 @@ describe('就这段提问… at its edges (PR #658 review)', () => {
     let refusals = 1;
     const settle = store.settleDialogueAttempt.bind(store);
     const dialogues = new DialogueExecutionOwner({
+      requestGovernor,
       records: {
         bindDialogueAttempt: store.bindDialogueAttempt.bind(store),
         openDialogueSpan: store.openDialogueSpan.bind(store),
