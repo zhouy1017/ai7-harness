@@ -11,8 +11,10 @@ import { join } from 'node:path';
  */
 export function stageHistoricalTrackedDocxFixture(store: EditorialStore, dataRoot: string, staged: StagedImportProjection) {
   if (staged.wordTrackedChanges === undefined) throw new Error('historical tracked fixture requires a revision inventory');
+  const target = staged.targetChoices.find((choice) => choice.kind === 'new-book');
+  if (target === undefined) throw new Error('historical fixture requires its actual new-Book target choice');
   const sourceReview = store.prepareSourceImportReview(staged.draftId, staged.draftVersion,
-    { kind: 'new-book', choiceId: 'new-book', confirmedTitle: staged.titleSuggestion.value, relationship: 'source-only' });
+    { kind: 'new-book', choiceId: target.id, confirmedTitle: staged.titleSuggestion.value, relationship: 'source-only' });
   const db = new DatabaseSync(join(dataRoot, 'store', 'ai7.sqlite'));
   let fidelity: unknown;
   try {

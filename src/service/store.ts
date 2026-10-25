@@ -5233,9 +5233,16 @@ export class EditorialStore {
     try {
       configureDatabase(authority, 'FILE');
       validateRequestAdmissionRecords(authority, Number(authority.prepare('PRAGMA user_version').get()?.user_version) >= MODEL_REQUEST_ADMISSION_SCHEMA_VERSION);
-      validateWordImportRetentionVersion(authority, Number(authority.prepare('PRAGMA user_version').get()?.user_version) >= WORD_TRACKED_IMPORT_SCHEMA_VERSION);
-      if (Number(authority.prepare('PRAGMA user_version').get()?.user_version) >= WORD_TRACKED_IMPORT_SCHEMA_VERSION) {
-        await validateRetainedWordImports(authority, dataRoot, objectsRoot);
+      const beforeWordVersion = Number(authority.prepare('PRAGMA user_version').get()?.user_version);
+      // An unknown future schema belongs to the existing unsupported-version refusal, not this Word reader.
+      if (beforeWordVersion <= LATEST_SCHEMA_VERSION) {
+        try {
+          validateWordImportRetentionVersion(authority, beforeWordVersion >= WORD_TRACKED_IMPORT_SCHEMA_VERSION);
+          if (beforeWordVersion >= WORD_TRACKED_IMPORT_SCHEMA_VERSION) await validateRetainedWordImports(authority, dataRoot, objectsRoot);
+        } catch (error) {
+          if (error instanceof ImportRetentionError) throw new StoreError(error.code, error.message);
+          throw error;
+        }
       }
       // 升级前备份 (Issue #433, S85b; DSTO-016): a store this software must move to a later Data Version is written whole into
       // the backup location before anything migrates it, and a backup that cannot be made opens nothing.
