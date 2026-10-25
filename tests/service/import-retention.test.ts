@@ -22,11 +22,10 @@ import {
   wordTrackedSampleRecord,
   WORD_EXTRACTOR_IDENTITY,
   type WordImportChoiceRecord,
-  type WordLocalImportAdmission,
 } from '../../src/service/import-retention.js';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import { EditorialLearningLedger } from '../../src/service/learning/ledger.js';
-import { wordTrackedEditCandidate, learningMaterialDigest, LOCAL_LEARNING_POLICY_BASIS } from '../../src/service/learning-eligibility.js';
+import { wordTrackedEditCandidate, learningMaterialDigest, wordLocalImportAdmissions } from '../../src/service/learning-eligibility.js';
 import { EditorialStore, SOURCE_VERSION_PARSER_CHANGED_MESSAGE, StoreError } from '../../src/service/store.js';
 import { CLARIFICATION_SCHEMA_VERSION, LATEST_SCHEMA_VERSION, PROPOSAL_CONFLICT_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import type { ManuscriptBlockProjection, TextBoxDisposition } from '../../src/shared/protocol.js';
@@ -163,25 +162,30 @@ describe('closed Word retention definitions (#1132)', () => {
             accepted: { digest: compiled.readings.accepted.readingDigest, blockCount: compiled.readings.accepted.blocks.length, usable: compiled.readings.accepted.usable } },
           mappingDigest: compiled.readings.rejected.mappingDigest, templateManifestDigest: compiled.templateManifestDigest, effectiveControls: controls };
         const record = canonicalRecord(choice);
+        const sampleEntries = samples.map((sample, index) => ({ sample, templateKey: compiled.templates[index]!.templateKey }));
+        const derive = (currentChoice: WordImportChoiceRecord, currentControls = controls) => wordLocalImportAdmissions({
+          bookId, samples: sampleEntries, choice: currentChoice, choiceDigest: canonicalRecord(currentChoice).digest, currentControls, recordedAt });
+        expect(derive({ ...choice, learnFromEdits: false })).toEqual([]);
+        expect(() => wordLocalImportAdmissions({ bookId, samples: [], choice, choiceDigest: record.digest, currentControls: controls, recordedAt })).toThrow('清单');
+        const admissions = derive(choice);
+        expect(admissions).toHaveLength(samples.length);
+        const cancelled = AbortSignal.abort(new Error('Word contract cancellation'));
+        expect(() => wordLocalImportAdmissions({ bookId, samples: sampleEntries, choice, choiceDigest: record.digest,
+          currentControls: controls, recordedAt, signal: cancelled })).toThrow('Word contract cancellation');
         db.prepare(`INSERT INTO word_revision_imports(commit_id, source_version_id, book_id, fidelity_review_id, revision_id, mode, canonical_json, sha256, created_at)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(commitId, sourceVersionId, bookId, choice.fidelityReviewId, choice.revisionId, choice.mode, record.json, record.digest, recordedAt);
-        const sources = samples.map((sample, index) => {
+        const sources = admissions.map(({ sample, templateKey, materialKey, materialDigest, record: admitted }) => {
           const sampleRecord = wordTrackedSampleRecord(sample);
-          const standing = controls.materials[index]!.standing;
-          if (standing.choice !== 'book' && standing.choice !== 'house') throw new Error('expected actual admitted default');
-          const admission: WordLocalImportAdmission = { schema: 'ai7.word-local-import-admission/1', sampleId: sample.sampleId,
-            sampleDigest: sampleRecord.digest, importChoiceDigest: record.digest, basis: LOCAL_LEARNING_POLICY_BASIS, reviewedLearnFromEdits: true,
-            global: { enabled: true, reference: controls.global.reference }, book: { excluded: false, reference: controls.book.reference },
-            standing: { ...standing, choice: standing.choice } };
-          const admitted = canonicalRecord(admission);
           db.prepare(`INSERT INTO word_tracked_edit_samples(sample_id, book_id, source_version_id, template_key, canonical_json, sha256)
-            VALUES (?, ?, ?, ?, ?, ?)`).run(sample.sampleId, bookId, sourceVersionId, compiled.templates[index]!.templateKey, sampleRecord.json, sampleRecord.digest);
+            VALUES (?, ?, ?, ?, ?, ?)`).run(sample.sampleId, bookId, sourceVersionId, templateKey, sampleRecord.json, sampleRecord.digest);
           db.prepare(`INSERT INTO word_tracked_edit_sample_imports(sample_id, commit_id, sample_digest, choice_digest, canonical_json, sha256, captured_at)
             VALUES (?, ?, ?, ?, ?, ?, ?)`).run(sample.sampleId, commitId, sampleRecord.digest, record.digest, admitted.json, admitted.digest, recordedAt);
           return { bookId, sampleId: sample.sampleId, sampleDigest: sampleRecord.digest, sourceVersionId, sourceDigest: compiled.sourceDigest,
             graphDigest: compiled.graphDigest, importCommitId: commitId, admissionDigest: admitted.digest,
-            materialKey: materials[index]!.materialKey, materialDigest: materials[index]!.materialDigest };
+            materialKey, materialDigest };
         });
+        expect(() => ledger.captureWordSamples(sources, cancelled)).toThrow('Word contract cancellation');
+        expect(db.prepare('SELECT count(*) total FROM learning_signals').get()?.total).toBe(0);
         const signals = ledger.captureWordSamples(sources);
         expect(signals).toHaveLength(samples.length);
         expect(ledger.captureWordSamples(sources)).toEqual(signals);
@@ -196,10 +200,20 @@ describe('closed Word retention definitions (#1132)', () => {
           applicability: { kind: 'house' }, title: '拒绝 Word 记忆', editorialDimension: '语言', confidence: 0.5 }, 'development-ci')).toThrow();
         expect(inspect().items).toEqual([]);
         ledger.change({ kind: 'book', bookId, excluded: true, expectedEntries: 0 });
+        const bookExcluded = ledger.wordImportControls(bookId, materials);
+        expect(() => derive(choice, bookExcluded)).toThrow('变化');
+        expect(derive({ ...choice, effectiveControls: bookExcluded }, bookExcluded)).toEqual([]);
         expect(inspect().signals[0]!.currentEligibility).toBe('excluded');
         expect(() => ledger.captureWordSamples(sources)).toThrow();
         ledger.change({ kind: 'book', bookId, excluded: false, expectedEntries: 1 });
+        ledger.change({ kind: 'switch', enabled: false, expectedEntries: 2 });
+        const globalOff = ledger.wordImportControls(bookId, materials);
+        expect(derive({ ...choice, effectiveControls: globalOff }, globalOff)).toEqual([]);
+        ledger.change({ kind: 'switch', enabled: true, expectedEntries: 3 });
+        expect(inspect().signals).toHaveLength(samples.length);
         ledger.change({ kind: 'material', signalId: signal.signalId });
+        const materialExcluded = ledger.wordImportControls(bookId, materials);
+        expect(derive({ ...choice, effectiveControls: materialExcluded }, materialExcluded)).toEqual([]);
         expect(inspect().signals[0]!.currentEligibility).toBe('excluded');
         db.exec('DROP TRIGGER word_tracked_edit_sample_imports_no_update');
         db.prepare('UPDATE word_tracked_edit_sample_imports SET choice_digest = ?').run('f'.repeat(64));

@@ -349,7 +349,8 @@ export class EditorialLearningLedger {
   }
 
   /** One atomic batch shares source/import validation, without copying or rehashing the graph per sample. */
-  captureWordSamples(sources: ReadonlyArray<WordTrackedEditLearningSource>): string[] {
+  captureWordSamples(sources: ReadonlyArray<WordTrackedEditLearningSource>, abortSignal?: AbortSignal): string[] {
+    abortSignal?.throwIfAborted();
     requireLearning(this.db.isTransaction);
     return this.#read(() => {
       const result: string[] = [];
@@ -357,10 +358,11 @@ export class EditorialLearningLedger {
       if (sources.length === 0) return result;
       requireLearning(new Set(sources.map((source) => source.sampleId)).size === sources.length &&
         sources.every((source) => source.bookId === sources[0]!.bookId && source.importCommitId === sources[0]!.importCommitId));
-      const evidenceBySample = sources.map((source) => this.#wordEvidence(source));
+      const evidenceBySample = sources.map((source) => { abortSignal?.throwIfAborted(); return this.#wordEvidence(source); });
       const current = this.wordImportControls(sources[0]!.bookId, sources.map((source, index) => ({
         templateKey: evidenceBySample[index]!.templateKey, materialKey: source.materialKey, materialDigest: source.materialDigest })));
       for (let index = 0; index < sources.length; index += 1) {
+        abortSignal?.throwIfAborted();
         const source = sources[index]!;
         const evidence = evidenceBySample[index]!;
         const eligibility = this.#standing(source.bookId, source.materialKey);
