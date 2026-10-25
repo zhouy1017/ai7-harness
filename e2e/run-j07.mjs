@@ -658,14 +658,19 @@ async function importAndOpen(renderer, title, distinct = false, start = 'landing
   await waitFor(renderer, `document.querySelector('[data-screen="editor"]') && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')`, 'import-editor');
 }
 
+/** Revision17 input controls change only through their real click and must reach the requested checked state. */
+async function clickImportControl(renderer, selector, checked, name) {
+  await assertRenderer(renderer, `(() => {const input=document.querySelector(${JSON.stringify(selector)});if(!(input instanceof HTMLInputElement)||input.disabled||input.checked===${checked})return false;input.click();return input.checked===${checked};})()`, name);
+}
+
 /** Revision17: prepare the first historical fixture through the public preserved source-only reader. */
 async function reviewHistoricalPublication(renderer, sourceDigest, sourceBytes) {
   await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'historical-publication-landing');
   await click(renderer, '导入稿件', 'historical-publication-stage');
   await waitFor(renderer, `document.querySelector('[data-import-target-choice="new-book"]')`, 'historical-publication-target');
-  await clickSelector(renderer, '[data-import-target-choice="new-book"]', 'historical-publication-new-book');
+  await clickImportControl(renderer, '[data-import-target-choice="new-book"]', true, 'historical-publication-new-book');
   await waitFor(renderer, `document.querySelector('[data-import-relationship="source-only"]')`, 'historical-publication-relationship');
-  await clickSelector(renderer, '[data-import-relationship="source-only"]', 'historical-publication-source-only');
+  await clickImportControl(renderer, '[data-import-relationship="source-only"]', true, 'historical-publication-source-only');
   await waitFor(renderer, `document.querySelector('#book-title')`, 'historical-publication-title');
   await fill(renderer, '#book-title', EXCERPT.title, 'historical-publication-title-filled');
   await click(renderer, '确认书名并复核', 'historical-publication-review');
@@ -1049,17 +1054,17 @@ async function main() {
       await waitFor(native, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, `${name}-landing`);
       await click(native, '导入稿件', `${name}-picker`);
       await waitFor(native, `document.querySelector('[data-import-target-choice="new-book"]')`, `${name}-target`);
-      await clickSelector(native, '[data-import-target-choice="new-book"]', `${name}-new-book`);
+      await clickImportControl(native, '[data-import-target-choice="new-book"]', true, `${name}-new-book`);
       await waitFor(native, `document.querySelector('[data-import-relationship="first-manuscript"]')`, `${name}-relationship`);
-      await clickSelector(native, '[data-import-relationship="first-manuscript"]', `${name}-first-manuscript`);
+      await clickImportControl(native, '[data-import-relationship="first-manuscript"]', true, `${name}-first-manuscript`);
       await waitFor(native, `document.querySelector('[data-word-import-controls="ready"]')`, `${name}-controls-before-prepare`);
       await assertRenderer(native, `document.querySelector('[data-word-import-mode="suggestions"]')?.checked===true && document.querySelector('[data-word-import-mode="accepted-baseline"]')?.checked===false && document.querySelector('[data-word-accepted-baseline-confirmation]')?.checked===false && document.querySelector('[data-word-learn-from-edits]')?.checked===true`, `${name}-honest-default`);
       if (mode === 'accepted-baseline') {
-        await clickSelector(native, '[data-word-import-mode="accepted-baseline"]', `${name}-accepted-mode`);
+        await clickImportControl(native, '[data-word-import-mode="accepted-baseline"]', true, `${name}-accepted-mode`);
         await assertRenderer(native, `document.querySelector('[data-word-accepted-baseline-confirmation]')?.checked===false && Array.from(document.querySelectorAll('button')).find(button=>button.textContent==='确认书名并复核')?.disabled===true`, `${name}-separate-confirmation-required`);
-        await clickSelector(native, '[data-word-accepted-baseline-confirmation]', `${name}-confirm-accepted`);
+        await clickImportControl(native, '[data-word-accepted-baseline-confirmation]', true, `${name}-confirm-accepted`);
       }
-      await clickSelector(native, '[data-word-learn-from-edits]', `${name}-learning-opt-out`);
+      await clickImportControl(native, '[data-word-learn-from-edits]', false, `${name}-learning-opt-out`);
       await assertRenderer(native, `document.querySelector('[data-word-learn-from-edits]')?.checked===false`, `${name}-learning-choice-visible`);
       await fill(native, '#book-title', EXCERPT.title, `${name}-title`);
       await click(native, '确认书名并复核', `${name}-prepare-import`);
