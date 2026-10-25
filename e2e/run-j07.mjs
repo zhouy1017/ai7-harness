@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { unzipSync } from 'fflate';
 import { lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
+import { DatabaseSync } from 'node:sqlite';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -638,9 +639,12 @@ const READ_PUBLICATION = `window.ai7.inspectDeliverables().then((deliverables) =
   prompt: deliverables.publication.actualsPrompt === null ? null : deliverables.publication.actualsPrompt.label + ' · ' + deliverables.publication.actualsPrompt.stateLabel,
 }))`;
 
-async function importAndOpen(renderer, title, distinct = false) {
-  await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'import-landing');
-  await click(renderer, '导入稿件', 'import-start');
+async function importAndOpen(renderer, title, distinct = false, start = 'landing') {
+  requireJourney(start === 'landing' || start === 'target', 'import-entry-stage');
+  if (start === 'landing') {
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'import-landing');
+    await click(renderer, '导入稿件', 'import-start');
+  }
   await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'import-target');
   await assertRenderer(renderer, `(() => { const radio=document.querySelector(${JSON.stringify(`input[aria-label="${distinct ? '新建图书（作为不同作品）' : '新建图书'}"]`)}); if (!(radio instanceof HTMLInputElement)) return false; radio.click(); return radio.checked; })()`, 'import-target-select');
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if (!(radio instanceof HTMLInputElement) || radio.checked) return false; radio.click(); return radio.checked; })()`, 'import-relationship-select');
@@ -652,6 +656,98 @@ async function importAndOpen(renderer, title, distinct = false) {
   await waitFor(renderer, `document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true'`, 'import-acknowledged', 180_000);
   await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'import-open');
   await waitFor(renderer, `document.querySelector('[data-screen="editor"]') && document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')`, 'import-editor');
+}
+
+/** Revision17 input controls change only through their real click and must reach the requested checked state. */
+async function clickImportControl(renderer, selector, checked, name) {
+  await assertRenderer(renderer, `(() => {const input=document.querySelector(${JSON.stringify(selector)});if(!(input instanceof HTMLInputElement)||input.disabled||input.checked===${checked})return false;input.click();return input.checked===${checked};})()`, name);
+}
+
+/** Revision17: prepare the first historical fixture through the public preserved source-only reader. */
+async function reviewHistoricalPublication(renderer, sourceDigest, sourceBytes) {
+  await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'historical-publication-landing');
+  await click(renderer, '导入稿件', 'historical-publication-stage');
+  await waitFor(renderer, `document.querySelector('[data-import-target-choice="new-book"]')`, 'historical-publication-target');
+  await clickImportControl(renderer, '[data-import-target-choice="new-book"]', true, 'historical-publication-new-book');
+  await waitFor(renderer, `document.querySelector('[data-import-relationship="source-only"]')`, 'historical-publication-relationship');
+  await clickImportControl(renderer, '[data-import-relationship="source-only"]', true, 'historical-publication-source-only');
+  await waitFor(renderer, `document.querySelector('#book-title')`, 'historical-publication-title');
+  await fill(renderer, '#book-title', EXCERPT.title, 'historical-publication-title-filled');
+  await click(renderer, '确认书名并复核', 'historical-publication-review');
+  await waitFor(renderer, `document.querySelector('[data-import-review-kind="source-only"]')`, 'historical-publication-reviewed');
+  await assertRenderer(renderer, `(() => { const review=document.querySelector('[data-import-review-kind="source-only"]');return review.querySelector('[data-source-sha256]')?.textContent===${JSON.stringify(sourceDigest)} && review.querySelector('[data-source-bytes]')?.textContent===${JSON.stringify(String(sourceBytes))};})()`, 'historical-publication-original-pin');
+}
+
+/** Only the closed, disposable first root is converted; no committed source or manuscript is seeded. */
+function plantHistoricalPublicationDraft(dataRoot, sourceDigest, sourceBytes) {
+  const db = new DatabaseSync(resolve(dataRoot, 'store', 'ai7.sqlite'));
+  try {
+    db.exec('PRAGMA foreign_keys = ON; BEGIN IMMEDIATE');
+    const stamp = db.prepare('PRAGMA user_version').get().user_version;
+    for (const table of ['books', 'manuscripts', 'source_versions', 'manuscript_import_records', 'import_commits']) {
+      requireJourney(db.prepare(`SELECT count(*) count FROM ${table}`).get().count === 0, 'historical-publication-no-committed-parent');
+    }
+    const rows = db.prepare(`SELECT d.draft_id FROM import_drafts d
+      JOIN staged_import_snapshots s ON s.draft_id=d.draft_id JOIN content_objects o ON o.object_digest=d.object_digest
+      WHERE d.state='reviewed' AND d.reviewed_relationship='source-only' AND d.reviewed_target_kind='new-book'
+        AND d.reviewed_existing_book_id IS NULL AND d.object_digest=? AND s.source_digest=? AND o.byte_length=?
+        AND s.parser_identity='ai7-docx-fflate-saxes/3'`).all(sourceDigest, sourceDigest, sourceBytes);
+    requireJourney(rows.length === 1 && db.prepare('SELECT count(*) count FROM import_drafts').get().count === 1,
+      'historical-publication-exact-reviewed-legacy-draft');
+    const draftId = rows[0].draft_id;
+    const snapshot = JSON.stringify(db.prepare('SELECT * FROM staged_import_snapshots WHERE draft_id=?').get(draftId));
+    const blocks = JSON.stringify(db.prepare('SELECT * FROM staged_import_blocks WHERE draft_id=? ORDER BY position').all(draftId));
+    const object = JSON.stringify(db.prepare('SELECT * FROM content_objects WHERE object_digest=?').get(sourceDigest));
+    requireJourney(db.prepare('DELETE FROM staged_word_revision_intakes WHERE draft_id=?').run(draftId).changes === 1,
+      'historical-publication-one-successor-stage-removed');
+    requireJourney(db.prepare(`UPDATE import_drafts SET state='staged',reviewed_title=NULL,reviewed_target_choice_id=NULL,
+      reviewed_target_kind=NULL,reviewed_existing_book_id=NULL,reviewed_relationship=NULL,reviewed_book_state_digest=NULL,
+      reviewed_reuse_source_version_id=NULL,review_digest=NULL,reviewed_at=NULL
+      WHERE draft_id=? AND state='reviewed' AND reviewed_relationship='source-only'`).run(draftId).changes === 1,
+    'historical-publication-one-review-reset');
+    requireJourney(JSON.stringify(db.prepare('SELECT * FROM staged_import_snapshots WHERE draft_id=?').get(draftId)) === snapshot &&
+      JSON.stringify(db.prepare('SELECT * FROM staged_import_blocks WHERE draft_id=? ORDER BY position').all(draftId)) === blocks &&
+      JSON.stringify(db.prepare('SELECT * FROM content_objects WHERE object_digest=?').get(sourceDigest)) === object &&
+      db.prepare('PRAGMA user_version').get().user_version === stamp, 'historical-publication-preserves-source-and-reader');
+    db.exec('COMMIT');
+  } catch (error) { if (db.isTransaction) db.exec('ROLLBACK'); throw error; }
+  finally { db.close(); }
+}
+
+/** Closed-product readback proves that the recovered import really used the unchanged legacy arm. */
+function requireHistoricalPublication(dataRoot, bookId, sourceDigest, sourceBytes) {
+  const db = new DatabaseSync(resolve(dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+  try {
+    const rows = db.prepare(`SELECT sv.parser_identity parent_parser,sp.parser_identity derivation_parser,o.byte_length
+      FROM manuscript_import_records mir JOIN source_versions sv ON sv.source_version_id=mir.source_version_id
+      JOIN source_provenance sp ON sp.provenance_id=mir.provenance_id JOIN content_objects o ON o.object_digest=sv.object_digest
+      WHERE mir.book_id=? AND sv.source_digest=? AND sv.object_digest=?`).all(bookId, sourceDigest, sourceDigest);
+    requireJourney(rows.length === 1 && rows[0].parent_parser === 'ai7-docx-fflate-saxes/3' &&
+      rows[0].derivation_parser === 'ai7-docx-fflate-saxes/3' && rows[0].byte_length === sourceBytes,
+    'historical-publication-actual-legacy-provenance');
+    for (const table of ['word_revision_sources', 'word_revision_imports', 'word_manuscript_source_segments',
+      'word_tracked_edit_samples', 'word_tracked_edit_sample_imports', 'word_import_mark_sources', 'learning_signals']) {
+      requireJourney(db.prepare(`SELECT count(*) count FROM ${table}`).get().count === 0, 'historical-publication-no-word-capture');
+    }
+  } finally { db.close(); }
+}
+
+/** The complete thirty-block native window and each real imported mark, cross-checked with the visible editor. */
+async function readNativeWordState(renderer, bookId, name) {
+  await assertRenderer(renderer, MARK_HELPERS, `${name}-mark-reader`);
+  const state = await renderer.evaluate(`(async()=>{const overview=await window.ai7.getBookOverview({bookId:${JSON.stringify(bookId)},historyCursor:null});
+    if(overview.primaryAction.kind!=='open-manuscript')return null;
+    const binding=overview.primaryAction;const page=await window.ai7.getManuscriptWindow({manuscriptId:binding.manuscriptId,branchId:binding.branchId,cursor:null});
+    const cards=await Promise.all(page.marks.map(mark=>window.ai7.getEditorialMarkCard({manuscriptId:page.manuscriptId,branchId:page.branchId,markId:mark.markId})));
+    return {bookId:page.bookId,revisionId:page.revisionId,revisionLabel:page.revisionLabel,workingDigest:page.workingDigest,total:page.position.totalBlocks,
+      previous:page.previousCursor,next:page.nextCursor,truncated:page.marksTruncated,texts:page.blocks.map(block=>block.text),
+      visible:window.__j07m.blocks().map((_,index)=>window.__j07m.text(index+1)),
+      marks:cards.map(card=>({markId:card.markId,kind:card.kind,status:card.status,source:card.source,body:card.body,pinnedText:card.pinnedText,
+        suggestion:card.suggestion===null?null:{changeType:card.suggestion.changeType,currentText:card.suggestion.currentText,proposedText:card.suggestion.proposedText,application:card.suggestion.application}}))};})()`);
+  requireJourney(state?.bookId === bookId && state.total === EXCERPT.blocks && state.texts.length === EXCERPT.blocks &&
+    state.previous === null && state.next === null && state.truncated === false &&
+    JSON.stringify(state.visible) === JSON.stringify(state.texts), `${name}-complete-visible-native-window`);
+  return state;
 }
 
 /**
@@ -910,11 +1006,13 @@ async function main() {
     credentialDataRoot = dataRoot;
     const shellRoot = await ensureCanonicalDataDirectory(dataRoot, 'shell');
     const executable = electronExecutable();
-    const launch = async ({ picker, save, folder, adapter } = {}) => {
+    const launch = async ({ picker, save, folder, adapter, root = dataRoot } = {}) => {
+      requireJourney(inside(runRoot, root) && await realpath(root) === root, 'launch-canonical-owned-root');
+      const launchShell = root === dataRoot ? shellRoot : await ensureCanonicalDataDirectory(root, 'shell');
       const args = [
         '--disable-background-networking', '--disable-component-update', '--disable-default-apps', '--disable-domain-reliability',
-        '--disable-sync', '--metrics-recording-only', '--no-first-run', '--remote-debugging-pipe', `--user-data-dir=${shellRoot}`,
-        resolve(ROOT, 'dist', 'main', 'index.cjs'), '--data-root', dataRoot, '--launcher-pid', String(process.pid),
+        '--disable-sync', '--metrics-recording-only', '--no-first-run', '--remote-debugging-pipe', `--user-data-dir=${launchShell}`,
+        resolve(ROOT, 'dist', 'main', 'index.cjs'), '--data-root', root, '--launcher-pid', String(process.pid),
       ];
       if (picker) args.push('--j07-picker-path', picker);
       // Issue #413: the Save dialog's one answer for this launch, in place of the platform's own.
@@ -933,6 +1031,156 @@ async function main() {
     };
     const close = async () => { await browser.close(); browser = undefined; };
 
+    // Revision17: these current native roots never receive the historical fixture conversion below.
+    const nativeWordExport = async (mode, name) => {
+      const root = await createCanonicalExternalDataRoot(resolve(runRoot, `${name}-data`), checkout);
+      const destinationRoot = resolve(runRoot, `${name}-exports`);
+      await mkdir(destinationRoot);
+      const destination = resolve(destinationRoot, `${name}.docx`);
+      const sourceDigest = createHash('sha256').update(await readFile(manuscript)).digest('hex');
+      const original = await readExportedDocx(manuscript);
+      const expected = await admittedParagraphs(EXCERPT);
+      const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' });
+      const words = (value) => Array.from(segmenter.segment(value), ({ segment }) => segment);
+      const insertion = await admittedSpanText(EXCERPT.source, EXPORT_INPUT.replacement.insert);
+      const replaced = words(expected[EXPORT_INPUT.replacement.block - 1]);
+      const deletion = replaced.slice(EXPORT_INPUT.replacement.from, EXPORT_INPUT.replacement.to).join('');
+      const annotation = await admittedSpanText(EXCERPT.source, EXPORT_INPUT.comment.text);
+      if (mode === 'accepted-baseline') expected[EXPORT_INPUT.replacement.block - 1] =
+        replaced.slice(0, EXPORT_INPUT.replacement.from).join('') + insertion + replaced.slice(EXPORT_INPUT.replacement.to).join('');
+      const digest = (value) => createHash('sha256').update(value).digest('hex');
+      at('import-and-open');
+      let native = await launch({ root, picker: manuscript, save: destination });
+      await waitFor(native, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, `${name}-landing`);
+      await click(native, '导入稿件', `${name}-picker`);
+      await waitFor(native, `document.querySelector('[data-import-target-choice="new-book"]')`, `${name}-target`);
+      await clickImportControl(native, '[data-import-target-choice="new-book"]', true, `${name}-new-book`);
+      await waitFor(native, `document.querySelector('[data-import-relationship="first-manuscript"]')`, `${name}-relationship`);
+      await clickImportControl(native, '[data-import-relationship="first-manuscript"]', true, `${name}-first-manuscript`);
+      await waitFor(native, `document.querySelector('[data-word-import-controls="ready"]')`, `${name}-controls-before-prepare`);
+      await assertRenderer(native, `document.querySelector('[data-word-import-mode="suggestions"]')?.checked===true && document.querySelector('[data-word-import-mode="accepted-baseline"]')?.checked===false && document.querySelector('[data-word-accepted-baseline-confirmation]')?.checked===false && document.querySelector('[data-word-learn-from-edits]')?.checked===true`, `${name}-honest-default`);
+      if (mode === 'accepted-baseline') {
+        await clickImportControl(native, '[data-word-import-mode="accepted-baseline"]', true, `${name}-accepted-mode`);
+        await assertRenderer(native, `document.querySelector('[data-word-accepted-baseline-confirmation]')?.checked===false && Array.from(document.querySelectorAll('button')).find(button=>button.textContent==='确认书名并复核')?.disabled===true`, `${name}-separate-confirmation-required`);
+        await clickImportControl(native, '[data-word-accepted-baseline-confirmation]', true, `${name}-confirm-accepted`);
+      }
+      await clickImportControl(native, '[data-word-learn-from-edits]', false, `${name}-learning-opt-out`);
+      await assertRenderer(native, `document.querySelector('[data-word-learn-from-edits]')?.checked===false`, `${name}-learning-choice-visible`);
+      await fill(native, '#book-title', EXCERPT.title, `${name}-title`);
+      await click(native, '确认书名并复核', `${name}-prepare-import`);
+      await waitFor(native, `document.querySelector('[data-screen="review"] [data-word-reviewed-mode="${mode}"][data-word-reviewed-learning="false"]')`, `${name}-reviewed-choice`);
+      await click(native, '新建图书并导入稿件', `${name}-commit-import`);
+      await waitFor(native, `document.querySelector('[data-screen="imported"]') && document.documentElement.dataset.ai7ImportCompletionAcknowledged==='true'`, `${name}-import-acknowledged`, 180_000);
+      const nativeBookId = await native.evaluate(`document.querySelector('[data-screen="imported"] .book-overview')?.dataset.bookId`);
+      requireJourney(UUID_PATTERN.test(nativeBookId ?? ''), `${name}-actual-book`);
+      await assertRenderer(native, PAGE_HELPERS, `${name}-page-helpers`);
+      await assertRenderer(native, sidebarNavigate(SIDEBAR.section('manuscript')), `${name}-open-imported-editor`);
+      await waitFor(native, `document.querySelector('.editor-shell[data-book-id="${nativeBookId}"] [data-testid="manuscript-editor"] > [data-block-id]')`, `${name}-imported-editor`);
+      const imported = await readNativeWordState(native, nativeBookId, name);
+      requireJourney(JSON.stringify(imported.texts.map(digest)) === JSON.stringify(expected.map(digest)), `${name}-complete-selected-reading`);
+      const expectedKinds = mode === 'suggestions' ? ['annotation', 'change-suggestion'] : ['annotation'];
+      requireJourney(JSON.stringify(imported.marks.map(mark => mark.kind).sort()) === JSON.stringify(expectedKinds) &&
+        imported.marks.every(mark => mark.source.kind === 'imported-author' && mark.source.label === IMPORTED_MARKS_AUTHOR && mark.status === 'open'),
+      `${name}-complete-imported-mark-branch`);
+      const comment = imported.marks.find(mark => mark.kind === 'annotation');
+      const suggestion = imported.marks.find(mark => mark.kind === 'change-suggestion');
+      requireJourney(comment.body === annotation && (mode === 'suggestions'
+        ? suggestion.suggestion?.changeType === 'replace' && suggestion.suggestion.currentText === deletion && suggestion.suggestion.proposedText === insertion && suggestion.suggestion.application === null
+        : suggestion === undefined), `${name}-exact-comment-and-replacement`);
+      await acknowledgedEdit(native, FIRST_EDIT, `${name}-edited-ancestry`);
+      expected[0] += FIRST_EDIT;
+      await openDeliverables(native, name);
+      at('export-open-current');
+      await clickSelector(native, '[data-screen="book-deliverables"] section.deliverables-publication [data-export-action="open"][data-export-target="current"]', `${name}-open-export`);
+      await waitFor(native, `window.__j07.exportCard()?.dataset.exportPhase==='ready' && window.__j07.exportCard().querySelector('section.export-fidelity')`, `${name}-export-reviewed`, 120_000);
+      const review = await native.evaluate(`window.ai7.reviewManuscriptExport({target:{kind:'current'},options:{includeAnnotations:true,includeSuggestions:true,includeEditorNotes:false},format:'docx'})`);
+      // Source order is fixed: one edited paragraph, one comment paragraph and one original revision paragraph.
+      const regenerated = new Set([1, EXPORT_INPUT.comment.block, EXPORT_INPUT.replacement.block]).size;
+      const restoration = `按「${mode === 'suggestions' ? '转为 AI7 修订建议' : '直接并入正文（作为定稿基线）'}」及之后的稿件文字导出；${expected.length - regenerated} 段恢复可保留的原文件格式，${regenerated} 段重新生成，具体损失见保真审阅。`;
+      const rows = ['inline-styles:preserved:1', 'annotations:preserved:1',
+        ...(mode === 'suggestions' ? ['change-suggestions:preserved:1'] : []), 'editor-notes:excluded:0',
+        'sections:preserved:1', 'headers-footers:preserved:1', 'file-revisions:degraded:2'];
+      const originalMarkerDetail = `正文来源的 2 处原始修订记号不直接恢复；文字按导入时确认的${mode === 'suggestions' ? '拒绝修订' : '接受修订'}阅读对应，之后的编辑按当前稿件写出。待处理修改建议按本次导出选项处理。`;
+      at('export-fidelity-table');
+      requireJourney(review.bookId === nativeBookId && review.target.kind === 'current' && review.target.revisionId !== imported.revisionId &&
+        review.format === 'docx' && review.degraded === true && review.restoration === 'from-original' && review.restorationLine === restoration &&
+        review.technical.writerIdentity === 'ai7-docx-word-export/1' && UUID_PATTERN.test(review.technical.sourceVersionId ?? '') &&
+        /^[0-9a-f]{64}$/.test(review.reviewDigest) && /^[0-9a-f]{64}$/.test(review.technical.inputDigest) &&
+        JSON.stringify(review.options) === JSON.stringify({includeAnnotations:true,includeSuggestions:true,includeEditorNotes:false}) &&
+        JSON.stringify(review.fidelity.filter(row => row.count > 0 || row.status !== 'preserved').map(row => `${row.key}:${row.status}:${row.count}`)) === JSON.stringify(rows) &&
+        review.fidelity.find(row => row.key === 'file-revisions')?.detail === originalMarkerDetail, `${name}-independent-native-review`, {
+          bookId: review.bookId, expectedBookId: nativeBookId, target: review.target, importedRevisionId: imported.revisionId,
+          format: review.format, degraded: review.degraded, restoration: review.restoration,
+          restorationLine: review.restorationLine, expectedRestorationLine: restoration, technical: review.technical,
+          reviewDigest: review.reviewDigest, options: review.options,
+          rows: review.fidelity.filter(row => row.count > 0 || row.status !== 'preserved').map(row => `${row.key}:${row.status}:${row.count}`),
+          expectedRows: rows, originalMarkerDetail: review.fidelity.find(row => row.key === 'file-revisions')?.detail,
+          expectedOriginalMarkerDetail: originalMarkerDetail,
+        });
+      await assertRenderer(native, `(() => {const card=window.__j07.exportCard();const fidelity=card.querySelector('section.export-fidelity');
+        return JSON.stringify(window.__j07.exportRows())===${JSON.stringify(JSON.stringify(rows))} && fidelity.dataset.exportDegraded==='true' && fidelity.dataset.exportRestoration==='from-original' &&
+          fidelity.querySelector('.export-restoration-line')?.textContent===${JSON.stringify(restoration)} && fidelity.querySelector('.export-degraded-note')!==null &&
+          fidelity.querySelector('[data-export-fidelity="file-revisions"] .export-fidelity-detail')?.textContent===${JSON.stringify(originalMarkerDetail)} &&
+          window.__j07.exportFact('保真审阅摘要')===${JSON.stringify(review.reviewDigest)} && window.__j07.exportFact('写出器')===${JSON.stringify(review.technical.writerIdentity)} &&
+          window.__j07.exportFact('来源版本 ID')===${JSON.stringify(review.technical.sourceVersionId)} && window.__j07.exportFact('导出输入摘要')===${JSON.stringify(review.technical.inputDigest)} &&
+          window.__j07.exportOption('includeAnnotations')?.checked===true && window.__j07.exportOption('includeSuggestions')?.checked===true && window.__j07.exportOption('includeEditorNotes')?.checked===false &&
+          window.__j07.exportAction('approve')?.disabled===true;})()`, `${name}-ui-and-service-review-match`);
+      at('export-save-dialog');
+      requireJourney(!existsSync(destination), `${name}-fresh-destination`);
+      await exportAct(native, 'choose', `${name}-choose-destination`);
+      await waitFor(native, `window.__j07.exportCard()?.dataset.exportPhase==='prepared' && window.__j07.status()==='已准备好导出文件，等待你确认。'`, `${name}-prepared`, 120_000);
+      const prepared = await native.evaluate(`({preparationId:window.__j07.exportFact('导出准备 ID'),payloadDigest:window.__j07.exportFact('文件摘要'),sourceVersionId:window.__j07.exportFact('来源版本 ID'),reviewDigest:window.__j07.exportFact('保真审阅摘要')})`);
+      requireJourney(UUID_PATTERN.test(prepared.preparationId ?? '') && /^[0-9a-f]{64}$/.test(prepared.payloadDigest ?? '') &&
+        prepared.sourceVersionId === review.technical.sourceVersionId && prepared.reviewDigest === review.reviewDigest && !existsSync(destination), `${name}-frozen-preparation-and-no-write`);
+      await assertRenderer(native, `window.__j07.exportAction('approve')?.disabled===false && window.__j07.exportAction('approve')?.textContent==='按上述方式导出' && window.__j07.exportCard().querySelector('.export-actions')?.dataset.exportAcceptsDegradation==='true' && window.__j07.exportCard().querySelector('.export-destination-line')?.textContent===${JSON.stringify(`${destination}（新建文件）`)}`, `${name}-explicit-degraded-approval`);
+      at('export-approved');
+      await exportAct(native, 'approve', `${name}-approve`);
+      await waitFor(native, `window.__j07.exportCard()?.dataset.exportPhase==='done' && window.__j07.status()===${JSON.stringify(EXPORTED_LABEL)} && window.__j07.tone()==='success'`, `${name}-written`, 120_000);
+      at('export-receipt-recorded');
+      const recordedNative = await native.evaluate(`window.ai7.inspectDeliverables().then(value=>value.exports)`);
+      const bytes = await readFile(destination);
+      requireJourney(recordedNative.length === 1, `${name}-one-real-receipt`);
+      const receipt = recordedNative[0];
+      requireJourney(receipt.bookId === nativeBookId && receipt.preparationId === prepared.preparationId && receipt.target.revisionId === review.target.revisionId &&
+        receipt.outcome === 'created' && receipt.format === 'docx' && receipt.destination === destination && receipt.fileName === basename(destination) &&
+        receipt.byteLength === bytes.length && receipt.technical.fileSha256 === digest(bytes) && prepared.payloadDigest === digest(bytes), `${name}-receipt-binds-file-and-version`);
+      await assertRenderer(native, `window.__j07.exportCard().querySelector('.export-receipt')?.dataset.exportOutcome==='created' && window.__j07.exportFact('来源版本 ID')===${JSON.stringify(review.technical.sourceVersionId)} && window.__j07.exportFact('导出准备 ID')===${JSON.stringify(prepared.preparationId)}`, `${name}-actual-created-receipt-ui`);
+      at('export-file-parsed');
+      const output = await readExportedDocx(destination);
+      requireJourney(JSON.stringify(output.paragraphs.map(paragraph => paragraph.digest)) === JSON.stringify(expected.map(digest)), `${name}-full-output-reading`);
+      requireJourney(JSON.stringify(output.comments) === JSON.stringify([{author:IMPORTED_MARKS_AUTHOR,digest:digest(annotation)}]) &&
+        JSON.stringify(output.paragraphs.flatMap((paragraph,index) => paragraph.bold ? [index + 1] : [])) === JSON.stringify([EXPORT_INPUT.styledRun.block]) &&
+        output.headerReference === true && output.parts['word/header1.xml'] === original.parts['word/header1.xml'], `${name}-comment-style-and-header`);
+      requireJourney(mode === 'suggestions'
+        ? JSON.stringify(output.insertions) === JSON.stringify([{author:IMPORTED_MARKS_AUTHOR,digest:digest(insertion)}]) && JSON.stringify(output.deletions) === JSON.stringify([{author:IMPORTED_MARKS_AUTHOR,digest:digest(deletion)}])
+        : output.insertions.length === 0 && output.deletions.length === 0, `${name}-exact-output-mark-branch`);
+      await openManuscript(native, name);
+      const beforeReopen = await readNativeWordState(native, nativeBookId, name);
+      requireJourney(JSON.stringify(beforeReopen.texts.map(digest)) === JSON.stringify(expected.map(digest)), `${name}-edited-current-reading`);
+      // The exported revision is the edited current revision itself, not merely some revision after the import.
+      requireJourney(beforeReopen.revisionId === review.target.revisionId, `${name}-exported-current-revision`);
+      const history = await native.evaluate(`window.ai7.inspectDeliverables().then(value=>JSON.stringify(value.exports))`);
+      const noWordSignals = `window.ai7.inspectEditorialLearning({signalOffset:0,itemOffset:0}).then(page=>page.signals.length===0 && page.nextSignalOffset===null)`;
+      requireJourney(await native.evaluate(noWordSignals), `${name}-opt-out-no-word-signals`);
+      at('restart-keeps-everything');
+      await close();
+      native = await launch({ root });
+      await waitFor(native, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('button[data-book-id="${nativeBookId}"]')`, `${name}-reopen-exact-book-ready`);
+      await clickSelector(native, `button[data-book-id="${nativeBookId}"]`, `${name}-reopen-exact-book`);
+      await waitFor(native, `document.querySelector('.editor-shell[data-book-id="${nativeBookId}"] [data-testid="manuscript-editor"] > [data-block-id]')`, `${name}-reopened-editor`);
+      await assertRenderer(native, PAGE_HELPERS, `${name}-reopened-page-helpers`);
+      const reopened = await readNativeWordState(native, nativeBookId, name);
+      requireJourney(JSON.stringify(reopened) === JSON.stringify(beforeReopen), `${name}-reopen-complete-text-marks-and-version`);
+      await openDeliverables(native, name);
+      requireJourney(await native.evaluate(`window.ai7.inspectDeliverables().then(value=>JSON.stringify(value.exports))`) === history &&
+        await native.evaluate(noWordSignals) && digest(await readFile(manuscript)) === sourceDigest, `${name}-reopen-history-opt-out-original`);
+      await waitFor(native, `window.__j07.exportRecords().length===1 && window.__j07.exportRecords()[0].dataset.preparationId===${JSON.stringify(receipt.preparationId)}`, `${name}-reopened-receipt-history-ui`);
+      requireJourney(loopback.healthy() && loopback.observedRequests() === 0, `${name}-zero-network`);
+      await close();
+    };
+    await nativeWordExport('suggestions', 'word-suggestions-export');
+    await nativeWordExport('accepted-baseline', 'word-accepted-export');
+
     at('import-and-open');
     let renderer = await launch({ picker: manuscript, save: exportPath });
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true'`, 'product-ready');
@@ -946,7 +1194,23 @@ async function main() {
     } finally {
       await renderer.send('Page.setBypassCSP', { enabled: false });
     }
-    await importAndOpen(renderer, EXCERPT.title);
+    const historicalDigest = createHash('sha256').update(await readFile(manuscript)).digest('hex');
+    await reviewHistoricalPublication(renderer, historicalDigest, metadata.size);
+    await close();
+    plantHistoricalPublicationDraft(dataRoot, historicalDigest, metadata.size);
+    renderer = await launch({ save: exportPath });
+    await waitFor(renderer, `document.querySelector('[data-screen="import-recovery"]')`, 'historical-publication-recovery');
+    await click(renderer, '继续导入', 'historical-publication-continue');
+    await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'historical-publication-recovered-target');
+    await importAndOpen(renderer, EXCERPT.title, false, 'target');
+    const historicalBookId = await renderer.evaluate(`document.querySelector('.editor-shell')?.dataset.bookId`);
+    requireJourney(UUID_PATTERN.test(historicalBookId ?? ''), 'historical-publication-committed-book');
+    await close();
+    requireHistoricalPublication(dataRoot, historicalBookId, historicalDigest, metadata.size);
+    renderer = await launch({ save: exportPath });
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('button[data-book-id="${historicalBookId}"]')`, 'historical-publication-reopen-ready');
+    await clickSelector(renderer, `button[data-book-id="${historicalBookId}"]`, 'historical-publication-open-exact-book');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id="${historicalBookId}"] [data-testid="manuscript-editor"] > [data-block-id]')`, 'historical-publication-editor');
     await assertRenderer(renderer, PAGE_HELPERS, 'page-helpers');
     const bookId = await renderer.evaluate(`document.querySelector('.editor-shell')?.dataset.bookId ?? null`);
     requireJourney(UUID_PATTERN.test(bookId ?? ''), 'book-identity');

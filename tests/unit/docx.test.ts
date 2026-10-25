@@ -1,16 +1,23 @@
 import { createHash } from 'node:crypto';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { unzipSync, zipSync } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { fixedArchiveTime } from '../../src/shared/archive-time.js';
 import {
   DOCX_PARSER_IDENTITY,
   DOCX_PARSER_IDENTITY_V1,
+  COMMENTS_REVISIONS_DETAIL,
   buildFidelityReport,
   deriveImportFidelityPlan,
   isCleanTracerFidelity,
   parseDocx,
+  parseNativeDocxIntake,
+  parseNativeDocxIntakeBytes,
+  wordImportFidelityReport,
+  compileWordTrackedDocx,
   withTextBoxDisposition,
   type DocumentSignals,
   type ParsedDocxBlock,
@@ -19,6 +26,8 @@ import type { ConversionLoss } from '../../src/service/text-manuscript.js';
 import type { FidelityCategoryProjection } from '../../src/shared/protocol.js';
 import { SAMPLE1_V1_REPORT } from '../support/import-retention.js';
 import { buildSyntheticDocx, writeSyntheticDocx, type SyntheticDocxOptions } from '../support/synthetic-docx.js';
+import { buildCorpusSource, wordParagraphMoveBody } from '../fixtures/docx-fidelity/builder.js';
+import { wordStagedIntakeRecord } from '../../src/service/import-retention.js';
 
 const NO_SIGNALS: DocumentSignals = {
   inlineStyles: 0, commentsRevisions: 0, notes: 0, tables: 0, imagesCaptions: 0, sections: 0, textBoxes: 0, fields: 0,
@@ -66,6 +75,450 @@ const NO_LOSS: ConversionLoss = {
 // has no such earlier gate and is covered below.
 
 let sandbox: string;
+
+const WORD_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+
+async function compileTrackedBody(body: string, extraEntries: Readonly<Record<string, Uint8Array>> = {}) {
+  const path = join(sandbox, 'word-revisions.docx');
+  await writeFile(path, buildSyntheticDocx({ extraEntries: { 'word/document.xml': Buffer.from(
+    `<w:document xmlns:w="${WORD_NS}" xmlns:x="urn:foreign"><w:body>${body}<w:sectPr/></w:body></w:document>`), ...extraEntries } }));
+  return { path, compiled: await compileWordTrackedDocx(path) };
+}
+
+describe('explicit tracked Word successor compiler (#1132)', () => {
+  it('states preview and selected-reading fidelity without changing historical reports', async () => {
+    const { path } = await compileTrackedBody('<w:p><w:r><w:t>base</w:t></w:r>' +
+      '<w:ins w:id="1" w:author="A"><w:r><w:t>new</w:t></w:r></w:ins></w:p>');
+    const result = await parseNativeDocxIntake(path, 'modes.docx', { legacy: () => undefined, wordPreview: () => undefined });
+    if (result.kind !== 'word') throw new Error('expected supported Word preview');
+    const { parsed, word } = result;
+    const previewRow = parsed.fidelity.find((row) => row.key === 'comments-revisions')!;
+    expect(previewRow.detail).toContain('尚未选择稿件基线');
+    const legacy = await parseDocx(path, 'modes.docx', () => undefined);
+    if (result.legacy.kind !== 'ready') throw new Error('expected actual legacy capability');
+    expect(result.legacy.parsed).toEqual(legacy);
+    const legacyBlocks: ParsedDocxBlock[] = [];
+    await parseDocx(path, 'modes.docx', (block) => legacyBlocks.push(block));
+    expect(result.legacy.blocks).toEqual(legacyBlocks);
+    const staged = wordStagedIntakeRecord('10000000-0000-4000-8000-000000000001', result)!;
+    if (staged.value.compatibility !== 'ready' || staged.value.legacy.kind !== 'ready') throw new Error('expected durable native/legacy staging');
+    expect(staged.value.previewReading).toBe('rejected');
+    expect(staged.value.legacy.blocks.map((block) => [block.position, block.sourceParagraphIndex, block.digest]))
+      .toEqual(legacyBlocks.map((block) => [block.position, block.sourceParagraphIndex, block.digest]));
+    expect(staged.value.legacy.blocks[0]!.startOffset).toBe(0);
+    expect(staged.value.legacy.blocks[0]!.stagedBlockId).toBe(`blk_${createHash('sha256').update(
+      `10000000-0000-4000-8000-000000000001\u0000${legacyBlocks[0]!.position}\u0000${legacyBlocks[0]!.digest}`).digest('hex').slice(0, 24)}`);
+    expect(JSON.parse(staged.json)).toEqual(staged.value);
+    expect(Object.hasOwn(staged.value, 'mode')).toBe(false);
+    expect(legacy.fidelity.find((row) => row.key === 'comments-revisions')!.detail).toBe(COMMENTS_REVISIONS_DETAIL);
+    for (const mode of ['suggestions', 'accepted-baseline'] as const) {
+      const reading = word.readings[mode === 'suggestions' ? 'rejected' : 'accepted'];
+      const report = wordImportFidelityReport(parsed.fidelity, mode, reading.marks.length, 'retain')!;
+      const row = report.find((category) => category.key === 'comments-revisions')!;
+      expect(row.detail).toContain(mode === 'suggestions' ? '拒绝 Word 修订' : '接受 Word 修订');
+      expect(row.detail).not.toContain('表格');
+      expect(row.count).toBe(reading.marks.length);
+      expect(deriveImportFidelityPlan(report, parsed.sourceDigest, parsed.archiveBytes, undefined,
+        parsed.parserIdentity)?.importedMarks).toBe(reading.marks.length);
+      expect(withTextBoxDisposition(report, 'retain', undefined, parsed.parserIdentity)).toEqual(report);
+      expect(withTextBoxDisposition(report, 'merge', undefined, parsed.parserIdentity)).toBeUndefined();
+      expect(report.at(-1)!.detail).toContain('最终确认的阅读');
+      expect(wordImportFidelityReport(legacy.fidelity, mode, reading.marks.length, 'retain')).toBeUndefined();
+    }
+    expect(wordImportFidelityReport(parsed.fidelity, 'suggestions', 20_001, 'retain')).toBeUndefined();
+    expect(wordImportFidelityReport(parsed.fidelity, 'suggestions', -1, 'retain')).toBeUndefined();
+    expect(wordImportFidelityReport(parsed.fidelity.map((row) => ({ ...row, detail: `${row.detail}x` })),
+      'suggestions', 1, 'retain')).toBeUndefined();
+  });
+
+  it('carries a nonempty accepted staging preview with original note/part fidelity while the legacy reader still refuses zero blocks', async () => {
+    const parts = unzipSync(await buildCorpusSource('synthetic'));
+    parts['word/document.xml'] = new Uint8Array(bodyDocumentXml('<w:p><w:ins w:id="1"><w:r><w:t>new</w:t></w:r></w:ins>' +
+      '<w:r><w:footnoteReference w:id="1"/><w:endnoteReference w:id="1"/></w:r></w:p><w:sectPr/>'));
+    const path = join(sandbox, 'word-preview.docx');
+    await writeFile(path, zipSync(parts, { level: 6, mtime: fixedArchiveTime() }));
+    const preview: string[] = [];
+    const legacy: ParsedDocxBlock[] = [];
+    const result = await parseNativeDocxIntake(path, 'word-preview.docx', {
+      legacy: (block) => legacy.push(block), wordPreview: (block) => preview.push(block.text),
+    });
+    if (result.kind !== 'word') throw new Error('expected supported Word staging preview');
+    expect(parseNativeDocxIntakeBytes(await readFile(path), 'word-preview.docx')).toEqual(result);
+    expect(result.word.previewReading).toBe('accepted');
+    expect(result.legacy).toEqual({ kind: 'unavailable', code: 'DOCX_REJECTED', reason: 'DOCX contains no editable text blocks' });
+    const staged = wordStagedIntakeRecord('10000000-0000-4000-8000-000000000001', result)!;
+    if (staged.value.compatibility !== 'ready') throw new Error('expected honest nonempty Word preview');
+    expect(staged.value.previewReading).toBe('accepted');
+    expect(staged.value.readings.rejected).toMatchObject({ usable: false, blockCount: 0 });
+    expect(staged.value.readings.accepted).toMatchObject({ usable: true, blockCount: 1 });
+    expect(staged.value.legacy.kind).toBe('unavailable');
+    expect(Object.hasOwn(staged.value, 'acceptedBaselineConfirmed')).toBe(false);
+    expect(preview).toEqual(['new']);
+    expect(legacy).toEqual([]);
+    expect(result.parsed.blockCount).toBe(1);
+    expect(result.parsed.importedMarks).toEqual([]);
+    expect(result.parsed.fidelity.find((row) => row.key === 'notes')!.count).toBe(2);
+    expect(deriveImportFidelityPlan(result.parsed.fidelity, result.parsed.sourceDigest, result.parsed.archiveBytes, undefined,
+      result.parsed.parserIdentity)).toBeDefined();
+    await expect(parseDocx(path, 'word-preview.docx', () => undefined)).rejects.toThrow('no editable text blocks');
+  });
+
+  it('keeps ordinary and unsupported native staging on the actual legacy reader without a new profile refusal', async () => {
+    for (const unsupported of [false, true]) {
+      const parts = unzipSync(await buildCorpusSource('synthetic'));
+      parts['word/document.xml'] = new Uint8Array(bodyDocumentXml('<w:p><w:r><w:t>base</w:t></w:r></w:p><w:sectPr/>'));
+      if (unsupported) parts['word/header1.xml'] = new TextEncoder().encode(`<w:hdr xmlns:w="${WORD_NS}"><w:p>` +
+        '<w:ins w:id="1"><w:r><w:t>side</w:t></w:r></w:ins></w:p></w:hdr>');
+      const path = join(sandbox, 'ordinary-or-unsupported.docx');
+      await writeFile(path, zipSync(parts, { level: 6, mtime: fixedArchiveTime() }));
+      const legacy: ParsedDocxBlock[] = [];
+      const preview: string[] = [];
+      const result = await parseNativeDocxIntake(path, 'ordinary.docx', {
+        legacy: (block) => legacy.push(block), wordPreview: (block) => preview.push(block.text),
+      });
+      expect(result.kind).toBe('legacy');
+      expect(parseNativeDocxIntakeBytes(await readFile(path), 'ordinary.docx')).toEqual(result);
+      expect(result.word?.kind ?? null).toBe(unsupported ? 'unsupported' : null);
+      expect(preview).toEqual([]);
+      expect(legacy.map((block) => block.text)).toEqual(['base']);
+      expect(result.parsed).toEqual(await parseDocx(path, 'ordinary.docx', () => undefined));
+      const staged = wordStagedIntakeRecord('10000000-0000-4000-8000-000000000001', result);
+      if (unsupported) expect(staged?.value).toMatchObject({ compatibility: 'unsupported', previewReading: null });
+      else expect(staged).toBeNull();
+    }
+  });
+
+  it('does not impose legacy raw-paragraph accumulation on a supported normalized Word preview', async () => {
+    const spaces = `<w:r><w:t xml:space="preserve">${' '.repeat(4000)}</w:t></w:r>`.repeat(16);
+    const { path } = await compileTrackedBody(`<w:p><w:r><w:t>base</w:t></w:r>${spaces}` +
+      '<w:ins w:id="1"><w:r><w:t>X</w:t></w:r></w:ins></w:p>');
+    const preview: string[] = [];
+    const result = await parseNativeDocxIntake(path, 'normalized.docx', {
+      legacy: () => { throw new Error('Word preview cannot emit legacy mapping rows'); }, wordPreview: (block) => preview.push(block.text),
+    });
+    expect(result.kind).toBe('word');
+    if (result.kind !== 'word') throw new Error('expected supported Word preview');
+    expect(parseNativeDocxIntakeBytes(await readFile(path), 'normalized.docx')).toEqual(result);
+    expect(result.legacy.kind).toBe('unavailable');
+    expect(preview).toEqual(['base']);
+    await expect(parseDocx(path, 'normalized.docx', () => undefined)).rejects.toThrow('paragraph exceeds');
+  });
+
+  it('stages every accepted preview block when only the suggestion mark plan exceeds its historical limit', async () => {
+    const count = 20_001;
+    const { path } = await compileTrackedBody(Array.from({ length: count }, (_, index) => '<w:p><w:r><w:t>b</w:t></w:r>' +
+      `<w:ins w:id="${index}"><w:r><w:t>n</w:t></w:r></w:ins></w:p>`).join(''));
+    let blocks = 0;
+    const result = await parseNativeDocxIntake(path, 'complete-preview.docx', {
+      legacy: () => { throw new Error('Word preview cannot emit legacy mapping rows'); }, wordPreview: () => { blocks += 1; },
+    });
+    if (result.kind !== 'word') throw new Error('expected accepted Word preview');
+    expect(result.word.previewReading).toBe('accepted');
+    expect(result.word.templates).toHaveLength(count);
+    expect(result.parsed.blockCount).toBe(count);
+    expect(blocks).toBe(count);
+    expect(result.parsed.importedMarks).toEqual([]);
+    const staged = wordStagedIntakeRecord('10000000-0000-4000-8000-000000000001', result)!;
+    if (staged.value.compatibility !== 'ready') throw new Error('expected complete supported Word staging');
+    expect(staged.value.templates).toHaveLength(count);
+    expect(staged.value.templateManifestDigest).toBe(result.word.templateManifestDigest);
+  });
+
+  it('leaves ordinary, formatting, comments and foreign lookalikes on the historical path', async () => {
+    for (const body of [
+      '<w:p><w:r><w:t>ordinary</w:t></w:r></w:p>',
+      '<w:p><w:pPr><w:pPrChange w:id="1"><w:pPr/></w:pPrChange></w:pPr><w:r><w:t>format</w:t></w:r></w:p>',
+      '<w:p><w:commentRangeStart w:id="0"/><w:r><w:t>comment</w:t></w:r><w:commentRangeEnd w:id="0"/></w:p>',
+      '<w:p><x:ins><w:r><w:t>foreign</w:t></w:r></x:ins></w:p>',
+    ]) expect((await compileTrackedBody(body)).compiled.kind).toBe('ordinary');
+  });
+
+  it('stages an honest accepted preview when all text was inserted, without choosing a baseline', async () => {
+    const { path, compiled } = await compileTrackedBody('<w:p><w:ins w:id="1" w:author=""><w:r><w:t>inserted</w:t></w:r></w:ins></w:p>');
+    expect(compiled.kind).toBe('ready');
+    if (compiled.kind !== 'ready') throw new Error('expected supported tracked input');
+    expect(compiled.previewReading).toBe('accepted');
+    expect(compiled.readings.rejected.blocks).toEqual([]);
+    expect(compiled.readings.accepted.blocks.map((block) => block.text)).toEqual(['inserted']);
+    expect(compiled.graph.events[0]!.rawAuthor).toBe('');
+    expect(compiled.templates).toHaveLength(1);
+    const chunked = await compileWordTrackedDocx(path, undefined, { xmlFeedBytes: 7 });
+    expect(chunked).toEqual(compiled);
+    await expect(parseDocx(path, 'all-inserted.docx', () => undefined)).rejects.toThrow('no editable text blocks');
+  });
+
+  it('keeps raw identities and mixed authors while separating hunks at unchanged whitespace', async () => {
+    const { compiled } = await compileTrackedBody('<w:p><w:r><w:t>start</w:t></w:r>' +
+      '<w:del w:id="1" w:author="A"><w:r><w:delText>old</w:delText></w:r></w:del>' +
+      '<w:ins w:id="2" w:author="B"><w:r><w:t>new</w:t></w:r></w:ins>' +
+      '<w:r><w:t xml:space="preserve"> </w:t></w:r>' +
+      '<w:ins w:id="3" w:author="B"><w:r><w:t>end</w:t></w:r></w:ins></w:p>');
+    if (compiled.kind !== 'ready') throw new Error('expected supported tracked input');
+    expect(compiled.templates.map((sample) => sample.operationKind)).toEqual(['replace', 'insert']);
+    expect(compiled.templates[0]!.eventMembership).toHaveLength(2);
+    expect(new Set(compiled.graph.events.map((event) => event.eventId)).size).toBe(3);
+    expect(compiled.graph.events.map((event) => event.rawId)).toEqual(['1', '2', '3']);
+    expect(compiled.readings.rejected.blocks[0]!.text).toBe('startold');
+    expect(compiled.readings.accepted.blocks[0]!.text).toBe('startnew end');
+  });
+
+  it('preserves contradictory nested run evidence without an empty sample', async () => {
+    const { compiled } = await compileTrackedBody('<w:p><w:r><w:t>plain</w:t></w:r><w:ins w:id="1"><w:del w:id="2">' +
+      '<w:r><w:delText>hidden</w:delText></w:r></w:del></w:ins></w:p>');
+    if (compiled.kind !== 'ready') throw new Error('expected supported tracked input');
+    expect(compiled.templates).toEqual([]);
+    expect(compiled.graph.events.map((event) => event.disposition)).toEqual(['no-visible-transition', 'no-visible-transition']);
+    expect(compiled.graph.events[1]!.parentEventIds).toEqual([compiled.graph.events[0]!.eventId]);
+    expect(compiled.readings.accepted.blocks[0]!.text).toBe('plain');
+    expect(compiled.readings.rejected.blocks[0]!.text).toBe('plain');
+  });
+
+  it.each(['ins', 'del'])('interprets a revised paragraph boundary (%s) independently of ordinary text', async (kind) => {
+    const { compiled } = await compileTrackedBody(`<w:p><w:pPr><w:rPr><w:${kind} w:id="1"/></w:rPr></w:pPr>` +
+      '<w:r><w:t>A</w:t></w:r></w:p><w:p><w:r><w:t>B</w:t></w:r></w:p>');
+    if (compiled.kind !== 'ready') throw new Error('expected supported tracked input');
+    expect(compiled.readings[kind === 'ins' ? 'accepted' : 'rejected'].blocks.map((block) => block.text)).toEqual(['A', 'B']);
+    const joined = compiled.readings[kind === 'ins' ? 'rejected' : 'accepted'];
+    expect(joined.blocks.map((block) => block.text)).toEqual(['AB']);
+    expect(joined.blocks[0]!.sourceParagraphIndices).toEqual([0, 1]);
+    expect(joined.segments.some((segment) => segment.fragment.kind === 'paragraph-boundary')).toBe(true);
+    expect(compiled.templates.map((sample) => sample.operationKind)).toEqual(['paragraph-boundary']);
+  });
+
+  it('pairs different range IDs by exact move name and leaves enclosed ordinary text ordinary', async () => {
+    const { compiled } = await compileTrackedBody('<w:p><w:moveFromRangeStart w:id="4" w:name="move"/>' +
+      '<w:moveFrom w:id="10"><w:r><w:delText>moved</w:delText></w:r></w:moveFrom>' +
+      '<w:r><w:t>stay</w:t></w:r><w:moveFromRangeEnd w:id="4"/></w:p>' +
+      '<w:p><w:moveToRangeStart w:id="9" w:name="move"/>' +
+      '<w:moveTo w:id="11"><w:r><w:t>moved</w:t></w:r></w:moveTo><w:moveToRangeEnd w:id="9"/></w:p>');
+    if (compiled.kind !== 'ready') throw new Error('expected supported tracked input');
+    expect(compiled.templates).toHaveLength(1);
+    expect(compiled.templates[0]!.operationKind).toBe('move');
+    expect(compiled.templates[0]!.eventMembership).toHaveLength(6);
+    expect(compiled.readings.rejected.blocks.map((block) => block.text)).toEqual(['movedstay']);
+    expect(compiled.readings.accepted.blocks.map((block) => block.text)).toEqual(['stay', 'moved']);
+  });
+
+  it('refuses activated unsupported stories and table revisions while retaining exact inventory locations', async () => {
+    const body = '<w:p><w:ins w:id="1"><w:r><w:t>new</w:t></w:r></w:ins></w:p>';
+    const { compiled } = await compileTrackedBody(body, { 'word/header1.xml': Buffer.from(
+      `<w:hdr xmlns:w="${WORD_NS}"><w:p><w:del w:id="2"><w:r><w:delText>old</w:delText></w:r></w:del></w:p></w:hdr>`) });
+    expect(compiled.kind).toBe('unsupported');
+    expect(compiled.inventory.locations.map((location) => location.code)).toContain('story-or-text-box-revision');
+    const table = await compileTrackedBody('<w:tbl><w:tr><w:trPr><w:ins w:id="1"/></w:trPr><w:tc><w:p><w:r><w:t>cell</w:t></w:r></w:p></w:tc></w:tr></w:tbl>');
+    expect(table.compiled.kind).toBe('unsupported');
+    expect(table.compiled.inventory.locations[0]!.code).toBe('table-revision');
+  });
+
+  it('inventories ordinary retained side-story text without imposing main-block text limits on it', async () => {
+    const side = { 'word/header1.xml': Buffer.from(`<w:hdr xmlns:w="${WORD_NS}"><w:p><w:r><w:t>${'a'.repeat(5_000)}</w:t></w:r></w:p></w:hdr>`) };
+    expect((await compileTrackedBody('<w:p><w:r><w:t>ordinary</w:t></w:r></w:p>', side)).compiled.kind).toBe('ordinary');
+    expect((await compileTrackedBody('<w:p><w:r><w:t>base</w:t></w:r><w:ins w:id="1"><w:r><w:t>new</w:t></w:r></w:ins></w:p>', side)).compiled.kind).toBe('ready');
+  });
+
+  it('interprets expanded namespaces consistently while preserving missing and empty raw metadata', async () => {
+    const body = '<w:p><w:r><w:t>base</w:t></w:r><w:del w:id="1" w:author="" w:date=""><w:r><w:delText>old</w:delText></w:r></w:del>' +
+      '<w:ins w:id="2"><w:r><w:t>new</w:t></w:r></w:ins></w:p>';
+    const first = (await compileTrackedBody(body)).compiled;
+    const second = (await compileTrackedBody(body.replace('<w:p>', `<w:p xmlns:q="${WORD_NS}">`).replace(/w:(del|ins|r|t|delText|id|author|date)(?=[\s/>=])/gu, 'q:$1'))).compiled;
+    if (first.kind !== 'ready' || second.kind !== 'ready') throw new Error('expected two namespace-equivalent graphs');
+    expect(second.sourceDigest).not.toBe(first.sourceDigest);
+    expect(second.graph.events.map(({ kind, elementOrdinal, rawId, rawAuthor, rawDate }) => ({ kind, elementOrdinal, rawId, rawAuthor, rawDate })))
+      .toEqual(first.graph.events.map(({ kind, elementOrdinal, rawId, rawAuthor, rawDate }) => ({ kind, elementOrdinal, rawId, rawAuthor, rawDate })));
+    expect(first.graph.events.map((event) => [event.rawAuthor, event.rawDate])).toEqual([['', ''], [null, null]]);
+    expect(second.readings.accepted.blocks.map((block) => block.text)).toEqual(first.readings.accepted.blocks.map((block) => block.text));
+    expect(second.templates.map((template) => template.operationKind)).toEqual(first.templates.map((template) => template.operationKind));
+  });
+
+  it('refuses ambiguous, overlapping and prematurely closed moves rather than returning an empty manifest', async () => {
+    const from = '<w:moveFromRangeStart w:id="1" w:name="n"/><w:moveFrom w:id="2"><w:r><w:delText>A</w:delText></w:r></w:moveFrom><w:moveFromRangeEnd w:id="1"/>';
+    const to = '<w:moveToRangeStart w:id="8" w:name="n"/><w:moveTo w:id="9"><w:r><w:t>A</w:t></w:r></w:moveTo><w:moveToRangeEnd w:id="8"/>';
+    for (const invalid of [from, from + to + to,
+      from.replace('<w:moveFrom w:id="2">', '<w:moveFromRangeStart w:id="3" w:name="other"/><w:moveFrom w:id="2">') + to,
+      from.replace('</w:moveFrom><w:moveFromRangeEnd w:id="1"/>', '<w:moveFromRangeEnd w:id="1"/></w:moveFrom>') + to]) {
+      const compiled = (await compileTrackedBody(`<w:p>${invalid}<w:r><w:t>stable</w:t></w:r></w:p>`)).compiled;
+      expect(compiled.kind).toBe('unsupported');
+      expect(compiled.inventory.locations.some((location) => location.code === 'invalid-move-graph')).toBe(true);
+    }
+  });
+
+  it.each([true, false])('keeps paragraph move marks out of reading presence, including a final destination (moved runs: %s)', async (withMovedRuns) => {
+    const { compiled, path } = await compileTrackedBody(wordParagraphMoveBody(withMovedRuns));
+    if (compiled.kind !== 'ready') throw new Error('expected supported paired paragraph move');
+    expect(compiled.readings.rejected.blocks.map((block) => block.text)).toEqual(withMovedRuns ? ['XA', 'M', 'B'] : ['A', 'M', 'B']);
+    expect(compiled.readings.accepted.blocks.map((block) => block.text)).toEqual(withMovedRuns ? ['A', 'M', 'BX'] : ['A', 'M', 'B']);
+    const marks = compiled.graph.events.filter((event) => event.context === 'paragraph-boundary');
+    expect(marks.map((event) => [event.kind, event.rawId, event.rawAuthor, event.rawDate])).toEqual([
+      ['moveFrom', '10', 'mark source', ''], ['moveTo', '20', 'mark destination', null],
+    ]);
+    expect(compiled.graph.events.filter((event) => event.kind.endsWith('RangeStart')).map((event) => event.rawId)).toEqual(['4', '9']);
+    for (const event of marks) {
+      const atom = compiled.graph.atoms[event.location.atomOrdinal]!;
+      expect(atom).toMatchObject({ kind: 'paragraph-boundary', paragraphIndex: event.location.paragraphIndex,
+        accepted: true, rejected: true, eventMembership: [event.eventId] });
+      expect(event.location.codeUnitOffset).toBe(0);
+      expect(event.location.atomOrdinal).toBe(compiled.graph.paragraphs[event.location.paragraphIndex]!.boundaryAtomOrdinal);
+      expect(event.disposition).toBe('no-visible-transition');
+    }
+    expect(compiled.graph.events).toHaveLength(withMovedRuns ? 8 : 6);
+    expect(await compileWordTrackedDocx(path, undefined, { xmlFeedBytes: 7 })).toEqual(compiled);
+    const malformed = (await compileTrackedBody(wordParagraphMoveBody(withMovedRuns).replace('<w:moveToRangeEnd w:id="9"/>', ''))).compiled;
+    expect(malformed.kind).toBe('unsupported');
+    expect(malformed.inventory.locations.some((location) => location.code === 'invalid-move-graph')).toBe(true);
+  });
+
+  it('refuses mixed projected paragraph joins and observes cancellation through the real compiler', async () => {
+    const compiled = (await compileTrackedBody('<w:p><w:pPr><w:pStyle w:val="Heading1"/><w:rPr><w:del w:id="1"/></w:rPr></w:pPr>' +
+      '<w:r><w:t>A</w:t></w:r></w:p><w:p><w:r><w:t>B</w:t></w:r></w:p>')).compiled;
+    expect(compiled.kind).toBe('unsupported');
+    expect(compiled.inventory.locations[0]!.code).toBe('incompatible-paragraph-join');
+    const { path } = await compileTrackedBody('<w:p><w:r><w:t>base</w:t></w:r><w:ins w:id="1"><w:r><w:t>new</w:t></w:r></w:ins></w:p>');
+    const abort = new AbortController(); abort.abort();
+    await expect(compileWordTrackedDocx(path, undefined, { signal: abort.signal })).rejects.toThrow();
+  });
+
+  it('links a paragraph-mark move whose range Word opens inside the paragraph, after w:pPr', async () => {
+    const inParagraph = (body: string): string => body
+      .replace(/(<w:moveFromRangeStart [^>]*\/>)(<w:p><w:pPr><w:rPr><w:moveFrom [^>]*\/><\/w:rPr><\/w:pPr>)/u, '$2$1')
+      .replace(/(<w:moveToRangeStart [^>]*\/>)(<w:p><w:pPr><w:rPr><w:moveTo [^>]*\/><\/w:rPr><\/w:pPr>)/u, '$2$1');
+    for (const withMovedRuns of [true, false]) {
+      const body = inParagraph(wordParagraphMoveBody(withMovedRuns));
+      expect(body).toContain('</w:pPr><w:moveFromRangeStart');
+      expect(body).toContain('</w:pPr><w:moveToRangeStart');
+      const { compiled } = await compileTrackedBody(body);
+      const { compiled: before } = await compileTrackedBody(wordParagraphMoveBody(withMovedRuns));
+      if (compiled.kind !== 'ready' || before.kind !== 'ready') throw new Error('expected Word-layout paragraph moves to stay supported');
+      for (const reading of ['rejected', 'accepted'] as const) {
+        expect(compiled.readings[reading].blocks.map((block) => block.text)).toEqual(before.readings[reading].blocks.map((block) => block.text));
+      }
+      expect(compiled.templates.map((template) => template.operationKind)).toEqual(before.templates.map((template) => template.operationKind));
+      for (const event of compiled.graph.events.filter((candidate) => candidate.context === 'paragraph-boundary')) {
+        const start = compiled.graph.events.find((linked) => event.linkedEventIds.includes(linked.eventId))!;
+        expect([start.kind, start.rangeName]).toEqual([event.kind === 'moveFrom' ? 'moveFromRangeStart' : 'moveToRangeStart', 'paragraph move']);
+      }
+      // A range that closes before the paragraph's own mark does not hold that mark.
+      const closesEarly = (await compileTrackedBody(body.replace('<w:r><w:t>A</w:t></w:r></w:p><w:moveFromRangeEnd w:id="4"/>',
+        '<w:r><w:t>A</w:t></w:r><w:moveFromRangeEnd w:id="4"/></w:p>'))).compiled;
+      expect(closesEarly.kind).toBe('unsupported');
+      expect(closesEarly.inventory.locations.some((location) => location.code === 'invalid-move-graph')).toBe(true);
+    }
+  });
+
+  it('refuses a paragraph join across a spanning complex field or math, but keeps one beside a contained field', async () => {
+    const joinMark = '<w:pPr><w:rPr><w:del w:id="1"/></w:rPr></w:pPr>';
+    const field = (type: string): string => `<w:r><w:fldChar w:fldCharType="${type}"/></w:r>`;
+    const spanning = (await compileTrackedBody(`<w:p>${joinMark}${field('begin')}<w:r><w:instrText>TOC</w:instrText></w:r>${field('separate')}` +
+      `<w:r><w:t>A</w:t></w:r></w:p><w:p><w:r><w:t>B</w:t></w:r>${field('end')}</w:p>`)).compiled;
+    expect(spanning.kind).toBe('unsupported');
+    expect(spanning.inventory.locations.map((location) => location.code)).toEqual(['incompatible-paragraph-join']);
+    const math = (await compileTrackedBody(`<w:p>${joinMark}<w:r><w:t>A</w:t></w:r>` +
+      '<m:oMath xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"><m:r><m:t>x</m:t></m:r></m:oMath></w:p><w:p><w:r><w:t>B</w:t></w:r></w:p>')).compiled;
+    expect(math.kind).toBe('unsupported');
+    expect(math.inventory.locations.map((location) => location.code)).toEqual(['incompatible-paragraph-join']);
+    const contained = (await compileTrackedBody(`<w:p>${joinMark}${field('begin')}<w:r><w:instrText>PAGE</w:instrText></w:r>${field('separate')}` +
+      `<w:r><w:t>1</w:t></w:r>${field('end')}<w:r><w:t>A</w:t></w:r></w:p><w:p><w:r><w:t>B</w:t></w:r></w:p>`)).compiled;
+    if (contained.kind !== 'ready') throw new Error('expected a join beside a contained field');
+    expect(contained.readings.accepted.blocks.map((block) => block.text)).toEqual(['1AB']);
+  });
+
+  it('makes only an over-bound joined reading unusable instead of refusing the whole intake', async () => {
+    // Each paragraph fits the 2,048-grapheme block bound; only their accepted-reading join exceeds it.
+    const long = 'a'.repeat(1500);
+    const { compiled, path } = await compileTrackedBody(`<w:p><w:pPr><w:rPr><w:del w:id="1" w:author="A"/></w:rPr></w:pPr><w:r><w:t>${long}</w:t></w:r></w:p>` +
+      `<w:p><w:r><w:t>${long}</w:t></w:r></w:p>`);
+    if (compiled.kind !== 'ready') throw new Error('expected the usable rejected reading to remain available');
+    expect(compiled.previewReading).toBe('rejected');
+    expect(compiled.readings.rejected).toMatchObject({ usable: true, refusals: [] });
+    expect(compiled.readings.rejected.blocks.map((block) => block.text.length)).toEqual([1500, 1500]);
+    expect(compiled.readings.accepted.usable).toBe(false);
+    expect(compiled.readings.accepted.refusals.map((refusal) => [refusal.code, refusal.paragraphIndex])).toEqual([['resource-limit', 0]]);
+    expect(compiled.readings.accepted.marks).toEqual([]);
+    const native = parseNativeDocxIntakeBytes(await readFile(path), 'joined.docx', { formatIdentified: true });
+    expect(native.kind).not.toBe('legacy');
+  });
+
+  it('never newly refuses an ordinary DOCX for side parts the historical reader does not parse', async () => {
+    const types = (extra: string): Buffer => Buffer.from('<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+      '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+      `<Default Extension="xml" ContentType="application/xml"/>${extra}` +
+      '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>');
+    const header = '<Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/>';
+    const sideParts: Record<string, Record<string, Uint8Array>> = {
+      svgDoctype: { '[Content_Types].xml': types('<Default Extension="svg" ContentType="image/svg+xml"/>'),
+        'word/media/image1.svg': Buffer.from('<?xml version="1.0"?><!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "svg11.dtd"><svg xmlns="http://www.w3.org/2000/svg"/>') },
+      utf16CustomXml: { 'customXml/item1.xml': Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('<?xml version="1.0" encoding="UTF-16"?><a/>', 'utf16le')]) },
+      longHeaderAttribute: { '[Content_Types].xml': types(header), 'word/header1.xml': Buffer.from(`<w:hdr xmlns:w="${WORD_NS}" ` +
+        `xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:v="urn:schemas-microsoft-com:vml"><w:p><w:r><w:pict><v:shape o:gfxdata="${'A'.repeat(40_000)}"/></w:pict></w:r></w:p></w:hdr>`) },
+      emptyAncillary: { 'word/webSettings.xml': new Uint8Array(0) },
+    };
+    for (const extra of Object.values(sideParts)) {
+      const ordinary = await compileTrackedBody('<w:p><w:r><w:t>ordinary</w:t></w:r></w:p>', extra);
+      expect(ordinary.compiled.kind).toBe('ordinary');
+      const native = parseNativeDocxIntakeBytes(await readFile(ordinary.path), 'ordinary.docx', { formatIdentified: true });
+      const legacy = await parseDocx(ordinary.path, 'ordinary.docx', () => undefined);
+      expect(native.kind).toBe('legacy');
+      if (native.kind === 'legacy') expect(native.parsed.contentDigest).toBe(legacy.contentDigest);
+    }
+    const tracked = '<w:p><w:r><w:t>base</w:t></w:r><w:ins w:id="1"><w:r><w:t>new</w:t></w:r></w:ins></w:p>';
+    // An unreadable non-story part cannot hold a tracked revision; an unreadable declared story refuses honestly.
+    expect((await compileTrackedBody(tracked, sideParts.svgDoctype)).compiled.kind).toBe('ready');
+    const story = (await compileTrackedBody(tracked, sideParts.longHeaderAttribute)).compiled;
+    expect(story.kind).toBe('unsupported');
+    expect(story.inventory.locations).toEqual([{ code: 'resource-limit', part: 'word/header1.xml', elementOrdinal: 0, paragraphIndex: null }]);
+  });
+
+  it('finds actual stories by expanded root/context and declared XML type rather than a word/ filename prefix', async () => {
+    const plain = '<w:p><w:r><w:t>base</w:t></w:r></w:p>';
+    const unrelated = { 'word/data.xml': Buffer.from(`<x:data xmlns:x="urn:data" xmlns:w="${WORD_NS}"><w:ins w:id="1"/></x:data>`) };
+    expect((await compileTrackedBody(plain, unrelated)).compiled.kind).toBe('ordinary');
+    const types = '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+      '<Default Extension="xml" ContentType="application/xml"/>' +
+      '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>' +
+      '<Override PartName="/custom/header.data" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/></Types>';
+    const compiled = (await compileTrackedBody(plain, { '[Content_Types].xml': Buffer.from(types),
+      'custom/header.data': Buffer.from(`<q:hdr xmlns:q="${WORD_NS}"><q:p><q:ins q:id="1"><q:r><q:t>new</q:t></q:r></q:ins></q:p></q:hdr>`) })).compiled;
+    expect(compiled.kind).toBe('unsupported');
+    expect(compiled.inventory.locations[0]).toMatchObject({ part: 'custom/header.data', code: 'story-or-text-box-revision' });
+    const math = (await compileTrackedBody(plain, { 'custom/math.xml': Buffer.from('<m:oMath xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math" ' +
+      `xmlns:w="${WORD_NS}"><w:ins w:id="1"><m:r><m:t>x</m:t></m:r></w:ins></m:oMath>`) })).compiled;
+    expect(math.kind).toBe('unsupported');
+    expect(math.inventory.locations[0]!.code).toBe('custom-xml-or-math-revision');
+  });
+
+  it.each(['footnoteReference', 'endnoteReference'])('refuses joins across retained %s and splits adjacent edit hunks at that payload', async (reference) => {
+    // Keep the corpus carrier's note bodies, content types and package/document relationships.
+    // Replacing only the main story gives every reference a real, unchanged retained note.
+    const parts = unzipSync(await buildCorpusSource('synthetic'));
+    const path = join(sandbox, 'complete-note-revisions.docx');
+    const compile = async (body: string) => {
+      parts['word/document.xml'] = new Uint8Array(bodyDocumentXml(`${body}<w:sectPr/>`));
+      await writeFile(path, zipSync(parts, { level: 6, mtime: fixedArchiveTime() }));
+      return compileWordTrackedDocx(path);
+    };
+    const note = `<w:r><w:${reference} w:id="1"/></w:r>`;
+    const ordinary = `<w:p><w:r><w:t>A</w:t></w:r>${note}</w:p><w:p><w:r><w:t>B</w:t></w:r></w:p>`;
+    expect((await compile(ordinary)).kind).toBe('ordinary');
+    const ordinaryBlocks: ParsedDocxBlock[] = [];
+    const parsed = await parseDocx(path, 'complete-note.docx', (block) => ordinaryBlocks.push(block));
+    expect(ordinaryBlocks.map((block) => block.text)).toEqual(['A', 'B']);
+    expect(parsed.fidelity.find((category) => category.key === 'notes')!.count).toBe(1);
+    const joined = await compile('<w:p><w:pPr><w:rPr><w:del w:id="1"/></w:rPr></w:pPr>' +
+      `<w:r><w:t>A</w:t></w:r>${note}</w:p><w:p><w:r><w:t>B</w:t></w:r></w:p>`);
+    expect(joined.kind).toBe('unsupported');
+    expect(joined.inventory.locations.some((location) => location.code === 'incompatible-paragraph-join')).toBe(true);
+    const split = await compile('<w:p><w:r><w:t>base</w:t></w:r><w:del w:id="1"><w:r><w:delText>old</w:delText></w:r></w:del>' +
+      `${note}<w:ins w:id="2"><w:r><w:t>new</w:t></w:r></w:ins></w:p>`);
+    if (split.kind !== 'ready') throw new Error('expected supported note-separated text edits');
+    expect(split.templates.map((template) => template.operationKind)).toEqual(['delete', 'insert']);
+  });
+
+  it('refuses textual revisions inherited by a text box from an outer run revision', async () => {
+    const compiled = (await compileTrackedBody('<w:p><w:r><w:t>base</w:t></w:r><w:ins w:id="1">' +
+      '<w:r><w:drawing><w:txbxContent><w:p><w:r><w:t>box</w:t></w:r></w:p></w:txbxContent></w:drawing></w:r></w:ins></w:p>')).compiled;
+    expect(compiled.kind).toBe('unsupported');
+    expect(compiled.inventory.locations.some((location) => location.code === 'story-or-text-box-revision')).toBe(true);
+  });
+});
 
 beforeEach(async () => {
   sandbox = await mkdtemp(join(tmpdir(), 'ai7-docx-test-'));

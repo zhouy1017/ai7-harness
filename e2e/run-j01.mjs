@@ -1,10 +1,11 @@
 import { copyFile, lstat, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { createReadStream, existsSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { DatabaseSync } from 'node:sqlite';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { strToU8, zipSync } from 'fflate';
+import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import {
   admittedParagraphs,
   admittedSpanText,
@@ -1336,7 +1337,16 @@ async function collectEditorBlockIdentitySequence(renderer, scenario) {
   for (;;) {
     const page = await renderer.evaluate(`Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] [data-block-id]'), (block) => ({ id: block.dataset.blockId, text: block.textContent }))`);
     requireJourney(Array.isArray(page) && page.length > 0 && page.length <= 32, `${scenario}-bounded-editor-page`);
-    identities.push(...page);
+    const overlapStart = identities.findIndex(block => block.id === page[0].id);
+    const overlapLength = overlapStart < 0 ? 0 : identities.length - overlapStart;
+    requireJourney(identities.length === 0 || overlapStart >= 0, `${scenario}-editor-window-source-continuity`);
+    requireJourney(overlapLength <= page.length && page.slice(0, overlapLength).every((block, index) =>
+      block.id === identities[overlapStart + index].id && block.text === identities[overlapStart + index].text),
+      `${scenario}-editor-window-overlap-consistent`);
+    const additions = page.slice(overlapLength);
+    requireJourney(additions.length > 0 && new Set([...identities, ...additions].map(block => block.id)).size === identities.length + additions.length,
+      `${scenario}-editor-window-progress`);
+    identities.push(...additions);
     const nextDisabled = await renderer.evaluate(`Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '向后浏览')?.disabled !== false`);
     if (nextDisabled) break;
     const firstBlockId = page[0].id;
@@ -1449,6 +1459,25 @@ async function resolvePagedIdentityConsequences(renderer, scenario) {
   );
 }
 
+/** A closed-guest historical /3 draft fixture, after the real source-only UI has invoked the preserved old reader. */
+function plantHistoricalTrackedDraft(dataRoot) {
+  const db = new DatabaseSync(resolve(dataRoot, 'store', 'ai7.sqlite'));
+  try {
+    db.exec('PRAGMA foreign_keys = ON; BEGIN IMMEDIATE');
+    const rows = db.prepare(`SELECT d.draft_id FROM import_drafts d JOIN staged_import_snapshots s ON s.draft_id = d.draft_id
+      WHERE d.state = 'reviewed' AND d.reviewed_relationship = 'source-only' AND s.parser_identity = 'ai7-docx-fflate-saxes/3'`).all();
+    requireJourney(rows.length === 1, 'historical-tracked-draft-exact-parent');
+    const draftId = rows[0].draft_id;
+    requireJourney(db.prepare('DELETE FROM staged_word_revision_intakes WHERE draft_id = ?').run(draftId).changes === 1,
+      'historical-tracked-draft-successor-absent');
+    db.prepare(`UPDATE import_drafts SET state = 'staged', reviewed_title = NULL, reviewed_target_choice_id = NULL,
+      reviewed_target_kind = NULL, reviewed_existing_book_id = NULL, reviewed_relationship = NULL,
+      reviewed_book_state_digest = NULL, reviewed_reuse_source_version_id = NULL, review_digest = NULL, reviewed_at = NULL WHERE draft_id = ?`).run(draftId);
+    db.exec('COMMIT');
+  } catch (error) { if (db.isTransaction) db.exec('ROLLBACK'); throw error; }
+  finally { db.close(); }
+}
+
 async function runJourney(
   renderer,
   expectation,
@@ -1520,7 +1549,7 @@ async function runJourney(
   // exportDiagnosticsBundle and revealDiagnosticsLocation.
   await assertRenderer(
     renderer,
-    `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined' && Object.keys(window.ai7).sort().join(',') === 'abandonImportDraft,acceptEditorialMemory,acceptReimportDegradation,acknowledgeImportCompletion,addLibraryMaterial,admitReadersReportExemplar,adoptImportedSkillUpdate,answerBaselineAnalysisClarification,appendMaintenanceCaseRevision,applyChangeSuggestion,applyChangeSuggestionBatch,approveBookDeliveryPackageArchiveExport,approveBookDeliveryPackageExport,approveDatabaseExport,approveManuscriptExport,askAboutSelection,askGlobalAgent,authorizeBaselineAnalysis,authorizeEvaluationRewrite,authorizeInitialEvaluation,authorizeReadersReport,authorizeReviewRun,authorizeTaskAuthorization,authorizeWritingTask,batchProposalDecisionDraft,buildMaterialVectors,cancelBaselineAnalysisRun,cancelBookDeliveryPackageArchiveExport,cancelBookDeliveryPackageExport,cancelDatabaseExport,cancelDatabaseReplacement,cancelReviewRun,cancelServiceJob,cancelWaitingBaselineAnalysis,cancelWaitingTask,changeEditorialLearning,changeSeriesMembership,checkImportedSkillUpdate,chooseBookDeliveryPackageArchiveDestination,chooseBookDeliveryPackageExportFolder,chooseDatabaseExportDestination,chooseDatabaseImportFile,chooseManuscriptExportDestination,commitBookCreation,commitManuscriptReimport,commitNewBookImport,commitReplacement,commitSourceImport,continueDialogueAnswer,continueGlobalAgentAnswer,continueImportDraft,continueReviewRun,controlTaskRun,convertDialogueToChangeSuggestion,createEditorialMark,createEditorialMemory,createImportedSkillUpdateRule,createProductionDocument,createReadersReportDraft,createSeries,createWritingDraft,deactivateDefaultExecutionRule,deactivateEditorialMemory,decideEvaluationRewrite,decideImportedExemplar,decideLearningMaterial,decideLibraryMaterial,decideProductionDocumentType,deferRecovery,designatePublicationVersion,discardAgentWorkspaceProposals,dismissImportedSkillUpdate,dismissReplacementPreview,editBaselineAnalysisPlan,editSeriesKnowledgeCandidate,editTaskPlan,enableCapturedProcedure,enableCustomAnalysisDimension,enableEditorialWorkspaceProfile,enableImportedSkill,enrollBackgroundAnalysis,exportDiagnosticsBundle,exportUsageCsv,flushJournalEdit,freezeReplacement,generateReviewReport,getAnalysisRevisionOverview,getAnalysisRevisionUnits,getAnalysisRunReportRows,getBaselineAnalysisPage,getBaselineAnalysisRangePlan,getBookOverview,getBookWorkbenchRoute,getCoverageManifestUnits,getEditorialMarkCard,getHistoricalRevision,getImportStartup,getManuscriptApplyOutcome,getManuscriptRail,getManuscriptWindow,getManuscriptWindowAt,getModelServiceSettings,getOutline,getPreferences,getProductDataLocation,getRecoveryComparison,getReimportLineageSourceVersionPage,getReimportMappingPage,getSearchResults,getStartup,getTaskPlanPage,holdBackgroundAnalysisEnrollment,importBundledSampleBook,importEarlierExemplar,importReviewGuidelineVersion,importSkillPackage,inspectAgentWorkspace,inspectAnalysisFeedback,inspectApplyReceipt,inspectBackgroundAnalysisEnrollment,inspectBaselineAnalysis,inspectBookDeliveryPackage,inspectBookFindings,inspectBookSeries,inspectBookTasks,inspectCapturedProcedure,inspectCapturedProcedureApplicability,inspectCapturedProcedureRun,inspectCapturedProcedures,inspectCustomAnalysisDimensions,inspectDataVersion,inspectDatabaseExports,inspectDatabaseReplacements,inspectDefaultExecutionRules,inspectDeliverables,inspectDeveloperProposal,inspectDialogue,inspectEditQualitySignals,inspectEditorialLearning,inspectEditorialWorkspaceProfile,inspectEvaluation,inspectEvaluationCalibration,inspectEvaluationProfiles,inspectEvidenceWorkspace,inspectExemplars,inspectFactualVerification,inspectFastInteractionRequest,inspectFastInteractionRoutes,inspectFeedbackHistory,inspectForegroundExecutionBoundary,inspectGlobalAgent,inspectGlobalAgentDialogue,inspectGlobalAttention,inspectHouseReviewPreference,inspectImportedSkillUpdate,inspectImportedSkills,inspectKnowledgeProcedures,inspectLearningAudit,inspectLearningLineage,inspectLearningMaterial,inspectLearningMaterials,inspectLibraryMaterial,inspectLibraryMaterialSegments,inspectLibraryMaterials,inspectMaintenanceCase,inspectParagraphAnalysis,inspectProcedureCapture,inspectProductionDocuments,inspectProposalConflict,inspectProposalWorkspace,inspectResearchEvidence,inspectReviewFindingOfMark,inspectReviewGuidelines,inspectReviewWorkspace,inspectScheduledBackups,inspectSeries,inspectSeriesCandidates,inspectSeriesExclusionHistory,inspectSeriesExclusionTargets,inspectSeriesHistory,inspectSeriesKnowledgeCandidates,inspectSeriesKnowledgeConflicts,inspectSeriesKnowledgeItems,inspectSeriesKnowledgeReview,inspectSeriesKnowledgeRevisions,inspectSeriesList,inspectSeriesMembers,inspectTaskAuthorization,inspectTaskIntentDrafts,inspectTaskPlan,inspectUsage,inspectWritingTask,installEditorialWorkspaceProfile,installImportedSkill,leaveBookWorkbench,listBooks,listCrashRecords,listMaintenanceCases,listPriorWork,notify,onAppearanceChanged,onNotificationNavigate,openBookWorkbench,pauseBaselineAnalysisRun,platform,polishSelection,pollServiceJob,prepareBaselineAnalysis,prepareBookCreation,prepareBookDeliveryPackage,prepareCorrectionProposal,prepareCustomAnalysis,prepareDatabaseMerge,prepareDatabaseReplacement,prepareEvaluationRewrite,prepareGlobalAgentTurn,prepareInitialEvaluation,prepareManuscriptReimport,prepareNewBookReview,prepareReadersReport,prepareReplacement,prepareReverseApply,prepareReviewRun,prepareSourceImportReview,prepareTaskAuthorization,prepareWritingTask,previewCapturedProcedureStop,previewCapturedProcedureValidation,previewImportedExemplar,previewLearningRemediation,previewLibraryMaterial,previewReviewGuidelineVersion,previewSeriesExclusion,previewSeriesMembershipChange,probeSearchBackend,promoteAgentWorkspaceProposals,promoteAnswerToTaskIntentDraft,promoteSeriesKnowledge,promoteTaskIntentDraft,proposeAgentWorkspaceChangeSet,proposeSeriesKnowledge,queryMaterialVectors,quickStartBaselineAnalysis,quickStartReviewRun,quickStartWritingTask,quitApplication,readLibraryDecisionReason,rebuildHouseReviewPreference,recommendProcedures,recordAnalysisFeedback,recordChangeSuggestionDecision,recordLearningReasonAsk,recordLearningRemediation,recordLearningSupervision,recordMaintenanceCase,recordManuscriptEntryPosition,recordProductionDocumentDelivery,recordProposalDecision,recordProposalDecisionFeedback,recordProposalDecisionReason,recordPublicationActuals,recordReviewFindingDisposition,recordSeriesExclusion,recordVerificationReviewDecision,redoManuscript,redoTaskPlan,regenerateDialogueAnswer,regenerateGlobalAgentAnswer,regenerateProposalConflictUnit,removeModelServiceCredential,removeSearchBackendCredential,requestMaterialTranslation,reselectImportDraft,resolveProposalConflict,resolveReimportMapping,resolveUnconfirmedOutcomes,restoreRecovery,resumeBaselineAnalysisRun,revealDiagnosticsLocation,revealManuscriptExport,revealProductDataLocation,reverseAppliedChangeSuggestion,reviewBookDeliveryPackageExport,reviewManuscriptExport,revokeBackgroundAnalysisEnrollment,revokeImportedSkillUpdateRule,rollBackDatabaseReplacement,rollbackImportedSkill,runEditorClipboardCommand,runReconnectPreflight,saveCapturedProcedure,saveCorrectionProposal,saveCustomAnalysisDimension,saveDeveloperProposal,saveDeveloperProposalFile,saveEvaluation,saveEvaluationProfile,saveEvidenceAsMaterial,saveMaintenanceErrata,saveMilestone,saveModelServiceCredential,saveModelServiceProxy,savePreference,saveProductionDocumentVersion,saveProposalConflictDraft,saveProposalDecisionDraft,saveSearchBackendCredential,saveTaskIntentDraft,searchReferableMaterials,selectAndStageManuscript,selectFastRoleModel,selectSearchBackend,setDefaultExecutionRule,setEvaluationPreferences,setScheduledBackup,startBaselineAnalysisWhenOnline,startEvaluation,startReplacementCommit,startSearch,startTaskWhenIdle,startTaskWhenOnline,stopCapturedProcedure,stopCustomAnalysisDimension,stopDialogueAnswer,stopGlobalAgentAnswer,testModelServiceConnection,transitionProductionDocumentPhase,undoManuscript,updateBookPeople,updateEditorialMark,validateImportedSkill,viewRecoveryCandidate'`,
+    `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined' && Object.keys(window.ai7).sort().join(',') === 'abandonImportDraft,acceptEditorialMemory,acceptReimportDegradation,acknowledgeImportCompletion,addLibraryMaterial,admitReadersReportExemplar,adoptImportedSkillUpdate,answerBaselineAnalysisClarification,appendMaintenanceCaseRevision,applyChangeSuggestion,applyChangeSuggestionBatch,approveBookDeliveryPackageArchiveExport,approveBookDeliveryPackageExport,approveDatabaseExport,approveManuscriptExport,askAboutSelection,askGlobalAgent,authorizeBaselineAnalysis,authorizeEvaluationRewrite,authorizeInitialEvaluation,authorizeReadersReport,authorizeReviewRun,authorizeTaskAuthorization,authorizeWritingTask,batchProposalDecisionDraft,buildMaterialVectors,cancelBaselineAnalysisRun,cancelBookDeliveryPackageArchiveExport,cancelBookDeliveryPackageExport,cancelDatabaseExport,cancelDatabaseReplacement,cancelReviewRun,cancelServiceJob,cancelWaitingBaselineAnalysis,cancelWaitingTask,changeEditorialLearning,changeSeriesMembership,checkImportedSkillUpdate,chooseBookDeliveryPackageArchiveDestination,chooseBookDeliveryPackageExportFolder,chooseDatabaseExportDestination,chooseDatabaseImportFile,chooseManuscriptExportDestination,commitBookCreation,commitManuscriptReimport,commitNewBookImport,commitReplacement,commitSourceImport,continueDialogueAnswer,continueGlobalAgentAnswer,continueImportDraft,continueReviewRun,controlTaskRun,convertDialogueToChangeSuggestion,createEditorialMark,createEditorialMemory,createImportedSkillUpdateRule,createProductionDocument,createReadersReportDraft,createSeries,createWritingDraft,deactivateDefaultExecutionRule,deactivateEditorialMemory,decideEvaluationRewrite,decideImportedExemplar,decideLearningMaterial,decideLibraryMaterial,decideProductionDocumentType,deferRecovery,designatePublicationVersion,discardAgentWorkspaceProposals,dismissImportedSkillUpdate,dismissReplacementPreview,editBaselineAnalysisPlan,editSeriesKnowledgeCandidate,editTaskPlan,enableCapturedProcedure,enableCustomAnalysisDimension,enableEditorialWorkspaceProfile,enableImportedSkill,enrollBackgroundAnalysis,exportDiagnosticsBundle,exportUsageCsv,flushJournalEdit,freezeReplacement,generateReviewReport,getAnalysisRevisionOverview,getAnalysisRevisionUnits,getAnalysisRunReportRows,getBaselineAnalysisPage,getBaselineAnalysisRangePlan,getBookOverview,getBookWorkbenchRoute,getCoverageManifestUnits,getEditorialMarkCard,getHistoricalRevision,getImportStartup,getManuscriptApplyOutcome,getManuscriptRail,getManuscriptWindow,getManuscriptWindowAt,getModelServiceSettings,getOutline,getPreferences,getProductDataLocation,getRecoveryComparison,getReimportLineageSourceVersionPage,getReimportMappingPage,getSearchResults,getStartup,getTaskPlanPage,holdBackgroundAnalysisEnrollment,importBundledSampleBook,importEarlierExemplar,importReviewGuidelineVersion,importSkillPackage,inspectAgentWorkspace,inspectAnalysisFeedback,inspectApplyReceipt,inspectBackgroundAnalysisEnrollment,inspectBaselineAnalysis,inspectBookDeliveryPackage,inspectBookFindings,inspectBookSeries,inspectBookTasks,inspectCapturedProcedure,inspectCapturedProcedureApplicability,inspectCapturedProcedureRun,inspectCapturedProcedures,inspectCustomAnalysisDimensions,inspectDataVersion,inspectDatabaseExports,inspectDatabaseReplacements,inspectDefaultExecutionRules,inspectDeliverables,inspectDeveloperProposal,inspectDialogue,inspectEditQualitySignals,inspectEditorialLearning,inspectEditorialWorkspaceProfile,inspectEvaluation,inspectEvaluationCalibration,inspectEvaluationProfiles,inspectEvidenceWorkspace,inspectExemplars,inspectFactualVerification,inspectFastInteractionRequest,inspectFastInteractionRoutes,inspectFeedbackHistory,inspectForegroundExecutionBoundary,inspectGlobalAgent,inspectGlobalAgentDialogue,inspectGlobalAttention,inspectHouseReviewPreference,inspectImportedSkillUpdate,inspectImportedSkills,inspectKnowledgeProcedures,inspectLearningAudit,inspectLearningLineage,inspectLearningMaterial,inspectLearningMaterials,inspectLibraryMaterial,inspectLibraryMaterialSegments,inspectLibraryMaterials,inspectMaintenanceCase,inspectParagraphAnalysis,inspectProcedureCapture,inspectProductionDocuments,inspectProposalConflict,inspectProposalWorkspace,inspectResearchEvidence,inspectReviewFindingOfMark,inspectReviewGuidelines,inspectReviewWorkspace,inspectScheduledBackups,inspectSeries,inspectSeriesCandidates,inspectSeriesExclusionHistory,inspectSeriesExclusionTargets,inspectSeriesHistory,inspectSeriesKnowledgeCandidates,inspectSeriesKnowledgeConflicts,inspectSeriesKnowledgeItems,inspectSeriesKnowledgeReview,inspectSeriesKnowledgeRevisions,inspectSeriesList,inspectSeriesMembers,inspectTaskAuthorization,inspectTaskIntentDrafts,inspectTaskPlan,inspectUsage,inspectWordTrackedEditSample,inspectWritingTask,installEditorialWorkspaceProfile,installImportedSkill,leaveBookWorkbench,listBooks,listCrashRecords,listMaintenanceCases,listPriorWork,notify,onAppearanceChanged,onNotificationNavigate,openBookWorkbench,pauseBaselineAnalysisRun,platform,polishSelection,pollServiceJob,prepareBaselineAnalysis,prepareBookCreation,prepareBookDeliveryPackage,prepareCorrectionProposal,prepareCustomAnalysis,prepareDatabaseMerge,prepareDatabaseReplacement,prepareEvaluationRewrite,prepareGlobalAgentTurn,prepareInitialEvaluation,prepareManuscriptReimport,prepareNewBookReview,prepareReadersReport,prepareReplacement,prepareReverseApply,prepareReviewRun,prepareSourceImportReview,prepareTaskAuthorization,prepareWritingTask,previewCapturedProcedureStop,previewCapturedProcedureValidation,previewImportedExemplar,previewLearningRemediation,previewLibraryMaterial,previewReviewGuidelineVersion,previewSeriesExclusion,previewSeriesMembershipChange,probeSearchBackend,promoteAgentWorkspaceProposals,promoteAnswerToTaskIntentDraft,promoteSeriesKnowledge,promoteTaskIntentDraft,proposeAgentWorkspaceChangeSet,proposeSeriesKnowledge,queryMaterialVectors,quickStartBaselineAnalysis,quickStartReviewRun,quickStartWritingTask,quitApplication,readLibraryDecisionReason,rebuildHouseReviewPreference,recommendProcedures,recordAnalysisFeedback,recordChangeSuggestionDecision,recordLearningReasonAsk,recordLearningRemediation,recordLearningSupervision,recordMaintenanceCase,recordManuscriptEntryPosition,recordProductionDocumentDelivery,recordProposalDecision,recordProposalDecisionFeedback,recordProposalDecisionReason,recordPublicationActuals,recordReviewFindingDisposition,recordSeriesExclusion,recordVerificationReviewDecision,redoManuscript,redoTaskPlan,regenerateDialogueAnswer,regenerateGlobalAgentAnswer,regenerateProposalConflictUnit,removeModelServiceCredential,removeSearchBackendCredential,requestMaterialTranslation,reselectImportDraft,resolveProposalConflict,resolveReimportMapping,resolveUnconfirmedOutcomes,restoreRecovery,resumeBaselineAnalysisRun,revealDiagnosticsLocation,revealManuscriptExport,revealProductDataLocation,reverseAppliedChangeSuggestion,reviewBookDeliveryPackageExport,reviewManuscriptExport,revokeBackgroundAnalysisEnrollment,revokeImportedSkillUpdateRule,rollBackDatabaseReplacement,rollbackImportedSkill,runEditorClipboardCommand,runReconnectPreflight,saveCapturedProcedure,saveCorrectionProposal,saveCustomAnalysisDimension,saveDeveloperProposal,saveDeveloperProposalFile,saveEvaluation,saveEvaluationProfile,saveEvidenceAsMaterial,saveMaintenanceErrata,saveMilestone,saveModelServiceCredential,saveModelServiceProxy,savePreference,saveProductionDocumentVersion,saveProposalConflictDraft,saveProposalDecisionDraft,saveSearchBackendCredential,saveTaskIntentDraft,searchReferableMaterials,selectAndStageManuscript,selectFastRoleModel,selectSearchBackend,setDefaultExecutionRule,setEvaluationPreferences,setScheduledBackup,startBaselineAnalysisWhenOnline,startEvaluation,startReplacementCommit,startSearch,startTaskWhenIdle,startTaskWhenOnline,stopCapturedProcedure,stopCustomAnalysisDimension,stopDialogueAnswer,stopGlobalAgentAnswer,testModelServiceConnection,transitionProductionDocumentPhase,undoManuscript,updateBookPeople,updateEditorialMark,validateImportedSkill,viewRecoveryCandidate'`,
     'renderer-isolation',
   );
   await assertRenderer(
@@ -1856,6 +1885,95 @@ async function runJourney(
     `document.querySelector('.editor-meta')?.textContent.includes('当前修订版 r1') && document.querySelector('.editor-meta')?.textContent.includes('修订日志序号 1') && !document.querySelector('.editor-meta')?.textContent.includes('稿件修订版 r1')`,
     'r1-journal-sequence',
   );
+}
+
+async function runNativeWordImport(renderer, scenario, restart, recoverCommitted) {
+  const { mode, learnFromEdits, existingBook, allInserted, expectedTexts, sampleCount, degraded = false } = scenario;
+  await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'word-landing');
+  if (existingBook) {
+    await clickExactButton(renderer, '新建图书', 'word-empty-book-open');
+    await waitFor(renderer, `document.querySelector('#empty-book-title')`, 'word-empty-book-form');
+    await assertRenderer(renderer, `(() => { const title = document.querySelector('#empty-book-title'); title.value = 'Word 首稿图书'; title.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`, 'word-empty-book-title');
+    await clickExactButton(renderer, '复核创建', 'word-empty-book-review');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-create-review"]')`, 'word-empty-book-reviewed');
+    await clickExactButton(renderer, '新建图书', 'word-empty-book-commit');
+    await waitFor(renderer, `document.querySelector('.book-overview[data-manuscript-state="empty"]')`, 'word-empty-book-created');
+    await clickExactButton(renderer, '导入首份稿件', 'word-empty-book-stage');
+  } else {
+    await clickExactButton(renderer, '导入稿件', 'word-new-book-stage');
+    await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'word-new-book-target');
+    await assertRenderer(renderer, `(() => { const target = document.querySelector('[data-import-target-choice="new-book"]'); if (!target || target.checked) return false; target.click(); return true; })()`, 'word-new-book-select');
+  }
+  await waitFor(renderer, `document.querySelector('[data-import-relationship="first-manuscript"]')`, 'word-relationship');
+  await assertRenderer(renderer, `(() => { const relationship = document.querySelector('[data-import-relationship="first-manuscript"]'); if (!relationship || relationship.checked) return false; relationship.click(); return true; })()`, 'word-first-manuscript');
+  const prepareLabel = existingBook ? '复核导入到所选图书' : '确认书名并复核';
+  await waitFor(renderer, `document.querySelector('[data-word-import-controls="ready"]')`, 'word-controls-before-prepare');
+  await assertRenderer(renderer, `(() => {
+    const controls = document.querySelector('[data-word-import-controls="ready"]');
+    const suggestions = controls.querySelector('[data-word-import-mode="suggestions"]');
+    const accepted = controls.querySelector('[data-word-import-mode="accepted-baseline"]');
+    const confirmation = controls.querySelector('[data-word-accepted-baseline-confirmation]');
+    const learning = controls.querySelector('[data-word-learn-from-edits]');
+    const prepare = Array.from(document.querySelectorAll('button')).find(button => button.textContent === ${JSON.stringify(prepareLabel)});
+    return suggestions.checked && !accepted.checked && !accepted.disabled && !confirmation.checked && learning.checked &&
+      prepare.disabled === ${Boolean(allInserted)} && !document.querySelector('[data-word-reviewed-mode]');
+  })()`, 'word-preview-never-selects-accepted-baseline');
+  // The two modes by their ADR 0094 names, the tagged preview, and why an unusable reading cannot be prepared.
+  const previewLabel = `当前暂存预览：${allInserted ? '接受修订后的阅读' : '撤销修订后的阅读'}。这只是预览，尚未选择稿件基线。`;
+  const readingReason = allInserted ? '撤销修订后没有可编辑的非空稿件，不能按「转为 AI7 修订建议」准备；仍可明确选择并确认「直接并入正文（作为定稿基线）」。'
+    : '最终保真、导入方式及本机保留范围会在下一步复核。';
+  await assertRenderer(renderer, `(() => {
+    const controls = document.querySelector('[data-word-import-controls="ready"]');
+    const option = (mode) => controls.querySelector('[data-word-import-mode="' + mode + '"]').closest('label').textContent;
+    return option('suggestions') === '转为 AI7 修订建议（推荐）' && option('accepted-baseline') === '直接并入正文（作为定稿基线）' &&
+      Array.from(controls.querySelectorAll('p')).some(line => line.textContent === ${JSON.stringify(previewLabel)}) &&
+      controls.querySelector('[data-word-reading-availability]').textContent === ${JSON.stringify(readingReason)};
+  })()`, 'word-preview-label-and-reading-reason');
+  if (mode === 'accepted-baseline') {
+    await assertRenderer(renderer, `(() => { document.querySelector('[data-word-import-mode="accepted-baseline"]').click(); const confirmation = document.querySelector('[data-word-accepted-baseline-confirmation]'); const prepare = Array.from(document.querySelectorAll('button')).find(button => button.textContent === ${JSON.stringify(prepareLabel)}); return !confirmation.checked && !confirmation.disabled && prepare.disabled; })()`, 'word-accepted-needs-separate-confirmation');
+    await assertRenderer(renderer, `document.querySelector('[data-word-reading-availability]').textContent === '请单独确认「直接并入正文（作为定稿基线）」，再准备导入。'`, 'word-accepted-confirmation-notice');
+    await assertRenderer(renderer, `(() => { const confirmation = document.querySelector('[data-word-accepted-baseline-confirmation]'); confirmation.click(); return confirmation.checked; })()`, 'word-accepted-confirmed');
+  }
+  if (!learnFromEdits) await assertRenderer(renderer, `(() => { const learning = document.querySelector('[data-word-learn-from-edits]'); learning.click(); return !learning.checked; })()`, 'word-learning-opt-out');
+  await clickExactButton(renderer, prepareLabel, 'word-actual-prepare');
+  const reviewedChoice = `document.querySelector('[data-word-reviewed-mode="${mode}"][data-word-reviewed-learning="${learnFromEdits}"]')`;
+  await waitFor(renderer, `document.querySelector('[data-screen="review"]') && ${reviewedChoice}`, 'word-review-exact-choice');
+  if (degraded) {
+    await assertRenderer(renderer, `(() => { const acceptance=document.querySelector('#accept-import-degradation'); if(!acceptance||acceptance.checked||document.querySelector('.commit-bar button'))return false;acceptance.click();return true;})()`, 'word-explicit-degradation');
+    await waitFor(renderer, `${reviewedChoice} && document.querySelector('.commit-bar button')?.disabled === false`, 'word-degradation-retains-exact-choice');
+  }
+  if (restart !== undefined) {
+    renderer = await restart();
+    await waitFor(renderer, `document.querySelector('[data-screen="import-recovery"] [data-word-recovered-mode="${mode}"][data-word-recovered-learning="${learnFromEdits}"]')`, 'word-recovery-exact-choice');
+    await clickExactButton(renderer, '继续导入', 'word-continue-reviewed');
+    await waitFor(renderer, `document.querySelector('[data-screen="review"]') && ${reviewedChoice}`, 'word-continued-exact-choice');
+  }
+  await assertRenderer(renderer, `(() => { const commit = document.querySelector('.commit-bar button'); if (!commit || commit.disabled) return false; commit.click(); return true; })()`, 'word-actual-commit');
+  if (scenario.interruptAfterCommit) {
+    await waitFor(renderer, `document.documentElement.dataset.ai7ServiceState === 'interrupted' && !document.querySelector('[data-screen="imported"]')`, 'word-no-optimistic-commit-success');
+    requireJourney(typeof recoverCommitted === 'function', 'word-owned-commit-recovery');
+    renderer = await recoverCommitted();
+  }
+  await waitFor(renderer, `document.querySelector('[data-screen="imported"]') && document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true'`, 'word-committed');
+  const selectedReading = await collectEditorBlockIdentitySequence(renderer, 'word-selected-reading');
+  requireJourney(JSON.stringify(selectedReading.map(block => block.text)) === JSON.stringify(expectedTexts),
+    'word-selected-baseline-exact', { expectedTexts, selectedReading });
+  const capture = await renderer.evaluate(`(async () => { const ids = []; let offset = 0; let pages = 0; let source = null; do { const page = await window.ai7.inspectEditorialLearning({ signalOffset: offset, itemOffset: 0 }); if (page.signals.length > 30 || page.signals.some(signal => signal.kind !== 'word-tracked-edit' || signal.currentEligibility !== 'house' || signal.memoryCandidate !== null)) return null; source ??= page.signals[0]?.source ?? null; ids.push(...page.signals.map(signal => signal.source.sampleId)); offset = page.nextSignalOffset; pages += 1; } while (offset !== null); return { count: ids.length, unique: new Set(ids).size, pages, source }; })()`);
+  requireJourney(capture?.count === (learnFromEdits ? sampleCount : 0) && capture.unique === capture.count &&
+    capture.pages >= (learnFromEdits && sampleCount > 30 ? 2 : 1), 'word-entire-signal-manifest');
+  if (scenario.detailPages) {
+    requireJourney(capture.source !== null, 'word-detail-real-source');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('quality')), 'word-detail-quality');
+    await waitFor(renderer, `document.querySelector('[data-material-key="${capture.source.materialKey}"] [data-learning-action="open"]')`, 'word-detail-material');
+    await assertRenderer(renderer, `(() => { document.querySelector('[data-material-key="${capture.source.materialKey}"] [data-learning-action="open"]').click(); return true; })()`, 'word-detail-material-open');
+    await assertRenderer(renderer, `(() => { document.querySelector('[data-learning-action="word-detail"]').click(); return true; })()`, 'word-detail-reader-open');
+    await waitFor(renderer, `document.querySelector('[data-word-detail-page] > article') && document.querySelector('[data-learning-action="word-detail-next"]')?.disabled === false`, 'word-detail-first-bounded-page');
+    const before = await renderer.evaluate(`JSON.stringify(Array.from(document.querySelector('[data-word-detail-page]').children,item=>[item.dataset.wordDetailSection,item.dataset.wordDetailOrdinal]))`);
+    await assertRenderer(renderer, `(() => { document.querySelector('[data-learning-action="word-detail-next"]').click();return true;})()`, 'word-detail-continue');
+    await waitFor(renderer, `JSON.stringify(Array.from(document.querySelector('[data-word-detail-page]').children,item=>[item.dataset.wordDetailSection,item.dataset.wordDetailOrdinal])) !== ${JSON.stringify(before)}`, 'word-detail-second-replaces-first');
+    await assertRenderer(renderer, `document.querySelector('[data-word-detail-page]').children.length <= 40`, 'word-detail-dom-remains-bounded');
+  }
+  return renderer;
 }
 
 async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImport) {
@@ -2697,6 +2815,48 @@ async function main() {
       await closeProduct();
     };
 
+    for (const wordCase of [
+      { name: 'suggestions-new', mode: 'suggestions', learnFromEdits: true, existingBook: false, allInserted: false, count: 45 },
+      { name: 'accepted-empty-book', mode: 'accepted-baseline', learnFromEdits: false, existingBook: true, allInserted: false, count: 1 },
+      { name: 'all-inserted-accepted', mode: 'accepted-baseline', learnFromEdits: true, existingBook: false, allInserted: true, count: 1, interruptAfterCommit: true },
+      { name: 'detail-beyond-first-page', mode: 'suggestions', learnFromEdits: true, existingBook: false, allInserted: false, count: 1, insertRuns: 45, detailPages: true },
+      { name: 'accepted-degradation', mode: 'accepted-baseline', learnFromEdits: true, existingBook: false, allInserted: false, count: 1, degraded: true },
+    ]) {
+      at(`word-${wordCase.name}`);
+      const wordLaunchScenario = wordCase.name === 'suggestions-new' ? 'word-suggestions-new'
+        : wordCase.name === 'accepted-empty-book' ? 'word-accepted-empty-book'
+          : wordCase.name === 'all-inserted-accepted' ? 'word-all-inserted-accepted'
+            : wordCase.name === 'detail-beyond-first-page' ? 'word-detail-beyond-first-page' : 'word-accepted-degradation';
+      const inputPath = resolve(syntheticRoot, `word-${wordCase.name}.docx`);
+      const baseSpan = wordCase.degraded ? { block: 8 } : { block: 8, from: 0, to: 10 }; const insertionSpan = { block: 9, from: 0, to: 5 };
+      if (!wordCase.degraded) await composeRevisedAdmittedDocx(inputPath, { source: ADMITTED_BASELINE_DOCX, title: 'Word 双阅读导入',
+        paragraphs: Array.from({ length: wordCase.count }, (_, index) => ({ runs: [
+          ...(wordCase.allInserted ? [] : [{ text: baseSpan }]),
+          ...Array.from({ length: wordCase.insertRuns ?? 1 }, (_, runIndex) => ({ text: insertionSpan, revision: { kind: 'ins', author: `作者${index}-${runIndex}`, date: '2026-10-25T00:00:00Z' } })),
+        ] })) });
+      const baseline = wordCase.allInserted ? '' : await admittedSpanText(ADMITTED_BASELINE_DOCX, baseSpan);
+      const insertion = await admittedSpanText(ADMITTED_BASELINE_DOCX, insertionSpan);
+      if (wordCase.degraded) {
+        await composeAdmittedDocx(inputPath, { source: ADMITTED_BASELINE_DOCX, startBlock: 8, blocks: 1, title: 'Word 双阅读导入',
+          retention: { footnote: { block: 1, noteSourceBlock: 10 } } });
+        const archive = unzipSync(readFileSync(inputPath));
+        const escaped = insertion.replace(/&/gu, '&amp;').replace(/</gu, '&lt;').replace(/>/gu, '&gt;');
+        archive['word/document.xml'] = strToU8(strFromU8(archive['word/document.xml']).replace('</w:p>',
+          `<w:ins w:id="1000" w:author="作者" w:date="2026-10-25T00:00:00Z"><w:r><w:t>${escaped}</w:t></w:r></w:ins></w:p>`));
+        await writeFile(inputPath, zipSync(archive, { mtime: fixedArchiveTime() }));
+      }
+      const expectedTexts = Array(wordCase.count).fill(baseline + (wordCase.mode === 'accepted-baseline' ? insertion.repeat(wordCase.insertRuns ?? 1) : ''));
+      const wordRoot = await createCanonicalExternalDataRoot(resolve(runRoot, `word-${wordCase.name}-data`), checkoutRoot);
+      renderer = await launchProduct({ dataRoot: wordRoot, pickerPath: inputPath, launchScenario: wordLaunchScenario,
+        ...(wordCase.interruptAfterCommit ? { importControl: 'after-commit-before-response' } : {}) });
+      renderer = await runNativeWordImport(renderer, { ...wordCase, expectedTexts, sampleCount: wordCase.count }, wordCase.existingBook ? async () => {
+        await closeProduct(); return launchProduct({ dataRoot: wordRoot, launchScenario: 'word-exact-review-recovery' });
+      } : undefined, wordCase.interruptAfterCommit ? async () => {
+        await closeProduct(); return launchProduct({ dataRoot: wordRoot, launchScenario: 'word-committed-recovery' });
+      } : undefined);
+      await closeProduct();
+    }
+
     const emptyBookRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'empty-book-first-import-data'), checkoutRoot);
     renderer = await launchProduct({ dataRoot: emptyBookRoot, pickerPath: docx, launchScenario: 'empty-book-first-import' });
     const populatedBookId = await runEmptyBookFirstImport(renderer, sample1Expectation, async ({ bookId, title }) => {
@@ -2841,7 +3001,16 @@ async function main() {
       `(() => { const blocks = Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')); const expected = ${JSON.stringify(expected)}; return blocks.length === expected.length && blocks.every((block, index) => block.textContent === expected[index]); })()`;
     const importedMarksRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'imported-marks-data'), checkoutRoot);
     renderer = await launchProduct({ dataRoot: importedMarksRoot, pickerPath: composedRevisedPath, launchScenario: 'imported-marks' });
+    // Preserve this pre-Word reader/Apply regression with its real historical draft, rather than widening the new profile.
+    await prepareSourceImportReview(renderer, { sourceSha256: composedRevisedSha256, sourceBytes: composedRevisedInfo.size, scenario: 'historical-imported-marks' });
+    await closeProduct();
+    plantHistoricalTrackedDraft(importedMarksRoot);
+    renderer = await launchProduct({ dataRoot: importedMarksRoot, launchScenario: 'historical-imported-marks-recovery' });
+    await waitFor(renderer, `document.querySelector('[data-screen="import-recovery"]')`, 'historical-imported-marks-recovery');
+    await clickExactButton(renderer, '继续导入', 'historical-imported-marks-continue');
+    await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'historical-imported-marks-target');
     await runJourney(renderer, importedMarksExpectation, {
+      start: 'target',
       diagnosticReviewLocation: 'imported-marks-review',
       diagnosticScenario: 'imported-marks',
     });

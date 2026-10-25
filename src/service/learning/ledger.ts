@@ -3,20 +3,28 @@ import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import type {
   ChangeEditorialLearningInput, CreateEditorialMemoryInput, DeactivateEditorialMemoryInput,
   EditorialLearningProjection, GlobalEditorialMemoryVersion, InspectEditorialLearningInput,
-  LearningSignal, LearningSignalStanding, LearningSourceReference, EditorialMemoryVersion, EditorialMemorySourceSnapshot,
+  LearningSignal, DecisionLearningSignal, WordTrackedEditLearningSignal, WordTrackedEditLearningSource,
+  LearningSignalStanding, LearningSourceReference, EditorialMemoryVersion, EditorialMemorySourceSnapshot,
   EditorialMemoryApplicability, EditorialMemoryAdmission, AcceptEditorialMemoryInput,
   LearningReasonAskInput, LearningReasonAskProjection, LearningReasonAskFrequency, PreferenceAdoptionProjection, PreferenceAdoptionCursor, ReferencedRuleVersion,
 } from '../../shared/protocol/learning.js';
 import { LEARNING_REASON_OPTIONS } from '../../shared/protocol/learning.js';
-import { MAX_FRAME_BYTES, type TrustedOperationalScope, type LearningSupervisionDirective, type GlobalMemoryPin } from '../../shared/protocol.js';
+import { MAX_FRAME_BYTES, type TrustedOperationalScope, type LearningSupervisionDirective, type GlobalMemoryPin, type LearningEligibilityChoice } from '../../shared/protocol.js';
 import { reviewCategoryEntry } from '../review/category-configuration.js';
 import { graphemesOf } from '../../shared/mark-anchor.js';
-import { canonicalJson, canonicalRecord, isRecord, sha256Hex, UUID_PATTERN, DIGEST_PATTERN } from '../analysis/canonical.js';
+import { canonicalJson, canonicalRecord, isRecord, hasExactKeys, sha256Hex, UUID_PATTERN, DIGEST_PATTERN } from '../analysis/canonical.js';
 import { BookPeople } from '../book-people.js';
 import { DecisionFeedbackLedger } from '../decision-feedback.js';
 import { graphemeEditVolume } from '../edit-quality-signals.js';
 import { LearningEligibilityError, LearningEligibilityLedger, LOCAL_LEARNING_POLICY_BASIS, LEARNING_ELIGIBILITY_POLICY_BASIS,
-  learningMaterialDigest, proposalDecisionCandidate, reviewDispositionCandidate, type LearningMaterialCandidate } from '../learning-eligibility.js';
+  learningMaterialDigest, proposalDecisionCandidate, reviewDispositionCandidate, wordTrackedEditCandidate, wordLocalImportAdmissions,
+  type LearningMaterialCandidate } from '../learning-eligibility.js';
+import { readWordParentSourcePin, wordParentSourcePinRecord, requireWordRevisionSource, wordTemplateKey,
+  wordTrackedSampleRecord, wordTrackedSamples, WORD_EXTRACTOR_IDENTITY,
+  readWordImportChoiceRecord, ImportRetentionError,
+  type WordTrackedEditSample, type WordRevisionGraph, type WordImportChoiceRecord, type WordLocalImportAdmission,
+  type WordImportControlsSnapshot, type WordSampleDetailSource } from '../import-retention.js';
+import { WORD_DOCX_PARSER_IDENTITY, type WordTrackedCompilation } from '../docx.js';
 
 type Row = Record<string, SQLOutputValue>;
 const PAGE_SIZE = 30;
@@ -193,11 +201,33 @@ export function importBookLearningControls(db: DatabaseSync, selectedBook: (book
   return imported;
 }
 
+interface WordLearningEvidence {
+  candidate: LearningMaterialCandidate;
+  templateKey: string;
+  admission: WordLocalImportAdmission;
+  recordedAt: string;
+}
+
+/** Historical Word facts only. The store may retain these with one byte-verified, generation-bound source context. */
+export class WordLearningProofs {
+  readonly signals = new Map<string, { readonly sha256: string; readonly signal: WordTrackedEditLearningSignal }>();
+  readonly evidence = new Map<string, WordLearningEvidence>();
+  readonly sources = new Map<string, { graphDigest: string; parentPinDigest: string; events: Set<string> }>();
+  readonly imports = new Map<string, { digest: string; choice: WordImportChoiceRecord;
+    materials: Map<string, WordImportControlsSnapshot['materials'][number]> }>();
+}
+
+/** Parsed historical facts have no cycles; a returned projection must never mutate a retained proof through a shared child. */
+function freezeWordLearningFact(value: unknown): void {
+  if (value === null || typeof value !== 'object' || Object.isFrozen(value)) return;
+  for (const child of Object.values(value)) freezeWordLearningFact(child);
+  Object.freeze(value);
+}
+
 /**
- * One synchronous read's proved results (Issue #1128 revision 7): complete item chains by their exact row identities and digests,
- * effective sources by version digest, and the signals, origins, snapshots and publications already validated. Only success is
- * kept, and the owner that opens it discards it when that read returns: standing, controls, decisions and directives are read
- * afresh by every operation, and nothing survives a request, a database open or a mutation.
+ * One synchronous read's C0 proofs (Issue #1128 revision 7) remain local to that operation. Only separately validated immutable
+ * Word facts may be copied from the store's one generation-bound source context; controls, standing, decisions, directives,
+ * effective memory sources and every other C0 proof are always read afresh and discarded when the operation returns.
  */
 export class LearningReads {
   readonly chains = new Map<string, { readonly fingerprint: string; readonly versions: GlobalEditorialMemoryVersion[] }>();
@@ -207,13 +237,28 @@ export class LearningReads {
   readonly snapshots = new Set<string>();
   readonly eligibility = new Map<string, ReturnType<LearningEligibilityLedger['history']>>();
   readonly publications = new Set<string>();
+  readonly word = new WordLearningProofs();
+  readonly wordSources = this.word.sources;
+  readonly wordImports = this.word.imports;
+  readonly availableWordSources = new Set<string>();
   controls: Array<{ row: Row; record: LearningControl }> | null = null;
+
+  constructor(word?: WordLearningProofs) { if (word !== undefined) this.useWordProofs(word); }
+
+  /** Copy only immutable Word facts; controls, standing and every C0 proof remain local to this operation. */
+  useWordProofs(facts: WordLearningProofs): void {
+    for (const [key, value] of facts.signals) { this.signals.set(key, value); this.word.signals.set(key, value); }
+    for (const [key, value] of facts.evidence) this.word.evidence.set(key, value);
+    for (const [key, value] of facts.sources) this.wordSources.set(key, value);
+    for (const [key, value] of facts.imports) this.wordImports.set(key, value);
+  }
 }
 
 /** Local capture only: no provider, scheduler, retrieval or composition dependency. The caller owns the transaction. */
 export class EditorialLearningLedger {
   #reads: LearningReads | null;
-  constructor(readonly db: DatabaseSync, reads?: LearningReads) { this.#reads = reads ?? null; }
+  constructor(readonly db: DatabaseSync, reads?: LearningReads,
+    readonly requireWordSource?: (source: WordTrackedEditLearningSource) => WordLearningProofs | void) { this.#reads = reads ?? null; }
 
   /** One read inside the caller's validated-result context, or inside one discarded as soon as this read returns. */
   #read<T>(operation: () => T): T {
@@ -284,7 +329,7 @@ export class EditorialLearningLedger {
       blockDigest: row.decided_block_digest === null ? null : String(row.decided_block_digest), materialKey: candidate.materialKey,
       materialDigest: learningMaterialDigest(candidate), reasonRevision, reviewRunId: null, findingId: null, resultSetRevisionId: null,
     };
-    this.#capture(`${decisionId}:${source.materialDigest}`, String(row.disposition) as LearningSignal['kind'], source,
+    this.#capture(`${decisionId}:${source.materialDigest}`, String(row.disposition) as DecisionLearningSignal['kind'], source,
       row.disposition === 'accepted-with-edit' ? graphemeEditVolume(String(row.proposed_text), String(row.edited_text)) : null,
       candidate.recordedAt);
   }
@@ -302,13 +347,351 @@ export class EditorialLearningLedger {
     this.#capture(String(row.signal_id), 'review-finding-ignored', source, null, candidate.recordedAt);
   }
 
-  #capture(sourceKey: string, kind: LearningSignal['kind'], source: LearningSourceReference, rewriteDistance: number | null, recordedAt: string, ask?: LearningSignal['ask']): string | null {
+  /** Actual control/standing owners supply the complete reviewed capture vector. */
+  wordImportControlPins(bookId: string | null): Pick<WordImportControlsSnapshot, 'global' | 'book'> {
+    return this.#read(() => {
+      requireLearning(bookId === null || UUID_PATTERN.test(bookId));
+      const rows = this.#controlRows();
+      const global = rows.filter(({ record }) => record.kind === 'switch').at(-1);
+      const book = bookId === null ? undefined : rows.filter(({ record }) => record.kind === 'book' && record.bookId === bookId).at(-1);
+      const reference = (entry: typeof global): WordImportControlsSnapshot['global']['reference'] => entry === undefined
+        ? { kind: 'default', basis: LOCAL_LEARNING_POLICY_BASIS }
+        : { kind: 'entry', entryId: entry.record.entryId, sha256: String(entry.row.sha256) };
+      return { global: { enabled: global?.record.value ?? true, reference: reference(global) },
+        book: { excluded: book?.record.value ?? false, reference: reference(book) } };
+    });
+  }
+
+  wordImportControls(bookId: string, materials: ReadonlyArray<{ templateKey: string; materialKey: string; materialDigest: string }>): WordImportControlsSnapshot {
+    return this.#read(() => {
+      requireLearning(UUID_PATTERN.test(bookId) && new Set(materials.map((material) => material.templateKey)).size === materials.length);
+      return { ...this.wordImportControlPins(bookId),
+        materials: materials.map((material) => {
+          const last = this.#eligibilityHistory(bookId, material.materialKey).at(-1);
+          requireLearning(last === undefined || last.materialDigest === material.materialDigest);
+          return { templateKey: material.templateKey, materialDigest: material.materialDigest,
+            standing: { choice: last?.choice ?? 'house', decisionId: last?.decisionId ?? null,
+              decisionDigest: last?.recordDigest ?? null, basisVersion: last?.basis.version ?? LOCAL_LEARNING_POLICY_BASIS.version } };
+        }) };
+    });
+  }
+
+  /**
+   * The import transaction supplies a compilation of verified original bytes after writing its parent/choice rows.
+   * Derive every admission from that complete manifest and current controls; never accept a caller-selected subset.
+   */
+  retainWordImportSamples(bookId: string, commitId: string, compiled: Extract<WordTrackedCompilation, { kind: 'ready' }>,
+    abortSignal?: AbortSignal): { sources: WordTrackedEditLearningSource[]; signalIds: string[] } {
+    abortSignal?.throwIfAborted();
+    requireLearning(this.db.isTransaction);
+    return this.#read(() => {
+      const { choice, digest: choiceDigest, createdAt } = readWordImportChoiceRecord(this.db, bookId, commitId);
+      requireLearning(compiled.sourceDigest === choice.originalDigest && compiled.graphDigest === choice.graphDigest &&
+        compiled.templateManifestDigest === choice.templateManifestDigest);
+      requireWordRevisionSource(this.db, readWordParentSourcePin(this.db, bookId, choice.sourceVersionId), compiled.graph);
+      for (const kind of ['rejected', 'accepted'] as const) {
+        const reading = compiled.readings[kind];
+        const pin = choice.readings[kind];
+        requireLearning(reading.readingDigest === pin.digest && reading.blocks.length === pin.blockCount && reading.usable === pin.usable);
+      }
+      const samples = wordTrackedSamples(bookId, compiled.graph, compiled.templates);
+      const entries = samples.map((sample, index) => {
+        abortSignal?.throwIfAborted();
+        const candidate = wordTrackedEditCandidate(sample, wordTrackedSampleRecord(sample).digest, createdAt);
+        return { sample, templateKey: compiled.templates[index]!.templateKey,
+          materialKey: candidate.materialKey, materialDigest: learningMaterialDigest(candidate) };
+      });
+      const admissions = wordLocalImportAdmissions({ bookId, samples: entries, choice, choiceDigest,
+        currentControls: this.wordImportControls(bookId, entries), recordedAt: createdAt,
+        ...(abortSignal === undefined ? {} : { signal: abortSignal }) });
+      const previous = this.db.prepare('SELECT * FROM word_tracked_edit_sample_imports WHERE commit_id = ?').all(commitId);
+      const memberships = new Map(previous.map((row) => [String(row.sample_id), row]));
+      requireLearning(previous.length === 0 || previous.length === admissions.length &&
+        admissions.every(({ sample }) => memberships.has(sample.sampleId)));
+      const readSample = this.db.prepare('SELECT * FROM word_tracked_edit_samples WHERE sample_id = ?');
+      const insertSample = this.db.prepare(`INSERT INTO word_tracked_edit_samples(sample_id, book_id, source_version_id, template_key, canonical_json, sha256)
+        VALUES (?, ?, ?, ?, ?, ?)`);
+      const insertMembership = this.db.prepare(`INSERT INTO word_tracked_edit_sample_imports(sample_id, commit_id, sample_digest, choice_digest, canonical_json, sha256, captured_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)`);
+      const sources = admissions.map(({ sample, templateKey, sampleDigest, materialKey, materialDigest, record }): WordTrackedEditLearningSource => {
+        abortSignal?.throwIfAborted();
+        const sampleRecord = wordTrackedSampleRecord(sample);
+        const prior = readSample.get(sample.sampleId);
+        if (prior === undefined) {
+          requireLearning(previous.length === 0);
+          insertSample.run(sample.sampleId, bookId, choice.sourceVersionId, templateKey, sampleRecord.json, sampleDigest);
+        } else requireLearning(prior.book_id === bookId && prior.source_version_id === choice.sourceVersionId &&
+          prior.template_key === templateKey && prior.canonical_json === sampleRecord.json && prior.sha256 === sampleDigest);
+        const membership = memberships.get(sample.sampleId);
+        if (membership === undefined) insertMembership.run(sample.sampleId, commitId, sampleDigest, choiceDigest, record.json, record.digest, createdAt);
+        else requireLearning(membership.sample_digest === sampleDigest && membership.choice_digest === choiceDigest &&
+          membership.canonical_json === record.json && membership.sha256 === record.digest && membership.captured_at === createdAt);
+        return { bookId, sampleId: sample.sampleId, sampleDigest, sourceVersionId: choice.sourceVersionId, sourceDigest: compiled.sourceDigest,
+          graphDigest: compiled.graphDigest, importCommitId: commitId, admissionDigest: record.digest, materialKey, materialDigest };
+      });
+      return { sources, signalIds: this.captureWordSamples(sources, abortSignal) };
+    });
+  }
+
+  /** Reopen/merge replay the complete historical admission vector, independently of today's exclusions. */
+  validateWordImportSamples(bookId: string, commitId: string, compiled: Extract<WordTrackedCompilation, { kind: 'ready' }>): void {
+    this.#read(() => {
+      const { choice, digest: choiceDigest, createdAt } = readWordImportChoiceRecord(this.db, bookId, commitId);
+      requireLearning(compiled.sourceDigest === choice.originalDigest && compiled.graphDigest === choice.graphDigest &&
+        compiled.templateManifestDigest === choice.templateManifestDigest);
+      requireWordRevisionSource(this.db, readWordParentSourcePin(this.db, bookId, choice.sourceVersionId), compiled.graph);
+      const samples = wordTrackedSamples(bookId, compiled.graph, compiled.templates);
+      const admissions = wordLocalImportAdmissions({ bookId, samples: samples.map((sample, index) =>
+        ({ sample, templateKey: compiled.templates[index]!.templateKey })), choice, choiceDigest,
+      currentControls: choice.effectiveControls, recordedAt: createdAt });
+      const rows = this.db.prepare('SELECT * FROM word_tracked_edit_sample_imports WHERE commit_id = ?').all(commitId);
+      const memberships = new Map(rows.map((row) => [String(row.sample_id), row]));
+      requireLearning(rows.length === admissions.length);
+      for (const { sample, templateKey, sampleDigest, materialKey, materialDigest, record } of admissions) {
+        const membership = memberships.get(sample.sampleId);
+        const sampleRow = this.db.prepare('SELECT * FROM word_tracked_edit_samples WHERE sample_id = ?').get(sample.sampleId);
+        requireLearning(membership && membership.sample_digest === sampleDigest && membership.choice_digest === choiceDigest &&
+          membership.canonical_json === record.json && membership.sha256 === record.digest && membership.captured_at === createdAt &&
+          sampleRow && sampleRow.book_id === bookId && sampleRow.source_version_id === choice.sourceVersionId &&
+          sampleRow.template_key === templateKey && sampleRow.canonical_json === wordTrackedSampleRecord(sample).json && sampleRow.sha256 === sampleDigest);
+        this.#wordEvidence({ bookId, sampleId: sample.sampleId, sampleDigest, sourceVersionId: choice.sourceVersionId,
+          sourceDigest: compiled.sourceDigest, graphDigest: compiled.graphDigest, importCommitId: commitId,
+          admissionDigest: record.digest, materialKey, materialDigest });
+        const signalRow = this.db.prepare('SELECT signal_id FROM learning_signals WHERE source_key = ?')
+          .get(`word-sample:${sample.sampleId}:${sampleDigest}`);
+        requireLearning(signalRow);
+        const signal = this.#signal(String(signalRow.signal_id));
+        requireLearning(signal.kind === 'word-tracked-edit' && signal.source.bookId === bookId && signal.source.sampleId === sample.sampleId &&
+          signal.source.sampleDigest === sampleDigest && signal.source.sourceVersionId === choice.sourceVersionId);
+      }
+    });
+  }
+
+  /** One atomic batch shares source/import validation, without copying or rehashing the graph per sample. */
+  captureWordSamples(sources: ReadonlyArray<WordTrackedEditLearningSource>, abortSignal?: AbortSignal): string[] {
+    abortSignal?.throwIfAborted();
+    requireLearning(this.db.isTransaction);
+    return this.#read(() => {
+      const result: string[] = [];
+      const controls = this.controls();
+      if (sources.length === 0) return result;
+      requireLearning(new Set(sources.map((source) => source.sampleId)).size === sources.length &&
+        sources.every((source) => source.bookId === sources[0]!.bookId && source.importCommitId === sources[0]!.importCommitId));
+      const evidenceBySample = sources.map((source) => { abortSignal?.throwIfAborted(); return this.#wordEvidence(source); });
+      const current = this.wordImportControls(sources[0]!.bookId, sources.map((source, index) => ({
+        templateKey: evidenceBySample[index]!.templateKey, materialKey: source.materialKey, materialDigest: source.materialDigest })));
+      let attribution: LearningSignal['attribution'] | null = null;
+      for (let index = 0; index < sources.length; index += 1) {
+        abortSignal?.throwIfAborted();
+        const source = sources[index]!;
+        const evidence = evidenceBySample[index]!;
+        const eligibility = this.#standing(source.bookId, source.materialKey);
+        // The caller must omit ineligible evidence entirely; persisted admissions cannot override current controls.
+        requireLearning(controls.enabled && !controls.excludedBooks.has(source.bookId) &&
+          (eligibility.choice === 'book' || eligibility.choice === 'house'));
+        requireLearning(canonicalJson(current.global) === canonicalJson(evidence.admission.global) &&
+          canonicalJson(current.book) === canonicalJson(evidence.admission.book) &&
+          canonicalJson(current.materials[index]!.standing) === canonicalJson(evidence.admission.standing));
+        const sourceKey = `word-sample:${source.sampleId}:${source.sampleDigest}`;
+        const prior = this.db.prepare('SELECT signal_id FROM learning_signals WHERE source_key = ?').get(sourceKey);
+        if (prior !== undefined) {
+          const signal = this.#signal(String(prior.signal_id));
+          requireLearning(signal.kind === 'word-tracked-edit' && signal.source.bookId === source.bookId &&
+            signal.source.sampleDigest === source.sampleDigest);
+          result.push(signal.signalId); continue;
+        }
+        const signal: WordTrackedEditLearningSignal = { schema: 'ai7.word-import-learning-signal/1', signalId: randomUUID(),
+          kind: 'word-tracked-edit', source, rewriteDistance: null, eligibility,
+          attribution: attribution ??= this.#attribution(source.bookId, evidence.recordedAt), recordedAt: evidence.recordedAt };
+        const record = canonicalRecord({ ...signal, basis: LOCAL_LEARNING_POLICY_BASIS });
+        this.db.prepare('INSERT INTO learning_signals(signal_id, book_id, source_key, recorded_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?)')
+          .run(signal.signalId, source.bookId, sourceKey, signal.recordedAt, record.json, record.digest);
+        result.push(signal.signalId);
+      }
+      return result;
+    });
+  }
+
+  /** Historical inspection stays available under current exclusions; it grants no memory-source admission. */
+  wordSampleImports(bookId: string, sampleId: string, sampleDigest: string): WordSampleDetailSource['imports'] {
+    return this.#read(() => {
+      requireLearning(UUID_PATTERN.test(bookId) && /^wts_[0-9a-f]{64}$/u.test(sampleId) && DIGEST_PATTERN.test(sampleDigest));
+      const sampleRow = this.db.prepare('SELECT * FROM word_tracked_edit_samples WHERE sample_id = ? AND book_id = ?').get(sampleId, bookId);
+      requireLearning(sampleRow && sampleRow.sha256 === sampleDigest);
+      const stored = read<WordTrackedEditSample & { schema: string }>(sampleRow);
+      const { schema, ...sample } = stored;
+      requireLearning(schema === 'ai7.word-tracked-edit-sample/1');
+      const memberships = this.db.prepare(`SELECT si.commit_id, si.sha256, si.captured_at, wi.commit_id retained_commit_id FROM word_tracked_edit_sample_imports si
+        LEFT JOIN word_revision_imports wi ON wi.commit_id = si.commit_id WHERE si.sample_id = ? ORDER BY wi.created_at, si.commit_id`).all(sampleId);
+      requireLearning(memberships.length > 0 && memberships.every((entry) => entry.commit_id === entry.retained_commit_id));
+      return memberships.map((membership) => {
+        const candidate = wordTrackedEditCandidate(sample, sampleDigest, String(membership.captured_at));
+        const source: WordTrackedEditLearningSource = { bookId, sampleId, sampleDigest, sourceVersionId: String(sampleRow.source_version_id),
+          sourceDigest: sample.sourceDigest, graphDigest: sample.graphDigest, importCommitId: String(membership.commit_id),
+          admissionDigest: String(membership.sha256), materialKey: candidate.materialKey, materialDigest: learningMaterialDigest(candidate) };
+        const evidence = this.#wordEvidence(source);
+        const imported = this.#reads?.wordImports.get(source.importCommitId);
+        requireLearning(imported);
+        return { choice: imported.choice, choiceDigest: imported.digest, admission: evidence.admission, admissionDigest: source.admissionDigest };
+      });
+    });
+  }
+
+  /** Retained samples, not a fabricated editorial decision, own these distinct local material cards. */
+  *wordCandidates(bookId: string): IterableIterator<LearningMaterialCandidate> {
+    const ownsRead = this.#reads === null;
+    if (ownsRead) this.#reads = new LearningReads();
+    try {
+      for (const row of this.db.prepare(`SELECT s.sample_id, s.sha256, l.signal_id FROM word_tracked_edit_samples s
+        LEFT JOIN learning_signals l ON l.source_key = 'word-sample:' || s.sample_id || ':' || s.sha256
+        WHERE s.book_id = ? ORDER BY l.recorded_at, s.sample_id`).iterate(bookId)) {
+        requireLearning(typeof row.signal_id === 'string');
+        const signal = this.#signal(row.signal_id);
+        requireLearning(signal.kind === 'word-tracked-edit' && signal.source.bookId === bookId &&
+          signal.source.sampleId === row.sample_id && signal.source.sampleDigest === row.sha256);
+        this.#currentEligibility(signal, this.controls());
+        yield this.#wordEvidence(signal.source).candidate;
+      }
+    } finally { if (ownsRead) this.#reads = null; }
+  }
+
+  wordCurrentEligibility(bookId: string, sampleId: string, sampleDigest: string): LearningEligibilityChoice {
+    return this.#read(() => {
+      const row = this.db.prepare('SELECT signal_id FROM learning_signals WHERE book_id = ? AND source_key = ?')
+        .get(bookId, `word-sample:${sampleId}:${sampleDigest}`);
+      requireLearning(row);
+      const signal = this.#signal(String(row.signal_id));
+      requireLearning(signal.kind === 'word-tracked-edit' && signal.source.bookId === bookId &&
+        signal.source.sampleId === sampleId && signal.source.sampleDigest === sampleDigest);
+      const standing = this.#currentEligibility(signal, this.controls());
+      requireLearning(standing !== 'superseded');
+      return standing;
+    });
+  }
+
+  #wordEvidence(source: WordTrackedEditLearningSource): WordLearningEvidence {
+    const key = canonicalJson(source);
+    const known = this.#reads?.word.evidence.get(key);
+    if (known !== undefined) return known;
+    try {
+      const evidence = this.#provedWordEvidence(source);
+      freezeWordLearningFact(evidence);
+      this.#reads?.word.evidence.set(key, evidence);
+      return evidence;
+    }
+    catch (error) {
+      if (error instanceof ImportRetentionError) throw new LearningEligibilityError(error.code, error.message);
+      throw error;
+    }
+  }
+
+  #provedWordEvidence(source: WordTrackedEditLearningSource): { candidate: LearningMaterialCandidate; templateKey: string;
+    admission: WordLocalImportAdmission; recordedAt: string } {
+    requireLearning(isRecord(source) && hasExactKeys(source, ['bookId', 'sampleId', 'sampleDigest', 'sourceVersionId', 'sourceDigest',
+      'graphDigest', 'importCommitId', 'admissionDigest', 'materialKey', 'materialDigest']) &&
+      [source.bookId, source.sourceVersionId, source.importCommitId].every((id) => UUID_PATTERN.test(id)) &&
+      /^wts_[0-9a-f]{64}$/u.test(source.sampleId) && source.materialKey === `word-sample:${source.sampleId}` &&
+      [source.sampleDigest, source.sourceDigest, source.graphDigest, source.admissionDigest, source.materialDigest].every((digest) => DIGEST_PATTERN.test(digest)));
+    const parent = readWordParentSourcePin(this.db, source.bookId, source.sourceVersionId);
+    const pin = wordParentSourcePinRecord(parent);
+    requireLearning(parent.sourceDigest === source.sourceDigest);
+    let graph = this.#reads?.wordSources.get(source.sourceVersionId);
+    const sourceRow = this.db.prepare(`SELECT book_id, object_digest, parent_parser_identity, parent_source_pin_json,
+      parent_source_pin_digest, compiler_identity, extractor_identity, graph_digest
+      FROM word_revision_sources WHERE source_version_id = ?`).get(source.sourceVersionId);
+    requireLearning(sourceRow && sourceRow.book_id === source.bookId && sourceRow.object_digest === source.sourceDigest &&
+      sourceRow.parent_parser_identity === parent.parserIdentity && sourceRow.parent_source_pin_json === pin.json &&
+      sourceRow.compiler_identity === WORD_DOCX_PARSER_IDENTITY && sourceRow.extractor_identity === WORD_EXTRACTOR_IDENTITY &&
+      sourceRow.parent_source_pin_digest === pin.digest && sourceRow.graph_digest === source.graphDigest);
+    if (graph === undefined) {
+      const row = this.db.prepare('SELECT graph_json canonical_json, graph_digest sha256 FROM word_revision_sources WHERE source_version_id = ?')
+        .get(source.sourceVersionId);
+      requireLearning(row);
+      const compiledGraph = read<WordRevisionGraph>(row);
+      requireWordRevisionSource(this.db, parent, compiledGraph);
+      requireLearning(Array.isArray(compiledGraph.events));
+      graph = { graphDigest: source.graphDigest, parentPinDigest: pin.digest, events: new Set(compiledGraph.events.map((event) => event.eventId)) };
+      this.#reads?.wordSources.set(source.sourceVersionId, graph);
+    }
+    requireLearning(graph.graphDigest === source.graphDigest && graph.parentPinDigest === pin.digest);
+    const sampleRow = this.db.prepare('SELECT * FROM word_tracked_edit_samples WHERE sample_id = ?').get(source.sampleId);
+    requireLearning(sampleRow && sampleRow.book_id === source.bookId && sampleRow.source_version_id === source.sourceVersionId && sampleRow.sha256 === source.sampleDigest);
+    const storedSample = read<WordTrackedEditSample & { schema: string }>(sampleRow);
+    requireLearning(isRecord(storedSample) && hasExactKeys(storedSample, ['schema', 'sampleId', 'bookId', 'sourceDigest', 'extractorIdentity', 'graphDigest',
+      'operationKind', 'eventMembership', 'before', 'after', 'sourceLocation', 'destinationLocation']) &&
+      ['insert', 'delete', 'replace', 'move', 'paragraph-boundary'].includes(storedSample.operationKind));
+    const { schema, ...sample } = storedSample;
+    const { sampleId, bookId, sourceDigest, extractorIdentity, graphDigest, ...template } = sample;
+    const templateKey = wordTemplateKey(sourceDigest, template);
+    requireLearning(schema === 'ai7.word-tracked-edit-sample/1' && sampleId === source.sampleId && bookId === source.bookId &&
+      sourceDigest === source.sourceDigest && graphDigest === source.graphDigest && extractorIdentity === WORD_EXTRACTOR_IDENTITY &&
+      templateKey === sampleRow.template_key && sampleId === `wts_${sha256Hex(canonicalJson({ schema: 'ai7.word-sample-id/1', bookId, templateKey }))}` &&
+      wordTrackedSampleRecord(sample).json === sampleRow.canonical_json && Array.isArray(template.before) && Array.isArray(template.after) &&
+      template.before.length + template.after.length > 0 && Array.isArray(template.eventMembership) &&
+      template.eventMembership.length > 0 && template.eventMembership.every((id) => graph.events.has(id)));
+    let imported = this.#reads?.wordImports.get(source.importCommitId);
+    const importRow = this.db.prepare('SELECT book_id, source_version_id, sha256, created_at FROM word_revision_imports WHERE commit_id = ?').get(source.importCommitId);
+    requireLearning(importRow && importRow.book_id === source.bookId && importRow.source_version_id === source.sourceVersionId);
+    if (imported === undefined) {
+      const { choice, digest } = readWordImportChoiceRecord(this.db, source.bookId, source.importCommitId);
+      requireLearning(digest === importRow.sha256 && choice.learnFromEdits && choice.originalDigest === source.sourceDigest &&
+        choice.parentSourcePinDigest === pin.digest && choice.graphDigest === source.graphDigest &&
+        choice.effectiveControls.global.enabled && !choice.effectiveControls.book.excluded);
+      const materials = new Map(choice.effectiveControls.materials.map((material) => [material.templateKey, material]));
+      imported = { digest, choice, materials };
+      this.#reads?.wordImports.set(source.importCommitId, imported);
+    }
+    requireLearning(imported.digest === importRow.sha256 && imported.choice.parentSourcePinDigest === pin.digest);
+    const membership = this.db.prepare('SELECT * FROM word_tracked_edit_sample_imports WHERE sample_id = ? AND commit_id = ?')
+      .get(source.sampleId, source.importCommitId);
+    requireLearning(membership && membership.sample_digest === source.sampleDigest && membership.choice_digest === imported.digest && membership.sha256 === source.admissionDigest);
+    const admission = read<WordLocalImportAdmission>(membership);
+    requireLearning(isRecord(admission) && hasExactKeys(admission, ['schema', 'sampleId', 'sampleDigest', 'importChoiceDigest', 'basis',
+      'reviewedLearnFromEdits', 'global', 'book', 'standing']));
+    const standing = imported.materials.get(templateKey);
+    requireLearning(standing && standing.materialDigest === source.materialDigest &&
+      admission.schema === 'ai7.word-local-import-admission/1' && admission.sampleId === source.sampleId && admission.sampleDigest === source.sampleDigest &&
+      admission.importChoiceDigest === imported.digest && canonicalJson(admission.basis) === canonicalJson(LOCAL_LEARNING_POLICY_BASIS) &&
+      admission.reviewedLearnFromEdits === true && admission.global.enabled && !admission.book.excluded &&
+      (admission.standing.choice === 'book' || admission.standing.choice === 'house') &&
+      canonicalJson(admission.global) === canonicalJson(imported.choice.effectiveControls.global) &&
+      canonicalJson(admission.book) === canonicalJson(imported.choice.effectiveControls.book) && canonicalJson(admission.standing) === canonicalJson(standing.standing));
+    if (admission.standing.decisionId !== null) {
+      const historical = this.#eligibilityHistory(source.bookId, source.materialKey).find((entry) => entry.decisionId === admission.standing.decisionId);
+      requireLearning(historical && historical.materialDigest === source.materialDigest && historical.recordDigest === admission.standing.decisionDigest &&
+        historical.choice === admission.standing.choice && historical.basis.version === admission.standing.basisVersion);
+    }
+    const recordedAt = String(membership.captured_at);
+    requireLearning(Number.isFinite(Date.parse(recordedAt)) && recordedAt === importRow.created_at);
+    const candidate = wordTrackedEditCandidate(sample, source.sampleDigest, recordedAt);
+    requireLearning(learningMaterialDigest(candidate) === source.materialDigest);
+    return { candidate, templateKey, admission, recordedAt };
+  }
+
+  #provedWordSignal(row: Row, signal: WordTrackedEditLearningSignal & { basis: unknown }): WordTrackedEditLearningSignal {
+    requireLearning(isRecord(signal) && hasExactKeys(signal, ['schema', 'signalId', 'kind', 'source', 'rewriteDistance', 'eligibility', 'attribution', 'recordedAt', 'basis']) &&
+      isRecord(signal.source) && signal.schema === 'ai7.word-import-learning-signal/1' && canonicalJson(signal.basis) === canonicalJson(LOCAL_LEARNING_POLICY_BASIS) &&
+      signal.signalId === row.signal_id && signal.source.bookId === row.book_id && signal.recordedAt === row.recorded_at &&
+      signal.rewriteDistance === null && signal.ask === undefined && UUID_PATTERN.test(signal.signalId) &&
+      row.source_key === `word-sample:${signal.source.sampleId}:${signal.source.sampleDigest}`);
+    requireLearning(isRecord(signal.attribution) && hasExactKeys(signal.attribution, ['peopleVersion', 'authors', 'editors']) &&
+      Number.isSafeInteger(signal.attribution.peopleVersion) && signal.attribution.peopleVersion >= 0 &&
+      [signal.attribution.authors, signal.attribution.editors].every((names) => Array.isArray(names) &&
+        names.every((name) => typeof name === 'string' && name.isWellFormed())));
+    const evidence = this.#wordEvidence(signal.source);
+    requireLearning(signal.recordedAt === evidence.recordedAt && canonicalJson(signal.eligibility) === canonicalJson({
+      choice: evidence.admission.standing.choice, decisionId: evidence.admission.standing.decisionId, basisVersion: evidence.admission.standing.basisVersion }));
+    freezeWordLearningFact(signal);
+    return signal;
+  }
+
+  #capture(sourceKey: string, kind: DecisionLearningSignal['kind'], source: LearningSourceReference, rewriteDistance: number | null, recordedAt: string, ask?: DecisionLearningSignal['ask']): string | null {
     const controls = this.controls();
     const eligibility = this.#standing(source.bookId, source.materialKey);
     if (!controls.enabled || controls.excludedBooks.has(source.bookId) || eligibility.choice === 'excluded' || eligibility.choice === 'deferred') return null;
     const prior = this.db.prepare('SELECT signal_id FROM learning_signals WHERE source_key = ?').get(sourceKey);
     if (prior) return String(prior.signal_id);
-    const signal: LearningSignal = { signalId: randomUUID(), kind, source, rewriteDistance, eligibility,
+    const signal: DecisionLearningSignal = { signalId: randomUUID(), kind, source, rewriteDistance, eligibility,
       attribution: this.#attribution(source.bookId, recordedAt), recordedAt, ...(ask === undefined ? {} : { ask }) };
     const record = canonicalRecord({ ...signal, schema: 'ai7.learning-signal/1', basis: LOCAL_LEARNING_POLICY_BASIS });
     this.db.prepare('INSERT INTO learning_signals(signal_id, book_id, source_key, recorded_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?)')
@@ -323,11 +706,13 @@ export class EditorialLearningLedger {
     if (known !== undefined && known.sha256 === row.sha256 && typeof row.canonical_json === 'string' && sha256Hex(row.canonical_json) === row.sha256) return known.signal;
     const signal = this.#provedSignal(row);
     this.#reads?.signals.set(id, { sha256: String(row.sha256), signal });
+    if (signal.kind === 'word-tracked-edit') this.#reads?.word.signals.set(id, { sha256: String(row.sha256), signal });
     return signal;
   }
 
   #provedSignal(row: Row): LearningSignal {
     const signal = read<LearningSignal & { schema: string; basis: unknown }>(row);
+    if (signal.kind === 'word-tracked-edit') return this.#provedWordSignal(row, signal);
     requireLearning(signal.schema === 'ai7.learning-signal/1' && canonicalJson(signal.basis) === canonicalJson(LOCAL_LEARNING_POLICY_BASIS) &&
       signal.signalId === row.signal_id && signal.source.bookId === row.book_id && signal.recordedAt === row.recorded_at);
     const source = signal.source;
@@ -367,6 +752,22 @@ export class EditorialLearningLedger {
   /** A later decision on the item, or a revised reason, supersedes the source: never usable, and never shown as 明确排除. */
   #currentEligibility(signal: LearningSignal, controls: Controls): LearningSignalStanding {
     if (!controls.enabled || controls.excludedBooks.has(signal.source.bookId)) return 'excluded';
+    if (signal.kind === 'word-tracked-edit') {
+      this.#wordEvidence(signal.source);
+      const last = this.#eligibilityHistory(signal.source.bookId, signal.source.materialKey).at(-1);
+      requireLearning(last === undefined || last.materialDigest === signal.source.materialDigest);
+      const choice = this.#standing(signal.source.bookId, signal.source.materialKey).choice;
+      if (choice === 'house' || choice === 'book') {
+        const identity = `${signal.source.bookId}:${signal.source.sourceVersionId}:${signal.source.sourceDigest}:${signal.source.graphDigest}`;
+        if (!this.#reads?.availableWordSources.has(identity)) {
+          if (this.requireWordSource === undefined) throw new LearningEligibilityError('WORD_SOURCE_UNAVAILABLE', 'Word 原始来源尚未通过实际对象可用性验证。');
+          const facts = this.requireWordSource(signal.source);
+          if (facts !== undefined) this.#reads?.useWordProofs(facts);
+          this.#reads?.availableWordSources.add(identity);
+        }
+      }
+      return choice;
+    }
     if (signal.kind === 'proactive-reason' && signal.ask?.state !== 'answered') return 'deferred';
     if (signal.source.reviewRunId === null) {
       const current = this.db.prepare(`SELECT decision_id FROM proposal_item_decisions WHERE item_id =
@@ -504,7 +905,8 @@ export class EditorialLearningLedger {
     if (input.kind === 'material') {
       const signal = this.#signal(input.signalId);
       let candidate: LearningMaterialCandidate | null = null;
-      if (signal.source.reviewRunId === null) candidate = this.#candidate(signal.source.decisionId, signal.kind === 'proactive-reason')?.candidate ?? null;
+      if (signal.kind === 'word-tracked-edit') candidate = this.#wordEvidence(signal.source).candidate;
+      else if (signal.source.reviewRunId === null) candidate = this.#candidate(signal.source.decisionId, signal.kind === 'proactive-reason')?.candidate ?? null;
       else {
         const row = this.db.prepare('SELECT * FROM quality_signals WHERE disposition_id = ?').get(signal.source.decisionId) as Row | undefined;
         if (row) candidate = reviewDispositionCandidate({ signalId: String(row.signal_id), reviewRunId: String(row.review_run_id),
@@ -550,7 +952,7 @@ export class EditorialLearningLedger {
   }
 
   #provedOrigin(signal: LearningSignal, allowMissing: boolean): { operationalScope: TrustedOperationalScope; editorialDimension: string } | null {
-    if (!['accepted', 'accepted-with-edit', 'rejected'].includes(signal.kind) || signal.source.reviewRunId !== null) {
+    if (signal.kind === 'word-tracked-edit' || !['accepted', 'accepted-with-edit', 'rejected'].includes(signal.kind) || signal.source.reviewRunId !== null) {
       requireLearning(allowMissing); return null;
     }
     const finding = this.db.prepare(`SELECT f.review_run_id, f.category_id FROM proposal_item_decisions d
@@ -577,6 +979,12 @@ export class EditorialLearningLedger {
     for (const row of this.db.prepare('SELECT signal_id FROM learning_signals WHERE book_id = ?').iterate(bookId)) {
       const signal = this.#signal(String(row.signal_id));
       if (signal.source.materialKey !== materialKey || signal.source.materialDigest !== materialDigest || this.#currentEligibility(signal, controls) !== 'house') continue;
+      if (signal.kind === 'word-tracked-edit') {
+        // This proves local policy-2 retention only; it never constructs a review-memory source snapshot.
+        sourceKeys.push(sha256Hex(canonicalJson({ signalId: signal.signalId, materialDigest: signal.source.materialDigest,
+          sampleDigest: signal.source.sampleDigest })));
+        continue;
+      }
       const origin = this.#reviewOrigin(signal, true);
       if (origin?.operationalScope !== scope) continue;
       const snapshot = this.sourceSnapshot(signal.signalId);
@@ -599,6 +1007,7 @@ export class EditorialLearningLedger {
    */
   #sourceStanding(signalId: string): { readonly snapshot: EditorialMemorySourceSnapshot } | { readonly unavailable: 'not-current' | 'not-review' } {
     const signal = this.#signal(signalId);
+    if (signal.kind === 'word-tracked-edit') return { unavailable: 'not-review' };
     const eligibility = this.#currentEligibility(signal, this.controls());
     if (eligibility !== 'book' && eligibility !== 'house') return { unavailable: 'not-current' };
     const origin = this.#reviewOrigin(signal, true);
@@ -627,6 +1036,7 @@ export class EditorialLearningLedger {
 
   #provedSource(snapshot: EditorialMemorySourceSnapshot): void {
     const signal = this.#signal(snapshot.signalId);
+    requireLearning(signal.kind !== 'word-tracked-edit');
     requireLearning(canonicalJson(snapshot.source) === canonicalJson(signal.source) &&
       canonicalJson(snapshot.attribution) === canonicalJson(signal.attribution) &&
       snapshot.sourceKey === sha256Hex(canonicalJson({ signalId: signal.signalId, materialDigest: signal.source.materialDigest, reasonRevision: signal.source.reasonRevision })) &&
@@ -653,6 +1063,7 @@ export class EditorialLearningLedger {
     validateEditorialMemorySourceShape(snapshot);
     if (!this.db.prepare('SELECT 1 FROM learning_signals WHERE signal_id = ?').get(snapshot.signalId)) return false;
     const signal = this.#signal(snapshot.signalId);
+    requireLearning(signal.kind !== 'word-tracked-edit');
     requireLearning(canonicalJson(signal.source) === canonicalJson(snapshot.source) && canonicalJson(signal.attribution) === canonicalJson(snapshot.attribution) &&
       canonicalJson(this.#reviewOrigin(signal)) === canonicalJson({ operationalScope: snapshot.operationalScope, editorialDimension: snapshot.editorialDimension }));
     return true;
@@ -970,6 +1381,7 @@ export class EditorialLearningLedger {
       return;
     }
     const signal = this.#signal(input.signalId);
+    requireLearning(signal.kind !== 'word-tracked-edit');
     // House memory may never promote a source explicitly restricted to one Book.
     requireLearning(this.#currentEligibility(signal, this.controls()) === 'house');
     requireLearning(input.title.trim().length > 0 && input.title.length <= 160 && input.editorialDimension.trim().length > 0 &&
@@ -1015,6 +1427,8 @@ export class EditorialLearningLedger {
     const wanted = new Set(materialKeys);
     return this.db.prepare('SELECT signal_id FROM learning_signals WHERE book_id = ?').all(bookId).flatMap((row) => {
       const signal = this.#signal(String(row.signal_id));
+      if (signal.kind === 'word-tracked-edit') return wanted.has(signal.source.materialKey)
+        ? [sha256Hex(canonicalJson({ signalId: signal.signalId, materialDigest: signal.source.materialDigest, sampleDigest: signal.source.sampleDigest }))] : [];
       return wanted.has(signal.source.materialKey) ? [sha256Hex(canonicalJson({ signalId: signal.signalId,
         materialDigest: signal.source.materialDigest, reasonRevision: signal.source.reasonRevision }))] : [];
     });
@@ -1079,6 +1493,13 @@ export class EditorialLearningLedger {
 
   #inspect(input: InspectEditorialLearningInput, scope?: TrustedOperationalScope): EditorialLearningProjection {
     const controls = this.controls();
+    // A bounded page must not hide a corrupt retained Word signal just beyond it. C0's existing families keep their reader.
+    for (const row of this.db.prepare(`SELECT signal_id FROM learning_signals
+      WHERE source_key LIKE 'word-sample:%' OR json_extract(canonical_json, '$.kind') = 'word-tracked-edit'`).iterate()) {
+      const signal = this.#signal(String(row.signal_id));
+      requireLearning(signal.kind === 'word-tracked-edit');
+      this.#currentEligibility(signal, controls);
+    }
     // An ask's own bookkeeping (offered, suppressed, dismissed) only paces later asks; the editor's list shows what they told AI7.
     const rows = this.db.prepare(`SELECT signal_id FROM learning_signals WHERE coalesce(json_extract(canonical_json, '$.ask.state'), 'answered') = 'answered'
       ORDER BY rowid DESC LIMIT ? OFFSET ?`).all(PAGE_SIZE + 1, input.signalOffset);
@@ -1136,6 +1557,7 @@ export class EditorialLearningLedger {
     for (const row of this.db.prepare('SELECT signal_id FROM learning_signals').iterate()) this.#signal(String(row.signal_id));
     for (const row of this.db.prepare('SELECT * FROM global_editorial_memory_items').iterate()) {
       const signal = this.#signal(String(row.source_signal_id));
+      requireLearning(signal.kind !== 'word-tracked-edit');
       for (const version of this.#versions(String(row.item_id))) {
         if (version.schema === 'ai7.global-editorial-memory/2') {
           requireLearning(memoryRevision);

@@ -40,7 +40,7 @@ describe('Data Version 1 frozen at the 1.0.0 boundary', () => {
     expect(DATA_VERSION_FROZEN).toBe(true);
     // The baseline is a literal: when a later slice adds a revision, LATEST moves past it and the classification must follow.
     expect(DATA_VERSION_BASELINE_REVISION).toBe(83);
-    expect(LATEST_SCHEMA_VERSION).toBe(92);
+    expect(LATEST_SCHEMA_VERSION).toBe(93);
     expect(DATA_VERSION).toBe(1);
     expect(DATA_VERSION).toBe(dataVersionAt(LATEST_SCHEMA_VERSION));
   });
@@ -60,7 +60,7 @@ describe('Data Version 1 frozen at the 1.0.0 boundary', () => {
     expect(unclassifiedRevisions([84, 86], 83, [...classes, { revision: 86, class: 'breaking' as const, change: '甲' }])).toEqual([]);
     // A breaking class raises the number only: Data Version 2 from revision 86 on.
     expect([85, 86].map((revision) => dataVersionAt(revision, [...classes, { revision: 86, class: 'breaking' as const, change: '甲' }]))).toEqual([1, 2]);
-    expect(SCHEMA_REVISION_CLASSES).toEqual([{ revision: 84, class: 'additive' }, { revision: 85, class: 'additive' }, { revision: 86, class: 'additive' }, { revision: 87, class: 'additive' }, { revision: 88, class: 'additive' }, { revision: 89, class: 'additive' }, { revision: 90, class: 'additive' }, { revision: 91, class: 'additive' }, { revision: 92, class: 'additive' }]);
+    expect(SCHEMA_REVISION_CLASSES).toEqual([{ revision: 84, class: 'additive' }, { revision: 85, class: 'additive' }, { revision: 86, class: 'additive' }, { revision: 87, class: 'additive' }, { revision: 88, class: 'additive' }, { revision: 89, class: 'additive' }, { revision: 90, class: 'additive' }, { revision: 91, class: 'additive' }, { revision: 92, class: 'additive' }, { revision: 93, class: 'additive' }]);
   });
 });
 

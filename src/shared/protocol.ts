@@ -128,7 +128,7 @@ import type { PublicSampleBookSourceDigest } from './public-samplebooks.js';
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 174 as const;
+export const SERVICE_PROTOCOL_VERSION = 175 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 export interface BookFindingProjection {
@@ -417,6 +417,7 @@ export const IPC_CHANNELS = {
   recordProposalDecisionReason: 'ai7:j05:record-proposal-decision-reason',
   recordProposalDecisionFeedback: 'ai7:j11:record-proposal-decision-feedback',
   inspectEditorialLearning: 'ai7:learning:inspect-editorial-learning',
+  inspectWordTrackedEditSample: 'ai7:j11:inspect-word-tracked-edit-sample',
   recordLearningReasonAsk: 'ai7:learning:record-reason-ask',
   changeEditorialLearning: 'ai7:learning:change-editorial-learning',
   createEditorialMemory: 'ai7:learning:create-editorial-memory',
@@ -1208,6 +1209,74 @@ export interface ImportIdentityFindingProjection {
   };
 }
 
+/** An explicit choice for supported native tracked Word intake; accepted mode requires its own confirmation. */
+export interface WordTrackedChangesChoice {
+  mode: 'suggestions' | 'accepted-baseline';
+  learnFromEdits: boolean;
+  acceptedBaselineConfirmed: boolean;
+}
+
+export type WordSampleDetailSection = 'before' | 'after' | 'events' | 'imports';
+export type WordSampleDetailField = 'text' | 'rawId' | 'rawAuthor' | 'rawDate' | 'rangeName' | 'record';
+export interface WordSampleCursorProjection {
+  schema: 'ai7.word-sample-cursor/1'; sampleDigest: string; detailDigest: string; section: WordSampleDetailSection;
+  entryOrdinal: number; field: WordSampleDetailField; codeUnitOffset: number;
+}
+export interface InspectWordTrackedEditSampleInput {
+  bookId: string; sampleId: string; sampleDigest: string; after: WordSampleCursorProjection | null;
+}
+export type WordSourceFragmentProjection =
+  | { kind: 'text'; part: string; paragraphIndex: number; atomOrdinal: number; fromCodeUnit: number; toCodeUnit: number; codeUnits: number; sha256: string }
+  | { kind: 'paragraph-boundary'; part: string; paragraphIndex: number; atomOrdinal: number; sha256: string };
+/** A transport projection of the existing policy basis, whose value remains owned by local learning. */
+export interface WordLocalLearningBasisProjection {
+  policy: 'ai7.learning-eligibility-policy'; mode: 'opt-out-local'; version: 2; authority: 'ADR 0094 §3'; rules: readonly [2, 5]; text: string;
+}
+export type WordControlReferenceProjection = { kind: 'entry'; entryId: string; sha256: string } |
+  { kind: 'default'; basis: WordLocalLearningBasisProjection };
+export interface WordLocalImportAdmissionProjection {
+  schema: 'ai7.word-local-import-admission/1'; sampleId: string; sampleDigest: string; importChoiceDigest: string;
+  basis: WordLocalLearningBasisProjection; reviewedLearnFromEdits: true;
+  global: { enabled: true; reference: WordControlReferenceProjection };
+  book: { excluded: false; reference: WordControlReferenceProjection };
+  standing: { choice: 'book' | 'house'; decisionId: string | null; decisionDigest: string | null; basisVersion: number };
+}
+export type WordSampleDetailRecordProjection =
+  | { type: 'fragment'; fragment: WordSourceFragmentProjection }
+  | { type: 'event'; eventId: string;
+      kind: 'ins' | 'del' | 'moveFrom' | 'moveTo' | 'moveFromRangeStart' | 'moveFromRangeEnd' | 'moveToRangeStart' | 'moveToRangeEnd' |
+        'commentRangeStart' | 'commentRangeEnd' | 'commentReference';
+      context: 'run' | 'paragraph-boundary' | 'range' | 'comment'; part: string; elementOrdinal: number;
+      location: { part: string; paragraphIndex: number; atomOrdinal: number; codeUnitOffset: number };
+      disposition: 'visible-transition' | 'no-visible-transition' | 'range' | 'comment'; parentCount: number; rangeLinkCount: number }
+  | { type: 'event-link'; eventId: string; relation: 'parent' | 'range'; linkedEventId: string; ordinal: number }
+  | { type: 'import'; commitId: string; mode: WordTrackedChangesChoice['mode']; sourceVersionId: string; sourceDigest: string;
+      parentSourcePinDigest: string; importReviewId: string; fidelityReviewId: string; revisionId: string; choiceDigest: string; admissionDigest: string;
+      workingObjectDigest: string | null; compilerIdentity: string; extractorIdentity: 'ai7-word-tracked-extractor/1'; graphDigest: string;
+      readings: Record<'rejected' | 'accepted', { digest: string; blockCount: number; usable: boolean }>;
+      mappingDigest: string; templateManifestDigest: string; learnFromEdits: boolean; acceptedBaselineConfirmed: boolean }
+  | { type: 'import-admission'; commitId: string; basis: WordLocalImportAdmissionProjection };
+export type WordSampleDetailItemProjection = {
+  section: WordSampleDetailSection; entryOrdinal: number; sourceOrdinal: number; childOrdinal: number | null;
+} & (
+  | { kind: 'text'; field: Exclude<WordSampleDetailField, 'record'>; text: string | null; sha256: string | null; fragment: WordSourceFragmentProjection | null;
+      startCodeUnit: number; endCodeUnit: number; totalCodeUnits: number; complete: boolean }
+  | { kind: 'record'; field: 'record'; record: WordSampleDetailRecordProjection; complete: true }
+);
+export interface WordTrackedEditSampleDetailProjection {
+  bookId: string; sampleId: string; sampleDigest: string; detailDigest: string; sourceVersionId: string; sourceDigest: string;
+  operationKind: 'insert' | 'delete' | 'replace' | 'move' | 'paragraph-boundary'; sectionCounts: Record<WordSampleDetailSection, number>;
+  items: WordSampleDetailItemProjection[]; nextCursor: WordSampleCursorProjection | null;
+}
+
+export type WordIntakeRefusalCode = 'table-revision' | 'custom-xml-or-math-revision' | 'story-or-text-box-revision' |
+  'incompatible-paragraph-join' | 'invalid-move-graph' | 'unrepresentable-comment' | 'unusable-reading' | 'resource-limit';
+export type WordTrackedChangesIntakeProjection =
+  | { compatibility: 'ready'; previewReading: 'rejected' | 'accepted';
+      readings: Record<'rejected' | 'accepted', { usable: boolean; blockCount: number }>;
+      savedChoice: WordTrackedChangesChoice | null }
+  | { compatibility: 'unsupported'; reasonCodes: ReadonlyArray<WordIntakeRefusalCode>; locationCount: number };
+
 export interface StagedImportProjection {
   draftId: string;
   draftVersion: number;
@@ -1252,6 +1321,7 @@ export interface StagedImportProjection {
   nextBookCursor: BookSummaryCursor | null;
   fidelity: ReadonlyArray<FidelityCategoryProjection>;
   detectedBlockCount: number;
+  wordTrackedChanges?: WordTrackedChangesIntakeProjection;
 }
 
 export interface ReviewBeforeImportProjection {
@@ -1285,6 +1355,8 @@ export interface ReviewBeforeImportProjection {
    * `retain` (保留为文本框, the default) or `merge` (并入正文); null when the file has none it can choose for.
    */
   textBoxDisposition: TextBoxDisposition | null;
+  trackedChanges?: WordTrackedChangesChoice;
+  wordLearning?: { globalEnabled: boolean; bookExcluded: boolean; sourceTemplateCount: number; eligibleSampleCount: number };
   recordsToCreate: ReadonlyArray<string>;
   nonEffects: ReadonlyArray<string>;
   workflowProfile: {
@@ -9664,8 +9736,8 @@ export interface RecordAnalysisFeedbackInput {
  * Where a Learning Material came from: a 修改建议 decided with the editor's reason or their own wording, a judgment of an
  * analysis result that says why, or a 审阅 finding the editor ignored and said why.
  */
-export type LearningMaterialKind = 'proposal-decision' | 'analysis-feedback' | 'review-disposition';
-export const LEARNING_MATERIAL_KINDS: readonly LearningMaterialKind[] = ['proposal-decision', 'analysis-feedback', 'review-disposition'];
+export type LearningMaterialKind = 'proposal-decision' | 'analysis-feedback' | 'review-disposition' | 'word-tracked-edit';
+export const LEARNING_MATERIAL_KINDS: readonly LearningMaterialKind[] = ['proposal-decision', 'analysis-feedback', 'review-disposition', 'word-tracked-edit'];
 /**
  * What the Learning Eligibility ledger decides about: the three kinds 学习准入 shows a card for, and `readers-report-exemplar`
  * (Issue #429) — 范例's admission of one 审稿意见 at one exact version, decided from 范例 and listed by no card.
@@ -9679,7 +9751,7 @@ const LEARNING_UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3
  */
 export const LEARNING_MATERIAL_KEY_PATTERN = new RegExp(
   `^(?:proposal-decision:${LEARNING_UUID}|analysis-feedback:${LEARNING_UUID}/(?:synopsis|(?:entities|events|relationships|settings)/\\d{1,6})` +
-  `|review-disposition:${LEARNING_UUID}/rvf_[0-9a-f]{24})$`,
+  `|review-disposition:${LEARNING_UUID}/rvf_[0-9a-f]{24}|word-sample:wts_[0-9a-f]{64})$`,
   'u',
 );
 
@@ -9723,11 +9795,14 @@ export type LearningMaterialTarget =
     readonly itemKey: string;
     readonly dimension: AnalysisFeedbackDimension;
   }
-  | { readonly kind: 'review'; readonly bookId: string; readonly reviewRunId: string; readonly findingId: string };
+  | { readonly kind: 'review'; readonly bookId: string; readonly reviewRunId: string; readonly findingId: string }
+  | { readonly kind: 'word-tracked-edit'; readonly bookId: string; readonly sampleId: string; readonly sampleDigest: string };
 
 /** One Learning Material as its Review Card shows it (LEARN-003). */
 export interface LearningMaterialProjection {
   readonly target: LearningMaterialTarget;
+  /** Word's actual current local controls/standing, separate from its historical capture and any human decision. */
+  readonly wordCurrentEligibility?: LearningEligibilityChoice;
   /** The exact originating Task, when the source record has one (LEARN-003); editor-authored material has none. */
   readonly sourceTask: null | { readonly taskIntentId: string; readonly label: string };
   /** The material's place: its kind and the record it comes from. */
@@ -9819,7 +9894,7 @@ export type FeedbackHistoryTarget =
 export const FEEDBACK_HISTORY_SIGNALS = ['接受', '修改后接受', '拒绝', '准确', '不准确', '不完整', '忽略'] as const;
 export interface FeedbackHistoryInput {
   readonly bookId?: string | null;
-  readonly origin?: LearningMaterialKind | null;
+  readonly origin?: Exclude<LearningMaterialKind, 'word-tracked-edit'> | null;
   readonly author?: string | null;
   readonly editor?: string | null;
   /** Exact projected disposition or judgment; omitted or null means all. */
@@ -9835,7 +9910,7 @@ export interface FeedbackHistoryInput {
 /** One piece of the editor's feedback as the history lists it. */
 export interface FeedbackHistoryEntryProjection {
   readonly entryId: string;
-  readonly origin: LearningMaterialKind;
+  readonly origin: Exclude<LearningMaterialKind, 'word-tracked-edit'>;
   readonly bookId: string;
   /**
    * The Editorial Dimension it is about, in the editor's words: an analysis dimension, a 审阅 category — a 修改建议 a 审阅
@@ -9931,6 +10006,7 @@ export interface LearningAuditInput {
 
 /** One material as 学习回溯 lists it: what it is, where it stands, and what used it (LAUD-001). */
 export interface LearningAuditMaterialProjection {
+  readonly wordCurrentEligibility?: LearningEligibilityChoice;
   readonly materialKey: string;
   readonly kind: LearningLedgerMaterialKind;
   readonly digest: string;
@@ -12168,6 +12244,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations {
        * preselects — or `merge`. A file without a text box can only be reviewed with `retain`.
        */
       textBoxDisposition: TextBoxDisposition;
+      trackedChanges?: WordTrackedChangesChoice;
     };
     output: ReviewBeforeImportProjection;
   };
@@ -12251,6 +12328,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations {
   recordProposalDecisionReason: { input: RecordProposalDecisionReasonInput; output: EditorialMarkCommandProjection };
   recordProposalDecisionFeedback: { input: RecordProposalDecisionFeedbackInput; output: EditorialMarkCommandProjection };
   inspectEditorialLearning: { input: InspectEditorialLearningInput; output: EditorialLearningProjection };
+  inspectWordTrackedEditSample: { input: InspectWordTrackedEditSampleInput; output: WordTrackedEditSampleDetailProjection };
   recordLearningReasonAsk: { input: LearningReasonAskInput & { frequency: import('./preferences.js').LearningAskFrequency }; output: LearningReasonAskProjection | null };
   changeEditorialLearning: { input: ChangeEditorialLearningInput; output: EditorialLearningProjection };
   createEditorialMemory: { input: CreateEditorialMemoryInput; output: EditorialLearningProjection };
@@ -12859,6 +12937,7 @@ export interface RendererApi extends GlobalAgentRendererApi {
   rebuildHouseReviewPreference(): Promise<HouseReviewPreferenceProjection>;
   inspectEditQualitySignals(input: { bookId: string | null; preferenceAfter?: PreferenceAdoptionCursor | null }): Promise<EditQualitySignalsProjection>;
   inspectLearningMaterials(input: { bookId: string | null; after?: LearningMaterialCursor | null }): Promise<LearningMaterialsProjection>;
+  inspectWordTrackedEditSample(input: InspectWordTrackedEditSampleInput): Promise<WordTrackedEditSampleDetailProjection>;
   inspectLearningMaterial(input: { bookId: string; materialKey: string }): Promise<LearningMaterialProjection>;
   decideLearningMaterial(input: DecideLearningMaterialInput): Promise<LearningMaterialProjection>;
   inspectFeedbackHistory(input?: FeedbackHistoryInput): Promise<FeedbackHistoryProjection>;
