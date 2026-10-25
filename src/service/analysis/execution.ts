@@ -1935,9 +1935,10 @@ export class BaselineAnalysisExecutionOwner {
       const checkpointStage = (stage: 'cross-unit-reduction' | 'assurance-sampling'): void => {
         if (live === null || stages.reduction === undefined) return;
         const carried = Object.fromEntries(CARRIED_STAGES.map((name) => [name, { ...stageUsage[name] }])) as CarriedStages;
+        // The same total a stop keeps (#541): what an older stop carried without stages still counts toward the ceiling.
         ledger.checkpointStageRequests(facts.runRecordId, stage, stages, {
-          inputTokens: CARRIED_STAGES.reduce((sum, name) => sum + carried[name].inputTokens, 0),
-          outputTokens: CARRIED_STAGES.reduce((sum, name) => sum + carried[name].outputTokens, 0), stages: carried,
+          inputTokens: unattributed.inputTokens + CARRIED_STAGES.reduce((sum, name) => sum + carried[name].inputTokens, 0),
+          outputTokens: unattributed.outputTokens + CARRIED_STAGES.reduce((sum, name) => sum + carried[name].outputTokens, 0), stages: carried,
         });
       };
       const clock = new RunStageClock();
@@ -2140,7 +2141,10 @@ export class BaselineAnalysisExecutionOwner {
       const keepSettled = (unit: CoverageManifestUnitProjection, wallMs: number): void => {
         const settledRecord = unitRecords.find((record) => record.unitOrdinal === unit.ordinal);
         if (settledRecord !== undefined) {
-          const requests = live === null ? undefined : [...(ledger.requestAdmissionOf(facts.runRecordId)?.open.values() ?? [])]
+          // A receipt-free historical Run settling locally keeps the historical checkpoint format: an
+          // empty `requests` array is governed evidence, which only a Run with a receipt may carry.
+          const receipt = live === null ? null : ledger.requestAdmissionOf(facts.runRecordId);
+          const requests = receipt === null ? undefined : [...receipt.open.values()]
             .filter((request) => request.stage === 'units' && request.unitOrdinal === unit.ordinal).map((request) => request.requestId);
           ledger.recordUnitCheckpoint({ runRecordId: facts.runRecordId, attemptId, unit: settledRecord, observation: unitObservations.get(unit.ordinal) ?? null,
             ...(requests === undefined ? {} : { requests }) });

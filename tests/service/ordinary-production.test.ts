@@ -481,6 +481,38 @@ it('reuses immediate completed reduction evidence and its exact usage after rest
   } finally { db.close(); }
 });
 
+it('settles a fenced unit by its frozen contract after a restart with Main missing, and the store opens again (#1131 review)', async () => {
+  const { store, production } = await openProductionStore(); await configure(store, production, 'deepseek-open-platform');
+  const bookId = await sample1Book(store, '公开样书的冻结契约结算'); const prepared = prepare(store, bookId, production.policy);
+  const ledger = store.baselineAnalysisLedger; const admit = ledger.admitModelRequest.bind(ledger); let snapshot: string | undefined;
+  const fence = vi.spyOn(ledger, 'admitModelRequest').mockImplementation((runId, request, claim) => {
+    admit(runId, request, claim);
+    if (snapshot === undefined && request.stage === 'units' && request.unitOrdinal === 2) snapshot = snapshotAtBoundary('fenced-unit-under-frozen-contract');
+  });
+  const runId = (await run(store, owner(store, production, stubTransport([], await chainAnswers(prepared))), bookId, prepared)).run!.runRecordId;
+  fence.mockRestore(); expect(snapshot).toBeDefined();
+  const reopened = await openProductionStore(snapshot!);
+  const missing = reopened.store.saveModelServiceConnection('合成重启后缺失的连接', null, 'needs-attention', 'opencode-go');
+  reopened.store.setModelServiceCredentialState(missing.credentialReference, 'missing'); reopened.store.selectModelServiceRoute('opencode-go');
+  await reopened.production.rebind(reopened.store); expect(reopened.production.live).toBeNull();
+  const kept = reopened.store.baselineAnalysisLedger; const receipt = kept.requestAdmissionOf(runId)!;
+  // The scenario this guards: the launch's current contract is no longer the one the Run froze.
+  expect(kept.definition.promptContractDigest).not.toBe(receipt.pins.promptContractDigest);
+  const admitted = new Map([...receipt.open.values()].filter((request) => request.stage === 'units').map((request) => [request.unitOrdinal!, request.requestDigest]));
+  expect(admitted.has(2)).toBe(true);
+  reopened.store.reconcileStoppedBaselineAnalysisRuns();
+  expect(kept.requestAdmissionOf(runId)!.open.size).toBe(0);
+  for (const [ordinal, requestDigest] of admitted) {
+    const checkpoint = kept.unitCheckpoints(runId).find((entry) => entry.unit.unitOrdinal === ordinal)!;
+    expect(checkpoint.unit.requestDigest).toBe(requestDigest);
+    if (ordinal === 2) expect(checkpoint.unit.closed).toMatchObject({ state: 'gap', gap: { code: 'outcome-unknown' } });
+  }
+  const settled = kept.unitCheckpoints(runId);
+  reopened.store.markCleanShutdown(); reopened.store.close();
+  const again = await openProductionStore(snapshot!);
+  expect(again.store.baselineAnalysisLedger.unitCheckpoints(runId)).toEqual(settled);
+});
+
 it('keeps an actually selected finite-ceiling production v2 Run serial with free global capacity (#1131)', async () => {
   const { store, production } = await openProductionStore(); await configure(store, production, 'opencode-go');
   const bookId = await sample1Book(store, '公开样书的有限预算'); const initial = prepare(store, bookId, production.policy);
@@ -630,6 +662,17 @@ it.each([{ guard: 'influence', cancel: false }, { guard: 'series', cancel: false
     const after = legacy.evidence(); expect(after.questions).toEqual(before.questions); expect(after.answers).toEqual(before.answers);
     expect(after.states.slice(0, before.states.length)).toEqual(before.states);
     expect(requestGovernor.snapshot()).toMatchObject({ registered: 0, waiting: 0, inFlight: 0 });
+    // Local settlement keeps the receipt-free historical checkpoint format, so the next real open still validates it.
+    const db = new DatabaseSync(join(legacy.snapshot, 'store', 'ai7.sqlite'), { readOnly: true });
+    try {
+      const checkpoints = db.prepare('SELECT canonical_json FROM analysis_unit_checkpoints WHERE run_record_id = ?').all(legacy.runId);
+      expect(checkpoints.length).toBeGreaterThan(0);
+      expect(checkpoints.every((row) => !Object.hasOwn(JSON.parse(String(row.canonical_json)) as object, 'requests'))).toBe(true);
+    } finally { db.close(); }
+    await execution.dispose(); legacy.store.markCleanShutdown(); legacy.store.close();
+    const reopened = await openProductionStore(legacy.snapshot);
+    expect(reopened.store.baselineAnalysisLedger.requestAdmissionOf(legacy.runId)).toBeNull();
+    expect(reopened.store.baselineAnalysisLedger.currentRunState(legacy.runId)).toBe(cancel ? 'cancelled' : 'interrupted');
   });
 
 it.each(['null', 'object', 'non-uuid', 'foreign-question', 'wrong-answer-pin', 'unpaired', 'wrong-unit'] as const)
@@ -691,6 +734,31 @@ it.each(['runRecordId', 'sequence', 'recordedAt'].flatMap((field) => [false, tru
     await expect(EditorialStore.open(legacy.snapshot, roots.codeRoot).then((incoming) => { opened.push(incoming); return incoming; })).rejects.toMatchObject({ code: 'ANALYSIS_RECORD_INVALID' });
     expect(legacy.evidence()).toEqual(before);
   });
+
+it.each(['carriedUsage', 'stageContinuation'] as const)('refuses a rehashed inherited %s copy on a later governed row (#1131 review)', async (field) => {
+  const { store, production } = await openProductionStore(); await configure(store, production, 'opencode-go');
+  const bookId = await sample1Book(store, '公开样书的阶段证据副本'); const prepared = prepare(store, bookId, production.policy);
+  const runId = (await run(store, owner(store, production, stubTransport([], await chainAnswers(prepared))), bookId, prepared)).run!.runRecordId;
+  store.markCleanShutdown(); store.close();
+  // Control: the untouched completed Run, its stage checkpoints and their inherited copies, opens.
+  const control = await EditorialStore.open(roots.dataRoot, roots.codeRoot); control.markCleanShutdown(); control.close();
+  const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+  const copies = (db.prepare("SELECT rowid, canonical_json FROM analysis_run_states WHERE run_record_id = ? AND json_type(canonical_json, '$.requestAdmission') IS NOT NULL ORDER BY sequence").all(runId))
+    .filter((row) => { const record = JSON.parse(String(row.canonical_json)) as { requestAdmission: { data: { event: { evidence?: { kind: string } } } }; carriedUsage?: unknown };
+      return record.carriedUsage !== undefined && record.requestAdmission.data.event.evidence?.kind !== 'stage-checkpoint'; });
+  expect(copies.length).toBeGreaterThan(0);
+  const row = copies.at(-1)!; const record = JSON.parse(String(row.canonical_json)) as Record<string, any>;
+  if (field === 'carriedUsage') record.carriedUsage.inputTokens += 1;
+  else { record.stageContinuation.data.reduction.outcome = { state: 'not-run', reason: '合成篡改。' }; record.stageContinuation.digest = canonicalRecord(record.stageContinuation.data).digest; }
+  const changed = canonicalRecord(record); const triggers = db.prepare("SELECT name, sql FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = 'analysis_run_states'").all();
+  db.exec('BEGIN');
+  try {
+    for (const trigger of triggers) db.exec(`DROP TRIGGER "${String(trigger.name).replaceAll('"', '""')}"`);
+    db.prepare('UPDATE analysis_run_states SET canonical_json = ?, sha256 = ? WHERE rowid = ?').run(changed.json, changed.digest, row.rowid!);
+    for (const trigger of triggers) db.exec(String(trigger.sql)); db.exec('COMMIT');
+  } catch (error) { db.exec('ROLLBACK'); throw error; } finally { db.close(); }
+  await expect(EditorialStore.open(roots.dataRoot, roots.codeRoot).then((incoming) => { opened.push(incoming); return incoming; })).rejects.toMatchObject({ code: 'ANALYSIS_RECORD_INVALID' });
+});
 
 it('claims a live clarification answer only with its granted fence and preserves a pause plus queued restart evidence (#1131)', async () => {
   const { store, production } = await openProductionStore(); await configure(store, production, 'opencode-go');

@@ -1359,8 +1359,18 @@ function readRequestAdmissions(db: DatabaseSync, runRecordId: string): RequestAd
   }
   const claims = new Set<string>();
   const firstReceiptRowSequence = rows.length === 0 ? null : asNumber(rows[0]!.sequence);
+  const sameEvidence = (left: unknown, right: unknown): boolean => left === undefined || right === undefined
+    ? left === right : canonicalRecord(left).digest === canonicalRecord(right).digest;
+  let predecessor: Record<string, unknown> | null = null;
   for (const row of db.prepare('SELECT sequence, recorded_at, canonical_json, sha256 FROM analysis_run_states WHERE run_record_id = ? ORDER BY sequence').all(runRecordId) as SqlRow[]) {
     const record = admissionRow(row);
+    // A governed row inherits its predecessor's stage evidence; only its own stage checkpoint carries new evidence.
+    if (Object.hasOwn(record, 'requestAdmission')) {
+      const event = (record.requestAdmission as { data: { event: { kind: string; evidence?: { kind: string } } } }).data.event;
+      if (!(event.kind === 'resolve' && event.evidence?.kind === 'stage-checkpoint') &&
+        (!sameEvidence(record.stageContinuation, predecessor?.stageContinuation) || !sameEvidence(record.carriedUsage, predecessor?.carriedUsage))) return invalid();
+    }
+    predecessor = record;
     if (rows.length > 0 && Object.hasOwn(record, 'stageContinuation')) {
       const stage = record.stageContinuation;
       if (!exact(stage, ['schema', 'data', 'digest']) || stage.schema !== 'ai7.analysis.stage-continuation/1' ||
@@ -5416,24 +5426,31 @@ export class BaselineAnalysisStore {
     const stored = this.executionBindingOf(runRecordId);
     requireAnalysis(stored !== null, 'ANALYSIS_RECORD_INVALID', '准入记录缺少执行绑定。');
     const manifest = this.#requestManifest(stored);
+    // The Run's frozen contract, never the launch's current one: a reopened Run whose current
+    // rule is missing or differs still names its admitted requests by the digests it froze.
+    const frozen = this.definitionForRun(runRecordId, reading.pins.promptContractDigest);
     const ordinals = [...new Set([...reading.open.values()].filter((request) => request.stage === 'units').map((request) => request.unitOrdinal!))].sort((left, right) => left - right);
     for (const ordinal of ordinals) {
       this.checkpointClarificationRequests(runRecordId, ordinal);
       reading = this.requestAdmissionOf(runRecordId)!;
       const requests = [...reading.open.values()].filter((request) => request.stage === 'units' && request.unitOrdinal === ordinal);
       if (requests.length === 0) continue;
-      const existing = this.unitCheckpoints(runRecordId).find((checkpoint) => checkpoint.unit.unitOrdinal === ordinal);
-      if (existing === undefined) {
-        const unit = manifest.units[ordinal - 1]!;
-        const reason = '本次请求已准入，AI7 关闭前没有保存可核对的单元结果；结果未知，这次运行不会再次发送。';
-        const question = this.clarificationsOf(runRecordId).find((entry) => entry.unitOrdinal === ordinal);
-        this.recordUnitCheckpoint({ runRecordId, attemptId: reading.pins.attemptId, requests: requests.map((request) => request.requestId),
-          unit: { unitOrdinal: ordinal, requestDigest: this.#definition.requestDigest(ordinal, unit.digest), lineage: { kind: 'recomputed' },
-            closed: { state: 'gap', gap: { unitOrdinal: ordinal, code: 'outcome-unknown', reason, startPosition: unit.startPosition, endPosition: unit.endPosition, blockIds: [...unit.blockIds] } } },
-          observation: { unitOrdinal: ordinal, attempts: (question?.firstAttempts ?? (question === undefined ? 0 : 1)) + new Set(requests.map((request) => `${request.sessionId}:${request.attemptIndex}:${request.adaptationId ?? ''}`)).size,
-            usage: question?.firstUsage ?? null, wallMs: question?.firstWallMs ?? 0 } });
-      }
-      this.checkpointModelRequests(runRecordId, ordinal);
+      const pins = reading.pins;
+      // The unknown checkpoint and its discharge commit together: a refused discharge leaves no row behind.
+      transact(this.#db, () => {
+        const existing = this.unitCheckpoints(runRecordId).find((checkpoint) => checkpoint.unit.unitOrdinal === ordinal);
+        if (existing === undefined) {
+          const unit = manifest.units[ordinal - 1]!;
+          const reason = '本次请求已准入，AI7 关闭前没有保存可核对的单元结果；结果未知，这次运行不会再次发送。';
+          const question = this.clarificationsOf(runRecordId).find((entry) => entry.unitOrdinal === ordinal);
+          this.recordUnitCheckpoint({ runRecordId, attemptId: pins.attemptId, requests: requests.map((request) => request.requestId),
+            unit: { unitOrdinal: ordinal, requestDigest: frozen.requestDigest(ordinal, unit.digest), lineage: { kind: 'recomputed' },
+              closed: { state: 'gap', gap: { unitOrdinal: ordinal, code: 'outcome-unknown', reason, startPosition: unit.startPosition, endPosition: unit.endPosition, blockIds: [...unit.blockIds] } } },
+            observation: { unitOrdinal: ordinal, attempts: (question?.firstAttempts ?? (question === undefined ? 0 : 1)) + new Set(requests.map((request) => `${request.sessionId}:${request.attemptIndex}:${request.adaptationId ?? ''}`)).size,
+              usage: question?.firstUsage ?? null, wallMs: question?.firstWallMs ?? 0 } });
+        }
+        this.checkpointModelRequests(runRecordId, ordinal);
+      });
       reading = this.requestAdmissionOf(runRecordId)!;
     }
     const stageRequests = [...reading.open.values()].filter((request) => request.stage === 'cross-unit-reduction' || request.stage === 'assurance-sampling');
