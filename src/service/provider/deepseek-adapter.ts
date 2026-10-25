@@ -686,7 +686,7 @@ export function parseProviderResponse(
 const MODEL_REQUEST_NO_SEND = new WeakMap<Error, { readonly request: object; readonly cause: unknown }>();
 
 /** A trusted transport wrapper observed that this exact invocation never entered its native sender. */
-export function modelRequestNotSent(request: Parameters<DeepSeekTransport>[1], cause: unknown): Error {
+export function modelRequestNotSent(request: object, cause: unknown): Error {
   const refusal = new Error('AI7_MODEL_REQUEST_NOT_SENT');
   MODEL_REQUEST_NO_SEND.set(refusal, { request, cause });
   return refusal;
