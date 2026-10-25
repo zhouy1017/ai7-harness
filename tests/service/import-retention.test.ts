@@ -29,11 +29,17 @@ import {
   resolveWordSampleDetailSource,
   wordSampleDetailStream,
   pageWordSampleDetail,
+  bindWordReadingToRevision,
+  retainWordManuscriptSourceSegments,
+  requireWordManuscriptSourceSegments,
   type WordImportChoiceRecord,
 } from '../../src/service/import-retention.js';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import { EditorialLearningLedger } from '../../src/service/learning/ledger.js';
 import { wordTrackedEditCandidate, learningMaterialDigest, wordLocalImportAdmissions } from '../../src/service/learning-eligibility.js';
+import { readWordManuscriptExportSource, planWordManuscriptExport } from '../../src/service/manuscript-export.js';
+import { renderDocxExport } from '../../src/service/docx-export.js';
+import { DEFAULT_MANUSCRIPT_EXPORT_OPTIONS } from '../../src/shared/protocol.js';
 import { EditorialStore, SOURCE_VERSION_PARSER_CHANGED_MESSAGE, StoreError } from '../../src/service/store.js';
 import { CLARIFICATION_SCHEMA_VERSION, LATEST_SCHEMA_VERSION, PROPOSAL_CONFLICT_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import type { ManuscriptBlockProjection, TextBoxDisposition } from '../../src/shared/protocol.js';
@@ -100,7 +106,7 @@ async function retainedWordParentFixture() {
     store.getBookOverview(bookId); // Validate the original records through their existing historical reader.
     store.markCleanShutdown();
   } finally { store.close(); }
-  return { compiled, bookId };
+  return { compiled, bookId, originalBytes: new Uint8Array(readFileSync(path)) };
 }
 
 // Definition/transaction proof only: these call the layer owner directly over genuine existing
@@ -177,7 +183,7 @@ describe('closed Word retention definitions (#1132)', () => {
   }, 120_000);
 
   it('captures only the distinct local Word signal over closed relation fixtures and keeps memory consumers closed', async () => {
-    const { compiled, bookId } = await retainedWordParentFixture();
+    const { compiled, bookId, originalBytes } = await retainedWordParentFixture();
     withDatabase(false, (db) => {
       initializeWordImportRetentionSchema(db);
       db.exec('BEGIN IMMEDIATE');
@@ -190,6 +196,12 @@ describe('closed Word retention definitions (#1132)', () => {
         const commitId = String(original.commit_id);
         const recordedAt = String(original.committed_at);
         const pin = readWordParentSourcePin(db, bookId, sourceVersionId);
+        const originalProvenance = db.prepare('SELECT * FROM source_provenance WHERE provenance_id = ?').get(String(original.provenance_id));
+        const wordProvenanceId = randomUUID();
+        // Complete this new-layer fixture's derivation provenance without rewriting the preserved parent provenance.
+        db.prepare(`INSERT INTO source_provenance(provenance_id, source_version_id, acquisition_path, locality, sanitized_identity, parser_identity, recorded_at)
+          VALUES (?, ?, 'native-file-picker', 'local-provider-free', ?, ?, ?)`).run(wordProvenanceId, sourceVersionId, pin.displayName, WORD_DOCX_PARSER_IDENTITY, recordedAt);
+        db.prepare('UPDATE manuscript_import_records SET provenance_id = ? WHERE commit_id = ?').run(wordProvenanceId, commitId);
         retainWordRevisionSource(db, pin, compiled.graph);
         const ledger = new EditorialLearningLedger(db);
         const samples = wordTrackedSamples(bookId, compiled.graph, compiled.templates);
@@ -197,6 +209,7 @@ describe('closed Word retention definitions (#1132)', () => {
           materialKey: `word-sample:${sample.sampleId}`,
           materialDigest: learningMaterialDigest(wordTrackedEditCandidate(sample, wordTrackedSampleRecord(sample).digest, recordedAt)) }));
         const controls = ledger.wordImportControls(bookId, materials);
+        const bound = bindWordReadingToRevision(db, bookId, String(original.resulting_revision_id), sourceVersionId, compiled.readings.rejected);
         const choice: WordImportChoiceRecord = { schema: 'ai7.word-import-choice/1', sourceVersionId,
           parentSourcePinDigest: wordParentSourcePinRecord(pin).digest, originalDigest: compiled.sourceDigest, workingObjectDigest: null,
           importReviewId: String(original.review_digest), fidelityReviewId: String(original.fidelity_review_id), commitId,
@@ -204,7 +217,7 @@ describe('closed Word retention definitions (#1132)', () => {
           mode: 'suggestions', learnFromEdits: true, acceptedBaselineConfirmed: false,
           readings: { rejected: { digest: compiled.readings.rejected.readingDigest, blockCount: compiled.readings.rejected.blocks.length, usable: compiled.readings.rejected.usable },
             accepted: { digest: compiled.readings.accepted.readingDigest, blockCount: compiled.readings.accepted.blocks.length, usable: compiled.readings.accepted.usable } },
-          mappingDigest: compiled.readings.rejected.mappingDigest, templateManifestDigest: compiled.templateManifestDigest, effectiveControls: controls };
+          mappingDigest: bound.mappingDigest, templateManifestDigest: compiled.templateManifestDigest, effectiveControls: controls };
         const record = canonicalRecord(choice);
         const sampleEntries = samples.map((sample, index) => ({ sample, templateKey: compiled.templates[index]!.templateKey }));
         const derive = (currentChoice: WordImportChoiceRecord, currentControls = controls) => wordLocalImportAdmissions({
@@ -218,6 +231,21 @@ describe('closed Word retention definitions (#1132)', () => {
           currentControls: controls, recordedAt, signal: cancelled })).toThrow('Word contract cancellation');
         db.prepare(`INSERT INTO word_revision_imports(commit_id, source_version_id, book_id, fidelity_review_id, revision_id, mode, canonical_json, sha256, created_at)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(commitId, sourceVersionId, bookId, choice.fidelityReviewId, choice.revisionId, choice.mode, record.json, record.digest, recordedAt);
+        expect(() => requireWordManuscriptSourceSegments(db, bookId, choice, compiled.readings.rejected)).toThrow('不完整');
+        expect(retainWordManuscriptSourceSegments(db, bookId, choice, compiled.readings.rejected).mappingDigest).toBe(bound.mappingDigest);
+        expect(retainWordManuscriptSourceSegments(db, bookId, choice, compiled.readings.rejected).mappingDigest).toBe(bound.mappingDigest);
+        expect(() => bindWordReadingToRevision(db, randomUUID(), choice.revisionId, sourceVersionId, compiled.readings.rejected)).toThrow();
+        expect(() => requireWordManuscriptSourceSegments(db, bookId, choice, compiled.readings.accepted)).toThrow('另一条阅读');
+        const mapped = readWordManuscriptExportSource(db, bookId, choice.revisionId, sourceVersionId, originalBytes);
+        expect(mapped.pins).toMatchObject({ importCommitId: commitId, mappingAncestorRevisionId: choice.revisionId,
+          parentSourcePinDigest: choice.parentSourcePinDigest });
+        const exportInput = { title: 'Word 对应契约', blocks: bound.blocks, marks: [], options: DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, source: mapped.source };
+        expect(renderDocxExport(exportInput, { emit: true }).bytes).not.toBeNull();
+        expect(planWordManuscriptExport(exportInput, 'docx', { ...mapped.pins, revisionId: choice.revisionId,
+          revisionDigest: String(db.prepare('SELECT revision_digest FROM manuscript_revisions WHERE revision_id = ?').get(choice.revisionId)!.revision_digest) }).binding.mode)
+          .toBe('suggestions');
+        expect(() => readWordManuscriptExportSource(db, randomUUID(), choice.revisionId, sourceVersionId, originalBytes)).toThrow();
+        expect(() => readWordManuscriptExportSource(db, bookId, choice.revisionId, sourceVersionId, originalBytes.slice(1))).toThrow('字节');
         const sources = admissions.map(({ sample, templateKey, materialKey, materialDigest, record: admitted }) => {
           const sampleRecord = wordTrackedSampleRecord(sample);
           db.prepare(`INSERT INTO word_tracked_edit_samples(sample_id, book_id, source_version_id, template_key, canonical_json, sha256)
@@ -238,9 +266,13 @@ describe('closed Word retention definitions (#1132)', () => {
         expect(signal).toMatchObject({ kind: 'word-tracked-edit', schema: 'ai7.word-import-learning-signal/1',
           currentEligibility: 'house', memoryCandidate: null, eligibility: { decisionId: null, basisVersion: 2 } });
         expect(Object.hasOwn(signal.source, 'decisionId')).toBe(false);
+        expect(db.prepare('SELECT * FROM source_provenance WHERE provenance_id = ?').get(String(original.provenance_id))).toEqual(originalProvenance);
+        expect(readWordParentSourcePin(db, bookId, sourceVersionId).parserIdentity).toBe('ai7-docx-fflate-saxes/3');
         const context = createWordSampleDetailContext(db, bookId, sourceVersionId, compiled);
         const firstSource = sources[0]!;
         const historicalImports = ledger.wordSampleImports(bookId, firstSource.sampleId, firstSource.sampleDigest);
+        expect(Object.isFrozen(historicalImports[0]!.choice.effectiveControls.materials)).toBe(true);
+        expect(() => { historicalImports[0]!.choice.mode = 'accepted-baseline'; }).toThrow();
         const detail = resolveWordSampleDetailSource(db, context, firstSource.sampleId, firstSource.sampleDigest, historicalImports);
         const detailDigest = wordSampleDetailStream(detail).detailDigest;
         const page = pageWordSampleDetail(detail, null);

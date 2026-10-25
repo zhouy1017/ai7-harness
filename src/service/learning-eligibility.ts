@@ -31,7 +31,7 @@ import { graphemesOf } from '../shared/mark-anchor.js';
 import { canonicalJson, canonicalRecord, isRecord, sha256Hex, UUID_PATTERN } from './analysis/canonical.js';
 import { graphemeCount } from './analysis/factual-review-contract.js';
 import { weighedPage } from './series.js';
-import { wordTrackedSampleRecord, wordTemplateKey, validateWordChoice, type WordTrackedEditSample,
+import { wordTrackedSampleRecord, wordTemplateKey, validateWordImportChoiceRecord, type WordTrackedEditSample,
   type WordImportChoiceRecord, type WordImportControlsSnapshot, type WordLocalImportAdmission } from './import-retention.js';
 
 /**
@@ -215,7 +215,7 @@ export function wordLocalImportAdmissions(input: {
   materialDigest: string; admission: WordLocalImportAdmission; record: { json: string; digest: string } }> {
   const { bookId, samples, choice, choiceDigest, currentControls, recordedAt } = input;
   input.signal?.throwIfAborted();
-  validateWordChoice({ mode: choice.mode, learnFromEdits: choice.learnFromEdits, acceptedBaselineConfirmed: choice.acceptedBaselineConfirmed });
+  validateWordImportChoiceRecord(choice);
   requireLearning(UUID_PATTERN.test(bookId) && canonicalRecord(choice).digest === choiceDigest &&
     canonicalJson(choice.effectiveControls) === canonicalJson(currentControls),
   'WORD_ADMISSION_STALE', 'Word 导入选择或学习设置已变化，请重新审阅。');

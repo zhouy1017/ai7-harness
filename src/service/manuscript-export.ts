@@ -45,7 +45,12 @@ import {
   type DocxExportResult,
   type DocxExportSource,
   type DocxExportSourceRow,
+  wordMappedDocxSource,
+  type WordMappedDocxSource,
 } from './docx-export.js';
+import { compileWordTrackedDocxBytes } from './docx.js';
+import { readWordImportChoiceRecord, readWordParentSourcePin, requireWordRevisionSource,
+  requireWordManuscriptSourceSegments } from './import-retention.js';
 import { REPORT_EXPORT_WRITER_IDENTITIES, renderReportExport, type ReportExportInput } from './report-export.js';
 import { MARKDOWN_EXPORT_WRITER_IDENTITY, PDF_EXPORT_WRITER_IDENTITY, renderMarkdownExport, renderPdfHtmlExport } from './text-export.js';
 
@@ -297,6 +302,63 @@ export function planWordManuscriptExport(input: DocxExportInput, format: Manuscr
 export function requireWordExportBinding(recorded: unknown, current: WordExportPreparationBinding): void {
   requireExport(isRecord(recorded) && canonicalJson(recorded) === canonicalJson(current),
     'EXPORT_PREPARATION_INVALID', 'Word 导出准备的来源、选择、版本、标记或写入器已经变化。');
+}
+
+/** For explicit Word-family plan selection: this source/ancestor reader never falls back to legacy or fresh output. */
+export function readWordManuscriptExportSource(db: DatabaseSync, bookId: string, revisionId: string, sourceVersionId: string,
+  original: Uint8Array): { source: WordMappedDocxSource; pins: Omit<WordExportSourcePins, 'revisionId' | 'revisionDigest'> } {
+  requireExport([bookId, revisionId, sourceVersionId].every((id) => UUID_PATTERN.test(id)), 'EXPORT_RECORD_INVALID', 'Word 导出来源标识无效。');
+  const revision = db.prepare(`SELECT r.manuscript_id, r.source_version_id, r.parent_revision_id, m.book_id FROM manuscript_revisions r
+    JOIN manuscripts m ON m.manuscript_id = r.manuscript_id WHERE r.revision_id = ?`);
+  const imports = db.prepare('SELECT commit_id FROM word_revision_imports WHERE revision_id = ?');
+  const legacy = db.prepare('SELECT 1 FROM manuscript_block_sources WHERE revision_id = ? LIMIT 1');
+  let current: string | null = revisionId;
+  let commitId: string | null = null;
+  let manuscriptId: string | null = null;
+  const seen = new Set<string>();
+  for (let step = 0; current !== null && step < 100_000; step += 1) {
+    requireExport(!seen.has(current), 'EXPORT_RECORD_INVALID', 'Word 导出修订版血缘存在循环。');
+    seen.add(current);
+    const row = revision.get(current);
+    requireExport(row && row.book_id === bookId && row.source_version_id === sourceVersionId,
+      'EXPORT_RECORD_INVALID', 'Word 导出血缘越过了图书或来源边界。');
+    manuscriptId ??= text(row.manuscript_id);
+    requireExport(row.manuscript_id === manuscriptId, 'EXPORT_RECORD_INVALID', 'Word 导出血缘越过了稿件边界。');
+    const imported = imports.get(current);
+    if (imported !== undefined) { commitId = text(imported.commit_id); break; }
+    requireExport(legacy.get(current) === undefined, 'EXPORT_RECORD_INVALID', '较近的修订版使用历史段落对应，不能冒充 Word 来源对应。');
+    current = nullableText(row.parent_revision_id);
+  }
+  requireExport(commitId !== null && current !== null, 'EXPORT_RECORD_INVALID', 'Word 导出缺少已提交的来源对应祖先。');
+  const { choice, digest } = readWordImportChoiceRecord(db, bookId, commitId);
+  requireExport(choice.revisionId === current && choice.sourceVersionId === sourceVersionId, 'EXPORT_RECORD_INVALID', 'Word 来源选择与对应祖先不一致。');
+  const parent = readWordParentSourcePin(db, bookId, sourceVersionId);
+  requireExport(original.byteLength === parent.sourceBytes && sha256Hex(original) === parent.sourceDigest,
+    'EXPORT_RECORD_INVALID', 'Word 原文件字节与其留存固定记录不一致。');
+  const box = db.prepare(`SELECT choice FROM import_fidelity_choices WHERE fidelity_review_id = ? AND category_key = 'text-boxes'`)
+    .get(choice.fidelityReviewId);
+  requireExport(box === undefined || box.choice === 'retain' || box.choice === 'merge', 'EXPORT_RECORD_INVALID', 'Word 文本框处置记录无效。');
+  const textBoxes = box?.choice === 'merge' ? 'merge' : 'retain';
+  const compiled = compileWordTrackedDocxBytes(original, { textBoxDisposition: textBoxes });
+  requireExport(compiled.kind === 'ready', 'EXPORT_RECORD_INVALID', 'Word 原文件不再符合已提交的编译契约。');
+  const boxCategory = db.prepare(`SELECT item_count FROM import_fidelity_categories WHERE fidelity_review_id = ? AND category_key = 'text-boxes'`)
+    .get(choice.fidelityReviewId);
+  requireExport(boxCategory && typeof boxCategory.item_count === 'number' && Number.isSafeInteger(boxCategory.item_count) && boxCategory.item_count >= 0 &&
+    (boxCategory.item_count > 0) === (box !== undefined) &&
+    (!compiled.graph.paragraphs.some((paragraph) => paragraph.sourcePart === 'text-box') || boxCategory.item_count > 0) && compiled.graphDigest === choice.graphDigest &&
+    compiled.templateManifestDigest === choice.templateManifestDigest, 'EXPORT_RECORD_INVALID', 'Word 来源图、完整操作清单或文本框处置已变化。');
+  requireWordRevisionSource(db, parent, compiled.graph);
+  for (const kind of ['rejected', 'accepted'] as const) {
+    const reading = compiled.readings[kind];
+    const pin = choice.readings[kind];
+    requireExport(pin.digest === reading.readingDigest && pin.blockCount === reading.blocks.length && pin.usable === reading.usable,
+      'EXPORT_RECORD_INVALID', 'Word 阅读固定记录与实际编译不一致。');
+  }
+  const selected = compiled.readings[choice.mode === 'suggestions' ? 'rejected' : 'accepted'];
+  const bound = requireWordManuscriptSourceSegments(db, bookId, choice, selected);
+  const source = wordMappedDocxSource(original, compiled, choice.mode, textBoxes, bound.blockBindings);
+  return { source, pins: { sourceVersionId, parentSourcePinDigest: choice.parentSourcePinDigest, workingObjectDigest: null,
+    importCommitId: commitId, importChoiceDigest: digest, mappingAncestorRevisionId: current } };
 }
 /** How a format laid out from the manuscript's words alone is written, in the editor's words. */
 export const EXPORT_TEXT_RESTORATION_LINES: Readonly<Record<'pdf' | 'markdown', string>> = {

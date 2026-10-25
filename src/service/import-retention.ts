@@ -6,7 +6,7 @@ import { DOCX_PARSER_IDENTITY, DOCX_PARSER_IDENTITY_V1, DOCX_PARSER_IDENTITY_V2,
   WORD_DOCX_PARSER_IDENTITY, type ParsedTextBox, type ParsedDocx, type ParsedDocxBlock,
   type NativeDocxIntakeParse, type WordTrackedCompilation } from './docx.js';
 import type { ParsedImportedMark } from './docx-marks.js';
-import type { LOCAL_LEARNING_POLICY_BASIS } from './learning-eligibility.js';
+import { LOCAL_LEARNING_POLICY_BASIS } from './learning-eligibility.js';
 import { canonicalJson as wordCanonicalJson, sha256Hex, DIGEST_PATTERN, UUID_PATTERN, hasExactKeys, isRecord } from './analysis/canonical.js';
 
 /** Frozen local contracts for Issue #1132. None of these definitions activates a store or IPC arm. */
@@ -174,6 +174,78 @@ export function bindWordReadingBlocks(reading: WordCompiledReading, bindings: Re
     return { ...segment, blockId };
   });
   return { blocks, segments, mappingDigest: sha256Hex(wordCanonicalJson(segments)) };
+}
+
+/** The persisted baseline, rather than an invented legacy row, determines every Book-owned block identity. */
+export function bindWordReadingToRevision(db: DatabaseSync, bookId: string, revisionId: string, sourceVersionId: string,
+  reading: WordCompiledReading): ReturnType<typeof bindWordReadingBlocks> & { blockBindings: WordBlockBinding[] } {
+  requireRetention([bookId, revisionId, sourceVersionId].every((id) => UUID_PATTERN.test(id)), 'WORD_MAPPING_INVALID', 'Word 稿件对应标识无效。');
+  const revision = db.prepare(`SELECT mr.manuscript_id FROM manuscript_revisions mr
+    JOIN manuscripts m ON m.manuscript_id = mr.manuscript_id
+    JOIN source_versions sv ON sv.source_version_id = mr.source_version_id AND sv.book_id = m.book_id
+    WHERE mr.revision_id = ? AND m.book_id = ? AND sv.source_version_id = ?`).get(revisionId, bookId, sourceVersionId);
+  requireRetention(revision !== undefined, 'WORD_MAPPING_INVALID', 'Word 稿件修订版不属于所选图书或来源。');
+  const rows = db.prepare(`SELECT v.*, b.manuscript_id block_manuscript_id FROM manuscript_block_versions v
+    LEFT JOIN manuscript_blocks b ON b.block_id = v.block_id WHERE v.revision_id = ? ORDER BY v.position`).all(revisionId);
+  requireRetention(rows.length === reading.blocks.length && rows.every((row, index) => {
+    const block = reading.blocks[index]!;
+    return row.block_manuscript_id === revision.manuscript_id && row.position === block.position && row.kind === block.kind && row.level === block.level &&
+      row.text === block.text && row.digest === block.digest && row.grapheme_length === block.graphemeLength;
+  }), 'WORD_MAPPING_INVALID', 'Word 实际稿件基线与明确选择的完整阅读不一致。');
+  const blockBindings = rows.map((row, index) => ({ sourceBlockId: reading.blocks[index]!.blockId, blockId: text(row.block_id) }));
+  return { blockBindings, ...bindWordReadingBlocks(reading, blockBindings) };
+}
+
+/** Exact source-linked rows for one Word import; missing, reordered or foreign rows never become legacy mapping. */
+export function requireWordManuscriptSourceSegments(db: DatabaseSync, bookId: string, choice: WordImportChoiceRecord, reading: WordCompiledReading):
+  ReturnType<typeof bindWordReadingToRevision> {
+  validateWordImportChoiceRecord(choice);
+  const selected = choice.mode === 'suggestions' ? 'rejected' : 'accepted';
+  requireRetention(reading.reading === selected && reading.readingDigest === choice.readings[selected].digest,
+    'WORD_MAPPING_INVALID', 'Word 稿件对应使用了另一条阅读。');
+  const bound = bindWordReadingToRevision(db, bookId, choice.revisionId, choice.sourceVersionId, reading);
+  requireRetention(bound.mappingDigest === choice.mappingDigest, 'WORD_MAPPING_INVALID', 'Word 实际稿件对应摘要与导入选择不一致。');
+  const parent = readWordParentSourcePin(db, bookId, choice.sourceVersionId);
+  requireRetention(parent.sourceDigest === choice.originalDigest && wordParentSourcePinRecord(parent).digest === choice.parentSourcePinDigest,
+    'WORD_MAPPING_INVALID', 'Word 稿件对应的原始来源固定记录已经变化。');
+  const imported = db.prepare(`SELECT wi.*, ws.book_id source_book_id, ws.graph_digest, ws.parent_source_pin_digest
+    FROM word_revision_imports wi JOIN word_revision_sources ws ON ws.source_version_id = wi.source_version_id WHERE wi.commit_id = ?`).get(choice.commitId);
+  const choiceJson = wordCanonicalJson(choice);
+  requireRetention(imported && imported.book_id === bookId && imported.source_book_id === bookId && imported.source_version_id === choice.sourceVersionId &&
+    imported.revision_id === choice.revisionId && imported.fidelity_review_id === choice.fidelityReviewId && imported.mode === choice.mode &&
+    imported.graph_digest === choice.graphDigest && imported.parent_source_pin_digest === choice.parentSourcePinDigest &&
+    imported.canonical_json === choiceJson && imported.sha256 === sha256Hex(choiceJson),
+  'WORD_MAPPING_INVALID', 'Word 稿件对应与已提交的来源或选择不一致。');
+  const rows = db.prepare(`SELECT s.* FROM word_manuscript_source_segments s
+    LEFT JOIN manuscript_block_versions v ON v.revision_id = s.revision_id AND v.block_id = s.block_id
+    WHERE s.revision_id = ? ORDER BY v.position, s.segment_ordinal`).all(choice.revisionId);
+  requireRetention(rows.length === bound.segments.length && rows.every((row, index) => {
+    const segment = bound.segments[index]!;
+    const json = wordCanonicalJson(segment);
+    return row.block_id === segment.blockId && row.segment_ordinal === segment.segmentOrdinal &&
+      row.source_version_id === choice.sourceVersionId && row.commit_id === choice.commitId && row.canonical_json === json && row.sha256 === sha256Hex(json);
+  }), 'WORD_MAPPING_INVALID', 'Word 有序来源片段不完整或已经变化。');
+  return bound;
+}
+
+/** Parent commit/choice rows already exist inside the same import transaction. */
+export function retainWordManuscriptSourceSegments(db: DatabaseSync, bookId: string, choice: WordImportChoiceRecord,
+  reading: WordCompiledReading, signal?: AbortSignal): ReturnType<typeof bindWordReadingToRevision> {
+  signal?.throwIfAborted();
+  requireRetention(db.isTransaction, 'WORD_MAPPING_INVALID', 'Word 来源对应必须与稿件原子提交。');
+  const bound = bindWordReadingToRevision(db, bookId, choice.revisionId, choice.sourceVersionId, reading);
+  requireRetention(bound.mappingDigest === choice.mappingDigest && reading.reading === (choice.mode === 'suggestions' ? 'rejected' : 'accepted') &&
+    reading.readingDigest === choice.readings[reading.reading].digest, 'WORD_MAPPING_INVALID', 'Word 来源对应与所选阅读不一致。');
+  if (db.prepare('SELECT 1 FROM word_manuscript_source_segments WHERE revision_id = ? LIMIT 1').get(choice.revisionId) === undefined) {
+    const insert = db.prepare(`INSERT INTO word_manuscript_source_segments(revision_id, block_id, segment_ordinal, source_version_id,
+      commit_id, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?, ?)`);
+    for (const segment of bound.segments) {
+      signal?.throwIfAborted();
+      const json = wordCanonicalJson(segment);
+      insert.run(choice.revisionId, segment.blockId, segment.segmentOrdinal, choice.sourceVersionId, choice.commitId, json, sha256Hex(json));
+    }
+  }
+  return requireWordManuscriptSourceSegments(db, bookId, choice, reading);
 }
 
 export interface WordCompiledReading {
@@ -470,6 +542,126 @@ export interface WordImportChoiceRecord extends WordTrackedChoiceInput {
   templateManifestDigest: string;
   effectiveControls: WordImportControlsSnapshot;
 }
+
+function wordControlReference(value: unknown): boolean {
+  return isRecord(value) && (value.kind === 'default'
+    ? hasExactKeys(value, ['kind', 'basis']) && wordCanonicalJson(value.basis) === wordCanonicalJson(LOCAL_LEARNING_POLICY_BASIS)
+    : value.kind === 'entry' && hasExactKeys(value, ['kind', 'entryId', 'sha256']) &&
+      typeof value.entryId === 'string' && value.entryId.length > 0 && value.entryId.isWellFormed() &&
+      typeof value.sha256 === 'string' && DIGEST_PATTERN.test(value.sha256));
+}
+
+function wordStanding(value: unknown): boolean {
+  return isRecord(value) && hasExactKeys(value, ['choice', 'decisionId', 'decisionDigest', 'basisVersion']) &&
+    ['book', 'house', 'excluded', 'deferred'].includes(String(value.choice)) && Number.isSafeInteger(value.basisVersion) && Number(value.basisVersion) > 0 &&
+    (value.decisionId === null && value.decisionDigest === null && value.choice === 'house' && value.basisVersion === 2 ||
+      typeof value.decisionId === 'string' && UUID_PATTERN.test(value.decisionId) &&
+      typeof value.decisionDigest === 'string' && DIGEST_PATTERN.test(value.decisionDigest));
+}
+
+/** Structural validation is shared by operational export and local learning; it does not grant admission. */
+export function validateWordImportChoiceRecord(value: unknown): asserts value is WordImportChoiceRecord {
+  requireRetention(isRecord(value) && hasExactKeys(value, ['schema', 'sourceVersionId', 'parentSourcePinDigest', 'originalDigest', 'workingObjectDigest',
+    'importReviewId', 'fidelityReviewId', 'commitId', 'revisionId', 'extractorIdentity', 'graphDigest', 'readings', 'mappingDigest',
+    'templateManifestDigest', 'effectiveControls', 'mode', 'learnFromEdits', 'acceptedBaselineConfirmed']), 'WORD_CHOICE_INVALID', 'Word 导入选择记录字段无效。');
+  const selection = validateWordChoice({ mode: value.mode, learnFromEdits: value.learnFromEdits, acceptedBaselineConfirmed: value.acceptedBaselineConfirmed });
+  requireRetention(value.schema === 'ai7.word-import-choice/1' && value.extractorIdentity === WORD_EXTRACTOR_IDENTITY && value.workingObjectDigest === null &&
+    [value.sourceVersionId, value.fidelityReviewId, value.commitId, value.revisionId].every((id) => typeof id === 'string' && UUID_PATTERN.test(id)) &&
+    [value.parentSourcePinDigest, value.originalDigest, value.importReviewId, value.graphDigest, value.mappingDigest, value.templateManifestDigest]
+      .every((digest) => typeof digest === 'string' && DIGEST_PATTERN.test(digest)), 'WORD_CHOICE_INVALID', 'Word 导入选择的固定标识无效。');
+  const controls = value.effectiveControls;
+  requireRetention(isRecord(controls) && hasExactKeys(controls, ['global', 'book', 'materials']) &&
+    isRecord(controls.global) && hasExactKeys(controls.global, ['enabled', 'reference']) && typeof controls.global.enabled === 'boolean' &&
+    isRecord(controls.book) && hasExactKeys(controls.book, ['excluded', 'reference']) && typeof controls.book.excluded === 'boolean' &&
+    wordControlReference(controls.global.reference) && wordControlReference(controls.book.reference) && Array.isArray(controls.materials),
+  'WORD_CHOICE_INVALID', 'Word 导入选择的学习控制记录无效。');
+  const keys = new Set<string>();
+  for (const material of controls.materials) {
+    requireRetention(isRecord(material) && hasExactKeys(material, ['templateKey', 'materialDigest', 'standing']) &&
+      typeof material.templateKey === 'string' && DIGEST_PATTERN.test(material.templateKey) && !keys.has(material.templateKey) &&
+      typeof material.materialDigest === 'string' && DIGEST_PATTERN.test(material.materialDigest) && wordStanding(material.standing),
+    'WORD_CHOICE_INVALID', 'Word 修改样本准入快照无效。');
+    keys.add(material.templateKey);
+  }
+  requireRetention(isRecord(value.readings) && hasExactKeys(value.readings, ['rejected', 'accepted']), 'WORD_CHOICE_INVALID', 'Word 两条阅读的固定记录无效。');
+  for (const reading of [value.readings.rejected, value.readings.accepted]) requireRetention(isRecord(reading) &&
+    hasExactKeys(reading, ['digest', 'blockCount', 'usable']) && typeof reading.digest === 'string' && DIGEST_PATTERN.test(reading.digest) &&
+    typeof reading.blockCount === 'number' && Number.isSafeInteger(reading.blockCount) && reading.blockCount >= 0 &&
+    typeof reading.usable === 'boolean' && (!reading.usable || reading.blockCount > 0), 'WORD_CHOICE_INVALID', 'Word 阅读的计数或摘要无效。');
+  const selected = value.readings[selection.mode === 'suggestions' ? 'rejected' : 'accepted'];
+  requireRetention(isRecord(selected) && selected.usable === true, 'WORD_CHOICE_INVALID', '所选 Word 阅读不可用。');
+}
+
+const WORD_CHOICE_DIGESTS = new WeakMap<WordImportChoiceRecord, string>();
+
+/** Imported choices are immutable shared evidence; prove/hash their whole control vector once, not once per sample. */
+export function wordImportChoiceDigest(choice: WordImportChoiceRecord): string {
+  const known = WORD_CHOICE_DIGESTS.get(choice);
+  if (known !== undefined) return known;
+  validateWordImportChoiceRecord(choice);
+  const digest = sha256Hex(wordCanonicalJson(choice));
+  const pending: unknown[] = [choice];
+  const seen = new WeakSet<object>();
+  while (pending.length > 0) {
+    const value = pending.pop();
+    if (value === null || typeof value !== 'object' || seen.has(value)) continue;
+    seen.add(value);
+    for (const child of Object.values(value)) pending.push(child);
+    Object.freeze(value);
+  }
+  WORD_CHOICE_DIGESTS.set(choice, digest);
+  return digest;
+}
+
+/** Operational choice readback also works when learning was off and no sample/admission exists. */
+export function readWordImportChoiceRecord(db: DatabaseSync, bookId: string, commitId: string): {
+  choice: WordImportChoiceRecord; digest: string; createdAt: string;
+} {
+  requireRetention(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(commitId), 'WORD_CHOICE_INVALID', 'Word 导入来源标识无效。');
+  const row = db.prepare(`SELECT wi.*, ic.operation_kind, ic.review_digest, ic.committed_at, mir.imported_at,
+    mir.book_id original_book_id, mir.source_version_id original_source_id, mir.resulting_revision_id original_revision_id,
+    mir.fidelity_review_id original_fidelity_id, fr.book_id fidelity_book_id, fr.source_version_id fidelity_source_id,
+    sp.source_version_id provenance_source_id, sp.parser_identity derivation_parser, sp.acquisition_path, sp.locality,
+    sp.recorded_at provenance_at, sp.sanitized_identity provenance_name, d.display_name draft_name,
+    d.object_digest draft_object_digest, d.source_format draft_format, d.working_object_digest draft_working_object,
+    m.book_id revision_book_id, mr.source_version_id revision_source_id
+    FROM word_revision_imports wi JOIN import_commits ic ON ic.commit_id = wi.commit_id
+    JOIN import_drafts d ON d.draft_id = ic.draft_id
+    JOIN manuscript_import_records mir ON mir.commit_id = wi.commit_id
+    JOIN source_provenance sp ON sp.provenance_id = mir.provenance_id
+    JOIN import_fidelity_reviews fr ON fr.fidelity_review_id = wi.fidelity_review_id
+    JOIN manuscript_revisions mr ON mr.revision_id = wi.revision_id
+    JOIN manuscripts m ON m.manuscript_id = mr.manuscript_id WHERE wi.commit_id = ?`).get(commitId);
+  requireRetention(row && row.book_id === bookId && row.original_book_id === bookId && row.fidelity_book_id === bookId && row.revision_book_id === bookId,
+    'WORD_CHOICE_INVALID', 'Word 导入的图书、确认或修订版来源不完整。');
+  const json = text(row.canonical_json);
+  requireRetention(sha256Hex(json) === row.sha256, 'WORD_CHOICE_INVALID', 'Word 导入选择的摘要无效。');
+  let value: unknown;
+  try { value = JSON.parse(json); } catch { throw new ImportRetentionError('WORD_CHOICE_INVALID', 'Word 导入选择无法读取。'); }
+  validateWordImportChoiceRecord(value);
+  const choice = value;
+  const parent = readWordParentSourcePin(db, bookId, choice.sourceVersionId);
+  const pin = wordParentSourcePinRecord(parent);
+  const source = db.prepare(`SELECT book_id, object_digest, parent_parser_identity, parent_source_pin_json, parent_source_pin_digest,
+    compiler_identity, extractor_identity, graph_digest FROM word_revision_sources WHERE source_version_id = ?`).get(choice.sourceVersionId);
+  requireRetention(source && source.book_id === bookId && source.object_digest === parent.objectDigest && source.parent_parser_identity === parent.parserIdentity &&
+    source.parent_source_pin_json === pin.json && source.parent_source_pin_digest === pin.digest &&
+    source.compiler_identity === WORD_DOCX_PARSER_IDENTITY && source.extractor_identity === choice.extractorIdentity && source.graph_digest === choice.graphDigest &&
+    choice.parentSourcePinDigest === pin.digest && choice.originalDigest === parent.sourceDigest,
+  'WORD_CHOICE_INVALID', 'Word 导入选择与原始来源或衍生图不一致。');
+  requireRetention(wordCanonicalJson(choice) === json && choice.commitId === commitId && choice.sourceVersionId === row.source_version_id &&
+    row.original_source_id === choice.sourceVersionId && row.fidelity_source_id === choice.sourceVersionId && row.revision_source_id === choice.sourceVersionId &&
+    row.provenance_source_id === choice.sourceVersionId && row.derivation_parser === WORD_DOCX_PARSER_IDENTITY &&
+    row.acquisition_path === 'native-file-picker' && row.locality === 'local-provider-free' && row.provenance_at === row.created_at &&
+    row.provenance_name === row.draft_name && row.draft_object_digest === choice.originalDigest && row.draft_format === 'DOCX' && row.draft_working_object === null &&
+    choice.revisionId === row.revision_id && row.original_revision_id === choice.revisionId && choice.fidelityReviewId === row.fidelity_review_id &&
+    row.original_fidelity_id === choice.fidelityReviewId && choice.importReviewId === row.review_digest && choice.mode === row.mode &&
+    row.operation_kind === 'manuscript-import' && row.created_at === row.committed_at && row.created_at === row.imported_at,
+  'WORD_CHOICE_INVALID', 'Word 导入选择与实际来源、确认、提交或修订版不一致。');
+  const createdAt = text(row.created_at);
+  requireRetention(Number.isFinite(Date.parse(createdAt)), 'WORD_CHOICE_INVALID', 'Word 导入时间无效。');
+  return { choice, digest: wordImportChoiceDigest(choice), createdAt };
+}
 export interface WordLocalImportAdmission {
   schema: 'ai7.word-local-import-admission/1';
   sampleId: string;
@@ -665,7 +857,7 @@ export function wordSampleDetailStream(source: WordSampleDetailSource): WordSamp
     requireRetention(choice.sourceVersionId === source.sourceVersionId && DIGEST_PATTERN.test(choice.parentSourcePinDigest) && choice.originalDigest === source.sample.sourceDigest &&
       choice.graphDigest === source.graphDigest && admission.sampleId === source.sample.sampleId &&
       admission.sampleDigest === source.sampleDigest && admission.importChoiceDigest === choiceDigest &&
-      sha256Hex(wordCanonicalJson(choice)) === choiceDigest && sha256Hex(wordCanonicalJson(admission)) === admissionDigest,
+      wordImportChoiceDigest(choice) === choiceDigest && sha256Hex(wordCanonicalJson(admission)) === admissionDigest,
     'WORD_SOURCE_CORRUPT', 'Word 修改样本的导入或准入身份不一致。');
   });
   let currentEvent: { event: WordSourceEvent; sourceOrdinal: number; start: number; end: number } | null = null;
