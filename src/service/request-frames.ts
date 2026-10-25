@@ -1923,9 +1923,10 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     case 'prepareNewBookReview': {
-      const input = requireInput(
+      const input = requireInputWithOptional(
         value.input,
         ['draftId', 'expectedDraftVersion', 'target', 'acceptDegradation', 'textBoxDisposition'],
+        ['trackedChanges'],
         tentativeId,
       );
       const target = input.target;
@@ -1943,7 +1944,12 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
         !isSafeInteger(input.expectedDraftVersion, 1) ||
         !validTarget ||
         typeof input.acceptDegradation !== 'boolean' ||
-        (input.textBoxDisposition !== 'retain' && input.textBoxDisposition !== 'merge')
+        (input.textBoxDisposition !== 'retain' && input.textBoxDisposition !== 'merge') ||
+        (input.trackedChanges !== undefined && !(isRecord(input.trackedChanges) &&
+          hasExactKeys(input.trackedChanges, ['mode', 'learnFromEdits', 'acceptedBaselineConfirmed']) &&
+          typeof input.trackedChanges.learnFromEdits === 'boolean' &&
+          (input.trackedChanges.mode === 'suggestions' && input.trackedChanges.acceptedBaselineConfirmed === false ||
+            input.trackedChanges.mode === 'accepted-baseline' && input.trackedChanges.acceptedBaselineConfirmed === true)))
       ) {
         throw new ProtocolError(tentativeId);
       }

@@ -457,6 +457,66 @@ export interface WordImportControlsSnapshot {
   materials: Array<{ templateKey: string; materialDigest: string; standing: WordMaterialStandingSnapshot }>;
 }
 
+/** Review has no new Book identity yet; only an existing Book can have material-specific standing. */
+export interface WordPreparedIntake {
+  schema: 'ai7.word-import-preparation/1';
+  draftId: string;
+  draftVersion: number;
+  choice: WordTrackedChoiceInput;
+  originalDigest: string;
+  sourceBytes: number;
+  inventoryDigest: string;
+  graphDigest: string;
+  extractorIdentity: typeof WORD_EXTRACTOR_IDENTITY;
+  readings: Record<WordReadingKind, { digest: string; blockCount: number; usable: boolean }>;
+  mappingDigest: string;
+  templateManifestDigest: string;
+  textBoxDisposition: TextBoxDisposition;
+  target:
+    | { kind: 'new-book'; controls: Pick<WordImportControlsSnapshot, 'global' | 'book'> }
+    | { kind: 'existing-book'; bookId: string; controls: WordImportControlsSnapshot; parentSourcePin: WordParentSourcePin | null };
+}
+
+const WORD_PREPARATION_KEYS = ['schema', 'draftId', 'draftVersion', 'choice', 'originalDigest', 'sourceBytes', 'inventoryDigest',
+  'graphDigest', 'extractorIdentity', 'readings', 'mappingDigest', 'templateManifestDigest', 'textBoxDisposition', 'target'] as const;
+
+/** Only the explicit visible choice is projected before the full preparation is freshly reconstructed. */
+export function wordPreparedSelection(db: DatabaseSync, draftId: string): { choice: WordTrackedChoiceInput; textBoxDisposition: TextBoxDisposition } | null {
+  const row = db.prepare('SELECT reviewed_json, reviewed_sha256 FROM staged_word_revision_intakes WHERE draft_id = ?').get(draftId);
+  if (row === undefined || row.reviewed_json === null && row.reviewed_sha256 === null) return null;
+  requireRetention(typeof row.reviewed_json === 'string' && sha256Hex(row.reviewed_json) === row.reviewed_sha256,
+    'WORD_PREPARATION_INVALID', 'Word 导入准备记录摘要无效。');
+  let value: unknown;
+  try { value = JSON.parse(row.reviewed_json); } catch { throw new ImportRetentionError('WORD_PREPARATION_INVALID', 'Word 导入准备无法读取。'); }
+  requireRetention(isRecord(value) && hasExactKeys(value, WORD_PREPARATION_KEYS) && value.schema === 'ai7.word-import-preparation/1' &&
+    value.draftId === draftId && wordCanonicalJson(value) === row.reviewed_json &&
+    (value.textBoxDisposition === 'retain' || value.textBoxDisposition === 'merge'),
+  'WORD_PREPARATION_INVALID', 'Word 导入准备身份或规范记录无效。');
+  return { choice: validateWordChoice(value.choice), textBoxDisposition: value.textBoxDisposition };
+}
+
+export function wordPreparedChoice(db: DatabaseSync, draftId: string): WordTrackedChoiceInput | null {
+  return wordPreparedSelection(db, draftId)?.choice ?? null;
+}
+
+export function recordWordPreparedIntake(db: DatabaseSync, prepared: WordPreparedIntake): void {
+  requireRetention(db.isTransaction && isRecord(prepared) && hasExactKeys(prepared, WORD_PREPARATION_KEYS), 'WORD_PREPARATION_INVALID', 'Word 导入准备必须原子保存。');
+  validateWordChoice(prepared.choice);
+  const json = wordCanonicalJson(prepared);
+  requireRetention(db.prepare(`UPDATE staged_word_revision_intakes SET reviewed_json = ?, reviewed_sha256 = ?
+    WHERE draft_id = ? AND compatibility = 'ready'`).run(json, sha256Hex(json), prepared.draftId).changes === 1,
+  'WORD_PREPARATION_INVALID', 'Word 导入准备缺少相应的原始暂存。');
+}
+
+/** Reconstructed source/selection/control/map pins, never payload equality alone, prove a restarted preparation. */
+export function requireWordPreparedIntake(db: DatabaseSync, prepared: WordPreparedIntake): void {
+  wordPreparedChoice(db, prepared.draftId);
+  const row = db.prepare('SELECT reviewed_json, reviewed_sha256 FROM staged_word_revision_intakes WHERE draft_id = ?').get(prepared.draftId);
+  const json = wordCanonicalJson(prepared);
+  requireRetention(row && row.reviewed_json === json && row.reviewed_sha256 === sha256Hex(json),
+    'WORD_PREPARATION_INVALID', 'Word 导入准备的来源、选择、对应或学习设置已经变化，请重新审阅。');
+}
+
 /** The immutable original is independent of every reading derived by the Word compiler. */
 export interface WordParentSourcePin {
   schema: 'ai7.word-parent-source-pin/1';

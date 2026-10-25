@@ -128,7 +128,7 @@ import type { PublicSampleBookSourceDigest } from './public-samplebooks.js';
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 174 as const;
+export const SERVICE_PROTOCOL_VERSION = 175 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 export interface BookFindingProjection {
@@ -1208,6 +1208,19 @@ export interface ImportIdentityFindingProjection {
   };
 }
 
+/** An explicit choice for supported native tracked Word intake; accepted mode requires its own confirmation. */
+export interface WordTrackedChangesChoice {
+  mode: 'suggestions' | 'accepted-baseline';
+  learnFromEdits: boolean;
+  acceptedBaselineConfirmed: boolean;
+}
+
+export type WordTrackedChangesIntakeProjection =
+  | { compatibility: 'ready'; previewReading: 'rejected' | 'accepted';
+      readings: Record<'rejected' | 'accepted', { usable: boolean; blockCount: number }>;
+      savedChoice: WordTrackedChangesChoice | null }
+  | { compatibility: 'unsupported'; reasonCodes: ReadonlyArray<string>; locationCount: number };
+
 export interface StagedImportProjection {
   draftId: string;
   draftVersion: number;
@@ -1252,6 +1265,7 @@ export interface StagedImportProjection {
   nextBookCursor: BookSummaryCursor | null;
   fidelity: ReadonlyArray<FidelityCategoryProjection>;
   detectedBlockCount: number;
+  wordTrackedChanges?: WordTrackedChangesIntakeProjection;
 }
 
 export interface ReviewBeforeImportProjection {
@@ -1285,6 +1299,7 @@ export interface ReviewBeforeImportProjection {
    * `retain` (保留为文本框, the default) or `merge` (并入正文); null when the file has none it can choose for.
    */
   textBoxDisposition: TextBoxDisposition | null;
+  trackedChanges?: WordTrackedChangesChoice;
   recordsToCreate: ReadonlyArray<string>;
   nonEffects: ReadonlyArray<string>;
   workflowProfile: {
@@ -12169,6 +12184,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations {
        * preselects — or `merge`. A file without a text box can only be reviewed with `retain`.
        */
       textBoxDisposition: TextBoxDisposition;
+      trackedChanges?: WordTrackedChangesChoice;
     };
     output: ReviewBeforeImportProjection;
   };

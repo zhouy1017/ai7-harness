@@ -314,17 +314,24 @@ export class EditorialLearningLedger {
   }
 
   /** Actual control/standing owners supply the complete reviewed capture vector. */
-  wordImportControls(bookId: string, materials: ReadonlyArray<{ templateKey: string; materialKey: string; materialDigest: string }>): WordImportControlsSnapshot {
+  wordImportControlPins(bookId: string | null): Pick<WordImportControlsSnapshot, 'global' | 'book'> {
     return this.#read(() => {
-      requireLearning(UUID_PATTERN.test(bookId) && new Set(materials.map((material) => material.templateKey)).size === materials.length);
+      requireLearning(bookId === null || UUID_PATTERN.test(bookId));
       const rows = this.#controlRows();
       const global = rows.filter(({ record }) => record.kind === 'switch').at(-1);
-      const book = rows.filter(({ record }) => record.kind === 'book' && record.bookId === bookId).at(-1);
+      const book = bookId === null ? undefined : rows.filter(({ record }) => record.kind === 'book' && record.bookId === bookId).at(-1);
       const reference = (entry: typeof global): WordImportControlsSnapshot['global']['reference'] => entry === undefined
         ? { kind: 'default', basis: LOCAL_LEARNING_POLICY_BASIS }
         : { kind: 'entry', entryId: entry.record.entryId, sha256: String(entry.row.sha256) };
       return { global: { enabled: global?.record.value ?? true, reference: reference(global) },
-        book: { excluded: book?.record.value ?? false, reference: reference(book) },
+        book: { excluded: book?.record.value ?? false, reference: reference(book) } };
+    });
+  }
+
+  wordImportControls(bookId: string, materials: ReadonlyArray<{ templateKey: string; materialKey: string; materialDigest: string }>): WordImportControlsSnapshot {
+    return this.#read(() => {
+      requireLearning(UUID_PATTERN.test(bookId) && new Set(materials.map((material) => material.templateKey)).size === materials.length);
+      return { ...this.wordImportControlPins(bookId),
         materials: materials.map((material) => {
           const last = this.#eligibilityHistory(bookId, material.materialKey).at(-1);
           requireLearning(last === undefined || last.materialDigest === material.materialDigest);

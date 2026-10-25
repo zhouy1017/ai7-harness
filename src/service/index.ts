@@ -1188,6 +1188,7 @@ async function dispatch(
           request.input.target,
           request.input.acceptDegradation,
           request.input.textBoxDisposition,
+          request.input.trackedChanges,
         ),
       };
     case 'commitNewBookImport':

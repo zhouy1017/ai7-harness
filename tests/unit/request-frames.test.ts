@@ -1078,6 +1078,28 @@ describe('decodeRequest rejects malformed frames', () => {
     })).requestId).toBe(id);
   });
 
+  it('decodes only the exact explicitly confirmed Word reading choice without changing ordinary preparation frames', () => {
+    const input: InputOf<'prepareNewBookReview'> = { draftId: randomUUID(), expectedDraftVersion: 1,
+      target: { kind: 'new-book', choiceId: 'new-book', confirmedTitle: '原始修订导入' }, acceptDegradation: false, textBoxDisposition: 'retain' };
+    const id = randomUUID();
+    const ordinary = { id, op: 'prepareNewBookReview', input } satisfies ServiceRequest;
+    expect(decodeRequest(frameOf(ordinary))).toEqual(ordinary);
+    for (const trackedChanges of [
+      { mode: 'suggestions', learnFromEdits: true, acceptedBaselineConfirmed: false },
+      { mode: 'accepted-baseline', learnFromEdits: false, acceptedBaselineConfirmed: true },
+    ] satisfies Array<NonNullable<InputOf<'prepareNewBookReview'>['trackedChanges']>>) {
+      const frame = { ...ordinary, input: { ...input, trackedChanges } } satisfies ServiceRequest;
+      expect(decodeRequest(frameOf(frame))).toEqual(frame);
+    }
+    for (const trackedChanges of [null, {}, [], { mode: 'suggestions', learnFromEdits: true },
+      { mode: 'suggestions', learnFromEdits: true, acceptedBaselineConfirmed: true },
+      { mode: 'accepted-baseline', learnFromEdits: true, acceptedBaselineConfirmed: false },
+      { mode: 'suggestions', learnFromEdits: 'true', acceptedBaselineConfirmed: false },
+      { mode: 'suggestions', learnFromEdits: true, acceptedBaselineConfirmed: false, approved: true }]) {
+      expect(rejectionFor(frameOf({ ...ordinary, input: { ...input, trackedChanges } })).requestId).toBe(id);
+    }
+  });
+
   it('rejects a baseline-analysis preparation whose goal, mode, or range is inconsistent, or whose digest is malformed', () => {
     const id = randomUUID();
     const bookId = randomUUID();
