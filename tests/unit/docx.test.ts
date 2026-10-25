@@ -9,11 +9,13 @@ import { fixedArchiveTime } from '../../src/shared/archive-time.js';
 import {
   DOCX_PARSER_IDENTITY,
   DOCX_PARSER_IDENTITY_V1,
+  COMMENTS_REVISIONS_DETAIL,
   buildFidelityReport,
   deriveImportFidelityPlan,
   isCleanTracerFidelity,
   parseDocx,
   parseNativeDocxIntake,
+  wordImportFidelityReport,
   compileWordTrackedDocx,
   withTextBoxDisposition,
   type DocumentSignals,
@@ -82,6 +84,36 @@ async function compileTrackedBody(body: string, extraEntries: Readonly<Record<st
 }
 
 describe('explicit tracked Word successor compiler (#1132)', () => {
+  it('states preview and selected-reading fidelity without changing historical reports', async () => {
+    const { path } = await compileTrackedBody('<w:p><w:r><w:t>base</w:t></w:r>' +
+      '<w:ins w:id="1" w:author="A"><w:r><w:t>new</w:t></w:r></w:ins></w:p>');
+    const result = await parseNativeDocxIntake(path, 'modes.docx', { legacy: () => undefined, wordPreview: () => undefined });
+    if (result.kind !== 'word') throw new Error('expected supported Word preview');
+    const { parsed, word } = result;
+    const previewRow = parsed.fidelity.find((row) => row.key === 'comments-revisions')!;
+    expect(previewRow.detail).toContain('尚未选择稿件基线');
+    const legacy = await parseDocx(path, 'modes.docx', () => undefined);
+    expect(legacy.fidelity.find((row) => row.key === 'comments-revisions')!.detail).toBe(COMMENTS_REVISIONS_DETAIL);
+    for (const mode of ['suggestions', 'accepted-baseline'] as const) {
+      const reading = word.readings[mode === 'suggestions' ? 'rejected' : 'accepted'];
+      const report = wordImportFidelityReport(parsed.fidelity, mode, reading.marks.length, 'retain')!;
+      const row = report.find((category) => category.key === 'comments-revisions')!;
+      expect(row.detail).toContain(mode === 'suggestions' ? '拒绝 Word 修订' : '接受 Word 修订');
+      expect(row.detail).not.toContain('表格');
+      expect(row.count).toBe(reading.marks.length);
+      expect(deriveImportFidelityPlan(report, parsed.sourceDigest, parsed.archiveBytes, undefined,
+        parsed.parserIdentity)?.importedMarks).toBe(reading.marks.length);
+      expect(withTextBoxDisposition(report, 'retain', undefined, parsed.parserIdentity)).toEqual(report);
+      expect(withTextBoxDisposition(report, 'merge', undefined, parsed.parserIdentity)).toBeUndefined();
+      expect(report.at(-1)!.detail).toContain('最终确认的阅读');
+      expect(wordImportFidelityReport(legacy.fidelity, mode, reading.marks.length, 'retain')).toBeUndefined();
+    }
+    expect(wordImportFidelityReport(parsed.fidelity, 'suggestions', 20_001, 'retain')).toBeUndefined();
+    expect(wordImportFidelityReport(parsed.fidelity, 'suggestions', -1, 'retain')).toBeUndefined();
+    expect(wordImportFidelityReport(parsed.fidelity.map((row) => ({ ...row, detail: `${row.detail}x` })),
+      'suggestions', 1, 'retain')).toBeUndefined();
+  });
+
   it('carries a nonempty accepted staging preview with original note/part fidelity while the legacy reader still refuses zero blocks', async () => {
     const parts = unzipSync(await buildCorpusSource('synthetic'));
     parts['word/document.xml'] = new Uint8Array(bodyDocumentXml('<w:p><w:ins w:id="1"><w:r><w:t>new</w:t></w:r></w:ins>' +

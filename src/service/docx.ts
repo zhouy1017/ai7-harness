@@ -15,6 +15,7 @@ import type { ConversionLoss } from './text-manuscript.js';
 import {
   ImportedMarkCollector,
   MAX_COMMENT_PART_BYTES,
+  MAX_IMPORTED_MARKS,
   emptyParagraphRevisions,
   recordParagraphText,
   type CommentMarkerRole,
@@ -29,7 +30,7 @@ import {
 } from './docx-marks.js';
 import { canonicalJson as wordCanonicalJson, sha256Hex } from './analysis/canonical.js';
 import { WORD_EXTRACTOR_IDENTITY, WORD_INTAKE_PROFILE, WORD_SOURCE_SCHEMA,
-  type WordCompiledReading, type WordEventKind, type WordIncompatibility, type WordIntakeInventory,
+  type WordCompiledReading, type WordEventKind, type WordImportMode, type WordIncompatibility, type WordIntakeInventory,
   type WordRevisionGraph, type WordReadingBlock, type WordSampleTemplate, type WordSourceAtom, type WordSourceEvent,
   type WordSourceParagraph } from './import-retention.js';
 
@@ -1126,6 +1127,37 @@ export const REIMPORT_COMMENTS_REVISIONS_DETAIL =
 
 /** Which form a revision-3 report's 批注与修订 row takes: none found, converted to marks, or a reimport's. */
 type CommentsRevisionsVariant = 'absent' | 'converted' | 'reimport';
+type WordFidelityVariant = 'word-preview' | 'word-suggestions' | 'word-accepted-baseline';
+
+const WORD_REVISION_DETAILS: Record<WordFidelityVariant, string> = {
+  'word-preview': '检测到原文件中的 Word 修订。这只是阅读预览，尚未选择稿件基线；确认导入方式后，按所选阅读对应文字、批注和修订。原始证据随来源版本保留。',
+  'word-suggestions': '以拒绝 Word 修订后的阅读作为稿件基线；能精确表示的文字编辑转为作者署名的修改建议，受支持的结构编辑采用来源关联批注。文件批注按此阅读精确对应，原始证据随来源版本保留。',
+  'word-accepted-baseline': '以接受 Word 修订后的阅读作为定稿基线；已并入的 Word 编辑不生成待处理修改建议。文件批注按所选阅读精确对应，原始修订和来源证据随来源版本保留。',
+};
+
+function buildWordFidelityReport(signals: DocumentSignalsV2, headersFooters: number,
+  disposition: TextBoxDisposition, variant: WordFidelityVariant): FidelityCategoryProjection[] {
+  return buildFidelityReportV2(signals, headersFooters, undefined, disposition).map((category) => {
+    if (category.key === 'comments-revisions') return { ...category, ...PRESERVED, detail: WORD_REVISION_DETAILS[variant] };
+    if (category.key === 'round-trip-export') return { ...category,
+      detail: '导出按最终确认的阅读和之后的稿件文字写出。原文件留存不代表版式往返保证；合段等无法原样恢复的部分，在导出保真审阅中说明。' };
+    return category;
+  });
+}
+
+/** The actual selected reading supplies its mark count; preview never chooses this mode. */
+export function wordImportFidelityReport(preview: unknown, mode: WordImportMode, markCount: number,
+  disposition: TextBoxDisposition): FidelityCategoryProjection[] | undefined {
+  if (matchingCandidate(preview, undefined, WORD_DOCX_PARSER_IDENTITY) === undefined ||
+    !Number.isSafeInteger(markCount) || markCount < 0 || markCount > MAX_IMPORTED_MARKS ||
+    (mode !== 'suggestions' && mode !== 'accepted-baseline')) return undefined;
+  const counts = candidateCounts(preview, 10)!;
+  const signals: DocumentSignalsV2 = { inlineStyles: counts[0]!, commentsRevisions: markCount,
+    notes: counts[2]!, tables: counts[3]!, imagesCaptions: counts[4]!, sections: counts[5]!, textBoxes: counts[7]!, fields: counts[8]! };
+  if (disposition === 'merge' && signals.textBoxes === 0) return undefined;
+  return buildWordFidelityReport(signals, counts[6]!, disposition,
+    mode === 'suggestions' ? 'word-suggestions' : 'word-accepted-baseline');
+}
 
 /**
  * The ten content classes with their counts, labels, and details (V2-UX-IMP-002 to 004, ADR 0086), as parser
@@ -1385,8 +1417,8 @@ function candidateCounts(value: unknown, rows: number): number[] | undefined {
 interface CandidateReport {
   report: FidelityCategoryProjection[];
   textBoxDisposition: TextBoxDisposition | null;
-  /** The form of a revision-3 report's 批注与修订 row; `absent` for every report before revision 3. */
-  commentsRevisions: CommentsRevisionsVariant;
+  /** Exact parser-owned wording, including the distinct Word preview and selected readings. */
+  commentsRevisions: CommentsRevisionsVariant | WordFidelityVariant;
 }
 
 function reportsForCandidateCounts(
@@ -1420,7 +1452,7 @@ function reportsForCandidateCounts(
     inlineStyles: counts[0]!, commentsRevisions: counts[1]!, notes: counts[2]!, tables: counts[3]!,
     imagesCaptions: counts[4]!, sections: counts[5]!, textBoxes: counts[7]!, fields: counts[8]!,
   };
-  const current = parserIdentity === DOCX_PARSER_IDENTITY || parserIdentity === WORD_DOCX_PARSER_IDENTITY;
+  const current = parserIdentity === DOCX_PARSER_IDENTITY;
   if (conversion !== undefined) {
     const { textBoxes, fields, ...rest } = signals;
     const withLoss = { ...conversion, loss: { ...rest, headersFooters: counts[6]!, textBoxes, fields } };
@@ -1431,6 +1463,11 @@ function reportsForCandidateCounts(
     }];
   }
   const dispositions: ReadonlyArray<TextBoxDisposition | null> = signals.textBoxes === 0 ? [null] : ['retain', 'merge'];
+  if (parserIdentity === WORD_DOCX_PARSER_IDENTITY) return dispositions.flatMap((disposition) =>
+    (['word-preview', 'word-suggestions', 'word-accepted-baseline'] as const).map((variant) => ({
+      report: buildWordFidelityReport(signals, counts[6]!, disposition ?? 'retain', variant),
+      textBoxDisposition: disposition, commentsRevisions: variant,
+    })));
   // Revision 3 rebuilds the 批注与修订 row in every form its count admits: with no mark it may be absent or
   // present (a formatting revision alone), and a reimport states it as its own.
   const variants: ReadonlyArray<CommentsRevisionsVariant> = !current
@@ -1488,7 +1525,7 @@ export function deriveImportFidelityPlan(
     outcome: degradations.length === 0 ? 'clean-import-no-round-trip' : 'degraded-import-no-round-trip',
     degradations,
     textBoxDisposition: match.textBoxDisposition,
-    importedMarks: match.commentsRevisions === 'converted'
+    importedMarks: match.commentsRevisions === 'converted' || match.commentsRevisions.startsWith('word-')
       ? match.report.find((category) => category.key === 'comments-revisions')!.count
       : 0,
   };
@@ -1635,7 +1672,8 @@ export async function parseNativeDocxIntake(path: string, displayNameInput: stri
     ? { value: metadataTitle, sourceLabel: 'DOCX 标题元数据' as const }
     : { value: fallbackTitle, sourceLabel: '文件名' as const };
   requireDocx(titleSuggestion.value.length > 0, 'no usable title suggestion');
-  const fidelity = fidelityReport(archive.document.signals, archive.entryNames);
+  const fidelity = buildWordFidelityReport(archive.document.signals,
+    archive.entryNames.filter((entry) => /^word\/(?:header|footer)[^/]*\.xml$/i.test(entry)).length, 'retain', 'word-preview');
   requireDocx(deriveImportFidelityPlan(fidelity, compiled.sourceDigest, compiled.archiveBytes, undefined, WORD_DOCX_PARSER_IDENTITY) !== undefined,
     'Word preview fidelity report is malformed');
   for (const block of preview.blocks) { options.signal?.throwIfAborted(); blocks.wordPreview(block); }
