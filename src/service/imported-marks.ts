@@ -230,6 +230,28 @@ export function createImportedMarks(
 }
 
 /** Selected-reading marks and their exact source locators join the real import transaction, independently of learning. */
+/** Original source locators survive Apply/reversal; current anchors and status belong to EditorialMarkStore. */
+export function validateWordImportedMarkSources(db: DatabaseSync, bookId: string, commitId: string,
+  compiled: Extract<WordTrackedCompilation, { kind: 'ready' }>): void {
+  const { choice } = readWordImportChoiceRecord(db, bookId, commitId);
+  requireImported(compiled.sourceDigest === choice.originalDigest && compiled.graphDigest === choice.graphDigest &&
+    compiled.templateManifestDigest === choice.templateManifestDigest,
+  'WORD_MARK_SOURCE_INVALID', 'Word 标记来源与原始编译结果不一致。');
+  const reading = compiled.readings[choice.mode === 'suggestions' ? 'rejected' : 'accepted'];
+  requireImported(reading.usable && reading.readingDigest === choice.readings[reading.reading].digest,
+    'WORD_MARK_SOURCE_INVALID', 'Word 标记来源缺少已确认的阅读。');
+  const revision = db.prepare('SELECT manuscript_id, branch_id FROM manuscript_revisions WHERE revision_id = ?').get(choice.revisionId);
+  const rows = db.prepare(`SELECT s.*, m.book_id, m.manuscript_id, m.branch_id FROM word_import_mark_sources s
+    LEFT JOIN editorial_marks m ON m.mark_id = s.mark_id WHERE s.commit_id = ? ORDER BY s.source_ordinal, s.mark_id`).all(commitId);
+  requireImported(revision && rows.length === reading.marks.length, 'WORD_MARK_SOURCE_INVALID', 'Word 标记来源对应不完整。');
+  rows.forEach((row, index) => {
+    const record = wordImportMarkSourceRecord(choice, reading.marks[index]!, text(row.mark_id));
+    requireImported(row.source_ordinal === index + 1 && row.canonical_json === record.json && row.sha256 === record.digest &&
+      row.book_id === bookId && row.manuscript_id === revision.manuscript_id && row.branch_id === revision.branch_id,
+    'WORD_MARK_SOURCE_INVALID', 'Word 原始标记定位或稿件归属已经变化。');
+  });
+}
+
 export function createWordImportedMarks(db: DatabaseSync, marks: EditorialMarkStore, bookId: string, commitId: string,
   compiled: Extract<WordTrackedCompilation, { kind: 'ready' }>, branchId: string, signal?: AbortSignal): number {
   signal?.throwIfAborted();

@@ -392,6 +392,40 @@ export class EditorialLearningLedger {
     });
   }
 
+  /** Reopen/merge replay the complete historical admission vector, independently of today's exclusions. */
+  validateWordImportSamples(bookId: string, commitId: string, compiled: Extract<WordTrackedCompilation, { kind: 'ready' }>): void {
+    this.#read(() => {
+      const { choice, digest: choiceDigest, createdAt } = readWordImportChoiceRecord(this.db, bookId, commitId);
+      requireLearning(compiled.sourceDigest === choice.originalDigest && compiled.graphDigest === choice.graphDigest &&
+        compiled.templateManifestDigest === choice.templateManifestDigest);
+      requireWordRevisionSource(this.db, readWordParentSourcePin(this.db, bookId, choice.sourceVersionId), compiled.graph);
+      const samples = wordTrackedSamples(bookId, compiled.graph, compiled.templates);
+      const admissions = wordLocalImportAdmissions({ bookId, samples: samples.map((sample, index) =>
+        ({ sample, templateKey: compiled.templates[index]!.templateKey })), choice, choiceDigest,
+      currentControls: choice.effectiveControls, recordedAt: createdAt });
+      const rows = this.db.prepare('SELECT * FROM word_tracked_edit_sample_imports WHERE commit_id = ?').all(commitId);
+      const memberships = new Map(rows.map((row) => [String(row.sample_id), row]));
+      requireLearning(rows.length === admissions.length);
+      for (const { sample, templateKey, sampleDigest, materialKey, materialDigest, record } of admissions) {
+        const membership = memberships.get(sample.sampleId);
+        const sampleRow = this.db.prepare('SELECT * FROM word_tracked_edit_samples WHERE sample_id = ?').get(sample.sampleId);
+        requireLearning(membership && membership.sample_digest === sampleDigest && membership.choice_digest === choiceDigest &&
+          membership.canonical_json === record.json && membership.sha256 === record.digest && membership.captured_at === createdAt &&
+          sampleRow && sampleRow.book_id === bookId && sampleRow.source_version_id === choice.sourceVersionId &&
+          sampleRow.template_key === templateKey && sampleRow.canonical_json === wordTrackedSampleRecord(sample).json && sampleRow.sha256 === sampleDigest);
+        this.#wordEvidence({ bookId, sampleId: sample.sampleId, sampleDigest, sourceVersionId: choice.sourceVersionId,
+          sourceDigest: compiled.sourceDigest, graphDigest: compiled.graphDigest, importCommitId: commitId,
+          admissionDigest: record.digest, materialKey, materialDigest });
+        const signalRow = this.db.prepare('SELECT signal_id FROM learning_signals WHERE source_key = ?')
+          .get(`word-sample:${sample.sampleId}:${sampleDigest}`);
+        requireLearning(signalRow);
+        const signal = this.#signal(String(signalRow.signal_id));
+        requireLearning(signal.kind === 'word-tracked-edit' && signal.source.bookId === bookId && signal.source.sampleId === sample.sampleId &&
+          signal.source.sampleDigest === sampleDigest && signal.source.sourceVersionId === choice.sourceVersionId);
+      }
+    });
+  }
+
   /** One atomic batch shares source/import validation, without copying or rehashing the graph per sample. */
   captureWordSamples(sources: ReadonlyArray<WordTrackedEditLearningSource>, abortSignal?: AbortSignal): string[] {
     abortSignal?.throwIfAborted();

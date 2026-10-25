@@ -42,7 +42,7 @@ import { EditorialLearningLedger } from '../../src/service/learning/ledger.js';
 import { wordTrackedEditCandidate, learningMaterialDigest, wordLocalImportAdmissions } from '../../src/service/learning-eligibility.js';
 import { readWordManuscriptExportSource, planWordManuscriptExport } from '../../src/service/manuscript-export.js';
 import { renderDocxExport } from '../../src/service/docx-export.js';
-import { createWordImportedMarks } from '../../src/service/imported-marks.js';
+import { createWordImportedMarks, validateWordImportedMarkSources } from '../../src/service/imported-marks.js';
 import { EditorialMarkStore } from '../../src/service/editorial-marks.js';
 import { DEFAULT_MANUSCRIPT_EXPORT_OPTIONS } from '../../src/shared/protocol.js';
 import { EditorialStore, SOURCE_VERSION_PARSER_CHANGED_MESSAGE, StoreError } from '../../src/service/store.js';
@@ -293,6 +293,7 @@ describe('closed Word retention definitions (#1132)', () => {
             expect(db.prepare('SELECT count(*) total FROM word_import_mark_sources WHERE commit_id = ?').get(commitId)?.total)
               .toBe(compiled.readings.rejected.marks.length);
             expect(ledger.retainWordImportSamples(bookId, commitId, compiled)).toEqual({ sources: [], signalIds: [] });
+            expect(() => ledger.validateWordImportSamples(bookId, commitId, compiled)).not.toThrow();
             for (const table of ['word_tracked_edit_samples', 'word_tracked_edit_sample_imports', 'learning_signals']) {
               expect(db.prepare(`SELECT count(*) total FROM ${table}`).get()?.total).toBe(0);
             }
@@ -320,6 +321,7 @@ describe('closed Word retention definitions (#1132)', () => {
         const wordMarkCount = createWordImportedMarks(db, markStore, bookId, commitId, compiled, branchId);
         expect(wordMarkCount).toBe(compiled.readings.rejected.marks.length);
         expect(createWordImportedMarks(db, markStore, bookId, commitId, compiled, branchId)).toBe(wordMarkCount);
+        expect(() => validateWordImportedMarkSources(db, bookId, commitId, compiled)).not.toThrow();
         expect(db.prepare('SELECT count(*) total FROM editorial_marks').get()!.total).toBe(Number(priorMarks) + wordMarkCount);
         const sourceMarkRows = db.prepare(`SELECT s.*, m.pinned_revision_id, m.book_id FROM word_import_mark_sources s
           JOIN editorial_marks m ON m.mark_id = s.mark_id WHERE s.commit_id = ? ORDER BY s.source_ordinal`).all(commitId);
@@ -360,6 +362,13 @@ describe('closed Word retention definitions (#1132)', () => {
         expect(signals).toHaveLength(samples.length);
         expect(ledger.retainWordImportSamples(bookId, commitId, compiled)).toEqual({ sources, signalIds: signals });
         expect(ledger.captureWordSamples(sources)).toEqual(signals);
+        expect(() => ledger.validateWordImportSamples(bookId, commitId, compiled)).not.toThrow();
+        db.exec('SAVEPOINT word_manifest_missing');
+        try {
+          db.exec('DROP TRIGGER word_tracked_edit_sample_imports_no_delete');
+          db.prepare('DELETE FROM word_tracked_edit_sample_imports WHERE sample_id = ? AND commit_id = ?').run(samples[0]!.sampleId, commitId);
+          expect(() => ledger.validateWordImportSamples(bookId, commitId, compiled)).toThrow();
+        } finally { db.exec('ROLLBACK TO word_manifest_missing; RELEASE word_manifest_missing'); }
         const inspect = () => ledger.inspect({ signalOffset: 0, itemOffset: 0 }, 'development-ci');
         const signal = inspect().signals[0]!;
         expect(signal).toMatchObject({ kind: 'word-tracked-edit', schema: 'ai7.word-import-learning-signal/1',
@@ -389,6 +398,7 @@ describe('closed Word retention definitions (#1132)', () => {
           applicability: { kind: 'house' }, title: '拒绝 Word 记忆', editorialDimension: '语言', confidence: 0.5 }, 'development-ci')).toThrow();
         expect(inspect().items).toEqual([]);
         ledger.change({ kind: 'book', bookId, excluded: true, expectedEntries: 0 });
+        expect(() => ledger.validateWordImportSamples(bookId, commitId, compiled)).not.toThrow();
         expect(wordSampleDetailContextCurrent(db, context)).toBe(false);
         expect(() => resolveWordSampleDetailSource(db, context, firstSource.sampleId, firstSource.sampleDigest, historicalImports)).toThrow('缓存已变化');
         const excludedContext = createWordSampleDetailContext(db, bookId, sourceVersionId, compiled);
@@ -502,6 +512,29 @@ describe('closed Word retention definitions (#1132)', () => {
 });
 
 describe('Word empty-layer migration through EditorialStore.open', () => {
+  it.each([MODEL_REQUEST_ADMISSION_SCHEMA_VERSION, LATEST_SCHEMA_VERSION])('refuses an orphan Word source before any open mutation at reader %s', async (reader) => {
+    const { compiled, bookId } = await retainedWordParentFixture();
+    const before = withDatabase(false, (db) => {
+      const sourceVersionId = String(db.prepare('SELECT source_version_id FROM source_versions WHERE book_id = ?').get(bookId)!.source_version_id);
+      db.exec('BEGIN IMMEDIATE');
+      try { retainWordRevisionSource(db, readWordParentSourcePin(db, bookId, sourceVersionId), compiled.graph); db.exec('COMMIT'); }
+      catch (error) { db.exec('ROLLBACK'); throw error; }
+      db.exec(`PRAGMA user_version = ${reader}`);
+      return { sources: retainedSourceRows(db), word: db.prepare('SELECT * FROM word_revision_sources').all(),
+        versions: db.prepare('SELECT * FROM store_versions ORDER BY ordinal').all() };
+    });
+    const marker = readFileSync(dataVersionMarkerPath(roots.dataRoot), 'utf8');
+    await expect(EditorialStore.open(roots.dataRoot, roots.codeRoot)).rejects.toMatchObject({
+      code: reader === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION ? 'WORD_READER_STAMP_INVALID' : 'WORD_SOURCE_INVALID' });
+    withDatabase(true, (db) => {
+      expect(db.prepare('PRAGMA user_version').get()!.user_version).toBe(reader);
+      expect(retainedSourceRows(db)).toEqual(before.sources);
+      expect(db.prepare('SELECT * FROM word_revision_sources').all()).toEqual(before.word);
+      expect(db.prepare('SELECT * FROM store_versions ORDER BY ordinal').all()).toEqual(before.versions);
+    });
+    expect(readFileSync(dataVersionMarkerPath(roots.dataRoot), 'utf8')).toBe(marker);
+  });
+
   it.each([false, true])('migrates a reader-92 source store without backfill through two reopens (interrupted before stamp: %s)', async (interrupt) => {
     const original = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try { await importSample1Book(original, roots.codeRoot, 'Word 迁移保留'); original.markCleanShutdown(); } finally { original.close(); }

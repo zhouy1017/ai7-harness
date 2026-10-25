@@ -45,7 +45,7 @@ import { DEVELOPMENT_CREDENTIAL_REFERENCES } from '../shared/protected-secret-id
 import { MODEL_SERVICE_ROUTE_BINDINGS, MODEL_SERVICE_ROUTES, modelServiceModels, type ModelConnectionTestStatus } from '../shared/protocol.js';
 import { closeSync, constants, createReadStream, existsSync, fstatSync, lstatSync, openSync, readSync } from 'node:fs';
 import { copyFile, lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
-import { basename, extname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
+import { basename, dirname, extname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { acceptedSourceImportRetainedBoundaryLabels, sourceImportRetainedBoundaryLabel, BASELINE_ANALYSIS_MODE_GOALS, BASELINE_ANALYSIS_MODE_LABELS, CAPTURED_PROCEDURE_CAPTURE_SLOTS, CAPTURED_PROCEDURE_STATE_LABELS, MAX_CAPTURED_PROCEDURE_RUNS_SHOWN, MAX_CAPTURED_PROCEDURE_TITLE_GRAPHEMES, MAX_CAPTURED_PROCEDURE_VERSIONS_PAGE, J03_TASK_GOAL, MAX_DIALOGUE_SELECTION_GRAPHEMES, MAX_EVALUATION_CALIBRATION_BOOKS, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_LEARNING_AUDIT_BOOK_CHOICES, MAX_LEARNING_AUDIT_PAGE, MAX_LEARNING_AUDIT_SERIES_CHOICES, MAX_LEARNING_LINEAGE_DECISIONS, MAX_LEARNING_LINEAGE_TASKS, MAX_LEARNING_REMEDIATION_ITEMS, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
 import type {
@@ -580,6 +580,7 @@ import {
   initializeImportRetentionSchema,
   initializeWordImportRetentionSchema,
   validateWordImportRetentionVersion,
+  validateWordImportRetentionClosure,
   recordTextBoxChoice,
   recordedTextBoxChoice,
   stageImportSources,
@@ -599,11 +600,12 @@ import {
 import {
   ImportedMarkError,
   createImportedMarks,
+  validateWordImportedMarkSources,
   initializeImportedMarkSchema,
   stageImportedMarks,
   stagedImportedMarksMatch,
 } from './imported-marks.js';
-import { ExportLedgerError, ManuscriptExportStore, initializeExportLedgerSchema } from './manuscript-export.js';
+import { ExportLedgerError, ManuscriptExportStore, initializeExportLedgerSchema, readWordManuscriptExportSource } from './manuscript-export.js';
 import {
   DEFAULT_EXECUTION_RULES_STATEMENT,
   DEFAULT_EXECUTION_RULE_PROCEDURES,
@@ -1943,6 +1945,57 @@ async function digestFile(path: string): Promise<string> {
   const hash = createHash('sha256');
   for await (const chunk of createReadStream(path)) hash.update(chunk);
   return hash.digest('hex');
+}
+
+function contentObjectPath(objectsRoot: string, objectDigest: string, relativeKey: string): string {
+  requireStore(DIGEST_PATTERN.test(objectDigest) && isManuscriptObjectKey(objectDigest, relativeKey),
+    'OBJECT_PATH_INVALID', '对象摘要或相对路径无效。');
+  const path = resolve(objectsRoot, ...relativeKey.split('/'));
+  requireStore(isInside(objectsRoot, path), 'OBJECT_PATH_INVALID', '对象路径越界。');
+  return path;
+}
+
+/** Read one bounded immutable original, with canonical path and actual byte proof rather than a database generation. */
+async function readRetainedWordOriginal(db: DatabaseSync, dataRoot: string, objectsRoot: string, bookId: string,
+  sourceVersionId: string): Promise<Uint8Array> {
+  const parent = readWordParentSourcePin(db, bookId, sourceVersionId);
+  requireStore(parent.sourceBytes <= MAX_ARCHIVE_BYTES, 'WORD_SOURCE_INVALID', 'Word 原文件超过已支持的包大小。');
+  const object = db.prepare('SELECT relative_key, byte_length FROM content_objects WHERE object_digest = ?').get(parent.objectDigest);
+  requireStore(object && object.byte_length === parent.sourceBytes, 'WORD_SOURCE_INVALID', 'Word 原文件对象记录不完整。');
+  const path = contentObjectPath(objectsRoot, parent.objectDigest, asString(object.relative_key));
+  const inspected = await inspectCanonicalDataFile(dataRoot, dirname(path), basename(path));
+  requireStore(inspected.exists && inspected.path === path, 'WORD_SOURCE_UNAVAILABLE', 'Word 原文件无法读取。');
+  const metadata = await lstat(path);
+  requireStore(metadata.isFile() && !metadata.isSymbolicLink() && metadata.size === parent.sourceBytes,
+    'WORD_SOURCE_UNAVAILABLE', 'Word 原文件不再是完整的留存文件。');
+  const hash = createHash('sha256');
+  const chunks: Buffer[] = [];
+  let bytes = 0;
+  for await (const chunk of createReadStream(path, { highWaterMark: 64 * 1024 })) {
+    bytes += chunk.byteLength;
+    requireStore(bytes <= parent.sourceBytes, 'WORD_SOURCE_UNAVAILABLE', 'Word 原文件在读取时已经变化。');
+    hash.update(chunk); chunks.push(chunk);
+  }
+  requireStore(bytes === parent.sourceBytes && hash.digest('hex') === parent.sourceDigest,
+    'WORD_SOURCE_UNAVAILABLE', 'Word 原文件字节与留存摘要不一致。');
+  return Buffer.concat(chunks, bytes);
+}
+
+/** Before backup or migration, replay every committed Word source and every complete import manifest. */
+async function validateRetainedWordImports(db: DatabaseSync, dataRoot: string, objectsRoot: string): Promise<void> {
+  validateWordImportRetentionClosure(db);
+  const ledger = new EditorialLearningLedger(db);
+  for (const source of db.prepare('SELECT book_id, source_version_id FROM word_revision_sources').iterate()) {
+    const bookId = asString(source.book_id);
+    const sourceVersionId = asString(source.source_version_id);
+    const original = await readRetainedWordOriginal(db, dataRoot, objectsRoot, bookId, sourceVersionId);
+    for (const imported of db.prepare('SELECT commit_id, revision_id FROM word_revision_imports WHERE source_version_id = ?').iterate(sourceVersionId)) {
+      const commitId = asString(imported.commit_id);
+      const { compiled } = readWordManuscriptExportSource(db, bookId, asString(imported.revision_id), sourceVersionId, original);
+      validateWordImportedMarkSources(db, bookId, commitId, compiled);
+      ledger.validateWordImportSamples(bookId, commitId, compiled);
+    }
+  }
 }
 
 /**
@@ -5124,6 +5177,9 @@ export class EditorialStore {
       configureDatabase(authority, 'FILE');
       validateRequestAdmissionRecords(authority, Number(authority.prepare('PRAGMA user_version').get()?.user_version) >= MODEL_REQUEST_ADMISSION_SCHEMA_VERSION);
       validateWordImportRetentionVersion(authority, Number(authority.prepare('PRAGMA user_version').get()?.user_version) >= WORD_TRACKED_IMPORT_SCHEMA_VERSION);
+      if (Number(authority.prepare('PRAGMA user_version').get()?.user_version) >= WORD_TRACKED_IMPORT_SCHEMA_VERSION) {
+        await validateRetainedWordImports(authority, dataRoot, objectsRoot);
+      }
       // 升级前备份 (Issue #433, S85b; DSTO-016): a store this software must move to a later Data Version is written whole into
       // the backup location before anything migrates it, and a backup that cannot be made opens nothing.
       const { upgrade, earlier } = await backUpBeforeUpgrade(authority, dataRoot, {
@@ -22672,13 +22728,7 @@ export class EditorialStore {
   }
 
   #contentObjectPath(objectDigest: string, relativeKey: string): string {
-    requireStore(/^[0-9a-f]{64}$/.test(objectDigest), 'OBJECT_PATH_INVALID', '对象摘要无效。');
-    // The retained original keeps the extension of the format it was identified as, so the key is
-    // checked against every admitted one rather than against DOCX alone (ADR 0072 §2).
-    requireStore(isManuscriptObjectKey(objectDigest, relativeKey), 'OBJECT_PATH_INVALID', '对象相对路径无效。');
-    const path = resolve(this.#objectsRoot, ...relativeKey.split('/'));
-    requireStore(isInside(this.#objectsRoot, path), 'OBJECT_PATH_INVALID', '对象路径越界。');
-    return path;
+    return contentObjectPath(this.#objectsRoot, objectDigest, relativeKey);
   }
 
   #loadAbandonmentCleanupIntent(draftId: string): AbandonmentCleanupIntent | null {

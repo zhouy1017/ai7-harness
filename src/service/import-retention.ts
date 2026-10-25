@@ -1425,6 +1425,28 @@ export function validateWordImportRetentionVersion(db: DatabaseSync, allowsWordR
     'WORD_READER_STAMP_INVALID', 'Word 修订记录与数据库的原始版本标记不一致。');
 }
 
+/** Every committed row is reached by one actual source/import closure; no orphan is silently skipped by a join. */
+export function validateWordImportRetentionClosure(db: DatabaseSync): void {
+  validateWordImportRetentionSchema(db);
+  const invalid = db.prepare(`SELECT 1 FROM word_revision_sources s
+    LEFT JOIN source_versions p ON p.source_version_id = s.source_version_id
+    WHERE p.source_version_id IS NULL OR p.book_id <> s.book_id OR p.object_digest <> s.object_digest
+      OR NOT EXISTS (SELECT 1 FROM word_revision_imports i WHERE i.source_version_id = s.source_version_id)
+    UNION ALL SELECT 1 FROM word_revision_imports i LEFT JOIN word_revision_sources s ON s.source_version_id = i.source_version_id
+    WHERE s.source_version_id IS NULL OR s.book_id <> i.book_id
+    UNION ALL SELECT 1 FROM word_manuscript_source_segments s LEFT JOIN word_revision_imports i ON i.commit_id = s.commit_id
+    WHERE i.commit_id IS NULL OR s.revision_id <> i.revision_id OR s.source_version_id <> i.source_version_id
+    UNION ALL SELECT 1 FROM word_tracked_edit_samples s LEFT JOIN word_revision_sources p ON p.source_version_id = s.source_version_id
+    WHERE p.source_version_id IS NULL OR p.book_id <> s.book_id
+      OR NOT EXISTS (SELECT 1 FROM word_tracked_edit_sample_imports i WHERE i.sample_id = s.sample_id)
+    UNION ALL SELECT 1 FROM word_tracked_edit_sample_imports si
+    LEFT JOIN word_tracked_edit_samples s ON s.sample_id = si.sample_id LEFT JOIN word_revision_imports i ON i.commit_id = si.commit_id
+    WHERE s.sample_id IS NULL OR i.commit_id IS NULL OR s.book_id <> i.book_id OR s.source_version_id <> i.source_version_id
+    UNION ALL SELECT 1 FROM word_import_mark_sources s LEFT JOIN word_revision_imports i ON i.commit_id = s.commit_id
+    WHERE i.commit_id IS NULL LIMIT 1`).get();
+  requireRetention(invalid === undefined, 'WORD_SOURCE_INVALID', 'Word 修订来源、导入、片段或样本存在不完整或跨图书的引用。');
+}
+
 /** Separate from revision 27: existing retention tables never cause the new layer to be skipped. */
 export function initializeWordImportRetentionSchema(db: DatabaseSync): void {
   const existing = Object.keys(WORD_IMPORT_RETENTION_SCHEMA_SQL).filter((name) =>

@@ -48,7 +48,7 @@ import {
   wordMappedDocxSource,
   type WordMappedDocxSource,
 } from './docx-export.js';
-import { compileWordTrackedDocxBytes } from './docx.js';
+import { compileWordTrackedDocxBytes, type WordTrackedCompilation } from './docx.js';
 import { readWordImportChoiceRecord, readWordParentSourcePin, requireWordRevisionSource,
   requireWordManuscriptSourceSegments } from './import-retention.js';
 import { REPORT_EXPORT_WRITER_IDENTITIES, renderReportExport, type ReportExportInput } from './report-export.js';
@@ -306,7 +306,8 @@ export function requireWordExportBinding(recorded: unknown, current: WordExportP
 
 /** For explicit Word-family plan selection: this source/ancestor reader never falls back to legacy or fresh output. */
 export function readWordManuscriptExportSource(db: DatabaseSync, bookId: string, revisionId: string, sourceVersionId: string,
-  original: Uint8Array): { source: WordMappedDocxSource; pins: Omit<WordExportSourcePins, 'revisionId' | 'revisionDigest'> } {
+  original: Uint8Array): { source: WordMappedDocxSource; compiled: Extract<WordTrackedCompilation, { kind: 'ready' }>;
+    pins: Omit<WordExportSourcePins, 'revisionId' | 'revisionDigest'> } {
   requireExport([bookId, revisionId, sourceVersionId].every((id) => UUID_PATTERN.test(id)), 'EXPORT_RECORD_INVALID', 'Word 导出来源标识无效。');
   const revision = db.prepare(`SELECT r.manuscript_id, r.source_version_id, r.parent_revision_id, m.book_id FROM manuscript_revisions r
     JOIN manuscripts m ON m.manuscript_id = r.manuscript_id WHERE r.revision_id = ?`);
@@ -357,7 +358,7 @@ export function readWordManuscriptExportSource(db: DatabaseSync, bookId: string,
   const selected = compiled.readings[choice.mode === 'suggestions' ? 'rejected' : 'accepted'];
   const bound = requireWordManuscriptSourceSegments(db, bookId, choice, selected);
   const source = wordMappedDocxSource(original, compiled, choice.mode, textBoxes, bound.blockBindings);
-  return { source, pins: { sourceVersionId, parentSourcePinDigest: choice.parentSourcePinDigest, workingObjectDigest: null,
+  return { source, compiled, pins: { sourceVersionId, parentSourcePinDigest: choice.parentSourcePinDigest, workingObjectDigest: null,
     importCommitId: commitId, importChoiceDigest: digest, mappingAncestorRevisionId: current } };
 }
 /** How a format laid out from the manuscript's words alone is written, in the editor's words. */
