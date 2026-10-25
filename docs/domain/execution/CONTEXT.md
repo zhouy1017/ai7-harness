@@ -430,7 +430,7 @@ _中文_: 阶段产物
 _Avoid_: Result Set Revision, Editorial Artifact, mark
 
 **Editorial Task Instruction**:
-The editor's own instruction for one procedure run, bounded in length, attributed to the procedure version, free of any house person's name, transmitted under its own outbound data category 编辑任务说明, and never an override of AI7's contract framing.
+The editor's own instruction for one procedure run, bounded in length, attributed to the procedure version, free of any house person's name except within [ADR 0100 §1](../../adr/0100-admit-scoped-editor-task-instruction-text.md#1-accepted-decision-and-exact-scope), transmitted under its own outbound data category 编辑任务说明, and never an override of AI7's contract framing.
 _中文_: 编辑任务说明
 _Avoid_: prompt, system instruction, Task Intent goal label
 
