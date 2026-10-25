@@ -1684,7 +1684,7 @@ async function main() {
         'word-lineage-restart-next-books');
     }
     await clickBook(renderer, wordSignal.source.bookId, 'word-lineage-restart-book');
-    await waitFor(renderer, `document.querySelector('.book-overview[data-book-id="${wordSignal.source.bookId}"]')`, 'word-lineage-restart-book-ready');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id="${wordSignal.source.bookId}"] [data-testid="manuscript-editor"] > [data-block-id]')`, 'word-lineage-restart-book-ready');
     const wordAfter = await renderer.evaluate(wordRead);
     requireJourney(JSON.stringify(wordAfter)===JSON.stringify(wordBefore), 'word-lineage-and-full-source-survive-restart');
 
