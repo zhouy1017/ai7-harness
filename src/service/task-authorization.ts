@@ -510,7 +510,9 @@ export const LOCAL_REVIEW_SCHEMA_VERSION = 90;
 export const EDITORIAL_MEMORY_SCHEMA_VERSION = 91;
 /** Reader-only successor: request fences need a reader that will not resend an ambiguous call. */
 export const MODEL_REQUEST_ADMISSION_SCHEMA_VERSION = 92;
-export const LATEST_SCHEMA_VERSION = MODEL_REQUEST_ADMISSION_SCHEMA_VERSION;
+/** Additive Word source/choice/sample layer; authoring successor under Issue #1132 revision 13. */
+export const WORD_TRACKED_IMPORT_SCHEMA_VERSION = 93;
+export const LATEST_SCHEMA_VERSION = WORD_TRACKED_IMPORT_SCHEMA_VERSION;
 /** The custom analysis kind family slice 7f brings (ADR 0090 item 4): admitted here so it needs no second rebuild. */
 const CUSTOM_ANALYSIS_KIND_GLOB = 'custom-analysis/[a-z0-9-]*' as const;
 const CUSTOM_ANALYSIS_CONTRACT_VERSION_GLOB = 'ai7.custom-analysis*/[0-9]*' as const;
@@ -3082,6 +3084,12 @@ export function validateTaskAuthorizationSchema(db: DatabaseSync): void {
 
 export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
   if (Number(db.prepare('PRAGMA user_version').get()?.user_version) === LATEST_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  // The genuine governed predecessor is proved by its own reader before the legacy refusal below.
+  if (Number(db.prepare('PRAGMA user_version').get()?.user_version) === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION) {
+    validateRequestAdmissionRecords(db, true);
+    transact(db, () => { db.exec(`PRAGMA user_version = ${LATEST_SCHEMA_VERSION}`); validateTaskAuthorizationSchema(db); });
+    return;
+  }
   // Never silently stamp a predecessor carrying new request variants.
   validateRequestAdmissionRecords(db, false);
   if (Number(db.prepare('PRAGMA user_version').get()?.user_version) === EDITORIAL_MEMORY_SCHEMA_VERSION) {

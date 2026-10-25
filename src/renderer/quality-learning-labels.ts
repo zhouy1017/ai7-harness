@@ -70,6 +70,13 @@ export function learningChoiceLabel(choice: LearningEligibilityChoice): string {
   return LEARNING_CHOICES.find((entry) => entry.choice === choice)!.label;
 }
 
+/** `decided`: the material's latest recorded decision exists, so a house standing is an explicit re-inclusion, not the default. */
+export function wordLearningStandingLine(choice: LearningEligibilityChoice, decided: boolean): string {
+  const labels: Record<LearningEligibilityChoice, string> = { house: decided ? '当前按人工决定纳入本机学习。' : '当前默认纳入本机学习；没有人工纳入决定。',
+    book: '当前仅纳入本书的本机学习。', excluded: '当前已排除学习；历史修改对仍可查看。', deferred: '当前暂缓学习；历史修改对仍可查看。' };
+  return labels[choice];
+}
+
 /** Each choice's consequence, shown beside it once chosen and before it is recorded (LEARN-005, LEARN-006, LEARN-012). */
 export function learningChoiceConsequence(choice: LearningEligibilityChoice, bookTitle: string): string {
   switch (choice) {

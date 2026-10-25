@@ -4493,6 +4493,14 @@ function registerRendererHandlers(
       return service.call('inspectLearningMaterial', { bookId: input.bookId, materialKey: input.materialKey });
     }),
   );
+  ipcMain.handle(IPC_CHANNELS.inspectWordTrackedEditSample, (event, input: ServiceOperationMap['inspectWordTrackedEditSample']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object' && typeof input.bookId === 'string', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('inspectWordTrackedEditSample', input);
+    }),
+  );
   // 设置 › 评估校准与预测 (Issue #430, S82): house settings, bound to no Book route; each write is serialized with every other
   // effect.
   ipcMain.handle(IPC_CHANNELS.inspectEvaluationCalibration, (event, input: ServiceOperationMap['inspectEvaluationCalibration']['input']) =>
@@ -6564,7 +6572,7 @@ export async function runApplication(): Promise<void> {
     await requireSameCanonicalDataDirectory(shellRoot, app.getPath('userData'));
     // The Data Version (数据版本) and the store's schema revision (数据库修订) apart (Issue #967): the unit suite holds each to its owner.
     const crashFacts = () => ({
-      appVersion: softwareVersion, buildIdentity, dataVersion: buildIdentity.dataVersion, schemaRevision: 92, protocol: SERVICE_PROTOCOL_VERSION,
+      appVersion: softwareVersion, buildIdentity, dataVersion: buildIdentity.dataVersion, schemaRevision: 93, protocol: SERVICE_PROTOCOL_VERSION,
       platform: process.platform, arch: process.arch, electron: process.versions.electron ?? 'unknown',
       uptimeSeconds: process.uptime(),
     });

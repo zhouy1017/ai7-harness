@@ -1,4 +1,5 @@
 import { execPre74Fixture } from '../support/pre74-schema.js';
+import { stageHistoricalTrackedDocxFixture } from '../support/import-retention.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
@@ -116,7 +117,9 @@ async function composeRevised(request: Omit<ComposedRevisedRequest, 'source' | '
 }
 
 async function stageAndReview(store: EditorialStore, path: string) {
-  const staged = await store.stageSelectedManuscript(randomUUID(), path);
+  const selected = await store.stageSelectedManuscript(randomUUID(), path);
+  // These unchanged MARK regressions exercise the historical reader; new public Word modes have separate coverage.
+  const staged = selected.wordTrackedChanges === undefined ? selected : stageHistoricalTrackedDocxFixture(store, roots.dataRoot, selected);
   const target = { kind: 'new-book', choiceId: 'new-book', confirmedTitle: staged.titleSuggestion.value } as const;
   const review = store.prepareNewBookReview(staged.draftId, staged.draftVersion, target, false);
   return { staged, review };
@@ -877,6 +880,35 @@ describe('a DOCX\'s comments and tracked changes enter the imported manuscript (
     }
   }, 180_000);
 
+  it('keeps current native Word staging separate from the unchanged public reimport mark collector', async () => {
+    const paragraphs: ComposedRevisedRequest['paragraphs'] = [
+      { runs: [text(span(10, 0, 20)), revised(span(11, 0, 5), 'ins', AUTHOR, '2026-09-01T10:01:00Z'),
+        revised(span(11, 5, 10), 'ins', AUTHOR, '2026-09-01T10:05:00Z'), text(span(10, 20))] },
+      { runs: [text(span(13, 0, 5)), revised(span(14, 0, 6), 'ins', AUTHOR, '2026-09-01T10:02:00Z'),
+        revised(span(14, 0, 6), 'ins', AUTHOR, '2026-09-01T10:06:00Z'), text(span(13, 5))] },
+    ];
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const { commit } = await importRevised(store, await composeRevised({ paragraphs }));
+      const original = importedSuggestions();
+      expect(original).toHaveLength(4);
+      const extended = await composeRevised({ paragraphs: [...paragraphs, { runs: [text(span(21))] }] });
+      // No historical fixture here: actual successor preview has two adjacent hunks, while real reimport retains four marks.
+      const changed = await reimportInto(store, commit.bookId, extended, null, 4, false);
+      expect(changed.resultKind).toBe('changed');
+      expect(importedSuggestions()).toEqual(original);
+      withDatabase(true, (db) => {
+        for (const table of ['word_revision_sources', 'word_revision_imports', 'word_tracked_edit_samples', 'learning_signals']) {
+          expect(db.prepare(`SELECT count(*) total FROM ${table}`).get()!.total).toBe(0);
+        }
+      });
+      store.markCleanShutdown(); store.close();
+      store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      expect(importedSuggestions()).toEqual(original);
+      store.markCleanShutdown();
+    } finally { store.close(); }
+  });
+
   it('makes a tracked replacement the author rewrote anew, even when the file reads as the manuscript does (Issue #412)', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
@@ -909,9 +941,16 @@ describe('a DOCX\'s comments and tracked changes enter the imported manuscript (
  * A reimport of `path` into the Book, every row resolved by a verb its shape admits, none preselected; committed. The file
  * carries `marks` comments and tracked changes.
  */
-async function reimportInto(store: EditorialStore, bookId: string, path: string, reuseSourceVersionId: string | null, marks = IMPORTED_MARKS) {
-  const staged = await store.stageSelectedManuscript(randomUUID(), path);
-  expect(staged.fidelity[1]).toMatchObject({ count: marks, status: 'preserved' });
+async function reimportInto(store: EditorialStore, bookId: string, path: string, reuseSourceVersionId: string | null, marks = IMPORTED_MARKS,
+  historical = true) {
+  const selected = await store.stageSelectedManuscript(randomUUID(), path);
+  const staged = historical && selected.wordTrackedChanges !== undefined ? stageHistoricalTrackedDocxFixture(store, roots.dataRoot, selected) : selected;
+  if (historical) {
+    expect(Array.isArray(staged.fidelity) ? staged.fidelity[1] : null).toMatchObject({ count: marks, status: 'preserved' });
+  } else {
+    expect(selected.wordTrackedChanges?.compatibility).toBe('ready');
+    expect(selected.fidelity[1]).toMatchObject({ count: 2, status: 'preserved' });
+  }
   const started = store.createManuscriptReimportPreparationWork(staged.draftId, staged.draftVersion, {
     kind: 'existing-book', bookId, relationship: 'reimport', lineage: { kind: 'unconfirmed' }, reuseSourceVersionId,
   });

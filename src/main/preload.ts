@@ -513,6 +513,8 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
   recordProposalDecisionFeedback: (input: ServiceOperationMap['recordProposalDecisionFeedback']['input']) =>
     invoke<ServiceOperationMap['recordProposalDecisionFeedback']['output']>(IPC_CHANNELS.recordProposalDecisionFeedback, input),
   inspectEditorialLearning: (input: ServiceOperationMap['inspectEditorialLearning']['input']) => invoke<ServiceOperationMap['inspectEditorialLearning']['output']>(IPC_CHANNELS.inspectEditorialLearning, input),
+  inspectWordTrackedEditSample: (input: ServiceOperationMap['inspectWordTrackedEditSample']['input']) =>
+    invoke<ServiceOperationMap['inspectWordTrackedEditSample']['output']>(IPC_CHANNELS.inspectWordTrackedEditSample, input),
   recordLearningReasonAsk: (input: Parameters<RendererApi['recordLearningReasonAsk']>[0]) => invoke<ServiceOperationMap['recordLearningReasonAsk']['output']>(IPC_CHANNELS.recordLearningReasonAsk, input),
   changeEditorialLearning: (input: ServiceOperationMap['changeEditorialLearning']['input']) => invoke<ServiceOperationMap['changeEditorialLearning']['output']>(IPC_CHANNELS.changeEditorialLearning, input),
   createEditorialMemory: (input: ServiceOperationMap['createEditorialMemory']['input']) => invoke<ServiceOperationMap['createEditorialMemory']['output']>(IPC_CHANNELS.createEditorialMemory, input),
