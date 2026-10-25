@@ -3,7 +3,8 @@ import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import type { ManuscriptBlockProjection, TextBoxDisposition } from '../shared/protocol.js';
 import { MAX_FRAME_BYTES } from '../shared/protocol.js';
 import { DOCX_PARSER_IDENTITY, DOCX_PARSER_IDENTITY_V1, DOCX_PARSER_IDENTITY_V2,
-  WORD_DOCX_PARSER_IDENTITY, type ParsedTextBox } from './docx.js';
+  WORD_DOCX_PARSER_IDENTITY, type ParsedTextBox, type ParsedDocx, type ParsedDocxBlock,
+  type NativeDocxIntakeParse } from './docx.js';
 import type { ParsedImportedMark } from './docx-marks.js';
 import type { LOCAL_LEARNING_POLICY_BASIS } from './learning-eligibility.js';
 import { canonicalJson as wordCanonicalJson, sha256Hex, DIGEST_PATTERN, UUID_PATTERN, hasExactKeys, isRecord } from './analysis/canonical.js';
@@ -218,6 +219,113 @@ export interface WordIntakeInventory {
   eventCount: number;
   storyParts: string[];
   locations: WordIncompatibility[];
+}
+
+export type WordLegacyStagedBlock = ParsedDocxBlock & { stagedBlockId: string; startOffset: number };
+type WordStagedReadingPin = { digest: string; blockCount: number; characterCount: number; usable: boolean; refusals: WordIncompatibility[] };
+export type WordStagedIntake = {
+  schema: 'ai7.word-staged-intake/1';
+  draftId: string;
+  sourceDigest: string;
+  sourceBytes: number;
+  compilerIdentity: typeof WORD_DOCX_PARSER_IDENTITY;
+  inventory: WordIntakeInventory;
+  inventoryDigest: string;
+} & (
+  | { compatibility: 'unsupported'; previewReading: null }
+  | { compatibility: 'ready'; previewReading: WordReadingKind; graph: WordRevisionGraph; graphDigest: string;
+      readings: Record<WordReadingKind, WordStagedReadingPin>; templates: WordSampleTemplate[]; templateManifestDigest: string;
+      legacy: { kind: 'ready'; parsed: ParsedDocx; blocks: WordLegacyStagedBlock[] } |
+        { kind: 'unavailable'; code: 'DOCX_REJECTED'; reason: string } }
+);
+
+/** Durable staging records the honest preview and the separate actual historical-reader capability. */
+export function wordStagedIntakeRecord(draftId: string, result: NativeDocxIntakeParse): {
+  value: WordStagedIntake; json: string; digest: string;
+} | null {
+  requireRetention(UUID_PATTERN.test(draftId), 'WORD_STAGING_INVALID', 'Word 导入草稿标识无效。');
+  const compiled = result.word;
+  if (compiled === null) return null;
+  requireRetention(compiled.sourceDigest === result.parsed.sourceDigest && compiled.archiveBytes === result.parsed.archiveBytes &&
+    compiled.inventory.sourceDigest === compiled.sourceDigest && compiled.inventory.schema === 'ai7.word-revision-inventory/1' &&
+    compiled.inventory.profile === WORD_INTAKE_PROFILE && compiled.inventory.activating &&
+    sha256Hex(wordCanonicalJson(compiled.inventory)) === compiled.inventoryDigest,
+  'WORD_STAGING_INVALID', 'Word 兼容性清单与原始文件不一致。');
+  const common = { schema: 'ai7.word-staged-intake/1' as const, draftId, sourceDigest: compiled.sourceDigest, sourceBytes: compiled.archiveBytes,
+    compilerIdentity: WORD_DOCX_PARSER_IDENTITY, inventory: compiled.inventory, inventoryDigest: compiled.inventoryDigest };
+  let value: WordStagedIntake;
+  if (result.kind === 'legacy') value = { ...common, compatibility: 'unsupported', previewReading: null };
+  else {
+    const word = result.word;
+    const preview = word.readings[word.previewReading];
+    requireRetention(word.previewReading === (word.readings.rejected.usable ? 'rejected' : 'accepted') && preview.usable && preview.blocks.length > 0 &&
+      result.parsed.blockCount === preview.blocks.length && result.parsed.characterCount === preview.characterCount &&
+      result.parsed.contentDigest === preview.contentDigest && result.parsed.structureDigest === preview.structureDigest &&
+      word.graph.schema === WORD_SOURCE_SCHEMA && word.graph.sourceDigest === word.sourceDigest && word.graph.parserIdentity === WORD_DOCX_PARSER_IDENTITY &&
+      word.graph.extractorIdentity === WORD_EXTRACTOR_IDENTITY && sha256Hex(wordCanonicalJson(word.graph)) === word.graphDigest &&
+      sha256Hex(wordCanonicalJson({ schema: 'ai7.word-sample-template-manifest/1', sourceDigest: word.sourceDigest,
+        extractorIdentity: WORD_EXTRACTOR_IDENTITY, templates: word.templates })) === word.templateManifestDigest,
+    'WORD_STAGING_INVALID', 'Word 暂存预览没有对应完整可用的阅读。');
+    const pin = (reading: WordCompiledReading): WordStagedReadingPin => ({ digest: reading.readingDigest, blockCount: reading.blocks.length,
+      characterCount: reading.characterCount, usable: reading.usable, refusals: reading.refusals });
+    let legacy: Extract<WordStagedIntake, { compatibility: 'ready' }>['legacy'];
+    if (result.legacy.kind === 'unavailable') legacy = result.legacy;
+    else {
+      let startOffset = 0;
+      const blocks = result.legacy.blocks.map((block) => {
+        const stagedBlockId = `blk_${sha256Hex(`${draftId}\u0000${block.position}\u0000${block.digest}`).slice(0, 24)}`;
+        const staged = { ...block, stagedBlockId, startOffset };
+        startOffset += block.graphemeLength;
+        return staged;
+      });
+      requireRetention(result.legacy.parsed.sourceDigest === word.sourceDigest && result.legacy.parsed.archiveBytes === word.archiveBytes &&
+        blocks.length === result.legacy.parsed.blockCount && startOffset === result.legacy.parsed.characterCount,
+      'WORD_STAGING_INVALID', 'Word 历史读法暂存不完整。');
+      legacy = { kind: 'ready', parsed: result.legacy.parsed, blocks };
+    }
+    value = { ...common, compatibility: 'ready', previewReading: word.previewReading, graph: word.graph, graphDigest: word.graphDigest,
+      readings: { rejected: pin(word.readings.rejected), accepted: pin(word.readings.accepted) }, templates: word.templates,
+      templateManifestDigest: word.templateManifestDigest, legacy };
+  }
+  const json = wordCanonicalJson(value);
+  return { value, json, digest: sha256Hex(json) };
+}
+
+/** Recompile from verified original bytes before this comparison; JSON equality alone is not source proof. */
+export function requireWordStagedIntake(db: DatabaseSync, draftId: string, result: NativeDocxIntakeParse): WordStagedIntake | null {
+  const expected = wordStagedIntakeRecord(draftId, result);
+  const row = db.prepare('SELECT * FROM staged_word_revision_intakes WHERE draft_id = ?').get(draftId);
+  if (expected === null) {
+    requireRetention(row === undefined, 'WORD_STAGING_INVALID', '普通文件不应携带 Word 修订暂存记录。');
+    return null;
+  }
+  requireRetention(row !== undefined && row.source_digest === expected.value.sourceDigest && row.compiler_identity === expected.value.compilerIdentity &&
+    row.inventory_digest === expected.value.inventoryDigest && row.compatibility === expected.value.compatibility && row.preview_reading === expected.value.previewReading &&
+    row.canonical_json === expected.json && row.sha256 === expected.digest,
+  'WORD_STAGING_INVALID', 'Word 暂存的原始清单、预览或历史读法已经变化。');
+  return expected.value;
+}
+
+/** For promotion after its positive-count snapshot is present, inside the same transaction. */
+export function stageWordRevisionIntake(db: DatabaseSync, draftId: string, result: NativeDocxIntakeParse): WordStagedIntake | null {
+  requireRetention(db.isTransaction, 'WORD_STAGING_INVALID', 'Word 暂存必须原子提交。');
+  const record = wordStagedIntakeRecord(draftId, result);
+  if (record === null) return requireWordStagedIntake(db, draftId, result);
+  const parent = db.prepare(`SELECT s.*, d.object_digest, co.byte_length FROM staged_import_snapshots s
+    JOIN import_drafts d ON d.draft_id = s.draft_id JOIN content_objects co ON co.object_digest = d.object_digest WHERE s.draft_id = ?`).get(draftId);
+  requireRetention(parent && parent.parser_identity === result.parsed.parserIdentity && parent.source_digest === record.value.sourceDigest &&
+    parent.object_digest === record.value.sourceDigest && parent.byte_length === record.value.sourceBytes &&
+    parent.content_digest === result.parsed.contentDigest && parent.structure_digest === result.parsed.structureDigest &&
+    parent.block_count === result.parsed.blockCount && parent.character_count === result.parsed.characterCount && result.parsed.blockCount > 0 &&
+    parent.fidelity_json === wordCanonicalJson(result.parsed.fidelity) && parent.title_suggestion === result.parsed.titleSuggestion.value &&
+    parent.title_source === result.parsed.titleSuggestion.sourceLabel,
+  'WORD_STAGING_INVALID', 'Word 暂存与实际正计数快照不一致。');
+  if (db.prepare('SELECT draft_id FROM staged_word_revision_intakes WHERE draft_id = ?').get(draftId) === undefined) {
+    db.prepare(`INSERT INTO staged_word_revision_intakes(draft_id, source_digest, compiler_identity, inventory_digest, compatibility,
+      preview_reading, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(draftId, record.value.sourceDigest,
+      record.value.compilerIdentity, record.value.inventoryDigest, record.value.compatibility, record.value.previewReading, record.json, record.digest);
+  }
+  return requireWordStagedIntake(db, draftId, result);
 }
 
 export interface WordTrackedChoiceInput {

@@ -26,6 +26,7 @@ import type { FidelityCategoryProjection } from '../../src/shared/protocol.js';
 import { SAMPLE1_V1_REPORT } from '../support/import-retention.js';
 import { buildSyntheticDocx, writeSyntheticDocx, type SyntheticDocxOptions } from '../support/synthetic-docx.js';
 import { buildCorpusSource, wordParagraphMoveBody } from '../fixtures/docx-fidelity/builder.js';
+import { wordStagedIntakeRecord } from '../../src/service/import-retention.js';
 
 const NO_SIGNALS: DocumentSignals = {
   inlineStyles: 0, commentsRevisions: 0, notes: 0, tables: 0, imagesCaptions: 0, sections: 0, textBoxes: 0, fields: 0,
@@ -98,6 +99,16 @@ describe('explicit tracked Word successor compiler (#1132)', () => {
     const legacyBlocks: ParsedDocxBlock[] = [];
     await parseDocx(path, 'modes.docx', (block) => legacyBlocks.push(block));
     expect(result.legacy.blocks).toEqual(legacyBlocks);
+    const staged = wordStagedIntakeRecord('10000000-0000-4000-8000-000000000001', result)!;
+    if (staged.value.compatibility !== 'ready' || staged.value.legacy.kind !== 'ready') throw new Error('expected durable native/legacy staging');
+    expect(staged.value.previewReading).toBe('rejected');
+    expect(staged.value.legacy.blocks.map((block) => [block.position, block.sourceParagraphIndex, block.digest]))
+      .toEqual(legacyBlocks.map((block) => [block.position, block.sourceParagraphIndex, block.digest]));
+    expect(staged.value.legacy.blocks[0]!.startOffset).toBe(0);
+    expect(staged.value.legacy.blocks[0]!.stagedBlockId).toBe(`blk_${createHash('sha256').update(
+      `10000000-0000-4000-8000-000000000001\u0000${legacyBlocks[0]!.position}\u0000${legacyBlocks[0]!.digest}`).digest('hex').slice(0, 24)}`);
+    expect(JSON.parse(staged.json)).toEqual(staged.value);
+    expect(Object.hasOwn(staged.value, 'mode')).toBe(false);
     expect(legacy.fidelity.find((row) => row.key === 'comments-revisions')!.detail).toBe(COMMENTS_REVISIONS_DETAIL);
     for (const mode of ['suggestions', 'accepted-baseline'] as const) {
       const reading = word.readings[mode === 'suggestions' ? 'rejected' : 'accepted'];
@@ -133,6 +144,13 @@ describe('explicit tracked Word successor compiler (#1132)', () => {
     if (result.kind !== 'word') throw new Error('expected supported Word staging preview');
     expect(result.word.previewReading).toBe('accepted');
     expect(result.legacy).toEqual({ kind: 'unavailable', code: 'DOCX_REJECTED', reason: 'DOCX contains no editable text blocks' });
+    const staged = wordStagedIntakeRecord('10000000-0000-4000-8000-000000000001', result)!;
+    if (staged.value.compatibility !== 'ready') throw new Error('expected honest nonempty Word preview');
+    expect(staged.value.previewReading).toBe('accepted');
+    expect(staged.value.readings.rejected).toMatchObject({ usable: false, blockCount: 0 });
+    expect(staged.value.readings.accepted).toMatchObject({ usable: true, blockCount: 1 });
+    expect(staged.value.legacy.kind).toBe('unavailable');
+    expect(Object.hasOwn(staged.value, 'acceptedBaselineConfirmed')).toBe(false);
     expect(preview).toEqual(['new']);
     expect(legacy).toEqual([]);
     expect(result.parsed.blockCount).toBe(1);
@@ -161,6 +179,9 @@ describe('explicit tracked Word successor compiler (#1132)', () => {
       expect(preview).toEqual([]);
       expect(legacy.map((block) => block.text)).toEqual(['base']);
       expect(result.parsed).toEqual(await parseDocx(path, 'ordinary.docx', () => undefined));
+      const staged = wordStagedIntakeRecord('10000000-0000-4000-8000-000000000001', result);
+      if (unsupported) expect(staged?.value).toMatchObject({ compatibility: 'unsupported', previewReading: null });
+      else expect(staged).toBeNull();
     }
   });
 
@@ -193,6 +214,10 @@ describe('explicit tracked Word successor compiler (#1132)', () => {
     expect(result.parsed.blockCount).toBe(count);
     expect(blocks).toBe(count);
     expect(result.parsed.importedMarks).toEqual([]);
+    const staged = wordStagedIntakeRecord('10000000-0000-4000-8000-000000000001', result)!;
+    if (staged.value.compatibility !== 'ready') throw new Error('expected complete supported Word staging');
+    expect(staged.value.templates).toHaveLength(count);
+    expect(staged.value.templateManifestDigest).toBe(result.word.templateManifestDigest);
   });
 
   it('leaves ordinary, formatting, comments and foreign lookalikes on the historical path', async () => {

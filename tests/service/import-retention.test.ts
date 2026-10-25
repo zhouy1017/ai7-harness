@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { unzipSync, zipSync } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { parseDocx, compileWordTrackedDocx, WORD_DOCX_PARSER_IDENTITY, type ParsedDocx, type ParsedDocxBlock } from '../../src/service/docx.js';
+import { parseDocx, parseNativeDocxIntake, compileWordTrackedDocx, WORD_DOCX_PARSER_IDENTITY,
+  type ParsedDocx, type ParsedDocxBlock, type NativeDocxIntakeParse } from '../../src/service/docx.js';
 import { fixedArchiveTime } from '../../src/shared/archive-time.js';
 import {
   IMPORT_FIDELITY_CATEGORIES_REVISION_26_SQL,
@@ -21,6 +22,8 @@ import {
   wordTrackedSamples,
   wordTrackedSampleRecord,
   WORD_EXTRACTOR_IDENTITY,
+  stageWordRevisionIntake,
+  requireWordStagedIntake,
   type WordImportChoiceRecord,
 } from '../../src/service/import-retention.js';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
@@ -98,6 +101,42 @@ async function retainedWordParentFixture() {
 // Definition/transaction proof only: these call the layer owner directly over genuine existing
 // parents, before its global migration activation. They are not a migrated-store or public-intake proof.
 describe('closed Word retention definitions (#1132)', () => {
+  it('stores unsupported compatibility beside a genuine legacy draft and refuses to relabel a legacy preview as Word', async () => {
+    const inputs: Array<{ draftId: string; result: NativeDocxIntakeParse }> = [];
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      for (const unsupported of [true, false]) {
+        const path = join(roots.inputRoot, `word-staged-${unsupported}.docx`);
+        await composeRevisedDocx(path, { source: ADMITTED_BASELINE_DOCX, title: 'Word 兼容性暂存', paragraphs: [
+          { runs: [{ text: { block: 8, from: 0, to: 10 } }, { text: { block: 9, from: 0, to: 5 },
+            revision: { kind: 'ins', author: '作者', date: '2026-10-25T00:00:00Z' } }] },
+        ], ...(unsupported ? { footnoteRevision: { text: { block: 10, from: 0, to: 5 }, author: '作者', date: '2026-10-25T00:00:00Z' } } : {}) });
+        const staged = await store.stageSelectedManuscript(randomUUID(), path);
+        const result = await parseNativeDocxIntake(path, `word-staged-${unsupported}.docx`, { legacy: () => undefined, wordPreview: () => undefined });
+        inputs.push({ draftId: staged.draftId, result });
+      }
+      store.markCleanShutdown();
+    } finally { store.close(); }
+    withDatabase(false, (db) => {
+      initializeWordImportRetentionSchema(db);
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        const unsupported = inputs[0]!;
+        expect(unsupported.result.kind).toBe('legacy');
+        const record = stageWordRevisionIntake(db, unsupported.draftId, unsupported.result);
+        expect(record).toMatchObject({ compatibility: 'unsupported', previewReading: null });
+        expect(stageWordRevisionIntake(db, unsupported.draftId, unsupported.result)).toEqual(record);
+        expect(requireWordStagedIntake(db, unsupported.draftId, unsupported.result)).toEqual(record);
+        const ready = inputs[1]!;
+        expect(ready.result.kind).toBe('word');
+        expect(() => stageWordRevisionIntake(db, ready.draftId, ready.result)).toThrow('正计数快照');
+        expect(db.prepare('SELECT count(*) total FROM staged_word_revision_intakes').get()?.total).toBe(1);
+        db.prepare('UPDATE staged_word_revision_intakes SET sha256 = ? WHERE draft_id = ?').run('f'.repeat(64), unsupported.draftId);
+        expect(() => stageWordRevisionIntake(db, unsupported.draftId, unsupported.result)).toThrow('已经变化');
+      } finally { db.exec('ROLLBACK'); }
+    });
+  }, 120_000);
+
   it('retains a real compiler graph beside its unchanged historical source pin and refuses drift', async () => {
     const { compiled, bookId } = await retainedWordParentFixture();
     withDatabase(false, (db) => {
