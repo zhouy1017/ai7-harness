@@ -151,6 +151,30 @@ export interface WordSourceSegment {
   normalizedSha256: string;
 }
 
+export interface WordBlockBinding {
+  sourceBlockId: string;
+  blockId: string;
+}
+
+/** Bind compiler locations to actual Book-owned block identities, without changing source-reading identity. */
+export function bindWordReadingBlocks(reading: WordCompiledReading, bindings: ReadonlyArray<WordBlockBinding>): {
+  blocks: WordReadingBlock[]; segments: WordSourceSegment[]; mappingDigest: string;
+} {
+  requireRetention(reading.usable && bindings.length === reading.blocks.length &&
+    new Set(bindings.map((binding) => binding.blockId)).size === bindings.length &&
+    bindings.every((binding, index) => isRecord(binding) && hasExactKeys(binding, ['sourceBlockId', 'blockId']) &&
+      binding.sourceBlockId === reading.blocks[index]!.blockId && /^blk_[0-9a-f]{24}$/u.test(binding.blockId)),
+  'WORD_MAPPING_INVALID', 'Word 来源块与实际稿件块的对应不完整。');
+  const ids = new Map(bindings.map((binding) => [binding.sourceBlockId, binding.blockId]));
+  const blocks = reading.blocks.map((block) => ({ ...block, blockId: ids.get(block.blockId)! }));
+  const segments = reading.segments.map((segment) => {
+    const blockId = ids.get(segment.blockId);
+    requireRetention(blockId !== undefined, 'WORD_MAPPING_INVALID', 'Word 来源片段没有实际稿件块。');
+    return { ...segment, blockId };
+  });
+  return { blocks, segments, mappingDigest: sha256Hex(wordCanonicalJson(segments)) };
+}
+
 export interface WordCompiledReading {
   reading: WordReadingKind;
   textBoxes: 'retain' | 'merge';

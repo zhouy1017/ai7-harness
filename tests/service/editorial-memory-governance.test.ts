@@ -270,6 +270,7 @@ it('refuses changed sources at creation and acceptance and never restores inacti
   const prepared = prepare();
   const preparedTask = prepared.categories.find((entry) => entry.categoryId === 'typos-and-usage')!.taskIntentId!;
   const window = subject.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+  if (signal.kind === 'word-tracked-edit') throw new Error('expected a review decision signal');
   subject.recordProposalDecisionFeedback({ manuscriptId: book.manuscriptId, branchId: book.branchId, windowStartBlockId: window.blocks[0]!.blockId,
     markId: signal.source.markId!, decisionId: signal.source.decisionId, expectedFeedback: signal.source.reasonRevision,
     action: 'revise', reason: '修订后的合成原因。', reasonSource: 'free-text' });
@@ -417,11 +418,12 @@ it('never infers automatic remediation from missing/superseded keys or a candida
   make(create([stale.signalId], '旧来源的编辑候选。'));
   subject.changeEditorialLearning({ kind: 'switch', enabled: false, expectedEntries: 0 });
   const window = subject.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+  if (stale.kind === 'word-tracked-edit') throw new Error('expected a review decision signal');
   subject.recordProposalDecisionFeedback({ manuscriptId: book.manuscriptId, branchId: book.branchId, windowStartBlockId: window.blocks[0]!.blockId,
     markId: stale.source.markId!, decisionId: stale.source.decisionId, expectedFeedback: stale.source.reasonRevision,
     action: 'revise', reason: '停用期间的新合成原因。', reasonSource: 'free-text' });
   subject.changeEditorialLearning({ kind: 'switch', enabled: true, expectedEntries: 1 });
-  const preview = (signal: typeof stale) => {
+  const preview = (signal: (typeof signals)[number]) => {
     const material = subject.inspectLearningMaterial(book.bookId, signal.source.materialKey);
     return subject.previewLearningRemediation({ bookId: book.bookId, items: [{ materialKey: material.materialKey, materialDigest: material.digest, expectedDecisions: material.decisions }] });
   };

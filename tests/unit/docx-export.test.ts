@@ -25,6 +25,7 @@ import { DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, type ExportFidelityRowProjection } f
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx, sourceSpanText, type SourceSpan } from '../support/composed-fixture.js';
 import { buildSyntheticDocx } from '../support/synthetic-docx.js';
 import { planWordManuscriptExport, requireWordExportBinding } from '../../src/service/manuscript-export.js';
+import { bindWordReadingBlocks } from '../../src/service/import-retention.js';
 import { buildCorpusSource, wordParagraphMoveBody } from '../fixtures/docx-fidelity/builder.js';
 
 // DOCX export (Issue #413, plan slice S64) over composed documents: every word of every input is a span of exact
@@ -79,6 +80,31 @@ describe('Word graph mapped export (#1132)', () => {
     return { title: 'synthetic Word graph', blocks: selected.blocks,
       marks, options: DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, source: wordMappedDocxSource(original, compiled, mode, textBoxes) };
   };
+
+  it.each(['suggestions', 'accepted-baseline'] as const)('replays actual Book-owned block bindings for the selected reading (%s)', async (mode) => {
+    const input = makeInput('<w:p><w:r><w:t>base</w:t></w:r><w:ins w:id="1"><w:r><w:t>new</w:t></w:r></w:ins></w:p>' +
+      '<w:p><w:r><w:t>tail</w:t></w:r></w:p>', mode);
+    if (!isWordMappedDocxSource(input.source)) throw new Error('expected Word source');
+    const compiled = compileWordTrackedDocxBytes(input.source.original);
+    if (compiled.kind !== 'ready') throw new Error('expected actual compiler output');
+    const selected = compiled.readings[mode === 'suggestions' ? 'rejected' : 'accepted'];
+    const bindings = selected.blocks.map((block, index) => ({ sourceBlockId: block.blockId,
+      blockId: `blk_${digest(`book-owned-${index}`).slice(0, 24)}` }));
+    const bound = bindWordReadingBlocks(selected, bindings);
+    const source = wordMappedDocxSource(input.source.original, compiled, mode, 'retain', bindings);
+    expect(bound.blocks.map((block) => block.blockId)).not.toEqual(selected.blocks.map((block) => block.blockId));
+    expect(bound.mappingDigest).not.toBe(selected.mappingDigest);
+    for (const edited of [false, true]) {
+      const blocks = bound.blocks.map((block) => edited && block.position === 1
+        ? { ...block, text: `${block.text} edited`, digest: blockDigest(block.kind, block.level, `${block.text} edited`) } : block);
+      const output = renderDocxExport({ ...input, source, blocks }, { emit: true });
+      expect((await parseBytes(output.bytes!)).blocks.map((block) => block.text)).toEqual(blocks.map((block) => block.text));
+    }
+    expect(() => bindWordReadingBlocks(selected, bindings.slice(1))).toThrow('Word');
+    expect(() => bindWordReadingBlocks(selected, bindings.map((binding) => ({ ...binding, blockId: bindings[0]!.blockId })))).toThrow('Word');
+    expect(() => renderDocxExport({ ...input, blocks: bound.blocks, source: { ...source,
+      mapping: { ...source.mapping, blockBindings: [...bindings].reverse() } } }, { emit: true })).toThrow('Word');
+  });
 
   it.each(['suggestions', 'accepted-baseline'] as const)('exports the selected replacement reading (%s), including an edited descendant', async (mode) => {
     const input = makeInput('<w:p><w:r><w:t>stable </w:t></w:r><w:del w:id="1"><w:r><w:delText>old</w:delText></w:r></w:del>' +

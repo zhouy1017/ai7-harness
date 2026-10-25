@@ -5,7 +5,8 @@ import { fixedArchiveTime } from '../shared/archive-time.js';
 import { graphemesOf } from '../shared/mark-anchor.js';
 import { canonicalJson, sha256Hex } from './analysis/canonical.js';
 import { compileWordTrackedDocxBytes, type WordTrackedCompilation } from './docx.js';
-import type { WordImportMode, WordReadingKind, WordRevisionGraph, WordSourceSegment } from './import-retention.js';
+import { bindWordReadingBlocks, type WordBlockBinding, type WordImportMode, type WordReadingKind,
+  type WordRevisionGraph, type WordSourceSegment } from './import-retention.js';
 import {
   EXPORT_FIDELITY_STATUS_LABELS,
   MAX_EXPORT_FIDELITY_POSITIONS,
@@ -199,7 +200,7 @@ export interface WordMappedDocxSource {
   textBoxes: 'retain' | 'merge';
   mapping: { kind: 'word-revisions'; mode: WordImportMode; reading: WordReadingKind;
     graph: WordRevisionGraph; graphDigest: string; readingDigest: string;
-    segments: ReadonlyArray<WordSourceSegment>; mappingDigest: string };
+    blockBindings: ReadonlyArray<WordBlockBinding>; segments: ReadonlyArray<WordSourceSegment>; mappingDigest: string };
 }
 
 export type DocxExportSource =
@@ -221,13 +222,15 @@ export function isWordMappedDocxSource(source: DocxExportSource): source is Word
 
 /** Builds the real new mapped arm directly from a successful compiler result, without legacy rows. */
 export function wordMappedDocxSource(original: Uint8Array, compiled: Extract<WordTrackedCompilation, { kind: 'ready' }>,
-  mode: WordImportMode, textBoxes: 'retain' | 'merge' = 'retain'): WordMappedDocxSource {
+  mode: WordImportMode, textBoxes: 'retain' | 'merge' = 'retain', blockBindings?: ReadonlyArray<WordBlockBinding>): WordMappedDocxSource {
   const reading = mode === 'suggestions' ? 'rejected' : 'accepted';
   const selected = compiled.readings[reading];
   requireExport(selected.usable && selected.textBoxes === textBoxes && sha256Hex(original) === compiled.sourceDigest,
     'DOCX_EXPORT_MAPPING_INVALID', '所选 Word 读法、文本框处理方式不可用或原文件已经变化。');
+  const bindings = blockBindings === undefined ? selected.blocks.map((block) => ({ sourceBlockId: block.blockId, blockId: block.blockId })) : blockBindings;
+  const bound = bindWordReadingBlocks(selected, bindings);
   return { kind: 'mapped', original, textBoxes, mapping: { kind: 'word-revisions', mode, reading, graph: compiled.graph,
-    graphDigest: compiled.graphDigest, readingDigest: selected.readingDigest, segments: selected.segments, mappingDigest: selected.mappingDigest } };
+    graphDigest: compiled.graphDigest, readingDigest: selected.readingDigest, blockBindings: bindings, segments: bound.segments, mappingDigest: bound.mappingDigest } };
 }
 
 export interface DocxExportInput {
@@ -1789,9 +1792,13 @@ function rewriteWordDocument(documentXml: string, input: DocxExportInput, source
   requireExport(binding.reading === (binding.mode === 'suggestions' ? 'rejected' : 'accepted') &&
     binding.graphDigest === compiled.graphDigest && canonicalJson(binding.graph) === canonicalJson(compiled.graph),
   'DOCX_EXPORT_MAPPING_INVALID', 'Word 来源图或所选导入方式已经变化。');
-  const selected = compiled.readings[binding.reading];
-  requireExport(selected.usable && binding.readingDigest === selected.readingDigest && binding.mappingDigest === selected.mappingDigest &&
-    canonicalJson(binding.segments) === canonicalJson(selected.segments), 'DOCX_EXPORT_MAPPING_INVALID', 'Word 所选读法或有序来源映射已经变化。');
+  const compiledReading = compiled.readings[binding.reading];
+  requireExport(compiledReading.usable && binding.readingDigest === compiledReading.readingDigest && Array.isArray(binding.blockBindings),
+    'DOCX_EXPORT_MAPPING_INVALID', 'Word 所选读法或稿件块对应已经变化。');
+  const bound = bindWordReadingBlocks(compiledReading, binding.blockBindings);
+  const selected = { ...compiledReading, ...bound };
+  requireExport(binding.mappingDigest === bound.mappingDigest && canonicalJson(binding.segments) === canonicalJson(bound.segments),
+    'DOCX_EXPORT_MAPPING_INVALID', 'Word 有序来源映射已经变化。');
   const root = parseXmlPart(documentXml, 'word/document.xml');
   const mainUri = root.uri;
   requireExport(root.local === 'document' && (mainUri === WORD_MAIN || mainUri === 'http://purl.oclc.org/ooxml/wordprocessingml/main'),

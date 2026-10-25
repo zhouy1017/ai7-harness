@@ -9654,8 +9654,8 @@ export interface RecordAnalysisFeedbackInput {
  * Where a Learning Material came from: a 修改建议 decided with the editor's reason or their own wording, a judgment of an
  * analysis result that says why, or a 审阅 finding the editor ignored and said why.
  */
-export type LearningMaterialKind = 'proposal-decision' | 'analysis-feedback' | 'review-disposition';
-export const LEARNING_MATERIAL_KINDS: readonly LearningMaterialKind[] = ['proposal-decision', 'analysis-feedback', 'review-disposition'];
+export type LearningMaterialKind = 'proposal-decision' | 'analysis-feedback' | 'review-disposition' | 'word-tracked-edit';
+export const LEARNING_MATERIAL_KINDS: readonly LearningMaterialKind[] = ['proposal-decision', 'analysis-feedback', 'review-disposition', 'word-tracked-edit'];
 /**
  * What the Learning Eligibility ledger decides about: the three kinds 学习准入 shows a card for, and `readers-report-exemplar`
  * (Issue #429) — 范例's admission of one 审稿意见 at one exact version, decided from 范例 and listed by no card.
@@ -9669,7 +9669,7 @@ const LEARNING_UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3
  */
 export const LEARNING_MATERIAL_KEY_PATTERN = new RegExp(
   `^(?:proposal-decision:${LEARNING_UUID}|analysis-feedback:${LEARNING_UUID}/(?:synopsis|(?:entities|events|relationships|settings)/\\d{1,6})` +
-  `|review-disposition:${LEARNING_UUID}/rvf_[0-9a-f]{24})$`,
+  `|review-disposition:${LEARNING_UUID}/rvf_[0-9a-f]{24}|word-sample:wts_[0-9a-f]{64})$`,
   'u',
 );
 
@@ -9713,7 +9713,8 @@ export type LearningMaterialTarget =
     readonly itemKey: string;
     readonly dimension: AnalysisFeedbackDimension;
   }
-  | { readonly kind: 'review'; readonly bookId: string; readonly reviewRunId: string; readonly findingId: string };
+  | { readonly kind: 'review'; readonly bookId: string; readonly reviewRunId: string; readonly findingId: string }
+  | { readonly kind: 'word-tracked-edit'; readonly bookId: string; readonly sampleId: string; readonly sampleDigest: string };
 
 /** One Learning Material as its Review Card shows it (LEARN-003). */
 export interface LearningMaterialProjection {
@@ -9809,7 +9810,7 @@ export type FeedbackHistoryTarget =
 export const FEEDBACK_HISTORY_SIGNALS = ['接受', '修改后接受', '拒绝', '准确', '不准确', '不完整', '忽略'] as const;
 export interface FeedbackHistoryInput {
   readonly bookId?: string | null;
-  readonly origin?: LearningMaterialKind | null;
+  readonly origin?: Exclude<LearningMaterialKind, 'word-tracked-edit'> | null;
   readonly author?: string | null;
   readonly editor?: string | null;
   /** Exact projected disposition or judgment; omitted or null means all. */
@@ -9825,7 +9826,7 @@ export interface FeedbackHistoryInput {
 /** One piece of the editor's feedback as the history lists it. */
 export interface FeedbackHistoryEntryProjection {
   readonly entryId: string;
-  readonly origin: LearningMaterialKind;
+  readonly origin: Exclude<LearningMaterialKind, 'word-tracked-edit'>;
   readonly bookId: string;
   /**
    * The Editorial Dimension it is about, in the editor's words: an analysis dimension, a 审阅 category — a 修改建议 a 审阅

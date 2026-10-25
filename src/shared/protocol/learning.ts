@@ -19,7 +19,7 @@ export interface LearningSourceReference {
   resultSetRevisionId: string | null;
 }
 
-export interface LearningSignal {
+export interface DecisionLearningSignal {
   signalId: string;
   kind: 'accepted' | 'accepted-with-edit' | 'rejected' | 'review-finding-ignored' | 'proactive-reason';
   ask?: {
@@ -35,6 +35,32 @@ export interface LearningSignal {
   eligibility: { choice: LearningEligibilityChoice; decisionId: string | null; basisVersion: number };
   recordedAt: string;
 }
+
+/** Local evidence from a Word import; it has no editorial decision or memory-source ancestry. */
+export interface WordTrackedEditLearningSource {
+  bookId: string;
+  sampleId: string;
+  sampleDigest: string;
+  sourceVersionId: string;
+  sourceDigest: string;
+  graphDigest: string;
+  importCommitId: string;
+  admissionDigest: string;
+  materialKey: string;
+  materialDigest: string;
+}
+export interface WordTrackedEditLearningSignal {
+  schema: 'ai7.word-import-learning-signal/1';
+  signalId: string;
+  kind: 'word-tracked-edit';
+  source: WordTrackedEditLearningSource;
+  rewriteDistance: null;
+  ask?: never;
+  attribution: DecisionLearningSignal['attribution'];
+  eligibility: DecisionLearningSignal['eligibility'];
+  recordedAt: string;
+}
+export type LearningSignal = DecisionLearningSignal | WordTrackedEditLearningSignal;
 
 /** Where a signal stands now: its eligibility, or `superseded` once a later decision or a revised reason replaced its source. */
 export type LearningSignalStanding = LearningEligibilityChoice | 'superseded';

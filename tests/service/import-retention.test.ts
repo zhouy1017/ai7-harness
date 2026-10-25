@@ -18,7 +18,15 @@ import {
   requireWordParentSourcePin,
   requireWordRevisionSource,
   retainWordRevisionSource,
+  wordTrackedSamples,
+  wordTrackedSampleRecord,
+  WORD_EXTRACTOR_IDENTITY,
+  type WordImportChoiceRecord,
+  type WordLocalImportAdmission,
 } from '../../src/service/import-retention.js';
+import { canonicalRecord } from '../../src/service/analysis/canonical.js';
+import { EditorialLearningLedger } from '../../src/service/learning/ledger.js';
+import { wordTrackedEditCandidate, learningMaterialDigest, LOCAL_LEARNING_POLICY_BASIS } from '../../src/service/learning-eligibility.js';
 import { EditorialStore, SOURCE_VERSION_PARSER_CHANGED_MESSAGE, StoreError } from '../../src/service/store.js';
 import { CLARIFICATION_SCHEMA_VERSION, LATEST_SCHEMA_VERSION, PROPOSAL_CONFLICT_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import type { ManuscriptBlockProjection, TextBoxDisposition } from '../../src/shared/protocol.js';
@@ -70,24 +78,29 @@ function databasePath(): string {
   return join(roots.dataRoot, 'store', 'ai7.sqlite');
 }
 
+async function retainedWordParentFixture() {
+  const path = join(roots.inputRoot, 'word-parent.docx');
+  await composeRevisedDocx(path, { source: ADMITTED_BASELINE_DOCX, title: '来源固定记录', paragraphs: [
+    { runs: [{ text: { block: 8, from: 0, to: 10 } }, { text: { block: 9, from: 0, to: 5 },
+      revision: { kind: 'ins', author: '作者', date: '2026-10-25T00:00:00Z' } }] },
+  ] });
+  const compiled = await compileWordTrackedDocx(path);
+  if (compiled.kind !== 'ready') throw new Error('expected actual supported Word compiler output');
+  const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  let bookId: string;
+  try {
+    bookId = (await importComposed(store, path)).bookId;
+    store.getBookOverview(bookId); // Validate the original records through their existing historical reader.
+    store.markCleanShutdown();
+  } finally { store.close(); }
+  return { compiled, bookId };
+}
+
 // Definition/transaction proof only: these call the layer owner directly over genuine existing
 // parents, before its global migration activation. They are not a migrated-store or public-intake proof.
 describe('closed Word retention definitions (#1132)', () => {
   it('retains a real compiler graph beside its unchanged historical source pin and refuses drift', async () => {
-    const path = join(roots.inputRoot, 'word-parent.docx');
-    await composeRevisedDocx(path, { source: ADMITTED_BASELINE_DOCX, title: '来源固定记录', paragraphs: [
-      { runs: [{ text: { block: 8, from: 0, to: 10 } }, { text: { block: 9, from: 0, to: 5 },
-        revision: { kind: 'ins', author: '作者', date: '2026-10-25T00:00:00Z' } }] },
-    ] });
-    const compiled = await compileWordTrackedDocx(path);
-    if (compiled.kind !== 'ready') throw new Error('expected actual supported Word compiler output');
-    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    let bookId: string;
-    try {
-      bookId = (await importComposed(store, path)).bookId;
-      store.getBookOverview(bookId); // Validate the original historical records through their existing reader.
-      store.markCleanShutdown();
-    } finally { store.close(); }
+    const { compiled, bookId } = await retainedWordParentFixture();
     withDatabase(false, (db) => {
       const source = db.prepare('SELECT source_version_id FROM source_versions WHERE book_id = ?').get(bookId);
       const sourceVersionId = String(source!.source_version_id);
@@ -117,6 +130,81 @@ describe('closed Word retention definitions (#1132)', () => {
       expect(() => requireWordParentSourcePin(db, pin)).toThrow('变化');
       db.prepare('UPDATE source_versions SET parser_identity = ? WHERE source_version_id = ?').run('unknown-parser/1', sourceVersionId);
       expect(() => readWordParentSourcePin(db, bookId, sourceVersionId)).toThrow('Word');
+    });
+  }, 120_000);
+
+  it('captures only the distinct local Word signal over closed relation fixtures and keeps memory consumers closed', async () => {
+    const { compiled, bookId } = await retainedWordParentFixture();
+    withDatabase(false, (db) => {
+      initializeWordImportRetentionSchema(db);
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        // This seeds only the new canonical relation fixture over genuine parents. It does not exercise
+        // public Word import, selected-reading manuscript persistence, a migrated store, or a Journey.
+        const original = db.prepare(`SELECT mir.*, ic.review_digest, ic.committed_at FROM manuscript_import_records mir
+          JOIN import_commits ic ON ic.commit_id = mir.commit_id WHERE mir.book_id = ?`).get(bookId)!;
+        const sourceVersionId = String(original.source_version_id);
+        const commitId = String(original.commit_id);
+        const recordedAt = String(original.committed_at);
+        const pin = readWordParentSourcePin(db, bookId, sourceVersionId);
+        retainWordRevisionSource(db, pin, compiled.graph);
+        const ledger = new EditorialLearningLedger(db);
+        const samples = wordTrackedSamples(bookId, compiled.graph, compiled.templates);
+        const materials = samples.map((sample, index) => ({ templateKey: compiled.templates[index]!.templateKey,
+          materialKey: `word-sample:${sample.sampleId}`,
+          materialDigest: learningMaterialDigest(wordTrackedEditCandidate(sample, wordTrackedSampleRecord(sample).digest, recordedAt)) }));
+        const controls = ledger.wordImportControls(bookId, materials);
+        const choice: WordImportChoiceRecord = { schema: 'ai7.word-import-choice/1', sourceVersionId,
+          parentSourcePinDigest: wordParentSourcePinRecord(pin).digest, originalDigest: compiled.sourceDigest, workingObjectDigest: null,
+          importReviewId: String(original.review_digest), fidelityReviewId: String(original.fidelity_review_id), commitId,
+          revisionId: String(original.resulting_revision_id), extractorIdentity: WORD_EXTRACTOR_IDENTITY, graphDigest: compiled.graphDigest,
+          mode: 'suggestions', learnFromEdits: true, acceptedBaselineConfirmed: false,
+          readings: { rejected: { digest: compiled.readings.rejected.readingDigest, blockCount: compiled.readings.rejected.blocks.length, usable: compiled.readings.rejected.usable },
+            accepted: { digest: compiled.readings.accepted.readingDigest, blockCount: compiled.readings.accepted.blocks.length, usable: compiled.readings.accepted.usable } },
+          mappingDigest: compiled.readings.rejected.mappingDigest, templateManifestDigest: compiled.templateManifestDigest, effectiveControls: controls };
+        const record = canonicalRecord(choice);
+        db.prepare(`INSERT INTO word_revision_imports(commit_id, source_version_id, book_id, fidelity_review_id, revision_id, mode, canonical_json, sha256, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(commitId, sourceVersionId, bookId, choice.fidelityReviewId, choice.revisionId, choice.mode, record.json, record.digest, recordedAt);
+        const sources = samples.map((sample, index) => {
+          const sampleRecord = wordTrackedSampleRecord(sample);
+          const standing = controls.materials[index]!.standing;
+          if (standing.choice !== 'book' && standing.choice !== 'house') throw new Error('expected actual admitted default');
+          const admission: WordLocalImportAdmission = { schema: 'ai7.word-local-import-admission/1', sampleId: sample.sampleId,
+            sampleDigest: sampleRecord.digest, importChoiceDigest: record.digest, basis: LOCAL_LEARNING_POLICY_BASIS, reviewedLearnFromEdits: true,
+            global: { enabled: true, reference: controls.global.reference }, book: { excluded: false, reference: controls.book.reference },
+            standing: { ...standing, choice: standing.choice } };
+          const admitted = canonicalRecord(admission);
+          db.prepare(`INSERT INTO word_tracked_edit_samples(sample_id, book_id, source_version_id, template_key, canonical_json, sha256)
+            VALUES (?, ?, ?, ?, ?, ?)`).run(sample.sampleId, bookId, sourceVersionId, compiled.templates[index]!.templateKey, sampleRecord.json, sampleRecord.digest);
+          db.prepare(`INSERT INTO word_tracked_edit_sample_imports(sample_id, commit_id, sample_digest, choice_digest, canonical_json, sha256, captured_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)`).run(sample.sampleId, commitId, sampleRecord.digest, record.digest, admitted.json, admitted.digest, recordedAt);
+          return { bookId, sampleId: sample.sampleId, sampleDigest: sampleRecord.digest, sourceVersionId, sourceDigest: compiled.sourceDigest,
+            graphDigest: compiled.graphDigest, importCommitId: commitId, admissionDigest: admitted.digest,
+            materialKey: materials[index]!.materialKey, materialDigest: materials[index]!.materialDigest };
+        });
+        const signals = ledger.captureWordSamples(sources);
+        expect(signals).toHaveLength(samples.length);
+        expect(ledger.captureWordSamples(sources)).toEqual(signals);
+        const inspect = () => ledger.inspect({ signalOffset: 0, itemOffset: 0 }, 'development-ci');
+        const signal = inspect().signals[0]!;
+        expect(signal).toMatchObject({ kind: 'word-tracked-edit', schema: 'ai7.word-import-learning-signal/1',
+          currentEligibility: 'house', memoryCandidate: null, eligibility: { decisionId: null, basisVersion: 2 } });
+        expect(Object.hasOwn(signal.source, 'decisionId')).toBe(false);
+        expect(() => ledger.sourceSnapshot(signal.signalId)).toThrow();
+        expect(() => ledger.create({ clientMemoryId: randomUUID(), signalId: signal.signalId, title: '拒绝 Word 记忆', editorialDimension: '语言', confidence: 0.5 })).toThrow();
+        expect(() => ledger.create({ schema: 'ai7.global-editorial-memory/2', actionId: randomUUID(), signalIds: [signal.signalId],
+          applicability: { kind: 'house' }, title: '拒绝 Word 记忆', editorialDimension: '语言', confidence: 0.5 }, 'development-ci')).toThrow();
+        expect(inspect().items).toEqual([]);
+        ledger.change({ kind: 'book', bookId, excluded: true, expectedEntries: 0 });
+        expect(inspect().signals[0]!.currentEligibility).toBe('excluded');
+        expect(() => ledger.captureWordSamples(sources)).toThrow();
+        ledger.change({ kind: 'book', bookId, excluded: false, expectedEntries: 1 });
+        ledger.change({ kind: 'material', signalId: signal.signalId });
+        expect(inspect().signals[0]!.currentEligibility).toBe('excluded');
+        db.exec('DROP TRIGGER word_tracked_edit_sample_imports_no_update');
+        db.prepare('UPDATE word_tracked_edit_sample_imports SET choice_digest = ?').run('f'.repeat(64));
+        expect(inspect).toThrow(); // Corruption never becomes an empty eligible page.
+      } finally { db.exec('ROLLBACK'); }
     });
   }, 120_000);
 

@@ -11,6 +11,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, text: string): HTMLEl
 const SIGNAL_KIND_LABELS: Readonly<Record<LearningSignal['kind'], string>> = {
   accepted: '接受', 'accepted-with-edit': '修改后接受', rejected: '拒绝并说明原因', 'review-finding-ignored': '忽略并说明',
   'proactive-reason': '学习询问原因',
+  'word-tracked-edit': 'Word 文件修订',
 };
 
 /** A signal the opt-out default admitted is never shown as the editor's own 纳入 choice (ADR 0094 §3; the policy's rule 2). */
@@ -117,16 +118,20 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi):
     for (const signal of page.signals) {
       const row = el('article', ''); row.className = 'learning-material'; row.dataset['learningSignal'] = signal.signalId;
       row.append(el('p', `《${signal.bookTitle}》 · ${SIGNAL_KIND_LABELS[signal.kind]} · ${signal.recordedAt}`),
-        el('p', `作者：${signal.attribution.authors.join('、') || '未记录'} · 责编：${signal.attribution.editors.join('、') || '未记录'} · ${signalStandingLabel(signal)}`),
-        el('p', `决定 ${signal.source.decisionId} · 修订 ${signal.source.revisionId} · 日志 ${signal.source.journalSequence}${signal.rewriteDistance === null ? '' : ` · 改写距离 ${signal.rewriteDistance}`}`));
-      if (signal.memoryCandidate != null) {
+        el('p', `作者：${signal.attribution.authors.join('、') || '未记录'} · 责编：${signal.attribution.editors.join('、') || '未记录'} · ${signalStandingLabel(signal)}`));
+      if (signal.kind === 'word-tracked-edit') {
+        row.append(el('p', 'Word 修改对已在本机保留；尚未用于编辑记忆、审阅偏好或模型任务。'));
+        const provenance = el('details', ''); provenance.append(el('summary', '来源与导入记录'),
+          el('p', `原始来源 ${signal.source.sourceVersionId} · 导入 ${signal.source.importCommitId}`)); row.append(provenance);
+      } else row.append(el('p', `决定 ${signal.source.decisionId} · 修订 ${signal.source.revisionId} · 日志 ${signal.source.journalSequence}${signal.rewriteDistance === null ? '' : ` · 改写距离 ${signal.rewriteDistance}`}`));
+      if (signal.kind !== 'word-tracked-edit' && signal.memoryCandidate != null) {
         const checkbox = el('input', ''); checkbox.type = 'checkbox'; checkbox.dataset['memorySource'] = signal.signalId; checkbox.checked = selected.has(signal.signalId); checkbox.disabled = busy;
         checkbox.addEventListener('change', () => { if (checkbox.checked) selected.set(signal.signalId, signal); else selected.delete(signal.signalId); });
         const label = el('label', `选为候选来源 · ${signal.memoryCandidate.editorialDimension}`); label.prepend(checkbox); row.append(label);
       }
       if (signal.currentEligibility !== 'excluded' && signal.currentEligibility !== 'superseded') row.append(action('排除此材料', () => run(() => api.changeEditorialLearning({ kind: 'material', signalId: signal.signalId }))));
       if (!page.excludedBooks.some((book) => book.bookId === signal.source.bookId)) row.append(action('排除本书', () => run(() => api.changeEditorialLearning({ kind: 'book', bookId: signal.source.bookId, excluded: true, expectedEntries: page.controlEntries }))));
-      if (signal.currentEligibility === 'house') {
+      if (signal.kind !== 'word-tracked-edit' && signal.currentEligibility === 'house') {
         const form = el('form', '');
         const titleLabel = el('label', '记忆标题'); const title = el('input', ''); title.maxLength = 160; title.required = true; title.name = 'memory-title'; titleLabel.append(title);
         const dimensionLabel = el('label', '编辑维度'); const dimension = el('input', ''); dimension.maxLength = 80; dimension.required = true; dimension.name = 'memory-dimension'; dimensionLabel.append(dimension);
