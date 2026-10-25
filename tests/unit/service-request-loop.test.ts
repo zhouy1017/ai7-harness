@@ -82,12 +82,15 @@ describe('the production framed service loop', () => {
   let native: (signal: AbortSignal) => Promise<unknown>;
   let dispatch: (operation: string) => Promise<void>;
   let responseFinished: () => void;
+  let completion: () => Promise<void>;
+  let refused: (wire: string) => void;
 
   beforeEach(() => {
     governor = new ModelRequestGovernor({ globalCapacity: 1 });
     input = new PassThrough(); output = new Responses(); connection = readyConnection();
     records = []; events = []; sends = 0; secretReads = 0;
     native = async () => modelBody(); dispatch = async () => undefined; responseFinished = () => undefined;
+    completion = async () => undefined; refused = () => undefined;
     loop = undefined; running = undefined; blocker = undefined; held = undefined;
   });
 
@@ -121,15 +124,18 @@ describe('the production framed service loop', () => {
           return { status: 200, json: () => native(init.signal as AbortSignal) };
         }) as unknown as typeof fetch,
       }, selection, { resolve: async () => { secretReads += 1; return 'public-synthetic-placeholder'; } }, execution),
-      probeCompleted: async () => { events.push('refresh'); },
+      probeCompleted: async () => { events.push('refresh'); await completion(); },
       ...(admitProbe === undefined ? {} : { admitProbe }),
       dispatch: async (request) => {
         events.push(request.op); await dispatch(request.op);
         return { id: request.id, ok: true, op: request.op, result: undefined } as ServiceResponse;
       },
-      failure: (id, error) => ({ id, ok: false, error: {
-        code: error instanceof Error && 'code' in error ? String(error.code) : 'SERVICE_REQUEST_FAILED', message: '请求未完成。',
-      } }),
+      failure: (id, error) => {
+        refused(id);
+        return { id, ok: false, error: {
+          code: error instanceof Error && 'code' in error ? String(error.code) : 'SERVICE_REQUEST_FAILED', message: '请求未完成。',
+        } };
+      },
       afterResponse: () => responseFinished(),
       onFatal: () => { input.end(); },
     });
@@ -240,6 +246,45 @@ describe('the production framed service loop', () => {
     let finished = false; void running!.then(() => { finished = true; });
     input.end(); await Promise.resolve(); expect(finished).toBe(false);
     finish(); await running; expect(governor.snapshot().registered).toBe(0);
+  });
+
+  it('refuses a probe whose ordered start runs after close, before registration, secret or send', async () => {
+    // The first probe's completion holds the effect lane, so the second probe's ordered start waits behind it.
+    const held = deferred(); const refreshing = deferred();
+    completion = async () => { refreshing.resolve(); await held.promise; };
+    start(); send('p', 'testModelServiceConnection', probeInput); await refreshing.promise;
+    const second = deferred(); refused = (wire) => { if (wire === wireId('p2')) second.resolve(); };
+    send('p2', 'testModelServiceConnection', probeInput); await new Promise((resolve) => setTimeout(resolve, 5));
+    loop!.close(); held.resolve(); await second.promise;
+    expect(await output.response('p2')).toMatchObject({ ok: false, error: { code: 'MODEL_CONNECTION_TEST_UNAVAILABLE' } });
+    input.end(); await running;
+    expect(output.frames.map((response) => response.id)).toEqual(['p', 'p2']);
+    // One accepted probe reads its credential twice (readiness, then release); the refused one reads none.
+    expect(secretReads).toBe(2); expect(sends).toBe(1); expect(governor.snapshot()).toMatchObject({ registered: 0, waiting: 0, inFlight: 0 });
+  });
+
+  it('keeps a completed probe registered while its response write is held, so a second probe is busy', async () => {
+    const blockedWrite = deferred<(error?: Error | null) => void>();
+    output.hold = (done) => blockedWrite.resolve(done);
+    start(); send('p', 'testModelServiceConnection', probeInput);
+    const finish = await blockedWrite.promise; output.hold = null;
+    const second = deferred(); refused = (wire) => { if (wire === wireId('p2')) second.resolve(); };
+    send('p2', 'testModelServiceConnection', probeInput); await second.promise;
+    expect(governor.snapshot().registered).toBe(1); expect(loop!.probing).toBe(true);
+    finish();
+    expect(await output.response('p2')).toMatchObject({ ok: false, error: { code: 'MODEL_CONNECTION_TEST_BUSY' } });
+    input.end(); await running;
+    expect(output.frames.map((response) => response.id)).toEqual(['p', 'p2']);
+    expect(sends).toBe(1); expect(secretReads).toBe(2); expect(governor.snapshot().registered).toBe(0);
+  });
+
+  it('stops on a late probe response write failure and releases its registration without further writes', async () => {
+    output.hold = (done) => done(new Error('late probe write failed'));
+    start(); send('p', 'testModelServiceConnection', probeInput);
+    await expect(running).rejects.toThrow('late probe write failed');
+    expect(sends).toBe(1); expect(records).toHaveLength(1);
+    expect(governor.snapshot()).toMatchObject({ registered: 0, waiting: 0, inFlight: 0 });
+    const settled = output.frames.length; await Promise.resolve(); expect(output.frames).toHaveLength(settled);
   });
 
   it('decodes split/coalesced frames and awaits each ordinary write before dispatching the next', async () => {
