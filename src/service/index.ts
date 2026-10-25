@@ -1939,7 +1939,7 @@ async function run(): Promise<void> {
     { EditorialStore, StoreError, StoreFatalError },
     { mountDormantHarness },
     { CooperativeJobOwner },
-    { resolveSourceCheckoutLaunchPolicy },
+    { resolveSourceCheckoutLaunchPolicy, resolveSourceCheckoutLaunchPolicySync },
     { BaselineAnalysisExecutionOwner, ModelRequestGovernor },
     { loadLaunchFixture },
     { createKeyringSecretResolver },
@@ -2141,7 +2141,7 @@ async function run(): Promise<void> {
       developerLive,
       production,
       currentLaunchPolicy: () => launchPolicy,
-      productionPolicyFor: (binding) => resolveSourceCheckoutLaunchPolicy(codeRoot, 'ordinary-production', binding),
+      productionPolicyFor: (binding) => resolveSourceCheckoutLaunchPolicySync(codeRoot, 'ordinary-production', binding),
       unitHold: unitHoldPath === undefined ? null : controlledUnitHold(unitHoldPath),
       // The current-read guard over Series material (Issue #64, S29b; SER-023): asked before each reading range of every Run.
       seriesScopeGuard: (runRecordId) => guardedStore.seriesScopeGuard(runRecordId),

@@ -12,6 +12,7 @@ import {
   ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION,
   bindOrdinaryProductionRules,
   resolveSourceCheckoutLaunchPolicy,
+  resolveSourceCheckoutLaunchPolicySync,
   verifyDeveloperLivePolicy,
   verifyOrdinaryProductionPolicy,
   type ConfiguredProviderBinding,
@@ -435,6 +436,51 @@ beforeEach(async () => {
   sandbox = await mkdtemp(join(tmpdir(), 'ai7-launch-policy-test-'));
   codeRoot = join(sandbox, 'checkout');
   await mkdir(codeRoot);
+});
+
+describe('synchronous frozen-binding policy resolution (#1131)', () => {
+  it.each(['development-ci', 'developer-live', 'ordinary-production', 'fixture-recording', 'unknown'] as const)
+    ('matches the async API for %s with null, permitted and denied bindings', async (scope) => {
+      await placeValidCheckout();
+      for (const binding of [null, DEEPSEEK_PRODUCTION_BINDING, GO_PRODUCTION_BINDING,
+        { ...DEEPSEEK_PRODUCTION_BINDING, model: 'not-an-admitted-model' }]) {
+        const requested = scope as TrustedOperationalScope;
+        expect(resolveSourceCheckoutLaunchPolicySync(codeRoot, requested, binding))
+          .toEqual(await resolveSourceCheckoutLaunchPolicy(codeRoot, requested, binding));
+      }
+    });
+
+  const inputs = [CARRIER_PATH, ACTIVE_SET_PATH, 'docs/policies/provider-processing-policy.v27.json', 'docs/policies/external-export-policy.v2.json'];
+  it('matches explicit Fast bindings and the defaulted argument without caching another role', async () => {
+    await placeValidCheckout();
+    for (const fast of [null, GO_PRODUCTION_BINDING, DEEPSEEK_PRODUCTION_BINDING,
+      { ...GO_PRODUCTION_BINDING, endpoint: 'https://invalid.example.invalid' }]) {
+      expect(resolveSourceCheckoutLaunchPolicySync(codeRoot, 'ordinary-production', DEEPSEEK_PRODUCTION_BINDING, fast))
+        .toEqual(await resolveSourceCheckoutLaunchPolicy(codeRoot, 'ordinary-production', DEEPSEEK_PRODUCTION_BINDING, fast));
+    }
+    expect(resolveSourceCheckoutLaunchPolicySync(codeRoot)).toEqual(await resolveSourceCheckoutLaunchPolicy(codeRoot));
+  });
+
+  it.each(inputs.flatMap((path) => ['missing', 'malformed', 'corrupt', 'invalid-utf8'].map((damage) => ({ path, damage }))))
+    ('matches fail-closed file errors for $path: $damage and re-reads after restoration', async ({ path, damage }) => {
+      await placeValidCheckout();
+      const resolveSync = () => resolveSourceCheckoutLaunchPolicySync(codeRoot, 'ordinary-production', DEEPSEEK_PRODUCTION_BINDING);
+      const resolveAsync = () => resolveSourceCheckoutLaunchPolicy(codeRoot, 'ordinary-production', DEEPSEEK_PRODUCTION_BINDING);
+      const verified = resolveSync();
+      expect(verified.integrityState).toBe('verified');
+      expect(await resolveAsync()).toEqual(verified);
+      const target = join(codeRoot, ...path.split('/')); const bytes = await readFile(target);
+      if (damage === 'missing') await rm(target);
+      else await writeFile(target, damage === 'malformed' ? '{invalid' : damage === 'invalid-utf8' ? Buffer.from([0xc3, 0x28])
+        : path === CARRIER_PATH ? Buffer.from(bytes.toString('utf8').replace('source-checkout', 'invalid-checkout')) : Buffer.concat([bytes, Buffer.from('\n')]));
+      const denied = resolveSync();
+      expect(denied).toEqual(await resolveAsync());
+      expect(denied).toMatchObject({ integrityState: 'denied', denialReason: 'launch-policy-integrity-denied' });
+      expectZeroTransmission(denied);
+      await writeFile(target, bytes);
+      expect(resolveSync()).toEqual(verified);
+      expect(await resolveAsync()).toEqual(verified);
+    });
 });
 
 describe('Provider Processing v27 Owner decisions', () => {

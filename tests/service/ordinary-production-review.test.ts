@@ -13,8 +13,11 @@ import { DialogueExecutionOwner, productionDialogueRoute } from '../../src/servi
 import { prepareGlobalAgentDisclosure, startGlobalAgentTurn } from '../../src/service/dialogue/global-agent-session.js';
 import { FastRoleExecutionOwner, productionFastRoleRoutes, testModelServiceConnection } from '../../src/service/fast-role/fast-role-execution.js';
 import { materialTranslator, MATERIAL_TRANSLATION_RESULT_SCHEMA } from '../../src/service/fast-role/material-translation-contract.js';
-import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
-import { parseReviewCategoryUnitMessageHeader } from '../../src/service/review/review-category-contract.js';
+import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy, resolveSourceCheckoutLaunchPolicySync } from '../../src/service/launch-policy.js';
+import { parseReviewCategoryUnitMessageHeader, reviewCategoryContract, reviewCategoryContractDigest } from '../../src/service/review/review-category-contract.js';
+import { parseFactualReviewUnitMessageHeader } from '../../src/service/analysis/factual-review-contract.js';
+import { CredentialBroker } from '../../src/service/provider/credential-broker.js';
+import * as harnessExecution from '../../src/service/harness/primary-agent-harness.js';
 import { reviewCategoryEntry, reviewCategoryContractInput } from '../../src/service/review/category-configuration.js';
 import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
 import { HouseReviewPreferenceLedger, liveHouseReviewPreferenceContract } from '../../src/service/house-review-preference.js';
@@ -24,6 +27,11 @@ import type { LaunchPolicyProjection } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2 } from '../support/sample1-baseline.js';
 import { sample1DerivedLibraryItem } from '../editorial-cases/runner/run-setups.js';
+import { makeJ13Series } from '../support/series-consistency.js';
+import { kindLocalTools } from '../../src/service/analysis/live-kind-admission.js';
+import type { AnalysisKindDefinition } from '../../src/service/analysis/kind-definition.js';
+import type { FrozenSeriesScope } from '../../src/shared/protocol.js';
+import { freezeSeriesScope, resolveSeriesConsistency, seriesConsistencyEntry, seriesConsistencyKindDefinition, liveSeriesConsistencyContract } from '../../src/service/review/series-consistency.js';
 
 // One explicit model-request capability per test application.
 // Registered first: the stack-ordered final hook runs after existing consumer teardown.
@@ -49,6 +57,7 @@ afterEach(async () => {
 interface ReviewRequest { readonly category: string; readonly ordinal: number; readonly body: string; readonly tools: string[]; readonly sentAt: number; abortedAt?: number; abortReason?: unknown }
 
 interface ProductionReviewControl {
+  readonly series?: boolean;
   readonly ready?: (application: { store: EditorialStore; owner: BaselineAnalysisExecutionOwner; bookId: string; reviewRunId: string; policy: LaunchPolicyProjection; transport: typeof fetch }) => void;
   readonly response?: (response: Response, signal: AbortSignal | undefined, body: string) => Promise<Response>;
   readonly credential?: (read: number) => Promise<string | null>;
@@ -136,6 +145,7 @@ async function productionReview(
     induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
     induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false, baselineAnalysisRoute: null,
   });
+  const applicationStore = store;
   const choice = ORDINARY_PRODUCTION_ALLOWED_BINDINGS[0];
   const pending = store.saveModelServiceConnection('合成生产连接', null, 'needs-attention', choice.route);
   store.saveModelServiceConnection('合成生产连接', pending.credentialReference, 'ready', choice.route);
@@ -144,6 +154,12 @@ async function productionReview(
   const policy = project(await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', binding));
   store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy,
     live: { scope: 'ordinary-production', ...binding, runBudgetCeiling: 'unset' } });
+  if (categories.includes('factual-review') || categories.includes('academic-integrity')) {
+    const search = store.saveSearchBackendCredential('search-tinyfish', null, 'needs-attention');
+    store.saveSearchBackendCredential('search-tinyfish', search.credentialReference, 'ready');
+    store.selectSearchBackend('search-tinyfish');
+    if (categories.includes('factual-review')) store.factualReviewLedger.bindLaunch(store.baselineAnalysisLedger.launch);
+  }
   const requests: ReviewRequest[] = [];
   const nativeFetch: typeof fetch = async (_url, init) => {
     const finish = (response: Response): Promise<Response> => control.response?.(response, init?.signal ?? undefined, String(init?.body)) ?? Promise.resolve(response);
@@ -183,7 +199,7 @@ async function productionReview(
         content = JSON.stringify({ schema: 'ai7.editorial-review.unit-result/2', unitOrdinal: header.ordinal,
           findings: shape === 'repeated' && header.ordinal === 1 ? bounded.slice(0, 4).map((entry) => ({ quote: entry.text,
             blockOrdinal: entry.ordinal, severity: 'should', note: '合成同类修改建议。', replacement: `${entry.text}合成` }))
-            : header.ordinal === 1 && block !== undefined && (header.categoryId === 'publication-risk' || body.messages.some((entry) => entry.role === 'tool'))
+            : header.ordinal === 1 && block !== undefined && header.categoryId !== 'academic-integrity' && (header.categoryId === 'publication-risk' || body.messages.some((entry) => entry.role === 'tool'))
             ? [{ quote: block.text, blockOrdinal: block.ordinal, severity: 'should', note: '合成审阅发现；请人工复核。',
               ...(header.categoryId === 'publication-risk' ? { clauseId: 'publication-risk/1' } : { replacement: `${block.text}合成` }) }] : [],
         });
@@ -199,13 +215,15 @@ async function productionReview(
     production: { scope: 'ordinary-production', nativeFetch }, secretResolver: { resolve: async () => {
       credentialReads += 1; return control.credential === undefined ? 'placeholder-production-key' : control.credential(credentialReads);
     } },
-    productionPolicyFor: async (selected) => project(await resolveSourceCheckoutLaunchPolicy(roots!.codeRoot, 'ordinary-production', selected)),
+    productionPolicyFor: (selected) => project(resolveSourceCheckoutLaunchPolicySync(roots!.codeRoot, 'ordinary-production', selected)),
+    seriesScopeGuard: (id) => applicationStore.seriesScopeGuard(id),
+    influenceGuard: (id) => applicationStore.learningInfluenceGuard(id),
   });
   driver = new ReviewRunDriver(store.reviewRunDriveSteps, owner);
   const book = await importSample1Book(store, roots.codeRoot, '合成生产审阅');
   await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
   if (usePreferences) store.recordLearningSupervision({ operation: 'create', targets: [], scope: { kind: 'house' },
-    categoryId: 'typos-and-usage', text: '统一编辑用语，保留有意的节奏。', effect: 'guide' });
+    categoryId: categories.includes('academic-integrity') ? 'academic-integrity' : 'typos-and-usage', text: '统一编辑用语，保留有意的节奏。', effect: 'guide' });
   // Seven editor rules made at distinct instants: recency, not ledger order, decides which five a request reads.
   if (usePreferences === 'top-five') for (let index = 2; index <= 7; index += 1) {
     await new Promise((resolveWait) => setTimeout(resolveWait, 5));
@@ -213,8 +231,9 @@ async function productionReview(
       categoryId: 'typos-and-usage', text: `合成偏好${index}：统一用语。`, effect: 'guide' });
   }
   const materialIds = useMaterial ? [await sample1DerivedLibraryItem(store, roots, book)] : [];
+  const seriesId = control.series === true ? makeJ13Series(store, book.bookId) : null;
   let work = store.createReviewRunPreparationWork(book.bookId, [...categories],
-    { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy, null, materialIds);
+    { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy, null, materialIds, null, null, seriesId);
   while (!work.done) work = store.advanceReviewRunPreparationWork(work.workId!);
   const run = work.projection!.run!;
   store.authorizeReviewRun(book.bookId, run.reviewRunId, run.categories.filter((category) => category.planEnvelopeDigest !== null)
@@ -225,6 +244,78 @@ async function productionReview(
 }
 
 const typosDefinition = () => reviewCategoryKindDefinition(reviewCategoryContractInput(reviewCategoryEntry('typos-and-usage')!));
+
+it('proves current academic Series preparation and exact initial and retained consistency source pins (#1131 rev21)', async () => {
+  const result = await productionReview(['academic-integrity'], () => 'valid', undefined, false, false, { series: true });
+  const request = result.requests.find((entry) => entry.category === 'academic-integrity')!;
+  expect(request.body).toContain('三部曲里海边小城的地名，以第一部的写法为准。');
+  expect(request.tools).toContain('read_blocks');
+  const db = new DatabaseSync(join(roots!.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+  try {
+    const seriesId = String(db.prepare('SELECT series_id FROM series LIMIT 1').get()!.series_id);
+    const scopes = [freezeSeriesScope(db, result.bookId, seriesId)];
+    const resolution = resolveSeriesConsistency(db, result.bookId); expect(resolution.kind).toBe('available');
+    const entry = seriesConsistencyEntry(reviewCategoryEntry('series-consistency')!, resolution);
+    const input = reviewCategoryContractInput(entry);
+    const plain = reviewCategoryKindDefinition(input, 2);
+    const tools = kindLocalTools(result.store.baselineAnalysisLedger.launch.policy, plain.kind)!; expect(tools).not.toBeNull();
+    const current = reviewCategoryKindDefinition(input, 2, tools);
+    for (const base of [reviewCategoryKindDefinition(input, 1), plain, current]) {
+      const registered = seriesConsistencyKindDefinition(db, base, scopes);
+      expect(registered.promptContractDigest).toBe(base.promptContractDigest);
+      expect(registered.schemaDigest).toBe(base.schemaDigest);
+      expect(registered.requestDigest).toBe(base.requestDigest);
+      expect(registered.parseUnitResult).toBe(base.parseUnitResult);
+      expect(registered.reduce).toBe(base.reduce);
+      expect(liveSeriesConsistencyContract(registered)).toEqual({ digest: base.promptContractDigest, system: base.systemPrompt });
+      expect(liveSeriesConsistencyContract({ ...registered })).toBeNull();
+    }
+    const pinChanges: Array<(pins: FrozenSeriesScope[]) => void> = [
+      (pins) => { Object.assign(pins[0]!, { seriesId: randomUUID() }); },
+      (pins) => { Object.assign(pins[0]!.knowledge[0]!, { itemId: randomUUID() }); },
+      (pins) => { Object.assign(pins[0]!.knowledge[0]!, { revisionId: randomUUID() }); },
+      (pins) => { Object.assign(pins[0]!.knowledge[0]!, { ordinal: pins[0]!.knowledge[0]!.ordinal + 1 }); },
+      (pins) => { Object.assign(pins[0]!.knowledge[0]!, { digest: '0'.repeat(64) }); },
+      (pins) => { Object.assign(pins[0]!, { knowledge: [] }); },
+    ];
+    for (const change of pinChanges) {
+      const initial = structuredClone(scopes); change(initial);
+      expect(() => seriesConsistencyKindDefinition(db, current, initial)).toThrow();
+      const retained = structuredClone(scopes); const registered = seriesConsistencyKindDefinition(db, current, retained);
+      change(retained); expect(() => liveSeriesConsistencyContract(registered)).toThrow();
+    }
+    const subset = reviewCategoryContract(input, 2, ['read_blocks']);
+    const baseChanges: Array<(base: AnalysisKindDefinition) => void> = [
+      (base) => { Object.assign(base, { kind: 'editorial-review/academic-integrity' }); },
+      (base) => { Object.assign(base, { contractVersion: 'ai7.editorial-review/99' }); },
+      (base) => { Object.assign(base, { contractVersion: 'ai7.editorial-review/1' }); },
+      (base) => { Object.assign(base, { promptContractDigest: '0'.repeat(64) }); },
+      (base) => { Object.assign(base, { systemPrompt: `${base.systemPrompt}\n不受支持的附加内容。` }); },
+      (base) => { Object.assign(base, { promptContractDigest: reviewCategoryContractDigest(subset), systemPrompt: subset.systemPrompt }); },
+    ];
+    for (const change of baseChanges) {
+      const initial = { ...current }; change(initial);
+      expect(() => seriesConsistencyKindDefinition(db, initial, scopes)).toThrow();
+      const retained = { ...current }; const registered = seriesConsistencyKindDefinition(db, retained, scopes);
+      change(retained); expect(() => liveSeriesConsistencyContract(registered)).toThrow();
+    }
+  } finally { db.close(); }
+});
+
+it('prepares selected Series consistency with the current production tool base (#1131 rev21)', async () => {
+  const result = await productionReview(['academic-integrity', 'series-consistency'], () => 'valid', undefined, false, false, { series: true });
+  expect(new Set(result.requests.map((request) => request.category))).toEqual(new Set(['academic-integrity', 'series-consistency']));
+  const { ledger } = latestReviewExecution(result.store);
+  const original = ledger.definition; const base = original.clarificationBase ?? original;
+  expect(base.kind).toBe('editorial-review/series-consistency');
+  const proof = liveSeriesConsistencyContract(base); expect(proof).not.toBeNull(); expect(base.seriesScopes).toHaveLength(1);
+  for (let refresh = 0; refresh < 3; refresh += 1) {
+    ledger.bindLaunch(ledger.launch);
+    expect(ledger.definition).toBe(original);
+    expect(ledger.definition.clarificationBase ?? ledger.definition).toBe(base);
+    expect(liveSeriesConsistencyContract(base)).toEqual(proof);
+  }
+});
 
 it('owns three isolated production units through body cleanup and joins out-of-order results in manifest order (#1131)', async () => {
   const held = heldReviewResponses(3);
@@ -376,6 +467,223 @@ it('pauses new units but keeps authorized inner calls at the FIFO tail, then res
   vi.restoreAllMocks();
 });
 
+it.each([{ coupled: false, withdrawn: false, source: 'material', pause: false }, { coupled: true, withdrawn: false, source: 'material', pause: false },
+  { coupled: true, withdrawn: true, source: 'material', pause: false }, { coupled: true, withdrawn: true, source: 'influence', pause: false },
+  { coupled: true, withdrawn: true, source: 'influence', pause: true }, { coupled: false, withdrawn: true, source: 'series', pause: false },
+  { coupled: false, withdrawn: false, source: 'consistency', pause: false }])
+  ('continues a tool-using frozen review after restart with Main missing, material+preference=$coupled, withdrawn=$withdrawn, source=$source, pause=$pause (#1131)', async ({ coupled, withdrawn, source, pause }) => {
+  requestGovernor.close(); requestGovernor = new ModelRequestGovernor();
+  const category = source === 'material' ? 'typos-and-usage' : source === 'consistency' ? 'series-consistency' : 'academic-integrity';
+  const searchReadiness = category === 'academic-integrity' ? vi.spyOn(CredentialBroker.prototype, 'checkPlanReadiness') : null;
+  if (searchReadiness !== null) cleanupResources.push(() => searchReadiness.mockRestore());
+  const held = heldReviewResponses(3); const ready = deferred<Parameters<NonNullable<ProductionReviewControl['ready']>>[0]>();
+  const working = productionReview([category], (_category, _ordinal, prior) => prior === 0 ? 'tools' : 'valid',
+    undefined, coupled, coupled, { response: (response, signal, body) => (JSON.parse(body) as { messages: Array<{ role: string }> }).messages.some((message) => message.role === 'tool')
+      ? Promise.resolve(response) : held.response(response, signal, body), ready: ready.resolve, series: source === 'series' || source === 'consistency' });
+  void working.catch(() => undefined);
+  const application = await Promise.race([ready.promise, working.then(() => { throw new Error('Review settled before genuine preparation completed'); })]);
+  const first = await Promise.race([held.at(1), working.then(() => { throw new Error('Review settled before its first held transport'); })]);
+  const { runRecordId, ledger } = latestReviewExecution(application.store); const facts = ledger.loadExecutionPlan(runRecordId);
+  const width = ledger.requestAdmissionOf(runRecordId)!.width;
+  const arrivals = [first, ...await Promise.all(Array.from({ length: width - 1 }, (_, index) => held.at(index + 2)))];
+  if (searchReadiness !== null) { expect(facts.webToolsBackend).toBeDefined(); expect(searchReadiness).toHaveBeenCalled(); }
+  ledger.requestPause(facts.bookId, facts.taskIntentId); application.owner.pauseRun(runRecordId, ledger);
+  for (const arrival of arrivals) arrival.release();
+  const result = await working;
+  expect(ledger.currentRunState(runRecordId)).toBe('paused');
+  const originalDefinition = ledger.definitionForRun(runRecordId, facts.promptContractDigest);
+  const originalBase = originalDefinition.clarificationBase ?? originalDefinition;
+  const originalBinding = ledger.executionBindingOf(runRecordId); const checkpoints = ledger.unitCheckpoints(runRecordId);
+  if (coupled) expect(result.requests.some((request) => request.body.includes('统一编辑用语，保留有意的节奏。'))).toBe(true);
+  expect(result.requests.some((request) => (JSON.parse(request.body) as { messages: Array<{ role: string }> }).messages.some((message) => message.role === 'tool'))).toBe(true);
+  const missing = application.store.saveModelServiceConnection('合成重启审阅新选择', null, 'needs-attention', 'deepseek-open-platform');
+  application.store.setModelServiceCredentialState(missing.credentialReference, 'missing'); application.store.selectModelServiceRoute('deepseek-open-platform');
+  await driver!.dispose(); driver = undefined; await application.owner.dispose(); owner = undefined;
+  application.store.close(); store = undefined;
+  requestGovernor.close(); await requestGovernor.whenIdle(); requestGovernor = new ModelRequestGovernor();
+  const reopened = await EditorialStore.open(roots!.dataRoot, roots!.codeRoot); store = reopened;
+  const current = resolveSourceCheckoutLaunchPolicySync(roots!.codeRoot, 'ordinary-production', null);
+  reopened.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy: current, live: null });
+  const kept = reopened.executionLedgerForRun(runRecordId); const before = result.requests.length;
+  const restored = kept.definitionForRun(runRecordId, facts.promptContractDigest);
+  const restoredBase = kept.definitionForDigest(originalBase.promptContractDigest);
+  expect(restored.systemPrompt).toBe(originalDefinition.systemPrompt); expect(restored.schemaDigest).toBe(originalDefinition.schemaDigest);
+  expect(restored.clarificationBase ?? restored).toBe(restoredBase);
+  kept.bindLaunch({ operationalScope: 'ordinary-production', policy: current, live: null }); void kept.definition;
+  expect(kept.definitionForDigest(originalBase.promptContractDigest)).toBe(restoredBase);
+  expect(kept.definitionForDigest(facts.promptContractDigest).clarificationBase ?? restoredBase).toBe(restoredBase);
+  expect(kept.unitCheckpoints(runRecordId)).toEqual(checkpoints); expect(kept.executionBindingOf(runRecordId)).toEqual(originalBinding);
+  expect(kept.loadExecutionPlan(runRecordId)).toEqual(facts);
+  const states = () => {
+    const db = new DatabaseSync(join(roots!.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+    try { return db.prepare('SELECT canonical_json, sha256 FROM analysis_run_states WHERE run_record_id = ? ORDER BY sequence').all(runRecordId); }
+    finally { db.close(); }
+  };
+  const priorStates = states(); let deniedEffects = 0;
+  const other = ORDINARY_PRODUCTION_ALLOWED_BINDINGS.find((binding) => binding.route !== facts.productionBinding!.route)!;
+  expect(other).toBeDefined();
+  for (const resolver of [undefined, () => current,
+    () => resolveSourceCheckoutLaunchPolicySync(roots!.codeRoot, 'development-ci', null),
+    () => resolveSourceCheckoutLaunchPolicySync(roots!.codeRoot, 'ordinary-production', { ...other, credentialReference: facts.credentialReference })]) {
+    const refused = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: reopened.baselineAnalysisLedger, launchPolicy: current, fixture: null,
+      ...(resolver === undefined ? {} : { productionPolicyFor: resolver }),
+      production: { scope: 'ordinary-production', nativeFetch: async () => { deniedEffects += 1; throw new Error('unexpected transport'); } },
+      secretResolver: { resolve: async () => { deniedEffects += 1; return 'public-synthetic-placeholder'; } } });
+    expect(refused.carriesStoppedRun(runRecordId, kept)).toBe(false);
+    expect(() => refused.admitAndDispatch(runRecordId, kept, { resume: true })).toThrow('策略');
+    await refused.dispose(); expect(states()).toEqual(priorStates);
+  }
+  expect(deniedEffects).toBe(0); expect(requestGovernor.snapshot()).toMatchObject({ registered: 0, waiting: 0, inFlight: 0 });
+  const reads: string[] = []; const urls: string[] = [];
+  owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: reopened.baselineAnalysisLedger, launchPolicy: current, fixture: null,
+    productionPolicyFor: (binding) => resolveSourceCheckoutLaunchPolicySync(roots!.codeRoot, 'ordinary-production', binding),
+    materialGuard: (id, consuming) => reopened.materialGuard(id, consuming),
+    influenceGuard: (id) => reopened.learningInfluenceGuard(id),
+    seriesScopeGuard: (id) => reopened.seriesScopeGuard(id),
+    production: { scope: 'ordinary-production', nativeFetch: async (url, init) => { urls.push(String(url)); return application.transport(url, init); } },
+    secretResolver: { resolve: async (reference) => { reads.push(reference); return 'public-synthetic-placeholder'; } } });
+  expect(owner.carriesStoppedRun(runRecordId, kept)).toBe(true);
+  if (withdrawn) {
+    let materialCode: string | undefined;
+    if (source === 'material') {
+      expect(reopened.materialGuard(runRecordId, kept)).toBeNull();
+      const material = originalBase.materialReferences!.sources[0]!;
+      reopened.decideLibraryMaterial({ materialId: material.materialId, expectedDecisions: 2,
+        decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
+      const refusal = reopened.materialGuard(runRecordId, kept); expect(refusal).not.toBeNull(); materialCode = refusal!.code;
+    } else if (source === 'influence') {
+      expect(reopened.learningInfluenceGuard(runRecordId)).toBeNull();
+      const preference = reopened.inspectGlobalAgent().items.find((item) => item.kind === 'preference' && item.categoryId === category)!;
+      expect(preference).toBeDefined();
+      reopened.recordLearningSupervision({ operation: 'supervise', targets: [{ itemId: preference.itemId, revisionId: preference.revisionId }],
+        scope: { kind: 'house' }, categoryId: category, text: '冻结本次合成偏好。', effect: 'freeze' });
+      expect(reopened.learningInfluenceGuard(runRecordId)).not.toBeNull();
+    } else {
+      expect(reopened.seriesScopeGuard(runRecordId)).toBeNull();
+      const series = originalBase.seriesScopes![0]!; const knowledge = series.knowledge[0]!;
+      const request = { seriesId: series.seriesId, action: 'add' as const, exclusionId: null,
+        target: { kind: 'knowledge-item' as const, id: knowledge.itemId }, reason: '合成停止参考书系知识。' };
+      const preview = reopened.previewSeriesExclusion(request);
+      reopened.recordSeriesExclusion({ ...request, previewDigest: preview.previewDigest });
+      expect(reopened.seriesScopeGuard(runRecordId)).not.toBeNull();
+    }
+    const beforeUsage = checkpoints.reduce((usage, checkpoint) => ({ inputTokens: usage.inputTokens + (checkpoint.observation?.usage?.inputTokens ?? 0),
+      outputTokens: usage.outputTokens + (checkpoint.observation?.usage?.outputTokens ?? 0) }), { inputTokens: 0, outputTokens: 0 });
+    searchReadiness?.mockClear();
+    const preparing = deferred(); const release = deferred();
+    if (pause) {
+      const actual = harnessExecution.prepareExecution; let intercepted = false;
+      const prepare = vi.spyOn(harnessExecution, 'prepareExecution').mockImplementation(async (options) => {
+        const context = await actual(options);
+        if (!intercepted) { intercepted = true; preparing.resolve(); await release.promise; }
+        return context;
+      });
+      cleanupResources.push(() => { release.resolve(); prepare.mockRestore(); });
+    }
+    owner.admitAndDispatch(runRecordId, kept, { resume: true });
+    if (pause) { await preparing.promise; kept.requestPause(facts.bookId, facts.taskIntentId); owner.pauseRun(runRecordId, kept); release.resolve(); }
+    await owner.whenIdle();
+    expect(result.requests).toHaveLength(before); expect(urls).toHaveLength(0);
+    expect(kept.unitCheckpoints(runRecordId)).toEqual(checkpoints);
+    expect(kept.inspect(application.bookId).taskOutcome?.report?.usagePerStage.units).toMatchObject(beforeUsage);
+    expect(kept.currentRunState(runRecordId)).toBe('interrupted');
+    expect(kept.inspect(application.bookId).taskOutcome?.classification).toBe('interrupted');
+    const terminal = JSON.parse(String(states().at(-1)!.canonical_json)) as { cause?: string; detail: string };
+    if (source === 'material') expect(terminal.cause).toBe(materialCode);
+    else expect(terminal.detail).toContain(source === 'influence' ? 'learning-influence-withdrawn' : 'series-retrieval-scope-changed');
+    expect(kept.executionBindingOf(runRecordId)?.bindingDigest).toBe(originalBinding?.bindingDigest);
+    expect(reads).toHaveLength(0);
+    if (searchReadiness !== null) expect(searchReadiness).not.toHaveBeenCalled();
+    return;
+  }
+  owner.admitAndDispatch(runRecordId, kept, { resume: true }); await owner.whenIdle();
+  expect(kept.currentRunState(runRecordId)).toMatch(/^completed/u);
+  const continued = result.requests.slice(before);
+  expect(continued.length).toBeGreaterThan(0);
+  expect(continued.every((request) => request.tools.includes('read_blocks') && request.tools.includes('search_manuscript'))).toBe(true);
+  expect(continued.some((request) => (JSON.parse(request.body) as { messages: Array<{ role: string }> }).messages.some((message) => message.role === 'tool'))).toBe(true);
+  expect(reads.length).toBeGreaterThan(0); expect(reads.every((reference) => reference === facts.credentialReference)).toBe(true);
+  expect(urls.length).toBeGreaterThan(0); expect(urls.every((url) => url === facts.productionBinding!.endpoint)).toBe(true);
+  expect(kept.unitCheckpoints(runRecordId).slice(0, checkpoints.length)).toEqual(checkpoints);
+  expect(kept.executionBindingOf(runRecordId)?.bindingDigest).toBe(originalBinding?.bindingDigest);
+  const db = new DatabaseSync(join(roots!.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+  try {
+    const saved = JSON.parse(String(db.prepare('SELECT canonical_json FROM analysis_result_set_revisions WHERE run_record_id = ?').get(runRecordId)!.canonical_json)) as { schemaDigest: string; bindingPin: { promptContractDigest: string; behaviorCompositionDigest: string } };
+    expect(saved.schemaDigest).toBe(originalDefinition.schemaDigest);
+    expect(saved.bindingPin).toMatchObject({ promptContractDigest: facts.promptContractDigest, behaviorCompositionDigest: facts.behaviorCompositionDigest });
+  } finally { db.close(); }
+  expect(current.providerProcessing.bindingState).toBe('setup-required');
+  expect(() => reopened.createReviewRunPreparationWork(application.bookId, ['typos-and-usage'],
+    { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, current)).toThrow('模型服务需设置');
+});
+
+it.each([{ guard: 'influence', cancel: false, pause: false }, { guard: 'series', cancel: false, pause: false },
+  { guard: 'influence', cancel: true, pause: false }, { guard: 'influence', cancel: false, pause: true }])
+  ('settles a bound research continuation locally when the $guard guard stops it, cancel=$cancel, pause=$pause (#1131 rev19)', async ({ guard, cancel, pause }) => {
+    const searchReadiness = vi.spyOn(CredentialBroker.prototype, 'checkPlanReadiness');
+    cleanupResources.push(() => searchReadiness.mockRestore());
+    const held = heldReviewResponses(3, (message) => parseFactualReviewUnitMessageHeader(message)?.ordinal ?? null);
+    const ready = deferred<Parameters<NonNullable<ProductionReviewControl['ready']>>[0]>();
+    const working = productionReview(['factual-review'], () => 'valid', undefined, false, false, { ready: ready.resolve,
+      response: async (response, signal, body) => {
+        const parsed = JSON.parse(body) as { model: string; messages: Array<{ role: string; content: string }> };
+        const header = parseFactualReviewUnitMessageHeader(parsed.messages.findLast((message) => message.role === 'user')!.content);
+        const valid = header === null ? response : new Response(JSON.stringify({ model: parsed.model,
+          choices: [{ message: { content: JSON.stringify({ schema: 'ai7.factual-review.unit-result/2', unitOrdinal: header.ordinal, assertions: [], corrections: [] }) }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 40, completion_tokens: 20 } }), { status: 200 });
+        return held.response(valid, signal, body);
+      } });
+    void working.catch(() => undefined);
+    const application = await Promise.race([ready.promise, working.then(() => { throw new Error('Research settled before preparation completed'); })]);
+    const first = await Promise.race([held.at(1), working.then(() => { throw new Error(`Research settled before transport: ${JSON.stringify(application.store.inspectReviewWorkspace(application.bookId, application.reviewRunId).run?.categories.map((category) => ({ category: category.categoryId, state: category.state, detail: category.stateLabel })))}`); })]);
+    const { runRecordId, ledger } = latestReviewExecution(application.store); const facts = ledger.loadExecutionPlan(runRecordId);
+    const width = ledger.requestAdmissionOf(runRecordId)!.width;
+    const arrivals = [first, ...await Promise.all(Array.from({ length: width - 1 }, (_, index) => held.at(index + 2)))];
+    expect(facts.webToolsBackend).toBeDefined(); expect(facts.searchCredentialReference).toBeDefined();
+    expect(searchReadiness).toHaveBeenCalled();
+    ledger.requestPause(facts.bookId, facts.taskIntentId); application.owner.pauseRun(runRecordId, ledger);
+    for (const arrival of arrivals) arrival.release(); await working;
+    expect(ledger.currentRunState(runRecordId)).toBe('paused');
+    const checkpoints = ledger.unitCheckpoints(runRecordId); expect(checkpoints).toHaveLength(width);
+    const binding = ledger.executionBindingOf(runRecordId); const events = () => {
+      const db = new DatabaseSync(join(roots!.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+      try { return db.prepare("SELECT json_extract(canonical_json, '$.requestAdmission.data.event.kind') kind, json_extract(canonical_json, '$.modelClarificationAnswerClaim') claim FROM analysis_run_states WHERE run_record_id = ? ORDER BY sequence").all(runRecordId)
+        .filter((row) => row.kind === 'execution' || row.kind === 'admit' || row.claim !== null); }
+      finally { db.close(); }
+    };
+    const admissions = events(); await application.owner.dispose(); owner = undefined;
+    await driver!.dispose(); driver = undefined;
+    const credentials: string[] = []; let sends = 0; let guardChecks = 0; searchReadiness.mockClear();
+    owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: application.store.baselineAnalysisLedger, launchPolicy: application.policy, fixture: null,
+      productionPolicyFor: (binding) => resolveSourceCheckoutLaunchPolicySync(roots!.codeRoot, 'ordinary-production', binding),
+      production: { scope: 'ordinary-production', nativeFetch: async () => { sends += 1; throw new Error('unexpected source-stop send'); } },
+      secretResolver: { resolve: async (reference) => { credentials.push(reference); return 'public-synthetic-placeholder'; } },
+      ...(guard === 'influence' ? { influenceGuard: () => { guardChecks += 1; return '合成已停止使用的影响'; } }
+        : { seriesScopeGuard: () => { guardChecks += 1; return '合成已变化的书系范围'; } }) });
+    const prepared = deferred(); const release = deferred();
+    if (pause) {
+      const actual = harnessExecution.prepareExecution; let intercepted = false;
+      const prepare = vi.spyOn(harnessExecution, 'prepareExecution').mockImplementation(async (options) => {
+        const context = await actual(options);
+        if (!intercepted) { intercepted = true; prepared.resolve(); await release.promise; }
+        return context;
+      });
+      cleanupResources.push(() => { release.resolve(); prepare.mockRestore(); });
+    }
+    if (cancel) ledger.requestCancel(facts.bookId, facts.taskIntentId);
+    owner.admitAndDispatch(runRecordId, ledger, { resume: true, ...(cancel ? { cancel: true } : {}) });
+    if (pause) {
+      await prepared.promise; ledger.requestPause(facts.bookId, facts.taskIntentId); owner.pauseRun(runRecordId, ledger); release.resolve();
+    }
+    await owner.whenIdle();
+    expect(sends).toBe(0); expect(credentials).toEqual([]); expect(searchReadiness).not.toHaveBeenCalled();
+    expect(guardChecks).toBe(cancel ? 0 : 1); expect(events()).toEqual(admissions);
+    expect(ledger.unitCheckpoints(runRecordId)).toEqual(checkpoints); expect(ledger.executionBindingOf(runRecordId)?.bindingDigest).toBe(binding?.bindingDigest);
+    expect(ledger.currentRunState(runRecordId)).toBe(cancel ? 'cancelled' : 'interrupted');
+    expect(ledger.inspect(application.bookId).taskOutcome?.report?.usagePerStage.units).toMatchObject({ inputTokens: width * 40, outputTokens: width * 20 });
+    expect(requestGovernor.snapshot()).toMatchObject({ registered: 0, waiting: 0, inFlight: 0 }); searchReadiness.mockRestore();
+  });
+
 it('cancels every sent production sibling and keeps each unknown checkpoint without admitting another unit (#1131)', async () => {
   const held = heldReviewResponses(3);
   const working = productionReview(['typos-and-usage'], () => 'valid', undefined, false, false, held);
@@ -420,7 +728,7 @@ it('reopens a real crash snapshot with one committed sibling and three unmatched
     expect(kept.requestAdmissionOf(runRecordId)!.open.size).toBe(0);
     restarted = new BaselineAnalysisExecutionOwner({ requestGovernor: restartedGovernor, ledger: reopened.baselineAnalysisLedger,
       launchPolicy: application.policy, fixture: null, production: { scope: 'ordinary-production', nativeFetch: application.transport },
-      productionPolicyFor: (binding) => resolveSourceCheckoutLaunchPolicy(roots!.codeRoot, 'ordinary-production', binding),
+      productionPolicyFor: (binding) => resolveSourceCheckoutLaunchPolicySync(roots!.codeRoot, 'ordinary-production', binding),
       secretResolver: { resolve: async () => 'public-synthetic-placeholder' } });
     const before = (await working).requests.filter((request) => possible.includes(request.ordinal)).length;
     restarted.admitAndDispatch(runRecordId, kept, { resume: true }); await restarted.whenIdle();
@@ -459,7 +767,7 @@ it('preserves a committed unit, a possible send and queued unsent siblings disti
     expect(checkpoints.some((checkpoint) => queued.includes(checkpoint.unit.unitOrdinal))).toBe(false);
     restarted = new BaselineAnalysisExecutionOwner({ requestGovernor: capacity, ledger: reopened.baselineAnalysisLedger,
       launchPolicy: application.policy, fixture: null, production: { scope: 'ordinary-production', nativeFetch: application.transport },
-      productionPolicyFor: (binding) => resolveSourceCheckoutLaunchPolicy(roots!.codeRoot, 'ordinary-production', binding),
+      productionPolicyFor: (binding) => resolveSourceCheckoutLaunchPolicySync(roots!.codeRoot, 'ordinary-production', binding),
       secretResolver: { resolve: async () => 'public-synthetic-placeholder' } });
     restarted.admitAndDispatch(runRecordId, kept, { resume: true }); await restarted.whenIdle();
     expect(original.requests.filter((request) => request.ordinal === first.ordinal)).toHaveLength(1);
@@ -508,7 +816,7 @@ it.each(['before-fence', 'fenced-before-native'] as const)('keeps %s crash evide
     if (phase === 'fenced-before-native') expect(checkpoints[0]!.unit.closed).toMatchObject({ state: 'gap', gap: { code: 'outcome-unknown' } });
     restarted = new BaselineAnalysisExecutionOwner({ requestGovernor: capacity, ledger: reopened.baselineAnalysisLedger,
       launchPolicy: application.policy, fixture: null, production: { scope: 'ordinary-production', nativeFetch: application.transport },
-      productionPolicyFor: (binding) => resolveSourceCheckoutLaunchPolicy(roots!.codeRoot, 'ordinary-production', binding),
+      productionPolicyFor: (binding) => resolveSourceCheckoutLaunchPolicySync(roots!.codeRoot, 'ordinary-production', binding),
       secretResolver: { resolve: async () => 'public-synthetic-placeholder' } });
     restarted.admitAndDispatch(runRecordId, kept, { resume: true }); await restarted.whenIdle();
     if (phase === 'fenced-before-native') expect(original.requests.filter((request) => request.ordinal === possible[0]!.unitOrdinal)).toHaveLength(0);
@@ -550,7 +858,7 @@ it('reuses an exact unit checkpoint when a crash occurs before its request-fence
     expect(kept.requestAdmissionOf(runRecordId)!.open.size).toBe(0);
     restarted = new BaselineAnalysisExecutionOwner({ requestGovernor: capacity, ledger: reopened.baselineAnalysisLedger,
       launchPolicy: application.policy, fixture: null, production: { scope: 'ordinary-production', nativeFetch: application.transport },
-      productionPolicyFor: (binding) => resolveSourceCheckoutLaunchPolicy(roots!.codeRoot, 'ordinary-production', binding),
+      productionPolicyFor: (binding) => resolveSourceCheckoutLaunchPolicySync(roots!.codeRoot, 'ordinary-production', binding),
       secretResolver: { resolve: async () => 'public-synthetic-placeholder' } });
     restarted.admitAndDispatch(runRecordId, kept, { resume: true }); await restarted.whenIdle();
     expect(result.requests.filter((request) => request.ordinal === knownOrdinal)).toHaveLength(1);

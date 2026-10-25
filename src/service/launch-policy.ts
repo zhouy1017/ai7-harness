@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { LAUNCH_SELECTABLE_SCOPES, isTrustedOperationalScope, type AdmittedLocalTools, type AdmittedPlatformTools, type AdmittedProviderRule, type DeveloperLiveCeiling, type OutboundDataCategoryId, type DevelopmentValidationIntent, type LaunchPolicyProjection, type TrustedLaunchForm, type TrustedOperationalScope } from '../shared/protocol.js';
 import { CREDENTIAL_REFERENCE_PATTERN, DEVELOPMENT_CREDENTIAL_REFERENCES } from '../shared/protected-secret-identity.js';
@@ -211,12 +212,16 @@ function digest(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
-async function readBuiltFile(codeRoot: string, canonicalPath: string): Promise<Buffer> {
+function policyFilePath(codeRoot: string, canonicalPath: string): string {
   requirePolicy(!isAbsolute(canonicalPath) && canonicalPath.split('/').every((part) => part !== '..' && part !== ''));
   const target = resolve(codeRoot, ...canonicalPath.split('/'));
   const relation = relative(codeRoot, target);
   requirePolicy(relation !== '' && !relation.startsWith(`..${sep}`) && relation !== '..' && !isAbsolute(relation));
-  return readFile(target);
+  return target;
+}
+
+async function readBuiltFile(codeRoot: string, canonicalPath: string): Promise<Buffer> {
+  return readFile(policyFilePath(codeRoot, canonicalPath));
 }
 
 function parseJson(bytes: Uint8Array): Record<string, unknown> {
@@ -1990,8 +1995,39 @@ export async function resolveSourceCheckoutLaunchPolicy(
   configuredBinding: ConfiguredProviderBinding | null = null,
   configuredFastBinding: ConfiguredProviderBinding | null = configuredBinding,
 ): Promise<LaunchPolicyProjection> {
+  const verification = verifyLaunchPolicyInputs(requestedScope, configuredBinding, configuredFastBinding);
+  let step = verification.next();
+  while (!step.done) {
+    try { step = verification.next(await readBuiltFile(codeRoot, step.value)); }
+    catch (error) { step = verification.throw(error); }
+  }
+  return step.value;
+}
+
+/** Run admission reads the same complete verified inputs synchronously, without caching a prior projection. */
+export function resolveSourceCheckoutLaunchPolicySync(
+  codeRoot: string,
+  requestedScope: TrustedOperationalScope = 'development-ci',
+  configuredBinding: ConfiguredProviderBinding | null = null,
+  configuredFastBinding: ConfiguredProviderBinding | null = configuredBinding,
+): LaunchPolicyProjection {
+  const verification = verifyLaunchPolicyInputs(requestedScope, configuredBinding, configuredFastBinding);
+  let step = verification.next();
+  while (!step.done) {
+    try { step = verification.next(readFileSync(policyFilePath(codeRoot, step.value))); }
+    catch (error) { step = verification.throw(error); }
+  }
+  return step.value;
+}
+
+/** The single pure verification/projection body requests exactly its four pinned inputs in order. */
+function* verifyLaunchPolicyInputs(
+  requestedScope: TrustedOperationalScope,
+  configuredBinding: ConfiguredProviderBinding | null,
+  configuredFastBinding: ConfiguredProviderBinding | null,
+): Generator<string, LaunchPolicyProjection, Buffer> {
   try {
-    const carrier = parseJson(await readBuiltFile(codeRoot, CARRIER_PATH));
+    const carrier = parseJson(yield CARRIER_PATH);
     requirePolicy(
       exactKeys(carrier, ['manifestType', 'version', 'runtimeForm', 'trustedOperationalScope', 'launchSelectableScopes', 'activePolicySet']) &&
         carrier['manifestType'] === 'ai7-source-checkout-launch-authority' &&
@@ -2014,7 +2050,7 @@ export async function resolveSourceCheckoutLaunchPolicy(
         carrierPin['sha256'] === ACTIVE_SET_SHA256,
     );
 
-    const activeSetBytes = await readBuiltFile(codeRoot, ACTIVE_SET_PATH);
+    const activeSetBytes = yield ACTIVE_SET_PATH;
     requirePolicy(digest(activeSetBytes) === ACTIVE_SET_SHA256);
     const activeSet = parseJson(activeSetBytes);
     requirePolicy(
@@ -2064,7 +2100,7 @@ export async function resolveSourceCheckoutLaunchPolicy(
       verifyPin(scopePins[scope], PROVIDER_PINS[scope]);
     }
     const selectedProviderPin = PROVIDER_PINS[requestedScope];
-    const selectedProviderBytes = await readBuiltFile(codeRoot, selectedProviderPin.canonicalPath);
+    const selectedProviderBytes = yield selectedProviderPin.canonicalPath;
     requirePolicy(digest(selectedProviderBytes) === selectedProviderPin.sha256);
     const selectedPolicy = parseJson(selectedProviderBytes);
     verifyProviderPolicy(selectedPolicy, selectedProviderPin.version, selectedProviderPin.canonicalPath);
@@ -2078,7 +2114,7 @@ export async function resolveSourceCheckoutLaunchPolicy(
         externalPin['canonicalPath'] === EXTERNAL_PIN.canonicalPath &&
         externalPin['sha256'] === EXTERNAL_PIN.sha256,
     );
-    const externalBytes = await readBuiltFile(codeRoot, EXTERNAL_PIN.canonicalPath);
+    const externalBytes = yield EXTERNAL_PIN.canonicalPath;
     requirePolicy(digest(externalBytes) === EXTERNAL_PIN.sha256);
     const externalPolicy = parseJson(externalBytes);
     requirePolicy(

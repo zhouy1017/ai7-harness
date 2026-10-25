@@ -1,3 +1,5 @@
+import { validateRequestAdmissionRecords } from './analysis/baseline-analysis-store.js';
+import { MODEL_REQUEST_ADMISSION_SCHEMA_VERSION } from './task-authorization.js';
 import { IDLE_BACKGROUND_SCHEMA_VERSION, LOCAL_REVIEW_SCHEMA_VERSION, EDITORIAL_MEMORY_SCHEMA_VERSION } from './task-authorization.js';
 import { initializeLocalStageSchema } from './review/review-runs.js';
 import { sha256Hex } from './analysis/canonical.js';
@@ -1044,7 +1046,7 @@ import {
 import { REIMPORT_GROUP_VERBS, groupReimportMappings, reimportGroupResolutions, reimportGroupVerbs } from './reimport-groups.js';
 import type { ReviewRunDriveSteps } from './review/review-run-driver.js';
 import { reviewCategoryContractInput, type ReviewCategoryConfigurationEntry } from './review/category-configuration.js';
-import { reviewCategoryKindDefinition, withReviewLocalTools } from './review/review-category-kind.js';
+import { historicalReviewCategoryDefinitions, reviewCategoryKindDefinition, withReviewLocalTools } from './review/review-category-kind.js';
 import {
   EditorialMarkError,
   EditorialMarkStore,
@@ -2442,7 +2444,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === WRITING_TASK_SCHEMA_VERSION ||
       currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       currentVersion === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || currentVersion === PROPOSAL_REVIEW_SCHEMA_VERSION || currentVersion === FACTUAL_VERIFICATION_SCHEMA_VERSION || currentVersion === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || currentVersion === TASK_INTENT_DRAFT_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_SCHEMA_VERSION || currentVersion === CUSTOM_ANALYSIS_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || currentVersion === MODEL_SELECTION_SCHEMA_VERSION || currentVersion === PROCEDURE_DEFINITION_SCHEMA_VERSION || currentVersion === EDITORIAL_LEARNING_SCHEMA_VERSION || currentVersion === GLOBAL_AGENT_SCHEMA_VERSION || currentVersion === REVIEW_CONTRACT_SCHEMA_VERSION || currentVersion === IDLE_BACKGROUND_SCHEMA_VERSION || currentVersion === LOCAL_REVIEW_SCHEMA_VERSION || currentVersion === LATEST_SCHEMA_VERSION),
+      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || currentVersion === PROPOSAL_REVIEW_SCHEMA_VERSION || currentVersion === FACTUAL_VERIFICATION_SCHEMA_VERSION || currentVersion === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || currentVersion === TASK_INTENT_DRAFT_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_SCHEMA_VERSION || currentVersion === CUSTOM_ANALYSIS_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || currentVersion === MODEL_SELECTION_SCHEMA_VERSION || currentVersion === PROCEDURE_DEFINITION_SCHEMA_VERSION || currentVersion === EDITORIAL_LEARNING_SCHEMA_VERSION || currentVersion === GLOBAL_AGENT_SCHEMA_VERSION || currentVersion === REVIEW_CONTRACT_SCHEMA_VERSION || currentVersion === IDLE_BACKGROUND_SCHEMA_VERSION || currentVersion === LOCAL_REVIEW_SCHEMA_VERSION || currentVersion === EDITORIAL_MEMORY_SCHEMA_VERSION || currentVersion === LATEST_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2506,7 +2508,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === WRITING_TASK_SCHEMA_VERSION ||
       currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       currentVersion === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || currentVersion === PROPOSAL_REVIEW_SCHEMA_VERSION || currentVersion === FACTUAL_VERIFICATION_SCHEMA_VERSION || currentVersion === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || currentVersion === TASK_INTENT_DRAFT_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_SCHEMA_VERSION || currentVersion === CUSTOM_ANALYSIS_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || currentVersion === MODEL_SELECTION_SCHEMA_VERSION || currentVersion === PROCEDURE_DEFINITION_SCHEMA_VERSION || currentVersion === EDITORIAL_LEARNING_SCHEMA_VERSION || currentVersion === GLOBAL_AGENT_SCHEMA_VERSION || currentVersion === REVIEW_CONTRACT_SCHEMA_VERSION || currentVersion === IDLE_BACKGROUND_SCHEMA_VERSION || currentVersion === LOCAL_REVIEW_SCHEMA_VERSION || currentVersion === LATEST_SCHEMA_VERSION)
+      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || currentVersion === PROPOSAL_REVIEW_SCHEMA_VERSION || currentVersion === FACTUAL_VERIFICATION_SCHEMA_VERSION || currentVersion === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || currentVersion === TASK_INTENT_DRAFT_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_SCHEMA_VERSION || currentVersion === CUSTOM_ANALYSIS_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || currentVersion === MODEL_SELECTION_SCHEMA_VERSION || currentVersion === PROCEDURE_DEFINITION_SCHEMA_VERSION || currentVersion === EDITORIAL_LEARNING_SCHEMA_VERSION || currentVersion === GLOBAL_AGENT_SCHEMA_VERSION || currentVersion === REVIEW_CONTRACT_SCHEMA_VERSION || currentVersion === IDLE_BACKGROUND_SCHEMA_VERSION || currentVersion === LOCAL_REVIEW_SCHEMA_VERSION || currentVersion === EDITORIAL_MEMORY_SCHEMA_VERSION || currentVersion === LATEST_SCHEMA_VERSION)
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -2884,7 +2886,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === LATEST_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === LATEST_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2937,7 +2939,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === LATEST_SCHEMA_VERSION)) return;
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === LATEST_SCHEMA_VERSION)) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -3082,7 +3084,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === LATEST_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === LATEST_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -3134,7 +3136,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === LATEST_SCHEMA_VERSION)) return;
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === LATEST_SCHEMA_VERSION)) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -3676,7 +3678,7 @@ function initializeModelServiceSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === LATEST_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === LATEST_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -3728,7 +3730,7 @@ function initializeModelServiceSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === LATEST_SCHEMA_VERSION)) {
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === LATEST_SCHEMA_VERSION)) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -5107,6 +5109,7 @@ export class EditorialStore {
     let ingest: DatabaseSync | null = null;
     try {
       configureDatabase(authority, 'FILE');
+      validateRequestAdmissionRecords(authority, Number(authority.prepare('PRAGMA user_version').get()?.user_version) >= MODEL_REQUEST_ADMISSION_SCHEMA_VERSION);
       // 升级前备份 (Issue #433, S85b; DSTO-016): a store this software must move to a later Data Version is written whole into
       // the backup location before anything migrates it, and a backup that cannot be made opens nothing.
       const { upgrade, earlier } = await backUpBeforeUpgrade(authority, dataRoot, {
@@ -5267,6 +5270,7 @@ export class EditorialStore {
       new EditorialLearningLedger(authority).validate();
       new SupervisionDirectives(authority).validate();
       new HouseReviewPreferenceLedger(authority).validate();
+      validateRequestAdmissionRecords(authority, true);
       journal = new DatabaseSync(databasePath);
       configureDatabase(journal);
       ingest = new DatabaseSync(databasePath);
@@ -5653,7 +5657,7 @@ export class EditorialStore {
     const input = reviewCategoryContractInput(entry);
     const contractVersion = frozenVersion ?? this.#control.baselineAnalysisRoute?.reviewContractVersion ?? 2;
     const base = this.#reviewCategoryDefinitions.obtain(JSON.stringify([input, contractVersion]), () => this.#analysisCall(() => reviewCategoryKindDefinition(input, contractVersion)));
-    const toolBase = withReviewLocalTools(base, kindLocalTools(this.#baselineAnalysis.launch.policy, base.kind));
+    const toolBase = frozenPromptDigest === undefined ? withReviewLocalTools(base, kindLocalTools(this.#baselineAnalysis.launch.policy, base.kind)) : base;
     let scopes = entry.seriesScopes;
     const finish = (definition: AnalysisKindDefinition): AnalysisKindDefinition => scopes === undefined ? definition
       : entry.seriesKnowledge === undefined ? seriesScopeKindDefinition(this.#authority, definition, scopes) : definition;
@@ -5676,7 +5680,8 @@ export class EditorialStore {
           requireStore(typeof frozenBase === 'string' && /^[0-9a-f]{64}$/u.test(frozenBase), 'ANALYSIS_RECORD_INVALID', '任务参考资料的基础契约记录无效。');
           // A new guideline version is a new current kind contract, not corruption of the previous Task's pins.
           // Its ordinary ledger projection already knows how to offer a fresh preparation under that contract.
-          if (frozenBase !== base.promptContractDigest && frozenBase !== toolBase.promptContractDigest) return this.reviewCategoryLedger(base);
+          if (frozenBase !== base.promptContractDigest && frozenBase !== toolBase.promptContractDigest &&
+              !historicalReviewCategoryDefinitions(input, contractVersion).some((candidate) => candidate.promptContractDigest === frozenBase)) return this.reviewCategoryLedger(base);
           materials = { bookId: latestForBook, references: this.#analysisCall(() => taskMaterialSources(pins)) };
           const envelope = components.get('plan-envelope');
           requireStore(envelope !== undefined, 'ANALYSIS_RECORD_INVALID', '任务计划记录不完整。');
@@ -5694,9 +5699,26 @@ export class EditorialStore {
         refused && scopes === undefined ? frozenPromptDigest : undefined));
       return finish(refused ? material : houseReviewPreferenceKindDefinition(material, preference ?? null, true));
     };
-    const current = wrap(toolBase);
-    const prior = toolBase.promptContractDigest === base.promptContractDigest ? current : wrap(base);
-    const definition = frozenPromptDigest !== undefined && prior.promptContractDigest === frozenPromptDigest ? prior : current;
+    let definition: AnalysisKindDefinition;
+    let prior: AnalysisKindDefinition;
+    if (frozenPromptDigest === undefined) {
+      definition = wrap(toolBase);
+      prior = toolBase.promptContractDigest === base.promptContractDigest ? definition : wrap(base);
+    } else {
+      const candidates: AnalysisKindDefinition[] = [];
+      for (const historical of historicalReviewCategoryDefinitions(input, contractVersion)) {
+        try { candidates.push(wrap(historical)); }
+        catch (error) {
+          // Series consistency accepts only its own supported base; another historical form gains no proof.
+          if (!(error instanceof AnalysisError && error.code === 'SERIES_SCOPE_INVALID')) throw error;
+        }
+      }
+      const matched = candidates.find((candidate) => candidate.promptContractDigest === frozenPromptDigest);
+      requireStore(matched !== undefined, materials === undefined ? 'ANALYSIS_RECORD_INVALID' :
+        preference == null ? 'TASK_MATERIAL_RECORD_INVALID' : 'HOUSE_REVIEW_PREFERENCE_INVALID', '固定提示契约与任务计划不一致。');
+      definition = matched;
+      prior = candidates[0]!;
+    }
     requireStore(materials === undefined || scopes !== undefined || frozenPromptDigest === undefined || refused || definition.promptContractDigest === frozenPromptDigest,
       preference == null ? 'TASK_MATERIAL_RECORD_INVALID' : 'HOUSE_REVIEW_PREFERENCE_INVALID', '固定提示契约与任务计划不一致。');
     if (definition !== prior) Object.assign(definition, { toolPromptPredecessor: prior });

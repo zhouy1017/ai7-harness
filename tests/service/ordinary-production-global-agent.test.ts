@@ -5,7 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { Session } from '@deepseek-ai/dsh-session';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
-import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
+import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy, resolveSourceCheckoutLaunchPolicySync } from '../../src/service/launch-policy.js';
 import { DialogueExecutionOwner, productionDialogueRoute } from '../../src/service/dialogue/dialogue-execution.js';
 import { admittedGlobalAgentRoute, prepareGlobalAgentDisclosure, startGlobalAgentTurn } from '../../src/service/dialogue/global-agent-session.js';
 import { buildDialogueMessage } from '../../src/service/dialogue/contract.js';
@@ -283,7 +283,7 @@ describe('v27 Book-less Global Agent', () => {
     };
     const reviewOwner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
       production: { scope: 'ordinary-production', nativeFetch }, secretResolver: { resolve: async () => 'synthetic-test-placeholder' },
-      productionPolicyFor: (current) => resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', current, current) });
+      productionPolicyFor: (current) => resolveSourceCheckoutLaunchPolicySync(roots.codeRoot, 'ordinary-production', current, current) });
     const reviewDriver = new ReviewRunDriver(store.reviewRunDriveSteps, reviewOwner);
     try {
       let work = store.createReviewRunPreparationWork(book.bookId, ['typos-and-usage'],

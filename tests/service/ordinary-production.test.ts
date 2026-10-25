@@ -8,7 +8,7 @@ import { ServiceRequestLoop } from '../../src/service/service-request-loop.js';
 import * as harnessExecution from '../../src/service/harness/primary-agent-harness.js';
 import { adaptationMode } from '../../src/service/analysis/plan-edits.js';
 import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
-import { cpSync } from 'node:fs';
+import { cpSync, readFileSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -19,8 +19,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BaselineAnalysisExecutionOwner, type ExecutionOwnerDependencies } from '../../src/service/analysis/execution.js';
 import { BackgroundAnalysisDispatcher } from '../../src/service/background-analysis.js';
 import { liveKindRule } from '../../src/service/analysis/live-kind-admission.js';
-import type { LaunchBinding, OrdinaryProductionLaunchBinding } from '../../src/service/analysis/baseline-analysis-store.js';
-import { BASELINE_PROMPT_CONTRACT_DIGEST, unitRequestDigest } from '../../src/service/analysis/contract.js';
+import { validateRequestAdmissionRecords, type LaunchBinding, type OrdinaryProductionLaunchBinding } from '../../src/service/analysis/baseline-analysis-store.js';
+import { dataVersionMarkerPath } from '../../src/service/data-version.js';
+import { BASELINE_PROMPT_CONTRACT_DIGEST, BASELINE_PROMPT_CONTRACT_V1_DIGEST, unitRequestDigest } from '../../src/service/analysis/contract.js';
+import { withModelClarification } from '../../src/service/provider/clarification-contract.js';
+import { canonicalRecord, sha256Hex } from '../../src/service/analysis/canonical.js';
 import {
   ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST,
   assuranceSamplingRequestDigest,
@@ -31,7 +34,7 @@ import { BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, crossUnitRequestDigest, par
 import {
   ORDINARY_PRODUCTION_ALLOWED_BINDINGS,
   allowedProductionBindingOf,
-  resolveSourceCheckoutLaunchPolicy,
+  resolveSourceCheckoutLaunchPolicy, resolveSourceCheckoutLaunchPolicySync,
   type ConfiguredProviderBinding,
 } from '../../src/service/launch-policy.js';
 import { loadModelFixture, resolveFixtureEntry } from '../../src/service/provider/model-fixture.js';
@@ -177,7 +180,7 @@ function owner(store: EditorialStore, production: ProductionLaunch, nativeFetch:
     ledger: store.baselineAnalysisLedger,
     launchPolicy: production.policy,
     currentLaunchPolicy: () => production.policy,
-    productionPolicyFor: (binding) => resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', binding),
+    productionPolicyFor: (binding) => resolveSourceCheckoutLaunchPolicySync(roots.codeRoot, 'ordinary-production', binding),
     fixture: null,
     // A local placeholder for the editor's own credential: the broker releases it to the transmit step alone.
     secretResolver: { resolve: async (reference) => { reads.push(reference); return 'placeholder-production-key'; } },
@@ -263,6 +266,142 @@ async function run(store: EditorialStore, execution: BaselineAnalysisExecutionOw
   await execution.whenIdle();
   return store.inspectBaselineAnalysis(bookId, (runRecordId) => execution.progressFor(runRecordId));
 }
+
+it.each(['missing', 'ambiguous'] as const)('refuses the %s actual baseline rule without inventing a serial receipt or admission history (#1131 rev10)', async (selection) => {
+  const { store, production } = await openProductionStore(); await configure(store, production, 'opencode-go');
+  const bookId = await sample1Book(store, '合成规则唯一性'); const prepared = prepare(store, bookId, production.policy);
+  const authorized = store.authorizeBaselineAnalysis(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
+  const runId = authorized.dispatchRunRecordId!;
+  const actualRule = liveKindRule(production.policy, store.baselineAnalysisLedger.definition.kind)!;
+  const projected: LaunchPolicyProjection = { ...production.policy, providerProcessing: { ...production.policy.providerProcessing,
+    admittedRules: selection === 'missing' ? production.policy.providerProcessing.admittedRules!.filter((rule) => rule.ruleId !== actualRule.ruleId)
+      : [...production.policy.providerProcessing.admittedRules!, { ...actualRule, ruleId: 'duplicate-baseline-rule' }],
+  } };
+  let calls = 0; let credentials = 0;
+  const execution = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, fixture: null,
+    launchPolicy: projected, currentLaunchPolicy: () => projected, productionPolicyFor: () => projected,
+    secretResolver: { resolve: async () => { credentials += 1; return 'synthetic-placeholder'; } },
+    production: { scope: 'ordinary-production', nativeFetch: async () => { calls += 1; throw new Error('unexpected synthetic send'); } } });
+  owners.push(execution);
+  const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+  const before = db.prepare('SELECT * FROM analysis_run_states WHERE run_record_id = ? ORDER BY sequence').all(runId);
+  try {
+    expect(() => execution.admitAndDispatch(runId)).toThrow('规则');
+    expect(store.baselineAnalysisLedger.requestAdmissionOf(runId)).toBeNull();
+    expect(db.prepare('SELECT * FROM analysis_run_states WHERE run_record_id = ? ORDER BY sequence').all(runId)).toEqual(before);
+    expect([calls, credentials]).toEqual([0, 0]); expect(requestGovernor.snapshot()).toMatchObject({ registered: 0, waiting: 0, inFlight: 0 });
+  } finally { db.close(); }
+});
+
+it.each(['missing', 'denied', 'different-binding'] as const)('refuses a %s frozen-policy resolver before history or secret access (#1131)', async (resolution) => {
+  const { store, production } = await openProductionStore();
+  const reference = await configure(store, production, 'deepseek-open-platform');
+  const bookId = await sample1Book(store, '合成固定策略准入拒绝'); const prepared = prepare(store, bookId, production.policy);
+  const runId = store.authorizeBaselineAnalysis(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!;
+  const before = store.inspectBaselineAnalysis(bookId, () => null).run!.transitions;
+  let reads = 0; let sends = 0; const bindings: ConfiguredProviderBinding[] = [];
+  const execution = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy: production.policy, fixture: null,
+    ...(resolution === 'missing' ? {} : { productionPolicyFor: (binding: ConfiguredProviderBinding) => {
+      bindings.push(binding);
+      return resolution === 'denied' ? { ...production.policy, integrityState: 'denied' as const, denialReason: 'launch-policy-integrity-denied' as const }
+        : resolveSourceCheckoutLaunchPolicySync(roots.codeRoot, 'ordinary-production', { ...GO, credentialReference: reference });
+    } }),
+    production: { scope: 'ordinary-production', nativeFetch: async () => { sends += 1; throw new Error('unexpected transport'); } },
+    secretResolver: { resolve: async () => { reads += 1; return 'public-synthetic-placeholder'; } } });
+  owners.push(execution);
+  expect(() => execution.admitAndDispatch(runId)).toThrow();
+  expect(store.inspectBaselineAnalysis(bookId, () => null).run!.transitions).toEqual(before);
+  expect(reads).toBe(0); expect(sends).toBe(0);
+  expect(requestGovernor.snapshot()).toMatchObject({ registered: 0, waiting: 0, inFlight: 0 });
+  expect(bindings).toEqual(resolution === 'missing' ? [] : [{ ...OFFICIAL, credentialReference: reference }]);
+});
+
+it('starts a queued enrolled background Run on its frozen route after Main becomes missing (#1131)', async () => {
+  const { store, production } = await openProductionStore();
+  const reference = await configure(store, production, 'deepseek-open-platform');
+  const bookId = await sample1Book(store, '合成等待后台固定路线');
+  const runtime = { routeExecutable: true, placeFree: true, capacity: 2, editorWorkBusy: false, now: Date.now() + 3_600_000, quietMs: 30_000 };
+  const shown = store.inspectBackgroundAnalysisEnrollment(bookId, runtime);
+  const version = store.enrollBackgroundAnalysis(bookId, shown.offer.disclosureDigest!, 'backfill', { kind: 'book', seriesId: null }, 400_000, runtime).enrollment!.enrollmentVersionId;
+  let work = store.createBackgroundBaselineAnalysisPreparationWork(bookId, 'first-baseline', version, production.policy);
+  while (!work.done) work = store.advanceBaselineAnalysisPreparationWork(work.workId!);
+  const prepared = work.projection!;
+  const runId = store.startEnrolledBaselineAnalysis(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest, version, 'first-baseline', runtime).dispatchRunRecordId!;
+  const calls: StubCall[] = []; const reads: string[] = [];
+  const execution = owner(store, production, stubTransport(calls, await chainAnswers(prepared)), reads);
+  execution.setBackgroundIdle(false);
+  expect(execution.admitOrQueue(runId, store.baselineAnalysisLedger, 'background')).toBe('queued');
+  expect(calls).toHaveLength(0); expect(reads).toHaveLength(0);
+  const missing = store.saveModelServiceConnection('合成后台等待时新选择', null, 'needs-attention', 'opencode-go');
+  store.setModelServiceCredentialState(missing.credentialReference, 'missing'); store.selectModelServiceRoute('opencode-go');
+  await production.rebind(store); expect(production.live).toBeNull();
+  execution.setBackgroundIdle(true); await execution.whenIdle();
+  expect(store.baselineAnalysisLedger.currentRunState(runId)).toBe('completed');
+  expect(calls.length).toBeGreaterThan(0); expect(calls.every((call) => call.url === OFFICIAL.endpoint)).toBe(true);
+  expect(reads.length).toBeGreaterThan(0); expect(reads.every((read) => read === reference)).toBe(true);
+  expect(store.baselineAnalysisLedger.requestAdmissionOf(runId)!.pins.policyRuleId).toBe('enrolled-background-manuscript-analysis-processing');
+  expect(store.baselineAnalysisLedger.requestAdmissionOf(runId)!.width).toBe(1);
+});
+
+it('reopens a stopped Run on its frozen official route after Main switches to an unready connection (#1131)', async () => {
+  const { store, production } = await openProductionStore(); const reference = await configure(store, production, 'deepseek-open-platform');
+  const bookId = await sample1Book(store, '合成重启后固定路线'); const prepared = prepare(store, bookId, production.policy);
+  const calls: StubCall[] = []; let limited = true;
+  const transport = stubTransport(calls, await chainAnswers(prepared), (ordinal) => ordinal === 3 && limited
+    ? { status: 402, body: { error: { message: 'Insufficient Balance' } } } : null);
+  const original = owner(store, production, transport); const stopped = await run(store, original, bookId, prepared);
+  expect(stopped.state).toBe('resumable');
+  const runId = stopped.run!.runRecordId; const facts = store.baselineAnalysisLedger.loadExecutionPlan(runId);
+  const originalDefinition = store.baselineAnalysisLedger.definitionForRun(runId, facts.promptContractDigest);
+  const binding = store.baselineAnalysisLedger.executionBindingOf(runId); const checkpoints = store.baselineAnalysisLedger.unitCheckpoints(runId);
+  const missing = store.saveModelServiceConnection('合成未就绪新选择', null, 'needs-attention', 'opencode-go');
+  store.setModelServiceCredentialState(missing.credentialReference, 'missing'); store.selectModelServiceRoute('opencode-go');
+  await original.dispose(); await store.close(); requestGovernor.close(); await requestGovernor.whenIdle(); requestGovernor = new ModelRequestGovernor();
+  const reopened = await openProductionStore(roots.dataRoot); expect(reopened.production.live).toBeNull(); limited = false;
+  const reads: string[] = []; const continued = owner(reopened.store, reopened.production, transport, reads);
+  const ledger = reopened.store.baselineAnalysisLedger; const defaultDefinition = ledger.definition;
+  const restored = ledger.definitionForRun(runId, facts.promptContractDigest);
+  expect(restored.promptContractDigest).toBe(originalDefinition.promptContractDigest);
+  expect(restored.schemaDigest).toBe(originalDefinition.schemaDigest); expect(restored.systemPrompt).toBe(originalDefinition.systemPrompt);
+  expect(ledger.definition).toBe(defaultDefinition); expect(ledger.executionBindingOf(runId)).toEqual(binding);
+  expect(ledger.unitCheckpoints(runId)).toEqual(checkpoints);
+  expect(() => continued.admitAndDispatch(stopped.run!.runRecordId, reopened.store.baselineAnalysisLedger, { resume: true })).not.toThrow();
+  await continued.whenIdle();
+  expect(reopened.store.inspectBaselineAnalysis(bookId, () => null).run!.state).toBe('completed');
+  expect(calls.every((call) => call.url === OFFICIAL.endpoint)).toBe(true);
+  expect(reads.length).toBeGreaterThan(0); expect(reads.every((read) => read === reference)).toBe(true);
+  expect(ledger.executionBindingOf(runId)?.bindingDigest).toBe(binding?.bindingDigest);
+  expect(ledger.unitCheckpoints(runId).slice(0, checkpoints.length)).toEqual(checkpoints); expect(ledger.definition).toBe(defaultDefinition);
+});
+
+it('restores only exact current baseline contract variants without changing the new-plan default (#1131 rev14)', async () => {
+  const { store, production } = await openProductionStore(); await configure(store, production, 'deepseek-open-platform');
+  const ledger = store.baselineAnalysisLedger; const selected = ledger.definition; const base = selected.clarificationBase ?? selected;
+  const wrapped = withModelClarification(base);
+  expect(ledger.definitionForDigest(base.promptContractDigest).promptContractDigest).toBe(base.promptContractDigest);
+  expect(ledger.definitionForDigest(wrapped.promptContractDigest).promptContractDigest).toBe(wrapped.promptContractDigest);
+  expect(ledger.definitionForDigest('0'.repeat(64)).promptContractDigest).not.toBe('0'.repeat(64));
+  expect(ledger.definitionForDigest(BASELINE_PROMPT_CONTRACT_V1_DIGEST).promptContractDigest).not.toBe(BASELINE_PROMPT_CONTRACT_V1_DIGEST);
+  expect(ledger.definition).toBe(selected);
+});
+
+it.each(['unrelated', 'retained-v1'] as const)('refuses an unmatched %s baseline contract before continuation effects (#1131 rev14)', async (variant) => {
+  const { store, production } = await openProductionStore(); await configure(store, production, 'deepseek-open-platform');
+  const bookId = await sample1Book(store, '合成契约失配拒绝'); const prepared = prepare(store, bookId, production.policy);
+  const calls: StubCall[] = []; const reads: string[] = [];
+  const execution = owner(store, production, stubTransport(calls, await chainAnswers(prepared), () => ({ status: 402, body: { error: { message: 'Insufficient Balance' } } })), reads);
+  const stopped = await run(store, execution, bookId, prepared); const runId = stopped.run!.runRecordId;
+  const ledger = store.baselineAnalysisLedger; const facts = ledger.loadExecutionPlan(runId);
+  const before = store.inspectBaselineAnalysis(bookId, () => null).run!.transitions; const sent = calls.length; const secrets = reads.length;
+  const load = vi.spyOn(ledger, 'loadExecutionPlan').mockReturnValue({ ...facts,
+    promptContractDigest: variant === 'retained-v1' ? BASELINE_PROMPT_CONTRACT_V1_DIGEST : '0'.repeat(64) });
+  try {
+    expect(() => execution.admitAndDispatch(runId, ledger, { resume: true })).toThrow('契约');
+    expect(calls).toHaveLength(sent); expect(reads).toHaveLength(secrets);
+    expect(requestGovernor.snapshot()).toMatchObject({ registered: 0, waiting: 0, inFlight: 0 });
+  } finally { load.mockRestore(); }
+  expect(store.inspectBaselineAnalysis(bookId, () => null).run!.transitions).toEqual(before);
+});
 
 function code(operation: () => unknown): string {
   try {
@@ -387,7 +526,7 @@ it('keeps a historical v2 binding without an execution receipt serial on explici
   }) as unknown as typeof fetch;
   const capacity = new ModelRequestGovernor(); const execution = new BaselineAnalysisExecutionOwner({ requestGovernor: capacity,
     ledger: kept, launchPolicy: reopened.production.policy, fixture: null, production: { scope: 'ordinary-production', nativeFetch: transport },
-    productionPolicyFor: (frozen) => resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', frozen),
+    productionPolicyFor: (frozen) => resolveSourceCheckoutLaunchPolicySync(roots.codeRoot, 'ordinary-production', frozen),
     secretResolver: { resolve: async () => 'public-synthetic-placeholder' } });
   try {
     execution.admitAndDispatch(runId, kept, { resume: true }); await entered.promise;
@@ -397,6 +536,161 @@ it('keeps a historical v2 binding without an execution receipt serial on explici
     expect(kept.currentRunState(runId)).toBe('completed'); expect(kept.executionBindingOf(runId)!.bindingDigest).toBe(binding.bindingDigest);
   } finally { release.resolve(); await execution.dispose(); capacity.close(); await capacity.whenIdle(); }
 });
+
+/** An actual pre-receipt attempt, extended exclusively through the retained legacy question/answer/claim writers. */
+async function legacyClaimLaunch() {
+  const application = await openProductionStore(); await configure(application.store, application.production, 'opencode-go');
+  const bookId = await sample1Book(application.store, '合成历史澄清回答'); const prepared = prepare(application.store, bookId, application.production.policy);
+  const initialLedger = application.store.baselineAnalysisLedger; const begin = initialLedger.beginRequestAdmissions.bind(initialLedger);
+  let snapshot: string | undefined;
+  const intercept = vi.spyOn(initialLedger, 'beginRequestAdmissions').mockImplementation((id, width, rule) => {
+    snapshot ??= snapshotAtBoundary('legacy-answer-before-first-receipt'); return begin(id, width, rule);
+  });
+  const answers = await chainAnswers(prepared); let runId: string;
+  try { runId = (await run(application.store, owner(application.store, application.production, stubTransport([], answers)), bookId, prepared)).run!.runRecordId; }
+  finally { intercept.mockRestore(); }
+  const reopened = await openProductionStore(snapshot!); const ledger = reopened.store.baselineAnalysisLedger;
+  expect(ledger.requestAdmissionOf(runId)).toBeNull();
+  const facts = ledger.loadExecutionPlan(runId); const binding = ledger.executionBindingOf(runId)!;
+  const definition = ledger.definitionForRun(runId, facts.promptContractDigest);
+  const questionFor = (ordinal: number) => {
+    const unit = facts.manifest.units[ordinal - 1]!;
+    const message = definition.buildUnitMessage(unit, facts.manifest.units.length,
+      new Map(ledger.readRevisionBlocks(facts.checkpoint.manuscriptId, facts.checkpoint.revisionId).map((block) => [block.blockId, block])));
+    const id = ledger.recordClarificationRequest({ runRecordId: runId, attemptId: binding.attemptId, taskIntentId: facts.taskIntentId,
+      unitOrdinal: ordinal, planVersion: facts.planVersionOrdinal, planEnvelopeDigest: facts.planEnvelopeDigest,
+      requestDigest: definition.requestDigest(ordinal, unit.digest), failure: { code: 'MODEL_CLARIFICATION_REQUIRED', failureClass: 'clarification', status: null, reason: '合成历史问题。' },
+      firstPayloadDigest: null, firstUnitMessageDigest: sha256Hex(message), firstUsage: { inputTokens: 10, outputTokens: 5 }, firstWallMs: 1,
+      modelQuestion: { question: '按哪个合成阅读重点处理？', options: ['人物', '事件'], freeTextAllowed: true }, firstAttempts: 1 });
+    ledger.recordRunState(runId, 'awaiting-clarification', { detail: '合成历史等待回答。' });
+    ledger.recordClarificationAnswer(bookId, { taskIntentId: facts.taskIntentId, requestId: id, optionId: 'model-option-0', note: null });
+    return id;
+  };
+  const questionId = questionFor(1); expect(ledger.claimModelClarificationAnswer(runId, questionId)).toBe(true);
+  ledger.recordRunState(runId, 'resumable', { detail: '合成历史回答提交后中断。', modelClarificationAnswerClaim: questionId });
+  expect(ledger.requestAdmissionOf(runId)).toBeNull(); expect(ledger.modelClarificationAnswerNotSent(runId, questionId, 1)).toBe(false);
+  const predecessor = new DatabaseSync(join(snapshot!, 'store', 'ai7.sqlite'), { readOnly: true });
+  try { expect(() => validateRequestAdmissionRecords(predecessor, false)).not.toThrow(); } finally { predecessor.close(); }
+  const evidence = () => {
+    const db = new DatabaseSync(join(snapshot!, 'store', 'ai7.sqlite'), { readOnly: true });
+    try { return {
+      schemaRevision: db.prepare('PRAGMA user_version').get()!.user_version,
+      marker: readFileSync(dataVersionMarkerPath(snapshot!), 'utf8'),
+      questions: db.prepare('SELECT request_id, canonical_json, sha256 FROM analysis_clarification_requests WHERE run_record_id = ? ORDER BY unit_ordinal').all(runId),
+      answers: db.prepare('SELECT answer_id, canonical_json, sha256 FROM analysis_clarification_answers WHERE request_id IN (SELECT request_id FROM analysis_clarification_requests WHERE run_record_id = ?) ORDER BY answer_id').all(runId),
+      states: db.prepare('SELECT sequence, canonical_json, sha256 FROM analysis_run_states WHERE run_record_id = ? ORDER BY sequence').all(runId),
+    }; } finally { db.close(); }
+  };
+  const request = (ordinal: number) => ({ requestId: randomUUID(), producerId: randomUUID(), requestOrdinal: 1, sessionId: randomUUID(),
+    unitOrdinal: ordinal, stage: 'units' as const, attemptIndex: 1, adaptationId: null, payloadDigest: sha256Hex('synthetic-no-send-payload'),
+    messageDigest: sha256Hex('synthetic-no-send-message'), requestDigest: definition.requestDigest(ordinal, facts.manifest.units[ordinal - 1]!.digest),
+    inputDigest: facts.manifest.units[ordinal - 1]!.digest, contractDigest: facts.promptContractDigest });
+  return { ...reopened, ledger, runId, bookId, facts, binding, answers, snapshot: snapshot!, questionId, questionFor, evidence, request };
+}
+
+it.each([false, true])('keeps a real legacy answer claim unknown without repeating it, later no-send=%s (#1131 rev18)', async (laterNoSend) => {
+  const legacy = await legacyClaimLaunch(); const original = legacy.evidence();
+  if (laterNoSend) {
+    legacy.ledger.beginRequestAdmissions(legacy.runId, 1, liveKindRule(legacy.production.policy, 'baseline-manuscript-analysis')!.ruleId);
+    const unrelated = legacy.request(1); legacy.ledger.admitModelRequest(legacy.runId, unrelated);
+    legacy.ledger.recordModelRequestNotSent(legacy.runId, unrelated.requestId);
+    expect(legacy.ledger.modelClarificationAnswerNotSent(legacy.runId, legacy.questionId, 1)).toBe(false);
+  }
+  await legacy.store.close(); const restarted = await openProductionStore(legacy.snapshot);
+  restarted.store.reconcileStoppedBaselineAnalysisRuns(); const kept = restarted.store.baselineAnalysisLedger;
+  const calls: StubCall[] = []; const execution = owner(restarted.store, restarted.production, stubTransport(calls, legacy.answers));
+  execution.admitAndDispatch(legacy.runId, kept, { resume: true }); await execution.whenIdle();
+  expect(kept.requestAdmissionOf(legacy.runId)!.width).toBe(1);
+  expect(kept.currentRunState(legacy.runId)).toBe('completed-with-gaps');
+  expect(kept.unitCheckpoints(legacy.runId).find((checkpoint) => checkpoint.unit.unitOrdinal === 1)?.unit.closed).toMatchObject({ state: 'gap', gap: { code: 'outcome-unknown' } });
+  expect(calls.length).toBeGreaterThan(0);
+  expect(calls.some((call) => /^分析单元 1\//u.test((JSON.parse(call.body) as { messages: Array<{ role: string; content: string }> }).messages.findLast((message) => message.role === 'user')!.content))).toBe(false);
+  expect(kept.executionBindingOf(legacy.runId)!.bindingDigest).toBe(legacy.binding.bindingDigest);
+  const after = legacy.evidence(); expect(after.questions).toEqual(original.questions); expect(after.answers).toEqual(original.answers);
+  expect(after.states.slice(0, original.states.length)).toEqual(original.states);
+  expect(kept.unitCheckpoints(legacy.runId).find((checkpoint) => checkpoint.unit.unitOrdinal === 1)?.observation?.usage).toEqual({ inputTokens: 10, outputTokens: 5 });
+});
+
+it.each([{ guard: 'influence', cancel: false }, { guard: 'series', cancel: false }, { guard: 'influence', cancel: true }])
+  ('keeps a receipt-free legacy claimed answer unknown during a denying $guard callback, cancel=$cancel (#1131 rev19)', async ({ guard, cancel }) => {
+    const legacy = await legacyClaimLaunch(); const before = legacy.evidence(); let effects = 0;
+    const execution = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: legacy.ledger, launchPolicy: legacy.production.policy, fixture: null,
+      productionPolicyFor: (binding) => resolveSourceCheckoutLaunchPolicySync(roots.codeRoot, 'ordinary-production', binding),
+      production: { scope: 'ordinary-production', nativeFetch: async () => { effects += 1; throw new Error('unexpected stopped legacy send'); } },
+      secretResolver: { resolve: async () => { effects += 1; return 'public-synthetic-placeholder'; } },
+      ...(guard === 'influence' ? { influenceGuard: () => '合成拒绝继续读取' } : { seriesScopeGuard: () => '合成拒绝继续读取' }) });
+    owners.push(execution);
+    if (cancel) legacy.ledger.requestCancel(legacy.bookId, legacy.facts.taskIntentId);
+    execution.admitAndDispatch(legacy.runId, legacy.ledger, { resume: true, ...(cancel ? { cancel: true } : {}) }); await execution.whenIdle();
+    expect(effects).toBe(0); expect(legacy.ledger.requestAdmissionOf(legacy.runId)).toBeNull();
+    expect(legacy.ledger.currentRunState(legacy.runId)).toBe(cancel ? 'cancelled' : 'interrupted');
+    expect(legacy.ledger.unitCheckpoints(legacy.runId).find((checkpoint) => checkpoint.unit.unitOrdinal === 1)?.unit.closed).toMatchObject({ state: 'gap', gap: { code: 'outcome-unknown' } });
+    expect(legacy.ledger.inspect(legacy.bookId).taskOutcome?.report?.usagePerStage.units).toMatchObject({ inputTokens: 10, outputTokens: 5 });
+    expect(legacy.ledger.executionBindingOf(legacy.runId)!.bindingDigest).toBe(legacy.binding.bindingDigest);
+    const after = legacy.evidence(); expect(after.questions).toEqual(before.questions); expect(after.answers).toEqual(before.answers);
+    expect(after.states.slice(0, before.states.length)).toEqual(before.states);
+    expect(requestGovernor.snapshot()).toMatchObject({ registered: 0, waiting: 0, inFlight: 0 });
+  });
+
+it.each(['null', 'object', 'non-uuid', 'foreign-question', 'wrong-answer-pin', 'unpaired', 'wrong-unit'] as const)
+  ('refuses $0 claim evidence without treating old rows as new admissions (#1131 rev18)', async (damage) => {
+    const legacy = await legacyClaimLaunch(); const rule = liveKindRule(legacy.production.policy, 'baseline-manuscript-analysis')!.ruleId;
+    legacy.ledger.beginRequestAdmissions(legacy.runId, 1, rule);
+    if (damage === 'wrong-unit' || damage === 'unpaired') {
+      const question = legacy.questionFor(2);
+      if (damage === 'wrong-unit') {
+        const before = legacy.evidence();
+        expect(() => legacy.ledger.admitModelRequest(legacy.runId, legacy.request(3), question)).toThrow('准入记录无法核对');
+        expect(legacy.evidence()).toEqual(before); return;
+      }
+      legacy.ledger.recordRunState(legacy.runId, 'resumable', { modelClarificationAnswerClaim: question });
+    } else {
+      const db = new DatabaseSync(join(legacy.snapshot, 'store', 'ai7.sqlite'));
+      const table = damage === 'wrong-answer-pin' ? 'analysis_clarification_answers' : 'analysis_run_states';
+      const row = db.prepare(`SELECT rowid, canonical_json FROM ${table} WHERE ${table === 'analysis_run_states' ? "json_type(canonical_json, '$.modelClarificationAnswerClaim') IS NOT NULL" : 'request_id = ?'} ORDER BY rowid LIMIT 1`)
+        .get(...(table === 'analysis_run_states' ? [] : [legacy.questionId]))!;
+      const record = JSON.parse(String(row.canonical_json)) as Record<string, unknown>;
+      if (damage === 'wrong-answer-pin') record.requestSha256 = '0'.repeat(64);
+      else record.modelClarificationAnswerClaim = damage === 'null' ? null : damage === 'object' ? {} : damage === 'non-uuid' ? 'not-a-uuid' : randomUUID();
+      const changed = canonicalRecord(record);
+      const triggers = db.prepare("SELECT name, sql FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = ?").all(table);
+      db.exec('BEGIN');
+      try {
+        for (const trigger of triggers) db.exec(`DROP TRIGGER "${String(trigger.name).replaceAll('"', '""')}"`);
+        db.prepare(`UPDATE ${table} SET canonical_json = ?, sha256 = ? WHERE rowid = ?`).run(changed.json, changed.digest, row.rowid!);
+        for (const trigger of triggers) db.exec(String(trigger.sql));
+        db.exec('COMMIT');
+      } catch (error) { db.exec('ROLLBACK'); throw error; } finally { db.close(); }
+    }
+    const before = legacy.evidence();
+    expect(() => legacy.ledger.requestAdmissionOf(legacy.runId)).toThrow();
+    await expect(EditorialStore.open(legacy.snapshot, roots.codeRoot).then((incoming) => { opened.push(incoming); return incoming; })).rejects.toMatchObject({ code: 'ANALYSIS_RECORD_INVALID' });
+    expect(legacy.evidence()).toEqual(before);
+  });
+
+it.each(['runRecordId', 'sequence', 'recordedAt'].flatMap((field) => [false, true].map((receiptExists) => ({ field, receiptExists }))))
+  ('refuses rehashed legacy claim row $field drift, receiptExists=$receiptExists (#1131 rev19)', async ({ field, receiptExists }) => {
+    const legacy = await legacyClaimLaunch();
+    const rule = liveKindRule(legacy.production.policy, 'baseline-manuscript-analysis')!.ruleId;
+    if (receiptExists) legacy.ledger.beginRequestAdmissions(legacy.runId, 1, rule);
+    const db = new DatabaseSync(join(legacy.snapshot, 'store', 'ai7.sqlite'));
+    const row = db.prepare("SELECT rowid, canonical_json FROM analysis_run_states WHERE run_record_id = ? AND json_type(canonical_json, '$.modelClarificationAnswerClaim') IS NOT NULL ORDER BY sequence LIMIT 1").get(legacy.runId)!;
+    const record = JSON.parse(String(row.canonical_json)) as Record<string, unknown>;
+    record[field] = field === 'runRecordId' ? randomUUID() : field === 'sequence' ? Number(record.sequence) + 100 : '1900-01-01T00:00:00.000Z';
+    const changed = canonicalRecord(record); const triggers = db.prepare("SELECT name, sql FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = 'analysis_run_states'").all();
+    db.exec('BEGIN');
+    try {
+      for (const trigger of triggers) db.exec(`DROP TRIGGER "${String(trigger.name).replaceAll('"', '""')}"`);
+      db.prepare('UPDATE analysis_run_states SET canonical_json = ?, sha256 = ? WHERE rowid = ?').run(changed.json, changed.digest, row.rowid!);
+      for (const trigger of triggers) db.exec(String(trigger.sql)); db.exec('COMMIT');
+    } catch (error) { db.exec('ROLLBACK'); throw error; } finally { db.close(); }
+    const before = legacy.evidence();
+    if (receiptExists) expect(() => legacy.ledger.requestAdmissionOf(legacy.runId)).toThrow();
+    else expect(() => legacy.ledger.beginRequestAdmissions(legacy.runId, 1, rule)).toThrow();
+    expect(legacy.evidence()).toEqual(before);
+    await expect(EditorialStore.open(legacy.snapshot, roots.codeRoot).then((incoming) => { opened.push(incoming); return incoming; })).rejects.toMatchObject({ code: 'ANALYSIS_RECORD_INVALID' });
+    expect(legacy.evidence()).toEqual(before);
+  });
 
 it('claims a live clarification answer only with its granted fence and preserves a pause plus queued restart evidence (#1131)', async () => {
   const { store, production } = await openProductionStore(); await configure(store, production, 'opencode-go');
@@ -1261,7 +1555,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
         const prepared = await restarted.prepareDatabaseExport(destination, true);
         expect((await restarted.approveDatabaseExport(prepared.preparationId, true)).outcome).toBe('created');
         const preview = await restarted.inspectDatabaseImport(destination);
-        expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 91, dataVersion: 1 });
+        expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 92, dataVersion: 1 });
         await restarted.prepareDatabaseReplacement(preview.previewId);
         restarted.close();
         const replaced = await EditorialStore.open(roots.dataRoot, roots.codeRoot); opened.push(replaced);

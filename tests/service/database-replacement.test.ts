@@ -750,3 +750,18 @@ describe('替换本机全部数据 at its second review (Issue #434 review)', ()
     }
   }, 180_000);
 });
+
+
+it('validates and advances a historical reader91 package through the existing replacement open callback (#1131)', async () => {
+  let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  createBook(store, '合成待替换目标');
+  const preview = await store.inspectDatabaseImport(await handmade('reader91.ai7db', 1, 91));
+  expect(preview.compatibility).toBe('compatible');
+  await store.prepareDatabaseReplacement(preview.previewId, T); await store.close();
+  store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  try {
+    expect(store.inspectDataVersion()).toMatchObject({ dataVersion: 1, schemaRevision: LATEST_SCHEMA_VERSION });
+    expect(titles(store)).toEqual([]);
+    expect((await store.inspectDatabaseReplacements()).replacements[0]).toMatchObject({ outcome: 'applied' });
+  } finally { await store.close(); }
+});

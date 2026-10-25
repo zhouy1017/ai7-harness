@@ -1,3 +1,4 @@
+import { dataVersionMarkerPath, readDataVersionMarker } from '../../src/service/data-version.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
@@ -437,4 +438,27 @@ describe('数据版本标记 over the real store (Issue #967; ADR 0023)', () => 
     await reopened(() => undefined);
     expect((await readMarker()).schemaRevision).toBe(LATEST_SCHEMA_VERSION);
   }, 120_000);
+});
+
+
+it.each([90, 91])('advances a valid historical reader%s without rewriting Book or version-history rows (#1131)', async (revision) => {
+  const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  const creation = store.prepareBookCreation('合成历史读取', null);
+  store.commitBookCreation({ ...creation.proposed, reviewDigest: creation.reviewDigest });
+  await store.close();
+  const db = new DatabaseSync(databasePath());
+  const before = db.prepare('SELECT rowid, * FROM books ORDER BY rowid').all();
+  new DataVersionLedger(db).recordOpen({ softwareVersion: '0.0.9', dataVersion: 1, schemaRevision: revision });
+  const history = db.prepare('SELECT rowid, * FROM store_versions ORDER BY rowid').all();
+  db.exec(`PRAGMA user_version = ${revision}`); db.close();
+  const marker = (await readDataVersionMarker(roots.dataRoot))!;
+  await writeFile(dataVersionMarkerPath(roots.dataRoot), JSON.stringify({ ...marker, schemaRevision: revision }));
+  const upgraded = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  expect(upgraded.inspectDataVersion()).toMatchObject({ dataVersion: 1, schemaRevision: LATEST_SCHEMA_VERSION });
+  await upgraded.close();
+  const read = new DatabaseSync(databasePath());
+  try {
+    expect(read.prepare('SELECT rowid, * FROM books ORDER BY rowid').all()).toEqual(before);
+    expect(read.prepare('SELECT rowid, * FROM store_versions ORDER BY rowid').all().slice(0, history.length)).toEqual(history);
+  } finally { read.close(); }
 });
