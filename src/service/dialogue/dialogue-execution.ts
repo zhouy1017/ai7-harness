@@ -357,6 +357,9 @@ export class DialogueExecutionOwner {
     let outcome: HarnessTurnOutcome | null = null;
     let failure: string | null = null;
     const transmission: { read: (() => number) | null } = { read: null };
+    // A stop or close that refuses the next request before it leaves — a tool gap, a capacity wait — still settles as that stop.
+    let refusedForStop = false;
+    const stopping = (): boolean => active.stopRequested || this.#disposed;
     try {
       if (live !== null) active.producer = this.#deps.requestGovernor.registerProducer({ key: `dialogue:${turn.attemptId}`, kind: 'dialogue', lane: 'foreground' });
       // Inside the attempt: a source that cannot be read settles the attempt as failed rather than leaving it answering.
@@ -414,12 +417,13 @@ export class DialogueExecutionOwner {
       const harness: PrimaryAgentHarnessHandle = await prepareExecution({
         ...(active.producer === null ? {} : { acquireRequest: async (_payload: import('../provider/payload.js').AssembledModelPayload, turnSignal: AbortSignal) => {
           const combined = AbortSignal.any([active.requestAbort.signal, turnSignal]);
-          const permit = await this.#deps.requestGovernor.acquire(active.producer!, combined);
+          const permit = await this.#deps.requestGovernor.acquire(active.producer!, combined)
+            .catch((error: unknown) => { if (stopping()) refusedForStop = true; throw error; });
           try {
             combined.throwIfAborted();
-            if (active.stopRequested || this.#disposed || !isCurrent()) throw new DialogueError('DIALOGUE_SCOPE_CHANGED', '对话已停止或来源已变化；未发送任何内容。');
+            if (stopping() || !isCurrent()) throw new DialogueError('DIALOGUE_SCOPE_CHANGED', '对话已停止或来源已变化；未发送任何内容。');
             return { release: () => { pendingTicket = null; permit.release(); } };
-          } catch (error) { permit.release(); throw error; }
+          } catch (error) { if (stopping()) refusedForStop = true; permit.release(); throw error; }
         } }),
         ...(toolSession === null ? {} : { localTools: toolSession }),
         sessionId,
@@ -435,9 +439,11 @@ export class DialogueExecutionOwner {
           const nativeFetch = live.runtime.nativeFetch;
           // A stop during cache/session/credential setup can precede the Harness turn, when interrupt() is still idle.
           // Check again at both transport boundaries so that neither a cache claim nor an actual send starts after it.
-          // Nothing has left at either boundary, so the adapter reads it as a transport failure, never an unknown result (#1080).
+          // Before the adapter enters its sender (`beforeSend`) the refusal is an observed no-send. Inside the transport the
+          // adapter cannot tell it apart from a sent request's rejection, so it stays unknown unless the wrapper proves no-send.
           const requireRunning = (signal?: AbortSignal): void => {
             if (active.stopRequested || this.#disposed || !isCurrent() || signal?.aborted === true) {
+              if (stopping()) refusedForStop = true;
               throw Object.assign(new DOMException('Dialogue interrupted.', 'AbortError'), { requestSent: false });
             }
           };
@@ -547,7 +553,7 @@ export class DialogueExecutionOwner {
     // A stop or close that aborts the request before it leaves is a transport failure to the adapter (#1080), yet it is still
     // the editor's stop, or AI7 closing, and settles as one: nothing was sent.
     const last = outcome?.signals.at(-1);
-    const stoppedBeforeSend = (active.stopRequested || this.#disposed) && (transmission.read?.() ?? 0) === 0;
+    const stoppedBeforeSend = stopping() && ((transmission.read?.() ?? 0) === 0 || refusedForStop);
     let settled: DialogueOutcome;
     let cause: string | null = null;
     if (stoppedBeforeSend) {

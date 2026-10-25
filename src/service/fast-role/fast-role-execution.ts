@@ -375,7 +375,8 @@ export class FastRoleExecutionOwner {
         adapterFactory: (codes) => {
           if (live === null || route === null || slotBinding === null) return new Ai7LocalDeterministicAdapter(this.#deps.fixture!, promptContractDigest, codes);
           const nativeFetch = live.runtime.nativeFetch;
-          // Nothing has left at either boundary, so the adapter reads it as a transport failure, never an unknown result (#1080).
+          // Before the adapter enters its sender (`beforeSend`) the refusal is an observed no-send. Inside the transport the
+          // adapter cannot tell it apart from a sent request's rejection, so it stays unknown unless the wrapper proves no-send.
           const requireRunning = (signal?: AbortSignal): void => {
             if (this.#disposed || !isCurrent() || signal?.aborted === true) {
               throw Object.assign(new DOMException('Fast-role request interrupted.', 'AbortError'), { requestSent: false });

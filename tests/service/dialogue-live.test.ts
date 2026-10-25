@@ -303,6 +303,50 @@ describe('the admitted dialogue route, read from the selected policy', () => {
     } finally { await dialogues.dispose(); }
   });
 
+  it.each(['stop', 'dispose'] as const)('%s in a live tool gap settles as that stop before the next request is sent (#1131 review)', async (action) => {
+    const store = await openStore();
+    const book = await importSample1Book(store, roots.codeRoot, '对话工具间隙停止');
+    const selection = selectionOf(store, book);
+    const calls: StubCall[] = [];
+    const nativeFetch = (async (url: string, init: { headers: Record<string, string>; body: string }) => {
+      calls.push({ url, headers: init.headers, body: init.body });
+      const args = JSON.stringify({ query: selection.selectedText, k: 1, sourceKinds: ['manuscript'] });
+      return new Response(new ReadableStream<Uint8Array>({ start(controller) {
+        const event = (delta: unknown, finish_reason: string | null = null): void => {
+          controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ model: OPENCODE_GO_MODEL, choices: [{ index: 0, delta, finish_reason }] })}\n\n`));
+        };
+        event({ tool_calls: [{ index: 0, id: 'retrieval-1', type: 'function', function: { name: 'retrieve', arguments: '' } }] });
+        for (const fragment of [...args]) event({ tool_calls: [{ index: 0, function: { arguments: fragment } }] });
+        event({}, 'tool_calls');
+        controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ model: OPENCODE_GO_MODEL, choices: [], usage: { prompt_tokens: 210, completion_tokens: 48 } })}\n\ndata: [DONE]\n\n`));
+        controller.close();
+      } }), { headers: { 'content-type': 'text/event-stream' } });
+    }) as unknown as typeof fetch;
+    const dialogues = new DialogueExecutionOwner({ requestGovernor, records: store, fixture: null,
+      sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY),
+      live: liveRoute(nativeFetch),
+      retrievalIndex: (id) => store.dialogueRetrievalIndex(id) });
+    const acquire = requestGovernor.acquire.bind(requestGovernor); let acquisitions = 0; let stopping: Promise<void> | undefined;
+    const turn = store.askAboutSelection(book.bookId, { selection, question: '找到书中哪里有相似的描写？' });
+    // The tool result is in; the follow-on model request asks for capacity when the editor stops or AI7 closes.
+    vi.spyOn(requestGovernor, 'acquire').mockImplementation((producer, signal) => {
+      acquisitions += 1;
+      if (acquisitions === 2) stopping = action === 'stop' ? dialogues.stop(turn.attemptId) : dialogues.dispose();
+      return acquire(producer, signal);
+    });
+    try {
+      dialogues.requireReady(store.dialogueSourceDigest(book.bookId, selection));
+      dialogues.begin(turn);
+      await waitFor(() => stopping, (value) => value !== undefined, 'follow-on request asked for capacity');
+      await stopping;
+      const projection = store.inspectDialogue(book.bookId, turn.dialogueId, 0, () => null);
+      expect(calls).toHaveLength(1);
+      expect(projection.attempts[0]!.state).toBe(action === 'stop' ? 'stopped' : 'interrupted');
+      expect(projection.attempts[0]!.causeCode).toBe(action === 'stop' ? null : DIALOGUE_CLOSED_CAUSE);
+      expect(requestGovernor.snapshot()).toMatchObject({ registered: 0, waiting: 0, inFlight: 0 });
+    } finally { await dialogues.dispose(); }
+  });
+
   it('checks the frozen dialogue source after reimport, never a later admitted source in the same Book', async () => {
     const store = await openStore();
     const path = join(roots.inputRoot, 'composed-dialogue.docx');
