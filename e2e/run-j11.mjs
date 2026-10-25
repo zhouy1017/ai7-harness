@@ -3428,6 +3428,32 @@ async function main() {
     const wordAfter = await renderer.evaluate(`Promise.all([window.ai7.inspectEditorialLearning({signalOffset:0,itemOffset:0}),window.ai7.inspectLearningLineage({bookId:${JSON.stringify(wordSignal.source.bookId)},materialKey:${JSON.stringify(wordSignal.source.materialKey)}})]).then(([page,lineage])=>({items:JSON.stringify(page.items.map(item=>item.current)),standing:page.signals.find(signal=>signal.signalId===${JSON.stringify(wordSignal.signalId)})?.currentEligibility,downstream:lineage.downstream}))`);
     requireJourney(wordAfter.items === c0BeforeWord.items && wordAfter.standing === 'excluded' &&
       JSON.stringify(wordAfter.downstream) === JSON.stringify({ signals: 0, memoryCandidates: 0, activeMemories: 0, tasks: 0 }), 'word-preserves-c0-memory-owners-and-counts');
+    // Only that actual exclusion offers the existing explicit re-inclusion; it appends one decision and survives a reopen.
+    await clickSelector(renderer, '.learning-lineage [data-learning-audit-action="reinclude"]', 'word-audit-reinclude-open');
+    const wordReincluding = await readAudit(renderer, (page) => page.reinclude !== null, 'word-audit-reinclude-card');
+    requireJourney(JSON.stringify(wordReincluding.reinclude.choices) === JSON.stringify([['book', false], ['house', false]]) &&
+      wordReincluding.reinclude.record === false, 'word-audit-reinclude-explicit-choices', wordReincluding.reinclude);
+    await tick(renderer, '.learning-reinclude input[value="book"]', 'word-audit-reinclude-book');
+    await readAudit(renderer, (page) => page.reinclude?.record === true, 'word-audit-reinclude-chosen');
+    await clickSelector(renderer, '.learning-reinclude [data-learning-audit-action="reinclude-record"]', 'word-audit-reinclude-record');
+    await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent === '学习准入决定已记录。'`, 'word-audit-reinclude-status');
+    const wordHistory = JSON.stringify([['current', '仅纳入当前图书'], ['superseded', '明确排除']]);
+    const wordRestored = await readAudit(renderer, (page) => page.lineage?.decisions.length === 2 && page.reinclude === null, 'word-audit-reincluded');
+    requireJourney(wordRestored.lineage.standing === 'book' && JSON.stringify(wordRestored.lineage.decisions.map(([state, , choice]) => [state, choice])) === wordHistory,
+      'word-audit-reincluded-history', wordRestored.lineage);
+    await close(); await launch({ pickerPath: wordPath });
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'word-restored-reopen');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('quality')), 'word-restored-quality-open');
+    await clickSelector(renderer, '#quality-tab-audit', 'word-restored-audit-tab');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${wordMaterial} [data-learning-audit-action="open"]`)})`, 'word-restored-audit-row');
+    await clickSelector(renderer, `${wordMaterial} [data-learning-audit-action="open"]`, 'word-restored-audit-lineage');
+    const wordReopened = await readAudit(renderer, (page) => page.lineage?.key === wordSignal.source.materialKey && page.lineage.decisions.length === 2, 'word-restored-reopened-lineage');
+    requireJourney(wordReopened.lineage.standing === 'book' && JSON.stringify(wordReopened.lineage.decisions.map(([state, , choice]) => [state, choice])) === wordHistory,
+      'word-restored-history-after-reopen', wordReopened.lineage);
+    const wordRestoredAfter = await renderer.evaluate(`Promise.all([window.ai7.inspectEditorialLearning({signalOffset:0,itemOffset:0}),window.ai7.inspectLearningLineage({bookId:${JSON.stringify(wordSignal.source.bookId)},materialKey:${JSON.stringify(wordSignal.source.materialKey)}})]).then(([page,lineage])=>({items:JSON.stringify(page.items.map(item=>item.current)),words:page.signals.filter(signal=>signal.kind==='word-tracked-edit').map(signal=>[signal.signalId,signal.currentEligibility]),downstream:lineage.downstream}))`);
+    requireJourney(wordRestoredAfter.items === c0BeforeWord.items &&
+      JSON.stringify(wordRestoredAfter.words) === JSON.stringify([[wordSignal.signalId, 'book']]) &&
+      JSON.stringify(wordRestoredAfter.downstream) === JSON.stringify({ signals: 0, memoryCandidates: 0, activeMemories: 0, tasks: 0 }), 'word-restore-no-new-capture-or-downstream');
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');

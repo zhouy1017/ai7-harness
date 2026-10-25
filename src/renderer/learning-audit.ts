@@ -828,7 +828,9 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
       stop.disabled = busy || open.panel !== null;
       actions.append(stop);
     }
-    if (read.standing === 'excluded' && material.kind !== 'word-tracked-edit') {
+    // An excluded standing is an actual recorded exclusion decision, for a Word pair as for any other material: the
+    // existing explicit re-inclusion restores it; a Word pair's automatic admission never offers one before that.
+    if (read.standing === 'excluded') {
       const again = action(LEARNING_LINEAGE_REINCLUDE, 'secondary', 'reinclude', () => {
         if (busy || open.panel !== null) return;
         open.panel = { kind: 'reinclude', choice: null };
