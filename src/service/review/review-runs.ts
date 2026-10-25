@@ -2066,11 +2066,11 @@ export class ReviewRunStore {
     const envelope = frozen.components['plan-envelope'] as Record<string, unknown>;
     const contractVersion = isRecord(envelope.contractIdentity) && envelope.contractIdentity.version === 2 ? 2 : 1;
     const preference = new HouseReviewPreferenceLedger(this.#db).pinned(category.task.taskIntentId);
-    if (execution.materialReferences === undefined) return this.#ledgers.ledgerOf(category.entry, undefined, undefined, undefined, preference, contractVersion);
-    const references = taskMaterialSources(execution.materialReferences);
-    const intent = this.#db.prepare('SELECT book_id FROM analysis_task_intents WHERE task_intent_id = ?').get(category.task.taskIntentId) as SqlRow;
     const materialPromptDigest = clarificationPlanBaseDigest(execution, envelope);
     requireReview(materialPromptDigest !== null, 'REVIEW_RECORD_INVALID', '任务澄清指令的基础契约与计划不一致。');
+    if (execution.materialReferences === undefined) return this.#ledgers.ledgerOf(category.entry, undefined, materialPromptDigest, undefined, preference, contractVersion);
+    const references = taskMaterialSources(execution.materialReferences);
+    const intent = this.#db.prepare('SELECT book_id FROM analysis_task_intents WHERE task_intent_id = ?').get(category.task.taskIntentId) as SqlRow;
     return this.#ledgers.ledgerOf(category.entry, { bookId: text(intent.book_id), references }, materialPromptDigest, undefined, preference, contractVersion);
   }
 

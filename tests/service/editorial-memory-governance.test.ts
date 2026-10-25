@@ -3,9 +3,9 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, expect, it, vi } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
-import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
+import { BaselineAnalysisExecutionOwner, ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
-import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
+import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy, resolveSourceCheckoutLaunchPolicySync } from '../../src/service/launch-policy.js';
 import { parseReviewCategoryUnitMessageHeader } from '../../src/service/review/review-category-contract.js';
 import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/assurance-sampling-contract.js';
 import { EditorialLearningLedger, EDITORIAL_LEARNING_TRIGGER_SQL } from '../../src/service/learning/ledger.js';
@@ -20,13 +20,16 @@ let roots: ServiceTestRoots | undefined;
 let store: EditorialStore | undefined;
 let owner: BaselineAnalysisExecutionOwner | undefined;
 let driver: ReviewRunDriver | undefined;
+let requestGovernor: ModelRequestGovernor | undefined;
 afterEach(async () => {
   const stopped = driver?.dispose(); await owner?.dispose(); await stopped;
-  store?.close(); await roots?.dispose(); roots = undefined; store = undefined; owner = undefined; driver = undefined;
+  requestGovernor?.close(); await requestGovernor?.whenIdle();
+  await store?.close(); await roots?.dispose(); roots = undefined; store = undefined; owner = undefined; driver = undefined; requestGovernor = undefined;
 });
 
 /** Actual selected production policy/store/gate; only transport is synthetic. Nothing is sent to a provider. */
 async function sourceDecisions() {
+  requestGovernor = new ModelRequestGovernor();
   roots = await createServiceTestRoots('ai7-memory-governance-');
   store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
     induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
@@ -58,9 +61,9 @@ async function sourceDecisions() {
     return new Response(JSON.stringify({ model: choice.model, choices: [{ message: { content, reasoning_content: '合成推理。' }, finish_reason: 'stop' }],
       usage: { prompt_tokens: 40, completion_tokens: 20 } }), { status: 200 });
   };
-  owner = new BaselineAnalysisExecutionOwner({ ledger: subject.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
+  owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: subject.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
     production: { scope: 'ordinary-production', nativeFetch }, secretResolver: { resolve: async () => 'placeholder-production-key' },
-    productionPolicyFor: (selected) => resolveSourceCheckoutLaunchPolicy(roots!.codeRoot, 'ordinary-production', selected),
+    productionPolicyFor: (selected) => resolveSourceCheckoutLaunchPolicySync(roots!.codeRoot, 'ordinary-production', selected),
   });
   driver = new ReviewRunDriver(subject.reviewRunDriveSteps, owner);
   const book = await importSample1Book(subject, roots.codeRoot, '合成记忆来源');
@@ -870,7 +873,58 @@ it('counts a legacy merge over an excluded derived parent once, and its deactiva
     .toContain(fitting.itemId);
 });
 
-it('stamps revision 91 over a revision-90 store of /1 records without changing a byte', async () => {
+function historicalFixtureRows(db: DatabaseSync) {
+  return db.prepare("SELECT name, sql FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map((table) => ({
+    table: String(table.name), rows: db.prepare(/WITHOUT\s+ROWID/iu.test(String(table.sql))
+      ? `SELECT * FROM "${String(table.name).replaceAll('"', '""')}"`
+      : `SELECT rowid AS fixture_rowid, * FROM "${String(table.name).replaceAll('"', '""')}" ORDER BY rowid`).all(),
+  }));
+}
+
+/** Only the two explicitly leased disposable revision90 setups call this historical-format constructor. */
+function constructHistoricalRequestFormat(db: DatabaseSync) {
+  expect(db.prepare('SELECT count(*) total FROM analysis_clarification_requests').get()!.total).toBe(0);
+  expect(db.prepare('SELECT count(*) total FROM analysis_clarification_answers').get()!.total).toBe(0);
+  const fields = [
+    ['analysis_run_states', ['requestAdmission', 'requestRefusal']],
+    ['analysis_unit_checkpoints', ['requests']], ['analysis_clarification_requests', ['requests']],
+  ] as const;
+  const affected = new Set<string>(fields.map(([table]) => table));
+  const before = historicalFixtureRows(db);
+  const immutable = before.filter((entry) => !affected.has(entry.table));
+  const triggers = db.prepare("SELECT name, tbl_name, sql FROM sqlite_schema WHERE type = 'trigger' ORDER BY name").all();
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    for (const [table, properties] of fields) {
+      const rows = db.prepare(`SELECT rowid, * FROM ${table} ORDER BY rowid`).all();
+      const changed = rows.flatMap((row) => {
+        const record = JSON.parse(String(row.canonical_json)) as Record<string, unknown>;
+        if (!properties.some((property) => Object.hasOwn(record, property))) return [];
+        for (const property of properties) delete record[property];
+        return [{ row, record: canonicalRecord(record) }];
+      });
+      const owned = triggers.filter((trigger) => trigger.tbl_name === table);
+      if (changed.length !== 0) {
+        for (const trigger of owned) db.exec(`DROP TRIGGER "${String(trigger.name).replaceAll('"', '""')}"`);
+        for (const { row, record } of changed) db.prepare(`UPDATE ${table} SET canonical_json = ?, sha256 = ? WHERE rowid = ?`)
+          .run(record.json, record.digest, row.rowid!);
+        for (const trigger of owned) db.exec(String(trigger.sql));
+      }
+      const expected = rows.map((row) => {
+        const rewritten = changed.find((entry) => entry.row.rowid === row.rowid);
+        return rewritten === undefined ? row : { ...row, canonical_json: rewritten.record.json, sha256: rewritten.record.digest };
+      });
+      expect(db.prepare(`SELECT rowid, * FROM ${table} ORDER BY rowid`).all()).toEqual(expected);
+      for (const property of properties) expect(db.prepare(`SELECT count(*) total FROM ${table} WHERE json_type(canonical_json, '$.${property}') IS NOT NULL`).get()!.total).toBe(0);
+    }
+    expect(historicalFixtureRows(db).filter((entry) => !affected.has(entry.table))).toEqual(immutable);
+    expect(db.prepare("SELECT name, tbl_name, sql FROM sqlite_schema WHERE type = 'trigger' ORDER BY name").all()).toEqual(triggers);
+    db.exec('COMMIT');
+  } catch (error) { db.exec('ROLLBACK'); throw error; }
+  return { rows: historicalFixtureRows(db).filter((entry) => affected.has(entry.table)), triggers };
+}
+
+it('advances to the current reader over a revision-90 store of /1 records without changing a byte', async () => {
   const { subject, signals } = await sourceDecisions();
   subject.createEditorialMemory({ clientMemoryId: randomUUID(), signalId: signals[0]!.signalId, title: '旧版引用记忆', editorialDimension: '原有自由维度', confidence: 0.5 });
   expect(subject.inspectHouseReviewPreference().current!.schema).toBe('ai7.house-review-preference/1');
@@ -880,22 +934,34 @@ it('stamps revision 91 over a revision-90 store of /1 records without changing a
     'house_review_preference_versions', 'review_run_preference_pins', 'learning_supervision_directives'].map((table) => db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all());
   const legacy = new DatabaseSync(dbPath);
   let before: unknown;
-  try { legacy.exec('PRAGMA user_version = 90'); before = learningRows(legacy); } finally { legacy.close(); }
+  let constructed!: ReturnType<typeof constructHistoricalRequestFormat>;
+  try {
+    before = learningRows(legacy); constructed = constructHistoricalRequestFormat(legacy);
+    expect(learningRows(legacy)).toEqual(before); legacy.exec('PRAGMA user_version = 90');
+  } finally { legacy.close(); }
   store = await EditorialStore.open(roots!.dataRoot, roots!.codeRoot);
   store.markCleanShutdown(); store.close(); store = undefined;
   const stamped = new DatabaseSync(dbPath);
-  try { expect(stamped.prepare('PRAGMA user_version').get()!.user_version).toBe(91); expect(learningRows(stamped)).toEqual(before); } finally { stamped.close(); }
+  try {
+    expect(stamped.prepare('PRAGMA user_version').get()!.user_version).toBe(92); expect(learningRows(stamped)).toEqual(before);
+    expect(historicalFixtureRows(stamped).filter((entry) => constructed.rows.some((prior) => prior.table === entry.table))).toEqual(constructed.rows);
+    expect(stamped.prepare("SELECT name, tbl_name, sql FROM sqlite_schema WHERE type = 'trigger' ORDER BY name").all()).toEqual(constructed.triggers);
+  } finally { stamped.close(); }
 });
 
-it.each(['partial-stamp', 'publication'] as const)('refuses to open over a %s inconsistency in revision-91 records', async (damage) => {
+it.each(['partial-stamp', 'publication'] as const)('refuses to open over a %s inconsistency in historical /2 or current records', async (damage) => {
   const { subject, signals, make, create, accept } = await sourceDecisions();
   accept(make(create([signals[0]!.signalId], '合成修订记录。')));
   expect(subject.inspectHouseReviewPreference().current!.schema).toBe('ai7.house-review-preference/2');
   subject.markCleanShutdown(); subject.close(); store = undefined;
   const db = new DatabaseSync(join(roots!.dataRoot, 'store', 'ai7.sqlite'));
+  let beforePartial: ReturnType<typeof historicalFixtureRows> | undefined;
+  const legacyRead = damage === 'partial-stamp' ? vi.spyOn(EditorialLearningLedger.prototype, 'validate') : null;
   try {
     // A /2 record under a revision-90 stamp is an interrupted or forged upgrade, never read by the revision-90 readers.
-    if (damage === 'partial-stamp') db.exec('PRAGMA user_version = 90');
+    if (damage === 'partial-stamp') {
+      constructHistoricalRequestFormat(db); db.exec('PRAGMA user_version = 90'); beforePartial = historicalFixtureRows(db);
+    }
     else {
       const row = db.prepare("SELECT version_id, canonical_json FROM house_review_preference_versions WHERE json_extract(canonical_json, '$.schema') = 'ai7.house-review-preference/2'").get()!;
       const record = canonicalRecord({ ...(JSON.parse(String(row.canonical_json)) as Record<string, unknown>), sourceCount: 7 });
@@ -905,8 +971,12 @@ it.each(['partial-stamp', 'publication'] as const)('refuses to open over a %s in
     }
   } finally { db.close(); }
   await expect(EditorialStore.open(roots!.dataRoot, roots!.codeRoot)).rejects.toThrow();
+  if (legacyRead !== null) expect(legacyRead).toHaveBeenCalledWith(false);
   const after = new DatabaseSync(join(roots!.dataRoot, 'store', 'ai7.sqlite'));
-  try { expect(after.prepare('PRAGMA user_version').get()!.user_version).toBe(damage === 'partial-stamp' ? 90 : 91); } finally { after.close(); }
+  try {
+    expect(after.prepare('PRAGMA user_version').get()!.user_version).toBe(damage === 'partial-stamp' ? 90 : 92);
+    if (beforePartial !== undefined) expect(historicalFixtureRows(after)).toEqual(beforePartial);
+  } finally { after.close(); }
 });
 
 it('ranks a /2 version\'s legacy lines by their /1 dating, not by array position', async () => {

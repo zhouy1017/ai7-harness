@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 // The generator of the authored fixture `sample1-readers-report-authored` (Issue #429, plan slice S81c). The passages and the
 // five sections below are the authored part: each passage was written after reading one Analysis Unit of exact `sample1`
 // (ADR 0043) and cites, by its position in the unit message, the blocks it rests on; the sections are a 给作者的修改意见 written
@@ -28,6 +29,12 @@ import type { LaunchPolicyProjection } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 import { AUTHORED_PASSAGES, AUTHORED_SECTIONS, READERS_REPORT_FIXTURE_IDENTITY, finalizeAsJ11, runInitialEvaluationToEnd } from '../support/readers-report.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 const FIXTURES_ROOT = resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url)));
 const FIXTURE_PATH = resolve(FIXTURES_ROOT, `${READERS_REPORT_FIXTURE_IDENTITY}.json`);
@@ -84,7 +91,7 @@ async function pass(): Promise<boolean> {
     interruptAfterAbandonObjectRemoval: false,
     baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
   });
-  const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+  const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
   try {
     const imported = await importSample1Book(store, scenario.codeRoot, 'S81c 夹具生成');
     await pinEditorialWorkspaceProfileRevision2(store, imported.bookId);

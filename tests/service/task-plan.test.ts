@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -28,6 +29,12 @@ import {
   recordMissingCredentialConnection,
   requireExactSample1,
 } from '../support/sample1-baseline.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for the Task Drawer's plan projection (Issue #418, plan slice S72): the
 // real store over exact `sample1` (ADR 0043), the three Task kinds that hold a plan today, and the AI7
@@ -276,7 +283,7 @@ describe('the Task Drawer plan projection over the real store on exact sample1',
   it('names the current plan version\'s range after 重新确认计划 while the Task Intent keeps the first (#288)', async () => {
     const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-one-unit-failure');
     const store = await openWithRoute(fixture);
-    const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+    const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
     const prepare = (bookId: string, update: BaselineAnalysisUpdateRequest | null, reconfirm = false): BaselineAnalysisProjection => {
       const goal = update === null ? BASELINE_ANALYSIS_TASK_GOAL : BASELINE_ANALYSIS_MODE_GOALS[update.mode];
       let progress = store.createBaselineAnalysisPreparationWork(bookId, goal, update, launchPolicy, reconfirm);
@@ -407,7 +414,7 @@ describe('the Task Drawer plan projection over the real store on exact sample1',
   it('reads a Review Run\'s plan per category and reports the newer Run that supersedes it', async () => {
     const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-authored');
     const store = await openWithRoute(fixture);
-    const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+    const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
     const prepareRun = (bookId: string, categoryIds: ReadonlyArray<string>): string => {
       let progress = store.createReviewRunPreparationWork(bookId, categoryIds, WHOLE, launchPolicy);
       while (!progress.done) progress = store.advanceReviewRunPreparationWork(progress.workId!);

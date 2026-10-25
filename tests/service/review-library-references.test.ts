@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -18,6 +19,12 @@ import type { LaunchPolicyProjection, ReviewRunProjection } from '../../src/shar
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
+
 // Only admitted sample1 and synthetic library text, on the real store/ledger/execution path; no Provider or Electron.
 const TEXT = '合成资料说明虚构的背景术语。\n另一段只用于资料库参考边界的测试。';
 const WHOLE = { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null } as const;
@@ -36,7 +43,7 @@ async function open(): Promise<void> {
   store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false, induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false, baselineAnalysisRoute: {
     fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage,
   } });
-  owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null }, materialGuard: (id, ledger) => store.materialGuard(id, ledger), unitHold: async () => { unitBoundary?.(); } });
+  owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null }, materialGuard: (id, ledger) => store.materialGuard(id, ledger), unitHold: async () => { unitBoundary?.(); } });
   driver = new ReviewRunDriver(store.reviewRunDriveSteps, owner);
   opened = true;
 }

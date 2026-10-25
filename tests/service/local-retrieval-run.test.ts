@@ -1,7 +1,8 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import { DEVELOPER_LIVE_POLICY_BINDING, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
@@ -16,6 +17,12 @@ import { reviewCategoryKindId, type BaselineAnalysisProjection, type LaunchPolic
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { withRuleFor } from '../support/policy-rules.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // #893: a non-web authorized Run freezes and executes its local-only composition through the real owners under the selected
 // v24 rule. The model transport is an in-process stub under network denial, not a Provider call. Manuscript words come from
@@ -52,7 +59,7 @@ async function session(name: string, policyOf: (policy: LaunchPolicyProjection) 
     return turn(header, toolResults, (toolName, args) => result(null, [{ id: `${header.ordinal}-${toolResults.length}-${toolName}`, type: 'function',
       function: { name: toolName, arguments: JSON.stringify(args) } }]), (text) => result(text));
   };
-  const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
+  const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
     secretResolver: { resolve: async () => 'placeholder-development-key' },
     retrievalIndex: (id, ledger) => store.retrievalIndexForRun(id, ledger),
     developerLive: { launch: { runBudgetCeiling: live.runBudgetCeiling, providerCacheRoot: join(roots.inputRoot, 'cache'), validation: null }, nativeFetch } });

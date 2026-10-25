@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
@@ -25,6 +26,12 @@ import {
   recordMissingCredentialConnection,
   requireExactSample1,
 } from '../support/sample1-baseline.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for 用量 (Issue #936, plan slice 11c; V2-UX-MSET-010): the real store on a temporary Agent Data
 // Root, exact `sample1` imported twice, a baseline Run on each Book and a factual-review Run on the first, all through the
@@ -74,7 +81,7 @@ function reportTokens(projection: BaselineAnalysisProjection | FactualReviewProj
 async function seed(): Promise<SeededRun[]> {
   const runs: SeededRun[] = [];
   const store = await openWithRoute(baselineFixture);
-  const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture: baselineFixture, secretResolver: fakeSecrets });
+  const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture: baselineFixture, secretResolver: fakeSecrets });
   try {
     recordMissingCredentialConnection(store, 'L2 主编辑连接');
     for (const title of ['用量甲', '用量乙']) {
@@ -97,7 +104,7 @@ async function seed(): Promise<SeededRun[]> {
   }
 
   const factualStore = await openWithRoute(factualFixture);
-  const factualOwner = new BaselineAnalysisExecutionOwner({ ledger: factualStore.factualReviewLedger, launchPolicy, fixture: factualFixture, secretResolver: fakeSecrets });
+  const factualOwner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: factualStore.factualReviewLedger, launchPolicy, fixture: factualFixture, secretResolver: fakeSecrets });
   try {
     const first = runs[0]!;
     let progress = factualStore.createFactualReviewPreparationWork(first.bookId, FACTUAL_REVIEW_TASK_GOAL, launchPolicy);

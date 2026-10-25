@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import type { StreamChunk } from '@deepseek-ai/dsh-llm';
 import { EditorialStore } from '../../../src/service/store.js';
 import { DEVELOPER_LIVE_POLICY_BINDING } from '../../../src/service/launch-policy.js';
-import { BaselineAnalysisExecutionOwner } from '../../../src/service/analysis/execution.js';
+import { BaselineAnalysisExecutionOwner, ModelRequestGovernor } from '../../../src/service/analysis/execution.js';
 import type { ManifestBlockInput } from '../../../src/service/analysis/coverage-manifest.js';
 import type { BaselineAnalysisStore } from '../../../src/service/analysis/baseline-analysis-store.js';
 import { Ai7LocalDeterministicAdapter } from '../../../src/service/provider/local-deterministic-adapter.js';
@@ -31,6 +31,7 @@ import { generateSyntheticManuscript } from '../synthetic-manuscripts.mjs';
  */
 
 export interface CaseRoots {
+  readonly requestGovernor: ModelRequestGovernor;
   readonly dataRoot: string;
   readonly inputRoot: string;
   dispose(): Promise<void>;
@@ -45,19 +46,35 @@ export interface ImportedBook {
 
 export type CaseManuscript = { readonly source: 'sample1' } | { readonly source: 'synthetic'; readonly id: string };
 
+const applicationRequests = new WeakMap<EditorialStore, ModelRequestGovernor>();
+
+/** The explicit capability installed when this case application's store was opened. */
+export function caseRequestGovernor(store: EditorialStore): ModelRequestGovernor {
+  const requests = applicationRequests.get(store);
+  if (requests === undefined) throw new Error('EDITORIAL_CASE/request-governor-absent');
+  return requests;
+}
+
 export async function createCaseRoots(): Promise<CaseRoots> {
   const parent = await mkdtemp(join(await realpath(tmpdir()), 'ai7-editorial-case-'));
   const inputRoot = join(parent, 'input');
   await mkdir(inputRoot);
-  return { dataRoot: join(parent, 'data'), inputRoot, dispose: () => rm(parent, { recursive: true, force: true, maxRetries: 5 }) };
+  const requestGovernor = new ModelRequestGovernor();
+  return { dataRoot: join(parent, 'data'), inputRoot, requestGovernor, dispose: async () => {
+    requestGovernor.close();
+    await requestGovernor.whenIdle();
+    await rm(parent, { recursive: true, force: true, maxRetries: 5 });
+  } };
 }
 
 export async function openStore(roots: CaseRoots, codeRoot: string, fixture: ResolvedModelFixture | null): Promise<EditorialStore> {
-  return EditorialStore.open(roots.dataRoot, codeRoot, {
+  const store = await EditorialStore.open(roots.dataRoot, codeRoot, {
     induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
     induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false,
     baselineAnalysisRoute: fixture === null ? null : { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage, reviewContractVersion: reviewFixtureContractVersion(fixture) },
   });
+  applicationRequests.set(store, roots.requestGovernor);
+  return store;
 }
 
 /**
@@ -117,7 +134,7 @@ export function workingBlocks(store: EditorialStore, book: ImportedBook): Readon
 
 /** The deterministic route's owner: the product's fixture adapter, as `tests/service/review-runs.test.ts` binds it. */
 export function deterministicOwner(store: EditorialStore, policy: LaunchPolicyProjection, fixture: ResolvedModelFixture): BaselineAnalysisExecutionOwner {
-  return new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture, secretResolver: { resolve: async () => null } });
+  return new BaselineAnalysisExecutionOwner({ requestGovernor: caseRequestGovernor(store), ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture, secretResolver: { resolve: async () => null } });
 }
 
 const REPLAY_CODES = { QUOTA_EXCEEDED_CODE: 'QUOTA_EXCEEDED', INVALID_CREDENTIAL_CODE: 'INVALID_CREDENTIAL', CONTEXT_WINDOW_EXCEEDED_CODE: 'CONTEXT_WINDOW_EXCEEDED' };
@@ -183,6 +200,7 @@ export function developerLiveReplayOwner(
   store.baselineAnalysisLedger.bindLaunch(launch);
   store.initialEvaluationLedger.bindLaunch(launch);
   return new BaselineAnalysisExecutionOwner({
+    requestGovernor: roots.requestGovernor,
     ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
     ...(materialGuard === undefined ? {} : { materialGuard }),
     secretResolver: { resolve: async () => 'placeholder-development-key' },

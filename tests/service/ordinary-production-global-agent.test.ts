@@ -1,10 +1,11 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { Session } from '@deepseek-ai/dsh-session';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
-import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
+import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy, resolveSourceCheckoutLaunchPolicySync } from '../../src/service/launch-policy.js';
 import { DialogueExecutionOwner, productionDialogueRoute } from '../../src/service/dialogue/dialogue-execution.js';
 import { admittedGlobalAgentRoute, prepareGlobalAgentDisclosure, startGlobalAgentTurn } from '../../src/service/dialogue/global-agent-session.js';
 import { buildDialogueMessage } from '../../src/service/dialogue/contract.js';
@@ -19,6 +20,12 @@ import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
 import { parseReviewCategoryUnitMessageHeader } from '../../src/service/review/review-category-contract.js';
 import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/assurance-sampling-contract.js';
 import { pinEditorialWorkspaceProfileRevision2 } from '../support/sample1-baseline.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Real ordinary-production policy, store, Harness, gate, broker and session log. Only the provider stream is synthetic.
 let roots: ServiceTestRoots;
@@ -81,7 +88,7 @@ beforeEach(async () => {
   const nativeFetch = (async (url: string, init: { body: string; signal?: AbortSignal }) => {
     calls.push({ url, body: init.body }); return transport(init.signal);
   }) as unknown as typeof fetch;
-  owner = new DialogueExecutionOwner({ records: store, fixture: null, sessionLogRoot: store.harnessSessionLogRoot,
+  owner = new DialogueExecutionOwner({ requestGovernor, records: store, fixture: null, sessionLogRoot: store.harnessSessionLogRoot,
     live: productionDialogueRoute({ scope: 'ordinary-production', nativeFetch }, () => policy, () => credentialReference,
       { resolve: async (reference) => { expect(reference).toBe(credentialReference); return 'synthetic-test-placeholder'; } }) });
 });
@@ -193,6 +200,35 @@ describe('v27 Book-less Global Agent', () => {
     expect(store.inspectGlobalAgent().directives).toHaveLength(1);
   });
 
+  it('rechecks current disclosed sources after shared capacity waits and sends nothing stale (#1131)', async () => {
+    governance('合成的固定监督来源。');
+    const producers = Array.from({ length: 4 }, (_, index) => requestGovernor.registerProducer({
+      key: `source-guard-blocker:${index}`, kind: 'fast-role', lane: 'foreground',
+    }));
+    const permits = await Promise.all(producers.map((producer) => requestGovernor.acquire(producer, new AbortController().signal)));
+    let reachedCapacity!: () => void;
+    const queued = new Promise<void>((resolve) => { reachedCapacity = resolve; });
+    const acquire = requestGovernor.acquire.bind(requestGovernor);
+    vi.spyOn(requestGovernor, 'acquire').mockImplementation((producer, signal) => {
+      const pending = acquire(producer, signal);
+      reachedCapacity();
+      return pending;
+    });
+    try {
+      const turn = start();
+      await queued;
+      expect(requestGovernor.snapshot()).toMatchObject({ waiting: 1, inFlight: 4 });
+      governance('等待容量期间新增的监督来源。');
+      permits[0]!.release();
+      await waitFor(() => inspect(turn.dialogueId).attempts[0]?.state === 'failed');
+      expect(calls).toEqual([]);
+      expect(usage().totals).toMatchObject({ inputTokens: 0, outputTokens: 0 });
+    } finally {
+      for (const permit of permits) permit.release();
+      for (const producer of producers) requestGovernor.unregisterProducer(producer);
+    }
+  });
+
   it('lists eligible editorial-memory version ids without reading their example references, and stops using an excluded source', async () => {
     const book = await importSample1Book(store, roots.codeRoot, '合成记忆版本');
     const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
@@ -245,9 +281,9 @@ describe('v27 Book-less Global Agent', () => {
       return new Response(JSON.stringify({ model: binding.model, choices: [{ message: { content, reasoning_content: '合成推理。' }, finish_reason: 'stop' }],
         usage: { prompt_tokens: 40, completion_tokens: 20 } }), { status: 200 });
     };
-    const reviewOwner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
+    const reviewOwner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
       production: { scope: 'ordinary-production', nativeFetch }, secretResolver: { resolve: async () => 'synthetic-test-placeholder' },
-      productionPolicyFor: (current) => resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', current, current) });
+      productionPolicyFor: (current) => resolveSourceCheckoutLaunchPolicySync(roots.codeRoot, 'ordinary-production', current, current) });
     const reviewDriver = new ReviewRunDriver(store.reviewRunDriveSteps, reviewOwner);
     try {
       let work = store.createReviewRunPreparationWork(book.bookId, ['typos-and-usage'],

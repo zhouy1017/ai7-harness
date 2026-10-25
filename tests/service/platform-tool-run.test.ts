@@ -1,5 +1,6 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, beforeEach } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import { DEVELOPER_LIVE_POLICY_BINDING, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
@@ -16,6 +17,12 @@ import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../src/shared/p
 import type { BaselineAnalysisProjection, LaunchPolicyProjection } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // #473 (6b): one web-bearing review category through the real store, frozen plan, execution owner, harness tool loop, Egress
 // Gate, Credential Broker and per-ticket host admission, on a socket-free transport: the model asks for one public search per
@@ -71,6 +78,7 @@ async function setup(maxTotalTokens: number): Promise<void> {
     return new Response(JSON.stringify({ model: DEVELOPER_LIVE_POLICY_BINDING.model, choices: [{ message: { content: JSON.stringify(result), reasoning_content: '合成推理通道。' }, finish_reason: 'stop' }], usage }), { status: 200 });
   };
   owner = new BaselineAnalysisExecutionOwner({
+    requestGovernor,
     ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
     secretResolver: { resolve: async () => 'placeholder-development-key' },
     developerLive: { launch: { runBudgetCeiling: launch.live.runBudgetCeiling, providerCacheRoot: join(roots.inputRoot, 'cache'), validation: { family: 'reference-free-review', case: 'sample1-whole-book', delta: null } }, nativeFetch },

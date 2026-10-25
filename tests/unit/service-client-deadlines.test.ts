@@ -228,4 +228,97 @@ describe('serial service request execution deadlines', () => {
     peer.emit('exit', 1, null);
     await Promise.all(admitted);
   });
+
+  it('lets M and then cancellation C finish after more than30 seconds while P still waits', async () => {
+    const probe = outcome(client.call('testModelServiceConnection', { route: 'opencode-go', modelId: 'deepseek-v4.1-flash' }));
+    await vi.advanceTimersByTimeAsync(35_000);
+    expect(peer.kill).not.toHaveBeenCalled();
+    const mutation = outcome(client.call('selectFastRoleModel', { route: 'opencode-go', modelId: 'deepseek-v4.1-flash' }));
+    peer.reply(peer.requests[1]!, undefined);
+    await expect(mutation).resolves.toBeUndefined();
+    const cancellation = outcome(client.call('cancelBaselineAnalysisRun', {
+      bookId: '11111111-1111-4111-8111-111111111111', taskIntentId: '22222222-2222-4222-8222-222222222222',
+    }));
+    peer.reply(peer.requests[2]!, { state: 'cancelled' });
+    await expect(cancellation).resolves.toEqual({ state: 'cancelled' });
+    await vi.advanceTimersByTimeAsync(180_000);
+    expect(peer.kill).not.toHaveBeenCalled();
+    peer.reply(peer.requests[0]!, { outcome: 'passed' });
+    await expect(probe).resolves.toEqual({ outcome: 'passed' });
+  });
+
+  it('accepts the probe response ahead of an earlier ordinary request without changing its deadline', async () => {
+    const ordinary = outcome(client.call('getStartup', {}));
+    const probe = outcome(client.call('testModelServiceConnection', { route: 'opencode-go', modelId: 'deepseek-v4.1-flash' }));
+    peer.reply(peer.requests[1]!, { outcome: 'passed' });
+    await expect(probe).resolves.toEqual({ outcome: 'passed' });
+    await vi.advanceTimersByTimeAsync(35_000);
+    expect(peer.kill).not.toHaveBeenCalled();
+    peer.reply(peer.requests[0]!, { state: 'none' });
+    await ordinary;
+  });
+
+  it('classifies a probe failure by its pending entry and keeps ordinary FIFO refusals', async () => {
+    const probe = outcome(client.call('testModelServiceConnection', { route: 'opencode-go', modelId: 'deepseek-v4.1-flash' }));
+    const first = outcome(client.call('getStartup', {}));
+    const second = outcome(client.call('inspectGlobalAttention', {}));
+    // An untrusted operation field on a failure cannot turn an ordinary response into a probe.
+    peer.send({ id: peer.requests[2]!.id, ok: false, op: 'testModelServiceConnection', error: { code: 'FAKE_BUSY', message: 'refused' } });
+    await expect(first).resolves.toBe('SERVICE_PROTOCOL_FAILED');
+    await expect(second).resolves.toBe('SERVICE_PROTOCOL_FAILED');
+    await expect(probe).resolves.toBe('SERVICE_PROTOCOL_FAILED');
+    expect(peer.kill).toHaveBeenCalledTimes(1);
+  });
+
+  it('allows an untagged failed probe independently while ordinary requests stay pending', async () => {
+    const ordinary = outcome(client.call('getStartup', {}));
+    const probe = outcome(client.call('testModelServiceConnection', { route: 'opencode-go', modelId: 'deepseek-v4.1-flash' }));
+    peer.send({ id: peer.requests[1]!.id, ok: false, error: { code: 'MODEL_CONNECTION_TEST_BUSY', message: 'busy' } });
+    await expect(probe).resolves.toBe('MODEL_CONNECTION_TEST_BUSY');
+    expect(peer.kill).not.toHaveBeenCalled();
+    peer.reply(peer.requests[0]!, { state: 'none' });
+    await ordinary;
+  });
+
+  it.each(['unknown', 'duplicate', 'mismatch'] as const)('still faults a%s probe response', async (kind) => {
+    const probe = outcome(client.call('testModelServiceConnection', { route: 'opencode-go', modelId: 'deepseek-v4.1-flash' }));
+    const request = peer.requests[0]!;
+    if (kind === 'duplicate') { peer.reply(request, { outcome: 'passed' }); await probe; }
+    const ordinary = outcome(client.call('getStartup', {}));
+    peer.send({ id: kind === 'unknown' ? 'unknown-probe-id' : request.id, ok: true,
+      op: kind === 'mismatch' ? 'getStartup' : 'testModelServiceConnection', result: { outcome: 'passed' } });
+    await expect(ordinary).resolves.toBe('SERVICE_PROTOCOL_FAILED');
+    if (kind !== 'duplicate') await expect(probe).resolves.toBe(kind === 'mismatch' ? 'SERVICE_RESPONSE_INVALID' : 'SERVICE_PROTOCOL_FAILED');
+    expect(peer.kill).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps an ordinary watchdog active while a probe has no Main elapsed watchdog', async () => {
+    const probe = outcome(client.call('testModelServiceConnection', { route: 'opencode-go', modelId: 'deepseek-v4.1-flash' }));
+    const ordinary = outcome(client.call('inspectGlobalAttention', {}));
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expect(ordinary).resolves.toBe('SERVICE_TIMEOUT');
+    await expect(probe).resolves.toBe('SERVICE_PROTOCOL_FAILED');
+    expect(peer.kill).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the shutdown watchdog with an earlier pending probe', async () => {
+    const probe = outcome(client.call('testModelServiceConnection', { route: 'opencode-go', modelId: 'deepseek-v4.1-flash' }));
+    const stopped = client.stop();
+    await vi.advanceTimersByTimeAsync(30_000);
+    await stopped;
+    await expect(probe).resolves.toBe('SERVICE_PROTOCOL_FAILED');
+    expect(peer.kill).toHaveBeenCalledTimes(1);
+  });
+
+  it('includes a pending probe in the existing sixteen-request memory bound and rejects all on exit', async () => {
+    const probe = outcome(client.call('testModelServiceConnection', { route: 'opencode-go', modelId: 'deepseek-v4.1-flash' }));
+    const ordinary = Array.from({ length: 15 }, () => outcome(client.call('getStartup', {})));
+    await expect(outcome(client.call('getStartup', {}))).resolves.toBe('SERVICE_UNAVAILABLE');
+    expect(peer.requests).toHaveLength(16);
+    peer.emit('exit', 1, null);
+    await expect(probe).resolves.toBe('SERVICE_STOPPED');
+    expect(await Promise.all(ordinary)).toEqual(Array(15).fill('SERVICE_STOPPED'));
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(peer.kill).not.toHaveBeenCalled();
+  });
 });

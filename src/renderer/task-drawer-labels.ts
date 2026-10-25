@@ -1049,11 +1049,16 @@ export function taskPlanActivityRows(
     ['尝试', activity.attemptState === null ? '—' : attemptStateLabel(activity.attemptState)],
     ['上次更新', localInstantLabel(activity.lastTransitionAt)],
     ['进展', `已读完 ${activity.unitsSettled} / ${activity.unitsTotal} 个阅读范围${update === null ? '' : '（只算要重新分析的）'} · 已完成模型回合 ${activity.completedAttempts} 次`],
+    ...(activity.inFlightUnits ?? []).map((unit): readonly [string, string] => [`阅读范围 ${unit.unitOrdinal}`,
+      [unit.requestState === 'waiting-for-capacity' ? '等待模型请求名额' : unit.requestState === 'admitted' ? attemptStateLabel(unit.attemptState) : '正在处理工具或本地步骤',
+        ...(unit.admittedRequestStartedAt === null ? [] : [`本次请求 ${elapsedLabel(nowMs - Date.parse(unit.admittedRequestStartedAt))}`])].join(' · ')]),
   ];
 }
 
 /** Whether the step in flight has run longer than this Run can account for (LIVE-003), as ②A judges it. */
 export function taskPlanActivityIsStale(activity: NonNullable<TaskPlanRunControlProjection['activity']>, nowMs: number): boolean {
+  if (activity.stage === 'units' && activity.inFlightUnits !== undefined) return activity.inFlightUnits.some((unit) => unit.requestState === 'admitted' &&
+    unit.admittedRequestStartedAt !== null && runStepIsStale(nowMs - Date.parse(unit.admittedRequestStartedAt), activity.longestSettledUnitMs));
   return activity.currentUnitStartedAt !== null && runStepIsStale(nowMs - Date.parse(activity.currentUnitStartedAt), activity.longestSettledUnitMs);
 }
 

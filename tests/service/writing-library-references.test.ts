@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -57,6 +58,12 @@ import {
   answerWritingReflection,
 } from '../support/writing-task.js';
 
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
+
 /** How many characters J-07's 资料库 item's index extracts: what its box and its plan line say (`e2e/run-j07.mjs` pins the same). */
 const J07_LIBRARY_CHARACTERS = 85;
 
@@ -106,7 +113,7 @@ async function withSession(fixture: ResolvedModelFixture, body: (session: Sessio
     interruptAfterAbandonObjectRemoval: false,
     baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
   });
-  const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null }, materialGuard: (id, ledger) => store.materialGuard(id, ledger), unitHold: async (settled) => { unitBoundary?.(settled); } });
+  const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null }, materialGuard: (id, ledger) => store.materialGuard(id, ledger), unitHold: async (settled) => { unitBoundary?.(settled); } });
   try {
     await body({ store, owner });
     store.markCleanShutdown();

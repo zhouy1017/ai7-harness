@@ -1,15 +1,17 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, REVIEW_CATEGORY_CACHE_CAPACITY } from '../../src/service/store.js';
-import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
+import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
+import { kindLocalTools } from '../../src/service/analysis/live-kind-admission.js';
 import { BaselineAnalysisExecutionOwner, ExecutionAdmissionError } from '../../src/service/analysis/execution.js';
 import { sliceGraphemes } from '../../src/service/analysis/factual-review-contract.js';
 import { runReportUsageReconciles } from '../../src/service/analysis/run-report.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
-import type { ReviewCategoryContractInput } from '../../src/service/review/review-category-contract.js';
-import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
+import { reviewCategoryContract, reviewCategoryContractDigest, type ReviewCategoryContractInput } from '../../src/service/review/review-category-contract.js';
+import { historicalReviewCategoryDefinitions, reviewCategoryKindDefinition, withReviewLocalTools } from '../../src/service/review/review-category-kind.js';
 import {
   EDITORIAL_REVIEW_CONTRACT_VERSION,
   REVIEW_CATEGORY_ASSURANCE_STATEMENT,
@@ -20,6 +22,12 @@ import {
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { LITERARY_EXPRESSION, STYLE_AND_FORMAT, TYPOS_AND_USAGE } from '../support/review-categories.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for the review-category kind family (Issue #417): the real store and
 // ledger, the one execution owner, the AI7 local deterministic adapter over the authored fixture
@@ -56,6 +64,42 @@ interface Book {
   readonly branchId: string;
 }
 
+it('reconstructs only the known historical review grammar with the actual v27 compiler bytes (#1131 rev17)', async () => {
+  const binding = { ...ORDINARY_PRODUCTION_ALLOWED_BINDINGS[0], credentialReference: randomUUID() };
+  const verified = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', binding);
+  const plain = reviewCategoryKindDefinition(TYPOS_AND_USAGE, 2);
+  const tools = kindLocalTools(verified, plain.kind)!; expect(tools).not.toBeNull();
+  const actual = reviewCategoryKindDefinition(TYPOS_AND_USAGE, 2, tools);
+  expect(withReviewLocalTools(actual, tools)).toBe(actual);
+  const selected = withReviewLocalTools(plain, tools);
+  expect(selected).not.toBe(plain); expect(selected.promptContractDigest).toBe(actual.promptContractDigest);
+  expect(withReviewLocalTools(actual, null).promptContractDigest).toBe(plain.promptContractDigest);
+  for (const field of ['kind', 'contractVersion', 'promptContractDigest', 'systemPrompt', 'schemaDigest'] as const) {
+    const mismatched = { ...actual, [field]: `${actual[field]}-changed` };
+    const refreshed = withReviewLocalTools(mismatched, tools);
+    if (field === 'promptContractDigest') expect(refreshed).toBe(mismatched);
+    else { expect(refreshed).not.toBe(mismatched); expect(refreshed[field]).toBe(actual[field]); }
+  }
+  const variants = historicalReviewCategoryDefinitions(TYPOS_AND_USAGE, 2);
+  expect(variants).toHaveLength(2);
+  for (const expected of [plain, actual]) {
+    const restored = variants.find((candidate) => candidate.promptContractDigest === expected.promptContractDigest)!;
+    expect(restored).toBeDefined(); expect(restored.systemPrompt).toBe(expected.systemPrompt);
+    expect(restored.schemaDigest).toBe(expected.schemaDigest); expect(restored.unitResultSchema).toBe(expected.unitResultSchema);
+    expect(restored.requestDigest(1, 'a'.repeat(64))).toBe(expected.requestDigest(1, 'a'.repeat(64)));
+    expect(restored.reducerDigest).toBe(expected.reducerDigest);
+  }
+  const legacy = historicalReviewCategoryDefinitions(TYPOS_AND_USAGE, 1);
+  expect(legacy).toHaveLength(1); expect(legacy[0]!.systemPrompt).toBe(reviewCategoryKindDefinition(TYPOS_AND_USAGE, 1).systemPrompt);
+  expect(legacy[0]!.schemaDigest).toBe(reviewCategoryKindDefinition(TYPOS_AND_USAGE, 1).schemaDigest);
+  expect(legacy.some((candidate) => candidate.promptContractDigest === actual.promptContractDigest)).toBe(false);
+  expect(historicalReviewCategoryDefinitions(STYLE_AND_FORMAT, 2).some((candidate) => candidate.promptContractDigest === actual.promptContractDigest)).toBe(false);
+  const subset = reviewCategoryContractDigest(reviewCategoryContract(TYPOS_AND_USAGE, 2, ['read_blocks']));
+  expect(variants.some((candidate) => candidate.promptContractDigest === subset)).toBe(false);
+  expect(variants.some((candidate) => candidate.promptContractDigest === '0'.repeat(64))).toBe(false);
+  expect(() => Reflect.apply(historicalReviewCategoryDefinitions, undefined, [TYPOS_AND_USAGE, 3])).toThrow('REVIEW_CONTRACT_VERSION_UNSUPPORTED');
+});
+
 async function withBook(body: (book: Book) => Promise<void>, capacity?: number): Promise<void> {
   await requireExactSample1(roots.codeRoot);
   const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
@@ -67,6 +111,7 @@ async function withBook(body: (book: Book) => Promise<void>, capacity?: number):
     baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
   });
   const owner = new BaselineAnalysisExecutionOwner({
+    requestGovernor,
     ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null }, ...(capacity === undefined ? {} : { capacity }),
   });
   try {

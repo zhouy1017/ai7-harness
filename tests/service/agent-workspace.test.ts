@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -20,6 +21,12 @@ import type { AgentWorkspaceProjection, DialogueSelectionInput } from '../../src
 import { ADMITTED_BASELINE_DOCX, composeManuscriptDocx } from '../support/composed-fixture.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, requireExactSample1 } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for the Book-bound Agent 工作区 (Issue #90, wave 13 slice 13a; ADR 0045, UI ADR 0015) over the
 // real store, the real dialogue owner and PrimaryAgentHarness composition and the AI7 local deterministic adapter: one proposal
@@ -60,7 +67,7 @@ async function openStore(): Promise<EditorialStore> {
 }
 
 function localOwner(store: EditorialStore): DialogueExecutionOwner {
-  return new DialogueExecutionOwner({ records: store, fixture, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live: null });
+  return new DialogueExecutionOwner({ requestGovernor, records: store, fixture, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live: null });
 }
 
 /** The whole paragraph of the Book's manuscript holding `words`, selected as the workspace selects it. */
@@ -265,7 +272,7 @@ describe('Agent 工作区 over the real store, dialogue owner and harness', () =
       expect((await refusal(() => workspace.propose(book.bookId, { selection: { ...selection, manuscriptId: randomUUID() }, instruction: SET_INSTRUCTION }))).code)
         .toBe('AGENT_WORKSPACE_SCOPE');
       // A launch with no dialogue route refuses as the dialogue does.
-      const unbound = new AgentWorkspace(store, new DialogueExecutionOwner({ records: store, fixture: null, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live: null }));
+      const unbound = new AgentWorkspace(store, new DialogueExecutionOwner({ requestGovernor, records: store, fixture: null, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live: null }));
       expect((await refusal(() => unbound.propose(book.bookId, { selection, instruction: SET_INSTRUCTION }))).code).toBe('DIALOGUE_ROUTE_UNAVAILABLE');
       expect(changedTables(pinned, rowCounts())).toEqual({});
     } finally {
@@ -292,7 +299,7 @@ describe('Agent 工作区 over the real store, dialogue owner and harness', () =
         { launch: { runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 500_000 }, providerCacheRoot: cacheRoot, validation: null }, nativeFetch },
         policy, { resolve: async () => 'placeholder-development-key' },
       );
-      const dialogues = new DialogueExecutionOwner({ records: store, fixture: null, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live });
+      const dialogues = new DialogueExecutionOwner({ requestGovernor, records: store, fixture: null, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live });
       const workspace = new AgentWorkspace(store, dialogues);
       try {
         const selection = paragraphHolding(store, book, FIRST_ANCHOR);
@@ -337,7 +344,7 @@ describe('Agent 工作区 over the real store, dialogue owner and harness', () =
         policy, { resolve: async () => 'placeholder-development-key' },
       );
       expect(live.route).not.toBeNull();
-      const workspace = new AgentWorkspace(store, new DialogueExecutionOwner({ records: store, fixture: null, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live }));
+      const workspace = new AgentWorkspace(store, new DialogueExecutionOwner({ requestGovernor, records: store, fixture: null, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live }));
       const selection = paragraphHolding(store, book, '');
       const before = rowCounts();
       const refused = await refusal(() => workspace.propose(book.bookId, { selection, instruction: SET_INSTRUCTION }));

@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { copyFile, mkdir, readdir } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
@@ -21,6 +22,12 @@ import { LITERARY_EXPRESSION, STYLE_AND_FORMAT } from '../support/review-categor
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 import { makeJ13Series } from '../support/series-consistency.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for 可复用工序 (Issue #65, plan slice S30; ADR 0087): the real store on a temporary Agent Data
 // Root, exact `sample1` imported through the supported path into two Books, the baseline and the Review Run drive loop over the
@@ -91,7 +98,7 @@ async function open(wrap?: (inner: BaselineAnalysisExecutionOwner) => ReviewRunE
     interruptAfterAbandonObjectRemoval: false,
     baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
   });
-  const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+  const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
   return { store, owner, driver: new ReviewRunDriver(store.reviewRunDriveSteps, wrap === undefined ? owner : wrap(owner)) };
 }
 
@@ -860,6 +867,7 @@ async function openLayered(): Promise<Session> {
     baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
   });
   const owner = new BaselineAnalysisExecutionOwner({
+    requestGovernor,
     ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null },
     seriesScopeGuard: (runRecordId) => store.seriesScopeGuard(runRecordId),
   });

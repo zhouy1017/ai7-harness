@@ -2089,12 +2089,14 @@ export function baselineCancellationImpact(
   const progress = run.progress;
   const asked = kept?.waiting ?? [];
   const unconfirmed = kept?.unconfirmed ?? [];
-  const inFlight = progress?.stage === 'units' && progress.currentUnitOrdinal !== null;
-  const liveRemaining = progress === null ? 0 : Math.max(0, progress.unitsTotal - progress.unitsSettled - asked.length - (inFlight ? 1 : 0));
+  const activeUnits = progress?.stage !== 'units' ? [] : progress.inFlightUnits?.map((unit) => unit.unitOrdinal) ??
+    (progress.currentUnitOrdinal === null ? [] : [progress.currentUnitOrdinal]);
+  const inFlight = activeUnits.length > 0;
+  const liveRemaining = progress === null ? 0 : Math.max(0, progress.unitsTotal - progress.unitsSettled - asked.length - activeUnits.length);
   const stops = progress === null ? '这项任务已经停下；' : progress.stage !== 'units'
     ? `正在进行的${STAGE_WORDS[progress.stage]}会被中止，回答已传回的照常计入；之后的步骤都不再进行，不再发送任何内容。`
     : inFlight
-      ? `停在正在读的第 ${progress.currentUnitOrdinal} 个阅读范围；${restOf(liveRemaining)}之后的归纳、抽样都不再进行，不再发送任何内容。`
+      ? `停在正在读的第 ${activeUnits.join('、')} 个阅读范围；${restOf(liveRemaining)}之后的归纳、抽样都不再进行，不再发送任何内容。`
       : `在这两个阅读范围之间停止；${restOf(liveRemaining)}之后的归纳、抽样都不再进行，不再发送任何内容。`;
   // The existing redo caller supplies only aggregate progress. Preserve that disclosure without inventing zero
   // waiting/unknown counts; the cancellation owner supplies both arrays, even when they are empty.

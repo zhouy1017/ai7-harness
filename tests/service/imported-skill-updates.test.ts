@@ -289,7 +289,7 @@ describe('revision 83 over earlier stores', () => {
     store.markCleanShutdown(); store.close();
     const planted = new DatabaseSync(databasePath());
     try {
-      expect(Number(planted.prepare('PRAGMA user_version').get()?.user_version)).toBe(91);
+      expect(Number(planted.prepare('PRAGMA user_version').get()?.user_version)).toBe(92);
       for (const trigger of Object.keys(IMPORTED_SKILL_UPDATE_TRIGGER_SQL)) planted.exec(`DROP TRIGGER ${trigger}`);
       for (const table of Object.keys(IMPORTED_SKILL_UPDATE_SCHEMA_SQL).reverse()) planted.exec(`DROP TABLE ${table}`);
     } finally { planted.close(); }
