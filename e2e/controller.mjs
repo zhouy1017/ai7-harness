@@ -302,6 +302,13 @@ const J01_LAUNCH_SCENARIOS = Object.freeze([
   'after-commit-recovery',
   'uncertain-initial',
   'uncertain-recovery',
+  'word-suggestions-new',
+  'word-accepted-empty-book',
+  'word-all-inserted-accepted',
+  'word-detail-beyond-first-page',
+  'word-accepted-degradation',
+  'word-exact-review-recovery',
+  'word-committed-recovery',
 ]);
 
 const J01_LAUNCH_LOCATIONS = Object.freeze(
@@ -466,6 +473,11 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     ...J01_LAUNCH_LOCATIONS,
     'window-close',
     ...J01_COMPLETION_LOCATIONS,
+    'word-suggestions-new',
+    'word-accepted-empty-book',
+    'word-all-inserted-accepted',
+    'word-detail-beyond-first-page',
+    'word-accepted-degradation',
   ]),
   'J-02': Object.freeze([
     ...J14_DARK_PASS_LOCATIONS,
@@ -745,6 +757,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'skill-update-rule-clean-auto-adopt',
     'skill-update-rollback-current-selection',
     'zero-activity',
+    'word-persisted-source-lineage',
   ]),
   'J-03': Object.freeze([
     ...J14_DARK_PASS_LOCATIONS,
@@ -1415,6 +1428,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'zero-loopback-requests',
     'completion-browser-close',
     'completion-cleanup',
+    'word-local-source-inspection',
   ]),
   // J-16 (Issue #423, plan slice S77a): the 任务 panel — the Book's Tasks beside the manuscript, controlled from their cards,
   // a finished Task's result in a window beside the text, and the 回到<位置> chip a jump leaves.

@@ -3374,7 +3374,7 @@ async function main() {
       '_rels/.rels': [strToU8('<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rDoc" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>'), { mtime: fixedArchiveTime() }],
       'docProps/core.xml': [strToU8('<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>001 Word 来源详情</dc:title></cp:coreProperties>'), { mtime: fixedArchiveTime() }],
       'word/document.xml': [strToU8(`<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${wordBody}</w:body></w:document>`), { mtime: fixedArchiveTime() }],
-    }));
+    }, { mtime: fixedArchiveTime() }));
     await close(); await launch({ pickerPath: wordPath });
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'word-import-landing');
     await click(renderer, '导入稿件', 'word-import-stage');

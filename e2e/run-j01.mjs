@@ -2802,6 +2802,10 @@ async function main() {
       { name: 'accepted-degradation', mode: 'accepted-baseline', learnFromEdits: true, existingBook: false, allInserted: false, count: 1, degraded: true },
     ]) {
       at(`word-${wordCase.name}`);
+      const wordLaunchScenario = wordCase.name === 'suggestions-new' ? 'word-suggestions-new'
+        : wordCase.name === 'accepted-empty-book' ? 'word-accepted-empty-book'
+          : wordCase.name === 'all-inserted-accepted' ? 'word-all-inserted-accepted'
+            : wordCase.name === 'detail-beyond-first-page' ? 'word-detail-beyond-first-page' : 'word-accepted-degradation';
       const inputPath = resolve(syntheticRoot, `word-${wordCase.name}.docx`);
       const baseSpan = wordCase.degraded ? { block: 8 } : { block: 8, from: 0, to: 10 }; const insertionSpan = { block: 9, from: 0, to: 5 };
       await composeRevisedAdmittedDocx(inputPath, { source: ADMITTED_BASELINE_DOCX, title: 'Word 双阅读导入',
@@ -2822,7 +2826,7 @@ async function main() {
       }
       const expectedTexts = Array(wordCase.count).fill(baseline + (wordCase.mode === 'accepted-baseline' ? insertion.repeat(wordCase.insertRuns ?? 1) : ''));
       const wordRoot = await createCanonicalExternalDataRoot(resolve(runRoot, `word-${wordCase.name}-data`), checkoutRoot);
-      renderer = await launchProduct({ dataRoot: wordRoot, pickerPath: inputPath, launchScenario: `word-${wordCase.name}`,
+      renderer = await launchProduct({ dataRoot: wordRoot, pickerPath: inputPath, launchScenario: wordLaunchScenario,
         ...(wordCase.interruptAfterCommit ? { importControl: 'after-commit-before-response' } : {}) });
       renderer = await runNativeWordImport(renderer, { ...wordCase, expectedTexts, sampleCount: wordCase.count }, wordCase.existingBook ? async () => {
         await closeProduct(); return launchProduct({ dataRoot: wordRoot, launchScenario: 'word-exact-review-recovery' });
