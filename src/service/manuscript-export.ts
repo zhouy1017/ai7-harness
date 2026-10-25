@@ -26,7 +26,7 @@ import {
 } from '../shared/protocol.js';
 import { ensureCanonicalDataDirectory } from '../shared/data-root.js';
 import { reportExportLabel } from '../shared/report-wording.js';
-import { DIGEST_PATTERN, UUID_PATTERN, canonicalJson, canonicalRecord, isRecord, parseCanonicalJson, sha256Hex } from './analysis/canonical.js';
+import { DIGEST_PATTERN, UUID_PATTERN, canonicalJson, canonicalRecord, hasExactKeys, isRecord, parseCanonicalJson, sha256Hex } from './analysis/canonical.js';
 import { documentTypeLabel, readersReportDocumentType } from './production-document-types.js';
 import { WRITING_DRAFT_PARSER_IDENTITY } from './writing-tasks.js';
 import type { ManuscriptCheckpointBinding, ManuscriptCheckpointProgress, ManuscriptCheckpointPurpose } from './bounded-manuscript.js';
@@ -48,9 +48,9 @@ import {
   wordMappedDocxSource,
   type WordMappedDocxSource,
 } from './docx-export.js';
-import { compileWordTrackedDocxBytes, type WordTrackedCompilation } from './docx.js';
+import { WORD_DOCX_PARSER_IDENTITY, compileWordTrackedDocxBytes, type WordTrackedCompilation } from './docx.js';
 import { readWordImportChoiceRecord, readWordParentSourcePin, requireWordRevisionSource,
-  requireWordManuscriptSourceSegments } from './import-retention.js';
+  requireWordManuscriptSourceSegments, WORD_EXTRACTOR_IDENTITY } from './import-retention.js';
 import { REPORT_EXPORT_WRITER_IDENTITIES, renderReportExport, type ReportExportInput } from './report-export.js';
 import { MARKDOWN_EXPORT_WRITER_IDENTITY, PDF_EXPORT_WRITER_IDENTITY, renderMarkdownExport, renderPdfHtmlExport } from './text-export.js';
 
@@ -304,6 +304,21 @@ export function requireWordExportBinding(recorded: unknown, current: WordExportP
     'EXPORT_PREPARATION_INVALID', 'Word 导出准备的来源、选择、版本、标记或写入器已经变化。');
 }
 
+function validateWordExportBinding(value: unknown): asserts value is WordExportPreparationBinding {
+  requireExport(isRecord(value) && hasExactKeys(value, ['schema', 'writer', 'format', 'sourceVersionId', 'parentSourcePinDigest', 'sourceDigest',
+    'workingObjectDigest', 'importCommitId', 'importChoiceDigest', 'mode', 'graphDigest', 'compilerIdentity', 'extractorIdentity',
+    'selectedReadingDigest', 'mappingAncestorRevisionId', 'orderedSegmentsDigest', 'revisionId', 'revisionDigest', 'marksDigest', 'optionsDigest']) &&
+    value.schema === 'ai7.export.word-source-binding/1' && value.compilerIdentity === WORD_DOCX_PARSER_IDENTITY && value.extractorIdentity === WORD_EXTRACTOR_IDENTITY &&
+    (value.mode === 'suggestions' || value.mode === 'accepted-baseline') &&
+    (value.format === 'docx' && value.writer === WORD_DOCX_EXPORT_WRITER_IDENTITY ||
+      value.format === 'pdf' && value.writer === FORMAT_WRITERS.pdf || value.format === 'markdown' && value.writer === FORMAT_WRITERS.markdown) &&
+    ['sourceVersionId', 'importCommitId', 'mappingAncestorRevisionId', 'revisionId'].every((key) => typeof value[key] === 'string' && UUID_PATTERN.test(value[key])) &&
+    ['parentSourcePinDigest', 'sourceDigest', 'importChoiceDigest', 'graphDigest', 'selectedReadingDigest', 'orderedSegmentsDigest',
+      'revisionDigest', 'marksDigest', 'optionsDigest'].every((key) => typeof value[key] === 'string' && DIGEST_PATTERN.test(value[key])) &&
+    (value.workingObjectDigest === null || typeof value.workingObjectDigest === 'string' && DIGEST_PATTERN.test(value.workingObjectDigest)),
+  'EXPORT_PREPARATION_INVALID', 'Word 导出准备的完整来源固定记录无效。');
+}
+
 /** For explicit Word-family plan selection: this source/ancestor reader never falls back to legacy or fresh output. */
 export function readWordManuscriptExportSource(db: DatabaseSync, bookId: string, revisionId: string, sourceVersionId: string,
   original: Uint8Array): { source: WordMappedDocxSource; compiled: Extract<WordTrackedCompilation, { kind: 'ready' }>;
@@ -327,6 +342,8 @@ export function readWordManuscriptExportSource(db: DatabaseSync, bookId: string,
     requireExport(row.manuscript_id === manuscriptId, 'EXPORT_RECORD_INVALID', 'Word 导出血缘越过了稿件边界。');
     const imported = imports.get(current);
     if (imported !== undefined) { commitId = text(imported.commit_id); break; }
+    requireExport(db.prepare('SELECT 1 FROM word_manuscript_source_segments WHERE revision_id = ? LIMIT 1').get(current) === undefined,
+      'EXPORT_RECORD_INVALID', 'Word 导出祖先的来源片段缺少对应的导入选择。');
     requireExport(legacy.get(current) === undefined, 'EXPORT_RECORD_INVALID', '较近的修订版使用历史段落对应，不能冒充 Word 来源对应。');
     current = nullableText(row.parent_revision_id);
   }
@@ -529,10 +546,11 @@ interface ResolvedReport {
   record: ReviewReportRecord;
 }
 
-type ExportPlan =
-  | { kind: 'manuscript'; input: DocxExportInput; inputDigest: string; sourceVersionId: string }
+type ExportPlan = (
+  | { kind: 'manuscript'; input: DocxExportInput; inputDigest: string; sourceVersionId: string; wordBinding: WordExportPreparationBinding | null }
   | { kind: 'report'; input: ReportExportInput; inputDigest: string; sourceVersionId: null }
-  | { kind: 'manifest'; markdown: string; inputDigest: string; sourceVersionId: null };
+  | { kind: 'manifest'; markdown: string; inputDigest: string; sourceVersionId: null }
+) & { writer: string };
 
 function text(value: SQLOutputValue | undefined): string {
   requireExport(typeof value === 'string' && value.isWellFormed(), 'EXPORT_RECORD_INVALID', '导出记录无效。');
@@ -1122,6 +1140,7 @@ export class ManuscriptExportStore {
   async #requireAsPrepared(bookId: string, row: SqlRow, preparation: ManuscriptExportPreparationProjection): Promise<Uint8Array> {
     const resolved = this.#preparedTarget(bookId, row);
     const plan = await this.#plan(bookId, resolved, preparation.options, preparation.format);
+    this.#requirePlanBinding(row, plan);
     const rendered = this.#render(plan, preparation.format, true);
     requireExport(sha256Hex(rendered.bytes!) === preparation.technical.payloadDigest, 'EXPORT_PAYLOAD_CHANGED',
       '稿件或标记在准备导出后有了变化，请重新准备导出。');
@@ -1196,7 +1215,8 @@ export class ManuscriptExportStore {
       payloadBytes: payload.byteLength,
       policyId: POLICY.id,
       policyVersion: POLICY.version,
-      writer: writerOf(resolved, format),
+      writer: plan.writer,
+      ...(plan.kind !== 'manuscript' || plan.wordBinding === null ? {} : { wordSource: plan.wordBinding, wordInputDigest: plan.inputDigest }),
       ...(archive === undefined ? {} : { archive }),
       createdAt,
     });
@@ -1317,6 +1337,7 @@ export class ManuscriptExportStore {
     if (preparation.format !== 'pdf' || this.#outcomeRow(input.preparationId) !== undefined) return { format: preparation.format, print: null };
     const resolved = this.#preparedTarget(input.bookId, row);
     const plan = await this.#plan(input.bookId, resolved, preparation.options, 'pdf');
+    this.#requirePlanBinding(row, plan);
     const page = this.#render(plan, 'pdf', true).bytes!;
     requireExport(sha256Hex(page) === preparation.technical.payloadDigest, 'EXPORT_PAYLOAD_CHANGED',
       '稿件或标记在准备导出后有了变化，请重新准备导出。');
@@ -1678,7 +1699,7 @@ export class ManuscriptExportStore {
         digest: target.revisionDigest,
         ...(target.manifest.member === 'manifest' ? {} : { member: target.manifest.member }),
       }).digest;
-      return { kind: 'manifest', markdown: target.manifest.markdown, inputDigest, sourceVersionId: null };
+      return { kind: 'manifest', markdown: target.manifest.markdown, inputDigest, sourceVersionId: null, writer: writerOf(target, format) };
     }
     if (target.report !== null) {
       // A report is written from its recorded version alone: no block, no mark and no file of the manuscript.
@@ -1691,7 +1712,7 @@ export class ManuscriptExportStore {
         reportDigest: report.digest,
         title: target.bookTitle,
       }).digest;
-      return { kind: 'report', input, inputDigest, sourceVersionId: null };
+      return { kind: 'report', input, inputDigest, sourceVersionId: null, writer: REPORT_EXPORT_WRITER_IDENTITIES[format] };
     }
     const blocks = (this.#db.prepare(
       'SELECT block_id, position, kind, level, text, digest FROM manuscript_block_versions WHERE revision_id = ? ORDER BY position',
@@ -1714,6 +1735,7 @@ export class ManuscriptExportStore {
     const objectDigest = text(source.object_digest);
     const converter = nullableText(source.converter_identity);
     let exportSource: DocxExportSource;
+    let wordPins: Omit<WordExportSourcePins, 'revisionId' | 'revisionDigest'> | null = null;
     let mapping: DocxExportSourceRow[] = [];
     if (target.document !== null && (readersReportDocumentType(target.document.typeId) !== undefined || this.#drafted(target.document.documentId))) {
       // A 审稿意见 draft (Issue #429, S81c) was written from a finalized Evaluation Record, and a writing draft (Issue #432, S84a)
@@ -1726,14 +1748,24 @@ export class ManuscriptExportStore {
     } else if (text(source.format) !== 'DOCX' || source.parser_identity === null) {
       exportSource = { kind: 'fresh', reason: 'no-mapping', scan: null, converter: null };
     } else {
-      mapping = this.#mapping(target.revisionId, sourceVersionId);
       const original = await this.#environment.readObject(objectDigest);
-      exportSource = mapping.length === 0
-        ? { kind: 'fresh', reason: 'no-mapping', scan: original, converter: null }
-        : { kind: 'mapped', original, rows: mapping, textBoxes: this.#textBoxChoice(sourceVersionId, mapping) };
+      if (this.#wordMappingSelected(bookId, target.revisionId, sourceVersionId)) {
+        const word = readWordManuscriptExportSource(this.#db, bookId, target.revisionId, sourceVersionId, original);
+        exportSource = word.source;
+        wordPins = word.pins;
+      } else {
+        mapping = this.#mapping(target.revisionId, sourceVersionId);
+        exportSource = mapping.length === 0
+          ? { kind: 'fresh', reason: 'no-mapping', scan: original, converter: null }
+          : { kind: 'mapped', original, rows: mapping, textBoxes: this.#textBoxChoice(sourceVersionId, mapping) };
+      }
     }
     const marks = this.#marks(target.branchId, blocks);
     const input: DocxExportInput = { title: target.bookTitle, blocks, marks, options, source: exportSource };
+    if (wordPins !== null) {
+      const selected = planWordManuscriptExport(input, format, { ...wordPins, revisionId: target.revisionId, revisionDigest: target.revisionDigest });
+      return { kind: 'manuscript', input, sourceVersionId, inputDigest: selected.inputDigest, writer: selected.writer, wordBinding: selected.binding };
+    }
     const inputDigest = canonicalRecord({
       schema: INPUT_SCHEMA,
       writer: FORMAT_WRITERS[format],
@@ -1745,7 +1777,41 @@ export class ManuscriptExportStore {
       options,
       title: target.bookTitle,
     }).digest;
-    return { kind: 'manuscript', input, inputDigest, sourceVersionId };
+    return { kind: 'manuscript', input, inputDigest, sourceVersionId, writer: FORMAT_WRITERS[format], wordBinding: null };
+  }
+
+  /** A nearer genuine legacy reimport keeps its own reader; an incomplete Word origin cannot become fresh output. */
+  #wordMappingSelected(bookId: string, revisionId: string, sourceVersionId: string): boolean {
+    const origin = this.#db.prepare(`SELECT 1 FROM manuscript_revisions r JOIN manuscript_import_records mir ON mir.manuscript_id = r.manuscript_id
+      JOIN source_provenance sp ON sp.provenance_id = mir.provenance_id
+      WHERE r.revision_id = ? AND mir.book_id = ? AND mir.source_version_id = ? AND sp.parser_identity = ?`)
+      .get(revisionId, bookId, sourceVersionId, WORD_DOCX_PARSER_IDENTITY);
+    if (origin === undefined) return false;
+    const revision = this.#db.prepare('SELECT source_version_id, parent_revision_id FROM manuscript_revisions WHERE revision_id = ?');
+    let current: string | null = revisionId;
+    const seen = new Set<string>();
+    for (let step = 0; current !== null && step < 100_000; step += 1) {
+      requireExport(!seen.has(current), 'EXPORT_RECORD_INVALID', 'Word 导出修订版血缘存在循环。');
+      seen.add(current);
+      const row = revision.get(current);
+      requireExport(row && row.source_version_id === sourceVersionId, 'EXPORT_RECORD_INVALID', 'Word 导出血缘越过来源边界。');
+      if (this.#db.prepare('SELECT 1 FROM word_revision_imports WHERE revision_id = ?').get(current) !== undefined ||
+        this.#db.prepare('SELECT 1 FROM word_manuscript_source_segments WHERE revision_id = ? LIMIT 1').get(current) !== undefined) return true;
+      if (this.#db.prepare('SELECT 1 FROM manuscript_block_sources WHERE revision_id = ? LIMIT 1').get(current) !== undefined) return false;
+      current = nullableText(row.parent_revision_id);
+    }
+    return true;
+  }
+
+  #requirePlanBinding(row: SqlRow, plan: ExportPlan): void {
+    const stored = parseCanonicalJson(text(row.canonical_json));
+    requireExport(isRecord(stored), 'EXPORT_PREPARATION_INVALID', '导出准备记录无法读取。');
+    if (plan.kind === 'manuscript' && plan.wordBinding !== null) {
+      requireWordExportBinding(stored.wordSource, plan.wordBinding);
+      requireExport(stored.writer === plan.writer && stored.wordInputDigest === plan.inputDigest,
+        'EXPORT_PREPARATION_INVALID', 'Word 导出准备的写入器或完整输入固定记录已经变化。');
+    } else requireExport(stored.wordSource === undefined && stored.wordInputDigest === undefined && stored.writer !== WORD_DOCX_EXPORT_WRITER_IDENTITY,
+      'EXPORT_PREPARATION_INVALID', 'Word 导出准备不能切换为其他来源或写入器。');
   }
 
   /**
@@ -1883,7 +1949,7 @@ export class ManuscriptExportStore {
     try {
       return renderDocxExport(input, { emit });
     } catch (error) {
-      if (error instanceof DocxExportError && error.code === 'DOCX_EXPORT_SOURCE_UNSUPPORTED' && input.source.kind === 'mapped') {
+      if (error instanceof DocxExportError && error.code === 'DOCX_EXPORT_SOURCE_UNSUPPORTED' && input.source.kind === 'mapped' && !isWordMappedDocxSource(input.source)) {
         // A document that binds WordprocessingML to no prefix is written fresh from its blocks, and says why.
         return renderDocxExport({ ...input, source: { kind: 'fresh', reason: 'unprefixed', scan: input.source.original, converter: null } }, { emit });
       }
@@ -1921,6 +1987,8 @@ export class ManuscriptExportStore {
       ? reportRestorationLine(report.version)
       : format !== 'docx'
         ? EXPORT_TEXT_RESTORATION_LINES[format]
+        : plan.kind === 'manuscript' && plan.wordBinding !== null
+          ? `按「${plan.wordBinding.mode === 'suggestions' ? '修订作为修改建议' : '接受修订后的基线'}」及之后的稿件文字导出；${rendered.restoredBlocks} 段恢复可保留的原文件格式，${rendered.regeneratedBlocks} 段重新生成，具体损失见保真审阅。`
         : rendered.restoration === 'from-original'
           ? `未改过、也没有带出标记的 ${rendered.restoredBlocks} 段从原文件恢复；其余 ${rendered.regeneratedBlocks} 段按稿件文字重新写出。`
           : plan.kind === 'manuscript' && (plan.input.source.kind === 'mapped' || (plan.input.source.kind === 'fresh' && plan.input.source.reason === 'unprefixed'))
@@ -1952,7 +2020,7 @@ export class ManuscriptExportStore {
       technical: {
         revisionDigest: target.revisionDigest,
         sourceVersionId: plan.sourceVersionId,
-        writerIdentity: writerOf(target, format),
+        writerIdentity: plan.writer,
         inputDigest: plan.inputDigest,
       },
     };
@@ -2011,6 +2079,13 @@ export class ManuscriptExportStore {
       : null;
     const disposition = text(row.disposition) as ManuscriptExportDisposition;
     const stored = parseCanonicalJson(text(row.canonical_json));
+    if (isRecord(stored) && (stored.wordSource !== undefined || stored.writer === WORD_DOCX_EXPORT_WRITER_IDENTITY)) {
+      validateWordExportBinding(stored.wordSource);
+      requireExport(typeof stored.wordInputDigest === 'string' && DIGEST_PATTERN.test(stored.wordInputDigest) &&
+        stored.writer === stored.wordSource.writer && stored.wordSource.format === row.format && stored.wordSource.revisionId === revisionId &&
+        stored.wordSource.revisionDigest === row.revision_digest,
+      'EXPORT_PREPARATION_INVALID', 'Word 导出准备与其写入器、版本或完整输入摘要不一致。');
+    }
     if (isRecord(stored) && stored.archive !== undefined) {
       requireExport(isRecord(stored.archive) && typeof stored.archive.exportId === 'string' && UUID_PATTERN.test(stored.archive.exportId) &&
         stored.archive.destination === text(row.destination) && stored.archive.memberPath === text(row.file_name),
