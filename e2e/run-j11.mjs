@@ -3416,6 +3416,8 @@ async function main() {
     await assertRenderer(renderer, `!document.querySelector(${JSON.stringify(`${wordMaterial} input[value="book"], ${wordMaterial} input[value="house"]`)})`, 'word-no-human-inclusion-affordance');
     await assertRenderer(renderer, `(() => { const input=document.querySelector(${JSON.stringify(`${wordMaterial} input[value="excluded"]`)}); if(!(input instanceof HTMLInputElement)||input.disabled)return false;input.click();return input.checked;})()`, 'word-exclusion-select');
     await clickSelector(renderer, `${wordMaterial} [data-learning-action="record"]`, 'word-exclusion-record');
+    await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent === '学习准入决定已记录。' && document.querySelector(${JSON.stringify(`${wordMaterial} [data-learning-action="open"]`)})`, 'word-exclusion-recorded');
+    await clickSelector(renderer, `${wordMaterial} [data-learning-action="open"]`, 'word-exclusion-reinspect');
     await waitFor(renderer, `document.querySelector(${JSON.stringify(wordMaterial)})?.textContent.includes('当前已排除学习')`, 'word-current-exclusion');
     await clickSelector(renderer, `${wordMaterial} [data-learning-action="word-detail"]`, 'word-excluded-historical-inspection');
     await waitFor(renderer, `document.querySelector('[data-word-detail-page] > article')`, 'word-excluded-detail-readable');
