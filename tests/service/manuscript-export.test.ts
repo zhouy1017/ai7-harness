@@ -355,9 +355,13 @@ describe('selected native Word reading through the actual export service', () =>
       const reviewed = await review(store, book);
       expect(reviewed.savedForExport).toBe(true);
       expect(reviewed.technical.writerIdentity).toBe(WORD_DOCX_EXPORT_WRITER_IDENTITY);
+      expect(reviewed.degraded).toBe(true);
+      expect(reviewed.fidelity.find((row) => row.key === 'file-revisions')).toMatchObject({ count: 2, status: 'degraded',
+        detail: `正文来源的 2 处原始修订记号不直接恢复；文字按导入时确认的${mode === 'suggestions' ? '拒绝修订' : '接受修订'}阅读对应，之后的编辑按当前稿件写出。待处理修改建议按本次导出选项处理。` });
       const destination = join(outbox, `word-${mode}.docx`);
       const preparation = await store.prepareManuscriptExport({ bookId: book.bookId, revisionId: reviewed.target.revisionId,
         target: CURRENT, options: DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, reviewDigest: reviewed.reviewDigest, destination }, true);
+      expect(preparation.degraded).toBe(true);
       withDatabase(true, (db) => {
         const row = db.prepare('SELECT canonical_json FROM export_preparations WHERE preparation_id = ?').get(preparation.preparationId)!;
         expect(JSON.parse(String(row.canonical_json))).toMatchObject({ writer: WORD_DOCX_EXPORT_WRITER_IDENTITY,
@@ -370,6 +374,7 @@ describe('selected native Word reading through the actual export service', () =>
       expect(existsSync(destination)).toBe(false);
       store.markCleanShutdown(); store.close();
       store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      expect((await review(store, book)).fidelity).toEqual(reviewed.fidelity);
       const storedPreparation = withDatabase(true, (db) => {
         const row = db.prepare('SELECT canonical_json, sha256 FROM export_preparations WHERE preparation_id = ?').get(preparation.preparationId)!;
         const value: unknown = JSON.parse(String(row.canonical_json));

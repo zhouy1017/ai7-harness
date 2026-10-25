@@ -630,7 +630,8 @@ function styled(properties: XmlElement): boolean {
  * Count the classes of `nodes`. A text box's own content is read, as the parser reads it; a paragraph's
  * section carrier counts once; a field counts by the first word of its instruction, a HYPERLINK field as an
  * inline style. Revision and comment markup inside a text box, and every formatting revision, count as the
- * file's own revisions that did not become marks.
+ * file's own revisions that did not become marks. The Word graph writer also discloses each original
+ * body revision wrapper whose selected reading replaces that markup.
  */
 function countClasses(nodes: ReadonlyArray<XmlNode>, selectedWord = false): ClassCounts {
   const counts = emptyCounts();
@@ -701,8 +702,9 @@ function countClasses(nodes: ReadonlyArray<XmlNode>, selectedWord = false): Clas
         break;
       default:
         if (FORMATTING_REVISIONS.has(element.local) || TEXT_NEUTRAL_REVISIONS.has(element.local)) counts.fileRevisions += 1;
-        else if (inTextBox && (COMMENT_MARKERS.has(element.local) || element.local === 'ins' || element.local === 'del' ||
+        else if ((selectedWord || inTextBox) && (element.local === 'ins' || element.local === 'del' ||
           element.local === 'moveFrom' || element.local === 'moveTo')) counts.fileRevisions += 1;
+        else if (inTextBox && COMMENT_MARKERS.has(element.local)) counts.fileRevisions += 1;
         break;
     }
   }

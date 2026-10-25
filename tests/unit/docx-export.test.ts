@@ -113,10 +113,12 @@ describe('Word graph mapped export (#1132)', () => {
     for (const edited of [false, true]) {
       const blocks = input.blocks.map((block) => edited ? { ...block, text: `${block.text} edited`, digest: blockDigest(block.kind, block.level, `${block.text} edited`) } : block);
       const output = renderDocxExport({ ...input, blocks }, { emit: true });
-      expect(output.fidelity.find((row) => row.key === 'file-revisions')!.detail)
-        .toContain(mode === 'suggestions' ? '拒绝修订阅读' : '接受修订阅读');
+      expect(output.degraded).toBe(true);
+      expect(output.fidelity.find((row) => row.key === 'file-revisions')).toMatchObject({ count: 2, status: 'degraded',
+        detail: `正文来源的 2 处原始修订记号不直接恢复；文字按导入时确认的${mode === 'suggestions' ? '拒绝修订' : '接受修订'}阅读对应，之后的编辑按当前稿件写出。待处理修改建议按本次导出选项处理。` });
       const reread = await parseBytes(output.bytes!);
       expect(reread.blocks.map((block) => block.text)).toEqual(blocks.map((block) => block.text));
+      expect(reread.blocks.map((block) => block.text)).toEqual([`stable ${mode === 'suggestions' ? 'old' : 'new'}${edited ? ' edited' : ''}`]);
       expect(reread.parsed.importedMarks).toEqual([]);
     }
   });
@@ -127,6 +129,7 @@ describe('Word graph mapped export (#1132)', () => {
     for (const mode of ['suggestions', 'accepted-baseline'] as const) {
       const input = makeInput(body, mode);
       const output = renderDocxExport(input, { emit: true });
+      expect(output.fidelity.find((row) => row.key === 'file-revisions')).toMatchObject({ count: 1, status: 'degraded' });
       const reread = await parseBytes(output.bytes!);
       expect(reread.blocks.map((block) => block.text)).toEqual(input.blocks.map((block) => block.text));
     }
@@ -142,7 +145,9 @@ describe('Word graph mapped export (#1132)', () => {
       '<w:p><w:moveTo w:id="10"><w:r><w:t>B</w:t></w:r></w:moveTo><w:moveToRangeEnd w:id="8"/></w:p>';
     for (const mode of ['suggestions', 'accepted-baseline'] as const) {
       const input = makeInput(body, mode);
-      expect((await parseBytes(renderDocxExport(input, { emit: true }).bytes!)).blocks.map((block) => block.text)).toEqual(input.blocks.map((block) => block.text));
+      const output = renderDocxExport(input, { emit: true });
+      expect(output.fidelity.find((row) => row.key === 'file-revisions')).toMatchObject({ count: 4, status: 'degraded' });
+      expect((await parseBytes(output.bytes!)).blocks.map((block) => block.text)).toEqual(input.blocks.map((block) => block.text));
     }
   });
 
@@ -155,6 +160,7 @@ describe('Word graph mapped export (#1132)', () => {
         const blocks = input.blocks.map((block) => variant === 'edited' && block.position === 2
           ? { ...block, text: 'ME', digest: blockDigest(block.kind, block.level, 'ME') } : block);
         const output = renderDocxExport({ ...input, blocks }, { emit: true });
+        expect(output.fidelity.find((row) => row.key === 'file-revisions')).toMatchObject({ count: withMovedRuns ? 4 : 2, status: 'degraded' });
         const reread = await parseBytes(output.bytes!);
         expect(reread.blocks.map((block) => block.text)).toEqual(blocks.map((block) => block.text));
         expect(reread.parsed.importedMarks.filter((mark) => mark.kind === 'change-suggestion')).toEqual([]);
@@ -174,7 +180,9 @@ describe('Word graph mapped export (#1132)', () => {
 
   it('supports an unprefixed Word namespace in its own writer and keeps common text-format projections truthful', async () => {
     const input = makeInput('<w:p><w:r><w:t>old</w:t></w:r><w:ins w:id="1"><w:r><w:t>new</w:t></w:r></w:ins></w:p>', 'accepted-baseline', true);
-    expect((await parseBytes(renderDocxExport(input, { emit: true }).bytes!)).blocks.map((block) => block.text)).toEqual(input.blocks.map((block) => block.text));
+    const output = renderDocxExport(input, { emit: true });
+    expect(output.fidelity.find((row) => row.key === 'file-revisions')).toMatchObject({ count: 1, status: 'degraded' });
+    expect((await parseBytes(output.bytes!)).blocks.map((block) => block.text)).toEqual(input.blocks.map((block) => block.text));
     expect(renderMarkdownExport(input, { emit: true }).bytes).not.toBeNull();
     expect(renderPdfHtmlExport(input, { emit: true }).bytes).not.toBeNull();
   });
@@ -271,6 +279,7 @@ describe('Word graph mapped export (#1132)', () => {
       '<w:p><w:r><w:t>base</w:t></w:r><w:ins w:id="1"><w:r><w:t>new</w:t></w:r></w:ins></w:p>';
     const input = makeInput(body, mode);
     const output = renderDocxExport(input, { emit: true });
+    expect(output.fidelity.find((row) => row.key === 'file-revisions')).toMatchObject({ count: 1, status: 'degraded' });
     const reread = await parseBytes(output.bytes!);
     expect(reread.blocks.map((block) => block.text)).toEqual(input.blocks.map((block) => block.text));
     expect(reread.parsed.importedMarks).toEqual([]);
