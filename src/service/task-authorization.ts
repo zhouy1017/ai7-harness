@@ -3089,7 +3089,21 @@ export const IDLE_RUN_AUTHORIZATIONS_SQL = ANALYSIS_LEDGER_SCHEMA_SQL.analysis_r
   "sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64),\n    start_when TEXT NOT NULL DEFAULT 'now' CHECK(start_when IN ('now', 'idle'))",
 );
 
-/** Reader 94 semantics are checked before backup, reconstruction, migration or package use. No external log is needed to open retained data. */
+/** What reader 94 introduced, anywhere in a record: the two selected metadata fields, their material Plan field names, or a /2 dialogue variant. */
+function carriesPolicyOriginalFieldSemantics(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(carriesPolicyOriginalFieldSemantics);
+  if (!isRecord(value)) return false;
+  return Object.hasOwn(value, 'selectedPolicyIdentity') || Object.hasOwn(value, 'localFixtureProfile') ||
+    value.field === 'selectedPolicyIdentity' || value.field === 'localFixtureProfile' ||
+    value.schema === 'ai7.dialogue-attempt/2' || value.schema === 'ai7.dialogue-execution-binding/2' ||
+    Object.values(value).some(carriesPolicyOriginalFieldSemantics);
+}
+
+/**
+ * Reader 94 semantics are checked before backup, reconstruction, migration or package use. Only records carrying them are read
+ * here; every other row keeps its existing owner and read-time refusal, so a predecessor shape or a damaged legacy row is not
+ * reinterpreted by this reader. No external log is needed to open retained data.
+ */
 export function validatePolicyOriginalFieldRecords(db: DatabaseSync): void {
   const revision = Number(db.prepare('PRAGMA user_version').get()?.user_version);
   const admitted = revision >= POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION;
@@ -3097,41 +3111,44 @@ export function validatePolicyOriginalFieldRecords(db: DatabaseSync): void {
   const metadata = (value: unknown): void => {
     if (Array.isArray(value)) { value.forEach(metadata); return; }
     if (!isRecord(value)) return;
-    const hasIdentity = Object.hasOwn(value, 'selectedPolicyIdentity');
-    const hasProfile = Object.hasOwn(value, 'localFixtureProfile');
-    const variant = value.schema === 'ai7.dialogue-attempt/2' || value.schema === 'ai7.dialogue-execution-binding/2';
-    requireTask(admitted || (!hasIdentity && !hasProfile && !variant), 'SCHEMA_UNSUPPORTED', '此处理策略记录需要 Reader 94；没有修改数据。');
-    if (hasIdentity || hasProfile) {
+    if (Object.hasOwn(value, 'selectedPolicyIdentity') || Object.hasOwn(value, 'localFixtureProfile')) {
       const selected = selectedPolicyIdentityOf(value.selectedPolicyIdentity);
-      requireTask(selected !== null && (!hasProfile || localFixtureProfileOf(value.localFixtureProfile, selected) !== null),
+      requireTask(selected !== null && (!Object.hasOwn(value, 'localFixtureProfile') || localFixtureProfileOf(value.localFixtureProfile, selected) !== null),
         'TASK_RECORD_INVALID', '处理策略或本地夹具配置记录无效。');
     }
     Object.values(value).forEach(metadata);
   };
-  for (const table of ['provider_resolution_plans', 'analysis_plan_records', 'analysis_plan_revisions', 'analysis_execution_bindings', 'analysis_result_set_revisions',
-    'dialogue_attempts', 'dialogue_execution_bindings']) {
+  const selectedVersion = (version: unknown): boolean => version === 'v29' || version === 'v30';
+  const dialogueAttempts = new Set<string>();
+  for (const table of ['provider_resolution_plans', 'analysis_plan_records', 'analysis_plan_versions', 'analysis_plan_revisions', 'analysis_execution_bindings',
+    'analysis_result_set_revisions', 'dialogue_attempts', 'dialogue_execution_bindings']) {
     if (!exists(table)) continue;
+    const plan = table === 'provider_resolution_plans' || table === 'analysis_plan_records';
+    const pinned = table === 'analysis_execution_bindings' || table === 'analysis_result_set_revisions';
     for (const row of db.prepare(`SELECT * FROM ${table}`).all()) {
-      const json = asString(row.canonical_json);
-      requireTask(sha256(json) === row.sha256, 'TASK_RECORD_INVALID', '处理策略记录摘要不一致。');
-      const value = parseCanonicalJson(json);
+      if (typeof row.canonical_json !== 'string') continue;
+      let value: unknown;
+      try { value = JSON.parse(row.canonical_json) as unknown; } catch { continue; }
+      const providerPlan = plan && isRecord(value) && (table === 'provider_resolution_plans' || row.component === 'provider-resolution-plan') ? value : null;
+      const planPin = providerPlan === null ? null
+        : isRecord(providerPlan.remoteBinding) && isRecord(providerPlan.remoteBinding.providerProcessing) ? providerPlan.remoteBinding.providerProcessing
+          : isRecord(providerPlan.providerProcessing) ? providerPlan.providerProcessing : null;
+      const pin = pinned && isRecord(value) && isRecord(value.policyPin) ? value.policyPin : null;
+      // Every set-v21 pin is current-only, developer-live v24 included; older v24 pins stay with their existing owner.
+      if (!carriesPolicyOriginalFieldSemantics(value) && !selectedVersion(planPin?.version) && !selectedVersion(pin?.providerProcessingVersion) &&
+          pin?.activePolicySetVersion !== 'v21') continue;
+      requireTask(admitted, 'SCHEMA_UNSUPPORTED', '此处理策略记录需要 Reader 94；没有修改数据。');
+      requireTask(sha256(row.canonical_json) === row.sha256, 'TASK_RECORD_INVALID', '处理策略记录摘要不一致。');
       metadata(value);
-      if ((table === 'analysis_execution_bindings' || table === 'analysis_result_set_revisions') && isRecord(value)) {
-        requireTask(isResultSetPolicyPin(value.policyPin) && (admitted || value.policyPin.providerProcessingVersion !== 'v29' && value.policyPin.providerProcessingVersion !== 'v30'),
-          'TASK_RECORD_INVALID', '结果或执行绑定的策略 pin 与读者版本不一致。');
-      }
-      if ((table === 'provider_resolution_plans' || table === 'analysis_plan_records' && row.component === 'provider-resolution-plan') && isRecord(value)) {
-        providerPlanPolicyMetadata(value);
-      }
+      if (pinned) requireTask(isResultSetPolicyPin(pin), 'TASK_RECORD_INVALID', '结果或执行绑定的策略 pin 与读者版本不一致。');
+      if (providerPlan !== null) providerPlanPolicyMetadata(providerPlan);
+      if (table === 'dialogue_attempts' || table === 'dialogue_execution_bindings') dialogueAttempts.add(asString(row.attempt_id));
     }
   }
-  if (exists('dialogue_tasks')) {
+  // Each new dialogue variant reads through its own ledger: canonical shape, physical columns, task scope and binding joins.
+  if (dialogueAttempts.size > 0) {
     const ledger = new DialogueLedger(db);
-    for (const row of db.prepare('SELECT dialogue_id FROM dialogue_tasks').all()) {
-      const id = asString(row.dialogue_id);
-      requireTask(ledger.globalTask(id) !== null || ledger.task(id) !== null, 'TASK_RECORD_INVALID', '对话任务记录无效。');
-      ledger.attempts(id);
-    }
+    for (const attemptId of dialogueAttempts) ledger.policyVariant(attemptId);
   }
 }
 

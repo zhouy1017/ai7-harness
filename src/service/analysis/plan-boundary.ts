@@ -11,7 +11,8 @@ import type {
   SafeRetryRepetition,
 } from '../../shared/protocol.js';
 import { DIGEST_PATTERN, UUID_PATTERN, canonicalJson, canonicalRecord, isRecord, requireAnalysis } from './canonical.js';
-import { isSupportedProviderProcessingVersion, localFixtureProfileOf, selectedPolicyIdentityOf } from '../launch-policy.js';
+import { localFixtureProfileOf, selectedPolicyIdentityOf } from '../launch-policy.js';
+import { isRecordedProviderProcessingVersion } from '../../shared/protocol.js';
 
 /**
  * The Plan Boundary Split of the baseline-analysis Task kind and the material plan inputs whose
@@ -209,7 +210,8 @@ export function providerPlanPolicyMetadata(providerPlan: Readonly<Record<string,
   Pick<MaterialPlanInputsProjection, 'selectedPolicyIdentity' | 'localFixtureProfile'> {
   const binding = isRecord(providerPlan.remoteBinding) ? providerPlan.remoteBinding : providerPlan;
   const pin = isRecord(binding.providerProcessing) ? binding.providerProcessing : null;
-  if (pin !== null) requireAnalysis(isSupportedProviderProcessingVersion(pin.operationalScope, pin.version),
+  // A version some launch of this scope actually pinned, including developer-live v4 Plans frozen before #440.
+  if (pin !== null) requireAnalysis(isRecordedProviderProcessingVersion(pin.operationalScope, pin.version),
     'ANALYSIS_RECORD_INVALID', '计划的处理策略版本无法识别。');
   const hasIdentity = Object.hasOwn(providerPlan, 'selectedPolicyIdentity');
   const hasProfile = Object.hasOwn(providerPlan, 'localFixtureProfile');

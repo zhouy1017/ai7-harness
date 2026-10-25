@@ -41,6 +41,7 @@ it.each(['baseline', 'ambiguous'] as const)('replays the recorded /2 %s Run and 
     database.exec('PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000');
     const definition = mode === 'ambiguous' ? withAmbiguousClarificationValidation(baselineAnalysisKindDefinition()) : baselineAnalysisKindDefinition();
     const ledger = new BaselineAnalysisStore(database, new BoundedManuscriptStore(database), route, definition);
+    ledger.bindLaunch({ operationalScope: 'development-ci', live: null, policy, localFixtureRuntime: () => store!.localFixtureRuntime() });
     let work = ledger.prepare({ phase: 'start', bookId, goal: BASELINE_ANALYSIS_TASK_GOAL, update: null, reconfirm: false, launchPolicy: policy });
     while (!work.done) work = ledger.prepare({ phase: 'advance', workId: work.workId! });
     const prepared = work.projection!;

@@ -1,3 +1,4 @@
+import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cp, unlink, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
@@ -231,6 +232,7 @@ describe('durable request reader compatibility', () => {
     ('refuses property presence under predecessor $revision at $location ($value), without restamping', async ({ revision, table, field, value }) => {
       const crash = await admittedCrash(table === 'analysis_unit_checkpoints' ? 'unit' : table === 'analysis_clarification_requests' ? 'clarification' : 'held');
       const path = join(crash.snapshot, 'store', 'ai7.sqlite'); const db = new DatabaseSync(path);
+      constructPre94PolicyEncoding(db);
       for (const [target, property] of requestFields) rewriteRequestRows(db, target, (record) => { delete record[property]; });
       expect(db.prepare(`SELECT count(*) total FROM ${table}`).get()!.total).toBeGreaterThan(0);
       rewriteRequestRows(db, table, (record, index) => { if (index === 0) record[field] = value; });

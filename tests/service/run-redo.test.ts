@@ -250,6 +250,7 @@ describe('改计划重做 over the real store', () => {
       // blocks it before it begins — its plan moved.
       const live = () => store.baselineAnalysisLedger.bindLaunch({
         operationalScope: 'developer-live',
+        localFixtureRuntime: () => store.localFixtureRuntime(),
         live: {
           route: 'opencode-go',
           model: 'deepseek-v4.1-flash',
@@ -259,7 +260,8 @@ describe('改计划重做 over the real store', () => {
           runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 240_000 },
         },
       });
-      const offline = () => store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'development-ci', live: null });
+      const offline = () => store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'development-ci', live: null,
+        policy: launchPolicy, localFixtureRuntime: () => store.localFixtureRuntime() });
       const moved = async (taskIntentId: string, digest: string) => {
         store.startBaselineAnalysisWhenOnline(bookId, taskIntentId, digest);
         live();

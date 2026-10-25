@@ -70,8 +70,9 @@ beforeEach(async () => {
   for (const kind of kinds) {
     const id = kindId(kind);
     const rule = policy.providerProcessing.admittedRules.find((candidate) => candidate.taskKinds.includes(id))!;
-    policy = withRuleFor(policy, id, { materialReferencesAllowed: true,
-      outboundDataCategories: [...new Set([...rule.outboundDataCategories, 'frozen-material-reference-excerpt' as const])] });
+    // Current-policy positives use the resolver's actual terms, with no successor admission injected.
+    expect(rule.materialReferencesAllowed).toBe(true);
+    expect(rule.outboundDataCategories).toContain('frozen-material-reference-excerpt');
   }
   control = { baselineAnalysisRoute: null,
     induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,

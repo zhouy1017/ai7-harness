@@ -1,3 +1,4 @@
+import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -885,6 +886,7 @@ function historicalFixtureRows(db: DatabaseSync) {
 
 /** Only the two explicitly leased disposable revision90 setups call this historical-format constructor. */
 function constructHistoricalRequestFormat(db: DatabaseSync) {
+  constructPre94PolicyEncoding(db);
   expect(db.prepare('SELECT count(*) total FROM analysis_clarification_requests').get()!.total).toBe(0);
   expect(db.prepare('SELECT count(*) total FROM analysis_clarification_answers').get()!.total).toBe(0);
   const fields = [

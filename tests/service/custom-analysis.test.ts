@@ -1,3 +1,4 @@
+import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -339,6 +340,7 @@ describe('schema revision 82', () => {
     });
     const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
     const plant = new DatabaseSync(path);
+    constructPre94PolicyEncoding(plant);
     const sets = plant.prepare('SELECT rowid, * FROM analysis_result_sets ORDER BY rowid').all();
     const revisions = plant.prepare('SELECT rowid, * FROM analysis_result_set_revisions ORDER BY rowid').all();
     const plans = plant.prepare('SELECT rowid, * FROM analysis_plan_records ORDER BY rowid').all();

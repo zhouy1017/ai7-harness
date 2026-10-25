@@ -18,7 +18,7 @@ import {
   type ConfiguredProviderBinding,
 } from '../../src/service/launch-policy.js';
 import { SEARCH_BACKENDS } from '../../src/service/provider/search-backends.js';
-import { FACTUAL_REVIEW_KIND, LAUNCH_SELECTABLE_SCOPES, parseTrustedLaunchForm } from '../../src/shared/protocol.js';
+import { FACTUAL_REVIEW_KIND, LAUNCH_SELECTABLE_SCOPES, isRecordedProviderProcessingVersion, isResultSetPolicyPin, parseTrustedLaunchForm } from '../../src/shared/protocol.js';
 import { liveKindRule } from '../../src/service/analysis/live-kind-admission.js';
 import type { AdmittedLocalTools, AdmittedPlatformTools, AdmittedProviderRule, LaunchPolicyProjection, TrustedOperationalScope } from '../../src/shared/protocol.js';
 
@@ -464,6 +464,31 @@ beforeEach(async () => {
   sandbox = await mkdtemp(join(tmpdir(), 'ai7-launch-policy-test-'));
   codeRoot = join(sandbox, 'checkout');
   await mkdir(codeRoot);
+});
+
+describe('recorded policy pins and Plan versions (#1161)', () => {
+  const pin = (operationalScope: TrustedOperationalScope | 'fixture-recording', providerProcessingVersion: string, activePolicySetVersion: string) =>
+    ({ operationalScope, providerProcessingVersion, activePolicySetVersion, liveTransmissions: operationalScope === 'development-ci' ? 0 : 'bounded-by-run' });
+  it('reads every pin a launch actually wrote, including set v3 and the developer-live v4 pin before #440', () => {
+    for (const recorded of [pin('development-ci', 'v1', 'v3'), pin('development-ci', 'v1', 'v4'), pin('developer-live', 'v4', 'v4'),
+      pin('developer-live', 'v9', 'v7'), pin('development-ci', 'v1', 'v19'), pin('developer-live', 'v24', 'v19'), pin('ordinary-production', 'v13', 'v10'),
+      pin('ordinary-production', 'v27', 'v19'), pin('development-ci', 'v29', 'v21'), pin('ordinary-production', 'v30', 'v21'), pin('developer-live', 'v24', 'v21')]) {
+      expect(isResultSetPolicyPin(recorded), JSON.stringify(recorded)).toBe(true);
+    }
+    expect(isRecordedProviderProcessingVersion('developer-live', 'v4')).toBe(true);
+  });
+  it('refuses a pin no launch wrote: version and set cross-products, unselected sets and versions, and wrong bounds', () => {
+    for (const unwritten of [pin('development-ci', 'v1', 'v21'), pin('development-ci', 'v29', 'v19'), pin('ordinary-production', 'v30', 'v19'),
+      pin('ordinary-production', 'v27', 'v21'), pin('developer-live', 'v24', 'v7'), pin('developer-live', 'v4', 'v5'), pin('developer-live', 'v8', 'v6'),
+      pin('development-ci', 'v29', 'v20'), pin('ordinary-production', 'v28', 'v20'), pin('ordinary-production', 'v6', 'v5'), pin('development-ci', 'v1', 'v2'),
+      pin('fixture-recording', 'v2', 'v19')]) {
+      expect(isResultSetPolicyPin(unwritten), JSON.stringify(unwritten)).toBe(false);
+    }
+    expect(isResultSetPolicyPin({ ...pin('development-ci', 'v1', 'v19'), liveTransmissions: 'bounded-by-run' })).toBe(false);
+    expect(isResultSetPolicyPin({ ...pin('development-ci', 'v1', 'v19'), extra: true })).toBe(false);
+    expect(isRecordedProviderProcessingVersion('developer-live', 'v8')).toBe(false);
+    expect(isRecordedProviderProcessingVersion('ordinary-production', 'v28')).toBe(false);
+  });
 });
 
 describe('synchronous frozen-binding policy resolution (#1131)', () => {

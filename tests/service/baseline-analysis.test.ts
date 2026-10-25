@@ -1,3 +1,4 @@
+import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
@@ -401,7 +402,8 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       const attempt = settled.run!.attempt!;
       attemptId = attempt.attemptId;
       expect(attempt.credentialReadinessCheck).toEqual({ slot: 'deepseek-api-key', readiness: 'missing', valueReleased: false });
-      expect(resolver.reads).toEqual([credentialReference]);
+      // A v29 local Run never reads a credential (AC17); readiness stays the recorded missing state with nothing released.
+      expect(resolver.reads).toEqual([]);
       const binding = attempt.executionBinding!;
       expect(binding).toMatchObject({
         planEnvelopeDigest: prepared.planEnvelope!.digest,
@@ -734,10 +736,17 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       expect(prepared.planEnvelope?.boundary?.material.map((entry) => entry.field)).toEqual([
         'providerBinding.providerId', 'providerBinding.modelId', 'providerBinding.adapterRevision', 'providerBinding.configurationRevision', 'providerBinding.credentialReference',
         'artifactPin.identity', 'artifactPin.version', 'artifactPin.nativeCarrierSha256', 'artifactPin.sidecarRevision', 'artifactPin.sidecarSha256',
-        'selectedRange', 'predecessorRevision', 'runBudgetCeiling', 'outboundDataCategory', 'expectedOutcome',
+        'selectedRange', 'predecessorRevision', 'runBudgetCeiling', 'outboundDataCategory', 'expectedOutcome', 'selectedPolicyIdentity', 'localFixtureProfile',
       ]);
       expect(prepared.planVersion).toMatchObject({ ordinal: 1, state: 'current', planRevisionId: null, planEnvelopeDigest: prepared.planEnvelope!.digest });
       expect(prepared.planVersion?.materialInputs).toEqual({
+        // A new development-ci Plan names the selected v29/set v21 documents and the baseline caller's exact legacy profile.
+        selectedPolicyIdentity: { providerProcessingVersion: 'v29', providerProcessingSha256: 'c9545a5f461a7791115c1f4664bbd731757775951f814d39c28b12c85af88c9d',
+          activePolicySetVersion: 'v21', activePolicySetSha256: '4b845e924df777f440b07d53ba6e31447e0fe0b004e86efa89bf76554fb05392' },
+        localFixtureProfile: { schema: 'ai7.local-fixture-profile/1', policyVersion: 'v29', policySha256: 'c9545a5f461a7791115c1f4664bbd731757775951f814d39c28b12c85af88c9d',
+          activePolicySetVersion: 'v21', activePolicySetSha256: '4b845e924df777f440b07d53ba6e31447e0fe0b004e86efa89bf76554fb05392', kind: 'legacy',
+          profileId: 'development-ci-legacy-local-fixture-809c96f2', manifestSha256: '2572c1b5aa05d6ccc9a60a2a8a03ba2cefc10d5f48c1a85377d53797360bc0d2',
+          registeredProfile: 'baseline' },
         providerBinding: { providerId: 'deepseek-open-platform', modelId: 'deepseek-v4-pro', adapterRevision: 1, configurationRevision: 1, credentialReference },
         artifactPin: { identity: '@ai7/editorial-workspace-profile', version: '1.0.0', nativeCarrierSha256: 'ae485040c8fa602ab2e98ec91dd122201d40a8be41d8a4f86f7cd55ddb1e434d', sidecarRevision: 2, sidecarSha256: '980b565f25bdff29e539365e17344346017b05146a45cfea35c8ed7d528a1bff' },
         selectedRange: null,
@@ -1526,6 +1535,8 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       await owner.dispose();
       store.close();
     }
+    const predecessorEncoding = new DatabaseSync(databasePath);
+    try { constructPre94PolicyEncoding(predecessorEncoding); } finally { predecessorEncoding.close(); }
     const j03Tables = Object.keys(TASK_AUTHORIZATION_SCHEMA_SQL);
     const seededTables = new Set<string>(ANALYSIS_LEDGER_REVISION_17_TABLES);
     const analysisTables = Object.keys(ANALYSIS_LEDGER_SCHEMA_SQL).filter((table) => !seededTables.has(table));
@@ -1616,6 +1627,8 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       store.close();
     }
     // Every row of the three relations revision 20 rebuilds, exactly as revision 19 wrote them.
+    const predecessorEncoding = new DatabaseSync(databasePath);
+    try { constructPre94PolicyEncoding(predecessorEncoding); } finally { predecessorEncoding.close(); }
     const j03Tables = Object.keys(TASK_AUTHORIZATION_SCHEMA_SQL);
     const analysisTables = Object.keys(ANALYSIS_LEDGER_SCHEMA_SQL);
     const before = new DatabaseSync(databasePath, { readOnly: true });

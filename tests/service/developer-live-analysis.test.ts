@@ -19,6 +19,9 @@ import {
 } from '../../src/service/analysis/baseline-analysis-store.js';
 import { BASELINE_PROMPT_CONTRACT_DIGEST, unitRequestDigest } from '../../src/service/analysis/contract.js';
 import { RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST } from '../../src/service/analysis/run-report-contract.js';
+import { clarificationPromptContractDigest } from '../../src/service/provider/clarification-contract.js';
+import { reviewCategoryContractInput, reviewCategoryEntry } from '../../src/service/review/category-configuration.js';
+import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
 // The current baseline samples under sampling contract /2 (Issue #826).
 import {
   ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST,
@@ -52,7 +55,7 @@ import { PUBLIC_SAMPLEBOOKS } from '../../src/shared/public-samplebooks.js';
 import {
   BASELINE_ANALYSIS_MODE_GOALS,
   BASELINE_ANALYSIS_TASK_GOAL,
-  FACTUAL_REVIEW_TASK_GOAL,
+  reviewCategoryModeGoal,
   type BaselineAnalysisProjection,
   type DeveloperLiveCeiling,
   type LaunchPolicyProjection,
@@ -135,6 +138,7 @@ afterEach(async () => {
 function liveBinding(ceiling: Ceiling) {
   return {
     operationalScope: 'developer-live' as const,
+    policy: launchPolicy,
     live: {
       route: DEVELOPER_LIVE_POLICY_BINDING.route,
       model: DEVELOPER_LIVE_POLICY_BINDING.model,
@@ -403,29 +407,35 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
   });
   it('refuses undispatched analysis kinds and non-direct origins before a plan or authorization is recorded', async () => {
     const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
-    const factual = store.factualReviewLedger;
-    factual.bindLaunch(liveBinding(CEILING));
-    expect(refusalCode(() => factual.prepare({ phase: 'start', bookId,
-      goal: FACTUAL_REVIEW_TASK_GOAL, update: null, reconfirm: false, launchPolicy,
+    // Current v24 admits factual review. Publication risk remains absent from its actual review rule.
+    const category = reviewCategoryContractInput(reviewCategoryEntry('publication-risk')!);
+    const definition = reviewCategoryKindDefinition(category);
+    const undispatched = store.reviewCategoryLedger(definition);
+    undispatched.bindLaunch(liveBinding(CEILING));
+    expect(refusalCode(() => undispatched.prepare({ phase: 'start', bookId,
+      goal: reviewCategoryModeGoal(category.label, 'review-first'), update: null, reconfirm: false, launchPolicy,
     }))).toBe('ANALYSIS_KIND_NOT_ADMITTED');
-    expect(factual.inspect(bookId).taskIntent).toBeNull();
+    expect(undispatched.inspect(bookId).taskIntent).toBeNull();
     // A plan another launch froze meets the same refusal at authorization and at admission, before either reads it.
-    expect(refusalCode(() => factual.authorize(bookId, randomUUID(), prepared.planEnvelope!.digest))).toBe('ANALYSIS_KIND_NOT_ADMITTED');
+    expect(refusalCode(() => undispatched.authorize(bookId, randomUUID(), prepared.planEnvelope!.digest))).toBe('ANALYSIS_KIND_NOT_ADMITTED');
     const calls: StubCall[] = [];
     const execution = owner(store, stubTransport({ calls, responses: new Map() }));
     try {
-      expect(refusalCode(() => execution.admitAndDispatch(randomUUID(), factual))).toBe('EXECUTION_KIND_NOT_ADMITTED');
+      expect(refusalCode(() => execution.admitAndDispatch(randomUUID(), undispatched))).toBe('EXECUTION_KIND_NOT_ADMITTED');
       expect(calls).toHaveLength(0);
     } finally {
       await execution.dispose();
     }
-    for (const origin of [
-      { kind: 'default-execution-rule', ruleVersionId: randomUUID() },
-      { kind: 'background-analysis-enrollment', enrollmentVersionId: randomUUID() },
-    ] as const) {
-      expect(refusalCode(() => store.baselineAnalysisLedger.authorize(bookId, prepared.taskIntent!.taskIntentId,
-        prepared.planEnvelope!.digest, 'now', origin))).toBe('ANALYSIS_ORIGIN_NOT_ADMITTED');
-    }
+    expect(refusalCode(() => store.baselineAnalysisLedger.authorize(bookId, prepared.taskIntent!.taskIntentId,
+      prepared.planEnvelope!.digest, 'now', { kind: 'default-execution-rule', ruleVersionId: randomUUID() })))
+      .toBe('ANALYSIS_ORIGIN_NOT_ADMITTED');
+    // Current v24 admits the enrolled-background origin. The existing missing-rule negative must bind that same denial
+    // at authorization, rather than accidentally exercising the old launch-without-policy baseline-only default.
+    store.baselineAnalysisLedger.bindLaunch({ ...liveBinding(CEILING), policy: withoutBackgroundRule(launchPolicy) });
+    expect(refusalCode(() => store.baselineAnalysisLedger.authorize(bookId, prepared.taskIntent!.taskIntentId,
+      prepared.planEnvelope!.digest, 'now', { kind: 'background-analysis-enrollment', enrollmentVersionId: randomUUID() })))
+      .toBe('ANALYSIS_ORIGIN_NOT_ADMITTED');
+    store.baselineAnalysisLedger.bindLaunch(liveBinding(CEILING));
     expect(store.inspectBaselineAnalysis(bookId).authorization).toBeNull();
     // A background preparation needs the enrolled-background rule (Issue #864): refused by its origin where the policy has none,
     // and under v14 let past the origin, to be refused only because the editor's own plan waits.
@@ -511,11 +521,13 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
 
     // Every live call is a named test item, numbered by the ledger under the Task mode's purpose.
     const lines = await ledgerLines(cacheRoot);
+    const currentUnitContract = clarificationPromptContractDigest(BASELINE_PROMPT_CONTRACT_DIGEST);
+    expect(prepared.planEnvelope!.promptContractDigest).toBe(currentUnitContract);
     expect(lines.map((line) => line.promptContractDigest)).toEqual([
-      ...Array.from({ length: SAMPLE1_UNITS }, () => BASELINE_PROMPT_CONTRACT_DIGEST),
+      ...Array.from({ length: SAMPLE1_UNITS }, () => currentUnitContract),
       BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST, RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST,
     ]);
-    expect(lines.every((line) => line.taskPromptContractDigest === BASELINE_PROMPT_CONTRACT_DIGEST)).toBe(true);
+    expect(lines.every((line) => line.taskPromptContractDigest === currentUnitContract)).toBe(true);
     expect(lines.map((line) => line.itemId)).toEqual(
       Array.from({ length: FULL_CHAIN_TURNS }, (_unused, index) => `S40/first-baseline/${index + 1}`),
     );
@@ -582,7 +594,8 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
 
     // The Run Report's reflection turn is one more transmission this policy does not name either, so
     // it never formed a request: no call carries its header, and the report says exactly why.
-    expect(calls.some((call) => call.body.includes('运行反思'))).toBe(false);
+    expect(calls.some((call) => (JSON.parse(call.body) as { messages: Array<{ role: string; content: string }> })
+      .messages.findLast((message) => message.role === 'user')!.content.startsWith('运行反思 '))).toBe(false);
     const report = settled.taskOutcome!.report!;
     expect(report.ifRedone).toEqual({
       state: 'policy-bounded',

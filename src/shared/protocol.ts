@@ -2605,11 +2605,34 @@ export type ResultSetPolicyPin =
   | { operationalScope: 'developer-live'; providerProcessingVersion: DeveloperLiveProviderProcessingVersion; activePolicySetVersion: ActivePolicySetVersion; liveTransmissions: 'bounded-by-run' }
   | { operationalScope: 'ordinary-production'; providerProcessingVersion: OrdinaryProductionProviderProcessingVersion; activePolicySetVersion: ActivePolicySetVersion; liveTransmissions: 'bounded-by-run' };
 
+/**
+ * Every (scope, Provider Processing, active set) a launch actually pinned: each runtime-selected set's own scope pins, 41
+ * historical tuples plus the three set-v21 tuples this selection introduces. Set v3 predates carrier v2; developer-live v4
+ * (set v4, before #440) is outside today's version type yet authentic. On the accepted lineage sets v6 and v20 and
+ * developer-live v8 were never selected, and ordinary production was not launchable before set v10.
+ */
+const RECORDED_POLICY_PINS: Readonly<Record<TrustedOperationalScope, ReadonlyArray<readonly [string, string]>>> = {
+  'development-ci': [...['v3', 'v4', 'v5', 'v7', 'v8', 'v9', 'v10', 'v11', 'v12', 'v13', 'v14', 'v15', 'v16', 'v17', 'v18', 'v19']
+    .map((set) => ['v1', set] as const), ['v29', 'v21']],
+  'developer-live': [['v4', 'v4'], ['v5', 'v5'], ['v9', 'v7'], ['v10', 'v8'], ['v11', 'v9'], ['v12', 'v10'], ['v14', 'v11'], ['v16', 'v12'],
+    ['v18', 'v13'], ['v20', 'v14'], ['v22', 'v15'], ...['v16', 'v17', 'v18', 'v19', 'v21'].map((set) => ['v24', set] as const)],
+  'ordinary-production': [['v13', 'v10'], ['v15', 'v11'], ['v17', 'v12'], ['v19', 'v13'], ['v21', 'v14'], ['v23', 'v15'], ['v23', 'v16'],
+    ['v25', 'v17'], ['v26', 'v18'], ['v27', 'v19'], ['v30', 'v21']],
+};
+
+/** A Provider Processing version some launch of this scope actually pinned (a frozen Plan names no set). */
+export function isRecordedProviderProcessingVersion(scope: unknown, version: unknown): boolean {
+  return (scope === 'development-ci' || scope === 'developer-live' || scope === 'ordinary-production') &&
+    RECORDED_POLICY_PINS[scope].some(([recorded]) => recorded === version);
+}
+
+/** A recorded pin, read exactly against the tuples above, never as a cross-product of versions and sets. */
 export function isResultSetPolicyPin(value: unknown): value is ResultSetPolicyPin {
-  return isPolicyIdentityRecord(value) && hasPolicyIdentityKeys(value, ['operationalScope', 'providerProcessingVersion', 'activePolicySetVersion', 'liveTransmissions']) &&
-    isSupportedProviderProcessingVersion(value.operationalScope, value.providerProcessingVersion) &&
-    typeof value.activePolicySetVersion === 'string' && ['v5', 'v6', 'v7', 'v8', 'v9', 'v10', 'v11', 'v12', 'v13', 'v14', 'v15', 'v16', 'v17', 'v18', 'v19', 'v20', 'v21'].includes(value.activePolicySetVersion) &&
-    value.liveTransmissions === (value.operationalScope === 'development-ci' ? 0 : 'bounded-by-run');
+  if (!isPolicyIdentityRecord(value) || !hasPolicyIdentityKeys(value, ['operationalScope', 'providerProcessingVersion', 'activePolicySetVersion', 'liveTransmissions'])) return false;
+  const scope = value.operationalScope;
+  return (scope === 'development-ci' || scope === 'developer-live' || scope === 'ordinary-production') &&
+    RECORDED_POLICY_PINS[scope].some(([version, set]) => version === value.providerProcessingVersion && set === value.activePolicySetVersion) &&
+    value.liveTransmissions === (scope === 'development-ci' ? 0 : 'bounded-by-run');
 }
 
 /** The three launch-form arguments the built entry accepts beside `--data-root`; carried by argv only, never by an environment variable or setting. */

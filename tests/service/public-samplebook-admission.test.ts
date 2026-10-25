@@ -72,6 +72,7 @@ async function openStore(scope: 'development-ci' | 'developer-live'): Promise<Ed
   if (scope === 'developer-live') {
     store.baselineAnalysisLedger.bindLaunch({
       operationalScope: 'developer-live',
+      policy: livePolicy,
       live: {
         route: DEVELOPER_LIVE_POLICY_BINDING.route,
         model: DEVELOPER_LIVE_POLICY_BINDING.model,

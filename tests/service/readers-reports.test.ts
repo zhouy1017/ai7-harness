@@ -1,3 +1,4 @@
+import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { createHash, randomUUID } from 'node:crypto';
@@ -148,6 +149,7 @@ const REVISIONS_BEFORE_62 = [INITIAL_EVALUATION_SCHEMA_VERSION, DIALOGUE_SCHEMA_
  * the version stamped. Each relation is dropped before the one it refers to.
  */
 function plantRevisionBefore62(plant: DatabaseSync, version: (typeof REVISIONS_BEFORE_62)[number]): void {
+  constructPre94PolicyEncoding(plant);
   const later = [
     ...Object.keys(WRITING_TASK_SCHEMA_SQL).reverse(),
     ...Object.keys(EVALUATION_REWRITE_SCHEMA_SQL).reverse(),

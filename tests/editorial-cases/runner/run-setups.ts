@@ -27,6 +27,7 @@ export async function clarificationRun(store: EditorialStore, dataRoot: string, 
   const route = { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage };
   const definition = ambiguous ? withAmbiguousClarificationValidation(baselineAnalysisKindDefinition()) : baselineAnalysisKindDefinition();
   const ledger = new BaselineAnalysisStore(database, new BoundedManuscriptStore(database), route, definition);
+  ledger.bindLaunch({ operationalScope: 'development-ci', live: null, policy, localFixtureRuntime: () => store.localFixtureRuntime() });
   const owner = new BaselineAnalysisExecutionOwner({ requestGovernor: caseRequestGovernor(store), ledger, launchPolicy: policy, fixture, secretResolver: { resolve: async () => null } });
   try {
     let work = ledger.prepare({ phase: 'start', bookId: book.bookId, goal: BASELINE_ANALYSIS_TASK_GOAL, update: null, reconfirm: false, launchPolicy: policy });

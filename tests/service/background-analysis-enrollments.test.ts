@@ -1,4 +1,5 @@
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
+import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
@@ -441,12 +442,13 @@ describe('后台处理登记 over the real store on exact sample1', () => {
       edit(store, book, '〔改动〕');
       expect(store.backgroundAnalysisDecisionFor(book.bookId, runtime({ routeExecutable: false })).decision).toEqual({ kind: 'stopped', reason: BACKGROUND_NO_ROUTE });
       // Developer-live under a policy with no enrolled-background rule (Provider Processing v12; Issue #864): neither an Enrollment nor a start.
-      store.baselineAnalysisLedger.bindLaunch(LIVE);
+store.baselineAnalysisLedger.bindLaunch({ ...LIVE, localFixtureRuntime: () => store.localFixtureRuntime() });
       const live = store.inspectBackgroundAnalysisEnrollment(book.bookId, runtime());
       expect(live.next).toEqual({ kind: 'stopped', reason: BACKGROUND_NO_RULE });
       expect(store.startEnrolledBaselineAnalysis(book.bookId, randomUUID(), 'a'.repeat(64), live.enrollment!.enrollmentVersionId, 'sync-current', runtime()))
         .toEqual({ dispatchRunRecordId: null, reason: BACKGROUND_NO_RULE });
-      store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'development-ci', live: null });
+store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'development-ci', live: null, policy: launchPolicy,
+        localFixtureRuntime: () => store.localFixtureRuntime() });
 
       // A plan the editor prepared and has not started is theirs: the Enrollment waits, and never starts it.
       const prepared = prepare(store, book.bookId, 'reanalyze-book');
@@ -883,11 +885,11 @@ describe('后台处理登记 over the real store on exact sample1', () => {
       const book = await importedBook(store, 'L2 sample1 登记不变');
       enroll(store, book.bookId, 'backfill');
       const other = await importedBook(store, 'L2 sample1 开发者实时登记');
-      store.baselineAnalysisLedger.bindLaunch(LIVE);
+      store.baselineAnalysisLedger.bindLaunch({ ...LIVE, localFixtureRuntime: () => store.localFixtureRuntime() });
       const shown = store.inspectBackgroundAnalysisEnrollment(other.bookId, runtime());
       expect([shown.offer.canEnroll, shown.offer.reason, shown.offer.disclosureDigest]).toEqual([false, BACKGROUND_ENROLL_NO_RULE, null]);
       expect(await refusal(() => store.enrollBackgroundAnalysis(other.bookId, 'a'.repeat(64), 'backfill', { kind: 'book', seriesId: null }, 1_000_000, runtime()))).toBe('BACKGROUND_ANALYSIS_ENROLLMENT_UNAVAILABLE');
-      store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'development-ci', live: null });
+      store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'development-ci', live: null, policy: launchPolicy, localFixtureRuntime: () => store.localFixtureRuntime() });
       store.markCleanShutdown();
     } finally {
       await owner.dispose();
@@ -1199,6 +1201,7 @@ describe('后台处理登记 over the real store on exact sample1', () => {
       store.close();
     }
     const before = withDatabase(false, (database) => {
+      constructPre94PolicyEncoding(database);
       database.exec('PRAGMA foreign_keys = OFF');
       // A revision-65 store holds neither revision 67's relations (Issue #428, S80a) nor revision 66's.
       for (const table of [...Object.keys(MATERIAL_INDEX_SCHEMA_SQL).reverse(), ...Object.keys(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL).reverse()]) database.exec(`DROP TABLE ${table}`);
@@ -1292,6 +1295,7 @@ it('migrates revision 88 authorizations and enrollment rows without changing his
     store.markCleanShutdown();
   } finally { store.close(); }
   const before = withDatabase(false, (db) => {
+    constructPre94PolicyEncoding(db);
     db.exec('PRAGMA foreign_keys = OFF');
     db.exec('BEGIN IMMEDIATE');
     for (const [table, sql] of Object.entries({ analysis_run_authorizations: ANALYSIS_LEDGER_SCHEMA_SQL.analysis_run_authorizations, ...BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL })) {
@@ -1368,6 +1372,7 @@ it('recovers only the exact pre-stamp authorization shape and refuses an unexpec
     store.markCleanShutdown();
   } finally { store.close(); }
   const snapshot = withDatabase(false, (db) => {
+    constructPre94PolicyEncoding(db);
     db.exec('PRAGMA user_version = 88');
     return { rows: db.prepare('SELECT rowid, * FROM analysis_run_authorizations ORDER BY rowid').all(),
       sql: db.prepare("SELECT sql FROM sqlite_schema WHERE name = 'analysis_run_authorizations'").get()?.sql };

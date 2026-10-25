@@ -1,3 +1,4 @@
+import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { IMPORTED_SKILL_RELATIONS, CUSTOM_ANALYSIS_RELATIONS, HOUSE_REVIEW_PREFERENCE_RELATIONS, TASK_INTENT_DRAFT_RELATIONS } from '../support/pre74-schema.js';
 import { execPre74Fixture, FACTUAL_VERIFICATION_RELATIONS, MATERIAL_INDEX_LAYER_RELATIONS, PROPOSAL_REVIEW_RELATIONS, RESEARCH_EVIDENCE_RELATIONS } from '../support/pre74-schema.js';
@@ -162,6 +163,7 @@ describe('schema revision 30 over the real store', () => {
       first.close();
     }
     const before = withDatabase(false, (database) => {
+      constructPre94PolicyEncoding(database);
       // Revision 31 (Issue #421) came after: a store revision 29 left holds neither its rule ledger nor its
       // widened authorization origin.
       plantRevision30Relations(database);
@@ -403,6 +405,7 @@ describe('联网后开始任务 and Connectivity Wait over the real store', () =
       // the Run Budget Ceiling it froze are material inputs, and neither is what this launch would bind now.
       store.baselineAnalysisLedger.bindLaunch({
         operationalScope: 'developer-live',
+        localFixtureRuntime: () => store.localFixtureRuntime(),
         live: {
           route: 'opencode-go',
           model: 'deepseek-v4.1-flash',
@@ -439,7 +442,8 @@ describe('联网后开始任务 and Connectivity Wait over the real store', () =
       });
       // A blocked Run no longer holds the Book: back under the launch it was prepared for, 重新准备's request prepares the
       // new plan, and the decision is made — nothing of the old Task asks for the editor any more.
-      store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'development-ci', live: null });
+      store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'development-ci', live: null, policy: launchPolicy,
+        localFixtureRuntime: () => store.localFixtureRuntime() });
       let progress = store.createBaselineAnalysisPreparationWork(bookId, plan.reprepare!.prepare.goal, plan.reprepare!.prepare.update, launchPolicy);
       while (!progress.done) progress = store.advanceBaselineAnalysisPreparationWork(progress.workId!);
       expect(progress.projection?.state).toBe('prepared');

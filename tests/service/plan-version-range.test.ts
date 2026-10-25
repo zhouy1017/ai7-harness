@@ -128,6 +128,7 @@ describe('a Task\'s range reads as its latest plan version (Issue #288 甲)', ()
     };
     const live = (): void => store.baselineAnalysisLedger.bindLaunch({
       operationalScope: 'developer-live',
+      localFixtureRuntime: () => store.localFixtureRuntime(),
       live: {
         route: 'opencode-go',
         model: 'deepseek-v4.1-flash',
@@ -137,7 +138,8 @@ describe('a Task\'s range reads as its latest plan version (Issue #288 甲)', ()
         runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 240_000 },
       },
     });
-    const offline = (): void => store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'development-ci', live: null });
+    const offline = (): void => store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'development-ci', live: null,
+      policy: launchPolicy, localFixtureRuntime: () => store.localFixtureRuntime() });
     const preflight = (connectivity: () => Connectivity) => reconnectPreflight({
       waitingRuns: () => store.waitingBaselineAnalysisRuns(null),
       stillWaiting: ({ runRecordId }) => store.baselineAnalysisRunWaits(runRecordId),

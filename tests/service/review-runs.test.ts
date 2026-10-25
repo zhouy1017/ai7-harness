@@ -1,4 +1,5 @@
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
+import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
 import { withHouseReviewPreferenceFor } from '../support/policy-rules.js';
 import { HouseReviewPreferenceLedger } from '../../src/service/house-review-preference.js';
 import { HOUSE_PREFERENCE_CLOSED, HOUSE_PREFERENCE_NOT_RULE } from '../../src/service/task-plan.js';
@@ -425,6 +426,7 @@ describe('a Review Run over the real store on exact sample1', () => {
     const before: Array<{ table: string; rows: unknown[] }> = [];
     const db = database();
     try {
+      constructPre94PolicyEncoding(db);
       db.exec('PRAGMA foreign_keys = OFF; BEGIN IMMEDIATE');
       for (const table of ['analysis_task_intents', 'analysis_result_set_revisions', 'analysis_plan_adaptations']) {
         const sql = String(db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table)!.sql);

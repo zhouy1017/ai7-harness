@@ -1686,8 +1686,12 @@ export class BaselineAnalysisStore {
         : Number.isSafeInteger(ceiling.tokensPerFrozenUnit) && ceiling.tokensPerFrozenUnit > 0)) &&
         UUID_PATTERN.test(live.credentialReference)),
     'ANALYSIS_LAUNCH_BINDING_INVALID', '开发者实时绑定缺少必需的运行预算上限或凭据引用。');
-    this.#launch = { ...launch, ...(launch.retainedPolicyFor !== undefined || this.#launch.retainedPolicyFor === undefined
-      ? {} : { retainedPolicyFor: this.#launch.retainedPolicyFor }) };
+    // Keep the caller's object: the production launch's policy and live binding are getters over the editor's current
+    // connection, which a copy would freeze at bind time. The retained-interpretation reader the Store bound at open
+    // stays available behind it, as an own property of an object whose prototype is that launch.
+    const retainedPolicyFor = launch.retainedPolicyFor ?? this.#launch.retainedPolicyFor;
+    this.#launch = launch.retainedPolicyFor !== undefined || retainedPolicyFor === undefined ? launch
+      : Object.create(launch, { retainedPolicyFor: { value: retainedPolicyFor, enumerable: true } }) as LaunchBinding;
     this.#refreshClarificationDefinition();
   }
 

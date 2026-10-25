@@ -1607,7 +1607,9 @@ export class BaselineAnalysisExecutionOwner {
       // transport. Nothing but the count crosses this closure.
       let harness: PrimaryAgentHarnessHandle;
       const localFixture: LocalFixtureExecutionContext | null = live === null && facts.localFixtureProfile !== undefined && facts.selectedPolicyIdentity !== undefined
-        ? { selectedPolicyIdentity: facts.selectedPolicyIdentity, profile: facts.localFixtureProfile, kind: definition.kind, purpose: null,
+        // The retained custom tuple names its caller by session purpose: an exact registered custom dimension version.
+        ? { selectedPolicyIdentity: facts.selectedPolicyIdentity, profile: facts.localFixtureProfile, kind: definition.kind,
+          purpose: definition.kind.startsWith('custom-analysis/') ? 'exact-registered-custom-dimension-version' : null,
           contractId: definition.contractVersion, categories: ['public-or-synthetic'],
           sourceDigest: facts.sourceDigest, frozenPromptContractDigest: facts.promptContractDigest, frozenCompositionDigest: facts.behaviorCompositionDigest,
           composition: describeComposition(route, model, promptContractDigest, { ...facts.compositionOptions,

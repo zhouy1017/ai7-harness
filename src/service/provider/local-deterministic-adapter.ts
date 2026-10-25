@@ -431,8 +431,9 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
       const first = options.messages.find((message) => message.role === 'user' && message.source.kind === 'user');
       const original = first === undefined ? null : messageText(first);
       const message = original === null ? null : parseDialogueMessage(original);
+      // The stimulus entry is keyed by the retrieval contract, as dialogueRetrievalFixtureRule reads it; the profile partition must hold that entry.
       const stimulus = message === null ? undefined : this.#answering(resolveFixtureEntry(this.#fixture.entries, 0,
-        dialogueRequestDigest(DIALOGUE_PROMPT_CONTRACT_DIGEST, message.kind, sha256Hex(message.question)), 1));
+        dialogueRequestDigest(DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST, message.kind, dialogueQuestionDigest(message.question)), 1));
       if (message !== null && stimulus !== undefined && dialogueRetrievalFixtureRule(this.#fixture, message) !== null) {
         const last = options.messages.at(-1);
         const result = last === undefined ? null : toolResultOf(last);

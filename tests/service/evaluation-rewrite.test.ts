@@ -1,3 +1,4 @@
+import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { createHash, randomUUID } from 'node:crypto';
@@ -749,6 +750,7 @@ describe('the market section and 按我的评分重写评语 over the real store
     const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
     const rows = (database: DatabaseSync): string => JSON.stringify(KIND_COUPLED_ANALYSIS_RELATIONS.map((table) => database.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()));
     const plant = new DatabaseSync(path);
+    constructPre94PolicyEncoding(plant);
     let before: string;
     try {
       // Revision 63 exactly: the three relations as revision 62 left them, and no relation of revision 65.
@@ -783,6 +785,7 @@ describe('the market section and 按我的评分重写评语 over the real store
     await withBook(async () => undefined);
     const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
     const plant = new DatabaseSync(path);
+    constructPre94PolicyEncoding(plant);
     try {
       execPre74Fixture(plant, `DROP TABLE analysis_outcome_resolutions; DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks; PRAGMA user_version = ${CAPTURED_PROCEDURE_SCHEMA_VERSION};`);
     } finally {

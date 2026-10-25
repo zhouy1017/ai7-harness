@@ -395,7 +395,7 @@ describe('the Task Drawer plan projection over the real store on exact sample1',
       // Every exact identity is still there, one step below.
       expect(technical(drawer, 'plan-envelope')).toBe(prepared.planEnvelope!.digest);
       expect(technical(drawer, 'credential-reference')).toBe(prepared.providerResolutionPlan!.credentialReference);
-      expect(technical(drawer, 'provider-processing')).toBe('development-ci · v1 · 拒绝 · 0 次实时传输');
+      expect(technical(drawer, 'provider-processing')).toBe('development-ci · v29 · 拒绝 · 0 次实时传输');
       expect(technical(drawer, 'native-artifact')).toContain(prepared.artifactPin!.nativeCarrierSha256);
       expect(technical(drawer, 'readable-scope')).toContain(bookId);
       expect(technical(drawer, 'execution-steps')).toBe('分析结构 → 分析叙事连贯性 → 形成编辑复核重点');

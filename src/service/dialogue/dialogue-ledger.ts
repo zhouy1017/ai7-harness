@@ -628,7 +628,50 @@ export class DialogueLedger {
     return row === undefined ? null : this.#attempt(row);
   }
 
+  /**
+   * Only the attempt and binding records with their task joins, as reader 94 checks a /2 variant before open: a damaged
+   * span, outcome or conversion keeps its own read-time refusal and does not stop the store from opening.
+   */
+  policyVariant(attemptId: string): void {
+    requireDialogue(UUID_PATTERN.test(attemptId), 'DIALOGUE_INVALID', '回答标识无效。');
+    const row = this.#db.prepare('SELECT * FROM dialogue_attempts WHERE attempt_id = ?').get(attemptId) as SqlRow | undefined;
+    requireDialogue(row !== undefined, 'DIALOGUE_RECORD_INVALID', INVALID);
+    const { base, qualification } = this.#attemptRecord(row);
+    this.#bindingOf(base, qualification);
+  }
+
   #attempt(row: SqlRow): StoredDialogueAttempt {
+    const { base, qualification } = this.#attemptRecord(row);
+    const binding = this.#bindingOf(base, qualification);
+    const spanRow = this.#db.prepare('SELECT * FROM dialogue_harness_spans WHERE attempt_id = ?').get(base.attemptId) as SqlRow | undefined;
+    let span: StoredDialogueAttempt['span'] = null;
+    if (spanRow !== undefined) {
+      span = { harnessSessionId: text(spanRow.harness_session_id), startSeq: integer(spanRow.start_seq), openedAt: text(spanRow.opened_at) };
+      verified(spanRow, { schema: SPAN_SCHEMA, attemptId: base.attemptId, ...span });
+      requireDialogue(binding !== null && binding.harnessSessionId === span.harnessSessionId, 'DIALOGUE_RECORD_INVALID', INVALID);
+    }
+    const outcomeRow = this.#db.prepare('SELECT * FROM dialogue_attempt_outcomes WHERE attempt_id = ?').get(base.attemptId) as SqlRow | undefined;
+    let outcome: StoredDialogueAttempt['outcome'] = null;
+    if (outcomeRow !== undefined) {
+      const value = text(outcomeRow.outcome);
+      requireDialogue(value === 'completed' || value === 'stopped' || value === 'interrupted' || value === 'failed', 'DIALOGUE_RECORD_INVALID', INVALID);
+      outcome = { outcome: value, endSeq: nullableInteger(outcomeRow.end_seq), causeCode: nullableText(outcomeRow.cause_code), settledAt: text(outcomeRow.settled_at) };
+      verified(outcomeRow, { schema: OUTCOME_SCHEMA, attemptId: base.attemptId, ...outcome });
+      // A turn that reached the Session ends inside its span; one that never did names no end.
+      requireDialogue(outcome.endSeq === null || (span !== null && outcome.endSeq >= span.startSeq), 'DIALOGUE_RECORD_INVALID', INVALID);
+    }
+    const conversions = (this.#db.prepare('SELECT * FROM dialogue_conversions WHERE attempt_id = ? ORDER BY converted_at, conversion_id')
+      .all(base.attemptId) as SqlRow[]).map((conversionRow) => {
+      const conversion = { conversionId: text(conversionRow.conversion_id), markId: text(conversionRow.mark_id), convertedAt: text(conversionRow.converted_at) };
+      verified(conversionRow, { schema: CONVERSION_SCHEMA, attemptId: base.attemptId, ...conversion });
+      return conversion;
+    });
+    requireDialogue(conversions.length === 0 || outcome?.outcome === 'completed', 'DIALOGUE_RECORD_INVALID', INVALID);
+    return { ...base, ...(qualification === undefined ? {} : { qualification }), binding, span, outcome, conversions };
+  }
+
+  #attemptRecord(row: SqlRow): { base: Omit<StoredDialogueAttempt, 'qualification' | 'binding' | 'span' | 'outcome' | 'conversions'>;
+    qualification: QualifiedGlobalAttemptMetadata | undefined } {
     const kind = text(row.kind);
     requireDialogue(kind === 'ask' || kind === 'continue' || kind === 'regenerate', 'DIALOGUE_RECORD_INVALID', INVALID);
     const base = {
@@ -649,6 +692,10 @@ export class DialogueLedger {
       qualification = metadata;
     }
     verified(row, { schema: qualification === undefined ? ATTEMPT_SCHEMA : 'ai7.dialogue-attempt/2', ...base, ...qualification });
+    return { base, qualification };
+  }
+
+  #bindingOf(base: Pick<StoredDialogueAttempt, 'attemptId' | 'dialogueId'>, qualification: QualifiedGlobalAttemptMetadata | undefined): StoredDialogueBinding | null {
     const bindingRow = this.#db.prepare('SELECT * FROM dialogue_execution_bindings WHERE attempt_id = ?').get(base.attemptId) as SqlRow | undefined;
     let binding: StoredDialogueBinding | null = null;
     if (bindingRow !== undefined) {
@@ -685,31 +732,7 @@ export class DialogueLedger {
         isSupportedProviderProcessingVersion(binding.operationalScope, binding.providerProcessingVersion), 'DIALOGUE_RECORD_INVALID', INVALID);
       if (qualification !== undefined) this.#verifyQualifiedBinding(qualification, binding);
     }
-    const spanRow = this.#db.prepare('SELECT * FROM dialogue_harness_spans WHERE attempt_id = ?').get(base.attemptId) as SqlRow | undefined;
-    let span: StoredDialogueAttempt['span'] = null;
-    if (spanRow !== undefined) {
-      span = { harnessSessionId: text(spanRow.harness_session_id), startSeq: integer(spanRow.start_seq), openedAt: text(spanRow.opened_at) };
-      verified(spanRow, { schema: SPAN_SCHEMA, attemptId: base.attemptId, ...span });
-      requireDialogue(binding !== null && binding.harnessSessionId === span.harnessSessionId, 'DIALOGUE_RECORD_INVALID', INVALID);
-    }
-    const outcomeRow = this.#db.prepare('SELECT * FROM dialogue_attempt_outcomes WHERE attempt_id = ?').get(base.attemptId) as SqlRow | undefined;
-    let outcome: StoredDialogueAttempt['outcome'] = null;
-    if (outcomeRow !== undefined) {
-      const value = text(outcomeRow.outcome);
-      requireDialogue(value === 'completed' || value === 'stopped' || value === 'interrupted' || value === 'failed', 'DIALOGUE_RECORD_INVALID', INVALID);
-      outcome = { outcome: value, endSeq: nullableInteger(outcomeRow.end_seq), causeCode: nullableText(outcomeRow.cause_code), settledAt: text(outcomeRow.settled_at) };
-      verified(outcomeRow, { schema: OUTCOME_SCHEMA, attemptId: base.attemptId, ...outcome });
-      // A turn that reached the Session ends inside its span; one that never did names no end.
-      requireDialogue(outcome.endSeq === null || (span !== null && outcome.endSeq >= span.startSeq), 'DIALOGUE_RECORD_INVALID', INVALID);
-    }
-    const conversions = (this.#db.prepare('SELECT * FROM dialogue_conversions WHERE attempt_id = ? ORDER BY converted_at, conversion_id')
-      .all(base.attemptId) as SqlRow[]).map((conversionRow) => {
-      const conversion = { conversionId: text(conversionRow.conversion_id), markId: text(conversionRow.mark_id), convertedAt: text(conversionRow.converted_at) };
-      verified(conversionRow, { schema: CONVERSION_SCHEMA, attemptId: base.attemptId, ...conversion });
-      return conversion;
-    });
-    requireDialogue(conversions.length === 0 || outcome?.outcome === 'completed', 'DIALOGUE_RECORD_INVALID', INVALID);
-    return { ...base, ...(qualification === undefined ? {} : { qualification }), binding, span, outcome, conversions };
+    return binding;
   }
 
   #currentReader(): boolean {

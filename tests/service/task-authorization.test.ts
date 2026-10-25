@@ -16,6 +16,7 @@ import {
   planEnvelopeValue,
   planStopCondition,
   providerResolutionPlanValue,
+  validatePolicyOriginalFieldRecords,
   validateTaskAuthorizationSchema,
 } from '../../src/service/task-authorization.js';
 import {
@@ -595,4 +596,47 @@ describe('task authorization over the real store on exact sample1', () => {
       database.close();
     }
   }, 300_000);
+});
+
+describe('reader 94 pre-open validation of recorded policy pins (#1161)', () => {
+  // The real validator over one execution-binding row per case; only the columns it reads are present.
+  function refusal(revision: number, record: Record<string, unknown>, sha256?: string): string | null {
+    const database = new DatabaseSync(':memory:');
+    try {
+      database.exec('CREATE TABLE analysis_execution_bindings (attempt_id TEXT PRIMARY KEY, canonical_json TEXT NOT NULL, sha256 TEXT NOT NULL)');
+      const sealed = canonicalRecord(record);
+      database.prepare('INSERT INTO analysis_execution_bindings VALUES (?, ?, ?)').run(randomUUID(), sealed.json, sha256 ?? sealed.digest);
+      database.exec(`PRAGMA user_version = ${revision}`);
+      validatePolicyOriginalFieldRecords(database);
+      return null;
+    } catch (error) {
+      if (!(error instanceof TaskAuthorizationError)) throw error;
+      return error.code;
+    } finally {
+      database.close();
+    }
+  }
+  const pin = (operationalScope: string, providerProcessingVersion: string, activePolicySetVersion: string) => ({ policyPin: {
+    operationalScope, providerProcessingVersion, activePolicySetVersion, liveTransmissions: operationalScope === 'development-ci' ? 0 : 'bounded-by-run' } });
+
+  it('refuses every set-v21 pin below reader 94, developer-live v24 included, and keeps older v24 pins with their owner', () => {
+    expect(refusal(93, pin('developer-live', 'v24', 'v21'))).toBe('SCHEMA_UNSUPPORTED');
+    expect(refusal(93, pin('development-ci', 'v29', 'v21'))).toBe('SCHEMA_UNSUPPORTED');
+    expect(refusal(93, pin('ordinary-production', 'v30', 'v21'))).toBe('SCHEMA_UNSUPPORTED');
+    expect(refusal(93, pin('developer-live', 'v24', 'v19'))).toBeNull();
+    expect(refusal(93, pin('development-ci', 'v1', 'v3'))).toBeNull();
+    for (const current of [pin('developer-live', 'v24', 'v21'), pin('development-ci', 'v29', 'v21'), pin('ordinary-production', 'v30', 'v21')]) {
+      expect(refusal(LATEST_SCHEMA_VERSION, current)).toBeNull();
+    }
+    expect(refusal(LATEST_SCHEMA_VERSION, pin('developer-live', 'v24', 'v19'))).toBeNull();
+  });
+
+  it('refuses a current pin no launch wrote at reader 94 and planted current fields below it, and leaves other legacy rows to their owners', () => {
+    expect(refusal(LATEST_SCHEMA_VERSION, pin('development-ci', 'v29', 'v19'))).toBe('TASK_RECORD_INVALID');
+    expect(refusal(LATEST_SCHEMA_VERSION, pin('development-ci', 'v1', 'v21'))).toBe('TASK_RECORD_INVALID');
+    expect(refusal(LATEST_SCHEMA_VERSION, pin('development-ci', 'v29', 'v21'), '0'.repeat(64))).toBe('TASK_RECORD_INVALID');
+    expect(refusal(93, { ...pin('development-ci', 'v1', 'v19'), selectedPolicyIdentity: { providerProcessingVersion: 'v29' } })).toBe('SCHEMA_UNSUPPORTED');
+    // A damaged or predecessor-shaped legacy row is not reinterpreted here; its own reader refuses it when read.
+    expect(refusal(93, pin('development-ci', 'v1', 'v19'), '0'.repeat(64))).toBeNull();
+  });
 });

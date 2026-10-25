@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
@@ -494,6 +495,7 @@ describe('schema revision 80', () => {
     }
     const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
     const plant = new DatabaseSync(path);
+    constructPre94PolicyEncoding(plant);
     const intents = plant.prepare('SELECT rowid, * FROM analysis_task_intents ORDER BY rowid').all();
     const plans = plant.prepare('SELECT rowid, * FROM analysis_plan_records ORDER BY rowid').all();
     expect(intents).toHaveLength(1);

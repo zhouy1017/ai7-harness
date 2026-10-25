@@ -51,6 +51,18 @@ afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(
 // transport is a stub, so no socket is opened and no credential value beyond a local placeholder exists. Hand-built rules
 // serve only the refusals: the reading takes whatever the selected policy names.
 
+/**
+ * The Store as a predecessor build drove it: no selected v29 local runtime, so a local binding is written in the /1 shape an
+ * older revision really held. A /2 binding planted under an old marker is refused before open, as reader 94 requires.
+ */
+function predecessorLocalRecords(store: EditorialStore): EditorialStore {
+  return new Proxy(store, { get: (target, key) => {
+    if (key === 'localFixtureRuntime') return undefined;
+    const value: unknown = Reflect.get(target, key, target);
+    return typeof value === 'function' ? value.bind(target) : value;
+  } });
+}
+
 const QUESTION = '这段的叙述视角是否一致？';
 /** The synthetic answer the stub gives: the fixture's own words, quoting nothing of the Book. */
 const ANSWER = '这段一直用第三人称限知视角叙述。人物的心理只写到主人公为止，没有越界。末句的语气可以改得更平缓些。';
@@ -823,7 +835,7 @@ describe('revision 71', () => {
     const { fileURLToPath } = await import('node:url');
     const fixture = await loadModelFixture(resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url))), 'sample1-dialogue');
     let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    const local = new Owner({ requestGovernor, records: store, fixture, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live: null, answerHold: null });
+    const local = new Owner({ requestGovernor, records: predecessorLocalRecords(store), fixture, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live: null, answerHold: null });
     const book = await importSample1Book(store, roots.codeRoot, '修订71');
     const turn = store.askAboutSelection(book.bookId, { selection: selectionOf(store, book), question: QUESTION });
     local.begin(turn);
@@ -886,7 +898,7 @@ describe('revision 72 (Issue #811)', () => {
     const { fileURLToPath } = await import('node:url');
     const fixture = await loadModelFixture(resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url))), 'sample1-dialogue');
     let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    const local = new Owner({ requestGovernor, records: store, fixture, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live: null, answerHold: null });
+    const local = new Owner({ requestGovernor, records: predecessorLocalRecords(store), fixture, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live: null, answerHold: null });
     const book = await importSample1Book(store, roots.codeRoot, '修订72');
     const turn = store.askAboutSelection(book.bookId, { selection: selectionOf(store, book), question: QUESTION });
     local.begin(turn);

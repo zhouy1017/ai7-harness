@@ -252,12 +252,14 @@ export function defaultExecutionRuleBindingOf(inputs: MaterialPlanInputsProjecti
 
 /**
  * The labels of the material fields in which `inputs` differ from what the rule binds — the same labels, in the
- * same order, a Plan Revision's diff uses. The range and the predecessor are taken from `inputs` itself, so they
- * never count: a rule does not bind them.
+ * same order, a Plan Revision's diff uses. Range, predecessor and selected policy/profile are taken from the actual
+ * inputs: the persisted rule/enrollment binding never bound these fields. Current Plan/policy admission still applies.
  */
 export function defaultExecutionRuleDrift(binding: DefaultExecutionRuleBinding, inputs: MaterialPlanInputsProjection): ReadonlyArray<string> {
   // Named in the drawer's words by field key, never by the engineering label a stored diff carries.
-  return diffMaterialPlanInputs({ ...binding, selectedRange: inputs.selectedRange, predecessorRevision: inputs.predecessorRevision }, inputs)
+  return diffMaterialPlanInputs({ ...binding, selectedRange: inputs.selectedRange, predecessorRevision: inputs.predecessorRevision,
+    ...(inputs.selectedPolicyIdentity === undefined ? {} : { selectedPolicyIdentity: inputs.selectedPolicyIdentity }),
+    ...(inputs.localFixtureProfile === undefined ? {} : { localFixtureProfile: inputs.localFixtureProfile }) }, inputs)
     .map((entry) => DRIFT_FIELD_LABELS[entry.field] ?? entry.label);
 }
 

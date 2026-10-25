@@ -1,4 +1,5 @@
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
+import { withoutRuleFor } from '../support/policy-rules.js';
 import { randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
@@ -88,6 +89,8 @@ async function withSession(body: (session: Session) => Promise<void>): Promise<v
     interruptAfterAbandonObjectRemoval: false,
     baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
   });
+  const localRuntime = store.localFixtureRuntime();
+  store.baselineAnalysisLedger.bindLaunch({ ...store.baselineAnalysisLedger.launch, localFixtureRuntime: () => localRuntime });
   const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
   try {
     await body({ store, owner });
@@ -500,13 +503,16 @@ describe('快速开始 of a writing Task (S84b; TASK-017, TASK-020, TASK-026, TA
     });
   }, 300_000);
 
-  it('never uses a rule under developer-live, and never sets one there', async () => {
+  it('never uses or sets a default rule when developer-live lacks the writing rule', async () => {
     await withSession(async (session) => {
       const { store } = session;
       const { bookId, rule, reference } = await ruledBook(session, '写作开发者实时');
       const plan = prepare(store, bookId);
       const free = store.baselineAnalysisLedger.launch;
-      store.baselineAnalysisLedger.bindLaunch(LIVE_LAUNCH);
+      const runtime = store.localFixtureRuntime();
+      const previousPolicy = launchPolicy;
+      launchPolicy = withoutRuleFor(await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live'), 'writing');
+      store.baselineAnalysisLedger.bindLaunch({ ...LIVE_LAUNCH, policy: launchPolicy, localFixtureRuntime: () => runtime });
       try {
         const page = store.inspectWritingTask(bookId);
         expect(page.unavailable).toBe(WRITING_LIVE_UNAVAILABLE);
@@ -521,6 +527,7 @@ describe('快速开始 of a writing Task (S84b; TASK-017, TASK-020, TASK-026, TA
           .toBe(`DEFAULT_EXECUTION_RULE_UNAVAILABLE:${SET_RULE_DEVELOPER_LIVE}`);
       } finally {
         store.baselineAnalysisLedger.bindLaunch(free);
+        launchPolicy = previousPolicy;
       }
       expect(store.inspectDefaultExecutionRules().rules.map((entry) => entry.ordinal)).toEqual([1]);
     });
