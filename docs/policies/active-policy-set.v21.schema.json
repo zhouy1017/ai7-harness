@@ -62,6 +62,5 @@
         "sha256": "162441cc3e5d30b0cafb00a0d04ca5ab32b64c5039baafc8952a9925bd7984b6"
       }
     }
-  },
-  "description": "Exact immutable unselected successor of set v20; ordinary-production v30 with every other scope and export pin unchanged."
+  }
 }

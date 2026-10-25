@@ -13,7 +13,7 @@ The source-checkout carrier, build inventory and runtime still select set v19: o
 | Ordinary v30 canonical JSON | `f12df1d43cfc9f52b999c2cc8a6e9bac419177d42210d3bbe8c5008ba8d6a59e` |
 | Ordinary v30 schema | `5a7c1603dcea97143d24b31c31f0709d1fd3202e7c048e7d65ed085c845046ef` |
 | Set v21 canonical JSON | `4b845e924df777f440b07d53ba6e31447e0fe0b004e86efa89bf76554fb05392` |
-| Set v21 schema | `95e7f62581d16fb5a060e9aaaac5ebd9e05e70f6cde23c7a0ab34aed8fcd3080` |
+| Set v21 schema | `3d262deb0996ba7b61b8540589e03b6d5255ee9b6b17723fae144134ee9efb84` |
 
 The design authority is accepted [ADR 0099 §§1–2 and 5–6](../adr/0099-distinguish-public-release-from-scoped-global-agent-processing.md), explicitly composed with accepted [ADR 0100](../adr/0100-admit-scoped-editor-task-instruction-text.md) and [ADR 0101](../adr/0101-admit-scoped-full-fidelity-learned-examples.md). Their exact accepted sources are respectively `c82b105f2a4c3dcaa283c878d7b0889532b0bc8e` ([acceptance](https://github.com/zhouy1017/ai7-harness/issues/1123#issuecomment-6394479236)), `825cb2d88dee06c51677e83ae6a8510679aea16d` ([acceptance](https://github.com/zhouy1017/ai7-harness/issues/1134#issuecomment-6393191200)) and `a32462d98d1cf578eea00226dc4add22799092b3` ([acceptance](https://github.com/zhouy1017/ai7-harness/issues/1141#issuecomment-6393191444)). Accepted #1155 supplies their composed text at the authoring base. The privacy purpose is already accepted; exact successor-byte review, selection, typed consumers and final gates remain required.
 

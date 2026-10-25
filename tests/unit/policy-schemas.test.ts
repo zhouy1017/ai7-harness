@@ -853,9 +853,9 @@ describe('Provider Processing v24 and active-set v16 schemas: the ADR 0091 Publi
 
 describe('Unselected ordinary v30 and set v21: original-field declaration (Issue #1156)', () => {
   const { policyData: ordinary, schemaData: ordinarySchema } = readPair('provider-processing-policy.v30.json', 'provider-processing-policy.v30.schema.json');
-  const { policyData: predecessor } = readPair('provider-processing-policy.v28.json', 'provider-processing-policy.v28.schema.json');
+  const { policyData: predecessor, schemaData: predecessorSchema } = readPair('provider-processing-policy.v28.json', 'provider-processing-policy.v28.schema.json');
   const { policyData: set, schemaData: setSchema } = readPair('active-policy-set.v21.json', 'active-policy-set.v21.schema.json');
-  const { policyData: previousSet } = readPair('active-policy-set.v20.json', 'active-policy-set.v20.schema.json');
+  const { policyData: previousSet, schemaData: previousSetSchema } = readPair('active-policy-set.v20.json', 'active-policy-set.v20.schema.json');
   // Exact Issue §3 constants, independent of the candidate and its generated schema.
   const expectedQualification = {
     "qualificationId": "ordinary-production-original-fields-adr0099",
@@ -983,6 +983,22 @@ describe('Unselected ordinary v30 and set v21: original-field declaration (Issue
     ['ordinary-production-review', 'editorTaskInstruction', { personNamesAllowed: false }, false],
     ['ordinary-production-review', 'houseReviewGuidelineClause', { personNamesAllowed: false }, false],
   ] as const;
+  // Exact Issue §5 identity deltas, asserted before any inverse restores a predecessor value.
+  const expectedIdentities = {
+    schemaPath: 'docs/policies/provider-processing-policy.v30.schema.json', version: 'v30', predecessorVersion: 'v28',
+    predecessorCanonicalPath: 'docs/policies/provider-processing-policy.v28.json',
+    canonicalPath: 'docs/policies/provider-processing-policy.v30.json',
+    humanProjectionPath: 'docs/policies/provider-processing-policy.v30.md',
+  };
+  const appendedAuthorities = [
+    'docs/adr/0099-distinguish-public-release-from-scoped-global-agent-processing.md',
+    'docs/adr/0100-admit-scoped-editor-task-instruction-text.md',
+    'docs/adr/0101-admit-scoped-full-fidelity-learned-examples.md',
+  ];
+  const expectedSetIdentities = {
+    schemaPath: 'docs/policies/active-policy-set.v21.schema.json', version: 'v21', predecessorVersion: 'v20',
+    predecessorCanonicalPath: 'docs/policies/active-policy-set.v20.json',
+  };
   const qualificationRef = 'ordinary-production-original-fields-adr0099';
   const replacement = '姓名、角色或私密措辞仅在满足本文件原文字段资格时保留，否则沿用原有限制';
   const sha256 = (path: string) => createHash('sha256').update(readFileSync(resolve(ROOT, path))).digest('hex');
@@ -993,32 +1009,31 @@ describe('Unselected ordinary v30 and set v21: original-field declaration (Issue
   };
 
   it('closes both complete documents with the established root const dialect and exact identities', () => {
-    for (const [document, schema] of [[ordinary, ordinarySchema], [set, setSchema]]) {
-      expect(Object.keys(schema).sort()).toEqual(['$schema', 'const', 'description', 'title', 'type']);
+    // Each schema keeps its own predecessor's metadata pattern: ordinary keeps a description, the set does not.
+    expect(Object.keys(ordinarySchema)).toEqual(['$schema', 'title', 'description', 'type', 'const']);
+    expect(Object.keys(setSchema)).toEqual(['$schema', 'title', 'type', 'const']);
+    for (const [document, schema, previousSchema] of [[ordinary, ordinarySchema, predecessorSchema], [set, setSchema, previousSetSchema]]) {
+      expect(Object.keys(schema)).toEqual(Object.keys(previousSchema));
       expect(schema.$schema).toBe('http://json-schema.org/draft-07/schema#');
       expect(schema.type).toBe('object');
       expect(schema.const).toEqual(document);
       expect(() => validatePolicyDocument(document, schema)).not.toThrow();
     }
-    expect(ordinary).toMatchObject({ version: 'v30', predecessorVersion: 'v28', lifecycleStatus: 'active',
-      schemaPath: 'docs/policies/provider-processing-policy.v30.schema.json',
-      canonicalPath: 'docs/policies/provider-processing-policy.v30.json',
-      humanProjectionPath: 'docs/policies/provider-processing-policy.v30.md',
-      predecessorCanonicalPath: 'docs/policies/provider-processing-policy.v28.json', operationalScope: 'ordinary-production' });
-    expect(set).toMatchObject({ version: 'v21', predecessorVersion: 'v20',
-      schemaPath: 'docs/policies/active-policy-set.v21.schema.json', predecessorCanonicalPath: 'docs/policies/active-policy-set.v20.json' });
+    expect(ordinary).toMatchObject({ ...expectedIdentities, lifecycleStatus: 'active', operationalScope: 'ordinary-production' });
+    expect(set).toMatchObject(expectedSetIdentities);
     expect(ordinary.originalFieldQualification).toEqual(expectedQualification);
-    expect(ordinary.authorityBasis).toEqual([...predecessor.authorityBasis,
-      'docs/adr/0099-distinguish-public-release-from-scoped-global-agent-processing.md',
-      'docs/adr/0100-admit-scoped-editor-task-instruction-text.md',
-      'docs/adr/0101-admit-scoped-full-fidelity-learned-examples.md']);
+    expect(ordinary.authorityBasis).toEqual([...predecessor.authorityBasis, ...appendedAuthorities]);
   });
 
   it('independently reverses only the exhaustive ordinary deltas and proves complete v28 inheritance', () => {
     const normalized = structuredClone(ordinary);
-    for (const key of ['schemaPath', 'version', 'predecessorVersion', 'predecessorCanonicalPath', 'canonicalPath', 'humanProjectionPath', 'authorityBasis']) {
-      normalized[key] = structuredClone(predecessor[key]);
+    for (const [key, value] of Object.entries(expectedIdentities)) {
+      expect(normalized[key]).toBe(value);
+      normalized[key] = predecessor[key];
     }
+    expect(normalized.authorityBasis).toEqual([...predecessor.authorityBasis, ...appendedAuthorities]);
+    normalized.authorityBasis = normalized.authorityBasis.slice(0, -appendedAuthorities.length);
+    expect(normalized.originalFieldQualification).toEqual(expectedQualification);
     delete normalized.originalFieldQualification;
     expect(normalized.decision.providerAllowRules.map((entry: { ruleId: string }) => entry.ruleId)).toEqual(ruleIds);
     for (const id of ruleIds) {
@@ -1053,7 +1068,10 @@ describe('Unselected ordinary v30 and set v21: original-field declaration (Issue
       canonicalPath: 'docs/policies/provider-processing-policy.v30.json', sha256: sha256('docs/policies/provider-processing-policy.v30.json'),
     });
     const normalized = structuredClone(set);
-    for (const key of ['schemaPath', 'version', 'predecessorVersion', 'predecessorCanonicalPath']) normalized[key] = previousSet[key];
+    for (const [key, value] of Object.entries(expectedSetIdentities)) {
+      expect(normalized[key]).toBe(value);
+      normalized[key] = previousSet[key];
+    }
     normalized.activePolicies['provider-processing-policy'].scopePins['ordinary-production'] = previousSet.activePolicies['provider-processing-policy'].scopePins['ordinary-production'];
     expect(normalized).toEqual(previousSet);
     for (const pin of [...Object.values(set.activePolicies['provider-processing-policy'].scopePins), set.activePolicies['external-export-policy']] as Array<{ canonicalPath: string; sha256: string }>) {
