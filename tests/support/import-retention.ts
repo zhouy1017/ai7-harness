@@ -1,4 +1,4 @@
-import { IMPORT_RETENTION_SCHEMA_SQL } from '../../src/service/import-retention.js';
+import { IMPORT_RETENTION_SCHEMA_SQL, WORD_IMPORT_RETENTION_SCHEMA_SQL } from '../../src/service/import-retention.js';
 import type { FidelityCategoryProjection } from '../../src/shared/protocol.js';
 
 /**
@@ -9,6 +9,8 @@ import type { FidelityCategoryProjection } from '../../src/shared/protocol.js';
  * every earlier revision's exact validation accepts beside revision 26's own text.
  */
 export const IMPORT_RETENTION_RELATIONS_DROP_ORDER: ReadonlyArray<string> = Object.keys(IMPORT_RETENTION_SCHEMA_SQL).reverse();
+/** Every Word relation, transient included, before its own parent relation. */
+export const WORD_IMPORT_RETENTION_RELATIONS_DROP_ORDER: ReadonlyArray<string> = Object.keys(WORD_IMPORT_RETENTION_SCHEMA_SQL).reverse();
 
 /**
  * The eight rows exact `sample1` carried under parser identity `ai7-docx-fflate-saxes/1`, as the frozen

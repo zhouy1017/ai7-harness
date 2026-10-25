@@ -672,7 +672,7 @@ async function main() {
     await mkdir(resolve(shellRoot, 'crashes'));
     await writeFile(resolve(shellRoot, 'crashes', '2026-10-17T00-00-00.000Z-render-process-gone.json'), JSON.stringify({
       instant: '2026-10-17T00:00:00.000Z', kind: 'render-process-gone', reason: 'crashed', exitCode: 1,
-      appVersion: '0.1.0', schemaRevision: 92, protocol: 174, platform: process.platform, arch: process.arch,
+      appVersion: '0.1.0', schemaRevision: 93, protocol: 174, platform: process.platform, arch: process.arch,
       electron: '43.4.1', uptimeSeconds: 1, stack: '    at <redacted-path>:12:3',
     }), { flag: 'wx' });
     const executable = electronExecutable();

@@ -1415,6 +1415,16 @@ export function validateWordImportRetentionSchema(db: DatabaseSync): void {
   }
 }
 
+/** Physical-stamp proof before backup/initialization: a predecessor can carry only an empty complete layer. */
+export function validateWordImportRetentionVersion(db: DatabaseSync, allowsWordRecords: boolean): void {
+  const tables = Object.keys(WORD_IMPORT_RETENTION_SCHEMA_SQL);
+  const present = tables.filter((name) => db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?").get(name) !== undefined);
+  if (!allowsWordRecords && present.length === 0) return;
+  validateWordImportRetentionSchema(db);
+  requireRetention(allowsWordRecords || tables.every((table) => db.prepare(`SELECT 1 FROM ${table} LIMIT 1`).get() === undefined),
+    'WORD_READER_STAMP_INVALID', 'Word 修订记录与数据库的原始版本标记不一致。');
+}
+
 /** Separate from revision 27: existing retention tables never cause the new layer to be skipped. */
 export function initializeWordImportRetentionSchema(db: DatabaseSync): void {
   const existing = Object.keys(WORD_IMPORT_RETENTION_SCHEMA_SQL).filter((name) =>

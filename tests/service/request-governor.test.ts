@@ -11,6 +11,7 @@ import {
   type ModelRequestProducerKind,
 } from '../../src/service/analysis/execution.js';
 import { EditorialStore } from '../../src/service/store.js';
+import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
 import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy, resolveSourceCheckoutLaunchPolicySync } from '../../src/service/launch-policy.js';
 import { DataVersionError, dataVersionMarkerPath, readDataVersionMarker, refuseNewerDataVersion } from '../../src/service/data-version.js';
@@ -221,7 +222,7 @@ describe('durable request reader compatibility', () => {
     const crash = await admittedCrash();
     await unlink(dataVersionMarkerPath(crash.snapshot));
     const path = join(crash.snapshot, 'store', 'ai7.sqlite');
-    const db = new DatabaseSync(path); db.exec('PRAGMA user_version = 93'); const before = requestRows(db); db.close();
+    const db = new DatabaseSync(path); db.exec(`PRAGMA user_version = ${LATEST_SCHEMA_VERSION + 1}`); const before = requestRows(db); db.close();
     await expect(EditorialStore.open(crash.snapshot, crash.roots.codeRoot)).rejects.toMatchObject({ code: 'SCHEMA_UNSUPPORTED' });
     const after = new DatabaseSync(path); try { expect(requestRows(after)).toEqual(before); } finally { after.close(); }
   });
@@ -304,7 +305,7 @@ describe('durable request reader compatibility', () => {
     const crash = await admittedCrash(); const path = join(crash.snapshot, 'store', 'ai7.sqlite'); const db = new DatabaseSync(path);
     rewriteRequestRows(db, 'analysis_run_states', (record, index) => { if (index === 0) record.requestRefusal = null; });
     const destination = join(crash.roots.inputRoot, 'invalid-request-evidence.ai7db');
-    try { await writeDatabasePackage(db, crash.snapshot, destination, () => ({ dataVersion: 1, schemaRevision: 92, softwareVersion: '0.1.0',
+    try { await writeDatabasePackage(db, crash.snapshot, destination, () => ({ dataVersion: 1, schemaRevision: LATEST_SCHEMA_VERSION, softwareVersion: '0.1.0',
       createdAt: new Date().toISOString(), origin: 'database-export' })); } finally { db.close(); }
     const targetRoot = join(crash.roots.dataRoot, '..', 'request-target'); let target = await EditorialStore.open(targetRoot, crash.roots.codeRoot);
     crash.opened.push(target);
@@ -346,7 +347,7 @@ describe('durable request reader compatibility', () => {
     try {
       expect(() => ledger.recordModelRequestNotSent(crash.runRecordId, request.requestId)).toThrow('读者修订');
       expect(requestRows(db)).toEqual(before);
-    } finally { db.exec('PRAGMA user_version = 92'); db.close(); }
+    } finally { db.exec(`PRAGMA user_version = ${LATEST_SCHEMA_VERSION}`); db.close(); }
   });
 
   it.each([null, true, ['ordinary-production-editorial-review']])('refuses a coercible nonstring rule pin %j instead of treating it as a string', async (rule) => {
