@@ -40,6 +40,8 @@ import { EditorialLearningLedger } from '../../src/service/learning/ledger.js';
 import { wordTrackedEditCandidate, learningMaterialDigest, wordLocalImportAdmissions } from '../../src/service/learning-eligibility.js';
 import { readWordManuscriptExportSource, planWordManuscriptExport } from '../../src/service/manuscript-export.js';
 import { renderDocxExport } from '../../src/service/docx-export.js';
+import { createWordImportedMarks } from '../../src/service/imported-marks.js';
+import { EditorialMarkStore } from '../../src/service/editorial-marks.js';
 import { DEFAULT_MANUSCRIPT_EXPORT_OPTIONS } from '../../src/shared/protocol.js';
 import { EditorialStore, SOURCE_VERSION_PARSER_CHANGED_MESSAGE, StoreError } from '../../src/service/store.js';
 import { CLARIFICATION_SCHEMA_VERSION, LATEST_SCHEMA_VERSION, PROPOSAL_CONFLICT_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
@@ -220,6 +222,8 @@ describe('closed Word retention definitions (#1132)', () => {
             accepted: { digest: compiled.readings.accepted.readingDigest, blockCount: compiled.readings.accepted.blocks.length, usable: compiled.readings.accepted.usable } },
           mappingDigest: bound.mappingDigest, templateManifestDigest: compiled.templateManifestDigest, effectiveControls: controls };
         const record = canonicalRecord(choice);
+        const branchId = String(db.prepare('SELECT branch_id FROM branch_working_state WHERE base_revision_id = ?').get(choice.revisionId)!.branch_id);
+        const markStore = new EditorialMarkStore(db);
         const sampleEntries = samples.map((sample, index) => ({ sample, templateKey: compiled.templates[index]!.templateKey }));
         const derive = (currentChoice: WordImportChoiceRecord, currentControls = controls) => wordLocalImportAdmissions({
           bookId, samples: sampleEntries, choice: currentChoice, choiceDigest: canonicalRecord(currentChoice).digest, currentControls, recordedAt });
@@ -237,7 +241,12 @@ describe('closed Word retention definitions (#1132)', () => {
           db.exec('SAVEPOINT word_no_capture');
           try {
             configure();
-            insertChoice({ ...choice, learnFromEdits, effectiveControls: ledger.wordImportControls(bookId, materials) });
+            const mutedChoice = { ...choice, learnFromEdits, effectiveControls: ledger.wordImportControls(bookId, materials) };
+            insertChoice(mutedChoice);
+            retainWordManuscriptSourceSegments(db, bookId, mutedChoice, compiled.readings.rejected);
+            expect(createWordImportedMarks(db, markStore, bookId, commitId, compiled, branchId)).toBe(compiled.readings.rejected.marks.length);
+            expect(db.prepare('SELECT count(*) total FROM word_import_mark_sources WHERE commit_id = ?').get(commitId)?.total)
+              .toBe(compiled.readings.rejected.marks.length);
             expect(ledger.retainWordImportSamples(bookId, commitId, compiled)).toEqual({ sources: [], signalIds: [] });
             for (const table of ['word_tracked_edit_samples', 'word_tracked_edit_sample_imports', 'learning_signals']) {
               expect(db.prepare(`SELECT count(*) total FROM ${table}`).get()?.total).toBe(0);
@@ -253,6 +262,27 @@ describe('closed Word retention definitions (#1132)', () => {
         expect(() => requireWordManuscriptSourceSegments(db, bookId, choice, compiled.readings.rejected)).toThrow('不完整');
         expect(retainWordManuscriptSourceSegments(db, bookId, choice, compiled.readings.rejected).mappingDigest).toBe(bound.mappingDigest);
         expect(retainWordManuscriptSourceSegments(db, bookId, choice, compiled.readings.rejected).mappingDigest).toBe(bound.mappingDigest);
+        expect(() => createWordImportedMarks(db, markStore, bookId, commitId, compiled, randomUUID())).toThrow('基线');
+        const priorMarks = db.prepare('SELECT count(*) total FROM editorial_marks').get()!.total;
+        db.exec(`SAVEPOINT word_mark_rollback;
+          CREATE TRIGGER word_mark_source_failure BEFORE INSERT ON word_import_mark_sources
+          BEGIN SELECT RAISE(ABORT, 'WORD_MARK_SOURCE_FAILURE'); END`);
+        try {
+          expect(() => createWordImportedMarks(db, markStore, bookId, commitId, compiled, branchId)).toThrow('WORD_MARK_SOURCE_FAILURE');
+        } finally { db.exec('ROLLBACK TO word_mark_rollback; RELEASE word_mark_rollback'); }
+        expect(db.prepare('SELECT count(*) total FROM editorial_marks').get()!.total).toBe(priorMarks);
+        expect(db.prepare('SELECT count(*) total FROM word_import_mark_sources').get()!.total).toBe(0);
+        const wordMarkCount = createWordImportedMarks(db, markStore, bookId, commitId, compiled, branchId);
+        expect(wordMarkCount).toBe(compiled.readings.rejected.marks.length);
+        expect(createWordImportedMarks(db, markStore, bookId, commitId, compiled, branchId)).toBe(wordMarkCount);
+        expect(db.prepare('SELECT count(*) total FROM editorial_marks').get()!.total).toBe(Number(priorMarks) + wordMarkCount);
+        const sourceMarkRows = db.prepare(`SELECT s.*, m.pinned_revision_id, m.book_id FROM word_import_mark_sources s
+          JOIN editorial_marks m ON m.mark_id = s.mark_id WHERE s.commit_id = ? ORDER BY s.source_ordinal`).all(commitId);
+        expect(sourceMarkRows).toHaveLength(wordMarkCount);
+        expect(sourceMarkRows.every((row) => row.book_id === bookId && row.pinned_revision_id === choice.revisionId)).toBe(true);
+        expect(JSON.parse(String(sourceMarkRows[0]!.canonical_json))).toMatchObject({ schema: 'ai7.word-import-mark-source/1',
+          sourceVersionId, sourceDigest: compiled.sourceDigest, graphDigest: compiled.graphDigest, importCommitId: commitId,
+          importChoiceDigest: record.digest, locator: { kind: 'revision', templateKey: compiled.templates[0]!.templateKey } });
         expect(() => bindWordReadingToRevision(db, randomUUID(), choice.revisionId, sourceVersionId, compiled.readings.rejected)).toThrow();
         expect(() => requireWordManuscriptSourceSegments(db, bookId, choice, compiled.readings.accepted)).toThrow('另一条阅读');
         const mapped = readWordManuscriptExportSource(db, bookId, choice.revisionId, sourceVersionId, originalBytes);

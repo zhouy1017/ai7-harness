@@ -272,6 +272,42 @@ export interface WordSourceMark {
   fragments: WordSourceFragment[];
 }
 
+export interface WordImportMarkSource {
+  schema: 'ai7.word-import-mark-source/1';
+  markId: string;
+  sourceOrdinal: number;
+  sourceVersionId: string;
+  sourceDigest: string;
+  graphDigest: string;
+  importCommitId: string;
+  importChoiceDigest: string;
+  plannedMarkDigest: string;
+  locator: { kind: 'revision'; templateKey: string } | { kind: 'comment'; commentId: string };
+  eventMembership: string[];
+  fragments: WordSourceFragment[];
+}
+
+/** Source evidence survives learning opt-out and later edits to the ordinary Editorial Mark. */
+export function wordImportMarkSourceRecord(choice: WordImportChoiceRecord, source: WordSourceMark, markId: string): {
+  value: WordImportMarkSource; json: string; digest: string;
+} {
+  const choiceDigest = wordImportChoiceDigest(choice);
+  requireRetention(UUID_PATTERN.test(markId) && Number.isSafeInteger(source.mark.ordinal) && source.mark.ordinal > 0 &&
+    source.eventMembership.length > 0 && source.eventMembership.every((id) => DIGEST_PATTERN.test(id)) && source.fragments.length > 0 &&
+    (source.templateKey !== null && DIGEST_PATTERN.test(source.templateKey) && source.commentId === null ||
+      source.templateKey === null && source.commentId !== null && source.mark.origin === 'comment'),
+  'WORD_MARK_SOURCE_INVALID', 'Word 标记缺少明确的原始操作或批注定位。');
+  const locator: WordImportMarkSource['locator'] = source.templateKey !== null
+    ? { kind: 'revision', templateKey: source.templateKey }
+    : { kind: 'comment', commentId: source.commentId! };
+  const value: WordImportMarkSource = { schema: 'ai7.word-import-mark-source/1', markId, sourceOrdinal: source.mark.ordinal,
+    sourceVersionId: choice.sourceVersionId, sourceDigest: choice.originalDigest, graphDigest: choice.graphDigest,
+    importCommitId: choice.commitId, importChoiceDigest: choiceDigest, plannedMarkDigest: sha256Hex(wordCanonicalJson(source.mark)),
+    locator, eventMembership: source.eventMembership, fragments: source.fragments };
+  const json = wordCanonicalJson(value);
+  return { value, json, digest: sha256Hex(json) };
+}
+
 export type WordIncompatibilityCode = 'table-revision' | 'custom-xml-or-math-revision' |
   'story-or-text-box-revision' | 'incompatible-paragraph-join' | 'invalid-move-graph' |
   'unrepresentable-comment' | 'unusable-reading' | 'resource-limit';

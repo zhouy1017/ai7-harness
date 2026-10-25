@@ -6,6 +6,9 @@ import {
   type EditorialMarkStore,
   type ProducedEditorialMarkInput,
 } from './editorial-marks.js';
+import { readWordImportChoiceRecord, readWordParentSourcePin, requireWordRevisionSource,
+  requireWordManuscriptSourceSegments, wordImportMarkSourceRecord } from './import-retention.js';
+import type { WordTrackedCompilation } from './docx.js';
 
 /**
  * Imported marks (Issue #411, plan slice S62; V2-UX-MARK-009, editor-surfaces §7 批注与修订): what schema
@@ -222,6 +225,61 @@ export function createImportedMarks(
       'IMPORT_MARK_ANCHOR_FAILED',
       '文件中的批注或修订无法准确落在稿件文字上，本次导入没有提交。',
     );
+    return markIds.length;
+  });
+}
+
+/** Selected-reading marks and their exact source locators join the real import transaction, independently of learning. */
+export function createWordImportedMarks(db: DatabaseSync, marks: EditorialMarkStore, bookId: string, commitId: string,
+  compiled: Extract<WordTrackedCompilation, { kind: 'ready' }>, branchId: string, signal?: AbortSignal): number {
+  signal?.throwIfAborted();
+  requireImported(db.isTransaction, 'WORD_MARK_SOURCE_INVALID', 'Word 标记必须与导入原子提交。');
+  const { choice } = readWordImportChoiceRecord(db, bookId, commitId);
+  requireImported(compiled.sourceDigest === choice.originalDigest && compiled.graphDigest === choice.graphDigest &&
+    compiled.templateManifestDigest === choice.templateManifestDigest,
+  'WORD_MARK_SOURCE_INVALID', 'Word 标记计划与已确认的原始来源不一致。');
+  requireWordRevisionSource(db, readWordParentSourcePin(db, bookId, choice.sourceVersionId), compiled.graph);
+  const reading = compiled.readings[choice.mode === 'suggestions' ? 'rejected' : 'accepted'];
+  requireImported(reading.usable && reading.refusals.length === 0 && reading.marks.every(({ mark }, index) => mark.ordinal === index + 1),
+    'WORD_MARK_SOURCE_INVALID', 'Word 标记计划不完整或不可用。');
+  const bound = requireWordManuscriptSourceSegments(db, bookId, choice, reading);
+  const state = db.prepare(`SELECT m.book_id, s.manuscript_id, s.base_revision_id, s.journal_sequence FROM branch_working_state s
+    JOIN manuscripts m ON m.manuscript_id = s.manuscript_id WHERE s.branch_id = ?`).get(branchId);
+  const revision = db.prepare('SELECT manuscript_id FROM manuscript_revisions WHERE revision_id = ?').get(choice.revisionId);
+  requireImported(state && revision && state.book_id === bookId && state.manuscript_id === revision.manuscript_id &&
+    state.base_revision_id === choice.revisionId && state.journal_sequence === 0,
+  'WORD_MARK_SOURCE_INVALID', 'Word 标记只能写入这次导入的准确稿件基线。');
+  const previous = db.prepare(`SELECT s.*, m.book_id, m.manuscript_id, m.branch_id, m.pinned_revision_id FROM word_import_mark_sources s
+    LEFT JOIN editorial_marks m ON m.mark_id = s.mark_id WHERE s.commit_id = ? ORDER BY s.source_ordinal, s.mark_id`).all(commitId);
+  if (previous.length > 0) {
+    requireImported(previous.length === reading.marks.length, 'WORD_MARK_SOURCE_INVALID', 'Word 标记来源对应不完整。');
+    previous.forEach((row, index) => {
+      signal?.throwIfAborted();
+      const record = wordImportMarkSourceRecord(choice, reading.marks[index]!, text(row.mark_id));
+      requireImported(row.source_ordinal === index + 1 && row.canonical_json === record.json && row.sha256 === record.digest &&
+        row.book_id === bookId && row.manuscript_id === state.manuscript_id && row.branch_id === branchId && row.pinned_revision_id === choice.revisionId,
+      'WORD_MARK_SOURCE_INVALID', 'Word 标记来源或实际归属已经变化。');
+    });
+    return previous.length;
+  }
+  const inputs = reading.marks.map(({ mark }): ProducedEditorialMarkInput => {
+    signal?.throwIfAborted();
+    const block = bound.blocks[mark.blockPosition - 1];
+    requireImported(block !== undefined && block.position === mark.blockPosition, 'WORD_MARK_SOURCE_INVALID', 'Word 标记的稿件块不存在。');
+    return { manuscriptId: text(state.manuscript_id), branchId, blockId: block.blockId,
+      fromGrapheme: mark.fromGrapheme, toGrapheme: mark.toGrapheme, pinnedText: mark.pinnedText,
+      kind: mark.kind, body: mark.body, proposedText: mark.proposedText, rationale: null, atomicGroupId: null,
+      source: { kind: 'imported-author', label: mark.authorLabel }, basis: [], status: mark.status };
+  });
+  return marks.createProducedMany(inputs, (markIds) => {
+    requireImported(markIds.every((id) => id !== null), 'IMPORT_MARK_ANCHOR_FAILED', 'Word 批注或修订无法准确落在所选阅读上，本次导入没有提交。');
+    const insert = db.prepare(`INSERT INTO word_import_mark_sources(commit_id, mark_id, source_ordinal, canonical_json, sha256) VALUES (?, ?, ?, ?, ?)`);
+    markIds.forEach((markId, index) => {
+      signal?.throwIfAborted();
+      requireImported(markId !== null, 'IMPORT_MARK_ANCHOR_FAILED', 'Word 标记没有准确锚点。');
+      const record = wordImportMarkSourceRecord(choice, reading.marks[index]!, markId);
+      insert.run(commitId, markId, index + 1, record.json, record.digest);
+    });
     return markIds.length;
   });
 }
