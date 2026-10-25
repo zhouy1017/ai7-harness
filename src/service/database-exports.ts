@@ -19,7 +19,7 @@ import { isManuscriptObjectKey } from './manuscript-format.js';
 import { isRecoveryObjectKey } from './recovery-objects.js';
 import { LIBRARY_OBJECT_DIRECTORY, readLibraryMaterialRecord } from './library-materials.js';
 import { EDITORIAL_WORKSPACE_PROFILE_BYTES, EDITORIAL_WORKSPACE_PROFILE_DIGEST, EDITORIAL_WORKSPACE_PROFILE_RETAINED_KEY } from './editorial-workspace-profile.js';
-import { DATABASE_EXPORT_SCHEMA_VERSION } from './task-authorization.js';
+import { DATABASE_EXPORT_SCHEMA_VERSION, validatePolicyOriginalFieldRecords } from './task-authorization.js';
 import { DIGEST_PATTERN, UUID_PATTERN, canonicalJson, canonicalRecord, isRecord, parseCanonicalJson, sha256Hex } from './analysis/canonical.js';
 import {
   EXPORT_DISPOSITION_LABELS,
@@ -311,6 +311,7 @@ export function openPackageStore(path: string): DatabaseSync {
   const db = new DatabaseSync(path, { readOnly: true, defensive: true });
   try {
     db.exec('PRAGMA trusted_schema = OFF');
+    validatePolicyOriginalFieldRecords(db);
   } catch (error) {
     db.close();
     throw error;

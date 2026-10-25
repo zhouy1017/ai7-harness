@@ -26,7 +26,7 @@ export interface AdmittedFastRoleRoute {
   readonly ruleId: string;
   /** The live scope whose policy admitted it: developer-live, or ordinary production on the editor's route (Issue #811). */
   readonly operationalScope: 'developer-live' | 'ordinary-production';
-  readonly providerProcessingVersion: Exclude<ProviderProcessingVersion, 'v1'>;
+  readonly providerProcessingVersion: Exclude<ProviderProcessingVersion, 'v1' | 'v29'>;
   readonly modelRole: CredentialSlotBinding['modelRole'];
   readonly profile: ProviderRouteProfile;
   readonly modelProfile: ProviderModelProfile;
@@ -75,7 +75,7 @@ export function admittedFastRoleRoute(policy: LaunchPolicyProjection, kindId: st
   const scope = policy.operationalScope;
   if (policy.integrityState !== 'verified' || (scope !== 'developer-live' && scope !== 'ordinary-production') ||
       processing.decision !== 'eligible-only' || processing.liveTransmissionAllowed !== true ||
-      processing.version === null || processing.version === 'v1') return null;
+      processing.version === null || processing.version === 'v1' || processing.version === 'v29') return null;
   // The selected policy's allow rules, as the launch verified them; a projection that carries none admits nothing.
   const rules: ReadonlyArray<unknown> = processing.admittedRules ?? [];
   const kindRules = rules.filter((rule) => isRecord(rule) &&

@@ -128,7 +128,7 @@ import type { PublicSampleBookSourceDigest } from './public-samplebooks.js';
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 175 as const;
+export const SERVICE_PROTOCOL_VERSION = 176 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 export interface BookFindingProjection {
@@ -2480,10 +2480,101 @@ export type TrustedOperationalScope = 'development-ci' | 'developer-live' | 'ord
  */
 export type DeveloperLiveProviderProcessingVersion = 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v14' | 'v16' | 'v18' | 'v20' | 'v22' | 'v24';
 /** The ordinary-production version the active set selects: local production over the editor's own configured provider. */
-export type OrdinaryProductionProviderProcessingVersion = 'v13' | 'v15' | 'v17' | 'v19' | 'v21' | 'v23' | 'v25' | 'v26' | 'v27';
+export type OrdinaryProductionProviderProcessingVersion = 'v13' | 'v15' | 'v17' | 'v19' | 'v21' | 'v23' | 'v25' | 'v26' | 'v27' | 'v30';
 /** Historical v5, v7, v8, v9, v10, v11 and v12, the superseded web reservation v6, historical v13, v14 and v15, and selected v16. */
-export type ActivePolicySetVersion = 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v13' | 'v14' | 'v15' | 'v16' | 'v17' | 'v18' | 'v19';
-export type ProviderProcessingVersion = 'v1' | DeveloperLiveProviderProcessingVersion | OrdinaryProductionProviderProcessingVersion;
+export type ActivePolicySetVersion = 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v13' | 'v14' | 'v15' | 'v16' | 'v17' | 'v18' | 'v19' | 'v21';
+export type ProviderProcessingVersion = 'v1' | 'v29' | DeveloperLiveProviderProcessingVersion | OrdinaryProductionProviderProcessingVersion;
+
+/** Accepted identities shared by readers and gates; these constants do not select a policy or authorize a send. */
+export const ORIGINAL_FIELDS_ACTIVE_SET_SHA256 = '4b845e924df777f440b07d53ba6e31447e0fe0b004e86efa89bf76554fb05392';
+export const ORIGINAL_FIELDS_POLICY_SHA256 = 'f12df1d43cfc9f52b999c2cc8a6e9bac419177d42210d3bbe8c5008ba8d6a59e';
+export const LOCAL_FIXTURE_POLICY_SHA256 = 'c9545a5f461a7791115c1f4664bbd731757775951f814d39c28b12c85af88c9d';
+export const LOCAL_FIXTURE_MANIFEST_SHA256 = '2572c1b5aa05d6ccc9a60a2a8a03ba2cefc10d5f48c1a85377d53797360bc0d2';
+
+/** Retained known interpretations, never an arbitrary-v-number reader or a selection mechanism. */
+export function isSupportedProviderProcessingVersion(scope: unknown, version: unknown): boolean {
+  if (scope === 'development-ci') return version === 'v1' || version === 'v29';
+  if (scope === 'developer-live') return ['v5', 'v8', 'v9', 'v10', 'v11', 'v12', 'v14', 'v16', 'v18', 'v20', 'v22', 'v24'].some((entry) => entry === version);
+  if (scope === 'ordinary-production') return ['v13', 'v15', 'v17', 'v19', 'v21', 'v23', 'v25', 'v26', 'v27', 'v30'].some((entry) => entry === version);
+  return false;
+}
+
+/** Identity of the actual verified selected documents; this metadata grants no execution authority. */
+export interface SelectedPolicyIdentity {
+  readonly providerProcessingVersion: 'v24' | 'v29' | 'v30';
+  readonly providerProcessingSha256: string;
+  readonly activePolicySetVersion: 'v21';
+  readonly activePolicySetSha256: string;
+}
+export type LocalFixtureRegisteredProfile = 'baseline' | 'conflict' | 'custom' | 'dialogue' | 'evaluation' | 'factual' |
+  'polish' | 'readers' | 'review' | 'rewrite' | 'series' | 'workspace' | 'writing';
+export type LocalFixtureRuleId = 'development-ci-fixture-review' | 'development-ci-fixture-global-agent-dialogue' |
+  'development-ci-fixture-learning-curation' | 'development-ci-fixture-editorial-polish' |
+  'development-ci-fixture-factual-claim-stages' | 'development-ci-fixture-factual-recheck';
+interface LocalFixtureProfileIdentity {
+  readonly schema: 'ai7.local-fixture-profile/1';
+  readonly policyVersion: 'v29';
+  readonly policySha256: string;
+  readonly activePolicySetVersion: 'v21';
+  readonly activePolicySetSha256: string;
+}
+export type LocalFixtureProfile = LocalFixtureProfileIdentity & (
+  | { readonly kind: 'legacy'; readonly profileId: 'development-ci-legacy-local-fixture-809c96f2';
+      readonly manifestSha256: string; readonly registeredProfile: LocalFixtureRegisteredProfile }
+  | { readonly kind: 'rule'; readonly ruleId: LocalFixtureRuleId }
+);
+function isPolicyIdentityRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+function hasPolicyIdentityKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  return Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
+}
+
+const SELECTED_PROVIDER_DIGESTS = {
+  v24: '1522e203f3ead6a259f93494e25c34526a024f93a757b1c7d22568e219f4a6b6',
+  v29: LOCAL_FIXTURE_POLICY_SHA256,
+  v30: ORIGINAL_FIELDS_POLICY_SHA256,
+} as const;
+const LOCAL_FIXTURE_REGISTERED_PROFILES: readonly LocalFixtureRegisteredProfile[] = [
+  'baseline', 'conflict', 'custom', 'dialogue', 'evaluation', 'factual', 'polish', 'readers', 'review', 'rewrite', 'series', 'workspace', 'writing',
+];
+export const LOCAL_FIXTURE_RULE_IDS: readonly LocalFixtureRuleId[] = [
+  'development-ci-fixture-review', 'development-ci-fixture-global-agent-dialogue', 'development-ci-fixture-learning-curation',
+  'development-ci-fixture-editorial-polish', 'development-ci-fixture-factual-claim-stages', 'development-ci-fixture-factual-recheck',
+];
+
+/** A closed persisted interpretation, without substituting today's selection for an absent historical field. */
+export function selectedPolicyIdentityOf(value: unknown): SelectedPolicyIdentity | null {
+  if (!isPolicyIdentityRecord(value) || !hasPolicyIdentityKeys(value, ['providerProcessingVersion', 'providerProcessingSha256', 'activePolicySetVersion', 'activePolicySetSha256'])) return null;
+  const version = value['providerProcessingVersion'];
+  if ((version !== 'v24' && version !== 'v29' && version !== 'v30') || value['providerProcessingSha256'] !== SELECTED_PROVIDER_DIGESTS[version] ||
+      value['activePolicySetVersion'] !== 'v21' || value['activePolicySetSha256'] !== ORIGINAL_FIELDS_ACTIVE_SET_SHA256) return null;
+  return { providerProcessingVersion: version, providerProcessingSha256: SELECTED_PROVIDER_DIGESTS[version],
+    activePolicySetVersion: 'v21', activePolicySetSha256: ORIGINAL_FIELDS_ACTIVE_SET_SHA256 };
+}
+
+/** Shape and document equality only; the actual fixture/caller/message conjunction is checked by the fixture owner. */
+export function localFixtureProfileOf(value: unknown, selected: SelectedPolicyIdentity): LocalFixtureProfile | null {
+  if (!isPolicyIdentityRecord(value) || selected.providerProcessingVersion !== 'v29' || selectedPolicyIdentityOf(selected) === null ||
+      value['schema'] !== 'ai7.local-fixture-profile/1' || value['policyVersion'] !== 'v29' ||
+      value['policySha256'] !== selected.providerProcessingSha256 || value['activePolicySetVersion'] !== selected.activePolicySetVersion ||
+      value['activePolicySetSha256'] !== selected.activePolicySetSha256) return null;
+  const common = { schema: 'ai7.local-fixture-profile/1', policyVersion: 'v29', policySha256: selected.providerProcessingSha256,
+    activePolicySetVersion: selected.activePolicySetVersion, activePolicySetSha256: selected.activePolicySetSha256 } as const;
+  const keys = ['schema', 'policyVersion', 'policySha256', 'activePolicySetVersion', 'activePolicySetSha256', 'kind'];
+  if (value['kind'] === 'legacy' && hasPolicyIdentityKeys(value, [...keys, 'profileId', 'manifestSha256', 'registeredProfile']) &&
+      value['profileId'] === 'development-ci-legacy-local-fixture-809c96f2' && value['manifestSha256'] === LOCAL_FIXTURE_MANIFEST_SHA256) {
+    const registeredProfile = LOCAL_FIXTURE_REGISTERED_PROFILES.find((profile) => profile === value['registeredProfile']);
+    return registeredProfile === undefined ? null : { ...common, kind: 'legacy', profileId: 'development-ci-legacy-local-fixture-809c96f2',
+      manifestSha256: LOCAL_FIXTURE_MANIFEST_SHA256, registeredProfile };
+  }
+  if (value['kind'] === 'rule' && hasPolicyIdentityKeys(value, [...keys, 'ruleId'])) {
+    const ruleId = LOCAL_FIXTURE_RULE_IDS.find((id) => id === value['ruleId']);
+    return ruleId === undefined ? null : { ...common, kind: 'rule', ruleId };
+  }
+  return null;
+}
+
 /** Exact Run Budget Ceiling state: `unset` under development-ci, an explicit total-token ceiling under developer-live. */
 export type RunBudgetCeilingState = 'unset' | { kind: 'tokens'; maxTotalTokens: number };
 /**
@@ -2505,12 +2596,12 @@ export type RemoteProviderId = ConfiguredRouteId;
 export type CredentialSlotId = ConfiguredCredentialSlot;
 /** The Provider Processing pin a Provider Resolution Plan carries for its trusted scope. */
 export type ProviderProcessingPin =
-  | { operationalScope: 'development-ci'; version: 'v1'; decision: 'deny'; authorizedLiveTransmissionCount: 0 }
+  | { operationalScope: 'development-ci'; version: 'v1' | 'v29'; decision: 'deny'; authorizedLiveTransmissionCount: 0 }
   | { operationalScope: 'developer-live'; version: DeveloperLiveProviderProcessingVersion; decision: 'eligible-only'; authorizedLiveTransmissionCount: 'bounded-by-run' }
   | { operationalScope: 'ordinary-production'; version: OrdinaryProductionProviderProcessingVersion; decision: 'eligible-only'; authorizedLiveTransmissionCount: 'bounded-by-run' };
 /** The policy pin a Result Set Revision records; `liveTransmissions` is the policy's bound, never a usage count. */
 export type ResultSetPolicyPin =
-  | { operationalScope: 'development-ci'; providerProcessingVersion: 'v1'; activePolicySetVersion: ActivePolicySetVersion; liveTransmissions: 0 }
+  | { operationalScope: 'development-ci'; providerProcessingVersion: 'v1' | 'v29'; activePolicySetVersion: ActivePolicySetVersion; liveTransmissions: 0 }
   | { operationalScope: 'developer-live'; providerProcessingVersion: DeveloperLiveProviderProcessingVersion; activePolicySetVersion: ActivePolicySetVersion; liveTransmissions: 'bounded-by-run' }
   | { operationalScope: 'ordinary-production'; providerProcessingVersion: OrdinaryProductionProviderProcessingVersion; activePolicySetVersion: ActivePolicySetVersion; liveTransmissions: 'bounded-by-run' };
 
@@ -2876,6 +2967,8 @@ export interface AdmittedLocalTools {
 }
 
 export interface LaunchPolicyProjection {
+  /** Present only after the resolver verified the exact selected document bytes. */
+  selectedPolicyIdentity?: SelectedPolicyIdentity;
   integrityState: 'verified' | 'denied';
   denialReason: string | null;
   operationalScope: TrustedOperationalScope | null;
@@ -3168,6 +3261,8 @@ export interface TaskAuthorizationProjection {
     sidecarSha256: '980b565f25bdff29e539365e17344346017b05146a45cfea35c8ed7d528a1bff';
   };
   providerResolutionPlan: null | {
+    selectedPolicyIdentity?: SelectedPolicyIdentity;
+    localFixtureProfile?: LocalFixtureProfile;
     role: 'Main Editorial Role';
     capabilities: readonly [];
     providerId: 'deepseek-open-platform';
@@ -4444,10 +4539,14 @@ export type MaterialPlanField =
   | 'predecessorRevision'
   | 'runBudgetCeiling'
   | 'outboundDataCategory'
-  | 'expectedOutcome';
+  | 'expectedOutcome'
+  | 'selectedPolicyIdentity'
+  | 'localFixtureProfile';
 
 /** The material inputs one frozen plan version carries, re-derived from durable state for drift detection. */
 export interface MaterialPlanInputsProjection {
+  selectedPolicyIdentity?: SelectedPolicyIdentity;
+  localFixtureProfile?: LocalFixtureProfile;
   providerBinding: { providerId: string; modelId: string; adapterRevision: number; configurationRevision: number; credentialReference: string };
   artifactPin: { identity: string; version: string; nativeCarrierSha256: string; sidecarRevision: number; sidecarSha256: string };
   selectedRange: BaselineAnalysisSelectedRange | null;
@@ -4461,6 +4560,8 @@ export type PlanRevisionDiffValue =
   | string
   | number
   | null
+  | SelectedPolicyIdentity
+  | LocalFixtureProfile
   | BaselineAnalysisSelectedRange
   | { revisionId: string; ordinal: number; digest: string }
   | AnalysisReusePlanCounts
@@ -4859,6 +4960,8 @@ export interface BaselineAnalysisProjection {
   coverageManifest: null | CoverageManifestProjection;
   providerResolutionPlan: null | {
     webToolsBackend?: FrozenWebToolsBackend;
+    selectedPolicyIdentity?: SelectedPolicyIdentity;
+    localFixtureProfile?: LocalFixtureProfile;
     searchCredentialReference?: string;
     role: 'Main Editorial Role';
     capabilities: readonly [];

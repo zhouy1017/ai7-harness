@@ -77,7 +77,7 @@ describe('the research evidence ledger, schema 75', () => {
       // Revisions 76 (#892), 77 (#902), and 78 (#901) follow it; the exact revision-74 store traverses each.
       // Synchronized delta with #66 and #89: revisions 81 and 83 add imported Skill sibling relations.
       // #1044 adds independent model selection and translation-attempt metadata at revision 84.
-      expect(LATEST_SCHEMA_VERSION).toBe(RESEARCH_EVIDENCE_SCHEMA_VERSION + 18);
+      expect(LATEST_SCHEMA_VERSION).toBe(RESEARCH_EVIDENCE_SCHEMA_VERSION + 19);
       store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
       await importSample1Book(store, roots.codeRoot, '迁移回归');
       store.close(); store = undefined;

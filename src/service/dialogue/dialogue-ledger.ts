@@ -1,7 +1,12 @@
-import type { GlobalMemoryPin } from '../../shared/protocol.js';
+import type { GlobalMemoryPin, LocalFixtureProfile, SelectedPolicyIdentity } from '../../shared/protocol.js';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
-import { DIGEST_PATTERN, UUID_PATTERN, canonicalJson, sha256Hex } from '../analysis/canonical.js';
+import { DIGEST_PATTERN, UUID_PATTERN, canonicalJson, hasExactKeys, isRecord, parseStoredJson, sha256Hex } from '../analysis/canonical.js';
+import { CREDENTIAL_REFERENCE_PATTERN, DEVELOPMENT_CREDENTIAL_REFERENCES } from '../../shared/protected-secret-identity.js';
+import { ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS, isSupportedProviderProcessingVersion, localFixtureProfileOf, selectedPolicyIdentityOf } from '../launch-policy.js';
+import { POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION } from '../task-authorization.js';
+import { GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST } from './global-agent-session.js';
+import { AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST, DIALOGUE_PROMPT_CONTRACT_DIGEST, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST } from './contract.js';
 import type { DialogueMessageInput } from './contract.js';
 
 /**
@@ -321,6 +326,49 @@ export const DIALOGUE_TASKS_READ_LIMIT = 50;
 
 export type DialogueAttemptKind = 'ask' | 'continue' | 'regenerate';
 
+export interface QualifiedGlobalAttemptMetadata extends SelectedPolicyIdentity {
+  readonly textProcessing: 'qualified-original-fields';
+  readonly providerProcessingVersion: 'v30';
+  readonly policyRuleId: 'ordinary-production-global-agent-dialogue';
+  readonly route: 'opencode-go' | 'deepseek-open-platform';
+  readonly model: string;
+  readonly modelRole: 'Fast Interaction Role';
+  readonly credentialSlot: string;
+  readonly credentialReference: string;
+  readonly credentialUpdatedAt: string;
+  readonly requestContextSha256: string;
+  readonly messageSha256: string;
+  readonly retainedAncestrySha256: string;
+}
+const QUALIFIED_GLOBAL_FIELDS = ['textProcessing', 'providerProcessingVersion', 'providerProcessingSha256',
+  'activePolicySetVersion', 'activePolicySetSha256', 'policyRuleId', 'route', 'model', 'modelRole', 'credentialSlot',
+  'credentialReference', 'credentialUpdatedAt', 'requestContextSha256', 'messageSha256', 'retainedAncestrySha256'] as const;
+
+/** A closed local record interpretation. Actual source/current binding authority is proved separately before every send. */
+export function qualifiedGlobalAttemptMetadataOf(value: unknown): QualifiedGlobalAttemptMetadata | null {
+  if (!isRecord(value) || !hasExactKeys(value, QUALIFIED_GLOBAL_FIELDS)) return null;
+  const identity = selectedPolicyIdentityOf({ providerProcessingVersion: value.providerProcessingVersion,
+    providerProcessingSha256: value.providerProcessingSha256, activePolicySetVersion: value.activePolicySetVersion,
+    activePolicySetSha256: value.activePolicySetSha256 });
+  const route = value.route;
+  if (identity?.providerProcessingVersion !== 'v30' || value.textProcessing !== 'qualified-original-fields' ||
+      value.policyRuleId !== 'ordinary-production-global-agent-dialogue' || value.modelRole !== 'Fast Interaction Role' ||
+      (route !== 'opencode-go' && route !== 'deepseek-open-platform') || typeof value.model !== 'string' ||
+      typeof value.credentialSlot !== 'string' || !ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS.some((binding) =>
+        binding.route === route && binding.model === value.model && binding.credentialSlot === value.credentialSlot) ||
+      typeof value.credentialReference !== 'string' || !CREDENTIAL_REFERENCE_PATTERN.test(value.credentialReference) ||
+      DEVELOPMENT_CREDENTIAL_REFERENCES.has(value.credentialReference.toLowerCase()) ||
+      typeof value.credentialUpdatedAt !== 'string' || value.credentialUpdatedAt.length > 30 || !Number.isFinite(Date.parse(value.credentialUpdatedAt)) ||
+      new Date(value.credentialUpdatedAt).toISOString() !== value.credentialUpdatedAt ||
+      typeof value.requestContextSha256 !== 'string' || !DIGEST_PATTERN.test(value.requestContextSha256) ||
+      typeof value.messageSha256 !== 'string' || !DIGEST_PATTERN.test(value.messageSha256) ||
+      typeof value.retainedAncestrySha256 !== 'string' || !DIGEST_PATTERN.test(value.retainedAncestrySha256)) return null;
+  return { ...identity, providerProcessingVersion: 'v30', textProcessing: 'qualified-original-fields',
+    policyRuleId: 'ordinary-production-global-agent-dialogue', route, model: value.model, modelRole: 'Fast Interaction Role',
+    credentialSlot: value.credentialSlot, credentialReference: value.credentialReference, credentialUpdatedAt: value.credentialUpdatedAt,
+    requestContextSha256: value.requestContextSha256, messageSha256: value.messageSha256, retainedAncestrySha256: value.retainedAncestrySha256 };
+}
+
 /** The mark source a 转为修改建议 names (DIALOG-016), and how much of the answer its basis quotes. */
 export const DIALOGUE_MARK_SOURCE_LABEL = '对话回答';
 export const DIALOGUE_BASIS_QUOTE_CHARACTERS = 200;
@@ -328,6 +376,7 @@ export { MAX_DIALOGUE_PROPOSAL_CHARACTERS } from '../../shared/protocol.js';
 
 /** An attempt about to be sent: the Task, the attempt, and the one message its turn sends. */
 export interface DialogueTurnStart {
+  readonly qualification?: QualifiedGlobalAttemptMetadata;
   readonly dialogueId: string;
   readonly attemptId: string;
   readonly message: DialogueMessageInput;
@@ -370,6 +419,8 @@ interface DialogueBindingBase {
 
 /** An attempt answered by the J-04 deterministic fixture under development-ci, recorded exactly as revision 60 did. */
 export interface StoredLocalDialogueBinding extends DialogueBindingBase {
+  readonly selectedPolicyIdentity?: SelectedPolicyIdentity;
+  readonly localFixtureProfile?: LocalFixtureProfile;
   readonly route: 'ai7-local-deterministic';
   readonly operationalScope: 'development-ci';
   readonly fixtureSha256: string;
@@ -395,6 +446,7 @@ function livePairAdmitted(route: string, scope: string): boolean {
 export type StoredDialogueBinding = StoredLocalDialogueBinding | StoredLiveDialogueBinding;
 
 export interface StoredDialogueAttempt {
+  readonly qualification?: QualifiedGlobalAttemptMetadata;
   readonly attemptId: string;
   readonly dialogueId: string;
   readonly ordinal: number;
@@ -436,7 +488,8 @@ function sealed(record: Record<string, unknown>): { json: string; sha256: string
  * under its own digest; a live binding's carries the policy version and rule id in place of the fixture.
  */
 function bindingRecord(attemptId: string, binding: StoredDialogueBinding): Record<string, unknown> {
-  return { schema: BINDING_SCHEMA, attemptId, ...binding };
+  return { schema: binding.route === 'ai7-local-deterministic' && binding.selectedPolicyIdentity !== undefined
+    ? 'ai7.dialogue-execution-binding/2' : BINDING_SCHEMA, attemptId, ...binding };
 }
 
 /** A row read back: its record must be exactly the canonical form of what its columns say, under its digest. */
@@ -486,14 +539,17 @@ export class DialogueLedger {
     return { task, attemptId };
   }
 
-  askGlobal(scope: import('../../shared/protocol.js').TrustedOperationalScope, sources: ReadonlyArray<GlobalMemoryPin>, questionSha256: string, now: Date): { task: StoredGlobalDialogueTask; attemptId: string } {
+  askGlobal(scope: import('../../shared/protocol.js').TrustedOperationalScope, sources: ReadonlyArray<GlobalMemoryPin>, questionSha256: string, now: Date,
+    qualification?: QualifiedGlobalAttemptMetadata): { task: StoredGlobalDialogueTask; attemptId: string } {
     requireDialogue(DIGEST_PATTERN.test(questionSha256) && sources.length <= 12, 'DIALOGUE_INVALID', '全域对话范围无效。');
+    if (qualification !== undefined) requireDialogue(scope === 'ordinary-production' && this.#currentReader() &&
+      qualifiedGlobalAttemptMetadataOf(qualification) !== null, 'DIALOGUE_INVALID', '全域对话的原文字段身份无效。');
     const task: StoredGlobalDialogueTask = { dialogueId: randomUUID(), bookId: null, sources, operationalScope: scope,
       sourcesSha256: sha256Hex(canonicalJson(sources)), questionSha256, askedAt: now.toISOString() };
     const seal = sealed({ schema: 'ai7.global-agent-dialogue/1', ...task, presentationMode: 'interactive-stream' });
     this.#db.prepare(`INSERT INTO dialogue_tasks (dialogue_id, selection_sha256, question_sha256, presentation_mode, asked_at, canonical_json, sha256)
       VALUES (?, ?, ?, 'interactive-stream', ?, ?, ?)`).run(task.dialogueId, task.sourcesSha256, questionSha256, task.askedAt, seal.json, seal.sha256);
-    return { task, attemptId: this.#insertAttempt(task.dialogueId, 1, 'ask', null, now) };
+    return { task, attemptId: this.#insertAttempt(task.dialogueId, 1, 'ask', null, now, qualification) };
   }
 
   globalTask(dialogueId: string): StoredGlobalDialogueTask | null {
@@ -583,7 +639,16 @@ export class DialogueLedger {
       priorAttemptId: nullableText(row.prior_attempt_id),
       createdAt: text(row.created_at),
     };
-    verified(row, { schema: ATTEMPT_SCHEMA, ...base });
+    const raw = parseStoredJson(text(row.canonical_json), () => new DialogueError('DIALOGUE_RECORD_INVALID', INVALID));
+    requireDialogue(isRecord(raw), 'DIALOGUE_RECORD_INVALID', INVALID);
+    let qualification: QualifiedGlobalAttemptMetadata | undefined;
+    if (raw.schema === 'ai7.dialogue-attempt/2') {
+      const metadata = qualifiedGlobalAttemptMetadataOf(Object.fromEntries(QUALIFIED_GLOBAL_FIELDS.map((key) => [key, raw[key]])));
+      requireDialogue(this.#currentReader() && metadata !== null && this.globalTask(base.dialogueId)?.operationalScope === 'ordinary-production',
+        'DIALOGUE_RECORD_INVALID', INVALID);
+      qualification = metadata;
+    }
+    verified(row, { schema: qualification === undefined ? ATTEMPT_SCHEMA : 'ai7.dialogue-attempt/2', ...base, ...qualification });
     const bindingRow = this.#db.prepare('SELECT * FROM dialogue_execution_bindings WHERE attempt_id = ?').get(base.attemptId) as SqlRow | undefined;
     let binding: StoredDialogueBinding | null = null;
     if (bindingRow !== undefined) {
@@ -599,6 +664,15 @@ export class DialogueLedger {
       if (route === 'ai7-local-deterministic' && scope === 'development-ci') {
         requireDialogue(bindingRow.provider_processing_version === null && bindingRow.policy_rule_id === null, 'DIALOGUE_RECORD_INVALID', INVALID);
         binding = { ...shared, route, operationalScope: scope, fixtureSha256: text(bindingRow.fixture_sha256) };
+        const record = parseStoredJson(text(bindingRow.canonical_json), () => new DialogueError('DIALOGUE_RECORD_INVALID', INVALID));
+        if (isRecord(record) && record.schema === 'ai7.dialogue-execution-binding/2') {
+          const selected = selectedPolicyIdentityOf(record.selectedPolicyIdentity);
+          const profile = selected === null ? null : localFixtureProfileOf(record.localFixtureProfile, selected);
+          requireDialogue(this.#currentReader() && selected?.providerProcessingVersion === 'v29' && profile !== null,
+            'DIALOGUE_RECORD_INVALID', INVALID);
+          binding = { ...binding, selectedPolicyIdentity: selected, localFixtureProfile: profile };
+          this.#verifyLocalProfile(base.dialogueId, binding);
+        }
       } else {
         requireDialogue(livePairAdmitted(route, scope) && bindingRow.fixture_sha256 === null, 'DIALOGUE_RECORD_INVALID', INVALID);
         binding = {
@@ -607,6 +681,9 @@ export class DialogueLedger {
         };
       }
       verified(bindingRow, bindingRecord(base.attemptId, binding));
+      if (binding.route !== 'ai7-local-deterministic') requireDialogue(
+        isSupportedProviderProcessingVersion(binding.operationalScope, binding.providerProcessingVersion), 'DIALOGUE_RECORD_INVALID', INVALID);
+      if (qualification !== undefined) this.#verifyQualifiedBinding(qualification, binding);
     }
     const spanRow = this.#db.prepare('SELECT * FROM dialogue_harness_spans WHERE attempt_id = ?').get(base.attemptId) as SqlRow | undefined;
     let span: StoredDialogueAttempt['span'] = null;
@@ -632,12 +709,33 @@ export class DialogueLedger {
       return conversion;
     });
     requireDialogue(conversions.length === 0 || outcome?.outcome === 'completed', 'DIALOGUE_RECORD_INVALID', INVALID);
-    return { ...base, binding, span, outcome, conversions };
+    return { ...base, ...(qualification === undefined ? {} : { qualification }), binding, span, outcome, conversions };
   }
 
-  #insertAttempt(dialogueId: string, ordinal: number, kind: DialogueAttemptKind, priorAttemptId: string | null, now: Date): string {
+  #currentReader(): boolean {
+    return Number(this.#db.prepare('PRAGMA user_version').get()?.user_version) >= POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION;
+  }
+
+  #verifyLocalProfile(dialogueId: string, binding: StoredLocalDialogueBinding): void {
+    const expected = binding.promptContractSha256 === AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST ? 'workspace'
+      : binding.promptContractSha256 === DIALOGUE_PROMPT_CONTRACT_DIGEST || binding.promptContractSha256 === DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST ? 'dialogue' : null;
+    requireDialogue(this.task(dialogueId) !== null && binding.model === 'ai7-deterministic-fixture' && expected !== null &&
+      binding.localFixtureProfile?.kind === 'legacy' && binding.localFixtureProfile.registeredProfile === expected,
+    'DIALOGUE_RECORD_INVALID', INVALID);
+  }
+
+  #verifyQualifiedBinding(qualification: QualifiedGlobalAttemptMetadata, binding: StoredDialogueBinding): void {
+    requireDialogue(binding.operationalScope === 'ordinary-production' && binding.route === qualification.route && binding.model === qualification.model &&
+      binding.providerProcessingVersion === qualification.providerProcessingVersion && binding.policyRuleId === qualification.policyRuleId &&
+      binding.promptContractSha256 === GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST, 'DIALOGUE_RECORD_INVALID', INVALID);
+  }
+
+  #insertAttempt(dialogueId: string, ordinal: number, kind: DialogueAttemptKind, priorAttemptId: string | null, now: Date,
+    qualification?: QualifiedGlobalAttemptMetadata): string {
+    if (qualification !== undefined) requireDialogue(this.#currentReader() && qualifiedGlobalAttemptMetadataOf(qualification) !== null &&
+      this.globalTask(dialogueId)?.operationalScope === 'ordinary-production', 'DIALOGUE_INVALID', '全域对话的原文字段身份无效。');
     const attempt = { attemptId: randomUUID(), dialogueId, ordinal, kind, priorAttemptId, createdAt: now.toISOString() };
-    const seal = sealed({ schema: ATTEMPT_SCHEMA, ...attempt });
+    const seal = sealed({ schema: qualification === undefined ? ATTEMPT_SCHEMA : 'ai7.dialogue-attempt/2', ...attempt, ...qualification });
     this.#db.prepare(
       `INSERT INTO dialogue_attempts (attempt_id, dialogue_id, ordinal, kind, prior_attempt_id, created_at, canonical_json, sha256)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -649,7 +747,8 @@ export class DialogueLedger {
    * A new attempt after the last, which must have settled (DIALOG-014): 继续回答 only after an answer that stopped or was
    * interrupted with something kept, 重新回答 after any. Inside the caller's transaction.
    */
-  nextAttempt(dialogueId: string, kind: 'continue' | 'regenerate', keptFragments: (attempt: StoredDialogueAttempt) => number, now: Date): string {
+  nextAttempt(dialogueId: string, kind: 'continue' | 'regenerate', keptFragments: (attempt: StoredDialogueAttempt) => number, now: Date,
+    qualification?: QualifiedGlobalAttemptMetadata): string {
     const attempts = this.attempts(dialogueId);
     const last = attempts.at(-1);
     requireDialogue(last !== undefined, 'DIALOGUE_NOT_FOUND', '这段对话不存在。');
@@ -659,15 +758,25 @@ export class DialogueLedger {
         '只有停止或中断、内容不完整的回答才能继续回答。');
       requireDialogue(keptFragments(last) > 0, 'DIALOGUE_NOTHING_KEPT', '这次回答没有留下完整的内容可以接着回答；请重新回答。');
     }
-    return this.#insertAttempt(dialogueId, last.ordinal + 1, kind, last.attemptId, now);
+    return this.#insertAttempt(dialogueId, last.ordinal + 1, kind, last.attemptId, now, qualification);
   }
 
   bind(attemptId: string, binding: StoredDialogueBinding): void {
+    const attempt = this.attempt(attemptId);
+    requireDialogue(attempt !== null, 'DIALOGUE_NOT_FOUND', '这次回答不存在。');
+    if (attempt.qualification !== undefined) this.#verifyQualifiedBinding(attempt.qualification, binding);
+    if (binding.route === 'ai7-local-deterministic' &&
+        (Object.hasOwn(binding, 'selectedPolicyIdentity') || Object.hasOwn(binding, 'localFixtureProfile'))) {
+      const selected = selectedPolicyIdentityOf(binding.selectedPolicyIdentity);
+      requireDialogue(this.#currentReader() && selected?.providerProcessingVersion === 'v29' &&
+        localFixtureProfileOf(binding.localFixtureProfile, selected) !== null, 'DIALOGUE_INVALID', '本地对话的确定性配置无效。');
+      this.#verifyLocalProfile(attempt.dialogueId, binding);
+    }
     const live = binding.route !== 'ai7-local-deterministic';
     requireDialogue(UUID_PATTERN.test(binding.harnessSessionId) && DIGEST_PATTERN.test(binding.behaviorCompositionSha256) &&
       DIGEST_PATTERN.test(binding.promptContractSha256) &&
       (live
-        ? livePairAdmitted(binding.route, binding.operationalScope) && /^v[1-9][0-9]{0,14}$/u.test(binding.providerProcessingVersion) &&
+        ? livePairAdmitted(binding.route, binding.operationalScope) && isSupportedProviderProcessingVersion(binding.operationalScope, binding.providerProcessingVersion) &&
           binding.policyRuleId.length > 0 && binding.policyRuleId.length <= 128
         : binding.operationalScope === 'development-ci' && DIGEST_PATTERN.test(binding.fixtureSha256)),
     'DIALOGUE_INVALID', '对话的执行绑定无效。');

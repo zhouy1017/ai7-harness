@@ -62,7 +62,8 @@ import {
 import { AI7_FAILURE_CODES, type DshFailureCodes } from './classification.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from './egress-gate.js';
 import { lastUserMessageText, messageText, toolResultOf } from './payload.js';
-import { fixtureEntryKey, resolveFixtureEntry, type ModelFixtureEntry, type ResolvedModelFixture } from './model-fixture.js';
+import { fixtureEntryKey, resolveFixtureEntry, type LocalFixtureExecutionContext, type LocalFixturePolicyCatalog,
+  type ModelFixtureEntry, type ResolvedModelFixture } from './model-fixture.js';
 
 /** Explicit authored fixture stimulus only; recorded fixtures and every remote route remain outside this stub. */
 export function dialogueRetrievalFixtureRule(fixture: ResolvedModelFixture, message: DialogueMessageInput): LocalToolsRule | null {
@@ -241,6 +242,7 @@ export function substituteAssuranceSamplingBlockPlaceholders(text: string, messa
 export type AnswerHold = (chunksStreamed: number, interrupted: () => boolean) => Promise<void>;
 
 export class Ai7LocalDeterministicAdapter implements LlmAdapter {
+  readonly #profileEntryKeys: ReadonlySet<string> | null;
   readonly #fixture: ResolvedModelFixture;
   readonly #promptContractDigest: string;
   /** The sampling contract the Run's kind binds (Issue #826): its turns are keyed by it, never by another's. */
@@ -258,6 +260,7 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     promptContractDigest: string,
     codes: DshFailureCodes,
     options: {
+      readonly localFixture?: { readonly catalog: LocalFixturePolicyCatalog; readonly execution: LocalFixtureExecutionContext };
       readonly resolveBy?: FixtureResolution;
       /**
        * What each unit attempted in the Run's earlier executions (Issue #422, S76d): a continuation's attempts carry on
@@ -278,6 +281,9 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     } = {},
   ) {
     this.#fixture = fixture;
+    if (options.localFixture !== undefined && options.resolveBy === 'content-digest')
+      throw new Error('LOCAL_FIXTURE_PROFILE_REQUIRES_EXACT_REQUEST_KEYS');
+    this.#profileEntryKeys = options.localFixture?.catalog.entriesFor(options.localFixture.execution, fixture, promptContractDigest) ?? null;
     this.#promptContractDigest = promptContractDigest;
     this.#assurancePromptContractDigest = options.assurancePromptContractDigest ?? ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST;
     this.#codes = codes;
@@ -298,6 +304,8 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
    * task's captured answer from answering another's.
    */
   #answering(entry: ModelFixtureEntry | undefined): ModelFixtureEntry | undefined {
+    if (entry !== undefined && this.#profileEntryKeys !== null &&
+        !this.#profileEntryKeys.has(fixtureEntryKey(entry.unitOrdinal, entry.requestDigest, entry.attempt))) return undefined;
     const task = entry?.capture?.taskPromptContractDigest ?? null;
     return task === null || task === this.#promptContractDigest ? entry : undefined;
   }
@@ -423,7 +431,9 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
       const first = options.messages.find((message) => message.role === 'user' && message.source.kind === 'user');
       const original = first === undefined ? null : messageText(first);
       const message = original === null ? null : parseDialogueMessage(original);
-      if (message !== null && dialogueRetrievalFixtureRule(this.#fixture, message) !== null) {
+      const stimulus = message === null ? undefined : this.#answering(resolveFixtureEntry(this.#fixture.entries, 0,
+        dialogueRequestDigest(DIALOGUE_PROMPT_CONTRACT_DIGEST, message.kind, sha256Hex(message.question)), 1));
+      if (message !== null && stimulus !== undefined && dialogueRetrievalFixtureRule(this.#fixture, message) !== null) {
         const last = options.messages.at(-1);
         const result = last === undefined ? null : toolResultOf(last);
         let value: unknown = null;

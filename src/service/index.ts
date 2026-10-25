@@ -2088,7 +2088,7 @@ async function run(): Promise<void> {
           get live() { return productionState.live; },
         }
       : developerLive === null
-      ? { operationalScope: 'development-ci', live: null }
+      ? { operationalScope: 'development-ci', live: null, policy: launchPolicy, localFixtureRuntime: () => openedStore.localFixtureRuntime() }
       : {
           operationalScope: 'developer-live',
           policy: launchPolicy,
@@ -2234,6 +2234,7 @@ async function run(): Promise<void> {
     // 润色这段 and 基于当前稿件重新生成建议 (Issue #842): the launch's fixture under development-ci, and under developer-live the
     // route the selected policy admits for each kind, if any.
     const fastRoleOwner = new FastRoleExecutionOwner({
+      localFixtureRuntime: () => openedStore.localFixtureRuntime(),
       requestGovernor,
       fixture,
       live: developerLive !== null

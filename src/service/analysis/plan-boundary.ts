@@ -11,6 +11,7 @@ import type {
   SafeRetryRepetition,
 } from '../../shared/protocol.js';
 import { DIGEST_PATTERN, UUID_PATTERN, canonicalJson, canonicalRecord, isRecord, requireAnalysis } from './canonical.js';
+import { isSupportedProviderProcessingVersion, localFixtureProfileOf, selectedPolicyIdentityOf } from '../launch-policy.js';
 
 /**
  * The Plan Boundary Split of the baseline-analysis Task kind and the material plan inputs whose
@@ -41,6 +42,10 @@ export const MATERIAL_PLAN_FIELDS: ReadonlyArray<MaterialPlanField> = [
   'outboundDataCategory',
   'expectedOutcome',
 ];
+/** Preserve the historical declaration/digest; only new selected-contract Plans declare these additional fields. */
+export const SELECTED_POLICY_MATERIAL_PLAN_FIELDS: ReadonlyArray<MaterialPlanField> = [
+  ...MATERIAL_PLAN_FIELDS, 'selectedPolicyIdentity', 'localFixtureProfile',
+];
 
 export const MATERIAL_PLAN_FIELD_LABELS: Readonly<Record<MaterialPlanField, string>> = {
   'providerBinding.providerId': 'Provider 绑定 · provider',
@@ -58,6 +63,8 @@ export const MATERIAL_PLAN_FIELD_LABELS: Readonly<Record<MaterialPlanField, stri
   runBudgetCeiling: 'Run Budget Ceiling 状态',
   outboundDataCategory: '外发数据类别',
   expectedOutcome: '预期结果类别',
+  selectedPolicyIdentity: '处理策略与策略集版本',
+  localFixtureProfile: '本地确定性执行配置',
 };
 
 export const SAFE_RETRY_STATEMENT = '单个分析单元的模型请求因瞬时模型服务错误（速率限制、服务端错误、传输失败）失败时，在冻结计划内以完全相同的单元消息安全重试一次；不改变执行绑定、运行来源范围、Provider 绑定、预算状态或覆盖清单。第二次失败即记录为缺口。' as const;
@@ -73,7 +80,8 @@ export const PLAN_REVISION_REQUIRED_REASON = 'plan-revision-required' as const;
  * into 先问你 (Issue #422, S76d) leaves the adaptable list for its own, and the plan then says where the editor may be
  * asked; both are named only when something is there, so every split made before S76d reads back byte for byte.
  */
-export function planBoundarySplit(withdrawn: ReadonlyArray<string> = [], askFirst: ReadonlyArray<string> = [], contractRetry = false): PlanBoundarySplitProjection {
+export function planBoundarySplit(withdrawn: ReadonlyArray<string> = [], askFirst: ReadonlyArray<string> = [], contractRetry = false,
+  selectedContract = false): PlanBoundarySplitProjection {
   const entry = (adaptationClass: PlanAdaptationClass) => ({ adaptationClass, label: '安全重试', statement: SAFE_RETRY_STATEMENT });
   const asked = PLAN_ADAPTATION_CLASSES.filter((adaptationClass) => askFirst.includes(adaptationClass) && !withdrawn.includes(adaptationClass));
   const split: PlanBoundarySplitProjection = {
@@ -81,7 +89,7 @@ export function planBoundarySplit(withdrawn: ReadonlyArray<string> = [], askFirs
       .filter((adaptationClass) => !withdrawn.includes(adaptationClass) && !asked.includes(adaptationClass))
       .map(entry),
     ...(asked.length === 0 ? {} : { askFirst: asked.map(entry) }),
-    material: MATERIAL_PLAN_FIELDS.map((field) => ({ field, label: MATERIAL_PLAN_FIELD_LABELS[field] })),
+    material: (selectedContract ? SELECTED_POLICY_MATERIAL_PLAN_FIELDS : MATERIAL_PLAN_FIELDS).map((field) => ({ field, label: MATERIAL_PLAN_FIELD_LABELS[field] })),
     participation: asked.length === 0
       ? { expected: false, statement: NO_PARTICIPATION_STATEMENT }
       : { expected: true, statement: ASK_FIRST_SAFE_RETRY_STATEMENT },
@@ -108,13 +116,16 @@ function materialValueAt(inputs: MaterialPlanInputsProjection, field: MaterialPl
     case 'runBudgetCeiling': return inputs.runBudgetCeiling;
     case 'outboundDataCategory': return inputs.outboundDataCategory;
     case 'expectedOutcome': return inputs.expectedOutcome;
+    // An absent historical field is not a current pin or a null/default profile. This is a diff label only.
+    case 'selectedPolicyIdentity': return inputs.selectedPolicyIdentity ?? '历史记录未保存';
+    case 'localFixtureProfile': return inputs.localFixtureProfile ?? '历史记录未保存';
   }
 }
 
 /** Every material field whose frozen and proposed values differ, in the fixed field order; empty when nothing material drifted. */
 export function diffMaterialPlanInputs(prior: MaterialPlanInputsProjection, proposed: MaterialPlanInputsProjection): PlanRevisionDiffEntryProjection[] {
   const entries: PlanRevisionDiffEntryProjection[] = [];
-  for (const field of MATERIAL_PLAN_FIELDS) {
+  for (const field of SELECTED_POLICY_MATERIAL_PLAN_FIELDS) {
     const before = materialValueAt(prior, field);
     const after = materialValueAt(proposed, field);
     if (canonicalJson(before) !== canonicalJson(after)) {
@@ -166,6 +177,7 @@ export function materialPlanInputsOfComponents(
   const range = isRecord(reusePlan) && isRecord(reusePlan.selectedRange) ? reusePlan.selectedRange : null;
   const predecessor = isRecord(reusePlan) && isRecord(reusePlan.predecessor) ? reusePlan.predecessor : null;
   return {
+    ...providerPlanPolicyMetadata(providerPlan),
     providerBinding: {
       providerId: asString(binding.providerId, 'Provider 绑定记录无效。'),
       modelId: asString(binding.modelId, 'Provider 绑定记录无效。'),
@@ -190,6 +202,36 @@ export function materialPlanInputsOfComponents(
     outboundDataCategory: outboundDataCategoryOf(providerPlan.outboundDataCategory),
     expectedOutcome: asString(taskIntent.expectedOutcome, '任务意图记录无效。'),
   };
+}
+
+/** Validate frozen metadata before rebuilding a Plan, including a prepared offline Plan with no outcomes. */
+export function providerPlanPolicyMetadata(providerPlan: Readonly<Record<string, unknown>>):
+  Pick<MaterialPlanInputsProjection, 'selectedPolicyIdentity' | 'localFixtureProfile'> {
+  const binding = isRecord(providerPlan.remoteBinding) ? providerPlan.remoteBinding : providerPlan;
+  const pin = isRecord(binding.providerProcessing) ? binding.providerProcessing : null;
+  if (pin !== null) requireAnalysis(isSupportedProviderProcessingVersion(pin.operationalScope, pin.version),
+    'ANALYSIS_RECORD_INVALID', '计划的处理策略版本无法识别。');
+  const hasIdentity = Object.hasOwn(providerPlan, 'selectedPolicyIdentity');
+  const hasProfile = Object.hasOwn(providerPlan, 'localFixtureProfile');
+  const currentContract = pin?.version === 'v29' || pin?.version === 'v30';
+  requireAnalysis(hasIdentity || (!hasProfile && !currentContract), 'ANALYSIS_RECORD_INVALID', '计划缺少已选策略身份。');
+  if (!hasIdentity) return {};
+  const selected = selectedPolicyIdentityOf(providerPlan.selectedPolicyIdentity);
+  requireAnalysis(selected !== null && pin !== null && Object.keys(pin).length === 4 &&
+    pin.decision === (selected.providerProcessingVersion === 'v29' ? 'deny' : 'eligible-only') &&
+    pin.authorizedLiveTransmissionCount === (selected.providerProcessingVersion === 'v29' ? 0 : 'bounded-by-run') &&
+    pin.version === selected.providerProcessingVersion &&
+    ((pin.operationalScope === 'development-ci' && selected.providerProcessingVersion === 'v29') ||
+      (pin.operationalScope === 'ordinary-production' && selected.providerProcessingVersion === 'v30') ||
+      (pin.operationalScope === 'developer-live' && selected.providerProcessingVersion === 'v24')),
+  'ANALYSIS_RECORD_INVALID', '计划的已选策略身份无效。');
+  const local = isRecord(providerPlan.executionRoute) && providerPlan.executionRoute.kind === 'ai7-local-deterministic';
+  requireAnalysis(!local || hasProfile, 'ANALYSIS_RECORD_INVALID', '本地执行计划缺少确定性配置。');
+  if (!hasProfile) return { selectedPolicyIdentity: selected };
+  const profile = localFixtureProfileOf(providerPlan.localFixtureProfile, selected);
+  requireAnalysis(local && pin.operationalScope === 'development-ci' && profile !== null,
+    'ANALYSIS_RECORD_INVALID', '计划的本地确定性配置无效。');
+  return { selectedPolicyIdentity: selected, localFixtureProfile: profile };
 }
 
 /** The outbound data category the frozen component names: public or synthetic, or the editor's own words under ordinary production (Issue #811). */

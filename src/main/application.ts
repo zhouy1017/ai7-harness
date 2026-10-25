@@ -6572,7 +6572,7 @@ export async function runApplication(): Promise<void> {
     await requireSameCanonicalDataDirectory(shellRoot, app.getPath('userData'));
     // The Data Version (数据版本) and the store's schema revision (数据库修订) apart (Issue #967): the unit suite holds each to its owner.
     const crashFacts = () => ({
-      appVersion: softwareVersion, buildIdentity, dataVersion: buildIdentity.dataVersion, schemaRevision: 93, protocol: SERVICE_PROTOCOL_VERSION,
+      appVersion: softwareVersion, buildIdentity, dataVersion: buildIdentity.dataVersion, schemaRevision: 94, protocol: SERVICE_PROTOCOL_VERSION,
       platform: process.platform, arch: process.arch, electron: process.versions.electron ?? 'unknown',
       uptimeSeconds: process.uptime(),
     });
@@ -6876,7 +6876,7 @@ export async function runApplication(): Promise<void> {
       }
       requireDesktop(parent !== undefined && isAbsolute(parent));
       // Read the shipped policy set, never infer its version from the source branch or preferences.
-      const policySet = JSON.parse(await readFile(resolve(__dirname, '..', 'docs', 'policies', 'active-policy-set.v19.json'), 'utf8')) as { version: string };
+      const policySet = JSON.parse(await readFile(resolve(__dirname, '..', 'docs', 'policies', 'active-policy-set.v21.json'), 'utf8')) as { version: string };
       await writeDiagnosticsBundle(parent, {
         facts: { ...crashFacts(), policySetVersion: policySet.version, node: process.versions.node,
           locale: app.getLocale(), windowCount: ownedWindows.size },

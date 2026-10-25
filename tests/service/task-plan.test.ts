@@ -2,6 +2,7 @@ import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
@@ -12,6 +13,7 @@ import { validateTaskAuthorizationSchema } from '../../src/service/task-authoriz
 import {
   BASELINE_ANALYSIS_MODE_GOALS,
   BASELINE_ANALYSIS_TASK_GOAL,
+  FACTUAL_REVIEW_TASK_GOAL,
   J03_TASK_GOAL,
   type BaselineAnalysisProjection,
   type BaselineAnalysisSelectedRange,
@@ -23,6 +25,7 @@ import {
 } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { TYPOS_AND_USAGE } from '../support/review-categories.js';
+import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
 import {
   importSample1Book,
   pinEditorialWorkspaceProfileRevision2,
@@ -177,6 +180,73 @@ function technical(projection: TaskPlanProjection, key: string): string | undefi
 }
 
 describe('the Task Drawer plan projection over the real store on exact sample1', () => {
+  it('selected policy profile consumes the actual retained baseline adapter with zero credential reads', async () => {
+    const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-authored');
+    const store = await openWithRoute(fixture);
+    const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture,
+      secretResolver: { resolve: async () => { throw new Error('local profile must not read a credential'); } } });
+    try {
+      const { bookId } = await importBook(store, '合成已选夹具计划');
+      let work = store.createBaselineAnalysisPreparationWork(bookId, BASELINE_ANALYSIS_TASK_GOAL, null, launchPolicy);
+      while (!work.done) work = store.advanceBaselineAnalysisPreparationWork(work.workId!);
+      const prepared = work.projection!;
+      expect(prepared.providerResolutionPlan).toMatchObject({ selectedPolicyIdentity: launchPolicy.selectedPolicyIdentity,
+        localFixtureProfile: { kind: 'legacy', registeredProfile: 'baseline', policyVersion: 'v29' },
+        remoteBinding: { providerProcessing: { operationalScope: 'development-ci', version: 'v29', decision: 'deny', authorizedLiveTransmissionCount: 0 } } });
+      const run = store.authorizeBaselineAnalysis(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!;
+      expect(store.baselineAnalysisLedger.loadExecutionPlan(run).localFixtureProfile).toEqual(prepared.providerResolutionPlan!.localFixtureProfile);
+      owner.admitAndDispatch(run); await owner.whenIdle();
+      const settled = store.inspectBaselineAnalysis(bookId);
+      // This retained fixture inherits the declared unit-five failure/retry; v29 preserves that outcome.
+      expect(settled.run).toMatchObject({ state: 'completed-with-gaps', adaptations: [expect.objectContaining({ unitOrdinal: 5 })] });
+      expect(settled.resultSetRevision).toMatchObject({ policyPin: { providerProcessingVersion: 'v29' } });
+    } finally { await owner.dispose(); await store.close(); }
+  });
+
+  it('selected policy profile pins new no-adapter preparation to v29 rather than legacy v1', async () => {
+    const store = await openWithRoute(null);
+    try {
+      const { bookId } = await importBook(store, '合成无适配器计划');
+      let work = store.createBaselineAnalysisPreparationWork(bookId, BASELINE_ANALYSIS_TASK_GOAL, null, launchPolicy);
+      while (!work.done) work = store.advanceBaselineAnalysisPreparationWork(work.workId!);
+      expect(work.projection!.providerResolutionPlan).toMatchObject({ selectedPolicyIdentity: launchPolicy.selectedPolicyIdentity,
+        executionRoute: { kind: 'none' }, remoteBinding: { providerProcessing: { version: 'v29' } } });
+      expect(work.projection!.providerResolutionPlan).not.toHaveProperty('localFixtureProfile');
+      let fixed = store.createTaskAuthorizationPreparationWork(bookId, J03_TASK_GOAL, launchPolicy);
+      while (!fixed.done) fixed = store.advanceTaskAuthorizationPreparationWork(fixed.workId!);
+      expect(fixed.projection!.providerResolutionPlan).toMatchObject({ selectedPolicyIdentity: launchPolicy.selectedPolicyIdentity,
+        providerProcessing: { version: 'v29', decision: 'deny', authorizedLiveTransmissionCount: 0 } });
+    } finally { await store.close(); }
+  });
+
+  it.each(['version', 'hash', 'profile', 'reader'] as const)('selected policy profile rejects prepared factual %s corruption before offline reconstruction or native-open writes', async (damage) => {
+    const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-factual-authored');
+    const store = await openWithRoute(fixture);
+    const { bookId } = await importBook(store, '合成事实计划关闭读者');
+    let work = store.createFactualReviewPreparationWork(bookId, FACTUAL_REVIEW_TASK_GOAL, launchPolicy);
+    while (!work.done) work = store.advanceFactualReviewPreparationWork(work.workId!);
+    expect(work.projection!.providerResolutionPlan!.localFixtureProfile).toMatchObject({ kind: 'legacy', registeredProfile: 'factual' });
+    store.markCleanShutdown(); await store.close();
+    const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
+    const db = new DatabaseSync(path);
+    try {
+      if (damage === 'reader') db.exec('PRAGMA user_version = 93');
+      else {
+        const row = db.prepare("SELECT rowid, canonical_json FROM analysis_plan_records WHERE component = 'provider-resolution-plan'").get()!;
+        const value = JSON.parse(String(row.canonical_json));
+        if (damage === 'version') value.remoteBinding.providerProcessing.version = 'v999';
+        if (damage === 'hash') value.selectedPolicyIdentity.providerProcessingSha256 = '0'.repeat(64);
+        if (damage === 'profile') value.localFixtureProfile.ruleId = 'development-ci-fixture-review';
+        const json = canonicalJson(value);
+        db.exec('DROP TRIGGER analysis_plan_records_no_update');
+        db.prepare('UPDATE analysis_plan_records SET canonical_json = ?, sha256 = ? WHERE rowid = ?').run(json, sha256Hex(json), row.rowid!);
+      }
+    } finally { db.close(); }
+    const before = readFileSync(path);
+    await expect(openWithRoute(fixture)).rejects.toThrow();
+    expect(readFileSync(path)).toEqual(before);
+  });
+
   it('reads J-03\'s fixed task in the editor\'s words without moving one stored byte', async () => {
     const store = await openWithRoute(null);
     try {

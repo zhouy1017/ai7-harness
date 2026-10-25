@@ -149,7 +149,14 @@ export function mountGlobalAgent(options: {
       const prepared = await options.api.prepareGlobalAgentTurn(input);
       if (!root.isConnected || generation !== previewGeneration) return;
       disclosure.replaceChildren(el('h3', '将发送的内容'), el('p', `${prepared.provider.route} · ${prepared.provider.model}`),
-        el('p', `你的问题：${prepared.question}`), el('p', '已过滤本社人员姓名；备注、内部记录及记忆的原文例证不随发送。'));
+        el('p', `你的问题：${prepared.question}`), el('p', prepared.textProcessing === 'qualified-original-fields'
+          ? '本次保留问题和已选记忆字段中的原文。接着回答还会发送下列版本已经进入的完整回答片段；备注、内部记录及记忆的原文例证不随发送。'
+          : '已过滤本社人员姓名；备注、内部记录及记忆的原文例证不随发送。'));
+      if (prepared.textProcessing === 'qualified-original-fields') {
+        disclosure.append(el('p', '本次发送与保留回答共同涉及的记忆版本：'));
+        for (const influence of prepared.retainedInfluences ?? []) disclosure.append(el('p', `${influence.title} · ${influence.revisionId}`));
+        if (prepared.retainedInfluences?.length === 0) disclosure.append(el('p', '没有记忆来源。'));
+      }
       if (prepared.sources.length === 0) disclosure.append(el('p', '本次没有选用记忆版本。'));
       for (const entry of prepared.sources) {
         const row = el('div'); row.append(el('p', `${entry.title} · ${entry.revisionId}`), el('p', entry.text));

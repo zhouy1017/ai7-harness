@@ -45,7 +45,7 @@ import {
   type TransmitTicket,
 } from '../provider/egress-gate.js';
 import { Ai7LocalDeterministicAdapter } from '../provider/local-deterministic-adapter.js';
-import type { ResolvedModelFixture } from '../provider/model-fixture.js';
+import type { LocalFixtureExecutionContext, ResolvedModelFixture } from '../provider/model-fixture.js';
 import { ProviderResultCache } from '../provider/provider-result-cache.js';
 import {
   assuranceSamplingTurns,
@@ -1395,9 +1395,11 @@ export class BaselineAnalysisExecutionOwner {
     const live = this.#live();
     // Ordinary production (Issue #811): the Run's route is its plan's, from the editor's configured binding when it froze.
     const production = isOrdinaryProductionRuntime(live) ? live : null;
+    const localVersion = facts.selectedPolicyIdentity?.providerProcessingVersion === 'v29' ? 'v29' : 'v1';
     if (live === null) {
-      if (policy.operationalScope !== 'development-ci' || policy.providerProcessing.version !== 'v1' || policy.providerProcessing.liveTransmissionAllowed !== false) {
-        throw new ExecutionAdmissionError('EXECUTION_POLICY_INVALID', '当前可信策略不是 development-ci · Provider Processing v1。');
+      if (policy.integrityState !== 'verified' || policy.operationalScope !== 'development-ci' || policy.providerProcessing.liveTransmissionAllowed !== false ||
+          localVersion === 'v29' && (policy.providerProcessing.version !== 'v29' || facts.localFixtureProfile === undefined || facts.localFixtureRuntime === undefined)) {
+        throw new ExecutionAdmissionError('EXECUTION_POLICY_INVALID', '本地冻结计划缺少准确的已选策略或夹具配置。');
       }
     } else if (production !== null) {
       if (policy.operationalScope !== 'ordinary-production' || policy.providerProcessing.version !== ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION ||
@@ -1597,6 +1599,11 @@ export class BaselineAnalysisExecutionOwner {
       // The same counter the liveness signal reads to tell a dispatched attempt from one already in the
       // transport. Nothing but the count crosses this closure.
       let harness: PrimaryAgentHarnessHandle;
+      const localFixture: LocalFixtureExecutionContext | null = live === null && facts.localFixtureProfile !== undefined && facts.selectedPolicyIdentity !== undefined
+        ? { selectedPolicyIdentity: facts.selectedPolicyIdentity, profile: facts.localFixtureProfile, kind: definition.kind, purpose: null,
+          contractId: definition.contractVersion, categories: ['public-or-synthetic'],
+          composition: describeComposition(route, model, promptContractDigest, { ...facts.compositionOptions,
+            ...(localRule === null ? {} : { localTools: localRule }) }) } : null;
       try {
         harness = await prepareExecution({
           ...(live === null ? {} : {
@@ -1657,7 +1664,7 @@ export class BaselineAnalysisExecutionOwner {
           promptContractDigest,
           // One technical Session per Analysis Unit under developer-live; the deterministic route keeps its single
           // accumulating Session, so J-04's proven composition is untouched.
-          ...(live === null ? {} : { sessionMode: 'per-unit' as const }),
+          ...(live === null && facts.localFixtureProfile?.kind !== 'rule' ? {} : { sessionMode: 'per-unit' as const }),
           ...(firstUnitSessionId === undefined ? {} : { nextSessionId: () => nextUnitSessionId! }),
           adapterFactory: (codes) => {
             // A continuation's retry is the unit's second attempt however many executions it took to reach it (Issue #422,
@@ -1665,8 +1672,9 @@ export class BaselineAnalysisExecutionOwner {
             if (live === null) {
               // Sampling turns are keyed by the sampling contract this kind binds (Issue #826), as the unit turns are by its prompt.
               const assurance = definition.assurance === null ? {} : { assurancePromptContractDigest: definition.assurance.promptContractDigest };
+              const profile = localFixture === null ? {} : { localFixture: { catalog: facts.localFixtureRuntime!.catalog, execution: localFixture } };
               return new Ai7LocalDeterministicAdapter(fixture!, promptContractDigest, codes,
-                continuation === null ? assurance : { ...assurance, attemptsBefore: ledger.unitAttemptsOf(facts.runRecordId) });
+                { ...assurance, ...profile, ...(continuation === null ? {} : { attemptsBefore: ledger.unitAttemptsOf(facts.runRecordId) }) });
             }
             liveAdapter.instance = new DeepSeekOpenAiCompatibleAdapter({
               broker: broker,
@@ -1828,7 +1836,7 @@ export class BaselineAnalysisExecutionOwner {
       if (stored !== null) scopeChanged();
       if (!settlingLocally()) {
         // Readiness is never invented for local settlement of a withdrawn continuation.
-        const credentialReadiness = await this.#broker.checkReadiness({ bindingDigest, modelRole, slot: credentialSlot, credentialReference });
+        const credentialReadiness = live === null ? 'missing' : await this.#broker.checkReadiness({ bindingDigest, modelRole, slot: credentialSlot, credentialReference });
         if (stored === null) {
           const persisted = ledger.persistAttemptAndBinding({ runRecordId: facts.runRecordId, binding: bindingRecord, credentialReadiness });
           if (persisted.bindingDigest !== bindingDigest) throw new ExecutionAdmissionError('EXECUTION_BINDING_DIGEST_DRIFT', '执行绑定摘要在持久化时发生变化。');
@@ -1875,7 +1883,7 @@ export class BaselineAnalysisExecutionOwner {
         // Under ordinary production the baseline's own rule names the categories its unit messages carry.
         ...(production !== null && admitted === null && productionRule !== null ? { ruleOutboundCategories: new Set(productionRule.outboundDataCategories) } : {}),
         policy: live === null
-          ? { operationalScope: 'development-ci', providerProcessingVersion: 'v1', liveTransmissionAllowed: false, authorizedLiveTransmissionCount: 0 }
+          ? { operationalScope: 'development-ci', providerProcessingVersion: localVersion, liveTransmissionAllowed: false, authorizedLiveTransmissionCount: 0 }
           : production !== null
             ? { operationalScope: 'ordinary-production', providerProcessingVersion: ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' }
             : { operationalScope: 'developer-live', providerProcessingVersion: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
@@ -3511,7 +3519,8 @@ function executionBindingRecordOf(input: {
     credentialSlot: { modelRole: 'Main Editorial Role', slot: credentialSlot, credentialReference },
     outboundDataCategory: isOrdinaryProductionRuntime(live) ? 'unpublished-excerpts' : 'public-or-synthetic',
     policyPin: live === null
-      ? { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: ACTIVE_SET_VERSION, liveTransmissions: 0 }
+      ? { operationalScope: 'development-ci', providerProcessingVersion: facts.selectedPolicyIdentity?.providerProcessingVersion === 'v29' ? 'v29' : 'v1',
+        activePolicySetVersion: facts.selectedPolicyIdentity?.activePolicySetVersion ?? ACTIVE_SET_VERSION, liveTransmissions: 0 }
       : isOrdinaryProductionRuntime(live)
       ? { operationalScope: 'ordinary-production', providerProcessingVersion: ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION, activePolicySetVersion: ACTIVE_SET_VERSION, liveTransmissions: 'bounded-by-run' }
       : { operationalScope: 'developer-live', providerProcessingVersion: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, activePolicySetVersion: ACTIVE_SET_VERSION, liveTransmissions: 'bounded-by-run' },

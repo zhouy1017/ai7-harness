@@ -1,8 +1,163 @@
 import { readFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { canonicalJson, DIGEST_PATTERN, hasExactKeys, isRecord, sha256Hex } from '../analysis/canonical.js';
 import { providerCacheKey, providerEvidenceGeneration } from './provider-result-cache.js';
 import { clarificationPromptContractDigest } from './clarification-contract.js';
+import { LOCAL_FIXTURE_POLICY_SHA256, LOCAL_FIXTURE_MANIFEST_SHA256,
+  localFixtureProfileOf,
+  type LocalFixtureProfile, type LocalFixtureRegisteredProfile, type LocalFixtureRuleId, type SelectedPolicyIdentity } from '../../shared/protocol.js';
+import type { HarnessCompositionDescriptor } from '../harness/primary-agent-harness.js';
+import { AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST, DIALOGUE_PROMPT_CONTRACT_DIGEST, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST } from '../dialogue/contract.js';
+
+interface LegacyFixtureTuple {
+  readonly fixtureIdentity: string;
+  readonly registeredProfile: LocalFixtureRegisteredProfile;
+  readonly kinds: readonly string[];
+  readonly purpose: string | null;
+  readonly contracts: readonly string[];
+  readonly prompts: readonly string[];
+  readonly lineage: readonly { identity: string; sha256: string }[];
+  readonly lineageSha256: string;
+  readonly categories: readonly string[];
+  readonly tools: readonly string[];
+  readonly entryKeys: ReadonlySet<string>;
+}
+export interface LocalFixtureExecutionContext {
+  readonly selectedPolicyIdentity: SelectedPolicyIdentity;
+  readonly profile: LocalFixtureProfile;
+  readonly kind: string | null;
+  readonly purpose: string | null;
+  readonly contractId: string | null;
+  readonly composition: HarnessCompositionDescriptor;
+  readonly categories: readonly string[];
+}
+export interface LocalFixtureRuntimeContext {
+  readonly selectedPolicyIdentity: SelectedPolicyIdentity;
+  readonly catalog: LocalFixturePolicyCatalog;
+}
+
+/** The existing fixture owner reads the accepted compatibility inventory; source-code pins remain documentary provenance. */
+export class LocalFixturePolicyCatalog {
+  readonly #tuples: readonly LegacyFixtureTuple[];
+  readonly #rules: readonly Record<string, unknown>[];
+  private constructor(policy: Record<string, unknown>) {
+    const compatibility = policy.legacyLocalFixtureCompatibility;
+    requireFixture(isRecord(compatibility) && compatibility.manifestSha256 === LOCAL_FIXTURE_MANIFEST_SHA256 &&
+      Array.isArray(compatibility.tuples) && compatibility.tuples.length === 47, '本地夹具兼容清单无效。');
+    const strings = (value: unknown): string[] => {
+      requireFixture(Array.isArray(value) && value.every((entry) => typeof entry === 'string'), '本地夹具声明的列表无效。');
+      return value.map((entry) => String(entry));
+    };
+    this.#tuples = compatibility.tuples.map((value) => {
+      requireFixture(isRecord(value) && typeof value.fixtureIdentity === 'string' && typeof value.registeredProfile === 'string' &&
+        (value.sessionPurpose === null || typeof value.sessionPurpose === 'string') && typeof value.resolvedLineageSha256 === 'string' &&
+        isRecord(value.categoryAndToolSet) && Array.isArray(value.orderedLineage) && Array.isArray(value.entries), '本地夹具兼容元组无效。');
+      const candidate = localFixtureProfileOf({ schema: 'ai7.local-fixture-profile/1', policyVersion: 'v29', policySha256: LOCAL_FIXTURE_POLICY_SHA256,
+        activePolicySetVersion: 'v21', activePolicySetSha256: '4b845e924df777f440b07d53ba6e31447e0fe0b004e86efa89bf76554fb05392',
+        kind: 'legacy', profileId: 'development-ci-legacy-local-fixture-809c96f2', manifestSha256: LOCAL_FIXTURE_MANIFEST_SHA256,
+        registeredProfile: value.registeredProfile }, { providerProcessingVersion: 'v29', providerProcessingSha256: LOCAL_FIXTURE_POLICY_SHA256,
+          activePolicySetVersion: 'v21', activePolicySetSha256: '4b845e924df777f440b07d53ba6e31447e0fe0b004e86efa89bf76554fb05392' });
+      requireFixture(candidate?.kind === 'legacy', '本地夹具登记配置无法识别。');
+      return { fixtureIdentity: value.fixtureIdentity, registeredProfile: candidate.registeredProfile,
+        kinds: strings(value.allowedTaskKinds), purpose: value.sessionPurpose, contracts: strings(value.taskContractIdentities),
+        prompts: strings(value.capturedTaskPromptContractDigests), categories: strings(value.categoryAndToolSet.allowedOutboundDataCategories),
+        tools: strings(value.categoryAndToolSet.allowedTools), lineageSha256: value.resolvedLineageSha256,
+        lineage: value.orderedLineage.map((entry) => { requireFixture(isRecord(entry) && typeof entry.identity === 'string' &&
+          typeof entry.sha256 === 'string', '夹具继承链无效。'); return { identity: entry.identity, sha256: entry.sha256 }; }),
+        entryKeys: new Set(value.entries.map((entry) => { requireFixture(isRecord(entry) && typeof entry.unitOrdinal === 'number' &&
+          typeof entry.requestDigest === 'string' && (entry.attempt === null || typeof entry.attempt === 'number'), '夹具分区键无效。');
+          return fixtureEntryKey(entry.unitOrdinal, entry.requestDigest, entry.attempt); })) };
+    });
+    requireFixture(new Set(this.#tuples.map((tuple) => `${tuple.fixtureIdentity}/${tuple.registeredProfile}`)).size === 47,
+      '本地夹具兼容元组重复。');
+    requireFixture(Array.isArray(policy.fixtureReplayRules) && policy.fixtureReplayRules.length === 6 &&
+      policy.fixtureReplayRules.every(isRecord), '本地夹具规则声明无效。');
+    this.#rules = policy.fixtureReplayRules;
+  }
+
+  static read(codeRoot: string): LocalFixturePolicyCatalog {
+    const bytes = readFileSync(resolve(codeRoot, 'docs/policies/provider-processing-policy.v29.json'));
+    requireFixture(sha256Hex(bytes) === LOCAL_FIXTURE_POLICY_SHA256, '本地夹具策略字节无法核实。');
+    const policy: unknown = JSON.parse(bytes.toString('utf8'));
+    requireFixture(isRecord(policy) && sha256Hex(canonicalJson(policy)) === 'e8e6c8804d80bbd4805cbcd71e8c23c45f31b4b3c9aa0e260aaf55da4712f213',
+      '本地夹具策略声明无效。');
+    return new LocalFixturePolicyCatalog(policy);
+  }
+
+  get tuples(): ReadonlyArray<{ fixtureIdentity: string; registeredProfile: LocalFixtureRegisteredProfile }> {
+    return this.#tuples.map(({ fixtureIdentity, registeredProfile }) => ({ fixtureIdentity, registeredProfile }));
+  }
+
+  profile(selected: SelectedPolicyIdentity, fixture: Pick<ResolvedModelFixture, 'identity' | 'sha256' | 'lineage'>, registeredProfile: LocalFixtureRegisteredProfile,
+    ruleId?: LocalFixtureRuleId): LocalFixtureProfile {
+    const common = { schema: 'ai7.local-fixture-profile/1', policyVersion: 'v29', policySha256: selected.providerProcessingSha256,
+      activePolicySetVersion: selected.activePolicySetVersion, activePolicySetSha256: selected.activePolicySetSha256 } as const;
+    const profile = localFixtureProfileOf(ruleId === undefined
+      ? { ...common, kind: 'legacy', profileId: 'development-ci-legacy-local-fixture-809c96f2', manifestSha256: LOCAL_FIXTURE_MANIFEST_SHA256, registeredProfile }
+      : { ...common, kind: 'rule', ruleId }, selected);
+    const exact = (tuple: LegacyFixtureTuple): boolean => tuple.fixtureIdentity === fixture.identity && tuple.lineageSha256 === fixture.sha256 &&
+      canonicalJson(tuple.lineage) === canonicalJson(fixture.lineage);
+    requireFixture(profile !== null && this.#tuples.some(exact) && (profile.kind !== 'legacy' || this.#tuples.some((tuple) =>
+      exact(tuple) && tuple.registeredProfile === profile.registeredProfile)), '没有该调用方的准确本地夹具配置。');
+    return profile;
+  }
+
+  /** Validate actual caller/composition and the fixture identity before any replay; return only this profile's entry partition. */
+  entriesFor(context: LocalFixtureExecutionContext, fixture: ResolvedModelFixture, promptContractDigest: string): ReadonlySet<string> {
+    const profile = localFixtureProfileOf(context.profile, context.selectedPolicyIdentity);
+    requireFixture(profile !== null && context.composition.route === 'ai7-local-deterministic' &&
+      context.composition.model === 'ai7-deterministic-fixture' && context.composition.promptContractDigest === promptContractDigest &&
+      DIGEST_PATTERN.test(context.composition.digest), '本地夹具执行身份或组合不一致。');
+    requireFixture(context.purpose !== 'agent-workspace' || promptContractDigest === AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST,
+      '工作区夹具的提示契约不一致。');
+    requireFixture(context.purpose !== 'editorial-dialogue' || promptContractDigest === DIALOGUE_PROMPT_CONTRACT_DIGEST ||
+      promptContractDigest === DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST, '对话夹具的提示契约不一致。');
+    const exactFixture = (tuple: LegacyFixtureTuple): boolean => tuple.fixtureIdentity === fixture.identity &&
+      tuple.lineageSha256 === fixture.sha256 && canonicalJson(tuple.lineage) === canonicalJson(fixture.lineage);
+    const tools = [...(context.composition.localTools?.names ?? []), ...(context.composition.platformTools?.names ?? [])];
+    const sameSet = (a: readonly string[], b: readonly string[]): boolean => canonicalJson([...a].sort()) === canonicalJson([...b].sort());
+    if (profile.kind === 'legacy') {
+      const matches = this.#tuples.filter((tuple) => exactFixture(tuple) && tuple.registeredProfile === profile.registeredProfile);
+      requireFixture(matches.length === 1, '夹具身份、继承链或登记配置不一致。');
+      const tuple = matches[0]!;
+      requireFixture((tuple.purpose === null ? context.kind !== null && (tuple.kinds.includes(context.kind) ||
+        tuple.kinds.includes('custom-analysis/*') && context.kind.startsWith('custom-analysis/')) : tuple.purpose === context.purpose) &&
+        (tuple.contracts.length === 0 ? context.contractId === null : context.contractId !== null && tuple.contracts.includes(context.contractId)) &&
+        (tuple.prompts.length === 0 || tuple.prompts.includes(promptContractDigest)) && sameSet(tuple.categories, context.categories) &&
+        sameSet(tuple.tools, tools), '本地夹具的调用方、契约、类别或工具与登记配置不一致。');
+      return tuple.entryKeys;
+    }
+    const rules = this.#rules.filter((rule) => rule.ruleId === profile.ruleId);
+    requireFixture(rules.length === 1 && this.#tuples.some(exactFixture), '新规则缺少准确的已准入夹具。');
+    const rule = rules[0]!;
+    requireFixture(Array.isArray(rule.allowedTaskKinds) && context.kind !== null && rule.allowedTaskKinds.includes(context.kind) &&
+      Array.isArray(rule.allowedOutboundDataCategories) && context.categories.every((category) => (rule.allowedOutboundDataCategories as unknown[]).includes(category)) &&
+      rule.networkAllowed === false && rule.credentialUseAllowed === false && rule.remoteFallbackAllowed === false &&
+      rule.fixtureRecordingAllowed === false && rule.authorizedLiveTransmissionCount === 0 && rule.newContractFallbackAllowed === false,
+    '新规则不允许此本地调用方或负载。');
+    // Recognize all six closed rule forms; absent typed curation/claim/Global fixture consumers cannot borrow legacy answers.
+    requireFixture((profile.ruleId === 'development-ci-fixture-review' && context.contractId === 'ai7.editorial-review/1' &&
+      context.kind.startsWith('editorial-review/')) ||
+      (profile.ruleId === 'development-ci-fixture-editorial-polish' && context.contractId === 'ai7.editorial-polish/1'),
+    '该新规则尚无匹配的实际本地契约与夹具消费者；不回退到旧配置。');
+    requireFixture(tools.length === 0, '此实际本地契约没有声明工具。');
+    return new Set(fixture.entries.keys());
+  }
+}
+
+export function localFixtureRegisteredProfile(kind: string | null, purpose: string | null): LocalFixtureRegisteredProfile {
+  if (purpose === 'editorial-dialogue') return 'dialogue';
+  if (purpose === 'agent-workspace') return 'workspace';
+  if (kind === 'baseline-manuscript-analysis') return 'baseline';
+  if (kind === 'editorial-review/series-consistency') return 'series';
+  if (kind?.startsWith('editorial-review/')) return 'review';
+  if (kind?.startsWith('custom-analysis/')) return 'custom';
+  const profiles: Record<string, LocalFixtureRegisteredProfile> = { 'factual-review': 'factual', evaluation: 'evaluation',
+    'readers-report': 'readers', 'evaluation-rewrite': 'rewrite', writing: 'writing', 'editorial-polish': 'polish', 'conflict-regenerate': 'conflict' };
+  const profile = kind === null ? undefined : profiles[kind];
+  requireFixture(profile !== undefined, '本地调用方没有登记配置。'); return profile;
+}
 
 /**
  * Hand-written synthetic deterministic model fixtures (`tests/fixtures/model/<identity>.json`): one

@@ -27,7 +27,7 @@ import {
   type TransmitTicket,
 } from '../provider/egress-gate.js';
 import { transmitOnce } from '../provider/live-transmission.js';
-import type { ResolvedModelFixture } from '../provider/model-fixture.js';
+import type { LocalFixtureExecutionContext, LocalFixtureRuntimeContext, ResolvedModelFixture } from '../provider/model-fixture.js';
 import { ProviderResultCache } from '../provider/provider-result-cache.js';
 import {
   AGENT_WORKSPACE_PROMPT_CONTRACT,
@@ -64,6 +64,7 @@ import { DIALOGUE_OUTBOUND_CATEGORY, DIALOGUE_TASK_KIND, admittedDialogueRoute, 
  * reaches the transport itself every time, and nothing reads or writes the development cache or ledger.
  */
 export interface DialogueRecords {
+  localFixtureRuntime?(): LocalFixtureRuntimeContext | null;
   bindDialogueAttempt(attemptId: string, binding: StoredDialogueBinding): void;
   openDialogueSpan(attemptId: string, harnessSessionId: string, startSeq: number): void;
   settleDialogueAttempt(attemptId: string, outcome: DialogueOutcome, endSeq: number | null, causeCode: string | null): void;
@@ -374,6 +375,16 @@ export class DialogueExecutionOwner {
       const model = route === null ? LOCAL_DETERMINISTIC_MODEL : route.modelProfile.model;
       const composition = describeComposition(executionRoute, model, promptContractDigest,
         workspace ? AGENT_WORKSPACE_COMPOSITION_OPTIONS : { sessionLog: true, localTools: localRule !== null });
+      const localRuntime = live === null ? records.localFixtureRuntime?.() : null;
+      if (global && localRuntime != null) throw new DialogueError('GLOBAL_AGENT_POLICY_BLOCKED', '本地夹具没有全域原文字段消费者。');
+      const localProfile = localRuntime == null ? undefined : localRuntime.catalog.profile(localRuntime.selectedPolicyIdentity,
+        this.#deps.fixture!, workspace ? 'workspace' : 'dialogue');
+      const localFixture: { catalog: import('../provider/model-fixture.js').LocalFixturePolicyCatalog; execution: LocalFixtureExecutionContext } | undefined =
+        localRuntime == null || localProfile === undefined ? undefined : { catalog: localRuntime.catalog, execution: {
+          selectedPolicyIdentity: localRuntime.selectedPolicyIdentity, profile: localProfile,
+          kind: null, purpose: workspace ? 'agent-workspace' : 'editorial-dialogue',
+          contractId: workspace ? null : 'ai7.editorial-dialogue/1', composition, categories: [DIALOGUE_OUTBOUND_CATEGORY],
+        } };
       const bindingDigest = sha256Hex(`${turn.attemptId}\u0000${sessionId}\u0000${composition.digest}`);
       const slotBinding: CredentialSlotBinding | null = live === null || route === null ? null : {
         bindingDigest, modelRole: route.modelRole, slot: route.profile.credentialSlot, credentialReference, isCurrent,
@@ -387,10 +398,11 @@ export class DialogueExecutionOwner {
         outboundDataCategory: global ? 'public-or-synthetic' : DIALOGUE_OUTBOUND_CATEGORY,
         ...(global ? { contractCategories: new Set(['house-review-preference-excerpt'] as const) } : {}),
         ...(global && route?.globalAgentDialogue !== undefined ? { globalAgentScope: {
+          ...(turn.qualification === undefined ? {} : { qualification: turn.qualification }),
           rule: route.globalAgentDialogue, payloadCurrent: () => turn.sourceGuard?.() === true,
         } } : {}),
         policy: route === null
-          ? { operationalScope: 'development-ci', providerProcessingVersion: 'v1', liveTransmissionAllowed: false, authorizedLiveTransmissionCount: 0 }
+          ? { operationalScope: 'development-ci', providerProcessingVersion: localRuntime == null ? 'v1' : 'v29', liveTransmissionAllowed: false, authorizedLiveTransmissionCount: 0 }
           // The selected version, as the verified projection names it.
           : route.operationalScope === 'ordinary-production'
             ? { operationalScope: 'ordinary-production', providerProcessingVersion: route.providerProcessingVersion as OrdinaryProductionProviderProcessingVersion, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' }
@@ -434,7 +446,8 @@ export class DialogueExecutionOwner {
         sessionLogRoot: this.#deps.sessionLogRoot,
         adapterFactory: (codes) => {
           if (live === null || route === null || slotBinding === null) {
-            return new Ai7LocalDeterministicAdapter(this.#deps.fixture!, promptContractDigest, codes, { answerHold: this.#deps.answerHold ?? null });
+            return new Ai7LocalDeterministicAdapter(this.#deps.fixture!, promptContractDigest, codes, {
+              answerHold: this.#deps.answerHold ?? null, ...(localFixture === undefined ? {} : { localFixture }) });
           }
           const nativeFetch = live.runtime.nativeFetch;
           // A stop during cache/session/credential setup can precede the Harness turn, when interrupt() is still idle.
@@ -514,6 +527,8 @@ export class DialogueExecutionOwner {
             behaviorCompositionSha256: harness.composition.digest,
             promptContractSha256: promptContractDigest,
             fixtureSha256: this.#deps.fixture!.sha256,
+            ...(localRuntime == null || localProfile === undefined ? {} : {
+              selectedPolicyIdentity: localRuntime.selectedPolicyIdentity, localFixtureProfile: localProfile }),
             boundAt: new Date().toISOString(),
           }
           : {
