@@ -109,6 +109,29 @@ describe('successor exact source correspondence (#1132)', () => {
     expect(compiled.readings.accepted.marks.every((entry) => entry.mark.origin === 'comment')).toBe(true);
   });
 
+  it('makes one mark per comment thread, folding a reply whose own markers repeat its root range', () => {
+    const word = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+    const w14 = 'http://schemas.microsoft.com/office/word/2010/wordml';
+    const w15 = 'http://schemas.microsoft.com/office/word/2012/wordml';
+    const compiled = compileWordTrackedDocxBytes(buildSyntheticTrackedDocx('<w:p><w:commentRangeStart w:id="0"/><w:commentRangeStart w:id="1"/>' +
+      '<w:r><w:t>A</w:t></w:r><w:commentRangeEnd w:id="0"/><w:r><w:commentReference w:id="0"/></w:r>' +
+      '<w:commentRangeEnd w:id="1"/><w:r><w:commentReference w:id="1"/></w:r><w:ins w:id="2"><w:r><w:t>new</w:t></w:r></w:ins></w:p>', {
+      'word/comments.xml': Buffer.from(`<w:comments xmlns:w="${word}" xmlns:w14="${w14}">` +
+        '<w:comment w:id="0" w:author="Root"><w:p w14:paraId="00000001"><w:r><w:t>root body</w:t></w:r></w:p></w:comment>' +
+        '<w:comment w:id="1" w:author="Reply"><w:p w14:paraId="00000002"><w:r><w:t>reply body</w:t></w:r></w:p></w:comment></w:comments>'),
+      'word/commentsExtended.xml': Buffer.from(`<w15:commentsEx xmlns:w15="${w15}"><w15:commentEx w15:paraId="00000001" w15:done="0"/>` +
+        '<w15:commentEx w15:paraId="00000002" w15:paraIdParent="00000001" w15:done="0"/></w15:commentsEx>'),
+    }));
+    if (compiled.kind !== 'ready') throw new Error('expected a supported comment thread');
+    expect(compiled.graph.comments.map((comment) => [comment.rawId, comment.parentId])).toEqual([['0', null], ['1', '0']]);
+    for (const reading of [compiled.readings.rejected, compiled.readings.accepted]) {
+      expect(reading.commentMarks).toHaveLength(1);
+      expect(reading.commentMarks[0]!.commentId).toBe('0');
+      expect(reading.commentMarks[0]!.mark.body).toContain('root body');
+      expect(reading.commentMarks[0]!.mark.body).toContain('reply body');
+    }
+  });
+
   it('makes only the reading that wholly removes a comment unavailable, and refuses point-only comments', () => {
     const word = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
     const parts = { 'word/comments.xml': Buffer.from(`<w:comments xmlns:w="${word}"><w:comment w:id="0"><w:p><w:r><w:t>body</w:t></w:r></w:p></w:comment></w:comments>`) };
@@ -162,6 +185,11 @@ describe('successor exact source correspondence (#1132)', () => {
     const sourceVersionId = '10000000-0000-4000-8000-000000000001';
     const imports = [{ choiceDigest: 'c'.repeat(64), admissionDigest: 'd'.repeat(64) }];
     const detailDigest = wordSampleDetailDigest(sampleDigest, graphDigest, sourceVersionId, imports);
+    expect(detailDigest).toBe(digest(JSON.stringify({ graphDigest, imports: [{ admissionDigest: 'd'.repeat(64), choiceDigest: 'c'.repeat(64) }],
+      sampleDigest, schema: 'ai7.word-sample-detail/1', sourceVersionId })));
+    // The store passes each retained choice/admission record with its digest; only the digests enter detail identity.
+    expect(wordSampleDetailDigest(sampleDigest, graphDigest, sourceVersionId,
+      imports.map((entry) => ({ ...entry, choice: { mode: 'suggestions' }, admission: { learnFromEdits: true } })))).toBe(detailDigest);
     expect(wordSampleDetailDigest(sampleDigest, graphDigest, sourceVersionId, [...imports, ...imports])).not.toBe(detailDigest);
     const text = '😀e\u0301';
     const entry: WordSampleDetailEntry = { kind: 'text', section: 'events', entryOrdinal: 7, sourceOrdinal: 1,
@@ -170,7 +198,7 @@ describe('successor exact source correspondence (#1132)', () => {
     const cursor = { schema: 'ai7.word-sample-cursor/1', sampleDigest, detailDigest, section: 'events', entryOrdinal: 7, field: 'rawAuthor', codeUnitOffset: 3 };
     // Offset 3 is inside the e + combining-accent grapheme, but on a valid Unicode scalar boundary.
     expect(validateWordSampleCursor(cursor, { sampleDigest, detailDigest }, lookup)).toEqual(cursor);
-    for (const change of [{ codeUnitOffset: 1 }, { codeUnitOffset: 5 }, { entryOrdinal: 1 }, { field: 'rawId' },
+    for (const change of [{ codeUnitOffset: 1 }, { codeUnitOffset: 4 }, { codeUnitOffset: 5 }, { entryOrdinal: 1 }, { field: 'rawId' },
       { sampleDigest: graphDigest }, { detailDigest: graphDigest }, { extra: true }]) {
       expect(() => validateWordSampleCursor({ ...cursor, ...change }, { sampleDigest, detailDigest }, lookup)).toThrow('Word');
     }

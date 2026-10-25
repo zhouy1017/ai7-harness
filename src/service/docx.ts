@@ -1847,6 +1847,9 @@ function createWordPartParser(part: string, inventory: WordInventoryDraft,
   const paragraphBoundaryEvents = new Map<number, number[]>();
   const eventCloseOrdinals = new Map<number, number>();
   const openRanges = new Map<'moveFrom' | 'moveTo', string>();
+  const deferredMarkMoves = new Set<number>();
+  const markMoveCloseOrdinals = new Map<number, number>();
+  let openFields = 0;
   let elementOrdinal = 0;
   let paragraphIndex = -1;
   let sourceTextCodeUnits = 0;
@@ -1996,18 +1999,28 @@ function createWordPartParser(part: string, inventory: WordInventoryDraft,
           }
         } else if (kind === 'moveFrom' || kind === 'moveTo') {
           const opened = ranges.get(openRanges.get(kind) ?? '');
-          if (opened === undefined || opened.container !== event.container || runAncestors().some((ancestor) =>
+          // A paragraph mark stands at its paragraph's end, so Word may open the range after w:pPr.
+          if (opened === undefined && event.context === 'paragraph-boundary') deferredMarkMoves.add(index);
+          else if (opened === undefined || opened.container !== event.container || runAncestors().some((ancestor) =>
             (events[ancestor]!.kind === 'moveFrom' || events[ancestor]!.kind === 'moveTo') && events[ancestor]!.kind !== kind)) refuse('invalid-move-graph', ordinal);
           else event.links.push(opened.start);
         }
       }
     }
-    if (word && ['drawing', 'pict', 'object', 'fldChar', 'footnoteReference', 'endnoteReference', 'sectPr', 'tbl'].includes(tag.local)) {
+    // Math is a non-text payload like a drawing: it ends a hunk, and no paragraph join crosses it.
+    const mathPayload = (tag.uri === 'http://schemas.openxmlformats.org/officeDocument/2006/math' || tag.uri === 'http://purl.oclc.org/ooxml/officeDocument/math') &&
+      (tag.local === 'oMath' || tag.local === 'oMathPara');
+    if (mathPayload || (word && ['drawing', 'pict', 'object', 'fldChar', 'footnoteReference', 'endnoteReference', 'sectPr', 'tbl'].includes(tag.local))) {
       payloadBoundary = true;
       const paragraph = activeParagraph() ?? paragraphs.at(-1);
       if (paragraph !== undefined) {
         if (tag.local === 'sectPr') paragraph.sectionBoundary = true;
         else if (tag.local !== 'fldChar') paragraph.nonTextBoundary = true;
+      }
+      if (main && word && tag.local === 'fldChar' && !inProperties) {
+        const type = wordAttribute(tag, 'fldCharType');
+        if (type === 'begin') openFields += 1;
+        else if (type === 'end' && openFields > 0) openFields -= 1;
       }
     }
     if (main && word && (tag.local === 't' || tag.local === 'delText') && !inProperties) frame.text = '';
@@ -2033,7 +2046,16 @@ function createWordPartParser(part: string, inventory: WordInventoryDraft,
       if (frame.event !== null) eventCloseOrdinals.set(frame.event, elementOrdinal);
       if (frame.text !== null) addAtom('text', frame.text, frame.ordinal, runAncestors());
       if (frame.paragraph !== null) {
+        // A complex field still open at this paragraph's end spans its mark: no join may cross it.
+        if (openFields > 0) frame.paragraph.nonTextBoundary = true;
         const boundaryEvents = paragraphBoundaryEvents.get(frame.paragraph.paragraphIndex) ?? [];
+        for (const index of boundaryEvents) {
+          if (!deferredMarkMoves.has(index)) continue;
+          const event = events[index]!;
+          const opened = ranges.get(openRanges.get(event.kind === 'moveFrom' ? 'moveFrom' : 'moveTo') ?? '');
+          if (opened === undefined || opened.container !== event.container) refuse('invalid-move-graph', event.elementOrdinal, frame.paragraph.paragraphIndex);
+          else { event.links.push(opened.start); markMoveCloseOrdinals.set(index, elementOrdinal); }
+        }
         if (boundaryEvents.length > 1) refuse('incompatible-paragraph-join', events[boundaryEvents[0]!]!.elementOrdinal, frame.paragraph.paragraphIndex);
         for (const index of boundaryEvents) events[index]!.location = { part, paragraphIndex: frame.paragraph.paragraphIndex,
           atomOrdinal: atoms.length, codeUnitOffset: 0 };
@@ -2072,8 +2094,12 @@ function createWordPartParser(part: string, inventory: WordInventoryDraft,
         if (event.kind !== 'moveFrom' && event.kind !== 'moveTo') continue;
         const range = event.links[0] === undefined ? undefined : rangesByStart.get(event.links[0]);
         if (range !== undefined) rangeMembers.add(range.start);
-        if (range?.end === null || range === undefined || event.elementOrdinal <= events[range.start]!.elementOrdinal ||
-          (eventCloseOrdinals.get(index) ?? Number.POSITIVE_INFINITY) > events[range.end]!.elementOrdinal) {
+        // A paragraph mark linked at its paragraph's end lies inside the range when that end does.
+        const markEnd = markMoveCloseOrdinals.get(index);
+        if (range?.end === null || range === undefined || (markEnd === undefined
+          ? event.elementOrdinal <= events[range.start]!.elementOrdinal ||
+            (eventCloseOrdinals.get(index) ?? Number.POSITIVE_INFINITY) > events[range.end]!.elementOrdinal
+          : markEnd <= events[range.start]!.elementOrdinal || markEnd > events[range.end]!.elementOrdinal)) {
           refuse('invalid-move-graph', event.elementOrdinal, event.location.paragraphIndex);
         }
       }
@@ -2139,31 +2165,57 @@ function createWordCompilationReader(options: { signal?: AbortSignal; onArchiveP
   const main = createWordPartParser('word/document.xml', inventory, feedBytes, options.signal);
   const sides = new Map<string, StreamingDocxParser<RawWordPart>>();
   const deferred = new Map<string, Uint8Array[]>();
+  // The historical reader never parsed side parts with this envelope, so an unreadable side part (an SVG
+  // with a DOCTYPE, a UTF-16 custom XML item, a long VML attribute) cannot newly refuse an ordinary DOCX.
+  // Only an activated intake whose Word story part could not be inventoried refuses, as a resource limit.
+  const unreadable = new Set<string>();
+  const sideStep = (part: string, step: () => void): void => {
+    if (unreadable.has(part)) return;
+    try { step(); } catch (error) {
+      options.signal?.throwIfAborted();
+      if (error instanceof Error && error.name === 'AbortError') throw error;
+      unreadable.add(part); sides.delete(part);
+    }
+  };
   const reader = createDocxArchiveReader(main, options, (part, chunk, final) => {
     if (!part.toLowerCase().endsWith('.xml')) {
       const chunks = deferred.get(part) ?? []; chunks.push(chunk); deferred.set(part, chunks);
       return;
     }
-    let side = sides.get(part);
-    if (side === undefined) { side = createWordPartParser(part, inventory, feedBytes, options.signal); sides.set(part, side); }
-    side.write(chunk, final);
+    sideStep(part, () => {
+      let side = sides.get(part);
+      if (side === undefined) { side = createWordPartParser(part, inventory, feedBytes, options.signal); sides.set(part, side); }
+      side.write(chunk, final);
+    });
   });
   return { write: reader.write, finish() {
     const archive = reader.finish();
-    for (const side of sides.values()) side.finish({});
-    const declaredXml = wordPackageXmlParts(decodeMetadataXml(archive.metadata.get('[Content_Types].xml')!));
+    for (const [part, side] of [...sides]) sideStep(part, () => side.finish({}));
+    const contentType = wordPackageContentTypes(decodeMetadataXml(archive.metadata.get('[Content_Types].xml')!));
     for (const [part, chunks] of deferred) {
-      if (!declaredXml(part)) continue;
-      const side = createWordPartParser(part, inventory, feedBytes, options.signal);
-      chunks.forEach((chunk, index) => side.write(chunk, index === chunks.length - 1));
-      side.finish({});
+      const type = contentType(part);
+      if (type === undefined || !(type.endsWith('+xml') || type.endsWith('/xml'))) continue;
+      sideStep(part, () => {
+        const side = createWordPartParser(part, inventory, feedBytes, options.signal);
+        chunks.forEach((chunk, index) => side.write(chunk, index === chunks.length - 1));
+        side.finish({});
+      });
+    }
+    if (inventory.activating) {
+      for (const part of [...unreadable].sort()) {
+        if (WORD_STORY_CONTENT_TYPES.has(contentType(part) ?? '')) inventory.locations.push({ code: 'resource-limit', part, elementOrdinal: 0, paragraphIndex: null });
+      }
     }
     inventory.storyParts.sort();
     return finishWordCompilation(archive, inventory, options.textBoxDisposition ?? 'retain', options.signal);
   } };
 }
 
-function wordPackageXmlParts(contentTypes: string): (part: string) => boolean {
+/** Declared WordprocessingML story parts beside the main document: their text could hold tracked revisions. */
+const WORD_STORY_CONTENT_TYPES: ReadonlySet<string> = new Set(['header', 'footer', 'footnotes', 'endnotes', 'comments', 'document.glossary']
+  .map((story) => `application/vnd.openxmlformats-officedocument.wordprocessingml.${story}+xml`));
+
+function wordPackageContentTypes(contentTypes: string): (part: string) => string | undefined {
   const defaults = new Map<string, string>();
   const overrides = new Map<string, string>();
   const parser = new SaxesParser({ xmlns: true });
@@ -2176,10 +2228,7 @@ function wordPackageXmlParts(contentTypes: string): (part: string) => boolean {
     if (tag.local === 'Override') { const name = value('PartName'); if (name !== undefined) overrides.set(name.replace(/^\//u, ''), type); }
   });
   parser.write(contentTypes).close();
-  return (part) => {
-    const type = overrides.get(part) ?? defaults.get(part.slice(part.lastIndexOf('.') + 1).toLowerCase());
-    return type !== undefined && (type.endsWith('+xml') || type.endsWith('/xml'));
-  };
+  return (part) => overrides.get(part) ?? defaults.get(part.slice(part.lastIndexOf('.') + 1).toLowerCase());
 }
 
 function finishWordCompilation(archive: ReadDocxArchive<RawWordPart>, inventory: WordInventoryDraft,

@@ -101,6 +101,9 @@ function requireMarks(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`DOCX_REJECTED:${message}`);
 }
 
+/** A selected-reading block bound: that reading becomes unusable, never the whole intake or the historical reader. */
+class WordReadingBoundError extends Error {}
+
 const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' });
 
 function graphemesOf(value: string): string[] {
@@ -844,7 +847,9 @@ export function normalizeWordParagraph(raw: string, pieces: readonly WordRawPiec
   replace(/^\s+|\s+$/gu, '');
   const text = scalars.map((entry) => entry.text).join('');
   const outputClusters = Array.from(segmenter.segment(text));
-  requireMarks(text.length <= MAX_BLOCK_CODE_UNITS && outputClusters.length <= MAX_BLOCK_GRAPHEMES, 'selected Word paragraph exceeds the bounded block size');
+  if (!(text.length <= MAX_BLOCK_CODE_UNITS && outputClusters.length <= MAX_BLOCK_GRAPHEMES)) {
+    throw new WordReadingBoundError('DOCX_REJECTED:selected Word paragraph exceeds the bounded block size');
+  }
   const boundaries = new Map<number, number>([[0, 0]]);
   outputClusters.forEach((cluster, index) => boundaries.set(cluster.index + cluster.segment.length, index + 1));
   // Whitespace removal can expose a combining sequence. Merge its complete provenance before mapping.
@@ -913,11 +918,22 @@ export function compileWordReading(graph: WordRevisionGraph, decoded: ReadonlyMa
   let pieces: WordRawPiece[] = [];
   let paragraphs: number[] = [];
   let shape: WordRevisionGraph['paragraphs'][number] | undefined;
+  const bounds: WordIncompatibility[] = [];
+  let blockCountExceeded = false;
   const flush = (): void => {
     if (shape === undefined) return;
-    const normalized = normalizeWordParagraph(raw, pieces, decoded);
-    if (normalized.text.length > 0) {
-      requireMarks(blocks.length < 100_000, 'too many manuscript blocks');
+    let normalized: ReturnType<typeof normalizeWordParagraph> | null = null;
+    try { normalized = normalizeWordParagraph(raw, pieces, decoded); } catch (error) {
+      if (!(error instanceof WordReadingBoundError)) throw error;
+    }
+    const tooMany = normalized !== null && normalized.text.length > 0 && blocks.length >= 100_000;
+    if (normalized === null || tooMany) {
+      if (normalized === null || !blockCountExceeded) {
+        bounds.push({ code: 'resource-limit', part: 'word/document.xml',
+          elementOrdinal: atoms.get(shape.boundaryAtomOrdinal)?.elementOrdinal ?? 0, paragraphIndex: shape.paragraphIndex });
+      }
+      blockCountExceeded ||= tooMany;
+    } else if (normalized.text.length > 0) {
       const position = blocks.length + 1;
       const digest = sha256Hex(canonicalJson({ kind: shape.kind, level: shape.level, text: normalized.text }));
       const blockId = `blk_${sha256Hex(`${position}\u0000${digest}`).slice(0, 24)}`;
@@ -952,12 +968,14 @@ export function compileWordReading(graph: WordRevisionGraph, decoded: ReadonlyMa
   const contentDigest = sha256Hex(blocks.map((block) => block.text).join('\u001e'));
   const structureDigest = sha256Hex(canonicalJson(blocks.map(({ blockId, position, kind, level, digest }) => ({ blockId, position, kind, level, digest }))));
   const mappingDigest = sha256Hex(canonicalJson(segments));
-  const comments = wordCommentMarks(graph, blocks, commentBodies, signal);
-  const revisions = wordRevisionMarks(graph, blocks, decoded, templates, reading, signal);
+  // A reading over its block bounds is unusable; its marks are not planned against an incomplete block list.
+  const none = { marks: [], refusals: [] };
+  const comments: ReturnType<typeof wordCommentMarks> = bounds.length > 0 ? none : wordCommentMarks(graph, blocks, commentBodies, signal);
+  const revisions: ReturnType<typeof wordRevisionMarks> = bounds.length > 0 ? none : wordRevisionMarks(graph, blocks, decoded, templates, reading, signal);
   let marks = [...comments.marks, ...revisions.marks].sort((a, b) => a.mark.blockPosition - b.mark.blockPosition ||
     a.mark.fromGrapheme - b.mark.fromGrapheme || a.mark.toGrapheme - b.mark.toGrapheme || a.mark.ordinal - b.mark.ordinal)
     .map((entry, index) => ({ ...entry, mark: { ...entry.mark, ordinal: index + 1 } }));
-  const refusals = [...comments.refusals, ...revisions.refusals];
+  const refusals = [...bounds, ...comments.refusals, ...revisions.refusals];
   if (marks.length > MAX_IMPORTED_MARKS) {
     refusals.push({ code: 'resource-limit', part: 'word/document.xml', elementOrdinal: 0, paragraphIndex: null });
     marks = [];
@@ -1074,8 +1092,15 @@ function wordCommentMarks(graph: WordRevisionGraph, blocks: readonly WordReading
     if (comment.parentId === null) continue;
     const children = descendants.get(comment.parentId) ?? []; children.push(comment); descendants.set(comment.parentId, children);
   }
-  for (const comment of graph.comments) {
-    if (comment.markerEventIds.length === 0) continue;
+  const present = new Set(graph.comments.map((comment) => comment.rawId));
+  for (const root of graph.comments) {
+    // One mark per thread, as the historical collector makes: a reply folds into its root's body, and its own
+    // markers anchor the thread only when the root has none.
+    if (root.parentId !== null && present.has(root.parentId)) continue;
+    const thread = [root];
+    for (let index = 0; index < thread.length; index += 1) thread.push(...(descendants.get(thread[index]!.rawId) ?? []));
+    const comment = thread.find((entry) => entry.markerEventIds.length > 0);
+    if (comment === undefined) continue;
     const markers = comment.markerEventIds.map((id) => events.get(id)!);
     const starts = markers.filter((event) => event.kind === 'commentRangeStart');
     const ends = markers.filter((event) => event.kind === 'commentRangeEnd');
@@ -1083,7 +1108,7 @@ function wordCommentMarks(graph: WordRevisionGraph, blocks: readonly WordReading
     const last = ends[0]?.location.atomOrdinal ?? -1;
     const refuse = (): void => { refusals.push({ code: 'unrepresentable-comment', part: 'word/document.xml',
       elementOrdinal: markers[0]?.elementOrdinal ?? 0, paragraphIndex: markers[0]?.location.paragraphIndex ?? null }); };
-    if (starts.length !== 1 || ends.length !== 1 || first >= last || !bodies.has(comment.rawId)) { refuse(); continue; }
+    if (starts.length !== 1 || ends.length !== 1 || first >= last || !bodies.has(root.rawId)) { refuse(); continue; }
     let lo = 0; let hi = groups.length;
     while (lo < hi) { const mid = (lo + hi) >>> 1; if (groups[mid]!.fragment.atomOrdinal < first) lo = mid + 1; else hi = mid; }
     const mapped = new Map<string, { block: WordReadingBlock; groups: Set<WordNormalizationGroup> }>();
@@ -1103,8 +1128,8 @@ function wordCommentMarks(graph: WordRevisionGraph, blocks: readonly WordReading
       entry.groups.add(group);
     }
     if (!exact || mapped.size === 0) { refuse(); continue; }
-    let body = bodies.get(comment.rawId)!;
-    const replyQueue = [...(descendants.get(comment.rawId) ?? [])];
+    let body = bodies.get(root.rawId)!;
+    const replyQueue = [...(descendants.get(root.rawId) ?? [])];
     for (let index = 0; index < replyQueue.length; index += 1) {
       const reply = replyQueue[index]!;
       const replyBody = bodies.get(reply.rawId);
@@ -1119,9 +1144,9 @@ function wordCommentMarks(graph: WordRevisionGraph, blocks: readonly WordReading
       const label = mapped.size > 1 ? `（原批注第 ${++part}/${mapped.size} 部分）\n` : '';
       marks.push({ mark: { ordinal: marks.length + 1, blockPosition: block.position, fromGrapheme, toGrapheme,
         pinnedText: graphemesOf(block.text).slice(fromGrapheme, toGrapheme).join(''), kind: 'annotation', origin: 'comment',
-        authorLabel: authorLabel(comment.rawAuthor ?? undefined), body: truncateToFit(label + (body || EMPTY_COMMENT_BODY), MAX_MARK_BODY_CODE_UNITS),
-        proposedText: null, status: comment.resolved ? 'resolved' : 'open' }, eventMembership: comment.markerEventIds,
-      templateKey: null, commentId: comment.rawId, fragments: [...selected].flatMap((group) => group.fragments) });
+        authorLabel: authorLabel(root.rawAuthor ?? undefined), body: truncateToFit(label + (body || EMPTY_COMMENT_BODY), MAX_MARK_BODY_CODE_UNITS),
+        proposedText: null, status: root.resolved ? 'resolved' : 'open' }, eventMembership: comment.markerEventIds,
+      templateKey: null, commentId: root.rawId, fragments: [...selected].flatMap((group) => group.fragments) });
     }
   }
   return { marks, refusals };

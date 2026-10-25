@@ -377,6 +377,96 @@ describe('explicit tracked Word successor compiler (#1132)', () => {
     await expect(compileWordTrackedDocx(path, undefined, { signal: abort.signal })).rejects.toThrow();
   });
 
+  it('links a paragraph-mark move whose range Word opens inside the paragraph, after w:pPr', async () => {
+    const inParagraph = (body: string): string => body
+      .replace(/(<w:moveFromRangeStart [^>]*\/>)(<w:p><w:pPr><w:rPr><w:moveFrom [^>]*\/><\/w:rPr><\/w:pPr>)/u, '$2$1')
+      .replace(/(<w:moveToRangeStart [^>]*\/>)(<w:p><w:pPr><w:rPr><w:moveTo [^>]*\/><\/w:rPr><\/w:pPr>)/u, '$2$1');
+    for (const withMovedRuns of [true, false]) {
+      const body = inParagraph(wordParagraphMoveBody(withMovedRuns));
+      expect(body).toContain('</w:pPr><w:moveFromRangeStart');
+      expect(body).toContain('</w:pPr><w:moveToRangeStart');
+      const { compiled } = await compileTrackedBody(body);
+      const { compiled: before } = await compileTrackedBody(wordParagraphMoveBody(withMovedRuns));
+      if (compiled.kind !== 'ready' || before.kind !== 'ready') throw new Error('expected Word-layout paragraph moves to stay supported');
+      for (const reading of ['rejected', 'accepted'] as const) {
+        expect(compiled.readings[reading].blocks.map((block) => block.text)).toEqual(before.readings[reading].blocks.map((block) => block.text));
+      }
+      expect(compiled.templates.map((template) => template.operationKind)).toEqual(before.templates.map((template) => template.operationKind));
+      for (const event of compiled.graph.events.filter((candidate) => candidate.context === 'paragraph-boundary')) {
+        const start = compiled.graph.events.find((linked) => event.linkedEventIds.includes(linked.eventId))!;
+        expect([start.kind, start.rangeName]).toEqual([event.kind === 'moveFrom' ? 'moveFromRangeStart' : 'moveToRangeStart', 'paragraph move']);
+      }
+      // A range that closes before the paragraph's own mark does not hold that mark.
+      const closesEarly = (await compileTrackedBody(body.replace('<w:r><w:t>A</w:t></w:r></w:p><w:moveFromRangeEnd w:id="4"/>',
+        '<w:r><w:t>A</w:t></w:r><w:moveFromRangeEnd w:id="4"/></w:p>'))).compiled;
+      expect(closesEarly.kind).toBe('unsupported');
+      expect(closesEarly.inventory.locations.some((location) => location.code === 'invalid-move-graph')).toBe(true);
+    }
+  });
+
+  it('refuses a paragraph join across a spanning complex field or math, but keeps one beside a contained field', async () => {
+    const joinMark = '<w:pPr><w:rPr><w:del w:id="1"/></w:rPr></w:pPr>';
+    const field = (type: string): string => `<w:r><w:fldChar w:fldCharType="${type}"/></w:r>`;
+    const spanning = (await compileTrackedBody(`<w:p>${joinMark}${field('begin')}<w:r><w:instrText>TOC</w:instrText></w:r>${field('separate')}` +
+      `<w:r><w:t>A</w:t></w:r></w:p><w:p><w:r><w:t>B</w:t></w:r>${field('end')}</w:p>`)).compiled;
+    expect(spanning.kind).toBe('unsupported');
+    expect(spanning.inventory.locations.map((location) => location.code)).toEqual(['incompatible-paragraph-join']);
+    const math = (await compileTrackedBody(`<w:p>${joinMark}<w:r><w:t>A</w:t></w:r>` +
+      '<m:oMath xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"><m:r><m:t>x</m:t></m:r></m:oMath></w:p><w:p><w:r><w:t>B</w:t></w:r></w:p>')).compiled;
+    expect(math.kind).toBe('unsupported');
+    expect(math.inventory.locations.map((location) => location.code)).toEqual(['incompatible-paragraph-join']);
+    const contained = (await compileTrackedBody(`<w:p>${joinMark}${field('begin')}<w:r><w:instrText>PAGE</w:instrText></w:r>${field('separate')}` +
+      `<w:r><w:t>1</w:t></w:r>${field('end')}<w:r><w:t>A</w:t></w:r></w:p><w:p><w:r><w:t>B</w:t></w:r></w:p>`)).compiled;
+    if (contained.kind !== 'ready') throw new Error('expected a join beside a contained field');
+    expect(contained.readings.accepted.blocks.map((block) => block.text)).toEqual(['1AB']);
+  });
+
+  it('makes only an over-bound joined reading unusable instead of refusing the whole intake', async () => {
+    // Each paragraph fits the 2,048-grapheme block bound; only their accepted-reading join exceeds it.
+    const long = 'a'.repeat(1500);
+    const { compiled, path } = await compileTrackedBody(`<w:p><w:pPr><w:rPr><w:del w:id="1" w:author="A"/></w:rPr></w:pPr><w:r><w:t>${long}</w:t></w:r></w:p>` +
+      `<w:p><w:r><w:t>${long}</w:t></w:r></w:p>`);
+    if (compiled.kind !== 'ready') throw new Error('expected the usable rejected reading to remain available');
+    expect(compiled.previewReading).toBe('rejected');
+    expect(compiled.readings.rejected).toMatchObject({ usable: true, refusals: [] });
+    expect(compiled.readings.rejected.blocks.map((block) => block.text.length)).toEqual([1500, 1500]);
+    expect(compiled.readings.accepted.usable).toBe(false);
+    expect(compiled.readings.accepted.refusals.map((refusal) => [refusal.code, refusal.paragraphIndex])).toEqual([['resource-limit', 0]]);
+    expect(compiled.readings.accepted.marks).toEqual([]);
+    const native = parseNativeDocxIntakeBytes(await readFile(path), 'joined.docx', { formatIdentified: true });
+    expect(native.kind).not.toBe('legacy');
+  });
+
+  it('never newly refuses an ordinary DOCX for side parts the historical reader does not parse', async () => {
+    const types = (extra: string): Buffer => Buffer.from('<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+      '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+      `<Default Extension="xml" ContentType="application/xml"/>${extra}` +
+      '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>');
+    const header = '<Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/>';
+    const sideParts: Record<string, Record<string, Uint8Array>> = {
+      svgDoctype: { '[Content_Types].xml': types('<Default Extension="svg" ContentType="image/svg+xml"/>'),
+        'word/media/image1.svg': Buffer.from('<?xml version="1.0"?><!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "svg11.dtd"><svg xmlns="http://www.w3.org/2000/svg"/>') },
+      utf16CustomXml: { 'customXml/item1.xml': Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('<?xml version="1.0" encoding="UTF-16"?><a/>', 'utf16le')]) },
+      longHeaderAttribute: { '[Content_Types].xml': types(header), 'word/header1.xml': Buffer.from(`<w:hdr xmlns:w="${WORD_NS}" ` +
+        `xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:v="urn:schemas-microsoft-com:vml"><w:p><w:r><w:pict><v:shape o:gfxdata="${'A'.repeat(40_000)}"/></w:pict></w:r></w:p></w:hdr>`) },
+      emptyAncillary: { 'word/webSettings.xml': new Uint8Array(0) },
+    };
+    for (const extra of Object.values(sideParts)) {
+      const ordinary = await compileTrackedBody('<w:p><w:r><w:t>ordinary</w:t></w:r></w:p>', extra);
+      expect(ordinary.compiled.kind).toBe('ordinary');
+      const native = parseNativeDocxIntakeBytes(await readFile(ordinary.path), 'ordinary.docx', { formatIdentified: true });
+      const legacy = await parseDocx(ordinary.path, 'ordinary.docx', () => undefined);
+      expect(native.kind).toBe('legacy');
+      if (native.kind === 'legacy') expect(native.parsed.contentDigest).toBe(legacy.contentDigest);
+    }
+    const tracked = '<w:p><w:r><w:t>base</w:t></w:r><w:ins w:id="1"><w:r><w:t>new</w:t></w:r></w:ins></w:p>';
+    // An unreadable non-story part cannot hold a tracked revision; an unreadable declared story refuses honestly.
+    expect((await compileTrackedBody(tracked, sideParts.svgDoctype)).compiled.kind).toBe('ready');
+    const story = (await compileTrackedBody(tracked, sideParts.longHeaderAttribute)).compiled;
+    expect(story.kind).toBe('unsupported');
+    expect(story.inventory.locations).toEqual([{ code: 'resource-limit', part: 'word/header1.xml', elementOrdinal: 0, paragraphIndex: null }]);
+  });
+
   it('finds actual stories by expanded root/context and declared XML type rather than a word/ filename prefix', async () => {
     const plain = '<w:p><w:r><w:t>base</w:t></w:r></w:p>';
     const unrelated = { 'word/data.xml': Buffer.from(`<x:data xmlns:x="urn:data" xmlns:w="${WORD_NS}"><w:ins w:id="1"/></x:data>`) };

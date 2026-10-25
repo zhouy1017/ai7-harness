@@ -406,6 +406,12 @@ describe('closed Word retention definitions (#1132)', () => {
         expect(() => { historicalImports[0]!.choice.mode = 'accepted-baseline'; }).toThrow();
         const detail = resolveWordSampleDetailSource(db, context, firstSource.sampleId, firstSource.sampleDigest, historicalImports);
         const detailDigest = wordSampleDetailStream(detail).detailDigest;
+        // Recompute ai7.word-sample-detail/1 from the stored membership rows alone: ordered choice/admission digests.
+        const memberships = db.prepare('SELECT choice_digest, sha256 FROM word_tracked_edit_sample_imports WHERE sample_id = ? ORDER BY commit_id')
+          .all(firstSource.sampleId).map((row) => ({ admissionDigest: String(row.sha256), choiceDigest: String(row.choice_digest) }));
+        expect(memberships).toHaveLength(1);
+        expect(detailDigest).toBe(createHash('sha256').update(JSON.stringify({ graphDigest: compiled.graphDigest, imports: memberships,
+          sampleDigest: firstSource.sampleDigest, schema: 'ai7.word-sample-detail/1', sourceVersionId })).digest('hex'));
         const page = pageWordSampleDetail(detail, null);
         expect(page.sampleDigest).toBe(firstSource.sampleDigest);
         expect(page.items.length).toBeGreaterThan(0);

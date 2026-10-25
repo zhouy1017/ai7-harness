@@ -1141,7 +1141,9 @@ export function wordSampleDetailDigest(sampleDigest: string, graphDigest: string
   requireRetention(DIGEST_PATTERN.test(sampleDigest) && DIGEST_PATTERN.test(graphDigest) && UUID_PATTERN.test(sourceVersionId) &&
     imports.every((entry) => DIGEST_PATTERN.test(entry.choiceDigest) && DIGEST_PATTERN.test(entry.admissionDigest)),
   'WORD_SAMPLE_INVALID', 'Word 修改样本的详情身份无效。');
-  return sha256Hex(wordCanonicalJson({ schema: 'ai7.word-sample-detail/1', sampleDigest, graphDigest, sourceVersionId, imports }));
+  // Only the ordered choice/admission digests; the retained records behind them are pinned by those digests.
+  return sha256Hex(wordCanonicalJson({ schema: 'ai7.word-sample-detail/1', sampleDigest, graphDigest, sourceVersionId,
+    imports: imports.map(({ choiceDigest, admissionDigest }) => ({ choiceDigest, admissionDigest })) }));
 }
 
 /** UTF-16 cursor identity is separate from a Manuscript grapheme anchor, including inside a combining cluster. */
@@ -1163,7 +1165,8 @@ export function validateWordSampleCursor(value: unknown, identity: { sampleDiges
   if (entry.kind === 'record' || entry.text === null) requireRetention(codeUnitOffset === 0, 'WORD_SAMPLE_CURSOR_INVALID', '结构记录或空值不能带有文字偏移。');
   else {
     const text = entry.text;
-    requireRetention(codeUnitOffset <= text.length && !(codeUnitOffset > 0 && codeUnitOffset < text.length &&
+    // A continuation names the next incomplete position; only an empty field continues at its length.
+    requireRetention((codeUnitOffset < text.length || codeUnitOffset === 0) && !(codeUnitOffset > 0 &&
       /[\uD800-\uDBFF]/u.test(text[codeUnitOffset - 1]!) && /[\uDC00-\uDFFF]/u.test(text[codeUnitOffset]!)),
     'WORD_SAMPLE_CURSOR_INVALID', 'Word 修改样本详情的偏移切开了 Unicode 字符。');
   }
