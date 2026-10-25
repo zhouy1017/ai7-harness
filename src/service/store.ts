@@ -5262,6 +5262,11 @@ export class EditorialStore {
         new HouseReviewPreferenceLedger(authority).validate(false);
         for (const scope of ['development-ci', 'developer-live', 'ordinary-production'] as const) requireStore(
           new SupervisionDirectives(authority).history(scope).every((directive) => directive.actionId === undefined), 'SCHEMA_INVALID', '学习监督记录与数据库修订不一致。');
+      } else if (learningRevision === EDITORIAL_MEMORY_SCHEMA_VERSION) {
+        // Revision 92 only stamps (Issue #1131): a revision-91 store is proved by its own readers before it claims the successor.
+        new EditorialLearningLedger(authority).validate();
+        new SupervisionDirectives(authority).validate();
+        new HouseReviewPreferenceLedger(authority).validate();
       }
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
