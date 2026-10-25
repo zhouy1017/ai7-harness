@@ -1445,6 +1445,20 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     // 知识库 › 社级编辑记忆 (Issue #911): the house record takes no input; 质量与学习's edit signals, the house or one Book.
+    case 'inspectWordTrackedEditSample': {
+      const input = requireInput(value.input, ['bookId', 'sampleId', 'sampleDigest', 'after'], tentativeId);
+      const after = input.after;
+      const cursorValid = after === null || isRecord(after) &&
+        hasExactKeys(after, ['schema', 'sampleDigest', 'detailDigest', 'section', 'entryOrdinal', 'field', 'codeUnitOffset']) &&
+        after.schema === 'ai7.word-sample-cursor/1' && after.sampleDigest === input.sampleDigest &&
+        typeof after.detailDigest === 'string' && HEX_DIGEST_PATTERN.test(after.detailDigest) &&
+        typeof after.section === 'string' && ['before', 'after', 'events', 'imports'].includes(after.section) &&
+        typeof after.field === 'string' && ['text', 'rawId', 'rawAuthor', 'rawDate', 'rangeName', 'record'].includes(after.field) &&
+        isSafeInteger(after.entryOrdinal, 0) && isSafeInteger(after.codeUnitOffset, 0) && (after.field !== 'record' || after.codeUnitOffset === 0);
+      if (!validUuid(input.bookId) || typeof input.sampleId !== 'string' || !/^wts_[0-9a-f]{64}$/u.test(input.sampleId) ||
+        typeof input.sampleDigest !== 'string' || !HEX_DIGEST_PATTERN.test(input.sampleDigest) || !cursorValid) throw new ProtocolError(tentativeId);
+      break;
+    }
     case 'inspectEditorialLearning': {
       const input = requireInputWithOptional(value.input, ['signalOffset', 'itemOffset'], ['exclusionOffset', 'detailItemId', 'historyOffset', 'sourceOffset'], tentativeId);
       if (![input.signalOffset, input.itemOffset, input.exclusionOffset ?? 0, input.historyOffset ?? 0, input.sourceOffset ?? 0].every((offset) => Number.isSafeInteger(offset) && Number(offset) >= 0 && Number(offset) <= 1_000_000) ||

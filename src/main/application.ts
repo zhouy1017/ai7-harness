@@ -4493,6 +4493,14 @@ function registerRendererHandlers(
       return service.call('inspectLearningMaterial', { bookId: input.bookId, materialKey: input.materialKey });
     }),
   );
+  ipcMain.handle(IPC_CHANNELS.inspectWordTrackedEditSample, (event, input: ServiceOperationMap['inspectWordTrackedEditSample']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object' && typeof input.bookId === 'string', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('inspectWordTrackedEditSample', input);
+    }),
+  );
   // 设置 › 评估校准与预测 (Issue #430, S82): house settings, bound to no Book route; each write is serialized with every other
   // effect.
   ipcMain.handle(IPC_CHANNELS.inspectEvaluationCalibration, (event, input: ServiceOperationMap['inspectEvaluationCalibration']['input']) =>

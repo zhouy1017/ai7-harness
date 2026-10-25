@@ -417,6 +417,7 @@ export const IPC_CHANNELS = {
   recordProposalDecisionReason: 'ai7:j05:record-proposal-decision-reason',
   recordProposalDecisionFeedback: 'ai7:j11:record-proposal-decision-feedback',
   inspectEditorialLearning: 'ai7:learning:inspect-editorial-learning',
+  inspectWordTrackedEditSample: 'ai7:j11:inspect-word-tracked-edit-sample',
   recordLearningReasonAsk: 'ai7:learning:record-reason-ask',
   changeEditorialLearning: 'ai7:learning:change-editorial-learning',
   createEditorialMemory: 'ai7:learning:create-editorial-memory',
@@ -1213,6 +1214,59 @@ export interface WordTrackedChangesChoice {
   mode: 'suggestions' | 'accepted-baseline';
   learnFromEdits: boolean;
   acceptedBaselineConfirmed: boolean;
+}
+
+export type WordSampleDetailSection = 'before' | 'after' | 'events' | 'imports';
+export type WordSampleDetailField = 'text' | 'rawId' | 'rawAuthor' | 'rawDate' | 'rangeName' | 'record';
+export interface WordSampleCursorProjection {
+  schema: 'ai7.word-sample-cursor/1'; sampleDigest: string; detailDigest: string; section: WordSampleDetailSection;
+  entryOrdinal: number; field: WordSampleDetailField; codeUnitOffset: number;
+}
+export interface InspectWordTrackedEditSampleInput {
+  bookId: string; sampleId: string; sampleDigest: string; after: WordSampleCursorProjection | null;
+}
+export type WordSourceFragmentProjection =
+  | { kind: 'text'; part: string; paragraphIndex: number; atomOrdinal: number; fromCodeUnit: number; toCodeUnit: number; codeUnits: number; sha256: string }
+  | { kind: 'paragraph-boundary'; part: string; paragraphIndex: number; atomOrdinal: number; sha256: string };
+/** A transport projection of the existing policy basis, whose value remains owned by local learning. */
+export interface WordLocalLearningBasisProjection {
+  policy: 'ai7.learning-eligibility-policy'; mode: 'opt-out-local'; version: 2; authority: 'ADR 0094 §3'; rules: readonly [2, 5]; text: string;
+}
+export type WordControlReferenceProjection = { kind: 'entry'; entryId: string; sha256: string } |
+  { kind: 'default'; basis: WordLocalLearningBasisProjection };
+export interface WordLocalImportAdmissionProjection {
+  schema: 'ai7.word-local-import-admission/1'; sampleId: string; sampleDigest: string; importChoiceDigest: string;
+  basis: WordLocalLearningBasisProjection; reviewedLearnFromEdits: true;
+  global: { enabled: true; reference: WordControlReferenceProjection };
+  book: { excluded: false; reference: WordControlReferenceProjection };
+  standing: { choice: 'book' | 'house'; decisionId: string | null; decisionDigest: string | null; basisVersion: number };
+}
+export type WordSampleDetailRecordProjection =
+  | { type: 'fragment'; fragment: WordSourceFragmentProjection }
+  | { type: 'event'; eventId: string;
+      kind: 'ins' | 'del' | 'moveFrom' | 'moveTo' | 'moveFromRangeStart' | 'moveFromRangeEnd' | 'moveToRangeStart' | 'moveToRangeEnd' |
+        'commentRangeStart' | 'commentRangeEnd' | 'commentReference';
+      context: 'run' | 'paragraph-boundary' | 'range' | 'comment'; part: string; elementOrdinal: number;
+      location: { part: string; paragraphIndex: number; atomOrdinal: number; codeUnitOffset: number };
+      disposition: 'visible-transition' | 'no-visible-transition' | 'range' | 'comment'; parentCount: number; rangeLinkCount: number }
+  | { type: 'event-link'; eventId: string; relation: 'parent' | 'range'; linkedEventId: string; ordinal: number }
+  | { type: 'import'; commitId: string; mode: WordTrackedChangesChoice['mode']; sourceVersionId: string; sourceDigest: string;
+      parentSourcePinDigest: string; importReviewId: string; fidelityReviewId: string; revisionId: string; choiceDigest: string; admissionDigest: string;
+      workingObjectDigest: string | null; compilerIdentity: string; extractorIdentity: 'ai7-word-tracked-extractor/1'; graphDigest: string;
+      readings: Record<'rejected' | 'accepted', { digest: string; blockCount: number; usable: boolean }>;
+      mappingDigest: string; templateManifestDigest: string; learnFromEdits: boolean; acceptedBaselineConfirmed: boolean }
+  | { type: 'import-admission'; commitId: string; basis: WordLocalImportAdmissionProjection };
+export type WordSampleDetailItemProjection = {
+  section: WordSampleDetailSection; entryOrdinal: number; sourceOrdinal: number; childOrdinal: number | null;
+} & (
+  | { kind: 'text'; field: Exclude<WordSampleDetailField, 'record'>; text: string | null; sha256: string | null; fragment: WordSourceFragmentProjection | null;
+      startCodeUnit: number; endCodeUnit: number; totalCodeUnits: number; complete: boolean }
+  | { kind: 'record'; field: 'record'; record: WordSampleDetailRecordProjection; complete: true }
+);
+export interface WordTrackedEditSampleDetailProjection {
+  bookId: string; sampleId: string; sampleDigest: string; detailDigest: string; sourceVersionId: string; sourceDigest: string;
+  operationKind: 'insert' | 'delete' | 'replace' | 'move' | 'paragraph-boundary'; sectionCounts: Record<WordSampleDetailSection, number>;
+  items: WordSampleDetailItemProjection[]; nextCursor: WordSampleCursorProjection | null;
 }
 
 export type WordTrackedChangesIntakeProjection =
@@ -12268,6 +12322,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations {
   recordProposalDecisionReason: { input: RecordProposalDecisionReasonInput; output: EditorialMarkCommandProjection };
   recordProposalDecisionFeedback: { input: RecordProposalDecisionFeedbackInput; output: EditorialMarkCommandProjection };
   inspectEditorialLearning: { input: InspectEditorialLearningInput; output: EditorialLearningProjection };
+  inspectWordTrackedEditSample: { input: InspectWordTrackedEditSampleInput; output: WordTrackedEditSampleDetailProjection };
   recordLearningReasonAsk: { input: LearningReasonAskInput & { frequency: import('./preferences.js').LearningAskFrequency }; output: LearningReasonAskProjection | null };
   changeEditorialLearning: { input: ChangeEditorialLearningInput; output: EditorialLearningProjection };
   createEditorialMemory: { input: CreateEditorialMemoryInput; output: EditorialLearningProjection };
@@ -12876,6 +12931,7 @@ export interface RendererApi extends GlobalAgentRendererApi {
   rebuildHouseReviewPreference(): Promise<HouseReviewPreferenceProjection>;
   inspectEditQualitySignals(input: { bookId: string | null; preferenceAfter?: PreferenceAdoptionCursor | null }): Promise<EditQualitySignalsProjection>;
   inspectLearningMaterials(input: { bookId: string | null; after?: LearningMaterialCursor | null }): Promise<LearningMaterialsProjection>;
+  inspectWordTrackedEditSample(input: InspectWordTrackedEditSampleInput): Promise<WordTrackedEditSampleDetailProjection>;
   inspectLearningMaterial(input: { bookId: string; materialKey: string }): Promise<LearningMaterialProjection>;
   decideLearningMaterial(input: DecideLearningMaterialInput): Promise<LearningMaterialProjection>;
   inspectFeedbackHistory(input?: FeedbackHistoryInput): Promise<FeedbackHistoryProjection>;
