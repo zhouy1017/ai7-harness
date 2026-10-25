@@ -235,6 +235,8 @@ import {
   fidelityOutcomeLabel,
   fidelityReviewHeading,
   reimportFidelityHeading,
+  WORD_IMPORT_MODE_NAMES,
+  wordImportModeOption,
   wordIntakeRefusalLabel,
 } from './import-fidelity-labels.js';
 import { mountProposalConflict, type ProposalConflictSurface } from './proposal-conflict.js';
@@ -2295,7 +2297,8 @@ function renderImportRecovery(
     const choice = recoveredWord.savedChoice;
     const saved = element('section', 'review-section');
     saved.dataset['wordRecoveredMode'] = choice.mode; saved.dataset['wordRecoveredLearning'] = String(choice.learnFromEdits);
-    saved.append(element('h3', undefined, '已保存的 Word 导入选择'), element('p', undefined, choice.mode === 'suggestions'
+    saved.append(element('h3', undefined, '已保存的 Word 导入选择'), element('p', undefined, `导入方式：${WORD_IMPORT_MODE_NAMES[choice.mode]}`),
+    element('p', undefined, choice.mode === 'suggestions'
       ? '撤销原修订后的阅读作为基线，原修订保留为建议。' : '已单独确认：接受原修订后的阅读作为基线。'),
     element('p', undefined, choice.learnFromEdits ? '已选择学习这些编辑改动；提交时仍会校验当前排除设置。' : '已关闭本次编辑改动学习。'));
     content.append(saved);
@@ -7245,10 +7248,10 @@ function renderWordIntakeControls(staged: StagedImportProjection): {
   while (wordIntakeFormChoices.size > 16) { const oldest = wordIntakeFormChoices.keys().next().value; if (oldest === undefined) break; wordIntakeFormChoices.delete(oldest); }
   group.append(element('p', 'field-note', `当前暂存预览：${projection.previewReading === 'rejected' ? '撤销修订后的阅读' : '接受修订后的阅读'}。这只是预览，尚未选择稿件基线。`));
   const modes: Array<{ input: HTMLInputElement; mode: WordTrackedChangesChoice['mode'] }> = [];
-  for (const [mode, label] of [['suggestions', '修订作为修改建议'], ['accepted-baseline', '接受修订后的干净基线']] as const) {
+  for (const mode of ['suggestions', 'accepted-baseline'] as const) {
     const line = element('label', 'choice'); const input = element('input'); input.type = 'radio';
     input.name = `word-import-mode-${staged.draftId}`; input.value = mode; input.dataset['wordImportMode'] = mode;
-    line.append(input, element('span', undefined, label)); group.append(line); modes.push({ input, mode });
+    line.append(input, element('span', undefined, wordImportModeOption(mode))); group.append(line); modes.push({ input, mode });
     input.addEventListener('change', () => { if (!input.checked || busy) return;
       selected = { ...selected, mode, acceptedBaselineConfirmed: false }; changed(); });
   }
@@ -7270,10 +7273,10 @@ function renderWordIntakeControls(staged: StagedImportProjection): {
     learning.checked = selected.learnFromEdits; learning.disabled = busy;
     const reading = projection.readings[selected.mode === 'suggestions' ? 'rejected' : 'accepted'];
     notice.textContent = !reading.usable ? reading.blockCount === 0
-      ? selected.mode === 'suggestions' ? '撤销修订后没有可编辑的非空稿件，不能按修改建议方式准备；仍可明确选择并确认接受修订后的基线。'
+      ? selected.mode === 'suggestions' ? '撤销修订后没有可编辑的非空稿件，不能按「转为 AI7 修订建议」准备；仍可明确选择并确认「直接并入正文（作为定稿基线）」。'
         : '接受修订后没有可编辑的非空稿件，不能建立该基线。'
       : '所选阅读超出当前支持边界，不能准备；可选择另一项可用阅读。'
-      : selected.mode === 'accepted-baseline' && !selected.acceptedBaselineConfirmed ? '请单独确认接受修订后的基线，再准备导入。'
+      : selected.mode === 'accepted-baseline' && !selected.acceptedBaselineConfirmed ? '请单独确认「直接并入正文（作为定稿基线）」，再准备导入。'
         : '最终保真、导入方式及本机保留范围会在下一步复核。';
     for (const control of buttons) control.disabled = busy || !allowed();
   };
@@ -7452,7 +7455,7 @@ function renderTargetChoice(
     const fidelityView = renderFidelityReview(staged.fidelity, staged.source.conversion, { kind: 'offer' });
     const wordControls = relationshipSelection === 'first-manuscript' ? renderWordIntakeControls(staged) : null;
     const confirm = button('确认书名并复核', 'primary', async () => {
-      if (wordControls !== null && !wordControls.allowed()) { setStatus('请选择可用的 Word 阅读，并单独确认接受修订后的基线。', 'error'); return; }
+      if (wordControls !== null && !wordControls.allowed()) { setStatus('请选择可用的 Word 阅读；选择「直接并入正文（作为定稿基线）」时须单独确认。', 'error'); return; }
       const trackedChanges = wordControls?.choice();
       const confirmedTitle = title.value.normalize('NFC').replace(/\s+/g, ' ').trim();
       if (!confirmedTitle || confirmedTitle.length > 180) {
@@ -7511,7 +7514,7 @@ function renderTargetChoice(
     content.append(...wordControls.elements, ...fidelityView.elements);
     const actions = element('div', 'button-row');
     const confirm = button('复核导入到所选图书', 'primary', async () => {
-      if (!wordControls.allowed()) { setStatus('请选择可用的 Word 阅读，并单独确认接受修订后的基线。', 'error'); return; }
+      if (!wordControls.allowed()) { setStatus('请选择可用的 Word 阅读；选择「直接并入正文（作为定稿基线）」时须单独确认。', 'error'); return; }
       const trackedChanges = wordControls.choice();
       confirm.disabled = true;
       wordControls.setBusy(true);
@@ -8354,7 +8357,7 @@ function renderReview(
     const choice = review.trackedChanges;
     const word = element('section', 'review-section'); word.dataset['wordReviewedMode'] = choice.mode;
     word.dataset['wordReviewedLearning'] = String(choice.learnFromEdits);
-    word.append(element('h3', undefined, '本次 Word 修订导入'),
+    word.append(element('h3', undefined, '本次 Word 修订导入'), element('p', undefined, `导入方式：${WORD_IMPORT_MODE_NAMES[choice.mode]}`),
       element('p', undefined, choice.mode === 'suggestions' ? '撤销原修订后的文字作为稿件基线，原修订成为未应用的修改建议。'
         : '已单独确认：接受原修订后的文字作为稿件基线。原文件和原始修订证据仍会保留。'),
       element('p', undefined, choice.learnFromEdits ? '已允许按当前本机学习设置保留符合准入的原始修改对。' : '本次不保留学习修改对；来源、稿件对应和导入标记仍会保留。'));

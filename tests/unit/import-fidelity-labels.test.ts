@@ -22,6 +22,8 @@ import {
   reimportFidelityHeading,
   roundTripCard,
   textBoxChoiceStatement,
+  WORD_IMPORT_MODE_NAMES,
+  wordImportModeOption,
   wordIntakeRefusalLabel,
 } from '../../src/renderer/import-fidelity-labels.js';
 import { SAMPLE1_V1_REPORT } from '../support/import-retention.js';
@@ -44,6 +46,11 @@ describe('the import fidelity review words', () => {
       '表格行、单元格或合并修订', '影响文字的自定义 XML 或公式修订', '正文以外或文本框内的文字修订', '不能准确对应的跨段合段',
       '缺失、重叠或不能唯一配对的移动修订', '不能准确落在阅读上的批注', '没有可用的非空阅读', '超出当前资源边界',
     ]);
+  });
+  it('offers the two tracked-change modes by ADR 0094 §5 names, recommending the suggestions default', () => {
+    expect(WORD_IMPORT_MODE_NAMES).toEqual({ suggestions: '转为 AI7 修订建议', 'accepted-baseline': '直接并入正文（作为定稿基线）' });
+    expect(['suggestions', 'accepted-baseline'].map((mode) => wordImportModeOption(mode as 'suggestions' | 'accepted-baseline')))
+      .toEqual(['转为 AI7 修订建议（推荐）', '直接并入正文（作为定稿基线）']);
   });
   it('gives every status its own shape beside its text', () => {
     expect(['preserved', 'retained', 'degraded', 'unsupported'].map((status) => fidelityStatusShape(status as never)))

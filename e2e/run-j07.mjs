@@ -1096,7 +1096,7 @@ async function main() {
       const review = await native.evaluate(`window.ai7.reviewManuscriptExport({target:{kind:'current'},options:{includeAnnotations:true,includeSuggestions:true,includeEditorNotes:false},format:'docx'})`);
       // Source order is fixed: one edited paragraph, one comment paragraph and one original revision paragraph.
       const regenerated = new Set([1, EXPORT_INPUT.comment.block, EXPORT_INPUT.replacement.block]).size;
-      const restoration = `按「${mode === 'suggestions' ? '修订作为修改建议' : '接受修订后的基线'}」及之后的稿件文字导出；${expected.length - regenerated} 段恢复可保留的原文件格式，${regenerated} 段重新生成，具体损失见保真审阅。`;
+      const restoration = `按「${mode === 'suggestions' ? '转为 AI7 修订建议' : '直接并入正文（作为定稿基线）'}」及之后的稿件文字导出；${expected.length - regenerated} 段恢复可保留的原文件格式，${regenerated} 段重新生成，具体损失见保真审阅。`;
       const rows = ['inline-styles:preserved:1', 'annotations:preserved:1',
         ...(mode === 'suggestions' ? ['change-suggestions:preserved:1'] : []), 'editor-notes:excluded:0',
         'sections:preserved:1', 'headers-footers:preserved:1', 'file-revisions:degraded:2'];

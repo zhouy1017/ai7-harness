@@ -1988,7 +1988,7 @@ export class ManuscriptExportStore {
       : format !== 'docx'
         ? EXPORT_TEXT_RESTORATION_LINES[format]
         : plan.kind === 'manuscript' && plan.wordBinding !== null
-          ? `按「${plan.wordBinding.mode === 'suggestions' ? '修订作为修改建议' : '接受修订后的基线'}」及之后的稿件文字导出；${rendered.restoredBlocks} 段恢复可保留的原文件格式，${rendered.regeneratedBlocks} 段重新生成，具体损失见保真审阅。`
+          ? `按「${plan.wordBinding.mode === 'suggestions' ? '转为 AI7 修订建议' : '直接并入正文（作为定稿基线）'}」及之后的稿件文字导出；${rendered.restoredBlocks} 段恢复可保留的原文件格式，${rendered.regeneratedBlocks} 段重新生成，具体损失见保真审阅。`
         : rendered.restoration === 'from-original'
           ? `未改过、也没有带出标记的 ${rendered.restoredBlocks} 段从原文件恢复；其余 ${rendered.regeneratedBlocks} 段按稿件文字重新写出。`
           : plan.kind === 'manuscript' && (plan.input.source.kind === 'mapped' || (plan.input.source.kind === 'fresh' && plan.input.source.reason === 'unprefixed'))

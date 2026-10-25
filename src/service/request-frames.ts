@@ -1444,7 +1444,6 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
-    // 知识库 › 社级编辑记忆 (Issue #911): the house record takes no input; 质量与学习's edit signals, the house or one Book.
     case 'inspectWordTrackedEditSample': {
       const input = requireInput(value.input, ['bookId', 'sampleId', 'sampleDigest', 'after'], tentativeId);
       const after = input.after;
@@ -1459,6 +1458,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
         typeof input.sampleDigest !== 'string' || !HEX_DIGEST_PATTERN.test(input.sampleDigest) || !cursorValid) throw new ProtocolError(tentativeId);
       break;
     }
+    // 知识库 › 社级编辑记忆 (Issue #911): the house record takes no input; 质量与学习's edit signals, the house or one Book.
     case 'inspectEditorialLearning': {
       const input = requireInputWithOptional(value.input, ['signalOffset', 'itemOffset'], ['exclusionOffset', 'detailItemId', 'historyOffset', 'sourceOffset'], tentativeId);
       if (![input.signalOffset, input.itemOffset, input.exclusionOffset ?? 0, input.historyOffset ?? 0, input.sourceOffset ?? 0].every((offset) => Number.isSafeInteger(offset) && Number(offset) >= 0 && Number(offset) <= 1_000_000) ||

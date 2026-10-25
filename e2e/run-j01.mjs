@@ -1918,8 +1918,20 @@ async function runNativeWordImport(renderer, scenario, restart, recoverCommitted
     return suggestions.checked && !accepted.checked && !accepted.disabled && !confirmation.checked && learning.checked &&
       prepare.disabled === ${Boolean(allInserted)} && !document.querySelector('[data-word-reviewed-mode]');
   })()`, 'word-preview-never-selects-accepted-baseline');
+  // The two modes by their ADR 0094 names, the tagged preview, and why an unusable reading cannot be prepared.
+  const previewLabel = `当前暂存预览：${allInserted ? '接受修订后的阅读' : '撤销修订后的阅读'}。这只是预览，尚未选择稿件基线。`;
+  const readingReason = allInserted ? '撤销修订后没有可编辑的非空稿件，不能按「转为 AI7 修订建议」准备；仍可明确选择并确认「直接并入正文（作为定稿基线）」。'
+    : '最终保真、导入方式及本机保留范围会在下一步复核。';
+  await assertRenderer(renderer, `(() => {
+    const controls = document.querySelector('[data-word-import-controls="ready"]');
+    const option = (mode) => controls.querySelector('[data-word-import-mode="' + mode + '"]').closest('label').textContent;
+    return option('suggestions') === '转为 AI7 修订建议（推荐）' && option('accepted-baseline') === '直接并入正文（作为定稿基线）' &&
+      Array.from(controls.querySelectorAll('p')).some(line => line.textContent === ${JSON.stringify(previewLabel)}) &&
+      controls.querySelector('[data-word-reading-availability]').textContent === ${JSON.stringify(readingReason)};
+  })()`, 'word-preview-label-and-reading-reason');
   if (mode === 'accepted-baseline') {
     await assertRenderer(renderer, `(() => { document.querySelector('[data-word-import-mode="accepted-baseline"]').click(); const confirmation = document.querySelector('[data-word-accepted-baseline-confirmation]'); const prepare = Array.from(document.querySelectorAll('button')).find(button => button.textContent === ${JSON.stringify(prepareLabel)}); return !confirmation.checked && !confirmation.disabled && prepare.disabled; })()`, 'word-accepted-needs-separate-confirmation');
+    await assertRenderer(renderer, `document.querySelector('[data-word-reading-availability]').textContent === '请单独确认「直接并入正文（作为定稿基线）」，再准备导入。'`, 'word-accepted-confirmation-notice');
     await assertRenderer(renderer, `(() => { const confirmation = document.querySelector('[data-word-accepted-baseline-confirmation]'); confirmation.click(); return confirmation.checked; })()`, 'word-accepted-confirmed');
   }
   if (!learnFromEdits) await assertRenderer(renderer, `(() => { const learning = document.querySelector('[data-word-learn-from-edits]'); learning.click(); return !learning.checked; })()`, 'word-learning-opt-out');
