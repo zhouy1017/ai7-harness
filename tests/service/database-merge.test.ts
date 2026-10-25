@@ -304,6 +304,73 @@ function titles(store: EditorialStore): string[] {
 }
 
 describe('合并图书 over two real stores', () => {
+  it.each(['suggestions', 'accepted-baseline'] as const)('carries Word %s through public package inspection and selected-Book merge under destination learning controls', async (mode) => {
+    let source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const existingBookId = emptyBook(source, '两处原有的图书');
+    source.markCleanShutdown(); source.close();
+    cpSync(roots.dataRoot, otherRoot, { recursive: true });
+    source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const path = join(roots.inputRoot, `word-public-merge-${mode}.docx`);
+    const wordTables = ['word_revision_sources', 'word_revision_imports', 'word_manuscript_source_segments',
+      'word_tracked_edit_samples', 'word_tracked_edit_sample_imports', 'word_import_mark_sources'];
+    let packagePath: string;
+    let bookId: string;
+    let detailInput: Parameters<EditorialStore['inspectWordTrackedEditSample']>[0];
+    let detail: Awaited<ReturnType<EditorialStore['inspectWordTrackedEditSample']>>;
+    let originalWord: ReturnType<typeof learningRows>[];
+    try {
+      await composeRevisedDocx(path, { source: ADMITTED_BASELINE_DOCX, title: '公开包中的 Word 图书', paragraphs: [
+        { runs: [{ text: { block: 8, from: 0, to: 10 } }, { text: { block: 9, from: 0, to: 5 },
+          revision: { kind: 'ins', author: '作者', date: '2026-10-25T00:00:00Z' } }] },
+      ] });
+      const staged = await source.stageSelectedManuscript(randomUUID(), path);
+      const reviewed = source.prepareNewBookReview(staged.draftId, staged.draftVersion,
+        { kind: 'new-book', choiceId: 'new-book', confirmedTitle: staged.titleSuggestion.value }, false, 'retain',
+        { mode, learnFromEdits: true, acceptedBaselineConfirmed: mode === 'accepted-baseline' });
+      if (reviewed.reviewDigest === null) throw new Error('expected complete public Word merge fixture');
+      const commitId = randomUUID();
+      bookId = (await source.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: reviewed.draftVersion,
+        reviewDigest: reviewed.reviewDigest, commitId })).bookId;
+      await source.acknowledgeImportCompletion(commitId);
+      const signal = source.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }).signals[0]!;
+      if (signal.kind !== 'word-tracked-edit') throw new Error('expected real Word merge signal');
+      detailInput = { bookId, sampleId: signal.source.sampleId, sampleDigest: signal.source.sampleDigest, after: null };
+      detail = await source.inspectWordTrackedEditSample(detailInput);
+      originalWord = wordTables.map((table) => learningRows(roots.dataRoot, table));
+      source.changeEditorialLearning({ kind: 'switch', enabled: false, expectedEntries: 0 });
+      packagePath = await exportedFrom(source, `word-public-${mode}.ai7db`);
+      source.markCleanShutdown();
+    } finally { source.close(); }
+    let target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    try {
+      target.changeEditorialLearning({ kind: 'switch', enabled: false, expectedEntries: 0 });
+      const ownControls = learningRows(otherRoot);
+      const preview = await target.inspectDatabaseImport(packagePath);
+      expect(preview).toMatchObject({ compatibility: 'compatible', contents: { books: 2, sourceVersions: 1 } });
+      const waiting = await target.prepareDatabaseMerge(preview.previewId, T);
+      expect(waiting.pending?.mergeBooks?.map((book) => book.title)).toEqual(['公开包中的 Word 图书']);
+      expect(target.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }).signals).toEqual([]);
+      target.markCleanShutdown(); target.close();
+      target = await EditorialStore.open(otherRoot, roots.codeRoot);
+      expect(target.listBooks(null).items.map((book) => book.bookId).sort()).toEqual([existingBookId, bookId].sort());
+      expect(wordTables.map((table) => learningRows(otherRoot, table))).toEqual(originalWord);
+      expect(learningRows(otherRoot)).toEqual(ownControls);
+      expect(await target.inspectWordTrackedEditSample(detailInput)).toEqual(detail);
+      expect(target.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }).signals[0]!.currentEligibility).toBe('excluded');
+      expect((await target.inspectDatabaseReplacements()).replacements[0]).toMatchObject({ kind: 'merge', outcome: 'applied', mergedCount: 1 });
+      target.changeEditorialLearning({ kind: 'switch', enabled: true, expectedEntries: 1 });
+      expect(target.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }).signals[0]!.currentEligibility).toBe('house');
+      const material = target.inspectLearningMaterials(bookId).books[0]!.materials[0]!;
+      const input = { bookId, items: [{ materialKey: material.materialKey, materialDigest: material.digest, expectedDecisions: 0 }] };
+      const exclusion = target.previewLearningRemediation(input);
+      target.recordLearningRemediation({ ...input, previewDigest: exclusion.previewDigest });
+      expect(target.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }).signals[0]!.currentEligibility).toBe('excluded');
+      expect(await target.inspectWordTrackedEditSample(detailInput)).toEqual(detail);
+      expect(wordTables.map((table) => learningRows(otherRoot, table))).toEqual(originalWord);
+      target.markCleanShutdown();
+    } finally { target.close(); }
+  });
+
   it('names a policy for every relation of the store, and none it does not have', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     store.close();
