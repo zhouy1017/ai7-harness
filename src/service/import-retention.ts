@@ -423,25 +423,29 @@ export function pageWordSampleDetail(source: WordSampleDetailSource, after: unkn
       if (!fits(item, cursor(index + 1, 0))) break;
       page.items.push(item); index += 1; offset = 0; continue;
     }
-    const full = itemAt(field.length);
-    if (fits(full, cursor(index + 1, 0))) {
-      page.items.push(full); index += 1; offset = 0; continue;
+    // Encoded JSON needs at least one byte per well-formed UTF-16 code unit. Never
+    // allocate/encode a full tail that cannot fit even before its envelope is added.
+    if (field.length - offset <= budget) {
+      const full = itemAt(field.length);
+      if (fits(full, cursor(index + 1, 0))) {
+        page.items.push(full); index += 1; offset = 0; continue;
+      }
     }
-    const ends = [offset];
-    for (const scalar of field.slice(offset)) ends.push(ends.at(-1)! + scalar.length);
-    ends.pop(); // A complete field has a different continuation envelope and was checked separately.
-    let low = 0; let high = ends.length - 1;
+    const floorBoundary = (end: number): number => end > offset && end < field.length &&
+      /[\uD800-\uDBFF]/u.test(field[end - 1]!) && /[\uDC00-\uDFFF]/u.test(field[end]!) ? end - 1 : end;
+    let low = offset;
+    // A complete field has a different continuation envelope and was checked separately.
+    let high = floorBoundary(Math.min(field.length - 1, offset + budget));
     while (low < high) {
-      const middle = Math.ceil((low + high) / 2);
-      const end = ends[middle]!;
-      if (fits(itemAt(end), end === field.length ? cursor(index + 1, 0) : cursor(index, end))) low = middle;
-      else high = middle - 1;
+      let end = floorBoundary(low + Math.ceil((high - low) / 2));
+      if (end === low) end += field.codePointAt(low)! > 0xffff ? 2 : 1;
+      if (fits(itemAt(end), cursor(index, end))) low = end;
+      else high = floorBoundary(end - 1);
     }
-    if (low === 0) break;
-    const end = ends[low]!;
-    page.items.push(itemAt(end));
-    if (end < field.length) { offset = end; break; }
-    index += 1; offset = 0;
+    if (low === offset) break;
+    page.items.push(itemAt(low));
+    offset = low;
+    break;
   }
   page.nextCursor = cursor(index, offset);
   requireRetention(page.items.length > 0 || page.nextCursor === null, 'WORD_SOURCE_CORRUPT', 'Word 修改样本详情的一个字符或结构记录无法放入传输边界。');

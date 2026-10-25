@@ -216,6 +216,18 @@ describe('successor exact source correspondence (#1132)', () => {
         cursors.add(key);
         if (page.nextCursor.section === 'after' && page.nextCursor.codeUnitOffset > 3 &&
           page.nextCursor.codeUnitOffset < originalText.length) splitCombiningCluster = true;
+        const last = page.items.at(-1);
+        if (last?.kind === 'text' && !last.complete && last.text !== null) {
+          const entry = expected[last.section][last.entryOrdinal]!;
+          if (entry.kind !== 'text' || entry.text === null) throw new Error('expected complete source text field');
+          const end = last.endCodeUnit + (entry.text.codePointAt(last.endCodeUnit)! > 0xffff ? 2 : 1);
+          if (end < entry.text.length) {
+            const oneScalarMore = { ...page, items: [...page.items.slice(0, -1), { ...last,
+              text: entry.text.slice(last.startCodeUnit, end), endCodeUnit: end }],
+              nextCursor: { ...page.nextCursor, codeUnitOffset: end } };
+            expect(Buffer.byteLength(JSON.stringify(oneScalarMore), 'utf8')).toBeGreaterThan(2400);
+          }
+        }
       }
       cursor = page.nextCursor;
       pages += 1;
