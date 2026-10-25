@@ -13,6 +13,7 @@ import {
   deriveImportFidelityPlan,
   isCleanTracerFidelity,
   parseDocx,
+  parseNativeDocxIntake,
   compileWordTrackedDocx,
   withTextBoxDisposition,
   type DocumentSignals,
@@ -81,6 +82,79 @@ async function compileTrackedBody(body: string, extraEntries: Readonly<Record<st
 }
 
 describe('explicit tracked Word successor compiler (#1132)', () => {
+  it('carries a nonempty accepted staging preview with original note/part fidelity while the legacy reader still refuses zero blocks', async () => {
+    const parts = unzipSync(await buildCorpusSource('synthetic'));
+    parts['word/document.xml'] = new Uint8Array(bodyDocumentXml('<w:p><w:ins w:id="1"><w:r><w:t>new</w:t></w:r></w:ins>' +
+      '<w:r><w:footnoteReference w:id="1"/><w:endnoteReference w:id="1"/></w:r></w:p><w:sectPr/>'));
+    const path = join(sandbox, 'word-preview.docx');
+    await writeFile(path, zipSync(parts, { level: 6, mtime: fixedArchiveTime() }));
+    const preview: string[] = [];
+    const legacy: ParsedDocxBlock[] = [];
+    const result = await parseNativeDocxIntake(path, 'word-preview.docx', {
+      legacy: (block) => legacy.push(block), wordPreview: (block) => preview.push(block.text),
+    });
+    if (result.kind !== 'word') throw new Error('expected supported Word staging preview');
+    expect(result.word.previewReading).toBe('accepted');
+    expect(preview).toEqual(['new']);
+    expect(legacy).toEqual([]);
+    expect(result.parsed.blockCount).toBe(1);
+    expect(result.parsed.importedMarks).toEqual([]);
+    expect(result.parsed.fidelity.find((row) => row.key === 'notes')!.count).toBe(2);
+    expect(deriveImportFidelityPlan(result.parsed.fidelity, result.parsed.sourceDigest, result.parsed.archiveBytes, undefined,
+      result.parsed.parserIdentity)).toBeDefined();
+    await expect(parseDocx(path, 'word-preview.docx', () => undefined)).rejects.toThrow('no editable text blocks');
+  });
+
+  it('keeps ordinary and unsupported native staging on the actual legacy reader without a new profile refusal', async () => {
+    for (const unsupported of [false, true]) {
+      const parts = unzipSync(await buildCorpusSource('synthetic'));
+      parts['word/document.xml'] = new Uint8Array(bodyDocumentXml('<w:p><w:r><w:t>base</w:t></w:r></w:p><w:sectPr/>'));
+      if (unsupported) parts['word/header1.xml'] = new TextEncoder().encode(`<w:hdr xmlns:w="${WORD_NS}"><w:p>` +
+        '<w:ins w:id="1"><w:r><w:t>side</w:t></w:r></w:ins></w:p></w:hdr>');
+      const path = join(sandbox, 'ordinary-or-unsupported.docx');
+      await writeFile(path, zipSync(parts, { level: 6, mtime: fixedArchiveTime() }));
+      const legacy: ParsedDocxBlock[] = [];
+      const preview: string[] = [];
+      const result = await parseNativeDocxIntake(path, 'ordinary.docx', {
+        legacy: (block) => legacy.push(block), wordPreview: (block) => preview.push(block.text),
+      });
+      expect(result.kind).toBe('legacy');
+      expect(result.word?.kind ?? null).toBe(unsupported ? 'unsupported' : null);
+      expect(preview).toEqual([]);
+      expect(legacy.map((block) => block.text)).toEqual(['base']);
+      expect(result.parsed).toEqual(await parseDocx(path, 'ordinary.docx', () => undefined));
+    }
+  });
+
+  it('does not impose legacy raw-paragraph accumulation on a supported normalized Word preview', async () => {
+    const spaces = `<w:r><w:t xml:space="preserve">${' '.repeat(4000)}</w:t></w:r>`.repeat(16);
+    const { path } = await compileTrackedBody(`<w:p><w:r><w:t>base</w:t></w:r>${spaces}` +
+      '<w:ins w:id="1"><w:r><w:t>X</w:t></w:r></w:ins></w:p>');
+    const preview: string[] = [];
+    const result = await parseNativeDocxIntake(path, 'normalized.docx', {
+      legacy: () => { throw new Error('Word preview cannot emit legacy mapping rows'); }, wordPreview: (block) => preview.push(block.text),
+    });
+    expect(result.kind).toBe('word');
+    expect(preview).toEqual(['base']);
+    await expect(parseDocx(path, 'normalized.docx', () => undefined)).rejects.toThrow('paragraph exceeds');
+  });
+
+  it('stages every accepted preview block when only the suggestion mark plan exceeds its historical limit', async () => {
+    const count = 20_001;
+    const { path } = await compileTrackedBody(Array.from({ length: count }, (_, index) => '<w:p><w:r><w:t>b</w:t></w:r>' +
+      `<w:ins w:id="${index}"><w:r><w:t>n</w:t></w:r></w:ins></w:p>`).join(''));
+    let blocks = 0;
+    const result = await parseNativeDocxIntake(path, 'complete-preview.docx', {
+      legacy: () => { throw new Error('Word preview cannot emit legacy mapping rows'); }, wordPreview: () => { blocks += 1; },
+    });
+    if (result.kind !== 'word') throw new Error('expected accepted Word preview');
+    expect(result.word.previewReading).toBe('accepted');
+    expect(result.word.templates).toHaveLength(count);
+    expect(result.parsed.blockCount).toBe(count);
+    expect(blocks).toBe(count);
+    expect(result.parsed.importedMarks).toEqual([]);
+  });
+
   it('leaves ordinary, formatting, comments and foreign lookalikes on the historical path', async () => {
     for (const body of [
       '<w:p><w:r><w:t>ordinary</w:t></w:r></w:p>',
