@@ -662,6 +662,24 @@ export function readWordImportChoiceRecord(db: DatabaseSync, bookId: string, com
   requireRetention(Number.isFinite(Date.parse(createdAt)), 'WORD_CHOICE_INVALID', 'Word 导入时间无效。');
   return { choice, digest: wordImportChoiceDigest(choice), createdAt };
 }
+
+/** The import has already written its real parent commit, fidelity, provenance and baseline in this transaction. */
+export function retainWordRevisionImport(db: DatabaseSync, bookId: string, choice: WordImportChoiceRecord, createdAt: string):
+  ReturnType<typeof readWordImportChoiceRecord> {
+  requireRetention(db.isTransaction && UUID_PATTERN.test(bookId) && Number.isFinite(Date.parse(createdAt)),
+    'WORD_CHOICE_INVALID', 'Word 导入选择必须与实际导入原子提交。');
+  validateWordImportChoiceRecord(choice);
+  const json = wordCanonicalJson(choice);
+  const digest = sha256Hex(json);
+  const existing = db.prepare('SELECT canonical_json, sha256, created_at FROM word_revision_imports WHERE commit_id = ?').get(choice.commitId);
+  if (existing === undefined) {
+    db.prepare(`INSERT INTO word_revision_imports(commit_id, source_version_id, book_id, fidelity_review_id, revision_id, mode, canonical_json, sha256, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(choice.commitId, choice.sourceVersionId, bookId, choice.fidelityReviewId,
+      choice.revisionId, choice.mode, json, digest, createdAt);
+  } else requireRetention(existing.canonical_json === json && existing.sha256 === digest && existing.created_at === createdAt,
+    'WORD_CHOICE_INVALID', 'Word 导入选择与已提交记录不一致。');
+  return readWordImportChoiceRecord(db, bookId, choice.commitId);
+}
 export interface WordLocalImportAdmission {
   schema: 'ai7.word-local-import-admission/1';
   sampleId: string;

@@ -17,13 +17,14 @@ import { BookPeople } from '../book-people.js';
 import { DecisionFeedbackLedger } from '../decision-feedback.js';
 import { graphemeEditVolume } from '../edit-quality-signals.js';
 import { LearningEligibilityError, LearningEligibilityLedger, LOCAL_LEARNING_POLICY_BASIS, LEARNING_ELIGIBILITY_POLICY_BASIS,
-  learningMaterialDigest, proposalDecisionCandidate, reviewDispositionCandidate, wordTrackedEditCandidate, type LearningMaterialCandidate } from '../learning-eligibility.js';
+  learningMaterialDigest, proposalDecisionCandidate, reviewDispositionCandidate, wordTrackedEditCandidate, wordLocalImportAdmissions,
+  type LearningMaterialCandidate } from '../learning-eligibility.js';
 import { readWordParentSourcePin, wordParentSourcePinRecord, requireWordRevisionSource, wordTemplateKey,
-  wordTrackedSampleRecord, WORD_EXTRACTOR_IDENTITY,
+  wordTrackedSampleRecord, wordTrackedSamples, WORD_EXTRACTOR_IDENTITY,
   readWordImportChoiceRecord, ImportRetentionError,
   type WordTrackedEditSample, type WordRevisionGraph, type WordImportChoiceRecord, type WordLocalImportAdmission,
   type WordImportControlsSnapshot, type WordSampleDetailSource } from '../import-retention.js';
-import { WORD_DOCX_PARSER_IDENTITY } from '../docx.js';
+import { WORD_DOCX_PARSER_IDENTITY, type WordTrackedCompilation } from '../docx.js';
 
 type Row = Record<string, SQLOutputValue>;
 const PAGE_SIZE = 30;
@@ -331,6 +332,63 @@ export class EditorialLearningLedger {
             standing: { choice: last?.choice ?? 'house', decisionId: last?.decisionId ?? null,
               decisionDigest: last?.recordDigest ?? null, basisVersion: last?.basis.version ?? LOCAL_LEARNING_POLICY_BASIS.version } };
         }) };
+    });
+  }
+
+  /**
+   * The import transaction supplies a compilation of verified original bytes after writing its parent/choice rows.
+   * Derive every admission from that complete manifest and current controls; never accept a caller-selected subset.
+   */
+  retainWordImportSamples(bookId: string, commitId: string, compiled: Extract<WordTrackedCompilation, { kind: 'ready' }>,
+    abortSignal?: AbortSignal): { sources: WordTrackedEditLearningSource[]; signalIds: string[] } {
+    abortSignal?.throwIfAborted();
+    requireLearning(this.db.isTransaction);
+    return this.#read(() => {
+      const { choice, digest: choiceDigest, createdAt } = readWordImportChoiceRecord(this.db, bookId, commitId);
+      requireLearning(compiled.sourceDigest === choice.originalDigest && compiled.graphDigest === choice.graphDigest &&
+        compiled.templateManifestDigest === choice.templateManifestDigest);
+      requireWordRevisionSource(this.db, readWordParentSourcePin(this.db, bookId, choice.sourceVersionId), compiled.graph);
+      for (const kind of ['rejected', 'accepted'] as const) {
+        const reading = compiled.readings[kind];
+        const pin = choice.readings[kind];
+        requireLearning(reading.readingDigest === pin.digest && reading.blocks.length === pin.blockCount && reading.usable === pin.usable);
+      }
+      const samples = wordTrackedSamples(bookId, compiled.graph, compiled.templates);
+      const entries = samples.map((sample, index) => {
+        abortSignal?.throwIfAborted();
+        const candidate = wordTrackedEditCandidate(sample, wordTrackedSampleRecord(sample).digest, createdAt);
+        return { sample, templateKey: compiled.templates[index]!.templateKey,
+          materialKey: candidate.materialKey, materialDigest: learningMaterialDigest(candidate) };
+      });
+      const admissions = wordLocalImportAdmissions({ bookId, samples: entries, choice, choiceDigest,
+        currentControls: this.wordImportControls(bookId, entries), recordedAt: createdAt,
+        ...(abortSignal === undefined ? {} : { signal: abortSignal }) });
+      const previous = this.db.prepare('SELECT * FROM word_tracked_edit_sample_imports WHERE commit_id = ?').all(commitId);
+      const memberships = new Map(previous.map((row) => [String(row.sample_id), row]));
+      requireLearning(previous.length === 0 || previous.length === admissions.length &&
+        admissions.every(({ sample }) => memberships.has(sample.sampleId)));
+      const readSample = this.db.prepare('SELECT * FROM word_tracked_edit_samples WHERE sample_id = ?');
+      const insertSample = this.db.prepare(`INSERT INTO word_tracked_edit_samples(sample_id, book_id, source_version_id, template_key, canonical_json, sha256)
+        VALUES (?, ?, ?, ?, ?, ?)`);
+      const insertMembership = this.db.prepare(`INSERT INTO word_tracked_edit_sample_imports(sample_id, commit_id, sample_digest, choice_digest, canonical_json, sha256, captured_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)`);
+      const sources = admissions.map(({ sample, templateKey, sampleDigest, materialKey, materialDigest, record }): WordTrackedEditLearningSource => {
+        abortSignal?.throwIfAborted();
+        const sampleRecord = wordTrackedSampleRecord(sample);
+        const prior = readSample.get(sample.sampleId);
+        if (prior === undefined) {
+          requireLearning(previous.length === 0);
+          insertSample.run(sample.sampleId, bookId, choice.sourceVersionId, templateKey, sampleRecord.json, sampleDigest);
+        } else requireLearning(prior.book_id === bookId && prior.source_version_id === choice.sourceVersionId &&
+          prior.template_key === templateKey && prior.canonical_json === sampleRecord.json && prior.sha256 === sampleDigest);
+        const membership = memberships.get(sample.sampleId);
+        if (membership === undefined) insertMembership.run(sample.sampleId, commitId, sampleDigest, choiceDigest, record.json, record.digest, createdAt);
+        else requireLearning(membership.sample_digest === sampleDigest && membership.choice_digest === choiceDigest &&
+          membership.canonical_json === record.json && membership.sha256 === record.digest && membership.captured_at === createdAt);
+        return { bookId, sampleId: sample.sampleId, sampleDigest, sourceVersionId: choice.sourceVersionId, sourceDigest: compiled.sourceDigest,
+          graphDigest: compiled.graphDigest, importCommitId: commitId, admissionDigest: record.digest, materialKey, materialDigest };
+      });
+      return { sources, signalIds: this.captureWordSamples(sources, abortSignal) };
     });
   }
 
@@ -795,6 +853,12 @@ export class EditorialLearningLedger {
     for (const row of this.db.prepare('SELECT signal_id FROM learning_signals WHERE book_id = ?').iterate(bookId)) {
       const signal = this.#signal(String(row.signal_id));
       if (signal.source.materialKey !== materialKey || signal.source.materialDigest !== materialDigest || this.#currentEligibility(signal, controls) !== 'house') continue;
+      if (signal.kind === 'word-tracked-edit') {
+        // This proves local policy-2 retention only; it never constructs a review-memory source snapshot.
+        sourceKeys.push(sha256Hex(canonicalJson({ signalId: signal.signalId, materialDigest: signal.source.materialDigest,
+          sampleDigest: signal.source.sampleDigest })));
+        continue;
+      }
       const origin = this.#reviewOrigin(signal, true);
       if (origin?.operationalScope !== scope) continue;
       const snapshot = this.sourceSnapshot(signal.signalId);

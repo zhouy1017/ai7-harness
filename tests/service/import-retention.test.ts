@@ -32,6 +32,7 @@ import {
   bindWordReadingToRevision,
   retainWordManuscriptSourceSegments,
   requireWordManuscriptSourceSegments,
+  retainWordRevisionImport,
   type WordImportChoiceRecord,
 } from '../../src/service/import-retention.js';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
@@ -229,8 +230,26 @@ describe('closed Word retention definitions (#1132)', () => {
         const cancelled = AbortSignal.abort(new Error('Word contract cancellation'));
         expect(() => wordLocalImportAdmissions({ bookId, samples: sampleEntries, choice, choiceDigest: record.digest,
           currentControls: controls, recordedAt, signal: cancelled })).toThrow('Word contract cancellation');
-        db.prepare(`INSERT INTO word_revision_imports(commit_id, source_version_id, book_id, fidelity_review_id, revision_id, mode, canonical_json, sha256, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(commitId, sourceVersionId, bookId, choice.fidelityReviewId, choice.revisionId, choice.mode, record.json, record.digest, recordedAt);
+        const insertChoice = (selected: WordImportChoiceRecord) => {
+          expect(retainWordRevisionImport(db, bookId, selected, recordedAt).digest).toBe(canonicalRecord(selected).digest);
+        };
+        const noCapture = (configure: () => void, learnFromEdits = true) => {
+          db.exec('SAVEPOINT word_no_capture');
+          try {
+            configure();
+            insertChoice({ ...choice, learnFromEdits, effectiveControls: ledger.wordImportControls(bookId, materials) });
+            expect(ledger.retainWordImportSamples(bookId, commitId, compiled)).toEqual({ sources: [], signalIds: [] });
+            for (const table of ['word_tracked_edit_samples', 'word_tracked_edit_sample_imports', 'learning_signals']) {
+              expect(db.prepare(`SELECT count(*) total FROM ${table}`).get()?.total).toBe(0);
+            }
+          } finally { db.exec('ROLLBACK TO word_no_capture; RELEASE word_no_capture'); }
+        };
+        noCapture(() => undefined, false);
+        noCapture(() => ledger.change({ kind: 'switch', enabled: false, expectedEntries: 0 }));
+        noCapture(() => ledger.change({ kind: 'book', bookId, excluded: true, expectedEntries: 0 }));
+        insertChoice(choice);
+        insertChoice(choice);
+        expect(() => retainWordRevisionImport(db, bookId, { ...choice, learnFromEdits: false }, recordedAt)).toThrow('已提交');
         expect(() => requireWordManuscriptSourceSegments(db, bookId, choice, compiled.readings.rejected)).toThrow('不完整');
         expect(retainWordManuscriptSourceSegments(db, bookId, choice, compiled.readings.rejected).mappingDigest).toBe(bound.mappingDigest);
         expect(retainWordManuscriptSourceSegments(db, bookId, choice, compiled.readings.rejected).mappingDigest).toBe(bound.mappingDigest);
@@ -246,25 +265,32 @@ describe('closed Word retention definitions (#1132)', () => {
           .toBe('suggestions');
         expect(() => readWordManuscriptExportSource(db, randomUUID(), choice.revisionId, sourceVersionId, originalBytes)).toThrow();
         expect(() => readWordManuscriptExportSource(db, bookId, choice.revisionId, sourceVersionId, originalBytes.slice(1))).toThrow('字节');
-        const sources = admissions.map(({ sample, templateKey, materialKey, materialDigest, record: admitted }) => {
-          const sampleRecord = wordTrackedSampleRecord(sample);
-          db.prepare(`INSERT INTO word_tracked_edit_samples(sample_id, book_id, source_version_id, template_key, canonical_json, sha256)
-            VALUES (?, ?, ?, ?, ?, ?)`).run(sample.sampleId, bookId, sourceVersionId, templateKey, sampleRecord.json, sampleRecord.digest);
-          db.prepare(`INSERT INTO word_tracked_edit_sample_imports(sample_id, commit_id, sample_digest, choice_digest, canonical_json, sha256, captured_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)`).run(sample.sampleId, commitId, sampleRecord.digest, record.digest, admitted.json, admitted.digest, recordedAt);
-          return { bookId, sampleId: sample.sampleId, sampleDigest: sampleRecord.digest, sourceVersionId, sourceDigest: compiled.sourceDigest,
-            graphDigest: compiled.graphDigest, importCommitId: commitId, admissionDigest: admitted.digest,
-            materialKey, materialDigest };
-        });
-        expect(() => ledger.captureWordSamples(sources, cancelled)).toThrow('Word contract cancellation');
+        expect(() => ledger.retainWordImportSamples(bookId, commitId, compiled, cancelled)).toThrow('Word contract cancellation');
+        expect(() => ledger.retainWordImportSamples(bookId, commitId, { ...compiled, templates: compiled.templates.slice(1) })).toThrow();
+        expect(db.prepare('SELECT count(*) total FROM word_tracked_edit_samples').get()?.total).toBe(0);
+        expect(db.prepare('SELECT count(*) total FROM word_tracked_edit_sample_imports').get()?.total).toBe(0);
         expect(db.prepare('SELECT count(*) total FROM learning_signals').get()?.total).toBe(0);
-        const signals = ledger.captureWordSamples(sources);
+        db.exec(`SAVEPOINT word_capture_rollback;
+          CREATE TRIGGER word_capture_failure BEFORE INSERT ON learning_signals
+          BEGIN SELECT RAISE(ABORT, 'WORD_CAPTURE_FAILURE'); END`);
+        try {
+          expect(() => ledger.retainWordImportSamples(bookId, commitId, compiled)).toThrow('WORD_CAPTURE_FAILURE');
+        } finally { db.exec('ROLLBACK TO word_capture_rollback; RELEASE word_capture_rollback'); }
+        for (const table of ['word_tracked_edit_samples', 'word_tracked_edit_sample_imports', 'learning_signals']) {
+          expect(db.prepare(`SELECT count(*) total FROM ${table}`).get()?.total).toBe(0);
+        }
+        const { sources, signalIds: signals } = ledger.retainWordImportSamples(bookId, commitId, compiled);
+        expect(sources.map((source) => source.sampleId)).toEqual(admissions.map(({ sample }) => sample.sampleId));
+        expect(db.prepare('SELECT count(*) total FROM word_tracked_edit_sample_imports WHERE commit_id = ?').get(commitId)?.total).toBe(admissions.length);
         expect(signals).toHaveLength(samples.length);
+        expect(ledger.retainWordImportSamples(bookId, commitId, compiled)).toEqual({ sources, signalIds: signals });
         expect(ledger.captureWordSamples(sources)).toEqual(signals);
         const inspect = () => ledger.inspect({ signalOffset: 0, itemOffset: 0 }, 'development-ci');
         const signal = inspect().signals[0]!;
         expect(signal).toMatchObject({ kind: 'word-tracked-edit', schema: 'ai7.word-import-learning-signal/1',
           currentEligibility: 'house', memoryCandidate: null, eligibility: { decisionId: null, basisVersion: 2 } });
+        expect(ledger.automaticAdmissionFor(bookId, signal.source.materialKey, signal.source.materialDigest, 'development-ci'))
+          .toEqual({ choice: 'house', sourceKeys: ledger.sourceKeys(bookId, [signal.source.materialKey]) });
         expect(Object.hasOwn(signal.source, 'decisionId')).toBe(false);
         expect(db.prepare('SELECT * FROM source_provenance WHERE provenance_id = ?').get(String(original.provenance_id))).toEqual(originalProvenance);
         expect(readWordParentSourcePin(db, bookId, sourceVersionId).parserIdentity).toBe('ai7-docx-fflate-saxes/3');
@@ -298,6 +324,7 @@ describe('closed Word retention definitions (#1132)', () => {
         expect(() => derive(choice, bookExcluded)).toThrow('变化');
         expect(derive({ ...choice, effectiveControls: bookExcluded }, bookExcluded)).toEqual([]);
         expect(inspect().signals[0]!.currentEligibility).toBe('excluded');
+        expect(ledger.automaticAdmissionFor(bookId, signal.source.materialKey, signal.source.materialDigest, 'development-ci')).toBeNull();
         expect(() => ledger.captureWordSamples(sources)).toThrow();
         ledger.change({ kind: 'book', bookId, excluded: false, expectedEntries: 1 });
         ledger.change({ kind: 'switch', enabled: false, expectedEntries: 2 });
