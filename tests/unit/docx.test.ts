@@ -93,6 +93,11 @@ describe('explicit tracked Word successor compiler (#1132)', () => {
     const previewRow = parsed.fidelity.find((row) => row.key === 'comments-revisions')!;
     expect(previewRow.detail).toContain('尚未选择稿件基线');
     const legacy = await parseDocx(path, 'modes.docx', () => undefined);
+    if (result.legacy.kind !== 'ready') throw new Error('expected actual legacy capability');
+    expect(result.legacy.parsed).toEqual(legacy);
+    const legacyBlocks: ParsedDocxBlock[] = [];
+    await parseDocx(path, 'modes.docx', (block) => legacyBlocks.push(block));
+    expect(result.legacy.blocks).toEqual(legacyBlocks);
     expect(legacy.fidelity.find((row) => row.key === 'comments-revisions')!.detail).toBe(COMMENTS_REVISIONS_DETAIL);
     for (const mode of ['suggestions', 'accepted-baseline'] as const) {
       const reading = word.readings[mode === 'suggestions' ? 'rejected' : 'accepted'];
@@ -127,6 +132,7 @@ describe('explicit tracked Word successor compiler (#1132)', () => {
     });
     if (result.kind !== 'word') throw new Error('expected supported Word staging preview');
     expect(result.word.previewReading).toBe('accepted');
+    expect(result.legacy).toEqual({ kind: 'unavailable', code: 'DOCX_REJECTED', reason: 'DOCX contains no editable text blocks' });
     expect(preview).toEqual(['new']);
     expect(legacy).toEqual([]);
     expect(result.parsed.blockCount).toBe(1);
@@ -167,6 +173,8 @@ describe('explicit tracked Word successor compiler (#1132)', () => {
       legacy: () => { throw new Error('Word preview cannot emit legacy mapping rows'); }, wordPreview: (block) => preview.push(block.text),
     });
     expect(result.kind).toBe('word');
+    if (result.kind !== 'word') throw new Error('expected supported Word preview');
+    expect(result.legacy.kind).toBe('unavailable');
     expect(preview).toEqual(['base']);
     await expect(parseDocx(path, 'normalized.docx', () => undefined)).rejects.toThrow('paragraph exceeds');
   });

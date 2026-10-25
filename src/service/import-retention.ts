@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import type { ManuscriptBlockProjection, TextBoxDisposition } from '../shared/protocol.js';
 import { MAX_FRAME_BYTES } from '../shared/protocol.js';
-import type { ParsedTextBox } from './docx.js';
+import { DOCX_PARSER_IDENTITY, DOCX_PARSER_IDENTITY_V1, DOCX_PARSER_IDENTITY_V2,
+  WORD_DOCX_PARSER_IDENTITY, type ParsedTextBox } from './docx.js';
 import type { ParsedImportedMark } from './docx-marks.js';
 import type { LOCAL_LEARNING_POLICY_BASIS } from './learning-eligibility.js';
 import { canonicalJson as wordCanonicalJson, sha256Hex, DIGEST_PATTERN, UUID_PATTERN, hasExactKeys, isRecord } from './analysis/canonical.js';
@@ -215,9 +216,115 @@ export interface WordImportControlsSnapshot {
   book: { excluded: boolean; reference: WordControlReference };
   materials: Array<{ templateKey: string; materialDigest: string; standing: WordMaterialStandingSnapshot }>;
 }
+
+/** The immutable original is independent of every reading derived by the Word compiler. */
+export interface WordParentSourcePin {
+  schema: 'ai7.word-parent-source-pin/1';
+  sourceVersionId: string;
+  bookId: string;
+  objectDigest: string;
+  sourceDigest: string;
+  sourceBytes: number;
+  format: 'DOCX';
+  parserIdentity: string;
+  contentDigest: string;
+  structureDigest: string;
+  workingObjectDigest: null;
+  converterIdentity: null;
+  displayName: string;
+  createdAt: string;
+}
+
+/**
+ * Freeze the existing row and object identity without reparsing it under a different parser. The
+ * caller must first validate historical records through their own reader and verify original bytes.
+ */
+export function readWordParentSourcePin(db: DatabaseSync, bookId: string, sourceVersionId: string): WordParentSourcePin {
+  requireRetention(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(sourceVersionId), 'WORD_SOURCE_INVALID', 'Word 原始来源标识无效。');
+  const rows = db.prepare(`SELECT sv.*, co.byte_length FROM source_versions sv
+    JOIN content_objects co ON co.object_digest = sv.object_digest
+    WHERE sv.source_version_id = ? AND sv.book_id = ?`).all(sourceVersionId, bookId);
+  requireRetention(rows.length === 1, 'WORD_SOURCE_INVALID', 'Word 原始来源或留存对象不完整。');
+  const row = rows[0]!;
+  requireRetention(row.format === 'DOCX' && row.working_object_digest === null && row.converter_identity === null,
+    'WORD_SOURCE_INVALID', 'Word 原始来源不是未转换的 DOCX。');
+  const pin: WordParentSourcePin = { schema: 'ai7.word-parent-source-pin/1', sourceVersionId, bookId,
+    objectDigest: text(row.object_digest), sourceDigest: text(row.source_digest), sourceBytes: integer(row.byte_length),
+    format: 'DOCX', parserIdentity: text(row.parser_identity), contentDigest: text(row.content_digest),
+    structureDigest: text(row.structure_digest), workingObjectDigest: null, converterIdentity: null,
+    displayName: text(row.display_name), createdAt: text(row.created_at) };
+  wordParentSourcePinRecord(pin);
+  const matches = db.prepare('SELECT source_version_id FROM source_versions WHERE book_id = ? AND source_digest = ?')
+    .all(bookId, pin.sourceDigest);
+  requireRetention(matches.length === 1 && matches[0]!.source_version_id === sourceVersionId,
+    'WORD_SOURCE_INVALID', 'Word 原始来源身份不唯一。');
+  return pin;
+}
+
+export function wordParentSourcePinRecord(pin: WordParentSourcePin): { json: string; digest: string } {
+  requireRetention(isRecord(pin) && hasExactKeys(pin, ['schema', 'sourceVersionId', 'bookId', 'objectDigest', 'sourceDigest', 'sourceBytes', 'format',
+    'parserIdentity', 'contentDigest', 'structureDigest', 'workingObjectDigest', 'converterIdentity', 'displayName', 'createdAt']) &&
+    pin.schema === 'ai7.word-parent-source-pin/1' && UUID_PATTERN.test(pin.sourceVersionId) && UUID_PATTERN.test(pin.bookId) &&
+    [pin.objectDigest, pin.sourceDigest, pin.contentDigest, pin.structureDigest].every((digest) => DIGEST_PATTERN.test(digest)) &&
+    pin.objectDigest === pin.sourceDigest && pin.format === 'DOCX' && Number.isSafeInteger(pin.sourceBytes) && pin.sourceBytes > 0 &&
+    [DOCX_PARSER_IDENTITY_V1, DOCX_PARSER_IDENTITY_V2, DOCX_PARSER_IDENTITY, WORD_DOCX_PARSER_IDENTITY].some((identity) => identity === pin.parserIdentity) &&
+    pin.workingObjectDigest === null && pin.converterIdentity === null && pin.displayName.length > 0 && pin.displayName.isWellFormed() &&
+    Number.isFinite(Date.parse(pin.createdAt)), 'WORD_SOURCE_INVALID', 'Word 原始来源固定记录无效。');
+  const json = wordCanonicalJson(pin);
+  return { json, digest: sha256Hex(json) };
+}
+
+/** Pin equality never substitutes the successor compiler for the historical parent parser. */
+export function requireWordParentSourcePin(db: DatabaseSync, pin: WordParentSourcePin): { json: string; digest: string } {
+  const expected = wordParentSourcePinRecord(pin);
+  const actual = wordParentSourcePinRecord(readWordParentSourcePin(db, pin.bookId, pin.sourceVersionId));
+  requireRetention(actual.json === expected.json, 'WORD_SOURCE_CHANGED', 'Word 原始来源在确认后已变化，请重新审阅。');
+  return expected;
+}
+
+/** Compare retained evidence with a fresh compilation of its verified original; never trust graph JSON alone. */
+export function requireWordRevisionSource(db: DatabaseSync, parent: WordParentSourcePin, graph: WordRevisionGraph): {
+  parentSourcePinDigest: string; graphDigest: string;
+} {
+  const pin = requireWordParentSourcePin(db, parent);
+  const graphJson = wordCanonicalJson(graph);
+  const graphDigest = sha256Hex(graphJson);
+  requireRetention(graph.schema === WORD_SOURCE_SCHEMA && graph.profile === WORD_INTAKE_PROFILE &&
+    graph.sourceDigest === parent.sourceDigest && graph.parserIdentity === WORD_DOCX_PARSER_IDENTITY &&
+    graph.extractorIdentity === WORD_EXTRACTOR_IDENTITY, 'WORD_SOURCE_INVALID', 'Word 衍生图与原始来源不一致。');
+  const row = db.prepare('SELECT * FROM word_revision_sources WHERE source_version_id = ?').get(parent.sourceVersionId);
+  requireRetention(row !== undefined && row.book_id === parent.bookId && row.object_digest === parent.objectDigest &&
+    row.parent_parser_identity === parent.parserIdentity && row.parent_source_pin_json === pin.json && row.parent_source_pin_digest === pin.digest &&
+    row.compiler_identity === graph.parserIdentity && row.extractor_identity === graph.extractorIdentity &&
+    row.graph_json === graphJson && row.graph_digest === graphDigest,
+  'WORD_SOURCE_INVALID', 'Word 衍生来源的原始固定记录或编译图不一致。');
+  return { parentSourcePinDigest: pin.digest, graphDigest };
+}
+
+/** Called inside the import transaction, after historical-reader and original-byte validation. */
+export function retainWordRevisionSource(db: DatabaseSync, parent: WordParentSourcePin, graph: WordRevisionGraph): {
+  parentSourcePinDigest: string; graphDigest: string;
+} {
+  requireRetention(db.isTransaction, 'WORD_SOURCE_INVALID', 'Word 来源必须与导入一并提交。');
+  const pin = requireWordParentSourcePin(db, parent);
+  requireRetention(graph.schema === WORD_SOURCE_SCHEMA && graph.profile === WORD_INTAKE_PROFILE &&
+    graph.sourceDigest === parent.sourceDigest && graph.parserIdentity === WORD_DOCX_PARSER_IDENTITY &&
+    graph.extractorIdentity === WORD_EXTRACTOR_IDENTITY, 'WORD_SOURCE_INVALID', 'Word 衍生图与原始来源不一致。');
+  const existing = db.prepare('SELECT source_version_id FROM word_revision_sources WHERE source_version_id = ?').get(parent.sourceVersionId);
+  if (existing === undefined) {
+    const graphJson = wordCanonicalJson(graph);
+    db.prepare(`INSERT INTO word_revision_sources(source_version_id, book_id, object_digest,
+      parent_parser_identity, parent_source_pin_json, parent_source_pin_digest, compiler_identity, extractor_identity, graph_json, graph_digest)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(parent.sourceVersionId, parent.bookId, parent.objectDigest,
+      parent.parserIdentity, pin.json, pin.digest, graph.parserIdentity, graph.extractorIdentity, graphJson, sha256Hex(graphJson));
+  }
+  return requireWordRevisionSource(db, parent, graph);
+}
+
 export interface WordImportChoiceRecord extends WordTrackedChoiceInput {
   schema: 'ai7.word-import-choice/1';
   sourceVersionId: string;
+  parentSourcePinDigest: string;
   originalDigest: string;
   workingObjectDigest: string | null;
   importReviewId: string;
@@ -263,6 +370,7 @@ export type WordSampleDetailRecord =
       parentCount: number; rangeLinkCount: number }
   | { type: 'event-link'; eventId: string; relation: 'parent' | 'range'; linkedEventId: string; ordinal: number }
   | { type: 'import'; commitId: string; mode: WordImportMode; sourceVersionId: string; sourceDigest: string;
+      parentSourcePinDigest: string;
       importReviewId: string; fidelityReviewId: string; revisionId: string; choiceDigest: string; admissionDigest: string;
       workingObjectDigest: string | null; compilerIdentity: string; extractorIdentity: typeof WORD_EXTRACTOR_IDENTITY;
       graphDigest: string; readings: WordImportChoiceRecord['readings']; mappingDigest: string; templateManifestDigest: string;
@@ -358,7 +466,7 @@ export function wordSampleDetailStream(source: WordSampleDetailSource): WordSamp
   const sectionCounts = { before: source.sample.before.length, after: source.sample.after.length,
     events: eventCount, imports: source.imports.length * 2 };
   source.imports.forEach(({ choice, choiceDigest, admission, admissionDigest }) => {
-    requireRetention(choice.sourceVersionId === source.sourceVersionId && choice.originalDigest === source.sample.sourceDigest &&
+    requireRetention(choice.sourceVersionId === source.sourceVersionId && DIGEST_PATTERN.test(choice.parentSourcePinDigest) && choice.originalDigest === source.sample.sourceDigest &&
       choice.graphDigest === source.graphDigest && admission.sampleId === source.sample.sampleId &&
       admission.sampleDigest === source.sampleDigest && admission.importChoiceDigest === choiceDigest &&
       sha256Hex(wordCanonicalJson(choice)) === choiceDigest && sha256Hex(wordCanonicalJson(admission)) === admissionDigest,
@@ -408,6 +516,7 @@ export function wordSampleDetailStream(source: WordSampleDetailSource): WordSamp
         return record(section, ordinal, sourceOrdinal, ordinal % 2 === 1
           ? { type: 'import-admission', commitId: choice.commitId, basis: admission }
           : { type: 'import', commitId: choice.commitId, mode: choice.mode, sourceVersionId: choice.sourceVersionId,
+              parentSourcePinDigest: choice.parentSourcePinDigest,
               sourceDigest: choice.originalDigest, fidelityReviewId: choice.fidelityReviewId, importReviewId: choice.importReviewId,
               revisionId: choice.revisionId, choiceDigest, admissionDigest, workingObjectDigest: choice.workingObjectDigest,
               compilerIdentity: source.graph.parserIdentity, extractorIdentity: choice.extractorIdentity, graphDigest: choice.graphDigest,
@@ -748,6 +857,9 @@ export const WORD_IMPORT_RETENTION_SCHEMA_SQL = {
   source_version_id TEXT PRIMARY KEY REFERENCES source_versions(source_version_id),
   book_id TEXT NOT NULL REFERENCES books(book_id),
   object_digest TEXT NOT NULL REFERENCES content_objects(object_digest),
+  parent_parser_identity TEXT NOT NULL,
+  parent_source_pin_json TEXT NOT NULL CHECK(json_valid(parent_source_pin_json)),
+  parent_source_pin_digest TEXT NOT NULL CHECK(length(parent_source_pin_digest) = 64),
   compiler_identity TEXT NOT NULL,
   extractor_identity TEXT NOT NULL,
   graph_json TEXT NOT NULL CHECK(json_valid(graph_json)),

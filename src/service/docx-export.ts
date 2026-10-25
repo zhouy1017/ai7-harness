@@ -1242,6 +1242,7 @@ interface ReviewFacts {
   restoration: 'from-original' | 'regenerated';
   freshReason: string | null;
   textBoxes: 'retain' | 'merge';
+  wordMode?: WordImportMode;
   tallies: Record<'inline-styles' | 'notes' | 'tables' | 'images-captions' | 'sections' | 'headers-footers' | 'text-boxes' | 'fields' | 'file-revisions', ClassTally>;
   marks: MarkPlan;
   options: ManuscriptExportOptions;
@@ -1362,7 +1363,10 @@ function fidelityRows(facts: ReviewFacts): ExportFidelityRowProjection[] {
             : fidelityRow('text-boxes', '文本框', boxes.total, 'degraded', `锚定在改过或带标记的段落中的 ${boxes.lost} 个文本框连同内容照常写出，但锚点从原来的位置移到了该段末尾；其余从原文件恢复。`, boxes.positions),
     contentRow(facts, 'fields', '域（目录等）', '未检测到域。', '目录、页码等域从原文件恢复，打开后可以更新。',
       (count) => `改过或带标记的段落中的域只写出当前显示的文字，不再更新（${count} 个）；其余从原文件恢复。`),
-    revisions.total === 0
+    facts.wordMode !== undefined
+      ? fidelityRow('file-revisions', '原文件中的修订', revisions.total, revisions.total === 0 ? 'preserved' : 'degraded',
+        `正文来源的 ${revisions.total} 处原始修订记号不直接恢复；文字按导入时确认的${facts.wordMode === 'suggestions' ? '拒绝修订' : '接受修订'}阅读对应，之后的编辑按当前稿件写出。待处理修改建议按本次导出选项处理。`)
+      : revisions.total === 0
       ? fidelityRow('file-revisions', '原文件中的修订', 0, 'preserved', '原文件没有未转为稿件标记的修订。')
       : fidelityRow('file-revisions', '原文件中的修订', revisions.total, facts.restoration === 'regenerated' ? 'unavailable' : 'degraded',
         `原文件中未转为稿件标记的修订（格式修订、文本框中的批注与修订等，${revisions.total} 处）不写出；导出的文字是拒绝这些修订后的文字。`),
@@ -1952,6 +1956,7 @@ function mappedPackage(input: DocxExportInput, source: Extract<DocxExportSource,
     options: input.options,
   };
   facts.tallies['headers-footers'].total = original.names.filter((name) => /^word\/(header|footer)\d*\.xml$/i.test(name)).length;
+  if (isWordMappedDocxSource(source)) facts.wordMode = source.mapping.mode;
   const makeWriter = (prefix: string): MarkupWriter => new MarkupWriter(prefix, identities.nextId, identities.paraIds);
   const walk = isWordMappedDocxSource(source)
     ? { kind: 'word' as const, ...rewriteWordDocument(documentXml, input, source, plan, facts, makeWriter) }

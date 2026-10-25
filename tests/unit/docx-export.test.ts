@@ -87,6 +87,8 @@ describe('Word graph mapped export (#1132)', () => {
     for (const edited of [false, true]) {
       const blocks = input.blocks.map((block) => edited ? { ...block, text: `${block.text} edited`, digest: blockDigest(block.kind, block.level, `${block.text} edited`) } : block);
       const output = renderDocxExport({ ...input, blocks }, { emit: true });
+      expect(output.fidelity.find((row) => row.key === 'file-revisions')!.detail)
+        .toContain(mode === 'suggestions' ? '拒绝修订阅读' : '接受修订阅读');
       const reread = await parseBytes(output.bytes!);
       expect(reread.blocks.map((block) => block.text)).toEqual(blocks.map((block) => block.text));
       expect(reread.parsed.importedMarks).toEqual([]);
@@ -183,6 +185,7 @@ describe('Word graph mapped export (#1132)', () => {
   it('derives a pure writer/binding/digest plan and refuses different pins even when rendering is identical', () => {
     const input = makeInput('<w:p><w:r><w:t>base</w:t></w:r><w:ins w:id="1"><w:r><w:t>new</w:t></w:r></w:ins></w:p>', 'suggestions');
     const pins = { sourceVersionId: '10000000-0000-4000-8000-000000000001', workingObjectDigest: null,
+      parentSourcePinDigest: 'c'.repeat(64),
       importCommitId: '10000000-0000-4000-8000-000000000002', importChoiceDigest: 'a'.repeat(64),
       mappingAncestorRevisionId: '10000000-0000-4000-8000-000000000003', revisionId: '10000000-0000-4000-8000-000000000004', revisionDigest: 'b'.repeat(64) };
     const plan = planWordManuscriptExport(input, 'docx', pins);
@@ -191,6 +194,9 @@ describe('Word graph mapped export (#1132)', () => {
     const changed = planWordManuscriptExport(input, 'docx', { ...pins, mappingAncestorRevisionId: '10000000-0000-4000-8000-000000000005' });
     expect(changed.inputDigest).not.toBe(plan.inputDigest);
     expect(() => requireWordExportBinding(plan.binding, changed.binding)).toThrow('Word');
+    const changedParent = planWordManuscriptExport(input, 'docx', { ...pins, parentSourcePinDigest: 'd'.repeat(64) });
+    expect(changedParent.inputDigest).not.toBe(plan.inputDigest);
+    expect(() => requireWordExportBinding(plan.binding, changedParent.binding)).toThrow('Word');
     expect(() => requireWordExportBinding({ ...plan.binding, unknown: true }, plan.binding)).toThrow('Word');
   });
 

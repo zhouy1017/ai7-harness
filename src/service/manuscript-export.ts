@@ -237,6 +237,7 @@ export interface WordExportPreparationBinding {
   writer: string;
   format: ManuscriptExportFormat;
   sourceVersionId: string;
+  parentSourcePinDigest: string;
   sourceDigest: string;
   workingObjectDigest: string | null;
   importCommitId: string;
@@ -256,6 +257,7 @@ export interface WordExportPreparationBinding {
 
 export interface WordExportSourcePins {
   sourceVersionId: string;
+  parentSourcePinDigest: string;
   workingObjectDigest: string | null;
   importCommitId: string;
   importChoiceDigest: string;
@@ -273,7 +275,7 @@ export function planWordManuscriptExport(input: DocxExportInput, format: Manuscr
   for (const id of [pins.sourceVersionId, pins.importCommitId, pins.mappingAncestorRevisionId, pins.revisionId]) {
     requireExport(UUID_PATTERN.test(id), 'EXPORT_RECORD_INVALID', 'Word 导出计划的来源或版本标识无效。');
   }
-  for (const digest of [pins.importChoiceDigest, pins.revisionDigest, source.mapping.graphDigest,
+  for (const digest of [pins.parentSourcePinDigest, pins.importChoiceDigest, pins.revisionDigest, source.mapping.graphDigest,
     source.mapping.readingDigest, source.mapping.mappingDigest]) {
     requireExport(DIGEST_PATTERN.test(digest), 'EXPORT_RECORD_INVALID', 'Word 导出计划的固定摘要无效。');
   }

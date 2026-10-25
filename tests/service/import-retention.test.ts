@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { unzipSync, zipSync } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { parseDocx, type ParsedDocx, type ParsedDocxBlock } from '../../src/service/docx.js';
+import { parseDocx, compileWordTrackedDocx, WORD_DOCX_PARSER_IDENTITY, type ParsedDocx, type ParsedDocxBlock } from '../../src/service/docx.js';
 import { fixedArchiveTime } from '../../src/shared/archive-time.js';
 import {
   IMPORT_FIDELITY_CATEGORIES_REVISION_26_SQL,
@@ -13,6 +13,11 @@ import {
   initializeWordImportRetentionSchema,
   validateWordImportRetentionSchema,
   WORD_IMPORT_RETENTION_SCHEMA_SQL,
+  readWordParentSourcePin,
+  wordParentSourcePinRecord,
+  requireWordParentSourcePin,
+  requireWordRevisionSource,
+  retainWordRevisionSource,
 } from '../../src/service/import-retention.js';
 import { EditorialStore, SOURCE_VERSION_PARSER_CHANGED_MESSAGE, StoreError } from '../../src/service/store.js';
 import { CLARIFICATION_SCHEMA_VERSION, LATEST_SCHEMA_VERSION, PROPOSAL_CONFLICT_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
@@ -20,6 +25,7 @@ import type { ManuscriptBlockProjection, TextBoxDisposition } from '../../src/sh
 import {
   ADMITTED_BASELINE_DOCX,
   composeManuscriptDocx,
+  composeRevisedDocx,
   type ComposedManuscriptRequest,
 } from '../support/composed-fixture.js';
 import { IMPORT_RETENTION_RELATIONS_DROP_ORDER, SAMPLE1_V1_REPORT } from '../support/import-retention.js';
@@ -67,6 +73,53 @@ function databasePath(): string {
 // Definition/transaction proof only: these call the layer owner directly over genuine existing
 // parents, before its global migration activation. They are not a migrated-store or public-intake proof.
 describe('closed Word retention definitions (#1132)', () => {
+  it('retains a real compiler graph beside its unchanged historical source pin and refuses drift', async () => {
+    const path = join(roots.inputRoot, 'word-parent.docx');
+    await composeRevisedDocx(path, { source: ADMITTED_BASELINE_DOCX, title: '来源固定记录', paragraphs: [
+      { runs: [{ text: { block: 8, from: 0, to: 10 } }, { text: { block: 9, from: 0, to: 5 },
+        revision: { kind: 'ins', author: '作者', date: '2026-10-25T00:00:00Z' } }] },
+    ] });
+    const compiled = await compileWordTrackedDocx(path);
+    if (compiled.kind !== 'ready') throw new Error('expected actual supported Word compiler output');
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let bookId: string;
+    try {
+      bookId = (await importComposed(store, path)).bookId;
+      store.getBookOverview(bookId); // Validate the original historical records through their existing reader.
+      store.markCleanShutdown();
+    } finally { store.close(); }
+    withDatabase(false, (db) => {
+      const source = db.prepare('SELECT source_version_id FROM source_versions WHERE book_id = ?').get(bookId);
+      const sourceVersionId = String(source!.source_version_id);
+      const original = db.prepare('SELECT rowid, * FROM source_versions WHERE source_version_id = ?').get(sourceVersionId);
+      const provenance = db.prepare('SELECT rowid, * FROM source_provenance WHERE source_version_id = ?').all(sourceVersionId);
+      const pin = readWordParentSourcePin(db, bookId, sourceVersionId);
+      expect(pin.parserIdentity).toBe('ai7-docx-fflate-saxes/3');
+      expect(pin.sourceDigest).toBe(compiled.sourceDigest);
+      initializeWordImportRetentionSchema(db);
+      expect(() => retainWordRevisionSource(db, pin, compiled.graph)).toThrow('一并提交');
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        const retained = retainWordRevisionSource(db, pin, compiled.graph);
+        expect(retainWordRevisionSource(db, pin, compiled.graph)).toEqual(retained);
+        expect(retained).toEqual({ parentSourcePinDigest: wordParentSourcePinRecord(pin).digest, graphDigest: compiled.graphDigest });
+        expect(db.prepare('SELECT parent_parser_identity, compiler_identity FROM word_revision_sources').get())
+          .toMatchObject({ parent_parser_identity: pin.parserIdentity, compiler_identity: WORD_DOCX_PARSER_IDENTITY });
+        expect(() => requireWordRevisionSource(db, { ...pin, parserIdentity: WORD_DOCX_PARSER_IDENTITY }, compiled.graph)).toThrow('变化');
+        expect(() => requireWordRevisionSource(db, pin, { ...compiled.graph, events: [] })).toThrow('Word');
+        expect(() => readWordParentSourcePin(db, randomUUID(), sourceVersionId)).toThrow('Word');
+        expect(() => wordParentSourcePinRecord({ ...pin, objectDigest: 'f'.repeat(64) })).toThrow('Word');
+        expect(db.prepare('SELECT rowid, * FROM source_versions WHERE source_version_id = ?').get(sourceVersionId)).toEqual(original);
+        expect(db.prepare('SELECT rowid, * FROM source_provenance WHERE source_version_id = ?').all(sourceVersionId)).toEqual(provenance);
+        db.exec('COMMIT');
+      } catch (error) { db.exec('ROLLBACK'); throw error; }
+      db.prepare('UPDATE source_versions SET content_digest = ? WHERE source_version_id = ?').run('e'.repeat(64), sourceVersionId);
+      expect(() => requireWordParentSourcePin(db, pin)).toThrow('变化');
+      db.prepare('UPDATE source_versions SET parser_identity = ? WHERE source_version_id = ?').run('unknown-parser/1', sourceVersionId);
+      expect(() => readWordParentSourcePin(db, bookId, sourceVersionId)).toThrow('Word');
+    });
+  }, 120_000);
+
   it('adds the complete empty layer once while preserving existing source and retention records', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try { await importSample1Book(store, roots.codeRoot, 'Word 层保留校验'); store.markCleanShutdown(); } finally { store.close(); }

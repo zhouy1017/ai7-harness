@@ -1610,9 +1610,38 @@ export async function parseDocx(
 }
 
 export type ParsedWordDocx = Omit<ParsedDocx, 'parserIdentity'> & { parserIdentity: typeof WORD_DOCX_PARSER_IDENTITY };
+export type WordLegacyIntakeView =
+  | { kind: 'ready'; parsed: ParsedDocx; blocks: ParsedDocxBlock[] }
+  | { kind: 'unavailable'; code: 'DOCX_REJECTED'; reason: string };
 export type NativeDocxIntakeParse =
   | { kind: 'legacy'; parsed: ParsedDocx; word: Extract<WordTrackedCompilation, { kind: 'unsupported' }> | null }
-  | { kind: 'word'; parsed: ParsedWordDocx; word: Extract<WordTrackedCompilation, { kind: 'ready' }> };
+  | { kind: 'word'; parsed: ParsedWordDocx; word: Extract<WordTrackedCompilation, { kind: 'ready' }>; legacy: WordLegacyIntakeView };
+
+/**
+ * Source-only and reimport retain the real legacy result or its actual refusal. Neither may consume
+ * Word preview blocks as historical rows. A reader refusal is usable only while original bytes match.
+ */
+async function wordLegacyIntakeView(path: string, displayName: string, expected: { digest: string; bytes: number },
+  options: { signal?: AbortSignal; formatIdentified?: boolean }): Promise<WordLegacyIntakeView> {
+  const blocks: ParsedDocxBlock[] = [];
+  try {
+    const parsed = await parseDocx(path, displayName, (block) => blocks.push(block), expected, options);
+    return { kind: 'ready', parsed, blocks };
+  } catch (error) {
+    options.signal?.throwIfAborted();
+    if (!(error instanceof Error) || !error.message.startsWith('DOCX_REJECTED:')) throw error;
+    blocks.length = 0;
+    const hash = createHash('sha256');
+    let bytes = 0;
+    for await (const chunk of createReadStream(path, { highWaterMark: 64 * 1024, signal: options.signal })) {
+      bytes += chunk.length;
+      requireDocx(bytes <= MAX_ARCHIVE_BYTES && bytes <= expected.bytes, 'selected file changed during legacy capability read');
+      hash.update(chunk);
+    }
+    requireDocx(bytes === expected.bytes && hash.digest('hex') === expected.digest, 'selected file changed during legacy capability read');
+    return { kind: 'unavailable', code: 'DOCX_REJECTED', reason: error.message.slice('DOCX_REJECTED:'.length) };
+  }
+}
 
 /** The successor's own box projection, without inventing legacy paragraph mapping rows. */
 function wordRetainedTextBoxes(compiled: Extract<WordTrackedCompilation, { kind: 'ready' }>, signal?: AbortSignal): ParsedTextBox[] {
@@ -1676,8 +1705,9 @@ export async function parseNativeDocxIntake(path: string, displayNameInput: stri
     archive.entryNames.filter((entry) => /^word\/(?:header|footer)[^/]*\.xml$/i.test(entry)).length, 'retain', 'word-preview');
   requireDocx(deriveImportFidelityPlan(fidelity, compiled.sourceDigest, compiled.archiveBytes, undefined, WORD_DOCX_PARSER_IDENTITY) !== undefined,
     'Word preview fidelity report is malformed');
+  const legacy = await wordLegacyIntakeView(path, displayNameInput, expected, readOptions);
   for (const block of preview.blocks) { options.signal?.throwIfAborted(); blocks.wordPreview(block); }
-  return { kind: 'word', word: compiled, parsed: { parserIdentity: WORD_DOCX_PARSER_IDENTITY, sourceDigest: compiled.sourceDigest,
+  return { kind: 'word', word: compiled, legacy, parsed: { parserIdentity: WORD_DOCX_PARSER_IDENTITY, sourceDigest: compiled.sourceDigest,
     archiveBytes: compiled.archiveBytes, contentDigest: preview.contentDigest, structureDigest: preview.structureDigest,
     blockCount: preview.blocks.length, characterCount: preview.characterCount, fidelity, textBoxes: archive.document.textBoxes,
     importedMarks: archive.document.importedMarks, titleSuggestion } };
