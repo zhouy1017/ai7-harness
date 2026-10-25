@@ -1677,6 +1677,12 @@ async function main() {
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true'&&document.querySelector('[data-screen="landing"]')`, 'word-lineage-restart-product-ready');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'word-lineage-restart-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'word-lineage-restart-ready');
+    while (!(await renderer.evaluate(`Boolean(document.querySelector('button[data-book-id="${wordSignal.source.bookId}"]'))`))) {
+      const shownBooks = await renderer.evaluate(`document.querySelectorAll('[data-screen="landing"] .book-summary-item').length`);
+      await click(renderer, '加载更多图书', 'word-lineage-restart-more-books');
+      await waitFor(renderer, `document.querySelectorAll('[data-screen="landing"] .book-summary-item').length > ${shownBooks}`,
+        'word-lineage-restart-next-books');
+    }
     await clickBook(renderer, wordSignal.source.bookId, 'word-lineage-restart-book');
     await waitFor(renderer, `document.querySelector('.book-overview[data-book-id="${wordSignal.source.bookId}"]')`, 'word-lineage-restart-book-ready');
     const wordAfter = await renderer.evaluate(wordRead);
