@@ -6,7 +6,7 @@ AI7 is proprietary software. The following components remain under their own lic
 
 | Components | Version(s) | License and attribution |
 | --- | --- | --- |
-| the `@deepseek-ai/` scoped packages `dsh-agent`, `dsh-agent-loop`, `dsh-attachment`, `dsh-brand`, `dsh-code-runtime`, `dsh-invariants`, `dsh-llm`, `dsh-scope`, `dsh-session`, `dsh-session-persistence`, `dsh-settings`, `dsh-system-prompt`, `dsh-timeout`, `dsh-tools`, `dsh-typert-protocol`, `dsh-user-approval` | 0.1.0-rc.6 | MIT; Copyright (c) 2026 DeepSeek |
+| the `@deepseek-ai/` scoped packages `dsh-agent`, `dsh-agent-loop`, `dsh-attachment`, `dsh-brand`, `dsh-code-runtime`, `dsh-invariants`, `dsh-llm`, `dsh-scope`, `dsh-session`, `dsh-session-persistence`, `dsh-settings`, `dsh-subagent`, `dsh-subagent-in-process-driver`, `dsh-subagent-spawn-in-process`, `dsh-system-prompt`, `dsh-timeout`, `dsh-tools`, `dsh-typert-protocol`, `dsh-user-approval` | 0.1.0-rc.6 | MIT; Copyright (c) 2026 DeepSeek |
 | `@deepseek-ai/cordis`, `@deepseek-ai/cosmokit`, `@deepseek-ai/schemastery` | 4.0.1, 1.8.2, 3.18.1 | MIT; Copyright (c) 2021-present Shigma |
 | `@standard-schema/spec` | 1.1.0 | MIT; Copyright (c) 2024 Colin McDonnell |
 | `@napi-rs/keyring` and its exact optional `@napi-rs/keyring-*` native carriers | 1.3.0 | MIT; Copyright (c) 2020 N-API for Rust |
@@ -17,6 +17,7 @@ AI7 is proprietary software. The following components remain under their own lic
 | `rope-sequence` | 1.3.4 | MIT; Copyright (C) 2016 by Marijn Haverbeke `<marijn@haverbeke.berlin>` |
 | `saxes` | 6.0.0 | ISC; Copyright (c) Contributors; inherited sax portions Copyright (c) Isaac Z. Schlueter and Contributors |
 | `xmlchars` | 2.2.0 | MIT; Copyright Louis-Dominique Dubeau and contributors to xmlchars |
+| `zod` | 4.4.3 | MIT; Copyright (c) 2025 Colin McDonnell |
 
 ## Development-only components
 
@@ -59,6 +60,8 @@ Copyright (c) 2026 DeepSeek
 Copyright (c) 2021-present Shigma
 
 Copyright (c) 2024 Colin McDonnell
+
+Copyright (c) 2025 Colin McDonnell
 
 Copyright (c) 2020 N-API for Rust
 

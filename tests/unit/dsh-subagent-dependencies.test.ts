@@ -152,7 +152,10 @@ interface Composition {
   readonly adapter: SyntheticAdapter;
   readonly started: ObservedChild[];
   readonly ended: SubagentRunEndInfo[];
+  /** Called when a run's result settles (`subagent/end`), before its disposal begins. */
   onEnd: (() => void) | null;
+  /** Called while a child is being disposed (`agent/disposed`), after its result settled. */
+  onChildDisposed: (() => void) | null;
   readonly modules: { readonly prompt: typeof import('@deepseek-ai/dsh-system-prompt'); readonly subagent: typeof import('@deepseek-ai/dsh-subagent');
     readonly driver: typeof import('@deepseek-ai/dsh-subagent-in-process-driver') };
 }
@@ -188,8 +191,11 @@ async function compose(): Promise<Composition> {
     const parent = await context.agents.create({ sessionId: sessions.SessionId(randomUUID()), agentOptions: { provider: ROUTE, model: MODEL } });
     const composition: Composition = {
       context, parent, runtime: context.subagents, facade: new OneShotUnitFacade(context.subagents, parent.agent), adapter,
-      started: [], ended: [], onEnd: null, modules: { prompt, subagent, driver },
+      started: [], ended: [], onEnd: null, onChildDisposed: null, modules: { prompt, subagent, driver },
     };
+    context.on('agent/disposed', ({ agent: disposed }) => {
+      if (disposed.id !== parent.agent.id) composition.onChildDisposed?.();
+    });
     parent.agent.ctx.on('subagent/start', (info) => {
       const child = context.agents.get(info.id);
       composition.started.push({
@@ -374,21 +380,30 @@ describe('the admitted DSH sub-agent packages (provider-free dependency compatib
       await expect(facade.run(unit())).rejects.toBeInstanceOf(FacadeRefusal);
       expect(adapter.requests.length).toBe(1);
 
-      // The result settles before disposal finishes; a call made at that point is still refused.
-      let duringTeardown: Promise<SubagentResult> | null = null;
+      // The result settles before disposal finishes: a call made when it settles, and one made while the child is being
+      // disposed, are both refused. A wrongly admitted call would be answered at once, so it shows up as a second request.
+      let atSettlement: Promise<SubagentResult> | null = null;
+      let duringDisposal: Promise<SubagentResult> | null = null;
       composition.onEnd = () => {
-        duringTeardown = facade.run(unit());
-        duringTeardown.catch(() => undefined);
+        atSettlement = facade.run(unit());
+        atSettlement.catch(() => undefined);
       };
+      composition.onChildDisposed = () => {
+        duringDisposal = facade.run(unit());
+        duringDisposal.catch(() => undefined);
+      };
+      adapter.mode = 'answer';
       adapter.release();
       expect((await first).stopReason).toBe('completed');
       composition.onEnd = null;
-      expect(duringTeardown).not.toBeNull();
-      await expect(duringTeardown).rejects.toBeInstanceOf(FacadeRefusal);
+      composition.onChildDisposed = null;
+      expect(atSettlement).not.toBeNull();
+      expect(duringDisposal).not.toBeNull();
+      await expect(atSettlement).rejects.toBeInstanceOf(FacadeRefusal);
+      await expect(duringDisposal).rejects.toBeInstanceOf(FacadeRefusal);
       expect(adapter.requests.length).toBe(1);
       expectOnlyParent(composition);
 
-      adapter.mode = 'answer';
       const later = await facade.run(unit());
       expect(later.stopReason).toBe('completed');
       expect(adapter.requests.length).toBe(2);
