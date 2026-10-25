@@ -62,7 +62,7 @@ Ordinary-production v27 retains v26’s and v25’s bindings and connection-test
 
 ## Wave 20 eligibility declarations
 
-[Provider Processing v26](provider-processing-policy.v26.md) carries ADR 0095 §§2–6 and #1079’s configurable governor defaults (4 requests in flight, 3 units per Run, background share 1; the effective numbers are runtime configuration), 180-second request deadline, one Retry-After-aware rate-limit retry, read-only concurrency-safe local-tool declarations and parallel-call eligibility, review synthesis and contract-retry eligibility, and three searches per claim. Only its review rule adds 编辑任务说明 (at most 1,200 graphemes, attributed to the procedure version, no person’s name or contract-framing override) and 本社审阅规范条款 (at most 40 × 300 graphemes, attributed to the imported document version, no person’s name). 出版政策与风险 is eligible there with `webSearch: false` and 未联网核查 disclosure.
+[Provider Processing v26](provider-processing-policy.v26.md) carries ADR 0095 §§2–6 and #1079’s configurable governor defaults (4 requests in flight, 3 units per Run, background share 1; the effective numbers are runtime configuration), 180-second request deadline, one Retry-After-aware rate-limit retry, read-only concurrency-safe local-tool declarations and parallel-call eligibility, review synthesis and contract-retry eligibility, and three searches per claim. Only its review rule adds 编辑任务说明 (at most 1,200 graphemes, attributed to the procedure version, no person’s name or contract-framing override) and 本社审阅规范条款 (at most 40 × 300 graphemes, attributed to the imported document version, no person’s name). 出版政策与风险 is eligible there with `webSearch: false` and 未联网核查 disclosure. This paragraph describes the immutable v26 contract. Any instruction-only exception under [ADR 0100 §1](../adr/0100-admit-scoped-editor-task-instruction-text.md#1-accepted-decision-and-exact-scope) requires its separately selected successor and consumer; this index statement neither selects that successor nor changes v26 or v27.
 
 F-21b projects these declarations and reads the reviewed runtime model table. The later consumer slices own tool execution, synthesis and payload composition. Developer-live stays v24, including its existing refusals; development-ci v1, fixture-recording v2 and External Export v2 keep their exact pins.
 
@@ -73,6 +73,8 @@ F-21b projects these declarations and reads the reviewed runtime model table. Th
 ## Immutable history and activation
 
 Preserve every predecessor policy JSON, schema, Markdown projection and active-set manifest byte for byte. Rollback chooses a reviewed predecessor selection rather than editing its bytes or restoring revoked authority. New activation must integrate a coherent successor with matching path/digest/scope pins and the implementation that can enforce it; green tests alone do not activate policy.
+
+[ADR 0101 §1](../adr/0101-admit-scoped-full-fidelity-learned-examples.md#1-the-accepted-exception)'s learned-example text exception is accepted design, not a runtime selection: it applies only through a separately reviewed and selected immutable successor naming each source variant and purpose, and no selection above implements it; v27, its predecessors and unselected candidates keep their redaction bytes.
 
 [Learning eligibility](learning-eligibility-policy.md) and [factual verification](factual-verification-policy.md) retain their design-baseline status. They are not claimed as selected through the runtime schemas and active set above.
 
