@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
@@ -16,6 +17,12 @@ import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-d
 import { CUSTOM_DIMENSION_TEMPLATE, CUSTOM_DIMENSION_TITLE } from '../support/custom-analysis.js';
 import { execPre74Fixture, restoreCustomAnalysisPredecessor } from '../support/pre74-schema.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for 自定义分析维度 (Issue #922, slice 7f): the real store and ledger, the one execution owner and the
 // AI7 local deterministic adapter over the authored fixture `sample1-custom-analysis-authored`, and a fake secret resolver. The
@@ -57,7 +64,7 @@ async function withBook(body: (book: Book) => Promise<void>): Promise<void> {
     interruptAfterAbandonObjectRemoval: false,
     baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
   });
-  const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+  const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
   try {
     const imported = await importSample1Book(store, roots.codeRoot, 'L2 sample1 自定义分析');
     await pinEditorialWorkspaceProfileRevision2(store, imported.bookId);
@@ -318,7 +325,7 @@ describe('baseline and custom analysis on the same launch', () => {
 describe('schema revision 82', () => {
   it.each([TASK_INTENT_DRAFT_SCHEMA_VERSION, IMPORTED_SKILL_SCHEMA_VERSION])('rebuilds revision %i Result Set relations byte for byte, adds dimensions empty, and refuses a terminal store without them', async (predecessor) => {
     // Synchronized with #89: imported-Skill update ledgers follow revision 82 without rebuilding its relations.
-    expect(LATEST_SCHEMA_VERSION).toBe(89);
+    expect(LATEST_SCHEMA_VERSION).toBe(92);
     let bookId = '';
     await withBook(async (book) => {
       bookId = book.bookId;
@@ -350,7 +357,7 @@ describe('schema revision 82', () => {
     const migrated = new DatabaseSync(path);
     try {
       // Synchronized with #89: revision 83 adds imported-Skill update ledgers after this revision's migration.
-      expect(migrated.prepare('PRAGMA user_version').get()).toEqual({ user_version: 89 });
+      expect(migrated.prepare('PRAGMA user_version').get()).toEqual({ user_version: 92 });
       for (const table of ['analysis_result_sets', 'analysis_result_set_revisions'] as const) {
         expect((migrated.prepare(`SELECT sql FROM sqlite_schema WHERE name = '${table}'`).get() as { sql: string }).sql).toBe(ANALYSIS_RESULT_SET_SCHEMA_SQL[table]);
       }

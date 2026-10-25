@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
@@ -16,6 +17,12 @@ import { EditorialStore, StoreError, type BackgroundAnalysisRuntime } from '../.
 import { BASELINE_ANALYSIS_MODE_GOALS, BASELINE_ANALYSIS_TASK_GOAL, FACTUAL_REVIEW_TASK_GOAL, type BaselineAnalysisProjection, type BaselineAnalysisUpdateMode, type LaunchPolicyProjection } from '../../src/shared/protocol.js';
 import { SAMPLE1_UNITS, importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for 结果待确认 (Issue #51, plan slice S16c; V2-UX-CTRL-007, COPY-009, CONT-011, CONT-016; ADR
 // 0034): the real store on a temporary Agent Data Root, exact `sample1` imported through the supported path, and J-04's
@@ -55,7 +62,7 @@ function openWithRoute(): Promise<EditorialStore> {
 }
 
 function owner(store: EditorialStore): BaselineAnalysisExecutionOwner {
-  return new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+  return new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
 }
 
 function prepare(store: EditorialStore, bookId: string): BaselineAnalysisProjection {
@@ -101,6 +108,7 @@ async function pausedHoldingUnit4(store: EditorialStore, title: string): Promise
   const runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!;
   let turns = 0;
   const held: BaselineAnalysisExecutionOwner = new BaselineAnalysisExecutionOwner({
+    requestGovernor,
     ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null },
     unitHold: async () => {
       turns += 1;
@@ -340,6 +348,7 @@ describe('结果待确认 over the real store', () => {
     };
     const store = await openWithRoute();
     const execution = new BaselineAnalysisExecutionOwner({
+      requestGovernor,
       ledger: store.factualReviewLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null },
     });
     try {
@@ -616,6 +625,7 @@ describe('结果待确认 carried forward', () => {
       const runRecordId = store.authorizeBaselineAnalysis(bookId, sync.taskIntent!.taskIntentId, sync.planEnvelope!.digest).dispatchRunRecordId!;
       let turns = 0;
       const held: BaselineAnalysisExecutionOwner = new BaselineAnalysisExecutionOwner({
+        requestGovernor,
         ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null },
         unitHold: async () => {
           turns += 1;

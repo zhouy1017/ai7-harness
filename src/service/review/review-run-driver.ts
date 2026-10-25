@@ -25,6 +25,7 @@ import type { ReviewRunDriveStep, ReviewRunHandOff } from './review-runs.js';
  * starts no further category, the owner interrupts the one in flight, and the driver records that.
  */
 export interface ReviewRunDriveSteps {
+  local?(reviewRunId: string, stopping: () => boolean): Promise<void>;
   background?(reviewRunId: string): boolean;
   /** Take an approved Run for this lifetime; returns its categories in position order. */
   begin(reviewRunId: string): ReadonlyArray<string>;
@@ -167,6 +168,11 @@ export class ReviewRunDriver {
       if (!resume && this.#steps.paused?.(reviewRunId) === true) return;
       const step = this.#steps.step(reviewRunId, categoryId);
       switch (step.kind) {
+        case 'local':
+          if (this.#stopping) return;
+          if (this.#steps.local === undefined) throw new Error('LOCAL_CHECK_UNAVAILABLE');
+          yield this.#steps.local(reviewRunId, () => this.#stopping);
+          return;
         case 'done':
           return;
         case 'write':

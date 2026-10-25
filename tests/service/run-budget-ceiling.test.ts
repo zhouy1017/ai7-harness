@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -27,6 +28,12 @@ import {
 import { SAMPLE1_UNITS, importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { CLARIFICATION_UNANSWERABLE_ENDED } from '../../src/service/task-plan.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for the editor's Run Budget Ceiling (Issue #51, plan slice S16a; V2-UX-MODEL-013 to
 // MODEL-017): the real store on a temporary Agent Data Root, exact `sample1` imported through the supported path, J-04's
@@ -71,6 +78,7 @@ function openWithRoute(route: ResolvedModelFixture = fixture): Promise<Editorial
 
 function owner(store: EditorialStore, route: ResolvedModelFixture = fixture): BaselineAnalysisExecutionOwner {
   return new BaselineAnalysisExecutionOwner({
+    requestGovernor,
     ledger: store.baselineAnalysisLedger,
     launchPolicy,
     fixture: route,
@@ -454,6 +462,7 @@ describe('the editor\'s Run Budget Ceiling over the real store', () => {
     let heldAt: string | null = null;
     const store = await openWithRoute();
     const execution = new BaselineAnalysisExecutionOwner({
+      requestGovernor,
       ledger: store.baselineAnalysisLedger,
       launchPolicy,
       fixture,
@@ -468,7 +477,7 @@ describe('the editor\'s Run Budget Ceiling over the real store', () => {
       const prepared = prepare(store, bookId);
       const taskIntentId = prepared.taskIntent!.taskIntentId;
       // The eight ranges spend 12,380 and the reduction a little over 2,000 more, under a 15,000 ceiling; forming the
-      // reduction a second time passes it.
+      // reduction a second time would pass it; continuation must reuse the settled turn.
       const units = UNIT_TOKENS.reduce((total, count) => total + count, 0);
       const edited = store.editBaselineAnalysisPlan({
         bookId, taskIntentId, planEnvelopeDigest: prepared.planEnvelope!.digest, removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: tokens(15000),
@@ -476,7 +485,7 @@ describe('the editor\'s Run Budget Ceiling over the real store', () => {
       const runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, edited.planEnvelope!.digest).dispatchRunRecordId!;
       execution.admitAndDispatch(runRecordId);
       await until(() => heldAt === 'cross-unit-reduction', 'the reduction turn back');
-      // 暂停 while the reduction's turn is back: the Run waits, and 续行 forms the reduction again.
+      // Pause after the reduction settles: continuation retains its outcome and usage.
       store.requestBaselineAnalysisPause(bookId, taskIntentId);
       execution.pauseRun(runRecordId, store.baselineAnalysisLedger);
       release();
@@ -485,26 +494,24 @@ describe('the editor\'s Run Budget Ceiling over the real store', () => {
       const carried = store.baselineAnalysisLedger.carriedUsageOf(runRecordId);
       expect(carried).not.toBeNull();
       expect(carried!.inputTokens + carried!.outputTokens).toBeGreaterThan(1);
-      // After 续行 the first reduction's spend still counts: with the reduction formed again the ceiling is spent, and the
-      // sample is never sent. Without it, the Run would have read on as if it had spent less than it had.
       const reduction = carried!.inputTokens + carried!.outputTokens;
       expect(units + reduction).toBeLessThan(15000);
       execution.admitAndDispatch(runRecordId, store.baselineAnalysisLedger, { resume: true });
       await execution.whenIdle();
       const stopped = store.inspectBaselineAnalysis(bookId, () => null);
-      expect(stopped.run?.state).toBe('interrupted');
-      expect(stopped.taskOutcome?.stop).toMatchObject({ reason: 'run-budget-ceiling-reached', usedTokens: units + 2 * reduction });
+      expect(stopped.run?.state).toBe('completed');
+      expect(stopped.taskOutcome?.stop).toBeNull();
       expect(stopped.resultSetRevision?.crossUnitReduction?.state).toBe('closed');
-      // The sample is drawn, and its one turn is not sent: the ceiling is spent before it.
-      expect(stopped.resultSetRevision?.assuranceSample).toMatchObject({ state: 'gap', reason: expect.stringContaining('任务运行预算上限已达到，本轮未派发') });
-      // The Run's report states both reductions, in the stage they were spent in, and reconciles with the revision's usage:
-      // every token the stop counts is in it (Issue #541).
+      expect(stopped.resultSetRevision?.assuranceSample?.state).toBe('closed');
       const report = stopped.taskOutcome!.report!;
-      expect(report.usagePerStage['cross-unit-reduction'].requests).toBe(2);
-      expect(report.usagePerStage['cross-unit-reduction'].inputTokens + report.usagePerStage['cross-unit-reduction'].outputTokens).toBe(2 * reduction);
+      // The kept reduction still counts toward the ceiling: with it the sample's one turn spends the ceiling, and the
+      // reflection after it is kept back; counted for less, the reflection would have been sent.
+      expect(report.ifRedone).toEqual({ state: 'not-run', items: [], reason: '任务运行预算上限已达到；运行反思未派发。' });
+      expect(report.usagePerStage['cross-unit-reduction'].requests).toBe(1);
+      expect(report.usagePerStage['cross-unit-reduction'].inputTokens + report.usagePerStage['cross-unit-reduction'].outputTokens).toBe(reduction);
       expect(runReportUsageReconciles(report, stopped.resultSetRevision!.usage)).toBe(true);
       const reported = RUN_REPORT_REVISION_USAGE_STAGES.reduce((total, stage) => total + report.usagePerStage[stage].inputTokens + report.usagePerStage[stage].outputTokens, 0);
-      expect(reported).toBe(stopped.taskOutcome!.stop!.usedTokens);
+      expect(reported).toBe(units + reduction + report.usagePerStage['assurance-sampling'].inputTokens + report.usagePerStage['assurance-sampling'].outputTokens);
       store.markCleanShutdown();
     } finally {
       await execution.dispose();
@@ -519,6 +526,7 @@ describe('the editor\'s Run Budget Ceiling over the real store', () => {
       let pause: () => void = () => undefined;
       let samplingTurns = 0;
       const execution = new BaselineAnalysisExecutionOwner({
+        requestGovernor,
         ledger: store.baselineAnalysisLedger,
         launchPolicy,
         fixture,

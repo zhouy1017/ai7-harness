@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -24,6 +25,12 @@ import { malformedPdf, sampleTextPdf, syntheticPdf } from '../fixtures/material-
 import { dropFactualVerificationRelations, FACTUAL_VERIFICATION_SCHEMA_NAMES, dropMaterialIndexLayerRelations, restoreProposalReviewPredecessor, pre77SchemaRows, restoreTaskIntentDraftPredecessor, pre80SchemaRows } from '../support/pre74-schema.js';
 import { withoutRuleFor } from '../support/policy-rules.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for the Material Index's similarity vectors, PDF text layer and 来源译文 (Issue #892) over the
 // real store on a temporary Agent Data Root. Every file is the suite's own synthetic words or the authored public passage —
@@ -416,7 +423,7 @@ describe('来源译文 over the real store', () => {
       const routes = productionFastRoleRoutes({ scope: 'ordinary-production', nativeFetch: transport }, () => policy, () => go.credentialReference,
         { resolve: async () => 'placeholder-production-key' });
       expect(routes.routes[MATERIAL_TRANSLATION_KIND]?.ruleId).toBe('ordinary-production-material-translation');
-      const owner = new FastRoleExecutionOwner({ fixture: null, live: routes });
+      const owner = new FastRoleExecutionOwner({ requestGovernor, fixture: null, live: routes });
       store.useMaterialTranslator(materialTranslator(owner, 'ordinary-production', () => 1));
       // The house's own material: no public-passage list applies in production.
       const mill = await put(store, file('mill.txt', 'The mill turns.'), 'Mill notes');
@@ -464,7 +471,7 @@ describe('来源译文 over the real store', () => {
       // A policy without this kind has no route; only the refusal case changes its rules in memory.
       expect(fastRoleLiveRoutes({ launch: { runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 1 }, providerCacheRoot: cacheRoot, validation: null }, nativeFetch: transport }, withoutRuleFor(verified, MATERIAL_TRANSLATION_KIND), { resolve: async () => null })
         .routes[MATERIAL_TRANSLATION_KIND]).toBeNull();
-      const owner = new FastRoleExecutionOwner({ fixture: null, live: routes });
+      const owner = new FastRoleExecutionOwner({ requestGovernor, fixture: null, live: routes });
       const rules = (): number => policy.providerProcessing.admittedRules.filter((rule) => rule.taskKinds.includes(MATERIAL_TRANSLATION_KIND)).length;
       store.useMaterialTranslator(materialTranslator(owner, 'developer-live', rules));
       const passage = await put(store, file('public-passage-en.txt', readFileSync(join(roots.codeRoot, 'tests', 'fixtures', 'material-formats', 'public-passage-en.txt'))), 'The Small Bindery');
@@ -498,7 +505,7 @@ describe('revision 76', () => {
   it('migrates an exact revision-75 store by adding its two relations, moving nothing else, and refuses a 76 without them', async () => {
     expect(MATERIAL_INDEX_LAYER_SCHEMA_VERSION).toBe(76);
     // Revision 84 follows the imported Skill revisions and adds independent model selections and translation attempt metadata.
-    expect(LATEST_SCHEMA_VERSION).toBe(MATERIAL_INDEX_LAYER_SCHEMA_VERSION + 13);
+    expect(LATEST_SCHEMA_VERSION).toBe(MATERIAL_INDEX_LAYER_SCHEMA_VERSION + 16);
     const schemaRows = (): Array<{ name: string; sql: string }> => {
       const database = new DatabaseSync(storePath(), { readOnly: true });
       try {
@@ -538,7 +545,7 @@ describe('revision 76', () => {
     const migrated = new DatabaseSync(storePath());
     expect(['material_index_builds', 'material_index_segments'].map((table) =>
       migrated.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all())).toEqual(earlierLayers);
-    expect((migrated.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(89);
+    expect((migrated.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(92);
     dropMaterialIndexLayerRelations(migrated);
     migrated.close();
     await expect(EditorialStore.open(roots.dataRoot, roots.codeRoot)).rejects.toThrow();

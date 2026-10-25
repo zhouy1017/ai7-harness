@@ -15,10 +15,12 @@ export interface GlobalMemoryItem extends GlobalMemoryPin {
   readonly text: string;
   readonly categoryId: string;
   readonly bookId: string | null;
-  readonly state: 'active' | 'inactive' | 'frozen';
+  readonly state: 'proposed' | 'active' | 'inactive' | 'frozen';
   readonly lineage: ReadonlyArray<GlobalMemoryPin>;
 }
 export interface RecordLearningSupervisionInput {
+  /** Required for memory /2 targets; legacy preference actions keep their historical contract. */
+  readonly actionId?: string;
   readonly operation: 'create' | 'merge' | 'correct' | 'deactivate' | 'supervise';
   readonly targets: ReadonlyArray<GlobalMemoryPin>;
   readonly scope: LearningSupervisionScope;

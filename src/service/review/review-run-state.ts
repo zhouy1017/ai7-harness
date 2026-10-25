@@ -201,12 +201,12 @@ export type ReviewRunStop = 'scope-changed' | 'cancelled' | 'plan-moved';
 /**
  * The Run's state from its categories': prepared until approved; running while driven with anything
  * left; `partial` with 继续审阅 when it stopped with categories left; once every category is finished,
- * `settled` if all of them reached the manuscript, `failed` if none did, and `partial` otherwise.
+ * `settled` if all completed successfully, `failed` if none has output, and `partial` otherwise.
  */
 export function reviewRunState(input: {
   readonly authorized: boolean;
   readonly driving: boolean;
-  readonly categories: ReadonlyArray<{ readonly pending: boolean; readonly materialized: boolean }>;
+  readonly categories: ReadonlyArray<{ readonly pending: boolean; readonly materialized: boolean; readonly retained?: boolean }>;
   /**
    * What stopped the Run for good, from its categories' events (Issue #64, S29b): a Series Retrieval Exclusion, which leaves
    * only 修改计划并重新授权 and 取消任务 — never 继续审阅 (SER-024) — or the editor's 取消任务 after it. Absent, nothing did.
@@ -230,7 +230,8 @@ export function reviewRunState(input: {
   }
   const materialized = input.categories.filter((category) => category.materialized).length;
   if (materialized === input.categories.length) return { state: 'settled', canContinue: false };
-  return { state: materialized === 0 ? 'failed' : 'partial', canContinue: false };
+  // Retained terminal findings are useful output, never complete coverage or authority to continue.
+  return { state: materialized === 0 && !input.categories.some((category) => category.retained === true) ? 'failed' : 'partial', canContinue: false };
 }
 
 export function reviewRunStateLabel(state: ReviewRunState, canContinue: boolean, scopeStop: 'series-knowledge' | 'house-review-preference' | null = null): string {

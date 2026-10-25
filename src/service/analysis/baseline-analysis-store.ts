@@ -1,3 +1,4 @@
+import { MODEL_REQUEST_ADMISSION_SCHEMA_VERSION } from '../task-authorization.js';
 import { procedureIdForKind } from '../procedures/preinstalled.js';
 import { recordProcedurePlanPin, readProcedurePlanPin, resolveProcedureDefinition } from '../procedures/definition-store.js';
 import { withReviewLocalTools, pinnedReviewDefinition } from '../review/review-category-kind.js';
@@ -23,6 +24,7 @@ import {
   INITIAL_EVALUATION_KIND,
   READERS_REPORT_KIND,
   WRITING_KIND,
+  type AnalysisAssuranceSampleDispositionProjection,
   type AnalysisGoal,
   type AnalysisKindId,
   type AnalysisProjection,
@@ -72,6 +74,7 @@ import {
   type ReviewScopePlanCounts,
   type ReviewScopePlanProjection,
   type RunAttemptState,
+  type AnalysisInFlightUnitProjection,
   type RunBudgetCeilingState,
   type SafeRetryRepetition,
 } from '../../shared/protocol.js';
@@ -157,9 +160,9 @@ import {
   runReportReflectionNotRun,
   type RunReportRecord,
 } from './run-report.js';
-import { assuranceSampleNotRun } from './reducers.js';
+import { assuranceSampleNotRun, type CrossUnitOutcome } from './reducers.js';
 import { baselineAnalysisKindDefinition } from './kind-definition.js';
-import { ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST } from './assurance-sampling-contract.js';
+import { ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, assuranceSamplingTurns, buildAssuranceSamplingMessage, type AssuranceSampleDraw } from './assurance-sampling-contract.js';
 import { describeComposition } from '../harness/primary-agent-harness.js';
 import { kindLocalTools } from './live-kind-admission.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from '../provider/egress-gate.js';
@@ -258,7 +261,7 @@ export const RUN_CANCELLED_AFTER_START_LABEL = '已取消' as const;
 export const RUN_CANCELLING_DETAIL = '编辑取消了这项任务；正在进行的这一步会被中止，此后不再发送任何内容。' as const;
 
 /** What `pausing` records (CTRL-001): the editor's word, and where the Run stops to wait. */
-export const RUN_PAUSING_DETAIL = '编辑暂停了这项任务；正在进行的阅读范围读完后停下，已完成的部分都会保存。' as const;
+export const RUN_PAUSING_DETAIL = '编辑暂停了这项任务；正在进行的这一步完成后停下，不再开始下一步，已完成的结果与用量都会保存。' as const;
 
 /** What reconciliation records for a Run AI7 stopped under (CONT-014): nothing of it runs, and nothing is sent until 续行. */
 export const RECONCILED_RESUMABLE_DETAIL = 'AI7 上次关闭时这项任务正在运行；已读完的阅读范围都已保存。点「续行」从下一个阅读范围接着读；在此之前不会发送任何内容。' as const;
@@ -634,6 +637,7 @@ export interface RunProgress {
   readonly currentUnitOrdinal: number | null;
   readonly currentUnitStartedAt: string | null;
   readonly attemptState: RunAttemptState | null;
+  readonly inFlightUnits?: ReadonlyArray<AnalysisInFlightUnitProjection>;
   readonly completedAttempts: number;
   readonly longestSettledUnitMs: number | null;
   /** Which declared step of the Run is in flight: the unit loop, the cross-unit reduction, or the sample. */
@@ -1055,11 +1059,81 @@ export function providerConsequence(live: LiveReading, unitCount: number | null 
 }
 
 /**
- * The stages a stop keeps its usage for (Issue #541): a reduction or a sample 续行 forms again was spent all the same. A unit
+ * The stages a stop keeps its usage for (Issue #541): settled or refused stage work was spent all the same. A unit
  * a stop kept carries its own usage in its checkpoint.
  */
 export const CARRIED_STAGES = ['cross-unit-reduction', 'assurance-sampling'] as const;
 export type CarriedStages = Record<(typeof CARRIED_STAGES)[number], { requests: number; inputTokens: number; outputTokens: number }>;
+
+/** Private continuation evidence, nested in existing Run states; never a public protocol or a new binding. */
+export interface StageContinuation {
+  readonly runRecordId: string;
+  readonly attemptId: string;
+  readonly bindingDigest: string;
+  readonly manifestDigest: string;
+  readonly promptContractDigest: string;
+  reduction?: { inputDigest: string; contractDigest: string; requestDigest: string | null; outcome: CrossUnitOutcome };
+  sampling?: {
+    inputDigest: string; contractDigest: string; draw: AssuranceSampleDraw;
+    nextTurn: number; ended: boolean;
+    turns: Array<{ requestDigest: string; unitOrdinal: number; usage: { inputTokens: number; outputTokens: number } | null; state: 'closed' | 'gap' | 'outcome-unknown' }>;
+    dispositions: AnalysisAssuranceSampleDispositionProjection[]; gapReasons: string[];
+    sampled: { inputTokens: number; outputTokens: number; turnsWithUsage: number };
+  };
+}
+
+/** Payload-free identities for physical model admissions; tool dispatch tokens never cross this boundary. */
+export interface AnalysisRequestIdentity {
+  readonly requestId: string;
+  readonly producerId: string;
+  readonly requestOrdinal: number;
+  readonly sessionId: string;
+  readonly unitOrdinal: number | null;
+  readonly stage: RunProgressStage;
+  readonly attemptIndex: number;
+  readonly adaptationId: string | null;
+  readonly payloadDigest: string;
+  readonly messageDigest: string;
+  readonly requestDigest: string;
+  readonly inputDigest: string;
+  readonly contractDigest: string;
+}
+
+interface RequestAdmissionPins {
+  readonly runRecordId: string;
+  readonly attemptId: string;
+  readonly bindingDigest: string;
+  readonly planEnvelopeDigest: string;
+  readonly manifestDigest: string;
+  readonly compositionDigest: string;
+  readonly promptContractDigest: string;
+  readonly policyVersion: string;
+  readonly policyRuleId: string;
+}
+
+type RequestAdmissionEvent =
+  | { readonly kind: 'execution'; readonly width: 1 | 3; readonly limits: { readonly requests: 4; readonly units: 3; readonly backgroundRequests: 1 } }
+  | { readonly kind: 'admit'; readonly request: AnalysisRequestIdentity }
+  | { readonly kind: 'resolve'; readonly requests: readonly string[]; readonly evidence: {
+      readonly kind: 'no-send' | 'unit-checkpoint' | 'clarification-checkpoint' | 'stage-checkpoint' | 'reflection-outcome' | 'refused-turn' | 'unavailable';
+      readonly digest: string;
+    } };
+
+interface RequestAdmissionData extends RequestAdmissionPins {
+  readonly sequence: number;
+  readonly predecessorDigest: string | null;
+  readonly event: RequestAdmissionEvent;
+}
+
+export interface RequestAdmissionReading {
+  readonly pins: RequestAdmissionPins;
+  readonly width: 1 | 3;
+  readonly sequence: number;
+  readonly digest: string;
+  readonly open: ReadonlyMap<string, AnalysisRequestIdentity>;
+  readonly unavailable: ReadonlyArray<AnalysisRequestIdentity>;
+  readonly notSent: ReadonlyArray<AnalysisRequestIdentity>;
+}
 
 /**
  * The append-only ledger of one analysis kind of one Book database. The kind it serves is the
@@ -1080,10 +1154,308 @@ export function levelBelowPolicyMinimum(level: EvidenceAssuranceLevel, minimum: 
   return minimum !== null && LEVEL_ORDER[level] < LEVEL_ORDER[minimum];
 }
 
+/** Immutable references only: no route, launch policy, source selection, provider or writes. */
+function admissionRow(row: SqlRow | undefined): Record<string, unknown> {
+  requireAnalysis(row !== undefined, 'ANALYSIS_RECORD_INVALID', '请求准入引用缺失。');
+  const record = parseCanonicalJson(asString(row.canonical_json));
+  requireAnalysis(isRecord(record) && canonicalRecord(record).digest === row.sha256, 'ANALYSIS_RECORD_INVALID', '请求准入引用摘要不一致。');
+  return record;
+}
+
+function readAdmissionBinding(db: DatabaseSync, runRecordId: string): { attemptId: string; binding: ExecutionBindingRecord; bindingDigest: string } | null {
+  const runRow = db.prepare('SELECT * FROM analysis_run_records WHERE run_record_id = ?').get(runRecordId) as SqlRow | undefined;
+  const run = admissionRow(runRow);
+  const attemptRow = db.prepare('SELECT * FROM analysis_execution_attempts WHERE run_record_id = ?').get(runRecordId) as SqlRow | undefined;
+  if (attemptRow === undefined) return null;
+  const attempt = admissionRow(attemptRow);
+  const bindingRow = db.prepare('SELECT * FROM analysis_execution_bindings WHERE attempt_id = ?').get(attemptRow.attempt_id!) as SqlRow | undefined;
+  const binding = admissionRow(bindingRow) as unknown as ExecutionBindingRecord;
+  const authorization = admissionRow(db.prepare('SELECT * FROM analysis_run_authorizations WHERE authorization_id = ?').get(runRow!.authorization_id!) as SqlRow | undefined);
+  const intent = admissionRow(db.prepare('SELECT * FROM analysis_task_intents WHERE task_intent_id = ?').get(runRow!.task_intent_id!) as SqlRow | undefined);
+  requireAnalysis(run.runRecordId === runRecordId && run.taskIntentId === runRow!.task_intent_id && run.authorizationId === runRow!.authorization_id &&
+    attempt.attemptId === attemptRow.attempt_id && attempt.runRecordId === runRecordId &&
+    binding.attemptId === attempt.attemptId && binding.runRecordId === runRecordId && binding.taskIntentId === run.taskIntentId &&
+    intent.taskIntentId === run.taskIntentId && intent.bookId === binding.bookId && authorization.authorizationId === run.authorizationId &&
+    authorization.taskIntentId === run.taskIntentId && authorization.planEnvelopeDigest === binding.planEnvelopeDigest && authorization.planVersionOrdinal === binding.planVersion,
+    'ANALYSIS_RECORD_INVALID', '请求准入的运行、尝试与授权引用不一致。');
+  return { attemptId: asString(attemptRow.attempt_id), binding, bindingDigest: asString(bindingRow!.sha256) };
+}
+
+function readAdmissionManifest(db: DatabaseSync, stored: NonNullable<ReturnType<typeof readAdmissionBinding>>): CoverageManifestProjection {
+  const rows = db.prepare('SELECT * FROM analysis_plan_records WHERE task_intent_id = ? AND plan_version = ?').all(stored.binding.taskIntentId, stored.binding.planVersion) as SqlRow[];
+  const components = new Map(rows.map((row) => [asString(row.component), { record: admissionRow(row), digest: asString(row.sha256) }]));
+  for (const [component, digest] of [
+    ['plan-envelope', stored.binding.planEnvelopeDigest],
+    ['provider-resolution-plan', stored.binding.providerResolutionPlanDigest], ['run-source-scope', stored.binding.runSourceScopeDigest],
+  ]) requireAnalysis(components.get(component!)?.digest === digest, 'ANALYSIS_RECORD_INVALID', '请求准入的固定计划引用不一致。');
+  const manifest = components.get('coverage-manifest')!.record as unknown as CoverageManifestProjection;
+  requireAnalysis(manifestDigestIsExact(manifest) && manifest.digest === stored.binding.coverageManifestDigest &&
+    manifest.manuscript.revisionId === stored.binding.manuscriptPin.revisionId && manifest.manuscript.revisionDigest === stored.binding.manuscriptPin.revisionDigest,
+    'ANALYSIS_RECORD_INVALID', '请求准入的固定覆盖清单无法核对。');
+  return manifest;
+}
+
+function readAdmissionAdaptations(db: DatabaseSync, attemptId: string): Array<{ adaptationId: unknown; unitOrdinal: unknown }> {
+  return (db.prepare('SELECT * FROM analysis_plan_adaptations WHERE attempt_id = ? ORDER BY ordinal').all(attemptId) as SqlRow[]).map((row) => {
+    const record = admissionRow(row);
+    requireAnalysis(record.adaptationId === row.adaptation_id && record.attemptId === attemptId && record.unitOrdinal === row.unit_ordinal,
+      'ANALYSIS_RECORD_INVALID', '请求准入的调整引用不一致。');
+    return { adaptationId: record.adaptationId, unitOrdinal: record.unitOrdinal };
+  });
+}
+
+function readRequestAdmissions(db: DatabaseSync, runRecordId: string): RequestAdmissionReading | null {
+  const rows = db.prepare(`SELECT sequence, recorded_at, canonical_json, sha256 FROM analysis_run_states WHERE run_record_id = ?
+      AND json_type(canonical_json, '$.requestAdmission') IS NOT NULL ORDER BY sequence`).all(runRecordId) as SqlRow[];
+  if (rows.length === 0 && db.prepare(`SELECT 1 FROM analysis_run_states WHERE run_record_id = ? AND
+      json_type(canonical_json, '$.modelClarificationAnswerClaim') IS NOT NULL LIMIT 1`).get(runRecordId) === undefined) return null;
+  const exact = (value: unknown, keys: readonly string[]): value is Record<string, unknown> => isRecord(value) &&
+    Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
+  const invalid = (): never => { throw new AnalysisError('ANALYSIS_RECORD_INVALID', '模型请求准入记录无法核对；不能续行。'); };
+  const state: { reading: RequestAdmissionReading | null } = { reading: null };
+  const open = new Map<string, AnalysisRequestIdentity>();
+  const unavailable: AnalysisRequestIdentity[] = [];
+  const notSent: AnalysisRequestIdentity[] = [];
+  const seen = new Set<string>();
+  const admitted = new Map<string, { request: AnalysisRequestIdentity; recordedAt: string }>();
+  const resolutions = new Map<string, { kind: string; digest: string }>();
+  const refusalProofs = new Map<string, number>();
+  const ordinals = new Map<string, number>();
+  const stored = readAdmissionBinding(db, runRecordId);
+  let requestManifest: CoverageManifestProjection | undefined;
+  let adaptations: ReturnType<typeof readAdmissionAdaptations> | undefined;
+  for (const row of rows) {
+    const record = parseCanonicalJson(asString(row.canonical_json)) as Record<string, unknown>;
+    const receipt = record.requestAdmission;
+    if (record.runRecordId !== runRecordId || record.sequence !== row.sequence || record.recordedAt !== row.recorded_at) return invalid();
+    if (receipt === undefined) continue;
+    if (canonicalRecord(record).digest !== row.sha256 || !exact(receipt, ['schema', 'data', 'digest']) ||
+      receipt.schema !== 'ai7.analysis.request-admission/1' || !isRecord(receipt.data) || canonicalRecord(receipt.data).digest !== receipt.digest) return invalid();
+    const data = receipt.data as unknown as RequestAdmissionData;
+    if (!exact(data, ['runRecordId', 'attemptId', 'bindingDigest', 'planEnvelopeDigest', 'manifestDigest', 'compositionDigest',
+      'promptContractDigest', 'policyVersion', 'policyRuleId', 'sequence', 'predecessorDigest', 'event']) ||
+      data.sequence !== (state.reading?.sequence ?? 0) + 1 || data.predecessorDigest !== (state.reading?.digest ?? null)) return invalid();
+    const { sequence, predecessorDigest, event, ...pins } = data;
+    if (stored === null || pins.runRecordId !== runRecordId || pins.attemptId !== stored.attemptId || pins.bindingDigest !== stored.bindingDigest ||
+      pins.planEnvelopeDigest !== stored.binding.planEnvelopeDigest || pins.manifestDigest !== stored.binding.coverageManifestDigest ||
+      pins.compositionDigest !== stored.binding.behaviorCompositionDigest || pins.promptContractDigest !== stored.binding.promptContractDigest ||
+      pins.policyVersion !== stored.binding.policyPin.providerProcessingVersion || typeof pins.policyRuleId !== 'string' || !/^[a-z][a-z0-9-]{0,159}$/u.test(pins.policyRuleId) ||
+      state.reading !== null && canonicalJson(pins) !== canonicalJson(state.reading.pins)) return invalid();
+    let width: 1 | 3 = state.reading?.width ?? 1;
+    if (state.reading === null) {
+      if (!exact(event, ['kind', 'width', 'limits']) || event.kind !== 'execution' || (event.width !== 1 && event.width !== 3) ||
+        !exact(event.limits, ['requests', 'units', 'backgroundRequests']) || event.limits.requests !== 4 || event.limits.units !== 3 || event.limits.backgroundRequests !== 1 ||
+        event.width === 3 && (stored!.binding.compositionVersion !== 2 || stored!.binding.policyPin.operationalScope !== 'ordinary-production' || stored!.binding.runBudgetCeiling !== 'unset')) return invalid();
+      width = event.width;
+    } else if (event.kind === 'admit') {
+      if (!exact(event, ['kind', 'request'])) return invalid();
+      const request = event.request;
+      if (!exact(request, ['requestId', 'producerId', 'requestOrdinal', 'sessionId', 'unitOrdinal', 'stage', 'attemptIndex', 'adaptationId',
+        'payloadDigest', 'messageDigest', 'requestDigest', 'inputDigest', 'contractDigest']) ||
+        ![request.requestId, request.producerId, request.sessionId].every((id) => typeof id === 'string' && UUID_PATTERN.test(id)) ||
+        seen.has(request.requestId) || !Number.isSafeInteger(request.requestOrdinal) || request.requestOrdinal !== (ordinals.get(request.producerId) ?? 0) + 1 ||
+        !Number.isSafeInteger(request.attemptIndex) || request.attemptIndex < 1 || request.attemptIndex > 4 ||
+        request.adaptationId !== null && !UUID_PATTERN.test(request.adaptationId) ||
+        ![request.payloadDigest, request.messageDigest, request.requestDigest, request.inputDigest, request.contractDigest].every((digest) => typeof digest === 'string' && DIGEST_PATTERN.test(digest)) ||
+        !['units', 'cross-unit-reduction', 'assurance-sampling', 'run-report-reflection'].includes(request.stage) ||
+        request.stage === 'units' && (!Number.isSafeInteger(request.unitOrdinal) || request.unitOrdinal! < 1) ||
+        request.stage !== 'units' && request.unitOrdinal !== null) return invalid();
+      const manifest = requestManifest ??= readAdmissionManifest(db, stored);
+      if (request.unitOrdinal !== null && (manifest.units[request.unitOrdinal - 1]?.ordinal !== request.unitOrdinal ||
+        manifest.units[request.unitOrdinal - 1]!.digest !== request.inputDigest || request.contractDigest !== stored.binding.promptContractDigest)) return invalid();
+      if (request.adaptationId !== null && !(adaptations ??= readAdmissionAdaptations(db, stored!.attemptId)).some((adaptation) => adaptation.adaptationId === request.adaptationId && adaptation.unitOrdinal === request.unitOrdinal)) return invalid();
+      admitted.set(request.requestId, { request, recordedAt: asString(row.recorded_at) });
+      seen.add(request.requestId); ordinals.set(request.producerId, request.requestOrdinal); open.set(request.requestId, request);
+    } else if (event.kind === 'resolve') {
+      if (!exact(event, ['kind', 'requests', 'evidence']) || !Array.isArray(event.requests) || new Set(event.requests).size !== event.requests.length ||
+        !event.requests.every((id) => typeof id === 'string' && open.has(id)) || !exact(event.evidence, ['kind', 'digest']) || !DIGEST_PATTERN.test(event.evidence.digest)) return invalid();
+      const requests = event.requests.map((id) => open.get(id)!);
+      const evidence = event.evidence;
+      if (event.requests.length === 0 && evidence.kind !== 'stage-checkpoint') return invalid();
+      if (evidence.kind === 'no-send') {
+        if (requests.length !== 1 || canonicalRecord(requests[0]).digest !== evidence.digest) return invalid();
+        notSent.push(requests[0]!);
+      } else if (evidence.kind === 'unit-checkpoint') {
+        const unit = requests[0]?.unitOrdinal;
+        const checkpoint = db.prepare('SELECT canonical_json, sha256 FROM analysis_unit_checkpoints WHERE run_record_id = ? AND unit_ordinal = ?').get(runRecordId, unit ?? -1) as SqlRow | undefined;
+        if (checkpoint === undefined || checkpoint.sha256 !== evidence.digest || requests.some((request) => request.stage !== 'units' || request.unitOrdinal !== unit)) return invalid();
+        const kept = parseCanonicalJson(asString(checkpoint!.canonical_json)) as { requests?: unknown };
+        if (canonicalRecord(kept).digest !== evidence.digest || !Array.isArray(kept.requests) || kept.requests.length !== event.requests.length || !event.requests.every((id) => (kept.requests as unknown[]).includes(id))) return invalid();
+      } else if (evidence.kind === 'clarification-checkpoint') {
+        const unit = requests[0]?.unitOrdinal;
+        const checkpoint = db.prepare('SELECT canonical_json, sha256 FROM analysis_clarification_requests WHERE run_record_id = ? AND unit_ordinal = ?').get(runRecordId, unit ?? -1) as SqlRow | undefined;
+        if (checkpoint === undefined || checkpoint.sha256 !== evidence.digest || sha256Hex(asString(checkpoint.canonical_json)) !== evidence.digest ||
+          requests.some((request) => request.stage !== 'units' || request.unitOrdinal !== unit)) return invalid();
+        const kept = parseCanonicalJson(asString(checkpoint!.canonical_json)) as { requests?: unknown };
+        if (!Array.isArray(kept.requests) || kept.requests.length !== event.requests.length || !event.requests.every((id) => (kept.requests as unknown[]).includes(id))) return invalid();
+      } else if (evidence.kind === 'stage-checkpoint') {
+        const stage = record.stageContinuation;
+        if (!exact(stage, ['schema', 'data', 'digest']) || stage.schema !== 'ai7.analysis.stage-continuation/1' ||
+          !isRecord(stage.data) || canonicalRecord(stage.data).digest !== stage.digest ||
+          !exact(record.carriedUsage, ['inputTokens', 'outputTokens', 'stages']) ||
+          ![record.carriedUsage.inputTokens, record.carriedUsage.outputTokens].every((value) => Number.isSafeInteger(value) && (value as number) >= 0) ||
+          !exact(record.carriedUsage.stages, CARRIED_STAGES) ||
+          !Object.values(record.carriedUsage.stages).every((value) => exact(value, ['requests', 'inputTokens', 'outputTokens']) &&
+            Object.values(value).every((count) => Number.isSafeInteger(count) && (count as number) >= 0))) return invalid();
+        if (record.stageContinuation === undefined || record.carriedUsage === undefined ||
+          canonicalRecord({ stageContinuation: record.stageContinuation, carriedUsage: record.carriedUsage }).digest !== evidence.digest ||
+          requests.some((request) => request.stage === 'units' || request.stage === 'run-report-reflection')) return invalid();
+        const stages = (record.stageContinuation as { data?: StageContinuation }).data;
+        if (stages === undefined || stages.runRecordId !== runRecordId || stages.attemptId !== stored!.attemptId ||
+          stages.bindingDigest !== stored!.bindingDigest || stages.manifestDigest !== stored!.binding.coverageManifestDigest ||
+          stages.promptContractDigest !== stored!.binding.promptContractDigest || requests.some((request) => request.stage === 'cross-unit-reduction'
+            ? stages.reduction?.inputDigest !== request.inputDigest || stages.reduction.requestDigest !== request.requestDigest || stages.reduction.contractDigest !== request.contractDigest
+            : stages.sampling?.inputDigest !== request.inputDigest || stages.sampling.contractDigest !== request.contractDigest || !stages.sampling.turns.some((turn) => turn.requestDigest === request.requestDigest))) return invalid();
+      } else if (evidence.kind === 'reflection-outcome') {
+        const outcome = db.prepare('SELECT canonical_json, sha256 FROM analysis_task_outcomes WHERE run_record_id = ?').get(runRecordId) as SqlRow | undefined;
+        if (outcome === undefined || outcome.sha256 !== evidence.digest || sha256Hex(asString(outcome.canonical_json)) !== evidence.digest ||
+          requests.some((request) => request.stage !== 'run-report-reflection')) return invalid();
+      } else if (evidence.kind === 'refused-turn') {
+        const refused = record.requestRefusal;
+        if (!exact(refused, ['state', 'stage', 'unitOrdinal', 'observation']) || refused.state !== 'provider-account-limit' ||
+          canonicalRecord(refused).digest !== evidence.digest || requests.some((request) => request.stage !== refused.stage || request.unitOrdinal !== refused.unitOrdinal)) return invalid();
+        const observed = refused.observation;
+        if (!exact(observed, ['attempts', 'usage']) || !Number.isSafeInteger(observed.attempts) || (observed.attempts as number) < 1 ||
+          observed.usage !== null && (!exact(observed.usage, ['inputTokens', 'outputTokens']) ||
+            ![observed.usage.inputTokens, observed.usage.outputTokens].every((count) => Number.isSafeInteger(count) && (count as number) >= 0))) return invalid();
+        refusalProofs.set(evidence.digest, Number(row.sequence));
+      } else if (evidence.kind === 'unavailable') {
+        if (canonicalRecord({ requests, reason: 'possible-send-without-durable-result' }).digest !== evidence.digest) return invalid();
+        unavailable.push(...requests);
+      } else return invalid();
+      for (const id of event.requests) { resolutions.set(id, { kind: evidence.kind, digest: evidence.digest }); open.delete(id); }
+    } else return invalid();
+    state.reading = { pins, width, sequence, digest: receipt.digest as string, open, unavailable, notSent };
+  }
+  // Check arrays independently of discharge events, including the crash window before discharge.
+  for (const table of ['analysis_unit_checkpoints', 'analysis_clarification_requests'] as const) {
+    for (const checkpoint of db.prepare(`SELECT * FROM ${table} WHERE run_record_id = ?`).all(runRecordId) as SqlRow[]) {
+      const kept = admissionRow(checkpoint);
+      if (!Object.hasOwn(kept, 'requests')) continue;
+      if (!Array.isArray(kept.requests) || new Set(kept.requests).size !== kept.requests.length ||
+        kept.runRecordId !== runRecordId || kept.attemptId !== stored!.attemptId ||
+        table === 'analysis_clarification_requests' && kept.taskIntentId !== stored!.binding.taskIntentId ||
+        kept.unitOrdinal !== undefined && kept.unitOrdinal !== checkpoint.unit_ordinal) return invalid();
+      const manifest = requestManifest ??= readAdmissionManifest(db, stored!);
+      if (manifest.units[Number(checkpoint.unit_ordinal) - 1]?.ordinal !== checkpoint.unit_ordinal) return invalid();
+      const ids = kept.requests as unknown[];
+      const checkpointTime = asString(table === 'analysis_unit_checkpoints' ? checkpoint.recorded_at : checkpoint.raised_at);
+      if (!ids.every((id) => typeof id === 'string' && admitted.has(id) &&
+        admitted.get(id)!.request.stage === 'units' && admitted.get(id)!.request.unitOrdinal === checkpoint.unit_ordinal &&
+        admitted.get(id)!.recordedAt <= checkpointTime)) return invalid();
+      if (table === 'analysis_unit_checkpoints') {
+        const unit = kept.unit as { unitOrdinal?: unknown; requestDigest?: unknown } | undefined;
+        if (unit?.unitOrdinal !== checkpoint.unit_ordinal || !ids.every((id) => admitted.get(id as string)!.request.requestDigest === unit!.requestDigest)) return invalid();
+        for (const [id, value] of admitted) if (value.request.stage === 'units' && value.request.unitOrdinal === checkpoint.unit_ordinal &&
+          (resolutions.get(id) === undefined || resolutions.get(id)!.kind === 'unit-checkpoint' && resolutions.get(id)!.digest === checkpoint.sha256) && !ids.includes(id)) return invalid();
+      }
+    }
+  }
+  for (const row of db.prepare("SELECT sequence, canonical_json, sha256 FROM analysis_run_states WHERE run_record_id = ? AND json_type(canonical_json, '$.requestRefusal') IS NOT NULL").all(runRecordId) as SqlRow[]) {
+    const record = admissionRow(row);
+    const refusal = record.requestRefusal;
+    if (!exact(refusal, ['state', 'stage', 'unitOrdinal', 'observation']) || !refusalProofs.has(canonicalRecord(refusal).digest) ||
+      refusalProofs.get(canonicalRecord(refusal).digest)! > Number(row.sequence)) return invalid();
+  }
+  const claims = new Set<string>();
+  const firstReceiptRowSequence = rows.length === 0 ? null : asNumber(rows[0]!.sequence);
+  const sameEvidence = (left: unknown, right: unknown): boolean => left === undefined || right === undefined
+    ? left === right : canonicalRecord(left).digest === canonicalRecord(right).digest;
+  let predecessor: Record<string, unknown> | null = null;
+  for (const row of db.prepare('SELECT sequence, recorded_at, canonical_json, sha256 FROM analysis_run_states WHERE run_record_id = ? ORDER BY sequence').all(runRecordId) as SqlRow[]) {
+    const record = admissionRow(row);
+    // A governed row inherits its predecessor's stage evidence; only its own stage checkpoint carries new evidence.
+    if (Object.hasOwn(record, 'requestAdmission')) {
+      const event = (record.requestAdmission as { data: { event: { kind: string; evidence?: { kind: string } } } }).data.event;
+      if (!(event.kind === 'resolve' && event.evidence?.kind === 'stage-checkpoint') &&
+        (!sameEvidence(record.stageContinuation, predecessor?.stageContinuation) || !sameEvidence(record.carriedUsage, predecessor?.carriedUsage))) return invalid();
+    }
+    predecessor = record;
+    if (rows.length > 0 && Object.hasOwn(record, 'stageContinuation')) {
+      const stage = record.stageContinuation;
+      if (!exact(stage, ['schema', 'data', 'digest']) || stage.schema !== 'ai7.analysis.stage-continuation/1' ||
+        !isRecord(stage.data) || canonicalRecord(stage.data).digest !== stage.digest ||
+        stage.data.runRecordId !== runRecordId || stage.data.attemptId !== stored!.attemptId ||
+        stage.data.bindingDigest !== stored!.bindingDigest || stage.data.manifestDigest !== stored!.binding.coverageManifestDigest ||
+        stage.data.promptContractDigest !== stored!.binding.promptContractDigest) return invalid();
+    }
+    if (!Object.hasOwn(record, 'modelClarificationAnswerClaim')) continue;
+    if (record.runRecordId !== runRecordId || record.sequence !== row.sequence || record.recordedAt !== row.recorded_at) return invalid();
+    const claim = record.modelClarificationAnswerClaim;
+    if (typeof claim !== 'string' || !UUID_PATTERN.test(claim)) return invalid();
+    if (!claims.has(claim)) {
+      if (stored === null) return invalid();
+      const clarification = db.prepare('SELECT * FROM analysis_clarification_requests WHERE request_id = ?').get(claim) as SqlRow | undefined;
+      const question = admissionRow(clarification);
+      const model = clarification?.model_question_json == null ? null : parseModelClarification(asString(clarification.model_question_json));
+      const answerRow = db.prepare('SELECT * FROM analysis_clarification_answers WHERE request_id = ?').get(claim) as SqlRow | undefined;
+      const answer = admissionRow(answerRow);
+      const manifest = requestManifest ??= readAdmissionManifest(db, stored!);
+      const selected = typeof answer.optionId === 'string' ? /^model-option-([0-3])$/u.exec(answer.optionId)?.[1] : undefined;
+      if (question.schema !== CLARIFICATION_REQUEST_SCHEMA || question.requestId !== claim || clarification!.request_id !== claim ||
+        clarification!.run_record_id !== runRecordId || question.runRecordId !== runRecordId || question.origin !== 'model' || question.kind !== 'model-question' ||
+        question.attemptId !== stored!.attemptId || question.taskIntentId !== stored!.binding.taskIntentId ||
+        question.planVersion !== stored!.binding.planVersion || question.planEnvelopeDigest !== stored!.binding.planEnvelopeDigest ||
+        question.unitOrdinal !== clarification!.unit_ordinal || !Number.isSafeInteger(question.unitOrdinal) || (question.unitOrdinal as number) < 1 ||
+        manifest.units[(question.unitOrdinal as number) - 1]?.ordinal !== question.unitOrdinal ||
+        typeof question.requestDigest !== 'string' || !DIGEST_PATTERN.test(question.requestDigest) ||
+        typeof question.firstUnitMessageDigest !== 'string' || !DIGEST_PATTERN.test(question.firstUnitMessageDigest) ||
+        model === null || canonicalJson(question.modelQuestion) !== clarification!.model_question_json ||
+        answer.schema !== CLARIFICATION_ANSWER_SCHEMA || answer.answerId !== answerRow!.answer_id ||
+        typeof answer.answerId !== 'string' || !UUID_PATTERN.test(answer.answerId) || answer.requestId !== claim || answerRow!.request_id !== claim ||
+        answer.runRecordId !== runRecordId || answer.requestSha256 !== clarification!.sha256 || answerRow!.option_id !== 'retry' ||
+        answer.answeredAt !== answerRow!.answered_at || (answer.actor !== 'editor' && answer.actor !== 'service-timeout') ||
+        (answer.note !== null && (typeof answer.note !== 'string' || !answer.note.isWellFormed() || clarificationGraphemes(answer.note) > CLARIFICATION_NOTE_MAX)) ||
+        !(answer.optionId === 'no-answer' ? answer.note === null || answer.note === '' : answer.optionId === 'free-text'
+          ? model.freeTextAllowed && typeof answer.note === 'string' && answer.note !== ''
+          : selected !== undefined && model.options?.[Number(selected)] !== undefined && (answer.note === null || answer.note === '')) ||
+        answer.actor === 'service-timeout' && answer.optionId !== 'no-answer') return invalid();
+      const receipt = record.requestAdmission as { data?: { event?: RequestAdmissionEvent } } | undefined;
+      const event = receipt?.data?.event;
+      if (firstReceiptRowSequence !== null && asNumber(row.sequence) >= firstReceiptRowSequence &&
+        (event?.kind !== 'admit' || event.request.stage !== 'units' || event.request.unitOrdinal !== clarification!.unit_ordinal)) return invalid();
+      claims.add(claim);
+    }
+  }
+  return state.reading;
+}
+
+/** Validate every persisted request variant without selecting a policy, mutating, or reconciling. */
+export function validateRequestAdmissionRecords(db: DatabaseSync, allowGoverned: boolean): void {
+  const fields = [
+    ['analysis_run_states', 'requestAdmission'], ['analysis_run_states', 'requestRefusal'],
+    ['analysis_unit_checkpoints', 'requests'], ['analysis_clarification_requests', 'requests'],
+  ] as const;
+  const runs = new Set<string>();
+  for (const [table, field] of fields) {
+    if (db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) === undefined) continue;
+    const rows = db.prepare(`SELECT run_record_id FROM ${table} WHERE json_type(canonical_json, '$.${field}') IS NOT NULL`).all() as SqlRow[];
+    requireAnalysis(allowGoverned || rows.length === 0, 'ANALYSIS_RECORD_INVALID', '请求准入记录与数据库读者修订不一致。');
+    for (const row of rows) runs.add(asString(row.run_record_id));
+  }
+  const governedRuns = new Set(runs);
+  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'analysis_run_states'").get() !== undefined) {
+    for (const row of db.prepare("SELECT DISTINCT run_record_id FROM analysis_run_states WHERE json_type(canonical_json, '$.modelClarificationAnswerClaim') IS NOT NULL").all() as SqlRow[]) runs.add(asString(row.run_record_id));
+  }
+  const requestOwners = new Map<string, string>();
+  for (const runRecordId of runs) {
+    const reading = readRequestAdmissions(db, runRecordId);
+    requireAnalysis(!governedRuns.has(runRecordId) || reading !== null, 'ANALYSIS_RECORD_INVALID', '请求准入证据缺少执行收据。');
+    if (reading === null) continue;
+    for (const row of db.prepare("SELECT canonical_json FROM analysis_run_states WHERE run_record_id = ? AND json_extract(canonical_json, '$.requestAdmission.data.event.kind') = 'admit'").all(runRecordId) as SqlRow[]) {
+      const record = parseCanonicalJson(asString(row.canonical_json)) as { requestAdmission: { data: { event: { request: AnalysisRequestIdentity } } } };
+      const requestId = record.requestAdmission.data.event.request.requestId;
+      requireAnalysis(!requestOwners.has(requestId), 'ANALYSIS_RECORD_INVALID', '物理请求标识不能跨运行复用。');
+      requestOwners.set(requestId, runRecordId);
+    }
+  }
+}
+
 export class BaselineAnalysisStore {
   readonly #db: DatabaseSync;
   readonly #checkpointOwner: CheckpointOwner;
   readonly #route: BaselineAnalysisRouteFacts | null;
+  readonly #originalDefinition: AnalysisKindDefinition;
   #definition: AnalysisKindDefinition;
   readonly #work = new Map<string, PreparationWork>();
   /**
@@ -1107,6 +1479,7 @@ export class BaselineAnalysisStore {
     this.#db = db;
     this.#checkpointOwner = checkpointOwner;
     this.#route = route;
+    this.#originalDefinition = definition;
     this.#definition = route?.fixtureIdentity.startsWith('sample1-model-clarification') === true ? withModelClarification(definition) : definition;
   }
 
@@ -1159,7 +1532,17 @@ export class BaselineAnalysisStore {
    * the contract it froze.
    */
   definitionForDigest(promptContractDigest: string): AnalysisKindDefinition {
+    if (this.#originalDefinition.kind.startsWith('editorial-review/')) {
+      const original = pinnedReviewDefinition(this.#originalDefinition, promptContractDigest);
+      if (original.promptContractDigest === promptContractDigest) return original;
+    }
     const current = this.definition;
+    if (current.kind === BASELINE_ANALYSIS_KIND) {
+      const base = current.clarificationBase ?? current;
+      for (const candidate of [current, base, withModelClarification(base)]) {
+        if (candidate.promptContractDigest === promptContractDigest) return candidate;
+      }
+    }
     if (current.kind.startsWith('editorial-review/')) return pinnedReviewDefinition(current, promptContractDigest);
     if (current.kind !== FACTUAL_REVIEW_KIND) return current;
     for (const level of ['standard', 'strict', 'quick'] as const) {
@@ -2657,6 +3040,8 @@ export class BaselineAnalysisStore {
           unitMessageDigest: typeof record.unitMessageDigest === 'string' ? record.unitMessageDigest : null,
         };
       });
+      if (this.requestAdmissionOf(runRecordId)?.width === 3) spans.sort((left, right) =>
+        (left.unitOrdinal ?? Number.MAX_SAFE_INTEGER) - (right.unitOrdinal ?? Number.MAX_SAFE_INTEGER) || left.ordinal - right.ordinal);
       attempt = {
         attemptId,
         ordinal: 1,
@@ -4232,10 +4617,64 @@ export class BaselineAnalysisStore {
     const reasons = drift.length === 0 ? [] : [`计划的关键内容已经变化：${drift.join('、')}。这次运行不能照原计划续行；请改计划重做。`];
     try {
       this.unitCheckpoints(runRecordId);
+      this.stageContinuationOf(runRecordId);
     } catch {
       reasons.push('已保存的阅读进度无法核对，这次运行不能续行；请取消它，再重新开始。');
     }
     return reasons;
+  }
+
+  /** Read the latest optional stage evidence, refusing corrupt or incompatible evidence before admission. */
+  stageContinuationOf(runRecordId: string): StageContinuation | null {
+    const rows = this.#db.prepare('SELECT canonical_json, sha256 FROM analysis_run_states WHERE run_record_id = ? ORDER BY sequence DESC').all(runRecordId) as SqlRow[];
+    for (const row of rows) {
+      const record = parseCanonicalJson(asString(row.canonical_json)) as { stageContinuation?: { schema?: unknown; data?: StageContinuation; digest?: unknown }; carriedUsage?: unknown };
+      const kept = record.stageContinuation;
+      if (kept === undefined) continue;
+      const invalid = (): never => { throw new AnalysisError('ANALYSIS_RECORD_INVALID', '已保存的阶段进度无法核对；不能续行。'); };
+      if (canonicalRecord(record).digest !== row.sha256 || kept === null || kept.schema !== 'ai7.analysis.stage-continuation/1' ||
+          kept.data === undefined || canonicalRecord(kept.data).digest !== kept.digest || JSON.stringify(kept).length > 16_777_216) invalid();
+      const data = kept.data!;
+      const stored = this.executionBindingOf(runRecordId);
+      if (stored === null || data.runRecordId !== runRecordId || data.attemptId !== stored.attemptId || data.bindingDigest !== stored.bindingDigest ||
+          data.manifestDigest !== stored.binding.coverageManifestDigest || data.promptContractDigest !== stored.binding.promptContractDigest || record.carriedUsage === undefined || data.reduction === undefined) invalid();
+      const definition = this.definitionForRun(runRecordId, data.promptContractDigest);
+      const count = (value: number): boolean => Number.isSafeInteger(value) && value >= 0;
+      if (data.reduction !== undefined) {
+        const reduction = data.reduction;
+        if (!DIGEST_PATTERN.test(reduction.inputDigest) || reduction.contractDigest !== (definition.crossUnit?.promptContractDigest ?? data.promptContractDigest) ||
+            !['closed', 'gap', 'not-run'].includes(reduction.outcome?.state) ||
+            (reduction.requestDigest === null) !== (reduction.outcome.state === 'not-run') ||
+            reduction.requestDigest !== null && (!DIGEST_PATTERN.test(reduction.requestDigest) || reduction.outcome.state === 'not-run' || reduction.outcome.requestDigest !== reduction.requestDigest) ||
+            reduction.outcome.state === 'closed' && (!Array.isArray(reduction.outcome.findings) || reduction.outcome.usage !== null &&
+              (!count(reduction.outcome.usage.inputTokens) || !count(reduction.outcome.usage.outputTokens)))) invalid();
+      }
+      if (data.sampling !== undefined) {
+        const sample = data.sampling;
+        if (data.reduction === undefined || !DIGEST_PATTERN.test(sample.inputDigest) || sample.contractDigest !== definition.assurance?.promptContractDigest ||
+            !count(sample.nextTurn) || sample.nextTurn < 1 || !Array.isArray(sample.turns) || sample.turns.length !== sample.nextTurn - 1 ||
+            !sample.turns.every((turn) => DIGEST_PATTERN.test(turn.requestDigest) && count(turn.unitOrdinal) && turn.unitOrdinal > 0 &&
+              ['closed', 'gap', 'outcome-unknown'].includes(turn.state) && (turn.usage === null || count(turn.usage.inputTokens) && count(turn.usage.outputTokens))) ||
+            typeof sample.ended !== 'boolean' || sample.turns.some((turn) => turn.state === 'outcome-unknown') && !sample.ended ||
+            !Array.isArray(sample.dispositions) || !Array.isArray(sample.gapReasons) || !sample.gapReasons.every((reason) => typeof reason === 'string') ||
+            !Array.isArray(sample.draw?.sampled) || !count(sample.sampled?.inputTokens) || !count(sample.sampled?.outputTokens) || !count(sample.sampled?.turnsWithUsage)) invalid();
+      }
+      // A newer snapshot may only follow all submitted units; no corrupt stage pin can send unfinished units first.
+      const governed = this.requestAdmissionOf(runRecordId) !== null;
+      const plan = governed ? this.#planRecords(stored!.binding.taskIntentId, 'any', stored!.binding.planVersion) : null;
+      const reuse = plan?.['reuse-plan'] as { units: Array<{ disposition: string }> } | undefined;
+      const facts = governed ? null : this.loadExecutionPlan(runRecordId);
+      const expected = governed ? reuse === undefined ? this.#requestManifest(stored!).units.length : reuse.units.filter((unit) => unit.disposition === 'recomputed').length
+        : facts!.update === null ? facts!.manifest.units.length : facts!.update.reusePlan.units.filter((unit) => unit.disposition === 'recomputed').length;
+      if (this.unitCheckpoints(runRecordId).length !== expected) invalid();
+      const usage = this.carriedUsageOf(runRecordId)?.stages;
+      if (usage == null || data.reduction?.outcome.state === 'closed' && usage['cross-unit-reduction'].requests < 1) invalid();
+      if (data.sampling !== undefined && (usage!['assurance-sampling'].requests < data.sampling.nextTurn - 1 ||
+          data.sampling.sampled.turnsWithUsage > data.sampling.nextTurn - 1 ||
+          usage!['assurance-sampling'].inputTokens < data.sampling.sampled.inputTokens || usage!['assurance-sampling'].outputTokens < data.sampling.sampled.outputTokens)) invalid();
+      return data;
+    }
+    return null;
   }
 
   /** One settled unit of a Run, kept the moment it settles: the continuation point 续行 goes on from (CONT-015). */
@@ -4244,7 +4683,9 @@ export class BaselineAnalysisStore {
     attemptId: string;
     unit: UnitResultRecord;
     observation: UnitCheckpoint['observation'];
+    requests?: readonly string[];
   }): void {
+    if (input.requests !== undefined) requireAnalysis(Number(this.#db.prepare('PRAGMA user_version').get()?.user_version) >= MODEL_REQUEST_ADMISSION_SCHEMA_VERSION, 'ANALYSIS_RECORD_INVALID', '请求检查点写入需要已验证的读者修订。');
     const recordedAt = new Date().toISOString();
     const record = canonicalRecord({
       schema: UNIT_CHECKPOINT_SCHEMA,
@@ -4252,6 +4693,7 @@ export class BaselineAnalysisStore {
       attemptId: input.attemptId,
       unit: input.unit,
       observation: input.observation,
+      ...(input.requests === undefined ? {} : { requests: input.requests }),
       recordedAt,
     });
     this.#db.prepare(
@@ -4260,16 +4702,24 @@ export class BaselineAnalysisStore {
   }
 
   /**
-   * What a stopped Run spent beyond its units before it stopped — a reduction or a sample 续行 forms again — as its latest
+   * What a stopped Run spent beyond its units before it stopped — settled or refused stage work — as its latest
    * stop kept it (Issue #51, S16a): the ceiling counts it after 续行 as it did before. `null` when no stop kept any.
    */
   carriedUsageOf(runRecordId: string): { inputTokens: number; outputTokens: number; stages: CarriedStages | null } | null {
     const rows = this.#db.prepare(
-      "SELECT canonical_json FROM analysis_run_states WHERE run_record_id = ? AND state IN ('paused', 'resumable', 'awaiting-clarification') ORDER BY sequence DESC",
+      `SELECT canonical_json, sha256 FROM analysis_run_states WHERE run_record_id = ? AND
+       (state IN ('paused', 'resumable', 'awaiting-clarification') OR
+        json_extract(canonical_json, '$.requestAdmission.schema') = 'ai7.analysis.request-admission/1' AND json_type(canonical_json, '$.carriedUsage') IS NOT NULL)
+       ORDER BY sequence DESC`,
     ).all(runRecordId) as SqlRow[];
     const count = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
     for (const row of rows) {
-      const carried = (parseCanonicalJson(asString(row.canonical_json)) as { carriedUsage?: unknown }).carriedUsage;
+      const record = parseCanonicalJson(asString(row.canonical_json)) as { carriedUsage?: unknown; requestAdmission?: unknown };
+      if (record.requestAdmission !== undefined) {
+        requireAnalysis(canonicalRecord(record).digest === row.sha256, 'ANALYSIS_RECORD_INVALID', '阶段用量记录无法核对。');
+        this.requestAdmissionOf(runRecordId);
+      }
+      const carried = record.carriedUsage;
       if (carried === undefined) continue;
       const usage = carried as { inputTokens?: unknown; outputTokens?: unknown; stages?: unknown };
       requireAnalysis(carried !== null && typeof carried === 'object' && count(usage.inputTokens) && count(usage.outputTokens),
@@ -4351,7 +4801,10 @@ export class BaselineAnalysisStore {
     const requestId = randomUUID();
     const raisedAt = input.raisedAt ?? new Date().toISOString();
     const modelJson = input.modelQuestion === undefined ? null : canonicalJson(input.modelQuestion);
+    const requests = this.requestAdmissionOf(input.runRecordId);
+    const covered = requests === null ? undefined : [...requests.open.values()].filter((request) => request.stage === 'units' && request.unitOrdinal === input.unitOrdinal).map((request) => request.requestId);
     requireAnalysis(modelJson === null || parseModelClarification(modelJson) !== null, 'ANALYSIS_RECORD_INVALID', '模型澄清问题无效。');
+    if (covered !== undefined) requireAnalysis(Number(this.#db.prepare('PRAGMA user_version').get()?.user_version) >= MODEL_REQUEST_ADMISSION_SCHEMA_VERSION, 'ANALYSIS_RECORD_INVALID', '请求澄清写入需要已验证的读者修订。');
     const record = canonicalRecord({
       schema: CLARIFICATION_REQUEST_SCHEMA,
       ...(modelJson === null ? {} : { origin: 'model', modelQuestion: input.modelQuestion, firstAttempts: input.firstAttempts ?? 1 }),
@@ -4372,10 +4825,12 @@ export class BaselineAnalysisStore {
       firstUsage: input.firstUsage,
       firstWallMs: Math.max(0, Math.round(input.firstWallMs)),
       raisedAt,
+      ...(covered === undefined ? {} : { requests: covered }),
     });
     this.#db.prepare(
       'INSERT INTO analysis_clarification_requests(request_id, run_record_id, unit_ordinal, kind, raised_at, canonical_json, sha256, model_question_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
     ).run(requestId, input.runRecordId, input.unitOrdinal, 'ask-first-adaptation', raisedAt, record.json, record.digest, modelJson);
+    this.checkpointClarificationRequests(input.runRecordId, input.unitOrdinal);
     return requestId;
   }
 
@@ -4507,10 +4962,16 @@ export class BaselineAnalysisStore {
     return expired;
   }
 
-  claimModelClarificationAnswer(runRecordId: string, requestId: string): boolean {
+  modelClarificationAnswerClaimed(runRecordId: string, requestId: string): boolean {
     const rows = this.#db.prepare('SELECT canonical_json FROM analysis_run_states WHERE run_record_id = ?').all(runRecordId);
-    if (rows.some((row) => (parseCanonicalJson(asString(row.canonical_json)) as Record<string, unknown>).modelClarificationAnswerClaim === requestId)) return false;
-    this.recordRunState(runRecordId, 'executing', { detail: '按澄清回答接着处理这个阅读范围。', modelClarificationAnswerClaim: requestId });
+    return rows.some((row) => (parseCanonicalJson(asString(row.canonical_json)) as Record<string, unknown>).modelClarificationAnswerClaim === requestId);
+  }
+
+  claimModelClarificationAnswer(runRecordId: string, requestId: string, preserveState = false): boolean {
+    if (this.modelClarificationAnswerClaimed(runRecordId, requestId)) return false;
+    const detail = { detail: '按澄清回答接着处理这个阅读范围。', modelClarificationAnswerClaim: requestId };
+    if (preserveState) this.#appendExecutionEvidence(runRecordId, { modelClarificationAnswerClaim: requestId });
+    else this.recordRunState(runRecordId, 'executing', detail);
     return true;
   }
 
@@ -4669,6 +5130,7 @@ export class BaselineAnalysisStore {
     const cancelling: string[] = [];
     for (const row of rows) {
       const runRecordId = asString(row.run_record_id);
+      this.reconcileRequestAdmissions(runRecordId);
       const state = row.last_state === null ? null : asString(row.last_state);
       if (state === 'pausing') {
         this.recordRunState(runRecordId, 'paused', { detail: RECONCILED_PAUSED_DETAIL, reconciled: true });
@@ -4809,6 +5271,234 @@ export class BaselineAnalysisStore {
   }
 
   // ---- execution persistence -------------------------------------------------------------------
+
+  /** Immutable request pins remain readable after this Run publishes its successor revision. */
+  #requestManifest(stored: NonNullable<ReturnType<BaselineAnalysisStore['executionBindingOf']>>): CoverageManifestProjection {
+    const manifest = this.#planRecords(stored.binding.taskIntentId, 'any', stored.binding.planVersion)['coverage-manifest'] as CoverageManifestProjection;
+    requireAnalysis(manifestDigestIsExact(manifest) && manifest.digest === stored.binding.coverageManifestDigest &&
+      manifest.manuscript.revisionId === stored.binding.manuscriptPin.revisionId && manifest.manuscript.revisionDigest === stored.binding.manuscriptPin.revisionDigest,
+    'ANALYSIS_RECORD_INVALID', '请求准入的固定覆盖清单无法核对。');
+    return manifest;
+  }
+
+  /** An absent receipt is historical evidence, never an inferred admission. */
+  requestAdmissionOf(runRecordId: string): RequestAdmissionReading | null {
+    return readRequestAdmissions(this.#db, runRecordId);
+  }
+
+  /** Preserve the latest stop, detail and idle-yield marker when appending private execution evidence. */
+  #appendExecutionEvidence(runRecordId: string, detail: Record<string, unknown>): void {
+    const row = this.#db.prepare('SELECT canonical_json, sha256 FROM analysis_run_states WHERE run_record_id = ? ORDER BY sequence DESC LIMIT 1').get(runRecordId) as SqlRow | undefined;
+    requireAnalysis(row !== undefined && sha256Hex(asString(row.canonical_json)) === row.sha256, 'ANALYSIS_RECORD_INVALID', '运行状态无法核对。');
+    const { runRecordId: _run, sequence: _sequence, state, recordedAt: _at, requestAdmission: _receipt, ...kept } = parseCanonicalJson(asString(row.canonical_json)) as Record<string, unknown>;
+    this.recordRunState(runRecordId, state as BaselineAnalysisRunState, { ...kept, ...detail });
+  }
+
+  #appendRequestAdmission(runRecordId: string, pins: RequestAdmissionPins, event: RequestAdmissionEvent, detail: Record<string, unknown> = {}): void {
+    requireAnalysis(Number(this.#db.prepare('PRAGMA user_version').get()?.user_version) >= MODEL_REQUEST_ADMISSION_SCHEMA_VERSION,
+      'ANALYSIS_RECORD_INVALID', '请求准入写入需要已验证的读者修订。');
+    transact(this.#db, () => {
+      const prior = this.requestAdmissionOf(runRecordId);
+      const data: RequestAdmissionData = { ...pins, sequence: (prior?.sequence ?? 0) + 1, predecessorDigest: prior?.digest ?? null, event };
+      this.#appendExecutionEvidence(runRecordId, { ...detail, requestAdmission: { schema: 'ai7.analysis.request-admission/1', data, digest: canonicalRecord(data).digest } });
+      this.requestAdmissionOf(runRecordId);
+    });
+  }
+
+  beginRequestAdmissions(runRecordId: string, width: 1 | 3, policyRuleId: string): 1 | 3 {
+    requireAnalysis(typeof policyRuleId === 'string' && /^[a-z][a-z0-9-]{0,159}$/u.test(policyRuleId),
+      'ANALYSIS_RECORD_INVALID', '请求准入需要实际规则标识。');
+    const prior = this.requestAdmissionOf(runRecordId);
+    if (prior !== null) {
+      requireAnalysis(prior.pins.policyRuleId === policyRuleId, 'ANALYSIS_RECORD_INVALID', '请求准入的固定规则与实际规则不一致。');
+      return prior.width;
+    }
+    const stored = this.executionBindingOf(runRecordId);
+    requireAnalysis(stored !== null, 'ANALYSIS_RECORD_INVALID', '请求准入前必须保存执行绑定。');
+    const binding = stored.binding;
+    this.#appendRequestAdmission(runRecordId, { runRecordId, attemptId: stored.attemptId, bindingDigest: stored.bindingDigest,
+      planEnvelopeDigest: binding.planEnvelopeDigest, manifestDigest: binding.coverageManifestDigest, compositionDigest: binding.behaviorCompositionDigest,
+      promptContractDigest: binding.promptContractDigest, policyVersion: binding.policyPin.providerProcessingVersion, policyRuleId },
+    { kind: 'execution', width, limits: { requests: 4, units: 3, backgroundRequests: 1 } });
+    return this.requestAdmissionOf(runRecordId)!.width;
+  }
+
+  admitModelRequest(runRecordId: string, request: AnalysisRequestIdentity, clarificationRequestId: string | null = null): void {
+    transact(this.#db, () => {
+      const reading = this.requestAdmissionOf(runRecordId);
+      requireAnalysis(reading !== null, 'ANALYSIS_RECORD_INVALID', '请求准入缺少执行收据。');
+      if (clarificationRequestId !== null) requireAnalysis(!this.modelClarificationAnswerClaimed(runRecordId, clarificationRequestId),
+        'ANALYSIS_CLARIFICATION_ALREADY_CLAIMED', '澄清回答回合已经提交；没有再次发送。');
+      this.#appendRequestAdmission(runRecordId, reading.pins, { kind: 'admit', request },
+        clarificationRequestId === null ? {} : { modelClarificationAnswerClaim: clarificationRequestId });
+    });
+  }
+
+  recordModelRequestNotSent(runRecordId: string, requestId: string): void {
+    const reading = this.requestAdmissionOf(runRecordId);
+    const request = reading?.open.get(requestId);
+    requireAnalysis(reading !== null && request !== undefined, 'ANALYSIS_RECORD_INVALID', '未发送证明缺少精确的请求标识。');
+    this.#appendRequestAdmission(runRecordId, reading.pins, { kind: 'resolve', requests: [requestId], evidence: { kind: 'no-send', digest: canonicalRecord(request).digest } });
+  }
+
+  checkpointModelRequests(runRecordId: string, unitOrdinal: number): void {
+    const reading = this.requestAdmissionOf(runRecordId);
+    if (reading === null) return;
+    const requests = [...reading.open.values()].filter((request) => request.stage === 'units' && request.unitOrdinal === unitOrdinal).map((request) => request.requestId);
+    if (requests.length === 0) return;
+    const checkpoint = this.#db.prepare('SELECT sha256 FROM analysis_unit_checkpoints WHERE run_record_id = ? AND unit_ordinal = ?').get(runRecordId, unitOrdinal) as SqlRow | undefined;
+    requireAnalysis(checkpoint !== undefined, 'ANALYSIS_RECORD_INVALID', '请求结算前必须保存对应的单元结果。');
+    this.#appendRequestAdmission(runRecordId, reading.pins, { kind: 'resolve', requests, evidence: { kind: 'unit-checkpoint', digest: asString(checkpoint.sha256) } });
+    this.requestAdmissionOf(runRecordId);
+  }
+
+  checkpointClarificationRequests(runRecordId: string, unitOrdinal: number): void {
+    const reading = this.requestAdmissionOf(runRecordId);
+    if (reading === null) return;
+    const row = this.#db.prepare('SELECT canonical_json, sha256 FROM analysis_clarification_requests WHERE run_record_id = ? AND unit_ordinal = ?').get(runRecordId, unitOrdinal) as SqlRow | undefined;
+    if (row === undefined) return;
+    const checkpoint = parseCanonicalJson(asString(row.canonical_json)) as { requests?: string[] };
+    const requests = [...reading.open.values()].filter((request) => request.stage === 'units' && request.unitOrdinal === unitOrdinal && checkpoint.requests?.includes(request.requestId)).map((request) => request.requestId);
+    if (requests.length === 0) return;
+    this.#appendRequestAdmission(runRecordId, reading.pins, { kind: 'resolve', requests,
+      evidence: { kind: 'clarification-checkpoint', digest: asString(row.sha256) } });
+  }
+
+  modelClarificationAnswerNotSent(runRecordId: string, clarificationRequestId: string, unitOrdinal: number): boolean {
+    const reading = this.requestAdmissionOf(runRecordId);
+    if (reading === null) return false;
+    const claims = this.#db.prepare(`SELECT sequence, canonical_json FROM analysis_run_states WHERE run_record_id = ? AND
+      json_extract(canonical_json, '$.modelClarificationAnswerClaim') = ? ORDER BY sequence LIMIT 1`).get(runRecordId, clarificationRequestId) as SqlRow | undefined;
+    if (claims === undefined) return false;
+    const firstReceipt = this.#db.prepare(`SELECT sequence FROM analysis_run_states WHERE run_record_id = ? AND
+      json_type(canonical_json, '$.requestAdmission') IS NOT NULL ORDER BY sequence LIMIT 1`).get(runRecordId) as SqlRow;
+    const origin = parseCanonicalJson(asString(claims.canonical_json)) as { requestAdmission?: { data: { event: RequestAdmissionEvent } } };
+    const admitted = origin.requestAdmission?.data.event;
+    if (asNumber(claims.sequence) < asNumber(firstReceipt.sequence) || admitted?.kind !== 'admit' ||
+        admitted.request.stage !== 'units' || admitted.request.unitOrdinal !== unitOrdinal) return false;
+    const rows = this.#db.prepare(`SELECT canonical_json FROM analysis_run_states WHERE run_record_id = ? AND sequence >= ? AND
+      json_extract(canonical_json, '$.requestAdmission.data.event.kind') = 'admit' AND
+      json_extract(canonical_json, '$.requestAdmission.data.event.request.unitOrdinal') = ?`).all(runRecordId, claims.sequence!, unitOrdinal) as SqlRow[];
+    const ids = rows.map((row) => (parseCanonicalJson(asString(row.canonical_json)) as { requestAdmission: { data: { event: { request: AnalysisRequestIdentity } } } }).requestAdmission.data.event.request.requestId);
+    return ids.length > 0 && ids.every((id) => reading.notSent.some((request) => request.requestId === id));
+  }
+
+  checkpointStageRequests(runRecordId: string, stage: 'cross-unit-reduction' | 'assurance-sampling', stages: StageContinuation, carriedUsage: { inputTokens: number; outputTokens: number; stages: CarriedStages }): void {
+    const reading = this.requestAdmissionOf(runRecordId);
+    if (reading === null) return;
+    const detail = { stageContinuation: { schema: 'ai7.analysis.stage-continuation/1', data: stages, digest: canonicalRecord(stages).digest }, carriedUsage };
+    this.#appendRequestAdmission(runRecordId, reading.pins, { kind: 'resolve',
+      requests: [...reading.open.values()].filter((request) => request.stage === stage && (stage === 'cross-unit-reduction'
+        ? stages.reduction?.requestDigest === request.requestDigest && stages.reduction.inputDigest === request.inputDigest
+        : stages.sampling?.inputDigest === request.inputDigest && stages.sampling.turns.some((turn) => turn.requestDigest === request.requestDigest))).map((request) => request.requestId),
+      evidence: { kind: 'stage-checkpoint', digest: canonicalRecord(detail).digest } }, detail);
+  }
+
+  checkpointReflectionRequests(runRecordId: string): void {
+    const reading = this.requestAdmissionOf(runRecordId);
+    if (reading === null) return;
+    const requests = [...reading.open.values()].filter((request) => request.stage === 'run-report-reflection').map((request) => request.requestId);
+    if (requests.length === 0) return;
+    const outcome = this.#db.prepare('SELECT sha256 FROM analysis_task_outcomes WHERE run_record_id = ?').get(runRecordId) as SqlRow | undefined;
+    requireAnalysis(outcome !== undefined, 'ANALYSIS_RECORD_INVALID', '反思请求结算前必须保存运行结果。');
+    this.#appendRequestAdmission(runRecordId, reading.pins, { kind: 'resolve', requests, evidence: { kind: 'reflection-outcome', digest: asString(outcome.sha256) } });
+  }
+
+  hasCommittedOutcome(runRecordId: string): boolean {
+    return this.#db.prepare('SELECT 1 FROM analysis_task_outcomes WHERE run_record_id = ?').get(runRecordId) !== undefined;
+  }
+
+  checkpointRefusedRequests(runRecordId: string, stage: RunProgressStage, unitOrdinal: number | null,
+    observation: { attempts: number; usage: { inputTokens: number; outputTokens: number } | null }): void {
+    const reading = this.requestAdmissionOf(runRecordId);
+    if (reading === null) return;
+    const requests = [...reading.open.values()].filter((request) => request.stage === stage && request.unitOrdinal === unitOrdinal).map((request) => request.requestId);
+    if (requests.length === 0) return;
+    const requestRefusal = { state: 'provider-account-limit', stage, unitOrdinal, observation };
+    this.#appendRequestAdmission(runRecordId, reading.pins, { kind: 'resolve', requests,
+      evidence: { kind: 'refused-turn', digest: canonicalRecord(requestRefusal).digest } }, { requestRefusal });
+  }
+
+  /** Startup only: a possible send without an exact committed result is never re-executed. */
+  reconcileRequestAdmissions(runRecordId: string): void {
+    let reading = this.requestAdmissionOf(runRecordId);
+    if (reading === null || reading.open.size === 0) return;
+    const stored = this.executionBindingOf(runRecordId);
+    requireAnalysis(stored !== null, 'ANALYSIS_RECORD_INVALID', '准入记录缺少执行绑定。');
+    const manifest = this.#requestManifest(stored);
+    // The Run's frozen contract, never the launch's current one: a reopened Run whose current
+    // rule is missing or differs still names its admitted requests by the digests it froze.
+    const frozen = this.definitionForRun(runRecordId, reading.pins.promptContractDigest);
+    const ordinals = [...new Set([...reading.open.values()].filter((request) => request.stage === 'units').map((request) => request.unitOrdinal!))].sort((left, right) => left - right);
+    for (const ordinal of ordinals) {
+      this.checkpointClarificationRequests(runRecordId, ordinal);
+      reading = this.requestAdmissionOf(runRecordId)!;
+      const requests = [...reading.open.values()].filter((request) => request.stage === 'units' && request.unitOrdinal === ordinal);
+      if (requests.length === 0) continue;
+      const pins = reading.pins;
+      // The unknown checkpoint and its discharge commit together: a refused discharge leaves no row behind.
+      transact(this.#db, () => {
+        const existing = this.unitCheckpoints(runRecordId).find((checkpoint) => checkpoint.unit.unitOrdinal === ordinal);
+        if (existing === undefined) {
+          const unit = manifest.units[ordinal - 1]!;
+          const reason = '本次请求已准入，AI7 关闭前没有保存可核对的单元结果；结果未知，这次运行不会再次发送。';
+          const question = this.clarificationsOf(runRecordId).find((entry) => entry.unitOrdinal === ordinal);
+          this.recordUnitCheckpoint({ runRecordId, attemptId: pins.attemptId, requests: requests.map((request) => request.requestId),
+            unit: { unitOrdinal: ordinal, requestDigest: frozen.requestDigest(ordinal, unit.digest), lineage: { kind: 'recomputed' },
+              closed: { state: 'gap', gap: { unitOrdinal: ordinal, code: 'outcome-unknown', reason, startPosition: unit.startPosition, endPosition: unit.endPosition, blockIds: [...unit.blockIds] } } },
+            observation: { unitOrdinal: ordinal, attempts: (question?.firstAttempts ?? (question === undefined ? 0 : 1)) + new Set(requests.map((request) => `${request.sessionId}:${request.attemptIndex}:${request.adaptationId ?? ''}`)).size,
+              usage: question?.firstUsage ?? null, wallMs: question?.firstWallMs ?? 0 } });
+        }
+        this.checkpointModelRequests(runRecordId, ordinal);
+      });
+      reading = this.requestAdmissionOf(runRecordId)!;
+    }
+    const stageRequests = [...reading.open.values()].filter((request) => request.stage === 'cross-unit-reduction' || request.stage === 'assurance-sampling');
+    if (stageRequests.length > 0) {
+      const kept = this.stageContinuationOf(runRecordId);
+      const stages: StageContinuation = kept ?? { runRecordId, attemptId: reading.pins.attemptId, bindingDigest: reading.pins.bindingDigest,
+        manifestDigest: reading.pins.manifestDigest, promptContractDigest: reading.pins.promptContractDigest };
+      const usage = this.carriedUsageOf(runRecordId);
+      const carried: CarriedStages = structuredClone(usage?.stages ?? {
+        'cross-unit-reduction': { requests: 0, inputTokens: 0, outputTokens: 0 }, 'assurance-sampling': { requests: 0, inputTokens: 0, outputTokens: 0 },
+      });
+      const reduction = stageRequests.find((request) => request.stage === 'cross-unit-reduction');
+      if (reduction !== undefined && stages.reduction === undefined) {
+        stages.reduction = { inputDigest: reduction.inputDigest, contractDigest: reduction.contractDigest, requestDigest: reduction.requestDigest,
+          outcome: { state: 'gap', code: 'outcome-unknown', requestDigest: reduction.requestDigest,
+            reason: '归纳请求可能已经发出，关闭前没有保存可核对的结果；本次运行不会再次发送。' } };
+        carried['cross-unit-reduction'].requests += 1;
+      }
+      const sampling = stageRequests.find((request) => request.stage === 'assurance-sampling');
+      if (sampling !== undefined) {
+        const sample = stages.sampling;
+        requireAnalysis(sample !== undefined && sample.inputDigest === sampling.inputDigest && sample.contractDigest === sampling.contractDigest,
+          'ANALYSIS_RECORD_INVALID', '抽样准入缺少可核对的抽取记录；不能续行。');
+        if (!sample.turns.some((turn) => turn.requestDigest === sampling.requestDigest)) {
+          const turn = assuranceSamplingTurns(sample.draw.sampled)[sample.nextTurn - 1];
+          const definition = this.definitionForRun(runRecordId, reading.pins.promptContractDigest);
+          const blocks = new Map(this.readRevisionBlocks(manifest.manuscript.manuscriptId, manifest.manuscript.revisionId).map((block) => [block.blockId, block] as const));
+          requireAnalysis(turn !== undefined && definition.assurance !== null && canonicalRecord(buildAssuranceSamplingMessage(manifest.units[turn.unitOrdinal - 1]!,
+            manifest.units.length, blocks, turn.findings, definition.assurance.prompt)).digest === sampling.requestDigest,
+          'ANALYSIS_RECORD_INVALID', '抽样请求与抽取记录不一致；不能续行。');
+          sample.turns.push({ requestDigest: sampling.requestDigest, unitOrdinal: turn.unitOrdinal, usage: null, state: 'outcome-unknown' });
+          sample.nextTurn += 1; sample.ended = true;
+          sample.gapReasons.push(`第 ${turn.unitOrdinal} 个阅读范围的抽样请求可能已经发出，关闭前没有保存结果；本次运行不会再次发送。`);
+          carried['assurance-sampling'].requests += 1;
+        }
+      }
+      const totals = { inputTokens: usage?.inputTokens ?? 0, outputTokens: usage?.outputTokens ?? 0, stages: carried };
+      if (reduction !== undefined) this.checkpointStageRequests(runRecordId, 'cross-unit-reduction', stages, totals);
+      if (sampling !== undefined) this.checkpointStageRequests(runRecordId, 'assurance-sampling', stages, totals);
+      reading = this.requestAdmissionOf(runRecordId)!;
+    }
+    const reflection = [...reading.open.values()].filter((request) => request.stage === 'run-report-reflection');
+    if (reflection.length > 0) {
+      if (this.hasCommittedOutcome(runRecordId)) this.checkpointReflectionRequests(runRecordId);
+      else this.#appendRequestAdmission(runRecordId, reading.pins, { kind: 'resolve', requests: reflection.map((request) => request.requestId),
+        evidence: { kind: 'unavailable', digest: canonicalRecord({ requests: reflection, reason: 'possible-send-without-durable-result' }).digest } });
+    }
+  }
 
   recordRunState(runRecordId: string, state: BaselineAnalysisRunState, detail: Record<string, unknown>): void {
     requireAnalysis(UUID_PATTERN.test(runRecordId), 'ANALYSIS_RUN_INVALID', '运行记录标识无效。');

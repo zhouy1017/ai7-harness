@@ -1,7 +1,7 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 import { existsSync } from 'node:fs';
-import { lstat, mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { arch, platform, release, tmpdir } from 'node:os';
@@ -934,6 +934,47 @@ async function main() {
     await click(renderer, '返回稿件', 'proposal-return');
     await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, 'proposal-back-to-manuscript');
     await settled(renderer, 'proposal-settled');
+
+    // #1119 / F-20a: a distinct local procedure on exact admitted sample1 and tester-authored edits.
+    // No fixture/model binding is added to launch; the existing network-denied product path is unchanged.
+    at('local-check-exact-sample1');
+    const exactSample = resolve(ROOT, 'SampleBooks', ADMITTED_BASELINE_DOCX);
+    const exactBytes = await readFile(exactSample);
+    requireJourney(exactBytes.length === 29_550 && createHash('sha256').update(exactBytes).digest('hex') === 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483', 'local-exact-admitted-input');
+    await close(); renderer = await launch({ picker: exactSample });
+    await importAndOpen(renderer, '本地文字检查旅程');
+    // importAndOpen's J-14 dark pass names its own locations; a failure from here on is the local sequence's.
+    at('local-check-exact-sample1');
+    await assertRenderer(renderer, PAGE_HELPERS, 'local-page-helpers');
+    await assertRenderer(renderer, `(() => { const block=document.querySelector('[data-testid="manuscript-editor"] > p[data-block-id]'); if(!block)return false; window.__j05LocalBlock=block.dataset.blockId; return window.__j05.place(window.__j05LocalBlock,0,0) && document.execCommand('insertText',false,'本地检查…保留原文。'); })()`, 'local-tester-edit');
+    await settled(renderer, 'local-edit-durable');
+    await assertRenderer(renderer, `(() => { window.__j05LocalOriginal=window.__j05.text(window.__j05LocalBlock); return window.__j05LocalOriginal.startsWith('本地检查…保留原文。'); })()`, 'local-frozen-words-kept');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('review')), 'local-review-entry');
+    await waitFor(renderer, `document.querySelector('[data-review-action="new-local-check"]')?.disabled===false`, 'local-explicit-entry-ready');
+    await assertRenderer(renderer, `(() => { document.querySelector('[data-review-action="new-local-check"]').click(); return true; })()`, 'local-entry-click');
+    await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true && document.querySelector('[data-local-check-options]')?.hidden===false`, 'local-options-open');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const profile=sheet.querySelector('[data-local-check-numerals]'); const prose=sheet.querySelector('[data-local-check-prose]'); if(profile?.value!=='off'||!prose||prose.checked)return false; prose.click(); const button=sheet.querySelector('[data-review-action="prepare"]'); if(!button||button.disabled)return false; button.click(); return true; })()`, 'local-confirm-prose-numerals-off');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanStart==='ready' && document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, 'local-frozen-plan-ready');
+    await assertRenderer(renderer, `(async () => { const workspace=await window.ai7.inspectReviewWorkspace({reviewRunId:null}); const run=workspace.run; const plan=await window.ai7.inspectTaskPlan({kind:'review-run',ref:run.reviewRunId}); window.__j05LocalRun=run.reviewRunId; window.__j05LocalDigest=run.localCheck.planDigest; return run.localCheck.options.numerals==='off' && run.preinstalledProcedures.some((pin)=>pin.procedure.procedureId==='ai7-procedure/local-text-check'&&pin.procedure.version===1) && !plan.start.needsModelConnection && plan.service.provider==='不调用模型' && plan.start.categoryDigests.length===1 && plan.start.categoryDigests[0].planEnvelopeDigest===run.localCheck.planDigest; })()`, 'local-plan-exact-no-model-binding');
+    await assertRenderer(renderer, `(() => { document.querySelector('#task-drawer [data-task-drawer-control="start"]').click(); return true; })()`, 'local-authorize-exact-plan');
+    await waitFor(renderer, `document.querySelector('[data-local-check="materialized"]') && document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, 'local-finding-materialized');
+    await assertRenderer(renderer, `(async () => { const run=(await window.ai7.inspectReviewWorkspace({reviewRunId:window.__j05LocalRun})).run; const finding=run.findings.find((item)=>item.blockId===window.__j05LocalBlock&&item.stateLine?.startsWith('P02/v1')); if(!finding)return false; window.__j05LocalFinding=finding.findingId; window.__j05LocalMark=finding.markId; return finding.output==='annotation'&&finding.replacement===null&&finding.fromGrapheme===4&&finding.toGrapheme===5&&run.localCheck.counts.N01.disabled===97&&run.report.record.appendix.categories[0].adapterPin===null&&run.report.record.appendix.categories[0].planEnvelopeDigest===window.__j05LocalDigest; })()`, 'local-exact-rule-run-report-lineage');
+    await assertRenderer(renderer, `(() => { const button=document.querySelector('article[data-finding-id="'+window.__j05LocalFinding+'"] [data-review-action="convert-to-suggestion"]'); if(!button||button.disabled)return false; button.click(); return true; })()`, 'local-editor-conversion-open');
+    await waitFor(renderer, `document.querySelector('textarea[data-review-field="convert-to"]')`, 'local-conversion-form');
+    await assertRenderer(renderer, `(() => { const field=document.querySelector('textarea[data-review-field="convert-to"]'); field.value='……'; field.dispatchEvent(new Event('input',{bubbles:true})); document.querySelector('[data-review-action="convert-confirm"]').click(); return true; })()`, 'local-editor-conversion-confirm');
+    await waitFor(renderer, `!document.querySelector('textarea[data-review-field="convert-to"]')`, 'local-conversion-saved');
+    await assertRenderer(renderer, `(() => { document.querySelector('article[data-finding-id="'+window.__j05LocalFinding+'"] [data-review-action="go-to-text"]').click(); return true; })()`, 'local-return-to-mark');
+    // The converted annotation stays the finding's own mark, so 回到原文 opens its paragraph; the editor then opens the new suggestion.
+    await waitFor(renderer, `document.querySelector('[data-screen="editor"]') && window.__j05.mark('change-suggestion', window.__j05LocalBlock).length===1`, 'local-converted-suggestion-on-text');
+    await openMarkCard(renderer, 'change-suggestion', await renderer.evaluate('window.__j05LocalBlock'), 'local-suggestion');
+    await assertRenderer(renderer, `window.__j05.act('accept-and-apply')`, 'local-apply');
+    await waitFor(renderer, `window.__j05.card()?.querySelector('[data-mark-application]') && window.__j05.text(window.__j05LocalBlock).startsWith('本地检查……保留原文。')`, 'local-apply-writes-editor-choice');
+    await assertRenderer(renderer, `window.__j05.act('prepare-reverse')`, 'local-prepare-reversal');
+    await waitFor(renderer, `window.__j05.card()?.querySelector('[data-mark-form="reverse-apply"]')`, 'local-reversal-preview');
+    await assertRenderer(renderer, `window.__j05.act('submit')`, 'local-confirm-reversal');
+    await waitFor(renderer, `window.__j05.text(window.__j05LocalBlock)===window.__j05LocalOriginal && window.__j05.card()?.querySelector('[data-mark-state]')?.textContent==='待你处理'`, 'local-reversal-restores-text');
+    await assertRenderer(renderer, `(async () => { const run=(await window.ai7.inspectReviewWorkspace({reviewRunId:window.__j05LocalRun})).run; const finding=run.findings.find((item)=>item.findingId===window.__j05LocalFinding); return run.localCheck.planDigest===window.__j05LocalDigest && run.localCheck.state==='materialized' && finding.categoryId==='local-text-check' && finding.stateLine.startsWith('P02/v1') && run.report!==null; })()`, 'local-lineage-survives-editor-actions');
+    await settled(renderer, 'local-workflow-settled');
 
     at('completion-browser-close');
     await close();

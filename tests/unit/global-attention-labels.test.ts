@@ -50,6 +50,8 @@ import { TASK_PLAN_STATE_PILLS } from '../../src/renderer/task-drawer-labels.js'
 // so the whole screen is read here without a DOM.
 
 const RENDERER = readFileSync(fileURLToPath(new URL('../../src/renderer/index.ts', import.meta.url)), 'utf8');
+// The Manuscript screen owns its toolbar, so the recovery return's button is read there (Issue #1127).
+const MANUSCRIPT_SCREEN = readFileSync(fileURLToPath(new URL('../../src/renderer/manuscript-screen.ts', import.meta.url)), 'utf8');
 const AT = '2026-09-23T04:05:06.000Z';
 
 const STATES: ReadonlyArray<GlobalAttentionStateKey> = [
@@ -294,7 +296,7 @@ describe('each item', () => {
     expect(GLOBAL_ATTENTION_NEXT_STEP_LABELS['view-review']).toBe(TASK_BAR_RUN_LINKS['review-run']);
     expect(GLOBAL_ATTENTION_NEXT_STEP_LABELS['reconfirm-plan']).toBe(TASK_BAR_RECONFIRM);
     expect(GLOBAL_ATTENTION_NEXT_STEP_LABELS['continue-review']).toBe(REVIEW_ACTION_LABELS.continue);
-    expect(RENDERER).toContain(`button('${GLOBAL_ATTENTION_NEXT_STEP_LABELS['return-to-recovery']}'`);
+    expect(MANUSCRIPT_SCREEN).toContain(`button('${GLOBAL_ATTENTION_NEXT_STEP_LABELS['return-to-recovery']}'`);
     expect(RENDERER).toContain(`button('${GLOBAL_ATTENTION_NEXT_STEP_LABELS['retry-abandon-cleanup']}'`);
     expect(RENDERER).toContain(`${GLOBAL_ATTENTION_NEXT_STEP_LABELS['await-local-check']}；不要重复导入`);
     expect(RENDERER).toContain(`\`${GLOBAL_ATTENTION_NEXT_STEP_PREFIX}\${`);

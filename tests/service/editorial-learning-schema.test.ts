@@ -30,7 +30,7 @@ describe('reference-only learning schema revision 86', () => {
       const check = new DatabaseSync(join(roots!.dataRoot, 'store', 'ai7.sqlite'));
       try {
         // Synchronized with #1083 and #1084: revisions 87 and 88 follow, adding only their own relations, which this predecessor already carries.
-        expect(check.prepare('PRAGMA user_version').get()!.user_version).toBe(89);
+        expect(check.prepare('PRAGMA user_version').get()!.user_version).toBe(92);
         const added = new Set([...Object.keys(EDITORIAL_LEARNING_SCHEMA_SQL), ...Object.keys(EDITORIAL_LEARNING_TRIGGER_SQL)]);
         expect(check.prepare("SELECT name, sql FROM sqlite_schema WHERE sql IS NOT NULL ORDER BY name").all().filter((row) => !added.has(String(row.name)))).toEqual(before);
         expect(check.prepare('PRAGMA foreign_key_check').all()).toEqual([]);

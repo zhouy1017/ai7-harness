@@ -1,3 +1,4 @@
+import { validLocalOptions } from './review/deterministic/plan.js';
 import { validSupervisionInput } from './learning/supervision-directives.js';
 import { AnalysisError } from './analysis/canonical.js';
 import { baselineAnalysisOutbound } from './analysis/baseline-analysis-wire.js';
@@ -1445,8 +1446,9 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     // 知识库 › 社级编辑记忆 (Issue #911): the house record takes no input; 质量与学习's edit signals, the house or one Book.
     case 'inspectEditorialLearning': {
-      const input = requireInputWithOptional(value.input, ['signalOffset', 'itemOffset'], ['exclusionOffset'], tentativeId);
-      if (![input.signalOffset, input.itemOffset, input.exclusionOffset ?? 0].every((offset) => Number.isSafeInteger(offset) && Number(offset) >= 0 && Number(offset) <= 1_000_000)) throw new ProtocolError(tentativeId);
+      const input = requireInputWithOptional(value.input, ['signalOffset', 'itemOffset'], ['exclusionOffset', 'detailItemId', 'historyOffset', 'sourceOffset'], tentativeId);
+      if (![input.signalOffset, input.itemOffset, input.exclusionOffset ?? 0, input.historyOffset ?? 0, input.sourceOffset ?? 0].every((offset) => Number.isSafeInteger(offset) && Number(offset) >= 0 && Number(offset) <= 1_000_000) ||
+        input.detailItemId !== undefined && !validUuid(input.detailItemId)) throw new ProtocolError(tentativeId);
       break;
     }
     case 'recordLearningReasonAsk': {
@@ -1473,14 +1475,26 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     case 'createEditorialMemory': {
+      if (isRecord(value.input) && value.input.schema === 'ai7.global-editorial-memory/2') {
+        const input = requireInput(value.input, ['schema', 'actionId', 'signalIds', 'applicability', 'title', 'editorialDimension', 'confidence'], tentativeId);
+        const scope = input.applicability;
+        if (!validUuid(input.actionId) || !Array.isArray(input.signalIds) || input.signalIds.length < 1 || input.signalIds.length > 10 ||
+          !input.signalIds.every(validUuid) || new Set(input.signalIds).size !== input.signalIds.length ||
+          !isRecord(scope) || !(scope.kind === 'house' && hasExactKeys(scope, ['kind']) || scope.kind === 'book' && hasExactKeys(scope, ['kind', 'bookId']) && validUuid(scope.bookId)) ||
+          !isBoundedString(input.title, 160) || !isBoundedString(input.editorialDimension, 80) || typeof input.confidence !== 'number' ||
+          !Number.isFinite(input.confidence) || input.confidence < 0 || input.confidence > 1) throw new ProtocolError(tentativeId);
+        break;
+      }
       const input = requireInput(value.input, ['clientMemoryId', 'signalId', 'title', 'editorialDimension', 'confidence'], tentativeId);
       if (!validUuid(input.clientMemoryId) || !validUuid(input.signalId) || !isBoundedString(input.title, 160) || !isBoundedString(input.editorialDimension, 80) ||
           typeof input.confidence !== 'number' || !Number.isFinite(input.confidence) || input.confidence < 0 || input.confidence > 1) throw new ProtocolError(tentativeId);
       break;
     }
+    case 'acceptEditorialMemory':
     case 'deactivateEditorialMemory': {
-      const input = requireInput(value.input, ['itemId', 'expectedVersionId'], tentativeId);
-      if (!validUuid(input.itemId) || !validUuid(input.expectedVersionId)) throw new ProtocolError(tentativeId);
+      const input = value.op === 'acceptEditorialMemory' ? requireInput(value.input, ['itemId', 'expectedVersionId', 'actionId'], tentativeId)
+        : requireInputWithOptional(value.input, ['itemId', 'expectedVersionId'], ['actionId'], tentativeId);
+      if (!validUuid(input.itemId) || !validUuid(input.expectedVersionId) || input.actionId !== undefined && !validUuid(input.actionId)) throw new ProtocolError(tentativeId);
       break;
     }
     case 'inspectHouseReviewPreference':
@@ -1673,7 +1687,10 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     case 'prepareReviewRun': {
       // A sheet pre-filled from a Captured Procedure (Issue #65, S30) names the exact version and digest it was filled from.
-      const input = requireInputWithOptional(value.input, ['bookId', 'categoryIds', 'scope'], ['capturedProcedure', 'materialIds', 'seriesId'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'categoryIds', 'scope'], ['capturedProcedure', 'materialIds', 'seriesId', 'localCheck'], tentativeId);
+      if (input.localCheck !== undefined && (!validLocalOptions(input.localCheck) || !Array.isArray(input.categoryIds) || input.categoryIds.length !== 1 || input.categoryIds[0] !== 'local-text-check')) throw new ProtocolError(tentativeId);
+      if (Array.isArray(input.categoryIds) && input.categoryIds.includes('local-text-check') &&
+        (!validLocalOptions(input.localCheck) || input.capturedProcedure != null || input.seriesId != null || (Array.isArray(input.materialIds) && input.materialIds.length > 0))) throw new ProtocolError(tentativeId);
       if (!optionalOrNull(input, 'seriesId', validUuid)) throw new ProtocolError(tentativeId);
       if (!validUuid(input.bookId) || !Array.isArray(input.categoryIds) || !validReviewCategoryIds(input.categoryIds, 1) ||
           !validReviewRunScope(input.scope) ||
@@ -2561,7 +2578,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     case 'recordLearningSupervision': {
-      const input = requireInput(value.input, ['operation', 'targets', 'scope', 'text', 'categoryId', 'effect'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['operation', 'targets', 'scope', 'text', 'categoryId', 'effect'], ['actionId'], tentativeId);
       if (!validSupervisionInput(input)) throw new ProtocolError(tentativeId);
       break;
     }

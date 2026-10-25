@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { registerModelConnectionTestHandler } from './model-connection-test-handler.js';
 import { release } from 'node:os';
 import { readFile, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, resolve } from 'node:path';
@@ -628,7 +629,10 @@ function registerRendererHandlers(
   saveModelServiceProxy: (input: ServiceOperationMap['saveModelServiceProxy']['input']) => Promise<ModelServiceSettingsProjection>,
   saveModelServiceCredential: (input: ModelServiceCredentialInput) => Promise<ModelServiceSettingsProjection>,
   removeModelServiceCredential: (input?: { route: ModelServiceRouteId }) => Promise<ModelServiceSettingsProjection>,
-  modelOps: Pick<RendererApi, 'selectFastRoleModel' | 'testModelServiceConnection'>,
+  modelOps: Pick<RendererApi, 'selectFastRoleModel'> & {
+    startConnectionTest(input: Parameters<RendererApi['testModelServiceConnection']>[0]): Promise<unknown>;
+    connectionTestSettings(): Promise<ModelServiceSettingsProjection>;
+  },
   searchOps: Pick<RendererApi, 'selectSearchBackend' | 'probeSearchBackend' | 'saveSearchBackendCredential' | 'removeSearchBackendCredential'>,
   consumeLostApplyAcknowledgement: () => boolean,
   consumeInjectedSavePath: () => string | undefined,
@@ -2579,12 +2583,16 @@ function registerRendererHandlers(
       return serializeEffect(() => saveModelServiceProxy(input));
     }),
   );
-  for (const op of ['selectFastRoleModel', 'testModelServiceConnection'] as const) {
+  for (const op of ['selectFastRoleModel'] as const) {
     ipcMain.handle(IPC_CHANNELS[op], (event, input: Parameters<RendererApi[typeof op]>[0]) => envelope(async () => {
       requireSender(event); requireAuthority();
       return serializeEffect(() => modelOps[op](input));
     }));
   }
+  const disposeConnectionTest = registerModelConnectionTestHandler<IpcMainInvokeEvent, ModelServiceSettingsProjection>({
+    ipc: ipcMain, requireSender, requireAuthority, serializeEffect, envelope,
+    start: modelOps.startConnectionTest, project: modelOps.connectionTestSettings,
+  });
   ipcMain.handle(IPC_CHANNELS.getModelServiceSettings, (event) =>
     envelope(async () => {
       requireSender(event);
@@ -4429,6 +4437,11 @@ function registerRendererHandlers(
     requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
     return serializeEffect(async () => { requireAuthority(); return service.call('deactivateEditorialMemory', input); });
   }));
+  ipcMain.handle(IPC_CHANNELS.acceptEditorialMemory, (event, input: ServiceOperationMap['acceptEditorialMemory']['input']) => envelope(async () => {
+    requireSender(event);
+    requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+    return serializeEffect(async () => { requireAuthority(); return service.call('acceptEditorialMemory', input); });
+  }));
   ipcMain.handle(IPC_CHANNELS.inspectGlobalAgentDialogue, (event, input: ServiceOperationMap['inspectGlobalAgentDialogue']['input']) => envelope(async () => {
     requireSender(event); requireAuthority();
     return service.call('inspectGlobalAgentDialogue', input);
@@ -5050,6 +5063,8 @@ function registerRendererHandlers(
             bookId: route.bookId,
             // A sheet pre-filled from a Captured Procedure (Issue #65, S30) names the version it was filled from.
             ...(input.capturedProcedure === undefined || input.capturedProcedure === null ? {} : { capturedProcedure: input.capturedProcedure }),
+            // 本地文字检查 (Issue #1119) carries the editor's explicit options, which the service's request frame validates.
+            ...(input.localCheck === undefined ? {} : { localCheck: input.localCheck }),
           });
           // A Run of the leads alone is prepared by the job's first step, so its answer may already carry the workspace.
           const prepared = result.result;
@@ -6212,9 +6227,10 @@ function registerRendererHandlers(
   );
 
   return () => {
+    disposeConnectionTest();
     nativeTheme.removeListener('updated', broadcastAppearance);
     ipcMain.removeHandler(APPEARANCE_IPC_CHANNEL);
-    for (const channel of Object.values(IPC_CHANNELS)) ipcMain.removeHandler(channel);
+    for (const channel of Object.values(IPC_CHANNELS)) if (channel !== IPC_CHANNELS.testModelServiceConnection) ipcMain.removeHandler(channel);
     for (const channel of Object.values(PREFERENCE_IPC_CHANNELS)) ipcMain.removeHandler(channel);
     ipcMain.removeHandler(NOTIFICATION_CHANNELS.notify);
     notifier.dispose();
@@ -6548,7 +6564,7 @@ export async function runApplication(): Promise<void> {
     await requireSameCanonicalDataDirectory(shellRoot, app.getPath('userData'));
     // The Data Version (数据版本) and the store's schema revision (数据库修订) apart (Issue #967): the unit suite holds each to its owner.
     const crashFacts = () => ({
-      appVersion: softwareVersion, buildIdentity, dataVersion: buildIdentity.dataVersion, schemaRevision: 89, protocol: SERVICE_PROTOCOL_VERSION,
+      appVersion: softwareVersion, buildIdentity, dataVersion: buildIdentity.dataVersion, schemaRevision: 92, protocol: SERVICE_PROTOCOL_VERSION,
       platform: process.platform, arch: process.arch, electron: process.versions.electron ?? 'unknown',
       uptimeSeconds: process.uptime(),
     });
@@ -7131,7 +7147,8 @@ export async function runApplication(): Promise<void> {
       removeModelServiceCredential,
       {
         selectFastRoleModel: async (input) => { await service!.call('selectFastRoleModel', input); return settingsProjection(); },
-        testModelServiceConnection: async (input) => { await service!.call('testModelServiceConnection', input); return settingsProjection(); },
+        startConnectionTest: (input) => service!.call('testModelServiceConnection', input),
+        connectionTestSettings: settingsProjection,
       },
       searchOps,
       (() => {

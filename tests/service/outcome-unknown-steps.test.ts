@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -10,6 +11,12 @@ import { EditorialStore } from '../../src/service/store.js';
 import { BASELINE_ANALYSIS_TASK_GOAL, type BaselineAnalysisProjection, type LaunchPolicyProjection } from '../../src/shared/protocol.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for the non-unit steps' 结果待确认 (Issue #757, item 3; V2-UX-CTRL-007, COPY-009, CONT-011,
 // CONT-016; ADR 0034): the cross-unit reduction, a sample and the reflection, each driven to an ambiguous outcome — a sent
@@ -54,6 +61,7 @@ function open(fixture: ResolvedModelFixture): Promise<EditorialStore> {
 /** The owner over one fixture, recording every stage dispatch it observes — the test's own count of what was sent. */
 function ownerOf(store: EditorialStore, fixture: ResolvedModelFixture, sent: Array<'cross-unit-reduction' | 'assurance-sampling'>): BaselineAnalysisExecutionOwner {
   return new BaselineAnalysisExecutionOwner({
+    requestGovernor,
     ledger: store.baselineAnalysisLedger,
     launchPolicy,
     fixture,

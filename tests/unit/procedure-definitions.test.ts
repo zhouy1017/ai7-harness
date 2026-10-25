@@ -9,10 +9,10 @@ import { renderProcedureLibrary } from '../../src/renderer/procedure-library.js'
 import { installMiniDom } from '../support/mini-dom.js';
 
 describe('pre-installed procedures v1', () => {
-  it('keeps the five future stage types unavailable and binds only existing executors', () => {
+  it('admits the bounded local checker while other future stage types remain unavailable', () => {
     const kind = baselineAnalysisKindDefinition();
     const available = PROCEDURE_STAGE_TYPES.filter((type) => resolveProcedureStage(type, kind).state === 'available');
-    expect(available).toEqual(['chunked-review', 'cross-unit-reduction', 'synthesis', 'derived-report']);
+    expect(available).toEqual(['chunked-review', 'deterministic-check', 'cross-unit-reduction', 'synthesis', 'derived-report']);
     expect(PROCEDURE_STAGE_TYPES.map((type) => PROCEDURE_STAGE_LABELS[type])).toEqual([
       '通读记账', '分块审读', '确定性检查', '断言抽取', '联网取证', '跨单元归并与跨章一致性', '综合', '起草', '派生报告',
     ]);
@@ -27,8 +27,8 @@ describe('pre-installed procedures v1', () => {
     const configuration = canonicalJson(BUILTIN_REVIEW_CATEGORY_CONFIGURATION);
     const digest = reviewCategoryConfigurationDigest();
     const definitions = preinstalledProcedureDefinitions();
-    expect(definitions).toHaveLength(10);
-    expect(new Set(definitions.map((definition) => `${definition.id}@${definition.version}`)).size).toBe(10);
+    expect(definitions).toHaveLength(11);
+    expect(new Set(definitions.map((definition) => `${definition.id}@${definition.version}`)).size).toBe(11);
     expect(preinstalledProcedureDefinitions()).toEqual(definitions);
     expect(definitions.every((definition) => definition.editorInstruction === '' && definition.stages.length > 0)).toBe(true);
     expect(baselineProcedureDefinition(baselineAnalysisKindDefinition('retained-v1'))).toEqual(baselineProcedureDefinition());
@@ -53,14 +53,14 @@ describe('pre-installed procedures v1', () => {
     });
   });
 
-  it('lists ten enabled versions with their stages and uses and labels the review-only predecessor', () => {
+  it('lists eleven enabled versions with their stages and uses and labels the review-only predecessor', () => {
     const restore = installMiniDom();
     try {
       const library = renderProcedureLibrary(preinstalledProcedureDefinitions().map((definition) => ({
         procedureId: definition.id, version: definition.version, digest: 'a'.repeat(64), title: definition.title,
         state: 'enabled', uses: 2, stages: definition.stages.map((stage) => ({ stageType: stage.stageType, label: PROCEDURE_STAGE_LABELS[stage.stageType] })),
       })));
-      expect(library.querySelectorAll('li')).toHaveLength(10);
+      expect(library.querySelectorAll('li')).toHaveLength(11);
       expect(library.textContent).toContain('已使用 2 次');
       expect(library.textContent).toContain('跨单元归并与跨章一致性');
       expect(library.textContent).toContain('审阅专用前身');

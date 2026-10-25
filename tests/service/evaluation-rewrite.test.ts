@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
@@ -39,6 +40,12 @@ import { finalizeAsJ11, runInitialEvaluationToEnd } from '../support/readers-rep
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { AUTHORED_MARKET } from '../support/initial-evaluation-market.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for the market section and 按我的评分重写评语 (Issue #429, plan slice S81b2; V2-UX-EVAL-008,
 // EVAL-009) over the real store and ledger, the one execution owner and the AI7 local deterministic adapter over the authored
@@ -94,7 +101,7 @@ async function openStore(): Promise<EditorialStore> {
 async function withBook(body: (book: Book) => Promise<void>): Promise<void> {
   await requireExactSample1(roots.codeRoot);
   const store = await openStore();
-  const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+  const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
   try {
     const imported = await importSample1Book(store, roots.codeRoot, '评语重写之书');
     await pinEditorialWorkspaceProfileRevision2(store, imported.bookId);
@@ -516,7 +523,7 @@ describe('the market section and 按我的评分重写评语 over the real store
         } else {
           expect(settled.state).toBe('resumable');
           expect(settled.taskOutcome).toBeNull();
-          const owner = new BaselineAnalysisExecutionOwner({ ledger: second.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+          const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: second.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
           try {
             const ledger = second.executionLedgerForRun(runRecordId);
             ledger.requestCancel(bookId, settled.taskIntent!.taskIntentId);

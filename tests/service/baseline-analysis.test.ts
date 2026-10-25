@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
@@ -64,6 +65,12 @@ import { CLARIFICATION_RELATIONS_DROP_ORDER } from '../support/clarifications.js
 import { REIMPORT_GROUP_RELATIONS_DROP_ORDER } from '../support/reimport-groups.js';
 import { PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER } from '../support/production-documents.js';
 import { RUN_CHECKPOINT_RELATIONS_DROP_ORDER } from '../support/run-continuation.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for the covered baseline analysis: the real store, the real pinned
 // DSH composition, the AI7 local deterministic adapter over fixture (i)+(ii), and a fake secret
@@ -330,7 +337,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
     await requireExactSample1(roots.codeRoot);
     const resolver = fakeSecretResolver();
     const store = await openWithRoute(roots.dataRoot, fixture);
-    const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: resolver });
+    const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: resolver });
     let bookId: string;
     let revisionId: string;
     let attemptId: string;
@@ -647,6 +654,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
     const store = await openWithRoute(roots.dataRoot, happy);
     let withdrawn = false;
     const owner = new BaselineAnalysisExecutionOwner({
+      requestGovernor,
       ledger: store.baselineAnalysisLedger, launchPolicy, fixture: happy, secretResolver: fakeSecretResolver(),
       materialGuard: () => withdrawn ? { code: 'MATERIAL_INDEX_MOVED', materialTitle: '合成资料', message: '资料《合成资料》的索引版本已不在本机。' } : null,
       stageHold: async (current) => { if (current === stage) withdrawn = true; },
@@ -675,6 +683,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
     // Series now checks both each range and final assembly: ten checks admit units 1–5; the retry is refused.
     let calls = 0;
     const owner = new BaselineAnalysisExecutionOwner({
+      requestGovernor,
       ledger: store.baselineAnalysisLedger, launchPolicy, fixture: transient, secretResolver: fakeSecretResolver(),
       ...(guard === 'series' ? { seriesScopeGuard: () => (++calls >= 11 ? '书系知识条目「海边小城」（地点）' : null) }
         : { materialGuard: () => (++calls >= 7 ? { code: 'MATERIAL_REFERENCE_UNAVAILABLE', materialTitle: '合成资料', message: '资料《合成资料》现在不能允许参考。' } : null) }),
@@ -707,7 +716,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
     const transient = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-transient-retry');
     expect(transient.lineage.map((link) => link.identity)).toEqual(['sample1-baseline-transient-retry', 'sample1-baseline-one-unit-failure', 'sample1-baseline-happy']);
     const store = await openWithRoute(roots.dataRoot, transient);
-    const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture: transient, secretResolver: fakeSecretResolver() });
+    const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture: transient, secretResolver: fakeSecretResolver() });
     let bookId: string;
     let bindingDigest: string;
     try {
@@ -934,7 +943,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
   it('prepares 重新分析这段 by the paragraph block identity, and its plan names the reading ranges it reads again (Issue #423 review)', async () => {
     await requireExactSample1(roots.codeRoot);
     const store = await openWithRoute(roots.dataRoot, fixture);
-    const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: fakeSecretResolver() });
+    const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: fakeSecretResolver() });
     try {
       const imported = await importSample1Book(store, roots.codeRoot, 'L2 sample1 重新分析这段');
       const bookId = imported.bookId;
@@ -983,7 +992,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
   it('supersedes a prepared plan on material drift, refuses the stale version, and reconfirms the next version on the same Task', async () => {
     await requireExactSample1(roots.codeRoot);
     const store = await openWithRoute(roots.dataRoot, fixture);
-    const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: fakeSecretResolver() });
+    const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: fakeSecretResolver() });
     const reconfirm = (bookId: string, update: BaselineAnalysisUpdateRequest): BaselineAnalysisProjection => {
       const result = store.createBaselineAnalysisPreparationWork(bookId, BASELINE_ANALYSIS_MODE_GOALS[update.mode], update, launchPolicy, true);
       expect(result.done).toBe(true);
@@ -1254,7 +1263,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       // `blocked-before-dispatch` transition and its three reasons are its whole disclosure, and this
       // slice adds neither an outcome for it nor a classification value (Issue #276, revision 2).
       expect(authorized.projection.taskOutcome).toBeNull();
-      const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture: null, secretResolver: fakeSecretResolver() });
+      const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture: null, secretResolver: fakeSecretResolver() });
       expect(() => owner.admitAndDispatch(authorized.projection.run!.runRecordId)).toThrowError(/EXECUTION_ROUTE_ABSENT|没有可执行的本地确定性路由/u);
       // And it stays so after the refused dispatch: nothing invents an outcome to hang a report on.
       expect(store.inspectBaselineAnalysis(imported.bookId).taskOutcome).toBeNull();
@@ -1271,7 +1280,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
   it('reads a Task Outcome recorded before the Run Report with no report and the disclosed reason', async () => {
     await requireExactSample1(roots.codeRoot);
     const store = await openWithRoute(roots.dataRoot, fixture);
-    const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: fakeSecretResolver() });
+    const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: fakeSecretResolver() });
     let bookId: string;
     let outcomeId: string;
     try {
@@ -1318,7 +1327,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
   it('appends successor revisions through the three update modes with exact, position-independent lineage', async () => {
     await requireExactSample1(roots.codeRoot);
     const store = await openWithRoute(roots.dataRoot, fixture);
-    const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: fakeSecretResolver() });
+    const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: fakeSecretResolver() });
     let bookId: string;
     let revisionIds: string[];
     let digests: string[];
@@ -1494,7 +1503,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
     await requireExactSample1(roots.codeRoot);
     const databasePath = join(roots.dataRoot, 'store', 'ai7.sqlite');
     const store = await openWithRoute(roots.dataRoot, fixture);
-    const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: fakeSecretResolver() });
+    const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: fakeSecretResolver() });
     let bookId: string;
     let manuscriptId: string;
     let branchId: string;
@@ -1576,7 +1585,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
 
     // The migrated first baseline then serves as the predecessor of a real update.
     const migrated = await openWithRoute(roots.dataRoot, fixture);
-    const migratedOwner = new BaselineAnalysisExecutionOwner({ ledger: migrated.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: fakeSecretResolver() });
+    const migratedOwner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: migrated.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: fakeSecretResolver() });
     try {
       appendToFirstBlock(migrated, manuscriptId, branchId, J04_EDIT_SUFFIX);
       const sync = await runToSettled(migrated, migratedOwner, bookId, { mode: 'sync-current', selectedRange: null });
@@ -1592,7 +1601,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
     await requireExactSample1(roots.codeRoot);
     const databasePath = join(roots.dataRoot, 'store', 'ai7.sqlite');
     const store = await openWithRoute(roots.dataRoot, fixture);
-    const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: fakeSecretResolver() });
+    const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: fakeSecretResolver() });
     let bookId: string;
     try {
       const imported = await importSample1Book(store, roots.codeRoot, 'L2 sample1 修订版 19 迁移');

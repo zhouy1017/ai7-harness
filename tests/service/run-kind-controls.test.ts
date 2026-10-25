@@ -1,7 +1,8 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { expect, it } from 'vitest';
+import { expect, it, beforeEach, afterEach } from 'vitest';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import { CooperativeJobOwner } from '../../src/service/cooperative-jobs.js';
 import { ALWAYS_ONLINE } from '../../src/service/connectivity.js';
@@ -15,6 +16,12 @@ import { finalizeAsJ11, runInitialEvaluationToEnd } from '../support/readers-rep
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots } from '../support/temp-data-root.js';
 import { WRITING_BOOK_TITLE, WRITING_REQUEST } from '../support/writing-task.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 const FIXTURES = resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url)));
 const CASES = [
@@ -49,7 +56,7 @@ for (const [kind, identity] of CASES) it(`${kind}: pause checkpoints, resume the
   let release!: () => void;
   let gate = Promise.resolve();
   const block = (): void => { hold = true; waiting = false; gate = new Promise<void>((done) => { release = done; }); };
-  const execution = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture,
+  const execution = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture,
     secretResolver: { resolve: async () => null },
     unitHold: async () => { if (hold) { waiting = true; await gate; } },
   });

@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { unzipSync } from 'fflate';
@@ -46,6 +47,12 @@ import { KIND_COUPLED_ANALYSIS_RELATIONS, downgradeKindCoupledRelations } from '
 import { AUTHORED_SECTIONS, READERS_REPORT_FIXTURE_IDENTITY, finalizeAsJ11, runInitialEvaluationToEnd } from '../support/readers-report.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 
 // Service-integration suite (L2) for 审稿意见 (Issue #429, plan slice S81c; V2-UX-EVAL-013): the reader's report kind over the real
@@ -103,7 +110,7 @@ async function openStore(): Promise<EditorialStore> {
 async function withBook(body: (book: Book) => Promise<void>): Promise<void> {
   await requireExactSample1(roots.codeRoot);
   const store = await openStore();
-  const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+  const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
   try {
     const imported = await importSample1Book(store, roots.codeRoot, '审稿意见之书');
     await pinEditorialWorkspaceProfileRevision2(store, imported.bookId);

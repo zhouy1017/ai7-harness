@@ -1112,7 +1112,7 @@ The presentation of a canonical Annotation: an exportable comment on exact text 
 _Avoid_: 备注, 修改建议, finding without a location, private note
 
 **Editor Note** (`备注`):
-The presentation of a canonical Editor Note: an editor-private note on exact text that does not leave with an export by default and leaves only when the editor includes it in that export, is never sent to a model and is never in a Task's readable scope (ADR 0076; ADR 0079 §3 as amended 2026-09-10).
+The presentation of a canonical Editor Note: an editor-private note on exact text that does not leave with an export by default and leaves only when the editor includes it in that export, is never sent to a model and is never in a Task's readable scope (ADR 0076; ADR 0079 §3 as amended 2026-09-10). Words the editor deliberately types or pastes into a saved 编辑任务说明 are editor input, not the note: only [ADR 0100 §1](../adr/0100-admit-scoped-editor-task-instruction-text.md#1-accepted-decision-and-exact-scope) exempts that exact instruction text from redaction, with no note picker or read of the note or its anchored manuscript. An eligible native Proposal Decision reason is a separate decision-feedback record, not the Note; only the learned-example text processing of [ADR 0101 §1](../adr/0101-admit-scoped-full-fidelity-learned-examples.md#1-the-accepted-exception) exempts its original wording. This grants no read or automatic copying of the Note or its anchored manuscript.
 _Avoid_: 批注, exported comment, model context
 
 **Personal Highlight** (`自选高亮`):

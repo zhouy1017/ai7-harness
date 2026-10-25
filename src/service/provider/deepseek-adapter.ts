@@ -257,13 +257,97 @@ function anthropicMessagesBody(
   if (model.capabilities.structuredOutput !== 'none') throw new Error('PROVIDER_STRUCTURED_OUTPUT_UNSUPPORTED');
   if (model.capabilities.reasoningControl !== 'none') throw new Error('PROVIDER_REASONING_CONTROL_UNSUPPORTED');
   if (profile.maxOutputTokens === null) throw new Error('PROVIDER_MAX_OUTPUT_TOKENS_ABSENT');
+  const toolCalling = model.capabilities.toolCalling === 'function';
+  if ((payload.tools ?? []).length > 0 && !toolCalling) throw new Error('PROVIDER_TOOL_CALLING_UNSUPPORTED');
+  const tools = (payload.tools ?? []).map((tool) => {
+    const { name, description, parameters } = chatCompletionsTool(tool).function;
+    // Only canonical client functions: native/server declarations and toolsets cannot be silently converted.
+    if (!/^[a-zA-Z0-9_-]{1,128}$/u.test(name) || !isRecord(tool) ||
+        Object.keys(tool).some((key) => !['name', 'description', 'parameters'].includes(key))) {
+      throw new Error('PROVIDER_TOOL_SCHEMA_INVALID');
+    }
+    return { name, description, input_schema: parameters };
+  });
+  const names = tools.map((tool) => tool.name);
+  if (new Set(names).size !== names.length) throw new Error('PROVIDER_TOOL_SCHEMA_INVALID');
   const system = systemPromptOf(payload);
   return canonicalJson({
     model: model.model,
     max_tokens: profile.maxOutputTokens,
     ...(system === null ? {} : { system }),
-    messages: conversationMessages(payload),
+    messages: anthropicMessagesConversation(payload, names),
+    ...(tools.length > 0 ? { tools } : {}),
   });
+}
+
+/**
+ * Buffered client functions only (Issue #1056). Keep text before calls, then consume exactly one
+ * consecutive result per call into the next user message, retaining the canonical result order.
+ * No unresolved batch, opaque reasoning, or intervening message can be repaired by serialization.
+ */
+function anthropicMessagesConversation(payload: AssembledModelPayload, offeredNames: ReadonlyArray<string>): Array<Record<string, unknown>> {
+  const messages: Array<Record<string, unknown>> = [];
+  const seenIds = new Set<string>();
+  for (let index = 0; index < payload.messages.length; index += 1) {
+    const message = payload.messages[index]!;
+    // Shared history readers intentionally project a wider canonical shape for Chat/Responses.
+    // Messages cannot replay opaque fields, including those on otherwise ordinary text blocks.
+    // Results are checked where they are consumed; every other block type keeps its existing refusal below.
+    for (const block of message.content) {
+      const fields = block.type === 'text' ? ['type', 'text'] : block.type === 'tool-call' ? ['type', 'id', 'name', 'arguments'] : null;
+      if (fields !== null && Object.keys(block).some((key) => !fields.includes(key))) throw new Error('PROVIDER_TOOL_CALLS_INVALID');
+    }
+    const calls = assistantToolCalls(message);
+    if (calls !== null) {
+      if (offeredNames.length === 0) throw new Error('PROVIDER_TOOL_CALLING_UNSUPPORTED');
+      const content: Array<Record<string, unknown>> = [];
+      const pending = new Set<string>();
+      for (const block of message.content) {
+        if (block.type === 'text' && typeof block.text === 'string' && pending.size === 0) {
+          // A Messages text block must be non-empty; an empty one carries nothing, as Chat/Responses already omit it.
+          if (block.text.length > 0) content.push({ type: 'text', text: block.text });
+          continue;
+        }
+        if (block.type !== 'tool-call' || typeof block.id !== 'string' || block.id.length === 0 ||
+            typeof block.name !== 'string' || !offeredNames.includes(block.name) || typeof block.arguments !== 'string' || seenIds.has(block.id)) {
+          throw new Error('PROVIDER_TOOL_CALLS_INVALID');
+        }
+        let input: unknown;
+        try { input = JSON.parse(block.arguments) as unknown; } catch { throw new Error('PROVIDER_TOOL_CALLS_INVALID'); }
+        if (!isRecord(input)) throw new Error('PROVIDER_TOOL_CALLS_INVALID');
+        seenIds.add(block.id);
+        pending.add(block.id);
+        content.push({ type: 'tool_use', id: block.id, name: block.name, input });
+      }
+      messages.push({ role: 'assistant', content });
+      const results: Array<Record<string, unknown>> = [];
+      while (pending.size > 0) {
+        index += 1;
+        const next = payload.messages[index];
+        const result = next === undefined ? null : toolResultOf(next);
+        if (result === null || !pending.delete(result.callId)) throw new Error('PROVIDER_TOOL_CORRELATION_INVALID');
+        const resultBlock = next!.content[0]!;
+        if (Object.keys(resultBlock).some((key) => !['type', 'toolCallId', 'content', 'isError'].includes(key)) ||
+            resultBlock.content!.some((block) => Object.keys(block).some((key) => key !== 'type' && key !== 'text'))) {
+          throw new Error('PROVIDER_TOOL_CORRELATION_INVALID');
+        }
+        const isError = resultBlock.isError;
+        if (isError !== undefined && typeof isError !== 'boolean') throw new Error('PROVIDER_TOOL_CORRELATION_INVALID');
+        results.push({ type: 'tool_result', tool_use_id: result.callId, content: result.text, is_error: result.isError });
+      }
+      messages.push({ role: 'user', content: results });
+      continue;
+    }
+    // Results outside the immediately following batch are orphans, even if their id appeared before.
+    if (message.source.kind === 'tool' || message.content.some((block) => block.type === 'tool-result')) {
+      throw new Error('PROVIDER_TOOL_CORRELATION_INVALID');
+    }
+    const text = messageText(message);
+    if (text === null) throw new Error('DEEPSEEK_REQUEST_NON_TEXT_CONTENT');
+    if (message.role !== 'user' && message.role !== 'assistant') throw new Error('DEEPSEEK_REQUEST_ROLE_INVALID');
+    messages.push({ role: message.role, content: text });
+  }
+  return messages;
 }
 
 /**
@@ -394,10 +478,10 @@ function providerRequestBody(
   model: ProviderModelProfile,
   payload: AssembledModelPayload,
 ): string {
-  // Function tools are spelled only for chat completions and the text/function Responses subset; other shapes refuse them
+  // Function tools are spelled only for chat completions and the bounded Responses/Messages subsets; other shapes refuse them
   // rather than dropping them silently.
   if ((payload.tools ?? []).length > 0 && model.capabilities.requestShape !== 'openai-chat-completions' &&
-      model.capabilities.requestShape !== 'openai-responses') {
+      model.capabilities.requestShape !== 'openai-responses' && model.capabilities.requestShape !== 'anthropic-messages') {
     throw new Error('PROVIDER_TOOL_CALLING_UNSUPPORTED');
   }
   switch (model.capabilities.requestShape) {
@@ -599,8 +683,20 @@ export function parseProviderResponse(
   return normalized;
 }
 
-/** Classify a transport-level rejection (network denial, abort, other) into failure facts. */
-export function classifyTransportError(error: unknown, sent = false): { code: string; message: string } {
+const MODEL_REQUEST_NO_SEND = new WeakMap<Error, { readonly request: object; readonly cause: unknown }>();
+
+/** A trusted transport wrapper observed that this exact invocation never entered its native sender. */
+export function modelRequestNotSent(request: object, cause: unknown): Error {
+  const refusal = new Error('AI7_MODEL_REQUEST_NOT_SENT');
+  MODEL_REQUEST_NO_SEND.set(refusal, { request, cause });
+  return refusal;
+}
+
+/** After transport admission, names/codes and caller requestSent hints cannot prove no send. */
+export function classifyTransportError(error: unknown, sent = false, request?: object): { code: string; message: string } {
+  const proof = error instanceof Error ? MODEL_REQUEST_NO_SEND.get(error) : undefined;
+  if (proof !== undefined && proof.request === request) { error = proof.cause; sent = false; }
+  if (sent) return { code: AI7_FAILURE_CODES.OUTCOME_UNKNOWN, message: '请求可能已经发出，但未能核对完整结果；不会自动重发。' };
   const code = isRecord(error) && typeof error.code === 'string' ? error.code : null;
   const cause = isRecord(error) && isRecord(error.cause) ? error.cause : null;
   const timeoutCode = code ?? (typeof cause?.code === 'string' ? cause.code : null);
@@ -609,9 +705,7 @@ export function classifyTransportError(error: unknown, sent = false): { code: st
   if (code === AI7_FAILURE_CODES.NETWORK_DENIED) return { code, message: '出站网络在当前产品区间内被禁用。' };
   if (timeoutCode === 'UND_ERR_CONNECT_TIMEOUT') return { code: AI7_FAILURE_CODES.TRANSPORT_FAILED, message: '连接在发送请求前超时。' };
   if (name === 'AbortError' || name === 'TimeoutError' || timeoutCode === 'UND_ERR_HEADERS_TIMEOUT' || timeoutCode === 'UND_ERR_BODY_TIMEOUT' || timeoutCode === 'ETIMEDOUT') {
-    return sent && !(isRecord(error) && error.requestSent === false)
-      ? { code: AI7_FAILURE_CODES.OUTCOME_UNKNOWN, message: '请求已发出，但已中止或超过时限，结果未知。' }
-      : { code: AI7_FAILURE_CODES.TRANSPORT_FAILED, message: '请求在发送前已中止，未发送任何内容。' };
+    return { code: AI7_FAILURE_CODES.TRANSPORT_FAILED, message: '请求在发送前已中止，未发送任何内容。' };
   }
   return { code: AI7_FAILURE_CODES.TRANSPORT_FAILED, message: '模型服务传输失败。' };
 }
@@ -761,6 +855,10 @@ export interface DeepSeekAdapterDependencies {
   readonly codes: DshFailureCodes;
   /** Defaults to the global `fetch`, which the product interval denies. */
   readonly transport?: DeepSeekTransport;
+  /** Recheck the consumer/source generation inside the broker callback, before transport admission. */
+  readonly beforeSend?: () => void;
+  /** Exact-call observation from inside the adapter, before any native sender was entered. */
+  readonly onRequestNotSent?: () => void;
   /** The route this adapter serves; the unchanged production route when absent. */
   readonly profile?: ProviderRouteProfile;
   /** The model this adapter speaks to; the production model when absent. Must belong to the bound route. */
@@ -861,6 +959,7 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
     this.#lastUsage = null;
     this.#lastRetryDelayMs = null;
     if (options.provider !== this.#profile.route || options.model !== this.#modelProfile.model) {
+      this.#deps.onRequestNotSent?.();
       yield fail(AI7_FAILURE_CODES.INVALID_RESPONSE, '适配器只服务其绑定路由与模型。');
       return;
     }
@@ -873,12 +972,14 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
         ...(this.#deps.requestShape === undefined ? {} : { requestShape: this.#deps.requestShape }),
       });
     } catch {
+      this.#deps.onRequestNotSent?.();
       yield fail(AI7_FAILURE_CODES.INVALID_RESPONSE, '无法为本步骤组装请求；未发送任何内容。');
       return;
     }
     this.#requestDigests.push(assembly.requestDigest);
     const ticket = this.#deps.tickets.take();
     if (ticket === null || ticket.bindingDigest !== this.#deps.slotBinding.bindingDigest) {
+      this.#deps.onRequestNotSent?.();
       yield fail(AI7_FAILURE_CODES.TRANSMIT_TICKET_ABSENT, '没有本步骤的 transmit-remote 决定；未发送任何内容。');
       return;
     }
@@ -886,6 +987,7 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
     let streamed = '';
     let blockStarted = false;
     let sent = false;
+    let transportRequest: Parameters<DeepSeekTransport>[1] | undefined;
     let responseStatus: number | undefined;
     const deadline = new AbortController();
     const timer = setTimeout(() => deadline.abort(new DOMException('模型请求超过时限。', 'TimeoutError')),
@@ -897,15 +999,21 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
     try {
       const response: DeepSeekTransportResponse = await this.#deps.broker.releaseTo(this.#deps.slotBinding, ticket, async (secret) => {
         signal.throwIfAborted();
+        this.#deps.beforeSend?.();
+        // Live owners supply their captured transport explicitly. An uncomposed adapter has no
+        // native sender: refuse here, where no-send is observed, without trusting an error's code
+        // after some arbitrary transport has already been entered.
+        const transport = this.#deps.transport;
+        if (transport === undefined) throw Object.assign(new Error('出站网络在当前产品区间内被禁用。'), { code: AI7_FAILURE_CODES.NETWORK_DENIED });
         sent = true;
         this.#transmissions += 1;
-        const transport = this.#deps.transport ?? ((url, init) => fetch(url, init));
-        return transport(assembly.url, {
+        transportRequest = {
           method: assembly.method,
           headers: { ...assembly.headers, ...credentialHeaders(this.#profile, secret) },
           body: assembly.body,
           signal,
-        });
+        };
+        return transport(assembly.url, transportRequest);
       });
       responseStatus = response.status;
       let body: unknown = null;
@@ -938,17 +1046,21 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
       }
       // Tool calls are read only for a request that offered tools (Issue #473); to any other the response reads as before.
       const parsed = parseProviderResponse(response.status, body, this.#deps.codes, this.#profile, this.#modelProfile,
-        { toolCallsOffered: (options.tools ?? []).length > 0 });
+        { toolCallsOffered: (options.tools ?? []).length > 0,
+          ...(this.#modelProfile.capabilities.requestShape === 'anthropic-messages'
+            ? { offeredToolNames: (options.tools ?? []).map((tool) => tool.name) } : {}),
+        });
       outcome = response.replayed === true ? withoutIncurredUsage(parsed) : parsed;
       if (outcome.kind === 'failure' && this.#profile.limitPolicy === 'rate-limit-retryable' &&
           (outcome.code === AI7_FAILURE_CODES.RATE_LIMIT || (outcome.code === AI7_FAILURE_CODES.PROVIDER_ERROR && outcome.status >= 500 && outcome.status <= 599))) {
         this.#lastRetryDelayMs = retryBackoffMs(response.headers?.get('retry-after') ?? null);
       }
     } catch (error) {
+      if (!sent || error instanceof Error && MODEL_REQUEST_NO_SEND.get(error)?.request === transportRequest) this.#deps.onRequestNotSent?.();
       const classified = error instanceof Error && error.message === 'AI7_OUTCOME_UNKNOWN'
         ? { code: AI7_FAILURE_CODES.OUTCOME_UNKNOWN, message: '模型服务已接受请求，但回答没有完整传回。' }
-        : classifyTransportError(signal.aborted && !(isRecord(error) && error.requestSent === false)
-          ? new DOMException('请求已中止。', deadline.signal.aborted ? 'TimeoutError' : 'AbortError') : error, sent);
+        : classifyTransportError(signal.aborted && !(error instanceof Error && MODEL_REQUEST_NO_SEND.get(error)?.request === transportRequest)
+          ? new DOMException('请求已中止。', deadline.signal.aborted ? 'TimeoutError' : 'AbortError') : error, sent, transportRequest);
       yield fail(classified.code, classified.message, classified.code === AI7_FAILURE_CODES.OUTCOME_UNKNOWN ? responseStatus : undefined);
       return;
     } finally {

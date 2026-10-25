@@ -1,3 +1,4 @@
+import { validateRequestAdmissionRecords } from './analysis/baseline-analysis-store.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import {
@@ -504,7 +505,12 @@ export const GLOBAL_AGENT_SCHEMA_VERSION = 87;
 export const REVIEW_CONTRACT_SCHEMA_VERSION = 88;
 const PRE_IDLE_SCHEMA_VERSION = REVIEW_CONTRACT_SCHEMA_VERSION;
 export const IDLE_BACKGROUND_SCHEMA_VERSION = 89;
-export const LATEST_SCHEMA_VERSION = IDLE_BACKGROUND_SCHEMA_VERSION;
+export const LOCAL_REVIEW_SCHEMA_VERSION = 90;
+/** Revision 91 (Issue #1128): the editor-governed memory /2 and 本社审阅偏好 /2 record readers; no relation changes. */
+export const EDITORIAL_MEMORY_SCHEMA_VERSION = 91;
+/** Reader-only successor: request fences need a reader that will not resend an ambiguous call. */
+export const MODEL_REQUEST_ADMISSION_SCHEMA_VERSION = 92;
+export const LATEST_SCHEMA_VERSION = MODEL_REQUEST_ADMISSION_SCHEMA_VERSION;
 /** The custom analysis kind family slice 7f brings (ADR 0090 item 4): admitted here so it needs no second rebuild. */
 const CUSTOM_ANALYSIS_KIND_GLOB = 'custom-analysis/[a-z0-9-]*' as const;
 const CUSTOM_ANALYSIS_CONTRACT_VERSION_GLOB = 'ai7.custom-analysis*/[0-9]*' as const;
@@ -3076,6 +3082,22 @@ export function validateTaskAuthorizationSchema(db: DatabaseSync): void {
 
 export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
   if (Number(db.prepare('PRAGMA user_version').get()?.user_version) === LATEST_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  // Never silently stamp a predecessor carrying new request variants.
+  validateRequestAdmissionRecords(db, false);
+  if (Number(db.prepare('PRAGMA user_version').get()?.user_version) === EDITORIAL_MEMORY_SCHEMA_VERSION) {
+    transact(db, () => { db.exec(`PRAGMA user_version = ${LATEST_SCHEMA_VERSION}`); validateTaskAuthorizationSchema(db); });
+    return;
+  }
+  // Revision 91 only stamps: the store's open owner has proved every learning record with the revision-90 readers first.
+  if (Number(db.prepare('PRAGMA user_version').get()?.user_version) === LOCAL_REVIEW_SCHEMA_VERSION) {
+    transact(db, () => { db.exec(`PRAGMA user_version = ${LATEST_SCHEMA_VERSION}`); validateTaskAuthorizationSchema(db); });
+    return;
+  }
+  if (Number(db.prepare('PRAGMA user_version').get()?.user_version) === IDLE_BACKGROUND_SCHEMA_VERSION) {
+    validateAnalysisLedgerSchema(db);
+    transact(db, () => { db.exec(`PRAGMA user_version = ${LATEST_SCHEMA_VERSION}`); validateTaskAuthorizationSchema(db); });
+    return;
+  }
   const idleShape = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'analysis_run_authorizations'").get()?.sql;
   const preStamped = typeof idleShape === 'string' && normalizeSql(idleShape) === normalizeSql(IDLE_RUN_AUTHORIZATIONS_SQL);
   if (preStamped) requireTask(db.prepare("SELECT 1 FROM analysis_run_authorizations WHERE start_when <> 'now' LIMIT 1").get() === undefined,

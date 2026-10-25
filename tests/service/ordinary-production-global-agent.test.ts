@@ -1,10 +1,11 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { Session } from '@deepseek-ai/dsh-session';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
-import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
+import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy, resolveSourceCheckoutLaunchPolicySync } from '../../src/service/launch-policy.js';
 import { DialogueExecutionOwner, productionDialogueRoute } from '../../src/service/dialogue/dialogue-execution.js';
 import { admittedGlobalAgentRoute, prepareGlobalAgentDisclosure, startGlobalAgentTurn } from '../../src/service/dialogue/global-agent-session.js';
 import { buildDialogueMessage } from '../../src/service/dialogue/contract.js';
@@ -14,6 +15,17 @@ import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-d
 import { importSample1Book } from '../support/sample1-baseline.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import { decodeRequest } from '../../src/service/request-frames.js';
+import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
+import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
+import { parseReviewCategoryUnitMessageHeader } from '../../src/service/review/review-category-contract.js';
+import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/assurance-sampling-contract.js';
+import { pinEditorialWorkspaceProfileRevision2 } from '../support/sample1-baseline.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Real ordinary-production policy, store, Harness, gate, broker and session log. Only the provider stream is synthetic.
 let roots: ServiceTestRoots;
@@ -76,7 +88,7 @@ beforeEach(async () => {
   const nativeFetch = (async (url: string, init: { body: string; signal?: AbortSignal }) => {
     calls.push({ url, body: init.body }); return transport(init.signal);
   }) as unknown as typeof fetch;
-  owner = new DialogueExecutionOwner({ records: store, fixture: null, sessionLogRoot: store.harnessSessionLogRoot,
+  owner = new DialogueExecutionOwner({ requestGovernor, records: store, fixture: null, sessionLogRoot: store.harnessSessionLogRoot,
     live: productionDialogueRoute({ scope: 'ordinary-production', nativeFetch }, () => policy, () => credentialReference,
       { resolve: async (reference) => { expect(reference).toBe(credentialReference); return 'synthetic-test-placeholder'; } }) });
 });
@@ -188,6 +200,35 @@ describe('v27 Book-less Global Agent', () => {
     expect(store.inspectGlobalAgent().directives).toHaveLength(1);
   });
 
+  it('rechecks current disclosed sources after shared capacity waits and sends nothing stale (#1131)', async () => {
+    governance('合成的固定监督来源。');
+    const producers = Array.from({ length: 4 }, (_, index) => requestGovernor.registerProducer({
+      key: `source-guard-blocker:${index}`, kind: 'fast-role', lane: 'foreground',
+    }));
+    const permits = await Promise.all(producers.map((producer) => requestGovernor.acquire(producer, new AbortController().signal)));
+    let reachedCapacity!: () => void;
+    const queued = new Promise<void>((resolve) => { reachedCapacity = resolve; });
+    const acquire = requestGovernor.acquire.bind(requestGovernor);
+    vi.spyOn(requestGovernor, 'acquire').mockImplementation((producer, signal) => {
+      const pending = acquire(producer, signal);
+      reachedCapacity();
+      return pending;
+    });
+    try {
+      const turn = start();
+      await queued;
+      expect(requestGovernor.snapshot()).toMatchObject({ waiting: 1, inFlight: 4 });
+      governance('等待容量期间新增的监督来源。');
+      permits[0]!.release();
+      await waitFor(() => inspect(turn.dialogueId).attempts[0]?.state === 'failed');
+      expect(calls).toEqual([]);
+      expect(usage().totals).toMatchObject({ inputTokens: 0, outputTokens: 0 });
+    } finally {
+      for (const permit of permits) permit.release();
+      for (const producer of producers) requestGovernor.unregisterProducer(producer);
+    }
+  });
+
   it('lists eligible editorial-memory version ids without reading their example references, and stops using an excluded source', async () => {
     const book = await importSample1Book(store, roots.codeRoot, '合成记忆版本');
     const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
@@ -211,6 +252,76 @@ describe('v27 Book-less Global Agent', () => {
     const preview = prepareGlobalAgentDisclosure(store, owner, policy, ask);
     store.changeEditorialLearning({ kind: 'material', signalId: signal.signalId });
     expect(store.inspectGlobalAgent().sourceCandidates!.some((entry) => entry.itemId === candidate.itemId)).toBe(false);
+    expect(() => startGlobalAgentTurn(store, owner, () => policy, ask, preview.sha256)).toThrow('记忆版本已经变化');
+    expect(calls).toHaveLength(1);
+  });
+
+  it('sends only the title and exact current pin of accepted /2 memory from real production review decisions', async () => {
+    const pending = store.saveModelServiceConnection('合成来源审阅', null, 'needs-attention', binding.route);
+    store.saveModelServiceConnection('合成来源审阅', pending.credentialReference, 'ready', binding.route);
+    store.selectModelServiceRoute(binding.route); credentialReference = pending.credentialReference;
+    const selected = { ...binding, credentialReference };
+    policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', selected, selected);
+    store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy,
+      live: { scope: 'ordinary-production', ...selected, runBudgetCeiling: 'unset' } });
+    const book = await importSample1Book(store, roots.codeRoot, '合成候选来源');
+    await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
+    const nativeFetch: typeof fetch = async (_url, init) => {
+      const body = JSON.parse(String(init?.body)) as { messages: Array<{ role: string; content: string }> };
+      const message = body.messages.findLast((entry) => entry.role === 'user')!.content;
+      const header = parseReviewCategoryUnitMessageHeader(message);
+      const content = header !== null ? JSON.stringify({ schema: 'ai7.editorial-review.unit-result/2', unitOrdinal: header.ordinal,
+        findings: header.ordinal !== 1 ? [] : message.split('\n').flatMap((line) => {
+          const match = /^\[([1-9][0-9]*)\] \[blk_[0-9a-f]{24}\] \((?:title|heading|paragraph)(?: h[1-6])?\) (.*)$/u.exec(line);
+          return match === null || match[2]!.length < 10 || match[2]!.length > 80 ? [] : [{ quote: match[2]!, blockOrdinal: Number(match[1]),
+            severity: 'should', note: '合成审阅来源。', replacement: `${match[2]}合成` }];
+        }).slice(0, 2) }) : message.startsWith('保证抽样 ') ? JSON.stringify({ schema: 'ai7.analysis.assurance-sampling-result/1',
+          dispositions: parseAssuranceSamplingListedRefs(message).map((ref) => ({ ref, disposition: '成立', reason: '合成回归。' })) })
+          : JSON.stringify({ schema: 'ai7.analysis.run-report-reflection-result/1', items: [] });
+      return new Response(JSON.stringify({ model: binding.model, choices: [{ message: { content, reasoning_content: '合成推理。' }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 40, completion_tokens: 20 } }), { status: 200 });
+    };
+    const reviewOwner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
+      production: { scope: 'ordinary-production', nativeFetch }, secretResolver: { resolve: async () => 'synthetic-test-placeholder' },
+      productionPolicyFor: (current) => resolveSourceCheckoutLaunchPolicySync(roots.codeRoot, 'ordinary-production', current, current) });
+    const reviewDriver = new ReviewRunDriver(store.reviewRunDriveSteps, reviewOwner);
+    try {
+      let work = store.createReviewRunPreparationWork(book.bookId, ['typos-and-usage'],
+        { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy);
+      while (!work.done) work = store.advanceReviewRunPreparationWork(work.workId!);
+      const run = work.projection!.run!;
+      store.authorizeReviewRun(book.bookId, run.reviewRunId, run.categories.filter((entry) => entry.planEnvelopeDigest !== null)
+        .map((entry) => ({ categoryId: entry.categoryId, planEnvelopeDigest: entry.planEnvelopeDigest! })));
+      await reviewDriver.drive(run.reviewRunId);
+      const reviewed = store.inspectReviewWorkspace(book.bookId, run.reviewRunId).run!;
+      expect(reviewed.findings).toHaveLength(2);
+      for (const finding of reviewed.findings) store.recordChangeSuggestionDecision({ manuscriptId: book.manuscriptId, branchId: book.branchId,
+        windowStartBlockId: finding.blockId, markId: finding.markId!, clientDecisionId: randomUUID(), disposition: 'accepted-with-edit',
+        editedText: '合成编辑改写', reason: '统一合成术语。' });
+    } finally { const stopped = reviewDriver.dispose(); await reviewOwner.dispose(); await stopped; }
+    const signals = store.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }).signals;
+    store.createEditorialMemory({ schema: 'ai7.global-editorial-memory/2', actionId: randomUUID(), signalIds: signals.map((signal) => signal.signalId),
+      applicability: { kind: 'house' }, editorialDimension: 'typos-and-usage', title: '保持合成术语一致。', confidence: 0.7 });
+    const proposed = store.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }).items[0]!.current;
+    store.acceptEditorialMemory({ itemId: proposed.itemId, expectedVersionId: proposed.versionId, actionId: randomUUID() });
+    const global = store.inspectGlobalAgent();
+    const candidate = global.sourceCandidates!.find((entry) => entry.itemId === proposed.itemId)!;
+    const mutable = global.items.find((entry) => entry.itemId === proposed.itemId)!;
+    expect(Object.keys(candidate).sort()).toEqual(['itemId', 'kind', 'revisionId', 'text', 'title']);
+    expect(candidate.text).toBe(proposed.title);
+    expect(candidate.revisionId.startsWith(`${mutable.revisionId}@`)).toBe(true);
+    expect(global.items.filter((entry) => entry.itemId === proposed.itemId)).toHaveLength(1);
+    expect(global.sourceCandidates!.filter((entry) => entry.itemId === proposed.itemId)).toHaveLength(1);
+    const ask: PrepareGlobalAgentTurnInput = { kind: 'ask', question: '如何参考这条记忆？', sources: [pinOf(candidate)] };
+    const turn = start(ask); await waitFor(() => inspect(turn.dialogueId).attempts[0]?.state === 'completed');
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.body).toContain(candidate.revisionId);
+    expect(calls[0]!.body).toContain(candidate.text);
+    expect(calls[0]!.body).not.toMatch(/合成编辑改写|sourceKey|feedbackKey|currentAdmission|positiveExamples|parentVersions|actionId/u);
+    expect(JSON.parse(calls[0]!.body).tools).toBeUndefined();
+    const preview = prepareGlobalAgentDisclosure(store, owner, policy, ask);
+    store.recordLearningSupervision({ operation: 'correct', actionId: randomUUID(), targets: [pinOf(mutable)], scope: { kind: 'house' },
+      categoryId: 'typos-and-usage', text: candidate.text, effect: 'guide' });
     expect(() => startGlobalAgentTurn(store, owner, () => policy, ask, preview.sha256)).toThrow('记忆版本已经变化');
     expect(calls).toHaveLength(1);
   });

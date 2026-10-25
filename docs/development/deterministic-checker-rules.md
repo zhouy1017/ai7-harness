@@ -1,0 +1,41 @@
+# Local text checker v1
+
+Issue [#1119](https://github.com/zhouy1017/ai7-harness/issues/1119) implements the bounded F-20a child of [ADR 0095](../adr/0095-make-procedures-the-central-object-govern-concurrent-execution-and-use-dsh-as-the-complex-task-harness.md) §§1/5. The separate 本地文字检查 entry runs `ai7-procedure/local-text-check@1`: deterministic-check, then derived-report. The historical nine review categories, their model contracts and lead-only behavior keep their existing definitions. The procedure library retains their old versions.
+
+## Evidence boundary
+
+The Commander admitted the five authored predicates below from indexed clauses of the exact Ministry-hosted primary documents. Direct original-page inspection was unavailable. This is neither a full standard audit nor a claim of compliance. No standards text, examples, tables, character data or external corpus is copied into the implementation or its fixtures. Tests use newly authored synthetic strings and exact admitted sample1 with tester edits.
+
+Primary editions: [GB/T 15834-2011](https://www.moe.gov.cn/ewebeditor/uploadfile/2015/01/13/20150113091548267.pdf), its [second Ministry carrier](https://www.moe.gov.cn/jyb_sjzl/ziliao/A19/201001/W020190128580990138234.pdf), and [GB/T 15835-2011](https://www.moe.gov.cn/ewebeditor/uploadfile/2015/01/13/20150113091154536.pdf). Clause locations identify the source basis; recognition and abstention are engineering choices, not quotations from those documents.
+
+## Frozen applicability and exclusions
+
+The editor explicitly confirms Chinese prose for P01–P03. Mixed, technical or unknown text is not inferred to be Chinese prose. Numerals default to off on every new plan. National-standard numeral selection requires affirmative confirmation and an explicit declaration of applicability under GB/T 15835 §1; literary, reprinted-classic and unknown scopes remain unchecked with an out-of-applicability reason. An affirmative editor-convention selection can enable named N01/N02 predicates on those works; resulting cards say 编辑约定. A Book type or prior Run grants no such selection.
+
+The plan freezes exact source revision, working digest, journal sequence, selected paragraph identities/order, original text bytes, procedure digest, rule versions and all options. Explicit foreign/technical exclusions use grapheme ranges in those frozen blocks. It also accepts explicit block declarations for the doubled ellipsis context. The current UI offers the bounded applicability choices; exclusions and doubled-context declarations are supported by the typed preparation operation. Without that declaration, four-character ellipses are skipped.
+
+Version 1 excludes fenced code opened at paragraph start by three or more matching backticks or tildes, through a matching closing fence or scope end; paired inline backtick delimiters, through paragraph end when unclosed; whitespace-delimited tokens beginning http://, https:// or www.; and ASCII email-like tokens with a nonempty local part and dotted domain. These are conservative recognizers, not general parsers. A gap or selection edge is not stitched into surrounding text. Specialized and metalinguistic uses that are not recognized remain a disclosed false-positive risk.
+
+## Registry
+
+Each row has immutable rule version 1. All results are possible-issue annotations, with exact rule/version, observed text, primary location, applicable basis and limitations. None supplies a replacement.
+
+| ID | Primary clauses | Authored finite predicate | Abstention and known risks |
+| --- | --- | --- | --- |
+| P01 | P §§4.8.2, 4.8.3.4–5, 4.9.2, 5.1.3 | Stack over Chinese double quotes, single quotes inside recognized Chinese quotation, and fullwidth parentheses across consecutive paragraphs; report a crossing close with its known opener, recovering without a cascade | Repeated outer double quote at paragraph start is possible continuation. Missing counterparts require complete whole-Book boundaries without an excluded gap. Lone apostrophes and other bracket/title systems are unchecked; semantic quotation style is not inferred |
+| P02 | P §§4.11.2, 4.11.3.7, 5.1.5, A.9.1 | Maximal U+2026 run whose length is neither two nor four | Four needs explicit omitted-paragraph/poetry declaration. Trailing page-number-like tokens imply possible leaders and are skipped. ASCII periods, graphical leaders, surrounding punctuation and typeset width are not diagnosed |
+| P03 | P informative appendix B.3.4; B.3.5–7 exclusions | At least two consecutive complete paragraphs, equal indentation, ascending positive decimal fullwidth-parenthesized labels, Chinese body; annotate immediate 、，。；： or ASCII comma/period | Isolated specimens, mixed indentation, excluded gaps, chapters, narrative numbering and other hierarchies are unchecked. The recognizer does not prove a semantic list |
+| N01 | N §5.1.2; applicability §1 | Signed/unsigned `.digits%` or `.digits％` missing an integer part, away from identifier/dot continuations | Bare decimals, tokens signed with a glyph other than ASCII `+`/`-` and broader unit/locale/OCR forms are unchecked. Code/URLs/paths/identifiers do not enter recognized candidates. Mathematical specimens can still resemble this token; editor review is required |
+| N02 | N §5.1.3; applicability §1 | Two complete nonnegative decimal endpoints separated by ～, ~ or —, with %, ％, 万, 亿, 万元 or 亿元 only on the second endpoint | Explicit suffixes on both endpoints suppress the row. Ordinary shared units, scientific endpoints, endpoints signed with any sign glyph, identifiers, dates and ASCII hyphens are outside the grammar. Never inherit or multiply an endpoint, supply a replacement, or judge its semantic plausibility |
+
+Grouping, date formats, arbitrary title nesting, mixed-language parsing, punctuation semantics, line-break widths, idioms and quantity/identifier semantics remain deferred. F-20 and #1070 remain open for their separately scoped outcomes.
+
+## Outcome and recovery records
+
+The canonical `ai7.review.local-plan/1` lives in the existing ReviewRun snapshot. Authorization names its exact digest. Execution and materialization revalidate source/scope; drift refuses and requires a new plan. The local branch constructs no model Provider, credential broker, DSH session, model tool, Egress ticket, model permit, token usage or fixture route.
+
+The additive schema-90 `review_local_stage_artifacts` relation belongs to ReviewRun. Its immutable, digest-chained `ai7.review.local-stage-artifact/1` records bind the attempt, procedure, source and plan. A start commits before cooperative chunks. A crash leaves a started attempt that reopen records as interrupted without running it; explicit continue retains the exact authorized plan and refuses drift. Cancellation, failure and refusal are terminal. A completed artifact resumes materialization without rerunning predicates. Marks, findings and the materialized artifact commit together; duplicate continuation is idempotent. The plan also pins the exact per-Book import boundary; imported history grants no new runnable authority regardless of source/destination clock order. New local plans in the destination bind its own import boundary. Data Version stays 1; old model event constraints and foreign keys are unchanged.
+
+Results distinguish checked paragraphs, excluded contexts, skipped/uncertain recognitions, errors, findings, disabled rules, out-of-applicability, not-recognized and recognized-with-no-finding counts. These counters can overlap within a paragraph and are not a compliance percentage. A structurally valid candidate that fails exact anchoring is visibly excluded alone. Corrupt source/plan or artifact chains refuse consumption. Result storage is bounded to 10,000 candidates, 256 exclusion reasons and finite per-candidate text; overflow is counted as error and excluded, never silently passed. Large paragraph segmentation and punctuation scanning yield cooperatively.
+
+Cards use the existing disposition, explicit annotation-to-suggestion conversion, Apply and reversal owners. Reports are derived from findings, options and stage counters; they are not the execution owner. The J-05 delta exercises the local path without a model binding on exact sample1. Electron execution and the attested ladder follow [CI and test boundaries](../agents/ci-test-boundaries.md).
