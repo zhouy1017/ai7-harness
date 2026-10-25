@@ -1157,6 +1157,8 @@ async function main() {
       await openManuscript(native, name);
       const beforeReopen = await readNativeWordState(native, nativeBookId, name);
       requireJourney(JSON.stringify(beforeReopen.texts.map(digest)) === JSON.stringify(expected.map(digest)), `${name}-edited-current-reading`);
+      // The exported revision is the edited current revision itself, not merely some revision after the import.
+      requireJourney(beforeReopen.revisionId === review.target.revisionId, `${name}-exported-current-revision`);
       const history = await native.evaluate(`window.ai7.inspectDeliverables().then(value=>JSON.stringify(value.exports))`);
       const noWordSignals = `window.ai7.inspectEditorialLearning({signalOffset:0,itemOffset:0}).then(page=>page.signals.length===0 && page.nextSignalOffset===null)`;
       requireJourney(await native.evaluate(noWordSignals), `${name}-opt-out-no-word-signals`);
