@@ -178,6 +178,36 @@ describe('Word graph mapped export (#1132)', () => {
     }
   });
 
+  it.each(['suggestions', 'accepted-baseline'] as const)('discloses table and cell property revisions the Word writer drops, as the legacy writer does (%s)', async (mode) => {
+    const table = '<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/><w:tblPrChange w:id="5" w:author="T"><w:tblPr/></w:tblPrChange></w:tblPr>' +
+      '<w:tblGrid><w:gridCol w:w="2000"/></w:tblGrid><w:tr><w:tc><w:tcPr><w:tcW w:w="2000" w:type="dxa"/>' +
+      '<w:tcPrChange w:id="6" w:author="T"><w:tcPr/></w:tcPrChange></w:tcPr><w:p><w:r><w:t>cell</w:t></w:r></w:p></w:tc></w:tr></w:tbl>';
+    const input = makeInput('<w:p><w:r><w:t>stable </w:t></w:r><w:del w:id="1" w:author="A"><w:r><w:delText>old</w:delText></w:r></w:del>' +
+      `<w:ins w:id="2" w:author="B"><w:r><w:t>new</w:t></w:r></w:ins></w:p>${table}`, mode);
+    const output = renderDocxExport(input, { emit: true });
+    // The body replacement's two wrappers plus the table and cell property revisions.
+    expect(output.fidelity.find((row) => row.key === 'file-revisions')).toMatchObject({ count: 4, status: 'degraded' });
+    const reread = await parseBytes(output.bytes!);
+    expect(reread.blocks.map((block) => block.text)).toEqual(input.blocks.map((block) => block.text));
+  });
+
+  it.each(['suggestions', 'accepted-baseline'] as const)('counts a retained Word 2010 text box revision once, not again in its VML fallback (%s)', async (mode) => {
+    const boxRun = '<w:r><w:rPr><w:b/><w:rPrChange w:id="7" w:author="F"><w:rPr/></w:rPrChange></w:rPr><w:t>box</w:t></w:r>';
+    const box = '<w:r><mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"><mc:Choice Requires="wps"><w:drawing>' +
+      '<wp:anchor xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">' +
+      '<a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"><wps:wsp xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">' +
+      `<wps:txbx><w:txbxContent><w:p>${boxRun}</w:p></w:txbxContent></wps:txbx></wps:wsp></a:graphicData></a:graphic></wp:anchor></w:drawing></mc:Choice>` +
+      `<mc:Fallback><w:pict><v:shape><v:textbox><w:txbxContent><w:p>${boxRun}</w:p></w:txbxContent></v:textbox></v:shape></w:pict></mc:Fallback></mc:AlternateContent></w:r>`;
+    const input = makeInput('<w:p><w:r><w:t>stable </w:t></w:r><w:del w:id="1" w:author="A"><w:r><w:delText>old</w:delText></w:r></w:del>' +
+      `<w:ins w:id="2" w:author="B"><w:r><w:t>new</w:t></w:r></w:ins></w:p><w:p><w:r><w:t>anchor</w:t></w:r>${box}</w:p>`, mode);
+    const output = renderDocxExport(input, { emit: true });
+    // Two body wrappers plus the one formatting revision Word stores in the box; the fallback repeats it for old readers.
+    expect(output.fidelity.find((row) => row.key === 'file-revisions')).toMatchObject({ count: 3, status: 'degraded' });
+    expect(output.fidelity.find((row) => row.key === 'text-boxes')).toMatchObject({ count: 1 });
+    const reread = await parseBytes(output.bytes!);
+    expect(reread.blocks.map((block) => block.text)).toEqual(input.blocks.map((block) => block.text));
+  });
+
   it('supports an unprefixed Word namespace in its own writer and keeps common text-format projections truthful', async () => {
     const input = makeInput('<w:p><w:r><w:t>old</w:t></w:r><w:ins w:id="1"><w:r><w:t>new</w:t></w:r></w:ins></w:p>', 'accepted-baseline', true);
     const output = renderDocxExport(input, { emit: true });

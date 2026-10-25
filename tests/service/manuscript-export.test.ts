@@ -398,6 +398,30 @@ describe('selected native Word reading through the actual export service', () =>
         expect(ledgerCounts()).toEqual({ export_preparations: 1, export_approvals: 0, export_receipts: 0 });
         expect(existsSync(destination)).toBe(false);
       } finally { replacePreparation(storedPreparation.json, storedPreparation.sha256); }
+      // A missing Word segment refuses review and approval; it never falls back to legacy rows or a fresh file.
+      const segment = withDatabase(true, (db) => db.prepare(`SELECT * FROM word_manuscript_source_segments WHERE revision_id = ?
+        ORDER BY block_id, segment_ordinal LIMIT 1`).get(imported.revisionId)!);
+      const segmentTrigger = withDatabase(true, (db) => String(db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'trigger' AND name = ?")
+        .get('word_manuscript_source_segments_no_delete')!.sql));
+      withDatabase(false, (db) => {
+        db.exec('DROP TRIGGER word_manuscript_source_segments_no_delete');
+        try { db.prepare('DELETE FROM word_manuscript_source_segments WHERE revision_id = ? AND block_id = ? AND segment_ordinal = ?')
+          .run(segment.revision_id!, segment.block_id!, segment.segment_ordinal!); }
+        finally { db.exec(segmentTrigger); }
+      });
+      try {
+        expect(await refusal(() => review(store, book))).toBe('WORD_MAPPING_INVALID');
+        expect(await refusal(() => store.approveManuscriptExport({ bookId: book.bookId, preparationId: preparation.preparationId }, true)))
+          .toBe('WORD_MAPPING_INVALID');
+        expect(ledgerCounts()).toEqual({ export_preparations: 1, export_approvals: 0, export_receipts: 0 });
+        expect(existsSync(destination)).toBe(false);
+      } finally {
+        withDatabase(false, (db) => {
+          const columns = Object.keys(segment);
+          db.prepare(`INSERT INTO word_manuscript_source_segments (${columns.join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`)
+            .run(...columns.map((column) => segment[column]!));
+        });
+      }
       const receipt = await store.approveManuscriptExport({ bookId: book.bookId, preparationId: preparation.preparationId }, true);
       expect(receipt.outcome).toBe('created');
       expect(digest(await readFile(destination))).toBe(preparation.technical.payloadDigest);

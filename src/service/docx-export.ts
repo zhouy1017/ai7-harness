@@ -577,6 +577,15 @@ function readableChildren(element: XmlElement): XmlNode[] {
   return choice === undefined ? [] : [choice];
 }
 
+const MARKUP_COMPATIBILITY_URI = 'http://schemas.openxmlformats.org/markup-compatibility/2006';
+
+/** The selected-Word view reads only a namespace-verified AlternateContent's first Choice, as the Word compiler reads it. */
+function selectedReadableChildren(element: XmlElement): XmlNode[] {
+  if (element.uri !== MARKUP_COMPATIBILITY_URI || element.local !== 'AlternateContent') return element.children;
+  const choice = element.children.find((child): child is XmlElement => isElement(child) && child.uri === element.uri && child.local === 'Choice');
+  return choice === undefined ? [] : [choice];
+}
+
 function* readableElements(nodes: ReadonlyArray<XmlNode>, selectedWord = false): Generator<{ element: XmlElement; ancestors: ReadonlyArray<XmlElement> }> {
   const stack: Array<{ nodes: ReadonlyArray<XmlNode>; index: number; owner: XmlElement | null }> = [{ nodes, index: 0, owner: null }];
   const ancestors: XmlElement[] = [];
@@ -591,7 +600,7 @@ function* readableElements(nodes: ReadonlyArray<XmlNode>, selectedWord = false):
     if (!isElement(node)) continue;
     yield { element: node, ancestors };
     ancestors.push(node);
-    stack.push({ nodes: selectedWord ? node.children : readableChildren(node), index: 0, owner: node });
+    stack.push({ nodes: selectedWord ? selectedReadableChildren(node) : readableChildren(node), index: 0, owner: node });
   }
 }
 
@@ -1775,12 +1784,7 @@ function selectedWordParagraph(paragraph: XmlElement, reading: WordReadingKind):
       const accepted = node.local === 'ins' || node.local === 'moveTo';
       return accepted === (reading === 'accepted') ? children(node.children, false) : [];
     }
-    let source = node.children;
-    if (node.uri === 'http://schemas.openxmlformats.org/markup-compatibility/2006' && node.local === 'AlternateContent') {
-      const choice = node.children.find((child): child is XmlElement => isElement(child) && child.uri === node.uri && child.local === 'Choice');
-      source = choice === undefined ? [] : [choice];
-    }
-    const projected = { ...node, children: children(source, inProperties || (word && PROPERTY_PARENTS.has(node.local))) };
+    const projected = { ...node, children: children(selectedReadableChildren(node), inProperties || (word && PROPERTY_PARENTS.has(node.local))) };
     return [word && node.local === 'delText' ? renamed(projected, 't') : word && node.local === 'delInstrText' ? renamed(projected, 'instrText') : projected];
   });
   return { ...paragraph, children: children(paragraph.children, false) };
@@ -1907,7 +1911,11 @@ function rewriteWordDocument(documentXml: string, input: DocxExportInput, source
       note('file-revisions', counts.fileRevisions, 0, null);
       return [...flushPending(Number.POSITIVE_INFINITY), stripped(element)];
     }
-    if (element.uri === mainUri && (COMMENT_MARKERS.has(element.local) || FORMATTING_REVISIONS.has(element.local) || REVISION_MARKERS.has(element.local))) return [];
+    if (element.uri === mainUri && (COMMENT_MARKERS.has(element.local) || FORMATTING_REVISIONS.has(element.local) || REVISION_MARKERS.has(element.local))) {
+      // A table/row/cell property revision outside a paragraph is dropped and disclosed, as the legacy writer discloses it.
+      if (FORMATTING_REVISIONS.has(element.local) || TEXT_NEUTRAL_REVISIONS.has(element.local)) note('file-revisions', 1, 0, null);
+      return [];
+    }
     if (element.uri === mainUri && element.local === 'tbl') note('tables', 1, 0, null);
     const children = element.children.flatMap((child) => isElement(child) ? transform(child) : [child]);
     if (element.uri === mainUri && element.local === 'tc' && !children.some(holdsCellContent)) children.push({ raw: `<${writer.w('p')}/>` });
