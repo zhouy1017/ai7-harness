@@ -1936,7 +1936,7 @@ async function runNativeWordImport(renderer, scenario, restart, recoverCommitted
   await waitFor(renderer, `document.querySelector('[data-screen="imported"]') && document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true'`, 'word-committed');
   const selectedReading = await collectEditorBlockIdentitySequence(renderer, 'word-selected-reading');
   requireJourney(JSON.stringify(selectedReading.map(block => block.text)) === JSON.stringify(expectedTexts),
-    'word-selected-baseline-exact');
+    'word-selected-baseline-exact', { expectedTexts, selectedReading });
   const capture = await renderer.evaluate(`(async () => { const ids = []; let offset = 0; let pages = 0; let source = null; do { const page = await window.ai7.inspectEditorialLearning({ signalOffset: offset, itemOffset: 0 }); if (page.signals.length > 30 || page.signals.some(signal => signal.kind !== 'word-tracked-edit' || signal.currentEligibility !== 'house' || signal.memoryCandidate !== null)) return null; source ??= page.signals[0]?.source ?? null; ids.push(...page.signals.map(signal => signal.source.sampleId)); offset = page.nextSignalOffset; pages += 1; } while (offset !== null); return { count: ids.length, unique: new Set(ids).size, pages, source }; })()`);
   requireJourney(capture?.count === (learnFromEdits ? sampleCount : 0) && capture.unique === capture.count &&
     capture.pages >= (learnFromEdits && sampleCount > 30 ? 2 : 1), 'word-entire-signal-manifest');
