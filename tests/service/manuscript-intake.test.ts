@@ -1,12 +1,12 @@
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { createHash, randomUUID } from 'node:crypto';
-import { readdir, writeFile } from 'node:fs/promises';
+import { copyFile, cp, readdir, writeFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { canonicalJson } from '../../src/service/analysis/canonical.js';
 import { EditorialStore } from '../../src/service/store.js';
-import { parseDocx } from '../../src/service/docx.js';
+import { compileWordTrackedDocx, parseDocx } from '../../src/service/docx.js';
 import {
   MANUSCRIPT_INTAKE_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
@@ -256,6 +256,168 @@ const SOURCE_ONLY_INPUTS: ReadonlyArray<{ format: SourceFormat; fileName: string
 ];
 
 describe('native Word reading preparation over the real store', () => {
+  it('rolls the whole Word import back when signal capture fails and retries the same durable commit once', async () => {
+    const path = join(roots.inputRoot, 'word-atomic-rollback.docx');
+    await composeRevisedDocx(path, { source: ADMITTED_BASELINE_DOCX, title: '原子导入', paragraphs: [
+      { runs: [{ text: { block: 8, from: 0, to: 10 } }, { text: { block: 9, from: 0, to: 5 },
+        revision: { kind: 'ins', author: '作者', date: '2026-10-25T00:00:00Z' } }] },
+    ] });
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const staged = await store.stageSelectedManuscript(randomUUID(), path);
+      const reviewed = store.prepareNewBookReview(staged.draftId, staged.draftVersion,
+        { kind: 'new-book', choiceId: 'new-book', confirmedTitle: staged.titleSuggestion.value }, false, 'retain',
+        { mode: 'suggestions', learnFromEdits: true, acceptedBaselineConfirmed: false });
+      if (reviewed.reviewDigest === null) throw new Error('expected Word review before fault injection');
+      const input = { draftId: staged.draftId, expectedDraftVersion: reviewed.draftVersion, reviewDigest: reviewed.reviewDigest, commitId: randomUUID() };
+      const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+      try {
+        db.exec(`CREATE TRIGGER word_capture_atomic_failure BEFORE INSERT ON learning_signals
+          WHEN json_extract(NEW.canonical_json, '$.kind') = 'word-tracked-edit'
+          BEGIN SELECT RAISE(ABORT, 'WORD_ATOMIC_CAPTURE_FAILURE'); END`);
+        await expect(store.commitNewBookImport(input)).rejects.toThrow('WORD_ATOMIC_CAPTURE_FAILURE');
+        for (const table of ['books', 'manuscripts', 'source_versions', 'source_provenance', 'manuscript_import_records', 'import_commits',
+          'word_revision_sources', 'word_revision_imports', 'word_manuscript_source_segments', 'word_import_mark_sources',
+          'word_tracked_edit_samples', 'word_tracked_edit_sample_imports', 'learning_signals', 'editorial_marks']) {
+          expect(db.prepare(`SELECT count(*) total FROM ${table}`).get()!.total).toBe(0);
+        }
+        expect(db.prepare('SELECT state FROM import_commit_attempts WHERE attempt_id = ?').get(input.commitId)!.state).toBe('prepared');
+        expect(db.prepare('SELECT state FROM import_drafts WHERE draft_id = ?').get(staged.draftId)!.state).toBe('reviewed');
+        expect(db.prepare('SELECT count(*) total FROM staged_word_revision_intakes').get()!.total).toBe(1);
+        db.exec('DROP TRIGGER word_capture_atomic_failure');
+        const committed = await store.commitNewBookImport(input);
+        expect((await store.commitNewBookImport(input)).revisionId).toBe(committed.revisionId);
+        expect(db.prepare('SELECT count(*) total FROM import_commits').get()!.total).toBe(1);
+        expect(db.prepare('SELECT count(*) total FROM word_revision_imports').get()!.total).toBe(1);
+        expect(db.prepare('SELECT count(*) total FROM word_tracked_edit_samples').get()!.total).toBe(1);
+        expect(db.prepare('SELECT count(*) total FROM learning_signals').get()!.total).toBe(1);
+        await store.acknowledgeImportCompletion(input.commitId);
+      } finally { db.close(); }
+      store.markCleanShutdown();
+    } finally { store.close(); }
+  });
+
+  it('reuses an unchanged actual /3 original and proves mode-independent samples by cloning one empty Book', async () => {
+    const path = join(roots.inputRoot, 'word-preserved-original.docx');
+    await composeRevisedDocx(path, { source: ADMITTED_BASELINE_DOCX, title: '原来源独立于阅读', paragraphs: [
+      { runs: [{ text: { block: 8, from: 0, to: 10 } }, { text: { block: 9, from: 0, to: 5 },
+        revision: { kind: 'ins', author: '作者', date: '2026-10-25T00:00:00Z' } }] },
+    ] });
+    const base = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let bookId: string;
+    let sourceVersionId: string;
+    let provenanceId: string;
+    try {
+      const staged = await base.stageSelectedManuscript(randomUUID(), path);
+      const reviewed = base.prepareSourceImportReview(staged.draftId, staged.draftVersion,
+        { kind: 'new-book', choiceId: 'new-book', confirmedTitle: staged.titleSuggestion.value, relationship: 'source-only' });
+      const commitId = randomUUID();
+      const source = await base.commitSourceImport({ draftId: staged.draftId, expectedDraftVersion: reviewed.draftVersion,
+        reviewDigest: reviewed.reviewDigest, commitId });
+      await base.acknowledgeImportCompletion(commitId);
+      bookId = source.bookId; sourceVersionId = source.sourceVersionId; provenanceId = source.provenance.provenanceId;
+      expect(base.getBookOverview(bookId).manuscriptState.state).toBe('empty');
+      base.markCleanShutdown();
+    } finally { base.close(); }
+    const baseDb = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+    let oldSource: Row;
+    let oldProvenance: Row;
+    try {
+      oldSource = baseDb.prepare('SELECT rowid, * FROM source_versions WHERE source_version_id = ?').get(sourceVersionId)!;
+      oldProvenance = baseDb.prepare('SELECT rowid, * FROM source_provenance WHERE provenance_id = ?').get(provenanceId)!;
+      expect(oldSource.parser_identity).toBe('ai7-docx-fflate-saxes/3');
+    } finally { baseDb.close(); }
+    const alias = join(roots.inputRoot, 'word-same-bytes-other-name.docx');
+    await copyFile(path, alias);
+    const manifests: Row[][] = [];
+    for (const mode of ['suggestions', 'accepted-baseline'] as const) {
+      const dataRoot = join(roots.inputRoot, `word-clone-${mode}`);
+      await cp(roots.dataRoot, dataRoot, { recursive: true });
+      let store = await EditorialStore.open(dataRoot, roots.codeRoot);
+      try {
+        const staged = await store.stageSelectedManuscript(randomUUID(), alias);
+        const review = store.prepareNewBookReview(staged.draftId, staged.draftVersion,
+          { kind: 'existing-book', bookId, relationship: 'first-manuscript' }, false, 'retain',
+          { mode, learnFromEdits: true, acceptedBaselineConfirmed: mode === 'accepted-baseline' });
+        if (review.reviewDigest === null) throw new Error('expected complete preserved-source Word review');
+        const commitId = randomUUID();
+        const committed = await store.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: review.draftVersion,
+          reviewDigest: review.reviewDigest, commitId });
+        expect(committed.source.displayName).toBe('word-same-bytes-other-name.docx');
+        await store.acknowledgeImportCompletion(commitId);
+        store.markCleanShutdown(); store.close();
+        store = await EditorialStore.open(dataRoot, roots.codeRoot);
+        expect(store.getBookOverview(bookId).manuscriptState.state).toBe('populated');
+        const db = new DatabaseSync(join(dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+        try {
+          expect(db.prepare('SELECT rowid, * FROM source_versions WHERE source_version_id = ?').get(sourceVersionId)).toEqual(oldSource);
+          expect(db.prepare('SELECT rowid, * FROM source_provenance WHERE provenance_id = ?').get(provenanceId)).toEqual(oldProvenance);
+          expect(db.prepare('SELECT count(*) total FROM source_versions WHERE book_id = ?').get(bookId)!.total).toBe(1);
+          expect(db.prepare('SELECT source_version_id, parent_parser_identity FROM word_revision_sources').get())
+            .toEqual({ source_version_id: sourceVersionId, parent_parser_identity: 'ai7-docx-fflate-saxes/3' });
+          manifests.push(db.prepare('SELECT sample_id, template_key, sha256, canonical_json FROM word_tracked_edit_samples ORDER BY sample_id').all());
+        } finally { db.close(); }
+        store.markCleanShutdown();
+      } finally { store.close(); }
+    }
+    expect(manifests[0]!.length).toBeGreaterThan(0);
+    expect(manifests[1]).toEqual(manifests[0]);
+  });
+
+  it.each([{ mode: 'suggestions', learnFromEdits: true }, { mode: 'accepted-baseline', learnFromEdits: true },
+    { mode: 'suggestions', learnFromEdits: false }] as const)('atomically commits, retries and reopens native Word $mode with learning $learnFromEdits', async ({ mode, learnFromEdits }) => {
+    const path = join(roots.inputRoot, `word-${mode}.docx`);
+    await composeRevisedDocx(path, { source: ADMITTED_BASELINE_DOCX, title: '双阅读完整导入', paragraphs: [
+      { runs: [{ text: { block: 8, from: 0, to: 10 } },
+        { text: { block: 9, from: 0, to: 5 }, revision: { kind: 'del', author: '作者甲', date: '2026-10-25T00:00:00Z' } },
+        { text: { block: 10, from: 0, to: 6 }, revision: { kind: 'ins', author: '作者乙', date: '2026-10-25T00:00:01Z' } },
+        { text: { block: 11, from: 0, to: 8 } }] },
+    ] });
+    const compiled = await compileWordTrackedDocx(path);
+    if (compiled.kind !== 'ready') throw new Error('expected supported real Word compilation');
+    const reading = compiled.readings[mode === 'suggestions' ? 'rejected' : 'accepted'];
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const staged = await store.stageSelectedManuscript(randomUUID(), path);
+      const review = store.prepareNewBookReview(staged.draftId, staged.draftVersion,
+        { kind: 'new-book', choiceId: 'new-book', confirmedTitle: staged.titleSuggestion.value }, false, 'retain',
+        { mode, learnFromEdits, acceptedBaselineConfirmed: mode === 'accepted-baseline' });
+      if (review.reviewDigest === null) throw new Error('expected complete Word preparation');
+      const input = { draftId: staged.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest, commitId: randomUUID() };
+      const committed = await store.commitNewBookImport(input);
+      expect((await store.commitNewBookImport(input)).revisionId).toBe(committed.revisionId);
+      await store.acknowledgeImportCompletion(input.commitId);
+      store.markCleanShutdown(); store.close();
+      store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      expect(store.getBookOverview(committed.bookId).manuscriptState.state).toBe('populated');
+      expect(store.getManuscriptWindow(committed.manuscriptId, committed.branchId, null).blocks.map((block) => block.digest))
+        .toEqual(reading.blocks.map((block) => block.digest));
+      const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+      let sample: { sampleId: string; digest: string } | null = null;
+      try {
+        expect(db.prepare('SELECT count(*) total FROM word_revision_sources').get()!.total).toBe(1);
+        expect(db.prepare('SELECT count(*) total FROM word_revision_imports').get()!.total).toBe(1);
+        expect(db.prepare('SELECT count(*) total FROM word_tracked_edit_samples').get()!.total).toBe(learnFromEdits ? compiled.templates.length : 0);
+        expect(db.prepare('SELECT count(*) total FROM word_tracked_edit_sample_imports').get()!.total).toBe(learnFromEdits ? compiled.templates.length : 0);
+        expect(db.prepare('SELECT count(*) total FROM learning_signals').get()!.total).toBe(learnFromEdits ? compiled.templates.length : 0);
+        expect(db.prepare('SELECT count(*) total FROM word_import_mark_sources').get()!.total).toBe(reading.marks.length);
+        expect(db.prepare('SELECT count(*) total FROM manuscript_block_sources WHERE revision_id = ?').get(committed.revisionId)!.total).toBe(0);
+        expect(db.prepare('SELECT content_digest FROM source_versions').get()!.content_digest).toBe(compiled.readings[compiled.previewReading].contentDigest);
+        if (learnFromEdits) {
+          const row = db.prepare('SELECT sample_id, sha256 FROM word_tracked_edit_samples ORDER BY sample_id LIMIT 1').get()!;
+          sample = { sampleId: String(row.sample_id), digest: String(row.sha256) };
+        }
+      } finally { db.close(); }
+      if (sample !== null) {
+        const detail = await store.inspectWordTrackedEditSample({ bookId: committed.bookId, sampleId: sample.sampleId, sampleDigest: sample.digest, after: null });
+        expect(detail.sectionCounts.before).toBeGreaterThan(0);
+        expect(detail.sectionCounts.after).toBeGreaterThan(0);
+        expect(detail.sourceDigest).toBe(compiled.sourceDigest);
+      }
+      store.markCleanShutdown();
+    } finally { store.close(); }
+  });
+
   it('keeps tracked source-only import on the actual historical reader without Word capture', async () => {
     const path = join(roots.inputRoot, 'word-source-only.docx');
     await composeRevisedDocx(path, { source: ADMITTED_BASELINE_DOCX, title: '来源修订保留', paragraphs: [
