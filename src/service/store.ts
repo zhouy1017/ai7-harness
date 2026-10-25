@@ -494,6 +494,7 @@ import {
   isCleanTracerFidelity,
   MAX_ARCHIVE_BYTES,
   parseDocx,
+  compileWordTrackedDocx,
   withTextBoxDisposition,
   type FidelityConversionIdentity,
   type ImportFidelityPlan,
@@ -580,6 +581,14 @@ import {
   stageImportSources,
   stagedImportSourcesMatch,
   stagedTextBoxParagraphs,
+  readWordParentSourcePin,
+  wordParentSourcePinRecord,
+  createWordSampleDetailContext,
+  wordSampleDetailContextCurrent,
+  resolveWordSampleDetailSource,
+  pageWordSampleDetail,
+  type WordSampleDetailContext,
+  type WordSampleDetailPage,
   type StagedImportSources,
   type StagedTextBoxParagraph,
 } from './import-retention.js';
@@ -4759,6 +4768,8 @@ export class EditorialStore {
   #translationRun: Promise<void> | null = null;
   readonly #translationFailures = new Map<string, string>();
   readonly #learningEligibility: LearningEligibilityLedger;
+  /** One bounded Word source context; actual original-file availability/hash is checked on every detail read. */
+  #wordSampleDetailContext: WordSampleDetailContext | null = null;
   readonly #evaluationCalibration: EvaluationCalibrationLedger;
   readonly #series: SeriesLedger;
   readonly #usage: UsageLedger;
@@ -13229,6 +13240,65 @@ export class EditorialStore {
 
   inspectEditorialLearning(input: InspectEditorialLearningInput): EditorialLearningProjection {
     return this.#learningCall(() => new EditorialLearningLedger(this.#authority).inspect(input, this.#baselineAnalysis.launch.operationalScope));
+  }
+
+  /** Explicit-Book source detail; historical inspection remains available while current learning is excluded. */
+  async inspectWordTrackedEditSample(input: { bookId: string; sampleId: string; sampleDigest: string; after: unknown }): Promise<WordSampleDetailPage> {
+    this.#assertAvailable();
+    requireStore(isRecord(input) && hasExactKeys(input, ['bookId', 'sampleId', 'sampleDigest', 'after']) &&
+      typeof input.bookId === 'string' && typeof input.sampleId === 'string' && typeof input.sampleDigest === 'string' &&
+      UUID_PATTERN.test(input.bookId) && /^wts_[0-9a-f]{64}$/u.test(input.sampleId) && DIGEST_PATTERN.test(input.sampleDigest),
+    'WORD_SAMPLE_INVALID', 'Word 修改样本的图书或固定标识无效。');
+    const row = this.#authority.prepare(`SELECT source_version_id FROM word_tracked_edit_samples
+      WHERE book_id = ? AND sample_id = ? AND sha256 = ?`).get(input.bookId, input.sampleId, input.sampleDigest);
+    requireStore(row !== undefined, 'WORD_SAMPLE_INVALID', '这条 Word 修改样本不属于所选图书或摘要已经变化。');
+    const sourceVersionId = asString(row.source_version_id);
+    const parent = this.#retentionCall(() => readWordParentSourcePin(this.#authority, input.bookId, sourceVersionId));
+    requireStore(parent.sourceBytes <= MAX_ARCHIVE_BYTES, 'WORD_SOURCE_INVALID', 'Word 原文件超过已支持的包大小。');
+    const object = one(this.#authority.prepare('SELECT relative_key, byte_length FROM content_objects WHERE object_digest = ?')
+      .all(parent.objectDigest) as SqlRow[], 'WORD_SOURCE_UNAVAILABLE', 'Word 原文件对象记录缺失。');
+    requireStore(object.byte_length === parent.sourceBytes, 'WORD_SOURCE_INVALID', 'Word 原文件长度固定记录不一致。');
+    const path = this.#contentObjectPath(parent.objectDigest, asString(object.relative_key));
+    let context = this.#wordSampleDetailContext;
+    const reusable = context !== null && context.bookId === input.bookId && context.sourceVersionId === sourceVersionId &&
+      context.parentPinDigest === wordParentSourcePinRecord(parent).digest && wordSampleDetailContextCurrent(this.#authority, context);
+    try {
+      const info = await lstat(path);
+      requireStore(info.isFile() && !info.isSymbolicLink() && info.size === parent.sourceBytes,
+        'WORD_SOURCE_UNAVAILABLE', 'Word 原文件不再是完整的留存文件。');
+      if (reusable) {
+        const hash = createHash('sha256');
+        let bytes = 0;
+        for await (const chunk of createReadStream(path, { highWaterMark: 64 * 1024 })) {
+          bytes += chunk.byteLength;
+          requireStore(bytes <= parent.sourceBytes, 'WORD_SOURCE_UNAVAILABLE', 'Word 原文件在读取时已经变化。');
+          hash.update(chunk);
+        }
+        requireStore(bytes === parent.sourceBytes && hash.digest('hex') === parent.sourceDigest,
+          'WORD_SOURCE_UNAVAILABLE', 'Word 原文件字节与留存摘要不一致。');
+        this.#assertAvailable();
+        requireStore(context !== null && wordSampleDetailContextCurrent(this.#authority, context),
+          'WORD_SOURCE_CHANGED', 'Word 详情读取期间记录已变化，请重新查看。');
+      } else {
+        const compiled = await compileWordTrackedDocx(path, { digest: parent.sourceDigest, bytes: parent.sourceBytes });
+        this.#assertAvailable();
+        requireStore(compiled.kind === 'ready', 'WORD_SOURCE_INVALID', 'Word 原文件不再符合留存的修订编译契约。');
+        context = this.#retentionCall(() => createWordSampleDetailContext(this.#authority, input.bookId, sourceVersionId, compiled));
+      }
+    } catch (error) {
+      if (error instanceof StoreError) throw error;
+      if (error instanceof Error && error.message.startsWith('DOCX_REJECTED:')) throw new StoreError('WORD_SOURCE_INVALID', 'Word 原文件无法按留存的修订契约完整读取。');
+      if (isRecord(error) && typeof error.code === 'string' && typeof error.syscall === 'string') {
+        throw new StoreError('WORD_SOURCE_UNAVAILABLE', 'Word 原文件无法读取，无法查看完整修改详情。');
+      }
+      throw error;
+    }
+    requireStore(context !== null, 'WORD_SOURCE_INVALID', 'Word 详情缺少已验证的原始来源。');
+    const imports = this.#learningCall(() => new EditorialLearningLedger(this.#authority).wordSampleImports(input.bookId, input.sampleId, input.sampleDigest));
+    const source = this.#retentionCall(() => resolveWordSampleDetailSource(this.#authority, context, input.sampleId, input.sampleDigest, imports));
+    const page = this.#retentionCall(() => pageWordSampleDetail(source, input.after));
+    this.#wordSampleDetailContext = context;
+    return page;
   }
 
   recordLearningReasonAsk(input: LearningReasonAskInput, frequency: import('../shared/protocol/learning.js').LearningReasonAskFrequency): LearningReasonAskProjection | null {
