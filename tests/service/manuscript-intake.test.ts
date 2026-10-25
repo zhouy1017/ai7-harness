@@ -575,6 +575,78 @@ describe('native Word reading preparation over the real store', () => {
     expect(manifests[1]).toEqual(manifests[0]);
   });
 
+  it('refuses a retained /3 parent whose recorded content and structure its own reader does not reproduce, before any write', async () => {
+    const path = join(roots.inputRoot, 'word-mismatched-parent.docx');
+    await composeRevisedDocx(path, { source: ADMITTED_BASELINE_DOCX, title: '原来源记录与读法不符', paragraphs: [
+      { runs: [{ text: { block: 8, from: 0, to: 10 } }, { text: { block: 9, from: 0, to: 5 },
+        revision: { kind: 'ins', author: '作者', date: '2026-10-25T00:00:00Z' } }] },
+    ] });
+    const base = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let bookId: string;
+    let sourceVersionId: string;
+    try {
+      const staged = await base.stageSelectedManuscript(randomUUID(), path);
+      const reviewed = base.prepareSourceImportReview(staged.draftId, staged.draftVersion,
+        { kind: 'new-book', choiceId: 'new-book', confirmedTitle: staged.titleSuggestion.value, relationship: 'source-only' });
+      const commitId = randomUUID();
+      const source = await base.commitSourceImport({ draftId: staged.draftId, expectedDraftVersion: reviewed.draftVersion,
+        reviewDigest: reviewed.reviewDigest, commitId });
+      await base.acknowledgeImportCompletion(commitId);
+      bookId = source.bookId; sourceVersionId = source.sourceVersionId;
+      base.markCleanShutdown();
+    } finally { base.close(); }
+    // Coherently wrong /3 metadata: still a well-formed /3 parse record that every historical closure accepts, but not the
+    // content and structure that /3 actually reads from these exact retained bytes.
+    const databasePath = join(roots.dataRoot, 'store', 'ai7.sqlite');
+    const relabel = new DatabaseSync(databasePath);
+    let mismatched: Row;
+    try {
+      const contentDigest = createHash('sha256').update('another /3 content').digest('hex');
+      const structureDigest = createHash('sha256').update('another /3 structure').digest('hex');
+      relabel.prepare('UPDATE source_versions SET content_digest = ?, structure_digest = ? WHERE source_version_id = ?').run(contentDigest, structureDigest, sourceVersionId);
+      // The source-import record pins the same digests in its retained boundary and record digest; relabel it coherently.
+      const record = relabel.prepare('SELECT * FROM source_import_records WHERE source_version_id = ?').get(sourceVersionId)!;
+      const boundary = JSON.parse(String(record.retained_boundary_json)) as Record<string, unknown>;
+      const recordDigest = (retainedBoundary: Record<string, unknown>): string => createHash('sha256').update(canonicalJson({
+        schema: 'ai7.source-import-record/1', sourceImportRecordId: record.source_import_record_id, commitId: record.commit_id,
+        bookId: record.book_id, sourceVersionId, provenanceId: record.provenance_id, targetKind: record.target_kind,
+        sourceVersionDisposition: record.source_version_disposition, retainedBoundary,
+        namedNonEffects: JSON.parse(String(record.named_non_effects_json)), importedAt: record.imported_at })).digest('hex');
+      expect(recordDigest(boundary)).toBe(record.record_digest);
+      const relabelled = { ...boundary, contentDigest, structureDigest };
+      relabel.prepare('UPDATE source_import_records SET retained_boundary_json = ?, record_digest = ? WHERE source_import_record_id = ?')
+        .run(JSON.stringify(relabelled), recordDigest(relabelled), String(record.source_import_record_id));
+      mismatched = relabel.prepare('SELECT rowid, * FROM source_versions WHERE source_version_id = ?').get(sourceVersionId)!;
+      expect(mismatched.parser_identity).toBe('ai7-docx-fflate-saxes/3');
+    } finally { relabel.close(); }
+    const writes = (): Row => {
+      const db = new DatabaseSync(databasePath, { readOnly: true });
+      try {
+        return db.prepare(`SELECT (SELECT count(*) FROM word_revision_sources) sources, (SELECT count(*) FROM word_revision_imports) imports,
+          (SELECT count(*) FROM word_tracked_edit_samples) samples, (SELECT count(*) FROM manuscripts) manuscripts,
+          (SELECT count(*) FROM import_commits) commits, (SELECT count(*) FROM source_versions) versions`).get()!;
+      } finally { db.close(); }
+    };
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      // The historical record reader still accepts this empty Book; only the new semantic /3 comparison refuses it.
+      expect(store.getBookOverview(bookId).manuscriptState.state).toBe('empty');
+      const before = writes();
+      for (const mode of ['suggestions', 'accepted-baseline'] as const) {
+        const staged = await store.stageSelectedManuscript(randomUUID(), path);
+        expect(() => store.prepareNewBookReview(staged.draftId, staged.draftVersion,
+          { kind: 'existing-book', bookId, relationship: 'first-manuscript' }, false, 'retain',
+          { mode, learnFromEdits: true, acceptedBaselineConfirmed: mode === 'accepted-baseline' }))
+          .toThrow(expect.objectContaining({ code: 'WORD_SOURCE_INVALID' }));
+        expect(writes()).toEqual(before);
+      }
+      const db = new DatabaseSync(databasePath, { readOnly: true });
+      try { expect(db.prepare('SELECT rowid, * FROM source_versions WHERE source_version_id = ?').get(sourceVersionId)).toEqual(mismatched); }
+      finally { db.close(); }
+      store.markCleanShutdown();
+    } finally { store.close(); }
+  });
+
   it.each(['ai7-docx-fflate-saxes/1', 'ai7-docx-fflate-saxes/2'] as const)(
     'reuses frozen historical %s source-only rows without rewriting them under either Word reading', async (parserIdentity) => {
     const path = join(roots.inputRoot, 'word-historical-boundary.docx');
@@ -753,6 +825,39 @@ describe('native Word reading preparation over the real store', () => {
         expect(detail.sectionCounts.before).toBeGreaterThan(0);
         expect(detail.sectionCounts.after).toBeGreaterThan(0);
         expect(detail.sourceDigest).toBe(compiled.sourceDigest);
+        // That actual exclusion restores only through the existing explicit decision, which appends one decision and
+        // creates no sample, membership, signal, memory or downstream use; Book and global vetoes still govern.
+        const derivedRows = (): number[] => {
+          const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+          try {
+            return ['word_tracked_edit_samples', 'word_tracked_edit_sample_imports', 'learning_signals', 'learning_eligibility_decisions']
+              .map((table) => Number(db.prepare(`SELECT count(*) total FROM ${table}`).get()!.total));
+          } finally { db.close(); }
+        };
+        const excluded = store.inspectLearningMaterial(committed.bookId, material.materialKey);
+        const beforeRestore = derivedRows();
+        const decide = (choice: 'book' | 'house', expectedDecisions: number) => store.decideLearningMaterial({ bookId: committed.bookId,
+          materialKey: material.materialKey, materialDigest: excluded.digest, expectedDecisions, choice, note: null });
+        expect(() => decide('book', excluded.decisions - 1)).toThrow(expect.objectContaining({ code: 'LEARNING_ELIGIBILITY_MOVED' }));
+        expect(derivedRows()).toEqual(beforeRestore);
+        decide('book', excluded.decisions);
+        const restored = store.inspectLearningMaterial(committed.bookId, material.materialKey);
+        expect([restored.wordCurrentEligibility, restored.decisions]).toEqual(['book', excluded.decisions + 1]);
+        expect(derivedRows()).toEqual(beforeRestore.map((count, index) => index === 3 ? count + 1 : count));
+        store.changeEditorialLearning({ kind: 'book', bookId: committed.bookId, excluded: true, expectedEntries: 0 });
+        expect(store.inspectLearningMaterial(committed.bookId, material.materialKey).wordCurrentEligibility).toBe('excluded');
+        store.changeEditorialLearning({ kind: 'switch', enabled: false, expectedEntries: 1 });
+        store.changeEditorialLearning({ kind: 'book', bookId: committed.bookId, excluded: false, expectedEntries: 2 });
+        expect(store.inspectLearningMaterial(committed.bookId, material.materialKey).wordCurrentEligibility).toBe('excluded');
+        store.changeEditorialLearning({ kind: 'switch', enabled: true, expectedEntries: 3 });
+        store.markCleanShutdown(); store.close();
+        store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+        const reopened = store.inspectLearningMaterial(committed.bookId, material.materialKey);
+        expect([reopened.wordCurrentEligibility, reopened.decisions]).toEqual(['book', excluded.decisions + 1]);
+        expect(derivedRows()).toEqual(beforeRestore.map((count, index) => index === 3 ? count + 1 : count));
+        expect(store.inspectLearningLineage(committed.bookId, material.materialKey).downstream)
+          .toEqual({ signals: 0, memoryCandidates: 0, activeMemories: 0, tasks: 0 });
+        expect(store.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }).items).toEqual([]);
       }
       if (!globalEnabled || bookExcluded) {
         if (!globalEnabled) store.changeEditorialLearning({ kind: 'switch', enabled: true, expectedEntries: 1 });

@@ -24279,8 +24279,17 @@ export class EditorialStore {
           wordTrackedEditCandidate(sample, wordTrackedSampleRecord(sample).digest, snapshot.stagedAt)) }));
       const parent = this.#authority.prepare('SELECT source_version_id FROM source_versions WHERE book_id = ? AND source_digest = ?')
         .get(target.bookId, snapshot.sourceDigest);
-      preparedTarget = { kind: 'existing-book', bookId: target.bookId, controls: ledger.wordImportControls(target.bookId, materials),
-        parentSourcePin: parent === undefined ? null : this.#retentionCall(() => readWordParentSourcePin(this.#authority, target.bookId, asString(parent.source_version_id))) };
+      const parentSourcePin = parent === undefined ? null : this.#retentionCall(() => readWordParentSourcePin(this.#authority, target.bookId, asString(parent.source_version_id)));
+      if (parentSourcePin?.parserIdentity === DOCX_PARSER_IDENTITY) {
+        // A retained /3 parent is checked by that same reader's result over these verified bytes; /1 and /2 keep
+        // their recorded historical meaning and are never reparsed.
+        const legacy = native.legacy;
+        requireStore(legacy.kind === 'ready' && legacy.parsed.parserIdentity === DOCX_PARSER_IDENTITY &&
+          legacy.parsed.sourceDigest === parentSourcePin.sourceDigest && legacy.parsed.archiveBytes === parentSourcePin.sourceBytes &&
+          legacy.parsed.contentDigest === parentSourcePin.contentDigest && legacy.parsed.structureDigest === parentSourcePin.structureDigest,
+        'WORD_SOURCE_INVALID', 'Word 复用的历史来源与其 /3 读法的实际结果不一致。');
+      }
+      preparedTarget = { kind: 'existing-book', bookId: target.bookId, controls: ledger.wordImportControls(target.bookId, materials), parentSourcePin };
     }
     const bound = bindWordReadingBlocks(reading, reading.blocks.map((block) => ({ sourceBlockId: block.blockId,
       blockId: `blk_${sha256(`${snapshot.draftId}\u0000${block.position}\u0000${block.digest}`).slice(0, 24)}` })));
