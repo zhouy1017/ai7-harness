@@ -2817,7 +2817,7 @@ async function main() {
             : wordCase.name === 'detail-beyond-first-page' ? 'word-detail-beyond-first-page' : 'word-accepted-degradation';
       const inputPath = resolve(syntheticRoot, `word-${wordCase.name}.docx`);
       const baseSpan = wordCase.degraded ? { block: 8 } : { block: 8, from: 0, to: 10 }; const insertionSpan = { block: 9, from: 0, to: 5 };
-      await composeRevisedAdmittedDocx(inputPath, { source: ADMITTED_BASELINE_DOCX, title: 'Word 双阅读导入',
+      if (!wordCase.degraded) await composeRevisedAdmittedDocx(inputPath, { source: ADMITTED_BASELINE_DOCX, title: 'Word 双阅读导入',
         paragraphs: Array.from({ length: wordCase.count }, (_, index) => ({ runs: [
           ...(wordCase.allInserted ? [] : [{ text: baseSpan }]),
           ...Array.from({ length: wordCase.insertRuns ?? 1 }, (_, runIndex) => ({ text: insertionSpan, revision: { kind: 'ins', author: `作者${index}-${runIndex}`, date: '2026-10-25T00:00:00Z' } })),
