@@ -506,28 +506,57 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
    * time over the service's cursor, with its own filters; and the Evidence Workspace each open row holds, kept across repaints.
    */
   const NO_FACT_FILTERS: FactualVerificationLensFilters = { chapterBlockId: null, outcome: null, severity: null, sourceCondition: null, actionNeed: null };
-  const fact: { lens: FactualVerificationLensProjection | null; results: FactualVerificationResultProjection[]; next: number | null; pages: number;
-    filters: FactualVerificationLensFilters; open: Map<string, EvidenceWorkspaceSurface> } = { lens: null, results: [], next: null, pages: 1, filters: { ...NO_FACT_FILTERS }, open: new Map() };
-  const loadFactual = async (run: ReviewWorkspaceProjection['run']): Promise<void> => {
+  const fact: { reviewRunId: string | null; lens: FactualVerificationLensProjection | null; results: FactualVerificationResultProjection[]; next: number | null; pages: number;
+    filters: FactualVerificationLensFilters; open: Map<string, EvidenceWorkspaceSurface> } = { reviewRunId: null, lens: null, results: [], next: null, pages: 1, filters: { ...NO_FACT_FILTERS }, open: new Map() };
+  const clearFactual = (reset: boolean): void => {
+    for (const surface of fact.open.values()) surface.destroy();
+    fact.open.clear();
+    fact.lens = null;
+    fact.results = [];
+    fact.next = null;
+    // A Lens painted for the cleared identity goes with it, even when no repaint follows: a pending or rejected read keeps the card.
+    for (const section of Array.from(host.querySelectorAll<HTMLElement>('.fact-lens'))) section.remove();
+    if (reset) {
+      fact.reviewRunId = null;
+      fact.pages = 1;
+      fact.filters = { ...NO_FACT_FILTERS };
+    }
+  };
+  const loadFactual = async (run: ReviewWorkspaceProjection['run'], ticket: number): Promise<void> => {
+    const current = (): boolean => !destroyed && ticket === generation && host.isConnected;
+    if (!current()) return;
     const factual = run?.categories.find((category) => category.categoryId === 'factual-review');
-    if (run === null || factual === undefined || factual.state !== 'settled') {
-      fact.lens = null;
-      fact.results = [];
-      fact.next = null;
+    if (run === null || factual === undefined || !(factual.state === 'settled' ||
+      ((factual.state === 'failed' || factual.state === 'interrupted') && factual.findingsCount > 0))) {
+      clearFactual(true);
       return;
     }
+    if (fact.reviewRunId !== run.reviewRunId) clearFactual(true);
+    fact.reviewRunId = run.reviewRunId;
+    const filters = { ...fact.filters };
+    const pages = fact.pages;
     try {
-      let page = await api.inspectFactualVerification({ bookId, reviewRunId: run.reviewRunId, after: null, ...fact.filters });
+      let page = await api.inspectFactualVerification({ bookId, reviewRunId: run.reviewRunId, after: null, ...filters });
+      if (!current()) return;
+      if (page.bookId !== bookId || page.reviewRunId !== run.reviewRunId) { clearFactual(false); return; }
       const results = [...page.results];
-      for (let count = 1; count < fact.pages && page.nextCursor !== null; count += 1) {
-        page = await api.inspectFactualVerification({ bookId, reviewRunId: run.reviewRunId, after: page.nextCursor, ...fact.filters });
+      for (let count = 1; count < pages && page.nextCursor !== null; count += 1) {
+        page = await api.inspectFactualVerification({ bookId, reviewRunId: run.reviewRunId, after: page.nextCursor, ...filters });
+        if (!current()) return;
+        if (page.bookId !== bookId || page.reviewRunId !== run.reviewRunId) { clearFactual(false); return; }
         results.push(...page.results);
       }
       fact.lens = page;
-      fact.results = results;
+      fact.results = results.filter((result) => result.reviewRunId === run.reviewRunId);
       fact.next = page.nextCursor;
+      const identities = new Set(fact.results.map((result) => result.resultId));
+      for (const [id, surface] of fact.open) {
+        if (identities.has(id)) continue;
+        surface.destroy();
+        fact.open.delete(id);
+      }
     } catch {
-      // A read that fails leaves the lens as it was; the findings are still listed.
+      if (current()) clearFactual(false);
     }
   };
   const loadResearch = async (run: ReviewWorkspaceProjection['run']): Promise<void> => {
@@ -544,8 +573,12 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   /** The workspace with as many pages of findings as the editor has asked to see, read one after another. */
   let excludedPages = 1;
   let excludedOpen = false;
-  const load = async (): Promise<ReviewWorkspaceProjection> => {
+  const load = async (ticket: number): Promise<ReviewWorkspaceProjection> => {
     let first = await api.inspectReviewWorkspace({ reviewRunId: query.reviewRunId, ...filtersInput() });
+    if (first.bookId !== bookId) {
+      if (!destroyed && ticket === generation) clearFactual(true);
+      return first;
+    }
     if (first.run != null && excludedPages > 1) {
       const excluded = [...(first.run.excluded ?? [])];
       let nextOrdinal = first.run.excludedNextOrdinal;
@@ -558,7 +591,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       first = { ...first, run: { ...first.run, excluded, excludedNextOrdinal: nextOrdinal ?? null, excludedTruncated: nextOrdinal != null } };
     }
     const run = first.run;
-    if (run === null || query.pages <= 1 || !run.findingsTruncated) { await loadResearch(run); await loadFactual(run); return first; }
+    if (run === null || query.pages <= 1 || !run.findingsTruncated) { await loadResearch(run); await loadFactual(run, ticket); return first; }
     const findings = [...run.findings];
     let truncated: boolean = run.findingsTruncated;
     for (let page = 2; page <= query.pages && truncated && findings.length > 0; page += 1) {
@@ -569,7 +602,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     }
     const result = { ...first, run: { ...run, findings, findingsTruncated: truncated } };
     await loadResearch(result.run);
-    await loadFactual(result.run);
+    await loadFactual(result.run, ticket);
     return result;
   };
 
@@ -595,7 +628,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     clearPoll();
     if (force) stableKey = '';
     const ticket = ++generation;
-    void load().then(
+    if (fact.reviewRunId !== null && query.reviewRunId !== fact.reviewRunId) clearFactual(true);
+    void load(ticket).then(
       (next) => {
         if (destroyed || ticket !== generation || !host.isConnected || next.bookId !== host.dataset['reviewBookId']) return;
         show(next);
@@ -1353,7 +1387,12 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         changed: () => refresh(true),
       });
       fact.open.set(result.resultId, surface);
-      void surface.load().then(() => refresh(true), (error: unknown) => options.setStatus(options.errorMessage(error, '无法读取证据工作区。'), 'error'));
+      void surface.load().then(() => {
+        if (!destroyed && fact.reviewRunId === run.reviewRunId && fact.open.get(result.resultId) === surface) refresh(true);
+      }, (error: unknown) => {
+        if (!destroyed && fact.reviewRunId === run.reviewRunId && fact.open.get(result.resultId) === surface)
+          options.setStatus(options.errorMessage(error, '无法读取证据工作区。'), 'error');
+      });
     });
     toggle.textContent = open === undefined ? FACT_OPEN_WORKSPACE : FACT_CLOSE_WORKSPACE;
     toggle.setAttribute('aria-expanded', open === undefined ? 'false' : 'true');
@@ -2568,6 +2607,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       state.prepared = true;
       if (sheet.open) sheet.close();
       generation += 1;
+      clearFactual(true);
       stableKey = '';
       if (host.isConnected) show(result);
       options.setStatus(quickNote ?? REVIEW_STATUS_LINES.prepared, 'success');
@@ -2623,6 +2663,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     destroy: () => {
       destroyed = true;
       generation += 1;
+      clearFactual(true);
       clearPoll();
       if (sheet.open) sheet.close();
       exporter.destroy();

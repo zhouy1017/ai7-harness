@@ -99,6 +99,20 @@ describe('a Review Run\'s state', () => {
   const done = { pending: false, materialized: true };
   const lost = { pending: false, materialized: false };
   const left = { pending: true, materialized: false };
+  const retained = { pending: false, materialized: false, retained: true };
+
+  it('keeps retained terminal output partial, separate from completion and sibling continuation (#1058)', () => {
+    for (const categories of [[retained], [retained, retained], [retained, lost], [done, retained]]) {
+      expect(reviewRunState({ authorized: true, driving: false, categories })).toEqual({ state: 'partial', canContinue: false });
+    }
+    expect(reviewRunState({ authorized: true, driving: false, categories: [retained, left] })).toEqual({ state: 'partial', canContinue: true });
+    expect(reviewRunState({ authorized: true, driving: true, categories: [retained, left] })).toEqual({ state: 'running', canContinue: false });
+    for (const stop of ['scope-changed', 'cancelled', 'plan-moved'] as const) {
+      expect(reviewRunState({ authorized: true, driving: false, categories: [retained, left], stop })).toEqual({ state: stop, canContinue: false });
+    }
+    expect(reviewRunState({ authorized: true, driving: false, categories: [retained], waiting: true })).toEqual({ state: 'waiting', canContinue: false });
+    expect(reviewRunState({ authorized: false, driving: false, categories: [retained] })).toEqual({ state: 'prepared', canContinue: false });
+  });
 
   it('is prepared, then running, then settled when every category reached the manuscript', () => {
     expect(reviewRunState({ authorized: false, driving: false, categories: [left] })).toEqual({ state: 'prepared', canContinue: false });
