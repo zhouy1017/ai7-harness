@@ -40,7 +40,7 @@ function acceptUnit(input: unknown): { readonly unit: string; readonly signal: A
   if (extra.length > 0) throw new FacadeRefusal(`unsupported field ${String(extra[0])}`);
   const unit: unknown = Reflect.get(input, 'unit');
   const signal: unknown = Reflect.get(input, 'signal');
-  if (typeof unit !== 'string' || unit.length === 0) throw new FacadeRefusal('unit');
+  if (unit !== UNIT) throw new FacadeRefusal('unit');
   if (!(signal instanceof AbortSignal)) throw new FacadeRefusal('signal');
   return { unit, signal };
 }
@@ -347,6 +347,7 @@ describe('the admitted DSH sub-agent packages (provider-free dependency compatib
       for (const malformed of [null, [], 'unit', { unit: UNIT }, { unit: '', signal: new AbortController().signal }, { unit: 1, signal: new AbortController().signal }]) {
         await expect(facade.run(malformed)).rejects.toBeInstanceOf(FacadeRefusal);
       }
+      await expect(facade.run({ ...unit(), unit: 'another synthetic unit' })).rejects.toBeInstanceOf(FacadeRefusal);
       expect(adapter.requests.length).toBe(0);
       expect(composition.started.length).toBe(0);
       expectOnlyParent(composition);
