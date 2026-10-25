@@ -26,6 +26,11 @@ import {
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { TYPOS_AND_USAGE } from '../support/review-categories.js';
 import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
+import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
+import { prepareExecution, describeComposition } from '../../src/service/harness/primary-agent-harness.js';
+import { Ai7LocalDeterministicAdapter } from '../../src/service/provider/local-deterministic-adapter.js';
+import { evaluateEgress, LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from '../../src/service/provider/egress-gate.js';
+import type { LocalFixtureExecutionContext } from '../../src/service/provider/model-fixture.js';
 import {
   importSample1Book,
   pinEditorialWorkspaceProfileRevision2,
@@ -180,6 +185,73 @@ function technical(projection: TaskPlanProjection, key: string): string | undefi
 }
 
 describe('the Task Drawer plan projection over the real store on exact sample1', () => {
+  it('selected policy profile rule context drives an exact real review request through the production adapter without legacy fallback', async () => {
+    const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-authored');
+    const store = await openWithRoute(fixture);
+    try {
+      const { bookId } = await importBook(store, '合成新规则审阅适配器');
+      const definition = reviewCategoryKindDefinition(TYPOS_AND_USAGE, 2);
+      const ledger = store.reviewCategoryLedger(definition);
+      let work = store.createReviewCategoryPreparationWork(bookId, definition, { mode: 'review-first', selectedRange: null }, launchPolicy);
+      while (!work.done) work = store.advanceReviewCategoryPreparationWork(definition, work.workId!);
+      const prepared = work.projection!;
+      // Service defaults stay legacy. This separate proof consumes an explicit checked new-rule context, as Commander clarified.
+      expect(prepared.providerResolutionPlan!.localFixtureProfile).toMatchObject({ kind: 'legacy', registeredProfile: 'review' });
+      const run = store.authorizeReviewCategory(bookId, definition, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!;
+      const facts = ledger.loadExecutionPlan(run), runtime = store.localFixtureRuntime()!;
+      const composition = describeComposition(LOCAL_DETERMINISTIC_ROUTE, LOCAL_DETERMINISTIC_MODEL, definition.promptContractDigest, facts.compositionOptions);
+      const profile = runtime.catalog.profile(runtime.selectedPolicyIdentity, fixture, 'review', 'development-ci-fixture-review');
+      const context: LocalFixtureExecutionContext = { selectedPolicyIdentity: runtime.selectedPolicyIdentity, profile,
+        kind: definition.kind, purpose: null, contractId: definition.contractVersion, composition, categories: ['public-or-synthetic'],
+        sourceDigest: facts.sourceDigest, frozenPromptContractDigest: facts.promptContractDigest, frozenCompositionDigest: facts.behaviorCompositionDigest };
+      const unit = facts.manifest.units[0]!;
+      const blocks = ledger.readRevisionBlocks(facts.checkpoint.manuscriptId, facts.checkpoint.revisionId);
+      const message = definition.buildUnitMessage(unit, facts.manifest.units.length, new Map(blocks.map((block) => [block.blockId, block])));
+      const dispatch = async (sent: string) => {
+        let consumed = false;
+        const sessionId = randomUUID();
+        const harness = await prepareExecution({ sessionId, route: LOCAL_DETERMINISTIC_ROUTE, model: LOCAL_DETERMINISTIC_MODEL,
+          systemPrompt: definition.systemPrompt, promptContractDigest: definition.promptContractDigest,
+          ...(facts.compositionOptions === undefined ? {} : { compositionOptions: facts.compositionOptions }),
+          adapterFactory: (codes) => { consumed = context.profile.kind === 'rule'; return new Ai7LocalDeterministicAdapter(fixture,
+            definition.promptContractDigest, codes, { localFixture: { catalog: runtime.catalog, execution: context } }); },
+          gate: (payload) => evaluateEgress(payload, { bindingDigest: facts.providerResolutionPlanDigest, route: LOCAL_DETERMINISTIC_ROUTE,
+            model: LOCAL_DETERMINISTIC_MODEL, systemPrompt: definition.systemPrompt, outboundDataCategory: 'public-or-synthetic',
+            admittedUserMessages: new Set([sent]), policy: { operationalScope: 'development-ci', providerProcessingVersion: 'v29',
+              authorizedLiveTransmissionCount: 0, liveTransmissionAllowed: false } },
+          { currentBindingDigest: () => facts.providerResolutionPlanDigest, acceptedOutputDigests: new Set() }),
+          onTransmitTicket: () => { throw new Error('local rule issued a remote ticket'); } });
+        try {
+          harness.bindExecution({ harnessSessionId: sessionId, behaviorCompositionDigest: composition.digest, promptContractDigest: definition.promptContractDigest });
+          const result = await harness.submitUnit(sent);
+          expect(consumed).toBe(true);
+          return result;
+        } finally { await harness.finish(); }
+      };
+      const answered = await dispatch(message);
+      expect(answered.terminal).toBe('completed');
+      expect(answered.signals.some((signal) => signal.kind === 'contentCandidate')).toBe(true);
+      for (const changed of [{ ...context, sourceDigest: '0'.repeat(64) }, { ...context, frozenPromptContractDigest: '0'.repeat(64) },
+        { ...context, frozenCompositionDigest: '0'.repeat(64) }, { ...context, contractId: 'ai7.factual-claim-extraction/1' },
+        { ...context, categories: ['unpublished-excerpts'] },
+        { ...context, categories: ['public-or-synthetic', 'editor-task-instruction'] },
+        { ...context, profile: { ...profile, policySha256: '0'.repeat(64) } }]) {
+        expect(() => runtime.catalog.entriesFor(changed, fixture, definition.promptContractDigest)).toThrow();
+      }
+      expect(() => runtime.catalog.entriesFor(context, { ...fixture, sha256: '0'.repeat(64) }, definition.promptContractDigest)).toThrow();
+      expect((await dispatch(message.replace(unit.digest, '0'.repeat(64)))).terminal).not.toBe('completed');
+      const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger, launchPolicy, fixture,
+        secretResolver: { resolve: async () => { throw new Error('retained local review read a credential'); } } });
+      try {
+        owner.admitAndDispatch(run); await owner.whenIdle();
+        const actual = ledger.inspect(bookId);
+        expect(actual.state).toBe('settled');
+        expect(actual.resultSetRevision).toMatchObject({ policyPin: { providerProcessingVersion: 'v29' } });
+        expect(actual.providerResolutionPlan!.localFixtureProfile).toMatchObject({ kind: 'legacy', registeredProfile: 'review' });
+      } finally { await owner.dispose(); }
+    } finally { await store.close(); }
+  });
+
   it('selected policy profile consumes the actual retained baseline adapter with zero credential reads', async () => {
     const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-authored');
     const store = await openWithRoute(fixture);
@@ -379,7 +451,7 @@ describe('the Task Drawer plan projection over the real store on exact sample1',
       expect(firstPlan.edit).toEqual({ editable: true, reason: null, lastEdit: null, planEnvelopeDigest: first.planEnvelope!.digest, budget: { ceiling: 'unset', settable: true, reason: null } });
       expect(technical(firstPlan, 'coverage-manifest')).toContain(first.coverageManifest!.digest);
       expect(technical(firstPlan, 'execution-route')).toContain(fixture.identity);
-      expect(technical(firstPlan, 'material-fields')?.split('、')).toHaveLength(15);
+      expect(technical(firstPlan, 'material-fields')?.split('、')).toHaveLength(17);
 
       // Issue #420 (S74a): the deterministic route sends nothing, so this plan starts without a credential
       // — the Book's is `missing` — and the bar binds the exact envelope version 1 froze.

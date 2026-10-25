@@ -8,6 +8,7 @@ import { LOCAL_FIXTURE_POLICY_SHA256, LOCAL_FIXTURE_MANIFEST_SHA256,
   localFixtureProfileOf,
   type LocalFixtureProfile, type LocalFixtureRegisteredProfile, type LocalFixtureRuleId, type SelectedPolicyIdentity } from '../../shared/protocol.js';
 import type { HarnessCompositionDescriptor } from '../harness/primary-agent-harness.js';
+import { SAMPLE1_PUBLIC_SAMPLEBOOK } from '../../shared/public-samplebooks.js';
 import { AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST, DIALOGUE_PROMPT_CONTRACT_DIGEST, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST } from '../dialogue/contract.js';
 
 interface LegacyFixtureTuple {
@@ -31,6 +32,10 @@ export interface LocalFixtureExecutionContext {
   readonly contractId: string | null;
   readonly composition: HarnessCompositionDescriptor;
   readonly categories: readonly string[];
+  /** New-rule callers join actual frozen pins; legacy callers keep their existing owners. */
+  readonly sourceDigest?: string;
+  readonly frozenPromptContractDigest?: string;
+  readonly frozenCompositionDigest?: string;
 }
 export interface LocalFixtureRuntimeContext {
   readonly selectedPolicyIdentity: SelectedPolicyIdentity;
@@ -132,17 +137,50 @@ export class LocalFixturePolicyCatalog {
     requireFixture(rules.length === 1 && this.#tuples.some(exactFixture), '新规则缺少准确的已准入夹具。');
     const rule = rules[0]!;
     requireFixture(Array.isArray(rule.allowedTaskKinds) && context.kind !== null && rule.allowedTaskKinds.includes(context.kind) &&
-      Array.isArray(rule.allowedOutboundDataCategories) && context.categories.every((category) => (rule.allowedOutboundDataCategories as unknown[]).includes(category)) &&
+      Array.isArray(rule.allowedOutboundDataCategories) && context.categories.includes('public-or-synthetic') &&
+      new Set(context.categories).size === context.categories.length && context.categories.every((category) => (rule.allowedOutboundDataCategories as unknown[]).includes(category)) &&
       rule.networkAllowed === false && rule.credentialUseAllowed === false && rule.remoteFallbackAllowed === false &&
       rule.fixtureRecordingAllowed === false && rule.authorizedLiveTransmissionCount === 0 && rule.newContractFallbackAllowed === false,
     '新规则不允许此本地调用方或负载。');
-    // Recognize all six closed rule forms; absent typed curation/claim/Global fixture consumers cannot borrow legacy answers.
-    requireFixture((profile.ruleId === 'development-ci-fixture-review' && context.contractId === 'ai7.editorial-review/1' &&
-      context.kind.startsWith('editorial-review/')) ||
-      (profile.ruleId === 'development-ci-fixture-editorial-polish' && context.contractId === 'ai7.editorial-polish/1'),
-    '该新规则尚无匹配的实际本地契约与夹具消费者；不回退到旧配置。');
-    requireFixture(tools.length === 0, '此实际本地契约没有声明工具。');
-    return new Set(fixture.entries.keys());
+    // The actual implemented replay proof uses sample1, the source of these reviewed fixtures. Other source/fixture combinations need their own proof.
+    requireFixture(context.sourceDigest === SAMPLE1_PUBLIC_SAMPLEBOOK.sha256 &&
+      context.frozenPromptContractDigest === promptContractDigest && context.frozenCompositionDigest === context.composition.digest,
+    '新规则缺少准确的已准入来源、冻结提示或组合 pin。');
+    requireFixture(context.composition.platformTools === undefined, '本地规则不得注册联网工具。');
+    // Existing fixtures prove the unchanged public request only; added preference/instruction variants have no fixture yet.
+    requireFixture(sameSet(context.categories, ['public-or-synthetic']), '新规则的附加输入尚无准确夹具；不回退到旧配置。');
+    switch (profile.ruleId) {
+      case 'development-ci-fixture-review':
+        requireFixture((context.contractId === 'ai7.editorial-review/1' || context.contractId === 'ai7.editorial-review/2') && context.kind?.startsWith('editorial-review/') === true,
+          '新审阅规则不接受其他契约或事实声明阶段。');
+        requireFixture(tools.every((tool) => ['retrieve', 'exact_fetch', 'read_blocks', 'baseline_facts', 'guideline_clause', 'term_table', 'search_manuscript'].includes(tool)),
+          '本地审阅规则没有声明此工具。');
+        break;
+      case 'development-ci-fixture-editorial-polish':
+        requireFixture(context.kind === 'editorial-polish' && context.contractId === 'ai7.editorial-polish/1' && tools.length === 0,
+          '新润色规则的种类、契约或工具不一致。');
+        break;
+      case 'development-ci-fixture-global-agent-dialogue':
+        requireFixture(context.kind === 'global-agent-dialogue' && context.contractId === 'ai7.global-agent-dialogue/1' && tools.length === 0,
+          '本地全域规则的契约或工具不一致。');
+        throw new ModelFixtureError('MODEL_FIXTURE_INVALID', '本地全域规则没有实际合格的合成记忆来源与夹具消费者；不回退到旧配置。');
+      case 'development-ci-fixture-learning-curation':
+        throw new ModelFixtureError('MODEL_FIXTURE_INVALID', '学习整理尚无实际包络、样例与夹具消费者；不回退到旧配置。');
+      case 'development-ci-fixture-factual-claim-stages':
+        requireFixture(context.contractId === 'ai7.factual-claim-extraction/1' || context.contractId === 'ai7.factual-claim-verification/1',
+          '事实声明规则不接受旧审阅契约。');
+        throw new ModelFixtureError('MODEL_FIXTURE_INVALID', '事实声明阶段尚无实际账本、来源与持久计数器消费者；不回退到旧配置。');
+      case 'development-ci-fixture-factual-recheck':
+        requireFixture(context.contractId === 'ai7.factual-claim-verification/1', '单声明复查规则不接受提取或旧审阅契约。');
+        throw new ModelFixtureError('MODEL_FIXTURE_INVALID', '单声明复查尚无实际登记、请求证据与一次性计数器消费者；不回退到旧配置。');
+    }
+    const registeredProfile = localFixtureRegisteredProfile(context.kind, context.purpose);
+    const candidates = this.#tuples.filter((tuple) => exactFixture(tuple) && tuple.registeredProfile === registeredProfile &&
+      context.kind !== null && tuple.kinds.includes(context.kind) && context.contractId !== null && tuple.contracts.includes(context.contractId) &&
+      (tuple.prompts.length === 0 || tuple.prompts.includes(promptContractDigest)));
+    requireFixture(candidates.length === 1, '新规则缺少此实际调用方、契约或提示的准确夹具分区。');
+    // A review replay cannot borrow retained sampling/reflection/reduction or another caller's entries from a shared fixture.
+    return new Set([...candidates[0]!.entryKeys].filter((key) => profile.ruleId !== 'development-ci-fixture-review' || fixture.entries.get(key)!.unitOrdinal > 0));
   }
 }
 

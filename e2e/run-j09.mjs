@@ -1211,7 +1211,7 @@ async function main() {
       runningOf(twoAtOnce, bookId).progress?.unitsSettled === 1) && runA !== runC,
     'two-runs-at-once', twoAtOnce?.items?.map((item) => [item.group, item.state, item.progress?.unitsSettled ?? null]));
 
-    // #1080/#1131: these admitted development-ci v1 fixtures keep one held unit per Run and
+    // #1080/#1131: these admitted development-ci v29 legacy profiles keep one held unit per Run and
     // their legacy scalar activity; this Journey grants no production/fixture unit parallelism.
     const simultaneous = [heldA, heldC];
     requireJourney(simultaneous.every((analysis) => analysis.run?.progress?.currentUnitOrdinal === 2 &&

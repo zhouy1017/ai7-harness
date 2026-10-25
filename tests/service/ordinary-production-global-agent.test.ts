@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { Session } from '@deepseek-ai/dsh-session';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
-import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy, resolveSourceCheckoutLaunchPolicySync } from '../../src/service/launch-policy.js';
+import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, readRetainedBoundAnalysisPolicySync, resolveSourceCheckoutLaunchPolicy, resolveSourceCheckoutLaunchPolicySync } from '../../src/service/launch-policy.js';
 import { DialogueExecutionOwner, productionDialogueRoute } from '../../src/service/dialogue/dialogue-execution.js';
 import { admittedGlobalAgentRoute, prepareGlobalAgentDisclosure, startGlobalAgentTurn } from '../../src/service/dialogue/global-agent-session.js';
 import { buildDialogueMessage } from '../../src/service/dialogue/contract.js';
@@ -21,6 +21,7 @@ import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
 import { parseReviewCategoryUnitMessageHeader } from '../../src/service/review/review-category-contract.js';
 import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/assurance-sampling-contract.js';
 import { pinEditorialWorkspaceProfileRevision2 } from '../support/sample1-baseline.js';
+import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
 
 // One explicit model-request capability per test application.
 // Registered first: the stack-ordered final hook runs after existing consumer teardown.
@@ -31,6 +32,7 @@ afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(
 // Real ordinary-production policy, store, Harness, gate, broker and session log. Only the provider stream is synthetic.
 let roots: ServiceTestRoots;
 let store: EditorialStore;
+let closedForNativeRejection = false;
 let owner: DialogueExecutionOwner;
 let policy: LaunchPolicyProjection;
 let credentialReference: string;
@@ -88,6 +90,7 @@ async function open(): Promise<void> {
     live: { scope: 'ordinary-production', ...binding, credentialReference, runBudgetCeiling: 'unset' } });
 }
 beforeEach(async () => {
+  closedForNativeRejection = false;
   roots = await createServiceTestRoots('ai7-global-production-');
   credentialReference = randomUUID(); calls.length = 0;
   policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', { ...binding, credentialReference }, { ...binding, credentialReference });
@@ -102,9 +105,71 @@ beforeEach(async () => {
     live: productionDialogueRoute({ scope: 'ordinary-production', nativeFetch }, () => policy, () => credentialReference,
       { resolve: async (reference) => { expect(reference).toBe(credentialReference); return resolveCredential(reference); } }) });
 });
-afterEach(async () => { vi.restoreAllMocks(); await owner?.dispose(); await store?.close(); await roots?.dispose(); });
+afterEach(async () => { vi.restoreAllMocks(); await owner?.dispose(); if (!closedForNativeRejection) store?.close(); await roots?.dispose(); });
 
 describe('v30 Book-less Global Agent', () => {
+  it.each(['extra', 'missing', 'null', 'scope', 'reader'] as const)('original-field native reader refuses closed /2 %s corruption without mutation', async (damage) => {
+    const turn = start({ kind: 'ask', question: '合成原文问题。', sources: [] });
+    await waitFor(() => inspect(turn.dialogueId).attempts[0]?.state === 'completed');
+    await owner.dispose(); store.markCleanShutdown(); store.close(); closedForNativeRejection = true;
+    const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
+    const db = new DatabaseSync(path);
+    try {
+      if (damage === 'reader') db.exec('PRAGMA user_version = 93');
+      else {
+        const table = damage === 'scope' ? 'dialogue_tasks' : 'dialogue_attempts';
+        const key = damage === 'scope' ? 'dialogue_id' : 'attempt_id';
+        const id = damage === 'scope' ? turn.dialogueId : turn.attemptId;
+        const value = JSON.parse(String(db.prepare(`SELECT canonical_json FROM ${table} WHERE ${key} = ?`).get(id)!.canonical_json));
+        if (damage === 'extra') value.extra = false;
+        if (damage === 'missing') delete value.credentialUpdatedAt;
+        if (damage === 'null') value.retainedAncestrySha256 = null;
+        if (damage === 'scope') value.operationalScope = 'development-ci';
+        const json = canonicalJson(value);
+        db.exec(`DROP TRIGGER ${table}_no_update`);
+        db.prepare(`UPDATE ${table} SET canonical_json = ?, sha256 = ? WHERE ${key} = ?`).run(json, sha256Hex(json), id);
+      }
+    } finally { db.close(); }
+    const before = readFileSync(path);
+    await expect(EditorialStore.open(roots.dataRoot, roots.codeRoot)).rejects.toThrow();
+    expect(readFileSync(path)).toEqual(before);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('original-field qualification carries authentic predecessor /1 words into a new /2 without de-redaction or restamping', async () => {
+    // Build the predecessor through its real pinned interpreter and Store/transport owners, never by inserting success rows.
+    const selected = { ...binding, credentialReference };
+    const current = policy;
+    const legacy = readRetainedBoundAnalysisPolicySync(roots.codeRoot, { operationalScope: 'ordinary-production', providerProcessingVersion: 'v27',
+      activePolicySetVersion: 'v19', liveTransmissions: 'bounded-by-run' }, selected);
+    expect(legacy?.selectedPolicyIdentity).toBeUndefined(); expect(legacy?.providerProcessing.version).toBe('v27');
+    if (legacy === null) throw new Error('accepted predecessor unavailable');
+    policy = legacy;
+    store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy, live: { scope: 'ordinary-production', ...selected, runBudgetCeiling: 'unset' } });
+    const creation = store.prepareBookCreation('合成旧记录人员', null);
+    const bookId = store.commitBookCreation({ ...creation.proposed, reviewDigest: creation.reviewDigest }).overview.book.bookId;
+    store.updateBookPeople({ bookId, expectedVersion: 0, authors: [], editors: ['合成责编甲'], related: [] });
+    governance('合成责编甲建议保留短句。');
+    transport = async (signal) => heldResponse(signal);
+    const first = start({ ...input(), question: '合成责编甲的建议适用于何处？' });
+    await waitFor(() => (inspect(first.dialogueId).attempts[0]?.fragments.length ?? 0) > 0);
+    await owner.stop(first.attemptId);
+    expect(first.message.question).toBe('的建议适用于何处？'); expect(first.message.globalSources![0]!.text).not.toContain('合成责编甲');
+    const rawAttempt = (): string => {
+      const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+      try { return String(db.prepare('SELECT canonical_json FROM dialogue_attempts WHERE attempt_id = ?').get(first.attemptId)!.canonical_json); }
+      finally { db.close(); }
+    };
+    const historical = rawAttempt(); expect(JSON.parse(historical).schema).toBe('ai7.dialogue-attempt/1');
+    policy = current;
+    store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy, live: { scope: 'ordinary-production', ...selected, runBudgetCeiling: 'unset' } });
+    transport = async () => response();
+    const continued = start({ kind: 'continue', dialogueId: first.dialogueId, attemptId: first.attemptId });
+    await waitFor(() => inspect(first.dialogueId).attempts[1]?.state === 'completed');
+    expect(continued.qualification?.providerProcessingVersion).toBe('v30');
+    expect(continued.message.question).toBe(first.message.question); expect(continued.message.globalSources).toEqual(first.message.globalSources);
+    expect(calls[1]!.body).not.toContain('合成责编甲'); expect(rawAttempt()).toBe(historical);
+  });
   it('original-field qualification preserves exact existing fields and records prepared /2 truth through real Store controls', async () => {
     const created = store.prepareBookCreation('合成人员边界', null);
     const bookId = store.commitBookCreation({ ...created.proposed, reviewDigest: created.reviewDigest }).overview.book.bookId;
@@ -157,15 +222,32 @@ describe('v30 Book-less Global Agent', () => {
   });
 
   it('original-field continuation retains the whole contributing source union after a checkbox removal', async () => {
-    governance('合成偏好甲。'); governance('合成偏好乙。');
+    governance('合成偏好甲。');
+    // Supervision edits invalidate the whole preference-head pin. A real reference-only memory supplies an independent B.
+    const book = await importSample1Book(store, roots.codeRoot, '合成独立记忆乙');
+    const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+    const block = window.blocks.find((entry) => entry.kind === 'paragraph' && graphemesOf(entry.text).length > 10)!;
+    const mark = store.createEditorialMark({ manuscriptId: book.manuscriptId, branchId: book.branchId,
+      windowStartBlockId: window.blocks[0]!.blockId, clientMarkId: randomUUID(), baseRevisionId: window.revisionId,
+      expectedJournalSequence: window.journalSequence, blockId: block.blockId, baseBlockDigest: block.digest, fromGrapheme: 0, toGrapheme: 2,
+      selectedText: graphemesOf(block.text).slice(0, 2).join(''), kind: 'change-suggestion', highlightColor: null, body: '',
+      proposedText: '合成建议', rationale: '合成理由' });
+    store.recordChangeSuggestionDecision({ manuscriptId: book.manuscriptId, branchId: book.branchId,
+      windowStartBlockId: window.blocks[0]!.blockId, markId: mark.markId, clientDecisionId: randomUUID(),
+      disposition: 'accepted-with-edit', editedText: '合成的编辑改写', reason: null });
+    const signal = store.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }).signals[0]!;
+    store.createEditorialMemory({ clientMemoryId: randomUUID(), signalId: signal.signalId, title: '合成独立记忆乙', editorialDimension: '语言', confidence: 0.5 });
     transport = async (signal) => heldResponse(signal);
-    const first = start();
+    const candidates = store.inspectGlobalAgent().sourceCandidates!;
+    const selected = [pinOf(candidates.find((item) => item.kind === 'preference')!), pinOf(candidates.find((item) => item.kind === 'memory')!)];
+    expect(selected).toHaveLength(2);
+    const first = start({ kind: 'ask', question: '合成偏好有哪些边界？', sources: selected });
     await waitFor(() => (inspect(first.dialogueId).attempts[0]?.fragments.length ?? 0) > 0);
     await owner.stop(first.attemptId);
     const pins = first.message.globalSources!.map(pinOf);
-    const secondInput = { kind: 'continue' as const, dialogueId: first.dialogueId, attemptId: first.attemptId, sources: [] };
+    const secondInput = { kind: 'continue' as const, dialogueId: first.dialogueId, attemptId: first.attemptId, sources: [pins[1]!] };
     const preview = prepareGlobalAgentDisclosure(store, owner, policy, secondInput);
-    expect(preview.sources).toEqual([]);
+    expect(preview.sources.map(pinOf)).toEqual([pins[1]!]);
     expect(preview.retainedInfluences?.map(pinOf)).toEqual([...pins].sort((a, b) => a.itemId < b.itemId ? -1 : 1));
     const second = startGlobalAgentTurn(store, owner, () => policy, secondInput, preview.sha256);
     await waitFor(() => (inspect(first.dialogueId).attempts[1]?.fragments.length ?? 0) > 1);
@@ -173,12 +255,17 @@ describe('v30 Book-less Global Agent', () => {
     const removed = store.inspectGlobalAgent().items.find((item) => item.itemId === pins[0]!.itemId)!;
     store.recordLearningSupervision({ operation: 'deactivate', targets: [pinOf(removed)], scope: { kind: 'house' },
       categoryId: 'typos-and-usage', text: '', effect: 'guide' });
+    expect(store.globalAgentSourcesCurrent([pins[1]!])).toBe(true);
     expect(() => prepareGlobalAgentDisclosure(store, owner, policy, { kind: 'continue', dialogueId: first.dialogueId,
-      attemptId: second.attemptId, sources: [] })).toThrow('来源已经变化');
-    const regenerated = prepareGlobalAgentDisclosure(store, owner, policy, { kind: 'regenerate', dialogueId: first.dialogueId,
-      attemptId: second.attemptId, sources: [] });
-    expect(regenerated.kept).toBeNull(); expect(regenerated.retainedInfluences).toEqual([]);
-    expect(calls).toHaveLength(2);
+      attemptId: second.attemptId, sources: [pins[1]!] })).toThrow('来源已经变化');
+    const regenerate = { kind: 'regenerate' as const, dialogueId: first.dialogueId, attemptId: second.attemptId, sources: [pins[1]!] };
+    const regenerated = prepareGlobalAgentDisclosure(store, owner, policy, regenerate);
+    expect(regenerated.kept).toBeNull(); expect(regenerated.retainedInfluences?.map(pinOf)).toEqual([pins[1]!]);
+    transport = async () => response();
+    const third = startGlobalAgentTurn(store, owner, () => policy, regenerate, regenerated.sha256);
+    await waitFor(() => inspect(first.dialogueId).attempts[2]?.state === 'completed');
+    expect(third.message.kept).toBeNull(); expect(third.message.globalSources!.map(pinOf)).toEqual([pins[1]!]);
+    expect(calls).toHaveLength(3);
   });
 
   it('original-field qualification fresh-reads same-length log corruption and never substitutes a later repeated question', async () => {
@@ -223,7 +310,7 @@ describe('v30 Book-less Global Agent', () => {
   it('refuses a disclosure after the configured provider credential reference changes, before creating a turn', () => {
     const ask = input(); const preview = prepareGlobalAgentDisclosure(store, owner, policy, ask);
     credentialReference = randomUUID();
-    expect(() => startGlobalAgentTurn(store, owner, () => policy, ask, preview.sha256)).toThrow('发送内容或模型服务已经变化');
+    expect(() => startGlobalAgentTurn(store, owner, () => policy, ask, preview.sha256)).toThrow('模型服务已经变化');
     expect(store.inspectGlobalAgent().history).toEqual([]); expect(calls).toEqual([]);
   });
 
@@ -375,7 +462,7 @@ describe('v30 Book-less Global Agent', () => {
   });
 
   it('sends only the title and exact current pin of accepted /2 memory from real production review decisions', async () => {
-    const pending = store.saveModelServiceConnection('合成来源审阅', null, 'needs-attention', binding.route);
+    const pending = store.saveModelServiceConnection('合成来源审阅', credentialReference, 'needs-attention', binding.route);
     store.saveModelServiceConnection('合成来源审阅', pending.credentialReference, 'ready', binding.route);
     store.selectModelServiceRoute(binding.route); credentialReference = pending.credentialReference;
     const selected = { ...binding, credentialReference };

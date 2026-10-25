@@ -2605,6 +2605,13 @@ export type ResultSetPolicyPin =
   | { operationalScope: 'developer-live'; providerProcessingVersion: DeveloperLiveProviderProcessingVersion; activePolicySetVersion: ActivePolicySetVersion; liveTransmissions: 'bounded-by-run' }
   | { operationalScope: 'ordinary-production'; providerProcessingVersion: OrdinaryProductionProviderProcessingVersion; activePolicySetVersion: ActivePolicySetVersion; liveTransmissions: 'bounded-by-run' };
 
+export function isResultSetPolicyPin(value: unknown): value is ResultSetPolicyPin {
+  return isPolicyIdentityRecord(value) && hasPolicyIdentityKeys(value, ['operationalScope', 'providerProcessingVersion', 'activePolicySetVersion', 'liveTransmissions']) &&
+    isSupportedProviderProcessingVersion(value.operationalScope, value.providerProcessingVersion) &&
+    typeof value.activePolicySetVersion === 'string' && ['v5', 'v6', 'v7', 'v8', 'v9', 'v10', 'v11', 'v12', 'v13', 'v14', 'v15', 'v16', 'v17', 'v18', 'v19', 'v20', 'v21'].includes(value.activePolicySetVersion) &&
+    value.liveTransmissions === (value.operationalScope === 'development-ci' ? 0 : 'bounded-by-run');
+}
+
 /** The three launch-form arguments the built entry accepts beside `--data-root`; carried by argv only, never by an environment variable or setting. */
 export const TRUSTED_SCOPE_ARGUMENT = '--trusted-operational-scope';
 export const RUN_BUDGET_CEILING_ARGUMENT = '--run-budget-ceiling';

@@ -375,7 +375,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       }
       expect(prepared.providerResolutionPlan?.remoteBinding.credentialReference).toBe(credentialReference);
       expect(prepared.providerResolutionPlan?.remoteBinding.credentialReadiness).toBe('missing');
-      expect(prepared.providerResolutionPlan?.remoteBinding.providerProcessing).toEqual({ operationalScope: 'development-ci', version: 'v1', decision: 'deny', authorizedLiveTransmissionCount: 0 });
+      expect(prepared.providerResolutionPlan?.remoteBinding.providerProcessing).toEqual({ operationalScope: 'development-ci', version: 'v29', decision: 'deny', authorizedLiveTransmissionCount: 0 });
       expect(prepared.providerResolutionPlan?.executionRoute).toMatchObject({ kind: 'ai7-local-deterministic', fixtureIdentity: 'sample1-baseline-one-unit-failure', fixtureSha256: fixture.sha256 });
       expect(prepared.planEnvelope).toMatchObject({ dispatchAllowed: true, providerStatus: 'remote-denied-local-deterministic', promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST });
       expect(prepared.executionPlan?.unitCount).toBe(SAMPLE1_UNITS);
@@ -423,7 +423,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       expect(revision.manuscriptPin.revisionId).toBe(imported.revisionId);
       expect(revision.coverageManifestDigest).toBe(manifest.digest);
       expect(revision.bindingPin).toMatchObject({ attemptId, bindingDigest: binding.bindingDigest, harnessSessionId: binding.harnessSessionId });
-      expect(revision.policyPin).toEqual({ operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: ACTIVE_SET_VERSION, liveTransmissions: 0 });
+      expect(revision.policyPin).toEqual({ operationalScope: 'development-ci', providerProcessingVersion: 'v29', activePolicySetVersion: ACTIVE_SET_VERSION, liveTransmissions: 0 });
       // Synchronized delta (#274, #275): eight unit turns, the one cross-unit reduction turn after
       // them, and one assurance sampling turn — both cross-unit findings are anchored in unit 1, so
       // the sample of this Run is one turn.

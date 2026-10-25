@@ -7,6 +7,7 @@ import {
   isSupportedProviderProcessingVersion,
   selectedPolicyIdentityOf,
   localFixtureProfileOf,
+  isResultSetPolicyPin,
   type SelectedPolicyIdentity,
   type DeveloperLiveProviderProcessingVersion,
   type OrdinaryProductionProviderProcessingVersion,
@@ -3107,7 +3108,7 @@ export function validatePolicyOriginalFieldRecords(db: DatabaseSync): void {
     }
     Object.values(value).forEach(metadata);
   };
-  for (const table of ['provider_resolution_plans', 'analysis_plan_records', 'analysis_plan_revisions',
+  for (const table of ['provider_resolution_plans', 'analysis_plan_records', 'analysis_plan_revisions', 'analysis_execution_bindings', 'analysis_result_set_revisions',
     'dialogue_attempts', 'dialogue_execution_bindings']) {
     if (!exists(table)) continue;
     for (const row of db.prepare(`SELECT * FROM ${table}`).all()) {
@@ -3115,6 +3116,10 @@ export function validatePolicyOriginalFieldRecords(db: DatabaseSync): void {
       requireTask(sha256(json) === row.sha256, 'TASK_RECORD_INVALID', '处理策略记录摘要不一致。');
       const value = parseCanonicalJson(json);
       metadata(value);
+      if ((table === 'analysis_execution_bindings' || table === 'analysis_result_set_revisions') && isRecord(value)) {
+        requireTask(isResultSetPolicyPin(value.policyPin) && (admitted || value.policyPin.providerProcessingVersion !== 'v29' && value.policyPin.providerProcessingVersion !== 'v30'),
+          'TASK_RECORD_INVALID', '结果或执行绑定的策略 pin 与读者版本不一致。');
+      }
       if ((table === 'provider_resolution_plans' || table === 'analysis_plan_records' && row.component === 'provider-resolution-plan') && isRecord(value)) {
         providerPlanPolicyMetadata(value);
       }

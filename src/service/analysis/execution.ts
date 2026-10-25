@@ -615,6 +615,13 @@ export class BaselineAnalysisExecutionOwner {
   /** Ordinary production resolves this Run's frozen connection, independently of the current Main choice. */
   #policyForRun(facts: ExecutionPlanFacts, live: LiveRuntime | null): LaunchPolicyProjection {
     if (!isOrdinaryProductionRuntime(live)) return this.#policy();
+    if (facts.retainedPolicy !== undefined && facts.retainedPolicyPin !== undefined) {
+      const retained = facts.retainedPolicy;
+      if (retained.integrityState !== 'verified' || retained.operationalScope !== 'ordinary-production' || retained.selectedPolicyIdentity !== undefined ||
+          retained.providerProcessing.version !== facts.retainedPolicyPin.providerProcessingVersion || retained.activePolicySetVersion !== facts.retainedPolicyPin.activePolicySetVersion)
+        throw new ExecutionAdmissionError('EXECUTION_POLICY_INVALID', '历史执行绑定缺少准确的已核实策略阅读；未发起传输。');
+      return retained;
+    }
     if (facts.productionBinding === null || this.#deps.productionPolicyFor === undefined) {
       throw new ExecutionAdmissionError('EXECUTION_POLICY_INVALID', '无法校验本运行固定连接的实际策略；没有进入调度或发送。');
     }
@@ -1402,7 +1409,7 @@ export class BaselineAnalysisExecutionOwner {
         throw new ExecutionAdmissionError('EXECUTION_POLICY_INVALID', '本地冻结计划缺少准确的已选策略或夹具配置。');
       }
     } else if (production !== null) {
-      if (policy.operationalScope !== 'ordinary-production' || policy.providerProcessing.version !== ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION ||
+      if (policy.operationalScope !== 'ordinary-production' || policy.providerProcessing.version !== (facts.retainedPolicyPin?.providerProcessingVersion ?? ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION) ||
           policy.providerProcessing.decision !== 'eligible-only' || facts.productionBinding === null) {
         throw new ExecutionAdmissionError('EXECUTION_POLICY_INVALID', `当前可信策略不是 ordinary-production · Provider Processing ${ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION}。`);
       }
@@ -1602,6 +1609,7 @@ export class BaselineAnalysisExecutionOwner {
       const localFixture: LocalFixtureExecutionContext | null = live === null && facts.localFixtureProfile !== undefined && facts.selectedPolicyIdentity !== undefined
         ? { selectedPolicyIdentity: facts.selectedPolicyIdentity, profile: facts.localFixtureProfile, kind: definition.kind, purpose: null,
           contractId: definition.contractVersion, categories: ['public-or-synthetic'],
+          sourceDigest: facts.sourceDigest, frozenPromptContractDigest: facts.promptContractDigest, frozenCompositionDigest: facts.behaviorCompositionDigest,
           composition: describeComposition(route, model, promptContractDigest, { ...facts.compositionOptions,
             ...(localRule === null ? {} : { localTools: localRule }) }) } : null;
       try {
@@ -1885,7 +1893,7 @@ export class BaselineAnalysisExecutionOwner {
         policy: live === null
           ? { operationalScope: 'development-ci', providerProcessingVersion: localVersion, liveTransmissionAllowed: false, authorizedLiveTransmissionCount: 0 }
           : production !== null
-            ? { operationalScope: 'ordinary-production', providerProcessingVersion: ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' }
+            ? { operationalScope: 'ordinary-production', providerProcessingVersion: policy.providerProcessing.version as import('../../shared/protocol.js').OrdinaryProductionProviderProcessingVersion, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' }
             : { operationalScope: 'developer-live', providerProcessingVersion: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
         admittedUserMessages: new Set(unitMessages.values()),
         ...(localRule === null ? {} : { localTools: localRule }),
@@ -3518,12 +3526,12 @@ function executionBindingRecordOf(input: {
     adapterPin: live === null ? { fixtureIdentity: fixture!.identity, fixtureSha256: fixture!.sha256 } : null,
     credentialSlot: { modelRole: 'Main Editorial Role', slot: credentialSlot, credentialReference },
     outboundDataCategory: isOrdinaryProductionRuntime(live) ? 'unpublished-excerpts' : 'public-or-synthetic',
-    policyPin: live === null
+    policyPin: facts.retainedPolicyPin ?? (live === null
       ? { operationalScope: 'development-ci', providerProcessingVersion: facts.selectedPolicyIdentity?.providerProcessingVersion === 'v29' ? 'v29' : 'v1',
         activePolicySetVersion: facts.selectedPolicyIdentity?.activePolicySetVersion ?? ACTIVE_SET_VERSION, liveTransmissions: 0 }
       : isOrdinaryProductionRuntime(live)
       ? { operationalScope: 'ordinary-production', providerProcessingVersion: ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION, activePolicySetVersion: ACTIVE_SET_VERSION, liveTransmissions: 'bounded-by-run' }
-      : { operationalScope: 'developer-live', providerProcessingVersion: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, activePolicySetVersion: ACTIVE_SET_VERSION, liveTransmissions: 'bounded-by-run' },
+      : { operationalScope: 'developer-live', providerProcessingVersion: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, activePolicySetVersion: ACTIVE_SET_VERSION, liveTransmissions: 'bounded-by-run' }),
     runBudgetCeiling: runBudgetCeiling.kind === 'unset' ? 'unset' : runBudgetCeiling,
     dispatchAttribution: 'Dispatch',
     boundAt: input.boundAt,

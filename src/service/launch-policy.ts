@@ -22,12 +22,12 @@ import { canonicalJson } from './analysis/canonical.js';
 
 /**
  * The source-checkout launch authority (ADR 0046, ADR 0065): the build-embedded carrier pins active
- * policy set v19, the sole active set for all four Provider Processing scopes, and names the three
+ * policy set v21, the sole active set for all four Provider Processing scopes, and names the three
  * scopes the built entry may bind from its launch form. `development-ci` is the default and binds
- * Provider Processing v1 (zero live transmissions); `developer-live` is bound only by the launch
+ * Provider Processing v29 (zero live transmissions, closed local fixture profiles); `developer-live` is bound only by the launch
  * argument `--trusted-operational-scope developer-live` on a developer host and binds the immutable
  * Provider Processing v24; `ordinary-production` is bound only by `--trusted-operational-scope ordinary-production`
- * and binds v27, whose rules are filled from the editor's own configured provider binding. `fixture-recording`
+ * and binds v30, whose rules are filled from the editor's own configured provider binding. `fixture-recording`
  * is pinned by the active set but is not selectable from the source checkout. No environment variable or product
  * setting selects a scope; every invalid state resolves to the zero-transmission denial.
  */
@@ -2114,7 +2114,36 @@ export function resolveSourceCheckoutLaunchPolicySync(
   return step.value;
 }
 
-/** The single pure verification/projection body requests exactly its four pinned inputs in order. */
+/** Exact predecessor interpretation for an already bound v27/19 Run. This is never a launch selector or a current identity. */
+export function readRetainedBoundAnalysisPolicySync(codeRoot: string, pin: import('../shared/protocol.js').ResultSetPolicyPin,
+  binding: ConfiguredProviderBinding): LaunchPolicyProjection | null {
+  if (pin.operationalScope !== 'ordinary-production' || pin.providerProcessingVersion !== 'v27' || pin.activePolicySetVersion !== 'v19' ||
+      pin.liveTransmissions !== 'bounded-by-run') return null;
+  try {
+    const read = (path: string, sha256: string): Record<string, unknown> => {
+      const bytes = readFileSync(policyFilePath(codeRoot, path)); requirePolicy(digest(bytes) === sha256); return parseJson(bytes);
+    };
+    const active = read('docs/policies/active-policy-set.v19.json', '5b551888903b629c700fea7d358e57e1474b1f7984fe73f6605cd85619726f3e');
+    const policy = read('docs/policies/provider-processing-policy.v27.json', '8d0eaedb28454c9f923501991e0b4130d7ed5f9b267905cd30d3f7a434db1a12');
+    read(EXTERNAL_PIN.canonicalPath, EXTERNAL_PIN.sha256);
+    requirePolicy(active['version'] === 'v19' && policy['version'] === 'v27');
+    const reading = verifyOrdinaryProductionPolicy(policy);
+    const rules = bindOrdinaryProductionRules(reading, binding, binding);
+    requirePolicy(rules !== null && rules.length > 0);
+    return { integrityState: 'verified', denialReason: null, operationalScope: 'ordinary-production', activePolicySetVersion: 'v19',
+      providerProcessing: { version: 'v27', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run', liveTransmissionAllowed: true,
+        crossUnitReductionAllowed: reading.crossUnitReductionAllowed, assuranceSamplingAllowed: reading.assuranceSamplingAllowed,
+        runReportReflectionAllowed: reading.runReportReflectionAllowed, admittedRules: rules, bindingState: 'configured',
+        ...(reading.execution === undefined ? {} : { execution: reading.execution }), ...(reading.transport === undefined ? {} : { transport: reading.transport }),
+        ...(reading.research === undefined ? {} : { research: reading.research }), ...(reading.subAgents === undefined ? {} : { subAgents: reading.subAgents }),
+        ...(reading.backgroundProcessingEnrollment === undefined ? {} : { backgroundProcessingEnrollment: reading.backgroundProcessingEnrollment }),
+        label: '本机生产：实时传输受运行边界约束' },
+      externalExport: { version: 'v2', policyEligibilityIsEffectApproval: false, currentExportEffectAvailable: true,
+        label: '对外导出策略 v2 已校验：只导出到本机所选位置，每个文件单独批准' }, publicReleasePermission: { present: false, label: '公开发布许可：不存在' } };
+  } catch { return null; }
+}
+
+/** One verification/projection body reads the complete pinned set and schemas for both sync and async callers. */
 function* verifyLaunchPolicyInputs(
   requestedScope: TrustedOperationalScope,
   configuredBinding: ConfiguredProviderBinding | null,
@@ -2319,11 +2348,11 @@ function* verifyLaunchPolicyInputs(
         decision: 'deny',
         authorizedLiveTransmissionCount: 0,
         liveTransmissionAllowed: false,
-        // v1 authorizes zero transmissions, so no step of a Run may transmit, these three included.
+        // v29 authorizes zero live transmissions; fixture replay stays with its closed local profile.
         crossUnitReductionAllowed: false,
         assuranceSamplingAllowed: false,
         runReportReflectionAllowed: false,
-        // v1 names no allow rule.
+        // Local fixture declarations are not remote Provider allow rules.
         admittedRules: [],
         label: '开发与持续集成：零次实时传输',
       },

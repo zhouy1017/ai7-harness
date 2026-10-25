@@ -2,7 +2,7 @@ import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
 import { SAMPLE1_SOURCE_DIGEST } from '../../src/service/analysis/baseline-analysis-store.js';
 import { ADR_0091_PUBLIC_SAMPLEBOOKS } from '../../src/shared/public-samplebooks.js';
@@ -18,6 +18,7 @@ import { EditorialStore } from '../../src/service/store.js';
 import type { DevelopmentValidationIntent, FastInteractionRequestProjection, LaunchPolicyProjection } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, requireExactSample1 } from '../support/sample1-baseline.js';
+import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
 import {
   AUTHORED_POLISH_ANSWER,
   AUTHORED_REGENERATION,
@@ -113,6 +114,22 @@ async function settled(fast: FastRoleRequests, requestId: string): Promise<FastI
 }
 
 describe('the fast-role routes under developer-live', () => {
+  it('selected v29 profile reaches the actual local Fast adapter and creates no dialogue history', async () => {
+    const fixture = await loadModelFixture(join(roots.codeRoot, 'tests/fixtures/model'), 'sample1-polish-authored');
+    const runtime = store.localFixtureRuntime()!;
+    const observed = vi.spyOn(runtime.catalog, 'entriesFor');
+    const owner = new FastRoleExecutionOwner({ requestGovernor, fixture, live: null, localFixtureRuntime: () => runtime });
+    const fast = new FastRoleRequests(owner, store);
+    try {
+      const started = fast.polish(book.bookId, { selection: polishSelectionOf(store, book) });
+      const result = await settled(fast, started.taskId);
+      expect(result.kind === 'editorial-polish' && result.polish).toMatchObject({ state: 'suggested', outcomeUnknown: false });
+      expect(observed).toHaveBeenCalledWith(expect.objectContaining({ profile: expect.objectContaining({ kind: 'legacy', registeredProfile: 'polish', policyVersion: 'v29' }),
+        kind: 'editorial-polish', contractId: 'ai7.editorial-polish/1' }), fixture, expect.any(String));
+      expect(store.inspectUsage({ range: 'all', groupBy: 'book' }).totals).toMatchObject({ inputTokens: 0, outputTokens: 0 });
+      expect(store.inspectGlobalAgent().history).toEqual([]);
+    } finally { observed.mockRestore(); await owner.dispose(); }
+  });
   it('admits each kind only under its own rule, and refuses a Book outside the admitted SampleBooks before anything is sent', async () => {
     const calls: StubCall[] = [];
     const admitted = live(stubTransport(calls, () => AUTHORED_POLISH_ANSWER));
