@@ -24411,7 +24411,15 @@ export class EditorialStore {
       identityFindings,
       fidelity: reviewed.fidelity,
       textBoxDisposition: plan.textBoxDisposition,
-      ...(reviewed.word === undefined ? {} : { trackedChanges: reviewed.word.prepared.choice }),
+      ...(reviewed.word === undefined ? {} : { trackedChanges: reviewed.word.prepared.choice, wordLearning: {
+        globalEnabled: reviewed.word.prepared.target.controls.global.enabled,
+        bookExcluded: reviewed.word.prepared.target.controls.book.excluded,
+        sourceTemplateCount: reviewed.word.compiled.templates.length,
+        eligibleSampleCount: !reviewed.word.prepared.choice.learnFromEdits || !reviewed.word.prepared.target.controls.global.enabled ||
+          reviewed.word.prepared.target.controls.book.excluded ? 0 : reviewed.word.prepared.target.kind === 'new-book'
+          ? reviewed.word.compiled.templates.length : reviewed.word.prepared.target.controls.materials
+            .filter(({ standing }) => standing.choice === 'book' || standing.choice === 'house').length,
+      } }),
       recordsToCreate: recordsToCreate(plan, target.kind),
       nonEffects: nonEffects(plan),
       workflowProfile: {

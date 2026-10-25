@@ -87,6 +87,7 @@ import type {
   ServiceWireJobProjection as ServiceJobProjection,
   SourceImportCommitProjection,
   StagedImportProjection,
+  WordTrackedChangesChoice,
   StartupProjection,
   TaskAuthorizationProjection,
   TaskPlanKind,
@@ -234,6 +235,7 @@ import {
   fidelityOutcomeLabel,
   fidelityReviewHeading,
   reimportFidelityHeading,
+  wordIntakeRefusalLabel,
 } from './import-fidelity-labels.js';
 import { mountProposalConflict, type ProposalConflictSurface } from './proposal-conflict.js';
 import {
@@ -7183,6 +7185,72 @@ function renderLanding(
 type ImportRelationshipChoice = 'first-manuscript' | 'source-only' | 'reimport';
 type ReimportLineageChoice = 'unconfirmed' | string;
 
+/** The same draft/version's visible form choice survives target/paging/error rerenders; restart reads the saved service choice. */
+const wordIntakeFormChoices = new Map<string, WordTrackedChangesChoice>();
+
+function renderWordIntakeControls(staged: StagedImportProjection): {
+  elements: HTMLElement[]; choice(): WordTrackedChangesChoice | undefined; allowed(): boolean;
+  bind(button: HTMLButtonElement): void; setBusy(value: boolean): void;
+} {
+  const projection = staged.wordTrackedChanges;
+  if (projection === undefined) return { elements: [], choice: () => undefined, allowed: () => true, bind: () => undefined, setBusy: () => undefined };
+  const group = element('fieldset'); group.dataset['wordImportControls'] = projection.compatibility;
+  group.append(element('legend', undefined, 'Word 修订导入方式'));
+  if (projection.compatibility === 'unsupported') {
+    group.append(element('p', undefined, '此文件含当前不支持的修订结构，不能作为首份稿件导入；来源材料继续按原有导入边界处理。'));
+    const reasons = element('ul'); for (const code of projection.reasonCodes) reasons.append(element('li', undefined, wordIntakeRefusalLabel(code)));
+    group.append(reasons, element('p', 'field-note', `定位到 ${projection.locationCount} 处；完整原始文件仍留在本机暂存中。`));
+    return { elements: [group], choice: () => undefined, allowed: () => false,
+      bind: (control) => { control.disabled = true; }, setBusy: () => undefined };
+  }
+  const key = `${staged.draftId}:${staged.draftVersion}:${staged.source.sourceSha256}`;
+  let selected = wordIntakeFormChoices.get(key) ?? projection.savedChoice ??
+    { mode: 'suggestions', learnFromEdits: true, acceptedBaselineConfirmed: false };
+  wordIntakeFormChoices.set(key, { ...selected });
+  while (wordIntakeFormChoices.size > 16) { const oldest = wordIntakeFormChoices.keys().next().value; if (oldest === undefined) break; wordIntakeFormChoices.delete(oldest); }
+  group.append(element('p', 'field-note', `当前暂存预览：${projection.previewReading === 'rejected' ? '撤销修订后的阅读' : '接受修订后的阅读'}。这只是预览，尚未选择稿件基线。`));
+  const modes: Array<{ input: HTMLInputElement; mode: WordTrackedChangesChoice['mode'] }> = [];
+  for (const [mode, label] of [['suggestions', '修订作为修改建议'], ['accepted-baseline', '接受修订后的干净基线']] as const) {
+    const line = element('label', 'choice'); const input = element('input'); input.type = 'radio';
+    input.name = `word-import-mode-${staged.draftId}`; input.value = mode; input.dataset['wordImportMode'] = mode;
+    line.append(input, element('span', undefined, label)); group.append(line); modes.push({ input, mode });
+    input.addEventListener('change', () => { if (!input.checked || busy) return;
+      selected = { ...selected, mode, acceptedBaselineConfirmed: false }; changed(); });
+  }
+  const confirmationLabel = element('label', 'choice'); const confirmation = element('input'); confirmation.type = 'checkbox';
+  confirmation.dataset['wordAcceptedBaselineConfirmation'] = '';
+  confirmationLabel.append(confirmation, element('span', undefined, '我确认以接受修订后的文字建立稿件基线，原始修订留在原文件中。'));
+  const learningLabel = element('label', 'choice'); const learning = element('input'); learning.type = 'checkbox'; learning.dataset['wordLearnFromEdits'] = '';
+  learningLabel.append(learning, element('span', undefined, '允许在本机按当前学习设置保留原始修改对（默认开启，可取消）'));
+  const notice = element('p', 'field-note'); notice.dataset['wordReadingAvailability'] = '';
+  group.append(confirmationLabel, learningLabel,
+    element('p', 'field-note', '全局关闭、本书排除和材料排除优先；本次导入不会创建编辑记忆、更新审阅偏好或调用模型。'), notice);
+  let busy = false;
+  const buttons: HTMLButtonElement[] = [];
+  const allowed = (): boolean => projection.readings[selected.mode === 'suggestions' ? 'rejected' : 'accepted'].usable &&
+    (selected.mode === 'suggestions' ? !selected.acceptedBaselineConfirmed : selected.acceptedBaselineConfirmed);
+  const paint = (): void => {
+    for (const { input, mode } of modes) { input.checked = selected.mode === mode; input.disabled = busy; }
+    confirmation.checked = selected.acceptedBaselineConfirmed; confirmation.disabled = busy || selected.mode !== 'accepted-baseline';
+    learning.checked = selected.learnFromEdits; learning.disabled = busy;
+    const reading = projection.readings[selected.mode === 'suggestions' ? 'rejected' : 'accepted'];
+    notice.textContent = !reading.usable ? reading.blockCount === 0
+      ? selected.mode === 'suggestions' ? '撤销修订后没有可编辑的非空稿件，不能按修改建议方式准备；仍可明确选择并确认接受修订后的基线。'
+        : '接受修订后没有可编辑的非空稿件，不能建立该基线。'
+      : '所选阅读超出当前支持边界，不能准备；可选择另一项可用阅读。'
+      : selected.mode === 'accepted-baseline' && !selected.acceptedBaselineConfirmed ? '请单独确认接受修订后的基线，再准备导入。'
+        : '最终保真、导入方式及本机保留范围会在下一步复核。';
+    for (const control of buttons) control.disabled = busy || !allowed();
+  };
+  const changed = (): void => { wordIntakeFormChoices.set(key, { ...selected }); paint(); };
+  confirmation.addEventListener('change', () => { if (busy) return;
+    selected = { ...selected, acceptedBaselineConfirmed: selected.mode === 'accepted-baseline' && confirmation.checked }; changed(); });
+  learning.addEventListener('change', () => { if (busy) return; selected = { ...selected, learnFromEdits: learning.checked }; changed(); });
+  paint();
+  return { elements: [group], choice: () => ({ ...selected }), allowed,
+    bind: (control) => { buttons.push(control); paint(); }, setBusy: (value) => { busy = value; paint(); } };
+}
+
 function renderTargetChoice(
   staged: StagedImportProjection,
   selectedChoiceId: StagedImportProjection['targetChoices'][number]['id'] | null,
@@ -7347,7 +7415,10 @@ function renderTargetChoice(
     title.value = staged.titleSuggestion.value;
     const note = element('span', 'field-note', `建议来源：${staged.titleSuggestion.sourceLabel}。这是可编辑建议，不会自动创建图书。`);
     const fidelityView = renderFidelityReview(staged.fidelity, staged.source.conversion, { kind: 'offer' });
+    const wordControls = relationshipSelection === 'first-manuscript' ? renderWordIntakeControls(staged) : null;
     const confirm = button('确认书名并复核', 'primary', async () => {
+      if (wordControls !== null && !wordControls.allowed()) { setStatus('请选择可用的 Word 阅读，并单独确认接受修订后的基线。', 'error'); return; }
+      const trackedChanges = wordControls?.choice();
       const confirmedTitle = title.value.normalize('NFC').replace(/\s+/g, ' ').trim();
       if (!confirmedTitle || confirmedTitle.length > 180) {
         setStatus('请输入 1–180 个字符的书名。', 'error');
@@ -7355,6 +7426,7 @@ function renderTargetChoice(
         return;
       }
       confirm.disabled = true;
+      wordControls?.setBusy(true);
       title.disabled = true;
       setStatus('正在准备导入前复核…', 'busy');
       try {
@@ -7377,11 +7449,13 @@ function renderTargetChoice(
             target: { kind: 'new-book', choiceId: selectedChoice.id, confirmedTitle },
             acceptDegradation: false,
             textBoxDisposition: fidelityView.textBoxDisposition(),
+            ...(trackedChanges === undefined ? {} : { trackedChanges }),
           });
           renderReview(review, recoveryNotice, recoveryReturn);
         }
         setStatus('导入前复核已准备', 'success');
       } catch (error) {
+        wordControls?.setBusy(false);
         renderError(error, () => void initializeStartup());
       }
     });
@@ -7389,6 +7463,7 @@ function renderTargetChoice(
     actions.append(confirm, cancelImport);
     form.append(label, title, note);
     if (relationshipSelection === 'first-manuscript') {
+      if (wordControls !== null) { form.append(...wordControls.elements); wordControls.bind(confirm); }
       form.append(...fidelityView.elements);
     }
     form.append(actions);
@@ -7397,10 +7472,14 @@ function renderTargetChoice(
   } else if (selectedChoice?.kind === 'existing-book' && relationshipSelection === 'first-manuscript') {
     if (selectedChoice.manuscriptState !== 'empty') throw new Error('AI7_IMPORT_RELATIONSHIP_INVALID');
     const fidelityView = renderFidelityReview(staged.fidelity, staged.source.conversion, { kind: 'offer' });
-    content.append(...fidelityView.elements);
+    const wordControls = renderWordIntakeControls(staged);
+    content.append(...wordControls.elements, ...fidelityView.elements);
     const actions = element('div', 'button-row');
     const confirm = button('复核导入到所选图书', 'primary', async () => {
+      if (!wordControls.allowed()) { setStatus('请选择可用的 Word 阅读，并单独确认接受修订后的基线。', 'error'); return; }
+      const trackedChanges = wordControls.choice();
       confirm.disabled = true;
+      wordControls.setBusy(true);
       setStatus('正在重新校验所选图书并准备导入前复核…', 'busy');
       try {
         const review = await window.ai7.prepareNewBookReview({
@@ -7409,14 +7488,17 @@ function renderTargetChoice(
           target: { kind: 'existing-book', bookId: selectedChoice.bookId, relationship: 'first-manuscript' },
           acceptDegradation: false,
           textBoxDisposition: fidelityView.textBoxDisposition(),
+          ...(trackedChanges === undefined ? {} : { trackedChanges }),
         });
         renderReview(review, recoveryNotice, recoveryReturn);
         setStatus('导入前复核已准备', 'success');
       } catch (error) {
         confirm.disabled = false;
+        wordControls.setBusy(false);
         setStatus(rendererErrorMessage(error, '无法复核所选图书。'), 'error');
       }
     });
+    wordControls.bind(confirm);
     actions.append(confirm, cancelImport);
     content.append(actions);
     revealedControl = confirm;
@@ -8233,6 +8315,19 @@ function renderReview(
     element('p', 'lede', '最后一次确认：下面的记录会在一个事务中一起创建；列出的非影响不会随导入发生。'),
   );
   if (recoveryNotice) content.append(element('p', 'recovery-notice', recoveryNotice));
+  if (review.trackedChanges !== undefined) {
+    const choice = review.trackedChanges;
+    const word = element('section', 'review-section'); word.dataset['wordReviewedMode'] = choice.mode;
+    word.dataset['wordReviewedLearning'] = String(choice.learnFromEdits);
+    word.append(element('h3', undefined, '本次 Word 修订导入'),
+      element('p', undefined, choice.mode === 'suggestions' ? '撤销原修订后的文字作为稿件基线，原修订成为未应用的修改建议。'
+        : '已单独确认：接受原修订后的文字作为稿件基线。原文件和原始修订证据仍会保留。'),
+      element('p', undefined, choice.learnFromEdits ? '已允许按当前本机学习设置保留符合准入的原始修改对。' : '本次不保留学习修改对；来源、稿件对应和导入标记仍会保留。'));
+    if (review.wordLearning !== undefined) word.append(element('p', undefined,
+      `当前全局学习${review.wordLearning.globalEnabled ? '开启' : '关闭'}；本书${review.wordLearning.bookExcluded ? '已被排除' : '未被排除'}。` +
+      `此次按当前设置可保留 ${review.wordLearning.eligibleSampleCount} / ${review.wordLearning.sourceTemplateCount} 条原始修改对，尚未用于编辑记忆、审阅偏好或模型任务。`));
+    content.append(word);
+  }
   const identity = element('section', 'source-card');
   identity.append(element('h3', undefined, review.target.kind === 'new-book'
     ? `${review.target.label} · ${review.target.confirmedTitle}`
@@ -8334,6 +8429,7 @@ function renderReview(
                 },
             acceptDegradation: true,
             textBoxDisposition: review.textBoxDisposition ?? 'retain',
+            ...(review.trackedChanges === undefined ? {} : { trackedChanges: review.trackedChanges }),
           });
           setStatus('已接受本次导入的完整降级集合', 'success');
           renderReview(acceptedReview, recoveryNotice, recoveryReturn);

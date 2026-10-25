@@ -3,6 +3,7 @@ import type {
   ImportFidelityOutcome,
   ManuscriptConversionProjection,
   TextBoxDisposition,
+  WordIntakeRefusalCode,
 } from '../shared/protocol.js';
 
 /**
@@ -14,6 +15,19 @@ import type {
 
 /** The class that closes the review as a card rather than a row (ADR 0086 §1). */
 export const ROUND_TRIP_KEY = 'round-trip-export';
+
+const WORD_INTAKE_REFUSALS: Readonly<Record<WordIntakeRefusalCode, string>> = {
+  'table-revision': '表格行、单元格或合并修订',
+  'custom-xml-or-math-revision': '影响文字的自定义 XML 或公式修订',
+  'story-or-text-box-revision': '正文以外或文本框内的文字修订',
+  'incompatible-paragraph-join': '不能准确对应的跨段合段',
+  'invalid-move-graph': '缺失、重叠或不能唯一配对的移动修订',
+  'unrepresentable-comment': '不能准确落在阅读上的批注',
+  'unusable-reading': '没有可用的非空阅读',
+  'resource-limit': '超出当前资源边界',
+};
+
+export function wordIntakeRefusalLabel(code: WordIntakeRefusalCode): string { return WORD_INTAKE_REFUSALS[code]; }
 
 /** A status reads in text and in shape as well as in colour (V2-UX-IMP-003). */
 export function fidelityStatusShape(status: FidelityCategoryProjection['status']): string {

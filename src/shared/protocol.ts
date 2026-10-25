@@ -1269,11 +1269,13 @@ export interface WordTrackedEditSampleDetailProjection {
   items: WordSampleDetailItemProjection[]; nextCursor: WordSampleCursorProjection | null;
 }
 
+export type WordIntakeRefusalCode = 'table-revision' | 'custom-xml-or-math-revision' | 'story-or-text-box-revision' |
+  'incompatible-paragraph-join' | 'invalid-move-graph' | 'unrepresentable-comment' | 'unusable-reading' | 'resource-limit';
 export type WordTrackedChangesIntakeProjection =
   | { compatibility: 'ready'; previewReading: 'rejected' | 'accepted';
       readings: Record<'rejected' | 'accepted', { usable: boolean; blockCount: number }>;
       savedChoice: WordTrackedChangesChoice | null }
-  | { compatibility: 'unsupported'; reasonCodes: ReadonlyArray<string>; locationCount: number };
+  | { compatibility: 'unsupported'; reasonCodes: ReadonlyArray<WordIntakeRefusalCode>; locationCount: number };
 
 export interface StagedImportProjection {
   draftId: string;
@@ -1354,6 +1356,7 @@ export interface ReviewBeforeImportProjection {
    */
   textBoxDisposition: TextBoxDisposition | null;
   trackedChanges?: WordTrackedChangesChoice;
+  wordLearning?: { globalEnabled: boolean; bookExcluded: boolean; sourceTemplateCount: number; eligibleSampleCount: number };
   recordsToCreate: ReadonlyArray<string>;
   nonEffects: ReadonlyArray<string>;
   workflowProfile: {

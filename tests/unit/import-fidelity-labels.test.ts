@@ -22,6 +22,7 @@ import {
   reimportFidelityHeading,
   roundTripCard,
   textBoxChoiceStatement,
+  wordIntakeRefusalLabel,
 } from '../../src/renderer/import-fidelity-labels.js';
 import { SAMPLE1_V1_REPORT } from '../support/import-retention.js';
 
@@ -36,6 +37,14 @@ const WITH_BOX = buildFidelityReport({ ...NO_SIGNALS, textBoxes: 1 }, 0);
 const WITH_FIELD = buildFidelityReport({ ...NO_SIGNALS, fields: 2 }, 0);
 
 describe('the import fidelity review words', () => {
+  it('names every frozen Word refusal without implying a usable accepted baseline', () => {
+    const codes = ['table-revision', 'custom-xml-or-math-revision', 'story-or-text-box-revision', 'incompatible-paragraph-join',
+      'invalid-move-graph', 'unrepresentable-comment', 'unusable-reading', 'resource-limit'] satisfies Array<Parameters<typeof wordIntakeRefusalLabel>[0]>;
+    expect(codes.map(wordIntakeRefusalLabel)).toEqual([
+      '表格行、单元格或合并修订', '影响文字的自定义 XML 或公式修订', '正文以外或文本框内的文字修订', '不能准确对应的跨段合段',
+      '缺失、重叠或不能唯一配对的移动修订', '不能准确落在阅读上的批注', '没有可用的非空阅读', '超出当前资源边界',
+    ]);
+  });
   it('gives every status its own shape beside its text', () => {
     expect(['preserved', 'retained', 'degraded', 'unsupported'].map((status) => fidelityStatusShape(status as never)))
       .toEqual(['✓', '◆', '△', '⊘']);

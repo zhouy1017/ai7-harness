@@ -364,8 +364,9 @@ describe('native Word reading preparation over the real store', () => {
     expect(manifests[1]).toEqual(manifests[0]);
   });
 
-  it.each([{ mode: 'suggestions', learnFromEdits: true }, { mode: 'accepted-baseline', learnFromEdits: true },
-    { mode: 'suggestions', learnFromEdits: false }] as const)('atomically commits, retries and reopens native Word $mode with learning $learnFromEdits', async ({ mode, learnFromEdits }) => {
+  it.each([{ mode: 'suggestions', learnFromEdits: true, globalEnabled: true }, { mode: 'accepted-baseline', learnFromEdits: true, globalEnabled: true },
+    { mode: 'suggestions', learnFromEdits: false, globalEnabled: true }, { mode: 'suggestions', learnFromEdits: true, globalEnabled: false }] as const)(
+    'atomically commits, retries and reopens native Word $mode with learning $learnFromEdits and global $globalEnabled', async ({ mode, learnFromEdits, globalEnabled }) => {
     const path = join(roots.inputRoot, `word-${mode}.docx`);
     await composeRevisedDocx(path, { source: ADMITTED_BASELINE_DOCX, title: '双阅读完整导入', paragraphs: [
       { runs: [{ text: { block: 8, from: 0, to: 10 } },
@@ -378,11 +379,14 @@ describe('native Word reading preparation over the real store', () => {
     const reading = compiled.readings[mode === 'suggestions' ? 'rejected' : 'accepted'];
     let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
+      if (!globalEnabled) store.changeEditorialLearning({ kind: 'switch', enabled: false, expectedEntries: 0 });
       const staged = await store.stageSelectedManuscript(randomUUID(), path);
       const review = store.prepareNewBookReview(staged.draftId, staged.draftVersion,
         { kind: 'new-book', choiceId: 'new-book', confirmedTitle: staged.titleSuggestion.value }, false, 'retain',
         { mode, learnFromEdits, acceptedBaselineConfirmed: mode === 'accepted-baseline' });
       if (review.reviewDigest === null) throw new Error('expected complete Word preparation');
+      expect(review.wordLearning).toEqual({ globalEnabled, bookExcluded: false, sourceTemplateCount: compiled.templates.length,
+        eligibleSampleCount: learnFromEdits && globalEnabled ? compiled.templates.length : 0 });
       const input = { draftId: staged.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest, commitId: randomUUID() };
       const committed = await store.commitNewBookImport(input);
       expect((await store.commitNewBookImport(input)).revisionId).toBe(committed.revisionId);
@@ -397,13 +401,13 @@ describe('native Word reading preparation over the real store', () => {
       try {
         expect(db.prepare('SELECT count(*) total FROM word_revision_sources').get()!.total).toBe(1);
         expect(db.prepare('SELECT count(*) total FROM word_revision_imports').get()!.total).toBe(1);
-        expect(db.prepare('SELECT count(*) total FROM word_tracked_edit_samples').get()!.total).toBe(learnFromEdits ? compiled.templates.length : 0);
-        expect(db.prepare('SELECT count(*) total FROM word_tracked_edit_sample_imports').get()!.total).toBe(learnFromEdits ? compiled.templates.length : 0);
-        expect(db.prepare('SELECT count(*) total FROM learning_signals').get()!.total).toBe(learnFromEdits ? compiled.templates.length : 0);
+        expect(db.prepare('SELECT count(*) total FROM word_tracked_edit_samples').get()!.total).toBe(learnFromEdits && globalEnabled ? compiled.templates.length : 0);
+        expect(db.prepare('SELECT count(*) total FROM word_tracked_edit_sample_imports').get()!.total).toBe(learnFromEdits && globalEnabled ? compiled.templates.length : 0);
+        expect(db.prepare('SELECT count(*) total FROM learning_signals').get()!.total).toBe(learnFromEdits && globalEnabled ? compiled.templates.length : 0);
         expect(db.prepare('SELECT count(*) total FROM word_import_mark_sources').get()!.total).toBe(reading.marks.length);
         expect(db.prepare('SELECT count(*) total FROM manuscript_block_sources WHERE revision_id = ?').get(committed.revisionId)!.total).toBe(0);
         expect(db.prepare('SELECT content_digest FROM source_versions').get()!.content_digest).toBe(compiled.readings[compiled.previewReading].contentDigest);
-        if (learnFromEdits) {
+        if (learnFromEdits && globalEnabled) {
           const row = db.prepare('SELECT sample_id, sha256 FROM word_tracked_edit_samples ORDER BY sample_id LIMIT 1').get()!;
           sample = { sampleId: String(row.sample_id), digest: String(row.sha256) };
         }
@@ -413,6 +417,12 @@ describe('native Word reading preparation over the real store', () => {
         expect(detail.sectionCounts.before).toBeGreaterThan(0);
         expect(detail.sectionCounts.after).toBeGreaterThan(0);
         expect(detail.sourceDigest).toBe(compiled.sourceDigest);
+      }
+      if (!globalEnabled) {
+        store.changeEditorialLearning({ kind: 'switch', enabled: true, expectedEntries: 1 });
+        expect(store.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }).signals).toEqual([]);
+        const check = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+        try { expect(check.prepare('SELECT count(*) total FROM word_tracked_edit_samples').get()!.total).toBe(0); } finally { check.close(); }
       }
       store.markCleanShutdown();
     } finally { store.close(); }
