@@ -1675,8 +1675,11 @@ async function main() {
     await closeBrowser(); manager = await launch();
     renderer = await waitForRenderer(manager, 'word-lineage-restart-window');
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true'&&document.querySelector('[data-screen="landing"]')`, 'word-lineage-restart-product-ready');
+    // 书库 renders the landing again after its own startup reads; mark the startup landing so paging begins on that new
+    // render, which would otherwise replace pages appended meanwhile (Issue #1156 rev 2).
+    await assertRenderer(renderer, `(() => { const node=document.querySelector('[data-screen="landing"]')?.firstElementChild; if(!(node instanceof HTMLElement))return false; node.dataset.j15StartupLanding='true'; return true; })()`, 'word-lineage-restart-mark-landing');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'word-lineage-restart-library');
-    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'word-lineage-restart-ready');
+    await waitFor(renderer, `(() => { const node=document.querySelector('[data-screen="landing"]')?.firstElementChild; return node instanceof HTMLElement && node.dataset.j15StartupLanding!=='true'; })()`, 'word-lineage-restart-ready');
     while (!(await renderer.evaluate(`Boolean(document.querySelector('button[data-book-id="${wordSignal.source.bookId}"]'))`))) {
       const shownBooks = await renderer.evaluate(`document.querySelectorAll('[data-screen="landing"] .book-summary-item').length`);
       await click(renderer, '加载更多图书', 'word-lineage-restart-more-books');
