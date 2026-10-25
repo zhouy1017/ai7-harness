@@ -24,6 +24,11 @@ import {
   WORD_EXTRACTOR_IDENTITY,
   stageWordRevisionIntake,
   requireWordStagedIntake,
+  createWordSampleDetailContext,
+  wordSampleDetailContextCurrent,
+  resolveWordSampleDetailSource,
+  wordSampleDetailStream,
+  pageWordSampleDetail,
   type WordImportChoiceRecord,
 } from '../../src/service/import-retention.js';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
@@ -233,12 +238,30 @@ describe('closed Word retention definitions (#1132)', () => {
         expect(signal).toMatchObject({ kind: 'word-tracked-edit', schema: 'ai7.word-import-learning-signal/1',
           currentEligibility: 'house', memoryCandidate: null, eligibility: { decisionId: null, basisVersion: 2 } });
         expect(Object.hasOwn(signal.source, 'decisionId')).toBe(false);
+        const context = createWordSampleDetailContext(db, bookId, sourceVersionId, compiled);
+        const firstSource = sources[0]!;
+        const historicalImports = ledger.wordSampleImports(bookId, firstSource.sampleId, firstSource.sampleDigest);
+        const detail = resolveWordSampleDetailSource(db, context, firstSource.sampleId, firstSource.sampleDigest, historicalImports);
+        const detailDigest = wordSampleDetailStream(detail).detailDigest;
+        const page = pageWordSampleDetail(detail, null);
+        expect(page.sampleDigest).toBe(firstSource.sampleDigest);
+        expect(page.items.length).toBeGreaterThan(0);
+        expect(page.items.some((item) => item.kind === 'record' && item.record.type === 'import')).toBe(true);
+        expect(wordSampleDetailContextCurrent(db, context)).toBe(true);
+        expect(() => resolveWordSampleDetailSource(db, context, firstSource.sampleId, 'f'.repeat(64), historicalImports)).toThrow();
+        expect(() => resolveWordSampleDetailSource(db, context, firstSource.sampleId, firstSource.sampleDigest, [])).toThrow();
         expect(() => ledger.sourceSnapshot(signal.signalId)).toThrow();
         expect(() => ledger.create({ clientMemoryId: randomUUID(), signalId: signal.signalId, title: '拒绝 Word 记忆', editorialDimension: '语言', confidence: 0.5 })).toThrow();
         expect(() => ledger.create({ schema: 'ai7.global-editorial-memory/2', actionId: randomUUID(), signalIds: [signal.signalId],
           applicability: { kind: 'house' }, title: '拒绝 Word 记忆', editorialDimension: '语言', confidence: 0.5 }, 'development-ci')).toThrow();
         expect(inspect().items).toEqual([]);
         ledger.change({ kind: 'book', bookId, excluded: true, expectedEntries: 0 });
+        expect(wordSampleDetailContextCurrent(db, context)).toBe(false);
+        expect(() => resolveWordSampleDetailSource(db, context, firstSource.sampleId, firstSource.sampleDigest, historicalImports)).toThrow('缓存已变化');
+        const excludedContext = createWordSampleDetailContext(db, bookId, sourceVersionId, compiled);
+        const excludedDetail = resolveWordSampleDetailSource(db, excludedContext, firstSource.sampleId, firstSource.sampleDigest,
+          ledger.wordSampleImports(bookId, firstSource.sampleId, firstSource.sampleDigest));
+        expect(wordSampleDetailStream(excludedDetail).detailDigest).toBe(detailDigest);
         const bookExcluded = ledger.wordImportControls(bookId, materials);
         expect(() => derive(choice, bookExcluded)).toThrow('变化');
         expect(derive({ ...choice, effectiveControls: bookExcluded }, bookExcluded)).toEqual([]);
@@ -256,6 +279,7 @@ describe('closed Word retention definitions (#1132)', () => {
         expect(inspect().signals[0]!.currentEligibility).toBe('excluded');
         db.exec('DROP TRIGGER word_tracked_edit_sample_imports_no_update');
         db.prepare('UPDATE word_tracked_edit_sample_imports SET choice_digest = ?').run('f'.repeat(64));
+        expect(() => ledger.wordSampleImports(bookId, firstSource.sampleId, firstSource.sampleDigest)).toThrow();
         expect(inspect).toThrow(); // Corruption never becomes an empty eligible page.
       } finally { db.exec('ROLLBACK'); }
     });

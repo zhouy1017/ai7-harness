@@ -4,7 +4,7 @@ import type { ManuscriptBlockProjection, TextBoxDisposition } from '../shared/pr
 import { MAX_FRAME_BYTES } from '../shared/protocol.js';
 import { DOCX_PARSER_IDENTITY, DOCX_PARSER_IDENTITY_V1, DOCX_PARSER_IDENTITY_V2,
   WORD_DOCX_PARSER_IDENTITY, type ParsedTextBox, type ParsedDocx, type ParsedDocxBlock,
-  type NativeDocxIntakeParse } from './docx.js';
+  type NativeDocxIntakeParse, type WordTrackedCompilation } from './docx.js';
 import type { ParsedImportedMark } from './docx-marks.js';
 import type { LOCAL_LEARNING_POLICY_BASIS } from './learning-eligibility.js';
 import { canonicalJson as wordCanonicalJson, sha256Hex, DIGEST_PATTERN, UUID_PATTERN, hasExactKeys, isRecord } from './analysis/canonical.js';
@@ -548,6 +548,70 @@ export interface WordSampleDetailSource {
   sampleDigest: string;
   imports: ReadonlyArray<{ choice: WordImportChoiceRecord; choiceDigest: string;
     admission: WordLocalImportAdmission; admissionDigest: string }>;
+}
+
+export interface WordSampleDetailContext {
+  bookId: string;
+  sourceVersionId: string;
+  parentPinDigest: string;
+  generation: string;
+  graph: WordRevisionGraph;
+  graphDigest: string;
+  decodedAtoms: ReadonlyMap<number, string>;
+  eventIndex: ReadonlyMap<string, WordSourceEvent>;
+  samples: ReadonlyMap<string, { sample: WordTrackedEditSample; templateKey: string }>;
+}
+
+/** A cache never hides writes made through this connection, another connection, or a changed schema. */
+function wordDetailGeneration(db: DatabaseSync): string {
+  return wordCanonicalJson({ data: db.prepare('PRAGMA data_version').get(), schema: db.prepare('PRAGMA schema_version').get(),
+    changes: db.prepare('SELECT total_changes() changes').get() });
+}
+
+export function wordSampleDetailContextCurrent(db: DatabaseSync, context: WordSampleDetailContext): boolean {
+  return context.generation === wordDetailGeneration(db);
+}
+
+/** The caller verifies historical source records and original-object availability/bytes before compilation. */
+export function createWordSampleDetailContext(db: DatabaseSync, bookId: string, sourceVersionId: string,
+  compiled: Extract<WordTrackedCompilation, { kind: 'ready' }>): WordSampleDetailContext {
+  const generation = wordDetailGeneration(db);
+  const parent = readWordParentSourcePin(db, bookId, sourceVersionId);
+  requireRetention(parent.sourceDigest === compiled.sourceDigest && parent.sourceBytes === compiled.archiveBytes,
+    'WORD_SOURCE_INVALID', 'Word 详情的原始对象与已验证编译结果不一致。');
+  const pins = requireWordRevisionSource(db, parent, compiled.graph);
+  requireRetention(pins.graphDigest === compiled.graphDigest, 'WORD_SOURCE_INVALID', 'Word 详情来源图摘要无效。');
+  const samples = wordTrackedSamples(bookId, compiled.graph, compiled.templates);
+  const context: WordSampleDetailContext = { bookId, sourceVersionId, parentPinDigest: pins.parentSourcePinDigest, generation,
+    graph: compiled.graph, graphDigest: compiled.graphDigest, decodedAtoms: compiled.decodedAtoms,
+    eventIndex: new Map(compiled.graph.events.map((event) => [event.eventId, event])),
+    samples: new Map(samples.map((sample, index) => [sample.sampleId, { sample, templateKey: compiled.templates[index]!.templateKey }])) };
+  requireRetention(context.samples.size === samples.length && wordSampleDetailContextCurrent(db, context),
+    'WORD_DETAIL_CONTEXT_CHANGED', 'Word 详情来源在读取期间已变化。');
+  return context;
+}
+
+/** Actual compiler templates, exact stored rows and already-validated historical import memberships meet here. */
+export function resolveWordSampleDetailSource(db: DatabaseSync, context: WordSampleDetailContext, sampleId: string, sampleDigest: string,
+  imports: WordSampleDetailSource['imports']): WordSampleDetailSource {
+  requireRetention(wordSampleDetailContextCurrent(db, context), 'WORD_DETAIL_CONTEXT_CHANGED', 'Word 详情缓存已变化，请重新读取来源。');
+  const found = context.samples.get(sampleId);
+  const row = db.prepare('SELECT * FROM word_tracked_edit_samples WHERE sample_id = ? AND book_id = ?').get(sampleId, context.bookId);
+  requireRetention(found !== undefined && row !== undefined && row.source_version_id === context.sourceVersionId && row.sha256 === sampleDigest &&
+    row.template_key === found.templateKey,
+    'WORD_SAMPLE_INVALID', 'Word 修改样本不属于所选图书或来源。');
+  const sample = found.sample;
+  const expected = wordTrackedSampleRecord(sample);
+  const memberships = db.prepare(`SELECT wi.sha256 choice_digest, si.sha256 admission_digest FROM word_tracked_edit_sample_imports si
+    LEFT JOIN word_revision_imports wi ON wi.commit_id = si.commit_id WHERE si.sample_id = ? ORDER BY wi.created_at, si.commit_id`).all(sampleId);
+  requireRetention(expected.digest === sampleDigest && row.canonical_json === expected.json && imports.length > 0 && imports.length === memberships.length &&
+    imports.every(({ choice, choiceDigest, admissionDigest }, index) => choice.sourceVersionId === context.sourceVersionId &&
+      choice.parentSourcePinDigest === context.parentPinDigest && choice.originalDigest === context.graph.sourceDigest && choice.graphDigest === context.graphDigest &&
+      choiceDigest === memberships[index]!.choice_digest && admissionDigest === memberships[index]!.admission_digest),
+  'WORD_SAMPLE_INVALID', 'Word 修改样本或导入来源与实际编译清单不一致。');
+  requireRetention(wordSampleDetailContextCurrent(db, context), 'WORD_DETAIL_CONTEXT_CHANGED', 'Word 详情来源在读取期间已变化。');
+  return { sourceVersionId: context.sourceVersionId, graph: context.graph, graphDigest: context.graphDigest,
+    decodedAtoms: context.decodedAtoms, eventIndex: context.eventIndex, sample, sampleDigest, imports };
 }
 
 /** Resolve a pinned exact fragment, never a normalized manuscript excerpt. */

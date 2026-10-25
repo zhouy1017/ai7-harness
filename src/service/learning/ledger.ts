@@ -21,7 +21,7 @@ import { LearningEligibilityError, LearningEligibilityLedger, LOCAL_LEARNING_POL
 import { readWordParentSourcePin, wordParentSourcePinRecord, requireWordRevisionSource, wordTemplateKey,
   wordTrackedSampleRecord, validateWordChoice, WORD_EXTRACTOR_IDENTITY,
   type WordTrackedEditSample, type WordRevisionGraph, type WordImportChoiceRecord, type WordLocalImportAdmission,
-  type WordImportControlsSnapshot, type WordMaterialStandingSnapshot } from '../import-retention.js';
+  type WordImportControlsSnapshot, type WordMaterialStandingSnapshot, type WordSampleDetailSource } from '../import-retention.js';
 import { WORD_DOCX_PARSER_IDENTITY } from '../docx.js';
 
 type Row = Record<string, SQLOutputValue>;
@@ -389,6 +389,31 @@ export class EditorialLearningLedger {
         result.push(signal.signalId);
       }
       return result;
+    });
+  }
+
+  /** Historical inspection stays available under current exclusions; it grants no memory-source admission. */
+  wordSampleImports(bookId: string, sampleId: string, sampleDigest: string): WordSampleDetailSource['imports'] {
+    return this.#read(() => {
+      requireLearning(UUID_PATTERN.test(bookId) && /^wts_[0-9a-f]{64}$/u.test(sampleId) && DIGEST_PATTERN.test(sampleDigest));
+      const sampleRow = this.db.prepare('SELECT * FROM word_tracked_edit_samples WHERE sample_id = ? AND book_id = ?').get(sampleId, bookId);
+      requireLearning(sampleRow && sampleRow.sha256 === sampleDigest);
+      const stored = read<WordTrackedEditSample & { schema: string }>(sampleRow);
+      const { schema, ...sample } = stored;
+      requireLearning(schema === 'ai7.word-tracked-edit-sample/1');
+      const memberships = this.db.prepare(`SELECT si.commit_id, si.sha256, si.captured_at, wi.commit_id retained_commit_id FROM word_tracked_edit_sample_imports si
+        LEFT JOIN word_revision_imports wi ON wi.commit_id = si.commit_id WHERE si.sample_id = ? ORDER BY wi.created_at, si.commit_id`).all(sampleId);
+      requireLearning(memberships.length > 0 && memberships.every((entry) => entry.commit_id === entry.retained_commit_id));
+      return memberships.map((membership) => {
+        const candidate = wordTrackedEditCandidate(sample, sampleDigest, String(membership.captured_at));
+        const source: WordTrackedEditLearningSource = { bookId, sampleId, sampleDigest, sourceVersionId: String(sampleRow.source_version_id),
+          sourceDigest: sample.sourceDigest, graphDigest: sample.graphDigest, importCommitId: String(membership.commit_id),
+          admissionDigest: String(membership.sha256), materialKey: candidate.materialKey, materialDigest: learningMaterialDigest(candidate) };
+        const evidence = this.#wordEvidence(source);
+        const imported = this.#reads?.wordImports.get(source.importCommitId);
+        requireLearning(imported);
+        return { choice: imported.choice, choiceDigest: imported.digest, admission: evidence.admission, admissionDigest: source.admissionDigest };
+      });
     });
   }
 
