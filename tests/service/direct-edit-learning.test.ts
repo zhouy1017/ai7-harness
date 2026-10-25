@@ -22,16 +22,19 @@ import {
   type JournalAcknowledgement,
   type JournalEditInput,
 } from '../../src/shared/protocol.js';
-import { importSample1Book, requireExactSample1 } from '../support/sample1-baseline.js';
+import { ADMITTED_BASELINE_DOCX, composeRevisedDocx, sourceSpanText, type ComposedRevisedParagraph } from '../support/composed-fixture.js';
+import { importSample1Book, requireExactSample1, SAMPLE1_BLOCKS } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
 // Service-integration suite (L2) for Issue #1140's first phase: the exact source of an original manual command, read
-// from the real journal owners on a temporary Agent Data Root with exact `sample1`. Books are made and imported through
-// the real Store, which is then shut down cleanly and closed before one SQLite connection and one BoundedManuscriptStore
-// drive the editor's own freehand flush, manual Search/Replace, undo and redo; AI7 Apply runs through the reopened
-// Store. Nothing is captured as learning yet: these tests prove the reader, and that reading writes nothing. SQL here only
-// locates real records, recomputes their digests independently, or damages a disposable store for a refusal. Manuscript
-// text is compared by boolean, digest, count and position only, and never printed.
+// from the real journal owners on a temporary Agent Data Root with exact `sample1` or a manuscript composed from it.
+// Books are made and imported through the real Store, which is then shut down cleanly and closed before one SQLite
+// connection and one BoundedManuscriptStore drive the editor's own freehand flush, manual Search/Replace, undo and redo;
+// AI7 Apply and recovery after an unclean close run through the reopened Store. Nothing is captured as learning yet:
+// these tests prove the reader, and that reading writes nothing (`total_changes()` on the reading connection stays put).
+// SQL here only locates real records, recomputes their digests independently, or damages a disposable store for a
+// refusal — a negative fixture, never authority for anything. Manuscript text is compared by boolean, digest, count and
+// position only, and never printed.
 
 let roots: ServiceTestRoots;
 
@@ -74,6 +77,11 @@ function only(db: DatabaseSync, sql: string, ...params: SQLInputValue[]): Row {
 
 function counts(db: DatabaseSync): Record<string, number> {
   return Object.fromEntries(TRACKED.map((table) => [table, int(only(db, `SELECT count(*) total FROM ${table}`).total)]));
+}
+
+/** Every row this connection has inserted, updated or deleted since it opened. */
+function writes(db: DatabaseSync): number {
+  return int(only(db, 'SELECT total_changes() total').total);
 }
 
 function code(operation: () => unknown): string {
@@ -214,8 +222,11 @@ async function withStore<T>(work: (store: EditorialStore) => Promise<T> | T): Pr
   }
 }
 
-/** One connection and one journal owner over the closed Store, for one service lifetime. */
-function withOwners<T>(work: (owners: Owners) => T): T {
+/**
+ * One connection and one journal owner over the closed Store, for one service lifetime. `interrupted` closes the
+ * connection without ending the lifetime, which is what an interrupted product process leaves behind.
+ */
+function withOwners<T>(work: (owners: Owners) => T, { interrupted = false } = {}): T {
   const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
   try {
     db.exec('PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000');
@@ -223,11 +234,88 @@ function withOwners<T>(work: (owners: Owners) => T): T {
     const lifetime = randomUUID();
     bounded.startServiceLifetime(lifetime, new Date().toISOString());
     const result = work({ db, bounded, lifetime });
-    bounded.markServiceLifetimeClean(lifetime, new Date().toISOString());
+    if (!interrupted) bounded.markServiceLifetimeClean(lifetime, new Date().toISOString());
     return result;
   } finally {
     db.close();
   }
+}
+
+/** The next start after an interruption raises recovery for the book's branch; the editor restores one candidate. */
+async function restoreAfterInterruption(book: Book, kind: 'journal' | 'checkpoint'): Promise<{ restorationId: string; descendantRevisionId: string }> {
+  return withStore(async (store) => {
+    const startup = await store.getStartup();
+    expect(startup.state).toBe('manuscript-recovery');
+    if (startup.state !== 'manuscript-recovery') throw new Error('unreachable');
+    expect(startup.recovery.branchId).toBe(book.branchId);
+    const restoration = await store.restoreRecovery(randomUUID(), startup.recovery.attentionId, startup.recovery.attentionVersion, { kind });
+    expect(restoration.selected).toEqual({ kind });
+    return { restorationId: restoration.restorationId, descendantRevisionId: restoration.descendantRevisionId };
+  });
+}
+
+/** A page budget of about three of the source's largest members, and the pinned cursor its first page ends on. */
+function pinnedCursor(bounded: BoundedManuscriptStore, source: ManualCommandSource): { cursor: ManualCommandSourceCursor; budget: number } {
+  const whole = bounded.readManualCommandSource(source, null, MAX_FRAME_BYTES);
+  const largest = Math.max(...whole.members.map((member, index) => bytes(member) + bytes(whole.current[index]) + 2));
+  const budget = bytes({
+    ...whole, members: [], current: [],
+    next: { commandGroupId: source.commandGroupId, evidenceDigest: source.evidenceDigest, afterPosition: source.memberCount, historyDigest: whole.history.digest },
+  }) + 3 * largest;
+  const first = bounded.readManualCommandSource(source, null, budget);
+  expect(first.next).not.toBeNull();
+  return { cursor: first.next!, budget };
+}
+
+const LARGE_PARAGRAPHS = 300;
+
+/**
+ * A manuscript of `LARGE_PARAGRAPHS` ordinary paragraphs composed from `sample1`'s own blocks, each paragraph a few
+ * whole source blocks that hold the grapheme the source shares most widely, so that one manual replacement of it
+ * changes every paragraph. Imported through the Store's normal staging, review and commit.
+ */
+async function importLargeBook(store: EditorialStore): Promise<Book & { query: string }> {
+  const texts = new Map<number, string>();
+  for (let block = 1; block <= SAMPLE1_BLOCKS; block += 1) {
+    try {
+      texts.set(block, await sourceSpanText(ADMITTED_BASELINE_DOCX, { block }));
+    } catch {
+      // A block with no graphemes offers no span.
+    }
+  }
+  const coverage = new Map<string, number>();
+  for (const text of texts.values()) {
+    for (const part of new Set(graphemesOf(text))) coverage.set(part, (coverage.get(part) ?? 0) + 1);
+  }
+  const [query] = [...coverage]
+    .filter(([part]) => part.trim() === part && part.normalize('NFC') === part && !REPLACEMENT.includes(part))
+    .sort((left, right) => right[1] - left[1])[0]!;
+  const carriers = [...texts].filter(([, text]) => graphemesOf(text).includes(query)).map(([block, text]) => ({ block, text }));
+  const paragraphs: ComposedRevisedParagraph[] = [];
+  for (let next = 0; paragraphs.length < LARGE_PARAGRAPHS;) {
+    const runs: Array<{ text: { block: number } }> = [];
+    let graphemes = 0;
+    let units = 0;
+    for (;;) {
+      const carrier = carriers[next % carriers.length]!;
+      const size = graphemesOf(carrier.text).length;
+      if (runs.length > 0 && (graphemes + size > 700 || units + carrier.text.length > 1_800)) break;
+      runs.push({ text: { block: carrier.block } });
+      graphemes += size;
+      units += carrier.text.length;
+      next += 1;
+    }
+    paragraphs.push({ runs });
+  }
+  const path = join(roots.inputRoot, 'large.docx');
+  await composeRevisedDocx(path, { source: ADMITTED_BASELINE_DOCX, title: '大组替换组稿', paragraphs });
+  const staged = await store.stageSelectedManuscript(randomUUID(), path);
+  const review = store.prepareNewBookReview(staged.draftId, staged.draftVersion,
+    { kind: 'new-book', choiceId: 'new-book', confirmedTitle: staged.titleSuggestion.value }, false);
+  const commitId = randomUUID();
+  const commit = await store.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest!, commitId });
+  await store.acknowledgeImportCompletion(commitId);
+  return { bookId: commit.bookId, manuscriptId: commit.manuscriptId, branchId: commit.branchId, query };
 }
 
 async function createBooks(): Promise<{ empty: string; book: Book }> {
@@ -429,7 +517,10 @@ describe('the exact source of an original manual command (Issue #1140, first pha
 
       // Reading created nothing, and no learning signal exists: capture is not wired in this phase.
       const settled = counts(db);
+      const quiet = writes(db);
       for (let read = 0; read < 3; read += 1) bounded.readManualCommandSource(source, null, MAX_FRAME_BYTES);
+      expect(code(() => bounded.readManualCommandSource({ ...source, evidenceDigest: 'f'.repeat(64) }, null, MAX_FRAME_BYTES))).toBe('MANUAL_SOURCE_MISMATCH');
+      expect(writes(db)).toBe(quiet);
       expect(counts(db)).toEqual(settled);
       expect(settled.learning_signals).toBe(0);
       expect(verifiedChain(db, book.branchId)).toBe(2 + flushes);
@@ -439,9 +530,11 @@ describe('the exact source of an original manual command (Issue #1140, first pha
     // The reopened Store accepts the history whole, and the source still reads the same with nothing added.
     await withStore(() => undefined);
     withOwners(({ db, bounded }) => {
+      const quiet = writes(db);
       const reread = bounded.readManualCommandSource(firstRead.source, null, MAX_FRAME_BYTES);
       expect(reread.evidenceDigest).toBe(firstRead.digest);
       expect(reassembled(firstRead.source, [reread]).exact).toBe(true);
+      expect(writes(db)).toBe(quiet);
       expect(counts(db)).toEqual(firstRead.settled);
     });
   }, 180_000);
@@ -468,6 +561,7 @@ describe('the exact source of an original manual command (Issue #1140, first pha
       expect(source.commandKind).toBe('replacement');
       expect(source.memberCount).toBe(blocks);
       expect(workingDigestOf(source.beforeWorkingDigest, source.journalSequence, 'replacement', source.commandGroupId, source.evidenceDigest)).toBe(source.afterWorkingDigest);
+      const quiet = writes(db);
       const whole = readAll(bounded, source, MAX_FRAME_BYTES);
       const complete = reassembled(source, whole);
       expect(complete.exact).toBe(true);
@@ -513,6 +607,9 @@ describe('the exact source of an original manual command (Issue #1140, first pha
       expect(code(() => bounded.readManualCommandSource(
         { ...source, commandKind: 'edit', request: { origin: 'journal-edit', windowStartBlockId: complete.members[0]!.blockId } }, null, budget,
       ))).toBe('MANUAL_SOURCE_MISMATCH');
+
+      // Every page, every refusal: the reading connection wrote nothing.
+      expect(writes(db)).toBe(quiet);
 
       // Editing a replaced block changes the history: a pinned cursor refuses, an unpinned one reads the same evidence.
       const touched = complete.members[0]!.blockId;
@@ -620,6 +717,7 @@ describe('the exact source of an original manual command (Issue #1140, first pha
     });
 
     withOwners(({ db, bounded }) => {
+      const quiet = writes(db);
       // An Apply and its reversal journal `replacement` too, but no preview proves either manual.
       for (const sequence of [applied.apply, applied.reverse]) {
         const entry = entryAt(db, book.branchId, sequence);
@@ -651,6 +749,152 @@ describe('the exact source of an original manual command (Issue #1140, first pha
       expect(signals.every((json) => typeof JSON.parse(json).source?.decisionId === 'string')).toBe(true);
       expect(signals.every((json) => [local.manual, local.freehand].every((source) =>
         !json.includes(source.commandGroupId) && !json.includes(source.journalEntryId)))).toBe(true);
+      expect(writes(db)).toBe(quiet);
     });
   }, 180_000);
+
+  it('reads an owner-created replacement of more than 256 blocks in several full frames, through undo and redo, and refuses damage far past the first page', async () => {
+    const book = await withStore((store) => importLargeBook(store));
+    withOwners((owners) => {
+      const { db, bounded, lifetime } = owners;
+      expect(int(only(db, 'SELECT count(*) total FROM working_blocks WHERE branch_id = ?', book.branchId).total)).toBe(LARGE_PARAGRAPHS);
+      const replaced = replaceAll(owners, book, book.query, REPLACEMENT);
+      const source = sourceOf(db, entryAt(db, book.branchId, replaced.journalSequence), { origin: 'manual-search-replacement', previewId: replaced.previewId });
+      // Every block changed: one command of more than two 128-member storage batches.
+      expect(source.memberCount).toBe(LARGE_PARAGRAPHS);
+      expect(source.memberCount).toBeGreaterThan(2 * 128);
+      expect(workingDigestOf(source.beforeWorkingDigest, source.journalSequence, 'replacement', source.commandGroupId, source.evidenceDigest)).toBe(source.afterWorkingDigest);
+
+      // At the full frame budget the evidence needs several pages, each packed with whole members up to the frame.
+      const quiet = writes(db);
+      const pages = readAll(bounded, source, MAX_FRAME_BYTES);
+      const complete = reassembled(source, pages);
+      expect(complete.exact).toBe(true);
+      expect(pages.length).toBeGreaterThan(1);
+      expect(complete.members.reduce((total, member) => total + bytes(member), 0)).toBeGreaterThan(MAX_FRAME_BYTES);
+      const states = pages.flatMap((page) => page.current);
+      expect(states.every((state, index) => state.position === index + 1 && state.block === 'recorded-after')).toBe(true);
+      for (const page of pages) {
+        expect(bytes(page)).toBeLessThanOrEqual(MAX_FRAME_BYTES);
+        if (page.next === null) continue;
+        const following = page.next.afterPosition;
+        const worstNext = { ...page.next, afterPosition: source.memberCount, historyDigest: page.history.digest };
+        expect(bytes({ ...page, next: worstNext }) + bytes(complete.members[following]) + bytes(states[following]) + 2 > MAX_FRAME_BYTES).toBe(true);
+      }
+      expect(writes(db)).toBe(quiet);
+
+      // Undo and redo of the whole large group keep its evidence; only its history moves.
+      const workingDigest = (): string => bounded.getWindow(book.manuscriptId, book.branchId, { kind: 'start' }).workingDigest;
+      const undone = bounded.undo(book.manuscriptId, book.branchId, workingDigest(), lifetime);
+      expect(undone.commandGroupId).toBe(source.commandGroupId);
+      const afterUndo = readAll(bounded, source, MAX_FRAME_BYTES);
+      expect(reassembled(source, afterUndo).exact).toBe(true);
+      expect(afterUndo.every((page) => page.history.groupStatus === 'undone' && page.history.lastAction.kind === 'undo' &&
+        page.history.lastAction.sequence === undone.journalSequence)).toBe(true);
+      expect(afterUndo.flatMap((page) => page.current).every((state) => state.block === 'other-text')).toBe(true);
+      const redone = bounded.redo(book.manuscriptId, book.branchId, workingDigest(), lifetime);
+      const afterRedo = readAll(bounded, source, MAX_FRAME_BYTES);
+      expect(reassembled(source, afterRedo).exact).toBe(true);
+      expect(afterRedo.every((page) => page.history.groupStatus === 'applied' && page.history.lastAction.kind === 'redo' &&
+        page.history.lastAction.sequence === redone.journalSequence)).toBe(true);
+      expect(afterRedo.flatMap((page) => page.current).every((state) => state.block === 'recorded-after')).toBe(true);
+      expect(verifiedChain(db, book.branchId)).toBe(3);
+
+      // Negative fixtures on this disposable store only. The last member lies past the first 128 rows and past the first
+      // full page, and damage to it still refuses the first page.
+      const last = source.memberCount;
+      expect(last).toBeGreaterThan(128);
+      expect(afterRedo[0]!.members.at(-1)!.position).toBeLessThan(last);
+      const row = only(db,
+        `SELECT ce.after_text, ce.after_digest, wb.kind, wb.level FROM manuscript_command_edits ce
+         JOIN working_blocks wb ON wb.branch_id = ? AND wb.block_id = ce.block_id
+         WHERE ce.command_group_id = ? AND ce.position = ?`,
+        book.branchId, source.commandGroupId, last);
+      const original = { text: text(row.after_text), digest: text(row.after_digest) };
+      const damaged = `${original.text}丁`;
+      const damage = db.prepare('UPDATE manuscript_command_edits SET after_text = ?, after_digest = ? WHERE command_group_id = ? AND position = ?');
+      damage.run(damaged, original.digest, source.commandGroupId, last);
+      expect(code(() => bounded.readManualCommandSource(source, null, MAX_FRAME_BYTES))).toBe('HISTORY_CORRUPT');
+      // A forgery whose row digest agrees with its text passes the row checks; the working-state chain still refuses it.
+      const consistent = sha256(canonical({ kind: text(row.kind), level: row.level === null ? null : int(row.level), text: damaged }));
+      damage.run(damaged, consistent, source.commandGroupId, last);
+      expect(code(() => bounded.readManualCommandSource(source, null, MAX_FRAME_BYTES))).toBe('HISTORY_CORRUPT');
+      damage.run(original.text, original.digest, source.commandGroupId, last);
+      expect(reassembled(source, readAll(bounded, source, MAX_FRAME_BYTES)).exact).toBe(true);
+      expect(counts(db).learning_signals).toBe(0);
+    });
+  }, 300_000);
+
+  it('reports journal and checkpoint restorations after unclean closes as history beside unchanged sources, refusing cursors pinned before them', async () => {
+    const { book } = await createBooks();
+    // First lifetime: a manual replacement and a freehand edit outside it; then the process is interrupted.
+    const before = withOwners((owners) => {
+      const { db, bounded } = owners;
+      const { query } = frequentGrapheme(db, book.branchId);
+      const replaced = replaceAll(owners, book, query, REPLACEMENT);
+      const manual = sourceOf(db, entryAt(db, book.branchId, replaced.journalSequence), { origin: 'manual-search-replacement', previewId: replaced.previewId });
+      const outside = text(only(db,
+        `SELECT block_id FROM working_blocks WHERE branch_id = ? AND block_id NOT IN (
+           SELECT block_id FROM manuscript_command_edits WHERE command_group_id = ?
+         ) ORDER BY position LIMIT 1`,
+        book.branchId, manual.commandGroupId).block_id);
+      const typed = typeInto(owners, book, outside, 0, 0, '戊');
+      const freehand = sourceOf(db, entryOfEdit(db, typed.input.clientEditId), { origin: 'journal-edit', windowStartBlockId: typed.input.windowStartBlockId });
+      expect(bounded.readManualCommandSource(freehand, null, MAX_FRAME_BYTES).history.restoration).toBeNull();
+      return { manual, freehand, pinned: pinnedCursor(bounded, manual) };
+    }, { interrupted: true });
+
+    const journal = await restoreAfterInterruption(book, 'journal');
+    const middle = withOwners((owners) => {
+      const { db, bounded } = owners;
+      const quiet = writes(db);
+      const restoration = { restorationId: journal.restorationId, selectedKind: 'journal', selectedSnapshotId: null, descendantRevisionId: journal.descendantRevisionId };
+      // The restoration moved the history the cursor was pinned to; the evidence is the same.
+      expect(code(() => bounded.readManualCommandSource(before.manual, before.pinned.cursor, before.pinned.budget))).toBe('MANUAL_SOURCE_HISTORY_CHANGED');
+      const manual = readAll(bounded, before.manual, MAX_FRAME_BYTES);
+      expect(reassembled(before.manual, manual).exact).toBe(true);
+      expect(manual[0]!.history).toMatchObject({
+        revisionId: journal.descendantRevisionId, groupStatus: 'superseded', boundaryCrossed: true,
+        lastAction: { kind: 'replacement', journalEntryId: before.manual.journalEntryId }, restoration,
+      });
+      expect(manual[0]!.history.historyBoundarySequence).toBe(manual[0]!.history.historySequence);
+      // The journal candidate kept the text: every member's block still holds what the command wrote.
+      expect(manual.flatMap((page) => page.current).every((state) => state.block === 'recorded-after')).toBe(true);
+      const freehand = bounded.readManualCommandSource(before.freehand, null, MAX_FRAME_BYTES);
+      expect(reassembled(before.freehand, [freehand]).exact).toBe(true);
+      expect(freehand.history).toMatchObject({ revisionId: journal.descendantRevisionId, groupStatus: 'superseded', boundaryCrossed: true, restoration });
+      expect(freehand.current).toEqual([{ position: 1, block: 'recorded-after' }]);
+      expect(writes(db)).toBe(quiet);
+
+      // Second lifetime: the editor replaces again on the restored state, and is interrupted again.
+      const replaced = replaceAll(owners, book, '😀', '"');
+      const later = sourceOf(db, entryAt(db, book.branchId, replaced.journalSequence), { origin: 'manual-search-replacement', previewId: replaced.previewId });
+      expect(later.baseRevisionId).toBe(journal.descendantRevisionId);
+      expect(bounded.readManualCommandSource(later, null, MAX_FRAME_BYTES).history.restoration).toBeNull();
+      return { later, pinned: pinnedCursor(bounded, later) };
+    }, { interrupted: true });
+
+    const checkpoint = await restoreAfterInterruption(book, 'checkpoint');
+    withOwners(({ db, bounded }) => {
+      const quiet = writes(db);
+      const restoration = { restorationId: checkpoint.restorationId, selectedKind: 'checkpoint', selectedSnapshotId: null, descendantRevisionId: checkpoint.descendantRevisionId };
+      expect(code(() => bounded.readManualCommandSource(middle.later, middle.pinned.cursor, middle.pinned.budget))).toBe('MANUAL_SOURCE_HISTORY_CHANGED');
+      // The checkpoint candidate discarded the later replacement: its evidence stays whole while its blocks hold other text.
+      const later = readAll(bounded, middle.later, MAX_FRAME_BYTES);
+      expect(reassembled(middle.later, later).exact).toBe(true);
+      expect(later[0]!.history).toMatchObject({ revisionId: checkpoint.descendantRevisionId, groupStatus: 'superseded', boundaryCrossed: true, restoration });
+      expect(later.flatMap((page) => page.current).every((state) => state.block === 'other-text')).toBe(true);
+      // The earlier commands are what that checkpoint holds: the latest restoration after them is this one.
+      const earlier = readAll(bounded, before.manual, MAX_FRAME_BYTES);
+      expect(reassembled(before.manual, earlier).exact).toBe(true);
+      expect(earlier[0]!.history).toMatchObject({ revisionId: checkpoint.descendantRevisionId, restoration });
+      expect(earlier.flatMap((page) => page.current).every((state) => state.block === 'recorded-after')).toBe(true);
+      const freehand = bounded.readManualCommandSource(before.freehand, null, MAX_FRAME_BYTES);
+      expect(freehand.history.restoration).toEqual(restoration);
+      expect(freehand.current).toEqual([{ position: 1, block: 'recorded-after' }]);
+      expect(writes(db)).toBe(quiet);
+      expect(verifiedChain(db, book.branchId)).toBe(3);
+      expect(counts(db).learning_signals).toBe(0);
+    });
+  }, 300_000);
 });
