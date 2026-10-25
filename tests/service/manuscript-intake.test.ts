@@ -258,6 +258,39 @@ const SOURCE_ONLY_INPUTS: ReadonlyArray<{ format: SourceFormat; fileName: string
 ];
 
 describe('native Word reading preparation over the real store', () => {
+  it.each(['suggestions', 'accepted-baseline'] as const)('cancels a prepared native Word %s import without retaining a source, sample, admission or signal', async (mode) => {
+    const path = join(roots.inputRoot, `word-cancel-${mode}.docx`);
+    await composeRevisedDocx(path, { source: ADMITTED_BASELINE_DOCX, title: '取消 Word 导入', paragraphs: [
+      { runs: [{ text: { block: 8, from: 0, to: 10 } }, { text: { block: 9, from: 0, to: 5 },
+        revision: { kind: 'ins', author: '作者', date: '2026-10-25T00:00:00Z' } }] },
+    ] });
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const staged = await store.stageSelectedManuscript(randomUUID(), path);
+      const reviewed = store.prepareNewBookReview(staged.draftId, staged.draftVersion,
+        { kind: 'new-book', choiceId: 'new-book', confirmedTitle: staged.titleSuggestion.value }, false, 'retain',
+        { mode, learnFromEdits: true, acceptedBaselineConfirmed: mode === 'accepted-baseline' });
+      if (reviewed.reviewDigest === null) throw new Error('expected cancellable real Word preparation');
+      expect(reviewed.wordLearning?.eligibleSampleCount).toBe(1);
+      expect((await store.abandonImportDraft(staged.draftId, reviewed.draftVersion)).state).toBe('none');
+      await expect(store.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: reviewed.draftVersion,
+        reviewDigest: reviewed.reviewDigest, commitId: randomUUID() })).rejects.toMatchObject({ code: 'DRAFT_NOT_FOUND' });
+      expect(await countObjectFiles(roots.dataRoot)).toBe(0);
+      store.markCleanShutdown(); store.close();
+      store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      expect((await store.getImportStartup()).state).toBe('none');
+      const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+      try {
+        for (const table of ['staged_word_revision_intakes', 'word_revision_sources', 'word_revision_imports', 'word_manuscript_source_segments',
+          'word_tracked_edit_samples', 'word_tracked_edit_sample_imports', 'word_import_mark_sources', 'books', 'source_versions',
+          'content_objects', 'import_commits', 'learning_signals']) {
+          expect(db.prepare(`SELECT count(*) total FROM ${table}`).get()!.total).toBe(0);
+        }
+      } finally { db.close(); }
+      store.markCleanShutdown();
+    } finally { store.close(); }
+  });
+
   it('refuses a corrupt off-page Word signal before the first page and keeps source pairs current after manuscript edits', async () => {
     const path = join(roots.inputRoot, 'word-current-source-batch.docx');
     await composeRevisedDocx(path, { source: ADMITTED_BASELINE_DOCX, title: '完整当前来源验证', paragraphs: Array.from({ length: 35 }, (_, index) =>
