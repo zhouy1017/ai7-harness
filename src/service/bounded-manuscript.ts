@@ -3695,43 +3695,97 @@ function blockDigest(kind: ManuscriptBlockProjection['kind'], level: number | nu
   return sha256(canonicalJson({ kind, level, text }));
 }
 
-function recoveryCommandEvidenceDigest(db: DatabaseSync, groupId: string): string {
-  validateCommandHistoryGroup(db, groupId);
-  const group = one(db.prepare(
-    `SELECT branch_id, ordinal, kind, source_group_id
-     FROM manuscript_command_groups WHERE command_group_id = ?`,
-  ).all(groupId) as SqlRow[], 'HISTORY_CORRUPT', '恢复命令证据缺失。');
-  const digest = createHash('sha256');
-  digest.update(canonicalJson({
-    schema: 'ai7.recovery-command-evidence/1',
-    groupId,
-    branchId: asString(group.branch_id),
-    ordinal: asNumber(group.ordinal),
-    kind: asString(group.kind),
-    sourceGroupId: group.source_group_id === null ? null : asString(group.source_group_id),
-  }));
-  let position = 0;
-  while (true) {
-    const edits = db.prepare(
+/** The canonical header `ai7.recovery-command-evidence/1` hashes before a command group's members. */
+export interface CommandEvidenceHeader {
+  readonly schema: 'ai7.recovery-command-evidence/1';
+  readonly groupId: string;
+  readonly branchId: string;
+  readonly ordinal: number;
+  readonly kind: 'edit' | 'replacement';
+  readonly sourceGroupId: string | null;
+}
+
+/** One member of a command group exactly as its evidence hashes it: the block's whole text before and after. */
+export interface CommandEvidenceMember {
+  readonly position: number;
+  readonly blockId: string;
+  readonly beforeText: string;
+  readonly beforeDigest: string;
+  readonly afterText: string;
+  readonly afterDigest: string;
+}
+
+/**
+ * The one reading of a command group's immutable evidence (Issue #1140). The group is validated whole first; then its
+ * canonical header and every member, in position order and in storage batches, pass through the
+ * `ai7.recovery-command-evidence/1` digest as they are read. The working-state chain keeps only that digest; the manual
+ * source reader also keeps the members of the page it is packing, so the page and the digest that proves it come from
+ * one pass over the group.
+ */
+class CommandEvidenceReader {
+  readonly header: CommandEvidenceHeader;
+  readonly #db: DatabaseSync;
+  readonly #digest = createHash('sha256');
+  #position = 0;
+  #count = 0;
+  #exhausted = false;
+
+  constructor(db: DatabaseSync, groupId: string) {
+    validateCommandHistoryGroup(db, groupId);
+    const group = one(db.prepare(
+      `SELECT branch_id, ordinal, kind, source_group_id
+       FROM manuscript_command_groups WHERE command_group_id = ?`,
+    ).all(groupId) as SqlRow[], 'HISTORY_CORRUPT', '恢复命令证据缺失。');
+    this.#db = db;
+    this.header = {
+      schema: 'ai7.recovery-command-evidence/1',
+      groupId,
+      branchId: asString(group.branch_id),
+      ordinal: asNumber(group.ordinal),
+      kind: asString(group.kind) as CommandEvidenceHeader['kind'],
+      sourceGroupId: group.source_group_id === null ? null : asString(group.source_group_id),
+    };
+    this.#digest.update(canonicalJson(this.header));
+  }
+
+  /** The next storage batch of members, each already hashed; empty once the last member has been read. */
+  nextBatch(): CommandEvidenceMember[] {
+    if (this.#exhausted) return [];
+    const edits = this.#db.prepare(
       `SELECT position, block_id, before_text, before_digest, after_text, after_digest
        FROM manuscript_command_edits
        WHERE command_group_id = ? AND position > ? ORDER BY position LIMIT ?`,
-    ).all(groupId, position, HISTORY_BATCH) as SqlRow[];
-    if (edits.length === 0) break;
-    for (const edit of edits) {
-      position = asNumber(edit.position);
-      digest.update(canonicalJson({
-        position,
+    ).all(this.header.groupId, this.#position, HISTORY_BATCH) as SqlRow[];
+    if (edits.length === 0) {
+      this.#exhausted = true;
+      return [];
+    }
+    return edits.map((edit) => {
+      this.#position = asNumber(edit.position);
+      const member: CommandEvidenceMember = {
+        position: this.#position,
         blockId: asString(edit.block_id),
         beforeText: asString(edit.before_text),
         beforeDigest: asString(edit.before_digest),
         afterText: asString(edit.after_text),
         afterDigest: asString(edit.after_digest),
-      }));
-    }
+      };
+      this.#digest.update(canonicalJson(member));
+      this.#count += 1;
+      return member;
+    });
   }
-  requireBounded(position > 0, 'HISTORY_CORRUPT', '恢复命令证据为空。');
-  return digest.digest('hex');
+
+  /** Reads whatever members remain, then the whole group's digest and member count. */
+  finish(): { memberCount: number; digest: string } {
+    while (this.nextBatch().length > 0) { /* hashed as read */ }
+    requireBounded(this.#position > 0, 'HISTORY_CORRUPT', '恢复命令证据为空。');
+    return { memberCount: this.#count, digest: this.#digest.digest('hex') };
+  }
+}
+
+function recoveryCommandEvidenceDigest(db: DatabaseSync, groupId: string): string {
+  return new CommandEvidenceReader(db, groupId).finish().digest;
 }
 
 function recoveryWorkingDigest(
@@ -6503,6 +6557,129 @@ export type VerifiedRecoverySnapshot =
     }
   | { state: 'none' };
 
+/**
+ * The producer request a manual command was created by (Issue #1140), kept because its journal entry cannot give it
+ * back once the request is gone: freehand typing names the window the edit was made in, the manual Search/Replace
+ * commit the preview it committed. Every other field of the original request is read back from the journal entry and
+ * its member, and the entry's unchanged request fingerprint proves the whole. AI7 Apply journals `replacement` too, but
+ * under the fingerprint of its own command group, so no preview can pass an Apply off as manual.
+ */
+export type ManualCommandRequestPin =
+  | { readonly origin: 'journal-edit'; readonly windowStartBlockId: string }
+  | { readonly origin: 'manual-search-replacement'; readonly previewId: string };
+
+/**
+ * One original manual command named by its exact evidence (Issue #1140): the creation journal entry and command group,
+ * the Book, manuscript, branch and Revision they belong to, the working-state chain they joined and the immutable
+ * evidence digest that chain was computed over. It is the group's creation, never a later undo or redo of it.
+ */
+export interface ManualCommandSource {
+  readonly bookId: string;
+  readonly manuscriptId: string;
+  readonly branchId: string;
+  readonly baseRevisionId: string;
+  readonly journalEntryId: string;
+  readonly journalSequence: number;
+  readonly clientEditId: string;
+  readonly requestFingerprint: string;
+  readonly durableAt: string;
+  readonly commandGroupId: string;
+  readonly commandKind: 'edit' | 'replacement';
+  readonly commandOrdinal: number;
+  readonly sourceGroupId: null;
+  readonly beforeWorkingDigest: string;
+  readonly afterWorkingDigest: string;
+  readonly evidenceDigest: string;
+  readonly memberCount: number;
+  readonly request: ManualCommandRequestPin;
+}
+
+/** Where the next page starts: an exclusive member position of one exact source, and the history it was read against. */
+export interface ManualCommandSourceCursor {
+  readonly commandGroupId: string;
+  readonly evidenceDigest: string;
+  readonly afterPosition: number;
+  /** The `digest` of the history an earlier page reported; null reads the immutable evidence alone. */
+  readonly historyDigest: string | null;
+}
+
+/**
+ * What the editor's history holds now for the command's group, beside its immutable evidence and never part of it: the
+ * branch's current state, whether a history boundary (an Apply or a restoration) has crossed the group, the group's
+ * status and its latest journal action, and the latest restoration made after it. These are facts as they stand, not
+ * whether the change survived, was withdrawn or may be learned from.
+ */
+export interface ManualCommandHistory {
+  readonly revisionId: string;
+  readonly journalSequence: number;
+  readonly workingDigest: string;
+  readonly historySequence: number;
+  readonly historyBoundarySequence: number;
+  readonly boundaryCrossed: boolean;
+  readonly groupStatus: 'applied' | 'undone' | 'superseded';
+  readonly lastAction: { readonly kind: 'edit' | 'replacement' | 'undo' | 'redo'; readonly journalEntryId: string; readonly sequence: number };
+  readonly restoration: {
+    readonly restorationId: string;
+    readonly selectedKind: 'journal' | 'checkpoint' | 'snapshot';
+    readonly selectedSnapshotId: string | null;
+    readonly descendantRevisionId: string;
+  } | null;
+  readonly digest: string;
+}
+
+/** A page member's block in the working state now: gone, holding exactly the recorded after-text, or holding other text. */
+export interface ManualCommandMemberCurrent {
+  readonly position: number;
+  readonly block: 'absent' | 'recorded-after' | 'other-text';
+}
+
+export interface ManualCommandSourcePage {
+  readonly header: CommandEvidenceHeader;
+  readonly memberCount: number;
+  readonly evidenceDigest: string;
+  /** Whole members in position order: a page ends before the first member that would take it past its byte budget. */
+  readonly members: ReadonlyArray<CommandEvidenceMember>;
+  readonly current: ReadonlyArray<ManualCommandMemberCurrent>;
+  readonly next: ManualCommandSourceCursor | null;
+  readonly history: ManualCommandHistory;
+}
+
+const MANUAL_COMMAND_SOURCE_FIELDS = [
+  'bookId', 'manuscriptId', 'branchId', 'baseRevisionId', 'journalEntryId', 'journalSequence', 'clientEditId',
+  'requestFingerprint', 'durableAt', 'commandGroupId', 'commandKind', 'commandOrdinal', 'sourceGroupId',
+  'beforeWorkingDigest', 'afterWorkingDigest', 'evidenceDigest', 'memberCount', 'request',
+] as const;
+
+function hasExactFields(value: object, fields: ReadonlyArray<string>): boolean {
+  const own = Object.keys(value);
+  return own.length === fields.length && fields.every((field) => Object.hasOwn(value, field));
+}
+
+function encodedJsonBytes(value: unknown): number {
+  return Buffer.byteLength(JSON.stringify(value), 'utf8');
+}
+
+function requireManualCommandSource(source: ManualCommandSource): void {
+  const request: ManualCommandRequestPin | null = typeof source?.request === 'object' ? source.request : null;
+  requireBounded(
+    typeof source === 'object' && source !== null && hasExactFields(source, MANUAL_COMMAND_SOURCE_FIELDS) &&
+      [source.bookId, source.manuscriptId, source.branchId, source.baseRevisionId, source.journalEntryId, source.clientEditId, source.commandGroupId]
+        .every((id) => typeof id === 'string' && UUID_PATTERN.test(id)) &&
+      [source.requestFingerprint, source.beforeWorkingDigest, source.afterWorkingDigest, source.evidenceDigest]
+        .every((digest) => typeof digest === 'string' && DIGEST_PATTERN.test(digest)) &&
+      [source.journalSequence, source.commandOrdinal, source.memberCount].every((count) => Number.isSafeInteger(count) && count > 0) &&
+      typeof source.durableAt === 'string' && source.durableAt.isWellFormed() && source.durableAt.length > 0 && source.durableAt.length <= 64 &&
+      source.sourceGroupId === null && request !== null &&
+      (request.origin === 'journal-edit'
+        ? source.commandKind === 'edit' && hasExactFields(request, ['origin', 'windowStartBlockId']) &&
+          typeof request.windowStartBlockId === 'string' && BLOCK_PATTERN.test(request.windowStartBlockId)
+        : request.origin === 'manual-search-replacement' && source.commandKind === 'replacement' &&
+          hasExactFields(request, ['origin', 'previewId']) && typeof request.previewId === 'string' && UUID_PATTERN.test(request.previewId)),
+    'MANUAL_SOURCE_INVALID',
+    '手动编辑来源引用无效。',
+  );
+}
+
 export class BoundedManuscriptStore {
   readonly #db: DatabaseSync;
   readonly #cursorSecret = randomBytes(32);
@@ -8875,6 +9052,214 @@ export class BoundedManuscriptStore {
         canUndo: this.#hasHistory(branchId, 'applied'), canRedo: this.#hasHistory(branchId, 'undone'),
       };
     });
+  }
+
+  /**
+   * One page of an original manual command's exact evidence (Issue #1140). The source must prove itself against the
+   * real records first: its creation journal entry, command group, Book, manuscript, branch and Revision, its producer
+   * request recomputed into the entry's unchanged fingerprint, and the group's working-state chain recomputed over the
+   * evidence digest it names. Every page reads the whole group once through the same evidence the chain hashes, so a
+   * damaged member after the page refuses it as surely as one inside it; the page keeps whole members only, packed
+   * against `budgetBytes` of encoded JSON. The current history is reported beside the evidence and pinned by the
+   * cursor, so pages read across a change refuse rather than mix. Reading writes nothing.
+   */
+  readManualCommandSource(
+    source: ManualCommandSource,
+    cursor: ManualCommandSourceCursor | null,
+    budgetBytes: number,
+  ): ManualCommandSourcePage {
+    requireManualCommandSource(source);
+    requireBounded(Number.isSafeInteger(budgetBytes) && budgetBytes > 0 && budgetBytes <= MAX_FRAME_BYTES, 'MANUAL_SOURCE_INVALID', '手动编辑来源分页预算无效。');
+    requireBounded(
+      cursor === null || (
+        typeof cursor === 'object' && hasExactFields(cursor, ['commandGroupId', 'evidenceDigest', 'afterPosition', 'historyDigest']) &&
+          cursor.commandGroupId === source.commandGroupId && cursor.evidenceDigest === source.evidenceDigest &&
+          Number.isSafeInteger(cursor.afterPosition) && cursor.afterPosition >= 0 && cursor.afterPosition < source.memberCount &&
+          (cursor.historyDigest === null || (typeof cursor.historyDigest === 'string' && DIGEST_PATTERN.test(cursor.historyDigest)))
+      ),
+      'MANUAL_SOURCE_INVALID',
+      '手动编辑来源分页位置无效。',
+    );
+    const creation = this.#requireManualCommandCreation(source);
+    const history = this.#manualCommandHistory(source, creation.group, creation.latestSequence);
+    requireBounded(
+      cursor === null || cursor.historyDigest === null || cursor.historyDigest === history.digest,
+      'MANUAL_SOURCE_HISTORY_CHANGED',
+      '稿件历史已变化，请从第一页重新读取。',
+    );
+    const after = cursor?.afterPosition ?? 0;
+    const historyPin = cursor === null ? history.digest : cursor.historyDigest;
+    const evidence = new CommandEvidenceReader(this.#db, source.commandGroupId);
+    const header = evidence.header;
+    // What the page holds besides its members, with the longest cursor it could end on.
+    let bytes = encodedJsonBytes({
+      header, memberCount: source.memberCount, evidenceDigest: source.evidenceDigest, members: [], current: [],
+      next: { commandGroupId: source.commandGroupId, evidenceDigest: source.evidenceDigest, afterPosition: source.memberCount, historyDigest: history.digest },
+      history,
+    });
+    const currentBlock = this.#db.prepare('SELECT digest FROM working_blocks WHERE branch_id = ? AND block_id = ?');
+    const members: CommandEvidenceMember[] = [];
+    const current: ManualCommandMemberCurrent[] = [];
+    let first: CommandEvidenceMember | undefined;
+    let full = false;
+    for (let batch = evidence.nextBatch(); batch.length > 0; batch = evidence.nextBatch()) {
+      first ??= batch[0];
+      for (const member of batch) {
+        if (full || member.position <= after) continue;
+        const row = currentBlock.get(source.branchId, member.blockId) as SqlRow | undefined;
+        const state: ManualCommandMemberCurrent = {
+          position: member.position,
+          block: row === undefined ? 'absent' : asString(row.digest) === member.afterDigest ? 'recorded-after' : 'other-text',
+        };
+        const added = encodedJsonBytes(member) + encodedJsonBytes(state) + (members.length > 0 ? 2 : 0);
+        if (bytes + added > budgetBytes) {
+          full = true;
+          continue;
+        }
+        members.push(member);
+        current.push(state);
+        bytes += added;
+      }
+    }
+    const { memberCount, digest } = evidence.finish();
+    requireBounded(
+      asString(creation.group.after_working_digest) === recoveryWorkingDigest(
+        asString(creation.group.before_working_digest), source.journalSequence, source.commandKind, source.commandGroupId, digest,
+      ),
+      'HISTORY_CORRUPT',
+      '命令证据与其工作状态链不一致。',
+    );
+    requireBounded(
+      digest === source.evidenceDigest && memberCount === source.memberCount && first !== undefined &&
+        header.branchId === source.branchId && header.ordinal === source.commandOrdinal && header.kind === source.commandKind &&
+        header.sourceGroupId === null && first.blockId === asString(creation.entry.block_id) &&
+        first.afterDigest === asString(creation.entry.resulting_block_digest),
+      'MANUAL_SOURCE_MISMATCH',
+      '手动编辑来源与原始命令证据不一致。',
+    );
+    if (source.request.origin === 'journal-edit') {
+      // Freehand typing is one block: the original request is read back whole and must give the entry's fingerprint.
+      const request: JournalEditInput = {
+        clientEditId: source.clientEditId, manuscriptId: source.manuscriptId, branchId: source.branchId,
+        baseRevisionId: source.baseRevisionId, blockId: first.blockId, windowStartBlockId: source.request.windowStartBlockId,
+        baseBlockDigest: first.beforeDigest, expectedJournalSequence: source.journalSequence - 1,
+        fromGrapheme: asNumber(creation.entry.from_grapheme), toGrapheme: asNumber(creation.entry.to_grapheme),
+        insertText: asString(creation.entry.insert_text),
+      };
+      const before = graphemes(first.beforeText);
+      requireBounded(
+        memberCount === 1 && sha256(canonicalJson(request)) === source.requestFingerprint && request.toGrapheme <= before.length &&
+          [...before.slice(0, request.fromGrapheme), request.insertText, ...before.slice(request.toGrapheme)].join('') === first.afterText,
+        'MANUAL_SOURCE_MISMATCH',
+        '手动编辑来源与原始编辑请求不一致。',
+      );
+    }
+    requireBounded(members.length > 0, 'MANUAL_SOURCE_INVALID', '手动编辑来源分页预算容不下一个完整命令成员。');
+    const last = members.at(-1)!.position;
+    const page: ManualCommandSourcePage = {
+      header, memberCount, evidenceDigest: digest, members, current,
+      next: last < memberCount
+        ? { commandGroupId: source.commandGroupId, evidenceDigest: digest, afterPosition: last, historyDigest: historyPin }
+        : null,
+      history,
+    };
+    requireBounded(encodedJsonBytes(page) <= budgetBytes, 'MANUAL_SOURCE_INVALID', '手动编辑来源分页超出预算。');
+    return page;
+  }
+
+  /**
+   * The source's creation journal entry and command group, proved against everything the source names except the
+   * evidence itself: the entry is the group's one creation, every other entry of the group is a later undo or redo on
+   * the same branch, and the manual Search/Replace commit's preview gives the entry's fingerprint, which no Apply's does.
+   */
+  #requireManualCommandCreation(source: ManualCommandSource): { entry: SqlRow; group: SqlRow; latestSequence: number } {
+    const entry = one(this.#db.prepare(
+      `SELECT client_edit_id, request_fingerprint, manuscript_id, branch_id, base_revision_id, sequence, block_id,
+              from_grapheme, to_grapheme, insert_text, resulting_block_digest, resulting_working_digest, durable_at,
+              command_group_id, command_kind
+       FROM edit_journal_entries WHERE journal_entry_id = ?`,
+    ).all(source.journalEntryId) as SqlRow[], 'MANUAL_SOURCE_MISMATCH', '手动编辑来源的修订日志记录不存在。');
+    const group = one(this.#db.prepare(
+      `SELECT branch_id, ordinal, kind, status, source_group_id, before_working_digest, after_working_digest, created_at
+       FROM manuscript_command_groups WHERE command_group_id = ?`,
+    ).all(source.commandGroupId) as SqlRow[], 'MANUAL_SOURCE_MISMATCH', '手动编辑来源的命令组不存在。');
+    const owner = this.#db.prepare(
+      `SELECT m.book_id, b.manuscript_id branch_manuscript_id, r.manuscript_id revision_manuscript_id, r.branch_id revision_branch_id
+       FROM manuscripts m, manuscript_branches b, manuscript_revisions r
+       WHERE m.manuscript_id = ? AND b.branch_id = ? AND r.revision_id = ?`,
+    ).get(source.manuscriptId, source.branchId, source.baseRevisionId) as SqlRow | undefined;
+    const bindings = one(this.#db.prepare(
+      `SELECT max(sequence) latest,
+              coalesce(sum(CASE WHEN journal_entry_id = ? THEN 0
+                                WHEN command_kind IN ('undo', 'redo') AND branch_id = ? AND sequence > ? THEN 0
+                                ELSE 1 END), 0) stray
+       FROM edit_journal_entries WHERE command_group_id = ?`,
+    ).all(source.journalEntryId, source.branchId, source.journalSequence, source.commandGroupId) as SqlRow[],
+    'MANUAL_SOURCE_MISMATCH', '手动编辑来源的修订日志绑定无法读取。');
+    requireBounded(
+      owner !== undefined && owner.book_id === source.bookId && owner.branch_manuscript_id === source.manuscriptId &&
+        owner.revision_manuscript_id === source.manuscriptId && owner.revision_branch_id === source.branchId &&
+        entry.client_edit_id === source.clientEditId && entry.request_fingerprint === source.requestFingerprint &&
+        entry.manuscript_id === source.manuscriptId && entry.branch_id === source.branchId &&
+        entry.base_revision_id === source.baseRevisionId && entry.sequence === source.journalSequence &&
+        entry.durable_at === source.durableAt && entry.command_group_id === source.commandGroupId &&
+        entry.command_kind === source.commandKind && entry.resulting_working_digest === source.afterWorkingDigest &&
+        group.branch_id === source.branchId && group.ordinal === source.commandOrdinal && group.kind === source.commandKind &&
+        group.source_group_id === null && group.before_working_digest === source.beforeWorkingDigest &&
+        group.after_working_digest === source.afterWorkingDigest && group.created_at === source.durableAt &&
+        bindings.stray === 0,
+      'MANUAL_SOURCE_MISMATCH',
+      '手动编辑来源与原始修订日志、命令组或稿件绑定不一致。',
+    );
+    if (source.request.origin === 'manual-search-replacement') {
+      requireBounded(
+        sha256(canonicalJson({ previewId: source.request.previewId })) === source.requestFingerprint &&
+          entry.from_grapheme === 0 && entry.to_grapheme === 0,
+        'MANUAL_SOURCE_MISMATCH',
+        '手动编辑来源不是该替换预览的手动提交。',
+      );
+    }
+    return { entry, group, latestSequence: asNumber(bindings.latest) };
+  }
+
+  #manualCommandHistory(source: ManualCommandSource, group: SqlRow, latestSequence: number): ManualCommandHistory {
+    const binding = this.#binding(source.manuscriptId, source.branchId);
+    const latest = one(this.#db.prepare(
+      'SELECT journal_entry_id, command_kind, command_group_id FROM edit_journal_entries WHERE branch_id = ? AND sequence = ?',
+    ).all(source.branchId, latestSequence) as SqlRow[], 'HISTORY_CORRUPT', '命令组的最近修订日志记录缺失。');
+    const latestKind = asString(latest.command_kind);
+    requireBounded(
+      latest.command_group_id === source.commandGroupId && ['edit', 'replacement', 'undo', 'redo'].includes(latestKind),
+      'HISTORY_CORRUPT',
+      '命令组的最近修订日志记录不一致。',
+    );
+    const restoration = this.#db.prepare(
+      `SELECT r.restoration_id, r.selected_kind, r.selected_snapshot_id, r.descendant_revision_id
+       FROM recovery_restorations r JOIN recovery_attention a ON a.attention_id = r.attention_id
+       WHERE a.branch_id = ? AND r.pre_restore_journal_sequence >= ?
+       ORDER BY r.pre_restore_journal_sequence DESC, r.created_at DESC, r.restoration_id DESC LIMIT 1`,
+    ).get(source.branchId, source.journalSequence) as SqlRow | undefined;
+    const facts: Omit<ManualCommandHistory, 'digest'> = {
+      revisionId: binding.revisionId,
+      journalSequence: binding.journalSequence,
+      workingDigest: binding.workingDigest,
+      historySequence: binding.historySequence,
+      historyBoundarySequence: binding.historyBoundarySequence,
+      boundaryCrossed: asNumber(group.ordinal) <= binding.historyBoundarySequence,
+      groupStatus: asString(group.status) as ManualCommandHistory['groupStatus'],
+      lastAction: {
+        kind: latestKind as ManualCommandHistory['lastAction']['kind'],
+        journalEntryId: asString(latest.journal_entry_id),
+        sequence: latestSequence,
+      },
+      restoration: restoration === undefined ? null : {
+        restorationId: asString(restoration.restoration_id),
+        selectedKind: asString(restoration.selected_kind) as NonNullable<ManualCommandHistory['restoration']>['selectedKind'],
+        selectedSnapshotId: restoration.selected_snapshot_id === null ? null : asString(restoration.selected_snapshot_id),
+        descendantRevisionId: asString(restoration.descendant_revision_id),
+      },
+    };
+    return { ...facts, digest: sha256(canonicalJson(facts)) };
   }
 
   #binding(manuscriptId: string, branchId: string): BranchBinding {
