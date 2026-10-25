@@ -1,6 +1,11 @@
 # Provider Processing Policy v29 — development-ci candidate
 
-**UNSELECTED CANDIDATE — exact new-scope Owner decisions pending.** Prepared under [Issue #1120, brief revision 3](https://github.com/zhouy1017/ai7-harness/issues/1120). No approval is inferred from authorship. The unchanged source-checkout carrier still selects active-set v19; preparing set v20 selects no policy and changes no runtime permission.
+**APPROVED, UNSELECTED DECLARATIONS.**
+
+- **Approval:** on 2026-10-25 the Owner approved the nine exact declarations at reviewed commit `a60c843d97a827aea42ad4db004d143921ae9acf`: “同意九项具体条款” ([Owner record](https://github.com/zhouy1017/ai7-harness/issues/1071#issuecomment-6393190963), [nine-row packet](https://github.com/zhouy1017/ai7-harness/issues/1071#issuecomment-6387752881)). This document carries rows 6, 7 and 9. The bytes were prepared under [Issue #1120](https://github.com/zhouy1017/ai7-harness/issues/1120) brief revision 3 and integrated under brief revision 4.
+- **What approval does not do:** it accepts these declarations only. It selects nothing and records no fixture. It admits no dependency, material or credential, and it is not a release.
+- **Selection:** the unchanged source-checkout carrier still selects active-set v19. Set v20 selects no policy and changes no runtime permission, and no feature is complete.
+- **Related ADRs:** the separately accepted [ADR 0100](../adr/0100-admit-scoped-editor-task-instruction-text.md) and [ADR 0101](../adr/0101-admit-scoped-full-fidelity-learned-examples.md) exceptions are ordinary-production designs and are not implemented here. This document's fixture instruction, example and redaction rules are unchanged. ADR 0099 ([#1123](https://github.com/zhouy1017/ai7-harness/issues/1123)) is not accepted.
 
 [Canonical JSON](provider-processing-policy.v29.json) · [whole-document const schema](provider-processing-policy.v29.schema.json) · [candidate set v20](active-policy-set.v20.json) · [unchanged predecessor v1](provider-processing-policy.v1.json) · [ordinary-production counterpart v28](provider-processing-policy.v28.md).
 
@@ -205,7 +210,7 @@ The excluded design sketch is deliberately narrow: only editorial-review/typos-a
 
 F-06 boundary: this candidate grants no Global Agent cross-Book or procedure tool. The Global Agent rule keeps v27 targetedRetrieval.allowed=false, its listed memory/preference-only source contract and one bounded payload per attempt. Category-free bookkeeping wording and the excluded redaction lift add no tool or source. A bounded F-06 source/tool contract is a separate Commander decision before any later candidate expansion.
 
-The separately bounded activation/reader child must preserve historical plans and implement strict projections and consumers before selection. Host preparation is not final completion or release proof. Exact Owner decisions, Reviewer correction, the full exact-head guest ladder `doctor,bootstrap,check,test,service,build,e2e:all` and applicable existing Gate evidence remain required. No Ready, merge, activation or model-quality claim is made.
+The separately bounded activation/reader child must preserve historical plans and implement strict projections and consumers before selection. Steps 1 and 2 below are complete: the Owner decisions are recorded against these exact bytes. Integrating the unselected records is gated by the full exact-head guest ladder `doctor,bootstrap,check,test,service,build,e2e:all` and the applicable existing Gate. That evidence shows current selected behavior is unchanged; it is no v29 compatibility or activation proof. No activation or model-quality claim is made.
 
 1. Draft preparation authors/reviews the exact unselected v28/v29/set-v20 files, their schemas/projections, hashes and narrow pair-count synchronization. It changes no launch, build-copy list, Run identity, feature consumer or fixture recording. Candidate validation is not activation readiness.
 2. Record Owner decisions for each new scope row against those exact bytes; accepted omission repairs are separately identified. If any row changes or is declined, revise the concrete candidate and its hashes before proceeding. No approval is inferred for a future feature type.
@@ -216,9 +221,9 @@ The separately bounded activation/reader child must preserve historical plans an
 7. The background single-claim recheck additionally depends on the exact foreground verification executor, actual idle dispatcher, current decision/result-to-claim linkage, matching enrollment and durable once key. It cannot schedule hidden extraction to satisfy a missing ledger. The unready F-18c fixture profile is excluded and is not a dependency of preparing or deciding the closed policy rows above.
 8. Selecting v29 depends on the complete closed legacy compatibility manifest, its strict reader/consumer selection and preservation checks across the existing affected Journey matrix (including J-04/J-07/J-09/J-10/J-11/J-13/J-16 where the inventory shows a model fixture path). Preserve old records as v1 and new launches as v29; legacy profile consumers receive no new execution defaults. A missing compatibility mapping blocks selection, not the provider-free Draft preparation work.
 
-## Exact Owner decisions still open
+## Owner-approved exact declarations
 
-After the Draft has exact hashes, ask for the named diffs independently, citing the candidate files and their exact digests:
+The Owner approved these nine decisions as worded on 2026-10-25 against the exact hashes above: “同意九项具体条款” ([Owner record](https://github.com/zhouy1017/ai7-harness/issues/1071#issuecomment-6393190963)). The wording below is the request as put to the Owner, kept verbatim:
 
 1. Approve ordinary-production v28 editorial-learning-example/1 from eligible typed proposal-decision records, with the exact 10-example/2048-per-text/512-reason/16000-total/131072-byte bounds and mandatory enabled-learning envelope; retain the separate 12-line/200-grapheme reference preference block.
 2. Approve the existing bounded house-review-preference-excerpt category for polish, preserving the foreground one-attempt/Fast/no-web/suggestions-only contract.
@@ -230,9 +235,9 @@ After the Draft has exact hashes, ask for the named diffs independently, citing 
 8. Approve the coherent candidate set-v20 references to the accepted exact v28/v29 bytes, leaving fixture-recording v2, developer-live v24 and External Export v2 pins unchanged. Source-checkout selection/build/consumer activation belongs to the separately bounded later child.
 9. Accept the exact metadata-only legacyLocalFixtureCompatibility manifest as preservation of existing local fixture behavior, with its fixed809c source/policy/profile/fixture/entry pins, separate capability projection and no new-contract fallback. This grants no new kinds, tools, source payloads, throughput or subagents; review the complete populated tuples, not an empty future manifest.
 
-All decisions preserve ADR0079 redaction, existing credential/material boundaries, historical bytes and publication/export separation. Word examples and other untyped curation sources, arbitrary kinds/topology, developer-live F-04 stages, Search probe fixture success, and the unready v29 F-18c subagent counterpart remain explicitly excluded. No approval of unknown future profile, fixture, contract field or source type is requested.
+All decisions preserve ADR0079 redaction, existing credential/material boundaries, historical bytes and publication/export separation. Word examples and other untyped curation sources, arbitrary kinds/topology, developer-live F-04 stages, Search probe fixture success, and the unready v29 F-18c subagent counterpart remain explicitly excluded. No approval of unknown future profile, fixture, contract field or source type is given.
 
-Offer the curation partial-only alternative explicitly if the Owner declines the useful example payload. Do not ask them to approve unknown future source types, runtime schemas, raw captures or a redaction amendment by implication. Do not mark #1111 or F-05 complete from policy files or fixture success alone.
+Row 1 was approved as option A, so the partial-only curation alternative is neither offered nor encoded. The approval covers no unknown future source type, runtime schema, raw capture or redaction amendment. Do not mark #1111 or F-05 complete from policy files or fixture success alone.
 
 ## Complete metadata-only legacy manifest
 
