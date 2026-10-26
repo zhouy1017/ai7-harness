@@ -377,7 +377,7 @@ describe('Task Intent Drafts over the real store on exact sample1', () => {
   }, 300_000);
 
   it('promotes a 审阅 draft on its one paragraph as one category\'s Run, linking the Run and its Task', async () => {
-    const reviewFixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-authored');
+    const reviewFixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-cross-chapter-authored');
     fixture = reviewFixture;
     const store = await open();
     try {

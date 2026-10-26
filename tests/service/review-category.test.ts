@@ -31,7 +31,7 @@ afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(
 
 // Service-integration suite (L2) for the review-category kind family (Issue #417): the real store and
 // ledger, the one execution owner, the AI7 local deterministic adapter over the authored fixture
-// `sample1-review-authored`, and a fake secret resolver. The manuscript is exact `sample1` (ADR 0043);
+// `sample1-review-cross-chapter-authored`, and a fake secret resolver. The manuscript is exact `sample1` (ADR 0043);
 // no Provider, socket, credential value or Effect is involved. Assertions name counts, states and
 // identities, never manuscript text.
 
@@ -48,7 +48,7 @@ beforeEach(async () => {
   roots = await createServiceTestRoots('ai7-service-review-');
   launchPolicy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot);
   expect(launchPolicy.integrityState).toBe('verified');
-  fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-authored');
+  fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-cross-chapter-authored');
   expect(fixture.provenance).toBe('authored');
 });
 
@@ -188,7 +188,7 @@ describe('a review category over the real store on exact sample1', () => {
       expect(first.kind).toBe('editorial-review/typos-and-usage');
       expect(revision.ordinal).toBe(1);
       expect(revision.contractVersion).toBe(EDITORIAL_REVIEW_CONTRACT_VERSION);
-      expect(revision.adapterPin).toMatchObject({ route: 'ai7-local-deterministic', fixtureIdentity: 'sample1-review-authored' });
+      expect(revision.adapterPin).toMatchObject({ route: 'ai7-local-deterministic', fixtureIdentity: 'sample1-review-cross-chapter-authored' });
       expect(revision.category).toEqual({ categoryId: 'typos-and-usage', label: '错别字与规范用语', output: 'change-suggestion', riskPointsOnly: false });
       expect(revision.assurance.statement).toBe(REVIEW_CATEGORY_ASSURANCE_STATEMENT);
       // Every finding of a 修改建议 category proposes its replacement; the two the fixture wrote to fail

@@ -89,7 +89,7 @@ class RefusingFirstDispatch implements ReviewRunExecutionOwner {
 }
 
 async function open(wrap?: (inner: BaselineAnalysisExecutionOwner) => ReviewRunExecutionOwner, dataRoot: string = roots.dataRoot): Promise<Session> {
-  const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-authored');
+  const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-cross-chapter-authored');
   const store = await EditorialStore.open(dataRoot, roots.codeRoot, {
     induceUnprovableReconciliation: false,
     persistLegacyReviewedDraft: false,
@@ -181,7 +181,7 @@ describe('可复用工序 over the real store (ADR 0087)', () => {
       const capture = store.inspectProcedureCapture(source, finished.reviewRunId);
       expect(capture).toMatchObject({ available: true, runLabel: '第 1 次审阅', scopeSlot: 'whole', sourceScopeLabel: '全书', procedures: [] });
       expect(capture.steps.map((step) => [step.categoryId, step.eligible, step.model, step.output])).toEqual([
-        [STYLE, true, true, 'annotation'], [PLOT, true, false, 'annotation'], [LITERARY, true, true, 'change-suggestion'],
+        [STYLE, true, true, 'annotation'], [PLOT, true, true, 'annotation'], [LITERARY, true, true, 'change-suggestion'],
       ]);
       expect(capture.classification).toEqual({
         recommended: 'captured-procedure',
@@ -212,7 +212,7 @@ describe('可复用工序 over the real store (ADR 0087)', () => {
         expect(document).toMatchObject({
           schema: 'ai7.captured-procedure/1', title: '线索与体例复核', runAs: 'review-run', parameters: { scope: 'whole' },
           authorityCeiling: { runSourceScope: 'current-book', outputs: ['annotation'], model: true, searchEngine: false,
-            steps: [{ categoryId: STYLE, executor: 'review-category-contract' }, { categoryId: PLOT, executor: 'baseline-leads' }] },
+            steps: [{ categoryId: STYLE, executor: 'review-category-contract' }, { categoryId: PLOT, executor: 'review-category-contract' }] },
         });
         for (const forbidden of [source, finished.reviewRunId, 'L2 来源书', finished.manuscript.revisionId, 'clauses', 'guideline']) {
           expect(row.document_json.includes(forbidden)).toBe(false);
@@ -284,7 +284,7 @@ describe('可复用工序 over the real store (ADR 0087)', () => {
       expect(store.inspectCapturedProcedure(saved.procedureId, null).versions[1]).toMatchObject({ runCount: 1, runs: [{ bookId: target, bookTitle: 'L2 第二本书', label: '第 1 次' }] });
 
       // A Run prepared from version 1 and not yet authorized when version 1 is stopped is prepared again, never authorized.
-      const waiting = prepare(session, target, [STYLE], WHOLE, pin);
+      const waiting = prepare(session, target, [STYLE, PLOT], WHOLE, pin);
       const stopped = store.stopCapturedProcedure(saved.procedureId, first!.versionId, store.previewCapturedProcedureStop(saved.procedureId, first!.versionId).previewDigest);
       expect(stopped.versions.map((version) => [version.version, version.state])).toEqual([[2, 'pending-validation'], [1, 'stopped']]);
       expect(stopped.runnable).toBe(false);

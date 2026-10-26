@@ -76,7 +76,7 @@ async function close(): Promise<void> {
 }
 async function selectLocalReadRoute(): Promise<void> {
   await close();
-  localReadFixture = await loadModelFixture(resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url))), 'sample1-review-authored');
+  localReadFixture = await loadModelFixture(resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url))), 'sample1-review-cross-chapter-authored');
   await open();
 }
 beforeEach(async () => {

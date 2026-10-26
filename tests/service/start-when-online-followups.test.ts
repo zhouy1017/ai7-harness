@@ -3,7 +3,7 @@ import { capturedMapAnswer, capturedOrdinaryExecution } from '../support/capture
 import { BASELINE_PROMPT_CONTRACT_DIGEST, parseUnitMessageHeader, unitRequestDigest } from '../../src/service/analysis/contract.js';
 import { parseCrossUnitMessageHeader } from '../../src/service/analysis/cross-unit-contract.js';
 import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/assurance-sampling-contract.js';
-import { parseReviewCategoryUnitMessageHeader } from '../../src/service/review/review-category-contract.js';
+import { parseReviewCategoryUnitMessageHeader, parseReviewCrossChapterMessage, REVIEW_CROSS_CHAPTER_RESULT_SCHEMA } from '../../src/service/review/review-category-contract.js';
 import { parseWritingUnitMessageHeader, parseWritingSynthesisMessageHeader } from '../../src/service/writing/writing-contract.js';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -87,7 +87,8 @@ async function withSession(fixtureIdentity: string, body: (session: Session) => 
     if (request.stage === 'cross-unit-reduction' && parseCrossUnitMessageHeader(message) !== null) return capturedMapAnswer(fixture.entries)(request, message);
     const content = request.stage === 'units' && review !== null ? { schema: 'ai7.editorial-review.unit-result/2', unitOrdinal: review.ordinal, findings: [] }
       : request.stage === 'units' && writing !== null ? { schema: 'ai7.writing.unit-result/1', unitOrdinal: writing.ordinal, passages: AUTHORED_WRITING_PASSAGES[writing.ordinal] }
-        : parseWritingSynthesisMessageHeader(message) !== null ? AUTHORED_WRITING_DRAFT
+        : request.stage === 'cross-unit-reduction' && parseReviewCrossChapterMessage(message) !== null ? { schema: REVIEW_CROSS_CHAPTER_RESULT_SCHEMA, findings: [] }
+          : parseWritingSynthesisMessageHeader(message) !== null ? AUTHORED_WRITING_DRAFT
           : request.stage === 'assurance-sampling' ? { schema: 'ai7.analysis.assurance-sampling-result/1', dispositions: parseAssuranceSamplingListedRefs(message)
             .map((ref) => ({ ref, disposition: '成立', reason: '合成回归抽样。' })) }
             : request.stage === 'run-report-reflection' ? { schema: 'ai7.analysis.run-report-reflection-result/1', items: [] } : null;
@@ -203,7 +204,7 @@ function prepareWriting(store: EditorialStore, bookId: string): string {
 
 describe('Reconnect Preflight admits strictly oldest-first across kinds (Issue #764, item 1)', () => {
   it('hands the one free place to the older Review Run, and the later 写作任务 waits for the next pass', async () => {
-    await withSession('sample1-review-authored', async (session) => {
+    await withSession('sample1-review-cross-chapter-authored', async (session) => {
       const { store, owner } = session;
       const reviewBook = await sample1Book(store, '先到的审阅');
       const writingBook = await sample1Book(store, '后到的写作');
@@ -232,7 +233,7 @@ describe('Reconnect Preflight admits strictly oldest-first across kinds (Issue #
 
 describe('a leads-first Review Run keeps its place in the order (Issue #764 review)', () => {
   it('writes the baseline leads of 情节逻辑与前后一致 and takes the free place for the next category before a later 写作任务 is admitted', async () => {
-    await withSession('sample1-review-authored', async (session) => {
+    await withSession('sample1-review-cross-chapter-authored', async (session) => {
       const { store, owner } = session;
       const reviewBook = await sample1Book(store, '先到的本地审阅');
       const writingBook = await sample1Book(store, '后到的写作');
@@ -294,7 +295,7 @@ describe('ReviewRunStore.waitingRuns reads unsettled approvals only (Issue #764,
   it('scans the history of approvals once per store lifetime, not on every read', async () => {
     let waiting = '';
     let bookId = '';
-    await withSession('sample1-review-authored', async (session) => {
+    await withSession('sample1-review-cross-chapter-authored', async (session) => {
       const { store } = session;
       bookId = await sample1Book(store, '等待记录增长');
       // Settled for good, two ways: cancelled before anything was sent, and blocked by Reconnect Preflight. A read costs two statements per candidate: its records, and its approval.
@@ -309,7 +310,7 @@ describe('ReviewRunStore.waitingRuns reads unsettled approvals only (Issue #764,
       expect(store.waitingTaskRuns(null).map((run) => run.ref)).toEqual([waiting]);
     });
     // A later lifetime of the same store: the history is read once, and every read after it asks about the one that waits.
-    await withSession('sample1-review-authored', async (session) => {
+    await withSession('sample1-review-cross-chapter-authored', async (session) => {
       const { store } = session;
       const first = approvalStatements(() => store.waitingTaskRuns(null));
       expect(first.result.map((run) => run.ref)).toEqual([waiting]);
@@ -336,7 +337,7 @@ describe('ReviewRunStore.waitingRuns reads unsettled approvals only (Issue #764,
 
   it('keeps a Run that began its ledger Run before any category event out of the waiting, across a restart', async () => {
     let reviewRunId = '';
-    await withSession('sample1-review-authored', async (session) => {
+    await withSession('sample1-review-cross-chapter-authored', async (session) => {
       const { store } = session;
       const bookId = await sample1Book(store, '授权后未记事件');
       reviewRunId = prepareReview(store, bookId);
@@ -347,7 +348,7 @@ describe('ReviewRunStore.waitingRuns reads unsettled approvals only (Issue #764,
       expect(reviewStates(reviewRunId)).toEqual([]);
       expect(store.waitingTaskRuns(null)).toEqual([]);
     });
-    await withSession('sample1-review-authored', async (session) => {
+    await withSession('sample1-review-cross-chapter-authored', async (session) => {
       expect(session.store.waitingTaskRuns(null)).toEqual([]);
       expect(approvalStatements(() => session.store.waitingTaskRuns(null)).ran).toBe(0);
     });
@@ -355,7 +356,7 @@ describe('ReviewRunStore.waitingRuns reads unsettled approvals only (Issue #764,
 
   it('finds an approval written while the store was closed, as an import or a merge writes it', async () => {
     let imported = '';
-    await withSession('sample1-review-authored', async (session) => {
+    await withSession('sample1-review-cross-chapter-authored', async (session) => {
       const { store } = session;
       const bookId = await sample1Book(store, '关闭时写入');
       const sibling = prepareReview(store, bookId);
@@ -371,13 +372,13 @@ describe('ReviewRunStore.waitingRuns reads unsettled approvals only (Issue #764,
         ).run(imported, sibling);
       }, false);
     });
-    await withSession('sample1-review-authored', async (session) => {
+    await withSession('sample1-review-cross-chapter-authored', async (session) => {
       expect(session.store.waitingTaskRuns(null).map((run) => run.ref)).toEqual([imported]);
     });
   }, 300_000);
 
   it('loses no wait to a write that rolls back, and invents none', async () => {
-    await withSession('sample1-review-authored', async (session) => {
+    await withSession('sample1-review-cross-chapter-authored', async (session) => {
       const { store } = session;
       const bookId = await sample1Book(store, '回滚');
       const reviewRunId = prepareReview(store, bookId);

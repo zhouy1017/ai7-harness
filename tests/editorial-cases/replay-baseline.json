@@ -621,13 +621,13 @@
         "unmatched": 0
       },
       "recordedUsage": {
-        "requests": 8,
-        "inputTokens": 5600,
-        "outputTokens": 2080
+        "requests": 12,
+        "inputTokens": 8500,
+        "outputTokens": 2750
       },
       "contractsAgree": null,
       "fixtures": [
-        "802615ca2977c1a767873382df7b0c892d02e3f94db9ab71bbab10186e80becb"
+        "03b017c540750fc1f54d434434c0733d9ccef664cd15e8f99fccaa6887c52388"
       ]
     },
     "review-typos-sample1": {
@@ -772,13 +772,13 @@
         "unmatched": 0
       },
       "recordedUsage": {
-        "requests": 8,
-        "inputTokens": 5600,
-        "outputTokens": 2080
+        "requests": 12,
+        "inputTokens": 8500,
+        "outputTokens": 2750
       },
       "contractsAgree": null,
       "fixtures": [
-        "802615ca2977c1a767873382df7b0c892d02e3f94db9ab71bbab10186e80becb"
+        "03b017c540750fc1f54d434434c0733d9ccef664cd15e8f99fccaa6887c52388"
       ]
     },
     "writing-draft-sample1": {

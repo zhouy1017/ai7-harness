@@ -74,7 +74,7 @@ afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(
 
 // Service-integration suite (L2) for Review Runs (Issue #417, plan slice S69, Stage B): the real store,
 // the Review Run ledger and its drive loop, every category ledger, the one execution owner, and the AI7
-// local deterministic adapter over the authored fixtures — `sample1-review-authored`, layered over the
+// local deterministic adapter over the authored fixtures — `sample1-review-cross-chapter-authored`, layered over the
 // baseline's J-04 fixture so one store lifetime runs the baseline the leads come from, and
 // `sample1-factual-authored` for 事实核查. The manuscript is exact `sample1` (ADR 0043); no Provider,
 // socket, credential value or Effect beyond an editor's own Apply is involved. Assertions name counts,
@@ -434,7 +434,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       taskIntentId = projection.taskIntent!.taskIntentId;
       envelopeDigest = projection.planEnvelope!.digest;
     } finally { await close(legacy); }
-    const current = await open('sample1-review-authored');
+    const current = await open('sample1-review-cross-chapter-authored');
     try {
       const ledger = current.store.executionLedgerForRun(runRecordId);
       expect(ledger.definition.contractVersion).toBe('ai7.editorial-review/1');
@@ -643,7 +643,7 @@ describe('a Review Run over the real store on exact sample1', () => {
     }
   });
   it('quick-starts only a matching review category-set rule and records that origin on its category Runs', async () => {
-    await withBook('sample1-review-authored', async (session, book) => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
       const run = prepare(session, book, [TYPOS], WHOLE);
       const input = { bookId: book.bookId, reviewRunId: run.reviewRunId };
       const plan = session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: run.reviewRunId });
@@ -665,7 +665,7 @@ describe('a Review Run over the real store on exact sample1', () => {
   });
 
   it('reviews several categories and the baseline leads one after another and puts every finding on the manuscript as one record with its mark', async () => {
-    await withBook('sample1-review-authored', async (session, book) => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
       const before = workspace(session, book);
       // Nothing to lead from yet: the leads say so, and so do the two categories whose basis does not exist.
       expect(before.categories.map((category) => category.categoryId)).toEqual([
@@ -704,7 +704,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       ]);
       const typosPlan = prepared.categories[0]!;
       expect(typosPlan.plan).toMatchObject({ units: 8, recomputed: 8, reused: 0, unreviewed: 0, budgetCeilingLabel: '未设置任务预算上限' });
-      expect(typosPlan.plan!.routeLabel).toContain('sample1-review-authored');
+      expect(typosPlan.plan!.routeLabel).toContain('sample1-review-cross-chapter-authored');
       expect(typosPlan.modeLabel).toBe('全书审阅');
       expect(prepared.categories[2]).toMatchObject({ taskIntentId: expect.any(String), planEnvelopeDigest: expect.stringMatching(/^[a-f0-9]{64}$/u), plan: { units: 8 } });
       expect(approvals(prepared).map((approval) => approval.categoryId)).toEqual([TYPOS, STYLE, PLOT, LITERARY]);
@@ -765,7 +765,7 @@ describe('a Review Run over the real store on exact sample1', () => {
     });
   }, 300_000);
   it('derives each finding\'s status from its mark, records an ignored finding with its reason and Quality Signal, and versions the Report', async () => {
-    await withBook('sample1-review-authored', async (session, book) => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
       const run = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS, STYLE], WHOLE));
       const reviewRunId = run.reviewRunId;
       const databaseBytes = readFileSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
@@ -840,8 +840,8 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(report.record.mustItems.items.every((item) => graphemeCount(item.quote) <= 80 && item.locationLabel.startsWith('内容块 '))).toBe(true);
       expect(report.record.overview.rows.find((row) => row.categoryId === TYPOS)!.counts).toMatchObject({ handled: 1, ignored: 1 });
       expect(report.record.appendix.categories.map((category) => [category.categoryId, category.procedure.version, category.guidelineDocuments[0]!.version]))
-        .toEqual([[TYPOS, '1', '1'], [STYLE, '1', '1']]);
-      expect(report.record.appendix.categories[0]!.adapterPin).toMatchObject({ route: 'ai7-local-deterministic', fixtureIdentity: 'sample1-review-authored' });
+        .toEqual([[TYPOS, '1', '1'], [STYLE, '2', '1']]);
+      expect(report.record.appendix.categories[0]!.adapterPin).toMatchObject({ route: 'ai7-local-deterministic', fixtureIdentity: 'sample1-review-cross-chapter-authored' });
       expect(report.record.appendix.configuration.digest).toBe(first.configurationDigest);
       session.store.updateEditorialMark({
         ...binding(session, book), markId: anotherAnnotation!.markId!, action: 'set-status', body: null, highlightColor: null, status: 'resolved',
@@ -856,7 +856,7 @@ describe('a Review Run over the real store on exact sample1', () => {
     });
   }, 300_000);
   it('follows a finding\'s 修改建议 into the new version its conflict saved, and reads that version, never 已转为修改建议 (Issue #57)', async () => {
-    await withBook('sample1-review-authored', async (session, book) => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
       const run = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
       const finding = run.findings.find((candidate) => candidate.output === 'change-suggestion' && candidate.status === 'pending' && candidate.markId !== null)!;
       expect(finding).toBeDefined();
@@ -889,7 +889,7 @@ describe('a Review Run over the real store on exact sample1', () => {
   }, 300_000);
 
   it('reads 选章 by the analysis units of a manuscript without headings, and keeps only the leads anchored there', async () => {
-    await withBook('sample1-review-authored', async (session, book) => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
       await runBaseline(session, book);
       const ready = workspace(session, book);
       // The leads read the baseline's whole result, never only the changed chapters.
@@ -931,7 +931,7 @@ describe('a Review Run over the real store on exact sample1', () => {
   }, 300_000);
 
   it('reads 当前选区 — the paragraph 就这段发起任务… hands over — with its reading ranges as context, and marks only that paragraph (Issue #423, S77b)', async () => {
-    await withBook('sample1-review-authored', async (session, book) => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
       await runBaseline(session, book);
       const blocks = session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId);
       const at = (position: number) => blocks.find((block) => block.position === position)!;
@@ -1032,7 +1032,7 @@ describe('a Review Run over the real store on exact sample1', () => {
   }, 300_000);
 
   it('takes no review from a 当前选区 Run: 只审改动过的章 waits for a chapter review, and what it left off is marked by the next Run in scope (Issue #423 review, P1-2, P1-3, P3-1)', async () => {
-    await withBook('sample1-review-authored', async (session, book) => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
       const blocks = session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId);
       const twenty = blocks.find((block) => block.position === 20)!;
       const selection = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], { kind: 'selection', fromChapterBlockId: twenty.blockId, toChapterBlockId: twenty.blockId }));
@@ -1073,7 +1073,7 @@ describe('a Review Run over the real store on exact sample1', () => {
   }, 300_000);
 
   it('measures 只审改动过的章 from no 当前选区 Run: after one, an edit made before it is never carried as unchanged (Issue #423 final review, P1-4)', async () => {
-    await withBook('sample1-review-authored', async (session, book) => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
       const blocks = session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId);
       const twenty = blocks.find((block) => block.position === 20)!;
       const row = () => workspace(session, book).coverage.find((entry) => entry.categoryId === TYPOS)!;
@@ -1099,7 +1099,7 @@ describe('a Review Run over the real store on exact sample1', () => {
   }, 300_000);
 
   it('measures 只审改动过的章 per chapter from the latest Run that read it: an edit a 选章 left unread is read, never carried as unchanged (Issue #709)', async () => {
-    await withBook('sample1-review-authored', async (session, book) => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
       // sample1's eight chapters are its eight units: 1–15, 16–25, 26–43, 44–59, 60–68, 69–75, 76–92 and 93–97.
       const chapter = (position: number): ReviewRunScopeRequest => {
         const chosen = workspace(session, book).scopeOptions.chapters.chapters.find((entry) => entry.position === position)!;
@@ -1132,7 +1132,7 @@ describe('a Review Run over the real store on exact sample1', () => {
   }, 300_000);
 
   it('finds the Run that last read an edited chapter however many 选章 left it unread since, and reads it with nothing edited after them (Issue #709)', async () => {
-    await withBook('sample1-review-authored', async (session, book) => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
       const chapter = (position: number): ReviewRunScopeRequest => {
         const chosen = workspace(session, book).scopeOptions.chapters.chapters.find((entry) => entry.position === position)!;
         return { kind: 'chapters', fromChapterBlockId: chosen.blockId, toChapterBlockId: chosen.blockId };
@@ -1153,7 +1153,7 @@ describe('a Review Run over the real store on exact sample1', () => {
   }, 300_000);
 
   it('reads 需复审 for exactly what 只审改动过的章 reads again, and keeps a failed read a gap across a later 选章, which 只审改动过的章 retries (#711 review P2-1; Issue #716)', async () => {
-    await withBook('sample1-review-authored', async (session, book) => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
       const row = () => workspace(session, book).coverage.find((entry) => entry.categoryId === TYPOS)!;
       const changedScope = () => workspace(session, book).categories.find((category) => category.categoryId === TYPOS)!.scopes.changed;
       const inspect = () => session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE));
@@ -1194,7 +1194,7 @@ describe('a Review Run over the real store on exact sample1', () => {
   }, 300_000);
 
   it('counts no read made under another category contract: a 选章 after a new 规范文件 version leaves the rest unread, not changed (#711 review P2-1)', async () => {
-    await withBook('sample1-review-authored', async (session, book) => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
       const row = () => workspace(session, book).coverage.find((entry) => entry.categoryId === TYPOS)!;
       await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
       const path = join(roots.inputRoot, '本社文字规范.txt');
@@ -1212,7 +1212,7 @@ describe('a Review Run over the real store on exact sample1', () => {
   }, 300_000);
 
   it('reads an edited chapter no Run has read, across a 选章: never-read chapters stay unreviewed only until they are edited (#711 review P3-2)', async () => {
-    await withBook('sample1-review-authored', async (session, book) => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
       const row = () => workspace(session, book).coverage.find((entry) => entry.categoryId === TYPOS)!;
       await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], chapterScope(session, book, 44)));
       appendToBlockAt(session, book, 20, '的的');
@@ -1226,7 +1226,7 @@ describe('a Review Run over the real store on exact sample1', () => {
   }, 300_000);
 
   it('walks the chain once per latest revision, however often the 审阅 screen reads it, and shares that walk between plan, gate and matrix (#711 review P2-2)', async () => {
-    await withBook('sample1-review-authored', async (session, book) => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
       const ledger = session.store.reviewCategoryLedger(reviewCategoryKindDefinition(TYPOS_AND_USAGE));
       await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
       appendToBlockAt(session, book, 20, '的的');
@@ -1250,7 +1250,7 @@ describe('a Review Run over the real store on exact sample1', () => {
 
   it('reads each revision of the chain from SQLite once — one per Run while the ledger lives, and the whole chain once more after a reopen (Issue #727)', async () => {
     const definition = reviewCategoryKindDefinition(TYPOS_AND_USAGE);
-    const first = await open('sample1-review-authored');
+    const first = await open('sample1-review-cross-chapter-authored');
     let book: Book;
     try {
       book = await importBook(first);
@@ -1268,7 +1268,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       await close(first);
     }
     // Opened again, the first read walks the chain cold — six reads, one a revision — and the poll's reads walk no more.
-    const second = await open('sample1-review-authored');
+    const second = await open('sample1-review-cross-chapter-authored');
     try {
       const ledger = second.store.reviewCategoryLedger(definition);
       expect(workspace(second, book!).coverage.find((entry) => entry.categoryId === TYPOS)).toMatchObject({ state: 'needs-review', changedBlocks: 1 });
@@ -1284,7 +1284,7 @@ describe('a Review Run over the real store on exact sample1', () => {
   }, 300_000);
 
   it('stops the walk at an earlier record it cannot read and says so, keeps the category, and asks a plan that no longer derives to be prepared again (#711 review P3-3, P3-4)', async () => {
-    const first = await open('sample1-review-authored');
+    const first = await open('sample1-review-cross-chapter-authored');
     let book: Book;
     let reviewRunId: string;
     try {
@@ -1310,7 +1310,7 @@ describe('a Review Run over the real store on exact sample1', () => {
     } finally {
       db.close();
     }
-    const second = await open('sample1-review-authored');
+    const second = await open('sample1-review-cross-chapter-authored');
     try {
       const read = workspace(second, book!);
       // The category stays on the screen; the walk stops at the record it cannot read, leaves what it had not settled
@@ -1334,7 +1334,7 @@ describe('a Review Run over the real store on exact sample1', () => {
   }, 300_000);
 
   it('leaves a chapter no Run has read unreviewed under 只审改动过的章, through any number of 选章 (Issue #709)', async () => {
-    await withBook('sample1-review-authored', async (session, book) => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
       const chapter = (position: number): ReviewRunScopeRequest => {
         const chosen = workspace(session, book).scopeOptions.chapters.chapters.find((entry) => entry.position === position)!;
         return { kind: 'chapters', fromChapterBlockId: chosen.blockId, toChapterBlockId: chosen.blockId };
@@ -1355,7 +1355,7 @@ describe('a Review Run over the real store on exact sample1', () => {
   }, 300_000);
 
   it('names a running 当前选区 Run on its card, and starts none whose paragraph was removed or reordered after it was prepared (Issue #423 review)', async () => {
-    await withBook('sample1-review-authored', async (session, book) => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
       await runBaseline(session, book);
       const blocks = session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId);
       const at = (position: number) => blocks.find((block) => block.position === position)!;
@@ -1428,7 +1428,7 @@ describe('a Review Run over the real store on exact sample1', () => {
   }, 300_000);
 
   it('reviews only what changed, names the marks it already made again, and moves the coverage matrix with the manuscript', async () => {
-    await withBook('sample1-review-authored', async (session, book) => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
       const first = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
       expect(workspace(session, book).coverage.find((row) => row.categoryId === TYPOS)).toMatchObject({ state: 'current', lastRunOrdinal: 1, changedBlocks: 0 });
 
@@ -1469,7 +1469,7 @@ describe('a Review Run over the real store on exact sample1', () => {
     });
   }, 300_000);
   it('refuses an approval over a plan that moved, and refuses at its turn a category whose plan moved after the approval', async () => {
-    await withBook('sample1-review-authored', async (session, book) => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
       const stale = prepare(session, book, [TYPOS, STYLE], WHOLE);
       reenrollCredential();
       expect(storeCode(() => session.store.authorizeReviewRun(book.bookId, stale.reviewRunId, approvals(stale)))).toBe('REVIEW_PLAN_CHANGED');
@@ -1500,7 +1500,7 @@ describe('a Review Run over the real store on exact sample1', () => {
   }, 300_000);
 
   it('keeps going when one category cannot be dispatched, and ends that ledger Run instead of leaving it authorized', async () => {
-    const session = await open('sample1-review-authored', (inner) => new RefusingFirstDispatch(inner));
+    const session = await open('sample1-review-cross-chapter-authored', (inner) => new RefusingFirstDispatch(inner));
     try {
       const book = await importBook(session);
       const run = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS, STYLE], WHOLE));
@@ -1521,7 +1521,7 @@ describe('a Review Run over the real store on exact sample1', () => {
 
   it('stops between categories, reads partial after a restart, and 继续审阅 finishes the Run where it stopped', async () => {
     let gated = null as GatedOwner | null;
-    const first = await open('sample1-review-authored', (inner) => { gated = new GatedOwner(inner, 3); return gated; });
+    const first = await open('sample1-review-cross-chapter-authored', (inner) => { gated = new GatedOwner(inner, 3); return gated; });
     let book: Book;
     let reviewRunId: string;
     try {
@@ -1546,7 +1546,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       await close(first);
     }
 
-    const second = await open('sample1-review-authored');
+    const second = await open('sample1-review-cross-chapter-authored');
     try {
       const partial = workspace(second, book, reviewRunId).run!;
       expect(partial).toMatchObject({ state: 'partial', stateLabel: '部分完成 · 可继续审阅', canContinue: true });
@@ -1580,7 +1580,7 @@ describe('a Review Run over the real store on exact sample1', () => {
 
   it('records an approval while full, names a category that waits for a place of the governor 等待运行名额, and drops it once the category has one (Issue #632)', async () => {
     let taken = null as PlacesTakenOwner | null;
-    const session = await open('sample1-review-authored', (inner) => { taken = new PlacesTakenOwner(inner); return taken; });
+    const session = await open('sample1-review-cross-chapter-authored', (inner) => { taken = new PlacesTakenOwner(inner); return taken; });
     try {
       const book = await importBook(session);
       const prepared = prepare(session, book, [TYPOS, STYLE], WHOLE);
@@ -1612,7 +1612,7 @@ describe('a Review Run over the real store on exact sample1', () => {
 
   it('records a category the owner interrupted on shutdown as interrupted, and 继续审阅 goes on with the rest', async () => {
     let gated = null as GatedOwner | null;
-    const first = await open('sample1-review-authored', (inner) => { gated = new GatedOwner(inner, 2); return gated; });
+    const first = await open('sample1-review-cross-chapter-authored', (inner) => { gated = new GatedOwner(inner, 2); return gated; });
     let book: Book;
     let reviewRunId: string;
     try {
@@ -1633,7 +1633,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       await close(first);
     }
 
-    const second = await open('sample1-review-authored');
+    const second = await open('sample1-review-cross-chapter-authored');
     try {
       expect(workspace(second, book, reviewRunId).run).toMatchObject({ state: 'partial', canContinue: true });
       await second.driver.continue(reviewRunId);
@@ -1647,7 +1647,7 @@ describe('a Review Run over the real store on exact sample1', () => {
   }, 300_000);
 
   it('ends a category Run a stopped service left executing, records it interrupted, and finishes the rest', async () => {
-    const first = await open('sample1-review-authored');
+    const first = await open('sample1-review-cross-chapter-authored');
     let book: Book;
     let reviewRunId: string;
     try {
@@ -1665,7 +1665,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       await close(first);
     }
 
-    const second = await open('sample1-review-authored');
+    const second = await open('sample1-review-cross-chapter-authored');
     try {
       const partial = workspace(second, book, reviewRunId).run!;
       expect(partial).toMatchObject({ state: 'partial', canContinue: true });
@@ -1686,7 +1686,7 @@ describe('a Review Run over the real store on exact sample1', () => {
   it('settles at the next start a category Run a stopped service left admitted, executing or waiting, before any 继续审阅 (Issue #657)', async () => {
     let book: Book | undefined;
     for (const planted of ['authorized', 'admitted', 'executing'] as const) {
-      const first = await open('sample1-review-authored');
+      const first = await open('sample1-review-cross-chapter-authored');
       let reviewRunId: string;
       let runRecordId: string;
       try {
@@ -1707,7 +1707,7 @@ describe('a Review Run over the real store on exact sample1', () => {
         await close(first);
       }
 
-      const second = await open('sample1-review-authored');
+      const second = await open('sample1-review-cross-chapter-authored');
       const opened = book!;
       try {
         const typos = (): ReviewCategoryProjection => second.store.inspectReviewCategory(opened.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE));
@@ -1749,7 +1749,7 @@ describe('a Review Run over the real store on exact sample1', () => {
   }, 300_000);
 
   it('reads a Book without a manuscript as having nothing to review, and names why', async () => {
-    const session = await open('sample1-review-authored');
+    const session = await open('sample1-review-cross-chapter-authored');
     try {
       const creation = session.store.prepareBookCreation('空图书', null);
       const bookId = session.store.commitBookCreation({ ...creation.proposed, reviewDigest: creation.reviewDigest }).overview.book.bookId;
@@ -1823,7 +1823,7 @@ function wireBytes(value: unknown): number {
 // Book check before 继续审阅, and the mark lookup behind 查看任务.
 describe('the 审阅 operations as the service entry dispatches them', () => {
   it('prepares a Review Run as a cooperative service job, cancels one without writing a Run, and completes a Run of the leads alone at once', async () => {
-    await withBook('sample1-review-authored', async (session, book) => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
       const jobs = new CooperativeJobOwner(session.store);
       try {
         // A selection the store refuses fails at once, before any job exists.
@@ -1861,7 +1861,7 @@ describe('the 审阅 operations as the service entry dispatches them', () => {
   }, 300_000);
 
   it('drives an approved Run before it answers, continues only a Run of the route\'s Book, and finds the Run a produced mark came from', async () => {
-    await withBook('sample1-review-authored', async (session, book) => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
       const prepared = prepare(session, book, [TYPOS], WHOLE);
       // Approved and not yet driven, a Run reads partial: the answer is read only once the loop has taken it.
       session.store.authorizeReviewRun(book.bookId, prepared.reviewRunId, approvals(prepared));
@@ -1891,7 +1891,7 @@ describe('the 审阅 operations as the service entry dispatches them', () => {
   }, 300_000);
 
   it('pages the findings of a Run too large for one answer, under the frame limit, to the end — filtered in the service', async () => {
-    await withBook('sample1-review-authored', async (session, book) => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
       const run = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS, STYLE], WHOLE));
       const made = run.findings.length;
       expect(made).toBeGreaterThan(0);
@@ -1981,7 +1981,7 @@ describe('the 审阅 operations as the service entry dispatches them', () => {
   }, 300_000);
 
   it('lists the newest Review Runs only, and still opens an older one by its identity', async () => {
-    await withBook('sample1-review-authored', async (session, book) => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
       await runBaseline(session, book);
       // The leads need no plan, so each of these Runs is prepared by one step.
       const prepared = Array.from({ length: MAX_REVIEW_RUN_SUMMARIES + 1 }, () => prepare(session, book, [PLOT], WHOLE));
@@ -2012,7 +2012,7 @@ async function exportCode(operation: () => Promise<unknown>): Promise<string> {
 
 describe('the 审阅报告 exported in the manuscript\'s formats (Issue #500, S64b part 2)', () => {
   it('exports one recorded report version as DOCX, PDF and Markdown under the export ledger, and 交付物 lists each', async () => {
-    await withBook('sample1-review-authored', async (session, book) => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
       const run = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS, STYLE], WHOLE));
       const report = session.store.generateReviewReport(book.bookId, run.reviewRunId).run!.report!;
       const target = { kind: 'report' as const, reportId: report.reportId };
@@ -2113,7 +2113,7 @@ describe('the 审阅报告 exported in the manuscript\'s formats (Issue #500, S6
 const SERIES = 'series-consistency';
 /** Selection/procedure business coverage uses one actual ordinary Store; local review/2 and Series/1 remain separate. */
 async function openLayeredSelection(): Promise<Session> {
-  const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-authored'); // unchanged response bytes, not an admission pin
+  const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-cross-chapter-authored'); // unchanged response bytes, not an admission pin
   const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { baselineAnalysisRoute: null,
     induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
     induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false });
@@ -2266,7 +2266,7 @@ describe('the house\'s 可复用工序 on a 当前选区 (Issue #423, S77 deferr
   }, 300_000);
 
   it('refuses a selection of a Production Document\'s manuscript: no Task reads a document (the Owner, 2026-10-09)', async () => {
-    await withBook('sample1-review-authored', async (session, book) => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
       const { store } = session;
       // A news release made from a source import of two of sample1's paragraphs; its manuscript is a branch of its own.
       const path = join(roots.inputRoot, '新闻稿初稿.docx');
@@ -2291,7 +2291,7 @@ describe('the house\'s 可复用工序 on a 当前选区 (Issue #423, S77 deferr
 
 describe('house preference review consumption (#911)', () => {
   it('automatically rebuilds eligible review feedback, stays neutral without policy admission, and freezes one pin per category Run', async () => {
-    await withBook('sample1-review-authored', async (session, book) => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
       const first = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
       const finding = first.findings.find((entry) => entry.markId !== null)!;
       session.store.recordReviewFindingDisposition(book.bookId, first.reviewRunId, finding.findingId, '保留本书体例');
@@ -2332,7 +2332,7 @@ describe('house preference review consumption (#911)', () => {
   }, 300_000);
 
   it('keeps a category Task\'s pinned version through the editor\'s plan revision, which the one approval then accepts (#911 review)', async () => {
-    await withBook('sample1-review-authored', async (session, book) => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
       const first = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
       const finding = first.findings.find((entry) => entry.markId !== null)!;
       session.store.recordReviewFindingDisposition(book.bookId, first.reviewRunId, finding.findingId, '保留本书体例');
@@ -2360,7 +2360,7 @@ describe('house preference review consumption (#911)', () => {
   }, 300_000);
 
   it('reads only admitted judgments made under its own scope: an excluded decision\'s Apply and every named person stay out (#911 review)', async () => {
-    await withBook('sample1-review-authored', async (session, book) => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
       session.store.updateBookPeople({ bookId: book.bookId, expectedVersion: 0, authors: ['周一'], editors: ['郑三'], related: [{ roleId: 'proofreader', name: '王四' }] });
       const run = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS, LITERARY], WHOLE));
       const marked = run.findings.filter((entry) => entry.categoryId === TYPOS && entry.markId !== null && entry.output === 'change-suggestion');

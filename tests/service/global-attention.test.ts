@@ -332,7 +332,7 @@ class RefusingOwner implements ReviewRunExecutionOwner {
 
 describe('待我处理 over Review Runs', () => {
   it('names a Review Run that failed, one in flight, one a stopped service left to continue, and one completed, and writes nothing', async () => {
-    const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-authored');
+    const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-cross-chapter-authored');
     const prepareRun = (store: EditorialStore, bookId: string, categoryIds: ReadonlyArray<string>): ReviewRunProjection => {
       let progress = store.createReviewRunPreparationWork(bookId, categoryIds, WHOLE, launchPolicy);
       while (!progress.done) progress = store.advanceReviewRunPreparationWork(progress.workId!);

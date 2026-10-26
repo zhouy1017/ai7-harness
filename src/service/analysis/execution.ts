@@ -1541,6 +1541,7 @@ export class BaselineAnalysisExecutionOwner {
       let producer: ModelRequestProducer | null = null;
       let producerId = randomUUID();
       let requestOrdinal = 0;
+      let crossChapterRequestAdmitted = false;
       let transmissionsAtDispatch = 0;
       let currentRequestId: string | null = null;
       let clarificationRequestId: string | null = null;
@@ -1601,6 +1602,11 @@ export class BaselineAnalysisExecutionOwner {
       // Every tool-call result counted once for the whole Run, even when a unit ended on one (a tripped breaker).
       const seenLoopResults = new Set<object>();
       let platformSession: PlatformToolSession | null = null;
+      const crossChapterTurn = () => definition.reviewCrossChapter !== undefined && turnIdentity?.stage === 'cross-unit-reduction';
+      const executeTool = (call: import('../harness/primary-agent-harness.js').PlatformToolExecution) => {
+        if (crossChapterTurn()) throw new ExecutionAdmissionError('REVIEW_SYNTHESIS_TOOL_REFUSED', '跨章综合只使用冻结证据，不执行工具调用。');
+        return platformSession!.execute(call);
+      };
       // The tool loop's model turns spend tokens before the unit's turn ends: each is counted the moment anything asks the ceiling —
       // the next model call and also the tool call it asked for, so no search leaves past a reached ceiling (#473).
       const capturePendingLoopUsage = (): void => {
@@ -1637,6 +1643,7 @@ export class BaselineAnalysisExecutionOwner {
           ...(live === null ? {} : {
             acquireRequest: async (_payload: import('../provider/payload.js').AssembledModelPayload, signal: AbortSignal, requestIdentity: import('../harness/primary-agent-harness.js').HarnessRequestIdentity) => {
               if (producer === null || turnIdentity === null) throw new ExecutionAdmissionError('EXECUTION_REQUEST_IDENTITY_ABSENT', '模型请求没有当前单元或阶段标识。');
+              if (crossChapterTurn() && crossChapterRequestAdmitted) throw new ExecutionAdmissionError('REVIEW_SYNTHESIS_TURN_LIMIT', '跨章综合仅允许一次模型请求；没有发送后续回合。');
               const combined = AbortSignal.any([active.requestAbort.signal, signal]);
               const activity = unitActivity();
               if (activity !== undefined) { activity.requestState = 'waiting-for-capacity'; activity.admittedRequestStartedAt = null; }
@@ -1654,6 +1661,7 @@ export class BaselineAnalysisExecutionOwner {
                       ...identity, requestId: currentRequestId, producerId,
                       requestOrdinal: ++requestOrdinal, sessionId: requestIdentity.sessionId, payloadDigest: decision.payloadDigest, messageDigest: sha256Hex(message)
                     }, clarificationRequestId);
+                    if (crossChapterTurn()) crossChapterRequestAdmitted = true;
                     clarificationRequestId = null;
                     const admittedAt = new Date().toISOString();
                     if (activity !== undefined) { activity.requestState = 'admitted'; activity.admittedRequestStartedAt = admittedAt; }
@@ -1673,14 +1681,14 @@ export class BaselineAnalysisExecutionOwner {
           ...(localRule === null ? {} : { localToolsRule: localRule }),
           ...(localRule === null ? {} : {
             localTools: {
-              execute: (call: import('../harness/primary-agent-harness.js').PlatformToolExecution) => platformSession!.execute(call),
+              execute: executeTool,
               admit: (result: Parameters<PlatformToolSession['admit']>[0]) => platformSession!.admit(result),
               acceptToolCallMessage: (digest: string) => platformSession!.acceptToolCallMessage(digest),
             }
           }),
           ...(!webTools ? {} : {
             platformTools: {
-              execute: (call: import('../harness/primary-agent-harness.js').PlatformToolExecution) => platformSession!.execute(call),
+              execute: executeTool,
               admit: (result: Parameters<PlatformToolSession['admit']>[0]) => platformSession!.admit(result),
               acceptToolCallMessage: (digest: string) => platformSession!.acceptToolCallMessage(digest),
             }

@@ -187,7 +187,7 @@ function technical(projection: TaskPlanProjection, key: string): string | undefi
 describe('the Task Drawer plan projection over the real store on exact sample1', () => {
 
   it('selected policy profile consumes the actual retained baseline adapter with zero credential reads', async () => {
-    const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-authored');
+    const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-cross-chapter-authored');
     const store = await openWithRoute(fixture);
     const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture,
       secretResolver: { resolve: async () => { throw new Error('local profile must not read a credential'); } } });
@@ -459,7 +459,7 @@ describe('the Task Drawer plan projection over the real store on exact sample1',
   }, 300_000);
 
   it('reads a Review Run\'s plan per category and reports the newer Run that supersedes it', async () => {
-    const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-authored');
+    const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-cross-chapter-authored');
     const store = await openWithRoute(fixture);
     const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
     const prepareRun = (bookId: string, categoryIds: ReadonlyArray<string>): string => {

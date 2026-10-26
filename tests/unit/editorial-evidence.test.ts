@@ -13,7 +13,7 @@ import { RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST, runReportReflectionReques
 import type { AnalysisReductionResult } from '../../src/service/analysis/kind-definition.js';
 import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
 import { REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, REVIEW_CROSS_CHAPTER_RESULT_SCHEMA, parseReviewCrossChapterMessage, reviewCrossChapterFixtureDigest } from '../../src/service/review/review-category-contract.js';
-import { fixtureEntryKey, parseModelFixture, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
+import { fixtureEntryKey, loadModelFixture, parseModelFixture, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { providerEvidenceGeneration } from '../../src/service/provider/provider-result-cache.js';
 import { CLARIFICATION_INSTRUCTION, clarificationPromptContractDigest } from '../../src/service/provider/clarification-contract.js';
 import { STYLE_AND_FORMAT, TYPOS_AND_USAGE } from '../support/review-categories.js';
@@ -34,7 +34,8 @@ afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(
 
 const ROOT = resolve(fileURLToPath(new URL('../../', import.meta.url)));
 const CASES = join(ROOT, 'tests', 'editorial-cases', 'cases');
-const SYNTHETIC_FIXTURE = 'synthetic-editorial-review-authored';
+const SYNTHETIC_FIXTURE = 'synthetic-editorial-review-cross-chapter-authored';
+const SYNTHETIC_FIXTURE_BASE = 'synthetic-editorial-review-authored';
 
 function anchor(id: string, paragraph: number, from: number, to: number, words: string, corrections: string[] = [], category: string | null = 'typos-and-usage'): TextAnchor {
   return { id, paragraph, from, to, words, corrections, category };
@@ -264,6 +265,9 @@ it.runIf(process.env['AI7_REGENERATE_EDITORIAL_SYNTHETIC_FIXTURE'] === '1')('aut
   const fixture: ResolvedModelFixture = { identity: SYNTHETIC_FIXTURE, description: 'generator', provenance: 'authored',
     lineage: [{ identity: SYNTHETIC_FIXTURE, sha256: 'e'.repeat(64) }], entries, sha256: 'f'.repeat(64) };
   const add = (entry: ModelFixtureEntry) => { if (!entries.has(fixtureEntryKey(entry.unitOrdinal, entry.requestDigest))) entries.set(fixtureEntryKey(entry.unitOrdinal, entry.requestDigest), entry); };
+  const base = await loadModelFixture(join(ROOT, 'tests', 'fixtures', 'model'), SYNTHETIC_FIXTURE_BASE);
+  base.entries.forEach(add);
+  parseModelFixture(JSON.parse(await readFile(join(ROOT, 'tests', 'fixtures', 'model', `${SYNTHETIC_FIXTURE}.json`), 'utf8'))).entries.forEach(add);
   const policy = await resolveSourceCheckoutLaunchPolicy(ROOT);
   for (let pass = 0; pass < 4; pass += 1) {
     const before = entries.size;
@@ -327,11 +331,12 @@ it.runIf(process.env['AI7_REGENERATE_EDITORIAL_SYNTHETIC_FIXTURE'] === '1')('aut
     schema: 'ai7.model-fixture/1',
     identity: SYNTHETIC_FIXTURE,
     description: '编辑价值证据（Issue #812）两部合成稿的人工撰写审阅夹具：合成稿甲《灯塔守望人》的错别字与规范用语、合成稿乙《一座县城博物馆》的体例与格式。两部合成稿由 tests/editorial-cases/synthetic-manuscripts.mjs 从公开的合成文本确定性生成，不含任何书稿文字。回答模拟一位不完美的审阅者：多数注入错误给出正确改法，一处改法需编辑修改，一处漏报，一处把正确用法误判为错误，一处案例未预期的发现，一处引文不在文中；抽样一律「成立」，运行反思只说明账目。用于检验编辑价值证据工具与产品路径，不代表任何模型的编辑质量。',
-    basedOn: null,
+    basedOn: SYNTHETIC_FIXTURE_BASE,
     provenance: 'authored',
     provider: 'ai7-local-deterministic',
     model: 'ai7-deterministic-fixture',
-    entries: [...entries.values()].map((entry) => ({ unitOrdinal: entry.unitOrdinal, requestDigest: entry.requestDigest, response: entry.response })),
+    entries: [...entries.values()].filter((entry) => !base.entries.has(fixtureEntryKey(entry.unitOrdinal, entry.requestDigest)))
+      .map((entry) => ({ unitOrdinal: entry.unitOrdinal, requestDigest: entry.requestDigest, response: entry.response })),
   };
   await writeFile(join(ROOT, 'tests', 'fixtures', 'model', `${SYNTHETIC_FIXTURE}.json`), `${JSON.stringify(body, null, 2)}\n`, 'utf8');
 }, 600_000);

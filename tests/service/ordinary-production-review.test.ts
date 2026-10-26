@@ -283,6 +283,22 @@ it('keeps unit cards and a disclosed synthesis gap when the selected rule does n
   expect(settled.taskOutcome!.report!.usagePerStage['cross-unit-reduction'].requests).toBe(0);
 });
 
+it('retains unit evidence when synthesis asks for a tool and sends no second synthesis request', async () => {
+  const result = await productionReview(['style-and-format'], () => 'valid', undefined, false, false, { response: async (response, _signal, body) => {
+    const request = JSON.parse(body) as { messages: Array<{ role: string; content: string }> };
+    const input = parseReviewCrossChapterMessage(request.messages.findLast((entry) => entry.role === 'user')!.content);
+    if (input === null) return response;
+    return new Response(JSON.stringify({ model: ORDINARY_PRODUCTION_ALLOWED_BINDINGS[0].model, choices: [{ message: { content: null, tool_calls: [
+      { id: 'synthesis-read', type: 'function', function: { name: 'read_blocks', arguments: JSON.stringify({ blockId: input.evidence[0]!.sourceRange.blockId, radius: 0 }) } },
+    ] }, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 40, completion_tokens: 20 } }), { status: 200 });
+  } });
+  expect(result.requests.filter((request) => request.ordinal === 0)).toHaveLength(1);
+  const settled = result.store.inspectReviewCategory(result.bookId, reviewCategoryKindDefinition(reviewCategoryContractInput(reviewCategoryEntry('style-and-format')!)));
+  expect(settled.resultSetRevision?.findings).toHaveLength(1);
+  expect(settled.resultSetRevision?.crossChapterSynthesis?.state).toBe('gap');
+  expect(settled.taskOutcome?.classification).toBe('completed-with-gaps');
+});
+
 it('proves current academic Series preparation and exact initial and retained consistency source pins (#1131 rev21)', async () => {
   const result = await productionReview(['academic-integrity'], () => 'valid', undefined, false, false, { series: true });
   const request = result.requests.find((entry) => entry.category === 'academic-integrity')!;
@@ -406,7 +422,7 @@ it('owns three isolated production units through body cleanup and joins out-of-o
   const checkpoints = ledger.unitCheckpoints(runRecordId);
   expect(checkpoints.map((checkpoint) => checkpoint.unit.unitOrdinal)).toEqual([...checkpoints].map((checkpoint) => checkpoint.unit.unitOrdinal).sort((left, right) => left - right));
   expect(checkpoints.length).toBeGreaterThan(3);
-  expect(result.requests.map((request) => request.ordinal).sort((left, right) => left - right)).toEqual(checkpoints.map((checkpoint) => checkpoint.unit.unitOrdinal));
+  expect(result.requests.map((request) => request.ordinal).sort((left, right) => left - right)).toEqual([0, ...checkpoints.map((checkpoint) => checkpoint.unit.unitOrdinal)]);
   expect(ledger.requestAdmissionOf(runRecordId)!.open.size).toBe(0);
   expect(requestGovernor.snapshot()).toEqual({ registered: 0, waiting: 0, inFlight: 0, backgroundInFlight: 0 });
 });

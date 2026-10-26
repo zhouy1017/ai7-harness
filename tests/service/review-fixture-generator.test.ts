@@ -1,13 +1,13 @@
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
-// The generator of the authored fixture `sample1-review-authored` (Issue #417). The findings below are
+// The generator of `sample1-review-cross-chapter-authored`, inheriting the frozen #417 fixture. The findings below are
 // the authored part: each was written after reading one Analysis Unit of exact `sample1` (ADR 0043), and
 // each quotation is a verbatim substring of the block it names, except the four that are meant not to
 // anchor. Everything else in the fixture — every request digest, and the answers to the assurance sample
-// and the Run Report reflection those Runs send — depends on the three categories' frozen contracts and
+// and the Run Report reflection those Runs send — depends on the four categories' frozen contracts and
 // on the findings themselves, so it is derived by driving the real path until no Run asks anything new.
 //
 // It never runs in the Local Verification Ladder or in CI. After a clause, a label or the 工序 of one of
-// the three built-in categories changes, regenerate the fixture with
+// the four built-in categories changes, regenerate the current fixture with
 //   AI7_REGENERATE_REVIEW_FIXTURE=1 pnpm exec vitest run tests/service/review-fixture-generator.test.ts
 // and review the fixture's diff like any other change.
 import { randomUUID } from 'node:crypto';
@@ -30,7 +30,7 @@ import { reviewCategoryKindDefinition } from '../../src/service/review/review-ca
 import { REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, REVIEW_CROSS_CHAPTER_RESULT_SCHEMA, parseReviewCrossChapterMessage, reviewCrossChapterFixtureDigest, type ReviewUnitFinding } from '../../src/service/review/review-category-contract.js';
 import { reviewBaselineSource } from '../../src/service/review/review-leads.js';
 import { fixtureEntryKey, loadModelFixture, parseModelFixture, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
-import { BASELINE_ANALYSIS_TASK_GOAL, type CoverageManifestProjection, type LaunchPolicyProjection, type ReviewCategoryProjection, type ReviewCategoryTaskRequest } from '../../src/shared/protocol.js';
+import { BASELINE_ANALYSIS_TASK_GOAL, BASELINE_ANALYSIS_MODE_GOALS, type CoverageManifestProjection, type LaunchPolicyProjection, type ReviewCategoryProjection, type ReviewCategoryTaskRequest } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { LITERARY_EXPRESSION, PLOT_CONSISTENCY, STYLE_AND_FORMAT, TYPOS_AND_USAGE } from '../support/review-categories.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
@@ -41,7 +41,9 @@ let requestGovernor: ModelRequestGovernor;
 beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
 afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
-const FIXTURE_PATH = resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url)), 'sample1-review-authored.json');
+const FIXTURE_IDENTITY = 'sample1-review-cross-chapter-authored';
+const FIXTURE_BASE = 'sample1-baseline-transient-retry';
+const FIXTURE_PATH = resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url)), `${FIXTURE_IDENTITY}.json`);
 const J04_EDIT_SUFFIX = '，J-04 结果集形成后的确认编辑';
 // J-04 appends a second sentence to the same block before it opens 审阅, so the Review Run it starts
 // reads unit 1 with both (Issue #417).
@@ -146,10 +148,10 @@ function add(entry: ModelFixtureEntry, group: number, order: string): void {
 }
 
 const fixture: ResolvedModelFixture & { entries: Map<string, ModelFixtureEntry> } = {
-  identity: 'sample1-review-authored',
+  identity: FIXTURE_IDENTITY,
   description: 'generator',
   provenance: 'authored',
-  lineage: [{ identity: 'sample1-review-authored', sha256: 'e'.repeat(64) }],
+  lineage: [{ identity: FIXTURE_IDENTITY, sha256: 'e'.repeat(64) }],
   entries: new Map(),
   sha256: 'f'.repeat(64),
 };
@@ -313,7 +315,8 @@ function appendToFirstBlock(store: EditorialStore, manuscriptId: string, branchI
 }
 
 async function baseline(context: { store: EditorialStore; owner: BaselineAnalysisExecutionOwner; bookId: string }): Promise<void> {
-  let work = context.store.createBaselineAnalysisPreparationWork(context.bookId, BASELINE_ANALYSIS_TASK_GOAL, null, launchPolicy);
+  const update = context.store.inspectBaselineAnalysis(context.bookId).resultSetRevision === null ? null : { mode: 'sync-current' as const, selectedRange: null };
+  let work = context.store.createBaselineAnalysisPreparationWork(context.bookId, update === null ? BASELINE_ANALYSIS_TASK_GOAL : BASELINE_ANALYSIS_MODE_GOALS[update.mode], update, launchPolicy);
   while (!work.done) work = context.store.advanceBaselineAnalysisPreparationWork(work.workId!);
   const plan = work.projection!;
   const authorized = context.store.authorizeBaselineAnalysis(context.bookId, plan.taskIntent!.taskIntentId, plan.planEnvelope!.digest);
@@ -389,9 +392,11 @@ async function pass(): Promise<boolean> {
 
 it.runIf(process.env['AI7_REGENERATE_REVIEW_FIXTURE'] === '1')('generates the authored review fixture', async () => {
   await requireExactSample1(roots.codeRoot);
+  const predecessor = parseModelFixture(JSON.parse(await readFile(resolve(FIXTURE_PATH, '..', 'sample1-review-authored.json'), 'utf8')));
+  predecessor.entries.forEach((entry, index) => add(entry, -2, String(index).padStart(5, '0')));
   const retained = parseModelFixture(JSON.parse(await readFile(FIXTURE_PATH, 'utf8')));
   retained.entries.forEach((entry, index) => add(entry, -1, String(index).padStart(5, '0')));
-  const base = await loadModelFixture(resolve(FIXTURE_PATH, '..'), 'sample1-baseline-transient-retry');
+  const base = await loadModelFixture(resolve(FIXTURE_PATH, '..'), FIXTURE_BASE);
   for (const [key, entry] of base.entries) if (!fixture.entries.has(key)) fixture.entries.set(key, entry);
   let closed = false;
   for (let index = 0; index < 6 && !closed; index += 1) {
@@ -405,18 +410,27 @@ it.runIf(process.env['AI7_REGENERATE_REVIEW_FIXTURE'] === '1')('generates the au
   const ordered = [...entries.values()].sort((left, right) => left.group - right.group || (left.order < right.order ? -1 : left.order > right.order ? 1 : 0));
   const body = {
     schema: 'ai7.model-fixture/1',
-    identity: 'sample1-review-authored',
-    description: "编辑审阅契约 v2 的人工撰写夹具：逐单元阅读 sample1（ADR 0043 收录的 Public SampleBook）后写成，回答内置审阅类别配置中的三个类别——错别字与规范用语、体例与格式、文学性与表达改进——在全书审阅、只审改动过的章、全书重新审阅、所选范围审阅与所选范围重新审阅下发出的单元请求，也覆盖 J-04 在结果集形成后确认的编辑所改变的单元 1。每条引文都是其所声明内容块的逐字子串；另有四条故意不能唯一定位（三条找不到，一条多处出现），用来证明排除附录，并有三组引文与替换文字都相同的发现出现在相邻单元的重叠内容块中，用来证明合并。unitOrdinal 为 0 的条目回答这些运行发起的保证抽样与运行反思：抽样判定一律为「成立」，理由只说明引文经引文完整性逐字定位于其所声明的内容块，这是这一步能据本单元内容块作出的全部判断。本夹具叠加在 sample1-baseline-transient-retry 之上：同一次启动既能运行基线分析——审阅「情节逻辑与前后一致」的线索来自它——也能运行这三个审阅类别；两者的请求摘要互不相同，叠加不改变任何条目的键。",
+    identity: FIXTURE_IDENTITY,
+    description: '公开 sample1 的人工审阅夹具：保留原三个类别的精确历史条目，增加当前体例与格式、情节逻辑与前后一致的单元答复和一次跨章综合。跨章答复只引用输入中的精确证据，分别核对章序体例、梦境与现场的衔接；支持没有基线、匹配基线、陈旧基线和选章选区。四条原有排除发现与抽样、反思保持人工编写的测试含义，不代表模型质量或事实核查结论。',
     // Layered over the baseline's J-04 fixture (Issue #417, Stage B): one launch bound to this fixture
     // runs the baseline analysis the plot-consistency leads come from and the categories beside it.
-    // `basedOn` changes no request digest, so the generator never needs the base's entries.
-    basedOn: 'sample1-baseline-transient-retry',
+    // Baseline replay supplies exact source pins; its inherited entries are not duplicated here.
+    basedOn: FIXTURE_BASE,
     provenance: 'authored',
     provider: 'ai7-local-deterministic',
     model: 'ai7-deterministic-fixture',
-    entries: ordered.map(({ entry }) => ({ unitOrdinal: entry.unitOrdinal, requestDigest: entry.requestDigest, response: entry.response })),
+    entries: ordered.filter(({ entry }) => !base.entries.has(fixtureEntryKey(entry.unitOrdinal, entry.requestDigest)))
+      .map(({ entry }) => ({ unitOrdinal: entry.unitOrdinal, requestDigest: entry.requestDigest, response: entry.response })),
   };
   await writeFile(FIXTURE_PATH, `${JSON.stringify(body, null, 2)}\n`, 'utf8');
+  // The predecessor already reaches the loader's depth ceiling. Current controls share its baseline,
+  // retaining exactly the old authored retry overrides without another inheritance layer.
+  const controls = JSON.parse(await readFile(resolve(FIXTURE_PATH, '..', 'sample1-review-contract-v2-controls.json'), 'utf8'));
+  const controlled = new Map(body.entries.map((entry) => [fixtureEntryKey(entry.unitOrdinal, entry.requestDigest), entry]));
+  for (const entry of controls.entries) controlled.set(fixtureEntryKey(entry.unitOrdinal, entry.requestDigest, entry.attempt), entry);
+  await writeFile(resolve(FIXTURE_PATH, '..', 'sample1-review-cross-chapter-controls.json'), `${JSON.stringify({ ...body,
+    identity: 'sample1-review-cross-chapter-controls', description: 'Current cross-chapter review with the identical authored v2 retry controls; historical fixtures are unchanged.',
+    entries: [...controlled.values()] }, null, 2)}\n`, 'utf8');
   // eslint-disable-next-line no-console
   console.log(`wrote ${ordered.length} entries: ${ordered.map((entry) => `${entry.group}/${entry.order}`).join(' ')}`);
 }, 600_000);

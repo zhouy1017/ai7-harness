@@ -65,10 +65,12 @@ describe('bounded review cross-chapter synthesis', () => {
   });
 
   it('keeps a grounded card and excludes an invented evidence reference without losing its sibling', () => {
-    const { input, payload } = synthesisFixture();
+    const { input, baseline } = synthesisFixture();
+    const payload = reviewCrossChapterInput(input, { ...baseline, leads: [...baseline.leads, { ref: 'baseline-2', kind: 'timeline',
+      text: '另一处合成线索。', ranges: [{ blockId: blocks[1]!.blockId, fromGrapheme: 0, toGrapheme: 2 }] }] }, 'c'.repeat(64));
     const entry = { anchorRef: 'e1', evidenceRefs: ['e1'], severity: 'should', note: '跨章年份写法不一致，请核对。', clauseId: 'style-and-format/2' };
     const parsed = parseReviewCrossChapterResult(JSON.stringify({ schema: REVIEW_CROSS_CHAPTER_RESULT_SCHEMA,
-      findings: [entry, { ...entry, anchorRef: 'invented', evidenceRefs: ['invented'] }] }), payload, ['style-and-format/2']);
+      findings: [{ ...entry, evidenceRefs: ['e1', 'e2'] }, entry, { ...entry, anchorRef: 'invented', evidenceRefs: ['invented'] }] }), payload, ['style-and-format/2']);
     expect(parsed.ok).toBe(true); if (!parsed.ok) return;
     const reduced = applyReviewCrossChapter(reduceReviewCategory(input), { state: 'closed', findings: [], usage: null,
       requestDigest: reviewCrossChapterRequestDigest(payload), result: parsed.result }, input.categoryId);
@@ -76,6 +78,7 @@ describe('bounded review cross-chapter synthesis', () => {
     expect(reduced.findings[0]).toMatchObject({ sourceRange: payload.evidence[0]!.sourceRange, quote: '2024', note: entry.note });
     expect(reduced.findings[0]!.unitFindingRefs).toHaveLength(2);
     expect(reduced.findings[0]!.crossChapter?.baseline?.revisionId).toBe('baseline-revision');
+    expect(reduced.findings[0]!.crossChapter?.evidence.map((evidence) => evidence.ref)).toEqual(['e1', 'e2']);
     expect(reduced.excluded).toHaveLength(1);
     expect(reduced.excluded[0]!.rawText).toContain('invented');
     expect(reduced.reducerClosure.state).toBe('closed-with-gaps');

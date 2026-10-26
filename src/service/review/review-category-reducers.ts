@@ -370,7 +370,8 @@ export function applyReviewCrossChapter(reduction: ReviewCategoryReduction, outc
         unitOrdinal: anchor.unitOrdinal, blockId: anchor.sourceRange.blockId, sourceRange: anchor.sourceRange, quote: anchor.quote,
         severity: finding.severity, note: finding.note, replacement: null, clauseId: finding.clauseId, mergedFrom: previous?.mergedFrom ?? [],
         unitFindingRefs: [...new Map(refs.map((ref) => [canonicalJson(ref), ref])).values()],
-        crossChapter: { contractDigest: REVIEW_CROSS_CHAPTER_CONTRACT_DIGEST, requestDigest: outcome.requestDigest, evidence: finding.evidence, baseline: pin },
+        crossChapter: { contractDigest: REVIEW_CROSS_CHAPTER_CONTRACT_DIGEST, requestDigest: outcome.requestDigest,
+          evidence: [...new Map([...(previous?.crossChapter?.evidence ?? []), ...finding.evidence].map((entry) => [entry.ref, entry])).values()], baseline: pin },
       };
       if (index < 0) findings.push(card); else { findings[index] = card; merged += 1; }
     }

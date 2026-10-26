@@ -539,7 +539,7 @@ const readKnowledge = (renderer, predicate, name) => readUntil(renderer, READ_KN
 // The capture branch runs Review Runs of 体例与格式 and 文学性与表达改进, so its window binds the J-04 model adapter over the
 // authored fixture `sample1-review-authored` — the local deterministic route, no Provider — and answers one Save dialog with
 // `--j13-save-path`. Its Books are reached through 书库's 查找, since by then the library holds more than one page of Books.
-const REVIEW_FIXTURE_IDENTITY = 'sample1-review-authored';
+const REVIEW_FIXTURE_IDENTITY = 'sample1-review-cross-chapter-authored';
 const CAPTURE_TARGET_TITLE = '工序运行之书';
 const PROCEDURE_TITLE = '体例复核';
 const PROPOSAL_TITLE = '图注核对';

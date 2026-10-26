@@ -554,7 +554,7 @@ describe('学习准入 over the real store', () => {
   it('decides a 审阅 finding the editor ignored with a reason, by its own rvf_ identity, through the frame as through the store', async () => {
     await requireExactSample1(roots.codeRoot);
     const launchPolicy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot);
-    const fixture = await loadModelFixture(resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url))), 'sample1-review-authored');
+    const fixture = await loadModelFixture(resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url))), 'sample1-review-cross-chapter-authored');
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
       induceUnprovableReconciliation: false,
       persistLegacyReviewedDraft: false,

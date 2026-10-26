@@ -29,7 +29,7 @@ const CASES = [
   ['readers-report', 'sample1-readers-report-authored'],
   ['evaluation-rewrite', 'sample1-evaluation-rewrite-authored'],
   ['writing', 'sample1-writing-authored'],
-  ['review-run', 'sample1-review-authored'],
+  ['review-run', 'sample1-review-cross-chapter-authored'],
 ] as const;
 
 async function until(read: () => boolean): Promise<void> {
