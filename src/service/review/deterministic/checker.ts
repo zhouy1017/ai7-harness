@@ -1,14 +1,19 @@
 import { setImmediate } from 'node:timers/promises';
-import { canonicalJson, sha256Hex } from '../../analysis/canonical.js';
+import { BLOCK_ID_PATTERN, canonicalJson, DIGEST_PATTERN, hasExactKeys, isRecord, sha256Hex, UUID_PATTERN } from '../../analysis/canonical.js';
 import { graphemeCount, sliceGraphemes } from '../../analysis/factual-review-contract.js';
-import { LocalCheckError, numeralBasis, validateLocalPlan, type LocalCheckBlock, type LocalCheckPlan } from './plan.js';
-import { LOCAL_RULE_IDS, LOCAL_RULES, type LocalRuleId } from './rules.js';
+import { LocalCheckError, numeralBasis, validateLocalPlan, validateLocalPlanV2, type LocalCheckBlock, type LocalCheckPlan, type LocalCheckPlanV2 } from './plan.js';
+import { HOUSE_RULE, LOCAL_RULE_IDS, LOCAL_RULE_IDS_V2, LOCAL_RULES, type LocalRuleId, type LocalRuleIdV2 } from './rules.js';
+import { houseAnnotationDetail, type HouseWordListPin } from '../../../shared/protocol/house-word-list.js';
 
 export interface LocalCandidate {
   readonly id: string; readonly ruleId: LocalRuleId; readonly version: 1;
   readonly blockId: string; readonly from: number; readonly to: number; readonly quote: string;
   readonly observation: string; readonly basis: 'national-standard' | 'editor-convention';
 }
+export interface HouseCandidate extends Omit<LocalCandidate, 'ruleId' | 'basis'> {
+  readonly ruleId: 'H01'; readonly basis: 'house-word-list'; readonly houseWordList: HouseWordListPin; readonly entryId: string;
+}
+export type LocalCandidateV2 = LocalCandidate | HouseCandidate;
 export interface LocalRuleCounts {
   checked: number; exempt: number; skipped: number; error: number; findings: number;
   disabled: number; outOfApplicability: number; notRecognized: number; noFinding: number;
@@ -18,6 +23,14 @@ export interface LocalCheckResult {
   readonly paragraphs: number; readonly candidates: readonly LocalCandidate[];
   readonly excluded: readonly { readonly candidateId: string; readonly reason: string }[];
   readonly counts: Readonly<Record<LocalRuleId, LocalRuleCounts>>;
+}
+export interface LocalCheckResultV2 extends Omit<LocalCheckResult, 'schema' | 'candidates' | 'counts'> {
+  readonly schema: 'ai7.review.local-result/2'; readonly candidates: readonly LocalCandidateV2[];
+  readonly counts: Readonly<Record<LocalRuleIdV2, LocalRuleCounts>>;
+}
+export interface LocalCheckExecutionOptions {
+  readonly cancelled?: () => boolean;
+  readonly checkpoint?: (phase: 'scan' | 'matches') => Promise<void>;
 }
 type Opener = { mark: string; block: LocalCheckBlock; from: number; to: number; uncertain: boolean };
 type ListRow = { block: LocalCheckBlock; indent: string; number: bigint; from: number; to: number };
@@ -29,8 +42,27 @@ const OTHER_SIGN = /[＋－±∓﹢﹣]/u;
 const emptyCounts = (): LocalRuleCounts => ({ checked: 0, exempt: 0, skipped: 0, error: 0, findings: 0, disabled: 0, outOfApplicability: 0, notRecognized: 0, noFinding: 0 });
 
 /** Deterministic offsets never enter the quotation-search fallback used by a model. */
-export function candidateHasExactAnchor(plan: LocalCheckPlan, candidate: LocalCandidate, graphemes?: readonly string[],
+export function candidateHasExactAnchor(plan: LocalCheckPlan | LocalCheckPlanV2, candidate: LocalCandidateV2, graphemes?: readonly string[],
   block: LocalCheckBlock | undefined = plan.blocks.find((frozen) => frozen.blockId === candidate.blockId)): boolean {
+  if (plan.schema === 'ai7.review.local-plan/2') validateLocalPlanV2(plan);
+  return candidateHasFrozenAnchor(plan, candidate, graphemes, block);
+}
+function houseCandidateId(plan: LocalCheckPlanV2, entryId: string, blockId: string, from: number, to: number): string {
+  return sha256Hex(canonicalJson({ source: plan.source, planDigest: plan.digest, houseWordList: plan.houseWordList.pin,
+    rule: 'H01', version: 1, entryId, blockId, from, to }));
+}
+function candidateHasFrozenAnchor(plan: LocalCheckPlan | LocalCheckPlanV2, candidate: LocalCandidateV2, graphemes?: readonly string[],
+  block: LocalCheckBlock | undefined = plan.blocks.find((frozen) => frozen.blockId === candidate.blockId)): boolean {
+  if (candidate.ruleId === 'H01') {
+    if (plan.schema !== 'ai7.review.local-plan/2') return false;
+    const entry = plan.houseWordList.document.entries.find((entry) => entry.entryId === candidate.entryId);
+    return candidate.basis === 'house-word-list' && candidate.version === 1 && entry?.enabled === true && candidate.quote === entry.literal &&
+      canonicalJson(candidate.houseWordList) === canonicalJson(plan.houseWordList.pin) &&
+      candidate.id === houseCandidateId(plan, candidate.entryId, candidate.blockId, candidate.from, candidate.to) &&
+      block !== undefined && block.blockId === candidate.blockId && Number.isSafeInteger(candidate.from) && Number.isSafeInteger(candidate.to) &&
+      candidate.from >= 0 && candidate.to > candidate.from && candidate.to <= (graphemes?.length ?? graphemeCount(block.text)) &&
+      (graphemes === undefined ? sliceGraphemes(block.text, candidate.from, candidate.to) : graphemes.slice(candidate.from, candidate.to).join('')) === entry.literal;
+  }
   const basis = numeralBasis(plan.options);
   const enabled = candidate.ruleId.startsWith('P') ? plan.options.punctuation === 'chinese-prose' && candidate.basis === 'national-standard'
     : (basis === 'national-standard' || basis === 'editor-convention') && candidate.basis === basis && plan.options.numeralRules.some((id) => id === candidate.ruleId);
@@ -41,7 +73,8 @@ export function candidateHasExactAnchor(plan: LocalCheckPlan, candidate: LocalCa
 }
 
 /** Materialization validates each frozen block once, including repeated-text candidates with known offsets. */
-export function exactLocalCandidateIds(plan: LocalCheckPlan, candidates: readonly LocalCandidate[]): ReadonlySet<string> {
+export function exactLocalCandidateIds(plan: LocalCheckPlan | LocalCheckPlanV2, candidates: readonly LocalCandidateV2[]): ReadonlySet<string> {
+  if (plan.schema === 'ai7.review.local-plan/2') validateLocalPlanV2(plan); else validateLocalPlan(plan);
   const blocks = new Map(plan.blocks.map((block) => [block.blockId, block]));
   const cache = new Map<string, readonly string[]>();
   const valid = new Set<string>();
@@ -52,24 +85,24 @@ export function exactLocalCandidateIds(plan: LocalCheckPlan, candidates: readonl
     if (graphemes === undefined) {
       graphemes = Array.from(SEGMENTER.segment(block.text), (segment) => segment.segment); cache.set(candidate.blockId, graphemes);
     }
-    if (candidateHasExactAnchor(plan, candidate, graphemes, block)) valid.add(candidate.id);
+    if (candidateHasFrozenAnchor(plan, candidate, graphemes, block)) valid.add(candidate.id);
   }
   return valid;
 }
 
 /** One pass over frozen paragraphs, with cooperative yields within large paragraphs as well as between them. */
-export async function checkLocalPlan(plan: LocalCheckPlan, options: {
-  readonly cancelled?: () => boolean;
-  readonly checkpoint?: (phase: 'scan' | 'matches') => Promise<void>;
-} = {}): Promise<LocalCheckResult> {
-  validateLocalPlan(plan);
+export function checkLocalPlan(plan: LocalCheckPlan, options?: LocalCheckExecutionOptions): Promise<LocalCheckResult>;
+export function checkLocalPlan(plan: LocalCheckPlanV2, options?: LocalCheckExecutionOptions): Promise<LocalCheckResultV2>;
+export async function checkLocalPlan(plan: LocalCheckPlan | LocalCheckPlanV2, options: LocalCheckExecutionOptions = {}): Promise<LocalCheckResult | LocalCheckResultV2> {
+  if (plan.schema === 'ai7.review.local-plan/2') validateLocalPlanV2(plan); else validateLocalPlan(plan);
+  const house = plan.schema === 'ai7.review.local-plan/2' ? plan : null;
   const checkpoint = async (phase: 'scan' | 'matches' = 'scan'): Promise<void> => {
     if (options.cancelled?.()) throw new LocalCheckError('LOCAL_CHECK_CANCELLED', '本地检查已取消。');
     await (options.checkpoint?.(phase) ?? setImmediate());
     if (options.cancelled?.()) throw new LocalCheckError('LOCAL_CHECK_CANCELLED', '本地检查已取消。');
   };
-  const counts = Object.fromEntries(LOCAL_RULE_IDS.map((id) => [id, emptyCounts()])) as Record<LocalRuleId, LocalRuleCounts>;
-  const candidates: LocalCandidate[] = [];
+  const counts = { P01: emptyCounts(), P02: emptyCounts(), P03: emptyCounts(), N01: emptyCounts(), N02: emptyCounts(), H01: emptyCounts() };
+  const candidates: LocalCandidateV2[] = [];
   const excluded: { candidateId: string; reason: string }[] = [];
   const emitted = new Set<string>();
   const frozenGraphemes = new Map<string, readonly string[]>();
@@ -89,7 +122,7 @@ export async function checkLocalPlan(plan: LocalCheckPlan, options: {
       if (excluded.length < 256) excluded.push({ candidateId: candidate.id, reason: 'local-result-limit' });
       return;
     }
-    if (!candidateHasExactAnchor(plan, candidate, parts, block)) {
+    if (!candidateHasFrozenAnchor(plan, candidate, parts, block)) {
       // Counted in full; the listed reasons stay within the artifact's 256-entry bound.
       counts[id].error += 1; if (excluded.length < 256) excluded.push({ candidateId: candidate.id, reason: 'exact-grapheme-anchor-invalid' }); return;
     }
@@ -239,6 +272,41 @@ export async function checkLocalPlan(plan: LocalCheckPlan, options: {
     };
     await numeric('N01', /[+\-]?\.\d+[%％]/gu);
     await numeric('N02', /\d+(?:\.\d+)?[～~—]\d+(?:\.\d+)?(?:亿元|万元|[%％万亿])/gu);
+    if (house !== null) {
+      counts.H01.checked++; if (hasExclusion) counts.H01.exempt++;
+      const before = { ...counts.H01 }; let matches = 0; let work = 0;
+      for (const entry of house.houseWordList.document.entries) {
+        if (++work % 16 === 0) await checkpoint('matches');
+        if (!entry.enabled) continue;
+        // Search bounded overlapping windows, retaining every occurrence and yielding even on a huge no-hit paragraph.
+        for (let window = 0; window < block.text.length; window += 16384) {
+          if (++work % 16 === 0) await checkpoint('matches');
+          const end = Math.min(block.text.length, window + 16384);
+          const text = block.text.slice(window, end + entry.literal.length - 1);
+          let offset = text.indexOf(entry.literal);
+          while (offset >= 0 && window + offset < end) {
+            if (++matches % 512 === 0) await checkpoint('matches');
+            const from = indexAt.get(window + offset); const to = indexAt.get(window + offset + entry.literal.length);
+            if (from === undefined || to === undefined || !exact(from, to)) counts.H01.skipped++;
+            else {
+              const candidate: HouseCandidate = { id: houseCandidateId(house, entry.entryId, block.blockId, from, to), ruleId: 'H01', version: 1,
+                blockId: block.blockId, from, to, quote: entry.literal, observation: HOUSE_RULE.title, basis: 'house-word-list',
+                houseWordList: house.houseWordList.pin, entryId: entry.entryId };
+              if (candidates.length >= 10000) {
+                counts.H01.error++;
+                if (excluded.length < 256) excluded.push({ candidateId: candidate.id, reason: 'local-result-limit' });
+              } else if (!candidateHasFrozenAnchor(house, candidate, graphemes, block)) {
+                counts.H01.error++;
+                if (excluded.length < 256) excluded.push({ candidateId: candidate.id, reason: 'exact-grapheme-anchor-invalid' });
+              } else { candidates.push(candidate); counts.H01.findings++; }
+            }
+            offset = text.indexOf(entry.literal, offset + 1);
+          }
+        }
+      }
+      if (matches === 0) counts.H01.notRecognized++;
+      if (counts.H01.findings === before.findings && counts.H01.skipped === before.skipped && counts.H01.error === before.error && !hasExclusion) counts.H01.noFinding++;
+    }
     for (const id of LOCAL_RULE_IDS) if (enabled(id)) {
       if (!recognized.has(id)) counts[id].notRecognized++;
       else if (counts[id].findings === before.get(id) && counts[id].skipped === skippedBefore.get(id) && !hasExclusion) counts[id].noFinding++;
@@ -251,11 +319,95 @@ export async function checkLocalPlan(plan: LocalCheckPlan, options: {
   await checkpoint();
   // Block order by a precomputed index: a lookup per comparison would hold the event loop on a dense whole Book.
   const order = new Map(plan.blocks.map((block, index) => [block.blockId, index]));
-  candidates.sort((a, b) => order.get(a.blockId)! - order.get(b.blockId)! || a.from - b.from || a.ruleId.localeCompare(b.ruleId));
-  return { schema: 'ai7.review.local-result/1', planDigest: plan.digest, paragraphs: plan.blocks.length, candidates, excluded, counts };
+  const entryOrder = new Map(house?.houseWordList.document.entries.map((entry, index) => [entry.entryId, index]) ?? []);
+  candidates.sort((a, b) => order.get(a.blockId)! - order.get(b.blockId)! || a.from - b.from || a.ruleId.localeCompare(b.ruleId) ||
+    (a.ruleId === 'H01' && b.ruleId === 'H01' ? entryOrder.get(a.entryId)! - entryOrder.get(b.entryId)! : 0));
+  if (house !== null) return { schema: 'ai7.review.local-result/2', planDigest: plan.digest, paragraphs: plan.blocks.length, candidates, excluded, counts };
+  return { schema: 'ai7.review.local-result/1', planDigest: plan.digest, paragraphs: plan.blocks.length,
+    candidates: candidates.filter((candidate) => candidate.ruleId !== 'H01'), excluded,
+    counts: { P01: counts.P01, P02: counts.P02, P03: counts.P03, N01: counts.N01, N02: counts.N02 } };
 }
 
 export function localCandidateNote(candidate: LocalCandidate): string {
   const rule = LOCAL_RULES[candidate.ruleId];
   return `${candidate.basis === 'editor-convention' ? '编辑约定' : '有限条款检查'} · ${candidate.ruleId}/v${candidate.version} · ${rule.title}。${candidate.observation} 依据：${rule.edition} ${rule.clauses}（${rule.url}）。局限：${rule.limitation} 专业或元语言用法可能误报；仅供编辑复核。`;
+}
+
+export function houseCandidateNote(plan: LocalCheckPlanV2, candidate: HouseCandidate): string {
+  validateLocalPlanV2(plan);
+  if (!candidateHasFrozenAnchor(plan, candidate)) throw new LocalCheckError('LOCAL_ANCHOR_INVALID', '词条命中位置与冻结来源不一致。');
+  const entry = plan.houseWordList.document.entries.find((entry) => entry.entryId === candidate.entryId)!;
+  return houseAnnotationDetail(entry, { pin: plan.houseWordList.pin, ordinal: plan.houseWordList.document.ordinal });
+}
+
+function requireV2(value: unknown): asserts value {
+  if (!value) throw new LocalCheckError('LOCAL_RECORD_INVALID', '本地词表工序结果或摘要链无效。');
+}
+/** Structural validation preserves the per-candidate exact-anchor exclusion at materialization. */
+export function validateLocalResultV2(value: unknown, plan: LocalCheckPlanV2): asserts value is LocalCheckResultV2 {
+  validateLocalPlanV2(plan);
+  requireV2(isRecord(value) && hasExactKeys(value, ['schema', 'planDigest', 'paragraphs', 'candidates', 'excluded', 'counts']) &&
+    value.schema === 'ai7.review.local-result/2' && value.planDigest === plan.digest && value.paragraphs === plan.blocks.length &&
+    Array.isArray(value.candidates) && value.candidates.length <= 10000 && Array.isArray(value.excluded) && value.excluded.length <= 256 &&
+    isRecord(value.counts) && hasExactKeys(value.counts, [...LOCAL_RULE_IDS_V2]));
+  const ids = new Set<string>(); const findings = { P01: 0, P02: 0, P03: 0, N01: 0, N02: 0, H01: 0 };
+  for (const candidate of value.candidates) {
+    requireV2(isRecord(candidate));
+    const fields = ['id', 'ruleId', 'version', 'blockId', 'from', 'to', 'quote', 'observation', 'basis'];
+    requireV2(hasExactKeys(candidate, candidate.ruleId === 'H01' ? [...fields, 'houseWordList', 'entryId'] : fields) &&
+      typeof candidate.id === 'string' && DIGEST_PATTERN.test(candidate.id) && !ids.has(candidate.id) && candidate.version === 1 &&
+      typeof candidate.blockId === 'string' && BLOCK_ID_PATTERN.test(candidate.blockId) && Number.isSafeInteger(candidate.from) && Number.isSafeInteger(candidate.to) && Number(candidate.from) >= 0 && Number(candidate.to) > Number(candidate.from) &&
+      typeof candidate.quote === 'string' && candidate.quote.length > 0 && candidate.quote.length <= 65536 && candidate.quote.isWellFormed() &&
+      typeof candidate.observation === 'string' && candidate.observation.length <= 500 && candidate.observation.isWellFormed());
+    if (candidate.ruleId === 'H01') {
+      requireV2(candidate.basis === 'house-word-list' && candidate.observation === HOUSE_RULE.title && typeof candidate.entryId === 'string' && UUID_PATTERN.test(candidate.entryId) &&
+        canonicalJson(candidate.houseWordList) === canonicalJson(plan.houseWordList.pin));
+      findings.H01++;
+    } else {
+      requireV2(candidate.ruleId === 'P01' || candidate.ruleId === 'P02' || candidate.ruleId === 'P03' || candidate.ruleId === 'N01' || candidate.ruleId === 'N02');
+      requireV2(candidate.basis === 'national-standard' || candidate.basis === 'editor-convention'); findings[candidate.ruleId]++;
+    }
+    ids.add(candidate.id);
+  }
+  for (const id of LOCAL_RULE_IDS_V2) {
+    const count = value.counts[id];
+    requireV2(isRecord(count) && hasExactKeys(count, ['checked', 'exempt', 'skipped', 'error', 'findings', 'disabled', 'outOfApplicability', 'notRecognized', 'noFinding']) &&
+      Object.values(count).every((number) => Number.isSafeInteger(number) && Number(number) >= 0) && count.findings === findings[id]);
+  }
+  for (const exclusion of value.excluded) requireV2(isRecord(exclusion) && hasExactKeys(exclusion, ['candidateId', 'reason']) &&
+    typeof exclusion.candidateId === 'string' && DIGEST_PATTERN.test(exclusion.candidateId) && (exclusion.reason === 'local-result-limit' || exclusion.reason === 'exact-grapheme-anchor-invalid'));
+}
+
+export interface LocalStageArtifactV2 {
+  readonly schema: 'ai7.review.local-stage-artifact/2'; readonly reviewRunId: string; readonly categoryId: 'local-text-check';
+  readonly sequence: number; readonly attemptId: string;
+  readonly state: 'started' | 'completed' | 'materialized' | 'interrupted' | 'cancelled' | 'failed' | 'refused';
+  readonly planDigest: string; readonly procedure: LocalCheckPlanV2['procedure']; readonly source: LocalCheckPlanV2['source'];
+  readonly plan: LocalCheckPlanV2; readonly previousDigest: string | null; readonly recordedAt: string;
+  readonly result: LocalCheckResultV2 | null; readonly detail: string;
+}
+/** Pure unselected artifact contract. No ReviewRun table, lifecycle or materialization is activated here. */
+export function validateLocalStageArtifactV2(value: unknown, plan: LocalCheckPlanV2,
+  previous?: { readonly record: LocalStageArtifactV2; readonly digest: string }): asserts value is LocalStageArtifactV2 {
+  validateLocalPlanV2(plan);
+  requireV2(isRecord(value) && hasExactKeys(value, ['schema', 'reviewRunId', 'categoryId', 'sequence', 'attemptId', 'state', 'planDigest', 'procedure', 'source', 'plan', 'previousDigest', 'recordedAt', 'result', 'detail']) &&
+    value.schema === 'ai7.review.local-stage-artifact/2' && value.categoryId === 'local-text-check' && typeof value.reviewRunId === 'string' && UUID_PATTERN.test(value.reviewRunId) &&
+    typeof value.attemptId === 'string' && UUID_PATTERN.test(value.attemptId) && value.sequence === (previous?.record.sequence ?? 0) + 1 &&
+    value.previousDigest === (previous?.digest ?? null) && value.planDigest === plan.digest && canonicalJson(value.plan) === canonicalJson(plan) &&
+    canonicalJson(value.procedure) === canonicalJson(plan.procedure) && canonicalJson(value.source) === canonicalJson(plan.source) &&
+    typeof value.recordedAt === 'string' && Number.isFinite(Date.parse(value.recordedAt)) && new Date(value.recordedAt).toISOString() === value.recordedAt &&
+    typeof value.detail === 'string' && value.detail.isWellFormed() && value.detail.length <= 2000 &&
+    ['started', 'completed', 'materialized', 'interrupted', 'cancelled', 'failed', 'refused'].includes(String(value.state)));
+  if (previous !== undefined) requireV2(previous.digest === sha256Hex(canonicalJson(previous.record)) && previous.record.reviewRunId === value.reviewRunId && previous.record.planDigest === plan.digest);
+  const last = previous?.record.state;
+  const follows = value.state === 'started' ? previous === undefined || last === 'interrupted'
+    : value.state === 'materialized' ? last === 'completed'
+      : value.state === 'completed' || value.state === 'interrupted' ? last === 'started'
+        : previous === undefined || last === 'started' || last === 'interrupted' || last === 'completed';
+  requireV2(follows);
+  if (previous !== undefined) requireV2(value.state === 'started' ? value.attemptId !== previous.record.attemptId : value.attemptId === previous.record.attemptId);
+  if (value.state === 'completed' || value.state === 'materialized') {
+    validateLocalResultV2(value.result, plan);
+    if (value.state === 'materialized') requireV2(canonicalJson(value.result) === canonicalJson(previous?.record.result));
+  } else requireV2(value.result === null);
 }

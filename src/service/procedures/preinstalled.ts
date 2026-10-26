@@ -17,6 +17,14 @@ export function localCheckProcedureDefinition(): ProcedureDefinitionDocument {
       stage('derived-report', ['review-findings'], 'ai7.review.report/1')], outputKinds: ['annotation'] };
 }
 
+/** Unselected successor. Active defaults and immutable v1 bytes stay unchanged until integration. */
+export function localCheckProcedureDefinitionV2(): ProcedureDefinitionDocument {
+  return { schema: PROCEDURE_DEFINITION_SCHEMA, id: 'ai7-procedure/local-text-check', version: 2,
+    title: '本地文字检查', role: '以五项有限规则及编辑明确选定的本社字面词表生成供编辑判断的精确批注', editorInstruction: '',
+    stages: [stage('deterministic-check', ['frozen-local-plan'], 'ai7.review.local-result/2'),
+      stage('derived-report', ['review-findings'], 'ai7.review.report/1')], outputKinds: ['annotation'] };
+}
+
 /** The pre-installed procedure one built-in review category runs (ADR 0095 §1). */
 export function reviewProcedureId(categoryId: string): string {
   return `ai7-procedure/review-${categoryId}`;
