@@ -6178,7 +6178,7 @@ export class BaselineAnalysisStore {
       'ANALYSIS_POLICY_UNAVAILABLE', `无法建立可信的 developer-live Provider Processing ${DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION} 记录。`);
       return;
     }
-    requireAnalysis(['v1', 'v29'].includes(policy.providerProcessing.version) && policy.providerProcessing.decision === 'deny' &&
+    requireAnalysis(['v1', 'v29'].includes(policy.providerProcessing.version ?? '') && policy.providerProcessing.decision === 'deny' &&
       policy.providerProcessing.authorizedLiveTransmissionCount === 0 && policy.providerProcessing.liveTransmissionAllowed === false,
     'ANALYSIS_POLICY_UNAVAILABLE', '无法建立可信的 development-ci Provider Processing 拒绝记录。');
   }
