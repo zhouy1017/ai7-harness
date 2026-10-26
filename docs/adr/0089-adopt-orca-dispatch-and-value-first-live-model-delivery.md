@@ -1,16 +1,16 @@
 ---
-status: accepted by the Owner on 2026-10-12; implementation and runtime-policy activation are separate
+status: accepted by the Owner on 2026-10-12; amended by the Owner on 2026-10-26 to allow manual per-Issue dispatch, retire mandatory cross-provider review, and require repair only when E2E or CI tests fail
 date: 2026-10-12
 deciders: Owner
 ---
 
 # 0089 · Adopt Orca dispatch and value-first live-model delivery
 
-The Owner approved this design and documentation update on 2026-10-12, tracked by [#805](https://github.com/zhouy1017/ai7-harness/issues/805). It replaces conflicting repository-development guidance and reorders remaining implementation around actual editorial value.
+The Owner approved this design and documentation update on 2026-10-12, tracked by [#805](https://github.com/zhouy1017/ai7-harness/issues/805), and amended it on 2026-10-26 to allow manual per-Issue coding dispatch, remove mandatory cross-provider review, and gate repair strictly on E2E and CI test failures. It replaces conflicting repository-development guidance and reorders remaining implementation around actual editorial value.
 
 ## Decision owners
 
-- [Orca dispatch](../agents/orca-dispatch.md) is the sole current owner of repository roles, permitted model/effort pairs, handoff and wave integration.
+- [Orca dispatch](../agents/orca-dispatch.md) is the sole current owner of repository roles, manual per-Issue or Orca wave dispatch, test-driven gate repair and wave integration.
 - [Development plan](../development/development-plan.md) owns delivery order and dependencies. [PROGRESS](../../PROGRESS.md) reports current integration status.
 - This ADR owns the development-test/business boundary and the target Provider decision. Runtime configuration and immutable policies continue to describe the executable capabilities of their actual selected versions.
 
@@ -18,9 +18,9 @@ The model/effort table is deliberately not copied here or into templates.
 
 ## Orca roles and delivery
 
-The Commander splits and assigns work with balanced use of the ChatGPT, Claude and OpenCode Go subscriptions. Every coding Worker has an approved different-subscription Reviewer whose capability pairing is equal or higher. Different models on Go remain the same subscription channel.
+Work may be dispatched either by the Owner manually one Issue at a time to a single coding agent, or through an Orca wave coordinator across available ChatGPT, Claude and OpenCode Go subscriptions. Mandatory cross-provider review (requiring a second agent on a different subscription channel) is retired.
 
-The Worker implements, tests and opens a PR to the wave integration branch. After a single-writer handoff, the Reviewer reviews, repairs, tests and merges that slice. The Commander owns ordering, cumulative validation and final wave integration into dev. The protected main/release line remains separate.
+The assigned coding agent implements the Issue brief, runs the applicable CI checks (`check`, `test`, `test:service`, `build`) and E2E Journeys, fixes any failing E2E or CI tests on the branch, and opens or updates the PR to the wave integration branch or `dev`. Follow-up repair or review is triggered only when E2E tests or CI tests fail. Once the required E2E and CI checks pass, the slice may merge without waiting for a cross-provider Reviewer handoff. The protected `main`/release line remains separate.
 
 This replaces fixed old model bindings, the optional read-only Reviewer, Worker prohibitions on creating PRs and the Commander's former monopoly on every external action. It lifts the ADR 0082 dispatch hold as the new rulebook integrates; operational dispatch still requires a verified Orca runtime; product waves require the CI adaptation of [#806](https://github.com/zhouy1017/ai7-harness/issues/806). The infrastructure bootstrap for #806 itself follows rulebook §2 and does not wait on its own completion. An unavailable runtime is a disclosed prerequisite, not permission to call a different mechanism Orca.
 

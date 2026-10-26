@@ -37,7 +37,7 @@ Increment the brief revision when outcome, class, scope, dependencies or accepta
 
 ## Assignment prompt
 
-Give the Issue URL, brief revision and the exact assigned workspace/base or incoming PR head. Include the role assignment link from Orca dispatch. The agent verifies those records before editing; an author's full transcript is not the review brief.
+Give the Issue URL, brief revision and the exact assigned workspace/base. Under [Orca dispatch](orca-dispatch.md), the Owner may manually dispatch one Issue at a time to a single coding agent without a cross-provider Reviewer handoff; repair is required only when E2E or CI tests fail.
 
 ## Pull-request closure
 
