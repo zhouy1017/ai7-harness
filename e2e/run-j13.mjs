@@ -2117,8 +2117,8 @@ async function main() {
     // a model fixture (Issue #842), and 再选一段加入 is refused in words. Its entry opens the 就这段发起任务 composer with it held; 书系一致性 is unticked and
     // the editor's (S31b's reading, ruling 3): left unticked, 准备任务 prepares nothing and says so; ticked, it prepares a 当前选区
     // Run pinned to version 1 with nothing left out, whose plan opens beside the manuscript. Its card in 任务 names the paragraph
-    // and offers 跳到所选文字 (deferred item d), which puts the caret back on it. The Run is left prepared: this window's adapter
-    // answers 体例与格式, not 书系一致性.
+    // and offers 跳到所选文字 (deferred item d), which puts the caret back on it. Under the matching retained Series fixture,
+    // this stage intentionally leaves the Run prepared and claims no selection execution.
     await fill(renderer, '#book-filter-text', MEMBER, 'selection-procedure-find-text');
     await clickSelector(renderer, '[data-book-filter-action="find"]', 'selection-procedure-find');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"] button[data-book-id=${JSON.stringify(member)}]')`, 'selection-procedure-found');
