@@ -2441,7 +2441,7 @@ export class BaselineAnalysisStore {
 
   #selectedPlanMetadata(policy = this.#launch.policy): Pick<MaterialPlanInputsProjection, 'selectedPolicyIdentity' | 'localFixtureProfile'> {
     if (policy?.selectedPolicyIdentity === undefined) {
-      requireAnalysis(policy?.activePolicySetVersion !== 'v21' && policy?.providerProcessing.version !== 'v29' && policy?.providerProcessing.version !== 'v30',
+      requireAnalysis(!['v21', 'v22'].includes(policy?.activePolicySetVersion ?? '') && policy?.providerProcessing.version !== 'v29' && policy?.providerProcessing.version !== 'v30',
         'ANALYSIS_POLICY_UNAVAILABLE', '当前计划缺少已选处理策略身份。');
       return {};
     }
@@ -6178,9 +6178,9 @@ export class BaselineAnalysisStore {
       'ANALYSIS_POLICY_UNAVAILABLE', `无法建立可信的 developer-live Provider Processing ${DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION} 记录。`);
       return;
     }
-    requireAnalysis(policy.providerProcessing.version === 'v29' && policy.providerProcessing.decision === 'deny' &&
+    requireAnalysis(['v1', 'v29'].includes(policy.providerProcessing.version) && policy.providerProcessing.decision === 'deny' &&
       policy.providerProcessing.authorizedLiveTransmissionCount === 0 && policy.providerProcessing.liveTransmissionAllowed === false,
-    'ANALYSIS_POLICY_UNAVAILABLE', '无法建立可信的 development-ci Provider Processing v29 拒绝记录。');
+    'ANALYSIS_POLICY_UNAVAILABLE', '无法建立可信的 development-ci Provider Processing 拒绝记录。');
   }
 }
 

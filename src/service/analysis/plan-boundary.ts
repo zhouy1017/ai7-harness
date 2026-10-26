@@ -219,16 +219,18 @@ export function providerPlanPolicyMetadata(providerPlan: Readonly<Record<string,
   requireAnalysis(hasIdentity || (!hasProfile && !currentContract), 'ANALYSIS_RECORD_INVALID', '计划缺少已选策略身份。');
   if (!hasIdentity) return {};
   const selected = selectedPolicyIdentityOf(providerPlan.selectedPolicyIdentity);
+  const localPolicy = selected !== null && ['v1', 'v29'].includes(selected.providerProcessingVersion);
   requireAnalysis(selected !== null && pin !== null && Object.keys(pin).length === 4 &&
-    pin.decision === (selected.providerProcessingVersion === 'v29' ? 'deny' : 'eligible-only') &&
-    pin.authorizedLiveTransmissionCount === (selected.providerProcessingVersion === 'v29' ? 0 : 'bounded-by-run') &&
+    pin.decision === (localPolicy ? 'deny' : 'eligible-only') &&
+    pin.authorizedLiveTransmissionCount === (localPolicy ? 0 : 'bounded-by-run') &&
     pin.version === selected.providerProcessingVersion &&
-    ((pin.operationalScope === 'development-ci' && selected.providerProcessingVersion === 'v29') ||
+    ((pin.operationalScope === 'development-ci' && localPolicy) ||
       (pin.operationalScope === 'ordinary-production' && selected.providerProcessingVersion === 'v30') ||
       (pin.operationalScope === 'developer-live' && selected.providerProcessingVersion === 'v24')),
   'ANALYSIS_RECORD_INVALID', '计划的已选策略身份无效。');
   const local = isRecord(providerPlan.executionRoute) && providerPlan.executionRoute.kind === 'ai7-local-deterministic';
-  requireAnalysis(!local || hasProfile, 'ANALYSIS_RECORD_INVALID', '本地执行计划缺少确定性配置。');
+  requireAnalysis(!local || selected.providerProcessingVersion !== 'v29' || hasProfile,
+    'ANALYSIS_RECORD_INVALID', '本地执行计划缺少确定性配置。');
   if (!hasProfile) return { selectedPolicyIdentity: selected };
   const profile = localFixtureProfileOf(providerPlan.localFixtureProfile, selected);
   requireAnalysis(local && pin.operationalScope === 'development-ci' && profile !== null,
