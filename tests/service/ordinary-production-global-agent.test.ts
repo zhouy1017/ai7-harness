@@ -1,12 +1,12 @@
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { randomUUID } from 'node:crypto';
-import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { Session } from '@deepseek-ai/dsh-session';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
-import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, readRetainedBoundAnalysisPolicySync, resolveSourceCheckoutLaunchPolicy, resolveSourceCheckoutLaunchPolicySync } from '../../src/service/launch-policy.js';
+import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, allowedProductionBindingOf, readRetainedBoundAnalysisPolicySync, resolveSourceCheckoutLaunchPolicy, resolveSourceCheckoutLaunchPolicySync } from '../../src/service/launch-policy.js';
 import { DialogueExecutionOwner, productionDialogueRoute } from '../../src/service/dialogue/dialogue-execution.js';
 import { admittedGlobalAgentRoute, prepareGlobalAgentDisclosure, startGlobalAgentTurn } from '../../src/service/dialogue/global-agent-session.js';
 import { buildDialogueMessage } from '../../src/service/dialogue/contract.js';
@@ -22,6 +22,9 @@ import { parseReviewCategoryUnitMessageHeader } from '../../src/service/review/r
 import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/assurance-sampling-contract.js';
 import { pinEditorialWorkspaceProfileRevision2 } from '../support/sample1-baseline.js';
 import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
+import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
+import { readHarnessSessionLog } from '../../src/service/harness/session-log.js';
+import { attemptTurn } from '../../src/service/dialogue/dialogue-history.js';
 
 // One explicit model-request capability per test application.
 // Registered first: the stack-ordered final hook runs after existing consumer teardown.
@@ -108,6 +111,266 @@ beforeEach(async () => {
 afterEach(async () => { vi.restoreAllMocks(); await owner?.dispose(); if (!closedForNativeRejection) store?.close(); await roots?.dispose(); });
 
 describe('v30 Book-less Global Agent', () => {
+  it('retains completed Global and local histories through public replacement, merges only Book history, and refuses a missing parent log', async () => {
+    const copies: ServiceTestRoots[] = [];
+    const opened = new Set<EditorialStore>();
+    const owners = new Set<DialogueExecutionOwner>();
+    const dialogueTables = ['dialogue_tasks', 'dialogue_attempts', 'dialogue_execution_bindings',
+      'dialogue_harness_spans', 'dialogue_attempt_outcomes', 'dialogue_conversions'] as const;
+    const houseTables = ['editorial_learning_controls', 'global_editorial_memory_items',
+      'global_editorial_memory_item_versions', 'house_review_preference_versions', 'learning_supervision_directives'] as const;
+    const database = (root: ServiceTestRoots) => new DatabaseSync(join(root.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+    // Physical columns, canonical strings and their hashes are compared together; failures print no retained words.
+    const rows = (root: ServiceTestRoots, tables: readonly string[], dialogueId?: string): string => {
+      const db = database(root);
+      try {
+        return canonicalJson(tables.map((table) => {
+          const filter = dialogueId === undefined ? '' : table === 'dialogue_tasks' ? ' WHERE dialogue_id = ?'
+            : table === 'dialogue_attempts' ? ' WHERE dialogue_id = ?'
+              : ' WHERE attempt_id IN (SELECT attempt_id FROM dialogue_attempts WHERE dialogue_id = ?)';
+          const records = db.prepare(`SELECT * FROM ${table}${filter}`).all(...(dialogueId === undefined ? [] : [dialogueId]));
+          for (const row of records) if (typeof row.canonical_json === 'string') {
+            expect(canonicalJson(JSON.parse(row.canonical_json)) === row.canonical_json).toBe(true);
+            expect(sha256Hex(row.canonical_json) === row.sha256).toBe(true);
+          }
+          return { table, records: records.map((row) => canonicalJson(row)).sort() };
+        }));
+      } finally { db.close(); }
+    };
+    const history = (root: ServiceTestRoots, dialogueId: string, bookId: string | null, stoppedParent = bookId === null) => {
+      const db = database(root);
+      try {
+        const ledger = new DialogueLedger(db);
+        const task = db.prepare('SELECT * FROM dialogue_tasks WHERE dialogue_id = ?').get(dialogueId)!;
+        expect(task.book_id).toBe(bookId);
+        const location = ['manuscript_id', 'branch_id', 'revision_id', 'journal_sequence', 'block_id',
+          'from_grapheme', 'to_grapheme', 'block_digest'];
+        expect(location.every((key) => bookId === null ? task[key] === null : task[key] !== null)).toBe(true);
+        if (bookId === null) expect(ledger.globalTask(dialogueId)?.operationalScope).toBe('ordinary-production');
+        else expect(ledger.task(dialogueId)?.bookId).toBe(bookId);
+        const attempts = ledger.attempts(dialogueId);
+        expect(attempts).toHaveLength(stoppedParent ? 2 : 1);
+        expect(db.prepare('SELECT * FROM dialogue_conversions WHERE attempt_id IN (SELECT attempt_id FROM dialogue_attempts WHERE dialogue_id = ?)')
+          .all(dialogueId)).toHaveLength(0);
+        const logs = attempts.map((attempt, index) => {
+          const bound = attempt.binding!, span = attempt.span!, outcome = attempt.outcome!;
+          expect(attempt.ordinal).toBe(index + 1);
+          expect(attempt.priorAttemptId).toBe(index === 0 ? null : attempts[index - 1]!.attemptId);
+          expect(outcome.outcome).toBe(stoppedParent && index === 0 ? 'stopped' : 'completed');
+          expect(span.harnessSessionId).toBe(bound.harnessSessionId);
+          expect(bound.operationalScope).toBe(bookId === null ? 'ordinary-production' : 'development-ci');
+          const rawAttempt = db.prepare('SELECT canonical_json FROM dialogue_attempts WHERE attempt_id = ?').get(attempt.attemptId)!;
+          expect(JSON.parse(String(rawAttempt.canonical_json)).schema).toBe(bookId === null ? 'ai7.dialogue-attempt/2' : 'ai7.dialogue-attempt/1');
+          const rawBinding = db.prepare('SELECT * FROM dialogue_execution_bindings WHERE attempt_id = ?').get(attempt.attemptId)!;
+          if (bookId === null) {
+            expect(rawBinding.fixture_sha256).toBeNull();
+            expect(rawBinding.provider_processing_version).toBe('v30');
+          } else {
+            expect(JSON.parse(String(rawBinding.canonical_json))).toMatchObject({ schema: 'ai7.dialogue-execution-binding/2',
+              selectedPolicyIdentity: { providerProcessingVersion: 'v29' }, localFixtureProfile: { kind: 'legacy', registeredProfile: 'dialogue' } });
+            expect(rawBinding.provider_processing_version).toBeNull(); expect(rawBinding.policy_rule_id).toBeNull();
+          }
+          const log = readHarnessSessionLog(join(root.dataRoot, 'harness-sessions'), bound.harnessSessionId)!;
+          expect(log.header.id).toBe(bound.harnessSessionId);
+          expect(log.tornOffset).toBeUndefined();
+          expect(span.startSeq).toBeGreaterThanOrEqual(0);
+          expect(outcome.endSeq).not.toBeNull();
+          expect(outcome.endSeq!).toBeGreaterThanOrEqual(span.startSeq);
+          expect(outcome.endSeq!).toBeLessThan(log.events.length);
+          const turn = attemptTurn(log, span.startSeq, outcome.endSeq);
+          expect(turn.message !== null && turn.streamed.length > 0).toBe(true);
+          expect(sha256Hex(turn.message!.question) === task.question_sha256).toBe(true);
+          expect(log.events.slice(span.startSeq, outcome.endSeq! + 1).filter((event) => event.type === 'user/message')).toHaveLength(1);
+          const bytes = readFileSync(join(root.dataRoot, 'harness-sessions', `${bound.harnessSessionId}.jsonl`));
+          return { sessionId: bound.harnessSessionId, bytes, sha256: sha256Hex(bytes) };
+        });
+        expect(new Set(logs.map((log) => log.sessionId)).size).toBe(attempts.length);
+        return { rows: rows(root, dialogueTables, dialogueId), logs };
+      } finally { db.close(); }
+    };
+    const sameHistory = (actual: ReturnType<typeof history>, expected: ReturnType<typeof history>) => {
+      expect(actual.rows === expected.rows).toBe(true);
+      expect(actual.logs.map((log) => log.sessionId)).toEqual(expected.logs.map((log) => log.sessionId));
+      actual.logs.forEach((log, index) => {
+        expect(log.sha256).toBe(expected.logs[index]!.sha256);
+        expect(log.bytes.equals(expected.logs[index]!.bytes)).toBe(true);
+      });
+    };
+    // Reconstruct runtime admission from saved ready metadata only: no connection save, selection or authority write.
+    const ordinary = async (target: EditorialStore, root: ServiceTestRoots) => {
+      const controlsBefore = rows(root, houseTables);
+      const main = target.getConfiguredModelRoleBinding('main-editorial');
+      const fast = target.getConfiguredModelRoleBinding('fast-interaction');
+      if (main === null || fast === null) throw new Error('saved ordinary binding missing');
+      const admittedMain = allowedProductionBindingOf(main);
+      const admittedFast = allowedProductionBindingOf(fast, 'fast-interaction');
+      if (admittedMain === null || admittedFast === null) throw new Error('saved ordinary binding not admitted');
+      expect(target.getModelServiceConnections().some((entry) => entry.credentialReference === fast.credentialReference &&
+        entry.credentialOperationState === 'ready')).toBe(true);
+      const selectedPolicy = await resolveSourceCheckoutLaunchPolicy(root.codeRoot, 'ordinary-production', main, fast);
+      expect(selectedPolicy.integrityState).toBe('verified'); expect(selectedPolicy.providerProcessing.version).toBe('v30');
+      target.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy: selectedPolicy,
+        live: { scope: 'ordinary-production', ...admittedMain, credentialReference: main.credentialReference, runBudgetCeiling: 'unset' } });
+      const nativeFetch = (async (url: string, init: { body: string; signal?: AbortSignal }) => {
+        calls.push({ url, body: init.body }); return transport(init.signal);
+      }) as unknown as typeof fetch;
+      const dialogues = new DialogueExecutionOwner({ requestGovernor, records: target, fixture: null, sessionLogRoot: target.harnessSessionLogRoot,
+        live: productionDialogueRoute({ scope: 'ordinary-production', nativeFetch }, () => selectedPolicy, () => fast.credentialReference,
+          { resolve: async (reference) => { expect(reference).toBe(fast.credentialReference); return 'synthetic-test-placeholder'; } }) });
+      owners.add(dialogues);
+      expect(rows(root, houseTables) === controlsBefore).toBe(true);
+      return { dialogues, selectedPolicy };
+    };
+    const closeCopy = async (target: EditorialStore) => {
+      target.markCleanShutdown(); await target.close(); opened.delete(target);
+    };
+    const openCopy = async (root: ServiceTestRoots) => {
+      const target = await EditorialStore.open(root.dataRoot, root.codeRoot); opened.add(target); return target;
+    };
+    try {
+      governance('来源社保留短句。');
+      const sourceGuidance = store.inspectGlobalAgent().sourceCandidates!;
+      expect(sourceGuidance.length).toBeGreaterThan(0);
+      transport = async (signal) => heldResponse(signal);
+      const parent = start();
+      await waitFor(() => (inspect(parent.dialogueId).attempts[0]?.fragments.length ?? 0) > 0);
+      await owner.stop(parent.attemptId);
+      transport = async () => response();
+      const child = start({ kind: 'continue', dialogueId: parent.dialogueId, attemptId: parent.attemptId });
+      await waitFor(() => inspect(parent.dialogueId).attempts[1]?.state === 'completed');
+      await owner.dispose(); await requestGovernor.whenIdle();
+      store.markCleanShutdown(); await store.close(); closedForNativeRejection = true;
+
+      // The admitted local /2 binding has its own genuine CI/v29 lifecycle; its attempt stays /1.
+      store = await EditorialStore.open(roots.dataRoot, roots.codeRoot); closedForNativeRejection = false;
+      const fixture = await loadModelFixture(join(roots.codeRoot, 'tests', 'fixtures', 'model'), 'sample1-dialogue');
+      owner = new DialogueExecutionOwner({ requestGovernor, records: store, fixture, live: null,
+        sessionLogRoot: store.harnessSessionLogRoot, answerHold: null });
+      const book = await importSample1Book(store, roots.codeRoot, '公开包中唯一的图书');
+      const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+      const block = window.blocks.find((entry) => entry.kind === 'paragraph' && graphemesOf(entry.text).length >= 30)!;
+      const local = store.askAboutSelection(book.bookId, { question: '这段的叙述视角是否一致？', selection: {
+        manuscriptId: book.manuscriptId, branchId: book.branchId, windowStartBlockId: window.blocks[0]!.blockId,
+        baseRevisionId: window.revisionId, expectedJournalSequence: window.journalSequence, blockId: block.blockId,
+        baseBlockDigest: block.digest, fromGrapheme: 2, toGrapheme: 22, selectedText: graphemesOf(block.text).slice(2, 22).join(''),
+      } });
+      owner.begin(local);
+      await waitFor(() => store.inspectDialogue(book.bookId, local.dialogueId, 0, (id) => owner.liveText(id)).attempts[0]?.state === 'completed');
+      await owner.dispose(); await requestGovernor.whenIdle();
+      const sourceRuntime = await ordinary(store, roots);
+      const sourceGlobal = history(roots, parent.dialogueId, null), sourceLocal = history(roots, local.dialogueId, book.bookId);
+      const sourceGlobalProjection = canonicalJson(store.inspectGlobalAgentDialogue(parent.dialogueId));
+      const sourceLocalProjection = canonicalJson(store.inspectDialogue(book.bookId, local.dialogueId, 0, () => null));
+      const sourceHouse = rows(roots, houseTables);
+      const sourceProof = canonicalJson(store.globalAgentHistoryProof({ dialogueId: parent.dialogueId, attemptId: child.attemptId }, 'regenerate'));
+      const sourceBooks = store.listBooks(null).items.map(({ bookId, title }) => ({ bookId, title }));
+      expect(sourceBooks.map((entry) => entry.bookId)).toEqual([book.bookId]);
+      const packagePath = join(roots.inputRoot, 'completed-histories.ai7db');
+      const preparation = await store.prepareDatabaseExport(packagePath, true);
+      expect((await store.approveDatabaseExport(preparation.preparationId, true)).outcome).toBe('created');
+      await sourceRuntime.dialogues.dispose();
+      store.markCleanShutdown(); await store.close(); closedForNativeRejection = true;
+      const settledSourceBytes = readFileSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+      const packageBytes = readFileSync(packagePath);
+
+      const replacementRoot = await createServiceTestRoots('ai7-global-package-replace-'); copies.push(replacementRoot);
+      let replacement = await openCopy(replacementRoot);
+      const replacementPreview = await replacement.inspectDatabaseImport(packagePath);
+      expect(replacementPreview).toMatchObject({ compatibility: 'compatible', schemaRevision: 94, dataVersion: 1, contents: { books: 1 } });
+      const replacing = await replacement.prepareDatabaseReplacement(replacementPreview.previewId);
+      const replacementId = replacing.pending!.replacementId;
+      await closeCopy(replacement); replacement = await openCopy(replacementRoot);
+      const replacedRuntime = await ordinary(replacement, replacementRoot);
+      expect((await replacement.inspectDatabaseReplacements()).replacements[0]).toMatchObject({ replacementId, outcome: 'applied' });
+      expect(replacement.listBooks(null).items.map((entry) => entry.bookId)).toEqual([book.bookId]);
+      sameHistory(history(replacementRoot, parent.dialogueId, null), sourceGlobal);
+      sameHistory(history(replacementRoot, local.dialogueId, book.bookId), sourceLocal);
+      expect(rows(replacementRoot, houseTables) === sourceHouse).toBe(true);
+      expect(canonicalJson(replacement.inspectGlobalAgentDialogue(parent.dialogueId)) === sourceGlobalProjection).toBe(true);
+      expect(canonicalJson(replacement.inspectDialogue(book.bookId, local.dialogueId, 0, () => null)) === sourceLocalProjection).toBe(true);
+      expect(canonicalJson(replacement.globalAgentHistoryProof({ dialogueId: parent.dialogueId, attemptId: child.attemptId }, 'regenerate')) === sourceProof).toBe(true);
+
+      const mergeRoot = await createServiceTestRoots('ai7-global-package-merge-'); copies.push(mergeRoot);
+      let destination = await openCopy(mergeRoot);
+      destination.saveModelServiceConnection('目标社独立合成连接', null, 'ready', binding.route);
+      destination.selectModelServiceRoute(binding.route); destination.selectFastRoleModel(binding.route, binding.model);
+      let destinationRuntime = await ordinary(destination, mergeRoot);
+      destination.recordLearningSupervision({ operation: 'create', targets: [], scope: { kind: 'house' },
+        categoryId: 'typos-and-usage', text: '目标社先核对语境。', effect: 'guide' });
+      destination.changeEditorialLearning({ kind: 'switch', enabled: false, expectedEntries: 0 });
+      const ownInput = { kind: 'ask' as const, question: '目标社偏好如何使用？', sources: destination.inspectGlobalAgent().sourceCandidates!.map(pinOf) };
+      expect(ownInput.sources.length).toBeGreaterThan(0);
+      const ownDisclosure = prepareGlobalAgentDisclosure(destination, destinationRuntime.dialogues, destinationRuntime.selectedPolicy, ownInput);
+      const ownTurn = startGlobalAgentTurn(destination, destinationRuntime.dialogues, () => destinationRuntime.selectedPolicy, ownInput, ownDisclosure.sha256);
+      await waitFor(() => destination.inspectGlobalAgentDialogue(ownTurn.dialogueId, (id) => destinationRuntime.dialogues.liveText(id)).attempts[0]?.state === 'completed');
+      await destinationRuntime.dialogues.dispose(); await requestGovernor.whenIdle();
+      const ownHistory = history(mergeRoot, ownTurn.dialogueId, null, false), ownHouse = rows(mergeRoot, houseTables);
+      const ownProjection = destination.inspectGlobalAgent();
+      expect(ownProjection.books).toEqual([]);
+      const ownLearning = canonicalJson(destination.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }));
+      expect(destination.inspectGlobalAgent().history).toHaveLength(1);
+      expect(destination.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 })).toMatchObject({ enabled: false, controlEntries: 1 });
+      const ownDb = database(mergeRoot);
+      try {
+        expect(ownDb.prepare('SELECT * FROM learning_supervision_directives').all()).toHaveLength(1);
+        expect(ownDb.prepare('SELECT * FROM house_review_preference_versions').all().length).toBeGreaterThan(0);
+      } finally { ownDb.close(); }
+      const mergePreview = await destination.inspectDatabaseImport(packagePath);
+      expect(mergePreview).toMatchObject({ compatibility: 'compatible', contents: { books: 1 } });
+      const merging = await destination.prepareDatabaseMerge(mergePreview.previewId);
+      expect(merging.pending!.mergeBooks!.map((entry) => entry.bookId)).toEqual([book.bookId]);
+      const mergeId = merging.pending!.replacementId;
+      await closeCopy(destination); destination = await openCopy(mergeRoot);
+      destinationRuntime = await ordinary(destination, mergeRoot);
+      expect((await destination.inspectDatabaseReplacements()).replacements[0]).toMatchObject({ replacementId: mergeId, kind: 'merge', outcome: 'applied', mergedCount: 1 });
+      expect(destination.listBooks(null).items.map((entry) => entry.bookId)).toEqual([book.bookId]);
+      sameHistory(history(mergeRoot, local.dialogueId, book.bookId), sourceLocal);
+      expect(canonicalJson(destination.inspectDialogue(book.bookId, local.dialogueId, 0, () => null)) === sourceLocalProjection).toBe(true);
+      sameHistory(history(mergeRoot, ownTurn.dialogueId, null, false), ownHistory);
+      expect(rows(mergeRoot, houseTables) === ownHouse).toBe(true);
+      expect(canonicalJson(destination.inspectGlobalAgent()) === canonicalJson({ ...ownProjection, books: sourceBooks })).toBe(true);
+      expect(canonicalJson(destination.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 })) === ownLearning).toBe(true);
+      const mergedDb = database(mergeRoot);
+      try {
+        expect(mergedDb.prepare('SELECT * FROM dialogue_tasks').all()).toHaveLength(2);
+        expect(mergedDb.prepare('SELECT * FROM dialogue_attempts').all()).toHaveLength(2);
+        expect(mergedDb.prepare('SELECT * FROM dialogue_tasks WHERE dialogue_id = ?').all(parent.dialogueId)).toHaveLength(0);
+        for (const candidate of sourceGuidance) {
+          expect(destination.inspectGlobalAgent().sourceCandidates!.some((entry) => entry.itemId === candidate.itemId || entry.revisionId === candidate.revisionId)).toBe(false);
+        }
+      } finally { mergedDb.close(); }
+      sourceGlobal.logs.forEach((log) => expect(existsSync(join(mergeRoot.dataRoot, 'harness-sessions', `${log.sessionId}.jsonl`))).toBe(false));
+      expect(calls).toHaveLength(3);
+
+      // One actual parent log disappears only in the disposable replacement, after both positive public operations.
+      await replacedRuntime.dialogues.dispose(); await closeCopy(replacement);
+      rmSync(join(replacementRoot.dataRoot, 'harness-sessions', `${sourceGlobal.logs[0]!.sessionId}.jsonl`));
+      replacement = await openCopy(replacementRoot);
+      const cold = await ordinary(replacement, replacementRoot);
+      const missing = replacement.inspectGlobalAgentDialogue(parent.dialogueId);
+      expect(missing.attempts[0]?.state).toBe('stopped'); expect(missing.attempts[0]?.source).toBe('missing');
+      expect(missing.attempts[0]?.fragments).toHaveLength(0);
+      expect(missing.attempts[1]?.state).toBe('completed'); expect(missing.attempts[1]?.source).toBe('ledger');
+      const beforeRefusal = rows(replacementRoot, [...dialogueTables, ...houseTables]);
+      const callsBeforeRefusal = calls.length;
+      const again = { kind: 'regenerate' as const, dialogueId: parent.dialogueId, attemptId: child.attemptId };
+      expect(() => replacement.globalAgentHistoryProof(again, 'regenerate')).toThrowError(expect.objectContaining({ code: 'GLOBAL_AGENT_HISTORY_UNPROVEN' }));
+      expect(() => prepareGlobalAgentDisclosure(replacement, cold.dialogues, cold.selectedPolicy, again))
+        .toThrowError(expect.objectContaining({ code: 'GLOBAL_AGENT_HISTORY_UNPROVEN' }));
+      expect(rows(replacementRoot, [...dialogueTables, ...houseTables]) === beforeRefusal).toBe(true);
+      expect(calls).toHaveLength(callsBeforeRefusal);
+      expect(readFileSync(join(roots.dataRoot, 'store', 'ai7.sqlite')).equals(settledSourceBytes)).toBe(true);
+      expect(readFileSync(packagePath).equals(packageBytes)).toBe(true);
+      sameHistory(history(roots, parent.dialogueId, null), sourceGlobal);
+      sameHistory(history(roots, local.dialogueId, book.bookId), sourceLocal);
+    } finally {
+      for (const dialogues of owners) await dialogues.dispose();
+      await requestGovernor.whenIdle();
+      for (const target of opened) { target.markCleanShutdown(); await target.close(); }
+      for (const root of copies) await root.dispose();
+    }
+  });
+
   it.each(['extra', 'missing', 'null', 'scope', 'reader'] as const)('original-field native reader refuses closed /2 %s corruption without mutation', async (damage) => {
     const turn = start({ kind: 'ask', question: '合成原文问题。', sources: [] });
     await waitFor(() => inspect(turn.dialogueId).attempts[0]?.state === 'completed');
