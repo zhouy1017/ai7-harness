@@ -10,7 +10,7 @@ import type { RemoteExecutionRoute } from '../provider/egress-gate.js';
 import type { AdmittedProviderRule, LaunchPolicyProjection } from '../../shared/protocol.js';
 import { EVALUATION_REWRITE_KIND, INITIAL_EVALUATION_KIND, READERS_REPORT_KIND, WRITING_KIND, reviewCategoryKindId } from '../../shared/protocol.js';
 import type { OutboundDataCategory } from '../provider/egress-gate.js';
-import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryContractInput } from '../review/category-configuration.js';
+import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, HISTORICAL_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryContractInput } from '../review/category-configuration.js';
 import { reviewCategoryKindDefinition } from '../review/review-category-kind.js';
 import { liveMaterialContract } from '../task-material-references.js';
 import { withModelClarification } from '../provider/clarification-contract.js';
@@ -35,6 +35,7 @@ export interface LiveKindBinding {
 
 /** The parts of an analysis kind definition admission reads. */
 export interface LiveKindDefinition {
+  readonly reviewCrossChapter?: AnalysisKindDefinition['reviewCrossChapter'];
   readonly kind: string;
   readonly contractVersion?: string;
   readonly promptContractDigest: string;
@@ -111,7 +112,8 @@ export function liveKindAdmitted(
     modelRole: rule.modelRole,
     outboundDataCategories: rule.outboundDataCategories,
     // Provider Processing v11's synthesis term (#841); a rule that does not name it never admits a kind's synthesis.
-    crossUnitSynthesisAllowed: rule.crossUnitSynthesisAllowed === true,
+    crossUnitSynthesisAllowed: rule.crossUnitSynthesisAllowed === true &&
+      (definition.reviewCrossChapter === undefined || rule.plusOneCrossUnitSynthesisTurn === true),
   };
 }
 
@@ -170,8 +172,11 @@ function liveKindExpectation(definition: LiveKindDefinition, policy?: LaunchPoli
   const review = BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.find((category) => reviewCategoryKindId(category.categoryId) === definition.kind);
   if (review !== undefined) {
     if (review.executor !== 'review-category-contract' || review.seriesKnowledge !== undefined) return null;
-    const candidates = [reviewCategoryKindDefinition(reviewCategoryContractInput(review), definition.contractVersion === 'ai7.editorial-review/1' ? 1 : 2),
-      reviewCategoryKindDefinition(reviewCategoryContractInput(review), 2, kindLocalTools(policy, definition.kind) ?? undefined)];
+    const input = reviewCategoryContractInput(definition.reviewCrossChapter === undefined
+      ? HISTORICAL_REVIEW_CATEGORY_CONFIGURATION.categories.find((entry) => entry.categoryId === review.categoryId && entry.executor === 'review-category-contract') ?? review
+      : { ...review, crossChapter: definition.reviewCrossChapter });
+    const candidates = [reviewCategoryKindDefinition(input, definition.contractVersion === 'ai7.editorial-review/1' ? 1 : 2),
+      reviewCategoryKindDefinition(input, 2, kindLocalTools(policy, definition.kind) ?? undefined)];
     const expectedBase = liveMaterialContract(definition)?.basePromptContractDigest ?? definition.promptContractDigest;
     return {
       promptContractDigest: candidates.find((entry) => entry.promptContractDigest === expectedBase)?.promptContractDigest ?? null,

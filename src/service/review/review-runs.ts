@@ -116,7 +116,7 @@ import {
   type ReviewCategoryConfigurationEntry,
   type ReviewCategoryExecutor,
 } from './category-configuration.js';
-import { reviewLeadBody, reviewLeadsOf } from './review-leads.js';
+import { reviewBaselineSource, reviewLeadBody, reviewLeadsOf } from './review-leads.js';
 import { resolveSeriesConsistency, seriesConsistencyEntry, seriesKnowledgePinsCurrent, freezeSeriesScope, seriesKnowledgeAllowed, frozenSeriesScopes, seriesScopeMaterials, seriesScopeChanged, SERIES_POLICY_CLOSED, type SeriesKnowledgeReadings } from './series-consistency.js';
 import { buildReviewReport, reportQuote, reviewFindingCounts } from './review-report.js';
 import {
@@ -3493,9 +3493,11 @@ export class ReviewRunStore {
    */
   #forBook(bookId: string, house: ReviewCategoryConfiguration, readings?: SeriesKnowledgeReadings): ReviewCategoryConfiguration {
     const resolution = house.categories.some((entry) => entry.executor === 'series-knowledge') ? resolveSeriesConsistency(this.#db, bookId, readings) : null;
+    const baseline = house.categories.some((entry) => entry.crossChapter !== undefined) ? reviewBaselineSource(this.#readBaseline(bookId).revision) : null;
     return {
       ...house,
       categories: house.categories.map((entry) => {
+        if (entry.crossChapter !== undefined) return { ...entry, crossChapter: { baseline } };
         if (entry.executor !== 'series-knowledge') return reviewCategoryEntryForBook(entry, this.#db, bookId);
         const resolved = seriesConsistencyEntry(entry, resolution!);
         if (resolved.seriesKnowledge === undefined || this.#ledgers.baseline().launch.live === null) return resolved;

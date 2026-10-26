@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { EditorialStore } from '../../../src/service/store.js';
 import { ReviewRunDriver } from '../../../src/service/review/review-run-driver.js';
-import { reviewCategoryEntry, reviewCategoryEntryForBook, reviewCategoryContractInput } from '../../../src/service/review/category-configuration.js';
+import { HISTORICAL_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryEntry, reviewCategoryEntryForBook, reviewCategoryContractInput } from '../../../src/service/review/category-configuration.js';
 import { reviewCategoryKindDefinition } from '../../../src/service/review/review-category-kind.js';
 import type { BaselineAnalysisExecutionOwner } from '../../../src/service/analysis/execution.js';
 import type { ReviewCategoryResultSetRevisionProjection, ReviewFindingProjection, ReviewRunProjection } from '../../../src/shared/protocol.js';
@@ -83,7 +83,8 @@ export async function runReviewCase(
   // A Book-dependent category (跨交付物一致性) reads its entry for this Book, as the store froze it.
   const database = new DatabaseSync(resolve(dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
   for (const categoryId of categories) {
-    const builtIn = reviewCategoryEntry(categoryId);
+    const builtIn = testCase.fixture.startsWith('sample1-recorded-')
+      ? HISTORICAL_REVIEW_CATEGORY_CONFIGURATION.categories.find((entry) => entry.categoryId === categoryId) : reviewCategoryEntry(categoryId);
     if (builtIn === null || builtIn === undefined) continue;
     const entry = reviewCategoryEntryForBook(builtIn, database, book.bookId);
     let revision: ReviewCategoryResultSetRevisionProjection | null = null;

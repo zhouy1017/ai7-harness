@@ -3815,6 +3815,7 @@ export interface AnalysisReducerStageProjection {
     | 'section-reduction'
     | 'contradiction-continuity'
     | 'cross-unit-reduction'
+    | 'cross-chapter-consistency'
     | 'book-synthesis'
     | 'reference-integrity'
     | 'finding-reduction'
@@ -5983,6 +5984,53 @@ export interface ReviewFindingIdentityProjection {
   findingOrdinal: number;
 }
 
+/** Exact unit evidence retained when overlapping review units name the same occurrence. */
+export interface ReviewUnitFindingReference extends ReviewFindingIdentityProjection {
+  unitDigest: string;
+  resultDigest: string;
+}
+
+/** A baseline is frozen with the category Run; it is a lead, never a replacement for manuscript evidence. */
+export interface ReviewBaselineSource {
+  resultSetId: string;
+  revisionId: string;
+  digest: string;
+  manuscriptPin: BaselineAnalysisResultSetRevisionProjection['manuscriptPin'];
+  leads: ReadonlyArray<{ ref: string; kind: string; text: string; ranges: ReadonlyArray<AnalysisSourceRangeProjection> }>;
+  omitted: number;
+}
+
+export interface ReviewSynthesisEvidence {
+  ref: string;
+  blockPosition: number;
+  sourceRange: FactualSourceRangeProjection;
+  quote: string;
+  unitOrdinal: number;
+  unitFindingRefs: ReadonlyArray<ReviewUnitFindingReference>;
+  baselineLeadRefs: ReadonlyArray<string>;
+}
+
+export interface ReviewCrossChapterInput {
+  schema: 'ai7.editorial-review.cross-chapter-input/1';
+  categoryId: string;
+  categoryContractDigest: string;
+  closedUnitSetDigest: string;
+  units: ReadonlyArray<{ unitOrdinal: number; unitDigest: string; resultDigest: string }>;
+  manuscriptPin: CoverageManifestProjection['manuscript'];
+  baseline: ReviewBaselineSource | null;
+  findings: ReadonlyArray<ReviewCategoryFindingProjection>;
+  evidence: ReadonlyArray<ReviewSynthesisEvidence>;
+  omitted: { units: number; findings: number; evidence: number; baselineLeads: number };
+}
+
+export interface ReviewCrossChapterResult {
+  readonly schema: 'ai7.editorial-review.cross-chapter-result/1';
+  readonly findings: ReadonlyArray<{ readonly anchor: ReviewSynthesisEvidence; readonly evidence: ReadonlyArray<ReviewSynthesisEvidence>;
+    readonly severity: ReviewFindingSeverity; readonly note: string; readonly clauseId: string }>;
+  readonly rejected: ReadonlyArray<{ readonly index: number; readonly text: string; readonly reason: 'schema-invalid' | 'evidence-unknown' }>;
+  readonly input: ReviewCrossChapterInput;
+}
+
 /**
  * One located review finding. `sourceRange` is the exact grapheme range the service found the
  * quotation at in the committed block — never an offset the model supplied — which is the anchor an
@@ -6002,6 +6050,14 @@ export interface ReviewCategoryFindingProjection {
   clauseId: string | null;
   /** The identities of the duplicate findings merged into this record; empty when none were. */
   mergedFrom: ReadonlyArray<ReviewFindingIdentityProjection>;
+  /** Includes the first unit finding as well as every duplicate; historical records may omit it. */
+  unitFindingRefs?: ReadonlyArray<ReviewUnitFindingReference>;
+  crossChapter?: {
+    contractDigest: string;
+    requestDigest: string;
+    evidence: ReadonlyArray<ReviewSynthesisEvidence>;
+    baseline: Omit<ReviewBaselineSource, 'leads' | 'omitted'> | null;
+  };
 }
 
 /**
@@ -6130,6 +6186,10 @@ export type ReviewCategoryUnitProjection =
  * beside every shared component the other kinds carry, computed by the same reducers.
  */
 export interface ReviewCategoryResultSetRevisionProjection {
+  crossChapterSynthesis?:
+    | { state: 'closed'; requestDigest: string; usage: { inputTokens: number; outputTokens: number } | null; result: ReviewCrossChapterResult }
+    | { state: 'gap'; requestDigest: string; code: string; reason: string }
+    | { state: 'not-run'; reason: string };
   resultSetId: string;
   revisionId: string;
   ordinal: number;

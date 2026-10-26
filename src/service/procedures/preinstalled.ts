@@ -5,7 +5,7 @@ import {
   type ProcedureStageType,
 } from '../../shared/protocol/procedures.js';
 import { baselineAnalysisKindDefinition, factualReviewKindDefinition, type AnalysisKindDefinition } from '../analysis/kind-definition.js';
-import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, type ReviewCategoryConfigurationEntry } from '../review/category-configuration.js';
+import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, HISTORICAL_REVIEW_CATEGORY_CONFIGURATION, type ReviewCategoryConfigurationEntry } from '../review/category-configuration.js';
 import { REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, REVIEW_CATEGORY_UNIT_RESULT_SCHEMA_V1 } from '../review/review-category-contract.js';
 import { BASELINE_ANALYSIS_KIND, FACTUAL_REVIEW_KIND, reviewCategoryIdOfKind } from '../../shared/protocol.js';
 
@@ -61,20 +61,24 @@ export function baselineProcedureDefinition(definition: AnalysisKindDefinition =
 }
 
 /** Category identity and existing executor stay distinct from the legacy prompt's procedure identity. */
-export function reviewProcedureDefinition(entry: ReviewCategoryConfigurationEntry, version: 1 | 2 = 2): ProcedureDefinitionDocument {
+export function reviewProcedureDefinition(entry: ReviewCategoryConfigurationEntry, version: 1 | 2 | 3 = 3): ProcedureDefinitionDocument {
   const leads = entry.executor === 'baseline-leads';
   const factual = entry.executor === 'factual-review-kind';
   const resultSchema = factual ? factualReviewKindDefinition().unitResultSchema : version === 1 ? REVIEW_CATEGORY_UNIT_RESULT_SCHEMA_V1 : REVIEW_CATEGORY_UNIT_RESULT_SCHEMA;
   return {
     schema: PROCEDURE_DEFINITION_SCHEMA,
     id: reviewProcedureId(entry.categoryId),
-    version: !leads && !factual ? version : 1,
+    version: version === 3 ? entry.crossChapter !== undefined ? entry.categoryId === 'style-and-format' ? 3 : 2 : !leads && !factual ? 2 : 1 : !leads && !factual ? version : 1,
     title: entry.procedure.title,
     role: entry.description,
     editorInstruction: '',
     stages: [
       ...(leads ? [] : [
         { ...stage('chunked-review', ['manuscript-scope', 'category-guidelines'], resultSchema, entry.searchEngine), budgetShare: 1 },
+        ...(entry.crossChapter === undefined || version !== 3 ? [] : [
+          stage('cross-unit-reduction', ['unit-results'], 'ai7.editorial-review.cross-chapter-input/1'),
+          stage('cross-chapter-consistency', ['exact-occurrence-groups', 'pinned-baseline-leads'], 'ai7.editorial-review.cross-chapter-result/1'),
+        ]),
         stage('synthesis', ['unit-results'], factual ? factualReviewKindDefinition().revisionSchema : 'ai7.editorial-review.result-set-revision/1'),
       ]),
       stage('derived-report', [leads ? 'baseline-leads' : 'review-findings'], 'ai7.review.report/1'),
@@ -83,14 +87,15 @@ export function reviewProcedureDefinition(entry: ReviewCategoryConfigurationEntr
   };
 }
 
-export function preinstalledProcedureDefinitions(version: 1 | 2 = 2): readonly ProcedureDefinitionDocument[] {
-  return [...BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.map((entry) => reviewProcedureDefinition(entry, version)), baselineProcedureDefinition(),
-    ...(version === 2 ? [localCheckProcedureDefinition()] : [])];
+export function preinstalledProcedureDefinitions(version: 1 | 2 | 3 = 3): readonly ProcedureDefinitionDocument[] {
+  return [...(version === 3 ? BUILTIN_REVIEW_CATEGORY_CONFIGURATION : HISTORICAL_REVIEW_CATEGORY_CONFIGURATION).categories.map((entry) => reviewProcedureDefinition(entry, version)), baselineProcedureDefinition(),
+    ...(version >= 2 ? [localCheckProcedureDefinition()] : [])];
 }
 
 /** Immutable predecessors remain admitted beside the current versions. */
 export function allPreinstalledProcedureDefinitions(): readonly ProcedureDefinitionDocument[] {
-  return [...preinstalledProcedureDefinitions(1), ...preinstalledProcedureDefinitions(2).filter((document) => document.version === 2 || document.id === 'ai7-procedure/local-text-check'), localCheckProcedureDefinitionV2(), localCheckProcedureDefinitionV3()];
+  return [...preinstalledProcedureDefinitions(1), ...preinstalledProcedureDefinitions(2).filter((document) => document.version === 2 || document.id === 'ai7-procedure/local-text-check'), localCheckProcedureDefinitionV2(), localCheckProcedureDefinitionV3(),
+    ...preinstalledProcedureDefinitions(3).filter((document) => document.id === reviewProcedureId('style-and-format') || document.id === reviewProcedureId('plot-consistency'))];
 }
 
 /** Only the ten pre-installed definitions are admitted in F-26a. */

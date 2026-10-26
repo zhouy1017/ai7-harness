@@ -492,7 +492,7 @@ describe('the Task Drawer plan projection over the real store on exact sample1',
       });
       expect(drawer.steps).toEqual([
         { id: `category:${TYPOS_AND_USAGE.categoryId}`, label: `逐章审读：${TYPOS_AND_USAGE.label}`, result: `${TYPOS_AND_USAGE.label}的发现（稿件上的标记）`, removable: false, removed: false },
-        { id: 'category:plot-consistency', label: '读取基线分析的线索：情节逻辑与前后一致', result: '情节逻辑与前后一致的发现（稿件上的标记）', removable: false, removed: false },
+        { id: 'category:plot-consistency', label: '逐章审读：情节逻辑与前后一致', result: '情节逻辑与前后一致的发现（稿件上的标记）', removable: false, removed: false },
         { id: 'report', label: '汇总', result: '审阅报告', removable: false, removed: false },
       ]);
       // Review edits revise its category plans under their existing version ledgers.
@@ -500,16 +500,17 @@ describe('the Task Drawer plan projection over the real store on exact sample1',
       expect(drawer.edit.planEnvelopeDigest).toMatch(/^[a-f0-9]{64}$/u);
       expect(drawer.participation.after).toContain('每一类完成后');
       expect(technical(drawer, `category:${TYPOS_AND_USAGE.categoryId}`)).toMatch(/计划权限边界 [0-9a-f]{64}/u);
-      expect(technical(drawer, 'category:plot-consistency')).toContain('没有任务');
+      expect(technical(drawer, 'category:plot-consistency')).toMatch(/计划权限边界 [0-9a-f]{64}/u);
 
       // Issue #420 (S74a): the Run's one approval binds the exact digest of every Task-backed category — the
       // leads have no Task and bind none — and its deterministic route needs no credential.
       const typosDigest = store.inspectReviewWorkspace(bookId, firstRunId).run!.categories.find((category) => category.categoryId === TYPOS_AND_USAGE.categoryId)!.planEnvelopeDigest!;
+      const plotDigest = store.inspectReviewWorkspace(bookId, firstRunId).run!.categories.find((category) => category.categoryId === 'plot-consistency')!.planEnvelopeDigest!;
       expect(drawer.start).toEqual({
         readiness: 'ready',
         needsModelConnection: false,
         planEnvelopeDigest: null,
-        categoryDigests: [{ categoryId: TYPOS_AND_USAGE.categoryId, planEnvelopeDigest: typosDigest }],
+        categoryDigests: [{ categoryId: TYPOS_AND_USAGE.categoryId, planEnvelopeDigest: typosDigest }, { categoryId: 'plot-consistency', planEnvelopeDigest: plotDigest }],
         reconfirm: null,
       });
       expect(await barPlan(store, bookId, 'review-run', firstRunId, 'missing')).toEqual({ plan: drawer, asked: 0 });

@@ -1,4 +1,4 @@
-import { reviewCategoryContractInput, reviewCategoryEntry } from '../../src/service/review/category-configuration.js';
+import { HISTORICAL_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryContractInput, reviewCategoryEntry } from '../../src/service/review/category-configuration.js';
 import type { ReviewCategoryContractInput } from '../../src/service/review/review-category-contract.js';
 import { LOCAL_STAGE_SCHEMA_SQL, REVIEW_RUN_SCHEMA_SQL } from '../../src/service/review/review-runs.js';
 
@@ -26,6 +26,8 @@ function builtin(categoryId: string): ReviewCategoryContractInput {
  */
 export const TYPOS_AND_USAGE = builtin('typos-and-usage');
 export const STYLE_AND_FORMAT = builtin('style-and-format');
+export const HISTORICAL_STYLE_AND_FORMAT = reviewCategoryContractInput(HISTORICAL_REVIEW_CATEGORY_CONFIGURATION.categories.find((entry) => entry.categoryId === 'style-and-format')!);
+export const PLOT_CONSISTENCY = builtin('plot-consistency');
 export const LITERARY_EXPRESSION = builtin('literary-expression');
 
 export const AUTHORED_REVIEW_CATEGORIES: ReadonlyArray<ReviewCategoryContractInput> = [TYPOS_AND_USAGE, STYLE_AND_FORMAT, LITERARY_EXPRESSION];

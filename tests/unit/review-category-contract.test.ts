@@ -63,7 +63,8 @@ describe('the built-in review categories', () => {
     expect(by((category) => category.batchApply)).toEqual(['typos-and-usage']);
     expect(by((category) => category.riskPointsOnly)).toEqual(['academic-integrity', 'publication-risk']);
     expect(by((category) => category.searchEngine)).toEqual(['factual-review', 'academic-integrity']);
-    expect(by((category) => category.executor === 'baseline-leads')).toEqual(['plot-consistency']);
+    expect(by((category) => category.executor === 'baseline-leads')).toEqual([]);
+    expect(by((category) => category.crossChapter !== undefined)).toEqual(['style-and-format', 'plot-consistency']);
     expect(by((category) => category.executor === 'factual-review-kind')).toEqual(['factual-review']);
     expect(by((category) => category.executor === 'unavailable')).toEqual(['cross-deliverable-consistency']);
     // 书系一致性 is the house's until resolved for one Book from the Series Knowledge of its Series (Issue #64, S29a).
@@ -95,7 +96,7 @@ describe('the built-in review categories', () => {
     expect(reviewCategoryBasisStatement(entry('academic-integrity')))
       .toBe('依据：AI7 内置默认 · 引用与学术规范条款（第 1 版） · 工序：引用风险点标注（第 1 版） · 使用用户所选的联网检索后端；是否完成以本次运行的核查状态为准');
     expect(reviewCategoryBasisStatement(entry('plot-consistency')))
-      .toBe('依据：这本书最新的基线分析结果 · 工序：线索转批注（第 1 版） · 不调用模型，不使用搜索引擎');
+      .toContain('第 2 版');
     expect(reviewCategoryBasisStatement(entry('series-consistency'))).toBe('依据：书系知识 · 工序：书系一致性检查（第 1 版）');
   });
 
@@ -104,7 +105,7 @@ describe('the built-in review categories', () => {
     expect(digest).toMatch(/^[0-9a-f]{64}$/u);
     expect(reviewCategoryConfigurationDigest()).toBe(digest);
     const changed = structuredClone(BUILTIN_REVIEW_CATEGORY_CONFIGURATION) as { -readonly [K in keyof ReviewCategoryConfiguration]: ReviewCategoryConfiguration[K] };
-    changed.version = '2';
+    changed.version = 'next';
     expect(reviewCategoryConfigurationDigest(changed)).not.toBe(digest);
   });
 

@@ -2981,8 +2981,10 @@ export class BaselineAnalysisExecutionOwner {
       // A kind's own book-level step (Issue #429, S81b1) takes the same path under its own name, message, digest and parser;
       // the baseline kind declares none, and every word and digest of its reduction is the one it always had.
       const step = definition.crossUnit?.step ?? null;
+      const crossUnitContext = { manifest, blocks: blocksById };
       const named = (text: string): string => (step === null ? text : text.replaceAll('跨单元归纳', step.label));
-      const reductionInput = canonicalRecord(closedOutcomes).digest;
+      const reductionInput = definition.reviewCrossChapter === undefined ? canonicalRecord(closedOutcomes).digest
+        : step!.requestDigest(closedOutcomes, crossUnitContext);
       const reductionContract = definition.crossUnit?.promptContractDigest ?? promptContractDigest;
       if (stages.reduction !== undefined) {
         if (stages.reduction.inputDigest !== reductionInput || stages.reduction.contractDigest !== reductionContract) {
@@ -3005,7 +3007,7 @@ export class BaselineAnalysisExecutionOwner {
       } else {
         const requestDigest = step === null
           ? crossUnitRequestDigest(BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, unitSetDigest(closedOutcomes))
-          : step.requestDigest(closedOutcomes);
+          : step.requestDigest(closedOutcomes, crossUnitContext);
         const gap = (code: Extract<CrossUnitOutcome, { state: 'gap' }>['code'], reason: string): CrossUnitOutcome =>
           ({ state: 'gap', code, reason, requestDigest });
         if (live !== null && (step !== null ? admitted?.crossUnitSynthesisAllowed !== true : policy.providerProcessing.crossUnitReductionAllowed !== true)) {
@@ -3023,7 +3025,7 @@ export class BaselineAnalysisExecutionOwner {
           liveInterruption = 'run-budget-ceiling-reached';
           terminalClassification = 'interrupted';
         } else {
-          const message = step === null ? buildCrossUnitMessage(closedOutcomes, manifest.units.length) : step.buildMessage(closedOutcomes, manifest.units.length);
+          const message = step === null ? buildCrossUnitMessage(closedOutcomes, manifest.units.length) : step.buildMessage(closedOutcomes, manifest.units.length, crossUnitContext);
           // A kind's book-level synthesis turn under ordinary production carries the whole Book's words (Issue #811): the gate
           // reads it as unpublished full content, which the kind's rule must name; every other turn keeps the Run's category.
           if (production !== null && step !== null && context.bindingFacts !== null) context.bindingFacts = { ...context.bindingFacts, outboundDataCategory: 'unpublished-full-content' };
@@ -3066,7 +3068,7 @@ export class BaselineAnalysisExecutionOwner {
             } else if (step !== null) {
               const validated = prepareRetrievalResult(candidate.text, retrieval);
               const parsed = validated.rejected.length > 0 ? { ok: false as const, code: 'not-exact-fetched', detail: '未经精确取文' }
-                : step.parse(validated.text, closedOutcomes);
+                : step.parse(validated.text, closedOutcomes, crossUnitContext);
               const refused = parsed.ok ? null : step.refusalReason?.(parsed.code, parsed.detail) ?? null;
               crossUnit = parsed.ok
                 ? { state: 'closed', findings: [], requestDigest, usage: crossUnitUsage, result: parsed.result }

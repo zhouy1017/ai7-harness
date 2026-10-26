@@ -2977,17 +2977,16 @@ async function main() {
     const taskBacked = (preparedReview?.categories ?? []).filter((category) => (category.planEnvelopeDigest ?? '').length === 64);
     requireJourney(preparedReview?.state === 'prepared' && UUID_PATTERN.test(preparedReview.reviewRunId) &&
       JSON.stringify(preparedReview.categories.map((category) => category.categoryId)) === JSON.stringify(['typos-and-usage', 'style-and-format', 'plot-consistency']) &&
-      JSON.stringify(taskBacked.map((category) => category.categoryId)) === JSON.stringify(['typos-and-usage', 'style-and-format']), 'review-prepared-run', preparedReview?.categories);
+      JSON.stringify(taskBacked.map((category) => category.categoryId)) === JSON.stringify(['typos-and-usage', 'style-and-format', 'plot-consistency']), 'review-prepared-run', preparedReview?.categories);
     await assertRenderer(renderer, `(() => { const plans=document.querySelector('section.review-plans'); const open=plans?.querySelector('[data-review-action="view-plan"]'); return plans?.querySelector('.task-plan-summary-line')?.textContent===${JSON.stringify(`计划：3 个类别，授权一次后逐类审阅 · ${preparedReview.scope.label} · 任务输入修订版 ${preparedReview.manuscript.revisionLabel}`)} && open instanceof HTMLButtonElement && open.textContent==='查看计划并开始' && open.dataset.taskPlanOpen==='review-run' && plans.querySelector('[data-review-action="revise"]')?.textContent==='返回修改' && document.querySelectorAll('[data-review-action="authorize"]').length===0 && !plans.querySelector('.review-authorize-note') && ${AUTHORIZE_LABELED_BUTTONS}===0 && document.querySelector('dialog.review-sheet')?.open!==true; })()`, 'review-plans');
-    // One step per category — the leads read the baseline and freeze no model plan — and 汇总; each
+    // One model-backed step per category and 汇总; each
     // model-read category's own frozen plan one step away in 查看技术详情 (S72 D7).
     const reviewDrawer = await drawerShowing(renderer, preparedReview.reviewRunId, 'ready', 'review-drawer');
     requireJourney(reviewDrawer?.kind === 'review-run' && reviewDrawer.pill === '尚未开始' && reviewDrawer.version === null &&
       reviewDrawer.chips.position === '全书' && reviewDrawer.steps.length === 4 &&
       reviewDrawer.steps[0].startsWith('逐章审读：') && reviewDrawer.steps[1].startsWith('逐章审读：') &&
-      reviewDrawer.steps[2].startsWith('读取基线分析的线索：') && reviewDrawer.steps[3] === '汇总 → 审阅报告' &&
+      reviewDrawer.steps[2].startsWith('逐章审读：') && reviewDrawer.steps[3] === '汇总 → 审阅报告' &&
       taskBacked.every((category) => reviewDrawer.technical[`category:${category.categoryId}`]?.includes(`计划权限边界 ${category.planEnvelopeDigest}`)) &&
-      reviewDrawer.technical['category:plot-consistency']?.endsWith('直接读取基线分析的线索，没有任务') &&
       JSON.stringify(reviewDrawer.participation) === JSON.stringify(['预计无需中途参与', '结束后：每一类完成后，它的发现立即可以处理：修改建议由你接受并应用，批注由你标记为已处理或忽略并说明']) &&
       reviewDrawer.actions === 0 && reviewDrawer.footer === '计划说明，不是运行授权', 'review-drawer-plan', reviewDrawer);
 

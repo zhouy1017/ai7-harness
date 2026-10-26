@@ -12,7 +12,7 @@ import { ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, assuranceSampleDigest, assur
 import { RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST, runReportReflectionRequestDigest } from '../../src/service/analysis/run-report-contract.js';
 import type { AnalysisReductionResult } from '../../src/service/analysis/kind-definition.js';
 import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
-import { REVIEW_CATEGORY_UNIT_RESULT_SCHEMA } from '../../src/service/review/review-category-contract.js';
+import { REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, REVIEW_CROSS_CHAPTER_RESULT_SCHEMA, parseReviewCrossChapterMessage, reviewCrossChapterFixtureDigest } from '../../src/service/review/review-category-contract.js';
 import { fixtureEntryKey, parseModelFixture, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { providerEvidenceGeneration } from '../../src/service/provider/provider-result-cache.js';
 import { CLARIFICATION_INSTRUCTION, clarificationPromptContractDigest } from '../../src/service/provider/clarification-contract.js';
@@ -284,6 +284,15 @@ it.runIf(process.env['AI7_REGENERATE_EDITORIAL_SYNTHETIC_FIXTURE'] === '1')('aut
           add({ unitOrdinal: unit.ordinal, requestDigest: definition.requestDigest(unit.ordinal, unit.digest), attempt: null, contentDigest: null,
             response: { kind: 'unit-result', text: JSON.stringify({ schema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, unitOrdinal: unit.ordinal, findings }),
               usage: { inputTokens: 900, outputTokens: 60 + findings.length * 50 } } });
+        }
+        if (definition.crossUnit?.step !== undefined) {
+          const unit = manifest.units[0]!;
+          const parsed = definition.parseUnitResult(JSON.stringify({ schema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, unitOrdinal: unit.ordinal, findings }), unit);
+          if (!parsed.ok) throw new Error('SYNTHETIC_REVIEW_UNIT_INVALID');
+          const blocks = new Map(store.baselineAnalysisLedger.readRevisionBlocks(book.manuscriptId, manifest.manuscript.revisionId).map((block) => [block.blockId, block]));
+          const input = parseReviewCrossChapterMessage(definition.crossUnit.step.buildMessage([{ state: 'closed', unitOrdinal: unit.ordinal, result: parsed.result }], 1, { manifest, blocks }))!;
+          add({ unitOrdinal: 0, requestDigest: reviewCrossChapterFixtureDigest(input), attempt: null, contentDigest: null,
+            response: { kind: 'unit-result', text: JSON.stringify({ schema: REVIEW_CROSS_CHAPTER_RESULT_SCHEMA, findings: [] }), usage: { inputTokens: 800, outputTokens: 20 } } });
         }
         const authorized = store.authorizeReviewCategory(book.bookId, definition, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
         owner.admitAndDispatch(authorized.dispatchRunRecordId!, store.reviewCategoryLedger(definition));

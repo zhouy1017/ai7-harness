@@ -13,12 +13,16 @@ import {
   type ReviewCategoryFindingProjection,
   type ReviewFindingExclusionReason,
   type ReviewFindingSeverity,
+  type ReviewCrossChapterInput,
+  type ReviewBaselineSource,
+  type ReviewSynthesisEvidence,
 } from '../../shared/protocol.js';
 import { canonicalJson, sha256Hex } from '../analysis/canonical.js';
 import type { ManifestBlockInput } from '../analysis/coverage-manifest.js';
 import { locateQuotation, normalizedQuotation, sliceGraphemes } from '../analysis/factual-review-contract.js';
 import { coverageAxis, orderUnitOutcomes, unitGaps, type ClosedUnitOutcome, type GapUnitOutcome } from '../analysis/reducers.js';
-import { reviewCategoryMessageBlockIds, type ReviewCategoryUnitResult, type ReviewUnitFinding } from './review-category-contract.js';
+import { reviewCategoryMessageBlockIds, REVIEW_CROSS_CHAPTER_CONTRACT_DIGEST, type ReviewCrossChapterResult, type ReviewCategoryUnitResult, type ReviewUnitFinding } from './review-category-contract.js';
+import type { CrossUnitOutcome } from '../analysis/reducers.js';
 
 /**
  * Typed reducers over review-category unit results: Reference Integrity, then the finding set.
@@ -90,12 +94,14 @@ export interface ReviewCategoryReductionInput {
   readonly reusedUnitOrdinals?: ReadonlySet<number>;
   /** The committed blocks of the Task Input revision, by identity: the text every quotation is located in. */
   readonly blocks: ReadonlyMap<string, ManifestBlockInput>;
+  readonly exactOccurrences?: boolean;
 }
 
 export function reduceReviewCategory(input: ReviewCategoryReductionInput): ReviewCategoryReduction {
   const { manifest, blocks, categoryId } = input;
   const ordered = orderUnitOutcomes(manifest, input.outcomes);
   const closed = ordered.filter((outcome): outcome is ClosedUnitOutcome<ReviewCategoryUnitResult> => outcome.state === 'closed');
+  const resultDigests = new Map(input.exactOccurrences ? closed.map((outcome) => [outcome.unitOrdinal, sha256Hex(canonicalJson(outcome.result))]) : []);
   const gaps = unitGaps(manifest, ordered);
   // A unit the plan left out of scope is a gap in the coverage and nothing else: the Run lost nothing
   // there, so it never counts against a stage's closure.
@@ -202,7 +208,11 @@ export function reduceReviewCategory(input: ReviewCategoryReductionInput): Revie
       exclude('replacement-identical');
       continue;
     }
-    const key = canonicalJson([entry.blockId, normalized, replacement]);
+    const coordinates = { blockId: entry.blockId, fromGrapheme: entry.location.fromGrapheme, toGrapheme: entry.location.toGrapheme };
+    const reference = { unitOrdinal: entry.unitOrdinal, blockOrdinal: finding.blockOrdinal, findingOrdinal: entry.findingOrdinal,
+      unitDigest: manifest.units[entry.unitOrdinal - 1]!.digest,
+      resultDigest: resultDigests.get(entry.unitOrdinal)! };
+    const key = canonicalJson(input.exactOccurrences ? [coordinates, replacement] : [entry.blockId, normalized, replacement]);
     const existing = findingsByKey.get(key);
     if (existing !== undefined) {
       merged += 1;
@@ -210,12 +220,14 @@ export function reduceReviewCategory(input: ReviewCategoryReductionInput): Revie
       findings[existing] = {
         ...survivor,
         mergedFrom: [...survivor.mergedFrom, { unitOrdinal: entry.unitOrdinal, blockOrdinal: finding.blockOrdinal, findingOrdinal: entry.findingOrdinal }],
+        ...(input.exactOccurrences ? { unitFindingRefs: [...survivor.unitFindingRefs!, reference] } : {}),
       };
       continue;
     }
     findingsByKey.set(key, findings.length);
     findings.push({
-      findingId: findingId({ kind: 'finding', categoryId, blockId: entry.blockId, quote: normalized, replacement }),
+      findingId: findingId(input.exactOccurrences ? { kind: 'finding', categoryId, ...coordinates, replacement }
+        : { kind: 'finding', categoryId, blockId: entry.blockId, quote: normalized, replacement }),
       unitOrdinal: entry.unitOrdinal,
       blockId: entry.blockId,
       sourceRange: { blockId: entry.blockId, fromGrapheme: entry.location.fromGrapheme, toGrapheme: entry.location.toGrapheme },
@@ -225,6 +237,7 @@ export function reduceReviewCategory(input: ReviewCategoryReductionInput): Revie
       replacement,
       clauseId: finding.clauseId ?? null,
       mergedFrom: [],
+      ...(input.exactOccurrences ? { unitFindingRefs: [reference] } : {}),
     });
   }
 
@@ -287,4 +300,96 @@ export function reduceReviewCategory(input: ReviewCategoryReductionInput): Revie
     unitsOutOfScope: outOfScope,
   };
   return { coverage, reducerClosure, assurance, gaps, findings, excluded, findingCounts };
+}
+
+/** Local grouping precedes the one model turn. Only closed, in-scope blocks can supply evidence. */
+export function reviewCrossChapterInput(input: ReviewCategoryReductionInput, baseline: ReviewBaselineSource | null, categoryContractDigest: string): ReviewCrossChapterInput {
+  const reduction = reduceReviewCategory({ ...input, exactOccurrences: true });
+  const findings = reduction.findings.slice(0, 200);
+  const closed = new Set(input.outcomes.filter((outcome) => outcome.state === 'closed').map((outcome) => outcome.unitOrdinal));
+  const unitsByBlock = new Map(input.manifest.units.filter((unit) => closed.has(unit.ordinal))
+    .flatMap((unit) => unit.blockIds.map((id) => [id, unit.ordinal] as const)));
+  const evidence: ReviewSynthesisEvidence[] = [];
+  const byRange = new Map<string, ReviewSynthesisEvidence>();
+  let omittedEvidence = 0;
+  const add = (range: ReviewSynthesisEvidence['sourceRange'], refs: ReviewSynthesisEvidence['unitFindingRefs'], leadRefs: string[]): boolean => {
+    const block = input.blocks.get(range.blockId);
+    const unitOrdinal = unitsByBlock.get(range.blockId);
+    if (block === undefined || unitOrdinal === undefined || range.fromGrapheme < 0 || range.toGrapheme > block.graphemes || range.toGrapheme <= range.fromGrapheme) return false;
+    const key = canonicalJson(range);
+    const existing = byRange.get(key);
+    if (existing !== undefined) {
+      existing.unitFindingRefs = [...existing.unitFindingRefs, ...refs];
+      existing.baselineLeadRefs = [...new Set([...existing.baselineLeadRefs, ...leadRefs])];
+      return true;
+    }
+    if (evidence.length >= 320) { omittedEvidence += 1; return false; }
+    const entry = { ref: `e${evidence.length + 1}`, blockPosition: block.position, sourceRange: range, quote: sliceGraphemes(block.text, range.fromGrapheme, range.toGrapheme), unitOrdinal,
+      unitFindingRefs: refs, baselineLeadRefs: leadRefs };
+    evidence.push(entry); byRange.set(key, entry); return true;
+  };
+  for (const finding of findings) add(finding.sourceRange, finding.unitFindingRefs!, []);
+  const leads: ReviewBaselineSource['leads'][number][] = [];
+  const sameSource = baseline?.manuscriptPin.manuscriptId === input.manifest.manuscript.manuscriptId && baseline.manuscriptPin.revisionDigest === input.manifest.manuscript.revisionDigest;
+  if (sameSource && baseline !== null) for (const lead of baseline.leads) {
+    // A baseline claim with an out-of-scope side must not leak that side's words through its description.
+    if (lead.ranges.length === 0 || lead.ranges.some((range) => !unitsByBlock.has(range.blockId))) continue;
+    const ranges = lead.ranges.flatMap((range) => {
+      const block = input.blocks.get(range.blockId);
+      if (block === undefined) return [];
+      const from = range.fromGrapheme ?? 0;
+      const exact = { blockId: range.blockId, fromGrapheme: from, toGrapheme: Math.min(range.toGrapheme ?? block.graphemes, from + 80) };
+      return add(exact, [], [lead.ref]) ? [exact] : [];
+    });
+    if (ranges.length > 0) leads.push({ ...lead, ranges });
+  }
+  const units = input.outcomes.filter((outcome) => outcome.state === 'closed').map((outcome) => ({ unitOrdinal: outcome.unitOrdinal,
+    unitDigest: input.manifest.units.find((unit) => unit.ordinal === outcome.unitOrdinal)!.digest, resultDigest: sha256Hex(canonicalJson(outcome.result)) }));
+  return { schema: 'ai7.editorial-review.cross-chapter-input/1', categoryId: input.categoryId, categoryContractDigest,
+    closedUnitSetDigest: sha256Hex(canonicalJson(units)), units: units.slice(0, 200), manuscriptPin: input.manifest.manuscript,
+    baseline: baseline === null ? null : { ...baseline, leads }, findings: findings.filter((finding) => unitsByBlock.has(finding.blockId)), evidence,
+    omitted: { units: Math.max(0, units.length - 200), findings: reduction.findings.length - findings.length, evidence: omittedEvidence, baselineLeads: (baseline?.omitted ?? 0) + (baseline?.leads.length ?? 0) - leads.length } };
+}
+
+/** Synthesis enriches exact occurrences without deleting any unit evidence or moving a source anchor. */
+export function applyReviewCrossChapter(reduction: ReviewCategoryReduction, outcome: CrossUnitOutcome, categoryId: string): ReviewCategoryReduction {
+  const result = outcome.state === 'closed' ? outcome.result as ReviewCrossChapterResult : null;
+  const findings = [...reduction.findings];
+  const excluded = [...reduction.excluded];
+  let merged = 0;
+  const baseline = result?.input.baseline;
+  const pin = baseline == null ? null : { resultSetId: baseline.resultSetId, revisionId: baseline.revisionId, digest: baseline.digest, manuscriptPin: baseline.manuscriptPin };
+  if (result !== null && outcome.state === 'closed') {
+    for (const finding of result.findings) {
+      const { anchor } = finding;
+      const index = findings.findIndex((existing) => canonicalJson(existing.sourceRange) === canonicalJson(anchor.sourceRange) && existing.replacement === null);
+      const previous = index < 0 ? undefined : findings[index];
+      const refs = [...(previous?.unitFindingRefs ?? []), ...finding.evidence.flatMap((evidence) => evidence.unitFindingRefs)];
+      const card: ReviewCategoryFindingProjection = {
+        findingId: previous?.findingId ?? findingId({ kind: 'finding', categoryId, ...anchor.sourceRange, replacement: null }),
+        unitOrdinal: anchor.unitOrdinal, blockId: anchor.sourceRange.blockId, sourceRange: anchor.sourceRange, quote: anchor.quote,
+        severity: finding.severity, note: finding.note, replacement: null, clauseId: finding.clauseId, mergedFrom: previous?.mergedFrom ?? [],
+        unitFindingRefs: [...new Map(refs.map((ref) => [canonicalJson(ref), ref])).values()],
+        crossChapter: { contractDigest: REVIEW_CROSS_CHAPTER_CONTRACT_DIGEST, requestDigest: outcome.requestDigest, evidence: finding.evidence, baseline: pin },
+      };
+      if (index < 0) findings.push(card); else { findings[index] = card; merged += 1; }
+    }
+    for (const rejected of result.rejected) excluded.push({ findingId: findingId({ kind: 'cross-chapter-excluded', categoryId, requestDigest: outcome.requestDigest, index: rejected.index }),
+      unitOrdinal: 0, findingIndex: rejected.index, blockId: '', blockOrdinal: 0, quote: '', severity: 'note', note: '', replacement: null, clauseId: null,
+      rawText: rejected.text, reason: 'contract-schema-invalid', reasonLabel: rejected.reason === 'evidence-unknown' ? '跨章发现引用了未提供的来源。' : REVIEW_EXCLUSION_REASON_LABELS['contract-schema-invalid'] });
+  }
+  const state: AnalysisReducerStageProjection['state'] = outcome.state === 'closed' ? result!.rejected.length > 0 ? 'closed-with-gaps' : 'closed' : outcome.state === 'gap' ? 'closed-with-gaps' : 'not-run';
+  const stages = [...reduction.reducerClosure.stages, stage('cross-unit-reduction', reduction.findings.length, 0),
+    { stage: 'cross-chapter-consistency' as const, state, inputCount: result?.input.findings.length ?? 0 }];
+  const closedWithGaps = stages.some((entry) => entry.state !== 'closed');
+  return { ...reduction, findings, excluded,
+    findingCounts: { ...reduction.findingCounts, listed: reduction.findingCounts.listed + (result?.findings.length ?? 0) + (result?.rejected.length ?? 0),
+      located: reduction.findingCounts.located + (result?.findings.length ?? 0), excluded: excluded.length, merged: reduction.findingCounts.merged + merged,
+      bySeverity: reduction.findingCounts.bySeverity.map((entry) => ({ ...entry, count: entry.count + (result?.findings.filter((finding) => finding.severity === entry.severity).length ?? 0) })) },
+    reducerClosure: { axis: 'reducer-closure', state: closedWithGaps ? 'closed-with-gaps' : 'closed', stages,
+      label: closedWithGaps ? `归约/综合闭合：跨章一致性${outcome.state === 'closed' ? '保留排除发现' : `未闭合 · ${outcome.reason}`}` : '归约/综合闭合：全部阶段已闭合' },
+    assurance: { ...reduction.assurance, state: excluded.length > 0 || outcome.state !== 'closed' ? 'limited' : reduction.assurance.state,
+      label: `语义/证据保证：${closedWithGaps ? '有限' : '合格'} · ${findings.length} 条发现已定位 · 均待编辑处置`,
+      unresolvedItemCount: findings.length, crossUnitFindingCount: result?.findings.length ?? 0 },
+  };
 }

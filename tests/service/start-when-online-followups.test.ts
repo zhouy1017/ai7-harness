@@ -255,7 +255,7 @@ describe('a leads-first Review Run keeps its place in the order (Issue #764 revi
       expect(await preflight(session, 'online')).toEqual({ admitted: 1, blocked: 0, waiting: 1 });
       expect(withDatabase((database) => (database.prepare(
         'SELECT category_id, state FROM review_run_category_events WHERE review_run_id = ? ORDER BY rowid',
-      ).all(reviewRunId) as Array<{ category_id: string; state: string }>).map((row) => [row.category_id, row.state]))[0]).toEqual(['plot-consistency', 'materialized']);
+      ).all(reviewRunId) as Array<{ category_id: string; state: string }>).map((row) => [row.category_id, row.state]))[0]).toEqual(['plot-consistency', 'dispatched']);
       expect(reviewStates(reviewRunId)).toContain('dispatched');
       expect(transitions(taskIntentId)).toEqual(['authorized', 'awaiting-connectivity']);
       await session.driver.drive(reviewRunId);

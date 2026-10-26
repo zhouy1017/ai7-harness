@@ -74,7 +74,7 @@ export function initializeProcedureDefinitionSchema(db: DatabaseSync): void {
   const existing = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'procedure_definitions'").get() !== undefined;
   if (existing) {
     const legacy = Number(db.prepare('PRAGMA user_version').get()?.user_version) < HOUSE_WORD_LIST_SCHEMA_VERSION;
-    validateProcedureDefinitions(db, legacy);
+    validateProcedureDefinitions(db, legacy, true);
     const count = Number(db.prepare('SELECT count(*) total FROM procedure_definition_versions').get()!.total);
     if (count === allPreinstalledProcedureDefinitions().length) return;
   }
@@ -97,15 +97,18 @@ export function initializeProcedureDefinitionSchema(db: DatabaseSync): void {
 }
 
 /** Both generations have fixed bytes; a current store may lose neither predecessors nor successors. */
-export function validateProcedureDefinitions(db: DatabaseSync, allowLegacy = false): void {
+export function validateProcedureDefinitions(db: DatabaseSync, allowLegacy = false, allowPreCrossChapter = false): void {
   const identities = db.prepare('SELECT * FROM procedure_definitions').all();
   const versions = db.prepare('SELECT * FROM procedure_definition_versions').all();
   const preReview = Number(db.prepare('PRAGMA user_version').get()?.user_version) < REVIEW_CONTRACT_SCHEMA_VERSION;
+  const catalog = allPreinstalledProcedureDefinitions().filter((document) => !allowPreCrossChapter ||
+    !((document.id === 'ai7-procedure/review-style-and-format' && document.version === 3) || (document.id === 'ai7-procedure/review-plot-consistency' && document.version === 2)) ||
+    versions.some((row) => row.procedure_id === document.id && row.version === document.version));
   const expected = allowLegacy && preReview && versions.length === 10 ? preinstalledProcedureDefinitions(1)
     : allowLegacy && !identities.some((row) => row.procedure_id === 'ai7-procedure/local-text-check')
-      ? allPreinstalledProcedureDefinitions().filter((document) => document.id !== 'ai7-procedure/local-text-check')
+      ? catalog.filter((document) => document.id !== 'ai7-procedure/local-text-check')
       : allowLegacy && !versions.some((row) => row.procedure_id === 'ai7-procedure/local-text-check' && row.version === 3)
-        ? allPreinstalledProcedureDefinitions().filter((document) => document.id !== 'ai7-procedure/local-text-check' || document.version === 1) : allPreinstalledProcedureDefinitions();
+        ? catalog.filter((document) => document.id !== 'ai7-procedure/local-text-check' || document.version === 1) : catalog;
   requireAnalysis(identities.length === new Set(expected.map((document) => document.id)).size && versions.length === expected.length,
     'PROCEDURE_RECORD_INVALID', '预装工序版本不完整。');
   for (const document of expected) {

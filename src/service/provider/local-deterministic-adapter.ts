@@ -23,7 +23,7 @@ import {
   parseRunReportReflectionMessageHeader,
   runReportReflectionRequestDigest,
 } from '../analysis/run-report-contract.js';
-import { parseReviewCategoryUnitMessageHeader, reviewCategoryRequestDigest } from '../review/review-category-contract.js';
+import { parseReviewCategoryUnitMessageHeader, reviewCategoryRequestDigest, parseReviewCrossChapterMessage, reviewCrossChapterFixtureDigest, reviewUnitFixtureDigest } from '../review/review-category-contract.js';
 import {
   initialEvaluationRequestDigest,
   initialEvaluationSynthesisRequestDigest,
@@ -483,6 +483,7 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     // belongs to is decided by its header alone; its request digest is then keyed by that kind's
     // contract digest, which the adapter was constructed with.
     const crossUnit = text === null ? null : parseCrossUnitMessageHeader(text);
+    const reviewSynthesis = text === null ? null : parseReviewCrossChapterMessage(text);
     // AI7 初评's book-level synthesis (Issue #429, S81b1) is answered as the reduction is, under ordinal `0`, keyed by the
     // observations its header names under the evaluation contract this adapter was built with.
     const synthesis = text === null || crossUnit !== null ? null : parseInitialEvaluationSynthesisMessageHeader(text);
@@ -498,7 +499,7 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     const reflection = text === null || crossUnit !== null || synthesis !== null || report !== null || rewrite !== null || drafting !== null || sampling !== null
       ? null
       : parseRunReportReflectionMessageHeader(text);
-    const named = crossUnit !== null || synthesis !== null || report !== null || rewrite !== null || drafting !== null || sampling !== null || reflection !== null;
+    const named = reviewSynthesis !== null || crossUnit !== null || synthesis !== null || report !== null || rewrite !== null || drafting !== null || sampling !== null || reflection !== null;
     // A review-category unit is a unit like the two others, and its header additionally names the
     // category, which its request digest carries as well. An evaluation unit is one too, under its own header.
     const review = text === null || named ? null : parseReviewCategoryUnitMessageHeader(text);
@@ -525,7 +526,7 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     const toolResults = options.messages.slice(Math.max(lastUserIndex, lastAssistantIndex) + 1).flatMap((message) => {
       const result = message.source?.kind === 'tool' ? toolResultOf(message) : null; return result === null ? [] : [result];
     });
-    const expectedDigest = toolResults.length > 0 ? fixtureToolResultDigest(toolResults) : (text === null || named ? null : clarificationMessageRequestDigest(text)) ?? (crossUnit !== null
+    const expectedDigest = reviewSynthesis !== null ? reviewCrossChapterFixtureDigest(reviewSynthesis) : toolResults.length > 0 ? fixtureToolResultDigest(toolResults) : (text === null || named ? null : clarificationMessageRequestDigest(text)) ?? (crossUnit !== null
       ? crossUnitRequestDigest(BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, crossUnit.unitSetDigest)
       : synthesis !== null
         ? initialEvaluationSynthesisRequestDigest(this.#promptContractDigest, synthesis.setDigest)
@@ -542,7 +543,7 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
             : this.#resolveBy === 'content-digest'
               ? unitContentDigest(ownBlockTextsOf(text!))
               : review !== null
-                ? reviewCategoryRequestDigest(this.#promptContractDigest, review.categoryId, review.ordinal, review.unitDigest)
+                ? reviewCategoryRequestDigest(reviewUnitFixtureDigest(text!) ?? this.#promptContractDigest, review.categoryId, review.ordinal, review.unitDigest)
                 : evaluation !== null
                   ? initialEvaluationRequestDigest(this.#promptContractDigest, evaluation.ordinal, evaluation.unitDigest)
                   : readers !== null

@@ -859,7 +859,7 @@ import {
   type LearningMaterialCandidate,
   type LearningRemediationReach,
 } from './learning-eligibility.js';
-import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryEntry } from './review/category-configuration.js';
+import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, HISTORICAL_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryEntry } from './review/category-configuration.js';
 import { EvaluationCalibrationError, EvaluationCalibrationLedger, initializeEvaluationCalibrationSchema } from './evaluation-calibration.js';
 import { UsageLedger } from './usage.js';
 import {
@@ -5096,7 +5096,8 @@ export class EditorialStore {
       materialReadings: (boundary) => this.#taskMaterialReadings(boundary),
       materialOffers: (bookId) => this.#taskMaterialOffers(bookId),
       baseline: () => this.#baselineAnalysis,
-    }, () => this.#reviewGuidelines.configuration());
+    }, () => this.#control.baselineAnalysisRoute?.reviewContractVersion === 1
+      ? HISTORICAL_REVIEW_CATEGORY_CONFIGURATION : this.#reviewGuidelines.configuration());
     this.#manuscriptExport = new ManuscriptExportStore(authority, {
       readObject: (objectDigest) => this.#readContentObject(objectDigest),
       dataRoot,

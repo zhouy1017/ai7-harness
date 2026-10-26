@@ -70,8 +70,8 @@ describe('the Captured Procedure document (ADR 0087 §1)', () => {
       title: '体例与线索',
       runAs: 'review-run',
       steps: [
-        { categoryId: 'style-and-format', procedure: { procedureId: 'ai7-review-procedure/style-and-format', version: '1' }, output: 'annotation', model: true, searchEngine: false },
-        { categoryId: 'plot-consistency', procedure: { procedureId: 'ai7-review-procedure/plot-consistency-leads', version: '1' }, output: 'annotation', model: false, searchEngine: false },
+        { categoryId: 'style-and-format', procedure: { procedureId: 'ai7-review-procedure/style-and-format', version: '2' }, output: 'annotation', model: true, searchEngine: false },
+        { categoryId: 'plot-consistency', procedure: { procedureId: 'ai7-review-procedure/plot-consistency-leads', version: '2' }, output: 'annotation', model: true, searchEngine: false },
         { categoryId: 'factual-review', procedure: { procedureId: 'ai7-review-procedure/factual-review', version: '1' }, output: 'annotation', model: true, searchEngine: true },
       ],
       parameters: { scope: 'chapters' },
@@ -79,7 +79,7 @@ describe('the Captured Procedure document (ADR 0087 §1)', () => {
         runSourceScope: 'current-book',
         steps: [
           { categoryId: 'style-and-format', executor: 'review-category-contract' },
-          { categoryId: 'plot-consistency', executor: 'baseline-leads' },
+          { categoryId: 'plot-consistency', executor: 'review-category-contract' },
           { categoryId: 'factual-review', executor: 'factual-review-kind' },
         ],
         outputs: ['annotation'],
@@ -150,13 +150,14 @@ describe('validation (ADR 0087 §3)', () => {
     expect(capturedStepProblem(document, 0, without)).toBe('这一类已不在审阅配置中。');
     expect(capturedStepProblem(document, 0, configurationWith('style-and-format', { executor: 'unavailable', unavailableReason: '暂停使用。' })))
       .toBe('「体例与格式」现在不能运行：暂停使用。');
-    expect(capturedStepProblem(document, 0, configurationWith('style-and-format', { procedure: { ...STYLE.procedure, version: '2' } })))
-      .toBe('「体例与格式」的工序已换成第 2 版，与保存时的第 1 版不同；请从一次新的审阅重新保存。');
+    expect(capturedStepProblem(document, 0, configurationWith('style-and-format', { procedure: { ...STYLE.procedure, version: '3' } })))
+      .toBe('「体例与格式」的工序已换成第 3 版，与保存时的第 2 版不同；请从一次新的审阅重新保存。');
     for (const change of [{ searchEngine: true }, { output: 'change-suggestion' as const }, { executor: 'factual-review-kind' as const }]) {
       expect(capturedStepProblem(document, 0, configurationWith('style-and-format', change))).toBe('「体例与格式」现在的做法超出了保存时的范围；请从一次新的审阅重新保存。');
     }
-    // The leads calling a model would widen the ceiling too.
-    expect(capturedStepProblem(document, 1, configurationWith('plot-consistency', { executor: 'review-category-contract' })))
+    // A retained leads-only capture cannot authorize the current model-backed category.
+    const retained = capturedProcedureDocument('线索', [{ ...PLOT, executor: 'baseline-leads' }], 'whole');
+    expect(capturedStepProblem(retained, 0, BUILTIN_REVIEW_CATEGORY_CONFIGURATION))
       .toBe('「情节逻辑与前后一致」现在的做法超出了保存时的范围；请从一次新的审阅重新保存。');
   });
 
@@ -166,7 +167,7 @@ describe('validation (ADR 0087 §3)', () => {
     expect(ceilingWiderThanSource(document, [{ ...STYLE, output: 'change-suggestion' }, PLOT])).toEqual(['「体例与格式」的权限超出了来源审阅。']);
     const searching = capturedProcedureDocument('核查', [FACTUAL], 'whole');
     expect(ceilingWiderThanSource(searching, [{ ...FACTUAL, searchEngine: false }])).toEqual(['「事实核查」的权限超出了来源审阅。']);
-    expect(ceilingWiderThanSource(document, [STYLE, { ...PLOT, executor: 'review-category-contract' }])).toEqual(['「情节逻辑与前后一致」的权限超出了来源审阅。']);
+    expect(ceilingWiderThanSource(document, [STYLE, { ...PLOT, executor: 'baseline-leads' }])).toEqual(['「情节逻辑与前后一致」的权限超出了来源审阅。']);
   });
 });
 
@@ -199,9 +200,9 @@ describe('what a capture may keep (ADR 0087 §2; REUSE-019)', () => {
       ['literary-expression', false, '这一类在这次审阅中没有完成（已中断），不会保存。'],
     ]);
     const moved = procedureCaptureSource({ authorized: true, state: 'settled', canContinue: false, categories: [category(STYLE, 'settled')] },
-      configurationWith('style-and-format', { procedure: { ...STYLE.procedure, version: '2' } }));
+      configurationWith('style-and-format', { procedure: { ...STYLE.procedure, version: '3' } }));
     expect(moved.unavailableReason).toBe(CAPTURE_NOTHING_ELIGIBLE);
-    expect(moved.steps[0]!.excludedReason).toBe('这一类的工序已换成第 2 版，与这次审阅用的第 1 版不同，不会保存。');
+    expect(moved.steps[0]!.excludedReason).toBe('这一类的工序已换成第 3 版，与这次审阅用的第 2 版不同，不会保存。');
     const gone = procedureCaptureSource({ authorized: true, state: 'settled', canContinue: false, categories: [category(STYLE, 'settled')] },
       configurationWith('style-and-format', { executor: 'unavailable', unavailableReason: '暂停使用。' }));
     expect(gone.steps[0]!.excludedReason).toBe('这一类现在不能运行：暂停使用。');
@@ -370,7 +371,7 @@ describe('Series material chosen apart and what a step needs of a Book (Issue #6
     expect(chosenApartSteps(capturedProcedureDocument('体例', [STYLE, PLOT], 'whole'))).toEqual([]);
     const words = (categoryId: string) => ({ label: categoryId, procedureTitle: categoryId });
     expect(capturedStepProjections(document, words).map((step) => [step.categoryId, step.requirement]))
-      .toEqual([['style-and-format', null], ['plot-consistency', 'baseline-analysis'], ['series-consistency', 'series']]);
+      .toEqual([['style-and-format', null], ['plot-consistency', null], ['series-consistency', 'series']]);
   });
 
   it('records a step the editor did not choose apart from one the Book could not take, and reads an older pin as neither chosen', () => {

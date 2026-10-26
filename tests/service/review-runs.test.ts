@@ -4,7 +4,7 @@ import { BASELINE_PROMPT_CONTRACT_DIGEST, parseUnitMessageHeader, unitRequestDig
 import { parseCrossUnitMessageHeader } from '../../src/service/analysis/cross-unit-contract.js';
 import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/assurance-sampling-contract.js';
 import { parseFactualReviewUnitMessageHeader } from '../../src/service/analysis/factual-review-contract.js';
-import { parseReviewCategoryUnitMessageHeader } from '../../src/service/review/review-category-contract.js';
+import { parseReviewCategoryUnitMessageHeader, parseReviewCrossChapterMessage, REVIEW_CROSS_CHAPTER_RESULT_SCHEMA } from '../../src/service/review/review-category-contract.js';
 import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
 import { withHouseReviewPreferenceFor } from '../support/policy-rules.js';
 import { HouseReviewPreferenceLedger } from '../../src/service/house-review-preference.js';
@@ -31,13 +31,10 @@ import { graphemeCount, sliceGraphemes } from '../../src/service/analysis/factua
 import { resolveFixtureEntry, loadModelFixture, reviewFixtureContractVersion, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
 import { ReviewRunDriver, type ReviewRunExecutionOwner } from '../../src/service/review/review-run-driver.js';
-import { reviewLeadsOf } from '../../src/service/review/review-leads.js';
 import {
   FACTUAL_AGAIN_REASON,
   FACTUAL_CHAPTERS_REASON,
   FACTUAL_SELECTION_REASON,
-  LEADS_ABSENT_REASON,
-  LEADS_CHANGED_REASON,
   NEVER_REVIEWED_REASON,
   MAX_SELECTION_BLOCKS,
   SELECTION_BASE_REASON,
@@ -675,11 +672,11 @@ describe('a Review Run over the real store on exact sample1', () => {
         'typos-and-usage', 'style-and-format', 'plot-consistency', 'factual-review', 'academic-integrity', 'publication-risk',
         'literary-expression', 'series-consistency', 'cross-deliverable-consistency',
       ]);
-      expect(before.categories.find((category) => category.categoryId === PLOT)).toMatchObject({ available: false, unavailableReason: LEADS_ABSENT_REASON });
-      // Only the leads read without a model; the sheet says so in its 会发送 line.
-      expect(before.categories.filter((category) => category.modelFree).map((category) => category.categoryId)).toEqual([PLOT]);
+      expect(before.categories.find((category) => category.categoryId === PLOT)).toMatchObject({ available: true, unavailableReason: null });
+      // Every current category reads through a model plan; baseline leads are optional pinned input.
+      expect(before.categories.filter((category) => category.modelFree).map((category) => category.categoryId)).toEqual([]);
       expect(before.categories.find((category) => category.categoryId === 'series-consistency')!.available).toBe(false);
-      expect(before.coverage.map((row) => row.state)).toEqual(['never', 'never', 'unavailable', 'never', 'never', 'never', 'never', 'unavailable', 'unavailable']);
+      expect(before.coverage.map((row) => row.state)).toEqual(['never', 'never', 'never', 'never', 'never', 'never', 'never', 'unavailable', 'unavailable']);
       expect(before.scopeOptions.selection).toEqual({ available: false, unavailableReason: SELECTION_UNAVAILABLE_REASON });
       expect(before.newReview).toEqual({ available: true, unavailableReason: null });
       expect(before.runs).toEqual([]);
@@ -698,7 +695,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       // Ticked in any order, a Run keeps the configuration's order.
       const prepared = prepare(session, book, [LITERARY, PLOT, STYLE, TYPOS], WHOLE);
       expect(prepared.preinstalledProcedures?.map((entry) => [entry.categoryId, entry.procedure.procedureId, entry.procedure.version])).toEqual(
-        [TYPOS, STYLE, PLOT, LITERARY].map((categoryId) => [categoryId, `ai7-procedure/review-${categoryId}`, categoryId === PLOT ? 1 : 2]),
+        [TYPOS, STYLE, PLOT, LITERARY].map((categoryId) => [categoryId, `ai7-procedure/review-${categoryId}`, categoryId === STYLE ? 3 : 2]),
       );
       expect(prepared.preinstalledProcedures?.every((entry) => /^[a-f0-9]{64}$/u.test(entry.procedure.digest))).toBe(true);
       expect(prepared).toMatchObject({ ordinal: 1, label: '第 1 次', scope: { kind: 'whole', label: '全书', selectedRange: null }, authorization: null, canContinue: false });
@@ -709,9 +706,8 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(typosPlan.plan).toMatchObject({ units: 8, recomputed: 8, reused: 0, unreviewed: 0, budgetCeilingLabel: '未设置任务预算上限' });
       expect(typosPlan.plan!.routeLabel).toContain('sample1-review-authored');
       expect(typosPlan.modeLabel).toBe('全书审阅');
-      // The leads have no Task, no plan and nothing to approve.
-      expect(prepared.categories[2]).toMatchObject({ taskIntentId: null, planEnvelopeDigest: null, plan: null });
-      expect(approvals(prepared).map((approval) => approval.categoryId)).toEqual([TYPOS, STYLE, LITERARY]);
+      expect(prepared.categories[2]).toMatchObject({ taskIntentId: expect.any(String), planEnvelopeDigest: expect.stringMatching(/^[a-f0-9]{64}$/u), plan: { units: 8 } });
+      expect(approvals(prepared).map((approval) => approval.categoryId)).toEqual([TYPOS, STYLE, PLOT, LITERARY]);
 
       const settled = await authorizeAndDrive(session, book, prepared);
       expect(settled).toMatchObject({ state: 'settled', stateLabel: '已完成', canContinue: false });
@@ -720,7 +716,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(eventTrail(settled.reviewRunId)).toEqual([
         [TYPOS, 'dispatched'], [TYPOS, 'settled'], [TYPOS, 'materialized'],
         [STYLE, 'dispatched'], [STYLE, 'settled'], [STYLE, 'materialized'],
-        [PLOT, 'materialized'],
+        [PLOT, 'dispatched'], [PLOT, 'settled'], [PLOT, 'materialized'],
         [LITERARY, 'dispatched'], [LITERARY, 'settled'], [LITERARY, 'materialized'],
       ]);
 
@@ -734,8 +730,7 @@ describe('a Review Run over the real store on exact sample1', () => {
         expect(category.excludedCount).toBeGreaterThan(0);
       }
       expect(settled.categories[0]!.excludedCount).toBe(2);
-      const baseline = session.store.inspectBaselineAnalysis(book.bookId).resultSetRevision!;
-      expect(settled.categories.find((category) => category.categoryId === PLOT)!.findingsCount).toBe(reviewLeadsOf(baseline).length);
+      expect(settled.categories.find((category) => category.categoryId === PLOT)!.findingsCount).toBe(4);
       expect(settled.findings.length).toBe(settled.categories.reduce((sum, category) => sum + category.findingsCount, 0));
       expect(settled.findings.every((finding) => finding.markId !== null && finding.anchorState === 'exact' && finding.status === 'pending')).toBe(true);
       expect(settled.findings.map((finding) => finding.ordinal)).toEqual(settled.findings.map((_finding, index) => index + 1));
@@ -752,10 +747,6 @@ describe('a Review Run over the real store on exact sample1', () => {
         expect(card.source.taskId).toBe(task);
         if (finding.output === 'change-suggestion') {
           expect(card.suggestion).toMatchObject({ proposedText: finding.replacement, rationale: finding.note });
-        } else if (finding.categoryId === PLOT) {
-          expect(card.body.startsWith('【线索 · ')).toBe(true);
-          expect(card.basis.length).toBeGreaterThanOrEqual(1);
-          expect(card.basis.every((basis) => basis.label.startsWith('线索来源'))).toBe(true);
         } else {
           expect(card.body === finding.note).toBe(true);
         }
@@ -902,7 +893,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       await runBaseline(session, book);
       const ready = workspace(session, book);
       // The leads read the baseline's whole result, never only the changed chapters.
-      expect(ready.categories.find((category) => category.categoryId === PLOT)!.scopes.changed).toEqual({ available: false, unavailableReason: LEADS_CHANGED_REASON });
+      expect(ready.categories.find((category) => category.categoryId === PLOT)!.scopes.changed).toEqual({ available: false, unavailableReason: NEVER_REVIEWED_REASON });
       const options = ready.scopeOptions.chapters;
       // sample1 carries no heading styles, so its chapters are the analysis units every category reads by.
       expect(options).toMatchObject({ available: true, basis: 'analysis-units' });
@@ -930,14 +921,9 @@ describe('a Review Run over the real store on exact sample1', () => {
       const literary = run.findings.filter((finding) => finding.categoryId === LITERARY);
       expect(literary.length).toBeGreaterThan(0);
       expect(literary.every((finding) => read.has(finding.blockId))).toBe(true);
-      // The leads kept are exactly those anchored in the chosen chapters.
-      const positions = new Map(session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId).map((block) => [block.blockId, block.position] as const));
-      const inRange = reviewLeadsOf(session.store.inspectBaselineAnalysis(book.bookId).resultSetRevision!)
-        .filter((lead) => { const position = positions.get(lead.ranges[0]!.blockId)!; return position >= 16 && position <= 43; });
+      // Current plot findings come from the read units plus the one grounded synthesis, within the chosen chapters.
       const leads = run.findings.filter((finding) => finding.categoryId === PLOT);
-      expect(leads.length).toBeGreaterThan(0);
-      expect(leads.length).toBeLessThan(reviewLeadsOf(session.store.inspectBaselineAnalysis(book.bookId).resultSetRevision!).length);
-      expect(leads.map((finding) => finding.blockId).sort()).toEqual(inRange.map((lead) => lead.ranges[0]!.blockId).sort());
+      expect(leads.map((finding) => finding.blockPosition).sort((left, right) => left! - right!)).toEqual([21, 28, 29]);
       expect(leads.every((finding) => finding.blockPosition! >= 16 && finding.blockPosition! <= 43)).toBe(true);
       // Each finding names the chapter it falls in, for the 章 filter.
       expect(run.findings.every((finding) => options.chapters.some((chapter) => chapter.blockId === finding.chapterBlockId))).toBe(true);
@@ -1036,7 +1022,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       // anchored on 28, the side the selection holds (P3-2).
       const twentyEight = at(28);
       const sides = await authorizeAndDrive(session, book, prepare(session, book, [PLOT], on(twentyEight.blockId, twentyEight.blockId)));
-      expect(sides.findings.map((finding) => [finding.blockId, finding.blockPosition, finding.markId !== null])).toEqual(Array(4).fill([twentyEight.blockId, 28, true]));
+      expect(sides.findings.map((finding) => [finding.blockId, finding.blockPosition, finding.markId !== null])).toEqual([[twentyEight.blockId, 28, true]]);
 
       // A Run over the whole manuscript names no selection.
       const whole = prepare(session, book, [STYLE], WHOLE);
@@ -1453,10 +1439,10 @@ describe('a Review Run over the real store on exact sample1', () => {
       const scopes = (categoryId: string) => edited.categories.find((category) => category.categoryId === categoryId)!.scopes;
       expect(scopes(TYPOS).changed).toEqual({ available: true, unavailableReason: null });
       expect(scopes(STYLE).changed).toEqual({ available: false, unavailableReason: NEVER_REVIEWED_REASON });
-      expect(scopes(PLOT).changed).toEqual({ available: false, unavailableReason: LEADS_ABSENT_REASON });
+      expect(scopes(PLOT).changed).toEqual({ available: false, unavailableReason: NEVER_REVIEWED_REASON });
       // A selection 就这段发起任务… hands over (Issue #423, S77b) reads as 选章 does; the sheet itself holds none.
       expect(scopes(TYPOS).selection).toEqual({ available: true, unavailableReason: null });
-      expect(scopes(PLOT).selection).toEqual({ available: false, unavailableReason: LEADS_ABSENT_REASON });
+      expect(scopes(PLOT).selection).toEqual({ available: true, unavailableReason: null });
       expect(edited.scopeOptions.selection).toEqual({ available: false, unavailableReason: SELECTION_UNAVAILABLE_REASON });
       expect(storeMessage(() => session.store.createReviewRunPreparationWork(book.bookId, [STYLE], CHANGED, launchPolicy))).toContain(NEVER_REVIEWED_REASON);
       expect(storeCode(() => session.store.createReviewRunPreparationWork(book.bookId, [TYPOS], SELECTION, launchPolicy))).toBe('REVIEW_SCOPE_INVALID');
@@ -1863,11 +1849,11 @@ describe('the 审阅 operations as the service entry dispatches them', () => {
         // The completed job carries the workspace across the service boundary in one frame.
         expect(wireBytes(done)).toBeLessThan(MAX_FRAME_BYTES);
 
-        // The leads need no plan: their Run is written by the first step, and the job is complete at once.
+        // Plot review prepares its model plan through the same cooperative job.
         await runBaseline(session, book);
-        const leads = jobs.startReviewRunPreparation(book.bookId, [PLOT], WHOLE, launchPolicy);
-        expect(leads).toMatchObject({ kind: 'review-run-preparation', state: 'completed', progress: { completed: 1, total: 1, label: '审阅计划准备完成' } });
-        expect((leads.result as ReviewWorkspaceProjection).run).toMatchObject({ ordinal: 2, state: 'prepared', categories: [{ categoryId: PLOT, planEnvelopeDigest: null }] });
+        const leads = (await settleJob(jobs, jobs.startReviewRunPreparation(book.bookId, [PLOT], WHOLE, launchPolicy))).at(-1)!;
+        expect(leads).toMatchObject({ kind: 'review-run-preparation', state: 'completed', progress: { completed: 2, total: 2, label: '审阅计划准备完成' } });
+        expect((leads.result as ReviewWorkspaceProjection).run).toMatchObject({ ordinal: 2, state: 'prepared', categories: [{ categoryId: PLOT, planEnvelopeDigest: expect.any(String) }] });
       } finally {
         jobs.dispose();
       }
@@ -2138,8 +2124,10 @@ async function openLayeredSelection(): Promise<Session> {
     if (request.stage === 'units' && baseline !== null) return resolveFixtureEntry(fixture.entries, baseline.ordinal,
       unitRequestDigest(BASELINE_PROMPT_CONTRACT_DIGEST, baseline.ordinal, baseline.unitDigest), request.attemptIndex)?.response;
     if (request.stage === 'cross-unit-reduction' && parseCrossUnitMessageHeader(message) !== null) return capturedMapAnswer(fixture.entries)(request, message);
-    const content = request.stage === 'units' && review !== null ? { schema: 'ai7.editorial-review.unit-result/2', unitOrdinal: review.ordinal, findings: [] }
+    const content = request.stage === 'units' && review !== null ? { schema: 'ai7.editorial-review.unit-result/2', unitOrdinal: review.ordinal,
+      findings: review.categoryId === PLOT && review.ordinal === 3 ? [{ quote: '梦中的那一声沉雷', blockOrdinal: 5, severity: 'note', note: '梦境与现场的衔接尚待后文核对。', clauseId: 'plot-consistency/1' }] : [] }
       : request.stage === 'units' && factual !== null ? { schema: store.factualReviewLedger.definition.unitResultSchema, unitOrdinal: factual.ordinal, assertions: [] }
+        : request.stage === 'cross-unit-reduction' && parseReviewCrossChapterMessage(message) !== null ? { schema: REVIEW_CROSS_CHAPTER_RESULT_SCHEMA, findings: [] }
         : request.stage === 'assurance-sampling' ? { schema: 'ai7.analysis.assurance-sampling-result/1', dispositions: parseAssuranceSamplingListedRefs(message)
           .map((ref) => ({ ref, disposition: '成立', reason: '合成回归抽样。' })) }
           : request.stage === 'run-report-reflection' ? { schema: 'ai7.analysis.run-report-reflection-result/1', items: [] } : null;
@@ -2201,7 +2189,7 @@ describe('the house\'s 可复用工序 on a 当前选区 (Issue #423, S77 deferr
       expect(store.inspectCapturedProcedureRun(other.bookId, factual.procedureId, null, 'selection').resolved!.steps[1])
         .toEqual({ categoryId: FACTUAL, label: '事实核查', available: false, unavailableReason: FACTUAL_SELECTION_REASON, chosenApart: false });
       expect(store.inspectCapturedProcedureRun(other.bookId, steps.procedureId, null, 'selection').resolved!.steps[1])
-        .toMatchObject({ categoryId: PLOT, available: false, unavailableReason: LEADS_ABSENT_REASON });
+        .toMatchObject({ categoryId: PLOT, available: true, unavailableReason: null });
 
       // 按《体例线索复核》审阅这段 on 内容块 29, where one of sample1's leads stands: the Run pins the exact version and reads the
       // selection as a category Run on it does — only its steps, nothing the slot would refuse.

@@ -1,6 +1,6 @@
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
-import { parseReviewCategoryUnitMessageHeader } from '../../src/service/review/review-category-contract.js';
+import { parseReviewCategoryUnitMessageHeader, parseReviewCrossChapterMessage, REVIEW_CROSS_CHAPTER_RESULT_SCHEMA } from '../../src/service/review/review-category-contract.js';
 import { ruleFor, withRuleFor } from '../support/policy-rules.js';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
@@ -58,7 +58,8 @@ async function open(): Promise<void> {
     const header = parseReviewCategoryUnitMessageHeader(message);
     const content = request.stage === 'units' && header !== null
       ? { schema: 'ai7.editorial-review.unit-result/2', unitOrdinal: header.ordinal, findings: [] }
-      : request.stage === 'run-report-reflection' ? { schema: 'ai7.analysis.run-report-reflection-result/1', items: [] } : null;
+      : request.stage === 'cross-unit-reduction' && parseReviewCrossChapterMessage(message) !== null ? { schema: REVIEW_CROSS_CHAPTER_RESULT_SCHEMA, findings: [] }
+        : request.stage === 'run-report-reflection' ? { schema: 'ai7.analysis.run-report-reflection-result/1', items: [] } : null;
     return content === null ? undefined : { kind: 'unit-result', text: JSON.stringify(content), usage: { inputTokens: 10, outputTokens: 10 } };
   }, { materialGuard: (id, ledger) => store.materialGuard(id, ledger), unitHold: async () => { unitBoundary?.(); } });
   owner = capture.owner; launchPolicy = capture.policy;
@@ -337,7 +338,8 @@ describe('review categories reference exact library versions over ordinary captu
   it('refuses references for factual-review-only and leads-only selections without changing their contracts', async () => {
     await selectLocalReadRoute();
     const id = await material();
-    for (const category of ['factual-review', 'plot-consistency']) expect(() => prepare([id], [category])).toThrow(REVIEW_MATERIAL_CATEGORY_REQUIRED);
+    expect(() => prepare([id], ['factual-review'])).toThrow(REVIEW_MATERIAL_CATEGORY_REQUIRED);
+    expect(recordPins(prepare([id], ['plot-consistency']))).toHaveLength(1);
     await close(); localReadFixture = null; await open();
     const plain = prepare([], ['factual-review']);
     expect(plan(plain).scope.reference.some((line) => line.includes('资料库资料'))).toBe(false);

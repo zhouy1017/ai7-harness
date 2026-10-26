@@ -11,7 +11,7 @@ import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 //   AI7_REGENERATE_REVIEW_FIXTURE=1 pnpm exec vitest run tests/service/review-fixture-generator.test.ts
 // and review the fixture's diff like any other change.
 import { randomUUID } from 'node:crypto';
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, expect, it } from 'vitest';
@@ -27,11 +27,12 @@ import { RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST, runReportReflectionReques
 import type { AnalysisKindDefinition, AnalysisReductionResult } from '../../src/service/analysis/kind-definition.js';
 import { locateQuotation } from '../../src/service/analysis/factual-review-contract.js';
 import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
-import { REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, type ReviewUnitFinding } from '../../src/service/review/review-category-contract.js';
-import { fixtureEntryKey, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
-import type { CoverageManifestProjection, LaunchPolicyProjection, ReviewCategoryProjection, ReviewCategoryTaskRequest } from '../../src/shared/protocol.js';
+import { REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, REVIEW_CROSS_CHAPTER_RESULT_SCHEMA, parseReviewCrossChapterMessage, reviewCrossChapterFixtureDigest, type ReviewUnitFinding } from '../../src/service/review/review-category-contract.js';
+import { reviewBaselineSource } from '../../src/service/review/review-leads.js';
+import { fixtureEntryKey, loadModelFixture, parseModelFixture, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
+import { BASELINE_ANALYSIS_TASK_GOAL, type CoverageManifestProjection, type LaunchPolicyProjection, type ReviewCategoryProjection, type ReviewCategoryTaskRequest } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { LITERARY_EXPRESSION, STYLE_AND_FORMAT, TYPOS_AND_USAGE } from '../support/review-categories.js';
+import { LITERARY_EXPRESSION, PLOT_CONSISTENCY, STYLE_AND_FORMAT, TYPOS_AND_USAGE } from '../support/review-categories.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 
 // One explicit model-request capability per test application.
@@ -110,6 +111,15 @@ const AUTHORED: Authored = {
     7: [{ quote: '不敢笑,又不能不笑', blockOrdinal: 18, severity: 'note', note: '此处应使用全角逗号。', replacement: '不敢笑，又不能不笑' }],
     8: [{ quote: '原样退出来', blockOrdinal: 2, severity: 'note', note: '“退出来”可改为更贴切的动词。', replacement: '原样抽出来', clauseId: 'literary-expression/1' }],
   },
+  'plot-consistency': {
+    1: [{ quote: '《青铜重器》之一', blockOrdinal: 2, severity: 'note', note: '系列名称首次出现；请核对后文作品称谓是否保持一致。', clauseId: 'plot-consistency/1' }],
+    2: [{ quote: '一九八○年代', blockOrdinal: 7, severity: 'should', note: '死亡年份与后文来信时间需要对照；先作为未解线索保留。', clauseId: 'plot-consistency/1' }],
+    3: [
+      { quote: '梦中的那一声沉雷', blockOrdinal: 5, severity: 'note', note: '梦境与现场的界线尚待后文交代，请复核这条叙事线索。', clauseId: 'plot-consistency/1' },
+      { quote: '他将眼前的景物', blockOrdinal: 4, severity: 'note', note: '此处观察与此前梦境的衔接需要后文核对。', clauseId: 'plot-consistency/1' },
+    ],
+    4: [], 5: [], 6: [], 7: [], 8: [],
+  },
 };
 
 /** What each authored quotation is meant to be once Reference Integrity has looked: `unique` unless stated. */
@@ -120,7 +130,7 @@ const EXPECTED_STATE: Record<string, 'not-found' | 'ambiguous'> = {
   'literary-expression:6:1': 'not-found',
 };
 
-const DEFINITIONS = [TYPOS_AND_USAGE, STYLE_AND_FORMAT, LITERARY_EXPRESSION].map((input) => ({ input, definition: reviewCategoryKindDefinition(input) }));
+const DEFINITIONS = [TYPOS_AND_USAGE, STYLE_AND_FORMAT, LITERARY_EXPRESSION, PLOT_CONSISTENCY].map((input) => ({ input, definition: reviewCategoryKindDefinition(input) }));
 const byCategory = new Map(DEFINITIONS.map((entry) => [entry.input.categoryId, entry.definition] as const));
 
 interface Labelled { entry: ModelFixtureEntry; group: number; order: string }
@@ -175,9 +185,28 @@ const REFLECTION_TEXT = JSON.stringify({
   ],
 });
 
-function harvest(categoryIndex: number, definition: AnalysisKindDefinition, settled: ReviewCategoryProjection, label: string): { closed: boolean } {
+function harvest(categoryIndex: number, definition: AnalysisKindDefinition, settled: ReviewCategoryProjection, label: string, store: EditorialStore): { closed: boolean } {
   const revision = settled.resultSetRevision!;
   const manifest = settled.coverageManifest!;
+  if (definition.crossUnit?.step !== undefined) {
+    const gaps = new Set(revision.gaps.map((gap) => gap.unitOrdinal));
+    const outcomes = manifest.units.filter((unit) => !gaps.has(unit.ordinal)).map((unit) => {
+      const parsed = definition.parseUnitResult(JSON.stringify({ schema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, unitOrdinal: unit.ordinal,
+        findings: AUTHORED[revision.category.categoryId]![unit.ordinal]! }), unit);
+      if (!parsed.ok) throw new Error('AUTHORED_UNIT_INVALID');
+      return { state: 'closed' as const, unitOrdinal: unit.ordinal, result: parsed.result };
+    });
+    const blocks = new Map(store.baselineAnalysisLedger.readRevisionBlocks(manifest.manuscript.manuscriptId, manifest.manuscript.revisionId).map((block) => [block.blockId, block]));
+    const input = parseReviewCrossChapterMessage(definition.crossUnit.step.buildMessage(outcomes, manifest.units.length, { manifest, blocks }))!;
+    // Authored, bounded evidence only: compare the two numbered headings, or retain the stated dream/scene question.
+    const chosen = input.evidence.filter((entry) => revision.category.categoryId === 'style-and-format'
+      ? ['壹', '贰'].includes(entry.quote) : entry.quote === '梦中的那一声沉雷');
+    add({ unitOrdinal: 0, requestDigest: reviewCrossChapterFixtureDigest(input), attempt: null, contentDigest: null,
+      response: { kind: 'unit-result', usage: { inputTokens: 800, outputTokens: 80 }, text: JSON.stringify({ schema: REVIEW_CROSS_CHAPTER_RESULT_SCHEMA,
+        findings: chosen.length === 0 ? [] : [{ anchorRef: chosen[0]!.ref, evidenceRefs: chosen.map((entry) => entry.ref), severity: 'note',
+          note: revision.category.categoryId === 'style-and-format' ? '章序使用大写数字，请统一标题层级与呈现。' : '梦境与现场的衔接仍待后文交代；保留这条线索供编辑核对。',
+          clauseId: `${revision.category.categoryId}/1` }] }) } }, categoryIndex * 10 + 3, label);
+  }
   const candidates = definition.assurance!.candidates({ components: { findings: revision.findings } } as unknown as AnalysisReductionResult);
   expect(candidates.length).toBeLessThanOrEqual(30);
   const byUnit = new Map<number, typeof candidates[number][]>();
@@ -211,7 +240,7 @@ function harvest(categoryIndex: number, definition: AnalysisKindDefinition, sett
       response: { kind: 'unit-result', text: REFLECTION_TEXT, usage: { inputTokens: 900, outputTokens: 210 } },
     }, categoryIndex * 10 + 2, label);
   }
-  return { closed: sampleFinal && report.ifRedone.state === 'closed' };
+  return { closed: sampleFinal && report.ifRedone.state === 'closed' && (definition.crossUnit === null || revision.reducerClosure.stages.some((stage) => stage.stage === 'cross-chapter-consistency' && stage.state === 'closed')) };
 }
 
 let roots: ServiceTestRoots;
@@ -255,7 +284,9 @@ async function run(
   label: string,
   variant: string,
 ): Promise<{ settled: ReviewCategoryProjection; closed: boolean }> {
-  const definition = byCategory.get(categoryId)!;
+  const base = DEFINITIONS.find((entry) => entry.input.categoryId === categoryId)!.input;
+  const definition = base.crossChapter === undefined ? byCategory.get(categoryId)!
+    : reviewCategoryKindDefinition({ ...base, crossChapter: { baseline: reviewBaselineSource(context.store.inspectBaselineAnalysis(context.bookId).resultSetRevision) } });
   const categoryIndex = DEFINITIONS.findIndex((entry) => entry.input.categoryId === categoryId);
   let progress = context.store.createReviewCategoryPreparationWork(context.bookId, definition, request, launchPolicy);
   while (!progress.done) progress = context.store.advanceReviewCategoryPreparationWork(definition, progress.workId!);
@@ -267,7 +298,7 @@ async function run(
   await context.owner.whenIdle();
   const settled = context.store.inspectReviewCategory(context.bookId, definition);
   expect(settled.state).toBe('settled');
-  return { settled, ...harvest(categoryIndex, definition, settled, label) };
+  return { settled, ...harvest(categoryIndex, definition, settled, label, context.store) };
 }
 
 function appendToFirstBlock(store: EditorialStore, manuscriptId: string, branchId: string, suffix = J04_EDIT_SUFFIX): void {
@@ -279,6 +310,16 @@ function appendToFirstBlock(store: EditorialStore, manuscriptId: string, branchI
     windowStartBlockId: block.blockId, baseBlockDigest: block.digest, expectedJournalSequence: window.journalSequence,
     fromGrapheme: graphemes, toGrapheme: graphemes, insertText: suffix,
   });
+}
+
+async function baseline(context: { store: EditorialStore; owner: BaselineAnalysisExecutionOwner; bookId: string }): Promise<void> {
+  let work = context.store.createBaselineAnalysisPreparationWork(context.bookId, BASELINE_ANALYSIS_TASK_GOAL, null, launchPolicy);
+  while (!work.done) work = context.store.advanceBaselineAnalysisPreparationWork(work.workId!);
+  const plan = work.projection!;
+  const authorized = context.store.authorizeBaselineAnalysis(context.bookId, plan.taskIntent!.taskIntentId, plan.planEnvelope!.digest);
+  context.owner.admitAndDispatch(authorized.dispatchRunRecordId!);
+  await context.owner.whenIdle();
+  expect(context.store.inspectBaselineAnalysis(context.bookId).state).toBe('settled');
 }
 
 async function pass(): Promise<boolean> {
@@ -322,17 +363,36 @@ async function pass(): Promise<boolean> {
   // S4: J-04's end state — both of its edits in the first block — reviewed whole by every category, as
   // the Review Run J-04 opens in 审阅 does. Units 2 to 8 are unchanged, so only unit 1 is new.
   await withBook(async (context) => {
+    await baseline(context);
     appendToFirstBlock(context.store, context.manuscriptId, context.branchId);
+    await baseline(context);
     appendToFirstBlock(context.store, context.manuscriptId, context.branchId, J04_SECOND_EDIT_SUFFIX);
-    for (const categoryId of ['typos-and-usage', 'style-and-format', 'literary-expression']) {
+    for (const categoryId of ['typos-and-usage', 'style-and-format', 'literary-expression', 'plot-consistency']) {
       note((await run(context, categoryId, { mode: 'review-first', selectedRange: null }, 'g-j04-end', 'j')).closed);
     }
   });
+  // Current category Runs with no baseline, a matching baseline, and selection/chapter scope.
+  await withBook(async (context) => {
+    note((await run(context, 'plot-consistency', { mode: 'review-first', selectedRange: null }, 'h-no-baseline', 'a')).closed);
+  });
+  for (const selectedRange of [null, { startPosition: 1, endPosition: 2 }, { startPosition: 16, endPosition: 43 }, { startPosition: 29, endPosition: 29 }]) {
+    await withBook(async (context) => {
+      await baseline(context);
+      for (const categoryId of ['style-and-format', 'plot-consistency']) {
+        note((await run(context, categoryId, { mode: selectedRange === null ? 'review-first' : 'review-first-range', selectedRange },
+          `i-baseline-${selectedRange?.startPosition ?? 'whole'}`, 'a')).closed);
+      }
+    });
+  }
   return allClosed;
 }
 
 it.runIf(process.env['AI7_REGENERATE_REVIEW_FIXTURE'] === '1')('generates the authored review fixture', async () => {
   await requireExactSample1(roots.codeRoot);
+  const retained = parseModelFixture(JSON.parse(await readFile(FIXTURE_PATH, 'utf8')));
+  retained.entries.forEach((entry, index) => add(entry, -1, String(index).padStart(5, '0')));
+  const base = await loadModelFixture(resolve(FIXTURE_PATH, '..'), 'sample1-baseline-transient-retry');
+  for (const [key, entry] of base.entries) if (!fixture.entries.has(key)) fixture.entries.set(key, entry);
   let closed = false;
   for (let index = 0; index < 6 && !closed; index += 1) {
     additions = 0;

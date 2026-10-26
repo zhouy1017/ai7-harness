@@ -4,6 +4,7 @@ import {
   type AnalysisSourceRangeProjection,
   type BaselineAnalysisResultSetRevisionProjection,
   type ReviewFindingSeverity,
+  type ReviewBaselineSource,
 } from '../../shared/protocol.js';
 import { canonicalJson, sha256Hex } from '../analysis/canonical.js';
 
@@ -85,4 +86,22 @@ export function reviewLeadsOf(revision: LeadSource): ReviewLead[] {
 /** What a lead's 批注 says on the manuscript: which kind of lead it is, then the analysis's own words. */
 export function reviewLeadBody(lead: Pick<ReviewLead, 'kindLabel' | 'description'>): string {
   return `【线索 · ${lead.kindLabel}】${lead.description}`;
+}
+
+/** Snapshot only bounded baseline leads, with the exact producing revision and manuscript pin. */
+export function reviewBaselineSource(revision: BaselineAnalysisResultSetRevisionProjection | null): ReviewBaselineSource | null {
+  if (revision === null) return null;
+  const leads: ReviewBaselineSource['leads'][number][] = [];
+  let omitted = 0;
+  const add = (kind: string, text: string, ranges: ReadonlyArray<AnalysisSourceRangeProjection>): void => {
+    if (leads.length >= 160) { omitted += 1; return; }
+    const bounded = [...new Intl.Segmenter('zh', { granularity: 'grapheme' }).segment(text)].slice(0, 300).map((part) => part.segment).join('');
+    leads.push({ ref: `baseline-${leads.length + 1}`, kind, text: bounded, ranges: plainRanges(ranges).slice(0, 8) });
+  };
+  for (const entity of revision.synthesis.entities) add(`first-appearance/${entity.kind}`, [entity.name, ...entity.aliases, entity.note ?? ''].join('；'), entity.sourceRanges);
+  for (const event of revision.synthesis.events) add('timeline', [event.summary, event.chronology ?? '', ...event.participants].join('；'), event.sourceRanges);
+  for (const claim of revision.synthesis.settingClaims) add('setting', `${claim.subject}：${claim.claim}`, claim.sourceRanges);
+  for (const lead of reviewLeadsOf(revision)) add(lead.kind, lead.description, lead.ranges);
+  return { resultSetId: revision.resultSetId, revisionId: revision.revisionId, digest: revision.digest,
+    manuscriptPin: structuredClone(revision.manuscriptPin), leads, omitted };
 }
