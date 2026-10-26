@@ -3804,6 +3804,46 @@ async function main() {
     requireJourney(JSON.stringify(rangeReopened?.resultSetRevision) === JSON.stringify(rangeRevision) &&
       JSON.stringify(rangeReopened.taskOutcome) === JSON.stringify(rangeRecorded.taskOutcome) && loopback.healthy() && loopback.observedRequests() === 0,
     'range-recorded-restart-preserves-result');
+
+    // #1169: a standalone authored stock review, through the normal UI and the same native unit-child
+    // composition the service test verifies by its eight distinct child Session spans. No capture is inherited.
+    at('review-relaunch');
+    await closeOwnedBrowser();
+    cancellation.throwIfRequested();
+    modelAdapterIdentity = 'sample1-stock-typos-leaf-authored';
+    await launchForCleanup();
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'stock-leaf-launch-ready');
+    const leafBook = await importSample1(renderer, cancellation, true);
+    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'stock-leaf-artifact-ready');
+    await click(renderer, '审阅并为本图书启用 Revision 2', 'stock-leaf-artifact-enable');
+    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'stock-leaf-artifact-enabled');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'stock-leaf-return-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'stock-leaf-library');
+    await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(leafBook.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'stock-leaf-open-book');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(leafBook.bookId)}]')`, 'stock-leaf-manuscript-ready');
+    await openReviewDestination(renderer, 'stock-leaf-review-destination');
+    await reviewAction(renderer, '[data-review-action="new-review"]', 'stock-leaf-new-review');
+    await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'stock-leaf-sheet');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); sheet.querySelector('input[name="review-category"][value="typos-and-usage"]').click(); sheet.querySelector('input[name="review-scope"][value="whole"]').click(); sheet.querySelector('[data-review-action="prepare"]').click(); return true; })()`, 'stock-leaf-prepare');
+    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared'`, 'stock-leaf-prepared', 120_000);
+    const leafPrepared = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`)).run;
+    requireJourney(leafPrepared.categories.length === 1 && leafPrepared.categories[0].plan.units === SAMPLE1_UNITS &&
+      leafPrepared.categories[0].plan.recomputed === SAMPLE1_UNITS && leafPrepared.influence.length === 0, 'stock-leaf-complete-scope');
+    await drawerShowing(renderer, leafPrepared.reviewRunId, 'ready', 'stock-leaf-drawer');
+    await reviewAction(renderer, '#task-drawer [data-task-drawer-control="start"]', 'stock-leaf-start');
+    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, 'stock-leaf-settled', 180_000);
+    const leafReviewed = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`)).run;
+    requireJourney(leafReviewed.findings.length === 2 && leafReviewed.findings.every((finding) => finding.anchorState === 'exact' && finding.markId !== null) &&
+      leafReviewed.categories[0].excludedCount === 0, 'stock-leaf-validated-findings');
+    const leafUsage = await renderer.evaluate(`window.ai7.inspectUsage({range:'all',groupBy:'book'})`);
+    const leafRuns = leafUsage.rows.find((row) => row.key === leafBook.bookId).runs;
+    requireJourney(leafRuns.length === 1 && leafRuns[0].taskIntentId === leafPrepared.categories[0].taskIntentId, 'stock-leaf-one-business-run');
+    const leafDetail = await renderer.evaluate(`window.ai7.inspectUsage({range:'all',groupBy:'book',runRecordId:${JSON.stringify(leafRuns[0].runRecordId)}})`);
+    const leafReport = leafDetail.detail.report;
+    requireJourney(leafReport.units.submitted === SAMPLE1_UNITS && leafReport.units.gaps === 0 && leafReport.units.retried === 0 &&
+      leafReport.usagePerStage.units.requests === SAMPLE1_UNITS + 1 && leafReport.usagePerStage['assurance-sampling'].requests === 2 &&
+      leafReport.usagePerStage['run-report-reflection'].requests === 1 && leafReport.assurance.state === 'closed' && leafReport.ifRedone.state === 'closed' &&
+      loopback.observedRequests() === 0, 'stock-leaf-tools-and-parent-stages');
   } finally {
     finalCleanupRequested = true;
     try { await cancellation.cleanup(); } finally { cancellation.dispose(); }

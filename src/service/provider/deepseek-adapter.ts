@@ -864,7 +864,7 @@ export interface DeepSeekAdapterDependencies {
   /** The model this adapter speaks to; the production model when absent. Must belong to the bound route. */
   readonly modelProfile?: ProviderModelProfile;
   /** The technical Session id of the turn in flight; required by a profile that sends the Session header. */
-  readonly sessionId?: () => string;
+  readonly sessionId?: (request: GenerateOptions) => string;
   readonly requestShape?: 'editorial-dialogue-sse';
   /** The execution owner's pause/cancel signal; combined with the harness signal and request deadline. */
   readonly signal?: AbortSignal;
@@ -885,9 +885,12 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
   #lastResult: CanonicalModelResult | null = null;
   #lastUsage: ModelUsage | null = null;
   #lastRetryDelayMs: number | null = null;
+  #lastRequestNotSent = false;
 
   get lastUsage(): ModelUsage | null { return this.#lastUsage; }
   get lastRetryDelayMs(): number | null { return this.#lastRetryDelayMs; }
+  /** Transport-local observation for the exact last request; server responses never set it. */
+  get lastRequestNotSent(): boolean { return this.#lastRequestNotSent; }
 
   constructor(deps: DeepSeekAdapterDependencies) {
     this.#deps = deps;
@@ -956,6 +959,7 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
     // Cleared here so a reader after this turn never sees the previous turn's result: a turn that
     // fails before any response arrives has no canonical result, and must not appear to have one.
     this.#lastResult = null;
+    this.#lastRequestNotSent = false;
     this.#lastUsage = null;
     this.#lastRetryDelayMs = null;
     if (options.provider !== this.#profile.route || options.model !== this.#modelProfile.model) {
@@ -968,7 +972,7 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
       assembly = assembleProviderRequest(this.#profile, this.#modelProfile, options, {
         attribution: this.#deps.attribution(),
         promptContractDigest: this.#deps.promptContractDigest,
-        ...(this.#deps.sessionId === undefined ? {} : { sessionId: this.#deps.sessionId() }),
+        ...(this.#deps.sessionId === undefined ? {} : { sessionId: this.#deps.sessionId(options) }),
         ...(this.#deps.requestShape === undefined ? {} : { requestShape: this.#deps.requestShape }),
       });
     } catch {
@@ -1056,7 +1060,8 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
         this.#lastRetryDelayMs = retryBackoffMs(response.headers?.get('retry-after') ?? null);
       }
     } catch (error) {
-      if (!sent || error instanceof Error && MODEL_REQUEST_NO_SEND.get(error)?.request === transportRequest) this.#deps.onRequestNotSent?.();
+      this.#lastRequestNotSent = !sent || error instanceof Error && MODEL_REQUEST_NO_SEND.get(error)?.request === transportRequest;
+      if (this.#lastRequestNotSent) this.#deps.onRequestNotSent?.();
       const classified = error instanceof Error && error.message === 'AI7_OUTCOME_UNKNOWN'
         ? { code: AI7_FAILURE_CODES.OUTCOME_UNKNOWN, message: '模型服务已接受请求，但回答没有完整传回。' }
         : classifyTransportError(signal.aborted && !(error instanceof Error && MODEL_REQUEST_NO_SEND.get(error)?.request === transportRequest)

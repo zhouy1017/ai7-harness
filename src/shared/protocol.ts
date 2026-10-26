@@ -2588,6 +2588,19 @@ export function localFixtureProfileOf(value: unknown, selected: SelectedPolicyId
 
 /** Exact Run Budget Ceiling state: `unset` under development-ci, an explicit total-token ceiling under developer-live. */
 export type RunBudgetCeilingState = 'unset' | { kind: 'tokens'; maxTotalTokens: number };
+
+/** ADR 0095 / #1160: a technical leaf inside the parent attempt, never another Task or Run. */
+export interface ParentAttemptSubagentDeclaration {
+  readonly profileId: 'ai7-stock-typos-leaf/1';
+  readonly provider: 'spawn';
+  readonly transport: 'same-process';
+  readonly lifetime: 'one-shot';
+  readonly stage: 'units';
+  readonly maxDepth: 1;
+  readonly maxActiveChildren: 1;
+  readonly unitWidth: 1;
+  readonly awaitDisposal: true;
+}
 /**
  * The Run Budget Ceiling a developer-live launch binds: an explicit form ceiling as a total, or the
  * Provider Processing v18 default (unchanged since v9) of 30,000 tokens per frozen Coverage Manifest unit (ADR 0070),
@@ -4757,7 +4770,7 @@ export interface BaselineAnalysisPlanAdaptationProjection {
 export type SafeRetryRepetition = 'byte-identical' | 'differs' | 'unrecorded';
 
 export interface BaselineAnalysisExecutionBindingProjection {
-  compositionVersion?: 2;
+  compositionVersion?: 2 | 3;
   attemptId: string;
   bindingDigest: string;
   harnessSessionId: string;
@@ -5042,7 +5055,7 @@ export interface BaselineAnalysisProjection {
     stopCondition: string;
   };
   planEnvelope: null | {
-    compositionVersion?: 2;
+    compositionVersion?: 2 | 3;
     digest: string;
     dispatchAllowed: boolean;
     providerStatus: 'remote-denied-local-deterministic' | 'remote-denied-no-route' | 'remote-eligible-developer-live' | 'remote-eligible-ordinary-production';
