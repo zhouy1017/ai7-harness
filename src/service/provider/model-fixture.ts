@@ -130,7 +130,8 @@ export class LocalFixturePolicyCatalog {
         tuple.kinds.includes('custom-analysis/*') && context.kind.startsWith('custom-analysis/')) : tuple.purpose === context.purpose) &&
         (tuple.contracts.length === 0 ? context.contractId === null : context.contractId !== null && tuple.contracts.includes(context.contractId)) &&
         (tuple.prompts.length === 0 || tuple.prompts.includes(promptContractDigest)) && sameSet(tuple.categories, context.categories) &&
-        sameSet(tuple.tools, tools), '本地夹具的调用方、契约、类别或工具与登记配置不一致。');
+        // The manifest's tool list is an allowlist: a dialogue registers retrieval only when its question matches a stimulus.
+        tools.every((tool) => tuple.tools.includes(tool)), '本地夹具的调用方、契约、类别或工具与登记配置不一致。');
       return tuple.entryKeys;
     }
     const rules = this.#rules.filter((rule) => rule.ruleId === profile.ruleId);
