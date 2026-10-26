@@ -106,6 +106,13 @@ export const LOCAL_REVIEW_CATEGORY_V2: ReviewCategoryConfigurationEntry = {
   procedure: { procedureId: 'ai7-procedure/local-text-check', title: '本地文字检查', version: '2' },
 };
 
+export const LOCAL_REVIEW_CATEGORY_V3: ReviewCategoryConfigurationEntry = {
+  ...LOCAL_REVIEW_CATEGORY,
+  label: '确定性检查', description: '离线检查标点、数字、规范字形、异形词、本社词表与本书术语；可批量采纳机械修正，其余生成批注。',
+  output: 'change-suggestion', batchApply: true,
+  procedure: { procedureId: 'ai7-procedure/local-text-check', title: '确定性检查', version: '3' },
+};
+
 function builtinDocument(documentId: string, title: string, clauses: ReadonlyArray<ReviewGuidelineClause>): ReviewGuidelineDocument {
   return { documentId, title, issuer: BUILTIN_GUIDELINE_ISSUER, version: '1', clauses };
 }

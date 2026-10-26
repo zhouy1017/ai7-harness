@@ -37,6 +37,10 @@ export interface HouseWordListApi {
   inspectHouseWordList(input: InspectHouseWordListInput): Promise<HouseWordListPage>;
   saveHouseWordList(input: SaveHouseWordListInput): Promise<SaveHouseWordListResult>;
 }
+export interface HouseWordListOperations {
+  inspectHouseWordList: { input: InspectHouseWordListInput; output: HouseWordListPage };
+  saveHouseWordList: { input: SaveHouseWordListInput; output: SaveHouseWordListResult };
+}
 export class HouseWordListError extends Error {
   constructor(readonly code: string, message: string, readonly row: number | null = null) {
     super(message); this.name = 'HouseWordListError';

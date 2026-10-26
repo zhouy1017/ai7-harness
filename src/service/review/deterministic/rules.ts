@@ -23,3 +23,4 @@ export const LOCAL_RULES = {
     limitation: '仅识别非负十进制、～/~ /—及有限百分号/万/亿后缀；不推断端点值，不补单位，不判断日期或普通共用单位。' },
 } as const;
 export const LOCAL_CHECK_LIMITATION = '仅按五项有限识别规则提示可能问题；未识别、未检查或无发现均不表示符合整部标准。专业符号和元语言讨论可能误报。依据为官方原始文档的索引条款，未能直接核看原页。';
+export const LOCAL_TABLE_LIMITATION = '按所选离线规则与词表检查；未检查、未识别或无发现均不表示整部标准合规。字形对照及带条件词形需编辑判断；机械修正由编辑采纳后应用。';

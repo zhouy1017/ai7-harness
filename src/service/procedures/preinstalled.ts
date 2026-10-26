@@ -25,6 +25,13 @@ export function localCheckProcedureDefinitionV2(): ProcedureDefinitionDocument {
       stage('derived-report', ['review-findings'], 'ai7.review.report/1')], outputKinds: ['annotation'] };
 }
 
+export function localCheckProcedureDefinitionV3(): ProcedureDefinitionDocument {
+  return { schema: PROCEDURE_DEFINITION_SCHEMA, id: 'ai7-procedure/local-text-check', version: 3,
+    title: '确定性检查', role: '离线检查标点、数字、规范字形、异形词、本社词表与本书术语；机械修正由编辑采纳后应用', editorInstruction: '',
+    stages: [stage('deterministic-check', ['frozen-local-plan'], 'ai7.review.local-result/3'),
+      stage('derived-report', ['review-findings'], 'ai7.review.report/1')], outputKinds: ['annotation', 'change-suggestion'] };
+}
+
 /** The pre-installed procedure one built-in review category runs (ADR 0095 §1). */
 export function reviewProcedureId(categoryId: string): string {
   return `ai7-procedure/review-${categoryId}`;
@@ -83,7 +90,7 @@ export function preinstalledProcedureDefinitions(version: 1 | 2 = 2): readonly P
 
 /** Immutable predecessors remain admitted beside the current versions. */
 export function allPreinstalledProcedureDefinitions(): readonly ProcedureDefinitionDocument[] {
-  return [...preinstalledProcedureDefinitions(1), ...preinstalledProcedureDefinitions(2).filter((document) => document.version === 2 || document.id === 'ai7-procedure/local-text-check')];
+  return [...preinstalledProcedureDefinitions(1), ...preinstalledProcedureDefinitions(2).filter((document) => document.version === 2 || document.id === 'ai7-procedure/local-text-check'), localCheckProcedureDefinitionV2(), localCheckProcedureDefinitionV3()];
 }
 
 /** Only the ten pre-installed definitions are admitted in F-26a. */

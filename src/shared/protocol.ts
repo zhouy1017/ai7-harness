@@ -1,4 +1,5 @@
 import type { GlobalAgentOperations, GlobalAgentRendererApi } from './protocol/global-agent.js';
+import type { HouseWordListOperations, HouseWordListApi } from './protocol/house-word-list.js';
 export * from './protocol/global-agent.js';
 export type { ReviewContractIdentity, ReviewExcludedFindingProjection, ReviewContractRejectionReason } from './protocol/review.js';
 import type { ReviewExcludedFindingProjection, ReviewContractRejectionReason } from './protocol/review.js';
@@ -385,6 +386,8 @@ export const IPC_CHANNELS = {
   queryMaterialVectors: 'ai7:j15:query-material-vectors',
   requestMaterialTranslation: 'ai7:j15:request-material-translation',
   searchReferableMaterials: 'ai7:search-referable-materials',
+  inspectHouseWordList: 'ai7:inspect-house-word-list',
+  saveHouseWordList: 'ai7:save-house-word-list',
   inspectReviewWorkspace: 'ai7:j04:inspect-review-workspace',
   prepareReviewRun: 'ai7:j04:prepare-review-run',
   authorizeReviewRun: 'ai7:j04:authorize-review-run',
@@ -7283,6 +7286,8 @@ export interface TaskMaterialOffersProjection {
  * basis, the coverage matrix, the scope options, the 审阅记录, and the opened Run.
  */
 export interface ReviewWorkspaceProjection {
+  /** Latest editor-declared Book table, carried by its existing local ReviewRun. */
+  localBookTerms?: readonly import('./protocol/procedures.js').BookTermEntry[];
   listPages?: TaskPlanProjection['listPages'];
   /** Eligible local references offered separately from manuscript scope (Issue #428). */
   materials?: TaskMaterialOffersProjection;
@@ -11711,7 +11716,7 @@ export interface UsageProjection {
 /** The result of 导出为 CSV…: a file of numbers and ids, written where the editor chose. */
 export type UsageCsvExportResult = { outcome: 'cancelled' } | { outcome: 'written'; rows: number };
 
-export interface ServiceOperationMap extends GlobalAgentOperations {
+export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordListOperations {
   getSearchBackendSettings: { input: Record<string, never>; output: SearchBackendSettingsProjection };
   selectSearchBackend: { input: { backendId: string }; output: SearchBackendSettingsProjection };
   probeSearchBackend: { input: { backendId: string }; output: SearchBackendProbeProjection };
@@ -12799,7 +12804,7 @@ export type PickerReselectResult =
   | { status: 'cancelled' }
   | { status: 'reselected'; continuation: ContinueImportProjection };
 
-export interface RendererApi extends GlobalAgentRendererApi {
+export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   selectSearchBackend(input: { backendId: string }): Promise<ModelServiceSettingsProjection>;
   probeSearchBackend(input: { backendId: string }): Promise<SearchBackendProbeProjection>;
   saveSearchBackendCredential(input: { backendId: string; secret: string }): Promise<ModelServiceSettingsProjection>;

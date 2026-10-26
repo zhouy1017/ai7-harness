@@ -12,6 +12,7 @@ import { graphemeCount } from '../../src/service/analysis/factual-review-contrac
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import * as checker from '../../src/service/review/deterministic/checker.js';
 import { PROCEDURE_DEFINITION_TRIGGER_SQL } from '../../src/service/procedures/definition-store.js';
+import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import * as adapter from '../../src/service/provider/deepseek-adapter.js';
 import * as broker from '../../src/service/provider/credential-broker.js';
 import * as harness from '../../src/service/harness/primary-agent-harness.js';
@@ -61,6 +62,37 @@ function blockText(book: Book, blockId: string): string {
   return store.getManuscriptWindowAt(book.manuscriptId, book.branchId, { kind: 'block', blockId }).blocks.find((block) => block.blockId === blockId)!.text;
 }
 describe('provider-free local ReviewRun', () => {
+  it('checks House and Book tables offline and batch-applies once with undo lineage after reopen', async () => {
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot); const book = await importSample1Book(store, roots.codeRoot, '确定性词表公开样书');
+    const target = replaceFirst(book, '按纳 合成异称 公开留意词。');
+    const house = store.saveHouseWordList({ expectedCurrent: null, sourceKind: 'editor-entry', entries: [{ entryId: null, literal: '公开留意词', enabled: true, note: '编辑判断' }] });
+    const options: LocalCheckOptions = { ...OPTIONS, punctuation: 'off', tables: { characters: false, variantWords: true, houseWordList: house.pin,
+      bookTerms: [{ kind: 'person', preferred: '合成正名', variants: ['合成异称'] }] } };
+    const fetchTrap = vi.fn(() => { throw new Error('network'); }); vi.stubGlobal('fetch', fetchTrap);
+    const prepared = prepare(book, policy, options); authorize(book, prepared);
+    // Editing the current House catalog cannot change this Run's already frozen snapshot.
+    const current = store.inspectHouseWordList({ versionId: null, entryOffset: 0, historyOffset: 0 });
+    store.saveHouseWordList({ expectedCurrent: { versionId: house.pin.versionId, digest: house.pin.digest }, sourceKind: 'editor-entry', entries: current.entries.map((entry) => ({ ...entry, enabled: false })) });
+    const driver = new ReviewRunDriver(store.reviewRunDriveSteps, noModel()); await driver.drive(prepared.run.reviewRunId); await driver.dispose();
+    let run = store.inspectReviewWorkspace(book.bookId, prepared.run.reviewRunId).run!;
+    expect(run.state).toBe('settled'); expect(run.preinstalledProcedures![0]!.procedure.version).toBe(3);
+    expect(run.findings.some((finding) => finding.stateLine?.startsWith('H01/') && finding.output === 'annotation' && finding.replacement === null)).toBe(true);
+    const mechanical = run.findings.filter((finding) => finding.blockId === target && finding.output === 'change-suggestion'); expect(mechanical).toHaveLength(2);
+    const bind = { manuscriptId: book.manuscriptId, branchId: book.branchId, windowStartBlockId: store.getManuscriptWindowAt(book.manuscriptId, book.branchId, { kind: 'block', blockId: target }).blocks[0]!.blockId };
+    const input = { ...bind, markIds: mechanical.map((finding) => finding.markId!), clientEffectId: randomUUID() };
+    const applied = store.applyChangeSuggestionBatch(input); const retried = store.applyChangeSuggestionBatch(input);
+    expect(retried.application.effectId).toBe(applied.application.effectId); expect(blockText(book, target)).toBe('按捺 合成正名 公开留意词。');
+    expect(fetchTrap).not.toHaveBeenCalled(); store.markCleanShutdown(); store.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    run = store.inspectReviewWorkspace(book.bookId, prepared.run.reviewRunId).run!; expect(run.localCheck!.planDigest).toBe(prepared.run.localCheck!.planDigest);
+    expect(store.inspectReviewWorkspace(book.bookId, null).localBookTerms).toEqual(options.tables!.bookTerms);
+    const reverseInput = { ...bind, markId: mechanical[0]!.markId!, clientEffectId: randomUUID() };
+    expect(store.prepareReverseApply(reverseInput).ranges).toHaveLength(2);
+    const reversed = store.reverseAppliedChangeSuggestion(reverseInput);
+    expect(reversed.application.reversesEffectId).toBe(applied.application.effectId); expect(blockText(book, target)).toBe('按纳 合成异称 公开留意词。');
+    expect(store.reverseAppliedChangeSuggestion(reverseInput).application.effectId).toBe(reversed.application.effectId);
+    expect(store.inspectHouseWordList({ versionId: house.pin.versionId, entryOffset: 0, historyOffset: 0 }).selected!.enabledCount).toBe(1);
+  });
   it.each(['complete-and-reopen', 'cancel'] as const)('keeps local %s independent of four occupied real model permits (#1131)', async (mode) => {
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     const route = ORDINARY_PRODUCTION_ALLOWED_BINDINGS[0]; const connection = store.saveModelServiceConnection('本地检查旁的正式连接', null, 'ready', route.route);
@@ -281,7 +313,7 @@ describe('provider-free local ReviewRun', () => {
     db.exec("DELETE FROM procedure_definition_versions WHERE procedure_id = 'ai7-procedure/local-text-check'; DELETE FROM procedure_definitions WHERE procedure_id = 'ai7-procedure/local-text-check'; PRAGMA user_version = 89");
     db.exec(PROCEDURE_DEFINITION_TRIGGER_SQL['procedure_definition_versions_no_delete']!); db.exec(PROCEDURE_DEFINITION_TRIGGER_SQL['procedure_definitions_no_delete']!); db.close();
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot); store.markCleanShutdown(); store.close(); db = database();
-    expect(db.prepare('SELECT * FROM books').all()).toEqual(prior); expect(db.prepare('PRAGMA user_version').get()!.user_version).toBe(94);
+    expect(db.prepare('SELECT * FROM books').all()).toEqual(prior); expect(db.prepare('PRAGMA user_version').get()!.user_version).toBe(LATEST_SCHEMA_VERSION);
     db.exec('PRAGMA user_version = 89'); db.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot); replaceFirst(book, '他停住了…又望向门口。'); const prepared = prepare(book, policy); authorize(book, prepared);
     const driver = new ReviewRunDriver(store.reviewRunDriveSteps, noModel()); await driver.drive(prepared.run.reviewRunId); await driver.dispose(); store.markCleanShutdown(); store.close();

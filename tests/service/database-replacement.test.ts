@@ -138,7 +138,7 @@ describe('导入数据库 over the real store', () => {
       const original = work.projection!.providerResolutionPlan!;
       expect(original.localFixtureProfile).toMatchObject({ kind: 'legacy', registeredProfile: 'factual', policyVersion: 'v29' });
       const packagePath = await exported(store, `selected-${damage}.ai7db`);
-      expect(await store.inspectDatabaseImport(packagePath)).toMatchObject({ compatibility: 'compatible', schemaRevision: 94, dataVersion: 1 });
+      expect(await store.inspectDatabaseImport(packagePath)).toMatchObject({ compatibility: 'compatible', schemaRevision: 95, dataVersion: 1 });
       const entries = unzipSync(await readFile(packagePath));
       const manifest = parseCanonicalJson(strFromU8(entries['manifest.json']!)) as { schemaRevision: number; members: { path: string; bytes: number; sha256: string }[] };
       const member = manifest.members.find((entry) => entry.path === 'store/ai7.sqlite')!;

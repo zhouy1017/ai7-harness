@@ -69,6 +69,7 @@ export const SCHEMA_REVISION_CLASSES: ReadonlyArray<ClassifiedSchemaRevision> = 
   { revision: 92, class: 'additive' },
   { revision: 93, class: 'additive' },
   { revision: 94, class: 'additive' },
+  { revision: 95, class: 'additive' }, // #1164: append-only House word-list relation.
 ];
 
 /**

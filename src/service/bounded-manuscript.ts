@@ -1,3 +1,4 @@
+import { HOUSE_WORD_LIST_SCHEMA_VERSION, HOUSE_WORD_LIST_SCHEMA_SQL, HOUSE_WORD_LIST_TRIGGER_SQL, HOUSE_WORD_LIST_FOREIGN_KEYS } from './review/house-word-list.js';
 import { IDLE_BACKGROUND_SCHEMA_VERSION, LOCAL_REVIEW_SCHEMA_VERSION } from './task-authorization.js';
 import { LOCAL_STAGE_SCHEMA_SQL, LOCAL_STAGE_TRIGGER_SQL, LOCAL_STAGE_FOREIGN_KEYS, validateLocalStageArtifacts } from './review/review-runs.js';
 import { PROCEDURE_DEFINITION_SCHEMA_SQL, PROCEDURE_DEFINITION_TRIGGER_SQL, PROCEDURE_DEFINITION_FOREIGN_KEYS, validateProcedureDefinitions, validateProcedurePlanPins } from './procedures/definition-store.js';
@@ -149,7 +150,7 @@ import {
   DIALOGUE_LIVE_BINDING_SCHEMA_VERSION,
   MODEL_SERVICE_ROUTES_SCHEMA_VERSION,
   MODEL_CLARIFICATION_SCHEMA_VERSION, SEARCH_BACKEND_SCHEMA_VERSION, RESEARCH_EVIDENCE_SCHEMA_VERSION, MATERIAL_INDEX_LAYER_SCHEMA_VERSION, PROPOSAL_REVIEW_SCHEMA_VERSION, FACTUAL_VERIFICATION_SCHEMA_VERSION, HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION, TASK_INTENT_DRAFT_SCHEMA_VERSION, IMPORTED_SKILL_SCHEMA_VERSION, CUSTOM_ANALYSIS_SCHEMA_VERSION, IMPORTED_SKILL_UPDATE_SCHEMA_VERSION, MODEL_SELECTION_SCHEMA_VERSION, PROCEDURE_DEFINITION_SCHEMA_VERSION, EDITORIAL_LEARNING_SCHEMA_VERSION,
-  EDITORIAL_MEMORY_SCHEMA_VERSION, MODEL_REQUEST_ADMISSION_SCHEMA_VERSION, WORD_TRACKED_IMPORT_SCHEMA_VERSION, LATEST_SCHEMA_VERSION, IDLE_RUN_AUTHORIZATIONS_SQL,
+  EDITORIAL_MEMORY_SCHEMA_VERSION, MODEL_REQUEST_ADMISSION_SCHEMA_VERSION, WORD_TRACKED_IMPORT_SCHEMA_VERSION, POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION, LATEST_SCHEMA_VERSION, IDLE_RUN_AUTHORIZATIONS_SQL,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
@@ -517,6 +518,8 @@ export interface ExactReplacementTarget {
   toGrapheme: number;
   expectedText: string;
   insertText: string;
+  /** Internal inverse of one committed Effect target; never supplied by the renderer. */
+  reversalOf?: { effectId: string; itemId: string };
 }
 
 export interface ManuscriptStateIdentity {
@@ -2031,6 +2034,7 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   // Revision 24 (Issue #417): the Review Run relations, owned and spelled by `review/review-runs.ts`.
   ...REVIEW_RUN_FOREIGN_KEYS,
   ...LOCAL_STAGE_FOREIGN_KEYS,
+  ...HOUSE_WORD_LIST_FOREIGN_KEYS,
   // Revision 25 (Issue #414): the Publication Version relations, owned and spelled by `publication-versions.ts`.
   ...PUBLICATION_VERSION_FOREIGN_KEYS,
   // Revision 26 (Issue #57): the proposal-conflict relations, owned and spelled by `proposal-conflicts.ts`.
@@ -2789,6 +2793,7 @@ function requireManuscriptReimportTargetSchema(
     schemaObjectSql(db, 'table', 'review_excluded_findings') === undefined;
   const reviewTables = legacyReview ? Object.fromEntries(Object.entries(REVIEW_RUN_SCHEMA_SQL).filter(([name]) => name !== 'review_excluded_findings')) : REVIEW_RUN_SCHEMA_SQL;
   const reviewTriggers = legacyReview ? Object.fromEntries(Object.entries(REVIEW_RUN_TRIGGER_SQL).filter(([name]) => !name.startsWith('review_excluded_findings_'))) : REVIEW_RUN_TRIGGER_SQL;
+  const includeHouseWordList = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= HOUSE_WORD_LIST_SCHEMA_VERSION || committed(HOUSE_WORD_LIST_SCHEMA_SQL);
   const includeLocalStage = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= LOCAL_REVIEW_SCHEMA_VERSION || committed(LOCAL_STAGE_SCHEMA_SQL);
   includePublicationVersionTables ||= committed(PUBLICATION_VERSION_SCHEMA_SQL);
   includeProposalConflictTables ||= committed(PROPOSAL_CONFLICT_SCHEMA_SQL);
@@ -2908,6 +2913,7 @@ function requireManuscriptReimportTargetSchema(
       // flag of their own, as revisions 22 and 23 did.
       ...(includeReviewRunTables ? reviewTables : {}),
       ...(includeLocalStage ? LOCAL_STAGE_SCHEMA_SQL : {}),
+      ...(includeHouseWordList ? HOUSE_WORD_LIST_SCHEMA_SQL : {}),
       // Revision 25 (Issue #414) adds the Publication Version relations the same way, behind a flag of
       // their own, and revision 26 (Issue #57) the proposal-conflict relations.
       ...(includePublicationVersionTables ? PUBLICATION_VERSION_SCHEMA_SQL : {}),
@@ -3051,6 +3057,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeManuscriptEffectTables ? MANUSCRIPT_EFFECT_TRIGGER_SQL : {}),
       ...(includeReviewRunTables ? reviewTriggers : {}),
       ...(includeLocalStage ? LOCAL_STAGE_TRIGGER_SQL : {}),
+      ...(includeHouseWordList ? HOUSE_WORD_LIST_TRIGGER_SQL : {}),
       ...(includePublicationVersionTables ? PUBLICATION_VERSION_TRIGGER_SQL : {}),
       ...(includeProposalConflictTables ? PROPOSAL_CONFLICT_TRIGGER_SQL : {}),
       ...(includeImportRetentionTables ? IMPORT_RETENTION_TRIGGER_SQL : {}),
@@ -3108,7 +3115,7 @@ function requireManuscriptReimportTargetSchema(
     },
   );
   if (includeMaterialTranslationAttempts) validateMaterialTranslationAttemptSchema(db);
-  if (includeProcedureDefinitions) { validateProcedureDefinitions(db, Number(db.prepare('PRAGMA user_version').get()?.user_version) < LOCAL_REVIEW_SCHEMA_VERSION); validateProcedurePlanPins(db); }
+  if (includeProcedureDefinitions) { validateProcedureDefinitions(db, Number(db.prepare('PRAGMA user_version').get()?.user_version) < HOUSE_WORD_LIST_SCHEMA_VERSION); validateProcedurePlanPins(db); }
   if (includeLocalStage) validateLocalStageArtifacts(db);
 }
 
@@ -6080,7 +6087,7 @@ export function initializeBoundedSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === LATEST_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === LATEST_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -6131,7 +6138,7 @@ export function initializeBoundedSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === LATEST_SCHEMA_VERSION)) {
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === LATEST_SCHEMA_VERSION)) {
     transact(db, () => {
       if (validateStoreTruth || version !== LATEST_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(
@@ -8693,7 +8700,24 @@ export class BoundedManuscriptStore {
       const binding = this.#binding(manuscriptId, branchId);
       this.#requireBranchEditable(branchId);
       const byBlock = new Map<string, Array<ExactReplacementTarget & { index: number }>>();
+      const inverses = targets.filter((target) => target.reversalOf !== undefined);
+      const reverseEffect = inverses[0]?.reversalOf?.effectId;
+      requireBounded(inverses.length === 0 || inverses.length === targets.length &&
+        inverses.every((target) => target.reversalOf!.effectId === reverseEffect) && new Set(inverses.map((target) => target.reversalOf!.itemId)).size === targets.length,
+      'APPLY_INVALID', '撤销范围必须完整属于同一次应用。');
+      const originalRanges = new Map<number, { from: number; to: number }>();
       targets.forEach((target, index) => {
+        if (target.reversalOf !== undefined) {
+          const original = this.#db.prepare(`SELECT t.block_id, t.from_grapheme, t.to_grapheme, t.expected_text_digest, t.replacement_text_digest, i.target_count
+            FROM manuscript_effect_targets t JOIN manuscript_effect_intents i ON i.effect_id = t.effect_id AND i.kind = 'apply'
+            JOIN manuscript_effect_receipts r ON r.effect_id = i.effect_id
+            WHERE t.effect_id = ? AND t.item_id = ? AND i.manuscript_id = ? AND i.branch_id = ?`).get(target.reversalOf.effectId, target.reversalOf.itemId, manuscriptId, branchId);
+          requireBounded(original !== undefined && original.block_id === target.blockId && original.target_count === targets.length &&
+            original.expected_text_digest === sha256(target.insertText) && original.replacement_text_digest === sha256(target.expectedText) &&
+            this.#db.prepare('SELECT 1 FROM manuscript_effect_intents WHERE reverses_effect_id = ? LIMIT 1').get(target.reversalOf.effectId) === undefined,
+          'APPLY_INVALID', '撤销范围或文字与原应用凭据不一致。');
+          originalRanges.set(index, { from: asNumber(original.from_grapheme), to: asNumber(original.to_grapheme) });
+        }
         // An empty range is an insertion at that point — reversing an Apply that deleted its words: it
         // expects no text there and brings some.
         requireBounded(
@@ -8738,16 +8762,17 @@ export class BoundedManuscriptStore {
         const blockId = asString(row.block_id);
         const beforeText = asString(row.text);
         const before = graphemes(beforeText);
-        const ordered = byBlock.get(blockId)!.sort((left, right) => left.fromGrapheme - right.fromGrapheme);
+        const ordered = byBlock.get(blockId)!.sort((left, right) => left.fromGrapheme - right.fromGrapheme ||
+          (originalRanges.get(left.index)?.from ?? 0) - (originalRanges.get(right.index)?.from ?? 0));
         ordered.forEach((target, index) => {
-          // Targets never overlap, and an insertion shares its point with no other target, so where each
-          // one lands never depends on the order they were given in. The recheck of an empty range is
-          // its point lying inside the block.
+          // Ordinary Apply never shares an insertion point. A complete committed inverse may use the
+          // original contiguous ranges to order touching targets, including adjacent deletions.
           const previous = index === 0 ? undefined : ordered[index - 1]!;
           requireBounded(
             target.toGrapheme <= before.length &&
               (previous === undefined || previous.toGrapheme < target.fromGrapheme ||
-                (previous.toGrapheme === target.fromGrapheme && previous.toGrapheme > previous.fromGrapheme && target.toGrapheme > target.fromGrapheme)) &&
+                (previous.toGrapheme === target.fromGrapheme && (previous.toGrapheme > previous.fromGrapheme && target.toGrapheme > target.fromGrapheme ||
+                  reverseEffect !== undefined && originalRanges.get(previous.index)!.to === originalRanges.get(target.index)!.from))) &&
               before.slice(target.fromGrapheme, target.toGrapheme).join('') === target.expectedText,
             'APPLY_TARGET_DRIFTED',
             '原文已变，本次应用没有写入稿件。',

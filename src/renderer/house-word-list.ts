@@ -7,10 +7,11 @@ import {
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag); if (text !== undefined) node.textContent = text; return node;
 }
-/** Standalone KB child. The root shell and public bridge deliberately do not import or mount it yet. */
+/** The shared editor for the House list, also mounted from deterministic-check setup. */
 export function mountHouseWordList(options: {
   readonly root: HTMLElement; readonly api: HouseWordListApi;
   readonly setStatus: (message: string, tone?: 'busy' | 'success' | 'error') => void;
+  readonly onSaved?: () => void;
 }): { load(): Promise<void>; destroy(): void } {
   const { root, api, setStatus } = options;
   let page: HouseWordListPage | null = null; let draft: HouseWordListDraftEntry[] | null = null;
@@ -67,6 +68,7 @@ export function mountHouseWordList(options: {
     const input: SaveHouseWordListInput = { expectedCurrent, sourceKind, entries: draft };
     validateSaveHouseWordListInput(input);
     const saved = await api.saveHouseWordList(input);
+    options.onSaved?.();
     if (destroyed) return;
     draft = null; preview = null; pastedText = '';
     committedRead = saved; page = null;

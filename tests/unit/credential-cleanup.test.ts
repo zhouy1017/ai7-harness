@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
+import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 
 // Issue #649: the synthetic-credential cleanup every credential-saving Journey needs lives in one module, and its store
 // version pin moves with the service's terminal schema revision. `e2e/*.mjs` is runner infrastructure outside the typed
@@ -55,10 +56,7 @@ function plantStore(dataRoot: string, version: number, state: string | null): vo
 
 describe('the store version the metadata fallback reads', () => {
   it('is the terminal schema revision the service stamps', () => {
-    const source = readFileSync(resolve(ROOT, 'src', 'service', 'task-authorization.ts'), 'utf8');
-    const revisions = [...source.matchAll(/^export const \w+_SCHEMA_VERSION = (\d+);$/gmu)].map((match) => Number(match[1]));
-    expect(revisions.length).toBeGreaterThan(40);
-    expect(cleanup.CREDENTIAL_CLEANUP_SCHEMA_VERSION).toBe(Math.max(...revisions));
+    expect(cleanup.CREDENTIAL_CLEANUP_SCHEMA_VERSION).toBe(LATEST_SCHEMA_VERSION);
   });
 });
 

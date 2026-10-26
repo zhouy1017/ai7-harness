@@ -1,4 +1,5 @@
 import { validLocalOptions } from './review/deterministic/plan.js';
+import { validateInspectHouseWordListInput, validateSaveHouseWordListInput } from '../shared/protocol/house-word-list.js';
 import { validSupervisionInput } from './learning/supervision-directives.js';
 import { AnalysisError } from './analysis/canonical.js';
 import { baselineAnalysisOutbound } from './analysis/baseline-analysis-wire.js';
@@ -1697,6 +1698,14 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
           !optionalOrNull(input, 'chapterBlockId', (blockId) => isBoundedString(blockId, 28) && MARK_BLOCK_PATTERN.test(blockId))) {
         throw new ProtocolError(tentativeId);
       }
+      break;
+    }
+    case 'inspectHouseWordList':
+    case 'saveHouseWordList': {
+      try {
+        if (value.op === 'inspectHouseWordList') validateInspectHouseWordListInput(value.input);
+        else validateSaveHouseWordListInput(value.input);
+      } catch { throw new ProtocolError(tentativeId); }
       break;
     }
     case 'prepareReviewRun': {

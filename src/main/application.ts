@@ -5030,6 +5030,16 @@ function registerRendererHandlers(
     }
     return result;
   };
+  for (const operation of ['inspectHouseWordList', 'saveHouseWordList'] as const) {
+    ipcMain.handle(IPC_CHANNELS[operation], (event, input: ServiceOperationMap[typeof operation]['input']) => envelope(async () => {
+      const owned = requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        requireCurrentBookRoute(owned);
+        return service.call(operation, input);
+      });
+    }));
+  }
   ipcMain.handle(
     IPC_CHANNELS.inspectReviewWorkspace,
     (event, input?: Omit<ServiceOperationMap['inspectReviewWorkspace']['input'], 'bookId'>) =>
@@ -6572,7 +6582,7 @@ export async function runApplication(): Promise<void> {
     await requireSameCanonicalDataDirectory(shellRoot, app.getPath('userData'));
     // The Data Version (数据版本) and the store's schema revision (数据库修订) apart (Issue #967): the unit suite holds each to its owner.
     const crashFacts = () => ({
-      appVersion: softwareVersion, buildIdentity, dataVersion: buildIdentity.dataVersion, schemaRevision: 94, protocol: SERVICE_PROTOCOL_VERSION,
+      appVersion: softwareVersion, buildIdentity, dataVersion: buildIdentity.dataVersion, schemaRevision: 95, protocol: SERVICE_PROTOCOL_VERSION,
       platform: process.platform, arch: process.arch, electron: process.versions.electron ?? 'unknown',
       uptimeSeconds: process.uptime(),
     });
