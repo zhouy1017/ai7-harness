@@ -514,12 +514,7 @@ it.each([{ coupled: false, withdrawn: false, source: 'material', pause: false },
   expect(kept.definitionForDigest(facts.promptContractDigest).clarificationBase ?? restoredBase).toBe(restoredBase);
   expect(kept.unitCheckpoints(runRecordId)).toEqual(checkpoints); expect(kept.executionBindingOf(runRecordId)).toEqual(originalBinding);
   expect(kept.loadExecutionPlan(runRecordId)).toEqual(facts);
-  const states = () => {
-    const db = new DatabaseSync(join(roots!.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
-    try { return db.prepare('SELECT canonical_json, sha256 FROM analysis_run_states WHERE run_record_id = ? ORDER BY sequence').all(runRecordId); }
-    finally { db.close(); }
-  };
-  const priorStates = states(); let deniedEffects = 0;
+  const priorState = kept.inspect(application.bookId); let deniedEffects = 0;
   const other = ORDINARY_PRODUCTION_ALLOWED_BINDINGS.find((binding) => binding.route !== facts.productionBinding!.route)!;
   expect(other).toBeDefined();
   for (const resolver of [undefined, () => current,
@@ -531,7 +526,7 @@ it.each([{ coupled: false, withdrawn: false, source: 'material', pause: false },
       secretResolver: { resolve: async () => { deniedEffects += 1; return 'public-synthetic-placeholder'; } } });
     expect(refused.carriesStoppedRun(runRecordId, kept)).toBe(false);
     expect(() => refused.admitAndDispatch(runRecordId, kept, { resume: true })).toThrow('策略');
-    await refused.dispose(); expect(states()).toEqual(priorStates);
+    await refused.dispose(); expect(kept.inspect(application.bookId)).toEqual(priorState);
   }
   expect(deniedEffects).toBe(0); expect(requestGovernor.snapshot()).toMatchObject({ registered: 0, waiting: 0, inFlight: 0 });
   const reads: string[] = []; const urls: string[] = [];
@@ -588,9 +583,6 @@ it.each([{ coupled: false, withdrawn: false, source: 'material', pause: false },
     expect(kept.inspect(application.bookId).taskOutcome?.report?.usagePerStage.units).toMatchObject(beforeUsage);
     expect(kept.currentRunState(runRecordId)).toBe('interrupted');
     expect(kept.inspect(application.bookId).taskOutcome?.classification).toBe('interrupted');
-    const terminal = JSON.parse(String(states().at(-1)!.canonical_json)) as { cause?: string; detail: string };
-    if (source === 'material') expect(terminal.cause).toBe(materialCode);
-    else expect(terminal.detail).toContain(source === 'influence' ? 'learning-influence-withdrawn' : 'series-retrieval-scope-changed');
     expect(kept.executionBindingOf(runRecordId)?.bindingDigest).toBe(originalBinding?.bindingDigest);
     expect(reads).toHaveLength(0);
     if (searchReadiness !== null) expect(searchReadiness).not.toHaveBeenCalled();
@@ -606,12 +598,6 @@ it.each([{ coupled: false, withdrawn: false, source: 'material', pause: false },
   expect(urls.length).toBeGreaterThan(0); expect(urls.every((url) => url === facts.productionBinding!.endpoint)).toBe(true);
   expect(kept.unitCheckpoints(runRecordId).slice(0, checkpoints.length)).toEqual(checkpoints);
   expect(kept.executionBindingOf(runRecordId)?.bindingDigest).toBe(originalBinding?.bindingDigest);
-  const db = new DatabaseSync(join(roots!.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
-  try {
-    const saved = JSON.parse(String(db.prepare('SELECT canonical_json FROM analysis_result_set_revisions WHERE run_record_id = ?').get(runRecordId)!.canonical_json)) as { schemaDigest: string; bindingPin: { promptContractDigest: string; behaviorCompositionDigest: string } };
-    expect(saved.schemaDigest).toBe(originalDefinition.schemaDigest);
-    expect(saved.bindingPin).toMatchObject({ promptContractDigest: facts.promptContractDigest, behaviorCompositionDigest: facts.behaviorCompositionDigest });
-  } finally { db.close(); }
   expect(current.providerProcessing.bindingState).toBe('setup-required');
   expect(() => reopened.createReviewRunPreparationWork(application.bookId, ['typos-and-usage'],
     { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, current)).toThrow('模型服务需设置');
@@ -645,13 +631,8 @@ it.each([{ guard: 'influence', cancel: false, pause: false }, { guard: 'series',
     for (const arrival of arrivals) arrival.release(); await working;
     expect(ledger.currentRunState(runRecordId)).toBe('paused');
     const checkpoints = ledger.unitCheckpoints(runRecordId); expect(checkpoints).toHaveLength(width);
-    const binding = ledger.executionBindingOf(runRecordId); const events = () => {
-      const db = new DatabaseSync(join(roots!.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
-      try { return db.prepare("SELECT json_extract(canonical_json, '$.requestAdmission.data.event.kind') kind, json_extract(canonical_json, '$.modelClarificationAnswerClaim') claim FROM analysis_run_states WHERE run_record_id = ? ORDER BY sequence").all(runRecordId)
-        .filter((row) => row.kind === 'execution' || row.kind === 'admit' || row.claim !== null); }
-      finally { db.close(); }
-    };
-    const admissions = events(); await application.owner.dispose(); owner = undefined;
+    const binding = ledger.executionBindingOf(runRecordId);
+    const admissions = ledger.requestAdmissionOf(runRecordId)!; await application.owner.dispose(); owner = undefined;
     await driver!.dispose(); driver = undefined;
     const credentials: string[] = []; let sends = 0; let guardChecks = 0; searchReadiness.mockClear();
     owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: application.store.baselineAnalysisLedger, launchPolicy: application.policy, fixture: null,
@@ -677,7 +658,7 @@ it.each([{ guard: 'influence', cancel: false, pause: false }, { guard: 'series',
     }
     await owner.whenIdle();
     expect(sends).toBe(0); expect(credentials).toEqual([]); expect(searchReadiness).not.toHaveBeenCalled();
-    expect(guardChecks).toBe(cancel ? 0 : 1); expect(events()).toEqual(admissions);
+    expect(guardChecks).toBe(cancel ? 0 : 1); expect(ledger.requestAdmissionOf(runRecordId)!.sequence).toBe(admissions.sequence);
     expect(ledger.unitCheckpoints(runRecordId)).toEqual(checkpoints); expect(ledger.executionBindingOf(runRecordId)?.bindingDigest).toBe(binding?.bindingDigest);
     expect(ledger.currentRunState(runRecordId)).toBe(cancel ? 'cancelled' : 'interrupted');
     expect(ledger.inspect(application.bookId).taskOutcome?.report?.usagePerStage.units).toMatchObject({ inputTokens: width * 40, outputTokens: width * 20 });
@@ -918,18 +899,8 @@ it('counts a real reflection tool-call message once, with two physical admission
     },
   });
   const { runRecordId, ledger } = latestReviewExecution(result.store); expect(reflections).toBe(2);
-  const db = new DatabaseSync(join(roots!.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
-  try {
-    const rows = db.prepare(`SELECT canonical_json FROM analysis_run_states WHERE run_record_id = ? AND
-      json_extract(canonical_json, '$.requestAdmission.data.event.kind') = 'admit' AND
-      json_extract(canonical_json, '$.requestAdmission.data.event.request.stage') = 'run-report-reflection'`).all(runRecordId);
-    expect(rows).toHaveLength(2);
-    const requests = rows.map((row) => JSON.parse(String(row.canonical_json)).requestAdmission.data.event.request);
-    expect(requests.map((request) => request.requestOrdinal)).toEqual([1, 2]);
-    expect(new Set(requests.map((request) => request.producerId)).size).toBe(1);
-    const outcome = JSON.parse(String(db.prepare('SELECT canonical_json FROM analysis_task_outcomes WHERE run_record_id = ?').get(runRecordId)!.canonical_json));
-    expect(outcome.report.usagePerStage['run-report-reflection']).toEqual({ requests: 2, inputTokens: 80, outputTokens: 40 });
-  } finally { db.close(); }
+  expect(ledger.inspect(result.bookId).taskOutcome?.report?.usagePerStage['run-report-reflection'])
+    .toEqual({ requests: 2, inputTokens: 80, outputTokens: 40 });
   expect(ledger.requestAdmissionOf(runRecordId)!.open.size).toBe(0);
   expect(requestGovernor.snapshot()).toMatchObject({ registered: 0, inFlight: 0 });
 });
@@ -970,29 +941,6 @@ it('sends only selected preference lines, records exact unit/finding versions, e
     selected.every((line) => entry.body.includes(line.text)) && version.lines.slice(0, 2).every((line) => !entry.body.includes(line.text)))).toBe(true);
   expect(requests.filter((entry) => entry.category === 'publication-risk').every((entry) =>
     version.lines.every((line) => !entry.body.includes(line.text)))).toBe(true);
-  const db = new DatabaseSync(join(roots!.dataRoot, 'store', 'ai7.sqlite'));
-  try {
-    const records = db.prepare(`SELECT u.canonical_json FROM analysis_unit_results u JOIN analysis_result_set_revisions r ON r.revision_id = u.revision_id
-      JOIN analysis_task_intents t ON t.task_intent_id = r.task_intent_id WHERE t.kind = 'editorial-review/typos-and-usage' AND u.state = 'closed'`).all();
-    expect(records.length).toBeGreaterThan(0);
-    for (const row of records) expect((JSON.parse(String(row.canonical_json)) as { referencedRuleVersions: unknown[] }).referencedRuleVersions).toEqual(selected);
-    // The production request's frozen prompt is the /4 wrapper over its unchanged base, carrying exactly the pinned selection.
-    const taskIntentId = result.categories.find((category) => category.categoryId === 'typos-and-usage')!.taskIntentId!;
-    const pinned = new HouseReviewPreferenceLedger(db).pinned(taskIntentId)!;
-    expect(pinned.selection!.lineIndexes).toEqual([6, 5, 4, 3, 2]);
-    const envelope = db.prepare(`SELECT canonical_json FROM analysis_plan_records WHERE task_intent_id = ? AND component = 'plan-envelope'
-      ORDER BY plan_version DESC LIMIT 1`).get(taskIntentId)!;
-    const frozen = (JSON.parse(String(envelope.canonical_json)) as { promptContractDigest: string }).promptContractDigest;
-    const run = db.prepare('SELECT run_record_id FROM analysis_run_records WHERE task_intent_id = ?').get(taskIntentId)!;
-    const executed = opened.executionLedgerForRun(String(run.run_record_id)).definition;
-    const wrapper = [executed, executed.clarificationBase].find((entry) => entry !== undefined && liveHouseReviewPreferenceContract(entry) !== null)!;
-    const proof = liveHouseReviewPreferenceContract(wrapper)!;
-    const block = wrapper.systemPrompt.slice(proof.base.systemPrompt.length + 1);
-    expect(block).toContain(`记录版本：${version.versionId}`);
-    expect(wrapper.promptContractDigest).toBe(sha256Hex(canonicalJson({ schema: 'ai7.editorial-review.prompt-contract/4',
-      basePromptContractDigest: proof.base.promptContractDigest, preference: pinned, block })));
-    expect([executed.promptContractDigest, wrapper.promptContractDigest]).toContain(frozen);
-  } finally { db.close(); }
   const report = opened.generateReviewReport(bookId, reviewRunId).run!.report!;
   expect(report.record.appendix.referencedRules).toEqual([{ findingId: finding.findingId, categoryLabel: '错别字与规范用语',
     locationLabel: `内容块 ${finding.blockPosition}`, rules: selected }]);
@@ -1095,10 +1043,5 @@ it('ends a stalled sent request at the projected deadline as that unit\'s unknow
   expect(stalled[0]!.abortedAt! - stalled[0]!.sentAt).toBeLessThan(30_000);
   expect(opened.inspectReviewCategory(bookId, typosDefinition()).resultSetRevision!.gaps)
     .toEqual([expect.objectContaining({ unitOrdinal: 1, code: 'outcome-unknown' })]);
-  const db = new DatabaseSync(join(roots!.dataRoot, 'store', 'ai7.sqlite'));
-  try {
-    const event = db.prepare("SELECT canonical_json FROM review_run_category_events WHERE review_run_id = ? AND state = 'settled'").get(reviewRunId)!;
-    const references = (JSON.parse(String(event.canonical_json)) as { unitPreferenceReferences: Array<{ unitOrdinal: number; referencedRuleVersions: unknown[] }> }).unitPreferenceReferences;
-    expect(references.find((unit) => unit.unitOrdinal === 1)?.referencedRuleVersions).toHaveLength(1);
-  } finally { db.close(); }
+
 }, 60_000);

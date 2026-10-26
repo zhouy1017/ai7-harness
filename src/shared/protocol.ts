@@ -2485,11 +2485,13 @@ export type DeveloperLiveProviderProcessingVersion = 'v5' | 'v8' | 'v9' | 'v10' 
 /** The ordinary-production version the active set selects: local production over the editor's own configured provider. */
 export type OrdinaryProductionProviderProcessingVersion = 'v13' | 'v15' | 'v17' | 'v19' | 'v21' | 'v23' | 'v25' | 'v26' | 'v27' | 'v30';
 /** Historical v5, v7, v8, v9, v10, v11 and v12, the superseded web reservation v6, historical v13, v14 and v15, and selected v16. */
-export type ActivePolicySetVersion = 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v13' | 'v14' | 'v15' | 'v16' | 'v17' | 'v18' | 'v19' | 'v21';
+export type ActivePolicySetVersion = 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v13' | 'v14' | 'v15' | 'v16' | 'v17' | 'v18' | 'v19' | 'v21' | 'v22';
 export type ProviderProcessingVersion = 'v1' | 'v29' | DeveloperLiveProviderProcessingVersion | OrdinaryProductionProviderProcessingVersion;
 
 /** Accepted identities shared by readers and gates; these constants do not select a policy or authorize a send. */
 export const ORIGINAL_FIELDS_ACTIVE_SET_SHA256 = '4b845e924df777f440b07d53ba6e31447e0fe0b004e86efa89bf76554fb05392';
+export const CURRENT_ACTIVE_SET_SHA256 = '79b2e3c88e5e60aed21fd7f8f5aa89a1beddd7411a5d9ddb66e39c32b92b475d';
+export const DEVELOPMENT_CI_POLICY_SHA256 = 'd9dfe8c13a58649d8d9f607364030468ae71832b94c9436291d29000795d725a';
 export const ORIGINAL_FIELDS_POLICY_SHA256 = 'f12df1d43cfc9f52b999c2cc8a6e9bac419177d42210d3bbe8c5008ba8d6a59e';
 export const LOCAL_FIXTURE_POLICY_SHA256 = 'c9545a5f461a7791115c1f4664bbd731757775951f814d39c28b12c85af88c9d';
 export const LOCAL_FIXTURE_MANIFEST_SHA256 = '2572c1b5aa05d6ccc9a60a2a8a03ba2cefc10d5f48c1a85377d53797360bc0d2';
@@ -2504,9 +2506,9 @@ export function isSupportedProviderProcessingVersion(scope: unknown, version: un
 
 /** Identity of the actual verified selected documents; this metadata grants no execution authority. */
 export interface SelectedPolicyIdentity {
-  readonly providerProcessingVersion: 'v24' | 'v29' | 'v30';
+  readonly providerProcessingVersion: 'v1' | 'v24' | 'v29' | 'v30';
   readonly providerProcessingSha256: string;
-  readonly activePolicySetVersion: 'v21';
+  readonly activePolicySetVersion: 'v21' | 'v22';
   readonly activePolicySetSha256: string;
 }
 export type LocalFixtureRegisteredProfile = 'baseline' | 'conflict' | 'custom' | 'dialogue' | 'evaluation' | 'factual' |
@@ -2534,6 +2536,7 @@ function hasPolicyIdentityKeys(value: Record<string, unknown>, keys: readonly st
 }
 
 const SELECTED_PROVIDER_DIGESTS = {
+  v1: DEVELOPMENT_CI_POLICY_SHA256,
   v24: '1522e203f3ead6a259f93494e25c34526a024f93a757b1c7d22568e219f4a6b6',
   v29: LOCAL_FIXTURE_POLICY_SHA256,
   v30: ORIGINAL_FIELDS_POLICY_SHA256,
@@ -2550,15 +2553,18 @@ export const LOCAL_FIXTURE_RULE_IDS: readonly LocalFixtureRuleId[] = [
 export function selectedPolicyIdentityOf(value: unknown): SelectedPolicyIdentity | null {
   if (!isPolicyIdentityRecord(value) || !hasPolicyIdentityKeys(value, ['providerProcessingVersion', 'providerProcessingSha256', 'activePolicySetVersion', 'activePolicySetSha256'])) return null;
   const version = value['providerProcessingVersion'];
-  if ((version !== 'v24' && version !== 'v29' && version !== 'v30') || value['providerProcessingSha256'] !== SELECTED_PROVIDER_DIGESTS[version] ||
-      value['activePolicySetVersion'] !== 'v21' || value['activePolicySetSha256'] !== ORIGINAL_FIELDS_ACTIVE_SET_SHA256) return null;
+  const set = value['activePolicySetVersion'];
+  const setSha256 = set === 'v21' ? ORIGINAL_FIELDS_ACTIVE_SET_SHA256 : set === 'v22' ? CURRENT_ACTIVE_SET_SHA256 : null;
+  if ((version !== 'v1' && version !== 'v24' && version !== 'v29' && version !== 'v30') ||
+      value['providerProcessingSha256'] !== SELECTED_PROVIDER_DIGESTS[version] || setSha256 === null || value['activePolicySetSha256'] !== setSha256 ||
+      !((set === 'v21' && version !== 'v1') || (set === 'v22' && version !== 'v29'))) return null;
   return { providerProcessingVersion: version, providerProcessingSha256: SELECTED_PROVIDER_DIGESTS[version],
-    activePolicySetVersion: 'v21', activePolicySetSha256: ORIGINAL_FIELDS_ACTIVE_SET_SHA256 };
+    activePolicySetVersion: set as 'v21' | 'v22', activePolicySetSha256: setSha256 };
 }
 
 /** Shape and document equality only; the actual fixture/caller/message conjunction is checked by the fixture owner. */
 export function localFixtureProfileOf(value: unknown, selected: SelectedPolicyIdentity): LocalFixtureProfile | null {
-  if (!isPolicyIdentityRecord(value) || selected.providerProcessingVersion !== 'v29' || selectedPolicyIdentityOf(selected) === null ||
+  if (!isPolicyIdentityRecord(value) || selected.providerProcessingVersion !== 'v29' || selected.activePolicySetVersion !== 'v21' || selectedPolicyIdentityOf(selected) === null ||
       value['schema'] !== 'ai7.local-fixture-profile/1' || value['policyVersion'] !== 'v29' ||
       value['policySha256'] !== selected.providerProcessingSha256 || value['activePolicySetVersion'] !== selected.activePolicySetVersion ||
       value['activePolicySetSha256'] !== selected.activePolicySetSha256) return null;
@@ -2616,11 +2622,11 @@ export type ResultSetPolicyPin =
  */
 const RECORDED_POLICY_PINS: Readonly<Record<TrustedOperationalScope, ReadonlyArray<readonly [string, string]>>> = {
   'development-ci': [...['v3', 'v4', 'v5', 'v7', 'v8', 'v9', 'v10', 'v11', 'v12', 'v13', 'v14', 'v15', 'v16', 'v17', 'v18', 'v19']
-    .map((set) => ['v1', set] as const), ['v29', 'v21']],
+    .map((set) => ['v1', set] as const), ['v29', 'v21'], ['v1', 'v22']],
   'developer-live': [['v4', 'v4'], ['v5', 'v5'], ['v9', 'v7'], ['v10', 'v8'], ['v11', 'v9'], ['v12', 'v10'], ['v14', 'v11'], ['v16', 'v12'],
-    ['v18', 'v13'], ['v20', 'v14'], ['v22', 'v15'], ...['v16', 'v17', 'v18', 'v19', 'v21'].map((set) => ['v24', set] as const)],
+    ['v18', 'v13'], ['v20', 'v14'], ['v22', 'v15'], ...['v16', 'v17', 'v18', 'v19', 'v21', 'v22'].map((set) => ['v24', set] as const)],
   'ordinary-production': [['v13', 'v10'], ['v15', 'v11'], ['v17', 'v12'], ['v19', 'v13'], ['v21', 'v14'], ['v23', 'v15'], ['v23', 'v16'],
-    ['v25', 'v17'], ['v26', 'v18'], ['v27', 'v19'], ['v30', 'v21']],
+    ['v25', 'v17'], ['v26', 'v18'], ['v27', 'v19'], ['v30', 'v21'], ['v30', 'v22']],
 };
 
 /** A Provider Processing version some launch of this scope actually pinned (a frozen Plan names no set). */
@@ -2860,7 +2866,9 @@ export interface AdmittedProviderRule {
     readonly category: 'editor-task-instruction';
     readonly maxGraphemes: number;
     readonly attributedToProcedureVersion: true;
-    readonly personNamesAllowed: false;
+    readonly personNamesAllowed?: false;
+    readonly textProcessing?: { readonly mode: 'qualified-original-field-processing'; readonly qualificationRef: 'ordinary-production-original-fields-adr0099';
+      readonly unqualified: { readonly personNamesAllowed: false }; readonly qualifiedOriginalWords: 'preserve-within-existing-field-contract' };
     readonly contractFramingOverrideAllowed: false;
   };
   readonly houseReviewGuidelineClause?: {
@@ -2868,7 +2876,9 @@ export interface AdmittedProviderRule {
     readonly maxClauses: number;
     readonly maxGraphemesPerClause: number;
     readonly attributedToImportedDocumentVersion: true;
-    readonly personNamesAllowed: false;
+    readonly personNamesAllowed?: false;
+    readonly textProcessing?: { readonly mode: 'qualified-original-field-processing'; readonly qualificationRef: 'ordinary-production-original-fields-adr0099';
+      readonly unqualified: { readonly personNamesAllowed: false }; readonly qualifiedOriginalWords: 'preserve-within-existing-field-contract' };
   };
   readonly plusDeclaredContractRetryAdaptations?: boolean;
   /** `true` on the v22/v23 review rule alone (`source.seriesKnowledgeAllowed`); absent on every other rule and policy, which refuses Series knowledge. */

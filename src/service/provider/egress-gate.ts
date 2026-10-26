@@ -10,7 +10,7 @@ import { graphemeLength, writingMaterialDigest } from '../writing-tasks.js';
 import { DIGEST_PATTERN, canonicalJson, sha256Hex, isRecord } from '../analysis/canonical.js';
 import { assistantToolCalls, messageText, toolResultOf, seriesScopeRefusal, type AssembledContentBlock, type AssembledModelPayload } from './payload.js';
 import type { QualifiedGlobalAttemptMetadata } from '../dialogue/dialogue-ledger.js';
-import { ORIGINAL_FIELDS_ACTIVE_SET_SHA256, ORIGINAL_FIELDS_POLICY_SHA256, isSupportedProviderProcessingVersion } from '../../shared/protocol.js';
+import { selectedPolicyIdentityOf, isSupportedProviderProcessingVersion } from '../../shared/protocol.js';
 import {
   PLATFORM_TOOL_NAMES,
   ruleNamedToolSchemas,
@@ -499,8 +499,8 @@ export function evaluateEgress(
   if (global !== undefined && binding.policy.providerProcessingVersion === 'v30') {
     const qualified = global.qualification;
     const messages = [...binding.admittedUserMessages];
-    if (qualified === undefined || qualified.providerProcessingVersion !== 'v30' || qualified.activePolicySetVersion !== 'v21' ||
-        qualified.providerProcessingSha256 !== ORIGINAL_FIELDS_POLICY_SHA256 || qualified.activePolicySetSha256 !== ORIGINAL_FIELDS_ACTIVE_SET_SHA256 ||
+    if (qualified === undefined || qualified.providerProcessingVersion !== 'v30' || selectedPolicyIdentityOf({ providerProcessingVersion: qualified.providerProcessingVersion, providerProcessingSha256: qualified.providerProcessingSha256,
+          activePolicySetVersion: qualified.activePolicySetVersion, activePolicySetSha256: qualified.activePolicySetSha256 }) === null ||
         qualified.textProcessing !== 'qualified-original-fields' || qualified.policyRuleId !== 'ordinary-production-global-agent-dialogue' ||
         qualified.modelRole !== 'Fast Interaction Role' || qualified.route !== binding.route || qualified.model !== binding.model ||
         messages.length !== 1 || qualified.messageSha256 !== sha256Hex(messages[0]!) ||

@@ -286,7 +286,7 @@ export class HouseReviewPreferenceLedger {
         bookId: source.source.bookId, bookTitle: source.bookTitle, materialDigest: source.source.materialDigest, decisionId: source.source.decisionId,
         attribution: source.attribution, captured: source, currentAdmission: current.get(source.sourceKey)!.admission,
         currentEligibility: current.get(source.sourceKey)!.eligibility }));
-      const text = withoutNames(memory.title, preferenceNames([{ text: memory.title, categoryId: memory.editorialDimension, bookId: null, sources }], stripped));
+      const text = scope === 'ordinary-production' ? memory.title : withoutNames(memory.title, preferenceNames([{ text: memory.title, categoryId: memory.editorialDimension, bookId: null, sources }], stripped));
       // As a legacy line left without words drops out of `#governed`, a memory whose words are all names publishes no line;
       // it never fails the house's rebuild, a people change or another editor's action.
       if (text.length === 0) continue;
@@ -508,7 +508,7 @@ export class HouseReviewPreferenceLedger {
       const item = all.find((entry) => entry.itemId === itemId);
       return item?.lineage.flatMap((pin) => sourcesOf(pin.itemId, seen)) ?? [];
     };
-    const stripped = preferenceNames(baseLines, names);
+    const stripped = scope === 'ordinary-production' ? [] : preferenceNames(baseLines, names);
     const entries = governed.map((item) => ({ derived: item.revisionId === 'base', itemId: item.itemId, revisionId: item.revisionId,
       line: { text: withoutNames(item.text, stripped), categoryId: item.categoryId, bookId: item.bookId, sources: sourcesOf(item.itemId) } }))
       .filter((entry) => entry.line.text.length > 0);

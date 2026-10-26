@@ -14,7 +14,7 @@ import {
 import { modelProfileFor } from './provider/model-profile.js';
 import type { RemoteExecutionRoute } from './provider/egress-gate.js';
 import { SEARCH_BACKENDS } from './provider/search-backends.js';
-import { ORIGINAL_FIELDS_ACTIVE_SET_SHA256, ORIGINAL_FIELDS_POLICY_SHA256, LOCAL_FIXTURE_POLICY_SHA256, LOCAL_FIXTURE_MANIFEST_SHA256,
+import { CURRENT_ACTIVE_SET_SHA256, DEVELOPMENT_CI_POLICY_SHA256, ORIGINAL_FIELDS_ACTIVE_SET_SHA256, ORIGINAL_FIELDS_POLICY_SHA256, LOCAL_FIXTURE_POLICY_SHA256, LOCAL_FIXTURE_MANIFEST_SHA256,
   selectedPolicyIdentityOf, localFixtureProfileOf } from '../shared/protocol.js';
 export { ORIGINAL_FIELDS_ACTIVE_SET_SHA256, ORIGINAL_FIELDS_POLICY_SHA256, LOCAL_FIXTURE_POLICY_SHA256, LOCAL_FIXTURE_MANIFEST_SHA256,
   isSupportedProviderProcessingVersion, selectedPolicyIdentityOf, localFixtureProfileOf, LOCAL_FIXTURE_RULE_IDS } from '../shared/protocol.js';
@@ -22,9 +22,9 @@ import { canonicalJson } from './analysis/canonical.js';
 
 /**
  * The source-checkout launch authority (ADR 0046, ADR 0065): the build-embedded carrier pins active
- * policy set v21, the sole active set for all four Provider Processing scopes, and names the three
+ * policy set v22, the sole active set for all four Provider Processing scopes, and names the three
  * scopes the built entry may bind from its launch form. `development-ci` is the default and binds
- * Provider Processing v29 (zero live transmissions, closed local fixture profiles); `developer-live` is bound only by the launch
+ * Provider Processing v1 (zero live transmissions); `developer-live` is bound only by the launch
  * argument `--trusted-operational-scope developer-live` on a developer host and binds the immutable
  * Provider Processing v24; `ordinary-production` is bound only by `--trusted-operational-scope ordinary-production`
  * and binds v30, whose rules are filled from the editor's own configured provider binding. `fixture-recording`
@@ -33,14 +33,14 @@ import { canonicalJson } from './analysis/canonical.js';
  */
 const CARRIER_PATH = 'config/source-checkout-launch-authority.json';
 const CARRIER_VERSION = 2;
-export const ACTIVE_SET_VERSION = 'v21' as const;
-const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v21.json';
-const ACTIVE_SET_SHA256 = ORIGINAL_FIELDS_ACTIVE_SET_SHA256;
+export const ACTIVE_SET_VERSION = 'v22' as const;
+const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v22.json';
+const ACTIVE_SET_SHA256 = CURRENT_ACTIVE_SET_SHA256;
 const PROVIDER_PINS = {
   'development-ci': {
-    version: 'v29',
-    canonicalPath: 'docs/policies/provider-processing-policy.v29.json',
-    sha256: LOCAL_FIXTURE_POLICY_SHA256,
+    version: 'v1',
+    canonicalPath: 'docs/policies/provider-processing-policy.v1.json',
+    sha256: DEVELOPMENT_CI_POLICY_SHA256,
   },
   'fixture-recording': {
     version: 'v2',
@@ -1743,86 +1743,47 @@ function readWave21Eligibility(policy: Record<string, unknown>): Record<string, 
   return legacy;
 }
 
-/**
- * Read the complete accepted declaration before projecting the existing unqualified recipes. Document equality verifies
- * interpretation only: the Global owner must separately prove operation, fields, recipients and currentness at every send.
- */
-function readOriginalFieldPolicy(policy: Record<string, unknown>): OrdinaryProductionPolicyReading {
+/** Read the pinned successor directly; no predecessor document is synthesized or restamped. */
+function projectOriginalFieldPolicy(policy: Record<string, unknown>): OrdinaryProductionPolicyReading {
   requirePolicy(digest(Buffer.from(canonicalJson(policy))) === '146677f260a885ea5b6f1f5839b3574683d45d1224ebaa0ecd50509876fa47f3');
-  const qualification = policy['originalFieldQualification'];
-  requirePolicy(isRecord(qualification) && exactKeys(qualification, ['qualificationId', 'requirements']) &&
-    qualification['qualificationId'] === 'ordinary-production-original-fields-adr0099' && isRecord(qualification['requirements']) &&
-    exactKeys(qualification['requirements'], ['operation', 'field', 'modelRecipient', 'researchRecipients', 'recipeAndRule', 'currentness']));
-  const conservative = structuredClone(policy);
-  const decision = conservative['decision'];
-  requirePolicy(isRecord(decision) && Array.isArray(decision['providerAllowRules']) && decision['providerAllowRules'].length === 14);
-  const rules: Record<string, unknown>[] = [];
-  let nestedCount = 0;
-  const unwrap = (value: unknown, expected: Record<string, unknown>): Record<string, unknown> => {
-    requirePolicy(isRecord(value) && sameValue(value, {
-      mode: 'qualified-original-field-processing', qualificationRef: qualification['qualificationId'],
-      unqualified: expected, qualifiedOriginalWords: 'preserve-within-existing-field-contract',
-    }));
-    return structuredClone(expected);
-  };
-  const nested = (value: unknown): void => {
-    if (!isRecord(value)) return;
-    for (const [key, entry] of Object.entries(value)) {
-      if (key !== 'textProcessing') { if (Array.isArray(entry)) entry.forEach(nested); else nested(entry); continue; }
-      const expected = Object.hasOwn(value, 'category') &&
-        (value['category'] === 'editor-task-instruction' || value['category'] === 'house-review-guideline-clause')
-        ? { personNamesAllowed: false } : { housePeopleNamesAndRolesStripped: true, authorOrEditorNamesAllowed: false };
-      Object.assign(value, unwrap(entry, expected)); delete value['textProcessing']; nestedCount += 1;
-    }
-  };
-  for (const entry of decision['providerAllowRules']) {
-    requirePolicy(isRecord(entry));
-    entry['redaction'] = unwrap(entry['redaction'], HOUSE_PEOPLE_REDACTION);
-    nested(entry); rules.push(entry);
+  const declared = (policy['decision'] as { providerAllowRules: Array<Record<string, unknown>> }).providerAllowRules;
+  const rules: OrdinaryProductionPolicyReading['rules'][number][] = [];
+  for (const rule of declared) {
+    const ruleId = String(rule['ruleId']);
+    const base = ruleId === GLOBAL_AGENT_RULE_ID ? GLOBAL_AGENT_READING
+      : ruleId === BACKGROUND_PROCESSING_RULE_ID ? BACKGROUND_PROCESSING_READING : ORDINARY_PRODUCTION_RULES[ruleId];
+    // These declarations await their separately admitted typed consumers; no generic background fallback.
+    if (base === undefined) continue;
+    const reading: OrdinaryProductionRuleReading = { ...base,
+      taskKinds: rule['allowedTaskKinds'] as string[], outboundDataCategories: rule['allowedOutboundDataCategories'] as OutboundDataCategoryId[],
+      blocks: { ...base.blocks, source: rule['source'] as Record<string, unknown>, transmissions: rule['transmissions'] as Record<string, unknown> } };
+    const projection: NonNullable<OrdinaryProductionPolicyReading['rules'][number]['projection']> = {
+      taskKinds: reading.taskKinds, outboundDataCategories: reading.outboundDataCategories,
+      ...(ruleId === 'ordinary-production-review' ? {
+        crossUnitSynthesisAllowed: true, plusDeclaredContractRetryAdaptations: true,
+        taskKindOverrides: rule['taskKindOverrides'] as NonNullable<AdmittedProviderRule['taskKindOverrides']>,
+        editorTaskInstruction: rule['editorTaskInstruction'] as NonNullable<AdmittedProviderRule['editorTaskInstruction']>,
+        houseReviewGuidelineClause: rule['houseReviewGuidelineClause'] as NonNullable<AdmittedProviderRule['houseReviewGuidelineClause']>,
+      } : {}),
+      ...(reading.blocks.transmissions['plusOneCrossUnitSynthesisTurn'] === true ? { plusOneCrossUnitSynthesisTurn: true } : {}),
+      ...(ruleId === GLOBAL_AGENT_RULE_ID ? { globalAgentDialogue: {
+        source: GLOBAL_AGENT_SOURCE, redaction: HOUSE_PEOPLE_REDACTION,
+        outboundCategoryRestriction: 'none', outboundDataDisclosureRequired: true,
+      } } : {}),
+    };
+    rules.push({ ruleId, reading, projection,
+      allowedRoutes: [...new Set((base.modelRole === 'Fast Interaction Role' ? ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS : ORDINARY_PRODUCTION_ALLOWED_BINDINGS).map((binding) => binding.route))],
+      platformTools: verifyPlatformTools(rule, 'ordinary-production', base.platformTools),
+      localTools: rule['localTools'] as AdmittedLocalTools });
   }
-  requirePolicy(nestedCount === 6 && new Set(rules.map((rule) => rule['ruleId'])).size === 14);
-  const byId = (id: string): Record<string, unknown> => {
-    const rule = rules.find((entry) => entry['ruleId'] === id); requirePolicy(rule !== undefined); return rule;
-  };
-  // New declared curation/claim consumers are held until their own typed recipes exist. They cannot fall through to the
-  // inherited generic background recipe. Keep their exact declarations in the accepted document and report all ids.
-  decision['providerAllowRules'] = rules.filter((rule) => rule['ruleId'] !== 'ordinary-production-learning-curation' &&
-    rule['ruleId'] !== 'enrolled-background-factual-recheck');
-  const background = byId(BACKGROUND_PROCESSING_RULE_ID);
-  const actualBackgroundKinds = structuredClone(background['allowedTaskKinds']);
-  background['allowedTaskKinds'] = [...BACKGROUND_PROCESSING_KINDS];
-  const review = byId('ordinary-production-review');
-  const actualReviewKinds = structuredClone(review['allowedTaskKinds']);
-  const actualReviewOverrides = structuredClone(review['taskKindOverrides']);
-  requirePolicy(Array.isArray(review['allowedTaskKinds']) && isRecord(review['taskKindOverrides']));
-  review['allowedTaskKinds'] = review['allowedTaskKinds'].filter((kind) => kind !== 'editorial-review/plot-consistency');
-  delete review['taskKindOverrides']['editorial-review/plot-consistency'];
-  delete review['claimScopedFactualStages']; delete review['factualClaimContract'];
-  for (const rule of rules) {
-    if (isRecord(rule['houseReviewPreference'])) rule['houseReviewPreference']['descriptionZh'] = houseReviewPreferenceDescriptionZh('ordinary-production');
-    if (isRecord(rule['editorAuthoredQuestionTemplate'])) rule['editorAuthoredQuestionTemplate']['descriptionZh'] = EDITOR_AUTHORED_QUESTION_TEMPLATE_DESCRIPTION_ZH;
-  }
-  const polish = byId('ordinary-production-editorial-polish');
-  const actualPolishCategories = structuredClone(polish['allowedOutboundDataCategories']);
-  requirePolicy(Array.isArray(polish['allowedOutboundDataCategories']) && isRecord(polish['transmissions']));
-  polish['allowedOutboundDataCategories'] = polish['allowedOutboundDataCategories'].filter((category) => category !== HOUSE_REVIEW_PREFERENCE_CATEGORY);
-  delete polish['houseReviewPreference'];
-  delete polish['transmissions']['payloadLimitedToFrozenContractEditorSelectedPassageAndBoundedHouseReviewPreference'];
-  polish['transmissions']['payloadLimitedToFrozenContractAndEditorManuscriptExcerpts'] = true;
-  requirePolicy(isRecord(conservative['outboundDataCategories']));
-  delete conservative['outboundDataCategories']['editorial-learning-example'];
-  delete conservative['searchConnectionTest']; delete conservative['originalFieldQualification'];
-  conservative['version'] = 'v27';
-  const inherited = verifyOrdinaryProductionPolicy(conservative);
-  return { ...inherited, originalFieldQualificationId: 'ordinary-production-original-fields-adr0099',
-    declaredRuleIds: rules.map((rule) => String(rule['ruleId'])),
-    rules: inherited.rules.map((entry) => ({ ...entry, projection: { ...entry.projection,
-      ...(entry.ruleId === BACKGROUND_PROCESSING_RULE_ID ? { taskKinds: actualBackgroundKinds as string[] } : {}),
-      ...(entry.ruleId === 'ordinary-production-review' ? { taskKinds: actualReviewKinds as string[],
-        taskKindOverrides: actualReviewOverrides as NonNullable<AdmittedProviderRule['taskKindOverrides']> } : {}),
-      ...(entry.ruleId === 'ordinary-production-editorial-polish' ? { outboundDataCategories: actualPolishCategories as OutboundDataCategoryId[] } : {}),
-    } })),
-  };
+  return { originalFieldQualificationId: 'ordinary-production-original-fields-adr0099', declaredRuleIds: declared.map((rule) => String(rule['ruleId'])),
+    crossUnitReductionAllowed: true, assuranceSamplingAllowed: true, runReportReflectionAllowed: true,
+    allowedBindings: ORDINARY_PRODUCTION_ALLOWED_BINDINGS, fastAllowedBindings: ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS, connectionTestAllowed: true,
+    execution: policy['execution'] as NonNullable<OrdinaryProductionPolicyReading['execution']>,
+    transport: policy['transport'] as NonNullable<OrdinaryProductionPolicyReading['transport']>,
+    research: policy['research'] as NonNullable<OrdinaryProductionPolicyReading['research']>,
+    subAgents: policy['subAgents'] as NonNullable<OrdinaryProductionPolicyReading['subAgents']>,
+    backgroundProcessingEnrollment: declared.find((rule) => rule['ruleId'] === BACKGROUND_PROCESSING_RULE_ID)!['backgroundProcessingEnrollment'] as NonNullable<OrdinaryProductionPolicyReading['backgroundProcessingEnrollment']>, rules };
 }
 
 /**
@@ -1833,7 +1794,7 @@ function readOriginalFieldPolicy(policy: Record<string, unknown>): OrdinaryProdu
  * the document's `allowedBindings`, which the SHA-256 pin fixes, and checked for consistency across the roles and rules.
  */
 export function verifyOrdinaryProductionPolicy(policy: Record<string, unknown>): OrdinaryProductionPolicyReading {
-  if (policy['version'] === 'v30') return readOriginalFieldPolicy(policy);
+  if (policy['version'] === 'v30') return projectOriginalFieldPolicy(policy);
   const wave21 = policy['version'] === 'v27' ? policy : null;
   if (policy['version'] === 'v27') policy = readWave21Eligibility(policy);
   const wave20 = policy['version'] === 'v26' ? policy : null;
@@ -2176,9 +2137,8 @@ function* verifyLaunchPolicyInputs(
     const activeSetBytes = yield ACTIVE_SET_PATH;
     requirePolicy(digest(activeSetBytes) === ACTIVE_SET_SHA256);
     for (const [path, sha256] of [
-      ['docs/policies/active-policy-set.v21.schema.json', '3d262deb0996ba7b61b8540589e03b6d5255ee9b6b17723fae144134ee9efb84'],
+      ['docs/policies/active-policy-set.v22.schema.json', 'f4ec371b648183a26bab55283e7268032e79e4ecf37188d7b2456ad5e69a1f73'],
       ['docs/policies/provider-processing-policy.v30.schema.json', '5a7c1603dcea97143d24b31c31f0709d1fd3202e7c048e7d65ed085c845046ef'],
-      ['docs/policies/provider-processing-policy.v29.schema.json', 'b7251af2cc84bacb763c8d7993e575abc80c3c5d4728326e9ee36d6235a18435'],
     ] as const) requirePolicy(digest(yield path) === sha256);
     const activeSet = parseJson(activeSetBytes);
     requirePolicy(
@@ -2344,11 +2304,11 @@ function* verifyLaunchPolicyInputs(
       activePolicySetVersion: ACTIVE_SET_VERSION,
       selectedPolicyIdentity,
       providerProcessing: {
-        version: 'v29',
+        version: 'v1',
         decision: 'deny',
         authorizedLiveTransmissionCount: 0,
         liveTransmissionAllowed: false,
-        // v29 authorizes zero live transmissions; fixture replay stays with its closed local profile.
+        // v1 authorizes zero live transmissions; replay stays with the existing fixture owner.
         crossUnitReductionAllowed: false,
         assuranceSamplingAllowed: false,
         runReportReflectionAllowed: false,

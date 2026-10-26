@@ -26,7 +26,7 @@ const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url));
 describe('accepted original-field declaration reading (#1161)', () => {
   const policy = (): Record<string, unknown> => JSON.parse(readFileSync(join(REPO_ROOT,
     'docs/policies/provider-processing-policy.v30.json'), 'utf8')) as Record<string, unknown>;
-  it('reads all fourteen declarations and keeps the inherited Global recipe unqualified', () => {
+  it('reads all fourteen declarations and projects the closed Global recipe directly', () => {
     const reading = verifyOrdinaryProductionPolicy(policy());
     expect(reading.declaredRuleIds).toHaveLength(14);
     expect(reading.originalFieldQualificationId).toBe('ordinary-production-original-fields-adr0099');
@@ -47,13 +47,11 @@ describe('accepted original-field declaration reading (#1161)', () => {
   });
 });
 const CARRIER_PATH = 'config/source-checkout-launch-authority.json';
-const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v21.json';
+const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v22.json';
 const CARRIED_PATHS = [
   CARRIER_PATH,
   ACTIVE_SET_PATH,
-  'docs/policies/active-policy-set.v21.schema.json',
-  'docs/policies/provider-processing-policy.v29.json',
-  'docs/policies/provider-processing-policy.v29.schema.json',
+  'docs/policies/active-policy-set.v22.schema.json',
   'docs/policies/provider-processing-policy.v30.json',
   'docs/policies/provider-processing-policy.v30.schema.json',
   'docs/policies/provider-processing-policy.v1.json',
@@ -70,7 +68,7 @@ const CARRIED_PATHS = [
 ] as const;
 /** The exact pins active-set v16 records; the resolver and the carrier must agree with the bytes. */
 const EXPECTED_PINS = {
-  'development-ci': ['v29', 'docs/policies/provider-processing-policy.v29.json', 'c9545a5f461a7791115c1f4664bbd731757775951f814d39c28b12c85af88c9d'],
+  'development-ci': ['v1', 'docs/policies/provider-processing-policy.v1.json', 'd9dfe8c13a58649d8d9f607364030468ae71832b94c9436291d29000795d725a'],
   'fixture-recording': ['v2', 'docs/policies/provider-processing-policy.v2.json', 'd0e3996ce7ba091200d83178b48fb578090bf73b509406182a2d5403ab2a4ebc'],
   'ordinary-production': ['v30', 'docs/policies/provider-processing-policy.v30.json', 'f12df1d43cfc9f52b999c2cc8a6e9bac419177d42210d3bbe8c5008ba8d6a59e'],
   'developer-live': ['v24', 'docs/policies/provider-processing-policy.v24.json', '1522e203f3ead6a259f93494e25c34526a024f93a757b1c7d22568e219f4a6b6'],
@@ -110,7 +108,7 @@ const RETAINED_PREDECESSOR_DIGESTS = {
 } as const;
 /** ADR 0079 §3 decides External Export v2; active-set v16 pins its exact bytes, unchanged since v7. */
 const EXPECTED_EXTERNAL_PIN = ['v2', 'docs/policies/external-export-policy.v2.json', '162441cc3e5d30b0cafb00a0d04ca5ab32b64c5039baafc8952a9925bd7984b6'] as const;
-const ACTIVE_SET_SHA256 = '4b845e924df777f440b07d53ba6e31447e0fe0b004e86efa89bf76554fb05392';
+const ACTIVE_SET_SHA256 = '79b2e3c88e5e60aed21fd7f8f5aa89a1beddd7411a5d9ddb66e39c32b92b475d';
 
 const GO_BINDING = {
   route: 'opencode-go',
@@ -503,9 +501,9 @@ describe('synchronous frozen-binding policy resolution (#1131)', () => {
       }
     });
 
-  const inputs = [CARRIER_PATH, ACTIVE_SET_PATH, 'docs/policies/active-policy-set.v21.schema.json',
+  const inputs = [CARRIER_PATH, ACTIVE_SET_PATH, 'docs/policies/active-policy-set.v22.schema.json',
     'docs/policies/provider-processing-policy.v30.json', 'docs/policies/provider-processing-policy.v30.schema.json',
-    'docs/policies/provider-processing-policy.v29.json', 'docs/policies/provider-processing-policy.v29.schema.json',
+    'docs/policies/provider-processing-policy.v1.json',
     'docs/policies/provider-processing-policy.v24.json', 'docs/policies/provider-processing-policy.v2.json', 'docs/policies/external-export-policy.v2.json'];
   it('matches explicit Fast bindings and the defaulted argument without caching another role', async () => {
     await placeValidCheckout();
@@ -778,9 +776,9 @@ afterEach(async () => {
   await rm(sandbox, { recursive: true, force: true });
 });
 
-describe('active policy set v21', () => {
+describe('active policy set v22', () => {
   it('is the sole active set: the carrier pins it, it maps all four scopes, and every pin matches the exact bytes', async () => {
-    expect(ACTIVE_SET_VERSION).toBe('v21');
+    expect(ACTIVE_SET_VERSION).toBe('v22');
     expect(DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION).toBe('v24');
     expect(ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION).toBe('v30');
     const carrier = JSON.parse(await readFile(join(REPO_ROOT, ...CARRIER_PATH.split('/')), 'utf8')) as Record<string, unknown>;
@@ -790,7 +788,7 @@ describe('active policy set v21', () => {
       runtimeForm: 'source-checkout',
       trustedOperationalScope: 'development-ci',
       launchSelectableScopes: ['development-ci', 'developer-live', 'ordinary-production'],
-      activePolicySet: { version: 'v21', canonicalPath: ACTIVE_SET_PATH, sha256: ACTIVE_SET_SHA256 },
+      activePolicySet: { version: 'v22', canonicalPath: ACTIVE_SET_PATH, sha256: ACTIVE_SET_SHA256 },
     });
     expect(LAUNCH_SELECTABLE_SCOPES).toEqual(carrier.launchSelectableScopes);
     expect(await sha256Of(ACTIVE_SET_PATH)).toBe(ACTIVE_SET_SHA256);
@@ -802,8 +800,8 @@ describe('active policy set v21', () => {
         'external-export-policy': { version: string; canonicalPath: string; sha256: string };
       };
     };
-    expect(activeSet.version).toBe('v21');
-    expect(activeSet.predecessorVersion).toBe('v20');
+    expect(activeSet.version).toBe('v22');
+    expect(activeSet.predecessorVersion).toBe('v21');
     const pins = activeSet.activePolicies['provider-processing-policy'].scopePins;
     expect(Object.keys(pins)).toEqual(Object.keys(EXPECTED_PINS));
     for (const [scope, [version, canonicalPath, sha256]] of Object.entries(EXPECTED_PINS)) {
@@ -916,8 +914,8 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
     expect(projection.denialReason).toBeNull();
     expect(projection.operationalScope).toBe('development-ci');
     // One active set per launch: development-ci reports v16 while its Provider Processing pin stays v1.
-    expect(projection.activePolicySetVersion).toBe('v21');
-    expect(projection.providerProcessing.version).toBe('v29');
+    expect(projection.activePolicySetVersion).toBe('v22');
+    expect(projection.providerProcessing.version).toBe('v1');
     expect(projection.providerProcessing.label).toBe('开发与持续集成：零次实时传输');
     expect(projection.providerProcessing.bindingState).toBeUndefined();
     expect(projection.externalExport.version).toBe('v2');
@@ -932,7 +930,7 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
     expect(projection.integrityState).toBe('verified');
     expect(projection.denialReason).toBeNull();
     expect(projection.operationalScope).toBe('developer-live');
-    expect(projection.activePolicySetVersion).toBe('v21');
+    expect(projection.activePolicySetVersion).toBe('v22');
     expect(projection.providerProcessing).toEqual({
       version: 'v24',
       decision: 'eligible-only',
@@ -1535,7 +1533,7 @@ describe('Provider Processing v23 (ordinary-production, inherited from v19 and v
       expect(projection.integrityState).toBe('verified');
       expect(projection.denialReason).toBeNull();
       expect(projection.operationalScope).toBe('ordinary-production');
-      expect(projection.activePolicySetVersion).toBe('v21');
+      expect(projection.activePolicySetVersion).toBe('v22');
       expect(projection.providerProcessing).toEqual({
         version: 'v30',
         execution: readPolicySync('docs/policies/provider-processing-policy.v27.json').execution,
@@ -2580,8 +2578,8 @@ function v30ProductionAdmittedRules(binding: ConfiguredProviderBinding): Admitte
         taskKinds: current.find((entry) => entry.ruleId === rule.ruleId)!.allowedTaskKinds as string[], outboundDataCategories: document.allowedOutboundDataCategories as AdmittedProviderRule['outboundDataCategories'],
         plusDeclaredContractRetryAdaptations: true, crossUnitSynthesisAllowed: true,
         taskKindOverrides: current.find((entry) => entry.ruleId === rule.ruleId)!.taskKindOverrides as NonNullable<AdmittedProviderRule['taskKindOverrides']>,
-        editorTaskInstruction: document.editorTaskInstruction as NonNullable<AdmittedProviderRule['editorTaskInstruction']>,
-        houseReviewGuidelineClause: document.houseReviewGuidelineClause as NonNullable<AdmittedProviderRule['houseReviewGuidelineClause']>,
+        editorTaskInstruction: current.find((entry) => entry.ruleId === rule.ruleId)!.editorTaskInstruction as NonNullable<AdmittedProviderRule['editorTaskInstruction']>,
+        houseReviewGuidelineClause: current.find((entry) => entry.ruleId === rule.ruleId)!.houseReviewGuidelineClause as NonNullable<AdmittedProviderRule['houseReviewGuidelineClause']>,
       }),
     };
   }).concat([
