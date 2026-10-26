@@ -989,7 +989,7 @@ async function main() {
       JSON.stringify(full.steps) === JSON.stringify(['准备任务输入 → 任务输入修订版 r2', '记录运行（不派发） → 运行记录']) &&
       JSON.stringify(full.participation) === JSON.stringify(['预计无需中途参与']) &&
       full.terms['模型角色'] === '主编辑角色' && full.terms['提供方'] === 'DeepSeek 开放平台 · deepseek-v4-pro' &&
-      full.terms['提供方状态'] === '远程模型服务被拒绝（development-ci · v29：0 次实时传输）；这项任务只记录，不派发' &&
+      full.terms['提供方状态'] === '远程模型服务被拒绝（development-ci · v1：0 次实时传输）；这项任务只记录，不派发' &&
       full.terms['会发送'] === '本环境不连接模型服务，不会发送任何内容' && full.terms['发送内容类别'] === '公开或合成材料' &&
       full.terms['用量上限'] === '不发送，没有模型用量' && full.terms['所需时间'] === '暂无可靠估计' &&
       full.terms['预算上限'] === '未设置任务预算上限' && full.terms['账户限额'] === '未知 · 提供方未返回' &&
@@ -1010,7 +1010,7 @@ async function main() {
       technical.capabilities === '未声明' && technical['fallback-chain'] === '未声明' && technical.effects === '未声明' &&
       technical['credential-reference'] === readyConnection.credentialReference && technical['credential-readiness'] === 'readiness missing' &&
       technical['outbound-category'] === 'public-or-synthetic' && technical['run-budget-ceiling'] === 'unset' &&
-      technical['provider-processing'] === 'development-ci · v29 · 拒绝 · 0 次实时传输' && technical['plan-envelope'] === prepared.planEnvelope.digest &&
+      technical['provider-processing'] === 'development-ci · v1 · 拒绝 · 0 次实时传输' && technical['plan-envelope'] === prepared.planEnvelope.digest &&
       technical['not-do'] === prepared.namedNonEffects.join('；') && technical.authorization === undefined && technical['run-record'] === undefined,
     'drawer-technical-identities', technical);
 
