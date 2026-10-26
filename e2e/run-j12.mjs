@@ -1420,9 +1420,9 @@ async function main() {
         firstConnection.binding?.credentialSlot === 'deepseek-api-key' &&
         firstConnection.binding?.approvedFallbackChain?.length === 0 &&
         firstConnection.policy?.operationalScope === 'development-ci' &&
-        // Synchronized delta with Issue #1161: selected active set v21; new local Plans use Provider Processing v29.
-        firstConnection.policy?.activePolicySetVersion === 'v21' &&
-        firstConnection.policy?.providerProcessing?.version === 'v29' &&
+        // Synchronized delta with Issue #1163: selected active set v22; new local Plans use Provider Processing v1.
+        firstConnection.policy?.activePolicySetVersion === 'v22' &&
+        firstConnection.policy?.providerProcessing?.version === 'v1' &&
         firstConnection.policy?.providerProcessing?.authorizedLiveTransmissionCount === 0 &&
         firstConnection.policy?.externalExport?.version === 'v2' &&
         firstConnection.policy?.externalExport?.policyEligibilityIsEffectApproval === false &&

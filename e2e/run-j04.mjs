@@ -732,8 +732,8 @@ function requireRevisionShape(revision, prepared, attempt, fixtureDigest, name) 
     revision?.bindingPin?.attemptId === attempt.attemptId && revision?.bindingPin?.bindingDigest === attempt.executionBinding.bindingDigest &&
     revision?.bindingPin?.harnessSessionId === attempt.executionBinding.harnessSessionId &&
     revision?.bindingPin?.promptContractDigest === PROMPT_CONTRACT_DIGEST &&
-    // Synchronized delta with Issue #1161: selected active set v21; new local Plans use Provider Processing v29.
-    sameRecord(revision?.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v29', activePolicySetVersion: 'v21', liveTransmissions: 0 }) &&
+    // Synchronized delta with Issue #1163: selected active set v22; new local Plans use Provider Processing v1.
+    sameRecord(revision?.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v22', liveTransmissions: 0 }) &&
     revision?.provenance?.taskIntentId === prepared.taskIntent.taskIntentId && revision?.provenance?.attemptId === attempt.attemptId &&
     // Synchronized delta (#274, #275): eight unit turns, the reduction's, and the sample's.
     revision?.usage?.requests === SAMPLE1_UNITS + 1 + SAMPLING_TURNS, `${name}-identity`, { fixtureDigest, revision: revision === null || revision === undefined ? revision : { ...revision, units: undefined, sections: undefined, synthesis: undefined } });
@@ -828,8 +828,8 @@ function requireSuccessorShape(revision, expected, attempt, fixtureDigest, name)
     revision?.adapterPin?.fixtureIdentity === FIXTURE_IDENTITY && revision?.adapterPin?.fixtureSha256 === fixtureDigest &&
     revision?.bindingPin?.attemptId === attempt.attemptId && revision?.bindingPin?.bindingDigest === attempt.executionBinding.bindingDigest &&
     revision?.bindingPin?.promptContractDigest === PROMPT_CONTRACT_DIGEST &&
-    // Synchronized delta with Issue #1161: selected active set v21; new local Plans use Provider Processing v29.
-    sameRecord(revision?.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v29', activePolicySetVersion: 'v21', liveTransmissions: 0 }) &&
+    // Synchronized delta with Issue #1163: selected active set v22; new local Plans use Provider Processing v1.
+    sameRecord(revision?.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v22', liveTransmissions: 0 }) &&
     revision?.update?.mode === expected.mode && revision?.update?.modeLabel === expected.modeLabel &&
     sameRecord(revision?.update?.predecessor, expected.predecessor) && revision?.update?.reusePlanDigest === expected.reusePlanDigest &&
     sameRecord(revision?.update?.counts, expected.counts) && sameNullableRecord(revision?.update?.selectedRange ?? null, expected.selectedRange) &&
@@ -1292,7 +1292,7 @@ async function main() {
       plan.remoteBinding?.adapterRevision === 1 && plan.remoteBinding?.configurationRevision === 1 && plan.remoteBinding?.approvedFallbackChain?.length === 0 &&
       plan.remoteBinding?.credentialSlot === 'deepseek-api-key' && plan.remoteBinding?.credentialReference === readyConnection.credentialReference &&
       plan.remoteBinding?.credentialReadiness === 'missing' &&
-      sameRecord(plan.remoteBinding?.providerProcessing, { operationalScope: 'development-ci', version: 'v29', decision: 'deny', authorizedLiveTransmissionCount: 0 }) &&
+      sameRecord(plan.remoteBinding?.providerProcessing, { operationalScope: 'development-ci', version: 'v1', decision: 'deny', authorizedLiveTransmissionCount: 0 }) &&
       plan.executionRoute?.kind === 'ai7-local-deterministic' && plan.executionRoute?.model === 'ai7-deterministic-fixture' &&
       plan.executionRoute?.fixtureIdentity === FIXTURE_IDENTITY && plan.executionRoute?.fixtureSha256 === fixtureDigest &&
       JSON.stringify(plan.executionRoute?.fixtureLineage?.map((link) => link.identity)) === JSON.stringify([FIXTURE_IDENTITY, FIXTURE_BASE_IDENTITY]) &&

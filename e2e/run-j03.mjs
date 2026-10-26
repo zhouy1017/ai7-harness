@@ -1147,7 +1147,7 @@ async function main() {
     await assertRenderer(renderer, `document.querySelector('[data-task-authorization-action="inspect-foreground-boundary"]')?.textContent==='核对前台执行边界（不派发）'`, 'foreground-boundary-action-visible');
     await click(renderer, '核对前台执行边界（不派发）', 'foreground-boundary-click');
     await waitFor(renderer, `document.querySelector('[data-foreground-execution-state="blocked-before-dispatch"]')?.textContent.includes('前台执行已拒绝 · 未启动')`, 'foreground-boundary-blocked');
-    await assertRenderer(renderer, `(() => { const result=document.querySelector('[data-foreground-execution-state="blocked-before-dispatch"]'); return result?.textContent.includes('record-only-no-dispatch') && result.textContent.includes('development-ci · Provider Processing v29 · 0 次实时传输') && result.textContent.includes('生产或录制尝试必须创建新 Plan Envelope 并重新记录 Run Authorization'); })()`, 'foreground-boundary-visible-reasons');
+    await assertRenderer(renderer, `(() => { const result=document.querySelector('[data-foreground-execution-state="blocked-before-dispatch"]'); return result?.textContent.includes('record-only-no-dispatch') && result.textContent.includes('development-ci · Provider Processing v1 · 0 次实时传输') && result.textContent.includes('生产或录制尝试必须创建新 Plan Envelope 并重新记录 Run Authorization'); })()`, 'foreground-boundary-visible-reasons');
 
     const blockedBoundary = await renderer.evaluate(`window.ai7.inspectForegroundExecutionBoundary({runRecordId:${JSON.stringify(authorized.runRecord.runRecordId)},bookId:${JSON.stringify(crossBookId)}})`);
     requireJourney(blockedBoundary?.state === 'blocked-before-dispatch' && blockedBoundary?.terminalLabel === '前台执行已拒绝 · 未启动' &&
@@ -1155,8 +1155,8 @@ async function main() {
       blockedBoundary?.planEnvelopeDigest === authorized.planEnvelope.digest && blockedBoundary?.authorizationId === authorized.authorization.authorizationId &&
       blockedBoundary?.runRecordId === authorized.runRecord.runRecordId && blockedBoundary?.runAuthority === 'record-only-no-dispatch' &&
       blockedBoundary?.launchPolicy?.integrityState === 'verified' && blockedBoundary?.launchPolicy?.operationalScope === 'development-ci' &&
-      blockedBoundary?.launchPolicy?.activePolicySetVersion === 'v21' &&
-      blockedBoundary?.launchPolicy?.providerProcessing?.version === 'v29' && blockedBoundary?.launchPolicy?.providerProcessing?.decision === 'deny' &&
+      blockedBoundary?.launchPolicy?.activePolicySetVersion === 'v22' &&
+      blockedBoundary?.launchPolicy?.providerProcessing?.version === 'v1' && blockedBoundary?.launchPolicy?.providerProcessing?.decision === 'deny' &&
       blockedBoundary?.launchPolicy?.providerProcessing?.authorizedLiveTransmissionCount === 0 &&
       blockedBoundary?.launchPolicy?.providerProcessing?.liveTransmissionAllowed === false &&
       blockedBoundary.launchPolicy.providerProcessing.admittedRules?.length === 0 &&
@@ -1166,7 +1166,7 @@ async function main() {
       blockedBoundary?.requiresNewPlanEnvelope === true && blockedBoundary?.requiresRenewedRunAuthorization === true &&
       JSON.stringify(blockedBoundary?.reasons) === JSON.stringify([
         '现有 Run 权限仅为 record-only-no-dispatch，不能派发。',
-        '当前可信启动范围为 development-ci，Provider Processing v29 允许 0 次实时传输。',
+        '当前可信启动范围为 development-ci，Provider Processing v1 允许 0 次实时传输。',
         '生产或录制尝试必须创建新 Plan Envelope 并重新记录 Run Authorization。',
       ]), 'foreground-boundary-exact-denial');
     const afterBoundary = await renderer.evaluate(`window.ai7.inspectTaskAuthorization()`);
