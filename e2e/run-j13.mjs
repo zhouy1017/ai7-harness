@@ -2024,6 +2024,14 @@ async function main() {
     await click(renderer, '返回', 'stop-all-back');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'stop-all-landing');
 
+    at('procedure-series-fixture-relaunch');
+    // Fresh Series preparations use their matching retained /1 fixture; the earlier style capture stays on review /2.
+    // Keep the same store and the still-unconsumed proposal Save dialog answer. The two Series Runs remain prepared.
+    await closeBrowser();
+    manager = await launch(FIXTURE_IDENTITY, ['--j13-save-path', proposalPath]);
+    renderer = await waitForRenderer(manager, 'series-procedure-window');
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'series-procedure-ready');
+
     // ---- Series material chosen apart, and how a procedure fits a Book (Issue #66, plan slice S31b; REUSE-046, REUSE-048 to
     // REUSE-050, REUSE-053) --------------------------------------------------------------------------------------------------
     at('procedure-series-capture');
