@@ -876,6 +876,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'revision-history',
     'history-open-read-only',
     'restart-history',
+    'recorded-retained-pause',
     'safe-retry-relaunch',
     'safe-retry-prepare',
     'safe-retry-dispatch',
@@ -1588,6 +1589,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'capture-stop',
     'procedure-stop-all',
     // Issue #66 (S31b): a 书系一致性 procedure whose Series step the editor chooses apart, and how it fits a Book in no Series.
+    'procedure-series-fixture-relaunch',
     'procedure-series-capture',
     'procedure-series-chosen-apart',
     'procedure-recommendation',
