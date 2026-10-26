@@ -3692,8 +3692,8 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(recordedPausedBook.bookId)}]')`, 'recorded-paused-current-manuscript');
     await openAnalysisDestination(renderer, 'recorded-paused-current-analysis');
     const pausedUnderCurrent = await readBaseline(renderer);
-    requireJourney(sameRecord(pausedHistoricalFacts(pausedUnderCurrent), pausedHistoricalFacts(recordedPaused)) &&
-      sameRecord(pausedCheckpointRows(dataRoot, recordedPaused.run.runRecordId), recordedPausedCheckpoints),
+    requireJourney(sameValue(pausedHistoricalFacts(pausedUnderCurrent), pausedHistoricalFacts(recordedPaused)) &&
+      sameValue(pausedCheckpointRows(dataRoot, recordedPaused.run.runRecordId), recordedPausedCheckpoints),
     'recorded-paused-current-immutable-history');
     await reviewAction(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', 'recorded-paused-current-plan');
     const pausedPlan = await renderer.evaluate(`window.ai7.inspectTaskPlan(${JSON.stringify({ kind: 'baseline-analysis', ref: recordedPaused.taskIntent.taskIntentId })})`);
@@ -3705,8 +3705,8 @@ async function main() {
     requireJourney(refusedResume?.code === 'ANALYSIS_RESUME_BLOCKED' && refusedResume.message.length > 0,
       'recorded-paused-current-resume-refused');
     const pausedAfterRefusal = await readBaseline(renderer);
-    requireJourney(sameRecord(pausedHistoricalFacts(pausedAfterRefusal), pausedHistoricalFacts(recordedPaused)) &&
-      sameRecord(pausedCheckpointRows(dataRoot, recordedPaused.run.runRecordId), recordedPausedCheckpoints) &&
+    requireJourney(sameValue(pausedHistoricalFacts(pausedAfterRefusal), pausedHistoricalFacts(recordedPaused)) &&
+      sameValue(pausedCheckpointRows(dataRoot, recordedPaused.run.runRecordId), recordedPausedCheckpoints) &&
       loopback.healthy() && loopback.observedRequests() === 0,
     'recorded-paused-refusal-no-new-work');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'recorded-paused-current-return-library');
