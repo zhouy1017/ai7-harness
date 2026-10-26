@@ -1,4 +1,10 @@
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
+import { capturedMapAnswer, capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
+import { BASELINE_PROMPT_CONTRACT_DIGEST, parseUnitMessageHeader, unitRequestDigest } from '../../src/service/analysis/contract.js';
+import { parseCrossUnitMessageHeader } from '../../src/service/analysis/cross-unit-contract.js';
+import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/assurance-sampling-contract.js';
+import { parseFactualReviewUnitMessageHeader } from '../../src/service/analysis/factual-review-contract.js';
+import { parseReviewCategoryUnitMessageHeader } from '../../src/service/review/review-category-contract.js';
 import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
 import { withHouseReviewPreferenceFor } from '../support/policy-rules.js';
 import { HouseReviewPreferenceLedger } from '../../src/service/house-review-preference.js';
@@ -7,7 +13,7 @@ import { editCategoryWeight, graphemeEditVolume } from '../../src/service/edit-q
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../src/shared/protected-secret-identity.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { copyFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { strFromU8, unzipSync } from 'fflate';
@@ -22,7 +28,7 @@ import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execu
 import { PROCEDURE_STEP_NOT_CHOSEN } from '../../src/service/captured-procedures.js';
 import { RECONCILED_INTERRUPTED_DETAIL, type BaselineAnalysisStore } from '../../src/service/analysis/baseline-analysis-store.js';
 import { graphemeCount, sliceGraphemes } from '../../src/service/analysis/factual-review-contract.js';
-import { loadModelFixture, reviewFixtureContractVersion, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
+import { resolveFixtureEntry, loadModelFixture, reviewFixtureContractVersion, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
 import { ReviewRunDriver, type ReviewRunExecutionOwner } from '../../src/service/review/review-run-driver.js';
 import { reviewLeadsOf } from '../../src/service/review/review-leads.js';
@@ -107,6 +113,8 @@ interface Session {
   readonly owner: BaselineAnalysisExecutionOwner;
   readonly driver: ReviewRunDriver;
   readonly fixture: ResolvedModelFixture;
+  readonly responseEntries?: Map<string, ModelFixtureEntry>;
+  readonly capture?: ReturnType<typeof capturedOrdinaryExecution>;
 }
 
 interface Book {
@@ -135,8 +143,7 @@ async function close(session: Session): Promise<void> {
   const stopped = session.driver.dispose();
   await session.owner.dispose();
   await stopped;
-  session.store.markCleanShutdown();
-  session.store.close();
+  try { session.capture?.assertMatched(); session.store.markCleanShutdown(); } finally { session.store.close(); }
 }
 
 async function importBook(session: Session): Promise<Book> {
@@ -156,6 +163,29 @@ async function withBook(fixtureIdentity: string, body: (session: Session, book: 
     await close(session);
   }
 }
+
+/** Dynamic retry stimuli are ordinary transport bytes, never mutations under an admitted fixture hash. */
+async function withCapturedReviewBook(body: (session: Session, book: Book) => Promise<void>): Promise<void> {
+  const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-contract-v2-controls');
+  const responseEntries = new Map(fixture.entries);
+  const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { baselineAnalysisRoute: null,
+    induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
+    induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false });
+  const base = reviewCategoryKindDefinition(TYPOS_AND_USAGE);
+  const capture = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, requestGovernor, (request, message) => {
+    const header = parseReviewCategoryUnitMessageHeader(message);
+    if (request.stage === 'units' && header?.categoryId === TYPOS) return resolveFixtureEntry(responseEntries, header.ordinal,
+      base.requestDigest(header.ordinal, header.unitDigest), request.attemptIndex)?.response;
+    const content = request.stage === 'assurance-sampling' ? { schema: 'ai7.analysis.assurance-sampling-result/1', dispositions: parseAssuranceSamplingListedRefs(message)
+      .map((ref) => ({ ref, disposition: '成立', reason: '合成回归抽样。' })) }
+      : request.stage === 'run-report-reflection' ? { schema: 'ai7.analysis.run-report-reflection-result/1', items: [] } : null;
+    return content === null ? undefined : { kind: 'unit-result', text: JSON.stringify(content), usage: { inputTokens: 10, outputTokens: 5 } };
+  });
+  launchPolicy = capture.policy;
+  const session = { store, owner: capture.owner, driver: new ReviewRunDriver(store.reviewRunDriveSteps, capture.owner), fixture, capture, responseEntries };
+  try { await body(session, await importBook(session)); } finally { await close(session); }
+}
+
 
 /** The baseline analysis the leads of 情节逻辑与前后一致 come from, settled through the same owner. */
 async function runBaseline(session: Session, book: Book): Promise<void> {
@@ -456,10 +486,10 @@ describe('a Review Run over the real store on exact sample1', () => {
   }, 300_000);
 
   it('counts a safe retry and one later contract retry separately, with no third contract retry (#1084)', async () => {
-    await withBook('sample1-review-contract-v2-controls', async (session, book) => {
-      const entries = session.fixture.entries;
+    await withCapturedReviewBook( async (session, book) => {
+      const entries = session.responseEntries!;
       if (!(entries instanceof Map)) throw new Error('Expected mutable authored control entries');
-      for (const [key, entry] of [...session.fixture.entries]) {
+      for (const [key, entry] of [...session.responseEntries!]) {
         if (entry.unitOrdinal !== 1) continue;
         if (entry.attempt === 1) entries.set(key, { ...entry, response: { kind: 'adapter-failure', code: 'PROVIDER_ERROR', message: 'Synthetic before-response server failure', status: 503 } });
         if (entry.attempt === 2 && entry.response.kind === 'unit-result') {
@@ -477,11 +507,11 @@ describe('a Review Run over the real store on exact sample1', () => {
   }, 300_000);
 
   it('settles a second invalid envelope without resending it and pages oversized rejected text without loss (#1084)', async () => {
-    await withBook('sample1-review-contract-v2-controls', async (session, book) => {
-      const entries = session.fixture.entries;
+    await withCapturedReviewBook( async (session, book) => {
+      const entries = session.responseEntries!;
       if (!(entries instanceof Map)) throw new Error('Expected mutable authored control entries');
       const longNote = '合成说明'.repeat(20_000);
-      for (const [key, entry] of [...session.fixture.entries]) {
+      for (const [key, entry] of [...session.responseEntries!]) {
         if (entry.unitOrdinal !== 1 || entry.attempt !== 2 || entry.response.kind !== 'unit-result') continue;
         const body = JSON.parse(entry.response.text) as { findings: Array<Record<string, unknown>> };
         body.findings.at(-1)!.note = longNote;
@@ -507,10 +537,10 @@ describe('a Review Run over the real store on exact sample1', () => {
     const previous = roots;
     roots = isolated;
     try {
-      await withBook('sample1-review-contract-v2-controls', async (session, book) => {
-        const entries = session.fixture.entries;
+      await withCapturedReviewBook( async (session, book) => {
+        const entries = session.responseEntries!;
         if (!(entries instanceof Map)) throw new Error('Expected mutable authored control entries');
-        for (const [key, entry] of [...session.fixture.entries]) if (entry.unitOrdinal === 1 && entry.attempt === 2 && entry.response.kind === 'unit-result')
+        for (const [key, entry] of [...session.responseEntries!]) if (entry.unitOrdinal === 1 && entry.attempt === 2 && entry.response.kind === 'unit-result')
           entries.set(key, { ...entry, response: { ...entry.response, text: '{invalid' } });
         await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
         const projection = session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE));
@@ -2095,43 +2125,28 @@ describe('the 审阅报告 exported in the manuscript\'s formats (Issue #500, S6
 // ---- The house's 可复用工序 on a 当前选区 (Issue #423, S77 deferred items a and d) ------------------------------------------
 
 const SERIES = 'series-consistency';
-const SELECTION_FIXTURE = 'l2-review-factual-and-series-consistency';
-
-/**
- * A fixtures root holding every authored fixture and one layered over the review fixture with the 事实核查 and 书系一致性
- * fixtures' answers: one Review Run of 体例与格式, 情节逻辑与前后一致, 事实核查 and 书系一致性 in a Series Book is answered
- * whole, so a capture can keep any of them. Written for this suite only, under its scratch input root, from the admitted
- * fixtures' own entries.
- */
-async function selectionFixturesRoot(): Promise<string> {
-  const root = join(roots.inputRoot, 'fixtures');
-  await mkdir(root);
-  for (const name of await readdir(FIXTURES_ROOT)) if (name.endsWith('.json')) await copyFile(join(FIXTURES_ROOT, name), join(root, name));
-  const read = (name: string) => JSON.parse(readFileSync(join(FIXTURES_ROOT, `${name}.json`), 'utf8')) as { entries: unknown[] } & Record<string, unknown>;
-  const review = read('sample1-review-authored');
-  writeFileSync(join(root, `${SELECTION_FIXTURE}.json`), JSON.stringify({
-    ...review, identity: SELECTION_FIXTURE, entries: [...review.entries, ...read('sample1-factual-authored').entries, ...read('sample1-series-consistency-authored').entries],
-    description: 'L2 套件专用：审阅夹具的条目之外加上事实核查与书系一致性夹具的条目，使一次审阅同时覆盖四类。',
-  }));
-  return root;
-}
-
+/** Selection/procedure business coverage uses one actual ordinary Store; local review/2 and Series/1 remain separate. */
 async function openLayeredSelection(): Promise<Session> {
-  const fixture = await loadModelFixture(await selectionFixturesRoot(), SELECTION_FIXTURE);
-  const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
-    induceUnprovableReconciliation: false,
-    persistLegacyReviewedDraft: false,
-    induceReimportProofTamper: false,
-    induceAbandonObjectRemovalFailure: false,
-    interruptAfterAbandonObjectRemoval: false,
-    baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage, reviewContractVersion: reviewFixtureContractVersion(fixture) },
-  });
-  const owner = new BaselineAnalysisExecutionOwner({
-    requestGovernor,
-    ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null },
-    seriesScopeGuard: (runRecordId) => store.seriesScopeGuard(runRecordId),
-  });
-  return { store, owner, driver: new ReviewRunDriver(store.reviewRunDriveSteps, owner), fixture };
+  const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-authored'); // unchanged response bytes, not an admission pin
+  const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { baselineAnalysisRoute: null,
+    induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
+    induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false });
+  const search = store.saveSearchBackendCredential('search-tinyfish', null, 'needs-attention');
+  store.saveSearchBackendCredential('search-tinyfish', search.credentialReference, 'ready'); store.selectSearchBackend('search-tinyfish');
+  const capture = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, requestGovernor, (request, message) => {
+    const baseline = parseUnitMessageHeader(message), review = parseReviewCategoryUnitMessageHeader(message), factual = parseFactualReviewUnitMessageHeader(message);
+    if (request.stage === 'units' && baseline !== null) return resolveFixtureEntry(fixture.entries, baseline.ordinal,
+      unitRequestDigest(BASELINE_PROMPT_CONTRACT_DIGEST, baseline.ordinal, baseline.unitDigest), request.attemptIndex)?.response;
+    if (request.stage === 'cross-unit-reduction' && parseCrossUnitMessageHeader(message) !== null) return capturedMapAnswer(fixture.entries)(request, message);
+    const content = request.stage === 'units' && review !== null ? { schema: 'ai7.editorial-review.unit-result/2', unitOrdinal: review.ordinal, findings: [] }
+      : request.stage === 'units' && factual !== null ? { schema: store.factualReviewLedger.definition.unitResultSchema, unitOrdinal: factual.ordinal, assertions: [] }
+        : request.stage === 'assurance-sampling' ? { schema: 'ai7.analysis.assurance-sampling-result/1', dispositions: parseAssuranceSamplingListedRefs(message)
+          .map((ref) => ({ ref, disposition: '成立', reason: '合成回归抽样。' })) }
+          : request.stage === 'run-report-reflection' ? { schema: 'ai7.analysis.run-report-reflection-result/1', items: [] } : null;
+    return content === null ? undefined : { kind: 'unit-result', text: JSON.stringify(content), usage: { inputTokens: 10, outputTokens: 5 } };
+  }, { seriesScopeGuard: (id) => store.seriesScopeGuard(id) });
+  launchPolicy = capture.policy;
+  return { store, owner: capture.owner, driver: new ReviewRunDriver(store.reviewRunDriveSteps, capture.owner), fixture, capture };
 }
 
 /** 先看计划 from a Captured Procedure version (ADR 0087 §4): the pin the sheet — or the selection composer — carries. */

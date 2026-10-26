@@ -1,4 +1,6 @@
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
+import { capturedMapAnswer, capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
+import { BASELINE_PROMPT_CONTRACT_DIGEST, parseUnitMessageHeader, unitRequestDigest } from '../../src/service/analysis/contract.js';
 import { execPre74Fixture, expectedSchema75 } from '../support/pre74-schema.js';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -6,9 +8,9 @@ import { writeFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BaselineAnalysisExecutionOwner, OUTCOME_UNKNOWN_NOT_RESENT } from '../../src/service/analysis/execution.js';
-import { RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST, runReportReflectionRequestDigest } from '../../src/service/analysis/run-report-contract.js';
+import { RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST, runReportReflectionRequestDigest, parseRunReportReflectionMessageHeader } from '../../src/service/analysis/run-report-contract.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
-import { fixtureEntryKey, loadLaunchFixture, loadModelFixture, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
+import { fixtureEntryKey, resolveFixtureEntry, loadLaunchFixture, loadModelFixture, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
 import { EditorialStore, StoreError, UNCONFIRMED_CHANGED } from '../../src/service/store.js';
 import { categoryResendDisclosure, resendDisclosure } from '../../src/service/task-plan.js';
@@ -29,7 +31,7 @@ import { MATERIAL_INDEX_SCHEMA_VERSION, LATEST_SCHEMA_VERSION, OUTCOME_RESOLUTIO
 import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
 import { OUTCOME_UNKNOWN_CARRIED } from '../../src/service/analysis/outcome-unknown.js';
 import { OutcomeResolutionLedger } from '../../src/service/analysis/outcome-resolutions.js';
-import { canonicalRecord } from '../../src/service/analysis/canonical.js';
+import { canonicalRecord, sha256Hex } from '../../src/service/analysis/canonical.js';
 import { randomUUID } from 'node:crypto';
 
 // One explicit model-request capability per test application.
@@ -633,13 +635,35 @@ describe('结果待确认 a completed Run left (Issue #757)', () => {
 
   it('lists a completed baseline Run\'s ambiguous reduction, sample and reflection as steps, each its own 结果待确认', async () => {
     const happy = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-happy');
-    // Each variant on its own Agent Data Root, since a route is bound when the store opens.
-    const runOver = async (route: ResolvedModelFixture, title: string, body: (store: EditorialStore, projection: BaselineAnalysisProjection) => Promise<void> | void) => {
+    // Each real ordinary captured execution owns its own data root. No changed bytes are admitted under a fixture hash.
+    let accountingDigest = '';
+    const runOver = async (drop: 'cross-unit-reduction' | 'assurance-sampling' | 'run-report-reflection' | null, title: string, body: (store: EditorialStore, projection: BaselineAnalysisProjection) => Promise<void> | void) => {
       const outer = roots;
       roots = await createServiceTestRoots('ai7-service-outcome-unconfirmed-step-');
       writeFileSync(join(roots.dataRoot, '..', 'j10-unit-hold.txt'), 'release');
-      const store = await open(route);
-      const execution = ownerOf(store, route);
+      const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { baselineAnalysisRoute: null,
+        induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
+        induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false });
+      const answers = capturedMapAnswer(happy.entries);
+      let reflectionIdentity: { accountingDigest: string; contractDigest: string; requestDigest: string; physicalDigest: string } | undefined;
+      const captured = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, requestGovernor, (request, message) => {
+        if (request.stage === drop) {
+          if (drop === 'run-report-reflection') {
+            const header = parseRunReportReflectionMessageHeader(message);
+            if (header === null) return undefined;
+            reflectionIdentity = { accountingDigest: header.accountingDigest, contractDigest: request.contractDigest,
+              requestDigest: request.requestDigest, physicalDigest: sha256Hex(message) };
+          }
+          return DROPPED;
+        }
+        const header = parseUnitMessageHeader(message);
+        if (request.stage === 'units' && header !== null) return resolveFixtureEntry(happy.entries, header.ordinal,
+          unitRequestDigest(BASELINE_PROMPT_CONTRACT_DIGEST, header.ordinal, header.unitDigest), request.attemptIndex)?.response;
+        if (request.stage === 'run-report-reflection') return { kind: 'unit-result', text: JSON.stringify({ schema: 'ai7.analysis.run-report-reflection-result/1', items: [] }), usage: { inputTokens: 10, outputTokens: 5 } };
+        return answers(request, message);
+      });
+      launchPolicy = captured.policy;
+      const execution = captured.owner;
       try {
         const bookId = await book(store, title);
         let progress = store.createBaselineAnalysisPreparationWork(bookId, BASELINE_ANALYSIS_TASK_GOAL, null, launchPolicy);
@@ -647,25 +671,27 @@ describe('结果待确认 a completed Run left (Issue #757)', () => {
         const prepared = progress.projection!;
         execution.admitAndDispatch(store.authorizeBaselineAnalysis(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!);
         await execution.whenIdle();
+        if (drop === 'run-report-reflection') {
+          expect(reflectionIdentity!.accountingDigest).toBe(accountingDigest);
+          expect(reflectionIdentity!.contractDigest).toBe(RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST);
+          expect(reflectionIdentity!.requestDigest).toBe(reflectionIdentity!.physicalDigest);
+        }
         await body(store, store.inspectBaselineAnalysis(bookId, () => null));
         store.markCleanShutdown();
       } finally {
         await execution.dispose();
-        store.close();
+        try { captured.assertMatched(); } finally { store.close(); }
         await roots.dispose();
         roots = outer;
       }
     };
-    // The happy fixture's ordinal-0 entries of one suboperation, told apart by the result schema they answer in.
-    const ambiguousFor = (schema: string): ResolvedModelFixture =>
-      dropping(happy, (entry) => entry.unitOrdinal === 0 && entry.response.kind === 'unit-result' && entry.response.text.includes(schema));
     const stepsOf = (store: EditorialStore, projection: BaselineAnalysisProjection) => {
       const item = unconfirmedItem(store, projection.bookId, 'baseline-analysis');
       const plan = store.inspectTaskPlan({ bookId: projection.bookId, kind: 'baseline-analysis', ref: null });
       return { item, plan };
     };
 
-    await runOver(ambiguousFor('cross-unit-result'), 'L2 sample1 归纳结果待确认', (store, projection) => {
+    await runOver('cross-unit-reduction', 'L2 sample1 归纳结果待确认', (store, projection) => {
       expect(projection.taskOutcome?.classification).toMatch(/^completed/);
       const { item, plan } = stepsOf(store, projection);
       expect(item).toMatchObject({ state: 'analysis-outcome-unconfirmed', object: { taskKind: 'baseline-analysis', ranges: 0, steps: ['cross-unit-reduction'] } });
@@ -677,25 +703,19 @@ describe('结果待确认 a completed Run left (Issue #757)', () => {
       expect(store.inspectBaselineAnalysis(projection.bookId, () => null).taskOutcome?.report?.reportDigest).toBe(projection.taskOutcome?.report?.reportDigest);
     });
 
-    await runOver(ambiguousFor('assurance-sampling-result'), 'L2 sample1 抽样结果待确认', (store, projection) => {
+    await runOver('assurance-sampling', 'L2 sample1 抽样结果待确认', (store, projection) => {
       const { item, plan } = stepsOf(store, projection);
       expect(item?.object).toEqual({ kind: 'unconfirmed', taskKind: 'baseline-analysis', ranges: 0, steps: ['assurance-sampling'] });
       expect(plan.unconfirmed?.steps.map((step) => step.stage)).toEqual(['assurance-sampling']);
     });
 
-    // The reflection's request is keyed by the Run's own accounting, the same for every deterministic replay of one fixture over
-    // one manuscript: a first Run with nothing ambiguous reads it, and a second answers exactly that request 结果待确认.
-    let accountingDigest = '';
-    await runOver(happy, 'L2 sample1 反思账目', (store, projection) => {
+    // The logical reflection key names the Run's own accounting. Identical controlled prior turns over the same sample1
+    // give the same accounting; the physical admission separately hashes the actual message, including its real Run identity.
+    await runOver(null, 'L2 sample1 反思账目', (store, projection) => {
       accountingDigest = projection.taskOutcome!.report!.accountingDigest;
       expect(stepsOf(store, projection).item).toBeUndefined();
     });
-    const requestDigest = runReportReflectionRequestDigest(RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST, accountingDigest);
-    const reflecting: ResolvedModelFixture = {
-      ...happy,
-      entries: new Map([...happy.entries, [fixtureEntryKey(0, requestDigest), { unitOrdinal: 0, requestDigest, attempt: null, contentDigest: null, response: DROPPED }]]),
-    };
-    await runOver(reflecting, 'L2 sample1 反思结果待确认', (store, projection) => {
+    await runOver('run-report-reflection', 'L2 sample1 反思结果待确认', (store, projection) => {
       const ifRedone = projection.taskOutcome!.report!.ifRedone;
       expect(ifRedone.state).toBe('gap');
       expect(ifRedone.reason).toContain(`；${OUTCOME_UNKNOWN_NOT_RESENT}。`);

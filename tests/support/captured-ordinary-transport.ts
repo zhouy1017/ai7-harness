@@ -58,7 +58,7 @@ export function capturedOrdinaryExecution(store: EditorialStore, codeRoot: strin
   const unmatched: string[] = [];
   const requests: AnalysisRequestIdentity[] = [];
   const nativeFetch: typeof fetch = async (url, init) => {
-    const refuse = (): never => { unmatched.push('unmatched-request'); throw new Error('CAPTURED_ORDINARY_UNMATCHED_REQUEST'); };
+    const refuse = (reason = 'unmatched-request'): never => { unmatched.push(reason); throw new Error('CAPTURED_ORDINARY_UNMATCHED_REQUEST'); };
     if (String(url) !== allowed.endpoint || init === undefined) return refuse();
     const sessionId = new Headers(init.headers).get(OPENCODE_GO_SESSION_HEADER);
     const db = new DatabaseSync(join(dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
@@ -76,8 +76,9 @@ export function capturedOrdinaryExecution(store: EditorialStore, codeRoot: strin
     requests.push(request);
     let response: ModelFixtureResponse | undefined;
     try { response = answer(request, message); } catch (error) { unmatched.push('invalid-response-schedule'); throw error; }
-    if (response === undefined) return refuse();
-    if (response.kind === 'adapter-failure') return new Response(JSON.stringify({ error: { message: response.message } }), { status: response.status ?? 503 });
+    if (response === undefined) return refuse(`${request.stage}:${request.unitOrdinal ?? 'none'}:response-missing`);
+    // A fixture's status-less permanent adapter error becomes an actual non-retryable HTTP failure on this route.
+    if (response.kind === 'adapter-failure') return new Response(JSON.stringify({ error: { message: response.message } }), { status: response.status ?? 400 });
     if (response.kind === 'quota-exceeded') return new Response(JSON.stringify({ error: { message: response.message } }), { status: response.status });
     if (response.kind === 'outcome-unknown' || response.kind === 'interrupted') throw new Error(response.kind);
     if (response.kind !== 'unit-result') return refuse();
@@ -92,5 +93,6 @@ export function capturedOrdinaryExecution(store: EditorialStore, codeRoot: strin
     currentLaunchPolicy: () => policy, productionPolicyFor: (frozen) => resolveSourceCheckoutLaunchPolicySync(codeRoot, 'ordinary-production', frozen),
     fixture: null, production: { scope: 'ordinary-production', nativeFetch },
     secretResolver: { resolve: async () => 'synthetic-captured-transport-placeholder' }, ...controls });
-  return { owner, policy, launch, nativeFetch, requests, assertMatched: () => strictEqual(unmatched.length, 0, 'CAPTURED_ORDINARY_UNMATCHED_REQUEST') };
+  return { owner, policy, launch, nativeFetch, requests, assertMatched: () => strictEqual(unmatched.length, 0,
+    `CAPTURED_ORDINARY_UNMATCHED_REQUEST ${unmatched.join(', ')}`) };
 }

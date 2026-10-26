@@ -1,4 +1,10 @@
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
+import { capturedMapAnswer, capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
+import { BASELINE_PROMPT_CONTRACT_DIGEST, parseUnitMessageHeader, unitRequestDigest } from '../../src/service/analysis/contract.js';
+import { parseCrossUnitMessageHeader } from '../../src/service/analysis/cross-unit-contract.js';
+import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/assurance-sampling-contract.js';
+import { parseReviewCategoryUnitMessageHeader } from '../../src/service/review/review-category-contract.js';
+import { parseWritingUnitMessageHeader, parseWritingSynthesisMessageHeader } from '../../src/service/writing/writing-contract.js';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
@@ -7,7 +13,7 @@ import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execu
 import type { Connectivity, TaskPlanConnectivity } from '../../src/service/connectivity.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { LOCAL_DETERMINISTIC_ROUTE } from '../../src/service/provider/egress-gate.js';
-import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
+import { resolveFixtureEntry, loadModelFixture } from '../../src/service/provider/model-fixture.js';
 import { reconnectPreflight } from '../../src/service/reconnect-preflight.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
 import { SeriesExclusionLedger, seriesExclusionImpact, seriesExclusionTarget, seriesScopeStopDetail } from '../../src/service/series-exclusions.js';
@@ -17,7 +23,7 @@ import { LITERARY_EXPRESSION, TYPOS_AND_USAGE } from '../support/review-categori
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 import { J13_PLACE, J13_SERIES_TITLE, makeJ13Series } from '../support/series-consistency.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { WRITING_REQUEST } from '../support/writing-task.js';
+import { AUTHORED_WRITING_DRAFT, AUTHORED_WRITING_PASSAGES, WRITING_REQUEST } from '../support/writing-task.js';
 
 // One explicit model-request capability per test application.
 // Registered first: the stack-ordered final hook runs after existing consumer teardown.
@@ -55,7 +61,7 @@ interface Session {
   readonly driver: ReviewRunDriver;
 }
 
-async function withSession(fixtureIdentity: string, body: (session: Session) => Promise<void>, capacity?: number): Promise<void> {
+async function withSession(fixtureIdentity: string, body: (session: Session) => Promise<void>, capacity?: number, ordinary = false): Promise<void> {
   await requireExactSample1(roots.codeRoot);
   const fixture = await loadModelFixture(FIXTURES_ROOT, fixtureIdentity);
   const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
@@ -64,22 +70,57 @@ async function withSession(fixtureIdentity: string, body: (session: Session) => 
     induceReimportProofTamper: false,
     induceAbandonObjectRemovalFailure: false,
     interruptAfterAbandonObjectRemoval: false,
-    baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
+    baselineAnalysisRoute: ordinary ? null : { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
   });
-  const owner = new BaselineAnalysisExecutionOwner({
-    requestGovernor,
+  if (ordinary) {
+    const search = store.saveSearchBackendCredential('search-tinyfish', null, 'needs-attention');
+    store.saveSearchBackendCredential('search-tinyfish', search.credentialReference, 'ready'); store.selectSearchBackend('search-tinyfish');
+  }
+  let holdFirst = ordinary;
+  let releaseOccupant!: () => void, occupantEntered!: () => void;
+  const released = new Promise<void>((resolve) => { releaseOccupant = resolve; });
+  const entered = new Promise<void>((resolve) => { occupantEntered = resolve; });
+  const captured = ordinary ? capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, requestGovernor, (request, message) => {
+    const baseline = parseUnitMessageHeader(message), review = parseReviewCategoryUnitMessageHeader(message), writing = parseWritingUnitMessageHeader(message);
+    if (request.stage === 'units' && baseline !== null) return resolveFixtureEntry(fixture.entries, baseline.ordinal,
+      unitRequestDigest(BASELINE_PROMPT_CONTRACT_DIGEST, baseline.ordinal, baseline.unitDigest), request.attemptIndex)?.response;
+    if (request.stage === 'cross-unit-reduction' && parseCrossUnitMessageHeader(message) !== null) return capturedMapAnswer(fixture.entries)(request, message);
+    const content = request.stage === 'units' && review !== null ? { schema: 'ai7.editorial-review.unit-result/2', unitOrdinal: review.ordinal, findings: [] }
+      : request.stage === 'units' && writing !== null ? { schema: 'ai7.writing.unit-result/1', unitOrdinal: writing.ordinal, passages: AUTHORED_WRITING_PASSAGES[writing.ordinal] }
+        : parseWritingSynthesisMessageHeader(message) !== null ? AUTHORED_WRITING_DRAFT
+          : request.stage === 'assurance-sampling' ? { schema: 'ai7.analysis.assurance-sampling-result/1', dispositions: parseAssuranceSamplingListedRefs(message)
+            .map((ref) => ({ ref, disposition: '成立', reason: '合成回归抽样。' })) }
+            : request.stage === 'run-report-reflection' ? { schema: 'ai7.analysis.run-report-reflection-result/1', items: [] } : null;
+    return content === null ? undefined : { kind: 'unit-result', text: JSON.stringify(content), usage: { inputTokens: 10, outputTokens: 5 } };
+  }, { seriesScopeGuard: (id) => store.seriesScopeGuard(id), unitHold: async () => {
+    if (!holdFirst) return; holdFirst = false; occupantEntered(); await released;
+  } }) : null;
+  if (captured !== null) launchPolicy = captured.policy;
+  const owner = captured?.owner ?? new BaselineAnalysisExecutionOwner({ requestGovernor,
     ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null },
-    seriesScopeGuard: (runRecordId) => store.seriesScopeGuard(runRecordId), ...(capacity === undefined ? {} : { capacity }),
-  });
+    seriesScopeGuard: (runRecordId) => store.seriesScopeGuard(runRecordId), ...(capacity === undefined ? {} : { capacity }) });
   const driver = new ReviewRunDriver(store.reviewRunDriveSteps, owner);
   try {
+    if (ordinary) {
+      // Actual ordinary runtime has two places. Hold a real finite-Plan Run in one; the target scenario owns one free place.
+      const bookId = await sample1Book(store, '已占用一个运行名额');
+      let work = store.createBaselineAnalysisPreparationWork(bookId, BASELINE_ANALYSIS_TASK_GOAL, null, launchPolicy);
+      while (!work.done) work = store.advanceBaselineAnalysisPreparationWork(work.workId!);
+      const prepared = work.projection!;
+      const finite = store.editBaselineAnalysisPlan({ bookId, taskIntentId: prepared.taskIntent!.taskIntentId,
+        planEnvelopeDigest: prepared.planEnvelope!.digest, removedSteps: [], disallowedAdaptations: [],
+        runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 500_000 } });
+      owner.admitAndDispatch(store.authorizeBaselineAnalysis(bookId, finite.taskIntent!.taskIntentId, finite.planEnvelope!.digest).dispatchRunRecordId!);
+      await entered; expect(owner.capacity).toBe(2); expect(owner.busy).toBe(false);
+    }
     await body({ store, owner, driver });
     store.markCleanShutdown();
   } finally {
+    releaseOccupant();
     const stopped = driver.dispose();
     await owner.dispose();
     await stopped;
-    store.close();
+    try { captured?.assertMatched(); } finally { store.close(); }
   }
 }
 
@@ -94,7 +135,8 @@ async function sample1Book(store: EditorialStore, title: string): Promise<string
 const OFFLINE: TaskPlanConnectivity = { reading: () => 'offline', reachesNetwork: (routeKind) => routeKind === LOCAL_DETERMINISTIC_ROUTE, slotBusy: () => false };
 
 function planOf(store: EditorialStore, bookId: string, kind: StartWhenOnlineTaskKind, ref: string) {
-  return store.inspectTaskPlanWithConnection({ bookId, kind, ref }, async () => null, OFFLINE);
+  return store.inspectTaskPlanWithConnection({ bookId, kind, ref }, async () =>
+    store.baselineAnalysisLedger.launch.operationalScope === 'ordinary-production' ? 'present' : null, OFFLINE);
 }
 
 /** Reconnect Preflight wired exactly as the service wires it (src/service/index.ts), over every kind's waiting Runs. */
@@ -172,23 +214,23 @@ describe('Reconnect Preflight admits strictly oldest-first across kinds (Issue #
       const digest = (await planOf(store, writingBook, 'writing', taskIntentId)).start.planEnvelopeDigest!;
       store.startTaskWhenOnline({ bookId: writingBook, kind: 'writing', ref: taskIntentId, planEnvelopeDigest: digest, planDigests: [] });
       expect(store.waitingTaskRuns(null).map((run) => run.kind)).toEqual(['review-run', 'writing']);
-      expect(owner.capacity).toBe(1);
+      expect(owner.capacity).toBe(2);
       // One pass, one free place: the older Run takes it, and the governor is never exceeded.
       expect(await preflight(session, 'online')).toEqual({ admitted: 1, blocked: 0, waiting: 1 });
       expect(reviewStates(reviewRunId)[0]).toBe('dispatched');
       expect(transitions(taskIntentId)).toEqual(['authorized', 'awaiting-connectivity']);
       expect(store.waitingTaskRuns(null).map((run) => run.kind)).toEqual(['writing']);
       // The place frees and the next pass admits the later one.
-      await owner.whenIdle();
+      await session.driver.drive(reviewRunId);
       expect(reviewStates(reviewRunId)).toEqual(['dispatched', 'settled', 'materialized']);
       expect(await preflight(session, 'online')).toEqual({ admitted: 1, blocked: 0, waiting: 0 });
-      await owner.whenIdle();
+      await owner.whenDone(store.inspectWriting(writingBook)!.run!.runRecordId);
       expect(transitions(taskIntentId).slice(0, 3)).toEqual(['authorized', 'awaiting-connectivity', 'admitted']);
-    }, 1);
+    }, 1, true);
   }, 300_000);
 });
 
-describe('a local-first Review Run keeps its place in the order (Issue #764 review)', () => {
+describe('a leads-first Review Run keeps its place in the order (Issue #764 review)', () => {
   it('writes the baseline leads of 情节逻辑与前后一致 and takes the free place for the next category before a later 写作任务 is admitted', async () => {
     await withSession('sample1-review-authored', async (session) => {
       const { store, owner } = session;
@@ -198,8 +240,9 @@ describe('a local-first Review Run keeps its place in the order (Issue #764 revi
       let baseline = store.createBaselineAnalysisPreparationWork(reviewBook, BASELINE_ANALYSIS_TASK_GOAL, null, launchPolicy);
       while (!baseline.done) baseline = store.advanceBaselineAnalysisPreparationWork(baseline.workId!);
       const prepared = baseline.projection!;
-      owner.admitAndDispatch(store.authorizeBaselineAnalysis(reviewBook, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!);
-      await owner.whenIdle();
+      const baselineRun = store.authorizeBaselineAnalysis(reviewBook, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!;
+      owner.admitAndDispatch(baselineRun);
+      await owner.whenDone(baselineRun);
       expect(store.inspectBaselineAnalysis(reviewBook).state).toBe('settled');
 
       // The configuration orders 情节逻辑 (no model) before 文学表达 (a model), whatever the selection order.
@@ -208,17 +251,17 @@ describe('a local-first Review Run keeps its place in the order (Issue #764 revi
       await reviewWaitsOnline(store, reviewBook, reviewRunId);
       const digest = (await planOf(store, writingBook, 'writing', taskIntentId)).start.planEnvelopeDigest!;
       store.startTaskWhenOnline({ bookId: writingBook, kind: 'writing', ref: taskIntentId, planEnvelopeDigest: digest, planDigests: [] });
-      expect(owner.capacity).toBe(1);
+      expect(owner.capacity).toBe(2);
       expect(await preflight(session, 'online')).toEqual({ admitted: 1, blocked: 0, waiting: 1 });
       expect(withDatabase((database) => (database.prepare(
         'SELECT category_id, state FROM review_run_category_events WHERE review_run_id = ? ORDER BY rowid',
       ).all(reviewRunId) as Array<{ category_id: string; state: string }>).map((row) => [row.category_id, row.state]))[0]).toEqual(['plot-consistency', 'materialized']);
       expect(reviewStates(reviewRunId)).toContain('dispatched');
       expect(transitions(taskIntentId)).toEqual(['authorized', 'awaiting-connectivity']);
-      await owner.whenIdle();
+      await session.driver.drive(reviewRunId);
       expect(await preflight(session, 'online')).toEqual({ admitted: 1, blocked: 0, waiting: 0 });
-      await owner.whenIdle();
-    }, 1);
+      await owner.whenDone(store.inspectWriting(writingBook)!.run!.runRecordId);
+    }, 1, true);
   }, 300_000);
 });
 

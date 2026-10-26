@@ -1,6 +1,7 @@
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
@@ -9,14 +10,12 @@ import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execu
 import {
   BASELINE_PROMPT_CONTRACT_DIGEST,
   BASELINE_PROMPT_CONTRACT_V1_DIGEST,
-  BASELINE_UNIT_RESULT_SCHEMA,
-  unitRequestDigest,
 } from '../../src/service/analysis/contract.js';
 import {
   RETAINED_V1_RECORDED_FIXTURE_IDENTITY,
   type BaselinePromptContractSelection,
 } from '../../src/service/analysis/kind-definition.js';
-import { fixtureEntryKey, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
+import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { assuranceContractMoved, type BaselineAnalysisRouteFacts } from '../../src/service/analysis/baseline-analysis-store.js';
 import {
   ASSURANCE_SAMPLING_PROMPT_CONTRACT,
@@ -36,7 +35,6 @@ import {
 } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import {
-  SAMPLE1_UNITS,
   importSample1Book,
   pinEditorialWorkspaceProfileRevision2,
   recordMissingCredentialConnection,
@@ -49,25 +47,21 @@ let requestGovernor: ModelRequestGovernor;
 beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
 afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
-// Service-integration suite (L2) for Issue #826: a Book whose baseline was read under prompt contract /1 — unit 1 a gap for
-// answering its notes as bare strings — is read again under /2 on the real store, as the existing product data will be.
-// Every model answer is synthetic and built here in memory; no recorded fixture is replayed (ADR 0044 §Replay), and no
-// Provider, socket, credential value or Effect is involved. The input is the admitted public `sample1` (ADR 0043).
+// Service-integration suite (L2) for Issue #826: actual current authored pauses, exact old-pin reading and no-write drift
+// refusal. Genuine retained-/1 execution provenance is owned by complete J04; this file reads its fixture metadata only,
+// with no recorded replay, Provider, socket, credential value or Effect. Input is admitted public sample1 (ADR 0043).
 
-/**
- * Route facts naming the recorded fixture's identity: the store admits /1 beside that route alone. The fixture bound with it
- * here is a synthetic in-memory stand-in under a synthetic digest; it carries no recorded byte.
- */
+// Only the refusal cases below use deliberately malformed route tuples. Positive /1 execution provenance belongs
+// to complete J04: recorded-binds-prompt-contract-1, recorded-restart-preserves-result-and-report,
+// range-recorded-predecessor-readable, and the additional authentic paused-/1 continuation scenario (#1161 rev6).
 const SYNTHETIC_SHA = '5'.repeat(64);
-const HISTORICAL_ROUTE: BaselineAnalysisRouteFacts = {
-  fixtureIdentity: RETAINED_V1_RECORDED_FIXTURE_IDENTITY,
-  fixtureSha256: SYNTHETIC_SHA,
-  fixtureLineage: [{ identity: RETAINED_V1_RECORDED_FIXTURE_IDENTITY, sha256: SYNTHETIC_SHA }],
-};
+let historicalRoute: BaselineAnalysisRouteFacts;
 
 let roots: ServiceTestRoots;
 let launchPolicy: LaunchPolicyProjection;
 let holdPath: string;
+let currentFixture: ResolvedModelFixture;
+let currentRoute: BaselineAnalysisRouteFacts;
 
 beforeEach(async () => {
   roots = await createServiceTestRoots('ai7-service-prompt-contract-');
@@ -75,6 +69,11 @@ beforeEach(async () => {
   expect(launchPolicy.integrityState).toBe('verified');
   holdPath = join(roots.dataRoot, '..', 'j10-unit-hold.txt');
   writeFileSync(holdPath, 'release');
+  currentFixture = await loadModelFixture(resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url))), 'sample1-baseline-happy');
+  currentRoute = { fixtureIdentity: currentFixture.identity, fixtureSha256: currentFixture.sha256, fixtureLineage: currentFixture.lineage };
+  // Reading fixture metadata is not a replay: this L2 file never dispatches the recorded fixture.
+  const recorded = await loadModelFixture(resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url))), RETAINED_V1_RECORDED_FIXTURE_IDENTITY);
+  historicalRoute = { fixtureIdentity: recorded.identity, fixtureSha256: recorded.sha256, fixtureLineage: recorded.lineage };
 });
 
 afterEach(async () => {
@@ -102,32 +101,6 @@ function prepare(store: EditorialStore, bookId: string, update: BaselineAnalysis
   let progress = store.createBaselineAnalysisPreparationWork(bookId, goal, update, launchPolicy);
   while (!progress.done) progress = store.advanceBaselineAnalysisPreparationWork(progress.workId!);
   return progress.projection!;
-}
-
-/** A synthetic unit answer: valid notes, or — the #807 shape — the unresolved items as bare strings. */
-function unitAnswer(unitOrdinal: number, bareStringNotes: boolean): string {
-  return JSON.stringify({
-    schema: BASELINE_UNIT_RESULT_SCHEMA, unitOrdinal, synopsis: `合成概述（单元 ${unitOrdinal}）。`,
-    entities: [], events: [], relationships: [], settingClaims: [], conflicts: [],
-    unresolved: bareStringNotes ? ['合成未确定事项。'] : [{ description: '合成未确定事项。', sourceRanges: [] }],
-    confidence: 'medium',
-  });
-}
-
-/** Unit answers keyed by the request digests `promptContractDigest` derives over this manifest; no stage turn is answered. */
-function syntheticFixture(manifest: CoverageManifestProjection, promptContractDigest: string, bareStringUnits: ReadonlySet<number>): ResolvedModelFixture {
-  const entries = new Map<string, ModelFixtureEntry>();
-  for (const unit of manifest.units) {
-    const requestDigest = unitRequestDigest(promptContractDigest, unit.ordinal, unit.digest);
-    entries.set(fixtureEntryKey(unit.ordinal, requestDigest), {
-      unitOrdinal: unit.ordinal, requestDigest, attempt: null, contentDigest: null,
-      response: { kind: 'unit-result', text: unitAnswer(unit.ordinal, bareStringUnits.has(unit.ordinal)), usage: { inputTokens: 100, outputTokens: 20 } },
-    });
-  }
-  return {
-    identity: RETAINED_V1_RECORDED_FIXTURE_IDENTITY, description: '合成夹具（#826）。', provenance: 'authored',
-    lineage: HISTORICAL_ROUTE.fixtureLineage, entries, sha256: SYNTHETIC_SHA,
-  };
 }
 
 function withDatabase<T>(operation: (database: DatabaseSync) => T): T {
@@ -185,14 +158,12 @@ async function until(condition: () => boolean, label: string): Promise<void> {
   }
 }
 
-/** A first baseline Run held in flight at unit 3, then paused: a stopped Run that kept units 1 and 2. */
-async function pausedRun(store: EditorialStore, bookId: string, promptContractDigest: string): Promise<string> {
+/** A genuine current /2 pause on the unchanged admitted authored fixture, with three successful retained checkpoints. */
+async function pausedCurrentRun(store: EditorialStore, bookId: string): Promise<string> {
   const prepared = prepare(store, bookId);
-  const owner = new BaselineAnalysisExecutionOwner({
-    requestGovernor,
-    ledger: store.baselineAnalysisLedger, launchPolicy, fixture: syntheticFixture(prepared.coverageManifest!, promptContractDigest, new Set()),
-    secretResolver: fakeSecretResolver(), unitHold: controlledUnitHold(holdPath, { pollMs: 5 }),
-  });
+  expect(prepared.planEnvelope!.promptContractDigest).toBe(BASELINE_PROMPT_CONTRACT_DIGEST);
+  const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy,
+    fixture: currentFixture, secretResolver: fakeSecretResolver(), unitHold: controlledUnitHold(holdPath, { pollMs: 5 }) });
   try {
     writeFileSync(holdPath, '2');
     const runRecordId = store.authorizeBaselineAnalysis(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!;
@@ -200,34 +171,25 @@ async function pausedRun(store: EditorialStore, bookId: string, promptContractDi
     await until(() => owner.progressFor(runRecordId)?.currentUnitOrdinal === 3, 'unit 3 in flight');
     store.requestBaselineAnalysisPause(bookId, prepared.taskIntent!.taskIntentId);
     owner.pauseRun(runRecordId, store.baselineAnalysisLedger);
-    writeFileSync(holdPath, 'release');
-    await owner.whenIdle();
-    expect(store.inspectBaselineAnalysis(bookId, () => null).run?.state).toBe('paused');
+    writeFileSync(holdPath, 'release'); await owner.whenIdle();
+    expect(store.inspectBaselineAnalysis(bookId).run!.state).toBe('paused');
+    expect(store.baselineAnalysisLedger.unitCheckpoints(runRecordId).map((entry) => entry.unit.closed.state)).toEqual(['closed', 'closed', 'closed']);
     return runRecordId;
-  } finally {
-    await owner.dispose();
-  }
-}
-
-async function authorizeAndSettle(store: EditorialStore, owner: BaselineAnalysisExecutionOwner, bookId: string, prepared: BaselineAnalysisProjection) {
-  const authorized = store.authorizeBaselineAnalysis(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
-  owner.admitAndDispatch(authorized.dispatchRunRecordId!);
-  await owner.whenIdle();
-  return store.inspectBaselineAnalysis(bookId, (runRecordId) => owner.progressFor(runRecordId));
+  } finally { await owner.dispose(); }
 }
 
 describe('baseline prompt contract /1 → /2 on the real store (Issue #826)', () => {
   it('refuses /1 beside any route but the recorded fixture alone, and asks /2 by default', async () => {
     for (const route of [
       null,
-      { ...HISTORICAL_ROUTE, fixtureIdentity: 'sample1-baseline-happy', fixtureLineage: [{ identity: 'sample1-baseline-happy', sha256: SYNTHETIC_SHA }] },
-      { ...HISTORICAL_ROUTE, fixtureLineage: [...HISTORICAL_ROUTE.fixtureLineage, { identity: 'sample1-baseline-happy', sha256: SYNTHETIC_SHA }] },
-      { ...HISTORICAL_ROUTE, fixtureLineage: [{ identity: 'sample1-baseline-happy', sha256: SYNTHETIC_SHA }] },
+      { ...historicalRoute, fixtureIdentity: 'sample1-baseline-happy', fixtureLineage: [{ identity: 'sample1-baseline-happy', sha256: SYNTHETIC_SHA }] },
+      { ...historicalRoute, fixtureLineage: [...historicalRoute.fixtureLineage, { identity: 'sample1-baseline-happy', sha256: SYNTHETIC_SHA }] },
+      { ...historicalRoute, fixtureLineage: [{ identity: 'sample1-baseline-happy', sha256: SYNTHETIC_SHA }] },
     ]) {
       await expect(open(route, 'retained-v1')).rejects.toMatchObject({ code: 'ANALYSIS_PROMPT_CONTRACT_REFUSED' });
     }
     await expect(open(null, 'retained-v3' as BaselinePromptContractSelection)).rejects.toMatchObject({ code: 'ANALYSIS_PROMPT_CONTRACT_REFUSED' });
-    for (const [route, selection] of [[null, undefined], [null, 'current'], [HISTORICAL_ROUTE, undefined]] as const) {
+    for (const [route, selection] of [[null, undefined], [null, 'current'], [historicalRoute, undefined]] as const) {
       const store = await open(route, selection);
       try {
         expect(store.baselineAnalysisLedger.definition.promptContractDigest).toBe(BASELINE_PROMPT_CONTRACT_DIGEST);
@@ -235,7 +197,7 @@ describe('baseline prompt contract /1 → /2 on the real store (Issue #826)', ()
         store.close();
       }
     }
-    const historical = await open(HISTORICAL_ROUTE, 'retained-v1');
+    const historical = await open(historicalRoute, 'retained-v1');
     try {
       expect(historical.baselineAnalysisLedger.definition.promptContractDigest).toBe(BASELINE_PROMPT_CONTRACT_V1_DIGEST);
       // Only the baseline kind is retained: the other kinds' ledgers ask under their own contracts as before.
@@ -245,108 +207,24 @@ describe('baseline prompt contract /1 → /2 on the real store (Issue #826)', ()
     }
   });
 
-  it('reads a /1 revision with a unit-1 gap under /2 and re-reads the unit-1 range closure there alone', async () => {
-    await requireExactSample1(roots.codeRoot);
-    // --- The /1 launch: the first baseline, unit 1 answered with bare-string notes, as S40/first-baseline/9 was.
-    let store = await open(HISTORICAL_ROUTE, 'retained-v1');
-    let bookId: string;
-    let manifest: CoverageManifestProjection;
-    let revision1: NonNullable<BaselineAnalysisProjection['resultSetRevision']>;
-    let staleRunRecordId: string;
-    try {
-      const imported = await importSample1Book(store, roots.codeRoot, 'L2 sample1 提示契约 v2');
-      bookId = imported.bookId;
-      await pinEditorialWorkspaceProfileRevision2(store, bookId);
-      recordMissingCredentialConnection(store, 'L2 主编辑连接');
-      const prepared = prepare(store, bookId);
-      manifest = prepared.coverageManifest!;
-      expect(manifest.units).toHaveLength(SAMPLE1_UNITS);
-      expect(prepared.planEnvelope?.promptContractDigest).toBe(BASELINE_PROMPT_CONTRACT_V1_DIGEST);
-      // Sampling /1, as the recorded Run sampled: the plan records no pin, so its bytes are those of every plan before #826.
-      expect(prepared.executionPlan).not.toHaveProperty('assurancePromptContractDigest');
-      const owner = new BaselineAnalysisExecutionOwner({
-        requestGovernor,
-        ledger: store.baselineAnalysisLedger, launchPolicy, fixture: syntheticFixture(manifest, BASELINE_PROMPT_CONTRACT_V1_DIGEST, new Set([1])),
-        secretResolver: fakeSecretResolver(),
-      });
-      const settled = await authorizeAndSettle(store, owner, bookId, prepared);
-      expect(settled.run?.state).toBe('completed-with-gaps');
-      revision1 = settled.resultSetRevision!;
-      expect(settled.run?.attempt?.executionBinding?.promptContractDigest).toBe(BASELINE_PROMPT_CONTRACT_V1_DIGEST);
-      expect(revision1.units.map((unit) => unit.state)).toEqual(['gap', 'closed', 'closed', 'closed', 'closed', 'closed', 'closed', 'closed']);
-      expect(revision1.gaps[0]).toMatchObject({ unitOrdinal: 1, reason: expect.stringContaining('未解决事项不符合契约 v1。') });
+  // One-to-one provenance relocation (#1161 rev5/6): the former synthetic /1 execution, immutable reopen and range
+  // closure assertions are owned by complete J04's genuine recorded-/1 Book and six-reused/two-recomputed repair.
+  // Its separate paused-/1 Book proves actual historical continuation refusal with no new work. L2 retains real current
+  // pauses, absent-pin reading/refusal and isolated sampling/unit-contract drift before any state or span changes.
 
-      // A /1 range Task authorized but never dispatched before the release changes the contract.
-      const stale = prepare(store, bookId, { mode: 'reanalyze-range', selectedRange: null, selectedBlocks: { fromBlockId: manifest.units[0]!.blockIds[1]!, toBlockId: manifest.units[0]!.blockIds[1]! } });
-      staleRunRecordId = store.authorizeBaselineAnalysis(bookId, stale.taskIntent!.taskIntentId, stale.planEnvelope!.digest).dispatchRunRecordId!;
-      await owner.dispose();
-    } finally {
-      store.close();
-    }
-
-    // --- The /2 launch over the same data: nothing about the /1 revision is refused, and its facts read as they were.
-    store = await open(HISTORICAL_ROUTE);
-    try {
-      expect(store.baselineAnalysisLedger.definition.promptContractDigest).toBe(BASELINE_PROMPT_CONTRACT_DIGEST);
-      const reopened = store.inspectBaselineAnalysis(bookId);
-      expect(reopened.resultSetRevision).toMatchObject({
-        revisionId: revision1.revisionId, digest: revision1.digest, bindingPin: revision1.bindingPin, coverage: revision1.coverage,
-      });
-      expect(reopened.resultSetRevision!.units.map((unit) => unit.state)).toEqual(revision1.units.map((unit) => unit.state));
-      // The baseline kind recomputes rather than leaving units unreviewed, so no unread-changes walk reads its contracts.
-      expect(store.baselineAnalysisLedger.unreadChanges(bookId)).toMatchObject({ units: 0, cut: null });
-
-      const v2Fixture = syntheticFixture(manifest, BASELINE_PROMPT_CONTRACT_DIGEST, new Set());
-      const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture: v2Fixture, secretResolver: fakeSecretResolver() });
-      // The Run /1 froze is not carried by a launch asking /2: its composition drifted, and nothing is sent.
-      owner.admitAndDispatch(staleRunRecordId);
-      await owner.whenIdle();
-      const refused = store.inspectBaselineAnalysis(bookId, (runRecordId) => owner.progressFor(runRecordId));
-      expect(refused.run?.state).toBe('failed');
-      expect(JSON.stringify(refused.run)).toContain('EXECUTION_COMPOSITION_DRIFT');
-      expect(refused.run?.attempt?.spans ?? []).toEqual([]);
-
-      // 重新分析所选范围 over one interior block of unit 1: the range closure, read under /2; every other unit reused.
-      const interior = manifest.units[0]!.blockIds[1]!;
-      const prepared = prepare(store, bookId, { mode: 'reanalyze-range', selectedRange: null, selectedBlocks: { fromBlockId: interior, toBlockId: interior } });
-      expect(prepared.planEnvelope?.promptContractDigest).toBe(BASELINE_PROMPT_CONTRACT_DIGEST);
-      expect(prepared.executionPlan).toMatchObject({ assurancePromptContractDigest: ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST });
-      expect(prepared.update?.predecessor?.revisionId).toBe(revision1.revisionId);
-      const plan = prepared.update!.reusePlan!;
-      const recomputed = plan.units.filter((unit) => unit.disposition === 'recomputed').map((unit) => unit.unitOrdinal);
-      const reused = plan.units.filter((unit) => unit.disposition === 'reused');
-      // Unit 2 reads unit 1's last block as its overlap, so the closure of a unit-1 block is units 1 and 2 (#826 Commander).
-      expect(recomputed).toEqual([1, 2]);
-      expect(plan.counts).toEqual({ reused: 6, recomputed: 2, invalidated: 1, bypassed: 1 });
-      expect(reused.every((unit) => unit.reusedFrom?.revisionId === revision1.revisionId)).toBe(true);
-      expect(reused.length + recomputed.length).toBe(SAMPLE1_UNITS);
-
-      const settled = await authorizeAndSettle(store, owner, bookId, prepared);
-      const revision2 = settled.resultSetRevision!;
-      expect(revision2.revisionId).not.toBe(revision1.revisionId);
-      expect(settled.run?.attempt?.executionBinding?.promptContractDigest).toBe(BASELINE_PROMPT_CONTRACT_DIGEST);
-      // Only the closure was asked, and under /2: the fixture answers /2's request digests alone.
-      expect(settled.run?.attempt?.spans.map((span) => span.unitOrdinal)).toEqual(recomputed);
-      expect(revision2.units.map((unit) => unit.state)).toEqual(Array.from({ length: SAMPLE1_UNITS }, () => 'closed'));
-      expect(revision2.coverage).toMatchObject({ unitsTotal: SAMPLE1_UNITS, unitsClosed: SAMPLE1_UNITS, gapCount: 0 });
-      await owner.dispose();
-    } finally {
-      store.close();
-    }
-  });
 });
 
 describe('the sampling contract a baseline plan froze (Issue #826 stage pin)', () => {
   it('refuses stopped-run continuation when only the sampling contract changes, before recording a state or span', async () => {
     await requireExactSample1(roots.codeRoot);
-    const store = await open(HISTORICAL_ROUTE);
+    const store = await open(currentRoute);
     const ledger = store.baselineAnalysisLedger;
     let owner: BaselineAnalysisExecutionOwner | undefined;
     const definition = ledger.definition;
     const binding = vi.spyOn(ledger, 'definition', 'get');
     try {
       const bookId = await newBook(store, 'L2 sample1 仅抽样契约变化', true);
-      const runRecordId = await pausedRun(store, bookId, BASELINE_PROMPT_CONTRACT_DIGEST);
+      const runRecordId = await pausedCurrentRun(store, bookId);
       const stopped = store.inspectBaselineAnalysis(bookId);
       const facts = ledger.loadExecutionPlan(runRecordId);
       const recordedBinding = ledger.executionBindingOf(runRecordId);
@@ -356,7 +234,7 @@ describe('the sampling contract a baseline plan froze (Issue #826 stage pin)', (
       expect(facts.assurancePromptContractDigest).toBe(ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST);
       owner = new BaselineAnalysisExecutionOwner({
         requestGovernor,
-        ledger, launchPolicy, fixture: syntheticFixture(facts.manifest, BASELINE_PROMPT_CONTRACT_DIGEST, new Set()),
+        ledger, launchPolicy, fixture: currentFixture,
         secretResolver: fakeSecretResolver(),
       });
       expect(owner.carriesStoppedRun(runRecordId)).toBe(true);
@@ -388,7 +266,7 @@ describe('the sampling contract a baseline plan froze (Issue #826 stage pin)', (
 
   it('pins sampling /2 on a current plan, reuses it unchanged, and replaces or refuses a plan frozen without the pin', async () => {
     await requireExactSample1(roots.codeRoot);
-    let store = await open(HISTORICAL_ROUTE);
+    let store = await open(currentRoute);
     let stale: { bookId: string; taskIntentId: string };
     let authorized: { bookId: string; taskIntentId: string; manifest: CoverageManifestProjection };
     try {
@@ -409,10 +287,10 @@ describe('the sampling contract a baseline plan froze (Issue #826 stage pin)', (
     rewriteToPrePinPlan(stale.taskIntentId);
     rewriteToPrePinPlan(authorized.taskIntentId);
 
-    store = await open(HISTORICAL_ROUTE);
+    store = await open(currentRoute);
     const owner = new BaselineAnalysisExecutionOwner({
       requestGovernor,
-      ledger: store.baselineAnalysisLedger, launchPolicy, fixture: syntheticFixture(authorized.manifest, BASELINE_PROMPT_CONTRACT_DIGEST, new Set()),
+      ledger: store.baselineAnalysisLedger, launchPolicy, fixture: currentFixture,
       secretResolver: fakeSecretResolver(),
     });
     try {
@@ -444,43 +322,35 @@ describe('the sampling contract a baseline plan froze (Issue #826 stage pin)', (
     }
   });
 
-  it('carries a stopped Run whose plan still names the bound sampling contract, and no stopped Run across a change', async () => {
+  it('carries a genuine current /2 paused Run after reopen and refuses a changed unit contract before writes', async () => {
     await requireExactSample1(roots.codeRoot);
-    // A /1 Run paused under the retained contracts: baseline /1 and sampling /1, no pin recorded.
-    let store = await open(HISTORICAL_ROUTE, 'retained-v1');
-    let retainedRun: string;
-    try {
-      retainedRun = await pausedRun(store, await newBook(store, 'L2 sample1 停下的 /1 运行', true), BASELINE_PROMPT_CONTRACT_V1_DIGEST);
-    } finally {
-      store.close();
-    }
-    // A current Run paused under baseline /2 and sampling /2, pinned.
-    store = await open(HISTORICAL_ROUTE);
+    let store = await open(currentRoute);
     let currentRun: string;
-    let manifest: CoverageManifestProjection;
-    try {
-      const bookId = await newBook(store, 'L2 sample1 停下的 /2 运行', false);
-      currentRun = await pausedRun(store, bookId, BASELINE_PROMPT_CONTRACT_DIGEST);
-      manifest = store.inspectBaselineAnalysis(bookId).coverageManifest!;
-    } finally {
-      store.close();
-    }
-    store = await open(HISTORICAL_ROUTE);
-    const owner = new BaselineAnalysisExecutionOwner({
-      requestGovernor,
-      ledger: store.baselineAnalysisLedger, launchPolicy, fixture: syntheticFixture(manifest, BASELINE_PROMPT_CONTRACT_DIGEST, new Set()),
-      secretResolver: fakeSecretResolver(),
-    });
+    let bookId: string;
+    try { bookId = await newBook(store, 'L2 sample1 停下的 /2 运行', true); currentRun = await pausedCurrentRun(store, bookId); }
+    finally { store.close(); }
+    store = await open(currentRoute);
+    const ledger = store.baselineAnalysisLedger;
+    const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger, launchPolicy, fixture: currentFixture,
+      secretResolver: fakeSecretResolver() });
+    const selected = ledger.definition;
+    const definition = vi.spyOn(ledger, 'definition', 'get');
     try {
       expect(owner.carriesStoppedRun(currentRun)).toBe(true);
-      expect(owner.carriesStoppedRun(retainedRun)).toBe(false);
-      const facts = store.baselineAnalysisLedger.loadExecutionPlan(retainedRun);
-      expect(facts.assurancePromptContractDigest).toBe(ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST);
-      expect(assuranceContractMoved(store.baselineAnalysisLedger.definition, facts.assurancePromptContractDigest)).toBe(true);
-      expect(store.baselineAnalysisLedger.loadExecutionPlan(currentRun).assurancePromptContractDigest).toBe(ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST);
-    } finally {
-      await owner.dispose();
-      store.close();
-    }
+      const facts = ledger.loadExecutionPlan(currentRun);
+      const before = store.inspectBaselineAnalysis(bookId).run;
+      expect(facts.promptContractDigest).toBe(BASELINE_PROMPT_CONTRACT_DIGEST);
+      expect(facts.assurancePromptContractDigest).toBe(ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST);
+      expect(assuranceContractMoved(selected, facts.assurancePromptContractDigest)).toBe(false);
+      expect(before!.attempt!.spans.map((span) => span.unitOrdinal)).toEqual([1, 2, 3]);
+      // A mismatched selected unit-contract digest is a negative guard stimulus, never an invented /1 receipt.
+      definition.mockReturnValue({ ...selected, promptContractDigest: BASELINE_PROMPT_CONTRACT_V1_DIGEST });
+      expect(owner.carriesStoppedRun(currentRun)).toBe(false);
+      expect(() => owner.admitAndDispatch(currentRun, ledger, { resume: true })).toThrowError(expect.objectContaining({ code: 'EXECUTION_RESUME_BINDING_DRIFT' }));
+      expect(ledger.loadExecutionPlan(currentRun)).toEqual(facts);
+      expect(store.inspectBaselineAnalysis(bookId).run).toEqual(before);
+      definition.mockRestore(); expect(owner.carriesStoppedRun(currentRun)).toBe(true);
+    } finally { definition.mockRestore(); await owner.dispose(); store.close(); }
   });
+
 });

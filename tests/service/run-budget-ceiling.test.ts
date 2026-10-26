@@ -1,5 +1,6 @@
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
-import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { capturedMapAnswer, capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
+import { writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -15,7 +16,7 @@ import { ASSURANCE_SAMPLING_REMOVED } from '../../src/service/analysis/plan-edit
 import { RUN_REPORT_REVISION_USAGE_STAGES, runReportUsageReconciles } from '../../src/service/analysis/run-report.js';
 import { SET_RULE_BUDGET } from '../../src/service/default-execution-rules.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
-import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
+import { fixtureEntryKey, loadModelFixture, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { controlledUnitHold } from '../../src/service/unit-hold.js';
 import {
@@ -87,32 +88,15 @@ function owner(store: EditorialStore, route: ResolvedModelFixture = fixture): Ba
   });
 }
 
-/**
- * The transient-retry fixture with a second question: Analysis Unit 3 answers its first attempt with the same transient
- * error Analysis Unit 5 does, so a Run under 先问你 asks about both. It is written beside this case's Agent Data Root over
- * copies of the committed chain it is based on, for this case alone; nothing is admitted or committed.
- */
-async function twoQuestionsFixture(): Promise<ResolvedModelFixture> {
-  const root = join(roots.dataRoot, '..', 'model-fixtures');
-  mkdirSync(root, { recursive: true });
-  for (const identity of ['sample1-baseline-happy', 'sample1-baseline-one-unit-failure', 'sample1-baseline-transient-retry']) {
-    copyFileSync(join(FIXTURES_ROOT, `${identity}.json`), join(root, `${identity}.json`));
-  }
-  type Entry = { unitOrdinal: number; requestDigest: string; attempt?: number; response: unknown };
-  const read = (identity: string) => JSON.parse(readFileSync(join(FIXTURES_ROOT, `${identity}.json`), 'utf8')) as Record<string, unknown> & { entries: Entry[] };
-  const transient = read('sample1-baseline-transient-retry');
-  const failing = transient.entries.find((entry) => entry.unitOrdinal === 5 && entry.attempt === 1)!;
-  const unit3 = read('sample1-baseline-happy').entries.find((entry) => entry.unitOrdinal === 3)!;
-  writeFileSync(join(root, 'sample1-baseline-two-questions.json'), JSON.stringify({
-    schema: transient.schema,
-    identity: 'sample1-baseline-two-questions',
-    description: 'L2-only variant of sample1-baseline-transient-retry: Analysis Unit 3 fails its first attempt as unit 5 does.',
-    basedOn: 'sample1-baseline-transient-retry',
-    provider: transient.provider,
-    model: transient.model,
-    entries: [{ unitOrdinal: 3, requestDigest: unit3.requestDigest, attempt: 1, response: failing.response }],
-  }));
-  return loadModelFixture(root, 'sample1-baseline-two-questions');
+/** Controlled ordinary response bytes: two real retry-safe failures, without another admitted fixture identity. */
+async function twoQuestionsSchedule(): Promise<Map<string, ModelFixtureEntry>> {
+  const transient = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-transient-retry');
+  const entries = new Map(transient.entries);
+  const failure = [...entries.values()].find((entry) => entry.unitOrdinal === 5 && entry.attempt === 1)!;
+  const unit3 = [...entries.values()].find((entry) => entry.unitOrdinal === 3)!;
+  const entry = { ...unit3, attempt: 1, response: failure.response };
+  entries.set(fixtureEntryKey(3, entry.requestDigest, 1), entry);
+  return entries;
 }
 
 function prepare(store: EditorialStore, bookId: string, update: BaselineAnalysisUpdateRequest | null = null, redoOf: string | null = null): BaselineAnalysisProjection {
@@ -412,15 +396,27 @@ describe('the editor\'s Run Budget Ceiling over the real store', () => {
   }, 300_000);
 
   it('applies every answer at a spent ceiling though a pause came, a 不重试 first and a 再试一次 after it, each in its own words', async () => {
-    const twoQuestions = await twoQuestionsFixture();
-    const store = await openWithRoute(twoQuestions);
-    const execution = owner(store, twoQuestions);
+    const entries = await twoQuestionsSchedule();
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { baselineAnalysisRoute: null,
+      induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
+      induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false });
+    const captured = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, requestGovernor, capturedMapAnswer(entries),
+      { unitHold: controlledUnitHold(holdPath, { pollMs: 5 }) });
+    launchPolicy = captured.policy;
+    const execution = captured.owner;
     try {
       const bookId = await importedBook(store, 'L2 sample1 预算、两处答复与暂停');
       const prepared = prepare(store, bookId);
       const taskIntentId = prepared.taskIntent!.taskIntentId;
-      // Units 3 and 5 each fail once on a transient error and ask. Units 1, 2 (a gap), 4 and 6 spend 5,060; unit 7 brings
-      // it to 6,720, past a 6,000 ceiling.
+      for (const entry of [...entries.values()]) {
+        if (entry.unitOrdinal === 0) continue;
+        const unit = prepared.coverageManifest!.units.find((unit) => unit.ordinal === entry.unitOrdinal)!;
+        const digest = store.baselineAnalysisLedger.definition.requestDigest(unit.ordinal, unit.digest);
+        const next = { ...entry, requestDigest: digest };
+        entries.set(fixtureEntryKey(unit.ordinal, digest, entry.attempt ?? undefined), next);
+      }
+      // Units 3 and 5 fail once and ask. Successful turns spend 6,720 through unit 7; the real HTTP adapter also
+      // accounts 32 fallback tokens for the failed physical requests, unlike the former local adapter's zero usage.
       const edited = store.editBaselineAnalysisPlan({
         bookId, taskIntentId, planEnvelopeDigest: prepared.planEnvelope!.digest, removedSteps: [], disallowedAdaptations: [],
         askFirstAdaptations: ['safe-retry'], runBudgetCeiling: tokens(6000),
@@ -429,7 +425,8 @@ describe('the editor\'s Run Budget Ceiling over the real store', () => {
       // Four units settle — 1, 2, 4 and 6 — while units 3 and 5 wait for their answers; unit 7 is held in flight.
       writeFileSync(holdPath, '4');
       execution.admitAndDispatch(runRecordId);
-      await until(() => execution.progressFor(runRecordId)?.currentUnitOrdinal === 7, 'unit 7 in flight');
+      // Ordinary composition exposes per-unit technical Sessions; observe the actual admitted transport request.
+      await until(() => captured.requests.some((request) => request.stage === 'units' && request.unitOrdinal === 7), 'unit 7 in flight');
       const cards = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId }, (id) => execution.progressFor(id)).clarifications;
       const cardOf = (unitOrdinal: number) => cards.find((card) => card.unitOrdinal === unitOrdinal)!;
       expect(cards.map((card) => card.unitOrdinal).sort()).toEqual([3, 5]);
@@ -444,7 +441,9 @@ describe('the editor\'s Run Budget Ceiling over the real store', () => {
       // editor chose — the 不重试 as its gap, the 再试一次 kept back in the ceiling's words — and the Run ends there.
       const stopped = store.inspectBaselineAnalysis(bookId, () => null);
       expect(stopped.run?.state).toBe('interrupted');
-      expect(stopped.taskOutcome?.stop).toMatchObject({ reason: 'run-budget-ceiling-reached', maxTotalTokens: 6000, usedTokens: 6720 });
+      expect(stopped.taskOutcome?.stop).toMatchObject({ reason: 'run-budget-ceiling-reached', maxTotalTokens: 6000, usedTokens: 6720 + 32 });
+      expect(captured.requests.filter((request) => request.stage === 'units' && request.unitOrdinal === 3)).toHaveLength(1);
+      expect(captured.requests.filter((request) => request.stage === 'units' && request.unitOrdinal === 5)).toHaveLength(1);
       const gaps = stopped.resultSetRevision!.gaps;
       expect(gaps.find((entry) => entry.unitOrdinal === 3)?.reason).toContain(CLARIFICATION_RECORD_GAP);
       expect(gaps.find((entry) => entry.unitOrdinal === 5)?.reason).toContain(SAFE_RETRY_BUDGET_REACHED);
@@ -452,7 +451,7 @@ describe('the editor\'s Run Budget Ceiling over the real store', () => {
       store.markCleanShutdown();
     } finally {
       await execution.dispose();
-      store.close();
+      try { captured.assertMatched(); } finally { store.close(); }
     }
   }, 300_000);
 

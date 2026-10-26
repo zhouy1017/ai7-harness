@@ -1836,8 +1836,8 @@ function parseArguments(argv: string[]): {
           process.env.AI7_E2E_JOURNEY !== 'J-07'))) ||
     (connectivityPath !== undefined && (process.env.AI7_E2E_JOURNEY !== 'J-04' || !isAbsolute(connectivityPath))) ||
     // J-11 keeps a Run under way while ②A's follower is held (#641); J-13 holds a 书系一致性 Run while a Series Retrieval
-    // Exclusion is recorded (Issue #64, S29b).
-    (unitHoldPath !== undefined && ((process.env.AI7_E2E_JOURNEY !== 'J-09' && process.env.AI7_E2E_JOURNEY !== 'J-10' &&
+    // Exclusion is recorded (Issue #64, S29b). J-04 holds its genuine retained-/1 Run before pausing (#1161).
+    (unitHoldPath !== undefined && ((process.env.AI7_E2E_JOURNEY !== 'J-04' && process.env.AI7_E2E_JOURNEY !== 'J-09' && process.env.AI7_E2E_JOURNEY !== 'J-10' &&
       process.env.AI7_E2E_JOURNEY !== 'J-11' && process.env.AI7_E2E_JOURNEY !== 'J-13' && process.env.AI7_E2E_JOURNEY !== 'J-16') ||
       !isAbsolute(unitHoldPath))) ||
     (answerHoldPath !== undefined && (process.env.AI7_E2E_JOURNEY !== 'J-16' || !isAbsolute(answerHoldPath))) ||

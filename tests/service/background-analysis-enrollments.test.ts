@@ -532,6 +532,8 @@ describe('后台处理登记 over the real store on exact sample1', () => {
   }, 300_000);
 
   it('a background step that fails leaves nothing behind: the editor\'s 先看计划, 重新导入, J-03 and 审阅 all work after (P1-1)', async () => {
+    // Its unchanged admitted chain serves both the initial baseline and the later review preparation.
+    fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-authored');
     const store = await openWithRoute();
     const owner = ownerOf(store);
     try {

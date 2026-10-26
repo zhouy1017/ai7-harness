@@ -464,10 +464,10 @@ function parseArguments(argv: string[]): LaunchArguments {
   // J-10's unit hold (Issue #422) is guarded the same way — J-10's own, J-16's to hold a Run in its 任务 panel (Issue
   // #423), J-09's to hold several Books' Runs at once (Issue #49), J-11's to keep a Run under way while ②A's follower is held
   // (#641), and J-13's to hold a 书系一致性 Run while an exclusion is recorded (Issue #64, S29b), and absolute — and sits
-  // beside the adapter.
+  // beside the adapter. J-04 uses the same hold for its genuine retained-/1 pause and continuation refusal (#1161).
   const unitHoldPath = values.get('--j10-unit-hold-path');
   requireDesktop(unitHoldPath === undefined ||
-    ((process.env.AI7_E2E_JOURNEY === 'J-09' || process.env.AI7_E2E_JOURNEY === 'J-10' || process.env.AI7_E2E_JOURNEY === 'J-11' ||
+    ((process.env.AI7_E2E_JOURNEY === 'J-04' || process.env.AI7_E2E_JOURNEY === 'J-09' || process.env.AI7_E2E_JOURNEY === 'J-10' || process.env.AI7_E2E_JOURNEY === 'J-11' ||
       process.env.AI7_E2E_JOURNEY === 'J-13' || process.env.AI7_E2E_JOURNEY === 'J-16') && isAbsolute(unitHoldPath)));
   // J-16's answer hold (Issue #52, S17a): J-16's own, absolute, beside the adapter — it holds a dialogue answer mid-stream.
   const answerHoldPath = values.get('--j16-answer-hold-path');

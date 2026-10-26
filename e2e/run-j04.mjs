@@ -3,6 +3,7 @@ import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } fro
 import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createServer } from 'node:http';
+import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, SIDEBAR_ICONS_ONLY, runJ14DarkPass } from './controller.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
@@ -362,6 +363,20 @@ async function readBaseline(renderer, revisionId = null) {
   }
   return projection;
 }
+
+/** Read-only custody evidence for a real paused Run; no public projection exposes individual in-progress checkpoints. */
+function pausedCheckpointRows(dataRoot, runRecordId) {
+  const database = new DatabaseSync(resolve(dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+  try {
+    const rows = database.prepare('SELECT unit_ordinal, canonical_json, sha256 FROM analysis_unit_checkpoints WHERE run_record_id = ? ORDER BY unit_ordinal').all(runRecordId);
+    requireJourney(rows.every((row) => sha256Hex(row.canonical_json) === row.sha256), 'recorded-paused-checkpoint-digests');
+    return rows;
+  } finally { database.close(); }
+}
+
+const pausedHistoricalFacts = (projection) => ({ run: projection.run, taskIntent: projection.taskIntent,
+  checkpoint: projection.checkpoint, planEnvelope: projection.planEnvelope, executionPlan: projection.executionPlan,
+  history: projection.history, resultSetRevision: projection.resultSetRevision, taskOutcome: projection.taskOutcome });
 
 async function assertRenderer(renderer, expression, name) {
   requireJourney(await renderer.evaluate(`Promise.resolve(${expression}).then((value)=>Boolean(value))`), name);
@@ -865,6 +880,7 @@ async function main() {
   let runRootAcquisition;
   let tempParent;
   let dataRoot;
+  let unitHoldPath;
   let launchForCleanup;
   let electronExecutableForCleanup;
   let credentialMutationReached = false;
@@ -951,6 +967,9 @@ async function main() {
     return true;
   };
   const cleanup = () => (cleanupPromise ??= (async () => {
+    if (unitHoldPath !== undefined) {
+      try { await writeFile(unitHoldPath, 'release'); } catch (error) { cleanupFailure ??= error; }
+    }
     if (browserCloseRejected) throw cleanupFailure ?? journeyCheckFailure('J-04', 'browser-cleanup-failed');
     if (credentialMutationReached && !credentialRemoved) {
       try {
@@ -1053,6 +1072,8 @@ async function main() {
     // the deterministic route as one that reaches its model over the network. Absent, the reading is online, so
     // every stage before Connectivity Wait's reads exactly as it always has.
     const connectivityPath = resolve(runRoot, 'connectivity');
+    unitHoldPath = resolve(runRoot, 'retained-v1-unit-hold');
+    await writeFile(unitHoldPath, 'release');
     // Issue #500 (S64b part 2): the Save dialog's one answer per launch, for the 审阅报告's export, in a folder beside
     // the data and outside it. No other stage opens the dialog, so every launch may carry it.
     const exportsRoot = resolve(runRoot, 'exports');
@@ -1063,10 +1084,12 @@ async function main() {
       '--disable-sync', '--metrics-recording-only', '--no-first-run', '--remote-debugging-pipe', `--user-data-dir=${shellRoot}`,
       resolve(ROOT, 'dist', 'main', 'index.cjs'), '--data-root', dataRoot, '--launcher-pid', String(process.pid),
       '--j04-picker-path', SAMPLE1_PATH, '--j04-model-adapter', modelAdapterIdentity, '--j04-connectivity-path', connectivityPath,
-      '--j04-save-path', reportExportPath,
+      '--j04-save-path', reportExportPath, '--j10-unit-hold-path', unitHoldPath,
     ];
     requireJourney(!launchArgs().some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
     launchForCleanup = async (forCleanup = false) => {
+      // Every ordinary/cleanup relaunch starts released, including after cancellation of the paused subcase.
+      await writeFile(unitHoldPath, 'release');
       if (!forCleanup) cancellation.throwIfRequested();
       const acquisition = chromium.launch({
         executablePath: executable,
@@ -3588,6 +3611,54 @@ async function main() {
     requireJourney(JSON.stringify(recordedReopened) === JSON.stringify(recorded) && loopback.healthy() && loopback.observedRequests() === 0,
       'recorded-restart-preserves-result-and-report');
 
+    // #1161 rev6: a separate, unedited sample1 Book owns the genuine paused-/1 execution formerly simulated in L2.
+    // Keep the completed recorded Book above intact. This replay truthfully keeps unit1's schema gap and units2/3 closed.
+    at('recorded-retained-pause');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'recorded-paused-return-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'recorded-paused-library');
+    const recordedPausedBook = await importSample1(renderer, cancellation, true);
+    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'recorded-paused-artifact-ready');
+    await click(renderer, '审阅并为本图书启用 Revision 2', 'recorded-paused-artifact-enable');
+    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'recorded-paused-artifact-enabled');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'recorded-paused-open-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'recorded-paused-open-ready');
+    await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(recordedPausedBook.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'recorded-paused-open-book');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(recordedPausedBook.bookId)}]')`, 'recorded-paused-manuscript');
+    await openAnalysisDestination(renderer, 'recorded-paused-analysis');
+    await reviewAction(renderer, '[data-analysis-action="prepare"]', 'recorded-paused-prepare');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, 'recorded-paused-prepared', 120_000);
+    const recordedPausedPrepared = await readBaseline(renderer);
+    requireJourney(recordedPausedPrepared.bookId !== recordedBook.bookId && recordedPausedPrepared.checkpoint?.journalSequence === 0 &&
+      recordedPausedPrepared.planEnvelope?.promptContractDigest === RECORDED_PROMPT_CONTRACT_DIGEST &&
+      recordedPausedPrepared.executionPlan !== null && !('assurancePromptContractDigest' in recordedPausedPrepared.executionPlan),
+    'recorded-paused-absent-sampling-pin');
+    let recordedPaused;
+    let recordedPausedCheckpoints;
+    try {
+      await writeFile(unitHoldPath, '2');
+      await startFromBar(renderer, 'recorded-paused-start');
+      await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.run?.state==='executing' && analysis.run.progress?.unitsSettled===2 && analysis.run.progress.currentUnitOrdinal===3)`, 'recorded-paused-third-in-flight', 180_000);
+      const inFlight = await readBaseline(renderer);
+      await reviewAction(renderer, '#task-drawer [data-task-drawer-control="pause"]', 'recorded-paused-pause');
+      await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.run?.state==='pausing' && analysis.run.runRecordId===${JSON.stringify(inFlight.run.runRecordId)})`, 'recorded-paused-pausing');
+      // Release the in-flight unit before awaiting paused; otherwise this would wait for the bounded hold timeout.
+      await writeFile(unitHoldPath, '3');
+      await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.run?.state==='paused')`, 'recorded-paused-settled');
+      recordedPaused = await readBaseline(renderer);
+      recordedPausedCheckpoints = pausedCheckpointRows(dataRoot, recordedPaused.run.runRecordId);
+      const kept = recordedPausedCheckpoints.map((row) => JSON.parse(row.canonical_json).unit);
+      requireJourney(recordedPaused.run.runRecordId === inFlight.run.runRecordId &&
+        recordedPaused.run.attempt?.executionBinding?.promptContractDigest === RECORDED_PROMPT_CONTRACT_DIGEST &&
+        recordedPaused.run.attempt.executionBinding.fixtureIdentity === RECORDED_FIXTURE_IDENTITY &&
+        recordedPaused.run.attempt.executionBinding.fixtureSha256 === recordedFixtureDigest &&
+        sameRecord(recordedPaused.run.attempt.spans.map((span) => span.unitOrdinal), [1, 2, 3]) &&
+        sameRecord(kept.map((unit) => unit.unitOrdinal), [1, 2, 3]) &&
+        kept[0].closed.state === 'gap' && kept[0].closed.gap.code === 'contract-invalid' &&
+        kept[0].closed.gap.reason.includes('schema-invalid') && kept.slice(1).every((unit) => unit.closed.state === 'closed') &&
+        recordedPaused.resultSetRevision === null && recordedPaused.taskOutcome === null,
+      'recorded-paused-authentic-retained-checkpoints');
+    } finally { await writeFile(unitHoldPath, 'release'); }
+
     // Issue #826: the same Book under the current contracts. 重新分析所选范围 over unit 1 recomputes its closure, units 1
     // and 2 (unit 2 reads unit 1's last block as overlap), and reuses the other six /1 results by lineage. The six entries
     // replayed are the reviewed real captures of that recomputation — units 1 and 2 and the reduction from the first
@@ -3614,6 +3685,32 @@ async function main() {
         entry.capture.taskPromptContractDigest === PROMPT_CONTRACT_DIGEST) &&
       rangeFixture.entries.filter((entry) => entry.capture.subject === 'sampling').every((entry) => entry.capture.promptContractDigest === SAMPLING_CONTRACT_DIGEST),
     'range-recorded-source-provenance');
+
+    // This actual /1 -> /2 relaunch also changes fixture/composition. It proves historical incompatibility;
+    // L2 separately isolates sampling-only causality with every persisted field fixed.
+    await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(recordedPausedBook.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'recorded-paused-current-open');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(recordedPausedBook.bookId)}]')`, 'recorded-paused-current-manuscript');
+    await openAnalysisDestination(renderer, 'recorded-paused-current-analysis');
+    const pausedUnderCurrent = await readBaseline(renderer);
+    requireJourney(sameRecord(pausedHistoricalFacts(pausedUnderCurrent), pausedHistoricalFacts(recordedPaused)) &&
+      sameRecord(pausedCheckpointRows(dataRoot, recordedPaused.run.runRecordId), recordedPausedCheckpoints),
+    'recorded-paused-current-immutable-history');
+    await reviewAction(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', 'recorded-paused-current-plan');
+    const pausedPlan = await renderer.evaluate(`window.ai7.inspectTaskPlan(${JSON.stringify({ kind: 'baseline-analysis', ref: recordedPaused.taskIntent.taskIntentId })})`);
+    requireJourney(pausedPlan.runControl?.runRecordId === recordedPaused.run.runRecordId &&
+      typeof pausedPlan.runControl.resume?.reason === 'string' && pausedPlan.runControl.resume.reason.length > 0,
+    'recorded-paused-current-blocker');
+    await assertRenderer(renderer, `(() => { const button=document.querySelector('#task-drawer [data-task-drawer-control="resume"]'); return button instanceof HTMLButtonElement && button.disabled; })()`, 'recorded-paused-current-resume-disabled');
+    const refusedResume = await renderer.evaluate(`(async()=>{try{await window.ai7.resumeBaselineAnalysisRun(${JSON.stringify({ taskIntentId: recordedPaused.taskIntent.taskIntentId })});return null;}catch(error){return {code:error.code,message:error.message};}})()`);
+    requireJourney(refusedResume?.code === 'ANALYSIS_RESUME_BLOCKED' && refusedResume.message.length > 0,
+      'recorded-paused-current-resume-refused');
+    const pausedAfterRefusal = await readBaseline(renderer);
+    requireJourney(sameRecord(pausedHistoricalFacts(pausedAfterRefusal), pausedHistoricalFacts(recordedPaused)) &&
+      sameRecord(pausedCheckpointRows(dataRoot, recordedPaused.run.runRecordId), recordedPausedCheckpoints) &&
+      loopback.healthy() && loopback.observedRequests() === 0,
+    'recorded-paused-refusal-no-new-work');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'recorded-paused-current-return-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'recorded-paused-current-library');
     await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(recordedBook.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'range-recorded-open-book');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(recordedBook.bookId)}]')`, 'range-recorded-manuscript');
     await openAnalysisDestination(renderer, 'range-recorded-analysis');
