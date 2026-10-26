@@ -881,7 +881,8 @@ describe('只导入其中的图书 over the store', () => {
     let work = source.createFactualReviewPreparationWork(book.bookId, FACTUAL_REVIEW_TASK_GOAL, policy);
     while (!work.done) work = source.advanceFactualReviewPreparationWork(work.workId!);
     const original = work.projection!.providerResolutionPlan!;
-    expect(original.localFixtureProfile).toMatchObject({ kind: 'legacy', registeredProfile: 'factual', policyVersion: 'v29' });
+    expect(original.selectedPolicyIdentity).toEqual(policy.selectedPolicyIdentity);
+    expect(original.localFixtureProfile).toBeUndefined();
     const sourceRows = learningRows(roots.dataRoot, 'analysis_plan_records');
     const packagePath = await exportedFrom(source, 'selected-policy-merge.ai7db');
     source.close();

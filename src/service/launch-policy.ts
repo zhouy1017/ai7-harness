@@ -14,7 +14,7 @@ import {
 import { modelProfileFor } from './provider/model-profile.js';
 import type { RemoteExecutionRoute } from './provider/egress-gate.js';
 import { SEARCH_BACKENDS } from './provider/search-backends.js';
-import { CURRENT_ACTIVE_SET_SHA256, DEVELOPMENT_CI_POLICY_SHA256, ORIGINAL_FIELDS_ACTIVE_SET_SHA256, ORIGINAL_FIELDS_POLICY_SHA256, LOCAL_FIXTURE_POLICY_SHA256, LOCAL_FIXTURE_MANIFEST_SHA256,
+import { CURRENT_PRODUCTION_POLICY_SHA256, CURRENT_ACTIVE_SET_SHA256, DEVELOPMENT_CI_POLICY_SHA256, ORIGINAL_FIELDS_ACTIVE_SET_SHA256, ORIGINAL_FIELDS_POLICY_SHA256, LOCAL_FIXTURE_POLICY_SHA256, LOCAL_FIXTURE_MANIFEST_SHA256,
   selectedPolicyIdentityOf, localFixtureProfileOf } from '../shared/protocol.js';
 export { ORIGINAL_FIELDS_ACTIVE_SET_SHA256, ORIGINAL_FIELDS_POLICY_SHA256, LOCAL_FIXTURE_POLICY_SHA256, LOCAL_FIXTURE_MANIFEST_SHA256,
   isSupportedProviderProcessingVersion, selectedPolicyIdentityOf, localFixtureProfileOf, LOCAL_FIXTURE_RULE_IDS } from '../shared/protocol.js';
@@ -27,7 +27,7 @@ import { canonicalJson } from './analysis/canonical.js';
  * Provider Processing v1 (zero live transmissions); `developer-live` is bound only by the launch
  * argument `--trusted-operational-scope developer-live` on a developer host and binds the immutable
  * Provider Processing v24; `ordinary-production` is bound only by `--trusted-operational-scope ordinary-production`
- * and binds v30, whose rules are filled from the editor's own configured provider binding. `fixture-recording`
+ * and binds v31, whose rules are filled from the editor's own configured provider binding. `fixture-recording`
  * is pinned by the active set but is not selectable from the source checkout. No environment variable or product
  * setting selects a scope; every invalid state resolves to the zero-transmission denial.
  */
@@ -48,9 +48,9 @@ const PROVIDER_PINS = {
     sha256: 'd0e3996ce7ba091200d83178b48fb578090bf73b509406182a2d5403ab2a4ebc',
   },
   'ordinary-production': {
-    version: 'v30',
-    canonicalPath: 'docs/policies/provider-processing-policy.v30.json',
-    sha256: ORIGINAL_FIELDS_POLICY_SHA256,
+    version: 'v31',
+    canonicalPath: 'docs/policies/provider-processing-policy.v31.json',
+    sha256: CURRENT_PRODUCTION_POLICY_SHA256,
   },
   'developer-live': {
     version: 'v24',
@@ -1745,7 +1745,9 @@ function readWave21Eligibility(policy: Record<string, unknown>): Record<string, 
 
 /** Read the pinned successor directly; no predecessor document is synthesized or restamped. */
 function projectOriginalFieldPolicy(policy: Record<string, unknown>): OrdinaryProductionPolicyReading {
-  requirePolicy(digest(Buffer.from(canonicalJson(policy))) === '146677f260a885ea5b6f1f5839b3574683d45d1224ebaa0ecd50509876fa47f3');
+  requirePolicy(digest(Buffer.from(canonicalJson(policy))) === (policy['version'] === 'v30'
+    ? '146677f260a885ea5b6f1f5839b3574683d45d1224ebaa0ecd50509876fa47f3'
+    : 'ffe7a210dfe52c22810f8bcd07db8dc4335a770dde098ebc77f6755ed0c86e3d'));
   const declared = (policy['decision'] as { providerAllowRules: Array<Record<string, unknown>> }).providerAllowRules;
   const rules: OrdinaryProductionPolicyReading['rules'][number][] = [];
   for (const rule of declared) {
@@ -1794,7 +1796,7 @@ function projectOriginalFieldPolicy(policy: Record<string, unknown>): OrdinaryPr
  * the document's `allowedBindings`, which the SHA-256 pin fixes, and checked for consistency across the roles and rules.
  */
 export function verifyOrdinaryProductionPolicy(policy: Record<string, unknown>): OrdinaryProductionPolicyReading {
-  if (policy['version'] === 'v30') return projectOriginalFieldPolicy(policy);
+  if (policy['version'] === 'v30' || policy['version'] === 'v31') return projectOriginalFieldPolicy(policy);
   const wave21 = policy['version'] === 'v27' ? policy : null;
   if (policy['version'] === 'v27') policy = readWave21Eligibility(policy);
   const wave20 = policy['version'] === 'v26' ? policy : null;
@@ -2137,8 +2139,8 @@ function* verifyLaunchPolicyInputs(
     const activeSetBytes = yield ACTIVE_SET_PATH;
     requirePolicy(digest(activeSetBytes) === ACTIVE_SET_SHA256);
     for (const [path, sha256] of [
-      ['docs/policies/active-policy-set.v22.schema.json', 'f4ec371b648183a26bab55283e7268032e79e4ecf37188d7b2456ad5e69a1f73'],
-      ['docs/policies/provider-processing-policy.v30.schema.json', '5a7c1603dcea97143d24b31c31f0709d1fd3202e7c048e7d65ed085c845046ef'],
+      ['docs/policies/active-policy-set.v22.schema.json', 'ae6001084568789658fe4916b7c6b401810ab407b11fbc4e03cd2e152d67a520'],
+      ['docs/policies/provider-processing-policy.v31.schema.json', '03f53cd094efb913b3014896a3de386f244721d1fde6f9de990036d5f6e8a8ae'],
     ] as const) requirePolicy(digest(yield path) === sha256);
     const activeSet = parseJson(activeSetBytes);
     requirePolicy(

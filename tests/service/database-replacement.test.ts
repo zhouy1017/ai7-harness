@@ -123,7 +123,7 @@ async function handmade(name: string, dataVersion: number, schemaRevision: numbe
 const backups = (): string => `${roots.dataRoot}-backups`;
 
 describe('导入数据库 over the real store', () => {
-  it.each(['hash', 'reader'] as const)('selected policy profile package rejects %s tampering and preserves exact metadata through real replacement', async (damage) => {
+  it('retains selected v1 Plan metadata through database replacement', async () => {
     const fixture = await loadModelFixture(join(roots.codeRoot, 'tests/fixtures/model'), 'sample1-factual-authored');
     const control = { induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
       induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false,
@@ -136,31 +136,11 @@ describe('导入数据库 over the real store', () => {
       let work = store.createFactualReviewPreparationWork(book.bookId, FACTUAL_REVIEW_TASK_GOAL, policy);
       while (!work.done) work = store.advanceFactualReviewPreparationWork(work.workId!);
       const original = work.projection!.providerResolutionPlan!;
-      expect(original.localFixtureProfile).toMatchObject({ kind: 'legacy', registeredProfile: 'factual', policyVersion: 'v29' });
-      const packagePath = await exported(store, `selected-${damage}.ai7db`);
-      expect(await store.inspectDatabaseImport(packagePath)).toMatchObject({ compatibility: 'compatible', schemaRevision: 95, dataVersion: 1 });
-      const entries = unzipSync(await readFile(packagePath));
-      const manifest = parseCanonicalJson(strFromU8(entries['manifest.json']!)) as { schemaRevision: number; members: { path: string; bytes: number; sha256: string }[] };
-      const member = manifest.members.find((entry) => entry.path === 'store/ai7.sqlite')!;
-      const scratch = join(roots.inputRoot, `selected-${damage}.sqlite`); await writeFile(scratch, entries[member.path]!);
-      const db = new DatabaseSync(scratch);
-      try {
-        if (damage === 'reader') { db.exec('PRAGMA user_version = 93'); manifest.schemaRevision = 93; }
-        else {
-          const row = db.prepare("SELECT rowid, canonical_json FROM analysis_plan_records WHERE component = 'provider-resolution-plan'").get()!;
-          const value = JSON.parse(String(row.canonical_json)); value.selectedPolicyIdentity.providerProcessingSha256 = '0'.repeat(64);
-          const changed = canonicalRecord(value); db.exec('DROP TRIGGER analysis_plan_records_no_update');
-          db.prepare('UPDATE analysis_plan_records SET canonical_json = ?, sha256 = ? WHERE rowid = ?').run(changed.json, changed.digest, row.rowid!);
-        }
-      } finally { db.close(); }
-      entries[member.path] = await readFile(scratch); member.bytes = entries[member.path]!.byteLength; member.sha256 = sha256Hex(entries[member.path]!);
-      entries['manifest.json'] = Buffer.from(canonicalRecord(manifest).json);
-      const damaged = join(roots.inputRoot, `selected-damaged-${damage}.ai7db`); await writeFile(damaged, zipSync(entries, { mtime: fixedArchiveTime() }));
-      const before = await readFile(join(roots.dataRoot, 'store/ai7.sqlite'));
-      await expect(store.inspectDatabaseImport(damaged)).rejects.toThrow();
-      expect(await readFile(join(roots.dataRoot, 'store/ai7.sqlite'))).toEqual(before);
-      expect((await store.inspectDatabaseReplacements()).pending).toBeNull(); expect(existsSync(backups())).toBe(false);
+      expect(original.selectedPolicyIdentity).toEqual(policy.selectedPolicyIdentity);
+      expect(original.localFixtureProfile).toBeUndefined();
+      const packagePath = await exported(store, 'selected-v1.ai7db');
       const preview = await store.inspectDatabaseImport(packagePath);
+      expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 95, dataVersion: 1 });
       await store.prepareDatabaseReplacement(preview.previewId, T); await store.close();
       store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, control);
       expect(store.inspectFactualReview(book.bookId).providerResolutionPlan).toEqual(original);

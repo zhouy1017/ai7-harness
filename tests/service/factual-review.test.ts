@@ -172,7 +172,7 @@ describe('factual review over the real store on exact sample1', () => {
       expect(revision.schemaDigest).toBe(FACTUAL_REVIEW_SCHEMA_DIGEST);
       expect(revision.reducerDigest).toBe(FACTUAL_REVIEW_REDUCER_DIGEST);
       expect(revision.adapterPin).toMatchObject({ route: 'ai7-local-deterministic', fixtureIdentity: 'sample1-factual-authored' });
-      expect(revision.policyPin).toEqual({ operationalScope: 'development-ci', providerProcessingVersion: 'v29', activePolicySetVersion: 'v21', liveTransmissions: 0 });
+      expect(revision.policyPin).toEqual({ operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v22', liveTransmissions: 0 });
       expect(revision.coverage).toMatchObject({ state: 'complete', unitsTotal: SAMPLE1_UNITS, unitsClosed: SAMPLE1_UNITS, gapCount: 0 });
       expect(revision.gaps).toEqual([]);
       // Synchronized delta (#275): eight unit turns and one assurance sampling turn per anchor unit.

@@ -25,10 +25,10 @@ function readPair(policyFile: string, schemaFile: string) {
 describe('validateAllPolicies', () => {
   it('discovers all current, historical and unselected candidate pairs and validates every one at this base', () => {
     const pairs = discoverPolicyPairs(POLICIES_DIR);
-    expect(pairs).toHaveLength(52);
+    expect(pairs).toHaveLength(53);
 
     const results = validateAllPolicies(POLICIES_DIR);
-    expect(results).toHaveLength(52);
+    expect(results).toHaveLength(53);
     for (const result of results) {
       expect(result.ok, `${result.policyFile}: ${result.reason ?? ''}`).toBe(true);
     }

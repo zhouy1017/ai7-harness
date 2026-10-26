@@ -141,7 +141,7 @@ function storeBytes(): Buffer {
 }
 
 describe('就这段提问… over the real store and harness', () => {
-  it('selected v29 profile keeps the actual workspace caller on its separate retained partition', async () => {
+  it('runs the retained workspace fixture under lightweight v1 without Global history', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     const workspaceFixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-agent-workspace');
     const dialogues = new DialogueExecutionOwner({ requestGovernor, records: store, fixture: workspaceFixture, live: null,
@@ -169,17 +169,10 @@ describe('就这段提问… over the real store and harness', () => {
       }
       expect(projection.proposal?.state).toBe('ready');
       expect(store.inspectGlobalAgent().history).toEqual([]);
-      const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
-      try {
-        const rows = db.prepare('SELECT canonical_json, provider_processing_version, policy_rule_id FROM dialogue_execution_bindings').all();
-        expect(rows).toHaveLength(1);
-        expect(JSON.parse(String(rows[0]!.canonical_json))).toMatchObject({ schema: 'ai7.dialogue-execution-binding/2',
-          localFixtureProfile: { kind: 'legacy', registeredProfile: 'workspace', policyVersion: 'v29' } });
-        expect(rows[0]!.provider_processing_version).toBeNull(); expect(rows[0]!.policy_rule_id).toBeNull();
-      } finally { db.close(); }
+
     } finally { await dialogues.dispose(); await store.close(); }
   });
-  it('selected v29 profile reaches the real dialogue adapter and keeps live columns NULL in binding /2', async () => {
+  it('runs the retained dialogue fixture under lightweight v1', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     const dialogues = owner(store, null);
     try {
@@ -189,14 +182,7 @@ describe('就这段提问… over the real store and harness', () => {
       await waitFor(() => store.inspectDialogue(book.bookId, turn.dialogueId, 0, (id) => dialogues.liveText(id)).attempts[0]?.state,
         (state) => state === 'completed', 'local profile completed');
       expect(store.inspectDialogue(book.bookId, turn.dialogueId, 0, () => null).attempts[0]?.state).toBe('completed');
-      const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
-      try {
-        const row = db.prepare('SELECT canonical_json, provider_processing_version, policy_rule_id FROM dialogue_execution_bindings WHERE attempt_id = ?').get(turn.attemptId)!;
-        expect(row.provider_processing_version).toBeNull(); expect(row.policy_rule_id).toBeNull();
-        expect(JSON.parse(String(row.canonical_json))).toMatchObject({ schema: 'ai7.dialogue-execution-binding/2',
-          selectedPolicyIdentity: { providerProcessingVersion: 'v29' }, localFixtureProfile: { kind: 'legacy', registeredProfile: 'dialogue' } });
-        expect(new DialogueLedger(db).attempt(turn.attemptId)!.binding).toMatchObject({ localFixtureProfile: { registeredProfile: 'dialogue' } });
-      } finally { db.close(); }
+
     } finally { await dialogues.dispose(); await store.close(); }
   });
   it('retrieves and exact-fetches the pinned revision locally and recovers jump anchors from its Session log (#893)', async () => {

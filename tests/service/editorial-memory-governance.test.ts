@@ -1,4 +1,3 @@
-import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -9,10 +8,9 @@ import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
 import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy, resolveSourceCheckoutLaunchPolicySync } from '../../src/service/launch-policy.js';
 import { parseReviewCategoryUnitMessageHeader } from '../../src/service/review/review-category-contract.js';
 import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/assurance-sampling-contract.js';
-import { EditorialLearningLedger, EDITORIAL_LEARNING_TRIGGER_SQL } from '../../src/service/learning/ledger.js';
-import { HousePreferenceInfluence, HouseReviewPreferenceLedger, HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL } from '../../src/service/house-review-preference.js';
+import { EditorialLearningLedger } from '../../src/service/learning/ledger.js';
+import { HousePreferenceInfluence, HouseReviewPreferenceLedger } from '../../src/service/house-review-preference.js';
 import { SupervisionDirectives } from '../../src/service/learning/supervision-directives.js';
-import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import type { CreateEditorialMemoryInput, EditorialMemoryVersion, GlobalMemoryPin, RecordLearningSupervisionInput } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2 } from '../support/sample1-baseline.js';

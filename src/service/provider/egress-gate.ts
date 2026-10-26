@@ -496,10 +496,10 @@ export function evaluateEgress(
   if (!isSupportedProviderProcessingVersion(binding.policy.operationalScope, binding.policy.providerProcessingVersion))
     return refuse('payload-out-of-scope', '处理策略版本无法识别；未发送任何内容。');
   const global = binding.globalAgentScope;
-  if (global !== undefined && binding.policy.providerProcessingVersion === 'v30') {
+  if (global !== undefined && (binding.policy.providerProcessingVersion === 'v30' || binding.policy.providerProcessingVersion === 'v31')) {
     const qualified = global.qualification;
     const messages = [...binding.admittedUserMessages];
-    if (qualified === undefined || qualified.providerProcessingVersion !== 'v30' || selectedPolicyIdentityOf({ providerProcessingVersion: qualified.providerProcessingVersion, providerProcessingSha256: qualified.providerProcessingSha256,
+    if (qualified === undefined || qualified.providerProcessingVersion !== binding.policy.providerProcessingVersion || selectedPolicyIdentityOf({ providerProcessingVersion: qualified.providerProcessingVersion, providerProcessingSha256: qualified.providerProcessingSha256,
           activePolicySetVersion: qualified.activePolicySetVersion, activePolicySetSha256: qualified.activePolicySetSha256 }) === null ||
         qualified.textProcessing !== 'qualified-original-fields' || qualified.policyRuleId !== 'ordinary-production-global-agent-dialogue' ||
         qualified.modelRole !== 'Fast Interaction Role' || qualified.route !== binding.route || qualified.model !== binding.model ||

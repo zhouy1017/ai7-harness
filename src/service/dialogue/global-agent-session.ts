@@ -117,8 +117,9 @@ function qualifiedGlobalPreparation(store: GlobalAgentTurnStore, owner: Dialogue
   const route = owner.requireGlobalReady(policy);
   const connection = store.globalAgentModelConnection();
   const routeId = route.profile.route;
-  if (policy.integrityState !== 'verified' || policy.operationalScope !== 'ordinary-production' || policy.providerProcessing.version !== 'v30' ||
-      policy.activePolicySetVersion !== selected?.activePolicySetVersion || selected?.providerProcessingVersion !== 'v30' || route.providerProcessingVersion !== 'v30' ||
+  if (policy.integrityState !== 'verified' || policy.operationalScope !== 'ordinary-production' || selected === null || (selected.providerProcessingVersion !== 'v30' && selected.providerProcessingVersion !== 'v31') ||
+      policy.activePolicySetVersion !== selected.activePolicySetVersion || policy.providerProcessing.version !== selected.providerProcessingVersion ||
+      route.providerProcessingVersion !== selected.providerProcessingVersion ||
       route.modelRole !== 'Fast Interaction Role' || route.ruleId !== 'ordinary-production-global-agent-dialogue' ||
       connection.binding.route !== route.profile.route || connection.binding.endpoint !== route.profile.endpoint ||
       connection.binding.model !== route.modelProfile.model || connection.binding.credentialSlot !== route.profile.credentialSlot ||
@@ -150,7 +151,7 @@ function qualifiedGlobalPreparation(store: GlobalAgentTurnStore, owner: Dialogue
     promptContractSha256: GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST, actualAsk: history.actualAsk, messageSha256,
     selectedSources, retainedInfluences: union, retainedAncestrySha256: history.retainedAncestrySha256 };
   const requestContextSha256 = sha256Hex(canonicalJson(descriptor));
-  const qualification: QualifiedGlobalAttemptMetadata = { ...selected, providerProcessingVersion: 'v30', textProcessing: 'qualified-original-fields',
+  const qualification: QualifiedGlobalAttemptMetadata = { ...selected, providerProcessingVersion: selected.providerProcessingVersion, textProcessing: 'qualified-original-fields',
     policyRuleId: 'ordinary-production-global-agent-dialogue', route: routeId,
     model: route.modelProfile.model, modelRole: 'Fast Interaction Role', credentialSlot: route.profile.credentialSlot,
     credentialReference: connection.binding.credentialReference, credentialUpdatedAt: connection.credentialUpdatedAt,
@@ -168,7 +169,7 @@ function qualifiedGlobalPreparation(store: GlobalAgentTurnStore, owner: Dialogue
 export function prepareGlobalAgentDisclosure(store: GlobalAgentTurnStore, owner: DialogueExecutionOwner,
   policy: LaunchPolicyProjection, input: PrepareGlobalAgentTurnInput): GlobalAgentDisclosure {
   const route = owner.requireGlobalReady(policy);
-  if (policy.providerProcessing.version === 'v30')
+  if (policy.providerProcessing.version === 'v30' || policy.providerProcessing.version === 'v31')
     return qualifiedGlobalPreparation(store, owner, policy, input, store.prepareGlobalAgentTurn(input)).disclosure;
   return globalAgentDisclosure(store.prepareGlobalAgentTurn(input), store.inspectGlobalAgent().sourceCandidates ?? [],
     route, owner.globalDisclosureReference());
@@ -181,7 +182,7 @@ export function startGlobalAgentTurn(store: GlobalAgentTurnStore, owner: Dialogu
   if (disclosureSha256 !== disclosure.sha256) throw new DialogueError('GLOBAL_AGENT_DISCLOSURE_CHANGED', '发送内容或模型服务已经变化；请重新查看将发送的内容。未发送任何内容。');
   const route = owner.requireGlobalReady(policy());
   const initialPolicy = policy();
-  const prepared = initialPolicy.providerProcessing.version === 'v30'
+  const prepared = (initialPolicy.providerProcessing.version === 'v30' || initialPolicy.providerProcessing.version === 'v31')
     ? qualifiedGlobalPreparation(store, owner, initialPolicy, input, store.prepareGlobalAgentTurn(input)) : null;
   if (prepared !== null && prepared.disclosure.sha256 !== disclosure.sha256)
     throw new DialogueError('GLOBAL_AGENT_DISCLOSURE_CHANGED', '发送内容或模型服务已经变化；请重新查看将发送的内容。');

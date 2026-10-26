@@ -1,8 +1,5 @@
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
 import { Session } from '@deepseek-ai/dsh-session';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
@@ -10,7 +7,6 @@ import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, allowedProductionBindingOf, readR
 import { DialogueExecutionOwner, productionDialogueRoute } from '../../src/service/dialogue/dialogue-execution.js';
 import { admittedGlobalAgentRoute, prepareGlobalAgentDisclosure, startGlobalAgentTurn } from '../../src/service/dialogue/global-agent-session.js';
 import { buildDialogueMessage } from '../../src/service/dialogue/contract.js';
-import { DialogueLedger } from '../../src/service/dialogue/dialogue-ledger.js';
 import { GLOBAL_AGENT_POLICY_BLOCKED, type GlobalMemoryPin, type LaunchPolicyProjection, type PrepareGlobalAgentTurnInput, type TrustedOperationalScope } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book } from '../support/sample1-baseline.js';
@@ -22,9 +18,6 @@ import { parseReviewCategoryUnitMessageHeader } from '../../src/service/review/r
 import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/assurance-sampling-contract.js';
 import { pinEditorialWorkspaceProfileRevision2 } from '../support/sample1-baseline.js';
 import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
-import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
-import { readHarnessSessionLog } from '../../src/service/harness/session-log.js';
-import { attemptTurn } from '../../src/service/dialogue/dialogue-history.js';
 
 // One explicit model-request capability per test application.
 // Registered first: the stack-ordered final hook runs after existing consumer teardown.
@@ -35,7 +28,6 @@ afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(
 // Real ordinary-production policy, store, Harness, gate, broker and session log. Only the provider stream is synthetic.
 let roots: ServiceTestRoots;
 let store: EditorialStore;
-let closedForNativeRejection = false;
 let owner: DialogueExecutionOwner;
 let policy: LaunchPolicyProjection;
 let credentialReference: string;
@@ -93,7 +85,6 @@ async function open(): Promise<void> {
     live: { scope: 'ordinary-production', ...binding, credentialReference, runBudgetCeiling: 'unset' } });
 }
 beforeEach(async () => {
-  closedForNativeRejection = false;
   roots = await createServiceTestRoots('ai7-global-production-');
   credentialReference = randomUUID(); calls.length = 0;
   policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', { ...binding, credentialReference }, { ...binding, credentialReference });
@@ -108,7 +99,7 @@ beforeEach(async () => {
     live: productionDialogueRoute({ scope: 'ordinary-production', nativeFetch }, () => policy, () => credentialReference,
       { resolve: async (reference) => { expect(reference).toBe(credentialReference); return resolveCredential(reference); } }) });
 });
-afterEach(async () => { vi.restoreAllMocks(); await owner?.dispose(); if (!closedForNativeRejection) store?.close(); await roots?.dispose(); });
+afterEach(async () => { vi.restoreAllMocks(); await owner?.dispose(); store?.close(); await roots?.dispose(); });
 
 describe('v30 Book-less Global Agent', () => {
 
@@ -136,7 +127,7 @@ describe('v30 Book-less Global Agent', () => {
     transport = async () => response();
     const continued = start({ kind: 'continue', dialogueId: first.dialogueId, attemptId: first.attemptId });
     await waitFor(() => inspect(first.dialogueId).attempts[1]?.state === 'completed');
-    expect(continued.qualification?.providerProcessingVersion).toBe('v30');
+    expect(continued.qualification?.providerProcessingVersion).toBe('v31');
     expect(continued.message.question).toBe(first.message.question); expect(continued.message.globalSources).toEqual(first.message.globalSources);
     expect(calls[1]!.body).not.toContain('合成责编甲');
   });
@@ -148,7 +139,7 @@ describe('v30 Book-less Global Agent', () => {
     const ask = { ...input(), question: '合成责编甲的建议适用于何处？' };
     const prepared = prepareGlobalAgentDisclosure(store, owner, policy, ask);
     expect(prepared).toMatchObject({ textProcessing: 'qualified-original-fields', question: ask.question,
-      selectedPolicyIdentity: { providerProcessingVersion: 'v30', activePolicySetVersion: 'v22' } });
+      selectedPolicyIdentity: { providerProcessingVersion: 'v31', activePolicySetVersion: 'v22' } });
     expect(prepared.sources[0]!.text).toBe('合成责编甲建议保留短句。');
     const turn = startGlobalAgentTurn(store, owner, () => policy, ask, prepared.sha256);
     await waitFor(() => inspect(turn.dialogueId).attempts[0]?.state === 'completed');

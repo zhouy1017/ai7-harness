@@ -37,9 +37,9 @@
         "ordinary-production": {
           "policyId": "provider-processing-policy",
           "policyType": "provider-processing",
-          "version": "v30",
-          "canonicalPath": "docs/policies/provider-processing-policy.v30.json",
-          "sha256": "f12df1d43cfc9f52b999c2cc8a6e9bac419177d42210d3bbe8c5008ba8d6a59e"
+          "version": "v31",
+          "canonicalPath": "docs/policies/provider-processing-policy.v31.json",
+          "sha256": "1cf19c82e46adf7a731e4f0c625cc1dd1f8e07e5b744eb06a872cbaa01849bd5"
         },
         "developer-live": {
           "policyId": "provider-processing-policy",

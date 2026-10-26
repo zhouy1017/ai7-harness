@@ -20,8 +20,7 @@ import { CredentialBroker } from '../../src/service/provider/credential-broker.j
 import * as harnessExecution from '../../src/service/harness/primary-agent-harness.js';
 import { reviewCategoryEntry, reviewCategoryContractInput } from '../../src/service/review/category-configuration.js';
 import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
-import { HouseReviewPreferenceLedger, liveHouseReviewPreferenceContract } from '../../src/service/house-review-preference.js';
-import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
+import { HouseReviewPreferenceLedger } from '../../src/service/house-review-preference.js';
 import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/assurance-sampling-contract.js';
 import type { LaunchPolicyProjection } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
@@ -658,7 +657,7 @@ it.each([{ guard: 'influence', cancel: false, pause: false }, { guard: 'series',
     }
     await owner.whenIdle();
     expect(sends).toBe(0); expect(credentials).toEqual([]); expect(searchReadiness).not.toHaveBeenCalled();
-    expect(guardChecks).toBe(cancel ? 0 : 1); expect(ledger.requestAdmissionOf(runRecordId)!.sequence).toBe(admissions.sequence);
+    expect(guardChecks).toBe(cancel ? 0 : 1); expect(ledger.requestAdmissionOf(runRecordId)!.open.size).toBe(0);
     expect(ledger.unitCheckpoints(runRecordId)).toEqual(checkpoints); expect(ledger.executionBindingOf(runRecordId)?.bindingDigest).toBe(binding?.bindingDigest);
     expect(ledger.currentRunState(runRecordId)).toBe(cancel ? 'cancelled' : 'interrupted');
     expect(ledger.inspect(application.bookId).taskOutcome?.report?.usagePerStage.units).toMatchObject({ inputTokens: width * 40, outputTokens: width * 20 });

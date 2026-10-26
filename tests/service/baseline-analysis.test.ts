@@ -376,7 +376,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       }
       expect(prepared.providerResolutionPlan?.remoteBinding.credentialReference).toBe(credentialReference);
       expect(prepared.providerResolutionPlan?.remoteBinding.credentialReadiness).toBe('missing');
-      expect(prepared.providerResolutionPlan?.remoteBinding.providerProcessing).toEqual({ operationalScope: 'development-ci', version: 'v29', decision: 'deny', authorizedLiveTransmissionCount: 0 });
+      expect(prepared.providerResolutionPlan?.remoteBinding.providerProcessing).toEqual({ operationalScope: 'development-ci', version: 'v1', decision: 'deny', authorizedLiveTransmissionCount: 0 });
       expect(prepared.providerResolutionPlan?.executionRoute).toMatchObject({ kind: 'ai7-local-deterministic', fixtureIdentity: 'sample1-baseline-one-unit-failure', fixtureSha256: fixture.sha256 });
       expect(prepared.planEnvelope).toMatchObject({ dispatchAllowed: true, providerStatus: 'remote-denied-local-deterministic', promptContractDigest: BASELINE_PROMPT_CONTRACT_DIGEST });
       expect(prepared.executionPlan?.unitCount).toBe(SAMPLE1_UNITS);
@@ -425,7 +425,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       expect(revision.manuscriptPin.revisionId).toBe(imported.revisionId);
       expect(revision.coverageManifestDigest).toBe(manifest.digest);
       expect(revision.bindingPin).toMatchObject({ attemptId, bindingDigest: binding.bindingDigest, harnessSessionId: binding.harnessSessionId });
-      expect(revision.policyPin).toEqual({ operationalScope: 'development-ci', providerProcessingVersion: 'v29', activePolicySetVersion: ACTIVE_SET_VERSION, liveTransmissions: 0 });
+      expect(revision.policyPin).toEqual({ operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: ACTIVE_SET_VERSION, liveTransmissions: 0 });
       // Synchronized delta (#274, #275): eight unit turns, the one cross-unit reduction turn after
       // them, and one assurance sampling turn — both cross-unit findings are anchored in unit 1, so
       // the sample of this Run is one turn.
@@ -740,13 +740,8 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       ]);
       expect(prepared.planVersion).toMatchObject({ ordinal: 1, state: 'current', planRevisionId: null, planEnvelopeDigest: prepared.planEnvelope!.digest });
       expect(prepared.planVersion?.materialInputs).toEqual({
-        // A new development-ci Plan names the selected v29/set v21 documents and the baseline caller's exact legacy profile.
-        selectedPolicyIdentity: { providerProcessingVersion: 'v29', providerProcessingSha256: 'c9545a5f461a7791115c1f4664bbd731757775951f814d39c28b12c85af88c9d',
-          activePolicySetVersion: 'v21', activePolicySetSha256: '4b845e924df777f440b07d53ba6e31447e0fe0b004e86efa89bf76554fb05392' },
-        localFixtureProfile: { schema: 'ai7.local-fixture-profile/1', policyVersion: 'v29', policySha256: 'c9545a5f461a7791115c1f4664bbd731757775951f814d39c28b12c85af88c9d',
-          activePolicySetVersion: 'v21', activePolicySetSha256: '4b845e924df777f440b07d53ba6e31447e0fe0b004e86efa89bf76554fb05392', kind: 'legacy',
-          profileId: 'development-ci-legacy-local-fixture-809c96f2', manifestSha256: '2572c1b5aa05d6ccc9a60a2a8a03ba2cefc10d5f48c1a85377d53797360bc0d2',
-          registeredProfile: 'baseline' },
+        selectedPolicyIdentity: { providerProcessingVersion: 'v1', providerProcessingSha256: 'd9dfe8c13a58649d8d9f607364030468ae71832b94c9436291d29000795d725a',
+          activePolicySetVersion: 'v22', activePolicySetSha256: '68125ebd3e1266f02fc1cf02c0a548fa652c4cad3ee052bbfaebc68922758ebb' },
         providerBinding: { providerId: 'deepseek-open-platform', modelId: 'deepseek-v4-pro', adapterRevision: 1, configurationRevision: 1, credentialReference },
         artifactPin: { identity: '@ai7/editorial-workspace-profile', version: '1.0.0', nativeCarrierSha256: 'ae485040c8fa602ab2e98ec91dd122201d40a8be41d8a4f86f7cd55ddb1e434d', sidecarRevision: 2, sidecarSha256: '980b565f25bdff29e539365e17344346017b05146a45cfea35c8ed7d528a1bff' },
         selectedRange: null,

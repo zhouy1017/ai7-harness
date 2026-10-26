@@ -114,21 +114,18 @@ async function settled(fast: FastRoleRequests, requestId: string): Promise<FastI
 }
 
 describe('the fast-role routes under developer-live', () => {
-  it('selected v29 profile reaches the actual local Fast adapter and creates no dialogue history', async () => {
+  it('runs the retained Fast fixture under lightweight v1 without dialogue history', async () => {
     const fixture = await loadModelFixture(join(roots.codeRoot, 'tests/fixtures/model'), 'sample1-polish-authored');
-    const runtime = store.localFixtureRuntime()!;
-    const observed = vi.spyOn(runtime.catalog, 'entriesFor');
-    const owner = new FastRoleExecutionOwner({ requestGovernor, fixture, live: null, localFixtureRuntime: () => runtime });
+    expect(store.localFixtureRuntime()).toBeNull();
+    const owner = new FastRoleExecutionOwner({ requestGovernor, fixture, live: null, localFixtureRuntime: () => store.localFixtureRuntime() });
     const fast = new FastRoleRequests(owner, store);
     try {
       const started = fast.polish(book.bookId, { selection: polishSelectionOf(store, book) });
       const result = await settled(fast, started.taskId);
       expect(result.kind === 'editorial-polish' && result.polish).toMatchObject({ state: 'suggested', outcomeUnknown: false });
-      expect(observed).toHaveBeenCalledWith(expect.objectContaining({ profile: expect.objectContaining({ kind: 'legacy', registeredProfile: 'polish', policyVersion: 'v29' }),
-        kind: 'editorial-polish', contractId: 'ai7.editorial-polish/1' }), fixture, expect.any(String));
       expect(store.inspectUsage({ range: 'all', groupBy: 'book' }).totals).toMatchObject({ inputTokens: 0, outputTokens: 0 });
       expect(store.inspectGlobalAgent().history).toEqual([]);
-    } finally { observed.mockRestore(); await owner.dispose(); }
+    } finally { await owner.dispose(); }
   });
   it('admits each kind only under its own rule, and refuses a Book outside the admitted SampleBooks before anything is sent', async () => {
     const calls: StubCall[] = [];
