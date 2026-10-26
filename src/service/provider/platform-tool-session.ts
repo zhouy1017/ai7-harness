@@ -191,8 +191,13 @@ export class PlatformToolSession implements PlatformToolOwner {
     return this.#localBreaker.state === 'tripped' ? LOCAL_BREAKER_UNIT_END : BREAKER_UNIT_END;
   }
 
-  /** Start a unit: its breaker is intact and no call is a duplicate yet. Citations persist across the attempt. */
-  startUnit(): void {
+  /** Start a unit; fresh technical sessions have independent tool-call IDs. Run usage and citations persist. */
+  startUnit(freshSession = false): void {
+    if (freshSession) {
+      this.#acceptedToolCallDigests.clear();
+      this.#admittedToolResults.clear();
+      this.#executedCallIds.clear();
+    }
     this.#unit = {};
     this.#unitCaptures = [];
     this.#unitSearches = 0;
@@ -274,7 +279,7 @@ export class PlatformToolSession implements PlatformToolOwner {
         this.usage.refusedRetrievalCalls = (this.usage.refusedRetrievalCalls ?? 0) + 1;
       } else this.#observeWeb(state, `refused:${++this.#refusedRoundTrips}`);
     }
-    // A call id is admitted once per attempt: a reused id never replaces the result its first call was answered with, so
+    // A call id is admitted once per technical session: a reused id never replaces its first result, so
     // the gate refuses whatever history would carry the second one.
     if ([...this.#admittedToolResults.values()].some((admitted) => admitted.callId === result.callId)) return;
     this.#admittedToolResults.set(toolResultKey(result.callId, result.tool), {

@@ -1553,6 +1553,8 @@ export class BaselineAnalysisExecutionOwner {
         producer = null;
       };
       const beginTurn = (identity: NonNullable<typeof turnIdentity>, claim: string | null = null): void => {
+        // The disposed child's tool history is absent from the parent; later parent turns share their own receipts.
+        if (childProfile && turnIdentity?.stage === 'units' && identity.stage !== 'units') platformSession?.startUnit(true);
         if (firstUnitSessionId !== undefined) {
           if (!firstTurn) nextUnitSessionId = randomUUID();
           firstTurn = false;
@@ -2183,7 +2185,7 @@ export class BaselineAnalysisExecutionOwner {
             requestDigest: definition.requestDigest(unit.ordinal, unit.digest), inputDigest: unit.digest, contractDigest: promptContractDigest });
           return true;
         };
-        context.platformSession?.startUnit();
+        context.platformSession?.startUnit(childProfile);
         let turn: HarnessTurnOutcome;
         try { turn = await harness.submitUnit(message); } finally { context.recoverPreSend = null; }
         if (context.platformSession?.evidenceNeedsCommander === true) throw new ExecutionAdmissionError('PLATFORM_TOOL_EVIDENCE_MORE_SEARCH_REQUIRED', '本证据项需要第二次新检索；等待 Commander。');

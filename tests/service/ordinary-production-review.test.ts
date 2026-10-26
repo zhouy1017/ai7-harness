@@ -651,9 +651,7 @@ it.each([{ coupled: false, withdrawn: false, source: 'material', pause: false },
     return;
   }
   owner.admitAndDispatch(runRecordId, kept, { resume: true }); await owner.whenIdle();
-  expect(kept.currentRunState(runRecordId), JSON.stringify({ continuedTransports: result.requests.length - before, label: kept.inspect(application.bookId).stateLabel,
-    failures: kept.inspect(application.bookId).taskOutcome?.report?.failures, stop: kept.inspect(application.bookId).taskOutcome?.stop,
-    transitions: kept.inspect(application.bookId).run?.transitions })).toMatch(/^completed/u);
+  expect(kept.currentRunState(runRecordId)).toMatch(/^completed/u);
   const continued = result.requests.slice(before);
   expect(continued.length).toBeGreaterThan(0);
   expect(reads.length).toBeGreaterThan(0); expect(reads.every((reference) => reference === facts.credentialReference)).toBe(true);
@@ -945,17 +943,17 @@ it('settles an orphan terminal reflection locally as unavailable without inventi
   } finally { reopened.close(); }
 });
 
-it('counts a real reflection tool-call message once, with two physical admissions and aggregate usage once (#1131 rev8)', async () => {
+it('keeps reflection receipts separate from child tool IDs, with two admissions and usage counted once (#1131 rev8)', async () => {
   let reflections = 0;
-  const result = await productionReview(['typos-and-usage'], () => 'valid', undefined, false, false, {
+  const result = await productionReview(['typos-and-usage'], (_category, _ordinal, prior) => prior === 0 ? 'tools' : 'valid', undefined, false, false, {
     response: async (response, _signal, body) => {
       const request = JSON.parse(body) as { model: string; messages: Array<{ role: string; content: string }> };
       if (!request.messages.findLast((entry) => entry.role === 'user')!.content.startsWith('运行反思 ')) return response;
       reflections += 1;
       if (request.messages.some((entry) => entry.role === 'tool')) return response;
       return new Response(JSON.stringify({ model: request.model, choices: [{ message: { content: null, reasoning_content: '合成反思工具回合。', tool_calls: [
-        { id: 'reflection-search-1', type: 'function', function: { name: 'search_manuscript', arguments: JSON.stringify({ query: '的', mode: 'exact' }) } },
-        { id: 'reflection-search-2', type: 'function', function: { name: 'search_manuscript', arguments: JSON.stringify({ query: '了', mode: 'exact' }) } },
+        { id: 'read-1', type: 'function', function: { name: 'search_manuscript', arguments: JSON.stringify({ query: '的', mode: 'exact' }) } },
+        { id: 'search-1', type: 'function', function: { name: 'search_manuscript', arguments: JSON.stringify({ query: '了', mode: 'exact' }) } },
       ] }, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 40, completion_tokens: 20 } }), { status: 200 });
     },
   });
