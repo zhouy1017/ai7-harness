@@ -1681,6 +1681,8 @@ async function main() {
     const seventhIntentId = await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskPlanRef ?? ''`);
     requireJourney(UUID_PATTERN.test(seventhIntentId), 'seventh-task');
     await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.run?.progress?.unitsSettled===4 && analysis.run.progress.currentUnitOrdinal===5)`, 'unknown-fifth-in-flight', 180_000);
+    // The service observation can precede the drawer's own refresh; press pause only once this Task's control is enabled.
+    await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); if(drawer?.dataset.taskPlanKind!=='baseline-analysis'||drawer.dataset.taskPlanRef!==${JSON.stringify(seventhIntentId)})return false; const button=drawer.querySelector('[data-task-drawer-control="pause"]'); return button instanceof HTMLButtonElement && !button.disabled; })()`, 'unknown-pause-ready');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="pause"]', 'unknown-pause');
     await writeFile(holdPath, 'release', 'utf8');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState==='paused'`, 'unknown-explicitly-paused', 30_000);
