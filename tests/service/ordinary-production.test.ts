@@ -267,6 +267,54 @@ async function run(store: EditorialStore, execution: BaselineAnalysisExecutionOw
   return store.inspectBaselineAnalysis(bookId, (runRecordId) => execution.progressFor(runRecordId));
 }
 
+it('keeps launch fields enumerable across retained-reader fallback without freezing getters or changing their receiver (#1161)', async () => {
+  const { store, production } = await openProductionStore();
+  const ledger = store.baselineAnalysisLedger;
+  const fallback = ledger.launch.retainedPolicyFor;
+  expect(fallback).toBeTypeOf('function');
+  const runtime = () => store.localFixtureRuntime();
+  const launch: LaunchBinding = {
+    operationalScope: 'ordinary-production',
+    get policy() { expect(this).toBe(launch); return production.policy; },
+    get live() { expect(this).toBe(launch); return production.live; },
+    localFixtureRuntime: runtime,
+  };
+  ledger.bindLaunch(launch);
+  const bound = ledger.launch;
+  for (const key of ['operationalScope', 'live', 'policy', 'retainedPolicyFor', 'localFixtureRuntime']) {
+    expect(Object.prototype.propertyIsEnumerable.call(bound, key)).toBe(true);
+  }
+  expect(bound.retainedPolicyFor).toBe(fallback);
+  expect(bound.localFixtureRuntime).toBe(runtime);
+  expect(bound.live).toBeNull();
+  const first = await configure(store, production, 'opencode-go');
+  expect(bound.policy).toBe(production.policy);
+  expect(bound.live).toBe(production.live);
+  expect(bound.live?.credentialReference).toBe(first);
+  const next = await configure(store, production, 'deepseek-open-platform');
+  expect(next).not.toBe(first);
+  expect(bound.policy).toBe(production.policy);
+  expect(bound.live).toBe(production.live);
+  expect(bound.live?.credentialReference).toBe(next);
+  const copied = { ...bound };
+  ledger.bindLaunch(copied);
+  expect(ledger.launch).toBe(copied);
+  expect(ledger.launch).toMatchObject({ operationalScope: 'ordinary-production', policy: production.policy, live: production.live });
+  expect(ledger.launch.retainedPolicyFor).toBe(fallback);
+  expect(ledger.launch.localFixtureRuntime).toBe(runtime);
+  const supplied: NonNullable<LaunchBinding['retainedPolicyFor']> = () => null;
+  ledger.bindLaunch({ ...copied, retainedPolicyFor: supplied });
+  expect(ledger.launch.retainedPolicyFor).toBe(supplied);
+  ledger.bindLaunch(launch);
+  expect(ledger.launch.retainedPolicyFor).toBe(supplied);
+  expect(ledger.launch.localFixtureRuntime).toBe(runtime);
+  ledger.bindLaunch({ operationalScope: 'ordinary-production', policy: production.policy, live: production.live });
+  expect(ledger.launch.retainedPolicyFor).toBe(supplied);
+  expect(Object.hasOwn(ledger.launch, 'localFixtureRuntime')).toBe(false);
+  expect(ledger.launch.localFixtureRuntime).toBeUndefined();
+  store.markCleanShutdown();
+});
+
 it.each(['missing', 'ambiguous'] as const)('refuses the %s actual baseline rule without inventing a serial receipt or admission history (#1131 rev10)', async (selection) => {
   const { store, production } = await openProductionStore(); await configure(store, production, 'opencode-go');
   const bookId = await sample1Book(store, '合成规则唯一性'); const prepared = prepare(store, bookId, production.policy);

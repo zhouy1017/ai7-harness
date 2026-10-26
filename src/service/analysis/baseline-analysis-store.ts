@@ -1686,12 +1686,20 @@ export class BaselineAnalysisStore {
         : Number.isSafeInteger(ceiling.tokensPerFrozenUnit) && ceiling.tokensPerFrozenUnit > 0)) &&
         UUID_PATTERN.test(live.credentialReference)),
     'ANALYSIS_LAUNCH_BINDING_INVALID', '开发者实时绑定缺少必需的运行预算上限或凭据引用。');
-    // Keep the caller's object: the production launch's policy and live binding are getters over the editor's current
-    // connection, which a copy would freeze at bind time. The retained-interpretation reader the Store bound at open
-    // stays available behind it, as an own property of an object whose prototype is that launch.
+    // Preserve own fields for callers that spread/rebind the launch. Its policy/live accessors must still read the
+    // caller's current connection with their original receiver; the retained reader alone falls back to the Store's.
     const retainedPolicyFor = launch.retainedPolicyFor ?? this.#launch.retainedPolicyFor;
-    this.#launch = launch.retainedPolicyFor !== undefined || retainedPolicyFor === undefined ? launch
-      : Object.create(launch, { retainedPolicyFor: { value: retainedPolicyFor, enumerable: true } }) as LaunchBinding;
+    if (launch.retainedPolicyFor !== undefined || retainedPolicyFor === undefined) this.#launch = launch;
+    else {
+      const descriptors: PropertyDescriptorMap = Object.getOwnPropertyDescriptors(launch);
+      for (const key of Reflect.ownKeys(descriptors)) {
+        const descriptor = descriptors[key]!;
+        if (descriptor.get !== undefined) descriptor.get = descriptor.get.bind(launch);
+        if (descriptor.set !== undefined) descriptor.set = descriptor.set.bind(launch);
+      }
+      this.#launch = Object.defineProperties({}, { ...descriptors,
+        retainedPolicyFor: { value: retainedPolicyFor, enumerable: true } }) as LaunchBinding;
+    }
     this.#refreshClarificationDefinition();
   }
 

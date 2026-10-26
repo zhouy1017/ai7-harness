@@ -1,5 +1,6 @@
 import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
+import { capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
@@ -13,12 +14,14 @@ import { canonicalRecord, sha256Hex } from '../../src/service/analysis/canonical
 import { EVALUATION_INITIAL_DRAFT_TRIGGER_SQL, EVALUATION_RECORD_TRIGGER_SQL } from '../../src/service/evaluation-records.js';
 import { EVALUATION_REWRITE_SCHEMA_SQL, EVALUATION_REWRITE_TRIGGER_SQL } from '../../src/service/evaluation-rewrites.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
-import { fixtureEntryKey, loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
+import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
+import { RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST, parseRunReportReflectionMessageHeader } from '../../src/service/analysis/run-report-contract.js';
 import {
   EVALUATION_REWRITE_UNIT_RESULT_SCHEMA,
   evaluationRewriteObservationSetDigest,
-  evaluationRewriteRequestDigest,
   evaluationRewriteSynthesisRequestDigest,
+  parseEvaluationRewriteUnitMessageHeader,
+  parseEvaluationRewriteSynthesisMessageHeader,
 } from '../../src/service/evaluation/evaluation-rewrite-contract.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import {
@@ -545,45 +548,92 @@ describe('the market section and 按我的评分重写评语 over the real store
   }, 300_000);
 
   it('says how much of the Book a rewrite read, and offers no 总评 that names a conclusion while its 评语 stand', async () => {
-    // A fixture of this test's own over the authored one: the third range never answers, and the synthesis over the other
-    // seven writes a 总评 that chooses a conclusion.
-    const entries = new Map(fixture.entries);
-    fixture = { ...fixture, entries };
-    await withBook(async (book) => {
-      await runInitialEvaluationToEnd(book.store, book.owner, book.bookId, launchPolicy);
-      finalizeAsJ11(book.store, book.bookId);
-      const record = beginRewriteAsJ11(book.store, book.bookId);
-      let progress = book.store.createEvaluationRewritePreparationWork(book.bookId, record.recordId, launchPolicy);
-      while (!progress.done) progress = book.store.advanceEvaluationRewritePreparationWork(progress.workId!);
+    // Keep the actual local fixture for the initial evaluation. The changed partial-reading business response belongs
+    // to ordinary captured transport, never to new payload/key bytes under that admitted fixture's identity/hash.
+    await requireExactSample1(roots.codeRoot);
+    let store = await openStore();
+    let storeOpen = true;
+    let owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+    let captured: ReturnType<typeof capturedOrdinaryExecution> | undefined;
+    try {
+      const { bookId } = await importSample1Book(store, roots.codeRoot, '评语重写之书');
+      await pinEditorialWorkspaceProfileRevision2(store, bookId);
+      recordMissingCredentialConnection(store, 'L2 主编辑连接');
+      await runInitialEvaluationToEnd(store, owner, bookId, launchPolicy);
+      finalizeAsJ11(store, bookId);
+      const record = beginRewriteAsJ11(store, bookId);
+      await owner.dispose();
+      store.markCleanShutdown(); store.close(); storeOpen = false;
+      store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { baselineAnalysisRoute: null,
+        induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
+        induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false });
+      storeOpen = true;
+      let contract = '';
+      let synthesisContract = '';
+      let observationSet = '';
+      const units = new Map<number, { digest: string; requestDigest: string }>();
+      const verdict = '总体较好，建议推荐出版。';
+      captured = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, requestGovernor, (request, message) => {
+        const unit = parseEvaluationRewriteUnitMessageHeader(message);
+        if (request.stage === 'units' && unit !== null) {
+          const expected = units.get(unit.ordinal);
+          if (expected === undefined || unit.total !== 8 || unit.unitDigest !== expected.digest || request.unitOrdinal !== unit.ordinal ||
+            request.attemptIndex !== 1 || request.contractDigest !== contract || request.requestDigest !== expected.requestDigest) return undefined;
+          if (unit.ordinal === 3) return { kind: 'adapter-failure', code: 'SYNTHETIC_UNIT_UNAVAILABLE', status: 400, message: '合成：此阅读范围的请求被永久拒绝。' };
+          return { kind: 'unit-result', text: JSON.stringify({ schema: EVALUATION_REWRITE_UNIT_RESULT_SCHEMA,
+            unitOrdinal: unit.ordinal, observations: AUTHORED_REWRITE_OBSERVATIONS[unit.ordinal]! }), usage: { inputTokens: 100, outputTokens: 50 } };
+        }
+        const synthesis = parseEvaluationRewriteSynthesisMessageHeader(message);
+        if (request.stage === 'cross-unit-reduction' && synthesis !== null && synthesis.closed === 7 && synthesis.total === 8 &&
+          synthesis.setDigest === observationSet && request.contractDigest === synthesisContract &&
+          request.requestDigest === evaluationRewriteSynthesisRequestDigest(synthesisContract, observationSet)) {
+          return { kind: 'unit-result', text: JSON.stringify({ ...AUTHORED_REWRITE_WORDS, verdict }), usage: { inputTokens: 2600, outputTokens: 560 } };
+        }
+        if (request.stage === 'run-report-reflection' && parseRunReportReflectionMessageHeader(message) !== null &&
+          request.contractDigest === RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST && request.requestDigest === sha256Hex(message)) {
+          return { kind: 'unit-result', text: JSON.stringify({ schema: 'ai7.analysis.run-report-reflection-result/1', items: [] }), usage: { inputTokens: 10, outputTokens: 5 } };
+        }
+        return undefined;
+      });
+      owner = captured.owner;
+      const policy = captured.policy;
+      let progress = store.createEvaluationRewritePreparationWork(bookId, record.recordId, policy);
+      while (!progress.done) progress = store.advanceEvaluationRewritePreparationWork(progress.workId!);
       const prepared = progress.projection!;
       const manifest = prepared.coverageManifest!;
-      const contract = prepared.planEnvelope!.promptContractDigest;
+      contract = prepared.planEnvelope!.promptContractDigest;
       const third = manifest.units[2]!;
-      expect(entries.delete(fixtureEntryKey(third.ordinal, evaluationRewriteRequestDigest(contract, third.ordinal, third.digest)))).toBe(true);
       const closed = manifest.units.filter((unit) => unit.ordinal !== third.ordinal).map((unit) => ({
         unitOrdinal: unit.ordinal,
         result: { schema: EVALUATION_REWRITE_UNIT_RESULT_SCHEMA, unitOrdinal: unit.ordinal, observations: AUTHORED_REWRITE_OBSERVATIONS[unit.ordinal]! },
       }));
-      const verdict = '总体较好，建议推荐出版。';
-      const requestDigest = evaluationRewriteSynthesisRequestDigest(contract, evaluationRewriteObservationSetDigest(closed));
-      entries.set(fixtureEntryKey(0, requestDigest), {
-        unitOrdinal: 0, requestDigest, attempt: null, contentDigest: null,
-        response: { kind: 'unit-result', text: JSON.stringify({ ...AUTHORED_REWRITE_WORDS, verdict }), usage: { inputTokens: 2600, outputTokens: 560 } },
-      });
-      const authorized = book.store.authorizeEvaluationRewrite(book.bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
-      book.owner.admitOrQueue(authorized.dispatchRunRecordId!, authorized.ledger);
-      await book.owner.whenIdle();
-      const page = book.store.inspectEvaluation(book.bookId, record.recordId);
+      observationSet = evaluationRewriteObservationSetDigest(closed);
+      const authorized = store.authorizeEvaluationRewrite(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
+      synthesisContract = authorized.ledger.definition.crossUnit!.promptContractDigest;
+      for (const unit of manifest.units) units.set(unit.ordinal, { digest: unit.digest,
+        requestDigest: authorized.ledger.definition.requestDigest(unit.ordinal, unit.digest) });
+      // Ordinary execution keeps its real per-unit Sessions/default three-unit width; this case asserts no serial order.
+      owner.admitOrQueue(authorized.dispatchRunRecordId!, authorized.ledger);
+      await owner.whenIdle();
+      expect(captured.requests.filter((request) => request.stage === 'units').map((request) => request.unitOrdinal).sort((a, b) => a! - b!))
+        .toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+      expect(captured.requests.filter((request) => request.stage === 'cross-unit-reduction')).toHaveLength(1);
+      const page = store.inspectEvaluation(bookId, record.recordId);
       const proposal = page.rewrite.proposal!;
       // Seven of eight ranges read, and said so; the 评语 stand, the 总评 is set aside with why.
       expect(proposal.reading).toEqual({ unitsTotal: 8, unitsRead: 7 });
       expect(proposal.items.map((item) => item.after)).toEqual(AUTHORED_REWRITE_WORDS.items.map((item) => item.comment));
       expect([proposal.verdict, proposal.withheld]).toEqual([null, ['重写的总评写出了结论，没有采用：结论由你选。']]);
       // 采用 takes the 评语 alone: the version's own 总评 stays.
-      const accepted = book.store.decideEvaluationRewrite(book.bookId, proposal.revisionId, 'accept').record!;
+      const accepted = store.decideEvaluationRewrite(bookId, proposal.revisionId, 'accept').record!;
       expect([accepted.entries, accepted.content.verdict]).toEqual([record.entries + 1, record.content.verdict]);
       expect(accepted.content.items.filter((item) => item.score !== null).map((item) => item.comment)).toEqual(AUTHORED_REWRITE_WORDS.items.map((item) => item.comment));
-    });
+      expect(scoresOf(accepted.content)).toEqual(scoresOf(record.content));
+      store.markCleanShutdown();
+    } finally {
+      await owner.dispose();
+      try { captured?.assertMatched(); } finally { if (storeOpen) store.close(); }
+    }
   }, 300_000);
 
   it('offers no rewrite under a live scope, and prepares or starts none there', async () => {
