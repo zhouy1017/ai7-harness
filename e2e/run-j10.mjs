@@ -1865,6 +1865,7 @@ async function main() {
     const reviewStarted = await renderer.evaluate(`window.ai7.inspectTaskPlan({kind:'review-run',ref:${JSON.stringify(reviewRef)}})`);
 
     at('review-controls-pause-resume');
+    await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); if(drawer?.dataset.taskPlanKind!=='review-run'||drawer.dataset.taskPlanRef!==${JSON.stringify(reviewRef)})return false; const button=drawer.querySelector('[data-task-drawer-control="pause"]'); return button instanceof HTMLButtonElement && !button.disabled; })()`, 'review-controls-pause-ready');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="pause"]', 'review-controls-pause');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState==='pausing'`, 'review-controls-pausing');
     await writeFile(holdPath, '1', 'utf8');
