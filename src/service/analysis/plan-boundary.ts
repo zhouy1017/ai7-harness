@@ -215,7 +215,7 @@ export function providerPlanPolicyMetadata(providerPlan: Readonly<Record<string,
     'ANALYSIS_RECORD_INVALID', '计划的处理策略版本无法识别。');
   const hasIdentity = Object.hasOwn(providerPlan, 'selectedPolicyIdentity');
   const hasProfile = Object.hasOwn(providerPlan, 'localFixtureProfile');
-  const currentContract = pin?.version === 'v29' || pin?.version === 'v30';
+  const currentContract = ['v29', 'v30', 'v31'].includes(String(pin?.version));
   requireAnalysis(hasIdentity || (!hasProfile && !currentContract), 'ANALYSIS_RECORD_INVALID', '计划缺少已选策略身份。');
   if (!hasIdentity) return {};
   const selected = selectedPolicyIdentityOf(providerPlan.selectedPolicyIdentity);
@@ -225,7 +225,7 @@ export function providerPlanPolicyMetadata(providerPlan: Readonly<Record<string,
     pin.authorizedLiveTransmissionCount === (localPolicy ? 0 : 'bounded-by-run') &&
     pin.version === selected.providerProcessingVersion &&
     ((pin.operationalScope === 'development-ci' && localPolicy) ||
-      (pin.operationalScope === 'ordinary-production' && selected.providerProcessingVersion === 'v30') ||
+      (pin.operationalScope === 'ordinary-production' && isRecordedProviderProcessingVersion('ordinary-production', selected.providerProcessingVersion)) ||
       (pin.operationalScope === 'developer-live' && selected.providerProcessingVersion === 'v24')),
   'ANALYSIS_RECORD_INVALID', '计划的已选策略身份无效。');
   const local = isRecord(providerPlan.executionRoute) && providerPlan.executionRoute.kind === 'ai7-local-deterministic';
