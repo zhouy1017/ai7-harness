@@ -4,9 +4,12 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BaselineAnalysisExecutionOwner, OUTCOME_UNKNOWN_NOT_RESENT, assuranceSamplingTurnGapReason } from '../../src/service/analysis/execution.js';
 import { saysOutcomeUnknown } from '../../src/service/analysis/outcome-unknown.js';
-import { RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST, runReportReflectionRequestDigest } from '../../src/service/analysis/run-report-contract.js';
+import { RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST, parseRunReportReflectionMessageHeader } from '../../src/service/analysis/run-report-contract.js';
+import { BASELINE_PROMPT_CONTRACT_DIGEST, parseUnitMessageHeader, unitRequestDigest } from '../../src/service/analysis/contract.js';
+import { sha256Hex } from '../../src/service/analysis/canonical.js';
+import { capturedMapAnswer, capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
-import { fixtureEntryKey, loadModelFixture, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
+import { resolveFixtureEntry, loadModelFixture, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore } from '../../src/service/store.js';
 import { BASELINE_ANALYSIS_TASK_GOAL, type BaselineAnalysisProjection, type LaunchPolicyProjection } from '../../src/shared/protocol.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
@@ -207,30 +210,44 @@ describe('结果待确认 in non-unit steps (Issue #757, item 3)', () => {
 
   it('records an ambiguous reflection in the report, sent once, never re-sent', async () => {
     const happy = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-happy');
-    const store = await open(happy);
-    const executions: BaselineAnalysisExecutionOwner[] = [];
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { baselineAnalysisRoute: null,
+      induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
+      induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false });
+    const answers = capturedMapAnswer(happy.entries);
+    let dropReflection = false;
+    let unknownServed = 0;
+    let reflectionIdentity: { accountingDigest: string; contractDigest: string; requestDigest: string; physicalDigest: string } | undefined;
+    const captured = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, requestGovernor, (request, message) => {
+      if (request.stage === 'run-report-reflection') {
+        if (dropReflection) {
+          const header = parseRunReportReflectionMessageHeader(message);
+          if (header === null) return undefined;
+          unknownServed += 1;
+          reflectionIdentity = { accountingDigest: header.accountingDigest, contractDigest: request.contractDigest,
+            requestDigest: request.requestDigest, physicalDigest: sha256Hex(message) };
+          return DROPPED;
+        }
+        return { kind: 'unit-result', text: JSON.stringify({ schema: 'ai7.analysis.run-report-reflection-result/1', items: [] }), usage: { inputTokens: 10, outputTokens: 5 } };
+      }
+      const header = parseUnitMessageHeader(message);
+      if (request.stage === 'units' && header !== null) return resolveFixtureEntry(happy.entries, header.ordinal,
+        unitRequestDigest(BASELINE_PROMPT_CONTRACT_DIGEST, header.ordinal, header.unitDigest), request.attemptIndex)?.response;
+      return answers(request, message);
+    });
+    launchPolicy = captured.policy;
+    const execution = captured.owner;
     try {
-      // A first Run with nothing ambiguous mints the accounting the reflection's request is keyed by; the same
-      // fixture over one manuscript mints the same accounting digest on every deterministic replay.
-      const control = ownerOf(store, happy, []);
-      executions.push(control);
+      // Both Runs use the actual ordinary route. The unchanged happy entries provide response bytes only;
+      // the reflection is keyed by each real Run's accounting, never by an edited admitted fixture.
       const controlBook = await book(store, 'L2 sample1 反思账目');
-      const first = await run(store, control, controlBook);
-      // The control Run reached the reflection turn — the happy fixture carries no entry for it — and its digest
-      // is what the second Run's fixture keys the same request by.
+      const first = await run(store, execution, controlBook);
       expect(first.taskOutcome!.report!.usagePerStage['run-report-reflection'].requests).toBe(1);
-      const requestDigest = runReportReflectionRequestDigest(RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST, first.taskOutcome!.report!.accountingDigest);
-      // A second Run over the same fixture answers exactly that reflection request 结果待确认.
-      const { fixture, entries } = counted({
-        ...happy,
-        entries: new Map([...happy.entries, [fixtureEntryKey(0, requestDigest), {
-          unitOrdinal: 0, requestDigest, attempt: null, contentDigest: null, response: DROPPED,
-        }]]),
-      });
-      const execution = ownerOf(store, fixture, []);
-      executions.push(execution);
+      dropReflection = true;
       const bookId = await book(store, 'L2 sample1 反思步骤结果待确认', false);
       const settled = await run(store, execution, bookId);
+      expect(reflectionIdentity!.accountingDigest).toBe(first.taskOutcome!.report!.accountingDigest);
+      expect(reflectionIdentity!.contractDigest).toBe(RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST);
+      expect(reflectionIdentity!.requestDigest).toBe(reflectionIdentity!.physicalDigest);
       expect(settled.taskOutcome?.classification).toMatch(/^completed/);
       expect(settled.run?.state).toMatch(/^completed/);
       // The reflection's own record, in its exact words; it is not a report failure row, and a step has no code.
@@ -241,11 +258,11 @@ describe('结果待确认 in non-unit steps (Issue #757, item 3)', () => {
       // Its one turn was dispatched; nothing re-sent it. The report's count is the step's own constant, so the route's
       // count is what proves it.
       expect(settled.taskOutcome!.report!.usagePerStage['run-report-reflection'].requests).toBe(1);
-      expect(entries.unknownServed).toBe(1);
+      expect(unknownServed).toBe(1);
       store.markCleanShutdown();
     } finally {
-      for (const execution of executions) await execution.dispose();
-      store.close();
+      await execution.dispose();
+      try { captured.assertMatched(); } finally { store.close(); }
     }
   }, 300_000);
 });

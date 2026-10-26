@@ -80,7 +80,9 @@ export function capturedOrdinaryExecution(store: EditorialStore, codeRoot: strin
     // A fixture's status-less permanent adapter error becomes an actual non-retryable HTTP failure on this route.
     if (response.kind === 'adapter-failure') return new Response(JSON.stringify({ error: { message: response.message } }), { status: response.status ?? 400 });
     if (response.kind === 'quota-exceeded') return new Response(JSON.stringify({ error: { message: response.message } }), { status: response.status });
-    if (response.kind === 'outcome-unknown' || response.kind === 'interrupted') throw new Error(response.kind);
+    // An accepted HTTP response cut off mid-JSON exercises the real adapter's AI7_OUTCOME_UNKNOWN classification.
+    if (response.kind === 'outcome-unknown') return new Response('{"choices":[', { status: 200, headers: { 'content-type': 'application/json' } });
+    if (response.kind === 'interrupted') throw new Error(response.kind);
     if (response.kind !== 'unit-result') return refuse();
     const text = substituteAssuranceSamplingBlockPlaceholders(substituteAssuranceSamplingRefPlaceholders(
       substituteCrossUnitBlockPlaceholders(substituteBlockPlaceholders(response.text, ownBlockIdsOf(message)), parseCrossUnitCitedBlocks(message)),
