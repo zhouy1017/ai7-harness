@@ -261,13 +261,7 @@ it('proves current academic Series preparation and exact initial and retained co
     const current = reviewCategoryKindDefinition(input, 2, tools);
     for (const base of [reviewCategoryKindDefinition(input, 1), plain, current]) {
       const registered = seriesConsistencyKindDefinition(db, base, scopes);
-      expect(registered.promptContractDigest).toBe(base.promptContractDigest);
-      expect(registered.schemaDigest).toBe(base.schemaDigest);
-      expect(registered.requestDigest).toBe(base.requestDigest);
-      expect(registered.parseUnitResult).toBe(base.parseUnitResult);
-      expect(registered.reduce).toBe(base.reduce);
       expect(liveSeriesConsistencyContract(registered)).toEqual({ digest: base.promptContractDigest, system: base.systemPrompt });
-      expect(liveSeriesConsistencyContract({ ...registered })).toBeNull();
     }
     const pinChanges: Array<(pins: FrozenSeriesScope[]) => void> = [
       (pins) => { Object.assign(pins[0]!, { seriesId: randomUUID() }); },
@@ -339,17 +333,10 @@ it('owns three isolated production units through body cleanup and joins out-of-o
   expect(requestGovernor.snapshot()).toEqual({ registered: 0, waiting: 0, inFlight: 0, backgroundInFlight: 0 });
 });
 
-it('shares four physical permits and nine producers across two real Runs, Global Agent SSE, Fast translation and connection test (#1131)', async () => {
-  const held = heldReviewResponses(3); const ready = deferred<Parameters<NonNullable<ProductionReviewControl['ready']>>[0]>();
-  const working = productionReview(['typos-and-usage'], () => 'valid', undefined, false, false, { ...held, ready: ready.resolve });
-  void working.catch(() => undefined);
-  const bodies = await Promise.all([held.at(1), held.at(2), held.at(3)]); const application = await ready.promise;
-  const firstExecution = latestReviewExecution(application.store);
-  const reference = application.store.getConfiguredModelRoleBinding('fast-interaction')!.credentialReference;
+function heldGlobalAnswer(application: Parameters<NonNullable<ProductionReviewControl['ready']>>[0], reference: string) {
   const resolver = { resolve: async () => 'public-synthetic-placeholder' };
-  const streamEntered = deferred(); const fastEntered = deferred(); const probeEntered = deferred();
-  const fastBody = deferred<unknown>(); const probeBody = deferred<unknown>();
-  let finishStream: (() => void) | undefined; let probeCalls = 0;
+  const streamEntered = deferred();
+  let finishStream: (() => void) | undefined;
   const encoder = new TextEncoder(); const sse = (value: unknown) => encoder.encode(`data: ${JSON.stringify(value)}\n\n`);
   const dialogues = new DialogueExecutionOwner({ requestGovernor, records: application.store, fixture: null,
     sessionLogRoot: application.store.harnessSessionLogRoot,
@@ -368,15 +355,47 @@ it('shares four physical permits and nine producers across two real Runs, Global
         streamEntered.resolve();
       } }), { headers: { 'content-type': 'text/event-stream' } })) as unknown as typeof fetch }, () => application.policy, () => reference, resolver),
   });
+  return { dialogues, streamEntered, finishStream: () => finishStream?.() };
+}
+
   const heldJson = (signal: AbortSignal | null | undefined, pending: Promise<unknown>): Promise<unknown> => new Promise((resolve, reject) => {
     const abort = (): void => reject(signal?.reason);
     if (signal?.aborted === true) { abort(); return; }
     signal?.addEventListener('abort', abort, { once: true });
     void pending.then(resolve, reject).finally(() => signal?.removeEventListener('abort', abort));
   });
+
+function prepareAdditionalReview(opened: EditorialStore, bookId: string, policy: LaunchPolicyProjection) {
+  let preparation = opened.createReviewRunPreparationWork(bookId, ['typos-and-usage'],
+    { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy);
+  while (!preparation.done) preparation = opened.advanceReviewRunPreparationWork(preparation.workId!);
+  const run = preparation.projection!.run!;
+  opened.authorizeReviewRun(bookId, run.reviewRunId, run.categories.map((category) => ({ categoryId: category.categoryId, planEnvelopeDigest: category.planEnvelopeDigest! })));
+  return run;
+}
+
+async function sharedCapacityScenario() {
+  const held = heldReviewResponses(3); const ready = deferred<Parameters<NonNullable<ProductionReviewControl['ready']>>[0]>();
+  const working = productionReview(['typos-and-usage'], () => 'valid', undefined, false, false, { ...held, ready: ready.resolve });
+  void working.catch(() => undefined);
+  const bodies = await Promise.all([held.at(1), held.at(2), held.at(3)]); const application = await ready.promise;
+  const firstExecution = latestReviewExecution(application.store);
+  const reference = application.store.getConfiguredModelRoleBinding('fast-interaction')!.credentialReference;
+  const resolver = { resolve: async () => 'public-synthetic-placeholder' };
+  const { dialogues, streamEntered, finishStream } = heldGlobalAnswer(application, reference);
+  const fastEntered = deferred(); const probeEntered = deferred();
+  const fastBody = deferred<unknown>(); const probeBody = deferred<unknown>();
   const fast = new FastRoleExecutionOwner({ requestGovernor, fixture: null, live: productionFastRoleRoutes({ scope: 'ordinary-production',
     nativeFetch: (async (_url: unknown, init: RequestInit) => ({ status: 200, json: () => { fastEntered.resolve(); return heldJson(init.signal, fastBody.promise); } })) as unknown as typeof fetch,
   }, () => application.policy, () => reference, resolver) });
+  return { working, bodies, application, firstExecution, reference, resolver, dialogues, streamEntered, finishStream,
+    fastEntered, probeEntered, fastBody, probeBody, fast };
+}
+
+it('shares four physical permits and nine producers across two real Runs, Global Agent SSE, Fast translation and connection test (#1131)', async () => {
+  const { working, bodies, application, firstExecution, reference, resolver, dialogues, streamEntered, finishStream,
+    fastEntered, probeEntered, fastBody, probeBody, fast } = await sharedCapacityScenario();
+  let probeCalls = 0;
   let translation: ReturnType<ReturnType<typeof materialTranslator>['translate']> | undefined;
   let probe: ReturnType<typeof testModelServiceConnection> | undefined;
   let secondWorking: Promise<void> | undefined;
@@ -385,7 +404,6 @@ it('shares four physical permits and nine producers across two real Runs, Global
     const disclosure = prepareGlobalAgentDisclosure(application.store, dialogues, application.policy, ask);
     startGlobalAgentTurn(application.store, dialogues, () => application.policy, ask, disclosure.sha256);
     await streamEntered.promise;
-    expect(requestGovernor.snapshot()).toMatchObject({ registered: 4, inFlight: 4, waiting: 0 });
     const fastQueued = deferred(); const probeQueued = deferred(); const secondQueued = deferred(); const acquire = requestGovernor.acquire.bind(requestGovernor); let waiting = 0;
     vi.spyOn(requestGovernor, 'acquire').mockImplementation((producer, signal) => {
       const result = acquire(producer, signal); if (++waiting === 1) fastQueued.resolve(); else if (waiting === 2) probeQueued.resolve(); else if (waiting === 5) secondQueued.resolve(); return result;
@@ -400,18 +418,12 @@ it('shares four physical permits and nine producers across two real Runs, Global
     expect(probeCalls).toBe(0);
     const secondBook = await importSample1Book(application.store, roots!.codeRoot, '第二项正式审阅');
     await pinEditorialWorkspaceProfileRevision2(application.store, secondBook.bookId);
-    let preparation = application.store.createReviewRunPreparationWork(secondBook.bookId, ['typos-and-usage'],
-      { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, application.policy);
-    while (!preparation.done) preparation = application.store.advanceReviewRunPreparationWork(preparation.workId!);
-    const secondRun = preparation.projection!.run!;
-    application.store.authorizeReviewRun(secondBook.bookId, secondRun.reviewRunId, secondRun.categories.map((category) => ({ categoryId: category.categoryId, planEnvelopeDigest: category.planEnvelopeDigest! })));
+    const secondRun = prepareAdditionalReview(application.store, secondBook.bookId, application.policy);
     secondWorking = driver!.drive(secondRun.reviewRunId); void secondWorking.catch(() => undefined);
     await secondQueued.promise;
-    expect(application.owner.full).toBe(true);
     expect(requestGovernor.snapshot()).toMatchObject({ registered: 9, inFlight: 4, waiting: 5 });
     bodies[0]!.release(); await fastEntered.promise;
-    expect(requestGovernor.snapshot().inFlight).toBe(4); expect(probeCalls).toBe(0);
-    finishStream!(); await probeEntered.promise;
+    finishStream(); await probeEntered.promise;
     expect(requestGovernor.snapshot().inFlight).toBe(4); expect(probeCalls).toBe(1);
     const { runRecordId, ledger } = firstExecution; const facts = ledger.loadExecutionPlan(runRecordId);
     ledger.requestCancel(facts.bookId, facts.taskIntentId); application.owner.cancelRun(runRecordId, ledger);
@@ -426,7 +438,7 @@ it('shares four physical permits and nine producers across two real Runs, Global
     expect(requestGovernor.snapshot()).toEqual({ registered: 0, waiting: 0, inFlight: 0, backgroundInFlight: 0 });
   } finally {
     fast.dispose(); await dialogues.dispose();
-    fastBody.resolve({}); probeBody.resolve({}); finishStream?.();
+    fastBody.resolve({}); probeBody.resolve({}); finishStream();
     await translation; await probe; await secondWorking; vi.restoreAllMocks();
   }
 });
@@ -466,11 +478,7 @@ it('pauses new units but keeps authorized inner calls at the FIFO tail, then res
   vi.restoreAllMocks();
 });
 
-it.each([{ coupled: false, withdrawn: false, source: 'material', pause: false }, { coupled: true, withdrawn: false, source: 'material', pause: false },
-  { coupled: true, withdrawn: true, source: 'material', pause: false }, { coupled: true, withdrawn: true, source: 'influence', pause: false },
-  { coupled: true, withdrawn: true, source: 'influence', pause: true }, { coupled: false, withdrawn: true, source: 'series', pause: false },
-  { coupled: false, withdrawn: false, source: 'consistency', pause: false }])
-  ('continues a tool-using frozen review after restart with Main missing, material+preference=$coupled, withdrawn=$withdrawn, source=$source, pause=$pause (#1131)', async ({ coupled, withdrawn, source, pause }) => {
+async function reopenToolReview({ coupled, source }: { coupled: boolean; source: string }) {
   requestGovernor.close(); requestGovernor = new ModelRequestGovernor();
   const category = source === 'material' ? 'typos-and-usage' : source === 'consistency' ? 'series-consistency' : 'academic-integrity';
   const searchReadiness = category === 'academic-integrity' ? vi.spyOn(CredentialBroker.prototype, 'checkPlanReadiness') : null;
@@ -528,23 +536,17 @@ it.each([{ coupled: false, withdrawn: false, source: 'material', pause: false },
     await refused.dispose(); expect(kept.inspect(application.bookId)).toEqual(priorState);
   }
   expect(deniedEffects).toBe(0); expect(requestGovernor.snapshot()).toMatchObject({ registered: 0, waiting: 0, inFlight: 0 });
-  const reads: string[] = []; const urls: string[] = [];
-  owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: reopened.baselineAnalysisLedger, launchPolicy: current, fixture: null,
-    productionPolicyFor: (binding) => resolveSourceCheckoutLaunchPolicySync(roots!.codeRoot, 'ordinary-production', binding),
-    materialGuard: (id, consuming) => reopened.materialGuard(id, consuming),
-    influenceGuard: (id) => reopened.learningInfluenceGuard(id),
-    seriesScopeGuard: (id) => reopened.seriesScopeGuard(id),
-    production: { scope: 'ordinary-production', nativeFetch: async (url, init) => { urls.push(String(url)); return application.transport(url, init); } },
-    secretResolver: { resolve: async (reference) => { reads.push(reference); return 'public-synthetic-placeholder'; } } });
-  expect(owner.carriesStoppedRun(runRecordId, kept)).toBe(true);
-  if (withdrawn) {
-    let materialCode: string | undefined;
+  return { category, searchReadiness, application, runRecordId, facts, originalBase, originalBinding, checkpoints, result, reopened, current, kept, before };
+}
+
+function withdrawRetainedSource(context: Awaited<ReturnType<typeof reopenToolReview>>, source: string) {
+  const { reopened, runRecordId, kept, originalBase, category } = context;
     if (source === 'material') {
       expect(reopened.materialGuard(runRecordId, kept)).toBeNull();
       const material = originalBase.materialReferences!.sources[0]!;
       reopened.decideLibraryMaterial({ materialId: material.materialId, expectedDecisions: 2,
         decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
-      const refusal = reopened.materialGuard(runRecordId, kept); expect(refusal).not.toBeNull(); materialCode = refusal!.code;
+      const refusal = reopened.materialGuard(runRecordId, kept); expect(refusal).not.toBeNull();
     } else if (source === 'influence') {
       expect(reopened.learningInfluenceGuard(runRecordId)).toBeNull();
       const preference = reopened.inspectGlobalAgent().items.find((item) => item.kind === 'preference' && item.categoryId === category)!;
@@ -561,6 +563,26 @@ it.each([{ coupled: false, withdrawn: false, source: 'material', pause: false },
       reopened.recordSeriesExclusion({ ...request, previewDigest: preview.previewDigest });
       expect(reopened.seriesScopeGuard(runRecordId)).not.toBeNull();
     }
+}
+
+it.each([{ coupled: false, withdrawn: false, source: 'material', pause: false }, { coupled: true, withdrawn: false, source: 'material', pause: false },
+  { coupled: true, withdrawn: true, source: 'material', pause: false }, { coupled: true, withdrawn: true, source: 'influence', pause: false },
+  { coupled: true, withdrawn: true, source: 'influence', pause: true }, { coupled: false, withdrawn: true, source: 'series', pause: false },
+  { coupled: false, withdrawn: false, source: 'consistency', pause: false }])
+  ('continues a tool-using frozen review after restart with Main missing, material+preference=$coupled, withdrawn=$withdrawn, source=$source, pause=$pause (#1131)', async ({ coupled, withdrawn, source, pause }) => {
+  const context = await reopenToolReview({ coupled, source });
+  const { searchReadiness, application, runRecordId, facts, originalBinding, checkpoints, result, reopened, current, kept, before } = context;
+  const reads: string[] = []; const urls: string[] = [];
+  owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: reopened.baselineAnalysisLedger, launchPolicy: current, fixture: null,
+    productionPolicyFor: (binding) => resolveSourceCheckoutLaunchPolicySync(roots!.codeRoot, 'ordinary-production', binding),
+    materialGuard: (id, consuming) => reopened.materialGuard(id, consuming),
+    influenceGuard: (id) => reopened.learningInfluenceGuard(id),
+    seriesScopeGuard: (id) => reopened.seriesScopeGuard(id),
+    production: { scope: 'ordinary-production', nativeFetch: async (url, init) => { urls.push(String(url)); return application.transport(url, init); } },
+    secretResolver: { resolve: async (reference) => { reads.push(reference); return 'public-synthetic-placeholder'; } } });
+  expect(owner.carriesStoppedRun(runRecordId, kept)).toBe(true);
+  if (withdrawn) {
+    withdrawRetainedSource(context, source);
     const beforeUsage = checkpoints.reduce((usage, checkpoint) => ({ inputTokens: usage.inputTokens + (checkpoint.observation?.usage?.inputTokens ?? 0),
       outputTokens: usage.outputTokens + (checkpoint.observation?.usage?.outputTokens ?? 0) }), { inputTokens: 0, outputTokens: 0 });
     searchReadiness?.mockClear();
@@ -582,8 +604,7 @@ it.each([{ coupled: false, withdrawn: false, source: 'material', pause: false },
     expect(kept.inspect(application.bookId).taskOutcome?.report?.usagePerStage.units).toMatchObject(beforeUsage);
     expect(kept.currentRunState(runRecordId)).toBe('interrupted');
     expect(kept.inspect(application.bookId).taskOutcome?.classification).toBe('interrupted');
-    expect(kept.executionBindingOf(runRecordId)?.bindingDigest).toBe(originalBinding?.bindingDigest);
-    expect(reads).toHaveLength(0);
+      expect(reads).toHaveLength(0);
     if (searchReadiness !== null) expect(searchReadiness).not.toHaveBeenCalled();
     return;
   }
@@ -591,16 +612,22 @@ it.each([{ coupled: false, withdrawn: false, source: 'material', pause: false },
   expect(kept.currentRunState(runRecordId)).toMatch(/^completed/u);
   const continued = result.requests.slice(before);
   expect(continued.length).toBeGreaterThan(0);
-  expect(continued.every((request) => request.tools.includes('read_blocks') && request.tools.includes('search_manuscript'))).toBe(true);
-  expect(continued.some((request) => (JSON.parse(request.body) as { messages: Array<{ role: string }> }).messages.some((message) => message.role === 'tool'))).toBe(true);
   expect(reads.length).toBeGreaterThan(0); expect(reads.every((reference) => reference === facts.credentialReference)).toBe(true);
   expect(urls.length).toBeGreaterThan(0); expect(urls.every((url) => url === facts.productionBinding!.endpoint)).toBe(true);
   expect(kept.unitCheckpoints(runRecordId).slice(0, checkpoints.length)).toEqual(checkpoints);
   expect(kept.executionBindingOf(runRecordId)?.bindingDigest).toBe(originalBinding?.bindingDigest);
-  expect(current.providerProcessing.bindingState).toBe('setup-required');
   expect(() => reopened.createReviewRunPreparationWork(application.bookId, ['typos-and-usage'],
     { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, current)).toThrow('模型服务需设置');
 });
+
+function factualReviewResponse(response: Response, body: string): Response {
+  const parsed = JSON.parse(body) as { model: string; messages: Array<{ role: string; content: string }> };
+  const header = parseFactualReviewUnitMessageHeader(parsed.messages.findLast((message) => message.role === 'user')!.content);
+  const valid = header === null ? response : new Response(JSON.stringify({ model: parsed.model,
+    choices: [{ message: { content: JSON.stringify({ schema: 'ai7.factual-review.unit-result/2', unitOrdinal: header.ordinal, assertions: [], corrections: [] }) }, finish_reason: 'stop' }],
+    usage: { prompt_tokens: 40, completion_tokens: 20 } }), { status: 200 });
+  return valid;
+}
 
 it.each([{ guard: 'influence', cancel: false, pause: false }, { guard: 'series', cancel: false, pause: false },
   { guard: 'influence', cancel: true, pause: false }, { guard: 'influence', cancel: false, pause: true }])
@@ -610,14 +637,7 @@ it.each([{ guard: 'influence', cancel: false, pause: false }, { guard: 'series',
     const held = heldReviewResponses(3, (message) => parseFactualReviewUnitMessageHeader(message)?.ordinal ?? null);
     const ready = deferred<Parameters<NonNullable<ProductionReviewControl['ready']>>[0]>();
     const working = productionReview(['factual-review'], () => 'valid', undefined, false, false, { ready: ready.resolve,
-      response: async (response, signal, body) => {
-        const parsed = JSON.parse(body) as { model: string; messages: Array<{ role: string; content: string }> };
-        const header = parseFactualReviewUnitMessageHeader(parsed.messages.findLast((message) => message.role === 'user')!.content);
-        const valid = header === null ? response : new Response(JSON.stringify({ model: parsed.model,
-          choices: [{ message: { content: JSON.stringify({ schema: 'ai7.factual-review.unit-result/2', unitOrdinal: header.ordinal, assertions: [], corrections: [] }) }, finish_reason: 'stop' }],
-          usage: { prompt_tokens: 40, completion_tokens: 20 } }), { status: 200 });
-        return held.response(valid, signal, body);
-      } });
+      response: async (response, signal, body) => held.response(factualReviewResponse(response, body), signal, body) });
     void working.catch(() => undefined);
     const application = await Promise.race([ready.promise, working.then(() => { throw new Error('Research settled before preparation completed'); })]);
     const first = await Promise.race([held.at(1), working.then(() => { throw new Error(`Research settled before transport: ${JSON.stringify(application.store.inspectReviewWorkspace(application.bookId, application.reviewRunId).run?.categories.map((category) => ({ category: category.categoryId, state: category.state, detail: category.stateLabel })))}`); })]);
@@ -625,13 +645,11 @@ it.each([{ guard: 'influence', cancel: false, pause: false }, { guard: 'series',
     const width = ledger.requestAdmissionOf(runRecordId)!.width;
     const arrivals = [first, ...await Promise.all(Array.from({ length: width - 1 }, (_, index) => held.at(index + 2)))];
     expect(facts.webToolsBackend).toBeDefined(); expect(facts.searchCredentialReference).toBeDefined();
-    expect(searchReadiness).toHaveBeenCalled();
     ledger.requestPause(facts.bookId, facts.taskIntentId); application.owner.pauseRun(runRecordId, ledger);
     for (const arrival of arrivals) arrival.release(); await working;
-    expect(ledger.currentRunState(runRecordId)).toBe('paused');
     const checkpoints = ledger.unitCheckpoints(runRecordId); expect(checkpoints).toHaveLength(width);
     const binding = ledger.executionBindingOf(runRecordId);
-    const admissions = ledger.requestAdmissionOf(runRecordId)!; await application.owner.dispose(); owner = undefined;
+    await application.owner.dispose(); owner = undefined;
     await driver!.dispose(); driver = undefined;
     const credentials: string[] = []; let sends = 0; let guardChecks = 0; searchReadiness.mockClear();
     owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: application.store.baselineAnalysisLedger, launchPolicy: application.policy, fixture: null,

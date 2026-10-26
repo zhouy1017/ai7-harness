@@ -15,7 +15,7 @@ describe('a review Run freezes its search backend', () => {
       const configured = { ...ORDINARY_PRODUCTION_ALLOWED_BINDINGS[0], credentialReference: randomUUID() };
       store.saveModelServiceConnection('合成 Go 连接', configured.credentialReference, 'ready', 'opencode-go');
       const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', configured);
-      expect(policy.providerProcessing.version).toBe('v30');
+      expect(policy.providerProcessing.version).toBe('v31');
       const launch = { operationalScope: 'ordinary-production' as const, policy, live: { ...configured, scope: 'ordinary-production' as const, runBudgetCeiling: 'unset' as const } };
       store.baselineAnalysisLedger.bindLaunch(launch); store.factualReviewLedger.bindLaunch(launch);
       const book = await importSample1Book(store, roots.codeRoot, '生产检索密钥回归');
@@ -88,7 +88,7 @@ describe('a review Run freezes its search backend', () => {
       const configured = { ...official, credentialReference: randomUUID() };
       store.saveModelServiceConnection('合成 DeepSeek 连接', configured.credentialReference, 'ready', 'deepseek-open-platform');
       const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', configured);
-      expect(policy.providerProcessing.version).toBe('v30');
+      expect(policy.providerProcessing.version).toBe('v31');
       const launch = { operationalScope: 'ordinary-production' as const, policy, live: { ...configured, scope: 'ordinary-production' as const, runBudgetCeiling: 'unset' as const } };
       store.baselineAnalysisLedger.bindLaunch(launch); store.initialEvaluationLedger.bindLaunch(launch); store.factualReviewLedger.bindLaunch(launch);
       const book = await importSample1Book(store, roots.codeRoot, '无工具证据模型回归');
