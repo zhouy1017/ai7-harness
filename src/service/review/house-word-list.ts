@@ -8,7 +8,8 @@ import {
 } from '../../shared/protocol/house-word-list.js';
 import { canonicalJson, DIGEST_PATTERN, hasExactKeys, isRecord, sha256Hex, UUID_PATTERN } from '../analysis/canonical.js';
 
-/** No schema revision is reserved here. EditorialStore integration is a separately released change. */
+/** Actual additive House relation, installed by EditorialStore before its terminal stamp. */
+export const HOUSE_WORD_LIST_SCHEMA_VERSION = 95;
 export const HOUSE_WORD_LIST_SCHEMA_SQL = { house_word_list_versions: `CREATE TABLE house_word_list_versions (
   version_id TEXT PRIMARY KEY,
   list_id TEXT NOT NULL,
@@ -118,7 +119,6 @@ export function initializeHouseWordListSchema(db: DatabaseSync): void {
   transaction(db, () => {
     db.exec(HOUSE_WORD_LIST_SCHEMA_SQL.house_word_list_versions);
     for (const sql of Object.values(HOUSE_WORD_LIST_TRIGGER_SQL)) db.exec(sql);
-    validateHouseWordListStore(db);
   });
 }
 export class HouseWordLists {

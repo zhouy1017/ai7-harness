@@ -1107,6 +1107,10 @@ async function dispatch(
           chapterBlockId: request.input.chapterBlockId ?? null,
         }),
       };
+    case 'inspectHouseWordList':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectHouseWordList(request.input) };
+    case 'saveHouseWordList':
+      return { id: request.id, ok: true, op: request.op, result: store.saveHouseWordList(request.input) };
     case 'prepareReviewRun':
       return {
         id: request.id,

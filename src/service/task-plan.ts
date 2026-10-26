@@ -2557,7 +2557,7 @@ export function reviewRunPlan(input: {
     service: {
       role: roleLabel('Main Editorial Role'),
       provider: (route === null ? '不调用模型' : live ? `${route.kind} · ${route.model}` : 'AI7 本地确定性模型适配器') + (webSearchLabels.length === 0 ? '' : ` · 联网检索 · ${webSearchLabels.join('、')}`),
-      decision: (local !== undefined ? '本机执行五项有限识别规则，数字默认关闭；只生成可能问题批注，不表示整部标准合规' : route === null
+      decision: (local !== undefined ? local.options.tables === undefined ? '本机执行五项有限识别规则，数字默认关闭；只生成可能问题批注，不表示整部标准合规' : '在本机按所选字形、词形、本社词表及本书术语表检查；机械修正由你采纳后应用，其余生成批注，数字默认关闭' : route === null
         ? '只读基线分析的线索，不调用模型'
         : live ? `${production ? '本地正式生产' : '开发者实时'}：实时传输受运行边界约束`
           : route.kind === 'none'
@@ -2600,8 +2600,8 @@ export function reviewRunPlan(input: {
         : '没有开始的类别可以在「审阅」里新建一次审阅再审。',
     },
     technical: [
-      ...(local === undefined ? [] : [{ key: 'local-plan', label: '本地检查计划', value: `ai7.review.local-plan/1 · ${local.digest} · ${local.paragraphs} 个冻结段落` },
-        { key: 'local-applicability', label: '本次适用范围', value: `标点 ${local.options.punctuation} · 数字 ${local.options.numerals} · 出版物 ${local.options.publication} · 规则 ${local.options.numeralRules.join('、') || '数字未启用'} · 排除 ${local.options.excludedRanges.length} 处` }]),
+      ...(local === undefined ? [] : [{ key: 'local-plan', label: '本地检查计划', value: `ai7.review.local-plan/${local.options.tables === undefined ? '1' : '3'} · ${local.digest} · ${local.paragraphs} 个冻结段落` },
+        { key: 'local-applicability', label: '本次适用范围', value: `标点 ${local.options.punctuation} · 数字 ${local.options.numerals} · 出版物 ${local.options.publication} · 规则 ${local.options.numeralRules.join('、') || '数字未启用'} · 排除 ${local.options.excludedRanges.length} 处${local.options.tables === undefined ? '' : ` · 规范字表 ${local.options.tables.characters ? '启用' : '关闭'} · 异形词 ${local.options.tables.variantWords ? '启用' : '关闭'} · 本社词表 ${local.options.tables.houseWordList === null ? '未选择' : '已冻结选择'} · 本书词表 ${local.options.tables.bookTerms.length} 条`}` }]),
       ...(facts.housePreferences === undefined ? [] : preferences.length === 0 ? [{ key: 'house-review-preference', label: '本社审阅偏好', value: HOUSE_PREFERENCE_CLOSED }]
         : preferences.map(({ categoryLabel, preference }, index) => ({ key: `house-review-preference:${index}`, label: '本社审阅偏好',
           value: `${categoryLabel} · ${housePreferenceLabel(preference)} · ${preference.versionId} · ${preference.materialSetDigest}` }))),

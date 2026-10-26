@@ -61,6 +61,8 @@ import {
 } from '../shared/protocol.js';
 import { reportExportLabel } from '../shared/report-wording.js';
 import { applyOnce } from './manuscript-apply.js';
+import { mountHouseWordList } from './house-word-list.js';
+import { parseBookTerms } from '../shared/protocol/deterministic.js';
 import { openProcedureCapture } from './procedure-capture.js';
 import {
   ProcedureChoiceRequests,
@@ -235,7 +237,7 @@ export interface ReviewWorkspaceSurface {
   destroy(): void;
 }
 
-type ReviewApi = Partial<Pick<RendererApi, 'inspectBookSeries'>> & Pick<
+type ReviewApi = Partial<Pick<RendererApi, 'inspectBookSeries' | 'inspectHouseWordList' | 'saveHouseWordList'>> & Pick<
   RendererApi,
   'inspectReviewWorkspace' | 'prepareReviewRun' | 'continueReviewRun' | 'cancelReviewRun' | 'recordReviewFindingDisposition' | 'recordLearningReasonAsk' |
   'inspectTaskPlan' | 'getTaskPlanPage' | 'quickStartReviewRun' | 'searchReferableMaterials' |
@@ -959,7 +961,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     if (run.localCheck !== undefined) {
       const local = el('section', 'review-local-check');
       local.dataset['localCheck'] = run.localCheck.state;
-      local.append(el('p', 'field-note', '本地文字检查只按五项有限规则提示可能问题；专业符号、元语言用法可能误报，无发现不表示整部标准合规。原始官方文档仅核对了索引条款，未直接核看原页。'));
+      local.append(el('p', 'field-note', run.localCheck.options.tables === undefined
+        ? '本地文字检查按五项有限规则提示可能问题；无发现不表示整部标准合规。'
+        : '确定性检查在本机完成；字形对照及带条件词形仅供复核。机械修正须由你采纳后才会写入稿件，可在修改记录中撤销。'));
       local.append(el('p', 'field-note', `本次数字依据：${run.localCheck.options.numerals === 'editor-convention' ? '编辑约定' : run.localCheck.options.numerals === 'off' ? '未启用' : run.localCheck.options.publication === 'within-scope' ? '编辑明确声明在适用范围内' : '不在适用范围内，未检查'}。`));
       for (const [rule, count] of Object.entries(run.localCheck.counts ?? {})) local.append(el('p', 'field-note', `${rule}/v1：检查 ${count.checked} 段，排除上下文 ${count.exempt}，跳过 ${count.skipped}，未识别 ${count.notRecognized}，已检查无发现 ${count.noFinding}，发现 ${count.findings}，错误 ${count.error}，未启用 ${count.disabled}，不适用 ${count.outOfApplicability}。`));
       for (const exclusion of run.localCheck.excluded) local.append(el('p', 'field-note', `未生成批注：${exclusion.reason}（${exclusion.candidateId}）。`));
@@ -1419,6 +1423,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     // suggestions are accepted one by one.
     if (category.batchApply && category.output === 'change-suggestion' && category.state === 'settled') {
       const batch = actionButton('batch-prepare', 'secondary', () => void prepareBatch(run, category));
+      if (category.categoryId === 'local-text-check') batch.textContent = '批量采纳机械修正';
       batch.setAttribute('aria-expanded', ui.batch?.categoryId === category.categoryId ? 'true' : 'false');
       batch.disabled = working;
       heading.append(batch);
@@ -1993,7 +1998,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         after = opened.findings.at(-1)!.ordinal;
       }
       const suggestions = pending.filter((finding) => finding.output === 'change-suggestion');
-      const standing = suggestions.filter((finding) => finding.markId !== null && finding.markStatus === 'open' && finding.anchorState === 'exact' && finding.replacement !== null);
+      const exact = suggestions.filter((finding) => finding.markId !== null && finding.markStatus === 'open' && finding.anchorState === 'exact' && finding.replacement !== null);
+      // One batch cannot decide conflicting ranges; leave every overlapping suggestion for individual review.
+      const standing = category.categoryId === 'local-text-check' ? exact.filter((finding) => !exact.some((other) => other !== finding && other.blockId === finding.blockId &&
+        other.fromGrapheme < finding.toGrapheme && finding.fromGrapheme < other.toGrapheme)) : exact;
       const listed = standing.slice(0, MAX_BATCH_APPLY_SUGGESTIONS);
       ui.batch = {
         categoryId: category.categoryId,
@@ -2008,6 +2016,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       options.setStatus(listed.length === 0 ? REVIEW_BATCH_NOTHING : reviewBatchReadyLine(listed.length));
       pendingFocus = { findingId: null, field: 'batch' };
     });
+    if (category.categoryId === 'local-text-check' && ui.batch?.categoryId === category.categoryId && ui.batch.items.length > 0) await confirmBatch(run, ui.batch);
   }
 
   async function confirmBatch(run: ReviewRunProjection, strip: BatchStrip): Promise<void> {
@@ -2109,7 +2118,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     sheetOpening = false;
     if (destroyed || projection === null || sheet.open) return;
     sheetState = {
-      localOptions: { punctuation: 'off', numerals: 'off', publication: 'unknown', numeralRules: [], numeralsConfirmed: false, excludedRanges: [], doubledEllipsisBlockIds: [] },
+      localOptions: { punctuation: 'off', numerals: 'off', publication: 'unknown', numeralRules: [], numeralsConfirmed: false, excludedRanges: [], doubledEllipsisBlockIds: [],
+        tables: { characters: true, variantWords: true, bookTerms: projection.localBookTerms ?? [], houseWordList: null } },
       seriesId: null,
       seriesChoices,
       recommendation: new ProcedureRecommendationSelection(),
@@ -2301,7 +2311,43 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     confirmation.addEventListener('change', () => { state.localOptions = { ...state.localOptions, numeralsConfirmed: confirmation.checked }; updateSheet(); });
     confirmationLabel.append(confirmation, el('span', undefined, '我明确选择本次数字依据及 N01、N02；编辑约定不表示国标适用'));
     localOptions.append(proseLabel, numeralLabel, publicationLabel, confirmationLabel,
-      el('p', 'field-note', '只生成可能问题批注。四字符省略号没有省略段落/诗行声明时跳过；代码、网址、邮件等识别范围会排除。未识别和无发现均不表示合规。'));
+      el('p', 'field-note', '单省略号、缺零百分数、括号序号冗余标点及无附加条件的异形词可生成机械修正；其余生成批注。代码、网址、邮件等会排除。'));
+    const tables = state.localOptions.tables!;
+    for (const [key, label] of [['characters', '通用规范汉字表（2013）及字形对照参考'], ['variantWords', '第一批异形词整理表（GF 1001-2001；附录仅供复核）']] as const) {
+      const row = el('label', 'review-field'); const input = el('input'); input.type = 'checkbox'; input.checked = tables[key]; input.dataset['localTable'] = key;
+      input.addEventListener('change', () => { state.localOptions = { ...state.localOptions, tables: { ...state.localOptions.tables!, [key]: input.checked } }; updateSheet(); });
+      row.append(input, el('span', undefined, label)); localOptions.append(row);
+    }
+    const termsLabel = el('label', 'review-field'); const terms = el('textarea'); terms.dataset['localBookTerms'] = '';
+    terms.value = tables.bookTerms.map((entry) => `${entry.kind}\t${entry.preferred}\t${entry.variants.join('|')}`).join('\n');
+    const termProblem = el('p', 'field-note'); let invalidTerms = false;
+    terms.addEventListener('input', () => {
+      try { state.localOptions = { ...state.localOptions, tables: { ...state.localOptions.tables!, bookTerms: parseBookTerms(terms.value) } }; invalidTerms = false; termProblem.textContent = ''; }
+      catch (error) { invalidTerms = true; termProblem.textContent = error instanceof Error ? error.message : '请核对本书词表。'; }
+      updateSheet();
+    });
+    termsLabel.append(el('span', undefined, '本书术语/人名/地名表：每行以制表符分隔 类型、采用写法、待统一异写（多种用 | 分隔）；类型为 term/person/place。明确列出的异写可机械替换，随本次审阅保存。'), terms);
+    localOptions.append(termsLabel, termProblem);
+    if (api.inspectHouseWordList !== undefined && api.saveHouseWordList !== undefined) {
+      const houseChoice = el('label', 'review-field'); const house = el('input'); house.type = 'checkbox'; house.disabled = true; house.dataset['localHouseWordList'] = '';
+      const houseStatus = el('span', undefined, '本社自用词表：正在读取');
+      const refreshHouse = async (): Promise<void> => {
+        house.checked = false; state.localOptions = { ...state.localOptions, tables: { ...state.localOptions.tables!, houseWordList: null } };
+        try {
+          const page = await api.inspectHouseWordList!({ versionId: null, entryOffset: 0, historyOffset: 0 });
+          house.disabled = page.selected === null || page.selected.enabledCount === 0;
+          houseStatus.textContent = page.selected === null ? '本社自用词表：尚无词条，可在下方编辑' : `本社自用词表 第${page.selected.ordinal}版（${page.selected.enabledCount}条启用）；选中后仅生成批注`;
+          house.onchange = () => { state.localOptions = { ...state.localOptions, tables: { ...state.localOptions.tables!, houseWordList: house.checked ? page.current : null } }; updateSheet(); };
+        } catch { house.disabled = true; houseStatus.textContent = '本社词表读取失败，请重新打开检查选项。'; }
+        updateSheet();
+      };
+      houseChoice.append(house, houseStatus); localOptions.append(houseChoice);
+      const details = el('details'); details.append(el('summary', undefined, '编辑本社自用词表')); const host = el('div'); details.append(host); localOptions.append(details);
+      const editor = mountHouseWordList({ root: host, api: { inspectHouseWordList: api.inspectHouseWordList, saveHouseWordList: api.saveHouseWordList }, setStatus: options.setStatus, onSaved: () => void refreshHouse() });
+      details.addEventListener('toggle', () => { if (details.open) void editor.load(); });
+      sheet.addEventListener('close', () => editor.destroy(), { once: true });
+      void refreshHouse();
+    }
     categories.append(localOptions);
 
     const scopes = el('fieldset', 'review-scope-options');
@@ -2500,7 +2546,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       progress.hidden = state.job === null;
       progress.textContent = state.job === null ? '' : reviewPreparationLine(state.job.progress);
       prepare.disabled = preparing || loading || (state.materialIds.size > 0 && !acceptsMaterials);
-      if (local && ((state.localOptions.punctuation === 'off' && state.localOptions.numerals === 'off') || (state.localOptions.numerals !== 'off' && !state.localOptions.numeralsConfirmed))) prepare.disabled = true;
+      if (local && (invalidTerms || (state.localOptions.punctuation === 'off' && state.localOptions.numerals === 'off' && !state.localOptions.tables?.characters && !state.localOptions.tables?.variantWords && state.localOptions.tables?.bookTerms.length === 0 && state.localOptions.tables?.houseWordList === null) || (state.localOptions.numerals !== 'off' && !state.localOptions.numeralsConfirmed))) prepare.disabled = true;
       quick.disabled = prepare.disabled || state.categories.size === 0 || state.scope === null;
       close.disabled = preparing;
       cancelPreparation.hidden = !preparing;

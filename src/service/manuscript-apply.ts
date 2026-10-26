@@ -205,6 +205,7 @@ interface PlannedTarget {
   decision: { disposition: 'accepted' | 'accepted-with-edit' | 'withdrawn'; editedText: string | null; reason: string | null } | { existingDecisionId: string };
   standsAs: 'applied' | 'open';
 }
+type ReverseMember = ReturnType<EditorialMarkStore['suggestionTarget']> & { markId: string; originalFrom: number; originalTo: number };
 
 interface Binding {
   manuscriptId: string;
@@ -316,9 +317,10 @@ export class ManuscriptApplyStore {
       'APPLY_INVALID',
       '这次应用已经撤销过。',
     );
-    const members = this.#reverseMembers(input);
+    const members = this.#reverseMembers(input, String(original.effect_id));
+    requireApply(this.#reverseRangesStand(members), 'APPLY_TARGET_DRIFTED', '应用后的文字或修改范围已变，不能直接撤销这次应用。');
     return this.#commit(input, 'reverse-apply', 'confirm-reverse-apply', input.clientEffectId, original.effect_id, members.map((member) => {
-      requireApply(member.status === 'applied' && member.anchorState === 'exact', 'APPLY_TARGET_DRIFTED', '原子组中有应用后的文字改过；本次撤销没有写入稿件。');
+      requireApply(member.status === 'applied' && member.anchorState === 'exact', 'APPLY_TARGET_DRIFTED', '本次应用中有文字改过；本次撤销没有写入稿件。');
       requireApply(this.#db.prepare('SELECT 1 FROM manuscript_effect_targets WHERE effect_id = ? AND item_id = ?').get(original.effect_id!, member.itemId) !== undefined, 'PROPOSAL_ATOMIC_SCOPE', '原子组成员不属于同一次应用。');
       return { markId: member.markId, itemId: member.itemId, blockId: member.blockId, fromGrapheme: member.fromGrapheme,
         toGrapheme: member.toGrapheme, expectedText: member.standingText, insertText: member.currentText,
@@ -326,11 +328,23 @@ export class ManuscriptApplyStore {
     }), input.markId);
   }
 
-  #reverseMembers(input: PrepareReverseApplyInput): Array<ReturnType<EditorialMarkStore['suggestionTarget']> & { markId: string }> {
-    const group = this.#db.prepare('SELECT atomic_group_id FROM proposal_change_items WHERE mark_id = ?').get(input.markId);
-    const ids = group?.atomic_group_id === null || group?.atomic_group_id === undefined ? [{ mark_id: input.markId }]
-      : this.#db.prepare('SELECT mark_id FROM proposal_change_items WHERE atomic_group_id = ? ORDER BY rowid').all(group.atomic_group_id);
-    return ids.map((row) => ({ ...this.#marks.suggestionTarget({ ...input, markId: String(row.mark_id) }), markId: String(row.mark_id) }));
+  #reverseMembers(input: PrepareReverseApplyInput, effectId: string): ReverseMember[] {
+    // Reversal consumes the original Effect once, so it must restore that Effect's entire committed batch.
+    const ids = this.#db.prepare(`SELECT p.mark_id, t.from_grapheme, t.to_grapheme FROM manuscript_effect_targets t
+      JOIN proposal_change_items p ON p.item_id = t.item_id WHERE t.effect_id = ? ORDER BY t.ordinal`).all(effectId);
+    requireApply(ids.length > 0, 'APPLY_INVALID', '原应用的修改范围缺失。');
+    return ids.map((row) => ({ ...this.#marks.suggestionTarget({ ...input, markId: String(row.mark_id) }), markId: String(row.mark_id),
+      originalFrom: Number(row.from_grapheme), originalTo: Number(row.to_grapheme) }));
+  }
+
+  #reverseRangesStand(members: readonly ReverseMember[]): boolean {
+    const ordered = [...members].sort((a, b) => a.blockId.localeCompare(b.blockId) || a.fromGrapheme - b.fromGrapheme || a.originalFrom - b.originalFrom);
+    return ordered.every((member, index) => {
+      const previous = ordered[index - 1];
+      return member.status === 'applied' && member.anchorState === 'exact' && (previous === undefined || previous.blockId !== member.blockId ||
+        previous.toGrapheme < member.fromGrapheme || previous.toGrapheme === member.fromGrapheme &&
+          (previous.toGrapheme > previous.fromGrapheme && member.toGrapheme > member.fromGrapheme || previous.originalTo === member.originalFrom));
+    });
   }
 
   #requireAtomicScope(branchId: string, itemIds: ReadonlyArray<string>): void {
@@ -391,8 +405,8 @@ export class ManuscriptApplyStore {
     const book = this.#db.prepare('SELECT book_id FROM manuscripts WHERE manuscript_id = ?').get(input.manuscriptId)!;
     const window = this.#manuscript.getWindow(input.manuscriptId, input.branchId, { kind: 'window-start', blockId: target.blockId });
     const reversed = this.#db.prepare('SELECT 1 FROM manuscript_effect_intents WHERE reverses_effect_id = ?').get(original.effect_id!);
-    const members = this.#reverseMembers(input);
-    const exact = members.every((member) => member.status === 'applied' && member.anchorState === 'exact');
+    const members = this.#reverseMembers(input, String(original.effect_id));
+    const exact = this.#reverseRangesStand(members);
     return { ranges: members.map((member) => ({ markId: member.markId,
       position: Number(this.#db.prepare('SELECT position FROM working_blocks WHERE branch_id = ? AND block_id = ?').get(input.branchId, member.blockId)?.position ?? 0),
       fromGrapheme: member.fromGrapheme, toGrapheme: member.toGrapheme })),
@@ -467,6 +481,7 @@ export class ManuscriptApplyStore {
       toGrapheme: target.toGrapheme,
       expectedText: target.expectedText,
       insertText: target.insertText,
+      ...(reversesEffectId === null ? {} : { reversalOf: { effectId: reversesEffectId, itemId: target.itemId } }),
     }));
     const payloadDigest = sha256(JSON.stringify(planned.map((target) => [
       target.itemId, target.blockId, target.fromGrapheme, target.toGrapheme, sha256(target.expectedText), sha256(target.insertText),

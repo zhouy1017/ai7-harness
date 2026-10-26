@@ -3,8 +3,11 @@ import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { checkLocalPlan, candidateHasExactAnchor, exactLocalCandidateIds, houseCandidateNote, validateLocalResultV2, validateLocalStageArtifactV2,
   type HouseCandidate, type LocalStageArtifactV2 } from '../../src/service/review/deterministic/checker.js';
-import { freezeLocalPlan, freezeLocalPlanV2, validateLocalPlan, validateLocalPlanV2 } from '../../src/service/review/deterministic/plan.js';
-import { localCheckProcedureDefinition, localCheckProcedureDefinitionV2 } from '../../src/service/procedures/preinstalled.js';
+import { freezeLocalPlan, freezeLocalPlanV2, freezeLocalPlanV3, validateLocalPlan, validateLocalPlanV2 } from '../../src/service/review/deterministic/plan.js';
+import { localCheckProcedureDefinition, localCheckProcedureDefinitionV2, localCheckProcedureDefinitionV3 } from '../../src/service/procedures/preinstalled.js';
+import { STANDARD_CHARACTERS, VARIANT_WORDS, APPENDIX_WORDS } from '../../src/service/review/deterministic/tables.js';
+import { mechanicalReplacement, validateLocalResultV3 } from '../../src/service/review/deterministic/checker.js';
+import { parseBookTerms } from '../../src/shared/protocol/deterministic.js';
 import { HouseWordLists, initializeHouseWordListSchema } from '../../src/service/review/house-word-list.js';
 import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
 import type { LocalCheckOptions } from '../../src/shared/protocol/procedures.js';
@@ -19,6 +22,44 @@ function plan(texts: string[], options: Partial<LocalCheckOptions> = {}, scope: 
     bookImportId: null, scope, options: { ...OPTIONS, ...options }, blocks: texts.map((text, index) => ({ blockId: id(index + 1), position: index + 1, text })) });
 }
 const numeric: Partial<LocalCheckOptions> = { numerals: 'national-standard', publication: 'within-scope', numeralRules: ['N01', 'N02'], numeralsConfirmed: true };
+function tablePlan(texts: string[], options: Partial<LocalCheckOptions> = {}) {
+  const { tables: _tables, ...legacyOptions } = options;
+  const { schema: _schema, rules: _rules, digest: _digest, ...common } = plan(texts, { punctuation: 'off', ...legacyOptions });
+  const definition = localCheckProcedureDefinitionV3();
+  return freezeLocalPlanV3({ ...common, procedure: { procedureId: definition.id, version: 3, digest: sha256Hex(canonicalJson(definition)) }, houseWordList: null,
+    options: { ...common.options, tables: { characters: true, variantWords: true, bookTerms: [], houseWordList: null, ...options.tables } } });
+}
+describe('offline standard and Book tables', () => {
+  it('ships the complete character membership and word groups, with conditional forms left for judgment', async () => {
+    expect(STANDARD_CHARACTERS.size).toBe(8105); expect(VARIANT_WORDS).toHaveLength(338); expect(APPENDIX_WORDS).toHaveLength(44);
+    expect(STANDARD_CHARACTERS.has('𬭎')).toBe(true);
+    const frozen = tablePlan(['按纳 双𨱑 帐本 乾隆 龍 𠮷']); const result = await checkLocalPlan(frozen); validateLocalResultV3(result, frozen);
+    const word = result.candidates.find((candidate) => candidate.quote === '按纳' && candidate.ruleId === 'V01')!;
+    expect(mechanicalReplacement(word)).toBe('按捺');
+    expect(mechanicalReplacement(result.candidates.find((candidate) => candidate.quote === '帐本' && candidate.ruleId === 'V01')!)).toBeNull();
+    expect(result.candidates.some((candidate) => candidate.quote === '双𨱑' && mechanicalReplacement(candidate) === '双簧')).toBe(true);
+    expect(result.candidates.filter((candidate) => candidate.ruleId.startsWith('C')).every((candidate) => mechanicalReplacement(candidate) === null)).toBe(true);
+    expect(result.candidates.every((candidate) => candidateHasExactAnchor(frozen, candidate))).toBe(true);
+    const decimals = await checkLocalPlan(tablePlan(['比例.37%，比例-.37%。'], numeric));
+    expect(decimals.candidates.filter((candidate) => candidate.ruleId === 'N01').map(mechanicalReplacement)).toEqual(['0.37%', '-0.37%']);
+  });
+  it('freezes explicit Book term/name/place spellings and applies the existing masks at grapheme offsets', async () => {
+    const bookTerms = parseBookTerms('person\t甲名\t甲称\nplace\t乙地\t乙城\nterm\t丙词\t丙语');
+    const frozen = tablePlan(['🟦e\u0301甲称 乙城 丙语 `甲称` https://host.invalid/甲称'], { tables: { characters: false, variantWords: false, bookTerms, houseWordList: null } });
+    const result = await checkLocalPlan(frozen);
+    expect(result.candidates.map((candidate) => [candidate.ruleId, candidate.from, mechanicalReplacement(candidate)])).toEqual([['T01', 2, '甲名'], ['T01', 5, '乙地'], ['T01', 8, '丙词']]);
+    expect(result.counts.T01.skipped).toBe(2); expect(result.counts.H01.disabled).toBe(1);
+    expect(() => parseBookTerms('person\t甲名\t甲名')).toThrow();
+    expect(canonicalJson(await checkLocalPlan(frozen))).toBe(canonicalJson(result));
+  });
+  it('keeps Book choices above general words and cancels even on a long table no-hit scan', async () => {
+    const options = { characters: false, variantWords: true, bookTerms: [{ kind: 'term' as const, preferred: '按纳', variants: ['合成异写'] }], houseWordList: null };
+    const result = await checkLocalPlan(tablePlan(['按纳'], { tables: options }));
+    expect(mechanicalReplacement(result.candidates[0]!)).toBeNull();
+    let cancelled = false;
+    await expect(checkLocalPlan(tablePlan(['乙'.repeat(100000)], { tables: options }), { cancelled: () => cancelled, checkpoint: async (phase) => { if (phase === 'matches') cancelled = true; } })).rejects.toMatchObject({ code: 'LOCAL_CHECK_CANCELLED' });
+  });
+});
 async function counts(texts: string[], options: Partial<LocalCheckOptions> = {}, scope: 'whole' | 'selection' = 'whole') {
   const result = await checkLocalPlan(plan(texts, options, scope));
   return result.candidates.map((candidate) => candidate.ruleId);

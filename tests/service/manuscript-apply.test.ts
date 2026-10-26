@@ -487,7 +487,7 @@ describe('AI7 Apply on a Change Suggestion', () => {
     }
   }, 300_000);
 
-  it('never guesses which side of each other two deletions applied side by side stood', async () => {
+  it('restores adjacent batch deletions in their original committed Effect order', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
       const book = await importBook(store);
@@ -500,14 +500,15 @@ describe('AI7 Apply on a Change Suggestion', () => {
       for (const { markId } of [first, second]) {
         expect(batch.marks.find((mark) => mark.markId === markId)).toMatchObject({ status: 'applied', anchorState: 'exact', fromGrapheme: 4, toGrapheme: 4 });
       }
-      // The second deletion's words go back at the one point both stand on. Whether the first deletion's
-      // words belong in front of them or behind them is no longer known there, so that one drifts.
-      const reversed = store.reverseAppliedChangeSuggestion({ ...binding(store, book), markId: second.markId, clientEffectId: randomUUID() });
-      expect(blockText(store, book, block.blockId) === [...parts.slice(0, 4), ...parts.slice(6)].join('')).toBe(true);
-      expect(reversed.card).toMatchObject({ status: 'open', anchorState: 'exact', pinnedText: second.pinned, fromGrapheme: 4, toGrapheme: 7 });
-      expect(reversed.marks.find((mark) => mark.markId === first.markId)).toMatchObject({ status: 'applied', anchorState: 'drifted' });
-      expect(storeError(() => store.reverseAppliedChangeSuggestion({ ...binding(store, book), markId: first.markId, clientEffectId: randomUUID() })))
-        .toBe('APPLY_TARGET_DRIFTED');
+      // Original Effect ranges retain the order even though both current deletion anchors share one point.
+      const inverse = { ...binding(store, book), markId: second.markId, clientEffectId: randomUUID() };
+      expect(store.prepareReverseApply(inverse)).toMatchObject({ ready: true, originalEffectId: batch.application.effectId });
+      const restored = store.reverseAppliedChangeSuggestion(inverse);
+      expect(blockText(store, book, block.blockId) === block.text).toBe(true);
+      expect(restored.application.reversesEffectId).toBe(batch.application.effectId);
+      expect(restored.marks.find((mark) => mark.markId === first.markId)).toMatchObject({ status: 'open', anchorState: 'exact', fromGrapheme: 4, toGrapheme: 6 });
+      expect(restored.marks.find((mark) => mark.markId === second.markId)).toMatchObject({ status: 'open', anchorState: 'exact', fromGrapheme: 6, toGrapheme: 9 });
+      expect(store.reverseAppliedChangeSuggestion(inverse).application.effectId).toBe(restored.application.effectId);
       store.markCleanShutdown();
     } finally {
       store.close();

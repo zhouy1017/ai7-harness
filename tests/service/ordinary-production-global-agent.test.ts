@@ -276,7 +276,7 @@ describe('v30 Book-less Global Agent', () => {
       const replacementRoot = await createServiceTestRoots('ai7-global-package-replace-'); copies.push(replacementRoot);
       let replacement = await openCopy(replacementRoot);
       const replacementPreview = await replacement.inspectDatabaseImport(packagePath);
-      expect(replacementPreview).toMatchObject({ compatibility: 'compatible', schemaRevision: 94, dataVersion: 1, contents: { books: 1 } });
+      expect(replacementPreview).toMatchObject({ compatibility: 'compatible', schemaRevision: 95, dataVersion: 1, contents: { books: 1 } });
       const replacing = await replacement.prepareDatabaseReplacement(replacementPreview.previewId);
       const replacementId = replacing.pending!.replacementId;
       await closeCopy(replacement); replacement = await openCopy(replacementRoot);

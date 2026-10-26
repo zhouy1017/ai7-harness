@@ -257,7 +257,7 @@ describe('知识库 › 审阅规范文件 over the real store', () => {
       expect(freshProcedures.preinstalled.map((procedure) => [procedure.title, procedure.state, procedure.uses])).toEqual([
         ['错别字与规范用语审阅工序', 'enabled', 0], ['体例与格式审阅工序', 'enabled', 0], ['线索转批注', 'enabled', 0], ['断言列举与引文定位', 'enabled', 0],
         ['引用风险点标注', 'enabled', 0], ['出版风险点标注', 'enabled', 0], ['文学性与表达改进工序', 'enabled', 0],
-        ['书系一致性检查', 'enabled', 0], ['跨交付物一致性检查', 'enabled', 0], ['基线分析', 'enabled', 0], ['本地文字检查', 'enabled', 0],
+        ['书系一致性检查', 'enabled', 0], ['跨交付物一致性检查', 'enabled', 0], ['基线分析', 'enabled', 0], ['确定性检查', 'enabled', 0],
       ]);
       expect(freshProcedures.artifacts).toEqual([{
         title: '本社方案', revision: null, state: 'available-to-install', enabledBooks: 0,

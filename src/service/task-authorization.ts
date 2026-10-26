@@ -522,7 +522,7 @@ export const MODEL_REQUEST_ADMISSION_SCHEMA_VERSION = 92;
 export const WORD_TRACKED_IMPORT_SCHEMA_VERSION = 93;
 /** First reader of selected original-field identity and local-fixture profile records; no SQL shape change. */
 export const POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION = 94;
-export const LATEST_SCHEMA_VERSION = POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION;
+export const LATEST_SCHEMA_VERSION = 95; // #1164: real house_word_list_versions DDL, not a reader-only bump.
 /** The custom analysis kind family slice 7f brings (ADR 0090 item 4): admitted here so it needs no second rebuild. */
 const CUSTOM_ANALYSIS_KIND_GLOB = 'custom-analysis/[a-z0-9-]*' as const;
 const CUSTOM_ANALYSIS_CONTRACT_VERSION_GLOB = 'ai7.custom-analysis*/[0-9]*' as const;
@@ -3166,6 +3166,10 @@ export function validateTaskAuthorizationSchema(db: DatabaseSync): void {
 export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
   validatePolicyOriginalFieldRecords(db);
   if (Number(db.prepare('PRAGMA user_version').get()?.user_version) === LATEST_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  if (Number(db.prepare('PRAGMA user_version').get()?.user_version) === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION) {
+    transact(db, () => { db.exec(`PRAGMA user_version = ${LATEST_SCHEMA_VERSION}`); validateTaskAuthorizationSchema(db); });
+    return;
+  }
   if (Number(db.prepare('PRAGMA user_version').get()?.user_version) === WORD_TRACKED_IMPORT_SCHEMA_VERSION) {
     validateRequestAdmissionRecords(db, true);
     transact(db, () => { db.exec(`PRAGMA user_version = ${LATEST_SCHEMA_VERSION}`); validateTaskAuthorizationSchema(db); });

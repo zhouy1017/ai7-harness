@@ -470,6 +470,7 @@ async function constructPredecessorV12(dataRoot, bookId) {
     database.exec(`
       PRAGMA foreign_keys = OFF;
       BEGIN IMMEDIATE;
+      DROP TABLE house_word_list_versions;
       DROP TABLE word_import_mark_sources;
       DROP TABLE word_tracked_edit_sample_imports;
       DROP TABLE word_tracked_edit_samples;
@@ -1101,7 +1102,7 @@ async function main() {
 
     at('knowledge-procedures');
     // 工序与规则 (Issue #427, S79d; since Issue #1081, F-26a, the pre-installed procedure library): the nine review categories'
-    // 工序 and baseline analysis by what each does, and since Issue #1119 本地文字检查 at version 1 (local-text-check@1) as the
+    // 工序 and baseline analysis by what each does, and since Issue #1164 确定性检查 at version 3 (local-text-check@3) as the
     // eleventh, each 已启用 drawn solid with its version and its stages in order — none used
     // in this Journey — the review-only predecessor named above 可复用工序, and the 方案
     // in the house's words, 本社方案 v2, installed and enabled for the one Book that enabled it. Both layers (LAYER-008): the
