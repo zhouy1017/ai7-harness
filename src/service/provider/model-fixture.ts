@@ -94,13 +94,27 @@ export class LocalFixturePolicyCatalog {
     return this.#tuples.map(({ fixtureIdentity, registeredProfile }) => ({ fixtureIdentity, registeredProfile }));
   }
 
-  profile(selected: SelectedPolicyIdentity, fixture: Pick<ResolvedModelFixture, 'identity' | 'sha256' | 'lineage'>, registeredProfile: LocalFixtureRegisteredProfile,
-    ruleId?: LocalFixtureRuleId): LocalFixtureProfile {
+  /**
+   * The legacy profile a plan names for its caller. It carries no fixture identity: whether the launch's fixture serves it
+   * is checked by `entriesFor` before any replay, so deriving or re-deriving plan inputs never fails on that alone.
+   */
+  legacyProfile(selected: SelectedPolicyIdentity, registeredProfile: LocalFixtureRegisteredProfile): LocalFixtureProfile {
+    const profile = this.#profileOf(selected, registeredProfile);
+    requireFixture(profile !== null, '本地夹具配置无效。');
+    return profile;
+  }
+
+  #profileOf(selected: SelectedPolicyIdentity, registeredProfile: LocalFixtureRegisteredProfile, ruleId?: LocalFixtureRuleId): LocalFixtureProfile | null {
     const common = { schema: 'ai7.local-fixture-profile/1', policyVersion: 'v29', policySha256: selected.providerProcessingSha256,
       activePolicySetVersion: selected.activePolicySetVersion, activePolicySetSha256: selected.activePolicySetSha256 } as const;
-    const profile = localFixtureProfileOf(ruleId === undefined
+    return localFixtureProfileOf(ruleId === undefined
       ? { ...common, kind: 'legacy', profileId: 'development-ci-legacy-local-fixture-809c96f2', manifestSha256: LOCAL_FIXTURE_MANIFEST_SHA256, registeredProfile }
       : { ...common, kind: 'rule', ruleId }, selected);
+  }
+
+  profile(selected: SelectedPolicyIdentity, fixture: Pick<ResolvedModelFixture, 'identity' | 'sha256' | 'lineage'>, registeredProfile: LocalFixtureRegisteredProfile,
+    ruleId?: LocalFixtureRuleId): LocalFixtureProfile {
+    const profile = this.#profileOf(selected, registeredProfile, ruleId);
     const exact = (tuple: LegacyFixtureTuple): boolean => tuple.fixtureIdentity === fixture.identity && tuple.lineageSha256 === fixture.sha256 &&
       canonicalJson(tuple.lineage) === canonicalJson(fixture.lineage);
     requireFixture(profile !== null && this.#tuples.some(exact) && (profile.kind !== 'legacy' || this.#tuples.some((tuple) =>

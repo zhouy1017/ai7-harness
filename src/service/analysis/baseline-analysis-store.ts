@@ -2452,9 +2452,10 @@ export class BaselineAnalysisStore {
     const runtime = this.#launch.localFixtureRuntime?.();
     requireAnalysis(runtime !== undefined && runtime !== null && canonicalJson(runtime.selectedPolicyIdentity) === canonicalJson(selected),
       'ANALYSIS_POLICY_UNAVAILABLE', '本地夹具策略目录缺失或不一致。');
-    const profile = localFixtureRegisteredProfile(this.#definition.kind, null);
-    return { selectedPolicyIdentity: selected, localFixtureProfile: runtime.catalog.profile(selected,
-      { identity: this.#route.fixtureIdentity, sha256: this.#route.fixtureSha256, lineage: this.#route.fixtureLineage }, profile) };
+    // Plan inputs are also re-derived to detect drift; a launch whose fixture cannot serve this kind must read as drift, not
+    // fail the read. Execution still refuses an unserved fixture before any replay (LocalFixturePolicyCatalog.entriesFor).
+    return { selectedPolicyIdentity: selected,
+      localFixtureProfile: runtime.catalog.legacyProfile(selected, localFixtureRegisteredProfile(this.#definition.kind, null)) };
   }
 
   /**
