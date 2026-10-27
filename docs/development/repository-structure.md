@@ -45,5 +45,6 @@ The review at `dev@f3199a2d` found concentrated ownership in `src/service/store.
 - Extract one cohesive service-store operation group into its existing feature owner while leaving transactions, schema and authoritative state in their present owner.
 - Extract one renderer screen's rendering and event wiring without introducing another view-state store.
 - Separate one native application integration from shell lifecycle while preserving startup and close ordering.
+- Split one manuscript-store or analysis-store responsibility out of `src/service/bounded-manuscript.ts` or `src/service/analysis/baseline-analysis-store.ts` behind its existing owner interface.
 
-Each extraction needs an Issue, unchanged observable behavior, focused regression coverage and the applicable existing Journey. Track priority in the [development plan](development-plan.md); this map is navigation, not a second backlog.
+Each extraction needs an Issue, unchanged observable behavior, focused regression coverage and the applicable existing Journey. The [development plan](development-plan.md) tracks priority and the measured size ceilings (F-25); this map is navigation, not a second backlog.
