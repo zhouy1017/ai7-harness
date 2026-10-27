@@ -5969,7 +5969,7 @@ function renderKnowledgeBaseProjection(projection: DefaultExecutionRulesProjecti
         else if (['evaluation', 'readers-report', 'evaluation-rewrite'].includes(kind)) renderBookEvaluation(route.bookId, route.bookTitle);
         else renderBookReview(route.bookId, route.bookTitle);
       });
-    }).catch((error: unknown) => setStatus(rendererErrorMessage(error, '无法读取工序版本。'), 'error'));
+    }, rendererErrorMessage).catch((error: unknown) => setStatus(rendererErrorMessage(error, '无法读取工序版本。'), 'error'));
     const artifacts = element('ul', 'knowledge-artifact-list');
     for (const artifact of procedures.artifacts) {
       const item = element('li', undefined, artifactLine(artifact));

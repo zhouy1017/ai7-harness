@@ -53,7 +53,7 @@ export function renderProcedureLibrary(procedures: readonly PreinstalledProcedur
 
 /** The form owns only its unsaved values; the service owns versions and selections. */
 export async function mountEditableProcedureLibrary(root: HTMLElement, api: RendererApi,
-  openRun: (book: BookSummaryProjection, kind: string) => Promise<void>): Promise<void> {
+  openRun: (book: BookSummaryProjection, kind: string) => Promise<void>, errorMessage: (error: unknown, fallback: string) => string): Promise<void> {
   const node = <K extends keyof HTMLElementTagNameMap>(tag: K, text?: string): HTMLElementTagNameMap[K] => {
     const result = document.createElement(tag); if (text !== undefined) result.textContent = text; return result;
   };
@@ -63,7 +63,7 @@ export async function mountEditableProcedureLibrary(root: HTMLElement, api: Rend
     return button;
   };
   const status = node('p'); status.setAttribute('role', 'status');
-  const showError = (error: unknown): void => { status.textContent = error instanceof Error ? error.message : '无法保存工序，请重试。'; };
+  const showError = (error: unknown): void => { status.textContent = errorMessage(error, '无法保存工序，请重试。'); };
   const body = node('div'), formSlot = node('div');
   root.replaceChildren(status, body, formSlot);
   const label = (title: string, input: HTMLElement): HTMLLabelElement => { const result = node('label'); result.className = 'review-field'; result.append(node('span', title), input); return result; };
