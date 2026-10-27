@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import type { JournalEditInput } from '../../src/shared/protocol.js';
 import { importSample1Book } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+import { ADMITTED_BASELINE_DOCX, composeRevisedDocx } from '../support/composed-fixture.js';
 
 let roots: ServiceTestRoots;
 let store: EditorialStore;
@@ -35,6 +37,35 @@ function redo(): void { store.redoManuscript(book.manuscriptId, book.branchId, w
 
 // Public source/learning behavior on admitted sample1; no SQL inspection, corruption, or manuscript dumps.
 describe('actual manual edits in local learning', () => {
+  it.each(['suggestions', 'accepted-baseline'] as const)('keeps Word %s opt-out separate from a later actual manual edit', async (mode) => {
+    const path = join(roots.inputRoot, `word-opt-out-${mode}.docx`);
+    await composeRevisedDocx(path, { source: ADMITTED_BASELINE_DOCX, title: 'Word 来源分离', paragraphs: [{ runs: [
+      { text: { block: 8, from: 0, to: 10 } },
+      { text: { block: 9, from: 0, to: 5 }, revision: { kind: 'del', author: '原修订作者', date: '2026-10-25T00:00:00Z' } },
+      { text: { block: 10, from: 0, to: 6 }, revision: { kind: 'ins', author: '原修订作者', date: '2026-10-25T00:00:00Z' } },
+    ] }] });
+    const draft = await store.stageSelectedManuscript(randomUUID(), path);
+    const review = store.prepareNewBookReview(draft.draftId, draft.draftVersion,
+      { kind: 'new-book', choiceId: 'new-book', confirmedTitle: 'Word 来源分离' }, false, 'retain',
+      { mode, learnFromEdits: false, acceptedBaselineConfirmed: mode === 'accepted-baseline' });
+    const commitId = randomUUID();
+    book = await store.commitNewBookImport({ draftId: draft.draftId, expectedDraftVersion: review.draftVersion,
+      reviewDigest: review.reviewDigest!, commitId });
+    await store.acknowledgeImportCompletion(commitId);
+    expect(inspect()).toMatchObject({ signals: [], nextSignalOffset: null });
+    edit();
+    const page = inspect();
+    expect(page.signals.map(({ kind, source }) => ({ kind, bookId: source.bookId })))
+      .toEqual([{ kind: 'manual-edit-journal', bookId: book.bookId }]);
+    expect(page.nextSignalOffset).toBeNull();
+    const source = page.signals[0]!;
+    store.markCleanShutdown(); store.close();
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    expect(inspect().signals.map(({ signalId, kind }) => ({ signalId, kind })))
+      .toEqual([{ signalId: source.signalId, kind: 'manual-edit-journal' }]);
+    expect(inspect().nextSignalOffset).toBeNull();
+  });
+
   it('captures one exact original transformation and keeps a retried flush idempotent', () => {
     expect(inspect().signals).toEqual([]);
     const before = window().blocks[0]!.text;
