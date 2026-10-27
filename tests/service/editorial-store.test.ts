@@ -669,7 +669,7 @@ describe('EditorialStore on a temporary Agent Data Root', () => {
       // failure names the relation rather than printing the manuscript.
       const reshaped = [...truthBefore]
         .filter(([name, before]) => truthAfter.get(name)!.sql !== before.sql).map(([name]) => name);
-      expect(reshaped).toEqual(['analysis_plan_records', ...KIND_COUPLED_ANALYSIS_RELATIONS].sort());
+      expect(reshaped).toEqual(['analysis_plan_records', 'analysis_run_authorizations', ...KIND_COUPLED_ANALYSIS_RELATIONS].sort());
       const rewritten = [...truthBefore]
         .filter(([name, before]) => truthAfter.get(name)!.content !== before.content).map(([name]) => name);
       expect(rewritten).toEqual(['service_lifetimes']);

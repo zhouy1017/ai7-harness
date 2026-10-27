@@ -1,3 +1,4 @@
+import type { ManualCommandRequestPin, ManualCommandSource } from '../shared/protocol/learning.js';
 import { HOUSE_WORD_LIST_SCHEMA_VERSION, HOUSE_WORD_LIST_SCHEMA_SQL, HOUSE_WORD_LIST_TRIGGER_SQL, HOUSE_WORD_LIST_FOREIGN_KEYS } from './review/house-word-list.js';
 import { IDLE_BACKGROUND_SCHEMA_VERSION, LOCAL_REVIEW_SCHEMA_VERSION } from './task-authorization.js';
 import { LOCAL_STAGE_SCHEMA_SQL, LOCAL_STAGE_TRIGGER_SQL, LOCAL_STAGE_FOREIGN_KEYS, validateLocalStageArtifacts } from './review/review-runs.js';
@@ -92,7 +93,7 @@ import {
   ANALYSIS_LEDGER_REVISION_30_SQL,
   ANALYSIS_LEDGER_REVISION_65_SQL,
   ANALYSIS_LEDGER_REVISION_17_TABLES,
-  ANALYSIS_LEDGER_SCHEMA_SQL, ANALYSIS_LEDGER_REVISION_84_SQL, REVIEW_CONTRACT_SCHEMA_VERSION, WEB_TOOLS_PLAN_RECORDS_SQL, SEARCH_BACKEND_CONNECTIONS_SQL,
+  ANALYSIS_LEDGER_SCHEMA_SQL, CURATION_SCHEMA_SQL, ANALYSIS_LEDGER_REVISION_84_SQL, REVIEW_CONTRACT_SCHEMA_VERSION, WEB_TOOLS_PLAN_RECORDS_SQL, SEARCH_BACKEND_CONNECTIONS_SQL,
   ANALYSIS_LEDGER_TRIGGER_SQL,
   J03_TASK_AUTHORIZATION_SCHEMA_VERSION,
   J04_BASELINE_ANALYSIS_SCHEMA_VERSION,
@@ -314,6 +315,7 @@ import {
 const ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL: Readonly<Record<string, string | ReadonlyArray<string>>> = {
   ...ANALYSIS_LEDGER_SCHEMA_SQL,
   analysis_task_intents: [
+    CURATION_SCHEMA_SQL['analysis_task_intents']!,
     ANALYSIS_LEDGER_SCHEMA_SQL.analysis_task_intents,
     ANALYSIS_LEDGER_REVISION_84_SQL.analysis_task_intents,
     ANALYSIS_LEDGER_REVISION_79_SQL.analysis_task_intents,
@@ -358,6 +360,7 @@ const ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL: Readonly<Record<string, string | Read
   analysis_task_outcomes: [ANALYSIS_LEDGER_SCHEMA_SQL.analysis_task_outcomes, ANALYSIS_LEDGER_REVISION_31_SQL.analysis_task_outcomes],
   analysis_plan_revisions: [ANALYSIS_LEDGER_SCHEMA_SQL.analysis_plan_revisions, ANALYSIS_LEDGER_REVISION_33_SQL.analysis_plan_revisions],
   analysis_run_authorizations: [
+    CURATION_SCHEMA_SQL['analysis_run_authorizations']!,
     IDLE_RUN_AUTHORIZATIONS_SQL,
     ANALYSIS_LEDGER_SCHEMA_SQL.analysis_run_authorizations,
     ANALYSIS_LEDGER_REVISION_65_SQL.analysis_run_authorizations,
@@ -6087,7 +6090,7 @@ export function initializeBoundedSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === LATEST_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === 95 || version === LATEST_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -6138,7 +6141,7 @@ export function initializeBoundedSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === LATEST_SCHEMA_VERSION)) {
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === 95 || version === LATEST_SCHEMA_VERSION)) {
     transact(db, () => {
       if (validateStoreTruth || version !== LATEST_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(
@@ -6564,42 +6567,7 @@ export type VerifiedRecoverySnapshot =
     }
   | { state: 'none' };
 
-/**
- * The producer request a manual command was created by (Issue #1140), kept because its journal entry cannot give it
- * back once the request is gone: freehand typing names the window the edit was made in, the manual Search/Replace
- * commit the preview it committed. Every other field of the original request is read back from the journal entry and
- * its member, and the entry's unchanged request fingerprint proves the whole. AI7 Apply journals `replacement` too, but
- * under the fingerprint of its own command group, so no preview can pass an Apply off as manual.
- */
-export type ManualCommandRequestPin =
-  | { readonly origin: 'journal-edit'; readonly windowStartBlockId: string }
-  | { readonly origin: 'manual-search-replacement'; readonly previewId: string };
-
-/**
- * One original manual command named by its exact evidence (Issue #1140): the creation journal entry and command group,
- * the Book, manuscript, branch and Revision they belong to, the working-state chain they joined and the immutable
- * evidence digest that chain was computed over. It is the group's creation, never a later undo or redo of it.
- */
-export interface ManualCommandSource {
-  readonly bookId: string;
-  readonly manuscriptId: string;
-  readonly branchId: string;
-  readonly baseRevisionId: string;
-  readonly journalEntryId: string;
-  readonly journalSequence: number;
-  readonly clientEditId: string;
-  readonly requestFingerprint: string;
-  readonly durableAt: string;
-  readonly commandGroupId: string;
-  readonly commandKind: 'edit' | 'replacement';
-  readonly commandOrdinal: number;
-  readonly sourceGroupId: null;
-  readonly beforeWorkingDigest: string;
-  readonly afterWorkingDigest: string;
-  readonly evidenceDigest: string;
-  readonly memberCount: number;
-  readonly request: ManualCommandRequestPin;
-}
+export type { ManualCommandRequestPin, ManualCommandSource } from '../shared/protocol/learning.js';
 
 /** Where the next page starts: an exclusive member position of one exact source, and the history it was read against. */
 export interface ManualCommandSourceCursor {
@@ -8108,7 +8076,7 @@ export class BoundedManuscriptStore {
     return projection;
   }
 
-  flushJournalEdit(input: JournalEditInput, serviceLifetimeId: string): JournalAcknowledgement {
+  flushJournalEdit(input: JournalEditInput, serviceLifetimeId: string, capture?: (source: ManualCommandSource) => void): JournalAcknowledgement {
     validateIdentity(input.manuscriptId, input.branchId);
     requireBounded(UUID_PATTERN.test(serviceLifetimeId), 'LIFETIME_INVALID', '本地服务生命周期标识无效。');
     requireBounded(UUID_PATTERN.test(input.clientEditId) && UUID_PATTERN.test(input.baseRevisionId) && BLOCK_PATTERN.test(input.blockId) && BLOCK_PATTERN.test(input.windowStartBlockId) && DIGEST_PATTERN.test(input.baseBlockDigest), 'EDIT_INVALID', '编辑标识无效。');
@@ -8202,6 +8170,8 @@ export class BoundedManuscriptStore {
       ).run(sequence, workingDigest, delta, historyOrdinal, input.branchId, binding.journalSequence, binding.workingDigest);
       requireBounded(state.changes === 1, 'EDIT_SEQUENCE_CHANGED', '修订日志在保存时已前进。');
       this.#recordLifetimeJournalWrite(serviceLifetimeId, binding, sequence, workingDigest, durableAt);
+      if (capture !== undefined) capture(this.manualCommandSource(input.branchId, sequence,
+        { origin: 'journal-edit', windowStartBlockId: input.windowStartBlockId }));
     });
     const committed = one(this.#db.prepare(
       `SELECT client_edit_id, request_fingerprint, branch_id, base_revision_id, block_id, sequence,
@@ -8540,7 +8510,7 @@ export class BoundedManuscriptStore {
     };
   }
 
-  commitReplacement(previewId: string, serviceLifetimeId: string): ReplacementCommitProjection {
+  commitReplacement(previewId: string, serviceLifetimeId: string, capture?: (source: ManualCommandSource) => void): ReplacementCommitProjection {
     requireBounded(UUID_PATTERN.test(serviceLifetimeId), 'LIFETIME_INVALID', '本地服务生命周期标识无效。');
     const result = transact(this.#db, () => {
       const preview = one(this.#db.prepare('SELECT * FROM manuscript_replacement_previews WHERE preview_id = ?').all(previewId) as SqlRow[], 'REPLACEMENT_NOT_FOUND', '替换预览不存在。');
@@ -8657,6 +8627,8 @@ export class BoundedManuscriptStore {
       ).run(sequence, workingDigest, ordinal, totalDelta, binding.branchId, binding.journalSequence, binding.workingDigest);
       requireBounded(state.changes === 1, 'REPLACEMENT_STALE', '替换提交时稿件状态已变化。');
       this.#recordLifetimeJournalWrite(serviceLifetimeId, binding, sequence, workingDigest, now);
+      if (capture !== undefined) capture(this.manualCommandSource(binding.branchId, sequence,
+        { origin: 'manual-search-replacement', previewId }));
       requireBounded(
         this.#db.prepare("UPDATE manuscript_replacement_previews SET state = 'committed', committed_at = ? WHERE preview_id = ? AND state = 'frozen'").run(now, previewId).changes === 1,
         'REPLACEMENT_STATE_CHANGED',
@@ -9077,6 +9049,28 @@ export class BoundedManuscriptStore {
         canUndo: this.#hasHistory(branchId, 'applied'), canRedo: this.#hasHistory(branchId, 'undone'),
       };
     });
+  }
+
+  manualCommandSource(branchId: string, sequence: number, request: ManualCommandRequestPin): ManualCommandSource {
+    const entry = one(this.#db.prepare(`SELECT e.*, g.ordinal, g.kind, g.source_group_id, g.before_working_digest,
+      g.after_working_digest, m.book_id FROM edit_journal_entries e
+      JOIN manuscript_command_groups g ON g.command_group_id = e.command_group_id
+      JOIN manuscripts m ON m.manuscript_id = e.manuscript_id WHERE e.branch_id = ? AND e.sequence = ?`)
+      .all(branchId, sequence) as SqlRow[], 'MANUAL_SOURCE_MISMATCH', '手动编辑的原始日志不存在。');
+    requireBounded(entry.command_kind === 'edit' || entry.command_kind === 'replacement', 'MANUAL_SOURCE_MISMATCH', '这不是原始手动编辑。');
+    const evidence = new CommandEvidenceReader(this.#db, asString(entry.command_group_id));
+    while (evidence.nextBatch().length > 0) { /* The existing reader proves every whole member. */ }
+    const complete = evidence.finish();
+    const source: ManualCommandSource = {
+      bookId: asString(entry.book_id), manuscriptId: asString(entry.manuscript_id), branchId,
+      baseRevisionId: asString(entry.base_revision_id), journalEntryId: asString(entry.journal_entry_id), journalSequence: sequence,
+      clientEditId: asString(entry.client_edit_id), requestFingerprint: asString(entry.request_fingerprint), durableAt: asString(entry.durable_at),
+      commandGroupId: asString(entry.command_group_id), commandKind: entry.command_kind, commandOrdinal: asNumber(entry.ordinal),
+      sourceGroupId: null, beforeWorkingDigest: asString(entry.before_working_digest), afterWorkingDigest: asString(entry.after_working_digest),
+      evidenceDigest: complete.digest, memberCount: complete.memberCount, request,
+    };
+    this.readManualCommandSource(source, null, MAX_FRAME_BYTES);
+    return source;
   }
 
   /**

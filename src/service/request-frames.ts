@@ -1,6 +1,7 @@
 import { validLocalOptions } from './review/deterministic/plan.js';
 import { validateInspectHouseWordListInput, validateSaveHouseWordListInput } from '../shared/protocol/house-word-list.js';
 import { validSupervisionInput } from './learning/supervision-directives.js';
+import { validCurationBudget } from './learning/curation.js';
 import { AnalysisError } from './analysis/canonical.js';
 import { baselineAnalysisOutbound } from './analysis/baseline-analysis-wire.js';
 import { taskPlanOutbound } from './task-plan.js';
@@ -1483,7 +1484,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
         const input = requireInput(value.input, ['kind', 'signalId'], tentativeId);
         if (!validUuid(input.signalId)) throw new ProtocolError(tentativeId);
       } else {
-        const input = requireInput(value.input, kind === 'switch' ? ['kind', 'enabled', 'expectedEntries'] : ['kind', 'bookId', 'excluded', 'expectedEntries'], tentativeId);
+        const input = requireInput(value.input, kind === 'switch' ? ['kind', 'enabled', 'expectedEntries', ...(value.input.curation === undefined ? [] : ['curation'])] : ['kind', 'bookId', 'excluded', 'expectedEntries'], tentativeId);
+        if (input.curation !== undefined && (kind !== 'switch' || input.enabled !== true || !validCurationBudget(input.curation))) throw new ProtocolError(tentativeId);
         if (!Number.isSafeInteger(input.expectedEntries) || Number(input.expectedEntries) < 0 ||
             !(kind === 'switch' ? typeof input.enabled === 'boolean' : kind === 'book' && validUuid(input.bookId) && typeof input.excluded === 'boolean')) throw new ProtocolError(tentativeId);
       }

@@ -62,6 +62,7 @@ export const LEARNING_AUDIT_KIND_LABELS: Readonly<Record<LearningLedgerMaterialK
   'analysis-feedback': '分析反馈',
   'review-disposition': '审阅',
   'readers-report-exemplar': '审稿意见范例',
+  'manual-edit-journal': '直接修改稿件',
   'word-tracked-edit': 'Word 文件修订',
 };
 

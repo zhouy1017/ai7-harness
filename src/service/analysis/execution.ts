@@ -1,4 +1,7 @@
 import { PlatformToolSession, platformToolModelProfile } from '../provider/platform-tool-session.js';
+import { CURATION_CONTRACT, CURATION_CONTRACT_DIGEST, type CurationRun } from '../learning/curation.js';
+import { learningCurationRule } from './live-kind-admission.js';
+import type { EditorialStore } from '../store.js';
 import { ResearchSnapshotCache } from '../provider/research-snapshot-cache.js';
 import { researchSnapshotDigest, retainUnitEvidence, retainedPageOf, searchHitsOf, type RetainedPage, type RetainedUnit } from './factual-review-evidence.js';
 import { factualFindingId, locatedUnitFindings } from './factual-review-reducers.js';
@@ -512,6 +515,93 @@ export class BaselineAnalysisExecutionOwner {
   readonly #waitingCapacity: number;
   /** Runs still unwinding stay here; only those holding a governor place count toward `#capacity` (Issues #49, #865). */
   readonly #active = new Map<string, ActiveRun>();
+  #curation: { abort: AbortController; done: Promise<void> } | null = null;
+
+  /** One tool-free turn on the existing F17 lane, using the same broker, physical governor and final gate. */
+  startLearningCuration(store: Pick<EditorialStore, 'nextLearningCuration' | 'learningCurationCurrent' | 'publishLearningCuration'>): void {
+    if (this.#disposed || this.#curation !== null || !this.#idleConfirmed || !this.#placeForOrigin('background-analysis-enrollment') ||
+      !isOrdinaryProductionRuntime(this.#live())) return;
+    const active = { abort: new AbortController(), done: Promise.resolve() };
+    this.#curation = active;
+    active.done = this.#executeCuration(store, active.abort.signal).finally(() => { this.#curation = null; this.#drain(); this.#changed(); });
+  }
+
+  async #executeCuration(store: Pick<EditorialStore, 'nextLearningCuration' | 'learningCurationCurrent' | 'publishLearningCuration'>,
+    signal: AbortSignal): Promise<void> {
+    const live = this.#live();
+    if (!isOrdinaryProductionRuntime(live)) return;
+    const ledger = this.#deps.ledger;
+    let run: CurationRun | null = null, harness: PrimaryAgentHarnessHandle | null = null;
+    let adapter: DeepSeekOpenAiCompatibleAdapter | null = null, producer: ModelRequestProducer | null = null;
+    let usage: UsageFacts | null = null, sent = false;
+    try {
+      if (await this.liveCredentialReadiness() !== 'present' || !this.#backgroundIdle || signal.aborted) return;
+      run = store.nextLearningCuration();
+      if (run === null) return;
+      const frozen = run;
+      const binding = frozen.envelope.binding;
+      const sessionId = randomUUID();
+      const bound = ledger.bindCuration(frozen, sessionId);
+      const current = (): boolean => !signal.aborted && !this.#disposed && store.learningCurationCurrent(frozen) &&
+        learningCurationRule(this.#policy(), binding) !== null;
+      const requireCurrent = (): void => { if (!current()) throw new ExecutionAdmissionError('CURATION_STALE', '学习来源或启用范围已变化。'); };
+      const rule = learningCurationRule(this.#policy(), binding);
+      if (rule === null || frozen.bundle.emittedText === null || frozen.bundle.emittedDigest === null) throw new ExecutionAdmissionError('CURATION_STALE', '学习整理来源或策略不可用。');
+      producer = this.#deps.requestGovernor.registerProducer({ key: `curation:${frozen.runRecordId}`, kind: 'analysis-stage', lane: 'background' });
+      let ticket: TransmitTicket | null = null, admitted = false;
+      const facts: EgressBindingFacts = { bindingDigest: bound.bindingDigest, route: binding.route, model: binding.model,
+        systemPrompt: CURATION_CONTRACT.systemPrompt, outboundDataCategory: 'editorial-learning-example',
+        policy: { operationalScope: 'ordinary-production', providerProcessingVersion: 'v31', liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
+        admittedUserMessages: new Set([frozen.bundle.emittedText]), ruleOutboundCategories: new Set(rule.outboundDataCategories),
+        contractCategories: new Set(['editorial-learning-example', 'house-review-preference-excerpt']),
+        learningCurationScope: { messageDigest: frozen.bundle.emittedDigest, current } };
+      harness = await prepareExecution({ sessionId, route: binding.route, model: binding.model,
+        systemPrompt: CURATION_CONTRACT.systemPrompt, promptContractDigest: CURATION_CONTRACT_DIGEST,
+        compositionOptions: { version: 2, learningCuration: { bundleDigest: frozen.bundle.digest, contractDigest: CURATION_CONTRACT_DIGEST } },
+        acquireRequest: async (_payload, requestSignal) => {
+          const permit = await this.#deps.requestGovernor.acquire(producer!, AbortSignal.any([signal, requestSignal]));
+          try {
+            requireCurrent();
+            if (!this.#backgroundIdle) throw new ExecutionAdmissionError('CURATION_NOT_IDLE', '学习整理等待空闲时停止；未发送。');
+            return { release: () => { ticket = null; permit.release(); }, admit: (decision) => {
+              requireCurrent();
+              if (decision.decision !== 'transmit-remote' || admitted) throw new ExecutionAdmissionError('CURATION_REQUEST_BOUND', '学习整理只允许一次请求。');
+              admitted = true;
+              ledger.recordRunState(frozen.runRecordId, 'executing', { detail: '完整编辑样例已通过最终发送检查。',
+                curationRequest: { requestId: randomUUID(), sessionId, payloadDigest: decision.payloadDigest, messageDigest: frozen.bundle.emittedDigest,
+                  sourceManifestDigest: frozen.bundle.digest, reservedTokens: frozen.envelope.budget.perPassTokens } });
+            } };
+          } catch (error) { permit.release(); throw error; }
+        },
+        gate: (payload) => evaluateEgress(payload, facts, { currentBindingDigest: () => current() ? bound.bindingDigest : null,
+          acceptedOutputDigests: new Set(), ceilingState: () => admitted ? 'reached' : 'within' }),
+        onTransmitTicket: (value) => { ticket = value; },
+        adapterFactory: (codes) => {
+          adapter = new DeepSeekOpenAiCompatibleAdapter({ broker: this.#broker,
+            slotBinding: { bindingDigest: bound.bindingDigest, modelRole: 'Main Editorial Role', slot: binding.credentialSlot, credentialReference: binding.credentialReference },
+            tickets: { take: () => { const value = ticket; ticket = null; return value; } }, attribution: () => ({}),
+            promptContractDigest: CURATION_CONTRACT_DIGEST, codes, signal, beforeSend: requireCurrent,
+            profile: productionRouteProfile(binding.route), modelProfile: productionModelProfile(binding.route, binding.model),
+            ...(this.#policy().providerProcessing.transport === undefined ? {} : { transportSettings: this.#policy().providerProcessing.transport }),
+            sessionId: () => sessionId, transport: (url, init) => { requireCurrent(); sent = true; return live.nativeFetch(url, init); } });
+          return adapter;
+        },
+      });
+      if (harness.composition.digest !== frozen.compositionDigest) throw new ExecutionAdmissionError('CURATION_COMPOSITION_CHANGED', '整理组合与固定计划不一致。');
+      harness.bindExecution({ harnessSessionId: sessionId, behaviorCompositionDigest: frozen.compositionDigest, promptContractDigest: CURATION_CONTRACT_DIGEST });
+      const outcome = await harness.submitUnit(frozen.bundle.emittedText);
+      const result = (adapter as DeepSeekOpenAiCompatibleAdapter | null)?.lastCanonicalResult;
+      usage = result !== undefined && result !== null && 'usage' in result ? result.usage : null;
+      if (outcome.terminal !== 'completed' || result?.kind !== 'answer') throw new ExecutionAdmissionError('CURATION_UNCERTAIN', '整理未获得完整可核对的回答；不会自动重发。');
+      requireCurrent();
+      store.publishLearningCuration(frozen, result.text, { usage, transmitted: sent });
+    } catch {
+      if (run !== null) ledger.settleCuration(run, sent ? 'interrupted' : 'failed', { usage, proposals: 0, transmitted: sent,
+        reason: sent ? '学习整理结果未发布或结果不确定；保留预算与来源，不自动重发。' : '学习整理在发送前停止；没有发布候选。' });
+    } finally {
+      try { await harness?.finish(); } finally { if (producer !== null) this.#deps.requestGovernor.unregisterProducer(producer); }
+    }
+  }
   /** Of those, the Runs a 后台分析登记 started (Issue #864): under a live launch the editor's Runs never take their place. */
   readonly #backgroundActive = new Set<string>();
   /**
@@ -687,13 +777,13 @@ export class BaselineAnalysisExecutionOwner {
    */
   get busy(): boolean {
     const occupying = this.#occupiedPlaces();
-    return occupying.length >= this.#capacity || (this.#live() !== null &&
+    return occupying.length + (this.#curation === null ? 0 : 1) >= this.#capacity || (this.#live() !== null &&
       occupying.filter((run) => !this.#backgroundActive.has(run.runRecordId)).length >= LIVE_FOREGROUND_PLACES);
   }
 
   /** Whether every place is taken (Issue #864): a Run a 后台分析登记 starts needs a free place, within its share. */
   get full(): boolean {
-    return this.#occupiedPlaces().length >= this.#capacity;
+    return this.#occupiedPlaces().length + (this.#curation === null ? 0 : 1) >= this.#capacity;
   }
 
   /** The same waiting-state predicate governs total, foreground and background admission (Issues #864, #865). */
@@ -706,7 +796,7 @@ export class BaselineAnalysisExecutionOwner {
   /** Starts and continuations consume the same origin's share; a waiting Run owns no place (Issue #864 revision 5). */
   #placeForOrigin(origin: ExecutionPlanFacts['origin']): boolean {
     return origin === 'background-analysis-enrollment'
-      ? this.#backgroundIdle && !this.full && this.#occupiedPlaces().filter((run) => this.#backgroundActive.has(run.runRecordId)).length < executionBackgroundShare(this.#policy(), this.#capacity)
+      ? this.#backgroundIdle && !this.full && this.#occupiedPlaces().filter((run) => this.#backgroundActive.has(run.runRecordId)).length + (this.#curation === null ? 0 : 1) < executionBackgroundShare(this.#policy(), this.#capacity)
       : !this.busy;
   }
 
@@ -720,13 +810,13 @@ export class BaselineAnalysisExecutionOwner {
   #placeForCancellation(runRecordId: string, ledger: BaselineAnalysisStore): boolean {
     const facts = ledger.loadExecutionPlan(runRecordId);
     return facts.origin === 'background-analysis-enrollment' || facts.startWhen === 'idle'
-      ? !this.full && this.#occupiedPlaces().filter((run) => this.#backgroundActive.has(run.runRecordId)).length < executionBackgroundShare(this.#policy(), this.#capacity)
+      ? !this.full && this.#occupiedPlaces().filter((run) => this.#backgroundActive.has(run.runRecordId)).length + (this.#curation === null ? 0 : 1) < executionBackgroundShare(this.#policy(), this.#capacity)
       : !this.busy;
   }
 
   /** Whether nothing runs, waits for a place, or waits to finish its cancellation: no Run will write until another starts. */
   get idle(): boolean {
-    return this.#active.size === 0 && this.#queued.length === 0 && this.#pendingCancels.length === 0;
+    return this.#curation === null && this.#active.size === 0 && this.#queued.length === 0 && this.#pendingCancels.length === 0;
   }
 
   /** How many Runs execute at once. */
@@ -1147,8 +1237,8 @@ export class BaselineAnalysisExecutionOwner {
 
   /** Resolve once no Run is executing — a queued one admitted meanwhile included; used by the service suites. */
   async whenIdle(): Promise<void> {
-    while (this.#active.size > 0) {
-      await Promise.all([...this.#active.values()].map((active) => active.done));
+    while (this.#active.size > 0 || this.#curation !== null) {
+      await Promise.all([...this.#active.values()].map((active) => active.done).concat(this.#curation?.done ?? []));
     }
   }
 
@@ -1251,6 +1341,8 @@ export class BaselineAnalysisExecutionOwner {
 
   async dispose(): Promise<void> {
     this.#disposed = true;
+    const curation = this.#curation;
+    curation?.abort.abort();
     this.#changed();
     // A queued start stays `authorized` in its ledger, and the next start queues it again in its order.
     this.#queued.length = 0;
@@ -1262,6 +1354,7 @@ export class BaselineAnalysisExecutionOwner {
       if (this.#live() === null) active.harness?.interrupt();
     }
     await Promise.all(running.map((active) => active.done));
+    await curation?.done;
   }
 
   #recordFailure(ledger: BaselineAnalysisStore, facts: ExecutionPlanFacts, error: unknown): void {

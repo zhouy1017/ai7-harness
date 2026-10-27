@@ -1,900 +1,152 @@
-import { createHash, randomUUID } from 'node:crypto';
-import { join } from 'node:path';
-import { DatabaseSync, type SQLInputValue, type SQLOutputValue } from 'node:sqlite';
+import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import {
-  BoundedManuscriptStore,
-  BoundedStoreError,
-  type CommandEvidenceMember,
-  type ManualCommandRequestPin,
-  type ManualCommandSource,
-  type ManualCommandSourceCursor,
-  type ManualCommandSourcePage,
-} from '../../src/service/bounded-manuscript.js';
-import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { graphemesOf } from '../../src/shared/mark-anchor.js';
-import {
-  MAX_BLOCK_CODE_UNITS,
-  MAX_BLOCK_GRAPHEMES,
-  MAX_EDIT_CODE_UNITS,
-  MAX_EDIT_GRAPHEMES,
-  MAX_FRAME_BYTES,
-  type JournalAcknowledgement,
-  type JournalEditInput,
-} from '../../src/shared/protocol.js';
-import { ADMITTED_BASELINE_DOCX, composeRevisedDocx, sourceSpanText, type ComposedRevisedParagraph } from '../support/composed-fixture.js';
-import { importSample1Book, requireExactSample1, SAMPLE1_BLOCKS } from '../support/sample1-baseline.js';
+import { EditorialStore } from '../../src/service/store.js';
+import type { JournalEditInput } from '../../src/shared/protocol.js';
+import { importSample1Book } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
-// Service-integration suite (L2) for Issue #1140's first phase: the exact source of an original manual command, read
-// from the real journal owners on a temporary Agent Data Root with exact `sample1` or a manuscript composed from it.
-// Books are made and imported through the real Store, which is then shut down cleanly and closed before one SQLite
-// connection and one BoundedManuscriptStore drive the editor's own freehand flush, manual Search/Replace, undo and redo;
-// AI7 Apply and recovery after an unclean close run through the reopened Store. Nothing is captured as learning yet:
-// these tests prove the reader, and that reading writes nothing (`total_changes()` on the reading connection stays put).
-// SQL here only locates real records, recomputes their digests independently, or damages a disposable store for a
-// refusal — a negative fixture, never authority for anything. Manuscript text is compared by boolean, digest, count and
-// position only, and never printed.
-
 let roots: ServiceTestRoots;
+let store: EditorialStore;
+let book: { bookId: string; manuscriptId: string; branchId: string };
+const RAW = 'e\u0301q\u0301"\\😀𠀀';
 
 beforeEach(async () => {
   roots = await createServiceTestRoots('ai7-direct-edit-');
-  await requireExactSample1(roots.codeRoot);
+  store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  book = await importSample1Book(store, roots.codeRoot, '直接编辑样书');
 });
-
 afterEach(async () => {
+  store?.markCleanShutdown(); store?.close();
   await roots.dispose();
 });
-
-interface Book { bookId: string; manuscriptId: string; branchId: string }
-interface Owners { db: DatabaseSync; bounded: BoundedManuscriptStore; lifetime: string }
-type Row = Record<string, SQLOutputValue>;
-
-/** Raw text the tests author: a decomposed and a non-composing accent, a quote, a backslash and two astral scalars. */
-const RAW = 'e\u0301q\u0301"\\😀𠀀';
-/** The manual replacement: NFC-stable, with JSON escapes and astral and combining graphemes. */
-const REPLACEMENT = '"\\q\u0301😀';
-/** Graphemes the maximum-size member is filled from. */
-const FILL = ['"', '\\', '😀', 'q\u0301', 'e\u0301', '𠀀'];
-const TRACKED = ['edit_journal_entries', 'manuscript_command_groups', 'manuscript_command_edits', 'learning_signals', 'global_editorial_memory_items'] as const;
-
-function text(value: SQLOutputValue | undefined): string {
-  if (typeof value !== 'string') throw new Error('expected a text column');
-  return value;
+const inspect = () => store.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
+const window = () => store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+function edit(insertText = RAW, blockIndex = 0): JournalEditInput {
+  const view = window();
+  const block = view.blocks[blockIndex]!;
+  const input: JournalEditInput = { clientEditId: randomUUID(), manuscriptId: book.manuscriptId, branchId: book.branchId,
+    baseRevisionId: view.revisionId, blockId: block.blockId, windowStartBlockId: view.blocks[0]!.blockId,
+    baseBlockDigest: block.digest, expectedJournalSequence: view.journalSequence, fromGrapheme: 0, toGrapheme: 0, insertText };
+  store.flushJournalEdit(input);
+  return input;
 }
+function undo(): void { store.undoManuscript(book.manuscriptId, book.branchId, window().workingDigest); }
+function redo(): void { store.redoManuscript(book.manuscriptId, book.branchId, window().workingDigest); }
 
-function int(value: SQLOutputValue | undefined): number {
-  if (typeof value !== 'number') throw new Error('expected an integer column');
-  return value;
-}
+// Public source/learning behavior on admitted sample1; no SQL inspection, corruption, or manuscript dumps.
+describe('actual manual edits in local learning', () => {
+  it('captures one exact original transformation and keeps a retried flush idempotent', () => {
+    expect(inspect().signals).toEqual([]);
+    const before = window().blocks[0]!.text;
+    const input = edit();
+    const signal = inspect().signals[0]!;
+    expect(signal).toMatchObject({ kind: 'manual-edit-journal', currentEligibility: 'house', rewriteDistance: null });
+    const source = store.inspectManualLearningSource(signal.signalId);
+    expect(source.members).toHaveLength(1);
+    expect(source.members[0]!.beforeText === before).toBe(true);
+    expect(source.members[0]!.afterText === RAW + before).toBe(true);
+    expect(signal.source).not.toHaveProperty('decisionId');
+    expect(signal).not.toHaveProperty('ask');
+    store.flushJournalEdit(input);
+    expect(inspect().signals.map((entry) => entry.signalId)).toEqual([signal.signalId]);
+    expect(inspect().items).toEqual([]);
+  });
 
-function only(db: DatabaseSync, sql: string, ...params: SQLInputValue[]): Row {
-  const rows = db.prepare(sql).all(...params);
-  expect(rows.length).toBe(1);
-  return rows[0]!;
-}
+  it('keeps the original identity through undo and redo without additional support', () => {
+    edit();
+    const signal = inspect().signals[0]!;
+    undo();
+    expect(inspect().signals[0]).toMatchObject({ signalId: signal.signalId, currentEligibility: 'deferred' });
+    expect(store.inspectManualLearningSource(signal.signalId).history.lastAction.kind).toBe('undo');
+    redo();
+    expect(inspect().signals).toHaveLength(1);
+    expect(inspect().signals[0]).toMatchObject({ signalId: signal.signalId, currentEligibility: 'house' });
+    expect(store.inspectManualLearningSource(signal.signalId).history.lastAction.kind).toBe('redo');
+  });
 
-function counts(db: DatabaseSync): Record<string, number> {
-  return Object.fromEntries(TRACKED.map((table) => [table, int(only(db, `SELECT count(*) total FROM ${table}`).total)]));
-}
+  it('holds an earlier edit after the same block changes again', () => {
+    edit();
+    const original = inspect().signals[0]!;
+    edit('后续');
+    expect(inspect().signals.find((entry) => entry.signalId === original.signalId)?.currentEligibility).toBe('superseded');
+    expect(store.inspectManualLearningSource(original.signalId).current[0]!.block).toBe('other-text');
+    expect(inspect().signals[0]!.currentEligibility).toBe('house');
+  });
 
-/** Every row this connection has inserted, updated or deleted since it opened. */
-function writes(db: DatabaseSync): number {
-  return int(only(db, 'SELECT total_changes() total').total);
-}
+  it('holds a discarded redo tail without relabelling the new edit as its continuation', () => {
+    edit();
+    const original = inspect().signals[0]!;
+    undo(); edit('不同修改');
+    expect(inspect().signals.find((entry) => entry.signalId === original.signalId)?.currentEligibility).toBe('superseded');
+    expect(store.inspectManualLearningSource(original.signalId).history.groupStatus).toBe('superseded');
+    expect(inspect().signals[0]!.signalId).not.toBe(original.signalId);
+  });
 
-function code(operation: () => unknown): string {
-  try {
-    operation();
-  } catch (error) {
-    if (error instanceof BoundedStoreError || error instanceof StoreError) return error.code;
-    throw error;
-  }
-  return 'no-error';
-}
+  it('honors global and Book exclusions at capture without backfilling retries', () => {
+    store.changeEditorialLearning({ kind: 'switch', enabled: false, expectedEntries: 0 });
+    const disabled = edit();
+    expect(inspect().signals).toEqual([]);
+    store.changeEditorialLearning({ kind: 'switch', enabled: true, expectedEntries: 1 });
+    store.flushJournalEdit(disabled);
+    expect(inspect().signals).toEqual([]);
+    store.changeEditorialLearning({ kind: 'book', bookId: book.bookId, excluded: true, expectedEntries: 2 });
+    edit('排除期间');
+    expect(inspect().signals).toEqual([]);
+    store.changeEditorialLearning({ kind: 'book', bookId: book.bookId, excluded: false, expectedEntries: 3 });
+    edit('恢复以后');
+    expect(inspect().signals).toHaveLength(1);
+  });
 
-function bytes(value: unknown): number {
-  return Buffer.byteLength(JSON.stringify(value), 'utf8');
-}
+  it('excludes one exact manual material and keeps its source inspectable', () => {
+    edit();
+    const signal = inspect().signals[0]!;
+    store.changeEditorialLearning({ kind: 'material', signalId: signal.signalId });
+    expect(inspect().signals[0]!.currentEligibility).toBe('excluded');
+    expect(inspect().excludedMaterials).toContainEqual({ bookId: book.bookId, materialKey: signal.source.materialKey });
+    expect(store.inspectManualLearningSource(signal.signalId).members).toHaveLength(1);
+  });
 
-// The test's own canonical form of the flat evidence objects: keys in code-unit order, values as JSON writes them.
-function canonical(value: Record<string, unknown>): string {
-  return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${JSON.stringify(value[key])}`).join(',')}}`;
-}
+  it('captures a manual Search/Replace as one complete command group', () => {
+    edit('替换标识', 0); edit('替换标识', 1);
+    const search = store.createSearch(book.manuscriptId, book.branchId, '替换标识');
+    while (!store.advanceSearch(search.searchId).done) { /* bounded preparation */ }
+    const preview = store.prepareReplacement(search.searchId, '替换结果', []);
+    while (!store.advanceReplacementWork(preview.previewId).done) { /* bounded preparation */ }
+    store.freezeReplacement(preview.previewId, []);
+    while (!store.advanceReplacementWork(preview.previewId).done) { /* exact validation */ }
+    store.commitReplacement(preview.previewId);
+    const signal = inspect().signals[0]!;
+    expect(signal.kind).toBe('manual-edit-journal');
+    const source = store.inspectManualLearningSource(signal.signalId);
+    expect(source.memberCount).toBe(2);
+    expect(source.members.every((member) => member.beforeText.includes('替换标识') && member.afterText.includes('替换结果'))).toBe(true);
+    expect(source.next).toBeNull();
+    expect(source.history.lastAction.kind).toBe('replacement');
+    undo();
+    expect(inspect().signals[0]!.currentEligibility).toBe('deferred');
+    redo();
+    expect(inspect().signals).toHaveLength(3);
+  });
 
-function sha256(...parts: string[]): string {
-  const hash = createHash('sha256');
-  for (const part of parts) hash.update(part);
-  return hash.digest('hex');
-}
-
-function evidenceDigestOf(header: ManualCommandSourcePage['header'], members: ReadonlyArray<CommandEvidenceMember>): string {
-  return sha256(canonical({ ...header }), ...members.map((member) => canonical({ ...member })));
-}
-
-function workingDigestOf(previous: string, sequence: number, action: string, groupId: string, evidenceDigest: string): string {
-  return sha256(canonical({ schema: 'ai7.recovery-working-digest/1', previous, sequence, action, groupId, evidenceDigest }));
-}
-
-/** A command group's evidence digest recomputed here from its stored rows, independently of the product's reader. */
-function storedEvidence(db: DatabaseSync, groupId: string): { digest: string; members: number } {
-  const group = only(db, 'SELECT branch_id, ordinal, kind, source_group_id FROM manuscript_command_groups WHERE command_group_id = ?', groupId);
-  const rows = db.prepare(
-    `SELECT position, block_id, before_text, before_digest, after_text, after_digest
-     FROM manuscript_command_edits WHERE command_group_id = ? ORDER BY position`,
-  ).all(groupId);
-  const digest = sha256(
-    canonical({
-      schema: 'ai7.recovery-command-evidence/1', groupId, branchId: text(group.branch_id), ordinal: int(group.ordinal),
-      kind: text(group.kind), sourceGroupId: group.source_group_id === null ? null : text(group.source_group_id),
-    }),
-    ...rows.map((row) => canonical({
-      position: int(row.position), blockId: text(row.block_id), beforeText: text(row.before_text),
-      beforeDigest: text(row.before_digest), afterText: text(row.after_text), afterDigest: text(row.after_digest),
-    })),
-  );
-  return { digest, members: rows.length };
-}
-
-/** Every journal entry of the branch recomputed into the working digest it records, over independently recomputed evidence. */
-function verifiedChain(db: DatabaseSync, branchId: string): number {
-  const entries = db.prepare(
-    `SELECT e.sequence, e.command_kind, e.command_group_id, e.resulting_working_digest, g.before_working_digest
-     FROM edit_journal_entries e JOIN manuscript_command_groups g ON g.command_group_id = e.command_group_id
-     WHERE e.branch_id = ? ORDER BY e.sequence`,
-  ).all(branchId);
-  let previous: string | null = null;
-  for (const entry of entries) {
-    const groupId = text(entry.command_group_id);
-    const recomputed = workingDigestOf(
-      previous ?? text(entry.before_working_digest), int(entry.sequence), text(entry.command_kind), groupId, storedEvidence(db, groupId).digest,
-    );
-    expect(recomputed === text(entry.resulting_working_digest)).toBe(true);
-    previous = recomputed;
-  }
-  return entries.length;
-}
-
-function commandKindOf(value: SQLOutputValue | undefined): 'edit' | 'replacement' {
-  if (value === 'edit' || value === 'replacement') return value;
-  throw new Error('expected an original command kind');
-}
-
-/** A source named from a real journal entry and the producer request a test retained, with an independently recomputed digest. */
-function sourceOf(db: DatabaseSync, journalEntryId: string, request: ManualCommandRequestPin): ManualCommandSource {
-  const entry = only(db,
-    `SELECT e.sequence, e.client_edit_id, e.request_fingerprint, e.durable_at, e.manuscript_id, e.branch_id,
-            e.base_revision_id, e.command_group_id, m.book_id
-     FROM edit_journal_entries e JOIN manuscripts m ON m.manuscript_id = e.manuscript_id WHERE e.journal_entry_id = ?`,
-    journalEntryId);
-  const commandGroupId = text(entry.command_group_id);
-  const group = only(db, 'SELECT kind, ordinal, before_working_digest, after_working_digest FROM manuscript_command_groups WHERE command_group_id = ?', commandGroupId);
-  const evidence = storedEvidence(db, commandGroupId);
-  return {
-    bookId: text(entry.book_id), manuscriptId: text(entry.manuscript_id), branchId: text(entry.branch_id),
-    baseRevisionId: text(entry.base_revision_id), journalEntryId, journalSequence: int(entry.sequence),
-    clientEditId: text(entry.client_edit_id), requestFingerprint: text(entry.request_fingerprint), durableAt: text(entry.durable_at),
-    commandGroupId, commandKind: commandKindOf(group.kind), commandOrdinal: int(group.ordinal), sourceGroupId: null,
-    beforeWorkingDigest: text(group.before_working_digest), afterWorkingDigest: text(group.after_working_digest),
-    evidenceDigest: evidence.digest, memberCount: evidence.members, request,
-  };
-}
-
-function entryAt(db: DatabaseSync, branchId: string, sequence: number): string {
-  return text(only(db, 'SELECT journal_entry_id FROM edit_journal_entries WHERE branch_id = ? AND sequence = ?', branchId, sequence).journal_entry_id);
-}
-
-function entryOfEdit(db: DatabaseSync, clientEditId: string): string {
-  return text(only(db, 'SELECT journal_entry_id FROM edit_journal_entries WHERE client_edit_id = ?', clientEditId).journal_entry_id);
-}
-
-/** Every page of a source, following each page's own cursor. */
-function readAll(bounded: BoundedManuscriptStore, source: ManualCommandSource, budget: number): ManualCommandSourcePage[] {
-  const pages: ManualCommandSourcePage[] = [];
-  let cursor: ManualCommandSourceCursor | null = null;
-  do {
-    const page = bounded.readManualCommandSource(source, cursor, budget);
-    pages.push(page);
-    cursor = page.next;
-  } while (cursor !== null && pages.length <= source.memberCount);
-  return pages;
-}
-
-/** The pages put back together: their members in order, and whether they rebuild the source's exact evidence. */
-function reassembled(source: ManualCommandSource, pages: ReadonlyArray<ManualCommandSourcePage>): { members: CommandEvidenceMember[]; exact: boolean } {
-  const members = pages.flatMap((page) => page.members);
-  const exact = members.length === source.memberCount &&
-    members.every((member, index) => member.position === index + 1) &&
-    pages.every((page) => page.evidenceDigest === source.evidenceDigest && page.memberCount === source.memberCount) &&
-    evidenceDigestOf(pages[0]!.header, members) === source.evidenceDigest;
-  return { members, exact };
-}
-
-async function withStore<T>(work: (store: EditorialStore) => Promise<T> | T): Promise<T> {
-  const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-  try {
-    const result = await work(store);
-    store.markCleanShutdown();
-    return result;
-  } finally {
+  it.each(['journal', 'checkpoint'] as const)('preserves provenance and holds a %s recovery', async (kind) => {
+    edit();
+    const signal = inspect().signals[0]!;
     store.close();
-  }
-}
-
-/**
- * One connection and one journal owner over the closed Store, for one service lifetime. `interrupted` closes the
- * connection without ending the lifetime, which is what an interrupted product process leaves behind.
- */
-function withOwners<T>(work: (owners: Owners) => T, { interrupted = false } = {}): T {
-  const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
-  try {
-    db.exec('PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000');
-    const bounded = new BoundedManuscriptStore(db);
-    const lifetime = randomUUID();
-    bounded.startServiceLifetime(lifetime, new Date().toISOString());
-    const result = work({ db, bounded, lifetime });
-    if (!interrupted) bounded.markServiceLifetimeClean(lifetime, new Date().toISOString());
-    return result;
-  } finally {
-    db.close();
-  }
-}
-
-/** The next start after an interruption raises recovery for the book's branch; the editor restores one candidate. */
-async function restoreAfterInterruption(book: Book, kind: 'journal' | 'checkpoint'): Promise<{ restorationId: string; descendantRevisionId: string }> {
-  return withStore(async (store) => {
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    expect(inspect().signals[0]).toMatchObject({ signalId: signal.signalId, currentEligibility: 'deferred' });
     const startup = await store.getStartup();
-    expect(startup.state).toBe('manuscript-recovery');
-    if (startup.state !== 'manuscript-recovery') throw new Error('unreachable');
-    expect(startup.recovery.branchId).toBe(book.branchId);
-    const restoration = await store.restoreRecovery(randomUUID(), startup.recovery.attentionId, startup.recovery.attentionVersion, { kind });
-    expect(restoration.selected).toEqual({ kind });
-    return { restorationId: restoration.restorationId, descendantRevisionId: restoration.descendantRevisionId };
+    if (startup.state !== 'manuscript-recovery') throw new Error('expected actual recovery');
+    await store.restoreRecovery(randomUUID(), startup.recovery.attentionId, startup.recovery.attentionVersion, { kind });
+    expect(inspect().signals[0]).toMatchObject({ signalId: signal.signalId, currentEligibility: 'superseded' });
+    expect(store.inspectManualLearningSource(signal.signalId).history.restoration?.selectedKind).toBe(kind);
   });
-}
 
-/** A page budget of about three of the source's largest members, and the pinned cursor its first page ends on. */
-function pinnedCursor(bounded: BoundedManuscriptStore, source: ManualCommandSource): { cursor: ManualCommandSourceCursor; budget: number } {
-  const whole = bounded.readManualCommandSource(source, null, MAX_FRAME_BYTES);
-  const largest = Math.max(...whole.members.map((member, index) => bytes(member) + bytes(whole.current[index]) + 2));
-  const budget = bytes({
-    ...whole, members: [], current: [],
-    next: { commandGroupId: source.commandGroupId, evidenceDigest: source.evidenceDigest, afterPosition: source.memberCount, historyDigest: whole.history.digest },
-  }) + 3 * largest;
-  const first = bounded.readManualCommandSource(source, null, budget);
-  expect(first.next).not.toBeNull();
-  return { cursor: first.next!, budget };
-}
-
-const LARGE_PARAGRAPHS = 300;
-
-/**
- * A manuscript of `LARGE_PARAGRAPHS` ordinary paragraphs composed from `sample1`'s own blocks, each paragraph a few
- * whole source blocks that hold the grapheme the source shares most widely, so that one manual replacement of it
- * changes every paragraph. Imported through the Store's normal staging, review and commit.
- */
-async function importLargeBook(store: EditorialStore): Promise<Book & { query: string }> {
-  const texts = new Map<number, string>();
-  for (let block = 1; block <= SAMPLE1_BLOCKS; block += 1) {
-    try {
-      texts.set(block, await sourceSpanText(ADMITTED_BASELINE_DOCX, { block }));
-    } catch {
-      // A block with no graphemes offers no span.
-    }
-  }
-  const coverage = new Map<string, number>();
-  for (const text of texts.values()) {
-    for (const part of new Set(graphemesOf(text))) coverage.set(part, (coverage.get(part) ?? 0) + 1);
-  }
-  const [query] = [...coverage]
-    .filter(([part]) => part.trim() === part && part.normalize('NFC') === part && !REPLACEMENT.includes(part))
-    .sort((left, right) => right[1] - left[1])[0]!;
-  const carriers = [...texts].filter(([, text]) => graphemesOf(text).includes(query)).map(([block, text]) => ({ block, text }));
-  const paragraphs: ComposedRevisedParagraph[] = [];
-  for (let next = 0; paragraphs.length < LARGE_PARAGRAPHS;) {
-    const runs: Array<{ text: { block: number } }> = [];
-    let graphemes = 0;
-    let units = 0;
-    for (;;) {
-      const carrier = carriers[next % carriers.length]!;
-      const size = graphemesOf(carrier.text).length;
-      if (runs.length > 0 && (graphemes + size > 700 || units + carrier.text.length > 1_800)) break;
-      runs.push({ text: { block: carrier.block } });
-      graphemes += size;
-      units += carrier.text.length;
-      next += 1;
-    }
-    paragraphs.push({ runs });
-  }
-  const path = join(roots.inputRoot, 'large.docx');
-  await composeRevisedDocx(path, { source: ADMITTED_BASELINE_DOCX, title: '大组替换组稿', paragraphs });
-  const staged = await store.stageSelectedManuscript(randomUUID(), path);
-  const review = store.prepareNewBookReview(staged.draftId, staged.draftVersion,
-    { kind: 'new-book', choiceId: 'new-book', confirmedTitle: staged.titleSuggestion.value }, false);
-  const commitId = randomUUID();
-  const commit = await store.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest!, commitId });
-  await store.acknowledgeImportCompletion(commitId);
-  return { bookId: commit.bookId, manuscriptId: commit.manuscriptId, branchId: commit.branchId, query };
-}
-
-async function createBooks(): Promise<{ empty: string; book: Book }> {
-  return withStore(async (store) => {
-    const creation = store.prepareBookCreation('空白之书', null);
-    const empty = store.commitBookCreation({ ...creation.proposed, reviewDigest: creation.reviewDigest }).overview.book.bookId;
-    const imported = await importSample1Book(store, roots.codeRoot, '直接编辑样书');
-    return { empty, book: { bookId: imported.bookId, manuscriptId: imported.manuscriptId, branchId: imported.branchId } };
+  it('keeps one captured source after a clean restart', async () => {
+    edit();
+    const signal = inspect().signals[0]!;
+    store.markCleanShutdown(); store.close();
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    expect(inspect().signals).toHaveLength(1);
+    expect(inspect().signals[0]).toMatchObject({ signalId: signal.signalId, currentEligibility: 'house' });
   });
-}
-
-/** The editor's own typing: one flush against a window that holds the block, as the renderer sends it. */
-function typeInto(owners: Owners, book: Book, blockId: string, from: number, to: number, insertText: string): { input: JournalEditInput; ack: JournalAcknowledgement } {
-  const window = owners.bounded.getWindow(book.manuscriptId, book.branchId, { kind: 'block', blockId });
-  const block = window.blocks.find((candidate) => candidate.blockId === blockId)!;
-  const input: JournalEditInput = {
-    clientEditId: randomUUID(), manuscriptId: book.manuscriptId, branchId: book.branchId, baseRevisionId: window.revisionId,
-    blockId, windowStartBlockId: window.blocks[0]!.blockId, baseBlockDigest: block.digest,
-    expectedJournalSequence: window.journalSequence, fromGrapheme: from, toGrapheme: to, insertText,
-  };
-  return { input, ack: owners.bounded.flushJournalEdit(input, owners.lifetime) };
-}
-
-function blockText(db: DatabaseSync, branchId: string, blockId: string): string {
-  return text(only(db, 'SELECT text FROM working_blocks WHERE branch_id = ? AND block_id = ?', branchId, blockId).text);
-}
-
-function paragraphs(db: DatabaseSync, branchId: string): Array<{ blockId: string; length: number }> {
-  return db.prepare(
-    "SELECT block_id, grapheme_length FROM working_blocks WHERE branch_id = ? AND kind = 'paragraph' ORDER BY position",
-  ).all(branchId).map((row) => ({ blockId: text(row.block_id), length: int(row.grapheme_length) }));
-}
-
-/** The one grapheme found in the most blocks whose replacement keeps every such block inside its bounds. */
-function frequentGrapheme(db: DatabaseSync, branchId: string): { query: string; blocks: number } {
-  const replacementUnits = REPLACEMENT.length;
-  const replacementGraphemes = graphemesOf(REPLACEMENT).length;
-  const coverage = new Map<string, number>();
-  const unsafe = new Set<string>();
-  for (const row of db.prepare('SELECT text FROM working_blocks WHERE branch_id = ? ORDER BY position').all(branchId)) {
-    const blockText = text(row.text);
-    const parts = graphemesOf(blockText);
-    const tally = new Map<string, number>();
-    for (const part of parts) tally.set(part, (tally.get(part) ?? 0) + 1);
-    for (const [part, times] of tally) {
-      coverage.set(part, (coverage.get(part) ?? 0) + 1);
-      if (blockText.length + times * (replacementUnits - part.length) > MAX_BLOCK_CODE_UNITS ||
-        parts.length + times * (replacementGraphemes - 1) > MAX_BLOCK_GRAPHEMES) unsafe.add(part);
-    }
-  }
-  let best: { query: string; blocks: number } = { query: '', blocks: 0 };
-  for (const [part, blocks] of coverage) {
-    if (unsafe.has(part) || part.trim() !== part || part.normalize('NFC') !== part || REPLACEMENT.includes(part)) continue;
-    if (blocks > best.blocks) best = { query: part, blocks };
-  }
-  expect(best.blocks).toBeGreaterThan(1);
-  return best;
-}
-
-/** The manual Search/Replace the editor runs: search, prepare, freeze, validate and commit every match. */
-function replaceAll(owners: Owners, book: Book, query: string, replacement: string): { previewId: string; journalSequence: number; committed: number } {
-  const search = owners.bounded.createSearch(book.manuscriptId, book.branchId, query);
-  while (!owners.bounded.advanceSearch(search.searchId).done) { /* bounded search */ }
-  const preview = owners.bounded.prepareReplacement(search.searchId, replacement, []);
-  while (!owners.bounded.advanceReplacementWork(preview.previewId).done) { /* prepare */ }
-  owners.bounded.freezeReplacement(preview.previewId, []);
-  while (!owners.bounded.advanceReplacementWork(preview.previewId).done) { /* validate */ }
-  const commit = owners.bounded.commitReplacement(preview.previewId, owners.lifetime);
-  return { previewId: preview.previewId, journalSequence: commit.journalSequence, committed: commit.committedCount };
-}
-
-/** A preview the editor prepares and cancels: it leaves the manuscript alone and ages older terminal previews out. */
-function cancelledPreview(owners: Owners, book: Book, query: string): void {
-  const search = owners.bounded.createSearch(book.manuscriptId, book.branchId, query);
-  while (!owners.bounded.advanceSearch(search.searchId).done) { /* bounded search */ }
-  const preview = owners.bounded.prepareReplacement(search.searchId, 'x', []);
-  expect(owners.bounded.cancelReplacement(preview.previewId)).toBe(true);
-}
-
-describe('the exact source of an original manual command (Issue #1140, first phase)', () => {
-  it('names no source in an empty or imported Book, resolves a freehand flush exactly, and keeps its retry semantics', async () => {
-    const { empty, book } = await createBooks();
-    const firstRead = withOwners(({ db, bounded, lifetime }) => {
-      // An empty Book has no manuscript and so no journal; an import writes no journal and no command either.
-      expect(int(only(db, 'SELECT count(*) total FROM manuscripts WHERE book_id = ?', empty).total)).toBe(0);
-      expect(int(only(db, 'SELECT count(*) total FROM edit_journal_entries WHERE branch_id = ?', book.branchId).total)).toBe(0);
-      expect(int(only(db, 'SELECT count(*) total FROM manuscript_command_groups WHERE branch_id = ?', book.branchId).total)).toBe(0);
-      const before = counts(db);
-      expect(before.learning_signals).toBe(0);
-
-      const [target, other] = paragraphs(db, book.branchId);
-      const { input, ack } = typeInto({ db, bounded, lifetime }, book, target!.blockId, 1, 1, RAW);
-      expect(ack.sequence).toBe(input.expectedJournalSequence + 1);
-      // An exact retry is the same entry; another request under the same client edit is refused.
-      const retried = bounded.flushJournalEdit(input, lifetime);
-      expect({ sequence: retried.sequence, digest: retried.resultingWorkingDigest, at: retried.durableAt })
-        .toEqual({ sequence: ack.sequence, digest: ack.resultingWorkingDigest, at: ack.durableAt });
-      expect(code(() => bounded.flushJournalEdit({ ...input, insertText: 'x' }, lifetime))).toBe('IDEMPOTENCY_CONFLICT');
-      const afterEdit = counts(db);
-      expect(afterEdit).toEqual({
-        ...before,
-        edit_journal_entries: before.edit_journal_entries! + 1,
-        manuscript_command_groups: before.manuscript_command_groups! + 1,
-        manuscript_command_edits: before.manuscript_command_edits! + 1,
-      });
-
-      // The source is the real entry named by the retained request, and its digest is the one the working chain holds.
-      const source = sourceOf(db, entryOfEdit(db, input.clientEditId), { origin: 'journal-edit', windowStartBlockId: input.windowStartBlockId });
-      expect(source).toMatchObject({
-        bookId: book.bookId, manuscriptId: book.manuscriptId, branchId: book.branchId, baseRevisionId: input.baseRevisionId,
-        clientEditId: input.clientEditId, journalSequence: ack.sequence, durableAt: ack.durableAt,
-        afterWorkingDigest: ack.resultingWorkingDigest, commandKind: 'edit', memberCount: 1,
-      });
-      expect(workingDigestOf(source.beforeWorkingDigest, ack.sequence, 'edit', source.commandGroupId, source.evidenceDigest)).toBe(ack.resultingWorkingDigest);
-
-      const page = bounded.readManualCommandSource(source, null, MAX_FRAME_BYTES);
-      expect(page.header).toEqual({
-        schema: 'ai7.recovery-command-evidence/1', groupId: source.commandGroupId, branchId: book.branchId,
-        ordinal: source.commandOrdinal, kind: 'edit', sourceGroupId: null,
-      });
-      expect(reassembled(source, [page]).exact).toBe(true);
-      expect(page.next).toBeNull();
-      const member = page.members[0]!;
-      // The raw request text is kept as typed: not normalized, every escape and astral scalar intact.
-      expect(member.blockId).toBe(input.blockId);
-      expect(member.afterText.includes(RAW) && member.afterText.normalize('NFC') !== member.afterText).toBe(true);
-      expect(member.afterText === blockText(db, book.branchId, input.blockId)).toBe(true);
-      expect(page.current).toEqual([{ position: 1, block: 'recorded-after' }]);
-      expect(page.history).toMatchObject({
-        journalSequence: ack.sequence, workingDigest: ack.resultingWorkingDigest, boundaryCrossed: false, groupStatus: 'applied',
-        lastAction: { kind: 'edit', journalEntryId: source.journalEntryId, sequence: ack.sequence }, restoration: null,
-      });
-
-      // Only the exact original binding proves itself.
-      expect(code(() => bounded.readManualCommandSource({ ...source, bookId: empty }, null, MAX_FRAME_BYTES))).toBe('MANUAL_SOURCE_MISMATCH');
-      expect(code(() => bounded.readManualCommandSource({ ...source, journalEntryId: randomUUID() }, null, MAX_FRAME_BYTES))).toBe('MANUAL_SOURCE_MISMATCH');
-      const wrongWindow = [other!.blockId, target!.blockId].find((blockId) => blockId !== input.windowStartBlockId)!;
-      expect(code(() => bounded.readManualCommandSource(
-        { ...source, request: { origin: 'journal-edit', windowStartBlockId: wrongWindow } }, null, MAX_FRAME_BYTES,
-      ))).toBe('MANUAL_SOURCE_MISMATCH');
-      expect(code(() => bounded.readManualCommandSource({ ...source, evidenceDigest: 'f'.repeat(64) }, null, MAX_FRAME_BYTES))).toBe('MANUAL_SOURCE_MISMATCH');
-      expect(code(() => bounded.readManualCommandSource(
-        { ...source, commandKind: 'replacement', request: { origin: 'manual-search-replacement', previewId: randomUUID() } }, null, MAX_FRAME_BYTES,
-      ))).toBe('MANUAL_SOURCE_MISMATCH');
-      // A reference arrives as parsed data: an unknown origin or field is refused before any record is read.
-      const forged: ManualCommandSource = JSON.parse(JSON.stringify({ ...source, request: { origin: 'apply', applyCommandGroupId: source.commandGroupId } }));
-      expect(code(() => bounded.readManualCommandSource(forged, null, MAX_FRAME_BYTES))).toBe('MANUAL_SOURCE_INVALID');
-      const widened = { ...source, decisionId: null };
-      expect(code(() => bounded.readManualCommandSource(widened, null, MAX_FRAME_BYTES))).toBe('MANUAL_SOURCE_INVALID');
-      expect(code(() => bounded.readManualCommandSource({ ...source, commandKind: 'replacement' }, null, MAX_FRAME_BYTES))).toBe('MANUAL_SOURCE_INVALID');
-
-      // A lost acknowledgement retried after a later edit stays the existing drift refusal; the source is unchanged by it.
-      const later = typeInto({ db, bounded, lifetime }, book, other!.blockId, 0, 0, '乙');
-      expect(code(() => bounded.flushJournalEdit(input, lifetime))).toBe('JOURNAL_ACK_FAILED');
-      const laterSource = sourceOf(db, entryOfEdit(db, later.input.clientEditId), { origin: 'journal-edit', windowStartBlockId: later.input.windowStartBlockId });
-      // The later entry cannot stand in for the first one's group.
-      expect(code(() => bounded.readManualCommandSource({ ...laterSource, commandGroupId: source.commandGroupId }, null, MAX_FRAME_BYTES))).toBe('MANUAL_SOURCE_MISMATCH');
-      const again = bounded.readManualCommandSource(source, null, MAX_FRAME_BYTES);
-      expect(again.evidenceDigest).toBe(page.evidenceDigest);
-      expect(again.history).toMatchObject({ journalSequence: later.ack.sequence, lastAction: { kind: 'edit', sequence: ack.sequence } });
-      expect(again.history.digest).not.toBe(page.history.digest);
-
-      // The largest member a block supports: one block filled by flushes to its bound, read back whole.
-      const shortest = paragraphs(db, book.branchId).filter((candidate) => candidate.blockId !== target!.blockId && candidate.blockId !== other!.blockId)
-        .sort((left, right) => left.length - right.length)[0]!;
-      let filled: { input: JournalEditInput; ack: JournalAcknowledgement } | undefined;
-      let flushes = 0;
-      for (;;) {
-        const current = blockText(db, book.branchId, shortest.blockId);
-        let units = current.length;
-        let graphemes = graphemesOf(current).length;
-        const chunk: string[] = [];
-        let chunkUnits = 0;
-        for (let index = 0; chunk.length < MAX_EDIT_GRAPHEMES && graphemes < MAX_BLOCK_GRAPHEMES; index += 1) {
-          const fits = (part: string): boolean => chunkUnits + part.length <= MAX_EDIT_CODE_UNITS && units + part.length <= MAX_BLOCK_CODE_UNITS;
-          const part = [FILL[(flushes + index) % FILL.length]!, '"'].find(fits);
-          if (part === undefined) break;
-          chunk.push(part);
-          chunkUnits += part.length;
-          units += part.length;
-          graphemes += 1;
-        }
-        if (chunk.length === 0) break;
-        filled = typeInto({ db, bounded, lifetime }, book, shortest.blockId, graphemesOf(current).length, graphemesOf(current).length, chunk.join(''));
-        flushes += 1;
-      }
-      expect(flushes).toBeGreaterThan(1);
-      const largest = sourceOf(db, entryOfEdit(db, filled!.input.clientEditId), { origin: 'journal-edit', windowStartBlockId: filled!.input.windowStartBlockId });
-      const largestPage = bounded.readManualCommandSource(largest, null, MAX_FRAME_BYTES);
-      const pair = largestPage.members[0]!;
-      expect(reassembled(largest, [largestPage]).exact).toBe(true);
-      expect(pair.afterText.length === MAX_BLOCK_CODE_UNITS || graphemesOf(pair.afterText).length === MAX_BLOCK_GRAPHEMES).toBe(true);
-      expect(pair.afterText === blockText(db, book.branchId, shortest.blockId)).toBe(true);
-      // JSON writes a UTF-16 unit as at most six bytes, so even a worst-case pair is a small part of one frame.
-      const worstPair = 2 * (2 + 6 * MAX_BLOCK_CODE_UNITS) + 1_024;
-      expect(bytes(pair)).toBeLessThanOrEqual(worstPair);
-      expect(worstPair * 8).toBeLessThan(MAX_FRAME_BYTES);
-      expect(bytes(largestPage)).toBeLessThanOrEqual(MAX_FRAME_BYTES);
-
-      // Reading created nothing, and no learning signal exists: capture is not wired in this phase.
-      const settled = counts(db);
-      const quiet = writes(db);
-      for (let read = 0; read < 3; read += 1) bounded.readManualCommandSource(source, null, MAX_FRAME_BYTES);
-      expect(code(() => bounded.readManualCommandSource({ ...source, evidenceDigest: 'f'.repeat(64) }, null, MAX_FRAME_BYTES))).toBe('MANUAL_SOURCE_MISMATCH');
-      expect(writes(db)).toBe(quiet);
-      expect(counts(db)).toEqual(settled);
-      expect(settled.learning_signals).toBe(0);
-      expect(verifiedChain(db, book.branchId)).toBe(2 + flushes);
-      return { source, digest: page.evidenceDigest, settled };
-    });
-
-    // The reopened Store accepts the history whole, and the source still reads the same with nothing added.
-    await withStore(() => undefined);
-    withOwners(({ db, bounded }) => {
-      const quiet = writes(db);
-      const reread = bounded.readManualCommandSource(firstRead.source, null, MAX_FRAME_BYTES);
-      expect(reread.evidenceDigest).toBe(firstRead.digest);
-      expect(reassembled(firstRead.source, [reread]).exact).toBe(true);
-      expect(writes(db)).toBe(quiet);
-      expect(counts(db)).toEqual(firstRead.settled);
-    });
-  }, 180_000);
-
-  it('reads a many-block manual Search/Replace whole after its preview is pruned, in complete pages within a byte budget', async () => {
-    const { empty, book } = await createBooks();
-    withOwners((owners) => {
-      const { db, bounded, lifetime } = owners;
-      const { query, blocks } = frequentGrapheme(db, book.branchId);
-      const replaced = replaceAll(owners, book, query, REPLACEMENT);
-      expect(replaced.committed).toBeGreaterThanOrEqual(blocks);
-      const committedCounts = counts(db);
-      // A committed preview cannot be committed again, before or after it is pruned.
-      expect(code(() => bounded.commitReplacement(replaced.previewId, lifetime))).toBe('REPLACEMENT_NOT_READY');
-      for (let cycle = 0; cycle < 10 && int(only(db, 'SELECT count(*) total FROM manuscript_replacement_previews WHERE preview_id = ?', replaced.previewId).total) > 0; cycle += 1) {
-        cancelledPreview(owners, book, '😀');
-      }
-      expect(int(only(db, 'SELECT count(*) total FROM manuscript_replacement_previews WHERE preview_id = ?', replaced.previewId).total)).toBe(0);
-      expect(code(() => bounded.commitReplacement(replaced.previewId, lifetime))).toBe('REPLACEMENT_NOT_FOUND');
-      expect(counts(db)).toEqual(committedCounts);
-
-      // The pruned preview's identity still proves the commit manual; the evidence is one source of every replaced block.
-      const source = sourceOf(db, entryAt(db, book.branchId, replaced.journalSequence), { origin: 'manual-search-replacement', previewId: replaced.previewId });
-      expect(source.commandKind).toBe('replacement');
-      expect(source.memberCount).toBe(blocks);
-      expect(workingDigestOf(source.beforeWorkingDigest, source.journalSequence, 'replacement', source.commandGroupId, source.evidenceDigest)).toBe(source.afterWorkingDigest);
-      const quiet = writes(db);
-      const whole = readAll(bounded, source, MAX_FRAME_BYTES);
-      const complete = reassembled(source, whole);
-      expect(complete.exact).toBe(true);
-      expect(complete.members.every((member) => member.afterText.includes(REPLACEMENT) &&
-        !graphemesOf(member.afterText).includes(query) && graphemesOf(member.beforeText).includes(query))).toBe(true);
-      const states = whole.flatMap((page) => page.current);
-      expect(states.every((state, index) => state.position === index + 1 && state.block === 'recorded-after')).toBe(true);
-      expect(whole.every((page) => bytes(page) <= MAX_FRAME_BYTES)).toBe(true);
-
-      // A smaller budget splits the same evidence into several pages, each packed with whole members up to its budget.
-      const first = whole[0]!;
-      const worstNext = { commandGroupId: source.commandGroupId, evidenceDigest: source.evidenceDigest, afterPosition: source.memberCount, historyDigest: first.history.digest };
-      const sizes = complete.members.map((member, index) => bytes(member) + bytes(states[index]) + 2);
-      const budget = bytes({ ...first, members: [], current: [], next: worstNext }) + 3 * Math.max(...sizes);
-      const paged = readAll(bounded, source, budget);
-      expect(paged.length).toBeGreaterThan(2);
-      const split = reassembled(source, paged);
-      expect(split.exact).toBe(true);
-      expect(split.members.every((member, index) => bytes(member) === bytes(complete.members[index]) && member.afterDigest === complete.members[index]!.afterDigest)).toBe(true);
-      for (const page of paged) {
-        expect(bytes(page)).toBeLessThanOrEqual(budget);
-        if (page.next === null) continue;
-        const following = page.next.afterPosition;
-        expect(bytes({ ...page, next: worstNext }) + sizes[following]! > budget).toBe(true);
-      }
-      const pagedCounts = counts(db);
-
-      // A cursor binds its source, an exclusive position inside it and, by default, the history it was read against.
-      const cursor = paged[0]!.next!;
-      expect(cursor).toMatchObject({ commandGroupId: source.commandGroupId, evidenceDigest: source.evidenceDigest, historyDigest: paged[0]!.history.digest });
-      for (const wrong of [
-        { ...cursor, afterPosition: source.memberCount }, { ...cursor, afterPosition: -1 }, { ...cursor, afterPosition: 1.5 },
-        { ...cursor, evidenceDigest: 'f'.repeat(64) }, { ...cursor, commandGroupId: randomUUID() }, { ...cursor, page: 2 },
-      ]) {
-        expect(code(() => bounded.readManualCommandSource(source, wrong, budget))).toBe('MANUAL_SOURCE_INVALID');
-      }
-      for (const wrongBudget of [0, MAX_FRAME_BYTES + 1, 256]) {
-        expect(code(() => bounded.readManualCommandSource(source, null, wrongBudget))).toBe('MANUAL_SOURCE_INVALID');
-      }
-      expect(code(() => bounded.readManualCommandSource({ ...source, request: { origin: 'manual-search-replacement', previewId: randomUUID() } }, null, budget))).toBe('MANUAL_SOURCE_MISMATCH');
-      expect(code(() => bounded.readManualCommandSource({ ...source, memberCount: source.memberCount + 1 }, null, budget))).toBe('MANUAL_SOURCE_MISMATCH');
-      expect(code(() => bounded.readManualCommandSource({ ...source, bookId: empty }, null, budget))).toBe('MANUAL_SOURCE_MISMATCH');
-      expect(code(() => bounded.readManualCommandSource(
-        { ...source, commandKind: 'edit', request: { origin: 'journal-edit', windowStartBlockId: complete.members[0]!.blockId } }, null, budget,
-      ))).toBe('MANUAL_SOURCE_MISMATCH');
-
-      // Every page, every refusal: the reading connection wrote nothing.
-      expect(writes(db)).toBe(quiet);
-
-      // Editing a replaced block changes the history: a pinned cursor refuses, an unpinned one reads the same evidence.
-      const touched = complete.members[0]!.blockId;
-      typeInto(owners, book, touched, 0, 0, '丙');
-      expect(code(() => bounded.readManualCommandSource(source, cursor, budget))).toBe('MANUAL_SOURCE_HISTORY_CHANGED');
-      const unpinned = bounded.readManualCommandSource(source, { ...cursor, historyDigest: null }, budget);
-      expect(unpinned.members.length).toBeGreaterThan(0);
-      expect(unpinned.members.every((member, index) => member.position === cursor.afterPosition + 1 + index &&
-        member.afterDigest === complete.members[cursor.afterPosition + index]!.afterDigest)).toBe(true);
-      expect(unpinned.next?.historyDigest ?? null).toBeNull();
-      const refreshed = bounded.readManualCommandSource(source, null, budget);
-      expect(refreshed.evidenceDigest).toBe(source.evidenceDigest);
-      expect(refreshed.history.journalSequence).toBe(source.journalSequence + 1);
-      expect(refreshed.history.lastAction).toEqual({ kind: 'replacement', journalEntryId: source.journalEntryId, sequence: source.journalSequence });
-      expect(refreshed.current[0]).toEqual({ position: 1, block: 'other-text' });
-      expect(counts(db)).toEqual({
-        ...pagedCounts,
-        edit_journal_entries: pagedCounts.edit_journal_entries! + 1,
-        manuscript_command_groups: pagedCounts.manuscript_command_groups! + 1,
-        manuscript_command_edits: pagedCounts.manuscript_command_edits! + 1,
-      });
-      expect(verifiedChain(db, book.branchId)).toBe(2);
-
-      // Damage after the first page still refuses the first page: every page reads the whole group.
-      const lastPosition = source.memberCount;
-      const original = text(only(db, 'SELECT after_text FROM manuscript_command_edits WHERE command_group_id = ? AND position = ?', source.commandGroupId, lastPosition).after_text);
-      db.prepare('UPDATE manuscript_command_edits SET after_text = ? WHERE command_group_id = ? AND position = ?').run(`${original}丁`, source.commandGroupId, lastPosition);
-      expect(code(() => bounded.readManualCommandSource(source, null, budget))).toBe('HISTORY_CORRUPT');
-      db.prepare('UPDATE manuscript_command_edits SET after_text = ? WHERE command_group_id = ? AND position = ?').run(original, source.commandGroupId, lastPosition);
-      expect(bounded.readManualCommandSource(source, null, budget).evidenceDigest).toBe(source.evidenceDigest);
-      db.prepare('DELETE FROM manuscript_command_edits WHERE command_group_id = ? AND position = ?').run(source.commandGroupId, lastPosition);
-      expect(code(() => bounded.readManualCommandSource(source, null, budget))).toBe('HISTORY_CORRUPT');
-      expect(counts(db).learning_signals).toBe(0);
-    });
-  }, 180_000);
-
-  it('keeps one identity through undo and redo, reports redo-tail and Apply boundaries as history, and refuses Apply and undo as manual', async () => {
-    const { book } = await createBooks();
-    const local = withOwners((owners) => {
-      const { db, bounded, lifetime } = owners;
-      const [first, second] = paragraphs(db, book.branchId);
-      const typed = typeInto(owners, book, first!.blockId, 0, 0, '甲');
-      const freehand = sourceOf(db, entryOfEdit(db, typed.input.clientEditId), { origin: 'journal-edit', windowStartBlockId: typed.input.windowStartBlockId });
-      const { query } = frequentGrapheme(db, book.branchId);
-      const replaced = replaceAll(owners, book, query, REPLACEMENT);
-      const manual = sourceOf(db, entryAt(db, book.branchId, replaced.journalSequence), { origin: 'manual-search-replacement', previewId: replaced.previewId });
-      const created = bounded.readManualCommandSource(manual, null, MAX_FRAME_BYTES);
-      const workingDigest = (): string => bounded.getWindow(book.manuscriptId, book.branchId, { kind: 'start' }).workingDigest;
-
-      // Undo and redo move the same group's history; its evidence and identity do not move.
-      const undone = bounded.undo(book.manuscriptId, book.branchId, workingDigest(), lifetime);
-      expect(undone.commandGroupId).toBe(manual.commandGroupId);
-      const afterUndo = readAll(bounded, manual, MAX_FRAME_BYTES);
-      expect(reassembled(manual, afterUndo).exact).toBe(true);
-      expect(afterUndo[0]!.history).toMatchObject({
-        groupStatus: 'undone', boundaryCrossed: false,
-        lastAction: { kind: 'undo', journalEntryId: entryAt(db, book.branchId, undone.journalSequence), sequence: undone.journalSequence },
-      });
-      expect(afterUndo.flatMap((page) => page.current).every((state) => state.block === 'other-text')).toBe(true);
-      // The undo entry is not the group's creation, however the rest of the reference reads.
-      expect(code(() => bounded.readManualCommandSource({ ...manual, journalEntryId: entryAt(db, book.branchId, undone.journalSequence) }, null, MAX_FRAME_BYTES)))
-        .toBe('MANUAL_SOURCE_MISMATCH');
-      expect(code(() => bounded.readManualCommandSource(
-        sourceOf(db, entryAt(db, book.branchId, undone.journalSequence), manual.request), null, MAX_FRAME_BYTES,
-      ))).toBe('MANUAL_SOURCE_MISMATCH');
-      const redone = bounded.redo(book.manuscriptId, book.branchId, workingDigest(), lifetime);
-      const afterRedo = bounded.readManualCommandSource(manual, null, MAX_FRAME_BYTES);
-      expect(afterRedo.evidenceDigest).toBe(created.evidenceDigest);
-      expect(afterRedo.history).toMatchObject({ groupStatus: 'applied', lastAction: { kind: 'redo', sequence: redone.journalSequence } });
-      expect(afterRedo.current.every((state) => state.block === 'recorded-after')).toBe(true);
-
-      // New typing after an undo discards the redo tail: the group is superseded, though no history boundary crossed it.
-      bounded.undo(book.manuscriptId, book.branchId, workingDigest(), lifetime);
-      typeInto(owners, book, second!.blockId, 0, 0, '乙');
-      expect(code(() => bounded.redo(book.manuscriptId, book.branchId, workingDigest(), lifetime))).toBe('NOTHING_TO_REDO');
-      const tail = bounded.readManualCommandSource(manual, null, MAX_FRAME_BYTES);
-      expect(tail.evidenceDigest).toBe(created.evidenceDigest);
-      expect(tail.history).toMatchObject({ groupStatus: 'superseded', boundaryCrossed: false, lastAction: { kind: 'undo' } });
-      expect(bounded.readManualCommandSource(freehand, null, MAX_FRAME_BYTES).history).toMatchObject({ groupStatus: 'applied', boundaryCrossed: false });
-      expect(verifiedChain(db, book.branchId)).toBe(6);
-      return { freehand, manual, tail: tail.history, counts: counts(db) };
-    });
-
-    // AI7 Apply and its reversal run through the real Store, on a Change Suggestion the editor makes there.
-    const applied = await withStore((store) => {
-      const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
-      const block = window.blocks.find((candidate) => candidate.kind === 'paragraph' && graphemesOf(candidate.text).length >= 12)!;
-      const binding = { ...book, windowStartBlockId: window.blocks[0]!.blockId };
-      const mark = store.createEditorialMark({
-        manuscriptId: book.manuscriptId, branchId: book.branchId, windowStartBlockId: window.blocks[0]!.blockId, clientMarkId: randomUUID(),
-        baseRevisionId: window.revisionId, expectedJournalSequence: window.journalSequence, blockId: block.blockId,
-        baseBlockDigest: block.digest, fromGrapheme: 4, toGrapheme: 8, selectedText: graphemesOf(block.text).slice(4, 8).join(''),
-        kind: 'change-suggestion', highlightColor: null, body: '', proposedText: '〔建议〕', rationale: null,
-      });
-      const apply = store.applyChangeSuggestion({
-        manuscriptId: book.manuscriptId, branchId: book.branchId, windowStartBlockId: binding.windowStartBlockId, markId: mark.markId,
-        clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null,
-      });
-      const reverse = store.reverseAppliedChangeSuggestion({
-        manuscriptId: book.manuscriptId, branchId: book.branchId,
-        windowStartBlockId: store.getManuscriptWindow(book.manuscriptId, book.branchId, null).blocks[0]!.blockId,
-        markId: mark.markId, clientEffectId: randomUUID(),
-      });
-      return { apply: apply.application.after.journalSequence, reverse: reverse.application.after.journalSequence };
-    });
-
-    withOwners(({ db, bounded }) => {
-      const quiet = writes(db);
-      // An Apply and its reversal journal `replacement` too, but no preview proves either manual.
-      for (const sequence of [applied.apply, applied.reverse]) {
-        const entry = entryAt(db, book.branchId, sequence);
-        expect(code(() => bounded.readManualCommandSource(sourceOf(db, entry, local.manual.request), null, MAX_FRAME_BYTES))).toBe('MANUAL_SOURCE_MISMATCH');
-        expect(code(() => bounded.readManualCommandSource(
-          sourceOf(db, entry, { origin: 'manual-search-replacement', previewId: randomUUID() }), null, MAX_FRAME_BYTES,
-        ))).toBe('MANUAL_SOURCE_MISMATCH');
-      }
-      // The Apply is a history boundary: it supersedes the earlier typing and is reported apart from the redo tail.
-      const crossed = bounded.readManualCommandSource(local.freehand, null, MAX_FRAME_BYTES);
-      expect(reassembled(local.freehand, [crossed]).exact).toBe(true);
-      expect(crossed.history).toMatchObject({ groupStatus: 'superseded', boundaryCrossed: true, lastAction: { kind: 'edit', sequence: local.freehand.journalSequence } });
-      const manual = readAll(bounded, local.manual, MAX_FRAME_BYTES);
-      expect(reassembled(local.manual, manual).exact).toBe(true);
-      expect(manual[0]!.history).toMatchObject({ groupStatus: 'superseded', boundaryCrossed: true, lastAction: { kind: 'undo' } });
-      expect(local.tail).toMatchObject({ groupStatus: 'superseded', boundaryCrossed: false });
-      // The shared evidence still proves every entry of the branch, Apply and reversal included, and reading added nothing.
-      expect(verifiedChain(db, book.branchId)).toBe(8);
-      expect(local.counts.learning_signals).toBe(0);
-      expect({ ...counts(db), learning_signals: 0 }).toEqual({
-        ...local.counts,
-        edit_journal_entries: local.counts.edit_journal_entries! + 2,
-        manuscript_command_groups: local.counts.manuscript_command_groups! + 2,
-        manuscript_command_edits: local.counts.manuscript_command_edits! + 2,
-      });
-      // The accepted Change Suggestion records its own Proposal Decision signal; no signal names a manual command.
-      const signals = db.prepare('SELECT canonical_json FROM learning_signals').all().map((row) => text(row.canonical_json));
-      expect(signals.length).toBeGreaterThan(0);
-      expect(signals.every((json) => typeof JSON.parse(json).source?.decisionId === 'string')).toBe(true);
-      expect(signals.every((json) => [local.manual, local.freehand].every((source) =>
-        !json.includes(source.commandGroupId) && !json.includes(source.journalEntryId)))).toBe(true);
-      expect(writes(db)).toBe(quiet);
-    });
-  }, 180_000);
-
-  it('reads an owner-created replacement of more than 256 blocks in several full frames, through undo and redo, and refuses damage far past the first page', async () => {
-    const book = await withStore((store) => importLargeBook(store));
-    withOwners((owners) => {
-      const { db, bounded, lifetime } = owners;
-      expect(int(only(db, 'SELECT count(*) total FROM working_blocks WHERE branch_id = ?', book.branchId).total)).toBe(LARGE_PARAGRAPHS);
-      const replaced = replaceAll(owners, book, book.query, REPLACEMENT);
-      const source = sourceOf(db, entryAt(db, book.branchId, replaced.journalSequence), { origin: 'manual-search-replacement', previewId: replaced.previewId });
-      // Every block changed: one command of more than two 128-member storage batches.
-      expect(source.memberCount).toBe(LARGE_PARAGRAPHS);
-      expect(source.memberCount).toBeGreaterThan(2 * 128);
-      expect(workingDigestOf(source.beforeWorkingDigest, source.journalSequence, 'replacement', source.commandGroupId, source.evidenceDigest)).toBe(source.afterWorkingDigest);
-
-      // At the full frame budget the evidence needs several pages, each packed with whole members up to the frame.
-      const quiet = writes(db);
-      const pages = readAll(bounded, source, MAX_FRAME_BYTES);
-      const complete = reassembled(source, pages);
-      expect(complete.exact).toBe(true);
-      expect(pages.length).toBeGreaterThan(1);
-      expect(complete.members.reduce((total, member) => total + bytes(member), 0)).toBeGreaterThan(MAX_FRAME_BYTES);
-      const states = pages.flatMap((page) => page.current);
-      expect(states.every((state, index) => state.position === index + 1 && state.block === 'recorded-after')).toBe(true);
-      for (const page of pages) {
-        expect(bytes(page)).toBeLessThanOrEqual(MAX_FRAME_BYTES);
-        if (page.next === null) continue;
-        const following = page.next.afterPosition;
-        const worstNext = { ...page.next, afterPosition: source.memberCount, historyDigest: page.history.digest };
-        expect(bytes({ ...page, next: worstNext }) + bytes(complete.members[following]) + bytes(states[following]) + 2 > MAX_FRAME_BYTES).toBe(true);
-      }
-      expect(writes(db)).toBe(quiet);
-
-      // Undo and redo of the whole large group keep its evidence; only its history moves.
-      const workingDigest = (): string => bounded.getWindow(book.manuscriptId, book.branchId, { kind: 'start' }).workingDigest;
-      const undone = bounded.undo(book.manuscriptId, book.branchId, workingDigest(), lifetime);
-      expect(undone.commandGroupId).toBe(source.commandGroupId);
-      const afterUndo = readAll(bounded, source, MAX_FRAME_BYTES);
-      expect(reassembled(source, afterUndo).exact).toBe(true);
-      expect(afterUndo.every((page) => page.history.groupStatus === 'undone' && page.history.lastAction.kind === 'undo' &&
-        page.history.lastAction.sequence === undone.journalSequence)).toBe(true);
-      expect(afterUndo.flatMap((page) => page.current).every((state) => state.block === 'other-text')).toBe(true);
-      const redone = bounded.redo(book.manuscriptId, book.branchId, workingDigest(), lifetime);
-      const afterRedo = readAll(bounded, source, MAX_FRAME_BYTES);
-      expect(reassembled(source, afterRedo).exact).toBe(true);
-      expect(afterRedo.every((page) => page.history.groupStatus === 'applied' && page.history.lastAction.kind === 'redo' &&
-        page.history.lastAction.sequence === redone.journalSequence)).toBe(true);
-      expect(afterRedo.flatMap((page) => page.current).every((state) => state.block === 'recorded-after')).toBe(true);
-      expect(verifiedChain(db, book.branchId)).toBe(3);
-
-      // Negative fixtures on this disposable store only. The last member lies past the first 128 rows and past the first
-      // full page, and damage to it still refuses the first page.
-      const last = source.memberCount;
-      expect(last).toBeGreaterThan(128);
-      expect(afterRedo[0]!.members.at(-1)!.position).toBeLessThan(last);
-      const row = only(db,
-        `SELECT ce.after_text, ce.after_digest, wb.kind, wb.level FROM manuscript_command_edits ce
-         JOIN working_blocks wb ON wb.branch_id = ? AND wb.block_id = ce.block_id
-         WHERE ce.command_group_id = ? AND ce.position = ?`,
-        book.branchId, source.commandGroupId, last);
-      const original = { text: text(row.after_text), digest: text(row.after_digest) };
-      const damaged = `${original.text}丁`;
-      const damage = db.prepare('UPDATE manuscript_command_edits SET after_text = ?, after_digest = ? WHERE command_group_id = ? AND position = ?');
-      damage.run(damaged, original.digest, source.commandGroupId, last);
-      expect(code(() => bounded.readManualCommandSource(source, null, MAX_FRAME_BYTES))).toBe('HISTORY_CORRUPT');
-      // A forgery whose row digest agrees with its text passes the row checks; the working-state chain still refuses it.
-      const consistent = sha256(canonical({ kind: text(row.kind), level: row.level === null ? null : int(row.level), text: damaged }));
-      damage.run(damaged, consistent, source.commandGroupId, last);
-      expect(code(() => bounded.readManualCommandSource(source, null, MAX_FRAME_BYTES))).toBe('HISTORY_CORRUPT');
-      damage.run(original.text, original.digest, source.commandGroupId, last);
-      expect(reassembled(source, readAll(bounded, source, MAX_FRAME_BYTES)).exact).toBe(true);
-      expect(counts(db).learning_signals).toBe(0);
-    });
-  }, 300_000);
-
-  it('reports journal and checkpoint restorations after unclean closes as history beside unchanged sources, refusing cursors pinned before them', async () => {
-    const { book } = await createBooks();
-    // First lifetime: a manual replacement and a freehand edit outside it; then the process is interrupted.
-    const before = withOwners((owners) => {
-      const { db, bounded } = owners;
-      const { query } = frequentGrapheme(db, book.branchId);
-      const replaced = replaceAll(owners, book, query, REPLACEMENT);
-      const manual = sourceOf(db, entryAt(db, book.branchId, replaced.journalSequence), { origin: 'manual-search-replacement', previewId: replaced.previewId });
-      const outside = text(only(db,
-        `SELECT block_id FROM working_blocks WHERE branch_id = ? AND block_id NOT IN (
-           SELECT block_id FROM manuscript_command_edits WHERE command_group_id = ?
-         ) ORDER BY position LIMIT 1`,
-        book.branchId, manual.commandGroupId).block_id);
-      const typed = typeInto(owners, book, outside, 0, 0, '戊');
-      const freehand = sourceOf(db, entryOfEdit(db, typed.input.clientEditId), { origin: 'journal-edit', windowStartBlockId: typed.input.windowStartBlockId });
-      expect(bounded.readManualCommandSource(freehand, null, MAX_FRAME_BYTES).history.restoration).toBeNull();
-      return { manual, freehand, pinned: pinnedCursor(bounded, manual) };
-    }, { interrupted: true });
-
-    const journal = await restoreAfterInterruption(book, 'journal');
-    const middle = withOwners((owners) => {
-      const { db, bounded } = owners;
-      const quiet = writes(db);
-      const restoration = { restorationId: journal.restorationId, selectedKind: 'journal', selectedSnapshotId: null, descendantRevisionId: journal.descendantRevisionId };
-      // The restoration moved the history the cursor was pinned to; the evidence is the same.
-      expect(code(() => bounded.readManualCommandSource(before.manual, before.pinned.cursor, before.pinned.budget))).toBe('MANUAL_SOURCE_HISTORY_CHANGED');
-      const manual = readAll(bounded, before.manual, MAX_FRAME_BYTES);
-      expect(reassembled(before.manual, manual).exact).toBe(true);
-      expect(manual[0]!.history).toMatchObject({
-        revisionId: journal.descendantRevisionId, groupStatus: 'superseded', boundaryCrossed: true,
-        lastAction: { kind: 'replacement', journalEntryId: before.manual.journalEntryId }, restoration,
-      });
-      expect(manual[0]!.history.historyBoundarySequence).toBe(manual[0]!.history.historySequence);
-      // The journal candidate kept the text: every member's block still holds what the command wrote.
-      expect(manual.flatMap((page) => page.current).every((state) => state.block === 'recorded-after')).toBe(true);
-      const freehand = bounded.readManualCommandSource(before.freehand, null, MAX_FRAME_BYTES);
-      expect(reassembled(before.freehand, [freehand]).exact).toBe(true);
-      expect(freehand.history).toMatchObject({ revisionId: journal.descendantRevisionId, groupStatus: 'superseded', boundaryCrossed: true, restoration });
-      expect(freehand.current).toEqual([{ position: 1, block: 'recorded-after' }]);
-      expect(writes(db)).toBe(quiet);
-
-      // Second lifetime: the editor replaces again on the restored state, and is interrupted again.
-      const replaced = replaceAll(owners, book, '😀', '"');
-      const later = sourceOf(db, entryAt(db, book.branchId, replaced.journalSequence), { origin: 'manual-search-replacement', previewId: replaced.previewId });
-      expect(later.baseRevisionId).toBe(journal.descendantRevisionId);
-      expect(bounded.readManualCommandSource(later, null, MAX_FRAME_BYTES).history.restoration).toBeNull();
-      return { later, pinned: pinnedCursor(bounded, later) };
-    }, { interrupted: true });
-
-    const checkpoint = await restoreAfterInterruption(book, 'checkpoint');
-    withOwners(({ db, bounded }) => {
-      const quiet = writes(db);
-      const restoration = { restorationId: checkpoint.restorationId, selectedKind: 'checkpoint', selectedSnapshotId: null, descendantRevisionId: checkpoint.descendantRevisionId };
-      expect(code(() => bounded.readManualCommandSource(middle.later, middle.pinned.cursor, middle.pinned.budget))).toBe('MANUAL_SOURCE_HISTORY_CHANGED');
-      // The checkpoint candidate discarded the later replacement: its evidence stays whole while its blocks hold other text.
-      const later = readAll(bounded, middle.later, MAX_FRAME_BYTES);
-      expect(reassembled(middle.later, later).exact).toBe(true);
-      expect(later[0]!.history).toMatchObject({ revisionId: checkpoint.descendantRevisionId, groupStatus: 'superseded', boundaryCrossed: true, restoration });
-      expect(later.flatMap((page) => page.current).every((state) => state.block === 'other-text')).toBe(true);
-      // The earlier commands are what that checkpoint holds: the latest restoration after them is this one.
-      const earlier = readAll(bounded, before.manual, MAX_FRAME_BYTES);
-      expect(reassembled(before.manual, earlier).exact).toBe(true);
-      expect(earlier[0]!.history).toMatchObject({ revisionId: checkpoint.descendantRevisionId, restoration });
-      expect(earlier.flatMap((page) => page.current).every((state) => state.block === 'recorded-after')).toBe(true);
-      const freehand = bounded.readManualCommandSource(before.freehand, null, MAX_FRAME_BYTES);
-      expect(freehand.history.restoration).toEqual(restoration);
-      expect(freehand.current).toEqual([{ position: 1, block: 'recorded-after' }]);
-      expect(writes(db)).toBe(quiet);
-      expect(verifiedChain(db, book.branchId)).toBe(3);
-      expect(counts(db).learning_signals).toBe(0);
-    });
-  }, 300_000);
 });

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { ManualCommandSource } from '../shared/protocol/learning.js';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
   ANALYSIS_FEEDBACK_OTHER,
@@ -171,6 +172,7 @@ export interface LearningMaterialCandidate {
     | Omit<Extract<LearningMaterialTarget, { kind: 'analysis' }>, 'bookId'>
     | Omit<Extract<LearningMaterialTarget, { kind: 'review' }>, 'bookId'>
     | Omit<Extract<LearningMaterialTarget, { kind: 'word-tracked-edit' }>, 'bookId'>
+    | { readonly kind: 'manual-edit-journal'; readonly commandGroupId: string }
     /** A 审稿意见 offered into 范例 at one exact version (Issue #429): 学习准入 lists no card for it; 范例 admits it. */
     | { readonly kind: 'readers-report-exemplar'; readonly documentId: string; readonly revisionId: string };
   readonly materialKey: string;
@@ -191,6 +193,14 @@ export interface LearningMaterialCandidate {
 
 /** The page's order of a Book's materials (Issue #61 review): 修改建议 first, then analysis items, then 审阅 findings. */
 const KIND_ORDER: ReadonlyArray<string> = ['proposal-decision:', 'analysis-feedback:', 'review-disposition:', 'word-sample:'];
+
+/** The original command is one observation, even after undo/redo; it is never a decision or a vote. */
+export function manualEditCandidate(source: ManualCommandSource): LearningMaterialCandidate {
+  return { source: { kind: 'manual-edit-journal', commandGroupId: source.commandGroupId },
+    materialKey: `manual-edit:${source.commandGroupId}`, kind: 'manual-edit-journal', originLabel: '直接修改稿件',
+    recordedAt: source.durableAt, orderedAt: source.durableAt, content: source, excerpt: [],
+    rationale: '实际手动编辑的完整前后变化；撤销、后续修改与恢复状态决定能否用于学习，不代表采纳建议。' };
+}
 
 /** Full immutable evidence determines identity; card excerpts never determine admission. */
 export function wordTrackedEditCandidate(sample: WordTrackedEditSample, sampleDigest: string, recordedAt: string): LearningMaterialCandidate {

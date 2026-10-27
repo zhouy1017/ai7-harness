@@ -1,7 +1,7 @@
 import { IMPORTED_SKILL_SCHEMA_SQL, IMPORTED_SKILL_TRIGGER_SQL, IMPORTED_SKILL_UPDATE_SCHEMA_SQL, IMPORTED_SKILL_UPDATE_TRIGGER_SQL } from '../../src/service/imported-skill-schema.js';
 import { HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL, HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL } from '../../src/service/house-review-preference.js';
 import type { DatabaseSync } from 'node:sqlite';
-import { ANALYSIS_LEDGER_REVISION_79_SQL, ANALYSIS_LEDGER_REVISION_81_SQL, ANALYSIS_LEDGER_SCHEMA_SQL, ANALYSIS_LEDGER_TRIGGER_SQL, CUSTOM_ANALYSIS_SCHEMA_VERSION, WEB_TOOLS_PLAN_RECORDS_SQL } from '../../src/service/task-authorization.js';
+import { CURATION_SCHEMA_SQL, ANALYSIS_LEDGER_REVISION_79_SQL, ANALYSIS_LEDGER_REVISION_81_SQL, ANALYSIS_LEDGER_SCHEMA_SQL, ANALYSIS_LEDGER_TRIGGER_SQL, CUSTOM_ANALYSIS_SCHEMA_VERSION, WEB_TOOLS_PLAN_RECORDS_SQL, IDLE_RUN_AUTHORIZATIONS_SQL } from '../../src/service/task-authorization.js';
 import { CUSTOM_ANALYSIS_DIMENSION_SCHEMA_SQL, CUSTOM_ANALYSIS_DIMENSION_TRIGGER_SQL } from '../../src/service/custom-analysis-dimensions.js';
 import { TASK_INTENT_DRAFT_SCHEMA_SQL, TASK_INTENT_DRAFT_TRIGGER_SQL } from '../../src/service/task-intent-drafts.js';
 import { RESEARCH_EVIDENCE_SCHEMA_SQL, RESEARCH_EVIDENCE_TRIGGER_SQL } from '../../src/service/research-evidence-schema.js';
@@ -38,6 +38,22 @@ export function pre77SchemaRows<T extends { name: string; sql: unknown }>(rows: 
 /** Plant an actual predecessor, including revision 74's newly widened component CHECK and house settings. */
 export function execPre74Fixture(db: DatabaseSync, sql: string): void {
   const version = /PRAGMA user_version\s*=\s*(\d+)/iu.exec(sql)?.[1];
+  if (version !== undefined && Number(version) < 96) {
+    const enforced = Number(db.prepare('PRAGMA foreign_keys').get()?.foreign_keys) === 1;
+    if (enforced) db.exec('PRAGMA foreign_keys = OFF');
+    try {
+      for (const [table, shape] of Object.entries({ analysis_task_intents: ANALYSIS_LEDGER_SCHEMA_SQL.analysis_task_intents,
+        analysis_run_authorizations: IDLE_RUN_AUTHORIZATIONS_SQL })) {
+        const current = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table)?.sql;
+        if (typeof current !== 'string' || !(current.includes("'learning-curation'") || current.includes("'enabled-learning'"))) continue;
+        const columns = db.prepare(`PRAGMA table_info(${table})`).all().map((row) => String(row.name)).join(', ');
+        db.exec(`CREATE TEMP TABLE pre96_relation AS SELECT rowid AS prior_rowid, * FROM ${table}; DROP TABLE ${table};`);
+        db.exec(shape);
+        db.exec(`INSERT INTO ${table}(rowid, ${columns}) SELECT prior_rowid, ${columns} FROM temp.pre96_relation ORDER BY prior_rowid; DROP TABLE temp.pre96_relation;`);
+        db.exec(ANALYSIS_LEDGER_TRIGGER_SQL[`${table}_no_update`]!); db.exec(ANALYSIS_LEDGER_TRIGGER_SQL[`${table}_no_delete`]!);
+      }
+    } finally { if (enforced) db.exec('PRAGMA foreign_keys = ON'); }
+  }
   if (version !== undefined && Number(version) < 83) {
     for (const trigger of Object.keys(IMPORTED_SKILL_UPDATE_TRIGGER_SQL)) db.exec(`DROP TRIGGER IF EXISTS ${trigger}`);
     for (const table of Object.keys(IMPORTED_SKILL_UPDATE_SCHEMA_SQL).reverse()) db.exec(`DROP TABLE IF EXISTS ${table}`);
@@ -84,7 +100,7 @@ export function expectedSchema75(rows: readonly { name: string; sql: unknown }[]
     ...Object.entries({ ...TASK_INTENT_DRAFT_SCHEMA_SQL, ...TASK_INTENT_DRAFT_TRIGGER_SQL }).map(([name, sql]) => ({ name, sql })),
     ...Object.entries({ ...CUSTOM_ANALYSIS_DIMENSION_SCHEMA_SQL, ...CUSTOM_ANALYSIS_DIMENSION_TRIGGER_SQL }).map(([name, sql]) => ({ name, sql })),
     ...rows.map((row) => row.name === 'analysis_plan_records' ? { ...row, sql: WEB_TOOLS_PLAN_RECORDS_SQL }
-      : row.name === 'analysis_task_intents' ? { ...row, sql: ANALYSIS_LEDGER_SCHEMA_SQL.analysis_task_intents }
+      : row.name === 'analysis_task_intents' || row.name === 'analysis_run_authorizations' ? { ...row, sql: CURATION_SCHEMA_SQL[row.name] }
       : row.name === 'analysis_result_sets' ? { ...row, sql: ANALYSIS_LEDGER_SCHEMA_SQL.analysis_result_sets }
       : row.name === 'analysis_result_set_revisions' ? { ...row, sql: ANALYSIS_LEDGER_SCHEMA_SQL.analysis_result_set_revisions }
       : row.name === 'proposal_item_decisions' ? { ...row, sql: EDITORIAL_MARK_SCHEMA_SQL.proposal_item_decisions } : row),
@@ -210,5 +226,7 @@ export function restoreCustomAnalysisPredecessor(db: DatabaseSync, narrow = true
 export function pre82SchemaRows<T extends { name: string; sql: unknown }>(rows: readonly T[]): Array<T | { name: string; sql: unknown }> {
   const added = new Set([...Object.keys(CUSTOM_ANALYSIS_DIMENSION_SCHEMA_SQL), ...Object.keys(CUSTOM_ANALYSIS_DIMENSION_TRIGGER_SQL)]);
   return rows.filter((row) => !added.has(row.name)).map((row) => row.name === 'analysis_result_sets' || row.name === 'analysis_result_set_revisions'
-    ? { ...row, sql: ANALYSIS_LEDGER_REVISION_81_SQL[row.name] } : row);
+    ? { ...row, sql: ANALYSIS_LEDGER_REVISION_81_SQL[row.name] }
+    : row.name === 'analysis_task_intents' ? { ...row, sql: ANALYSIS_LEDGER_SCHEMA_SQL.analysis_task_intents }
+    : row.name === 'analysis_run_authorizations' ? { ...row, sql: IDLE_RUN_AUTHORIZATIONS_SQL } : row);
 }

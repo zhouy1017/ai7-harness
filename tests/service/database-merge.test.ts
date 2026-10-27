@@ -892,7 +892,7 @@ describe('只导入其中的图书 over the store', () => {
       categoryId: 'typos-and-usage', text: '目标本社保留的合成偏好。', effect: 'guide' });
     const targetHouse = target.inspectGlobalAgent();
     const preview = await target.inspectDatabaseImport(packagePath);
-    expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 95, dataVersion: 1 });
+    expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 96, dataVersion: 1 });
     await target.prepareDatabaseMerge(preview.previewId, T);
     target.close();
     target = await EditorialStore.open(otherRoot, roots.codeRoot, control);
@@ -1934,7 +1934,7 @@ describe('what a merge refuses, puts back and brings forward', () => {
 it('validates a historical reader91 source through the existing selected-Book merge callback (#1131)', async () => {
   const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
   const bookId = emptyBook(source, '合成历史来源'); await source.close();
-  const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite')); db.exec('PRAGMA user_version = 91');
+  const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite')); execPre74Fixture(db, 'PRAGMA user_version = 91');
   const packagePath = join(roots.inputRoot, 'reader91.ai7db');
   try { await writeDatabasePackage(db, roots.dataRoot, packagePath, () => ({ dataVersion: 1, schemaRevision: 91,
     softwareVersion: '0.1.0', createdAt: T.toISOString(), origin: 'database-export' })); } finally { db.close(); }

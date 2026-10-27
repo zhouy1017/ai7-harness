@@ -25,6 +25,19 @@ export interface LiveKindRule {
   readonly crossUnitSynthesisAllowed: boolean;
 }
 
+/** The enabled-learning origin is distinct from enrolled background processing, despite its shared kind name. */
+export function learningCurationRule(policy: LaunchPolicyProjection | undefined, binding: LiveKindBinding): AdmittedProviderRule | null {
+  if (policy?.integrityState !== 'verified' || policy.operationalScope !== 'ordinary-production' ||
+    policy.providerProcessing.version !== 'v31' || policy.providerProcessing.decision !== 'eligible-only' ||
+    policy.providerProcessing.liveTransmissionAllowed !== true) return null;
+  const rules = policy.providerProcessing.admittedRules?.filter((rule) => rule.ruleId === 'ordinary-production-learning-curation') ?? [];
+  const rule = rules.length === 1 ? rules[0]! : null;
+  return rule?.enabledLearningEnvelope?.disableStopsLaterDispatchAndUse === true && rule.taskKinds.length === 1 &&
+    rule.taskKinds[0] === 'learning-curation' && rule.outboundDataCategories.includes('editorial-learning-example') &&
+    rule.modelRole === 'Main Editorial Role' && rule.route === binding.route && rule.endpoint === binding.endpoint &&
+    rule.model === binding.model && rule.credentialSlot === binding.credentialSlot ? rule : null;
+}
+
 /** The launch's live binding facts the rule must name exactly; `LaunchBinding['live']` satisfies it. */
 export interface LiveKindBinding {
   readonly route: string;

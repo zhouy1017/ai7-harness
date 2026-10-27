@@ -2172,6 +2172,7 @@ async function run(): Promise<void> {
     // nothing running it now. It settles 已暂停 or 任务已中断 · 可续行 before any request is read; one left cancelling is
     // finished by the owner, sending nothing.
     const reconciled = store.reconcileStoppedBaselineAnalysisRuns();
+    store.baselineAnalysisLedger.reconcileCuration();
     for (const runRecordId of reconciled.cancelling) {
       try {
         analysisExecution.cancelRun(runRecordId, store.baselineAnalysisLedger);
@@ -2345,6 +2346,7 @@ async function run(): Promise<void> {
     const ownedJobs = jobs;
     background = new BackgroundAnalysisDispatcherClass({
       store: openStore, execution: owner, launchPolicy, editorWorkBusy: () => ownedJobs.busy, dispatchReady: () => reading() !== 'offline',
+      curate: () => owner.startLearningCuration(openStore),
       // J-09's pace (Issue #95, S39): its quiet period, and a look four times as often, never less than a quarter second.
       ...(backgroundQuietMs === undefined ? {} : { quietMs: backgroundQuietMs, tickMs: Math.max(250, Math.round(backgroundQuietMs / 4)) }),
     });

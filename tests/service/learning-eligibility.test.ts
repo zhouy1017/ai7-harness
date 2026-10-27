@@ -180,11 +180,11 @@ describe('学习准入 over the real store', () => {
       store.recordProposalDecisionFeedback({ ...binding, markId: rejectedMark, decisionId: rejection.decisionId, expectedFeedback: 0,
         action: 'revise', reason: '学习理由修订示例', reasonSource: 'free-text' });
       const revisedSignal = inspect().signals[0]!;
-      if (revisedSignal.kind === 'word-tracked-edit') throw new Error('expected a decision signal');
+      if (revisedSignal.kind === 'word-tracked-edit' || revisedSignal.kind === 'manual-edit-journal') throw new Error('expected a decision signal');
       expect(revisedSignal.source.reasonRevision).toBe(1);
       // The revised reason supersedes the earlier signal: unusable, and never reported as the editor's 明确排除.
       expect(inspect().signals.slice(0, 2).map((signal) => {
-        if (signal.kind === 'word-tracked-edit') throw new Error('expected a decision signal');
+        if (signal.kind === 'word-tracked-edit' || signal.kind === 'manual-edit-journal') throw new Error('expected a decision signal');
         return [signal.source.reasonRevision, signal.currentEligibility];
       })).toEqual([[1, 'house'], [0, 'superseded']]);
       const create = { clientMemoryId: randomUUID(), signalId: rewritten.signalId, title: '保持用语一致', editorialDimension: '语言', confidence: 0.5 };
@@ -580,7 +580,7 @@ describe('学习准入 over the real store', () => {
       store.recordReviewFindingDisposition(bookId, run.reviewRunId, finding.findingId, '本书体例允许这种写法');
       const captured = store.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }).signals[0]!;
       expect(captured.kind).toBe('review-finding-ignored');
-      if (captured.kind === 'word-tracked-edit') throw new Error('expected a review finding signal');
+      if (captured.kind === 'word-tracked-edit' || captured.kind === 'manual-edit-journal') throw new Error('expected a review finding signal');
       expect(captured.source).toMatchObject({ bookId, reviewRunId: run.reviewRunId, findingId: finding.findingId });
       expect(captured.source.resultSetRevisionId).not.toBeNull();
       const material = store.inspectLearningMaterials(bookId).books[0]!.materials.find((entry) => entry.kind === 'review-disposition')!;

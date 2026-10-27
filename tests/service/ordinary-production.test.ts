@@ -1,3 +1,4 @@
+import { execPre74Fixture } from '../support/pre74-schema.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { MODEL_SERVICE_CONNECTION_REVISION_72_SQL } from '../../src/service/bounded-manuscript.js';
 import { FastRoleExecutionOwner, productionFastRoleRoutes, testModelServiceConnection } from '../../src/service/fast-role/fast-role-execution.js';
@@ -1112,7 +1113,7 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
     const reference = await configure(store, production, 'deepseek-open-platform');
     expect(production.live).toMatchObject({ route: 'deepseek-open-platform', model: 'deepseek-flash', credentialReference: reference });
     // v13 names the editor's unpublished words in every admitted rule (#853 revision 5), which is what the gate admits them by.
-    for (const rule of production.policy.providerProcessing.admittedRules.filter((rule) => rule.ruleId !== 'ordinary-production-model-connection-test')) {
+    for (const rule of production.policy.providerProcessing.admittedRules.filter((rule) => rule.ruleId !== 'ordinary-production-model-connection-test' && rule.ruleId !== 'ordinary-production-learning-curation')) {
       expect(rule.outboundDataCategories).toEqual(expect.arrayContaining(['unpublished-metadata', 'unpublished-excerpts', 'unpublished-full-content']));
     }
     const bookId = await sample1Book(store, 'L2 官方路线');
@@ -1560,7 +1561,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
     const before = database.prepare(`SELECT ${columns} FROM model_service_connections`).all();
     database.exec(`CREATE TEMP TABLE legacy_model_selection AS SELECT ${columns} FROM model_service_connections; DROP TABLE model_service_connections;`);
     database.exec(MODEL_SERVICE_CONNECTION_REVISION_72_SQL);
-    database.exec(`INSERT INTO model_service_connections SELECT * FROM legacy_model_selection; DROP TABLE legacy_model_selection;
+    execPre74Fixture(database, `INSERT INTO model_service_connections SELECT * FROM legacy_model_selection; DROP TABLE legacy_model_selection;
       DROP TABLE material_translation_attempts; PRAGMA user_version = 83;`);
     database.close();
     const migrated = await EditorialStore.open(roots.dataRoot, roots.codeRoot); opened.push(migrated);
@@ -1671,7 +1672,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
         const prepared = await restarted.prepareDatabaseExport(destination, true);
         expect((await restarted.approveDatabaseExport(prepared.preparationId, true)).outcome).toBe('created');
         const preview = await restarted.inspectDatabaseImport(destination);
-        expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 95, dataVersion: 1 });
+        expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 96, dataVersion: 1 });
         await restarted.prepareDatabaseReplacement(preview.previewId);
         restarted.close();
         const replaced = await EditorialStore.open(roots.dataRoot, roots.codeRoot); opened.push(replaced);

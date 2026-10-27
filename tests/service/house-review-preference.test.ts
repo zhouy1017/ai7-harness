@@ -1,3 +1,4 @@
+import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -132,7 +133,7 @@ describe('house review preference ledger', () => {
     const before = db.prepare('SELECT name, sql FROM sqlite_schema WHERE sql IS NOT NULL ORDER BY name').all();
     // Synchronized delta with Issue #423 (slice 7a): a predecessor of revision 80 has no drafts and the narrower Task Intents.
     restoreTaskIntentDraftPredecessor(db);
-    dropHouseReviewPreferenceRelations(db); db.exec('PRAGMA user_version = 78'); db.close();
+    dropHouseReviewPreferenceRelations(db); execPre74Fixture(db, 'PRAGMA user_version = 78'); db.close();
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     expect(store.inspectHouseReviewPreference().current).toBeNull();
     expect(store.inspectHouseReviewPreference().basis).toBe(LOCAL_LEARNING_POLICY_BASIS.text);

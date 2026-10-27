@@ -120,7 +120,7 @@ function constructReader92Predecessor(db: DatabaseSync): void {
   db.prepare('UPDATE store_versions SET schema_revision = ?, canonical_json = ?, sha256 = ? WHERE record_id = ?')
     .run(MODEL_REQUEST_ADMISSION_SCHEMA_VERSION, old.json, old.digest, String(row.record_id));
   db.exec(DATA_VERSION_TRIGGER_SQL.store_versions_no_update!);
-  db.exec(`PRAGMA user_version = ${MODEL_REQUEST_ADMISSION_SCHEMA_VERSION}`);
+  execPre74Fixture(db, `PRAGMA user_version = ${MODEL_REQUEST_ADMISSION_SCHEMA_VERSION}`);
   expect(new DataVersionLedger(db).standing().latest?.schemaRevision).toBe(MODEL_REQUEST_ADMISSION_SCHEMA_VERSION);
   const markerPath = dataVersionMarkerPath(roots.dataRoot);
   const marker = readDataVersionMarkerText(readFileSync(markerPath, 'utf8'));
@@ -277,7 +277,7 @@ describe('closed Word retention definitions (#1132)', () => {
     });
   }, 120_000);
 
-  it('captures only the distinct local Word signal over closed relation fixtures and keeps memory consumers closed', async () => {
+  it('captures only the distinct local Word signal over closed relation fixtures and keeps development memory consumers closed', async () => {
     const { compiled, bookId, originalBytes } = await retainedWordParentFixture();
     withDatabase(false, (db) => {
       initializeWordImportRetentionSchema(db);
@@ -419,7 +419,7 @@ describe('closed Word retention definitions (#1132)', () => {
         expect(wordSampleDetailContextCurrent(db, context)).toBe(true);
         expect(() => resolveWordSampleDetailSource(db, context, firstSource.sampleId, 'f'.repeat(64), historicalImports)).toThrow();
         expect(() => resolveWordSampleDetailSource(db, context, firstSource.sampleId, firstSource.sampleDigest, [])).toThrow();
-        expect(() => ledger.sourceSnapshot(signal.signalId)).toThrow();
+        expect(ledger.sourceSnapshot(signal.signalId)).toMatchObject({ sourceKind: 'word-tracked-edit', signalId: signal.signalId });
         expect(() => ledger.create({ clientMemoryId: randomUUID(), signalId: signal.signalId, title: '拒绝 Word 记忆', editorialDimension: '语言', confidence: 0.5 })).toThrow();
         expect(() => ledger.create({ schema: 'ai7.global-editorial-memory/2', actionId: randomUUID(), signalIds: [signal.signalId],
           applicability: { kind: 'house' }, title: '拒绝 Word 记忆', editorialDimension: '语言', confidence: 0.5 }, 'development-ci')).toThrow();
@@ -546,7 +546,7 @@ describe('Word empty-layer migration through EditorialStore.open', () => {
       db.exec('BEGIN IMMEDIATE');
       try { retainWordRevisionSource(db, readWordParentSourcePin(db, bookId, sourceVersionId), compiled.graph); db.exec('COMMIT'); }
       catch (error) { db.exec('ROLLBACK'); throw error; }
-      db.exec(`PRAGMA user_version = ${reader}`);
+      execPre74Fixture(db, `PRAGMA user_version = ${reader}`);
       return { sources: retainedSourceRows(db), word: db.prepare('SELECT * FROM word_revision_sources').all(),
         versions: db.prepare('SELECT * FROM store_versions ORDER BY ordinal').all() };
     });
@@ -579,7 +579,7 @@ describe('Word empty-layer migration through EditorialStore.open', () => {
       const execute = DatabaseSync.prototype.exec;
       let interrupted = false;
       const stamp = vi.spyOn(DatabaseSync.prototype, 'exec').mockImplementation(function (this: DatabaseSync, sql: string): void {
-        if (!interrupted && sql.trim() === `PRAGMA user_version = ${LATEST_SCHEMA_VERSION}`) {
+        if (!interrupted && sql.trim() === `PRAGMA user_version = 95`) {
           interrupted = true;
           throw new Error('WORD_MIGRATION_BEFORE_STAMP');
         }

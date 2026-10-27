@@ -2831,6 +2831,7 @@ export function parseTrustedLaunchForm(raw: RawTrustedLaunchForm): TrustedLaunch
  * research.
  */
 export type OutboundDataCategoryId =
+  | 'editorial-learning-example'
   | 'editor-task-instruction'
   | 'house-review-guideline-clause'
   | 'public-or-synthetic'
@@ -2856,6 +2857,8 @@ export type OutboundDataCategoryId =
  * it permits. Eligibility only — a rule authorizes no Run, dispatch or Apply on its own.
  */
 export interface AdmittedProviderRule {
+  readonly enabledLearningEnvelope?: { readonly pins: readonly string[]; readonly missingStaleRevokedOrExceededResult: 'refuse';
+    readonly extraPerPassClickRequired: false; readonly disableStopsLaterDispatchAndUse: true };
   /** v27 review names the same bounded synthesis turn as writing/evaluation; eligibility only. */
   readonly plusOneCrossUnitSynthesisTurn?: boolean;
   /** Book-less dialogue: category labels record what is sent and do not restrict transmission; ADR 0079 §4.4 redaction still applies. */
@@ -7206,7 +7209,7 @@ export type HouseReviewPreferenceSource = {
   eligibilityDecisionId: string; qualityLineageDigest: string; feedbackKey?: string;
   attribution: { peopleVersion: number; authors: ReadonlyArray<string>; editors: ReadonlyArray<string> };
 } | {
-  kind: 'editorial-memory'; bookId: string; bookTitle: string; materialDigest: string; decisionId: string;
+  kind: 'editorial-memory'; bookId: string; bookTitle: string; materialDigest: string; decisionId: string | null;
   /** Automatic admission has no human decision identity. */
   eligibilityDecisionId?: never;
   itemId: string; versionId: string; actionId: string; sourceKey: string; feedbackKey: string;
@@ -9965,7 +9968,7 @@ export const LEARNING_MATERIAL_KINDS: readonly LearningMaterialKind[] = ['propos
  * What the Learning Eligibility ledger decides about: the three kinds 学习准入 shows a card for, and `readers-report-exemplar`
  * (Issue #429) — 范例's admission of one 审稿意见 at one exact version, decided from 范例 and listed by no card.
  */
-export type LearningLedgerMaterialKind = LearningMaterialKind | 'readers-report-exemplar';
+export type LearningLedgerMaterialKind = LearningMaterialKind | 'readers-report-exemplar' | 'manual-edit-journal';
 
 const LEARNING_UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
 /**

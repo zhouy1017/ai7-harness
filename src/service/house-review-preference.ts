@@ -215,7 +215,7 @@ export function withoutNames(text: string, names: ReadonlyArray<string>): string
 
 export class HouseReviewPreferenceLedger {
   #reads: LearningReads | null = null;
-  constructor(readonly db: DatabaseSync) {}
+  constructor(readonly db: DatabaseSync, readonly learning?: () => EditorialLearningLedger) {}
 
   /**
    * One outer read or publication with one validated-result context for every lineage it checks (Issue #1128 revision 7); the
@@ -227,7 +227,7 @@ export class HouseReviewPreferenceLedger {
     try { return operation(); } finally { this.#reads = null; }
   }
 
-  #learning(): EditorialLearningLedger { return new EditorialLearningLedger(this.db, this.#reads ?? undefined); }
+  #learning(): EditorialLearningLedger { return this.learning?.() ?? new EditorialLearningLedger(this.db, this.#reads ?? undefined); }
 
   /** Revision 91's whole-store proof on open (Issue #1128): every publication, including history beyond any page, and every Run pin. */
   validate(memoryRevision = true): void { this.#read(() => this.#validateAll(memoryRevision)); }
@@ -283,7 +283,7 @@ export class HouseReviewPreferenceLedger {
       const captured = learning.effectiveSources(memory);
       const sources: HouseReviewPreferenceSource[] = captured.map((source) => ({ kind: 'editorial-memory', itemId: memory.itemId,
         versionId: memory.versionId, actionId: memory.actionId, sourceKey: source.sourceKey, feedbackKey: source.feedbackKey,
-        bookId: source.source.bookId, bookTitle: source.bookTitle, materialDigest: source.source.materialDigest, decisionId: source.source.decisionId,
+        bookId: source.source.bookId, bookTitle: source.bookTitle, materialDigest: source.source.materialDigest, decisionId: source.sourceKind === undefined ? source.source.decisionId : null,
         attribution: source.attribution, captured: source, currentAdmission: current.get(source.sourceKey)!.admission,
         currentEligibility: current.get(source.sourceKey)!.eligibility }));
       const text = scope === 'ordinary-production' ? memory.title : withoutNames(memory.title, preferenceNames([{ text: memory.title, categoryId: memory.editorialDimension, bookId: null, sources }], stripped));
@@ -402,9 +402,9 @@ export class HouseReviewPreferenceLedger {
           learning.validateHistoricalSource(source.captured);
           validateEditorialMemorySourceShape({ ...source.captured, admission: source.currentAdmission, eligibility: source.currentEligibility });
           valid(source.sourceKey === source.captured.sourceKey && source.feedbackKey === source.captured.feedbackKey &&
-            source.bookId === source.captured.source.bookId && source.materialDigest === source.captured.source.materialDigest && source.decisionId === source.captured.source.decisionId &&
+            source.bookId === source.captured.source.bookId && source.materialDigest === source.captured.source.materialDigest && source.decisionId === (source.captured.sourceKind === undefined ? source.captured.source.decisionId : null) &&
             source.bookTitle === source.captured.bookTitle && canonicalJson(source.attribution) === canonicalJson(source.captured.attribution) &&
-            source.captured.editorialDimension === line.categoryId && source.captured.operationalScope === record.operationalScope &&
+            (source.captured.editorialDimension === null || source.captured.editorialDimension === line.categoryId) && source.captured.operationalScope === record.operationalScope &&
             (line.bookId === null ? source.currentEligibility === 'house' : line.bookId === source.bookId));
           feedback.add(source.feedbackKey);
         }
