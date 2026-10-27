@@ -41,6 +41,13 @@ interface DispatchAccounting {
   observation: BreakerVerdict | null;
 }
 
+export interface FactualSearchAccounting {
+  readonly reserveTool: (identity: string) => boolean;
+  readonly reserveSearch: (queryDigest: string) => boolean;
+  readonly searchResult: (queryDigest: string) => { readonly text: string; readonly sourceUrl: string | null } | null;
+  readonly recordSearchResult: (queryDigest: string, result: { readonly text: string; readonly sourceUrl: string | null }) => void;
+}
+
 /**
  * One attempt's platform tools, end to end (ADR 0080 §7, Issue #473 S87-f3a): the owner the harness routes `websearch`
  * and `webfetch` calls to. Each call is canonicalized, counted by the unit's breaker, decided by the one Egress Gate
@@ -61,6 +68,7 @@ export function platformToolModelProfile(profile: ProviderModelProfile, scope: s
 }
 
 export class PlatformToolSession implements PlatformToolOwner {
+  readonly #claimAccounting: FactualSearchAccounting | null;
   readonly #binding: EgressBindingFacts;
   readonly #base: Pick<EgressAttemptScope, 'currentBindingDigest' | 'acceptedOutputDigests' | 'ceilingState'>;
   readonly #fetch: PlatformToolFetch;
@@ -109,6 +117,7 @@ export class PlatformToolSession implements PlatformToolOwner {
   readonly #fetchedPages = new Map<string, ResearchSnapshot | { readonly failed: string }>();
 
   constructor(deps: {
+    readonly factualClaimAccounting?: FactualSearchAccounting;
     readonly binding: EgressBindingFacts;
     readonly scope: Pick<EgressAttemptScope, 'currentBindingDigest' | 'acceptedOutputDigests' | 'ceilingState'>;
     readonly fetch?: PlatformToolFetch;
@@ -132,7 +141,9 @@ export class PlatformToolSession implements PlatformToolOwner {
     this.#binding = deps.binding;
     this.#retrieval = deps.retrieval ?? null;
     this.#localBreaker = new PlatformToolBreaker(deps.binding.localTools?.breaker.roundTrips ?? LOCAL_TOOL_ROUND_TRIP_BREAKER);
-    this.#oneQueryPerUnit = rule !== null && 'backends' in rule.websearch;
+    this.#claimAccounting = deps.factualClaimAccounting ?? null;
+    if (this.#claimAccounting !== null && deps.binding.factualClaimScope?.stage !== 'web-verification') throw new Error('FACTUAL_SEARCH_SCOPE_REQUIRED');
+    this.#oneQueryPerUnit = this.#claimAccounting === null && rule !== null && 'backends' in rule.websearch;
     this.#base = deps.scope;
     this.#fetch = deps.fetch ?? (() => { throw new Error('LOCAL_TOOL_HAS_NO_TRANSPORT'); });
     this.#admitHost = deps.admitHost ?? (() => { throw new Error('LOCAL_TOOL_HAS_NO_HOST'); });
@@ -329,6 +340,7 @@ export class PlatformToolSession implements PlatformToolOwner {
   }
 
   #observeWeb(state: DispatchAccounting, digest: string): BreakerVerdict {
+    if (state.observation === null && this.#claimAccounting !== null && !this.#claimAccounting.reserveTool(state.callId)) return state.observation = 'tripped';
     return state.observation ??= this.#breaker.observe(digest);
   }
 
@@ -419,6 +431,14 @@ export class PlatformToolSession implements PlatformToolOwner {
     if (args.tool !== 'websearch' && args.tool !== 'webfetch' || this.#book === null) return this.#refuseCounted(call, '本次尝试未准许该工具。');
     if (this.#evidenceOnly && args.tool === 'webfetch') return this.#refuseCounted(call, '此最小证据项只执行一次检索往返；不取回网页。');
     const digest = toolArgumentsDigest(args);
+    if (args.tool === 'websearch' && this.#claimAccounting !== null) {
+      const reused = this.#claimAccounting.searchResult(digest);
+      if (reused !== null) {
+        if (this.#observeWeb(this.#dispatchState(call, call.dispatch), digest) === 'tripped') return refusal('断言工具额度已用完。');
+        for (const url of urlsIn(reused.text)) this.cite(url);
+        return reused;
+      }
+    }
     if (args.tool === 'websearch' && this.#oneQueryPerUnit) {
       if (this.#unitSearchQuery !== null && this.#unitSearchQuery !== digest) {
         this.usage.refusedSearchCalls += 1;
@@ -457,6 +477,11 @@ export class PlatformToolSession implements PlatformToolOwner {
         // The call brings only its arguments: the gate derives the host and the category from the rule and the binding.
         const decision = evaluateSearchServiceCall({ arguments: args }, this.#binding, scope, this.#book);
         if (decision.decision !== 'call-search-service') return refusal(decision.detail);
+        if (this.#claimAccounting !== null && !this.#claimAccounting.reserveSearch(digest)) {
+          this.#book.revoke(decision.ticket);
+          this.usage.refusedSearchCalls += 1;
+          return refusal('断言检索额度已用完，或该查询已经提交；失败和结果未知的提交不会重发。');
+        }
         const settled = await this.#settle(
           { kind: 'search-call', purpose: this.#purpose, argumentsDigest: decision.ticket.argumentsDigest, host: decision.ticket.host, origin: this.#searchOrigin },
           {
@@ -467,6 +492,7 @@ export class PlatformToolSession implements PlatformToolOwner {
         if (settled.snapshot === null) return refusal(`搜索服务没有返回可用结果（状态 ${settled.status}）。`);
         for (const url of urlsIn(settled.snapshot.text)) this.cite(url);
         const result = { text: settled.snapshot.text, sourceUrl: settled.snapshot.url };
+        this.#claimAccounting?.recordSearchResult(digest, result);
         this.#unitSearchHasResult = result.text !== '[]';
         this.#runResults.set(digest, result);
         this.#searchSnapshots.set(digest, settled.snapshot);

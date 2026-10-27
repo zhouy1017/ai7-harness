@@ -49,7 +49,9 @@ import { UUID_PATTERN, canonicalJson, canonicalRecord, sha256Hex } from './analy
 import { FACTUAL_VERIFICATION_POLICY_VERSION, graphemeCount } from './analysis/factual-review-contract.js';
 import { retrievalCandidateOf, type FactualEvidenceRelation } from './analysis/factual-review-contract-v2.js';
 import { evidenceStaleness, titleSiteLabel } from './analysis/factual-review-evidence.js';
-import { FACTUAL_VERIFICATION_FOREIGN_KEYS, FACTUAL_VERIFICATION_SCHEMA_SQL, FACTUAL_VERIFICATION_TRIGGER_SQL } from './factual-verification-schema.js';
+import { FACTUAL_CLAIM_SCHEMA_SQL, FACTUAL_CLAIM_TRIGGER_SQL, FACTUAL_VERIFICATION_FOREIGN_KEYS, FACTUAL_VERIFICATION_SCHEMA_SQL, FACTUAL_VERIFICATION_TRIGGER_SQL } from './factual-verification-schema.js';
+import type { FactualClaimLedger } from './analysis/factual-claim-ledger.js';
+import type { FactualClaimVerificationResult } from './analysis/factual-claim-contract.js';
 
 export { FACTUAL_VERIFICATION_FOREIGN_KEYS, FACTUAL_VERIFICATION_SCHEMA_SQL, FACTUAL_VERIFICATION_TRIGGER_SQL };
 
@@ -84,6 +86,29 @@ const DECISION_SCHEMA = 'ai7.factual-review-decision/1';
 const PROPOSAL_SCHEMA = 'ai7.correction-proposal/1';
 const RUN_ASSURANCE_SCHEMA = 'ai7.factual-run-assurance/1';
 const GRAPHEMES = new Intl.Segmenter('zh', { granularity: 'grapheme' });
+
+export function initializeFactualClaimSchema(db: DatabaseSync, version: number): void {
+  for (const [name, sql] of Object.entries({ ...FACTUAL_CLAIM_SCHEMA_SQL, ...FACTUAL_CLAIM_TRIGGER_SQL })) {
+    const row = db.prepare('SELECT sql FROM sqlite_schema WHERE name = ?').get(name);
+    if (row === undefined) {
+      requireVerification(version < 97, 'SCHEMA_INVALID', '事实断言账本结构缺失。');
+      db.exec(sql);
+    } else requireVerification(fold(String(row.sql)) === fold(sql), 'SCHEMA_INVALID', '事实断言账本结构不兼容。');
+  }
+}
+
+export interface FactualClaimSession {
+  readonly sessionId: string;
+  readonly runRecordId: string;
+  readonly stage: 'claim-extraction' | 'web-verification';
+  readonly scopeId: string;
+  readonly ledgerDigest: string | null;
+  readonly sourceMessageDigest: string;
+  readonly promptContractDigest: string;
+  readonly limits: { readonly model: number; readonly tool: number; readonly search: number };
+}
+
+type FactualClaimEventKind = 'model' | 'tool' | 'search' | 'search-result' | 'verification-result' | 'source-exclusion';
 
 /** Revision 78's relations, created once on a store below it; a store that has them is checked against their exact text. */
 export function initializeFactualVerificationSchema(db: DatabaseSync, version: number): void {
@@ -368,6 +393,105 @@ export class FactualVerificationLedger {
 
   constructor(db: DatabaseSync) {
     this.#db = db;
+  }
+
+  /** Membership is written once before any claim verification session can be admitted. */
+  freezeClaims(runRecordId: string, ledger: FactualClaimLedger): FactualClaimLedger {
+    const prior = this.claims(runRecordId);
+    requireVerification(prior === null || prior.digest === ledger.digest, 'FACTUAL_CLAIM_MEMBERSHIP_FROZEN', '这次运行的断言集合已经冻结。');
+    if (prior !== null) return prior;
+    const { digest, ...body } = ledger;
+    const record = canonicalRecord(body);
+    requireVerification(record.digest === digest, 'FACTUAL_CLAIM_DIGEST_INVALID', '断言账本摘要不一致。');
+    this.#db.prepare('INSERT INTO factual_claim_ledgers(run_record_id, ledger_digest, canonical_json, recorded_at) VALUES (?, ?, ?, ?)')
+      .run(runRecordId, digest, record.json, new Date().toISOString());
+    return ledger;
+  }
+
+  claims(runRecordId: string): FactualClaimLedger | null {
+    const row = this.#db.prepare('SELECT canonical_json, ledger_digest FROM factual_claim_ledgers WHERE run_record_id = ?').get(runRecordId);
+    return row === undefined ? null : { ...JSON.parse(String(row.canonical_json)) as Omit<FactualClaimLedger, 'digest'>, digest: String(row.ledger_digest) };
+  }
+
+  /** The session key survives restart; a new technical session cannot inherit or reset its counters. */
+  admitClaimSession(input: FactualClaimSession): FactualClaimSession {
+    const prior = this.#db.prepare('SELECT canonical_json FROM factual_claim_sessions WHERE run_record_id = ? AND stage = ? AND scope_id = ?')
+      .get(input.runRecordId, input.stage, input.scopeId);
+    if (prior !== undefined) {
+      const recorded = JSON.parse(String(prior.canonical_json)) as FactualClaimSession;
+      requireVerification(canonicalRecord(recorded).json === canonicalRecord(input).json, 'FACTUAL_CLAIM_SESSION_FROZEN', '断言会话已经固定；不能创建新的会话或重置额度。');
+      return recorded;
+    }
+    if (input.stage === 'web-verification') {
+      const ledger = this.claims(input.runRecordId);
+      requireVerification(ledger?.digest === input.ledgerDigest && ledger.claims.some((claim) => claim.claimId === input.scopeId),
+        'FACTUAL_CLAIM_NOT_ELIGIBLE', '这条断言不属于本次运行冻结的可核查集合。');
+    }
+    const record = canonicalRecord(input);
+    this.#db.prepare(`INSERT INTO factual_claim_sessions(session_id, run_record_id, stage, scope_id, ledger_digest,
+      model_limit, tool_limit, search_limit, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(input.sessionId, input.runRecordId, input.stage, input.scopeId, input.ledgerDigest,
+        input.limits.model, input.limits.tool, input.limits.search, record.json, record.digest);
+    return input;
+  }
+
+  claimSession(runRecordId: string, stage: FactualClaimSession['stage'], scopeId: string): FactualClaimSession | null {
+    const row = this.#db.prepare('SELECT canonical_json FROM factual_claim_sessions WHERE run_record_id = ? AND stage = ? AND scope_id = ?').get(runRecordId, stage, scopeId);
+    return row === undefined ? null : JSON.parse(String(row.canonical_json)) as FactualClaimSession;
+  }
+
+  claimAllowance(sessionId: string): FactualClaimSession['limits'] {
+    const session = this.#db.prepare('SELECT model_limit, tool_limit, search_limit FROM factual_claim_sessions WHERE session_id = ?').get(sessionId);
+    requireVerification(session !== undefined, 'FACTUAL_CLAIM_SESSION_MISSING', '断言会话未准入。');
+    const used = new Map(this.#db.prepare('SELECT kind, count(*) AS n FROM factual_claim_events WHERE session_id = ? GROUP BY kind').all(sessionId)
+      .map((row) => [String(row.kind), Number(row.n)]));
+    return { model: Number(session.model_limit) - (used.get('model') ?? 0), tool: Number(session.tool_limit) - (used.get('tool') ?? 0),
+      search: Number(session.search_limit) - (used.get('search') ?? 0) };
+  }
+
+  /** Reserve synchronously before transport. Failure/unknown outcomes leave this immutable row spent. */
+  reserveClaimCall(sessionId: string, kind: 'model' | 'tool' | 'search', identity: string): boolean {
+    const record = canonicalRecord({ identity });
+    const limit = { model: 'model_limit', tool: 'tool_limit', search: 'search_limit' }[kind];
+    const inserted = this.#db.prepare(`INSERT INTO factual_claim_events(session_id, sequence, kind, identity, canonical_json, sha256, recorded_at)
+      SELECT ?, (SELECT COALESCE(MAX(sequence), 0) + 1 FROM factual_claim_events WHERE session_id = ?), ?, ?, ?, ?, ?
+      WHERE (SELECT count(*) FROM factual_claim_events WHERE session_id = ? AND kind = ?)
+        < (SELECT ${limit} FROM factual_claim_sessions WHERE session_id = ?)
+      ON CONFLICT(session_id, kind, identity) DO NOTHING`)
+      .run(sessionId, sessionId, kind, identity, record.json, record.digest, new Date().toISOString(), sessionId, kind, sessionId);
+    return Number(inserted.changes) === 1;
+  }
+
+  claimSearchResult(sessionId: string, queryDigest: string): { readonly text: string; readonly sourceUrl: string | null } | null {
+    return this.#claimEvent(sessionId, 'search-result', queryDigest) as { readonly text: string; readonly sourceUrl: string | null } | null;
+  }
+
+  recordClaimSearchResult(sessionId: string, queryDigest: string, result: { readonly text: string; readonly sourceUrl: string | null }): void {
+    requireVerification(this.#claimEvent(sessionId, 'search', queryDigest) !== null, 'FACTUAL_SEARCH_NOT_RESERVED', '检索提交尚未记录。');
+    this.#appendClaimEvent(sessionId, 'search-result', queryDigest, result);
+  }
+
+  recordClaimVerification(sessionId: string, result: FactualClaimVerificationResult): void {
+    const prior = this.claimVerifications(sessionId);
+    requireVerification(prior.length < 2, 'FACTUAL_VERIFICATION_ROUND_LIMIT', '这条断言已经完成两轮取证。');
+    this.#appendClaimEvent(sessionId, 'verification-result', String(prior.length + 1), result);
+  }
+
+  claimVerifications(sessionId: string): readonly FactualClaimVerificationResult[] {
+    return this.#db.prepare("SELECT canonical_json FROM factual_claim_events WHERE session_id = ? AND kind = 'verification-result' ORDER BY sequence").all(sessionId)
+      .map((row) => JSON.parse(String(row.canonical_json)) as FactualClaimVerificationResult);
+  }
+
+  #claimEvent(sessionId: string, kind: FactualClaimEventKind, identity: string): unknown | null {
+    const row = this.#db.prepare('SELECT canonical_json FROM factual_claim_events WHERE session_id = ? AND kind = ? AND identity = ?').get(sessionId, kind, identity);
+    return row === undefined ? null : JSON.parse(String(row.canonical_json)) as unknown;
+  }
+
+  #appendClaimEvent(sessionId: string, kind: FactualClaimEventKind, identity: string, body: unknown): void {
+    const record = canonicalRecord(body);
+    this.#db.prepare(`INSERT INTO factual_claim_events(session_id, sequence, kind, identity, canonical_json, sha256, recorded_at)
+      SELECT ?, COALESCE(MAX(sequence), 0) + 1, ?, ?, ?, ?, ? FROM factual_claim_events WHERE session_id = ?`)
+      .run(sessionId, kind, identity, record.json, record.digest, new Date().toISOString(), sessionId);
   }
 
   #present(): boolean {

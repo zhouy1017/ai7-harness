@@ -3,6 +3,9 @@ import { canonicalJson, hasExactKeys, isRecord, sha256Hex } from './canonical.js
 import { FACTUAL_REVIEW_PROMPT_CONTRACT, FACTUAL_REVIEW_UNIT_RESULT_SCHEMA, parseFactualReviewUnitResult, type FactualUnitAssertion } from './factual-review-contract.js';
 import { FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA, parseFactualReviewUnitResultV2, type FactualEvidenceRelation, type FactualCorrectionEntry } from './factual-review-contract-v2.js';
 import { FACTUAL_CLAIM_EXTRACTION_CONTRACT, FACTUAL_CLAIM_VERIFICATION_CONTRACT } from './factual-claim-ledger.js';
+import { factualReviewLevelDefinition, type AnalysisKindDefinition } from './kind-definition.js';
+import { reduceFactualReview, type FactualUnitOutcome } from './factual-review-reducers.js';
+import { FixtureReplayResearchCapability } from '../capabilities/research.js';
 
 export const FACTUAL_CLAIM_VERIFICATION_RESULT_SCHEMA = 'ai7.factual-claim-verification-result/1' as const;
 
@@ -73,4 +76,30 @@ export function parseFactualClaimVerification(text: string, claim: { readonly cl
     evidenceRelations, corrections: parsed.result.corrections[0]?.variants ?? [] };
   const json = canonicalJson(result);
   return { ok: true as const, result, canonicalJson: json, digest: sha256Hex(json) };
+}
+
+/** The whole-manuscript successor. Separate policy admission selects it; legacy and range prompts stay pinned. */
+export function factualClaimKindDefinition(level: 'standard' | 'strict'): AnalysisKindDefinition {
+  const base = factualReviewLevelDefinition(level);
+  const verification = factualClaimVerificationPrompt(level);
+  const verificationPromptDigest = sha256Hex(canonicalJson(verification));
+  const promptContractDigest = sha256Hex(canonicalJson({ extraction: FACTUAL_CLAIM_EXTRACTION_PROMPT, verification }));
+  return { ...base, factualClaims: { level, verificationPrompt: verification.systemPrompt, verificationPromptDigest },
+    systemPrompt: FACTUAL_CLAIM_EXTRACTION_PROMPT.systemPrompt, promptContractDigest,
+    unitResultSchema: FACTUAL_CLAIM_EXTRACTION_CONTRACT,
+    schemaDigest: sha256Hex(canonicalJson({ promptContractDigest, verificationPromptDigest })),
+    researchDeclaration: { webSearch: true, searchEngine: 'user-selected-backend' },
+    assurance: null, assuranceAbsentReason: '断言工序不增加抽样回合。',
+    executionSteps: ['逐单元抽取断言', '冻结精确断言及其出处', '逐断言联网取证', '归并已定位发现'],
+    parseUnitResult: (text, unit) => parseFactualClaimExtraction(text, { unitOrdinal: unit.ordinal, blockCount: unit.overlapBlockIds.length + unit.blockIds.length }),
+    requestDigest: (ordinal, digest) => sha256Hex(canonicalJson({ promptContractDigest, ordinal, digest })),
+    unitRecord: (result) => ({ assertions: (result as { assertions: readonly FactualUnitAssertion[] }).assertions }),
+    unitResultOfRecord: (record, unitOrdinal) => ({ schema: FACTUAL_CLAIM_EXTRACTION_CONTRACT, unitOrdinal, assertions: record.assertions }),
+    reduce: (input) => {
+      const reduction = reduceFactualReview({ ...input, outcomes: input.outcomes as readonly FactualUnitOutcome[],
+        research: new FixtureReplayResearchCapability(), exactOccurrences: true });
+      return { ...reduction, components: { findings: reduction.findings, excluded: reduction.excluded,
+        assertionCounts: reduction.assertionCounts, research: reduction.research }, conflictCount: 0 };
+    },
+  };
 }

@@ -1462,6 +1462,17 @@ export function validateRequestAdmissionRecords(db: DatabaseSync, allowGoverned:
 }
 
 export class BaselineAnalysisStore {
+  #factualVerification: import('../factual-verification.js').FactualVerificationLedger | null = null;
+
+  bindFactualVerification(owner: import('../factual-verification.js').FactualVerificationLedger): void {
+    requireAnalysis(this.kind === FACTUAL_REVIEW_KIND, 'FACTUAL_CLAIM_KIND_INVALID', '只有事实核查任务可以绑定断言账本。');
+    this.#factualVerification = owner;
+  }
+
+  get factualVerification(): import('../factual-verification.js').FactualVerificationLedger {
+    requireAnalysis(this.#factualVerification !== null, 'FACTUAL_CLAIM_OWNER_MISSING', '事实核查账本未绑定。');
+    return this.#factualVerification;
+  }
   readonly #db: DatabaseSync;
   readonly #checkpointOwner: CheckpointOwner;
   readonly #route: BaselineAnalysisRouteFacts | null;

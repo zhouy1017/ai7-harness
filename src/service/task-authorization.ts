@@ -524,7 +524,8 @@ export const WORD_TRACKED_IMPORT_SCHEMA_VERSION = 93;
 export const POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION = 94;
 const PRE_CURATION_SCHEMA_VERSION = 95;
 export const LEARNING_CURATION_SCHEMA_VERSION = 96;
-export const LATEST_SCHEMA_VERSION = LEARNING_CURATION_SCHEMA_VERSION;
+export const FACTUAL_CLAIM_SCHEMA_VERSION = 97;
+export const LATEST_SCHEMA_VERSION = FACTUAL_CLAIM_SCHEMA_VERSION;
 /** The custom analysis kind family slice 7f brings (ADR 0090 item 4): admitted here so it needs no second rebuild. */
 const CUSTOM_ANALYSIS_KIND_GLOB = 'custom-analysis/[a-z0-9-]*' as const;
 const CUSTOM_ANALYSIS_CONTRACT_VERSION_GLOB = 'ai7.custom-analysis*/[0-9]*' as const;
@@ -1848,12 +1849,14 @@ function requireExactObjects(
 ): void {
   for (const [name, sql] of Object.entries(expected)) {
     const row = db.prepare('SELECT sql FROM sqlite_schema WHERE type = ? AND name = ?').get(type, name) as SqlRow | undefined;
-    const curationShape = type === 'table' && Number(db.prepare('PRAGMA user_version').get()?.user_version) === LEARNING_CURATION_SCHEMA_VERSION
+    const curationShape = type === 'table' && Number(db.prepare('PRAGMA user_version').get()?.user_version) >= LEARNING_CURATION_SCHEMA_VERSION
       && CURATION_SCHEMA_SQL[name] !== undefined && row !== undefined && normalizeSql(asString(row.sql)) === normalizeSql(CURATION_SCHEMA_SQL[name]!);
+    const factualShape = type === 'table' && Number(db.prepare('PRAGMA user_version').get()?.user_version) === FACTUAL_CLAIM_SCHEMA_VERSION
+      && name === 'analysis_task_intents' && row !== undefined && normalizeSql(asString(row.sql)) === normalizeSql(FACTUAL_TASK_INTENTS_SQL);
     const idlePreStamp = type === 'table' && name === 'analysis_run_authorizations' &&
       normalizeSql(sql) === normalizeSql(ANALYSIS_LEDGER_SCHEMA_SQL.analysis_run_authorizations) &&
       row !== undefined && normalizeSql(asString(row.sql)) === normalizeSql(IDLE_RUN_AUTHORIZATIONS_SQL);
-    requireTask(row !== undefined && (normalizeSql(asString(row.sql)) === normalizeSql(sql) || idlePreStamp || curationShape),
+    requireTask(row !== undefined && (normalizeSql(asString(row.sql)) === normalizeSql(sql) || idlePreStamp || curationShape || factualShape),
       'SCHEMA_INVALID', `${label} ${name} 结构不兼容。`);
   }
 }
@@ -3181,6 +3184,9 @@ export const CURATION_SCHEMA_SQL: Readonly<Record<string, string>> = {
   analysis_run_authorizations: IDLE_RUN_AUTHORIZATIONS_SQL.replace("'standard-direct', 'default-execution-rule'", "'enabled-learning', 'standard-direct', 'default-execution-rule'"),
 };
 
+export const FACTUAL_TASK_INTENTS_SQL = CURATION_SCHEMA_SQL.analysis_task_intents!
+  .replace("AND mode IN ('whole-manuscript', 'range')", "AND mode IN ('whole-manuscript', 'range', 'review-again', 'review-range')");
+
 export function validateTaskAuthorizationSchema(db: DatabaseSync): void {
   requireTask(Number(db.prepare('PRAGMA user_version').get()?.user_version) === LATEST_SCHEMA_VERSION, 'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');
   validateJ03TaskAuthorizationSchema(db);
@@ -3188,8 +3194,8 @@ export function validateTaskAuthorizationSchema(db: DatabaseSync): void {
   validateAuthorizationStartTimes(db);
 }
 
-export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
-  if (Number(db.prepare('PRAGMA user_version').get()?.user_version) === LATEST_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+function initializeCurationSchema(db: DatabaseSync): void {
+  if (Number(db.prepare('PRAGMA user_version').get()?.user_version) === LEARNING_CURATION_SCHEMA_VERSION) return;
   initializePreCurationSchema(db);
   const foreignKeys = Number(db.prepare('PRAGMA foreign_keys').get()?.foreign_keys) === 1;
   db.exec('PRAGMA foreign_keys = OFF');
@@ -3205,6 +3211,29 @@ export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
       db.exec(ANALYSIS_LEDGER_TRIGGER_SQL[`${table}_no_delete`]!);
     }
     requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '学习整理迁移后引用校验失败。');
+    db.exec(`PRAGMA user_version = ${LEARNING_CURATION_SCHEMA_VERSION}`);
+    validateAnalysisLedgerSchema(db);
+    db.exec('COMMIT');
+  } catch (error) { db.exec('ROLLBACK'); throw error; }
+  finally { if (foreignKeys) db.exec('PRAGMA foreign_keys = ON'); }
+}
+
+export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
+  if (Number(db.prepare('PRAGMA user_version').get()?.user_version) === LATEST_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  initializeCurationSchema(db);
+  const foreignKeys = Number(db.prepare('PRAGMA foreign_keys').get()?.foreign_keys) === 1;
+  db.exec('PRAGMA foreign_keys = OFF');
+  try {
+    db.exec('BEGIN IMMEDIATE');
+    db.exec('CREATE TEMP TABLE factual_task_migration AS SELECT rowid AS prior_rowid, * FROM analysis_task_intents');
+    const columns = db.prepare('PRAGMA table_info(analysis_task_intents)').all().map((row) => String(row.name)).join(', ');
+    db.exec('DROP TABLE analysis_task_intents');
+    db.exec(FACTUAL_TASK_INTENTS_SQL);
+    db.exec(`INSERT INTO analysis_task_intents(rowid, ${columns}) SELECT prior_rowid, ${columns} FROM temp.factual_task_migration ORDER BY prior_rowid`);
+    db.exec('DROP TABLE temp.factual_task_migration');
+    db.exec(ANALYSIS_LEDGER_TRIGGER_SQL.analysis_task_intents_no_update!);
+    db.exec(ANALYSIS_LEDGER_TRIGGER_SQL.analysis_task_intents_no_delete!);
+    requireTask(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '事实核查任务迁移后引用校验失败。');
     db.exec(`PRAGMA user_version = ${LATEST_SCHEMA_VERSION}`);
     validateTaskAuthorizationSchema(db);
     db.exec('COMMIT');

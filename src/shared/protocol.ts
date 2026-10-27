@@ -2856,7 +2856,55 @@ export type OutboundDataCategoryId =
  * admits, the Model Role it binds, that role's exact route, endpoint, model and credential slot, and the outbound data categories
  * it permits. Eligibility only — a rule authorizes no Run, dispatch or Apply on its own.
  */
+export interface AdmittedFactualVerificationStage {
+  readonly contractId: 'ai7.factual-claim-verification/1';
+  readonly stageId: 'web-verification';
+  readonly maximumInitialSessionsPerEligibleClaim: number;
+  readonly maximumModelRequestsPerSession: number;
+  readonly maximumPlatformToolRoundsPerSession: number;
+  readonly maximumSearchSubmissionsPerClaim: number;
+  readonly maximumMetadataUtf8Bytes: number;
+  readonly tools: readonly string[];
+  readonly automaticTransportRetryAllowed: false;
+  readonly contractRetryAllowed: false;
+  readonly counterResetOnResumeAllowed: false;
+}
+
+export interface AdmittedFactualClaimStages {
+  readonly taskKind: 'factual-review';
+  readonly taskMode: 'whole-manuscript';
+  readonly evidenceAssuranceLevels: readonly EvidenceAssuranceLevel[];
+  readonly procedureId: string;
+  readonly procedureVersion: number;
+  readonly claimArtifactSchema: 'ai7.factual-claim-ledger/1';
+  readonly claimExtraction: {
+    readonly contractId: 'ai7.factual-claim-extraction/1';
+    readonly stageId: 'claim-extraction';
+    readonly maximumInitialSessionsPerCoverageUnit: number;
+    readonly maximumModelRequestsPerSession: number;
+    readonly maximumAssertionsPerCoverageUnit: number;
+    readonly tools: readonly string[];
+    readonly automaticTransportRetryAllowed: false;
+    readonly contractRetryAllowed: false;
+  };
+  readonly claimVerification: AdmittedFactualVerificationStage;
+}
+
+export interface AdmittedFactualRecheck {
+  readonly maximumClaims: number;
+  readonly maximumAutomaticRunsPerOnceKey: number;
+  readonly requestedLevels: readonly EvidenceAssuranceLevel[];
+  readonly onlyContractId: 'ai7.factual-claim-verification/1';
+  readonly onlyStageId: 'web-verification';
+  readonly verificationContract: AdmittedFactualVerificationStage;
+  readonly onceKeyPersistedBeforeDispatch: true;
+  readonly latestStillCurrentEditorDecisionRequired: true;
+  readonly sameBookActiveMatchingEnrollmentRequired: true;
+}
+
 export interface AdmittedProviderRule {
+  readonly claimScopedFactualStages?: AdmittedFactualClaimStages;
+  readonly factualRecheck?: AdmittedFactualRecheck;
   readonly enabledLearningEnvelope?: { readonly pins: readonly string[]; readonly missingStaleRevokedOrExceededResult: 'refuse';
     readonly extraPerPassClickRequired: false; readonly disableStopsLaterDispatchAndUse: true };
   /** v27 review names the same bounded synthesis turn as writing/evaluation; eligibility only. */

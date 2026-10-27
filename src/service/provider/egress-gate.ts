@@ -136,6 +136,7 @@ export interface SearchBackendBinding {
 }
 
 export interface EgressBindingFacts {
+  readonly factualClaimScope?: { readonly stage: 'claim-extraction' | 'web-verification'; readonly current: () => boolean };
   readonly learningCurationScope?: { readonly messageDigest: string; readonly current: () => boolean };
   /** Book-less dialogue's exact listed revisions, disclosure and retained redaction, rechecked at the final gate. */
   readonly globalAgentScope?: {
@@ -494,6 +495,9 @@ export function evaluateEgress(
   binding: EgressBindingFacts,
   scope: EgressAttemptScope,
 ): EgressDecision {
+  if (binding.factualClaimScope !== undefined && (binding.policy.operationalScope !== 'ordinary-production' || !binding.factualClaimScope.current())) {
+    return { decision: 'refuse', reason: 'binding-stale', detail: '断言会话、冻结来源或剩余额度已变化；未发送。' };
+  }
   if (binding.learningCurationScope !== undefined && (binding.policy.operationalScope !== 'ordinary-production' ||
     binding.policy.providerProcessingVersion !== 'v31' || binding.outboundDataCategory !== 'editorial-learning-example' ||
     payload.messages.length !== 1 || payload.tools?.length || payload.messages[0]?.role !== 'user' ||

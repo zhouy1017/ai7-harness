@@ -55,7 +55,7 @@ export interface FactualClaimLedger {
 export function freezeFactualClaimLedger(input: {
   readonly manifest: CoverageManifestProjection;
   readonly blocks: ReadonlyMap<string, Pick<ManifestBlockInput, 'text'>>;
-  readonly units: readonly { readonly result: FactualReviewUnitResult; readonly sourceUnitMessage: string }[];
+  readonly units: readonly { readonly result: Pick<FactualReviewUnitResult, 'unitOrdinal' | 'assertions'>; readonly sourceUnitMessage: string }[];
 }): FactualClaimLedger {
   const claims = new Map<string, FactualClaim>();
   const excluded: FactualClaimLedger['excluded'][number][] = [];

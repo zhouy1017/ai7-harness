@@ -8,6 +8,10 @@ import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { DEVELOPER_LIVE_POLICY_BINDING, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import { parseFactualReviewUnitMessageHeader } from '../../src/service/analysis/factual-review-contract.js';
+import { buildFactualReviewUnitMessage, type FactualUnitAssertion } from '../../src/service/analysis/factual-review-contract.js';
+import { deriveCoverageManifest } from '../../src/service/analysis/coverage-manifest.js';
+import { factualClaimVerificationInput, freezeFactualClaimLedger } from '../../src/service/analysis/factual-claim-ledger.js';
+import { sha256Hex } from '../../src/service/analysis/canonical.js';
 import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/assurance-sampling-contract.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
 import type { ReviewRunDriveSteps } from '../../src/service/review/review-run-driver.js';
@@ -283,6 +287,43 @@ function retentionRows(reviewRunId: string) {
 function binding(book: Book): Book & { windowStartBlockId: string } {
   return { ...book, windowStartBlockId: store.getManuscriptWindow(book.manuscriptId, book.branchId, null).blocks[0]!.blockId };
 }
+
+function syntheticClaimLedger() {
+  const text = '公开合成陈述：该桥建于一九八〇年。';
+  const blocks = [text, '第二个公开合成段落。'].map((value, index) => ({ blockId: `blk_${String(index + 1).padStart(24, '0')}`,
+    position: index + 1, kind: 'paragraph' as const, level: null, text: value, digest: sha256Hex(value), graphemes: 1200 }));
+  const manifest = deriveCoverageManifest({ bookId: '11111111-1111-4111-8111-111111111111', manuscriptId: '22222222-2222-4222-8222-222222222222',
+    branchId: '33333333-3333-4333-8333-333333333333', revisionId: '44444444-4444-4444-8444-444444444444',
+    revisionLabel: 'r1', revisionDigest: sha256Hex(text), blocks });
+  const byId = new Map(blocks.map((block) => [block.blockId, block]));
+  const assertion: FactualUnitAssertion = { quote: '该桥建于一九八〇年', blockOrdinal: 1, assertionClass: 'real-world-fact', category: '时间', severity: 'A', question: '建成年份是否一致？', basis: '公开合成核查。' };
+  const ledger = freezeFactualClaimLedger({ manifest, blocks: byId, units: manifest.units.map((unit) => ({
+    sourceUnitMessage: buildFactualReviewUnitMessage(unit, manifest.units.length, byId),
+    result: { schema: 'ai7.factual-review.unit-result/1', unitOrdinal: unit.ordinal, assertions: [assertion,
+      ...(unit.ordinal === 1 ? [{ ...assertion, question: '这个年份是否为重建年份？' }, { ...assertion, assertionClass: 'fictional-canon' as const }] : [])] },
+  })) });
+  return { ledger, assertion };
+}
+
+describe('factual claim occurrence ledger', () => {
+  it('groups only identical occurrences and keeps both overlapping producers', () => {
+    const { ledger } = syntheticClaimLedger();
+    expect(ledger.counts).toEqual({ coverageUnits: 2, assertions: 4, eligibleClaims: 2 });
+    expect(ledger.claims[0]!.producers.map((entry) => entry.sourceUnitOrdinal)).toEqual([1, 2]);
+    expect(ledger.claims[1]!.claimId).not.toBe(ledger.claims[0]!.claimId);
+    expect(ledger.excluded).toMatchObject([{ reason: 'ineligible-class' }]);
+    expect(syntheticClaimLedger().ledger.digest).toBe(ledger.digest);
+  });
+
+  it('encodes one claim with the unchanged frozen producing message and a separate metadata bound', () => {
+    const { ledger } = syntheticClaimLedger();
+    const input = factualClaimVerificationInput(ledger, ledger.claims[0]!.claimId, 16384);
+    expect(JSON.parse(input.message)).toMatchObject({ claimId: ledger.claims[0]!.claimId, sourceUnitMessage: ledger.units[0]!.sourceUnitMessage });
+    expect(input.sourceUnitMessageDigest).toBe(ledger.units[0]!.messageDigest);
+    expect(input.digest).toBe(sha256Hex(input.message));
+    expect(() => factualClaimVerificationInput(ledger, ledger.claims[0]!.claimId, 1)).toThrow('字节上限');
+  });
+});
 
 describe('Evidence Assurance Levels on 事实核查 (Issue #901)', () => {
   // #1058 / J04: an actual terminal refusal after unit 1 must keep its exact findings, without another send.
