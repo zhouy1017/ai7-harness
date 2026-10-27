@@ -1,3 +1,4 @@
+import { selectedPolicyIdentityOf } from '../../src/shared/protocol.js';
 import type { DatabaseSync, SQLInputValue, SQLOutputValue } from 'node:sqlite';
 import { ANALYSIS_LEDGER_TRIGGER_SQL } from '../../src/service/task-authorization.js';
 import { canonicalRecord, sha256Hex } from '../../src/service/analysis/canonical.js';
@@ -30,8 +31,7 @@ export function constructPre94PolicyEncoding(database: DatabaseSync): void {
     if (value.schema === 'ai7.dialogue-attempt/2') fail();
     if (Object.hasOwn(value, 'selectedPolicyIdentity')) {
       const identity = value.selectedPolicyIdentity;
-      if (!record(identity) || identity.activePolicySetVersion !== 'v21' ||
-          !['v24', 'v29', 'v30'].includes(String(identity.providerProcessingVersion))) fail();
+      if (!record(identity) || selectedPolicyIdentityOf(identity) === null) fail();
     }
     if (Object.hasOwn(value, 'localFixtureProfile') && (!record(value.localFixtureProfile) || value.localFixtureProfile.kind !== 'legacy')) fail();
     const next = Object.fromEntries(Object.entries(value).filter(([key]) => key !== 'selectedPolicyIdentity' && key !== 'localFixtureProfile')
@@ -42,10 +42,10 @@ export function constructPre94PolicyEncoding(database: DatabaseSync): void {
     }
     // Only the scope/version fields of actual policy pins change; no /2 prompt, result or body is relabeled.
     if (next.operationalScope === 'development-ci' && next.version === 'v29') next.version = 'v1';
-    if (next.operationalScope === 'ordinary-production' && next.version === 'v30') next.version = 'v27';
-    if (next.activePolicySetVersion === 'v21' && Object.hasOwn(next, 'providerProcessingVersion')) {
-      if (next.operationalScope === 'development-ci' && next.providerProcessingVersion === 'v29') next.providerProcessingVersion = 'v1';
-      else if (next.operationalScope === 'ordinary-production' && next.providerProcessingVersion === 'v30') next.providerProcessingVersion = 'v27';
+    if (next.operationalScope === 'ordinary-production' && ['v30', 'v31'].includes(String(next.version))) next.version = 'v27';
+    if (['v21', 'v22'].includes(String(next.activePolicySetVersion)) && Object.hasOwn(next, 'providerProcessingVersion')) {
+      if (next.operationalScope === 'development-ci' && ['v1', 'v29'].includes(String(next.providerProcessingVersion))) next.providerProcessingVersion = 'v1';
+      else if (next.operationalScope === 'ordinary-production' && ['v30', 'v31'].includes(String(next.providerProcessingVersion))) next.providerProcessingVersion = 'v27';
       else if (next.operationalScope !== 'developer-live' || next.providerProcessingVersion !== 'v24') fail();
       next.activePolicySetVersion = 'v19';
     }

@@ -1,7 +1,7 @@
 import { HouseWordLists, initializeHouseWordListSchema } from './review/house-word-list.js';
 import { HouseWordListError, type InspectHouseWordListInput, type SaveHouseWordListInput } from '../shared/protocol/house-word-list.js';
 import { validateRequestAdmissionRecords } from './analysis/baseline-analysis-store.js';
-import { MODEL_REQUEST_ADMISSION_SCHEMA_VERSION, WORD_TRACKED_IMPORT_SCHEMA_VERSION, POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION, validatePolicyOriginalFieldRecords } from './task-authorization.js';
+import { MODEL_REQUEST_ADMISSION_SCHEMA_VERSION, WORD_TRACKED_IMPORT_SCHEMA_VERSION, POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION } from './task-authorization.js';
 import { IDLE_BACKGROUND_SCHEMA_VERSION, LOCAL_REVIEW_SCHEMA_VERSION, EDITORIAL_MEMORY_SCHEMA_VERSION } from './task-authorization.js';
 import { initializeLocalStageSchema } from './review/review-runs.js';
 import { sha256Hex } from './analysis/canonical.js';
@@ -14,7 +14,7 @@ import type { WordTrackedEditLearningSource } from '../shared/protocol/learning.
 import type { ChangeEditorialLearningInput, CreateEditorialMemoryInput, DeactivateEditorialMemoryInput, InspectEditorialLearningInput, EditorialLearningProjection, LearningReasonAskInput, LearningReasonAskProjection } from '../shared/protocol/learning.js';
 import { buildDialogueMessage, dialogueQuestionDigest } from './dialogue/contract.js';
 import { fragmentsText } from './dialogue/fragments.js';
-import { globalAgentDialogueProjection, proveGlobalHistory, type GlobalHistoryProof } from './dialogue/global-agent-session.js';
+import { globalAgentDialogueProjection, readGlobalAgentHistory, type GlobalAgentTurnHistory } from './dialogue/global-agent-session.js';
 import type { AskGlobalAgentInput, GlobalAgentDialogueProjection, GlobalAgentAttemptInput, GlobalMemoryPin, GlobalAgentSourceCandidate, HouseReviewPreferenceVersion, PrepareGlobalAgentTurnInput } from '../shared/protocol.js';
 import { GLOBAL_AGENT_SCHEMA_VERSION } from './task-authorization.js';
 import { SupervisionDirectives, governedMemoryItems, preferenceItems, initializeSupervisionSchema, supervisionSourceCandidates, editorialMemoryGovernanceItem, type EditorialMemoryGovernanceHooks } from './learning/supervision-directives.js';
@@ -3661,7 +3661,7 @@ function readModelConnectionTest(row: SqlRow): ModelConnectionTestStatus | null 
   const facts = value.provenance;
   requireStore(value.outcome !== 'passed' || (value.code === null && facts !== undefined), 'MODEL_CONNECTION_TEST_INVALID', '连接测试状态无效。');
   if (facts !== undefined) requireStore(isModelTextAttemptProvenance(facts) && facts.model === value.modelId && facts.route === row.provider_id &&
-    facts.credentialReference === row.credential_reference && facts.credentialSlot === row.credential_slot && (facts.policyVersion === 'v25' || facts.policyVersion === 'v26' || facts.policyVersion === 'v27' || facts.policyVersion === 'v30') && facts.failureCode === value.code &&
+    facts.credentialReference === row.credential_reference && facts.credentialSlot === row.credential_slot && (facts.policyVersion === 'v25' || facts.policyVersion === 'v26' || facts.policyVersion === 'v27' || facts.policyVersion === 'v30' || facts.policyVersion === 'v31') && facts.failureCode === value.code &&
     (facts.credentialUpdatedAt === undefined || facts.credentialUpdatedAt === value.credentialUpdatedAt) &&
     allowedProductionBindingOf({ route: facts.route, endpoint: facts.endpoint, model: facts.model, credentialSlot: facts.credentialSlot, credentialReference: facts.credentialReference }, 'fast-interaction') !== null,
     'MODEL_CONNECTION_TEST_INVALID', '连接测试来历无效。');
@@ -5258,7 +5258,6 @@ export class EditorialStore {
     let journal: DatabaseSync | null = null;
     let ingest: DatabaseSync | null = null;
     try {
-      validatePolicyOriginalFieldRecords(authority);
       configureDatabase(authority, 'FILE');
       validateRequestAdmissionRecords(authority, Number(authority.prepare('PRAGMA user_version').get()?.user_version) >= MODEL_REQUEST_ADMISSION_SCHEMA_VERSION);
       const beforeWordVersion = Number(authority.prepare('PRAGMA user_version').get()?.user_version);
@@ -13645,9 +13644,9 @@ export class EditorialStore {
 
   #globalOriginalFieldsSelected(): boolean {
     const policy = this.#baselineAnalysis.launch.policy;
-    if (policy?.providerProcessing.version !== 'v30') return false;
+    if (policy?.providerProcessing.version !== 'v30' && policy?.providerProcessing.version !== 'v31') return false;
     requireStore(policy.integrityState === 'verified' && policy.operationalScope === 'ordinary-production' &&
-      selectedPolicyIdentityOf(policy.selectedPolicyIdentity)?.providerProcessingVersion === 'v30',
+      selectedPolicyIdentityOf(policy.selectedPolicyIdentity)?.providerProcessingVersion === policy.providerProcessing.version,
     'GLOBAL_AGENT_POLICY_BLOCKED', '当前处理策略身份无法核实；未发送任何内容。');
     return true;
   }
@@ -13661,21 +13660,21 @@ export class EditorialStore {
     requireStore(binding !== null && connection !== undefined, 'GLOBAL_AGENT_POLICY_BLOCKED', '模型服务连接已变化；未发送任何内容。');
     const policy = resolveSourceCheckoutLaunchPolicySync(this.#codeRoot, 'ordinary-production',
       this.getConfiguredModelRoleBinding('main-editorial'), binding);
-    requireStore(policy.integrityState === 'verified' && policy.providerProcessing.version === 'v30' &&
+    requireStore(policy.integrityState === 'verified' && (policy.providerProcessing.version === 'v30' || policy.providerProcessing.version === 'v31') &&
       canonicalJson(policy.selectedPolicyIdentity) === canonicalJson(this.#baselineAnalysis.launch.policy?.selectedPolicyIdentity),
     'GLOBAL_AGENT_POLICY_BLOCKED', '当前策略字节或已选身份无法核实；未发送任何内容。');
     return { binding, credentialUpdatedAt: connection.credentialUpdatedAt, policy };
   }
 
   /** Re-read a specific immutable predecessor prefix even after its new attempt has entered the governed queue. */
-  globalAgentHistoryProof(input: { dialogueId: string; attemptId: string }, kind: 'continue' | 'regenerate'): GlobalHistoryProof {
+  globalAgentHistory(input: { dialogueId: string; attemptId: string }, kind: 'continue' | 'regenerate'): GlobalAgentTurnHistory {
     return this.#dialogueCall(() => {
       const task = this.#dialogues.globalTask(input.dialogueId);
       requireStore(task?.operationalScope === 'ordinary-production', 'DIALOGUE_NOT_FOUND', '全域对话不存在。');
       const attempts = this.#dialogues.attempts(input.dialogueId);
       const through = attempts.findIndex((attempt) => attempt.attemptId === input.attemptId);
       requireStore(through >= 0, 'DIALOGUE_ATTEMPT_STALE', '回答已经变化，请重新查看。');
-      return proveGlobalHistory(task, attempts.slice(0, through + 1), this.harnessSessionLogRoot, kind);
+      return readGlobalAgentHistory(task, attempts.slice(0, through + 1), this.#dialogueHistory, kind);
     });
   }
 
@@ -13757,23 +13756,20 @@ export class EditorialStore {
         pins.every((pin) => task.sources.some((original) => original.itemId === pin.itemId && original.revisionId === pin.revisionId)) &&
         this.globalAgentSourcesCurrent(pins), 'GLOBAL_AGENT_SCOPE_CHANGED', '记忆版本已经变化，请重新提问。');
       const qualified = this.#globalOriginalFieldsSelected();
-      const proof = qualified ? proveGlobalHistory(task, attempts, this.harnessSessionLogRoot, kind) : null;
-      const resolved = proof === null ? resolveAttempts(attempts, this.#dialogueHistory, () => null) : null;
-      const first = proof === null ? resolved!.first : { question: proof.question!, globalSources: proof.originalSources };
+      const resolved = resolveAttempts(attempts, this.#dialogueHistory, () => null);
+      const first = resolved.first;
       requireStore(first?.globalSources !== undefined, 'DIALOGUE_HISTORY_MISSING', '对话记录无法读取。');
-      const answer = resolved?.attempts.at(-1);
-      const fragmentCount = proof?.completeFragmentCount ?? answer!.fragments.length;
+      const answer = resolved.attempts.at(-1)!;
+      const fragmentCount = answer.fragments.length;
       requireStore(last.outcome !== null && (kind === 'regenerate' ||
         (last.outcome.outcome === 'stopped' || last.outcome.outcome === 'interrupted') && fragmentCount > 0), 'DIALOGUE_NOT_STOPPED', '回答尚不能继续。');
       const prepareText = (text: string): string => qualified ? text : this.globalAgentRedact(text);
       const message: DialogueTurnStart['message'] = { kind: kind === 'continue' ? 'continue' : 'ask', selection: '',
         question: prepareText(first.question), globalSources: pins.map((pin) => ({ ...pin,
           text: prepareText(first.globalSources!.find((source) => source.itemId === pin.itemId && source.revisionId === pin.revisionId)!.text) })),
-        kept: kind === 'continue' ? prepareText(proof?.kept ?? fragmentsText(answer!.fragments)) : null };
+        kept: kind === 'continue' ? prepareText(fragmentsText(answer.fragments)) : null };
       if (!preview) {
         this.#requireGlobalQualification(qualification, message);
-        if (qualified) requireStore(qualification!.retainedAncestrySha256 === proof!.retainedAncestrySha256,
-          'GLOBAL_AGENT_SCOPE_CHANGED', '保留回答的来源已经变化；未发送任何内容。');
       }
       const attemptId = preview ? last.attemptId : this.#transaction(this.#authority, () => this.#dialogues.nextAttempt(task.dialogueId, kind, () => fragmentCount, now, qualification));
       return { dialogueId: task.dialogueId, attemptId, message, ...(qualification === undefined ? {} : { qualification }) };
@@ -19097,7 +19093,7 @@ export class EditorialStore {
     requireStore(Number.isFinite(Date.parse(result.testedAt)) && (result.outcome !== 'passed' || facts !== undefined), 'MODEL_CONNECTION_TEST_INVALID', '连接测试状态无效。');
     if (facts !== undefined) requireStore(facts.role === 'Fast Interaction Role' && facts.model === result.modelId &&
       facts.credentialReference === connection.credentialReference && facts.route === connection.binding.providerId &&
-      facts.credentialSlot === connection.binding.credentialSlot && DIGEST_PATTERN.test(facts.bindingDigest) && (facts.policyVersion === 'v25' || facts.policyVersion === 'v26' || facts.policyVersion === 'v27' || facts.policyVersion === 'v30') &&
+      facts.credentialSlot === connection.binding.credentialSlot && DIGEST_PATTERN.test(facts.bindingDigest) && (facts.policyVersion === 'v25' || facts.policyVersion === 'v26' || facts.policyVersion === 'v27' || facts.policyVersion === 'v30' || facts.policyVersion === 'v31') &&
       allowedProductionBindingOf({ route: facts.route, endpoint: facts.endpoint, model: facts.model, credentialSlot: facts.credentialSlot, credentialReference: facts.credentialReference }, 'fast-interaction') !== null &&
       (facts.failureCode === null || /^[A-Z0-9_]{1,100}$/u.test(facts.failureCode)) &&
       (counts == null || [counts.inputTokens, counts.outputTokens, ...(counts.reasoningTokens === undefined ? [] : [counts.reasoningTokens]),

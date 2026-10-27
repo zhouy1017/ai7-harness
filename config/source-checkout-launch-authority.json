@@ -9,8 +9,8 @@
     "ordinary-production"
   ],
   "activePolicySet": {
-    "version": "v21",
-    "canonicalPath": "docs/policies/active-policy-set.v21.json",
-    "sha256": "4b845e924df777f440b07d53ba6e31447e0fe0b004e86efa89bf76554fb05392"
+    "version": "v22",
+    "canonicalPath": "docs/policies/active-policy-set.v22.json",
+    "sha256": "68125ebd3e1266f02fc1cf02c0a548fa652c4cad3ee052bbfaebc68922758ebb"
   }
 }

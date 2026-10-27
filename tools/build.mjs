@@ -115,6 +115,8 @@ async function ensureClosedOutputs() {
     'docs/policies/active-policy-set.v20.schema.json',
     'docs/policies/active-policy-set.v21.json',
     'docs/policies/active-policy-set.v21.schema.json',
+    'docs/policies/active-policy-set.v22.json',
+    'docs/policies/active-policy-set.v22.schema.json',
     'docs/policies/external-export-policy.v1.json',
     'docs/policies/external-export-policy.v2.json',
     'docs/policies/provider-processing-policy.v1.json',
@@ -148,6 +150,8 @@ async function ensureClosedOutputs() {
     'docs/policies/provider-processing-policy.v29.schema.json',
     'docs/policies/provider-processing-policy.v30.json',
     'docs/policies/provider-processing-policy.v30.schema.json',
+    'docs/policies/provider-processing-policy.v31.json',
+    'docs/policies/provider-processing-policy.v31.schema.json',
     'notices/ELECTRON_LICENSE',
     'notices/ELECTRON_LICENSES.chromium.html',
     'notices/THIRD_PARTY_NOTICES.md',
@@ -231,6 +235,8 @@ async function ensureClosedOutputs() {
     'docs/policies/active-policy-set.v20.schema.json',
     'docs/policies/active-policy-set.v21.json',
     'docs/policies/active-policy-set.v21.schema.json',
+    'docs/policies/active-policy-set.v22.json',
+    'docs/policies/active-policy-set.v22.schema.json',
     'docs/policies/external-export-policy.v1.json',
     'docs/policies/external-export-policy.v2.json',
     'docs/policies/provider-processing-policy.v1.json',
@@ -264,6 +270,8 @@ async function ensureClosedOutputs() {
     'docs/policies/provider-processing-policy.v29.schema.json',
     'docs/policies/provider-processing-policy.v30.json',
     'docs/policies/provider-processing-policy.v30.schema.json',
+    'docs/policies/provider-processing-policy.v31.json',
+    'docs/policies/provider-processing-policy.v31.schema.json',
   ];
   for (const path of exactPolicyCarriers) {
     const built = await readFile(outputPath(...path.split('/')));
@@ -468,6 +476,8 @@ async function main() {
     'docs/policies/active-policy-set.v20.schema.json',
     'docs/policies/active-policy-set.v21.json',
     'docs/policies/active-policy-set.v21.schema.json',
+    'docs/policies/active-policy-set.v22.json',
+    'docs/policies/active-policy-set.v22.schema.json',
     'docs/policies/external-export-policy.v1.json',
     'docs/policies/external-export-policy.v2.json',
     'docs/policies/provider-processing-policy.v1.json',
@@ -501,6 +511,8 @@ async function main() {
     'docs/policies/provider-processing-policy.v29.schema.json',
     'docs/policies/provider-processing-policy.v30.json',
     'docs/policies/provider-processing-policy.v30.schema.json',
+    'docs/policies/provider-processing-policy.v31.json',
+    'docs/policies/provider-processing-policy.v31.schema.json',
   ]) {
     await copyFile(resolve(ROOT, ...path.split('/')), outputPath(...path.split('/')));
   }

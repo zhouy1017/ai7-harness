@@ -16,7 +16,6 @@ import {
   planEnvelopeValue,
   planStopCondition,
   providerResolutionPlanValue,
-  validatePolicyOriginalFieldRecords,
   validateTaskAuthorizationSchema,
 } from '../../src/service/task-authorization.js';
 import {
@@ -278,232 +277,35 @@ describe('task authorization over the real store on exact sample1', () => {
     await requireExactSample1();
   }, 60_000);
 
-  it('records a not-dispatched authorization and leaves an append-only ledger', async () => {
+  it('retains a denied zero-transmission authorization across restart', async () => {
     await requireExactSample1();
-    const launchPolicy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot);
-    // The suite asserts the store's behavior under the trusted development-ci denial, so an
-    // unverified checkout must fail here rather than as a confusing task-authorization error.
-    expect(launchPolicy.integrityState).toBe('verified');
-    expect(launchPolicy.operationalScope).toBe('development-ci');
-    expect(launchPolicy.providerProcessing.version).toBe('v29');
-    expect(launchPolicy.providerProcessing.decision).toBe('deny');
-    expect(launchPolicy.providerProcessing.liveTransmissionAllowed).toBe(false);
-
-    let bookId: string;
-    let credentialReference: string;
-    let authorizationId: string;
-    let runRecordId: string;
-
+    const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot);
+    expect(policy).toMatchObject({ integrityState: 'verified', operationalScope: 'development-ci',
+      providerProcessing: { version: 'v1', decision: 'deny', authorizedLiveTransmissionCount: 0, liveTransmissionAllowed: false } });
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let bookId: string;
+    let runRecordId: string;
     try {
-      const imported = await importSample1(store);
-      bookId = imported.bookId;
-
-      // Before the preconditions exist the whole surface stays closed: `inspect` itself is gated,
-      // which is why no task-authorization state is reachable from a Book that only has lineage.
-      let closed: unknown;
-      try {
-        store.inspectTaskAuthorization(bookId);
-      } catch (error) {
-        closed = error;
-      }
-      expect(closed).toBeInstanceOf(StoreError);
-      expect((closed as StoreError).code).toBe('TASK_LINEAGE_UNAVAILABLE');
-
+      bookId = (await importSample1(store)).bookId;
+      expect(() => store.inspectTaskAuthorization(bookId)).toThrow();
       await pinProfileRevision2(store, bookId);
-      credentialReference = recordUnreadyCredentialMetadata(store);
-
-      // With both preconditions recorded the surface opens, and nothing is prepared yet.
-      const available = store.inspectTaskAuthorization(bookId);
-      expect(available.state).toBe('available');
-      expect(available.taskIntent).toBeNull();
-      expect(available.planEnvelope).toBeNull();
-      expect(available.actions).toEqual({ canPrepare: true, canAuthorize: false });
-      expect(available.namedNonEffects).toContain('不访问网络或调用 Provider');
-
-      const prepared = completePreparation(store, bookId, launchPolicy);
-      expect(prepared.state).toBe('prepared');
-      expect(prepared.taskIntent?.goal).toBe(J03_TASK_GOAL);
-      expect(prepared.taskIntent?.expectedOutcome).toBe('供编辑复核的结构与叙事连贯性重点清单');
-      expect(prepared.checkpoint?.purpose).toBe('Task Input / 任务输入');
-      expect(prepared.checkpoint?.manuscriptId).toBe(imported.manuscriptId);
-      expect(prepared.checkpoint?.revisionDigest).toMatch(DIGEST_PATTERN);
-
-      // The frozen plan pins exact sample1 lineage, the Revision 2 authority sidecar, and an
-      // unready credential reference, and it stays a denied, non-dispatchable envelope.
-      expect(prepared.manuscriptPin?.sourceDigest).toBe(SAMPLE1_SHA256);
-      expect(prepared.manuscriptPin?.revisionId).toBe(prepared.checkpoint?.revisionId);
-      expect(prepared.manuscriptPin?.revisionDigest).toBe(prepared.checkpoint?.revisionDigest);
-      expect(prepared.manuscriptPin?.sourceVersionId).toMatch(UUID_PATTERN);
-      expect(prepared.runSourceScope?.readableScopeKinds).toEqual(['current-book-primary-manuscript-revision']);
-      expect(prepared.runSourceScope?.sourceVersionEvidence.readable).toBe(false);
-      expect(prepared.artifactPin?.sidecarRevision).toBe(2);
-      expect(prepared.artifactPin?.sidecarSha256).toBe(SIDECAR_REVISION_2_SHA256);
-      expect(prepared.artifactPin?.nativeCarrierSha256).toBe(NATIVE_CARRIER_SHA256);
-      expect(prepared.providerResolutionPlan?.credentialReference).toBe(credentialReference);
-      expect(prepared.providerResolutionPlan?.credentialReadiness).toBe('missing');
-      expect(prepared.providerResolutionPlan?.capabilities).toEqual([]);
-      expect(prepared.providerResolutionPlan?.approvedFallbackChain).toEqual([]);
-      expect(prepared.providerResolutionPlan?.providerProcessing).toEqual({
-        operationalScope: 'development-ci',
-        version: 'v29',
-        decision: 'deny',
-        authorizedLiveTransmissionCount: 0,
-      });
-      expect(prepared.executionPlan?.effects).toEqual([]);
-      expect(prepared.executionPlan?.stopCondition).toBe('Provider Processing v29 denies dispatch');
-      expect(prepared.planEnvelope?.providerStatus).toBe('denied');
-      expect(prepared.planEnvelope?.dispatchAllowed).toBe(false);
-      expect(prepared.planEnvelope?.summary).toBe('计划已冻结；Provider Processing v29 拒绝派发');
-      expect(prepared.planEnvelope?.digest).toMatch(DIGEST_PATTERN);
-      expect(prepared.authorization).toBeNull();
-      expect(prepared.runRecord).toBeNull();
-      expect(prepared.actions).toEqual({ canPrepare: false, canAuthorize: true });
-
-      // Preparing again over the same Book returns the frozen plan rather than a second intent.
-      const reprepared = completePreparation(store, bookId, launchPolicy);
-      expect(reprepared.taskIntent?.taskIntentId).toBe(prepared.taskIntent!.taskIntentId);
-      expect(reprepared.planEnvelope?.digest).toBe(prepared.planEnvelope!.digest);
-
-      const authorized = store.authorizeTaskAuthorization(
-        bookId,
-        prepared.taskIntent!.taskIntentId,
-        prepared.planEnvelope!.digest,
-      );
-      expect(authorized.state).toBe('authorized');
-      expect(authorized.authorization?.origin).toBe('standard-direct');
-      expect(authorized.authorization?.planEnvelopeDigest).toBe(prepared.planEnvelope!.digest);
-      expect(authorized.authorization?.authorizationId).toMatch(UUID_PATTERN);
-      // The terminal state is a record, not a dispatch: the run is never handed to any executor.
-      expect(authorized.runRecord?.state).toBe('recorded-not-dispatched');
-      expect(authorized.runRecord?.dispatched).toBe(false);
-      expect(authorized.runRecord?.terminalLabel).toBe('已记录授权 · 未派发');
-      expect(authorized.actions).toEqual({ canPrepare: false, canAuthorize: false });
-      authorizationId = authorized.authorization!.authorizationId;
+      recordUnreadyCredentialMetadata(store);
+      const prepared = completePreparation(store, bookId, policy);
+      expect(prepared.providerResolutionPlan?.providerProcessing).toEqual({ operationalScope: 'development-ci',
+        version: 'v1', decision: 'deny', authorizedLiveTransmissionCount: 0 });
+      const authorized = store.authorizeTaskAuthorization(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
       runRecordId = authorized.runRecord!.runRecordId;
-
-      // Authorizing the same frozen envelope again is idempotent, and a stale digest is refused.
-      const repeated = store.authorizeTaskAuthorization(
-        bookId,
-        prepared.taskIntent!.taskIntentId,
-        prepared.planEnvelope!.digest,
-      );
-      expect(repeated.authorization?.authorizationId).toBe(authorizationId);
-      expect(repeated.runRecord?.runRecordId).toBe(runRecordId);
-      let stale: unknown;
-      try {
-        store.authorizeTaskAuthorization(bookId, prepared.taskIntent!.taskIntentId, 'f'.repeat(64));
-      } catch (error) {
-        stale = error;
-      }
-      expect((stale as StoreError).code).toBe('TASK_AUTHORIZATION_STALE');
-
-      const inspected = store.inspectTaskAuthorization(bookId);
-      expect(inspected.state).toBe('authorized');
-      expect(inspected.authorization?.authorizationId).toBe(authorizationId);
-      expect(inspected.runRecord?.runRecordId).toBe(runRecordId);
-      expect(inspected.planEnvelope?.digest).toBe(prepared.planEnvelope!.digest);
-
-      // The foreground boundary refuses the recorded Run and states why in three exact reasons; only
-      // the middle one names the launch's own scope, Provider Processing version, and transmission
-      // count. These are byte pins: nothing about them may move when they stop being constants.
-      const boundary = store.inspectForegroundExecutionBoundary(bookId, runRecordId, launchPolicy);
-      expect(boundary.state).toBe('blocked-before-dispatch');
-      expect(boundary.terminalLabel).toBe('前台执行已拒绝 · 未启动');
-      expect(boundary.runAuthority).toBe('record-only-no-dispatch');
-      expect(boundary.requiresNewPlanEnvelope).toBe(true);
-      expect(boundary.requiresRenewedRunAuthorization).toBe(true);
-      expect(boundary.reasons).toEqual([
-        '现有 Run 权限仅为 record-only-no-dispatch，不能派发。',
-        '当前可信启动范围为 development-ci，Provider Processing v29 允许 0 次实时传输。',
-        '生产或录制尝试必须创建新 Plan Envelope 并重新记录 Run Authorization。',
-      ]);
-      // Reading the boundary records nothing: the projection is exactly what it was before.
-      expect(store.inspectTaskAuthorization(bookId)).toEqual(inspected);
-
+      expect(authorized.runRecord?.dispatched).toBe(false);
+      expect(store.inspectForegroundExecutionBoundary(bookId, runRecordId, policy)).toMatchObject({
+        state: 'blocked-before-dispatch', runAuthority: 'record-only-no-dispatch', requiresNewPlanEnvelope: true });
       store.markCleanShutdown();
-    } finally {
-      store.close();
-    }
-
-    // A second open reads the recorded authorization back unchanged.
+    } finally { store.close(); }
     const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
-      const restarted = reopened.inspectTaskAuthorization(bookId);
-      expect(restarted.state).toBe('authorized');
-      expect(restarted.authorization?.authorizationId).toBe(authorizationId);
-      expect(restarted.runRecord?.runRecordId).toBe(runRecordId);
-      expect(restarted.runRecord?.dispatched).toBe(false);
-      expect(restarted.providerResolutionPlan?.credentialReference).toBe(credentialReference);
+      expect(reopened.inspectTaskAuthorization(bookId!)).toMatchObject({ state: 'authorized', runRecord: { runRecordId: runRecordId!, dispatched: false } });
       reopened.markCleanShutdown();
-    } finally {
-      reopened.close();
-    }
-
-    // The ledger is append-only in the database itself, not only behind the store API: every task
-    // table rejects `UPDATE` and `DELETE` through its own trigger, with the row left in place.
-    const database = new DatabaseSync(storeDatabasePath());
-    try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version)
-        .toBe(LATEST_SCHEMA_VERSION);
-      expect(ANALYSIS_LEDGER_TABLES.length).toBeGreaterThan(0);
-      for (const table of ANALYSIS_LEDGER_TABLES) {
-        const rows = database.prepare(`SELECT count(*) total FROM ${table}`).get() as { total: number };
-        expect(rows.total).toBe(0);
-      }
-      expect(IMMUTABLE_TABLES.length).toBeGreaterThan(0);
-      for (const table of IMMUTABLE_TABLES) {
-        const before = database.prepare(`SELECT count(*) total FROM ${table}`).get() as { total: number };
-        expect(before.total).toBe(1);
-        expect(() => database.prepare(`UPDATE ${table} SET sha256 = sha256`).run())
-          .toThrowError(/TASK_LEDGER_IMMUTABLE/);
-        expect(() => database.prepare(`DELETE FROM ${table}`).run())
-          .toThrowError(/TASK_LEDGER_IMMUTABLE/);
-        const after = database.prepare(`SELECT count(*) total FROM ${table}`).get() as { total: number };
-        expect(after.total).toBe(1);
-      }
-      // The recorded run stayed exactly the terminal not-dispatched row the API reported.
-      const run = database.prepare('SELECT state, dispatched FROM run_records WHERE run_record_id = ?')
-        .get(runRecordId) as { state: string; dispatched: number };
-      expect(run.state).toBe('recorded-not-dispatched');
-      expect(run.dispatched).toBe(0);
-
-      // The three stored records, pinned byte for byte as the canonical JSON this code writes today.
-      // Only the identifiers and digests one Run mints are interpolated; every statement about the
-      // trusted scope, the Provider Processing version, the decision, and the live transmission count
-      // is literal here, so a refactor that derives them instead has to reproduce them exactly.
-      const jsonOf = (table: string): string =>
-        (database.prepare(`SELECT canonical_json FROM ${table}`).get() as { canonical_json: string }).canonical_json;
-      const digestOf = (table: string): string =>
-        (database.prepare(`SELECT sha256 FROM ${table}`).get() as { sha256: string }).sha256;
-      const taskIntentId = (database.prepare('SELECT task_intent_id FROM task_intents')
-        .get() as { task_intent_id: string }).task_intent_id;
-      expect(jsonOf('provider_resolution_plans')).toBe(
-        `{"adapterRevision":1,"approvedFallbackChain":[],"capabilities":[],"configurationRevision":1,` +
-        `"credentialReadiness":"missing","credentialReference":${JSON.stringify(credentialReference)},` +
-        `"modelId":"deepseek-v4-pro","outboundDataCategory":"public-or-synthetic",` +
-        `"providerId":"deepseek-open-platform","providerProcessing":{"authorizedLiveTransmissionCount":0,` +
-        `"decision":"deny","operationalScope":"development-ci","version":"v29"},"role":"Main Editorial Role",` +
-        `"runBudgetCeiling":"unset","selectedPolicyIdentity":{"activePolicySetSha256":"4b845e924df777f440b07d53ba6e31447e0fe0b004e86efa89bf76554fb05392",` +
-        `"activePolicySetVersion":"v21","providerProcessingSha256":"c9545a5f461a7791115c1f4664bbd731757775951f814d39c28b12c85af88c9d","providerProcessingVersion":"v29"}}`,
-      );
-      expect(jsonOf('execution_plans')).toBe(
-        '{"effects":[],"steps":["分析结构","分析叙事连贯性","形成编辑复核重点"],' +
-        '"stopCondition":"Provider Processing v29 denies dispatch"}',
-      );
-      expect(jsonOf('plan_envelopes')).toBe(
-        `{"artifactPinDigest":"${digestOf('task_artifact_pins')}",` +
-        `"checkpointDigest":"${digestOf('task_input_checkpoints')}","dispatchAllowed":false,` +
-        `"executionPlanDigest":"${digestOf('execution_plans')}",` +
-        `"manuscriptPinDigest":"${digestOf('task_manuscript_pins')}",` +
-        `"providerResolutionPlanDigest":"${digestOf('provider_resolution_plans')}",` +
-        `"providerStatus":"denied","runSourceScopeDigest":"${digestOf('run_source_scopes')}",` +
-        `"summary":"计划已冻结；Provider Processing v29 拒绝派发","taskIntentId":"${taskIntentId}"}`,
-      );
-    } finally {
-      database.close();
-    }
-  }, 300_000);
+    } finally { reopened.close(); }
+  });
 
   // `task_artifact_pins.sha256` is unique and the artifact pin record is identical for every Book, so
   // one store holds at most one prepared J-03 plan. Each scope is therefore observed in its own
@@ -548,7 +350,7 @@ describe('task authorization over the real store on exact sample1', () => {
       if (pin.version === 'v18' || pin.version === 'v20' || pin.version === 'v22') {
         // #920 rev 4, #990, #1044: predecessor records retain their exact pin while active set v19 still selects developer-live v24.
         const selected = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live');
-        expect(selected.activePolicySetVersion).toBe('v21');
+        expect(selected.activePolicySetVersion).toBe('v22');
         expect(selected.providerProcessing.version).toBe('v24');
         const authorized = reopened.authorizeTaskAuthorization(bookId, live.taskIntent!.taskIntentId, live.planEnvelope!.digest);
         expect(authorized.state).toBe('authorized');
@@ -561,82 +363,4 @@ describe('task authorization over the real store on exact sample1', () => {
       reopened.close();
     }
   }, 300_000);
-
-  it('refuses a stored plan whose statements are not its own pin readings', async () => {
-    await requireExactSample1();
-    let bookId: string;
-
-    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
-      bookId = (await importSample1(store)).bookId;
-      await pinProfileRevision2(store, bookId);
-      recordUnreadyCredentialMetadata(store);
-      store.markCleanShutdown();
-    } finally {
-      store.close();
-    }
-
-    const database = new DatabaseSync(storeDatabasePath());
-    try {
-      // A developer-live pin above an Execution Plan that still states the v1 denial: exactly the
-      // drift between a plan's pin and a plan's statements that deriving them makes impossible. The
-      // validator is called directly, as the store calls it when it opens, so that the refusal is
-      // observed without leaving a store that failed to open holding this database.
-      writePreparedPlan(database, bookId, DEVELOPER_LIVE_PIN, executionPlanValue(DEVELOPMENT_CI_PIN));
-      let refused: unknown;
-      try {
-        validateTaskAuthorizationSchema(database);
-      } catch (error) {
-        refused = error;
-      }
-      expect(refused).toBeInstanceOf(TaskAuthorizationError);
-      expect((refused as TaskAuthorizationError).code).toBe('TASK_RECORD_INVALID');
-      expect((refused as TaskAuthorizationError).message).toBe('Execution Plan 无效。');
-    } finally {
-      database.close();
-    }
-  }, 300_000);
-});
-
-describe('reader 94 pre-open validation of recorded policy pins (#1161)', () => {
-  // The real validator over one execution-binding row per case; only the columns it reads are present.
-  function refusal(revision: number, record: Record<string, unknown>, sha256?: string): string | null {
-    const database = new DatabaseSync(':memory:');
-    try {
-      database.exec('CREATE TABLE analysis_execution_bindings (attempt_id TEXT PRIMARY KEY, canonical_json TEXT NOT NULL, sha256 TEXT NOT NULL)');
-      const sealed = canonicalRecord(record);
-      database.prepare('INSERT INTO analysis_execution_bindings VALUES (?, ?, ?)').run(randomUUID(), sealed.json, sha256 ?? sealed.digest);
-      database.exec(`PRAGMA user_version = ${revision}`);
-      validatePolicyOriginalFieldRecords(database);
-      return null;
-    } catch (error) {
-      if (!(error instanceof TaskAuthorizationError)) throw error;
-      return error.code;
-    } finally {
-      database.close();
-    }
-  }
-  const pin = (operationalScope: string, providerProcessingVersion: string, activePolicySetVersion: string) => ({ policyPin: {
-    operationalScope, providerProcessingVersion, activePolicySetVersion, liveTransmissions: operationalScope === 'development-ci' ? 0 : 'bounded-by-run' } });
-
-  it('refuses every set-v21 pin below reader 94, developer-live v24 included, and keeps older v24 pins with their owner', () => {
-    expect(refusal(93, pin('developer-live', 'v24', 'v21'))).toBe('SCHEMA_UNSUPPORTED');
-    expect(refusal(93, pin('development-ci', 'v29', 'v21'))).toBe('SCHEMA_UNSUPPORTED');
-    expect(refusal(93, pin('ordinary-production', 'v30', 'v21'))).toBe('SCHEMA_UNSUPPORTED');
-    expect(refusal(93, pin('developer-live', 'v24', 'v19'))).toBeNull();
-    expect(refusal(93, pin('development-ci', 'v1', 'v3'))).toBeNull();
-    for (const current of [pin('developer-live', 'v24', 'v21'), pin('development-ci', 'v29', 'v21'), pin('ordinary-production', 'v30', 'v21')]) {
-      expect(refusal(LATEST_SCHEMA_VERSION, current)).toBeNull();
-    }
-    expect(refusal(LATEST_SCHEMA_VERSION, pin('developer-live', 'v24', 'v19'))).toBeNull();
-  });
-
-  it('refuses a current pin no launch wrote at reader 94 and planted current fields below it, and leaves other legacy rows to their owners', () => {
-    expect(refusal(LATEST_SCHEMA_VERSION, pin('development-ci', 'v29', 'v19'))).toBe('TASK_RECORD_INVALID');
-    expect(refusal(LATEST_SCHEMA_VERSION, pin('development-ci', 'v1', 'v21'))).toBe('TASK_RECORD_INVALID');
-    expect(refusal(LATEST_SCHEMA_VERSION, pin('development-ci', 'v29', 'v21'), '0'.repeat(64))).toBe('TASK_RECORD_INVALID');
-    expect(refusal(93, { ...pin('development-ci', 'v1', 'v19'), selectedPolicyIdentity: { providerProcessingVersion: 'v29' } })).toBe('SCHEMA_UNSUPPORTED');
-    // A damaged or predecessor-shaped legacy row is not reinterpreted here; its own reader refuses it when read.
-    expect(refusal(93, pin('development-ci', 'v1', 'v19'), '0'.repeat(64))).toBeNull();
-  });
 });

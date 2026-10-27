@@ -328,7 +328,7 @@ export type DialogueAttemptKind = 'ask' | 'continue' | 'regenerate';
 
 export interface QualifiedGlobalAttemptMetadata extends SelectedPolicyIdentity {
   readonly textProcessing: 'qualified-original-fields';
-  readonly providerProcessingVersion: 'v30';
+  readonly providerProcessingVersion: 'v30' | 'v31';
   readonly policyRuleId: 'ordinary-production-global-agent-dialogue';
   readonly route: 'opencode-go' | 'deepseek-open-platform';
   readonly model: string;
@@ -351,7 +351,7 @@ export function qualifiedGlobalAttemptMetadataOf(value: unknown): QualifiedGloba
     providerProcessingSha256: value.providerProcessingSha256, activePolicySetVersion: value.activePolicySetVersion,
     activePolicySetSha256: value.activePolicySetSha256 });
   const route = value.route;
-  if (identity?.providerProcessingVersion !== 'v30' || value.textProcessing !== 'qualified-original-fields' ||
+  if (identity === null || (identity.providerProcessingVersion !== 'v30' && identity.providerProcessingVersion !== 'v31') || value.textProcessing !== 'qualified-original-fields' ||
       value.policyRuleId !== 'ordinary-production-global-agent-dialogue' || value.modelRole !== 'Fast Interaction Role' ||
       (route !== 'opencode-go' && route !== 'deepseek-open-platform') || typeof value.model !== 'string' ||
       typeof value.credentialSlot !== 'string' || !ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS.some((binding) =>
@@ -363,7 +363,7 @@ export function qualifiedGlobalAttemptMetadataOf(value: unknown): QualifiedGloba
       typeof value.requestContextSha256 !== 'string' || !DIGEST_PATTERN.test(value.requestContextSha256) ||
       typeof value.messageSha256 !== 'string' || !DIGEST_PATTERN.test(value.messageSha256) ||
       typeof value.retainedAncestrySha256 !== 'string' || !DIGEST_PATTERN.test(value.retainedAncestrySha256)) return null;
-  return { ...identity, providerProcessingVersion: 'v30', textProcessing: 'qualified-original-fields',
+  return { ...identity, providerProcessingVersion: identity.providerProcessingVersion, textProcessing: 'qualified-original-fields',
     policyRuleId: 'ordinary-production-global-agent-dialogue', route, model: value.model, modelRole: 'Fast Interaction Role',
     credentialSlot: value.credentialSlot, credentialReference: value.credentialReference, credentialUpdatedAt: value.credentialUpdatedAt,
     requestContextSha256: value.requestContextSha256, messageSha256: value.messageSha256, retainedAncestrySha256: value.retainedAncestrySha256 };

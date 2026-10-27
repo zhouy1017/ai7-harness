@@ -732,8 +732,8 @@ function requireRevisionShape(revision, prepared, attempt, fixtureDigest, name) 
     revision?.bindingPin?.attemptId === attempt.attemptId && revision?.bindingPin?.bindingDigest === attempt.executionBinding.bindingDigest &&
     revision?.bindingPin?.harnessSessionId === attempt.executionBinding.harnessSessionId &&
     revision?.bindingPin?.promptContractDigest === PROMPT_CONTRACT_DIGEST &&
-    // Synchronized delta with Issue #1161: selected active set v21; new local Plans use Provider Processing v29.
-    sameRecord(revision?.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v29', activePolicySetVersion: 'v21', liveTransmissions: 0 }) &&
+    // Synchronized delta with Issue #1163: selected active set v22; new local Plans use Provider Processing v1.
+    sameRecord(revision?.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v22', liveTransmissions: 0 }) &&
     revision?.provenance?.taskIntentId === prepared.taskIntent.taskIntentId && revision?.provenance?.attemptId === attempt.attemptId &&
     // Synchronized delta (#274, #275): eight unit turns, the reduction's, and the sample's.
     revision?.usage?.requests === SAMPLE1_UNITS + 1 + SAMPLING_TURNS, `${name}-identity`, { fixtureDigest, revision: revision === null || revision === undefined ? revision : { ...revision, units: undefined, sections: undefined, synthesis: undefined } });
@@ -828,8 +828,8 @@ function requireSuccessorShape(revision, expected, attempt, fixtureDigest, name)
     revision?.adapterPin?.fixtureIdentity === FIXTURE_IDENTITY && revision?.adapterPin?.fixtureSha256 === fixtureDigest &&
     revision?.bindingPin?.attemptId === attempt.attemptId && revision?.bindingPin?.bindingDigest === attempt.executionBinding.bindingDigest &&
     revision?.bindingPin?.promptContractDigest === PROMPT_CONTRACT_DIGEST &&
-    // Synchronized delta with Issue #1161: selected active set v21; new local Plans use Provider Processing v29.
-    sameRecord(revision?.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v29', activePolicySetVersion: 'v21', liveTransmissions: 0 }) &&
+    // Synchronized delta with Issue #1163: selected active set v22; new local Plans use Provider Processing v1.
+    sameRecord(revision?.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v22', liveTransmissions: 0 }) &&
     revision?.update?.mode === expected.mode && revision?.update?.modeLabel === expected.modeLabel &&
     sameRecord(revision?.update?.predecessor, expected.predecessor) && revision?.update?.reusePlanDigest === expected.reusePlanDigest &&
     sameRecord(revision?.update?.counts, expected.counts) && sameNullableRecord(revision?.update?.selectedRange ?? null, expected.selectedRange) &&
@@ -1292,7 +1292,7 @@ async function main() {
       plan.remoteBinding?.adapterRevision === 1 && plan.remoteBinding?.configurationRevision === 1 && plan.remoteBinding?.approvedFallbackChain?.length === 0 &&
       plan.remoteBinding?.credentialSlot === 'deepseek-api-key' && plan.remoteBinding?.credentialReference === readyConnection.credentialReference &&
       plan.remoteBinding?.credentialReadiness === 'missing' &&
-      sameRecord(plan.remoteBinding?.providerProcessing, { operationalScope: 'development-ci', version: 'v29', decision: 'deny', authorizedLiveTransmissionCount: 0 }) &&
+      sameRecord(plan.remoteBinding?.providerProcessing, { operationalScope: 'development-ci', version: 'v1', decision: 'deny', authorizedLiveTransmissionCount: 0 }) &&
       plan.executionRoute?.kind === 'ai7-local-deterministic' && plan.executionRoute?.model === 'ai7-deterministic-fixture' &&
       plan.executionRoute?.fixtureIdentity === FIXTURE_IDENTITY && plan.executionRoute?.fixtureSha256 === fixtureDigest &&
       JSON.stringify(plan.executionRoute?.fixtureLineage?.map((link) => link.identity)) === JSON.stringify([FIXTURE_IDENTITY, FIXTURE_BASE_IDENTITY]) &&
@@ -1336,7 +1336,7 @@ async function main() {
       JSON.stringify(firstFull.steps) === JSON.stringify(['逐章读取 → 各章摘要', '汇总全书 → 梗概与人物、事件、关系、设定', '核对与抽检 → 可信程度说明']) &&
       firstFull.terms['提供方'] === 'DeepSeek 开放平台 · deepseek-v4-pro' &&
       // Since #744 the decision line carries the research status; the deterministic route froze no search backend.
-      firstFull.terms['提供方状态'] === '远程模型服务被拒绝（development-ci · v29：0 次实时传输）；由 AI7 本地确定性模型适配器执行 · 未联网核查' &&
+      firstFull.terms['提供方状态'] === '远程模型服务被拒绝（development-ci · v1：0 次实时传输）；由 AI7 本地确定性模型适配器执行 · 未联网核查' &&
       firstFull.terms['用量上限'] === '不发送，没有模型用量' && firstFull.terms['预算上限'] === '未设置任务预算上限' && firstFull.terms['账户限额'] === '未知 · 提供方未返回' &&
       JSON.stringify(firstFull.columns) === JSON.stringify(['运行中 AI7 可以自己调整', '这些一变就先停下来问你']) &&
       JSON.stringify(firstFull.adaptable) === JSON.stringify([SAFE_RETRY_ADAPTATION]) && JSON.stringify(firstFull.askFirst) === JSON.stringify(LOCKED_BOUNDARY) &&
@@ -1346,7 +1346,7 @@ async function main() {
       firstTechnical['execution-route'] === `ai7-local-deterministic · ai7-deterministic-fixture · 夹具 ${FIXTURE_IDENTITY} · ${fixtureDigest}` &&
       firstTechnical['provider-binding'] === 'deepseek-open-platform · deepseek-v4-pro · adapter r1 · config r1 · 凭据 missing' &&
       firstTechnical['credential-reference'] === readyConnection.credentialReference &&
-      firstTechnical['provider-processing'] === 'development-ci · v29 · 拒绝 · 0 次实时传输' &&
+      firstTechnical['provider-processing'] === 'development-ci · v1 · 拒绝 · 0 次实时传输' &&
       firstTechnical['prompt-contract'] === PROMPT_CONTRACT_DIGEST && firstTechnical['plan-envelope'] === prepared.planEnvelope.digest &&
       firstTechnical['material-fields'] === PLAN_MATERIAL_FIELDS.join('、') &&
       firstTechnical['plan-versions'] === `版本 1 · current · ${prepared.planEnvelope.digest}` &&
@@ -2961,7 +2961,7 @@ async function main() {
 
     at('review-prepare');
     // F-05 part 2a (Issue #1109 revisions 6-7): a real governed house rule for this category exists before the review, made through
-    // the public governance action. Fixture requests keep the development-ci v29 policy, which admits no preference excerpt, so the
+    // the public governance action. Fixture requests keep the development-ci v1 policy, which admits no preference excerpt, so the
     // Run must pin none and disclose none; only the local ask is exercised, at 经常.
     await renderer.evaluate(`window.ai7.recordLearningSupervision({operation:'create',targets:[],scope:{kind:'house'},categoryId:'typos-and-usage',text:'统一编辑用语，保留有意的节奏。',effect:'guide'}).then(() => true)`);
     const governedPreference = await renderer.evaluate(`window.ai7.inspectHouseReviewPreference()`);
@@ -3087,7 +3087,7 @@ async function main() {
     // names the category that produced it (MARK-008, MARK-010).
     const typosFinding = reviewed.run.findings.find((finding) => finding.categoryId === 'typos-and-usage' && finding.markId !== null);
     requireJourney(typosFinding !== undefined, 'review-typos-finding-marked');
-    // development-ci v29 admits no preference excerpt: the governed rule above was pinned by no category, and neither lineage nor a
+    // development-ci v1 admits no preference excerpt: the governed rule above was pinned by no category, and neither lineage nor a
     // chip may imply it was sent.
     requireJourney(reviewed.run.influence.length === 0 && reviewed.run.findings.every((finding) => (finding.referencedRuleVersions?.length ?? 0) === 0),
       'review-no-preference-references-under-ci', reviewed.run.influence);

@@ -26,7 +26,7 @@ const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url));
 describe('accepted original-field declaration reading (#1161)', () => {
   const policy = (): Record<string, unknown> => JSON.parse(readFileSync(join(REPO_ROOT,
     'docs/policies/provider-processing-policy.v30.json'), 'utf8')) as Record<string, unknown>;
-  it('reads all fourteen declarations and keeps the inherited Global recipe unqualified', () => {
+  it('reads all fourteen declarations and projects the closed Global recipe directly', () => {
     const reading = verifyOrdinaryProductionPolicy(policy());
     expect(reading.declaredRuleIds).toHaveLength(14);
     expect(reading.originalFieldQualificationId).toBe('ordinary-production-original-fields-adr0099');
@@ -46,16 +46,32 @@ describe('accepted original-field declaration reading (#1161)', () => {
     }
   });
 });
+it('declares bounded typed curation and scoped Global tools without activating their future consumers', () => {
+  const policy = JSON.parse(readFileSync(join(REPO_ROOT, 'docs/policies/provider-processing-policy.v31.json'), 'utf8'));
+  const reading = verifyOrdinaryProductionPolicy(policy);
+  expect(reading.declaredRuleIds).toHaveLength(15);
+  const curation = policy.decision.providerAllowRules.find((rule: { ruleId: string }) => rule.ruleId === 'ordinary-production-learning-curation');
+  expect(curation.source.sourceKinds).toEqual(['proposal-decision', 'manual-edit-journal', 'word-tracked-edit']);
+  expect(curation.qualifiedOriginalExamples).toMatchObject({ maxExamplesPerRequest: 10, maxBeforeGraphemes: 2048,
+    maxReasonGraphemes: 512, maxTextGraphemesTotal: 16000, maxEncodedCategoryBytes: 131072,
+    enabledLearningEnvelopeRequired: true, webToolsExternalToolsSubagentsAndSecondaryForwardingAllowed: false });
+  const scoped = policy.decision.providerAllowRules.find((rule: { ruleId: string }) => rule.ruleId === 'ordinary-production-global-agent-scoped-dialogue');
+  expect(scoped.scopedTools.names).toEqual(['retrieve', 'exact_fetch', 'read_procedure', 'propose_learning_supervision']);
+  expect(scoped.scopedTools).toMatchObject({ editorConfirmationBeforeGovernanceRequired: true,
+    directMemoryOrManuscriptMutationAllowed: false, shellFilesystemWebOrUnrestrictedNetworkAllowed: false });
+  expect(reading.rules.some((rule) => rule.ruleId === scoped.ruleId || rule.ruleId === curation.ruleId)).toBe(false);
+  expect(reading.rules.find((rule) => rule.ruleId === 'ordinary-production-global-agent-dialogue')!.localTools.targetedRetrieval.allowed).toBe(false);
+});
 const CARRIER_PATH = 'config/source-checkout-launch-authority.json';
-const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v21.json';
+const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v22.json';
 const CARRIED_PATHS = [
   CARRIER_PATH,
   ACTIVE_SET_PATH,
-  'docs/policies/active-policy-set.v21.schema.json',
-  'docs/policies/provider-processing-policy.v29.json',
-  'docs/policies/provider-processing-policy.v29.schema.json',
+  'docs/policies/active-policy-set.v22.schema.json',
   'docs/policies/provider-processing-policy.v30.json',
   'docs/policies/provider-processing-policy.v30.schema.json',
+  'docs/policies/provider-processing-policy.v31.json',
+  'docs/policies/provider-processing-policy.v31.schema.json',
   'docs/policies/provider-processing-policy.v1.json',
   'docs/policies/provider-processing-policy.v2.json',
   'docs/policies/provider-processing-policy.v3.json',
@@ -70,9 +86,9 @@ const CARRIED_PATHS = [
 ] as const;
 /** The exact pins active-set v16 records; the resolver and the carrier must agree with the bytes. */
 const EXPECTED_PINS = {
-  'development-ci': ['v29', 'docs/policies/provider-processing-policy.v29.json', 'c9545a5f461a7791115c1f4664bbd731757775951f814d39c28b12c85af88c9d'],
+  'development-ci': ['v1', 'docs/policies/provider-processing-policy.v1.json', 'd9dfe8c13a58649d8d9f607364030468ae71832b94c9436291d29000795d725a'],
   'fixture-recording': ['v2', 'docs/policies/provider-processing-policy.v2.json', 'd0e3996ce7ba091200d83178b48fb578090bf73b509406182a2d5403ab2a4ebc'],
-  'ordinary-production': ['v30', 'docs/policies/provider-processing-policy.v30.json', 'f12df1d43cfc9f52b999c2cc8a6e9bac419177d42210d3bbe8c5008ba8d6a59e'],
+  'ordinary-production': ['v31', 'docs/policies/provider-processing-policy.v31.json', '1cf19c82e46adf7a731e4f0c625cc1dd1f8e07e5b744eb06a872cbaa01849bd5'],
   'developer-live': ['v24', 'docs/policies/provider-processing-policy.v24.json', '1522e203f3ead6a259f93494e25c34526a024f93a757b1c7d22568e219f4a6b6'],
 } as const;
 /** Every immutable predecessor asset keeps its exact bytes: v6, v13, v15, v17, v19 and v21 (the old ordinary-production), v11, v12, v14, v16, v18, v20 and v22 (the old developer-live), and sets v9 to v15. */
@@ -110,7 +126,7 @@ const RETAINED_PREDECESSOR_DIGESTS = {
 } as const;
 /** ADR 0079 §3 decides External Export v2; active-set v16 pins its exact bytes, unchanged since v7. */
 const EXPECTED_EXTERNAL_PIN = ['v2', 'docs/policies/external-export-policy.v2.json', '162441cc3e5d30b0cafb00a0d04ca5ab32b64c5039baafc8952a9925bd7984b6'] as const;
-const ACTIVE_SET_SHA256 = '4b845e924df777f440b07d53ba6e31447e0fe0b004e86efa89bf76554fb05392';
+const ACTIVE_SET_SHA256 = '68125ebd3e1266f02fc1cf02c0a548fa652c4cad3ee052bbfaebc68922758ebb';
 
 const GO_BINDING = {
   route: 'opencode-go',
@@ -503,9 +519,9 @@ describe('synchronous frozen-binding policy resolution (#1131)', () => {
       }
     });
 
-  const inputs = [CARRIER_PATH, ACTIVE_SET_PATH, 'docs/policies/active-policy-set.v21.schema.json',
-    'docs/policies/provider-processing-policy.v30.json', 'docs/policies/provider-processing-policy.v30.schema.json',
-    'docs/policies/provider-processing-policy.v29.json', 'docs/policies/provider-processing-policy.v29.schema.json',
+  const inputs = [CARRIER_PATH, ACTIVE_SET_PATH, 'docs/policies/active-policy-set.v22.schema.json',
+    'docs/policies/provider-processing-policy.v31.json', 'docs/policies/provider-processing-policy.v31.schema.json',
+    'docs/policies/provider-processing-policy.v1.json',
     'docs/policies/provider-processing-policy.v24.json', 'docs/policies/provider-processing-policy.v2.json', 'docs/policies/external-export-policy.v2.json'];
   it('matches explicit Fast bindings and the defaulted argument without caching another role', async () => {
     await placeValidCheckout();
@@ -778,11 +794,11 @@ afterEach(async () => {
   await rm(sandbox, { recursive: true, force: true });
 });
 
-describe('active policy set v21', () => {
+describe('active policy set v22', () => {
   it('is the sole active set: the carrier pins it, it maps all four scopes, and every pin matches the exact bytes', async () => {
-    expect(ACTIVE_SET_VERSION).toBe('v21');
+    expect(ACTIVE_SET_VERSION).toBe('v22');
     expect(DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION).toBe('v24');
-    expect(ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION).toBe('v30');
+    expect(ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION).toBe('v31');
     const carrier = JSON.parse(await readFile(join(REPO_ROOT, ...CARRIER_PATH.split('/')), 'utf8')) as Record<string, unknown>;
     expect(carrier).toEqual({
       manifestType: 'ai7-source-checkout-launch-authority',
@@ -790,7 +806,7 @@ describe('active policy set v21', () => {
       runtimeForm: 'source-checkout',
       trustedOperationalScope: 'development-ci',
       launchSelectableScopes: ['development-ci', 'developer-live', 'ordinary-production'],
-      activePolicySet: { version: 'v21', canonicalPath: ACTIVE_SET_PATH, sha256: ACTIVE_SET_SHA256 },
+      activePolicySet: { version: 'v22', canonicalPath: ACTIVE_SET_PATH, sha256: ACTIVE_SET_SHA256 },
     });
     expect(LAUNCH_SELECTABLE_SCOPES).toEqual(carrier.launchSelectableScopes);
     expect(await sha256Of(ACTIVE_SET_PATH)).toBe(ACTIVE_SET_SHA256);
@@ -802,8 +818,8 @@ describe('active policy set v21', () => {
         'external-export-policy': { version: string; canonicalPath: string; sha256: string };
       };
     };
-    expect(activeSet.version).toBe('v21');
-    expect(activeSet.predecessorVersion).toBe('v20');
+    expect(activeSet.version).toBe('v22');
+    expect(activeSet.predecessorVersion).toBe('v21');
     const pins = activeSet.activePolicies['provider-processing-policy'].scopePins;
     expect(Object.keys(pins)).toEqual(Object.keys(EXPECTED_PINS));
     for (const [scope, [version, canonicalPath, sha256]] of Object.entries(EXPECTED_PINS)) {
@@ -916,8 +932,8 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
     expect(projection.denialReason).toBeNull();
     expect(projection.operationalScope).toBe('development-ci');
     // One active set per launch: development-ci reports v16 while its Provider Processing pin stays v1.
-    expect(projection.activePolicySetVersion).toBe('v21');
-    expect(projection.providerProcessing.version).toBe('v29');
+    expect(projection.activePolicySetVersion).toBe('v22');
+    expect(projection.providerProcessing.version).toBe('v1');
     expect(projection.providerProcessing.label).toBe('开发与持续集成：零次实时传输');
     expect(projection.providerProcessing.bindingState).toBeUndefined();
     expect(projection.externalExport.version).toBe('v2');
@@ -932,7 +948,7 @@ describe('resolveSourceCheckoutLaunchPolicy', () => {
     expect(projection.integrityState).toBe('verified');
     expect(projection.denialReason).toBeNull();
     expect(projection.operationalScope).toBe('developer-live');
-    expect(projection.activePolicySetVersion).toBe('v21');
+    expect(projection.activePolicySetVersion).toBe('v22');
     expect(projection.providerProcessing).toEqual({
       version: 'v24',
       decision: 'eligible-only',
@@ -1535,9 +1551,9 @@ describe('Provider Processing v23 (ordinary-production, inherited from v19 and v
       expect(projection.integrityState).toBe('verified');
       expect(projection.denialReason).toBeNull();
       expect(projection.operationalScope).toBe('ordinary-production');
-      expect(projection.activePolicySetVersion).toBe('v21');
+      expect(projection.activePolicySetVersion).toBe('v22');
       expect(projection.providerProcessing).toEqual({
-        version: 'v30',
+        version: 'v31',
         execution: readPolicySync('docs/policies/provider-processing-policy.v27.json').execution,
         transport: readPolicySync('docs/policies/provider-processing-policy.v27.json').transport,
         research: readPolicySync('docs/policies/provider-processing-policy.v27.json').research,
@@ -1567,7 +1583,7 @@ describe('Provider Processing v23 (ordinary-production, inherited from v19 and v
     expect(projection.integrityState).toBe('verified');
     expect(projection.operationalScope).toBe('ordinary-production');
     expect(projection.providerProcessing).toEqual({
-      version: 'v30',
+      version: 'v31',
       execution: readPolicySync('docs/policies/provider-processing-policy.v27.json').execution,
       transport: readPolicySync('docs/policies/provider-processing-policy.v27.json').transport,
       research: readPolicySync('docs/policies/provider-processing-policy.v27.json').research,
@@ -1636,7 +1652,7 @@ describe('Provider Processing v23 (ordinary-production, inherited from v19 and v
 
   it('denies an ordinary-production launch whose v23 bytes drifted, under any binding, while the other scopes still verify', async () => {
     await placeValidCheckout();
-    const target = join(codeRoot, ...'docs/policies/provider-processing-policy.v30.json'.split('/'));
+    const target = join(codeRoot, ...'docs/policies/provider-processing-policy.v31.json'.split('/'));
     await writeFile(target, `${await readFile(target, 'utf8')}\n`);
     for (const binding of [null, GO_PRODUCTION_BINDING]) {
       const projection = await resolveSourceCheckoutLaunchPolicy(codeRoot, 'ordinary-production', binding);
@@ -2024,7 +2040,7 @@ describe('Provider Processing v22 and v23: platform tools on the research rules 
     ['ordinary-production', V23_PATH],
   ] as const)('denies a %s launch after a one-byte change inside a backend host of its pinned bytes', async (scope, path) => {
     await placeValidCheckout();
-    const target = join(codeRoot, ...(path === V23_PATH ? 'docs/policies/provider-processing-policy.v30.json' : path).split('/'));
+    const target = join(codeRoot, ...(path === V23_PATH ? 'docs/policies/provider-processing-policy.v31.json' : path).split('/'));
     const bytes = await readFile(target);
     const offset = bytes.indexOf('"api.search.tinyfish.ai"');
     expect(offset).toBeGreaterThan(0);
@@ -2119,7 +2135,7 @@ describe('Provider Processing v22 and v23: local targeted retrieval on every rul
   it.each([['developer-live', V24_PATH], ['ordinary-production', V23_PATH]] as const)('denies a %s launch after a one-byte change inside the local tools block of its pinned bytes (%s)', async (scope, path) => {
     for (const [from, to] of [['"callsPerUnit": 5', '"callsPerUnit": 6'], ['"candidatesPerCall": 8', '"candidatesPerCall": 9'], ['"scope": "no-egress"', '"scope": "no-egrexs"'], ['"allowed": false', '"allowed": true']] as const) {
       await placeValidCheckout();
-      const target = join(codeRoot, ...(path === V23_PATH ? 'docs/policies/provider-processing-policy.v30.json' : path).split('/'));
+      const target = join(codeRoot, ...(path === V23_PATH ? 'docs/policies/provider-processing-policy.v31.json' : path).split('/'));
       const original = await readFile(target, 'utf8');
       expect(original.includes(from), from).toBe(true);
       await writeFile(target, original.replace(from, to));
@@ -2580,8 +2596,8 @@ function v30ProductionAdmittedRules(binding: ConfiguredProviderBinding): Admitte
         taskKinds: current.find((entry) => entry.ruleId === rule.ruleId)!.allowedTaskKinds as string[], outboundDataCategories: document.allowedOutboundDataCategories as AdmittedProviderRule['outboundDataCategories'],
         plusDeclaredContractRetryAdaptations: true, crossUnitSynthesisAllowed: true,
         taskKindOverrides: current.find((entry) => entry.ruleId === rule.ruleId)!.taskKindOverrides as NonNullable<AdmittedProviderRule['taskKindOverrides']>,
-        editorTaskInstruction: document.editorTaskInstruction as NonNullable<AdmittedProviderRule['editorTaskInstruction']>,
-        houseReviewGuidelineClause: document.houseReviewGuidelineClause as NonNullable<AdmittedProviderRule['houseReviewGuidelineClause']>,
+        editorTaskInstruction: current.find((entry) => entry.ruleId === rule.ruleId)!.editorTaskInstruction as NonNullable<AdmittedProviderRule['editorTaskInstruction']>,
+        houseReviewGuidelineClause: current.find((entry) => entry.ruleId === rule.ruleId)!.houseReviewGuidelineClause as NonNullable<AdmittedProviderRule['houseReviewGuidelineClause']>,
       }),
     };
   }).concat([
