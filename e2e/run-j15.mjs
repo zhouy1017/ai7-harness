@@ -468,6 +468,9 @@ async function constructPredecessorV12(dataRoot, bookId) {
     database.exec(`
       PRAGMA foreign_keys = OFF;
       BEGIN IMMEDIATE;
+      DROP TABLE procedure_run_choices;
+      DROP TABLE procedure_version_stops;
+      DROP TABLE procedure_version_origins;
       DROP TABLE house_word_list_versions;
       DROP TABLE word_import_mark_sources;
       DROP TABLE word_tracked_edit_sample_imports;
@@ -1101,12 +1104,12 @@ async function main() {
     at('knowledge-procedures');
     // 工序与规则 (Issue #427, S79d; since Issue #1081, F-26a, the pre-installed procedure library): the nine review categories'
     // 工序 and baseline analysis by what each does, and since Issue #1164 确定性检查 at version 3 (local-text-check@3) as the
-    // eleventh, each 已启用 drawn solid with its version and its stages in order — none used
+    // eleventh, plus factual claim stages and four editorial procedures (#1170), each 已启用 drawn solid with its version and its stages in order — none used
     // in this Journey — the review-only predecessor named above 可复用工序, and the 方案
     // in the house's words, 本社方案 v2, installed and enabled for the one Book that enabled it. Both layers (LAYER-008): the
     // words carry no identifier, and 查看技术详情, closed, holds the carrier's and the 权限侧车's identities and each 工序's id.
     await click(renderer, '工序与规则', 'knowledge-procedures-tab');
-    await waitFor(renderer, `document.querySelector('.knowledge-base')?.dataset.knowledgeTab==='rules' && document.querySelector('.knowledge-procedures')?.dataset.procedureCount==='11'`, 'knowledge-procedures-painted');
+    await waitFor(renderer, `document.querySelector('.knowledge-base')?.dataset.knowledgeTab==='rules' && document.querySelector('.knowledge-procedures')?.dataset.procedureCount==='16' && document.querySelectorAll('.knowledge-procedure-list > li').length===16 && document.querySelector('[data-procedure-field=template]')`, 'knowledge-procedures-painted');
     const procedures = await renderer.evaluate(`(() => {
       const section = document.querySelector('.knowledge-procedures');
       const details = section?.querySelector(':scope > details.technical-details') ?? null;
@@ -1126,7 +1129,7 @@ async function main() {
       };
     })()`);
     const library = await renderer.evaluate(`({ stages: Array.from(document.querySelectorAll('.procedure-stages'), (node) => node.textContent), predecessor: document.querySelector('.procedure-predecessor')?.textContent, baseline: document.querySelector('[data-procedure-id="ai7-procedure/baseline-analysis"]')?.textContent })`);
-    requireJourney(library.stages.length === 11 && library.stages.every((value) => value.length > 0) && library.predecessor?.includes('审阅专用前身') && library.baseline?.includes('跨单元归并与跨章一致性'), 'preinstalled-procedure-library', library);
+    requireJourney(library.stages.length === 16 && library.stages.every((value) => value.length > 0) && library.predecessor?.includes('审阅专用前身') && library.baseline?.includes('跨单元归并与跨章一致性'), 'preinstalled-procedure-library', library);
     await assertRenderer(renderer, `(() => { const entries=document.querySelectorAll('.preinstalled-procedure-library li[data-procedure-version="2"]'); if(entries.length!==7)return false; return Array.from(entries).every((entry) => { const history=entry.querySelector('details.procedure-previous-versions'); if(!(history instanceof HTMLDetailsElement))return false; history.open=true; const row=history.querySelector('[data-procedure-previous-version="1"]'); return row?.textContent.startsWith('第 1 版 · ') === true && /^[0-9a-f]{64}$/u.test(row.dataset.procedureDigest ?? '') && !/[0-9a-f]{64}/u.test(row.textContent); }); })()`, 'preinstalled-review-v2-with-v1-history');
     await assertRenderer(renderer, `(() => {
       return [['style-and-format', '3', ['1', '2']], ['plot-consistency', '2', ['1']]].every(([category, version, previous]) => {
@@ -1142,15 +1145,15 @@ async function main() {
       });
     })()`, 'preinstalled-cross-chapter-history');
     const technical = new Map(procedures?.technical ?? []);
-    requireJourney(JSON.stringify(procedures?.states) === JSON.stringify(Array(11).fill(['enabled', '已启用', '0', 'solid'])) &&
+    requireJourney(JSON.stringify(procedures?.states) === JSON.stringify(Array(16).fill(['enabled', '已启用', '0', 'solid'])) &&
       // #1084: the review procedures read under contract /2 are version 2, version 1 kept in their closed 历史版本.
-      procedures.first === '已启用 错别字与规范用语审阅工序 · 第 2 版 · 预装 · 已使用 0 次 · 分块审读 → 综合 → 派生报告历史版本第 1 版 · 分块审读 → 综合 → 派生报告' &&
+      procedures.first.includes('错别字与规范用语审阅工序 · 第 2 版') && procedures.first.includes('改写为新版本') && procedures.first.includes('历史版本第 1 版 · 分块审读 → 综合 → 派生报告') &&
       JSON.stringify(procedures.reasons) === '[]' &&
       procedures.artifact === '本社方案 v2 · 已安装 · 已为 1 本书启用' && procedures.identifierInWords === false &&
       procedures.detailsOpen === false && procedures.summary === '查看技术详情' &&
       technical.get('原生载体身份') === '@ai7/editorial-workspace-profile' && technical.get('原生载体版本') === '1.0.0' &&
       /^[0-9a-f]{64}$/u.test(technical.get('SHA-256') ?? '') && technical.get('权限侧车') === 'ai7.editorial-workspace-profile.authority' &&
-      /^[0-9a-f]{64}$/u.test(technical.get('权限侧车 SHA-256') ?? '') && procedures.technical.length === 5 + 11 &&
+      /^[0-9a-f]{64}$/u.test(technical.get('权限侧车 SHA-256') ?? '') && procedures.technical.length === 5 + 16 &&
       procedures.technical.slice(5).every(([, procedureId]) => /^ai7-procedure\//u.test(procedureId ?? '')),
     'knowledge-procedures-list', procedures);
     // 可复用工序 and 开发建议 (Issue #65, S30; ADR 0087) sit apart from the built-in 工序, empty here and saying how one is made;
@@ -1159,6 +1162,27 @@ async function main() {
     const captured = await renderer.evaluate(`[document.querySelector('.knowledge-captured-procedures .captured-procedures-empty')?.textContent ?? null, document.querySelector('.knowledge-developer-proposals .developer-proposals-empty')?.textContent ?? null, document.querySelectorAll('[data-procedure-action]').length]`);
     requireJourney(JSON.stringify(captured) === JSON.stringify(['还没有可复用工序。在一次完成的审阅里点「将以上工序保存为可复用工序」就能保存。', '还没有开发建议。', 0]),
       'knowledge-captured-empty', captured);
+
+    // #1170: the editor creates and revises an immutable definition; incompatible dependency order is refused by name.
+    at('knowledge-procedures');
+    await assertRenderer(renderer, `(() => { document.querySelector('[data-procedure-field="template"]').value='ai7-procedure/baseline-analysis'; return true; })()`, 'editable-template-choice');
+    await click(renderer, '新建工序', 'editable-create-open');
+    await fill(renderer, '[data-procedure-editor] [data-procedure-field="title"]', 'J15 可编辑工序', 'editable-title');
+    await fill(renderer, '[data-procedure-editor] [data-procedure-field="instruction"]', '保留作者短句。', 'editable-instruction');
+    await fill(renderer, '[data-procedure-editor] ol li:first-child textarea', '语境明确时允许省略主语。', 'editable-exemption');
+    await assertRenderer(renderer, `(() => { const rows=document.querySelectorAll('[data-procedure-editor] ol li'); rows[0].querySelector('input').value='60'; rows[0].querySelector('input').dispatchEvent(new Event('input')); rows[1].querySelector('input').value='40'; rows[1].querySelector('input').dispatchEvent(new Event('input')); Array.from(rows[0].querySelectorAll('button')).find(b=>b.textContent==='下移').click(); return true; })()`, 'editable-budget-and-order');
+    await click(renderer, '保存为新版本', 'editable-incompatible-save');
+    await waitFor(renderer, `document.querySelector('.preinstalled-procedure-library [role=status]')?.textContent.includes('阶段须为')`, 'editable-incompatible-order-named');
+    await assertRenderer(renderer, `(() => { Array.from(document.querySelector('[data-procedure-editor] ol li').querySelectorAll('button')).find(b=>b.textContent==='下移').click(); return true; })()`, 'editable-restore-compatible-order');
+    await click(renderer, '保存为新版本', 'editable-save-v1');
+    await waitFor(renderer, `Array.from(document.querySelectorAll('.knowledge-procedure-list > li')).some(li=>li.querySelector('h4')?.textContent==='J15 可编辑工序 · 第 1 版')`, 'editable-created-v1');
+    const editableV1 = await renderer.evaluate(`window.ai7.procedureLibrary({action:'inspect'}).then(page=>page.procedures.find(p=>p.document.title==='J15 可编辑工序'))`);
+    requireJourney(editableV1?.document.editorInstruction==='保留作者短句。' && editableV1.document.stages[0].budgetShare===0.6 && editableV1.document.stages[0].exemptionRules[0]==='语境明确时允许省略主语。', 'editable-version-settings');
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('[data-procedure-id="${editableV1.procedureId}"]'); Array.from(card.querySelectorAll('button')).find(b=>b.textContent==='改写为新版本').click(); return true; })()`, 'editable-edit-v1');
+    await fill(renderer, '[data-procedure-editor] [data-procedure-field="instruction"]', '关注时间线。', 'editable-instruction-v2');
+    await click(renderer, '保存为新版本', 'editable-save-v2');
+    await waitFor(renderer, `document.querySelector('[data-procedure-id="${editableV1.procedureId}"]')?.dataset.procedureVersion==='2'`, 'editable-created-v2');
+    await assertRenderer(renderer, `(async()=>{const p=(await window.ai7.procedureLibrary({action:'inspect'})).procedures.find(p=>p.procedureId==='${editableV1.procedureId}');return p.versions.length===2&&p.versions[1].digest==='${editableV1.digest}'&&p.documents[1].editorInstruction==='保留作者短句。'&&p.document.editorInstruction==='关注时间线。';})()`, 'editable-v1-unchanged');
 
     // ---- 知识库 › 资料库 (Issue #427, plan slice S79c; editor-surfaces §8.4, V2-UX-KB-007, ATTN-009, LEARN-004 to LEARN-007) ----
     at('knowledge-library-add');
@@ -1702,6 +1726,43 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id="${wordSignal.source.bookId}"] [data-testid="manuscript-editor"] > [data-block-id]')`, 'word-lineage-restart-book-ready');
     const wordAfter = await renderer.evaluate(wordRead);
     requireJourney(JSON.stringify(wordAfter)===JSON.stringify(wordBefore), 'word-lineage-and-full-source-survive-restart');
+
+    // Select an editable deterministic version, execute the admitted public Book offline, then capture the completed Run.
+    at('knowledge-procedures');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'editable-run-knowledge');
+    await waitFor(renderer, `document.querySelector('.knowledge-base')`, 'editable-run-knowledge-ready');
+    await click(renderer, '工序与规则', 'editable-run-rules');
+    await waitFor(renderer, `document.querySelector('[data-procedure-field="template"]')`, 'editable-run-library-ready');
+    await assertRenderer(renderer, `(() => { document.querySelector('[data-procedure-field="template"]').value='ai7-procedure/local-text-check'; return true; })()`, 'editable-local-template');
+    await click(renderer, '新建工序', 'editable-local-create');
+    await fill(renderer, '[data-procedure-editor] [data-procedure-field="title"]', 'J15 离线工序', 'editable-local-title');
+    await assertRenderer(renderer, `document.querySelector('[data-procedure-editor] [data-procedure-field="instruction"]')?.disabled===true`, 'editable-local-no-language-interpreter');
+    await click(renderer, '保存为新版本', 'editable-local-save');
+    await waitFor(renderer, `Array.from(document.querySelectorAll('.knowledge-procedure-list h4')).some(h=>h.textContent==='J15 离线工序 · 第 1 版')`, 'editable-local-saved');
+    const localProcedure = await renderer.evaluate(`window.ai7.procedureLibrary({action:'inspect'}).then(page=>page.procedures.find(p=>p.document.title==='J15 离线工序'))`);
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('[data-procedure-id="${localProcedure.procedureId}"]'); Array.from(card.querySelectorAll('button')).find(b=>b.textContent==='运行此工序…').click(); return true; })()`, 'editable-local-run-choice');
+    await waitFor(renderer, `document.querySelector('[data-procedure-field="book"]')?.options.length>0`, 'editable-local-books');
+    await assertRenderer(renderer, `(() => { const select=document.querySelector('[data-procedure-field="book"]'); select.value='${wordSignal.source.bookId}'; return select.value==='${wordSignal.source.bookId}'; })()`, 'editable-local-book-pin');
+    await click(renderer, '打开任务', 'editable-local-open-task');
+    await waitFor(renderer, `document.querySelector('[data-review-action="new-local-check"]')?.disabled===false`, 'editable-local-entry');
+    await assertRenderer(renderer, `(() => { document.querySelector('[data-review-action="new-local-check"]').click(); return true; })()`, 'editable-local-options');
+    await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'editable-local-options-ready');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); sheet.querySelector('[data-local-check-prose]').click(); const button=sheet.querySelector('[data-review-action="prepare"]'); if(button.disabled)return false; button.click(); return true; })()`, 'editable-local-prepare');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanStart==='ready' && document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, 'editable-local-plan');
+    const localRun = await renderer.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(p=>p.run)`);
+    requireJourney(localRun.preinstalledProcedures.some(p=>p.procedure.procedureId===localProcedure.procedureId&&p.procedure.digest===localProcedure.digest), 'editable-run-exact-pin');
+    await assertRenderer(renderer, `(() => { document.querySelector('#task-drawer [data-task-drawer-control="start"]').click(); return true; })()`, 'editable-local-start');
+    await waitFor(renderer, `document.querySelector('[data-local-check="materialized"]') && document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, 'editable-local-completed');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'editable-capture-knowledge');
+    await waitFor(renderer, `document.querySelector('.knowledge-base')`, 'editable-capture-knowledge-ready');
+    await click(renderer, '工序与规则', 'editable-capture-rules');
+    await waitFor(renderer, `document.querySelector('[data-procedure-field="capture-run"]')`, 'editable-capture-available');
+    await assertRenderer(renderer, `(() => { const select=document.querySelector('[data-procedure-field="capture-run"]'); select.value='${localRun.reviewRunId}'; return select.value==='${localRun.reviewRunId}'; })()`, 'editable-capture-source');
+    await click(renderer, '从本次运行捕获', 'editable-capture-open');
+    await fill(renderer, '[data-procedure-editor] [data-procedure-field="title"]', 'J15 已完成运行工序', 'editable-capture-title');
+    await click(renderer, '保存为新版本', 'editable-capture-save');
+    await waitFor(renderer, `Array.from(document.querySelectorAll('.knowledge-procedure-list h4')).some(h=>h.textContent==='J15 已完成运行工序 · 第 1 版')`, 'editable-capture-saved');
+    await assertRenderer(renderer, `(async()=>{const page=await window.ai7.procedureLibrary({action:'inspect'});const p=page.procedures.find(p=>p.document.title==='J15 已完成运行工序');const old=page.procedures.find(p=>p.procedureId==='${editableV1.procedureId}');return p.sourceRunId==='${localRun.reviewRunId}'&&p.executorKind==='local-text-check'&&old.version===2&&old.versions[1].digest==='${editableV1.digest}';})()`, 'editable-capture-and-history-retained');
 
     at('zero-activity');
     await assertRenderer(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && !Object.keys(window.ai7).some((key)=>/provider|session/i.test(key))`, 'exact-service-readiness-remained-zero');

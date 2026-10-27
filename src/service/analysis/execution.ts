@@ -1,3 +1,4 @@
+import { procedureStageBudget } from '../procedures/execution.js';
 import { PlatformToolSession, platformToolModelProfile } from '../provider/platform-tool-session.js';
 import { excerptLocated, independenceGroups, mapVerificationOutcome, registrableDomain, type FactualClaimSession } from '../factual-verification.js';
 import { factualClaimVerificationInput, freezeFactualClaimLedger } from './factual-claim-ledger.js';
@@ -1714,6 +1715,14 @@ export class BaselineAnalysisExecutionOwner {
     // Usage accumulated so far, in the shape the ceiling evaluator reads. Every attempt counts, so the
     // ceiling sees exactly what the Run has spent at the instant the gate asks, before each dispatch.
     const accumulated: UsageFacts[] = [];
+    const stageUsage: Record<RunReportRevisionUsageStageId, { requests: number; inputTokens: number; outputTokens: number }> = {
+      units: { requests: 0, inputTokens: 0, outputTokens: 0 },
+      'cross-unit-reduction': { requests: 0, inputTokens: 0, outputTokens: 0 },
+      'assurance-sampling': { requests: 0, inputTokens: 0, outputTokens: 0 },
+    };
+    const procedure = ledger.procedureForRun(facts.runRecordId);
+    const keepsWebBudget = procedure?.stages.some((stage) => stage.stageType === 'web-verification' && stage.budgetShare > 0) === true;
+    const webUsage = { inputTokens: 0, outputTokens: 0 };
     let terminalClassification: 'completed' | 'completed-with-gaps' | 'failed' | 'interrupted' | 'cancelled' = 'completed';
     let liveInterruption: LiveInterruption | null = null;
     let materialRefusal: MaterialGuardRefusal | null = null;
@@ -1831,9 +1840,14 @@ export class BaselineAnalysisExecutionOwner {
           pendingLoopUsage.push(last.usage); seenLoopResults.add(last);
         }
       };
-      const ceilingState = (): EgressCeilingState => {
+      const ceilingState = (stage = claimSession === undefined ? turnIdentity?.stage ?? 'units' : 'web-verification'): EgressCeilingState => {
         if (runBudgetCeiling.kind === 'unset') return 'unset';
         capturePendingLoopUsage();
+        const cap = procedure === null ? null : procedureStageBudget(procedure, stage, runBudgetCeiling.maxTotalTokens);
+        const used = stageUsage[stage as RunReportRevisionUsageStageId];
+        const webVerificationTokens = webUsage.inputTokens + webUsage.outputTokens;
+        const tokens = stage === 'web-verification' ? webVerificationTokens : used === undefined ? 0 : used.inputTokens + used.outputTokens - (stage === 'units' ? webVerificationTokens : 0);
+        if (cap !== null && tokens + totalTokens(pendingLoopUsage) >= cap) return 'reached';
         return evaluateRunBudgetCeiling([...accumulated, ...pendingLoopUsage], runBudgetCeiling).state === 'reached' ? 'reached' : 'within';
       };
       // The single-use ticket the gate issued for the step in flight; the adapter takes it or refuses.
@@ -2152,14 +2166,19 @@ export class BaselineAnalysisExecutionOwner {
         // sends an evaluation's editor-authored record or house exemplars only where the rule names them.
         ...(admitted === null ? {} : {
           ruleOutboundCategories: new Set(admitted.outboundDataCategories),
-          contractCategories: new Set(liveKindContractCategories(definition.kind, definition.clarificationBase ?? definition)),
+          contractCategories: new Set(liveKindContractCategories(definition.kind, definition.procedureBinding === undefined ? definition.clarificationBase ?? definition : definition)),
           ...(frozenMaterial === null ? {} : {
             materialExcerpts: frozenMaterial.materials,
             frozenMaterialDigests: new Set(frozenMaterial.sources.map((source) => source.sha256)),
           }),
         }),
+        ...(definition.procedureBinding === undefined || selectedRule === null ? {} : {
+          ruleOutboundCategories: new Set(selectedRule.outboundDataCategories),
+          contractCategories: new Set([...liveKindContractCategories(definition.kind, definition), 'editor-task-instruction'] as const),
+        }),
         // Under ordinary production the baseline's own rule names the categories its unit messages carry.
-        ...(production !== null && admitted === null && productionRule !== null ? { ruleOutboundCategories: new Set(productionRule.outboundDataCategories) } : {}),
+        ...(production !== null && admitted === null && productionRule !== null ? { ruleOutboundCategories: new Set(productionRule.outboundDataCategories),
+          ...(definition.procedureBinding === undefined ? {} : { contractCategories: new Set(['editor-task-instruction'] as const) }) } : {}),
         policy: live === null
           ? { operationalScope: 'development-ci', providerProcessingVersion: localVersion, liveTransmissionAllowed: false, authorizedLiveTransmissionCount: 0 }
           : production !== null
@@ -2200,11 +2219,7 @@ export class BaselineAnalysisExecutionOwner {
       // The same turns, counted a second time by the stage they belong to (ADR 0066 §Run Report).
       // Both counters move at the same three call sites, so the report's three revision-facing stages
       // sum to the revision's own usage by construction rather than by subtracting one from another.
-      const stageUsage: Record<RunReportRevisionUsageStageId, { requests: number; inputTokens: number; outputTokens: number }> = {
-        units: { requests: 0, inputTokens: 0, outputTokens: 0 },
-        'cross-unit-reduction': { requests: 0, inputTokens: 0, outputTokens: 0 },
-        'assurance-sampling': { requests: 0, inputTokens: 0, outputTokens: 0 },
-      };
+
       // A turn whose model asked for platform tools made one request per step of its loop, and the Run Report counts each (#473).
       const countTurn = (stage: RunReportRevisionUsageStageId, turnUsage: { inputTokens: number; outputTokens: number } | null, signals: ReadonlyArray<HarnessSignal> = []): void => {
         const requests = 1 + signals.filter((signal) => signal.kind === 'progress' && signal.label === PLATFORM_TOOL_CALL_PROGRESS).length;
@@ -2223,8 +2238,8 @@ export class BaselineAnalysisExecutionOwner {
         const carried = Object.fromEntries(CARRIED_STAGES.map((name) => [name, { ...stageUsage[name] }])) as CarriedStages;
         // The same total a stop keeps (#541): what an older stop carried without stages still counts toward the ceiling.
         ledger.checkpointStageRequests(facts.runRecordId, stage, stages, {
-          inputTokens: unattributed.inputTokens + CARRIED_STAGES.reduce((sum, name) => sum + carried[name].inputTokens, 0),
-          outputTokens: unattributed.outputTokens + CARRIED_STAGES.reduce((sum, name) => sum + carried[name].outputTokens, 0), stages: carried,
+          inputTokens: unattributed.inputTokens + (keepsWebBudget ? webUsage.inputTokens : 0) + CARRIED_STAGES.reduce((sum, name) => sum + carried[name].inputTokens, 0),
+          outputTokens: unattributed.outputTokens + (keepsWebBudget ? webUsage.outputTokens : 0) + CARRIED_STAGES.reduce((sum, name) => sum + carried[name].outputTokens, 0), stages: carried,
         });
       };
       const clock = new RunStageClock();
@@ -2329,6 +2344,12 @@ export class BaselineAnalysisExecutionOwner {
         usage.outputTokens += kept.outputTokens;
         unattributed.inputTokens -= kept.inputTokens;
         unattributed.outputTokens -= kept.outputTokens;
+      }
+      if (keepsWebBudget && carriedStop?.webVerification !== undefined) {
+        Object.assign(webUsage, carriedStop.webVerification);
+        unattributed.inputTokens -= webUsage.inputTokens; unattributed.outputTokens -= webUsage.outputTokens;
+        stageUsage.units.inputTokens += webUsage.inputTokens; stageUsage.units.outputTokens += webUsage.outputTokens;
+        usage.inputTokens += webUsage.inputTokens; usage.outputTokens += webUsage.outputTokens;
       }
       // The attempt a provider's account limit refused before 续行 (Issue #51, S16b) was sent: it counts toward the Run and
       // the ceiling, and its range's row carries it once the range is read again — or ends it as the gap it is.
@@ -3113,9 +3134,10 @@ export class BaselineAnalysisExecutionOwner {
         // The stages hold what earlier stops kept too, since 续行 counted it into them.
         const carriedStages = Object.fromEntries(CARRIED_STAGES.map((stage) => [stage, { ...stageUsage[stage] }])) as CarriedStages;
         const carriedUsage = {
-          inputTokens: unattributed.inputTokens + CARRIED_STAGES.reduce((total, stage) => total + carriedStages[stage].inputTokens, 0),
-          outputTokens: unattributed.outputTokens + CARRIED_STAGES.reduce((total, stage) => total + carriedStages[stage].outputTokens, 0),
+          inputTokens: unattributed.inputTokens + (keepsWebBudget ? webUsage.inputTokens : 0) + CARRIED_STAGES.reduce((total, stage) => total + carriedStages[stage].inputTokens, 0),
+          outputTokens: unattributed.outputTokens + (keepsWebBudget ? webUsage.outputTokens : 0) + CARRIED_STAGES.reduce((total, stage) => total + carriedStages[stage].outputTokens, 0),
           stages: carriedStages,
+          ...(keepsWebBudget ? { webVerification: { ...webUsage } } : {}),
         };
         const settled = active.progress.unitsSettled;
         // 模型服务账户限额 (Issue #51, S16b; MODEL-018): outside developer-live the Run stops resumable in its own words, with
@@ -3241,7 +3263,7 @@ export class BaselineAnalysisExecutionOwner {
           rule.procedureVersion !== facts.compositionOptions.procedure.version) throw new ExecutionAdmissionError('FACTUAL_CLAIM_POLICY_MISSING', '断言阶段缺少准确的规则或工序。');
         const retainedByUnit = new Map<number, RetainedUnit[]>();
         for (const claim of claims.claims) {
-          if (active.cancelRequested || active.interrupted || active.pauseRequested || sourceStopped() || ceilingState() === 'reached' || scopeChanged()) break;
+          if (active.cancelRequested || active.interrupted || active.pauseRequested || sourceStopped() || ceilingState('web-verification') === 'reached' || scopeChanged()) break;
           const input = factualClaimVerificationInput(claims, claim.claimId, rule.claimVerification.maximumMetadataUtf8Bytes);
           const producer = claim.producers[0]!;
           const session = claimOwner.claimSession(facts.runRecordId, 'web-verification', claim.claimId) ?? claimOwner.admitClaimSession({
@@ -3261,7 +3283,7 @@ export class BaselineAnalysisExecutionOwner {
             const unknown = [...(open?.values() ?? [])].some((request) => request.sessionId === session.sessionId);
             while (!unknown && rounds.length < 2 && (rounds.length === 0 || rounds.at(-1)?.state === 'pending') &&
               claimOwner.claimAllowance(session.sessionId).model > 0 && (rounds.length === 0 || claimOwner.claimAllowance(session.sessionId).search > 0)) {
-              if (active.cancelRequested || active.interrupted || active.pauseRequested || scopeChanged() || ceilingState() === 'reached') break;
+              if (active.cancelRequested || active.interrupted || active.pauseRequested || scopeChanged() || ceilingState('web-verification') === 'reached') break;
               isolated.beginTurn({ stage: 'web-verification', unitOrdinal: null, attemptIndex: rounds.length + 1, adaptationId: null,
                 message: input.message, requestDigest: canonicalRecord({ ledger: claims.digest, claimId: claim.claimId, round: rounds.length + 1 }).digest,
                 inputDigest: claims.digest, contractDigest: session.promptContractDigest });
@@ -3270,7 +3292,9 @@ export class BaselineAnalysisExecutionOwner {
               ledger.recordSpan(attemptId, ++spanOrdinal, turn.span, null, { attemptIndex: rounds.length + 1,
                 payloadDigest: isolated.admittedPayloadDigest, unitMessageDigest: input.digest, adaptationId: null });
               const usageSignal = turn.signals.find((signal) => signal.kind === 'usage');
-              countTurn('units', usageSignal?.kind === 'usage' ? usageSignal.usage : null, turn.signals);
+              const claimUsage = usageSignal?.kind === 'usage' ? usageSignal.usage : null;
+              webUsage.inputTokens += claimUsage?.inputTokens ?? 0; webUsage.outputTokens += claimUsage?.outputTokens ?? 0;
+              countTurn('units', claimUsage, turn.signals);
               active.progress.completedAttempts += 1;
               const candidate = turn.signals.find((signal) => signal.kind === 'contentCandidate');
               const parsed = turn.terminal === 'completed' && candidate?.kind === 'contentCandidate'
@@ -3341,7 +3365,7 @@ export class BaselineAnalysisExecutionOwner {
         if (step !== null) crossUnit = { state: 'not-run', reason: step.notEnoughReason };
       } else {
         const requestDigest = step === null
-          ? crossUnitRequestDigest(BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, unitSetDigest(closedOutcomes))
+          ? crossUnitRequestDigest(reductionContract, unitSetDigest(closedOutcomes))
           : step.requestDigest(closedOutcomes, crossUnitContext);
         const gap = (code: Extract<CrossUnitOutcome, { state: 'gap' }>['code'], reason: string): CrossUnitOutcome =>
           ({ state: 'gap', code, reason, requestDigest });
@@ -3352,7 +3376,7 @@ export class BaselineAnalysisExecutionOwner {
           // kind's book-level step is never sent under the baseline's term, whatever that term reads: only the rule that
           // admitted the kind can name it (Issue #429, Provider Processing v11's synthesis term).
           crossUnit = gap('policy-bounded', named('跨单元归纳未派发：当前 Provider Processing 策略仅授权单元数内的传输'));
-        } else if (ceilingState() === 'reached') {
+        } else if (ceilingState('cross-unit-reduction') === 'reached') {
           // The ceiling is evaluated before this dispatch exactly as before a unit's, so a Run that has
           // spent its bound ends here rather than spending one more turn to discover it — and ends as the
           // ceiling reached, with every unit it read kept (Issue #51, S16a; MODEL-016).
@@ -3484,7 +3508,7 @@ export class BaselineAnalysisExecutionOwner {
       // reduction does — an interrupted Run has already stopped, and nothing further is sent.
       const sample = await this.#drawAndJudge({
         active, definition, harness, reduction: reduced, manifest, blocksById, admittedUserMessages, stages,
-        acceptedOutputDigests, liveAdapter, countTurn, clock, ceilingState, live, policy,
+        acceptedOutputDigests, liveAdapter, countTurn, clock, ceilingState: () => ceilingState('assurance-sampling'), live, policy,
         beginTurn: context.beginTurn, checkpoint: () => checkpointStage('assurance-sampling'),
         validationStep: (step) => { context.validationStep = step; },
         stopped: terminalClassification === 'interrupted' || terminalClassification === 'cancelled',

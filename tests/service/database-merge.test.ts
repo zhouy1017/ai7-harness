@@ -1,3 +1,5 @@
+import { PROCEDURE_DEFINITION_SCHEMA_SQL, PROCEDURE_DEFINITION_TRIGGER_SQL } from '../../src/service/procedures/definition-store.js';
+import { BASELINE_ANALYSIS_TASK_GOAL } from '../../src/shared/protocol.js';
 import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
@@ -892,7 +894,7 @@ describe('只导入其中的图书 over the store', () => {
       categoryId: 'typos-and-usage', text: '目标本社保留的合成偏好。', effect: 'guide' });
     const targetHouse = target.inspectGlobalAgent();
     const preview = await target.inspectDatabaseImport(packagePath);
-    expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 97, dataVersion: 1 });
+    expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 98, dataVersion: 1 });
     await target.prepareDatabaseMerge(preview.previewId, T);
     target.close();
     target = await EditorialStore.open(otherRoot, roots.codeRoot, control);
@@ -1252,6 +1254,61 @@ describe('what a merge refuses, puts back and brings forward', () => {
       target.close();
     }
   }, 180_000);
+
+  it('migrates a genuine revision-97 package on selected-Book merge (#1170)', async () => {
+    const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const creation = source.prepareBookCreation('版本97待合并图书', null);
+    source.commitBookCreation({ ...creation.proposed, reviewDigest: creation.reviewDigest }); source.close();
+    const db = new DatabaseSync(storeOf(roots.dataRoot));
+    const path = join(roots.inputRoot, 'revision97.ai7db');
+    try {
+      db.exec('DROP TABLE procedure_run_choices; DROP TABLE procedure_version_stops; DROP TABLE procedure_version_origins; DROP TABLE procedure_plan_pins;');
+      db.exec(PROCEDURE_DEFINITION_SCHEMA_SQL.procedure_plan_pins);
+      for (const action of ['update', 'delete']) db.exec(PROCEDURE_DEFINITION_TRIGGER_SQL[`procedure_plan_pins_no_${action}`]!);
+      execPre74Fixture(db, 'PRAGMA user_version = 97');
+      await writeDatabasePackage(db, roots.dataRoot, path, () => ({ dataVersion: 1, softwareVersion: '0.1.0', schemaRevision: 97,
+        createdAt: T.toISOString(), origin: 'database-export', contents: { books: 1, sourceVersions: 0, libraryMaterials: 0, series: 0 } }));
+    } finally { db.close(); }
+    let target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    try {
+      const preview = await target.inspectDatabaseImport(path);
+      expect(preview).toMatchObject({ schemaRevision: 97, compatibility: 'compatible' });
+      await target.prepareDatabaseMerge(preview.previewId, T);
+      target.close(); target = await EditorialStore.open(otherRoot, roots.codeRoot);
+      expect(titles(target)).toEqual(['版本97待合并图书']);
+      expect(target.procedureLibrary({ action: 'inspect' }).procedures).toHaveLength(16);
+      target.markCleanShutdown();
+    } finally { target.close(); }
+  });
+
+  it('keeps an imported Run exact without installing the source house procedure library (#1170)', async () => {
+    const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let bookId: string, procedure: { procedureId: string; version: number; digest: string }, promptDigest: string, path: string;
+    try {
+      ({ bookId } = await importSample1Book(source, roots.codeRoot, '合并工序公开样书'));
+      await pinEditorialWorkspaceProfileRevision2(source, bookId); recordMissingCredentialConnection(source, '合并工序连接');
+      const original = source.procedureLibrary({ action: 'inspect' }).procedures.find((entry) => entry.executorKind === 'baseline-manuscript-analysis')!;
+      const created = source.procedureLibrary({ action: 'save', input: { procedureId: null,
+        basedOn: { procedureId: original.procedureId, version: original.version, digest: original.digest },
+        title: '源社工序', editorInstruction: '保留短句', stages: original.document.stages } }).procedures.find((entry) => entry.document.title === '源社工序')!;
+      procedure = { procedureId: created.procedureId, version: created.version, digest: created.digest };
+      source.procedureLibrary({ action: 'select', bookId, procedure });
+      let work = source.createBaselineAnalysisPreparationWork(bookId, BASELINE_ANALYSIS_TASK_GOAL, null, await resolveSourceCheckoutLaunchPolicy(roots.codeRoot));
+      while (!work.done) work = source.advanceBaselineAnalysisPreparationWork(work.workId!);
+      const plan = work.projection!; promptDigest = plan.planEnvelope!.promptContractDigest;
+      source.authorizeBaselineAnalysis(bookId, plan.taskIntent!.taskIntentId, plan.planEnvelope!.digest);
+      path = await exportedFrom(source, 'pinned-procedure.ai7db'); source.markCleanShutdown();
+    } finally { source.close(); }
+    let target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    try {
+      const preview = await target.inspectDatabaseImport(path!); await target.prepareDatabaseMerge(preview.previewId, T);
+      target.close(); target = await EditorialStore.open(otherRoot, roots.codeRoot);
+      expect(target.inspectBaselineAnalysis(bookId!).run!.procedure).toEqual(procedure!);
+      expect(target.baselineAnalysisLedger.definitionForDigest(promptDigest!).systemPrompt).toContain('保留短句');
+      expect(target.procedureLibrary({ action: 'inspect' }).procedures.some((entry) => entry.procedureId === procedure!.procedureId)).toBe(false);
+      target.markCleanShutdown();
+    } finally { target.close(); }
+  });
 
   it('brings a package made at an older revision to this one before it merges', async () => {
     const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);

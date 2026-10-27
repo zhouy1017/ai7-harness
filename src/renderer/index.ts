@@ -1,5 +1,5 @@
 import { mountManuscriptScreen, documentContextOf, type ManuscriptScreen } from './manuscript-screen.js';
-import { renderProcedureLibrary } from './procedure-library.js';
+import { renderProcedureLibrary, mountEditableProcedureLibrary } from './procedure-library.js';
 import { mountGlobalAgent } from './global-agent.js';
 import { buildIdentityLine, currentBuildIdentity, requireMatchingVersions } from '../shared/build-identity.js';
 import { hydrateAnalysisRevision, appendBaselineSummaryPage } from './analysis-paging.js';
@@ -5963,6 +5963,13 @@ function renderKnowledgeBaseProjection(projection: DefaultExecutionRulesProjecti
     const section = element('section', 'knowledge-procedures');
     section.dataset['procedureCount'] = String(procedures.preinstalled.length);
     const list = renderProcedureLibrary(procedures.preinstalled);
+    void mountEditableProcedureLibrary(list, window.ai7, async (book, kind) => {
+      await requestBookWorkbenchRoute({ kind: 'book', bookId: book.bookId }, async (route) => {
+        if (kind === 'writing') renderBookDeliverables(route.bookId, route.bookTitle);
+        else if (['evaluation', 'readers-report', 'evaluation-rewrite'].includes(kind)) renderBookEvaluation(route.bookId, route.bookTitle);
+        else renderBookReview(route.bookId, route.bookTitle);
+      });
+    }).catch((error: unknown) => setStatus(rendererErrorMessage(error, '无法读取工序版本。'), 'error'));
     const artifacts = element('ul', 'knowledge-artifact-list');
     for (const artifact of procedures.artifacts) {
       const item = element('li', undefined, artifactLine(artifact));

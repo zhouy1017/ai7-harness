@@ -1736,6 +1736,30 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       if (!validUuid(input.bookId) || !validUuid(input.reviewRunId)) throw new ProtocolError(tentativeId);
       break;
     }
+    case 'procedureLibrary': {
+      const input = value.input;
+      const pin = (candidate: unknown): boolean => isRecord(candidate) && hasExactKeys(candidate, ['procedureId', 'version', 'digest']) &&
+        isBoundedString(candidate.procedureId, 160) && isSafeInteger(candidate.version, 1) && typeof candidate.digest === 'string' && /^[a-f0-9]{64}$/u.test(candidate.digest);
+      if (!isRecord(input)) throw new ProtocolError(tentativeId);
+      if (input.action === 'inspect' && hasExactKeys(input, ['action'])) break;
+      if (input.action === 'stop' && hasExactKeys(input, ['action', 'procedure']) && pin(input.procedure)) break;
+      if (input.action === 'select' && hasExactKeys(input, ['action', 'bookId', 'procedure']) && validUuid(input.bookId) && pin(input.procedure)) break;
+      const edit = input.input;
+      if (input.action !== 'save' || !hasExactKeys(input, ['action', 'input']) || !isRecord(edit) ||
+        !hasExactKeys(edit, ['procedureId', 'basedOn', 'title', 'editorInstruction', 'stages', ...(edit.captureRunId === undefined ? [] : ['captureRunId'])]) ||
+        !(edit.procedureId === null || isBoundedString(edit.procedureId, 160)) || !pin(edit.basedOn) || !isBoundedString(edit.title, 1024) ||
+        !isBoundedString(edit.editorInstruction, 12000, true) || (edit.captureRunId !== undefined && !validUuid(edit.captureRunId)) ||
+        !Array.isArray(edit.stages) || edit.stages.length === 0 || edit.stages.length > 16 || !edit.stages.every((stage) => isRecord(stage) &&
+          hasExactKeys(stage, ['stageType', 'inputs', 'toolWhitelist', 'parallelism', 'outputTemplateId', 'exemptionRules', 'budgetShare', 'web']) &&
+          isBoundedString(stage.stageType, 80) && Array.isArray(stage.inputs) && stage.inputs.length <= 16 && stage.inputs.every((item) => isBoundedString(item, 160)) &&
+          Array.isArray(stage.toolWhitelist) && stage.toolWhitelist.length <= 16 && stage.toolWhitelist.every((item) => isBoundedString(item, 80)) &&
+          isSafeInteger(stage.parallelism, 1) && isBoundedString(stage.outputTemplateId, 160) && typeof stage.web === 'boolean' &&
+          typeof stage.budgetShare === 'number' && Number.isFinite(stage.budgetShare) && stage.budgetShare >= 0 && stage.budgetShare <= 1 &&
+          Array.isArray(stage.exemptionRules) && stage.exemptionRules.length <= 20 && stage.exemptionRules.every((rule) => isBoundedString(rule, 12000, true)))) {
+        throw new ProtocolError(tentativeId);
+      }
+      break;
+    }
     case 'saveCapturedProcedure': {
       const input = requireInput(value.input, ['bookId', 'reviewRunId', 'categoryIds', 'scopeSlot', 'title', 'procedureId'], tentativeId);
       if (!validUuid(input.bookId) || !validUuid(input.reviewRunId) || !Array.isArray(input.categoryIds) || !validReviewCategoryIds(input.categoryIds, 1) ||

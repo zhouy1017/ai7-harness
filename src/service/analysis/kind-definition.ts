@@ -252,6 +252,7 @@ export interface ResearchDeclaration {
 }
 
 export interface AnalysisKindDefinition {
+  readonly procedureBinding?: import('../procedures/execution.js').ProcedureKindBinding;
   readonly factualClaims?: { readonly level: 'standard' | 'strict'; readonly verificationPrompt: string; readonly verificationPromptDigest: string };
   readonly reviewCrossChapter?: { readonly baseline: import('../../shared/protocol.js').ReviewBaselineSource | null };
   readonly legacyReviewContract?: AnalysisKindDefinition;

@@ -1,3 +1,4 @@
+import { baselineProcedureDefinition } from '../../src/service/procedures/preinstalled.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -25,6 +26,23 @@ import {
 import type { ServiceOperation, ServiceOperationMap, ServiceRequest } from '../../src/shared/protocol.js';
 
 const encoder = new TextEncoder();
+
+describe('editable procedure commands (#1170)', () => {
+  it('carries exact version selections and new versions without accepting execution authority', () => {
+    const document = baselineProcedureDefinition();
+    const procedure = { procedureId: document.id, version: 1, digest: 'a'.repeat(64) };
+    const input = { procedureId: null, basedOn: procedure, title: '新工序', editorInstruction: '保留短句', stages: document.stages };
+    for (const command of [{ action: 'inspect' }, { action: 'save', input }, { action: 'stop', procedure },
+      { action: 'select', bookId: randomUUID(), procedure }]) {
+      const frame = { id: randomUUID(), op: 'procedureLibrary', input: command };
+      expect(decodeRequest(encoder.encode(JSON.stringify(frame)))).toEqual(frame);
+    }
+    for (const invalid of [{ ...input, provider: 'live' }, { ...input, basedOn: { ...procedure, digest: 'latest' } },
+      { ...input, stages: [{ ...document.stages[0], run: true }] }]) {
+      expect(() => decodeRequest(encoder.encode(JSON.stringify({ id: randomUUID(), op: 'procedureLibrary', input: { action: 'save', input: invalid } })))).toThrow(ProtocolError);
+    }
+  });
+});
 
 describe('explicit local review options (#1119)', () => {
   it('binds finite affirmative options only to the local entry and rejects resource/model additions', () => {

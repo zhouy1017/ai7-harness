@@ -1,6 +1,8 @@
+import { currentPreinstalledVersion, selectedProcedureForBook, resolveProcedurePin, procedureStopped, validateProcedureEdit } from '../procedures/editable.js';
+import { withProcedureDefinition, procedureInstruction } from '../procedures/execution.js';
 import { MODEL_REQUEST_ADMISSION_SCHEMA_VERSION } from '../task-authorization.js';
 import { procedureIdForKind, FACTUAL_CLAIM_PROCEDURE_ID } from '../procedures/preinstalled.js';
-import { recordProcedurePlanPin, readProcedurePlanPin, resolveProcedureDefinition } from '../procedures/definition-store.js';
+import { recordProcedurePlanPin, readProcedurePlanPin, readProcedurePlanDocument, resolveProcedureDefinition } from '../procedures/definition-store.js';
 import { withReviewLocalTools, pinnedReviewDefinition, reviewCategoryKindDefinition } from '../review/review-category-kind.js';
 import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryEntry, reviewCategoryContractInput } from '../review/category-configuration.js';
 import type { CompositionOptions } from '../harness/primary-agent-harness.js';
@@ -472,6 +474,7 @@ interface PreparationWork {
 
 /** A Task Intent as `prepare` decided it, before it is written. */
 interface PendingIntent {
+  readonly procedure?: ProcedureDefinitionPin;
   readonly factualDecision?: import('../factual-verification.js').FactualRecheckSelection;
   readonly taskIntentId: string;
   readonly bookId: string;
@@ -1747,6 +1750,18 @@ export class BaselineAnalysisStore {
    * the contract it froze.
    */
   definitionForDigest(promptContractDigest: string): AnalysisKindDefinition {
+    const row = this.#db.prepare(`SELECT p.canonical_json, p.sha256 FROM analysis_plan_records p JOIN analysis_task_intents t ON t.task_intent_id = p.task_intent_id
+      WHERE p.component = 'plan-envelope' AND t.kind = ? AND json_extract(p.canonical_json, '$.promptContractDigest') = ?
+      AND json_extract(p.canonical_json, '$.basePromptContractDigest') IS NOT NULL LIMIT 1`).get(this.#definition.kind, promptContractDigest);
+    if (row !== undefined) {
+      const plan = parseCanonicalJson(asString(row.canonical_json)) as { basePromptContractDigest: string; compositionOptions: { procedure: ProcedureDefinitionPin } };
+      const pin = plan.compositionOptions.procedure;
+      return withProcedureDefinition(this.#baseDefinitionForDigest(plan.basePromptContractDigest), readProcedurePlanDocument(this.#db, String(row.sha256))!, pin);
+    }
+    return this.#baseDefinitionForDigest(promptContractDigest);
+  }
+
+  #baseDefinitionForDigest(promptContractDigest: string): AnalysisKindDefinition {
     if (this.#originalDefinition.kind.startsWith('editorial-review/')) {
       const original = pinnedReviewDefinition(this.#originalDefinition, promptContractDigest);
       if (original.promptContractDigest === promptContractDigest) return original;
@@ -1781,7 +1796,15 @@ export class BaselineAnalysisStore {
     const planned = this.definitionForDigest(promptContractDigest);
     if (planned.kind !== FACTUAL_REVIEW_KIND) return planned;
     const assurance = this.factualRunAssurance(runRecordId);
-    return assurance?.effectiveLevel === 'quick' ? this.#factualDefinitionFor('quick') : planned;
+    if (assurance?.effectiveLevel !== 'quick') return planned;
+    const quick = this.#factualDefinitionFor('quick');
+    return planned.procedureBinding === undefined ? quick : withProcedureDefinition(quick, planned.procedureBinding.document, planned.procedureBinding.pin);
+  }
+
+  procedureForRun(runRecordId: string): import('../../shared/protocol/procedures.js').ProcedureDefinitionDocument | null {
+    const digest = this.#db.prepare(`SELECT a.plan_envelope_sha256 FROM analysis_run_records r
+      JOIN analysis_run_authorizations a ON a.authorization_id = r.authorization_id WHERE r.run_record_id = ?`).get(runRecordId);
+    return digest === undefined ? null : readProcedurePlanDocument(this.#db, String(digest.plan_envelope_sha256));
   }
 
   factualRunAssurance(runRecordId: string): import('../../shared/protocol.js').FactualRunAssuranceProjection | null {
@@ -1823,9 +1846,10 @@ export class BaselineAnalysisStore {
     return { ...sources, baseline, terms: baseline.entities.filter((entity) => isRecord(entity) && ['person', 'place', 'term'].includes(String(entity.kind))) };
   }
 
-  #newCompositionOptions(bookId: string, leafMode = false, definition = this.#definition): CompositionOptions {
+  #newCompositionOptions(bookId: string, leafMode = false, definition = this.#definition, selected?: ProcedureDefinitionPin): CompositionOptions {
     const id = definition.factualClaims === undefined ? procedureIdForKind(this.#definition.kind) : FACTUAL_CLAIM_PROCEDURE_ID;
-    const resolved = id === null ? null : resolveProcedureDefinition(this.#db, id, this.#definition.contractVersion === 'ai7.editorial-review/1' ? 1 : undefined);
+    const resolved = selected === undefined ? id === null ? null : resolveProcedureDefinition(this.#db, id, this.#definition.contractVersion === 'ai7.editorial-review/1' ? 1 : currentPreinstalledVersion(id))
+      : { document: resolveProcedurePin(this.#db, selected), pin: selected };
     const procedureOptions = resolved === null ? {} : { procedure: resolved.pin, stages: resolved.document.stages.map((stage, index) =>
       ({ ordinal: index + 1, stageType: stage.stageType, digest: sha256Hex(canonicalJson(stage)) })) };
     const stock = reviewCategoryEntry('typos-and-usage')!;
@@ -3137,15 +3161,26 @@ export class BaselineAnalysisStore {
    * leaves out-of-scope units unreviewed gets the scope plan, and the baseline kind gets the reuse plan
    * it has always had, from the same untouched function and therefore with the same bytes.
    */
+  #selectedDefinition(base: AnalysisKindDefinition, bookId: string): AnalysisKindDefinition {
+    const pin = selectedProcedureForBook(this.#db, bookId, base.kind);
+    return pin === null ? base : withProcedureDefinition(base, resolveProcedurePin(this.#db, pin), pin);
+  }
+
   #derivePlan(
     mode: AnalysisTaskMode,
     selectedRange: BaselineAnalysisSelectedRange | null,
     manifest: CoverageManifestProjection,
     predecessor: ReusePlanPredecessor | ScopePlanPredecessor | null,
+    definition = this.#selectedDefinition(this.#definition, manifest.manuscript.bookId),
   ): AnalysisPlanRecord {
+    const prior = predecessor === null ? null : this.#revisionBody(this.#revisionRowById(predecessor.revisionId));
+    const priorDefinition = prior === null ? null : this.definitionForDigest(String((prior.bindingPin as Record<string, unknown>).promptContractDigest));
+    const procedureCompatible = definition.procedureBinding === undefined && priorDefinition?.procedureBinding === undefined ||
+      prior?.schemaDigest === definition.schemaDigest;
     if (this.#definition.outOfScope === 'leave-unreviewed') {
       requireAnalysis(predecessor === null || 'schemaDigest' in predecessor, 'ANALYSIS_RECORD_INVALID', '前一修订版缺少审阅范围计划所需的事实。');
       return deriveScopePlan({
+        procedureCompatible,
         kind: this.#definition.kind,
         contractVersion: this.#definition.contractVersion,
         schemaDigest: this.#definition.schemaDigest,
@@ -3158,7 +3193,7 @@ export class BaselineAnalysisStore {
       });
     }
     requireAnalysis(predecessor !== null, 'ANALYSIS_RECORD_INVALID', '更新任务缺少前一修订版。');
-    return deriveReusePlan({ mode: mode as BaselineAnalysisUpdateMode, selectedRange, manifest, predecessor });
+    return deriveReusePlan({ procedureCompatible, mode: mode as BaselineAnalysisUpdateMode, selectedRange, manifest, predecessor });
   }
 
   /** The counts a whole first Task's revision states: every unit read, none reused. */
@@ -4264,14 +4299,16 @@ export class BaselineAnalysisStore {
     // imported anew since (Issue #427 review): its plan could never execute under this contract, so the preparation is a
     // new Task Intent under the contract that applies now.
     // So is one whose plan froze another assurance sampling contract (Issue #826): the composition does not pin it.
-    const contractCurrent = existing.planEnvelope === null || (existing.planEnvelope.promptContractDigest === this.#planDefinition(existing.planVersion?.edits ?? NO_PLAN_EDITS, existing.taskIntent?.mode).promptContractDigest &&
+    const contractCurrent = existing.planEnvelope === null || (existing.planEnvelope.promptContractDigest === this.#selectedDefinition(this.#planDefinition(existing.planVersion?.edits ?? NO_PLAN_EDITS, existing.taskIntent?.mode), input.bookId).promptContractDigest &&
       (existing.executionPlan === null ||
         !assuranceContractMoved(this.#definition, frozenAssurancePromptContractDigest(existing.executionPlan as unknown as Record<string, unknown>))));
     // Nor is a Task whose frozen scope plan the chain no longer derives (#711 review P3-4): 重新准备 makes it anew.
     const planDerives = existing.coverageManifest === null || existing.authorization !== null || this.#frozenPlanDerives(existing.update, existing.coverageManifest);
     // A Task the 后台分析登记 dispatcher prepared is never the editor's to revise or resume, and the dispatcher never takes up any
     // Task Intent but the one it creates now (#713 review, P1-2): each side's preparation is a Task of its own.
-    const sameTask = background === null && input.newTask !== true && intentDraft === null && latestIntent !== null && latestIntent.preparedByEnrollmentVersionId === null &&
+    const selectedProcedure = background === null ? selectedProcedureForBook(this.#db, input.bookId, this.#definition.kind) : null;
+    const sameProcedure = canonicalJson(latestIntent?.record.procedure ?? null) === canonicalJson(selectedProcedure);
+    const sameTask = sameProcedure && background === null && input.newTask !== true && intentDraft === null && latestIntent !== null && latestIntent.preparedByEnrollmentVersionId === null &&
       existing.run === null && latestIntent.mode === mode &&
       latestIntent.predecessorRevisionId === (latest?.revisionId ?? null) && (input.reconfirm || checkpointCurrent) && contractCurrent && planDerives;
     if (sameTask && existing.checkpoint !== null) {
@@ -4284,6 +4321,7 @@ export class BaselineAnalysisStore {
     // Background preparations and draft promotions write their intent only when the plan freezes. A stopped preparation leaves
     // no orphan intent, and a failed draft promotion leaves its draft editable. Ordinary preparation retains its existing path.
     const pendingIntent: PendingIntent | null = reusable ? null : {
+      ...(selectedProcedure === null ? {} : { procedure: selectedProcedure }),
       ...(input.factualDecision === undefined ? {} : { factualDecision: input.factualDecision }),
       taskIntentId, bookId: input.bookId, goal: input.goal, mode, redoOf,
       preparedByEnrollmentVersionId: background?.enrollmentVersionId ?? null,
@@ -4322,6 +4360,7 @@ export class BaselineAnalysisStore {
   #insertIntent(intent: PendingIntent): void {
     const createdAt = new Date().toISOString();
     const base = {
+      ...(intent.procedure === undefined ? {} : { procedure: intent.procedure }),
       ...(intent.factualDecision === undefined ? {} : { factualDecision: intent.factualDecision }),
       bookId: intent.bookId,
       contractVersion: this.#definition.contractVersion,
@@ -4448,6 +4487,26 @@ export class BaselineAnalysisStore {
       revisionDigest: checkpoint.revisionDigest,
       blocks,
     });
+    const live = this.#launch.live;
+    const production = live !== null && live.scope === 'ordinary-production' ? live : null;
+    // The editor's ceiling is the plan's own outside developer-live (Issue #51, S16a); under it the launch sets the
+    // ceiling, so a redo that copies a ceiling the editor once set keeps the rest of the edit and not the ceiling.
+    const edits = !launchSetsCeilingOf(live) ? input.edits : withoutCeiling(input.edits);
+    // The factual Task's level decides its contract and its research declaration (Issue #901); every other kind's is its own.
+    const baseDefinition = this.#planDefinition(edits, intent.mode);
+    const selected = intent.record.procedure as ProcedureDefinitionPin | undefined;
+    const document = selected === undefined ? null : resolveProcedurePin(this.#db, selected);
+    if (selected !== undefined && document !== null) {
+      const currentId = baseDefinition.factualClaims === undefined ? procedureIdForKind(baseDefinition.kind) : FACTUAL_CLAIM_PROCEDURE_ID;
+      if (currentId !== null) validateProcedureEdit(resolveProcedureDefinition(this.#db, currentId, currentPreinstalledVersion(currentId)).document,
+        { procedureId: null, basedOn: selected, title: document.title, editorInstruction: document.editorInstruction, stages: document.stages });
+    }
+    const definition = selected === undefined || document === null ? baseDefinition : withProcedureDefinition(baseDefinition, document, selected);
+    if (selected !== undefined) requireAnalysis(!procedureStopped(this.#db, selected), 'PROCEDURE_STOPPED', '所选工序版本已停用，请选择另一个版本。');
+    if (selected !== undefined && document !== null && procedureInstruction(document, selected) !== '' && live !== null) {
+      requireAnalysis(liveKindRule(this.#launch.policy, definition.kind, ['editor-task-instruction'])?.editorTaskInstruction !== undefined,
+        'PROCEDURE_INSTRUCTION_NOT_ADMITTED', '当前模型处理策略尚未允许编辑任务说明。');
+    }
     let reusePlan: AnalysisPlanRecord | null = null;
     if (this.#carriesPlan(intent.mode)) {
       const latestRow = this.#revisionRows(checkpoint.bookId).at(-1);
@@ -4466,6 +4525,7 @@ export class BaselineAnalysisStore {
         this.#definition.mode(intent.mode).rangeBound ? requireSelectedRange(input.selectedRange, manifest.totalBlocks) : null,
         manifest,
         latestRow === undefined ? null : this.#planPredecessor(latestRow),
+        definition,
       );
     }
     const manuscriptPin = {
@@ -4522,13 +4582,6 @@ export class BaselineAnalysisStore {
     // The plan freezes whichever binding the launch bound: the denied production binding on the
     // deterministic route, or the selected developer-live binding. Both are frozen before authorization, never chosen
     // at dispatch, so an authorized Run can never transmit somewhere its plan did not name.
-    const live = this.#launch.live;
-    const production = live !== null && live.scope === 'ordinary-production' ? live : null;
-    // The editor's ceiling is the plan's own outside developer-live (Issue #51, S16a); under it the launch sets the
-    // ceiling, so a redo that copies a ceiling the editor once set keeps the rest of the edit and not the ceiling.
-    const edits = !launchSetsCeilingOf(live) ? input.edits : withoutCeiling(input.edits);
-    // The factual Task's level decides its contract and its research declaration (Issue #901); every other kind's is its own.
-    const definition = this.#planDefinition(edits, intent.mode);
     const promptContractDigest = definition.promptContractDigest;
     const admittedToolRule = this.#definition.kind === BASELINE_ANALYSIS_KIND || intent.preparedByEnrollmentVersionId !== null ? null
       : liveKindRule(this.#launch.policy, this.#definition.kind);
@@ -4550,10 +4603,10 @@ export class BaselineAnalysisStore {
     }
     const leafMode = intent.mode === 'review-first' && intent.selectedRange === null && intent.preparedByEnrollmentVersionId === null;
     const composition = live === null
-      ? describeComposition(LOCAL_DETERMINISTIC_ROUTE, LOCAL_DETERMINISTIC_MODEL, promptContractDigest, this.#newCompositionOptions(checkpoint.bookId, leafMode, definition))
+      ? describeComposition(LOCAL_DETERMINISTIC_ROUTE, LOCAL_DETERMINISTIC_MODEL, promptContractDigest, this.#newCompositionOptions(checkpoint.bookId, leafMode, definition, selected))
       : describeComposition(live.route, live.model, promptContractDigest, { platformTools: webToolsBackend !== undefined && definition.factualClaims === undefined,
         researchDeclaration: definition.factualClaims === undefined ? researchDeclaration : { webSearch: false, searchEngine: null },
-        ...this.#newCompositionOptions(checkpoint.bookId, leafMode, definition),
+        ...this.#newCompositionOptions(checkpoint.bookId, leafMode, definition, selected),
         localTools: intent.preparedByEnrollmentVersionId === null && definition.evidenceAssuranceLevel !== 'quick' && definition.factualClaims === undefined ? kindLocalTools(this.#launch.policy, this.#definition.kind) ?? false : false });
     const providerPlan = {
       ...this.#selectedPlanMetadata(input.policy),
@@ -4672,6 +4725,7 @@ export class BaselineAnalysisStore {
       providerResolutionPlanDigest: records['provider-resolution-plan']!.digest,
       executionPlanDigest: records['execution-plan']!.digest,
       promptContractDigest,
+      ...(definition.procedureBinding === undefined ? {} : { basePromptContractDigest: baseDefinition.promptContractDigest }),
       ...(definition.contractIdentity === undefined ? {} : { contractIdentity: { ...definition.contractIdentity, digest: promptContractDigest } }),
       behaviorCompositionDigest: composition.digest,
       compositionVersion: composition.version,
@@ -4703,8 +4757,7 @@ export class BaselineAnalysisStore {
       `INSERT INTO analysis_plan_versions(plan_version_id, task_intent_id, ordinal, plan_revision_id, plan_envelope_sha256, created_at, canonical_json, sha256)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(planVersionId, taskIntentId, ordinal, input.planRevisionId, envelope.digest, instant, version.json, version.digest);
-    const procedureId = definition.factualClaims === undefined ? procedureIdForKind(this.#definition.kind) : FACTUAL_CLAIM_PROCEDURE_ID;
-    if (procedureId !== null) recordProcedurePlanPin(this.#db, taskIntentId, envelope.digest, procedureId, definition.contractVersion === 'ai7.editorial-review/1' ? 1 : undefined);
+    if (composition.procedure !== undefined) recordProcedurePlanPin(this.#db, taskIntentId, envelope.digest, composition.procedure.procedureId, composition.procedure.version);
     return { planVersionId, planEnvelopeDigest: envelope.digest };
   }
 
@@ -4792,6 +4845,7 @@ export class BaselineAnalysisStore {
       ...(origin.kind === 'background-analysis-enrollment' ? { enrollmentVersionId: origin.enrollmentVersionId } : {}),
     });
     const procedure = readProcedurePlanPin(this.#db, planEnvelopeDigest);
+    requireAnalysis(procedure === null || !procedureStopped(this.#db, procedure), 'PROCEDURE_STOPPED', '计划固定的工序版本已停用，请选择另一个版本重新准备。');
     const run = canonicalRecord({ runRecordId, authorizationId, taskIntentId, recordedAt: instant,
       ...(procedure === null ? {} : { procedure }) });
     transact(this.#db, () => {
@@ -5013,7 +5067,7 @@ export class BaselineAnalysisStore {
    * What a stopped Run spent beyond its units before it stopped — settled or refused stage work — as its latest
    * stop kept it (Issue #51, S16a): the ceiling counts it after 续行 as it did before. `null` when no stop kept any.
    */
-  carriedUsageOf(runRecordId: string): { inputTokens: number; outputTokens: number; stages: CarriedStages | null } | null {
+  carriedUsageOf(runRecordId: string): { inputTokens: number; outputTokens: number; stages: CarriedStages | null; webVerification?: { inputTokens: number; outputTokens: number } } | null {
     const rows = this.#db.prepare(
       `SELECT canonical_json, sha256 FROM analysis_run_states WHERE run_record_id = ? AND
        (state IN ('paused', 'resumable', 'awaiting-clarification') OR
@@ -5029,7 +5083,7 @@ export class BaselineAnalysisStore {
       }
       const carried = record.carriedUsage;
       if (carried === undefined) continue;
-      const usage = carried as { inputTokens?: unknown; outputTokens?: unknown; stages?: unknown };
+      const usage = carried as { inputTokens?: unknown; outputTokens?: unknown; stages?: unknown; webVerification?: { inputTokens?: unknown; outputTokens?: unknown } };
       requireAnalysis(carried !== null && typeof carried === 'object' && count(usage.inputTokens) && count(usage.outputTokens),
         'ANALYSIS_RECORD_INVALID', '运行记录的已用量无效。');
       // The stages a stop kept its usage by (Issue #541); a stop recorded before they were kept names none.
@@ -5048,7 +5102,12 @@ export class BaselineAnalysisStore {
         requireAnalysis(summed.inputTokens <= (usage.inputTokens as number) && summed.outputTokens <= (usage.outputTokens as number),
           'ANALYSIS_RECORD_INVALID', '运行记录的已用量无效。');
       }
-      return { inputTokens: usage.inputTokens as number, outputTokens: usage.outputTokens as number, stages };
+      const web = usage.webVerification;
+      requireAnalysis(web === undefined || web !== null && count(web.inputTokens) && count(web.outputTokens) &&
+        web.inputTokens <= (usage.inputTokens as number) && web.outputTokens <= (usage.outputTokens as number),
+      'ANALYSIS_RECORD_INVALID', '联网取证阶段的已用量无效。');
+      return { inputTokens: usage.inputTokens as number, outputTokens: usage.outputTokens as number, stages,
+        ...(web === undefined ? {} : { webVerification: { inputTokens: web.inputTokens as number, outputTokens: web.outputTokens as number } }) };
     }
     return null;
   }
@@ -5951,7 +6010,7 @@ export class BaselineAnalysisStore {
         predecessor = this.#planPredecessor(predecessorRow);
       }
       const stored = plan['reuse-plan'] as AnalysisPlanRecord;
-      const rederived = this.#derivePlan(intent.mode, stored.selectedRange, manifest, predecessor);
+      const rederived = this.#derivePlan(intent.mode, stored.selectedRange, manifest, predecessor, this.definitionForDigest(asString(envelope.promptContractDigest)));
       const record = reusePlanRecord(rederived);
       requireAnalysis(record.digest === digests['reuse-plan'] && canonicalJson(stored) === record.json && envelope.reusePlanDigest === record.digest,
         'ANALYSIS_REUSE_PLAN_DRIFT', REUSE_PLAN_DRIFT_REASON);

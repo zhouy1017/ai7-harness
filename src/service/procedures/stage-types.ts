@@ -6,18 +6,7 @@ import { reduceReviewCategory } from '../review/review-category-reducers.js';
 import { parseFactualClaimVerification } from '../analysis/factual-claim-contract.js';
 
 /** The registry describes existing owners; it neither schedules work nor constructs model messages. */
-export const PROCEDURE_STAGE_LABELS: Readonly<Record<ProcedureStageType, string>> = {
-  'read-through-ledger': '通读记账',
-  'chunked-review': '分块审读',
-  'deterministic-check': '确定性检查',
-  'claim-extraction': '断言抽取',
-  'web-verification': '联网取证',
-  'cross-unit-reduction': '跨单元归并与跨章一致性',
-  'cross-chapter-consistency': '跨章一致性',
-  synthesis: '综合',
-  drafting: '起草',
-  'derived-report': '派生报告',
-};
+export { PROCEDURE_STAGE_LABELS } from '../../shared/protocol/procedures.js';
 
 export type ProcedureStageExecutor =
   | { readonly state: 'available'; readonly executor: 'local-text-check'; readonly check: typeof checkLocalPlan }
@@ -43,6 +32,9 @@ export function resolveProcedureStage(stageType: ProcedureStageType, definition?
     case 'chunked-review':
       return definition === undefined ? unavailable('尚未绑定现有单元契约。')
         : { state: 'available', executor: 'unit-contract', definition };
+    case 'drafting':
+      return definition?.crossUnit != null && ['writing', 'readers-report', 'evaluation-rewrite'].includes(definition.kind)
+        ? { state: 'available', executor: 'cross-unit', binding: definition.crossUnit } : unavailable('这一任务没有起草阶段。');
     case 'cross-unit-reduction':
       if (definition?.reviewCrossChapter !== undefined) return { state: 'available', executor: 'review-grouping', reduce: reduceReviewCategory };
       return definition?.crossUnit == null ? unavailable('这一契约没有跨单元阶段。')
