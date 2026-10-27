@@ -186,7 +186,7 @@ const PRE_17_PLAN_COLUMNS = 'task_intent_id, component, canonical_json, sha256, 
 
 /** Drop the three revision-17 relations and rebuild `analysis_plan_records` in its exact revision-16 shape (plan version 1 only). */
 function downgradePlanRecordsToRevision16(database: DatabaseSync): void {
-  database.exec('DROP TABLE procedure_plan_pins; DROP TABLE procedure_definition_versions; DROP TABLE procedure_definitions');
+  database.exec('DROP TABLE procedure_run_choices; DROP TABLE procedure_version_stops; DROP TABLE procedure_version_origins; DROP TABLE procedure_plan_pins; DROP TABLE procedure_definition_versions; DROP TABLE procedure_definitions');
   for (const table of [...ANALYSIS_LEDGER_REVISION_17_TABLES].reverse()) database.exec(`DROP TABLE ${table}`);
   database.exec('CREATE TEMP TABLE downgrade_plans AS SELECT rowid AS r, * FROM analysis_plan_records WHERE plan_version = 1');
   database.exec('DROP TABLE analysis_plan_records');

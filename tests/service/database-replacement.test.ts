@@ -1,3 +1,4 @@
+import { PROCEDURE_DEFINITION_SCHEMA_SQL, PROCEDURE_DEFINITION_TRIGGER_SQL } from '../../src/service/procedures/definition-store.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { copyFile, readFile, readdir, rename, writeFile } from 'node:fs/promises';
@@ -104,11 +105,17 @@ async function handmade(name: string, dataVersion: number, schemaRevision: numbe
   mkdirSync(join(other, 'objects'), { recursive: true });
   if (schemaRevision >= 55) {
     const store = await EditorialStore.open(other, roots.codeRoot);
+    if (schemaRevision === 97) createBook(store, '版本97合成图书');
     store.close();
   }
   const database = new DatabaseSync(schemaRevision >= 55 ? join(other, 'store', 'ai7.sqlite') : ':memory:');
   try {
     if (schemaRevision < 55) database.exec('CREATE TABLE marker (value TEXT) STRICT;');
+    if (schemaRevision === 97) {
+      database.exec('DROP TABLE procedure_run_choices; DROP TABLE procedure_version_stops; DROP TABLE procedure_version_origins; DROP TABLE procedure_plan_pins;');
+      database.exec(PROCEDURE_DEFINITION_SCHEMA_SQL.procedure_plan_pins);
+      for (const action of ['update', 'delete']) database.exec(PROCEDURE_DEFINITION_TRIGGER_SQL[`procedure_plan_pins_no_${action}`]!);
+    }
     execPre74Fixture(database, `PRAGMA user_version = ${schemaRevision};`);
     const path = join(roots.inputRoot, name);
     await writeDatabasePackage(database, other, path, () => ({
@@ -123,6 +130,44 @@ async function handmade(name: string, dataVersion: number, schemaRevision: numbe
 const backups = (): string => `${roots.dataRoot}-backups`;
 
 describe('导入数据库 over the real store', () => {
+  it('migrates a genuine revision-97 package through replacement before creating an editable version (#1170)', async () => {
+    const path = await handmade('revision97.ai7db', 1, 97);
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const preview = await store.inspectDatabaseImport(path);
+      expect(preview).toMatchObject({ schemaRevision: 97, compatibility: 'compatible' });
+      await store.prepareDatabaseReplacement(preview.previewId, T);
+      store.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      expect(titles(store)).toEqual(['版本97合成图书']);
+      const original = store.procedureLibrary({ action: 'inspect' }).procedures.find((entry) => entry.executorKind === 'writing')!;
+      const created = store.procedureLibrary({ action: 'save', input: { procedureId: original.procedureId,
+        basedOn: { procedureId: original.procedureId, version: original.version, digest: original.digest },
+        title: '迁移后的写作', editorInstruction: '简明', stages: original.document.stages } });
+      expect(created.procedures.find((entry) => entry.procedureId === original.procedureId)!.documents).toContainEqual(original.document);
+      expect(await store.inspectDatabaseImport(await exported(store, 'revision98.ai7db'))).toMatchObject({ schemaRevision: 98 });
+      store.markCleanShutdown();
+    } finally { store.close(); }
+  });
+
+  it('retains custom versions and their stop state through public database replacement (#1170)', async () => {
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      createBook(store, '本社工序合成图书');
+      const original = store.procedureLibrary({ action: 'inspect' }).procedures.find((entry) => entry.executorKind === 'writing')!;
+      const input = { procedureId: null, basedOn: { procedureId: original.procedureId, version: original.version, digest: original.digest },
+        title: '替换保留的工序', editorInstruction: '保留作者语气', stages: original.document.stages };
+      const created = store.procedureLibrary({ action: 'save', input }).procedures.find((entry) => entry.document.title === input.title)!;
+      const procedure = { procedureId: created.procedureId, version: created.version, digest: created.digest };
+      store.procedureLibrary({ action: 'stop', procedure });
+      const preview = await store.inspectDatabaseImport(await exported(store, 'procedure-replacement.ai7db'));
+      await store.prepareDatabaseReplacement(preview.previewId, T);
+      store.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      expect(store.procedureLibrary({ action: 'inspect' }).procedures.find((entry) => entry.procedureId === procedure.procedureId))
+        .toMatchObject({ ...procedure, document: created.document, stopped: true });
+      store.markCleanShutdown();
+    } finally { store.close(); }
+  });
+
   it('reopens the genuine revision-96 predecessor with its Book and learning choice intact (#1168)', async () => {
     let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     const bookId = createBook(store, '版本九十六的合成图书');
@@ -136,7 +181,7 @@ describe('导入数据库 over the real store', () => {
       expect(store.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }))
         .toMatchObject({ enabled: false, signals: [], items: [], controlEntries: 1 });
       const preview = await store.inspectDatabaseImport(await exported(store, 'migrated-v96.ai7db'));
-      expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 97, dataVersion: 1 });
+      expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 98, dataVersion: 1 });
       store.markCleanShutdown();
     } finally { store.close(); }
   });
@@ -158,7 +203,7 @@ describe('导入数据库 over the real store', () => {
       expect(original.localFixtureProfile).toBeUndefined();
       const packagePath = await exported(store, 'selected-v1.ai7db');
       const preview = await store.inspectDatabaseImport(packagePath);
-      expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 97, dataVersion: 1 });
+      expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 98, dataVersion: 1 });
       await store.prepareDatabaseReplacement(preview.previewId, T); await store.close();
       store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, control);
       expect(store.inspectFactualReview(book.bookId).providerResolutionPlan).toEqual(original);

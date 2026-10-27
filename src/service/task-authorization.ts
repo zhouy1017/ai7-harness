@@ -525,7 +525,8 @@ export const POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION = 94;
 const PRE_CURATION_SCHEMA_VERSION = 95;
 export const LEARNING_CURATION_SCHEMA_VERSION = 96;
 export const FACTUAL_CLAIM_SCHEMA_VERSION = 97;
-export const LATEST_SCHEMA_VERSION = FACTUAL_CLAIM_SCHEMA_VERSION;
+export const EDITABLE_PROCEDURE_SCHEMA_VERSION = 98;
+export const LATEST_SCHEMA_VERSION = EDITABLE_PROCEDURE_SCHEMA_VERSION;
 /** The custom analysis kind family slice 7f brings (ADR 0090 item 4): admitted here so it needs no second rebuild. */
 const CUSTOM_ANALYSIS_KIND_GLOB = 'custom-analysis/[a-z0-9-]*' as const;
 const CUSTOM_ANALYSIS_CONTRACT_VERSION_GLOB = 'ai7.custom-analysis*/[0-9]*' as const;
@@ -1851,7 +1852,7 @@ function requireExactObjects(
     const row = db.prepare('SELECT sql FROM sqlite_schema WHERE type = ? AND name = ?').get(type, name) as SqlRow | undefined;
     const curationShape = type === 'table' && Number(db.prepare('PRAGMA user_version').get()?.user_version) >= LEARNING_CURATION_SCHEMA_VERSION
       && CURATION_SCHEMA_SQL[name] !== undefined && row !== undefined && normalizeSql(asString(row.sql)) === normalizeSql(CURATION_SCHEMA_SQL[name]!);
-    const factualShape = type === 'table' && Number(db.prepare('PRAGMA user_version').get()?.user_version) === FACTUAL_CLAIM_SCHEMA_VERSION
+    const factualShape = type === 'table' && Number(db.prepare('PRAGMA user_version').get()?.user_version) >= FACTUAL_CLAIM_SCHEMA_VERSION
       && name === 'analysis_task_intents' && row !== undefined && normalizeSql(asString(row.sql)) === normalizeSql(FACTUAL_TASK_INTENTS_SQL);
     const idlePreStamp = type === 'table' && name === 'analysis_run_authorizations' &&
       normalizeSql(sql) === normalizeSql(ANALYSIS_LEDGER_SCHEMA_SQL.analysis_run_authorizations) &&
@@ -3225,6 +3226,10 @@ function initializeCurationSchema(db: DatabaseSync): void {
 
 export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
   if (Number(db.prepare('PRAGMA user_version').get()?.user_version) === LATEST_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
+  if (Number(db.prepare('PRAGMA user_version').get()?.user_version) === FACTUAL_CLAIM_SCHEMA_VERSION) {
+    db.exec(`PRAGMA user_version = ${LATEST_SCHEMA_VERSION}`);
+    return validateTaskAuthorizationSchema(db);
+  }
   initializeCurationSchema(db);
   const foreignKeys = Number(db.prepare('PRAGMA foreign_keys').get()?.foreign_keys) === 1;
   db.exec('PRAGMA foreign_keys = OFF');

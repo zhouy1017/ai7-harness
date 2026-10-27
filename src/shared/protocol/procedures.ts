@@ -8,7 +8,7 @@ export type ProcedureStageType = (typeof PROCEDURE_STAGE_TYPES)[number];
 
 /** Closed local formats; declaring v2 does not select or activate it. */
 export type LocalCheckProcedureVersion = 1 | 2 | 3;
-export type LocalCheckPlanSchema = 'ai7.review.local-plan/1' | 'ai7.review.local-plan/2' | 'ai7.review.local-plan/3';
+export type LocalCheckPlanSchema = 'ai7.review.local-plan/1' | 'ai7.review.local-plan/2' | 'ai7.review.local-plan/3' | 'ai7.review.local-plan/4';
 export type LocalCheckResultSchema = 'ai7.review.local-result/1' | 'ai7.review.local-result/2' | 'ai7.review.local-result/3';
 export type LocalCheckArtifactSchema = 'ai7.review.local-stage-artifact/1' | 'ai7.review.local-stage-artifact/2' | 'ai7.review.local-stage-artifact/3';
 
@@ -72,4 +72,57 @@ export interface PreinstalledProcedureProjection extends ProcedureDefinitionPin 
   readonly previousVersions?: readonly (ProcedureDefinitionPin & { readonly stages: readonly { readonly stageType: ProcedureStageType; readonly label: string }[] })[];
   readonly state: 'enabled';
   readonly uses: number;
+}
+
+/** A library version always names an existing product executor. */
+export interface EditableProcedureProjection extends ProcedureDefinitionPin {
+  readonly document: ProcedureDefinitionDocument;
+  readonly executorKind: string;
+  readonly preInstalled: boolean;
+  readonly stopped: boolean;
+  readonly sourceRunId: string | null;
+  readonly versions: readonly ProcedureDefinitionPin[];
+  readonly documents: readonly ProcedureDefinitionDocument[];
+  readonly uses: number;
+}
+
+export interface SaveProcedureDefinitionInput {
+  /** Null creates a procedure from the selected executor's template. */
+  readonly procedureId: string | null;
+  readonly basedOn: ProcedureDefinitionPin;
+  readonly title: string;
+  readonly editorInstruction: string;
+  readonly stages: readonly ProcedureStageDefinition[];
+  readonly captureRunId?: string;
+}
+
+export interface ProcedureLibraryProjection {
+  readonly procedures: readonly EditableProcedureProjection[];
+  readonly completedRuns: readonly { readonly runId: string; readonly bookId: string; readonly bookTitle: string;
+    readonly title: string; readonly procedure: ProcedureDefinitionPin; readonly document: ProcedureDefinitionDocument; readonly executorKind: string }[];
+}
+
+export type ProcedureLibraryCommand =
+  | { readonly action: 'inspect' }
+  | { readonly action: 'save'; readonly input: SaveProcedureDefinitionInput }
+  | { readonly action: 'stop'; readonly procedure: ProcedureDefinitionPin }
+  | { readonly action: 'select'; readonly bookId: string; readonly procedure: ProcedureDefinitionPin };
+
+export const PROCEDURE_STAGE_LABELS: Readonly<Record<ProcedureStageType, string>> = {
+  'read-through-ledger': '通读记账',
+  'chunked-review': '分块审读',
+  'deterministic-check': '确定性检查',
+  'claim-extraction': '断言抽取',
+  'web-verification': '联网取证',
+  'cross-unit-reduction': '跨单元归并与跨章一致性',
+  'cross-chapter-consistency': '跨章一致性',
+  synthesis: '综合',
+  drafting: '起草',
+  'derived-report': '派生报告',
+};
+
+/** Existing deterministic owners cannot interpret text rules or spend a model budget. */
+export function procedureStageUsesModel(stage: ProcedureStageDefinition, stages: readonly ProcedureStageDefinition[]): boolean {
+  return !['deterministic-check', 'synthesis', 'derived-report'].includes(stage.stageType) &&
+    !(stage.stageType === 'cross-unit-reduction' && stages.some((entry) => entry.stageType === 'cross-chapter-consistency'));
 }

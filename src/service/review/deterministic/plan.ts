@@ -1,4 +1,5 @@
-import type { LocalCheckOptions, ProcedureDefinitionPin } from '../../../shared/protocol/procedures.js';
+import type { LocalCheckOptions, ProcedureDefinitionPin, ProcedureDefinitionDocument } from '../../../shared/protocol/procedures.js';
+import { validateProcedureEdit } from '../../procedures/editable.js';
 import { BLOCK_ID_PATTERN, canonicalJson, hasExactKeys, isRecord, sha256Hex } from '../../analysis/canonical.js';
 import { graphemeCount } from '../../analysis/factual-review-contract.js';
 import { LOCAL_CHECK_PROCEDURE, LOCAL_RULE_IDS, LOCAL_RULE_IDS_V2 } from './rules.js';
@@ -37,7 +38,15 @@ export interface LocalCheckPlanV3 extends Omit<LocalCheckPlanV2, 'schema' | 'hou
   readonly standardTableVersion: typeof STANDARD_TABLE_VERSION;
   readonly houseWordList: LocalCheckPlanV2['houseWordList'] | null;
 }
-export type AnyLocalCheckPlan = LocalCheckPlan | LocalCheckPlanV2 | LocalCheckPlanV3;
+export interface LocalCheckPlanV4 extends Omit<LocalCheckPlanV3, 'schema'> {
+  readonly schema: 'ai7.review.local-plan/4';
+  readonly procedureDefinition: ProcedureDefinitionDocument;
+}
+export type LocalCheckTablePlan = LocalCheckPlanV3 | LocalCheckPlanV4;
+export type AnyLocalCheckPlan = LocalCheckPlan | LocalCheckPlanV2 | LocalCheckTablePlan;
+export function isLocalTablePlan(plan: AnyLocalCheckPlan): plan is LocalCheckTablePlan {
+  return plan.schema === 'ai7.review.local-plan/3' || plan.schema === 'ai7.review.local-plan/4';
+}
 export class LocalCheckError extends Error {
   constructor(readonly code: string, message: string) { super(message); this.name = 'LocalCheckError'; }
 }
@@ -72,7 +81,8 @@ export function validateLocalPlan(value: unknown): asserts value is LocalCheckPl
 function validateLocalFields(value: Record<string, unknown>, version: 1 | 2 | 3, ruleIds: readonly string[]): void {
   requireLocal(value.bookImportId === null || typeof value.bookImportId === 'string' && /^[0-9a-f-]{36}$/i.test(value.bookImportId));
   requireLocal(isRecord(value.procedure) && hasExactKeys(value.procedure, ['procedureId', 'version', 'digest']) &&
-    value.procedure.procedureId === LOCAL_CHECK_PROCEDURE && value.procedure.version === version && typeof value.procedure.digest === 'string' && /^[0-9a-f]{64}$/.test(value.procedure.digest));
+    (value.schema === 'ai7.review.local-plan/4' || value.procedure.procedureId === LOCAL_CHECK_PROCEDURE && value.procedure.version === version) &&
+    typeof value.procedure.digest === 'string' && /^[0-9a-f]{64}$/.test(value.procedure.digest));
   requireLocal(canonicalJson(value.rules) === canonicalJson(ruleIds.map((id) => ({ id, version: 1 }))));
   requireLocal(['whole', 'chapters', 'selection'].includes(String(value.scope)) && validLocalOptions(value.options));
   requireLocal(version === 3 ? value.options.tables !== undefined : value.options.tables === undefined);
@@ -120,11 +130,29 @@ export function freezeLocalPlanV3(input: Omit<LocalCheckPlanV3, 'schema' | 'rule
   validateLocalPlanV3(plan); return plan;
 }
 export function validateLocalPlanV3(value: unknown): asserts value is LocalCheckPlanV3 {
-  requireLocal(isRecord(value) && hasExactKeys(value, ['schema', 'procedure', 'rules', 'source', 'bookImportId', 'scope', 'options', 'blocks', 'digest', 'grammarVersion', 'exclusionVersion', 'houseWordList', 'standardTableVersion']));
+  requireLocal(isRecord(value) && value.schema === 'ai7.review.local-plan/3');
+  validateLocalTablePlan(value);
+}
+export function freezeLocalPlanV4(input: Omit<LocalCheckPlanV4, 'schema' | 'rules' | 'digest' | 'grammarVersion' | 'exclusionVersion' | 'standardTableVersion'>): LocalCheckPlanV4 {
+  const body = { schema: 'ai7.review.local-plan/4' as const, ...structuredClone(input), grammarVersion: 1 as const, exclusionVersion: 1 as const,
+    standardTableVersion: STANDARD_TABLE_VERSION, rules: [...LOCAL_RULE_IDS_V2, ...TABLE_RULE_IDS].map((id) => ({ id, version: 1 })) };
+  const plan = { ...body, digest: sha256Hex(canonicalJson(body)) };
+  validateLocalTablePlan(plan); return plan;
+}
+function validateLocalTablePlan(value: Record<string, unknown>): void {
+  const editable = value.schema === 'ai7.review.local-plan/4';
+  requireLocal(hasExactKeys(value, ['schema', 'procedure', 'rules', 'source', 'bookImportId', 'scope', 'options', 'blocks', 'digest', 'grammarVersion', 'exclusionVersion', 'houseWordList', 'standardTableVersion', ...(editable ? ['procedureDefinition'] : [])]));
   const { digest, ...body } = value;
-  requireLocal(value.schema === 'ai7.review.local-plan/3' && digest === sha256Hex(canonicalJson(body)) && value.grammarVersion === 1 && value.exclusionVersion === 1 && value.standardTableVersion === STANDARD_TABLE_VERSION);
+  requireLocal((editable || value.schema === 'ai7.review.local-plan/3') && digest === sha256Hex(canonicalJson(body)) && value.grammarVersion === 1 && value.exclusionVersion === 1 && value.standardTableVersion === STANDARD_TABLE_VERSION);
   validateLocalFields(value, 3, [...LOCAL_RULE_IDS_V2, ...TABLE_RULE_IDS]);
-  requireLocal(isRecord(value.procedure) && value.procedure.digest === sha256Hex(canonicalJson(localCheckProcedureDefinitionV3())) && isRecord(value.options) && validLocalTables(value.options.tables));
+  requireLocal(isRecord(value.procedure) && isRecord(value.options) && validLocalTables(value.options.tables));
+  if (editable) {
+    requireLocal(isRecord(value.procedureDefinition) && value.procedureDefinition.id === value.procedure.procedureId &&
+      value.procedureDefinition.version === value.procedure.version && sha256Hex(canonicalJson(value.procedureDefinition)) === value.procedure.digest);
+    const document = value.procedureDefinition as unknown as ProcedureDefinitionDocument;
+    validateProcedureEdit(localCheckProcedureDefinitionV3(), { procedureId: document.id, basedOn: value.procedure as unknown as ProcedureDefinitionPin,
+      title: document.title, editorInstruction: document.editorInstruction, stages: document.stages });
+  } else requireLocal(value.procedure.digest === sha256Hex(canonicalJson(localCheckProcedureDefinitionV3())));
   if (value.houseWordList === null) requireLocal(value.options.tables.houseWordList === null);
   else {
     requireLocal(isRecord(value.houseWordList) && hasExactKeys(value.houseWordList, ['pin', 'document']));
@@ -134,7 +162,8 @@ export function validateLocalPlanV3(value: unknown): asserts value is LocalCheck
   }
 }
 export function validateAnyLocalPlan(value: unknown): asserts value is AnyLocalCheckPlan {
-  if (isRecord(value) && value.schema === 'ai7.review.local-plan/3') validateLocalPlanV3(value);
+  if (isRecord(value) && value.schema === 'ai7.review.local-plan/4') validateLocalTablePlan(value);
+  else if (isRecord(value) && value.schema === 'ai7.review.local-plan/3') validateLocalPlanV3(value);
   else if (isRecord(value) && value.schema === 'ai7.review.local-plan/2') validateLocalPlanV2(value);
   else validateLocalPlan(value);
 }

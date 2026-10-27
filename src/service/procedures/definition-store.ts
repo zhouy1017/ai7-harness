@@ -2,7 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { ProcedureDefinitionDocument, ProcedureDefinitionPin } from '../../shared/protocol/procedures.js';
 import { canonicalJson, canonicalRecord, parseCanonicalJson, requireAnalysis, sha256Hex } from '../analysis/canonical.js';
 import { preinstalledProcedureDefinitions, allPreinstalledProcedureDefinitions } from './preinstalled.js';
-import { FACTUAL_CLAIM_SCHEMA_VERSION, LOCAL_REVIEW_SCHEMA_VERSION, REVIEW_CONTRACT_SCHEMA_VERSION } from '../task-authorization.js';
+import { FACTUAL_CLAIM_SCHEMA_VERSION, EDITABLE_PROCEDURE_SCHEMA_VERSION, REVIEW_CONTRACT_SCHEMA_VERSION } from '../task-authorization.js';
 import { HOUSE_WORD_LIST_SCHEMA_VERSION } from '../review/house-word-list.js';
 
 export const PROCEDURE_DEFINITION_SCHEMA_SQL = {
@@ -51,13 +51,30 @@ export const PROCEDURE_DEFINITION_FOREIGN_KEYS = {
   ],
 } as const;
 
+/** A merged Book carries the version snapshot without installing another house's library. */
+export const PROCEDURE_PLAN_PINS_V2_SQL = PROCEDURE_DEFINITION_SCHEMA_SQL.procedure_plan_pins.replace(
+  'version_id TEXT NOT NULL REFERENCES', 'version_id TEXT REFERENCES');
+
+export function migrateProcedurePlanSnapshots(db: DatabaseSync): void {
+  const row = db.prepare("SELECT sql FROM sqlite_schema WHERE name = 'procedure_plan_pins'").get();
+  if (!String(row?.sql).includes('version_id TEXT NOT NULL')) return;
+  db.exec('CREATE TEMP TABLE previous_procedure_pins AS SELECT * FROM procedure_plan_pins');
+  db.exec('DROP TABLE procedure_plan_pins');
+  db.exec(PROCEDURE_PLAN_PINS_V2_SQL);
+  if (db.prepare('SELECT 1 FROM previous_procedure_pins LIMIT 1').get() !== undefined) {
+    db.exec('INSERT INTO procedure_plan_pins SELECT * FROM previous_procedure_pins');
+  }
+  db.exec('DROP TABLE previous_procedure_pins');
+  for (const operation of ['update', 'delete']) db.exec(PROCEDURE_DEFINITION_TRIGGER_SQL[`procedure_plan_pins_no_${operation}`]!);
+}
+
 /** The three tables and the initial ten versions commit together, before the terminal schema stamp. */
 function insertProcedureVersions(db: DatabaseSync, documents: readonly ProcedureDefinitionDocument[]): void {
   const createdAt = new Date().toISOString();
   for (const document of documents) {
     if (document.version === 1) {
       const identity = canonicalRecord({ procedureId: document.id, preInstalled: true, createdAt });
-      db.prepare('INSERT INTO procedure_definitions VALUES (?, 1, ?, ?, ?)').run(document.id, createdAt, identity.json, identity.digest);
+      db.prepare('INSERT INTO procedure_definitions VALUES (?, 1, ?, ?, ?) ON CONFLICT(procedure_id) DO NOTHING').run(document.id, createdAt, identity.json, identity.digest);
     }
     const record = canonicalRecord(document);
     const versionId = `${document.id}@${document.version}`;
@@ -73,10 +90,10 @@ function insertProcedureVersions(db: DatabaseSync, documents: readonly Procedure
 export function initializeProcedureDefinitionSchema(db: DatabaseSync): void {
   const existing = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'procedure_definitions'").get() !== undefined;
   if (existing) {
-    const legacy = Number(db.prepare('PRAGMA user_version').get()?.user_version) < HOUSE_WORD_LIST_SCHEMA_VERSION;
-    validateProcedureDefinitions(db, legacy, true);
-    const count = Number(db.prepare('SELECT count(*) total FROM procedure_definition_versions').get()!.total);
-    if (count === allPreinstalledProcedureDefinitions().length) return;
+    if (Number(db.prepare('PRAGMA user_version').get()?.user_version) >= EDITABLE_PROCEDURE_SCHEMA_VERSION) {
+      validateProcedureDefinitions(db);
+      return;
+    }
   }
   db.exec('BEGIN IMMEDIATE');
   try {
@@ -96,37 +113,19 @@ export function initializeProcedureDefinitionSchema(db: DatabaseSync): void {
   }
 }
 
-/** Both generations have fixed bytes; a current store may lose neither predecessors nor successors. */
+/** Check the finite product catalogue by key. Historical content is immutable and validated when written/read. */
 export function validateProcedureDefinitions(db: DatabaseSync, allowLegacy = false, allowPreCrossChapter = false): void {
-  const identities = db.prepare('SELECT * FROM procedure_definitions').all();
-  const versions = db.prepare('SELECT * FROM procedure_definition_versions').all();
   const schemaVersion = Number(db.prepare('PRAGMA user_version').get()?.user_version);
-  const preReview = schemaVersion < REVIEW_CONTRACT_SCHEMA_VERSION;
-  const catalog = allPreinstalledProcedureDefinitions().filter((document) =>
-    !((allowPreCrossChapter && ((document.id === 'ai7-procedure/review-style-and-format' && document.version === 3) ||
-      (document.id === 'ai7-procedure/review-plot-consistency' && document.version === 2))) ||
-      (schemaVersion < FACTUAL_CLAIM_SCHEMA_VERSION && document.id === 'ai7-procedure/factual-claim-check')) ||
-    versions.some((row) => row.procedure_id === document.id && row.version === document.version));
-  const expected = allowLegacy && preReview && versions.length === 10 ? preinstalledProcedureDefinitions(1)
-    : allowLegacy && !identities.some((row) => row.procedure_id === 'ai7-procedure/local-text-check')
-      ? catalog.filter((document) => document.id !== 'ai7-procedure/local-text-check')
-      : allowLegacy && !versions.some((row) => row.procedure_id === 'ai7-procedure/local-text-check' && row.version === 3)
-        ? catalog.filter((document) => document.id !== 'ai7-procedure/local-text-check' || document.version === 1) : catalog;
-  requireAnalysis(identities.length === new Set(expected.map((document) => document.id)).size && versions.length === expected.length,
-    'PROCEDURE_RECORD_INVALID', '预装工序版本不完整。');
+  const expected = allowLegacy && schemaVersion < REVIEW_CONTRACT_SCHEMA_VERSION ? preinstalledProcedureDefinitions(1)
+    : allPreinstalledProcedureDefinitions();
   for (const document of expected) {
-    const identity = identities.find((row) => row.procedure_id === document.id);
-    const row = versions.find((version) => version.procedure_id === document.id && version.version === document.version);
-    requireAnalysis(identity !== undefined && row !== undefined, 'PROCEDURE_RECORD_INVALID', '预装工序版本缺失。');
-    const previous = document.version === 1 ? null : sha256Hex(canonicalJson(expected.find((entry) => entry.id === document.id && entry.version === document.version - 1)!));
-    const identityRecord = canonicalRecord({ procedureId: document.id, preInstalled: true, createdAt: identity.created_at });
-    const versionRecord = canonicalRecord({ versionId: `${document.id}@${document.version}`, procedureId: document.id,
-      version: document.version, documentDigest: sha256Hex(canonicalJson(document)), previousDocumentDigest: previous, createdAt: row.created_at });
-    requireAnalysis(identity.pre_installed === 1 && identity.canonical_json === identityRecord.json && identity.sha256 === identityRecord.digest &&
-      row.version_id === `${document.id}@${document.version}` && row.previous_document_sha256 === previous &&
-      row.document_json === canonicalJson(document) && row.document_sha256 === sha256Hex(canonicalJson(document)) &&
-      row.canonical_json === versionRecord.json && row.sha256 === versionRecord.digest,
-    'PROCEDURE_RECORD_INVALID', '预装工序版本或摘要无效。');
+    if (schemaVersion < EDITABLE_PROCEDURE_SCHEMA_VERSION && ['evaluation', 'readers-report', 'evaluation-rewrite', 'writing'].some((kind) => document.id === `ai7-procedure/${kind}`)) continue;
+    if (schemaVersion < FACTUAL_CLAIM_SCHEMA_VERSION && document.id === 'ai7-procedure/factual-claim-check') continue;
+    if (allowLegacy && schemaVersion < HOUSE_WORD_LIST_SCHEMA_VERSION && document.id === 'ai7-procedure/local-text-check') continue;
+    if (allowPreCrossChapter && ((document.id === 'ai7-procedure/review-style-and-format' && document.version === 3) ||
+      (document.id === 'ai7-procedure/review-plot-consistency' && document.version === 2))) continue;
+    requireAnalysis(db.prepare('SELECT 1 FROM procedure_definition_versions WHERE version_id = ?').get(`${document.id}@${document.version}`) !== undefined,
+      'PROCEDURE_RECORD_INVALID', '预装工序版本缺失。');
   }
 }
 
@@ -145,15 +144,23 @@ export function resolveProcedureDefinition(db: DatabaseSync, procedureId: string
 
 /** New plans pin the latest matching contract; existing pins are immutable. */
 export function recordProcedurePlanPin(db: DatabaseSync, taskIntentId: string, envelopeDigest: string, procedureId: string, version?: number): void {
-  const { pin } = resolveProcedureDefinition(db, procedureId, version);
-  const record = canonicalRecord({ taskIntentId, planEnvelopeDigest: envelopeDigest, procedure: pin });
+  const { pin, document } = resolveProcedureDefinition(db, procedureId, version);
+  const record = canonicalRecord({ taskIntentId, planEnvelopeDigest: envelopeDigest, procedure: pin, document });
   db.prepare('INSERT INTO procedure_plan_pins VALUES (?, ?, ?, ?, ?)')
-    .run(envelopeDigest, taskIntentId, `${pin.procedureId}@${pin.version}`, record.json, record.digest);
+    .run(envelopeDigest, taskIntentId, null, record.json, record.digest);
 }
 
 export function readProcedurePlanPin(db: DatabaseSync, envelopeDigest: string): ProcedureDefinitionPin | null {
   const row = db.prepare('SELECT * FROM procedure_plan_pins WHERE plan_envelope_sha256 = ?').get(envelopeDigest);
   if (row === undefined) return null; // History predating revision 85 is never retroactively pinned.
+  const snapshot = parseCanonicalJson(String(row.canonical_json)) as { document?: ProcedureDefinitionDocument; procedure: ProcedureDefinitionPin };
+  if (snapshot.document !== undefined) {
+    const expected = canonicalRecord({ taskIntentId: row.task_intent_id, planEnvelopeDigest: envelopeDigest, procedure: snapshot.procedure, document: snapshot.document });
+    requireAnalysis(expected.json === row.canonical_json && expected.digest === row.sha256 &&
+      snapshot.document.id === snapshot.procedure.procedureId && snapshot.document.version === snapshot.procedure.version &&
+      sha256Hex(canonicalJson(snapshot.document)) === snapshot.procedure.digest, 'PROCEDURE_RECORD_INVALID', '运行固定的工序版本快照无效。');
+    return snapshot.procedure;
+  }
   const version = db.prepare('SELECT procedure_id, version FROM procedure_definition_versions WHERE version_id = ?').get(row.version_id!);
   requireAnalysis(version !== undefined, 'PROCEDURE_RECORD_INVALID', '工序计划引用无效。');
   const { pin } = resolveProcedureDefinition(db, String(version.procedure_id), Number(version.version));
@@ -163,10 +170,10 @@ export function readProcedurePlanPin(db: DatabaseSync, envelopeDigest: string): 
   return pin;
 }
 
-export function validateProcedurePlanPins(db: DatabaseSync): void {
-  for (const row of db.prepare('SELECT plan_envelope_sha256, task_intent_id FROM procedure_plan_pins').iterate()) {
-    readProcedurePlanPin(db, String(row.plan_envelope_sha256));
-    requireAnalysis(db.prepare('SELECT 1 FROM analysis_plan_versions WHERE plan_envelope_sha256 = ? AND task_intent_id = ?')
-      .get(row.plan_envelope_sha256!, row.task_intent_id!) !== undefined, 'PROCEDURE_RECORD_INVALID', '工序计划任务引用无效。');
-  }
+export function readProcedurePlanDocument(db: DatabaseSync, envelopeDigest: string): ProcedureDefinitionDocument | null {
+  const pin = readProcedurePlanPin(db, envelopeDigest);
+  if (pin === null) return null;
+  const row = db.prepare('SELECT canonical_json FROM procedure_plan_pins WHERE plan_envelope_sha256 = ?').get(envelopeDigest)!;
+  const record = parseCanonicalJson(String(row.canonical_json)) as { document?: ProcedureDefinitionDocument };
+  return record.document ?? resolveProcedureDefinition(db, pin.procedureId, pin.version).document;
 }

@@ -1,3 +1,4 @@
+import { withProcedureDefinition, procedureStageBudget } from '../../src/service/procedures/execution.js';
 import { describe, expect, it } from 'vitest';
 import { baselineAnalysisKindDefinition } from '../../src/service/analysis/kind-definition.js';
 import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
@@ -10,6 +11,23 @@ import { renderProcedureLibrary } from '../../src/renderer/procedure-library.js'
 import { installMiniDom } from '../support/mini-dom.js';
 
 describe('pre-installed procedures v1', () => {
+  it('preserves stock contracts and isolates edited instructions and exemptions across model stages', () => {
+    const base = baselineAnalysisKindDefinition();
+    const document = preinstalledProcedureDefinitions().find((entry) => entry.id === 'ai7-procedure/baseline-analysis')!;
+    const pin = { procedureId: document.id, version: 2, digest: 'a'.repeat(64) };
+    expect(withProcedureDefinition(base, document, pin)).toBe(base);
+    const edited = { ...document, version: 2, editorInstruction: '保留短句', stages: document.stages.map((stage, i) => ({ ...stage,
+      exemptionRules: i === 0 ? ['允许省略主语'] : [], budgetShare: i === 0 ? 0.6 : i === 1 ? 0.4 : 0 })) };
+    const bound = withProcedureDefinition(base, edited, pin);
+    expect(bound.systemPrompt).toContain('保留短句'); expect(bound.systemPrompt).toContain('允许省略主语');
+    expect(bound.requestDigest(1, 'b'.repeat(64))).not.toBe(base.requestDigest(1, 'b'.repeat(64)));
+    expect(bound.crossUnit!.promptContractDigest).not.toBe(base.crossUnit!.promptContractDigest);
+    expect(bound.assurance!.promptContractDigest).not.toBe(base.assurance!.promptContractDigest);
+    expect(procedureStageBudget(edited, 'units', 1000)).toBe(600);
+    expect(procedureStageBudget(edited, 'cross-unit-reduction', 1000)).toBe(400);
+    expect(procedureStageBudget(edited, 'assurance-sampling', 1000)).toBeNull();
+  });
+
   it('binds exact local grouping and one cross-chapter turn on both current review categories', () => {
     for (const categoryId of ['style-and-format', 'plot-consistency']) {
       const entry = BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.find((category) => category.categoryId === categoryId)!;
@@ -52,8 +70,8 @@ describe('pre-installed procedures v1', () => {
     const configuration = canonicalJson(BUILTIN_REVIEW_CATEGORY_CONFIGURATION);
     const digest = reviewCategoryConfigurationDigest();
     const definitions = preinstalledProcedureDefinitions();
-    expect(definitions).toHaveLength(11);
-    expect(new Set(definitions.map((definition) => `${definition.id}@${definition.version}`)).size).toBe(11);
+    expect(definitions).toHaveLength(16);
+    expect(new Set(definitions.map((definition) => `${definition.id}@${definition.version}`)).size).toBe(16);
     expect(preinstalledProcedureDefinitions()).toEqual(definitions);
     expect(definitions.every((definition) => definition.editorInstruction === '' && definition.stages.length > 0)).toBe(true);
     expect(baselineProcedureDefinition(baselineAnalysisKindDefinition('retained-v1'))).toEqual(baselineProcedureDefinition());
@@ -78,14 +96,14 @@ describe('pre-installed procedures v1', () => {
     });
   });
 
-  it('lists eleven enabled versions with their stages and uses and labels the review-only predecessor', () => {
+  it('lists sixteen enabled versions with their stages and uses and labels the review-only predecessor', () => {
     const restore = installMiniDom();
     try {
       const library = renderProcedureLibrary(preinstalledProcedureDefinitions().map((definition) => ({
         procedureId: definition.id, version: definition.version, digest: 'a'.repeat(64), title: definition.title,
         state: 'enabled', uses: 2, stages: definition.stages.map((stage) => ({ stageType: stage.stageType, label: PROCEDURE_STAGE_LABELS[stage.stageType] })),
       })));
-      expect(library.querySelectorAll('li')).toHaveLength(11);
+      expect(library.querySelectorAll('li')).toHaveLength(16);
       expect(library.textContent).toContain('已使用 2 次');
       expect(library.textContent).toContain('跨单元归并与跨章一致性');
       expect(library.textContent).toContain('审阅专用前身');

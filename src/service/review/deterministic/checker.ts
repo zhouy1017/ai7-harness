@@ -1,7 +1,7 @@
 import { setImmediate } from 'node:timers/promises';
 import { BLOCK_ID_PATTERN, canonicalJson, DIGEST_PATTERN, hasExactKeys, isRecord, sha256Hex, UUID_PATTERN } from '../../analysis/canonical.js';
 import { graphemeCount, sliceGraphemes } from '../../analysis/factual-review-contract.js';
-import { LocalCheckError, numeralBasis, validateAnyLocalPlan, validateLocalPlan, validateLocalPlanV2, type AnyLocalCheckPlan, type LocalCheckBlock, type LocalCheckPlan, type LocalCheckPlanV2, type LocalCheckPlanV3 } from './plan.js';
+import { LocalCheckError, isLocalTablePlan, numeralBasis, validateAnyLocalPlan, validateLocalPlan, validateLocalPlanV2, type AnyLocalCheckPlan, type LocalCheckBlock, type LocalCheckPlan, type LocalCheckPlanV2, type LocalCheckTablePlan } from './plan.js';
 import { APPENDIX_WORDS, CHARACTER_FORMS, STANDARD_CHARACTERS, TABLE_RULE_IDS, VARIANT_WORDS, type TableRuleId } from './tables.js';
 import { HOUSE_RULE, LOCAL_RULE_IDS, LOCAL_RULE_IDS_V2, LOCAL_RULES, type LocalRuleId, type LocalRuleIdV2 } from './rules.js';
 import { houseAnnotationDetail, type HouseWordListPin } from '../../../shared/protocol/house-word-list.js';
@@ -52,10 +52,10 @@ const IDENTIFIER_CHARACTER = /^(?!\p{Script=Han})[\p{L}\p{N}\p{M}_]$/u;
 const OTHER_SIGN = /[＋－±∓﹢﹣]/u;
 const emptyCounts = (): LocalRuleCounts => ({ checked: 0, exempt: 0, skipped: 0, error: 0, findings: 0, disabled: 0, outOfApplicability: 0, notRecognized: 0, noFinding: 0 });
 const WORD_FORMS = new Map([...VARIANT_WORDS, ...APPENDIX_WORDS].flatMap((entry) => entry.variants.map((literal) => [literal, entry] as const)));
-function tableCandidateId(plan: LocalCheckPlanV3, rule: TableRuleId, blockId: string, from: number, to: number): string {
+function tableCandidateId(plan: LocalCheckTablePlan, rule: TableRuleId, blockId: string, from: number, to: number): string {
   return sha256Hex(canonicalJson({ source: plan.source, planDigest: plan.digest, rule, version: 1, blockId, from, to }));
 }
-function tableMatch(plan: LocalCheckPlanV3, rule: TableRuleId, quote: string): Pick<TableCandidate, 'basis' | 'observation' | 'replacement'> | null {
+function tableMatch(plan: LocalCheckTablePlan, rule: TableRuleId, quote: string): Pick<TableCandidate, 'basis' | 'observation' | 'replacement'> | null {
   const tables = plan.options.tables!;
   if (rule === 'T01') {
     const entry = tables.bookTerms.find((entry) => entry.variants.includes(quote));
@@ -93,7 +93,7 @@ export function anyLocalCandidateNote(plan: AnyLocalCheckPlan, candidate: AnyLoc
   return localCandidateNote(candidate);
 }
 
-export function validateLocalResultV3(value: unknown, plan: LocalCheckPlanV3): asserts value is LocalCheckResultV3 {
+export function validateLocalResultV3(value: unknown, plan: LocalCheckTablePlan): asserts value is LocalCheckResultV3 {
   validateAnyLocalPlan(plan);
   requireV2(isRecord(value) && hasExactKeys(value, ['schema', 'planDigest', 'paragraphs', 'candidates', 'excluded', 'counts']) &&
     value.schema === 'ai7.review.local-result/3' && value.planDigest === plan.digest && value.paragraphs === plan.blocks.length &&
@@ -126,7 +126,7 @@ export function candidateHasExactAnchor(plan: AnyLocalCheckPlan, candidate: AnyL
   validateAnyLocalPlan(plan);
   return candidateHasFrozenAnchor(plan, candidate, graphemes, block);
 }
-function houseCandidateId(plan: LocalCheckPlanV2 | LocalCheckPlanV3, entryId: string, blockId: string, from: number, to: number): string {
+function houseCandidateId(plan: LocalCheckPlanV2 | LocalCheckTablePlan, entryId: string, blockId: string, from: number, to: number): string {
   return sha256Hex(canonicalJson({ source: plan.source, planDigest: plan.digest, houseWordList: plan.houseWordList!.pin,
     rule: 'H01', version: 1, entryId, blockId, from, to }));
 }
@@ -143,7 +143,7 @@ function candidateHasFrozenAnchor(plan: AnyLocalCheckPlan, candidate: AnyLocalCa
       (graphemes === undefined ? sliceGraphemes(block.text, candidate.from, candidate.to) : graphemes.slice(candidate.from, candidate.to).join('')) === entry.literal;
   }
   if ('replacement' in candidate) {
-    if (plan.schema !== 'ai7.review.local-plan/3') return false;
+    if (!isLocalTablePlan(plan)) return false;
     const expected = tableMatch(plan, candidate.ruleId, candidate.quote);
     return expected !== null && candidate.version === 1 && candidate.basis === expected.basis && candidate.observation === expected.observation &&
       candidate.replacement === expected.replacement && candidate.id === tableCandidateId(plan, candidate.ruleId, candidate.blockId, candidate.from, candidate.to) &&
@@ -180,7 +180,7 @@ export function exactLocalCandidateIds(plan: AnyLocalCheckPlan, candidates: read
 /** One pass over frozen paragraphs, with cooperative yields within large paragraphs as well as between them. */
 export function checkLocalPlan(plan: LocalCheckPlan, options?: LocalCheckExecutionOptions): Promise<LocalCheckResult>;
 export function checkLocalPlan(plan: LocalCheckPlanV2, options?: LocalCheckExecutionOptions): Promise<LocalCheckResultV2>;
-export function checkLocalPlan(plan: LocalCheckPlanV3, options?: LocalCheckExecutionOptions): Promise<LocalCheckResultV3>;
+export function checkLocalPlan(plan: LocalCheckTablePlan, options?: LocalCheckExecutionOptions): Promise<LocalCheckResultV3>;
 export function checkLocalPlan(plan: AnyLocalCheckPlan, options?: LocalCheckExecutionOptions): Promise<AnyLocalCheckResult>;
 export async function checkLocalPlan(plan: AnyLocalCheckPlan, options: LocalCheckExecutionOptions = {}): Promise<AnyLocalCheckResult> {
   validateAnyLocalPlan(plan);
@@ -396,7 +396,7 @@ export async function checkLocalPlan(plan: AnyLocalCheckPlan, options: LocalChec
       if (matches === 0) counts.H01.notRecognized++;
       if (counts.H01.findings === before.findings && counts.H01.skipped === before.skipped && counts.H01.error === before.error && !hasExclusion) counts.H01.noFinding++;
     }
-    if (plan.schema === 'ai7.review.local-plan/3') {
+    if (isLocalTablePlan(plan)) {
       const tables = plan.options.tables!;
       const tableEnabled = (id: TableRuleId) => id === 'C01' || id === 'C02' ? tables.characters : id === 'V01' ? tables.variantWords : tables.bookTerms.length > 0;
       const before = Object.fromEntries(TABLE_RULE_IDS.map((id) => [id, counts[id].findings + counts[id].error + counts[id].skipped]));
@@ -455,7 +455,7 @@ export async function checkLocalPlan(plan: AnyLocalCheckPlan, options: LocalChec
   const entryOrder = new Map(house?.houseWordList!.document.entries.map((entry, index) => [entry.entryId, index]) ?? []);
   candidates.sort((a, b) => order.get(a.blockId)! - order.get(b.blockId)! || a.from - b.from || a.ruleId.localeCompare(b.ruleId) ||
     (a.ruleId === 'H01' && b.ruleId === 'H01' ? entryOrder.get(a.entryId)! - entryOrder.get(b.entryId)! : 0));
-  if (plan.schema === 'ai7.review.local-plan/3') return { schema: 'ai7.review.local-result/3', planDigest: plan.digest, paragraphs: plan.blocks.length, candidates, excluded, counts };
+  if (isLocalTablePlan(plan)) return { schema: 'ai7.review.local-result/3', planDigest: plan.digest, paragraphs: plan.blocks.length, candidates, excluded, counts };
   const oldCandidates = candidates.filter((candidate): candidate is LocalCandidateV2 => !('replacement' in candidate));
   if (house !== null) return { schema: 'ai7.review.local-result/2', planDigest: plan.digest, paragraphs: plan.blocks.length, candidates: oldCandidates, excluded,
     counts: { P01: counts.P01, P02: counts.P02, P03: counts.P03, N01: counts.N01, N02: counts.N02, H01: counts.H01 } };

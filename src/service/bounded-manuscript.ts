@@ -1,8 +1,9 @@
+import { EDITABLE_PROCEDURE_SCHEMA_SQL, EDITABLE_PROCEDURE_TRIGGER_SQL, EDITABLE_PROCEDURE_FOREIGN_KEYS } from './procedures/editable-schema.js';
 import type { ManualCommandRequestPin, ManualCommandSource } from '../shared/protocol/learning.js';
 import { HOUSE_WORD_LIST_SCHEMA_VERSION, HOUSE_WORD_LIST_SCHEMA_SQL, HOUSE_WORD_LIST_TRIGGER_SQL, HOUSE_WORD_LIST_FOREIGN_KEYS } from './review/house-word-list.js';
 import { IDLE_BACKGROUND_SCHEMA_VERSION, LOCAL_REVIEW_SCHEMA_VERSION } from './task-authorization.js';
 import { LOCAL_STAGE_SCHEMA_SQL, LOCAL_STAGE_TRIGGER_SQL, LOCAL_STAGE_FOREIGN_KEYS, validateLocalStageArtifacts } from './review/review-runs.js';
-import { PROCEDURE_DEFINITION_SCHEMA_SQL, PROCEDURE_DEFINITION_TRIGGER_SQL, PROCEDURE_DEFINITION_FOREIGN_KEYS, validateProcedureDefinitions, validateProcedurePlanPins } from './procedures/definition-store.js';
+import { PROCEDURE_DEFINITION_SCHEMA_SQL, PROCEDURE_PLAN_PINS_V2_SQL, PROCEDURE_DEFINITION_TRIGGER_SQL, PROCEDURE_DEFINITION_FOREIGN_KEYS, validateProcedureDefinitions } from './procedures/definition-store.js';
 import { EDITORIAL_LEARNING_SCHEMA_SQL, EDITORIAL_LEARNING_TRIGGER_SQL, EDITORIAL_LEARNING_FOREIGN_KEYS } from './learning/ledger.js';
 import { DIALOGUE_TASKS_REVISION_86_SQL } from './dialogue/dialogue-ledger.js';
 import { SUPERVISION_SCHEMA_SQL, SUPERVISION_TRIGGER_SQL, SUPERVISION_FOREIGN_KEYS } from './learning/supervision-directives.js';
@@ -2104,6 +2105,7 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   ...CUSTOM_ANALYSIS_DIMENSION_FOREIGN_KEYS,
   ...IMPORTED_SKILL_UPDATE_FOREIGN_KEYS,
   ...PROCEDURE_DEFINITION_FOREIGN_KEYS,
+  ...EDITABLE_PROCEDURE_FOREIGN_KEYS,
   ...EVALUATION_PROFILE_FOREIGN_KEYS,
   editorial_workspace_profile_sidecar_revisions: [
     'native_artifact_id>native_artifact_installations.artifact_id:NO ACTION/NO ACTION/NONE',
@@ -2867,6 +2869,7 @@ function requireManuscriptReimportTargetSchema(
   // Revision 83 (Issue #89; ADR 0090 §3): foreign Skill update candidates, the Artifact Update Rule ledger and current selections.
   const includeImportedSkillUpdateTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || committed(IMPORTED_SKILL_UPDATE_SCHEMA_SQL);
   // Revision 85 (Issue #1081, F-26a; ADR 0095 §1): the pre-installed Procedure Definition versions and the plans' sibling pins.
+  const includeEditableProcedures = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= 98 || committed(EDITABLE_PROCEDURE_SCHEMA_SQL);
   const includeProcedureDefinitions = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= PROCEDURE_DEFINITION_SCHEMA_VERSION || committed(PROCEDURE_DEFINITION_SCHEMA_SQL);
   requireExactSchema(
     db,
@@ -3045,6 +3048,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeCustomAnalysisTables ? CUSTOM_ANALYSIS_DIMENSION_SCHEMA_SQL : {}),
       ...(includeImportedSkillUpdateTables ? IMPORTED_SKILL_UPDATE_SCHEMA_SQL : {}),
       ...(includeProcedureDefinitions ? PROCEDURE_DEFINITION_SCHEMA_SQL : {}),
+      ...(includeEditableProcedures ? { ...EDITABLE_PROCEDURE_SCHEMA_SQL, procedure_plan_pins: PROCEDURE_PLAN_PINS_V2_SQL } : {}),
     },
     // The partial index that keeps one primary Manuscript per Book stands with the rebuilt relation, whatever the version.
     {
@@ -3120,10 +3124,11 @@ function requireManuscriptReimportTargetSchema(
       ...(includeCustomAnalysisTables ? CUSTOM_ANALYSIS_DIMENSION_TRIGGER_SQL : {}),
       ...(includeImportedSkillUpdateTables ? IMPORTED_SKILL_UPDATE_TRIGGER_SQL : {}),
       ...(includeProcedureDefinitions ? PROCEDURE_DEFINITION_TRIGGER_SQL : {}),
+      ...(includeEditableProcedures ? EDITABLE_PROCEDURE_TRIGGER_SQL : {}),
     },
   );
   if (includeMaterialTranslationAttempts) validateMaterialTranslationAttemptSchema(db);
-  if (includeProcedureDefinitions) { validateProcedureDefinitions(db, Number(db.prepare('PRAGMA user_version').get()?.user_version) < HOUSE_WORD_LIST_SCHEMA_VERSION); validateProcedurePlanPins(db); }
+  if (includeProcedureDefinitions) { validateProcedureDefinitions(db, Number(db.prepare('PRAGMA user_version').get()?.user_version) < HOUSE_WORD_LIST_SCHEMA_VERSION); }
   if (includeLocalStage) validateLocalStageArtifacts(db);
 }
 
@@ -6095,7 +6100,7 @@ export function initializeBoundedSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === 95 || version === LEARNING_CURATION_SCHEMA_VERSION || version === LATEST_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === 95 || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === LATEST_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -6146,7 +6151,7 @@ export function initializeBoundedSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === 95 || version === LEARNING_CURATION_SCHEMA_VERSION || version === LATEST_SCHEMA_VERSION)) {
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === 95 || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === LATEST_SCHEMA_VERSION)) {
     transact(db, () => {
       if (validateStoreTruth || version !== LATEST_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(

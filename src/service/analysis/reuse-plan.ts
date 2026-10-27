@@ -42,6 +42,7 @@ export interface ReusePlanPredecessor {
 }
 
 export interface ReusePlanInput {
+  readonly procedureCompatible?: boolean;
   readonly mode: BaselineAnalysisUpdateMode;
   readonly selectedRange: BaselineAnalysisSelectedRange | null;
   readonly manifest: CoverageManifestProjection;
@@ -83,7 +84,7 @@ export function deriveReusePlan(input: ReusePlanInput): AnalysisReusePlanProject
   const states = new Map(predecessor.unitStates.map((unit) => [unit.unitOrdinal, unit.state] as const));
   requireAnalysis(predecessor.manifest.units.every((unit) => states.has(unit.ordinal)) && states.size === predecessor.manifest.units.length,
     'ANALYSIS_RECORD_INVALID', '前一修订版的单元结果与其覆盖清单不一致。');
-  const contractCompatible = predecessor.contractVersion === BASELINE_ANALYSIS_CONTRACT_VERSION;
+  const contractCompatible = input.procedureCompatible !== false && predecessor.contractVersion === BASELINE_ANALYSIS_CONTRACT_VERSION;
   const newKeys = unitContentKeys(manifest);
   const predecessorKeys = unitContentKeys(predecessor.manifest);
   const closedByKey = new Map<string, number[]>();
@@ -224,6 +225,7 @@ export interface ScopePlanPredecessor extends ReusePlanPredecessor {
 }
 
 export interface ScopePlanInput {
+  readonly procedureCompatible?: boolean;
   readonly kind: AnalysisKindId;
   readonly contractVersion: string;
   readonly schemaDigest: string;
@@ -250,7 +252,7 @@ export function deriveScopePlan(input: ScopePlanInput): ReviewScopePlanProjectio
   requireAnalysis(predecessor === null ||
     (predecessor.manifest.units.every((unit) => states.has(unit.ordinal)) && states.size === predecessor.manifest.units.length),
   'ANALYSIS_RECORD_INVALID', '前一修订版的单元结果与其覆盖清单不一致。');
-  const contractCompatible = predecessor !== null &&
+  const contractCompatible = input.procedureCompatible !== false && predecessor !== null &&
     predecessor.contractVersion === input.contractVersion &&
     (input.kind.startsWith('editorial-review/')
       ? (predecessor.categoryConfigurationIdentity ?? predecessor.schemaDigest) === (input.categoryConfigurationIdentity ?? input.schemaDigest)

@@ -129,7 +129,7 @@ import type { PublicSampleBookSourceDigest } from './public-samplebooks.js';
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 176 as const;
+export const SERVICE_PROTOCOL_VERSION = 177 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 export interface BookFindingProjection {
@@ -315,6 +315,7 @@ export const IPC_CHANNELS = {
   decideImportedExemplar: 'ai7:kb:decide-imported-exemplar',
   inspectExemplars: 'ai7:j07:inspect-exemplars',
   admitReadersReportExemplar: 'ai7:j07:admit-readers-report-exemplar',
+  procedureLibrary: 'ai7:procedures:library',
   inspectKnowledgeProcedures: 'ai7:j15:inspect-knowledge-procedures',
   inspectCapturedProcedures: 'ai7:j15:inspect-captured-procedures',
   importSkillPackage: 'ai7:kb:import-skill-package',
@@ -12208,6 +12209,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
     output: ExemplarBookProjection;
   };
   /** 知识库 › 工序与规则 (Issue #427, S79d): the review categories' 工序 and the native artifact, with their use. */
+  procedureLibrary: { input: import('./protocol/procedures.js').ProcedureLibraryCommand; output: import('./protocol/procedures.js').ProcedureLibraryProjection };
   inspectKnowledgeProcedures: {
     input: Record<string, never>;
     output: KnowledgeProceduresProjection;
@@ -13054,6 +13056,7 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   /** 知识库 › 范例 › 归入范例 (Issue #429): names its Book; the window's route is not involved. */
   admitReadersReportExemplar(input: AdmitReadersReportExemplarInput): Promise<ExemplarBookProjection>;
   /** 知识库 › 工序与规则's expert 工序 (Issue #427, S79d): names no Book. */
+  procedureLibrary(input: import('./protocol/procedures.js').ProcedureLibraryCommand): Promise<import('./protocol/procedures.js').ProcedureLibraryProjection>;
   inspectKnowledgeProcedures(): Promise<KnowledgeProceduresProjection>;
   /** 知识库 › 工序与规则's 可复用工序 and 开发建议 (Issue #65, S30; ADR 0087): names no Book. */
   inspectCapturedProcedures(): Promise<CapturedProceduresProjection>;

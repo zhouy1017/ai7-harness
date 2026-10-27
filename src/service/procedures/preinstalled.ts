@@ -8,9 +8,32 @@ import { baselineAnalysisKindDefinition, factualReviewKindDefinition, type Analy
 import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, HISTORICAL_REVIEW_CATEGORY_CONFIGURATION, type ReviewCategoryConfigurationEntry } from '../review/category-configuration.js';
 import { REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, REVIEW_CATEGORY_UNIT_RESULT_SCHEMA_V1 } from '../review/review-category-contract.js';
 import { BASELINE_ANALYSIS_KIND, FACTUAL_REVIEW_KIND, reviewCategoryIdOfKind } from '../../shared/protocol.js';
+import { INITIAL_EVALUATION_UNIT_RESULT_SCHEMA, INITIAL_EVALUATION_SYNTHESIS_RESULT_SCHEMA, INITIAL_EVALUATION_RESULT_SET_REVISION_SCHEMA } from '../evaluation/initial-evaluation-contract.js';
+import { READERS_REPORT_UNIT_RESULT_SCHEMA, READERS_REPORT_SYNTHESIS_RESULT_SCHEMA, READERS_REPORT_RESULT_SET_REVISION_SCHEMA } from '../evaluation/readers-report-contract.js';
+import { EVALUATION_REWRITE_UNIT_RESULT_SCHEMA, EVALUATION_REWRITE_SYNTHESIS_RESULT_SCHEMA, EVALUATION_REWRITE_RESULT_SET_REVISION_SCHEMA } from '../evaluation/evaluation-rewrite-contract.js';
+import { WRITING_UNIT_RESULT_SCHEMA, WRITING_SYNTHESIS_RESULT_SCHEMA, WRITING_RESULT_SET_REVISION_SCHEMA } from '../writing/writing-contract.js';
 
 export const BASELINE_PROCEDURE_ID = 'ai7-procedure/baseline-analysis';
 export const FACTUAL_CLAIM_PROCEDURE_ID = 'ai7-procedure/factual-claim-check';
+
+/** Existing kind contracts remain the executors; these documents contain no Book-specific inputs. */
+export function editorialProcedureDefinitions(): readonly ProcedureDefinitionDocument[] {
+  return [
+    { kind: 'evaluation', title: 'AI7 初评', unit: INITIAL_EVALUATION_UNIT_RESULT_SCHEMA,
+      synthesis: INITIAL_EVALUATION_SYNTHESIS_RESULT_SCHEMA, result: INITIAL_EVALUATION_RESULT_SET_REVISION_SCHEMA, draft: false },
+    { kind: 'readers-report', title: '审稿意见', unit: READERS_REPORT_UNIT_RESULT_SCHEMA,
+      synthesis: READERS_REPORT_SYNTHESIS_RESULT_SCHEMA, result: READERS_REPORT_RESULT_SET_REVISION_SCHEMA, draft: true },
+    { kind: 'evaluation-rewrite', title: '按我的评分重写评语', unit: EVALUATION_REWRITE_UNIT_RESULT_SCHEMA,
+      synthesis: EVALUATION_REWRITE_SYNTHESIS_RESULT_SCHEMA, result: EVALUATION_REWRITE_RESULT_SET_REVISION_SCHEMA, draft: true },
+    { kind: 'writing', title: '写作任务', unit: WRITING_UNIT_RESULT_SCHEMA,
+      synthesis: WRITING_SYNTHESIS_RESULT_SCHEMA, result: WRITING_RESULT_SET_REVISION_SCHEMA, draft: true },
+  ].map((entry) => ({ schema: PROCEDURE_DEFINITION_SCHEMA, id: `ai7-procedure/${entry.kind}`, version: 1,
+    title: entry.title, role: entry.title, editorInstruction: '', stages: [
+      { ...stage('chunked-review', ['manuscript-scope'], entry.unit), budgetShare: 1 },
+      stage(entry.draft ? 'drafting' : 'cross-unit-reduction', ['unit-results'], entry.synthesis),
+      stage('synthesis', ['unit-results', 'cross-unit-results'], entry.result),
+    ], outputKinds: entry.draft ? ['document'] : ['record'] }));
+}
 
 export function factualClaimProcedureDefinition(): ProcedureDefinitionDocument {
   return { schema: PROCEDURE_DEFINITION_SCHEMA, id: FACTUAL_CLAIM_PROCEDURE_ID, version: 1,
@@ -98,20 +121,22 @@ export function reviewProcedureDefinition(entry: ReviewCategoryConfigurationEntr
 
 export function preinstalledProcedureDefinitions(version: 1 | 2 | 3 = 3): readonly ProcedureDefinitionDocument[] {
   return [...(version === 3 ? BUILTIN_REVIEW_CATEGORY_CONFIGURATION : HISTORICAL_REVIEW_CATEGORY_CONFIGURATION).categories.map((entry) => reviewProcedureDefinition(entry, version)), baselineProcedureDefinition(),
-    ...(version >= 2 ? [localCheckProcedureDefinition()] : [])];
+    ...(version >= 2 ? [localCheckProcedureDefinition()] : []),
+    ...(version === 3 ? [factualClaimProcedureDefinition(), ...editorialProcedureDefinitions()] : [])];
 }
 
 /** Immutable predecessors remain admitted beside the current versions. */
 export function allPreinstalledProcedureDefinitions(): readonly ProcedureDefinitionDocument[] {
   return [...preinstalledProcedureDefinitions(1), ...preinstalledProcedureDefinitions(2).filter((document) => document.version === 2 || document.id === 'ai7-procedure/local-text-check'), localCheckProcedureDefinitionV2(), localCheckProcedureDefinitionV3(),
     ...preinstalledProcedureDefinitions(3).filter((document) => document.id === reviewProcedureId('style-and-format') || document.id === reviewProcedureId('plot-consistency')),
-    factualClaimProcedureDefinition()];
+    factualClaimProcedureDefinition(), ...editorialProcedureDefinitions()];
 }
 
-/** Only the ten pre-installed definitions are admitted in F-26a. */
+/** Kind identity selects the behavior-preserving pre-installed procedure. */
 export function procedureIdForKind(kind: string): string | null {
   if (kind === BASELINE_ANALYSIS_KIND) return BASELINE_PROCEDURE_ID;
   if (kind === FACTUAL_REVIEW_KIND) return reviewProcedureId('factual-review');
+  if (['evaluation', 'readers-report', 'evaluation-rewrite', 'writing'].includes(kind)) return `ai7-procedure/${kind}`;
   const categoryId = reviewCategoryIdOfKind(kind);
   return BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.some((entry) => entry.categoryId === categoryId)
     ? reviewProcedureId(categoryId!) : null;

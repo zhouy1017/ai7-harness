@@ -1,4 +1,5 @@
 import { liveHouseReviewPreferenceContract } from '../house-review-preference.js';
+import { withProcedureDefinition } from '../procedures/execution.js';
 import { CUSTOM_ANALYSIS_KIND_FAMILY, EDITOR_AUTHORED_QUESTION_TEMPLATE_CATEGORY, taskKindListed } from '../launch-policy.js';
 import { liveSeriesContract, liveSeriesConsistencyContract } from '../review/series-consistency.js';
 import { FACTUAL_REVIEW_KIND } from '../../shared/protocol.js';
@@ -49,6 +50,7 @@ export interface LiveKindBinding {
 
 /** The parts of an analysis kind definition admission reads. */
 export interface LiveKindDefinition {
+  readonly procedureBinding?: AnalysisKindDefinition['procedureBinding'];
   readonly reviewCrossChapter?: AnalysisKindDefinition['reviewCrossChapter'];
   readonly kind: string;
   readonly contractVersion?: string;
@@ -212,6 +214,14 @@ export function liveKindAdmission(
   definition: LiveKindDefinition,
   binding: LiveKindBinding,
 ): LiveKindRule | null {
+  if (definition.procedureBinding !== undefined) {
+    const { base, document, pin } = definition.procedureBinding;
+    const expected = withProcedureDefinition(base, document, pin);
+    const rule = liveKindRule(policy, definition.kind, ['editor-task-instruction']);
+    if (rule?.editorTaskInstruction === undefined || expected.systemPrompt !== definition.systemPrompt ||
+        expected.promptContractDigest !== definition.promptContractDigest) return null;
+    return liveKindAdmission(policy, base, binding);
+  }
   const consistency = liveSeriesConsistencyContract(definition);
   if (consistency !== null) {
     if (definition.kind !== reviewCategoryKindId('series-consistency') || consistency.digest !== definition.promptContractDigest ||
@@ -252,6 +262,7 @@ export function liveKindAdmission(
 
 /** The categories a kind's payload carries besides the binding's own public or synthetic material. */
 export function liveKindContractCategories(kind: string, definition?: LiveKindDefinition): readonly OutboundDataCategory[] {
+  if (definition?.procedureBinding !== undefined) return [...liveKindContractCategories(kind, definition.procedureBinding.base), 'editor-task-instruction'];
   if (definition !== undefined && liveSeriesConsistencyContract(definition) !== null) return ['series-knowledge-excerpt'];
   const series = definition === undefined ? null : liveSeriesContract(definition);
   if (series !== null) return [...liveKindContractCategories(kind, series.base), 'series-knowledge-excerpt'];
