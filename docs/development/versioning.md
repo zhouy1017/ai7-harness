@@ -13,20 +13,20 @@ One `x.y.z` in root `package.json` names the software everywhere — source, bui
 | Version | Status | Wave or scope | Integrated dev commit | Tag / release |
 | --- | --- | --- | --- | --- |
 | 0.1.0 | integrated | Waves 1–20 and the governance wave `codex/integration-1098` (ADR 0097, ADR 0098) | `a40bf0b8acc4f67b14df08670df80dc509386978` and its successors until Wave 21 integrates | none |
-| 0.2.0 | planned | Wave 21 — the core completes and procedures become editable | — | — |
+| 0.2.0 | integrated | Wave 21 — the core completes and procedures become editable (W21-S1–S9, PRs #1182–#1187, #1190–#1193) | the squash commit of the Wave 21 pull request on `dev`, named in that PR's closure (this row is raised by the candidate under orca-dispatch §5) | none |
 | 0.3.0 | planned | Wave 22 — desk work and derived deliverables | — | — |
 | 1.0.0 | planned | Wave 23 — acceptance and closure (`1.0.0-rc.N` before the Owner accepts) | — | — |
 
 ## Canonical inputs
 
-Root `package.json.version` owns the software SemVer, currently `0.1.0`. Root `package.json.ai7.dataVersion` owns the existing Data Version, currently **1**. `src/service/data-version.ts` reads that value and retains the freeze, schema classification and compatibility checks. Database revision **84** and service protocol **161** keep their separate meanings. Build identity never enters a store-version ledger, backup manifest or migration decision; an ordinary rebuild does not create a software upgrade.
+Root `package.json.version` owns the software SemVer, currently `0.2.0`. Root `package.json.ai7.dataVersion` owns the existing Data Version, currently **1**. `src/service/data-version.ts` reads that value and retains the freeze, schema classification and compatibility checks. Database revision (**98** at this head) and service protocol (**178**) keep their separate meanings. Build identity never enters a store-version ledger, backup manifest or migration decision; an ordinary rebuild does not create a software upgrade.
 
 `pnpm run version:identity` prints this closed shape:
 
 ```json
 {
   "schema": 1,
-  "softwareVersion": "0.1.0",
+  "softwareVersion": "0.2.0",
   "dataVersion": 1,
   "buildNumber": 1234,
   "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",

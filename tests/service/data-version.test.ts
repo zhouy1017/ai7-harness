@@ -104,15 +104,15 @@ describe('数据版本 over the real store', () => {
     expect([updated.update?.from, updated.update?.to, updated.update?.fromDataVersion, updated.update?.toDataVersion]).toEqual(['0.0.9', version, 1, 1]);
     expect(updated.history.map((entry) => entry.softwareVersion)).toEqual([version, '0.0.9']);
     // The version the service entry hands the store is the one recorded: here, a later software opening the same data.
-    const later = await reopened((store) => store.inspectDataVersion(), '0.2.0');
+    const later = await reopened((store) => store.inspectDataVersion(), '0.3.0');
     expect([later.softwareVersion, later.update?.from, later.update?.to, later.history.map((entry) => entry.softwareVersion)])
-      .toEqual(['0.2.0', version, '0.2.0', ['0.2.0', version, '0.0.9']]);
-    // The review's probe (Issue #433 review): 0.2.0, then an earlier build opens the data again. That is no update.
+      .toEqual(['0.3.0', version, '0.3.0', ['0.3.0', version, '0.0.9']]);
+    // The review's probe (Issue #433 review): 0.3.0, then an earlier build opens the data again. That is no update.
     const back = await reopened((store) => store.inspectDataVersion(), '0.1.0');
-    expect([back.update?.from, back.update?.to, back.update?.direction]).toEqual(['0.2.0', '0.1.0', 'earlier']);
+    expect([back.update?.from, back.update?.to, back.update?.direction]).toEqual(['0.3.0', '0.1.0', 'earlier']);
     // A build with build metadata opens it as its own version.
-    const built = await reopened((store) => store.inspectDataVersion(), '0.2.0+build.7');
-    expect([built.softwareVersion, built.update?.direction]).toEqual(['0.2.0+build.7', 'newer']);
+    const built = await reopened((store) => store.inspectDataVersion(), '0.3.0+build.7');
+    expect([built.softwareVersion, built.update?.direction]).toEqual(['0.3.0+build.7', 'newer']);
 
     // The ledger refuses to be rewritten, and a record rewritten by hand stops the store from opening.
     const tamper = new DatabaseSync(databasePath());
