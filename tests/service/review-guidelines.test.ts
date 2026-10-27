@@ -244,7 +244,7 @@ describe('知识库 › 审阅规范文件 over the real store', () => {
         ['表达改进条款', 1, 'AI7 内置默认'],
       ]);
       expect(typosDocument(fresh).appliedBy).toEqual([{ categoryId: TYPOS, label: '错别字与规范用语' }]);
-      // 线索条款 and 事实核查契约 are AI7's fixed statements: their categories read no clause of theirs.
+      // Current plot-consistency reads clauses; factual review retains its fixed contract.
       expect(fresh.documents.map((document) => document.use)).toEqual(['clauses', 'clauses', 'clauses', 'factual-kind', 'clauses', 'clauses', 'clauses']);
       expect(typosDocument(fresh).clauses.map((clause) => [clause.clauseId, clause.citations])).toEqual([
         ['typos-and-usage/1', 0], ['typos-and-usage/2', 0], ['typos-and-usage/3', 0], ['typos-and-usage/4', 0],

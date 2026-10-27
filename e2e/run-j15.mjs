@@ -206,10 +206,8 @@ const HOUSE_GUIDELINE = ['本社文字规范（J-15）', '', '1. 指出错字、
   '3. 数字与标点按本社体例手册统一，', '体例手册未写到的，按国家现行规范。', '4. 专名在全书前后写法一致。', '5. 引文与原文核对后再改，不凭记忆改动。'].join('\n');
 const KNOWLEDGE_TABS = ['审阅规范文件', '评估方案', '工序与规则', '社级编辑记忆', '范例', '资料库', '外部来源留存'];
 const GUIDELINE_TITLES = ['文字规范条款', '体例条款', '线索条款', '事实核查契约', '引用与学术规范条款', '出版风险提示条款', '表达改进条款'];
-// 线索条款 and 事实核查契约 are AI7's fixed statements (Issue #427 review): their categories read no clause of theirs, so
-// they say so where the others offer 导入新版本….
+// 事实核查契约 remains fixed; current plot-consistency reads clauses as well as pinned baseline leads (#1167).
 const GUIDELINE_FIXED = new Map([
-  [2, '「情节逻辑与前后一致」把基线分析里的线索变成批注，不按这里的条款找问题。这是 AI7 的固定说明，不能导入新版本。'],
   [3, '「事实核查」按 AI7 固定的事实核查契约执行，不读取这里的条款。这是 AI7 的固定说明，不能导入新版本。'],
 ]);
 /** The 知识库 page as an editor reads it: its tabs, the chosen one, and each guideline card's words. */
@@ -1130,6 +1128,19 @@ async function main() {
     const library = await renderer.evaluate(`({ stages: Array.from(document.querySelectorAll('.procedure-stages'), (node) => node.textContent), predecessor: document.querySelector('.procedure-predecessor')?.textContent, baseline: document.querySelector('[data-procedure-id="ai7-procedure/baseline-analysis"]')?.textContent })`);
     requireJourney(library.stages.length === 11 && library.stages.every((value) => value.length > 0) && library.predecessor?.includes('审阅专用前身') && library.baseline?.includes('跨单元归并与跨章一致性'), 'preinstalled-procedure-library', library);
     await assertRenderer(renderer, `(() => { const entries=document.querySelectorAll('.preinstalled-procedure-library li[data-procedure-version="2"]'); if(entries.length!==7)return false; return Array.from(entries).every((entry) => { const history=entry.querySelector('details.procedure-previous-versions'); if(!(history instanceof HTMLDetailsElement))return false; history.open=true; const row=history.querySelector('[data-procedure-previous-version="1"]'); return row?.textContent.startsWith('第 1 版 · ') === true && /^[0-9a-f]{64}$/u.test(row.dataset.procedureDigest ?? '') && !/[0-9a-f]{64}/u.test(row.textContent); }); })()`, 'preinstalled-review-v2-with-v1-history');
+    await assertRenderer(renderer, `(() => {
+      return [['style-and-format', '3', ['1', '2']], ['plot-consistency', '2', ['1']]].every(([category, version, previous]) => {
+        const entry=document.querySelector('.preinstalled-procedure-library [data-procedure-id="ai7-procedure/review-'+category+'"]');
+        const history=entry?.querySelector('details.procedure-previous-versions');
+        if(entry?.dataset.procedureVersion!==version || !(history instanceof HTMLDetailsElement))return false;
+        history.open=true;
+        const rows=Array.from(history.querySelectorAll('[data-procedure-previous-version]'));
+        return entry.querySelector('.procedure-stages')?.textContent.includes('跨单元归并与跨章一致性 → 跨章一致性') &&
+          JSON.stringify(rows.map((row)=>row.dataset.procedurePreviousVersion))===JSON.stringify(previous) &&
+          rows.every((row)=>row.textContent.startsWith('第 '+row.dataset.procedurePreviousVersion+' 版 · ') &&
+            /^[0-9a-f]{64}$/u.test(row.dataset.procedureDigest ?? '') && !/[0-9a-f]{64}/u.test(row.textContent));
+      });
+    })()`, 'preinstalled-cross-chapter-history');
     const technical = new Map(procedures?.technical ?? []);
     requireJourney(JSON.stringify(procedures?.states) === JSON.stringify(Array(11).fill(['enabled', '已启用', '0', 'solid'])) &&
       // #1084: the review procedures read under contract /2 are version 2, version 1 kept in their closed 历史版本.
