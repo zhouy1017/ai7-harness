@@ -123,6 +123,24 @@ async function handmade(name: string, dataVersion: number, schemaRevision: numbe
 const backups = (): string => `${roots.dataRoot}-backups`;
 
 describe('导入数据库 over the real store', () => {
+  it('reopens the genuine revision-96 predecessor with its Book and learning choice intact (#1168)', async () => {
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const bookId = createBook(store, '版本九十六的合成图书');
+    store.changeEditorialLearning({ kind: 'switch', enabled: false, expectedEntries: 0 });
+    store.markCleanShutdown(); store.close();
+    const predecessor = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try { execPre74Fixture(predecessor, 'PRAGMA user_version = 96;'); } finally { predecessor.close(); }
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect(store.getBookOverview(bookId).book.title).toBe('版本九十六的合成图书');
+      expect(store.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }))
+        .toMatchObject({ enabled: false, signals: [], items: [], controlEntries: 1 });
+      const preview = await store.inspectDatabaseImport(await exported(store, 'migrated-v96.ai7db'));
+      expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 97, dataVersion: 1 });
+      store.markCleanShutdown();
+    } finally { store.close(); }
+  });
+
   it('retains selected v1 Plan metadata through database replacement', async () => {
     const fixture = await loadModelFixture(join(roots.codeRoot, 'tests/fixtures/model'), 'sample1-factual-authored');
     const control = { induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
