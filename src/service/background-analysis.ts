@@ -23,8 +23,9 @@ export interface BackgroundAnalysisDispatcherDependencies {
   readonly store: Pick<EditorialStore,
     'backgroundAnalysisBooks' | 'backgroundAnalysisDecisionFor' | 'createBackgroundBaselineAnalysisPreparationWork' |
     'advanceBaselineAnalysisPreparationWork' | 'cancelBaselineAnalysisPreparationWork' | 'backgroundMayContinue' |
-    'startEnrolledBaselineAnalysis' | 'noteBackgroundNotStarted' | 'replacementFrozen'> & Partial<Pick<EditorialStore, 'backgroundIdleFacts'>>;
-  readonly execution: Pick<BaselineAnalysisExecutionOwner, 'full' | 'routeExecutable' | 'admitOrQueue' | 'capacity'> & Partial<Pick<BaselineAnalysisExecutionOwner, 'setBackgroundIdle'>>;
+    'startEnrolledBaselineAnalysis' | 'noteBackgroundNotStarted' | 'replacementFrozen'> & Partial<Pick<EditorialStore, 'backgroundIdleFacts' |
+      'nextFactualRecheck' | 'startFactualRecheck' | 'factualRecheckCurrent' | 'publishFactualRecheck' | 'factualReviewLedger'>>;
+  readonly execution: Pick<BaselineAnalysisExecutionOwner, 'full' | 'routeExecutable' | 'admitOrQueue' | 'capacity'> & Partial<Pick<BaselineAnalysisExecutionOwner, 'setBackgroundIdle' | 'startFactualRecheck'>>;
   /** Whether a job the editor asked for is queued or under way: the dispatcher never steps in beside one. */
   readonly editorWorkBusy?: () => boolean;
   /** Deferred starts wait for connectivity as well as quiet. */
@@ -130,7 +131,13 @@ export class BackgroundAnalysisDispatcher {
           // A Book whose look or start failed is looked at again on the next pass; its records say what was recorded.
         }
       }
-      if (lane.idle && !this.#disposed) this.#deps.curate?.();
+      if (lane.idle && !this.#disposed) {
+        const store = this.#deps.store;
+        if (store.nextFactualRecheck && store.startFactualRecheck && store.factualRecheckCurrent && store.publishFactualRecheck && store.factualReviewLedger) {
+          this.#deps.execution.startFactualRecheck?.(store as Pick<EditorialStore, 'nextFactualRecheck' | 'startFactualRecheck' | 'factualRecheckCurrent' | 'publishFactualRecheck' | 'factualReviewLedger'>);
+        }
+        this.#deps.curate?.();
+      }
     } while (this.#again && !this.#disposed);
   }
 

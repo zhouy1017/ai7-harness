@@ -69,6 +69,8 @@ export type ReviewCategoryScopePlan =
 
 /** The facts of one category's ledger a scope reads: whether it has reviewed, and whether that is stale. */
 export interface ReviewCategoryLedgerFacts {
+  readonly factualUpdates?: boolean;
+  readonly factualSupplement?: boolean;
   readonly hasRevision: boolean;
   /**
    * A Run of the whole manuscript, chosen chapters or changed chapters put this category on the manuscript (Issue #423 review,
@@ -121,6 +123,10 @@ export function reviewCategoryScopePlan(
     return { kind: 'leads', selectedRange: scope.kind === 'chapters' || scope.kind === 'selection' ? scope.selectedRange : null };
   }
   if (executor === 'factual-review-kind') {
+    if (facts.factualUpdates === true) {
+      if (scope.kind === 'whole') return { kind: 'task', mode: facts.hasRevision ? 'review-again' : 'whole-manuscript', selectedRange: null };
+      if (facts.factualSupplement === true && facts.hasRevision && (scope.kind === 'chapters' || scope.kind === 'selection') && scope.selectedRange !== null) return { kind: 'task', mode: 'review-range', selectedRange: scope.selectedRange };
+    }
     if (scope.kind === 'chapters') return { kind: 'refused', reason: FACTUAL_CHAPTERS_REASON };
     if (scope.kind === 'selection') return { kind: 'refused', reason: FACTUAL_SELECTION_REASON };
     if (scope.kind === 'changed') return { kind: 'refused', reason: FACTUAL_CHANGED_REASON };

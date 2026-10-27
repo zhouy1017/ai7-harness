@@ -1533,7 +1533,7 @@ export interface OrdinaryProductionPolicyReading {
     readonly localTools: AdmittedLocalTools;
     readonly projection?: Partial<Pick<AdmittedProviderRule, 'taskKinds' | 'outboundDataCategories' | 'crossUnitSynthesisAllowed' |
       'plusDeclaredContractRetryAdaptations' | 'plusOneCrossUnitSynthesisTurn' | 'globalAgentDialogue' |
-      'taskKindOverrides' | 'editorTaskInstruction' | 'houseReviewGuidelineClause' | 'enabledLearningEnvelope'>>;
+      'taskKindOverrides' | 'editorTaskInstruction' | 'houseReviewGuidelineClause' | 'enabledLearningEnvelope' | 'claimScopedFactualStages' | 'factualRecheck'>>;
   }>;
 }
 
@@ -1753,9 +1753,12 @@ function projectOriginalFieldPolicy(policy: Record<string, unknown>): OrdinaryPr
   for (const rule of declared) {
     const ruleId = String(rule['ruleId']);
     const curation = ruleId === 'ordinary-production-learning-curation' && policy['version'] === 'v31';
+    const factualRecheck = ruleId === 'enrolled-background-factual-recheck';
     const curationBlocks = Object.fromEntries(['authorityOrigin', 'executionMode', 'scopeLimits', 'clarification', 'source', 'transmissions',
       'authorizationPreconditions', 'providerAccountLimit'].map((key) => [key, rule[key]]));
-    const base = curation ? productionReading('Main Editorial Role', ['learning-curation'], ['editorial-learning-example'],
+    const base = factualRecheck ? researchReading(productionReading('Main Editorial Role', ['factual-recheck'], ['public-or-synthetic'],
+      { ...curationBlocks, output: null } as OrdinaryProductionRuleReading['blocks'], false, true))
+      : curation ? productionReading('Main Editorial Role', ['learning-curation'], ['editorial-learning-example'],
       { ...curationBlocks, output: null } as OrdinaryProductionRuleReading['blocks'], false, true) : ruleId === GLOBAL_AGENT_RULE_ID ? GLOBAL_AGENT_READING
       : ruleId === BACKGROUND_PROCESSING_RULE_ID ? BACKGROUND_PROCESSING_READING : ORDINARY_PRODUCTION_RULES[ruleId];
     // These declarations await their separately admitted typed consumers; no generic background fallback.
@@ -1766,7 +1769,9 @@ function projectOriginalFieldPolicy(policy: Record<string, unknown>): OrdinaryPr
     const projection: NonNullable<OrdinaryProductionPolicyReading['rules'][number]['projection']> = {
       taskKinds: reading.taskKinds, outboundDataCategories: reading.outboundDataCategories,
       ...(curation ? { enabledLearningEnvelope: rule['enabledLearningEnvelope'] as NonNullable<AdmittedProviderRule['enabledLearningEnvelope']> } : {}),
+      ...(factualRecheck ? { factualRecheck: rule['factualRecheck'] as NonNullable<AdmittedProviderRule['factualRecheck']> } : {}),
       ...(ruleId === 'ordinary-production-review' ? {
+        claimScopedFactualStages: rule['claimScopedFactualStages'] as NonNullable<AdmittedProviderRule['claimScopedFactualStages']>,
         crossUnitSynthesisAllowed: true, plusDeclaredContractRetryAdaptations: true,
         taskKindOverrides: rule['taskKindOverrides'] as NonNullable<AdmittedProviderRule['taskKindOverrides']>,
         editorTaskInstruction: rule['editorTaskInstruction'] as NonNullable<AdmittedProviderRule['editorTaskInstruction']>,
@@ -1780,7 +1785,7 @@ function projectOriginalFieldPolicy(policy: Record<string, unknown>): OrdinaryPr
     };
     rules.push({ ruleId, reading, projection,
       allowedRoutes: [...new Set((base.modelRole === 'Fast Interaction Role' ? ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS : ORDINARY_PRODUCTION_ALLOWED_BINDINGS).map((binding) => binding.route))],
-      platformTools: verifyPlatformTools(rule, 'ordinary-production', base.platformTools),
+      platformTools: verifyPlatformTools(factualRecheck ? declared.find((candidate) => candidate['ruleId'] === 'ordinary-production-review')! : rule, 'ordinary-production', base.platformTools),
       localTools: rule['localTools'] as AdmittedLocalTools });
   }
   return { originalFieldQualificationId: 'ordinary-production-original-fields-adr0099', declaredRuleIds: declared.map((rule) => String(rule['ruleId'])),

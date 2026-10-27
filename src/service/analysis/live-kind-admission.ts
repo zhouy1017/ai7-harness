@@ -4,6 +4,7 @@ import { liveSeriesContract, liveSeriesConsistencyContract } from '../review/ser
 import { FACTUAL_REVIEW_KIND } from '../../shared/protocol.js';
 import { localToolsFromProjection, type LocalToolsRule } from '../retrieval/local-rule.js';
 import { FACTUAL_REVIEW_PROMPT_CONTRACT_DIGEST } from './factual-review-contract.js';
+import { factualClaimKindDefinition } from './factual-claim-contract.js';
 import { platformToolsFromProjection } from '../provider/search-service.js';
 import { modelProfileFor } from '../provider/model-profile.js';
 import type { RemoteExecutionRoute } from '../provider/egress-gate.js';
@@ -169,7 +170,9 @@ function plannedPayloadCategories(kind: string): readonly OutboundDataCategory[]
 function liveKindExpectation(definition: LiveKindDefinition, policy?: LaunchPolicyProjection): LiveKindExpectation | null {
   if (definition.kind === FACTUAL_REVIEW_KIND) {
     // The research contract (#744) and each Evidence Assurance Level's own (Issue #901): 快速整理 is v1 with no tool declared.
-    const admitted = [withFactualResearch(factualReviewKindDefinition()), factualReviewLevelDefinition('standard'), factualReviewLevelDefinition('strict')]
+    const stages = liveKindRule(policy, FACTUAL_REVIEW_KIND)?.claimScopedFactualStages;
+    const admitted = [withFactualResearch(factualReviewKindDefinition()), factualReviewLevelDefinition('standard'), factualReviewLevelDefinition('strict'),
+      ...(stages === undefined ? [] : [factualClaimKindDefinition('standard'), factualClaimKindDefinition('strict')])]
       .map((entry) => entry.promptContractDigest);
     // v1's bytes are admitted only as the 快速整理 level a plan chose, never as v1 on a launch whose rule hands it no tool.
     const quick = definition.evidenceAssuranceLevel === 'quick' && definition.promptContractDigest === factualReviewLevelDefinition('quick').promptContractDigest;

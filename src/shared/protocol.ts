@@ -2856,7 +2856,55 @@ export type OutboundDataCategoryId =
  * admits, the Model Role it binds, that role's exact route, endpoint, model and credential slot, and the outbound data categories
  * it permits. Eligibility only — a rule authorizes no Run, dispatch or Apply on its own.
  */
+export interface AdmittedFactualVerificationStage {
+  readonly contractId: 'ai7.factual-claim-verification/1';
+  readonly stageId: 'web-verification';
+  readonly maximumInitialSessionsPerEligibleClaim: number;
+  readonly maximumModelRequestsPerSession: number;
+  readonly maximumPlatformToolRoundsPerSession: number;
+  readonly maximumSearchSubmissionsPerClaim: number;
+  readonly maximumMetadataUtf8Bytes: number;
+  readonly tools: readonly string[];
+  readonly automaticTransportRetryAllowed: false;
+  readonly contractRetryAllowed: false;
+  readonly counterResetOnResumeAllowed: false;
+}
+
+export interface AdmittedFactualClaimStages {
+  readonly taskKind: 'factual-review';
+  readonly taskMode: 'whole-manuscript';
+  readonly evidenceAssuranceLevels: readonly EvidenceAssuranceLevel[];
+  readonly procedureId: string;
+  readonly procedureVersion: number;
+  readonly claimArtifactSchema: 'ai7.factual-claim-ledger/1';
+  readonly claimExtraction: {
+    readonly contractId: 'ai7.factual-claim-extraction/1';
+    readonly stageId: 'claim-extraction';
+    readonly maximumInitialSessionsPerCoverageUnit: number;
+    readonly maximumModelRequestsPerSession: number;
+    readonly maximumAssertionsPerCoverageUnit: number;
+    readonly tools: readonly string[];
+    readonly automaticTransportRetryAllowed: false;
+    readonly contractRetryAllowed: false;
+  };
+  readonly claimVerification: AdmittedFactualVerificationStage;
+}
+
+export interface AdmittedFactualRecheck {
+  readonly maximumClaims: number;
+  readonly maximumAutomaticRunsPerOnceKey: number;
+  readonly requestedLevels: readonly EvidenceAssuranceLevel[];
+  readonly onlyContractId: 'ai7.factual-claim-verification/1';
+  readonly onlyStageId: 'web-verification';
+  readonly verificationContract: AdmittedFactualVerificationStage;
+  readonly onceKeyPersistedBeforeDispatch: true;
+  readonly latestStillCurrentEditorDecisionRequired: true;
+  readonly sameBookActiveMatchingEnrollmentRequired: true;
+}
+
 export interface AdmittedProviderRule {
+  readonly claimScopedFactualStages?: AdmittedFactualClaimStages;
+  readonly factualRecheck?: AdmittedFactualRecheck;
   readonly enabledLearningEnvelope?: { readonly pins: readonly string[]; readonly missingStaleRevokedOrExceededResult: 'refuse';
     readonly extraPerPassClickRequired: false; readonly disableStopsLaterDispatchAndUse: true };
   /** v27 review names the same bounded synthesis turn as writing/evaluation; eligibility only. */
@@ -5454,6 +5502,7 @@ export interface FactualRunAssuranceProjection {
 
 /** One Evidence Source Card (V2-UX-EVID-003): every check a discrete state, a candidate never quoted (EVID-004). */
 export interface EvidenceSourceCardProjection {
+  excluded?: boolean;
   /** The relation's own identity within the result: stable across pages and pinning. */
   cardId: string;
   sourceRef: string;
@@ -5592,6 +5641,7 @@ export interface FactualDecisionCardProjection {
 
 /** The Assertion-centered Evidence Workspace (V2-UX-EVID-001 to 013): a read, it mutates nothing (EVID-012). */
 export interface EvidenceWorkspaceProjection {
+  claimRecheckAvailable?: boolean;
   bookId: string;
   result: FactualVerificationResultProjection;
   sources: ReadonlyArray<EvidenceSourceCardProjection>;
@@ -5683,6 +5733,7 @@ export interface InspectEvidenceWorkspaceInput {
   sourcesAfter: number | null;
 }
 export interface RecordVerificationReviewDecisionInput {
+  excludedSourceRefs?: readonly string[];
   bookId: string;
   resultId: string;
   /** The result version the editor read; a later version refuses the decision (FREV-011). */
@@ -5698,7 +5749,7 @@ export interface RecordVerificationReviewDecisionInput {
  */
 export interface VerificationReviewDecisionRecordedProjection {
   workspace: EvidenceWorkspaceProjection;
-  supplementary: null | { blockId: string; level: EvidenceAssuranceLevel; statement: string };
+  supplementary: null | { blockId: string; level: EvidenceAssuranceLevel; statement: string; decisionId?: string };
 }
 /** Why 要求补充证据 prepares no Task yet (Issue #901 rev 4; follow-up #905). */
 export const SUPPLEMENTARY_CHECK_DEFERRED = '已记录补充核查的要求（同一段文字、同级或更高级别）。这本书的事实核查目前只能运行一次；补充核查任务将在事实核查的更新方式接入后开放（#905）。' as const;
@@ -7459,6 +7510,7 @@ export interface FrozenSeriesScope {
 }
 
 export interface PrepareReviewRunInput {
+  decisionId?: string;
   localCheck?: import('./protocol/procedures.js').LocalCheckOptions;
   seriesId?: string | null;
   materialIds?: ReadonlyArray<string>;

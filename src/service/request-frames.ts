@@ -1021,7 +1021,9 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     case 'recordVerificationReviewDecision': {
-      const input = requireInput(value.input, ['bookId', 'resultId', 'resultVersion', 'disposition', 'ownWords', 'reason'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'resultId', 'resultVersion', 'disposition', 'ownWords', 'reason'], ['excludedSourceRefs'], tentativeId);
+      if (input.excludedSourceRefs !== undefined && (input.disposition !== 'request-evidence' || !Array.isArray(input.excludedSourceRefs) ||
+        input.excludedSourceRefs.length < 1 || input.excludedSourceRefs.length > 8 || !input.excludedSourceRefs.every((ref) => isBoundedString(ref, 2048) && ref.startsWith('https://')))) throw new ProtocolError(tentativeId);
       const reason = input.reason;
       if (!validUuid(input.bookId) || !validUuid(input.resultId) || !isSafeInteger(input.resultVersion, 1) ||
           !VERIFICATION_REVIEW_DISPOSITIONS.includes(input.disposition as never) || !(input.ownWords === null || isBoundedString(input.ownWords, 2_000)) ||
@@ -1712,7 +1714,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     case 'prepareReviewRun': {
       // A sheet pre-filled from a Captured Procedure (Issue #65, S30) names the exact version and digest it was filled from.
-      const input = requireInputWithOptional(value.input, ['bookId', 'categoryIds', 'scope'], ['capturedProcedure', 'materialIds', 'seriesId', 'localCheck'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'categoryIds', 'scope'], ['capturedProcedure', 'materialIds', 'seriesId', 'localCheck', 'decisionId'], tentativeId);
+      if (input.decisionId !== undefined && (!validUuid(input.decisionId) || !Array.isArray(input.categoryIds) || input.categoryIds.length !== 1 || input.categoryIds[0] !== 'factual-review')) throw new ProtocolError(tentativeId);
       if (input.localCheck !== undefined && (!validLocalOptions(input.localCheck) || !Array.isArray(input.categoryIds) || input.categoryIds.length !== 1 || input.categoryIds[0] !== 'local-text-check')) throw new ProtocolError(tentativeId);
       if (Array.isArray(input.categoryIds) && input.categoryIds.includes('local-text-check') &&
         (!validLocalOptions(input.localCheck) || input.capturedProcedure != null || input.seriesId != null || (Array.isArray(input.materialIds) && input.materialIds.length > 0))) throw new ProtocolError(tentativeId);

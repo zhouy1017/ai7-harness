@@ -1603,11 +1603,11 @@ describe('Provider Processing v23 (ordinary-production, inherited from v19 and v
         outboundDataCategories: ['public-or-synthetic', 'editorial-learning-example', 'house-review-preference-excerpt'],
         enabledLearningEnvelope: rulesOf(readPolicySync('docs/policies/provider-processing-policy.v31.json'))
           .find((rule) => rule.ruleId === 'ordinary-production-learning-curation')!.enabledLearningEnvelope,
-      }), expect.objectContaining({ ruleId: 'ordinary-production-model-connection-test', taskKinds: ['model-connection-test'], route: binding.route, model: binding.model })],
+      }), factualRecheckRuleExpectation(binding), expect.objectContaining({ ruleId: 'ordinary-production-model-connection-test', taskKinds: ['model-connection-test'], route: binding.route, model: binding.model })],
       bindingState: 'configured',
       label: '本机生产：实时传输受运行边界约束',
     });
-    expect(projection.providerProcessing.admittedRules).toHaveLength(14);
+    expect(projection.providerProcessing.admittedRules).toHaveLength(15);
     // The two source flags agree with the categories here too: material in review, writing, evaluation and 来源译文; deliverables in review.
     expect(projection.providerProcessing.admittedRules.filter((rule) => rule.materialReferencesAllowed).map((rule) => rule.ruleId))
       .toEqual(['ordinary-production-review', 'ordinary-production-writing', 'ordinary-production-evaluation', 'ordinary-production-material-translation']);
@@ -1621,7 +1621,7 @@ describe('Provider Processing v23 (ordinary-production, inherited from v19 and v
     expect(new Set(projection.providerProcessing.admittedRules.map((rule) => `${rule.route}|${rule.endpoint}|${rule.model}|${rule.credentialSlot}`)).size).toBe(1);
     expect(JSON.stringify(projection)).not.toContain(binding.credentialReference);
     // Production admission must retain every policy category, including all three unpublished classes.
-    const policyRules = rulesOf(readPolicySync('docs/policies/provider-processing-policy.v30.json'));
+    const policyRules = rulesOf(readPolicySync('docs/policies/provider-processing-policy.v31.json'));
     for (const rule of projection.providerProcessing.admittedRules.filter((rule) => rule.ruleId !== 'ordinary-production-model-connection-test')) {
       expect(rule.outboundDataCategories, rule.ruleId).toEqual(policyRules.find((candidate) => candidate.ruleId === rule.ruleId)!.allowedOutboundDataCategories);
     }
@@ -1859,7 +1859,7 @@ describe('Provider Processing v22 and v23: enrolled background analysis and mode
     for (const [projection, ids] of [[developerLive, V16_ADMITTED_RULES.map((rule) => rule.ruleId)], [production, PRODUCTION_RULE_ID_ORDER]] as const) {
       const rules = projection.providerProcessing.admittedRules.filter((rule) => rule.ruleId !== 'ordinary-production-model-connection-test' &&
         rule.ruleId !== 'ordinary-production-global-agent-dialogue' && rule.ruleId !== 'ordinary-production-learning-curation' &&
-        rule.ruleId !== 'enrolled-background-processing');
+        rule.ruleId !== 'enrolled-background-processing' && rule.ruleId !== 'enrolled-background-factual-recheck');
       expect(rules.map((rule) => rule.ruleId)).toEqual(ids);
       expect(rules.map((rule) => [rule.clarificationQuestionAllowed, rule.clarificationTimeoutHours, rule.backgroundOrigin])).toEqual(expected);
       // The default-execution-rule origin is projected from each rule's own authorityOrigin: review in both scopes, writing in developer-live only.
@@ -2593,7 +2593,7 @@ describe('Provider Processing v24: the ADR 0091 Public SampleBooks (Issue #990)'
 /** Independent predecessor expectations plus the selected v27 additions. */
 function v30ProductionAdmittedRules(binding: ConfiguredProviderBinding): AdmittedProviderRule[] {
   const declared = rulesOf(readPolicySync('docs/policies/provider-processing-policy.v27.json'));
-  const current = rulesOf(readPolicySync('docs/policies/provider-processing-policy.v30.json'));
+  const current = rulesOf(readPolicySync('docs/policies/provider-processing-policy.v31.json'));
   return productionAdmittedRules(binding).map((rule) => {
     const document = declared.find((entry) => entry.ruleId === rule.ruleId)!;
     return { ...rule, localTools: document.localTools as AdmittedLocalTools,
@@ -2607,6 +2607,7 @@ function v30ProductionAdmittedRules(binding: ConfiguredProviderBinding): Admitte
         taskKindOverrides: current.find((entry) => entry.ruleId === rule.ruleId)!.taskKindOverrides as NonNullable<AdmittedProviderRule['taskKindOverrides']>,
         editorTaskInstruction: current.find((entry) => entry.ruleId === rule.ruleId)!.editorTaskInstruction as NonNullable<AdmittedProviderRule['editorTaskInstruction']>,
         houseReviewGuidelineClause: current.find((entry) => entry.ruleId === rule.ruleId)!.houseReviewGuidelineClause as NonNullable<AdmittedProviderRule['houseReviewGuidelineClause']>,
+        claimScopedFactualStages: current.find((entry) => entry.ruleId === rule.ruleId)!.claimScopedFactualStages as NonNullable<AdmittedProviderRule['claimScopedFactualStages']>,
       }),
     };
   }).concat([
@@ -2619,4 +2620,11 @@ function v30ProductionAdmittedRules(binding: ConfiguredProviderBinding): Admitte
       modelRole: 'Main Editorial Role', backgroundOrigin: true, route: binding.route, model: binding.model,
     }),
   ]);
+}
+
+function factualRecheckRuleExpectation(binding: ConfiguredProviderBinding): AdmittedProviderRule {
+  return expect.objectContaining({ ruleId: 'enrolled-background-factual-recheck', taskKinds: ['factual-recheck'],
+    modelRole: 'Main Editorial Role', backgroundOrigin: true, route: binding.route, model: binding.model,
+    factualRecheck: expect.objectContaining({ maximumClaims: 1, maximumAutomaticRunsPerOnceKey: 1, onlyStageId: 'web-verification',
+      verificationContract: expect.objectContaining({ maximumModelRequestsPerSession: 129, maximumPlatformToolRoundsPerSession: 128, maximumSearchSubmissionsPerClaim: 3 }) }) });
 }

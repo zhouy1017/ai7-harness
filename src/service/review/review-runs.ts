@@ -1018,6 +1018,7 @@ export interface ReviewRunPlanFacts {
 
 export type ReviewRunPrepareInput =
   | {
+    factualDecision?: import('../factual-verification.js').FactualRecheckSelection;
     phase: 'start';
     bookId: string;
     categoryIds: ReadonlyArray<string>;
@@ -1067,6 +1068,7 @@ interface PlannedCategory {
 }
 
 interface PreparationWork {
+  readonly factualDecision?: import('../factual-verification.js').FactualRecheckSelection;
   readonly localPlan?: AnyLocalCheckPlan;
   readonly housePreferences?: Readonly<Record<string, HouseReviewPreferenceUse>> | undefined;
   /** The Task Intent Draft the Run is prepared from (Issue #423, slice 7a); absent for every other preparation. */
@@ -1365,7 +1367,8 @@ export class ReviewRunStore {
         if (this.#ledgers.baseline().launch.live !== null && entry.executor !== 'baseline-leads') {
           requireReview(liveReviewRule(input.launchPolicy, entry) !== null, 'REVIEW_CATEGORY_UNAVAILABLE', `「${entry.label}」：${liveReviewUnavailableReason(entry)}`);
         }
-        const plan = reviewCategoryScopePlan(entry.executor, entry.unavailableReason, scope, reading.facts);
+        const plan = reviewCategoryScopePlan(entry.executor, entry.unavailableReason, scope,
+          { ...reading.facts, factualSupplement: input.factualDecision !== undefined });
         requireReview(plan.kind !== 'refused', 'REVIEW_SCOPE_UNAVAILABLE', `「${entry.label}」：${plan.kind === 'refused' ? plan.reason : ''}`);
         return { position: position + 1, entry, plan };
       });
@@ -1378,6 +1381,7 @@ export class ReviewRunStore {
     const housePreferences = usedPreferences.length > 0 ? Object.fromEntries(usedPreferences)
       : offeredPreferences.some(([, offer]) => offer === 'closed') ? {} : undefined;
     const work: PreparationWork = {
+      ...(input.factualDecision === undefined ? {} : { factualDecision: input.factualDecision }),
       ...(housePreferences === undefined ? {} : { housePreferences }),
       ...(input.intentDraft === undefined ? {} : { intentDraft: input.intentDraft }),
       redoOf: input.redoOf ?? null,
@@ -1477,7 +1481,7 @@ export class ReviewRunStore {
           } },
         };
         const result = work.ledgerWorkId === null
-          ? ledger.prepare({ ...request, reconfirm: false, ...draft })
+          ? ledger.prepare({ ...request, reconfirm: false, ...draft, ...(work.factualDecision === undefined ? {} : { factualDecision: work.factualDecision }) })
           : ledger.prepare({ phase: 'advance', workId: work.ledgerWorkId });
         if (!result.done) {
           work.ledgerWorkId = result.workId;
@@ -4085,6 +4089,7 @@ export class ReviewRunStore {
       }
     }
     const facts: ReviewCategoryLedgerFacts = {
+      factualUpdates: entry.executor === 'factual-review-kind' && this.#ledgers.ledgerOf(entry).definition.updateModes.includes('review-again'),
       hasRevision: revision !== null,
       reviewed,
       selectionBase,
@@ -4095,7 +4100,7 @@ export class ReviewRunStore {
     };
     return {
       entry,
-      unavailableReason: entry.executor === 'factual-review-kind' && revision !== null ? FACTUAL_AGAIN_REASON : null,
+      unavailableReason: entry.executor === 'factual-review-kind' && revision !== null && !facts.factualUpdates ? FACTUAL_AGAIN_REASON : null,
       facts,
       projection,
       unread,

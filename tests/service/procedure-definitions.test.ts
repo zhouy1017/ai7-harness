@@ -78,10 +78,10 @@ describe('Procedure Definition persistence and exact plan pins', () => {
     store.markCleanShutdown(); store.close();
     db = new DatabaseSync(path);
     // Synchronized with #1082, #1083 and #1084: revisions 86 to 88 follow; 88 adds the version-2 review procedures beside version 1.
-    expect(db.prepare('PRAGMA user_version').get()!.user_version).toBe(96);
-    const originalVersions = db.prepare("SELECT * FROM procedure_definition_versions WHERE version = 1 AND procedure_id <> 'ai7-procedure/local-text-check' ORDER BY version_id").all();
+    expect(db.prepare('PRAGMA user_version').get()!.user_version).toBe(97);
+    const originalVersions = db.prepare("SELECT * FROM procedure_definition_versions WHERE version = 1 AND procedure_id NOT IN ('ai7-procedure/local-text-check', 'ai7-procedure/factual-claim-check') ORDER BY version_id").all();
     // A genuine revision85 holds the historical ten definitions, before the new local identity exists.
-    execPre74Fixture(db, "DROP TRIGGER procedure_definition_versions_no_delete; DROP TRIGGER procedure_definitions_no_delete; DELETE FROM procedure_definition_versions WHERE version > 1 OR procedure_id = 'ai7-procedure/local-text-check'; DELETE FROM procedure_definitions WHERE procedure_id = 'ai7-procedure/local-text-check'; PRAGMA user_version = 85;");
+    execPre74Fixture(db, "DROP TRIGGER procedure_definition_versions_no_delete; DROP TRIGGER procedure_definitions_no_delete; DELETE FROM procedure_definition_versions WHERE version > 1 OR procedure_id IN ('ai7-procedure/local-text-check', 'ai7-procedure/factual-claim-check'); DELETE FROM procedure_definitions WHERE procedure_id IN ('ai7-procedure/local-text-check', 'ai7-procedure/factual-claim-check'); PRAGMA user_version = 85;");
     db.exec(PROCEDURE_DEFINITION_TRIGGER_SQL['procedure_definition_versions_no_delete']!);
     db.exec(PROCEDURE_DEFINITION_TRIGGER_SQL['procedure_definitions_no_delete']!);
     db.close();
@@ -91,7 +91,7 @@ describe('Procedure Definition persistence and exact plan pins', () => {
     expect(library.filter((entry) => entry.version === 2).every((entry) => entry.previousVersions?.[0]?.version === 1)).toBe(true);
     store.markCleanShutdown(); store.close();
     db = new DatabaseSync(path);
-    expect(db.prepare("SELECT * FROM procedure_definition_versions WHERE version = 1 AND procedure_id <> 'ai7-procedure/local-text-check' ORDER BY version_id").all()).toEqual(originalVersions);
+    expect(db.prepare("SELECT * FROM procedure_definition_versions WHERE version = 1 AND procedure_id NOT IN ('ai7-procedure/local-text-check', 'ai7-procedure/factual-claim-check') ORDER BY version_id").all()).toEqual(originalVersions);
     expect(resolveProcedureDefinition(db, 'ai7-procedure/review-typos-and-usage', 1).document.stages[0]!.outputTemplateId).toBe('ai7.editorial-review.unit-result/1');
     expect(resolveProcedureDefinition(db, 'ai7-procedure/review-typos-and-usage').document.stages[0]!.outputTemplateId).toBe('ai7.editorial-review.unit-result/2');
     db.exec('DROP TABLE procedure_plan_pins'); db.close();
