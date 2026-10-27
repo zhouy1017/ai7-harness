@@ -1520,10 +1520,10 @@ async function dispatch(
     // slot say which Run is in flight, exactly as the analysis inspections read them; nothing is written.
     // 全域智能体 (Issue #1083): no Book route. The disclosed state is the execution owner's own decision for the selected policy.
     case 'inspectGlobalAgent':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectGlobalAgent((id) => dialogues.liveText(id), globalDialogueAdmitted(dialogues, launchPolicy)) };
+      return { id: request.id, ok: true, op: request.op, result: store.inspectGlobalAgent((id) => dialogues.liveText(id), globalDialogueAdmitted(dialogues, launchPolicy), globalDialogueAdmitted(dialogues, launchPolicy, true)) };
     case 'recordLearningSupervision':
       store.recordLearningSupervision(request.input);
-      return { id: request.id, ok: true, op: request.op, result: store.inspectGlobalAgent((id) => dialogues.liveText(id), globalDialogueAdmitted(dialogues, launchPolicy)) };
+      return { id: request.id, ok: true, op: request.op, result: store.inspectGlobalAgent((id) => dialogues.liveText(id), globalDialogueAdmitted(dialogues, launchPolicy), globalDialogueAdmitted(dialogues, launchPolicy, true)) };
     case 'prepareGlobalAgentTurn':
       return { id: request.id, ok: true, op: request.op, result: globalDialogueCall(() => prepareGlobalAgentDisclosure(store, dialogues, launchPolicy, request.input)) };
     case 'askGlobalAgent': {
@@ -1680,8 +1680,8 @@ function globalDialogueCall<T>(operation: () => T): T {
   }
 }
 
-function globalDialogueAdmitted(dialogues: DialogueExecutionOwner, policy: LaunchPolicyProjection): boolean {
-  try { dialogues.requireGlobalReady(policy); return true; } catch (error) {
+function globalDialogueAdmitted(dialogues: DialogueExecutionOwner, policy: LaunchPolicyProjection, scoped = false): boolean {
+  try { if (scoped) dialogues.requireGlobalScopedReady(policy); else dialogues.requireGlobalReady(policy); return true; } catch (error) {
     if (error instanceof DialogueError) return false;
     throw error;
   }

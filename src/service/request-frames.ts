@@ -145,6 +145,15 @@ function validGlobalAgentPins(value: unknown): boolean {
     isBoundedString(pin.itemId, 180) && isBoundedString(pin.revisionId, 180));
 }
 
+/** A scoped Global Agent turn's explicit Books and exact procedure versions (#1171); absent keeps the no-tools turn. */
+function validGlobalAgentScope(value: unknown): boolean {
+  return value === undefined || (isRecord(value) && hasExactKeys(value, ['bookIds', 'procedures']) &&
+    Array.isArray(value.bookIds) && value.bookIds.length <= 8 && value.bookIds.every(validUuid) &&
+    Array.isArray(value.procedures) && value.procedures.length <= 8 && value.procedures.every((pin) => isRecord(pin) &&
+      hasExactKeys(pin, ['procedureId', 'version', 'digest']) && isBoundedString(pin.procedureId, 200) && isSafeInteger(pin.version, 1) &&
+      typeof pin.digest === 'string' && HEX_DIGEST_PATTERN.test(pin.digest)));
+}
+
 function requireInput(value: unknown, keys: readonly string[], requestId: string): Record<string, unknown> {
   if (!isRecord(value) || !hasExactKeys(value, keys)) throw new ProtocolError(requestId);
   return value;
@@ -2648,11 +2657,12 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
             input.sources !== undefined && !validGlobalAgentPins(input.sources)) throw new ProtocolError(tentativeId);
         break;
       }
-      const input = value.op === 'prepareGlobalAgentTurn' ? requireInput(value.input, ['kind', 'question', 'sources'], tentativeId)
-        : requireInputWithOptional(value.input, ['question', 'sources'], ['disclosureSha256'], tentativeId);
+      const input = value.op === 'prepareGlobalAgentTurn' ? requireInputWithOptional(value.input, ['kind', 'question', 'sources'], ['scope'], tentativeId)
+        : requireInputWithOptional(value.input, ['question', 'sources'], ['disclosureSha256', 'scope'], tentativeId);
       if (value.op === 'prepareGlobalAgentTurn' && input.kind !== 'ask' ||
           input.disclosureSha256 !== undefined && (typeof input.disclosureSha256 !== 'string' || !HEX_DIGEST_PATTERN.test(input.disclosureSha256))) throw new ProtocolError(tentativeId);
-      if (!isBoundedString(input.question, MAX_DIALOGUE_QUESTION_CHARACTERS) || !validGlobalAgentPins(input.sources)) throw new ProtocolError(tentativeId);
+      if (!isBoundedString(input.question, MAX_DIALOGUE_QUESTION_CHARACTERS) || !validGlobalAgentPins(input.sources) ||
+          !validGlobalAgentScope(input.scope)) throw new ProtocolError(tentativeId);
       break;
     }
     case 'inspectDialogue': {

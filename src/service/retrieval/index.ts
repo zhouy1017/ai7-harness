@@ -2,7 +2,8 @@ import { canonicalJson, isRecord, sha256Hex } from '../analysis/canonical.js';
 import type { EmbeddingProvider } from '../knowledge/embedding.js';
 
 /** Disposable projections only. Readers own authorization, availability and the authoritative pinned bytes. */
-export type RetrievalSourceKind = 'manuscript' | 'material' | 'retained-source';
+/** `memory` is one explicitly pinned house memory/preference revision of a scoped Global Agent turn (#1171); lexical only. */
+export type RetrievalSourceKind = 'manuscript' | 'material' | 'retained-source' | 'memory';
 export interface RetrievalAnchor {
   readonly blockId?: string;
   readonly segmentOrdinal?: number;

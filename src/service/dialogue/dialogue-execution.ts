@@ -1,7 +1,8 @@
-import { GLOBAL_AGENT_PROMPT_CONTRACT, GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST, admittedGlobalAgentRoute } from './global-agent-session.js';
+import { GLOBAL_AGENT_PROMPT_CONTRACT, GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST, GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT, GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT_DIGEST,
+  admittedGlobalAgentRoute, admittedGlobalAgentScopedRoute } from './global-agent-session.js';
 import { randomUUID } from 'node:crypto';
 import { RetrievalIndex } from '../retrieval/index.js';
-import { PlatformToolSession } from '../provider/platform-tool-session.js';
+import { PlatformToolSession, type GlobalAgentScopedToolOwner } from '../provider/platform-tool-session.js';
 import { DIALOGUE_RETRIEVAL_PROMPT_CONTRACT, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST } from './contract.js';
 import { sha256Hex } from '../analysis/canonical.js';
 import { DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS, type ModelRequestGovernor, type ModelRequestProducer } from '../analysis/execution.js';
@@ -24,6 +25,7 @@ import {
   evaluateEgress,
   type EgressBindingFacts,
   type ExecutionRoute,
+  type OutboundDataCategory,
   type TransmitTicket,
 } from '../provider/egress-gate.js';
 import { transmitOnce } from '../provider/live-transmission.js';
@@ -68,6 +70,8 @@ export interface DialogueRecords {
   bindDialogueAttempt(attemptId: string, binding: StoredDialogueBinding): void;
   openDialogueSpan(attemptId: string, harnessSessionId: string, startSeq: number): void;
   settleDialogueAttempt(attemptId: string, outcome: DialogueOutcome, endSeq: number | null, causeCode: string | null): void;
+  /** A scoped Global Agent turn's pinned index and further tools (#1171); without it every scoped turn refuses. */
+  globalAgentScopedTools?(message: DialogueMessageInput): { retrieval: RetrievalIndex; scopedTools: GlobalAgentScopedToolOwner };
 }
 
 /**
@@ -226,7 +230,16 @@ export class DialogueExecutionOwner {
   }
 
   requireGlobalReady(policy: LaunchPolicyProjection): AdmittedDialogueRoute {
-    const route = admittedGlobalAgentRoute(policy);
+    return this.#requireGlobal(admittedGlobalAgentRoute(policy));
+  }
+
+  /** The scoped tool dialogue's own admission (#1171): a launch that admits only the no-tools rule refuses here, never falls back. */
+  requireGlobalScopedReady(policy: LaunchPolicyProjection): AdmittedDialogueRoute {
+    if (this.#deps.records.globalAgentScopedTools === undefined) throw new DialogueError('GLOBAL_AGENT_POLICY_BLOCKED', '当前处理策略未允许');
+    return this.#requireGlobal(admittedGlobalAgentScopedRoute(policy));
+  }
+
+  #requireGlobal(route: AdmittedDialogueRoute | null): AdmittedDialogueRoute {
     const bound = this.#deps.live?.route;
     if (route === null || this.#deps.live === null || this.#disposed || !this.#deps.live.credentialReference ||
         bound?.profile.route !== route.profile.route || bound.modelProfile.model !== route.modelProfile.model)
@@ -343,16 +356,19 @@ export class DialogueExecutionOwner {
     const sessionId = randomUUID();
     // An Agent 工作区 turn registers no tool, whatever the rule or fixture offers the dialogue (Issue #90, slice 13a).
     const global = turn.message.globalSources !== undefined;
+    // A scoped Global turn registers exactly its rule's four declared tools on composition v2 (#1171); the no-tools turn none.
+    const scoped = global && turn.message.globalScope !== undefined ? turn.globalRoute?.localTools ?? null : null;
     const workspace = turn.settled !== undefined;
     const admittedLocalRule = workspace || global ? null
       : live?.route?.localTools ?? (live === null && this.#deps.fixture !== null ? dialogueRetrievalFixtureRule(this.#deps.fixture, turn.message) : null);
     // This caller still pins composition v1; Book dialogue's expanded tool composition belongs to F-18b.
-    const localRule = admittedLocalRule === null ? null : { targetedRetrieval: admittedLocalRule.targetedRetrieval, breaker: admittedLocalRule.breaker };
+    const localRule = scoped ?? (admittedLocalRule === null ? null : { targetedRetrieval: admittedLocalRule.targetedRetrieval, breaker: admittedLocalRule.breaker });
     let retrieval: RetrievalIndex | null = null;
-    const promptContractDigest = global ? GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST : workspace ? AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST
-      : localRule === null ? DIALOGUE_PROMPT_CONTRACT_DIGEST : DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST;
-    const systemPrompt = global ? GLOBAL_AGENT_PROMPT_CONTRACT.systemPrompt : workspace ? AGENT_WORKSPACE_PROMPT_CONTRACT.systemPrompt
-      : localRule === null ? DIALOGUE_PROMPT_CONTRACT.systemPrompt : DIALOGUE_RETRIEVAL_PROMPT_CONTRACT.systemPrompt;
+    let scopedTools: GlobalAgentScopedToolOwner | undefined;
+    const promptContractDigest = scoped !== null ? GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT_DIGEST : global ? GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST
+      : workspace ? AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST : localRule === null ? DIALOGUE_PROMPT_CONTRACT_DIGEST : DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST;
+    const systemPrompt = scoped !== null ? GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT.systemPrompt : global ? GLOBAL_AGENT_PROMPT_CONTRACT.systemPrompt
+      : workspace ? AGENT_WORKSPACE_PROMPT_CONTRACT.systemPrompt : localRule === null ? DIALOGUE_PROMPT_CONTRACT.systemPrompt : DIALOGUE_RETRIEVAL_PROMPT_CONTRACT.systemPrompt;
     let current: string | null = null;
     let spanOpened = false;
     let outcome: HarnessTurnOutcome | null = null;
@@ -364,7 +380,10 @@ export class DialogueExecutionOwner {
     try {
       if (live !== null) active.producer = this.#deps.requestGovernor.registerProducer({ key: `dialogue:${turn.attemptId}`, kind: 'dialogue', lane: 'foreground' });
       // Inside the attempt: a source that cannot be read settles the attempt as failed rather than leaving it answering.
-      retrieval = localRule === null ? null : this.#deps.retrievalIndex?.(turn.dialogueId) ?? new RetrievalIndex([]);
+      if (global && turn.message.globalScope !== undefined) {
+        if (scoped === null || records.globalAgentScopedTools === undefined) throw new DialogueError('GLOBAL_AGENT_POLICY_BLOCKED', '当前处理策略未允许');
+        ({ retrieval, scopedTools } = records.globalAgentScopedTools(turn.message));
+      } else retrieval = localRule === null ? null : this.#deps.retrievalIndex?.(turn.dialogueId) ?? new RetrievalIndex([]);
       active.retrieval = retrieval;
       const route = live === null ? null : turn.globalRoute ?? live.route!;
       // Read once: under ordinary-production the configured reference may change while this answer is in flight (Issue #811).
@@ -373,8 +392,8 @@ export class DialogueExecutionOwner {
         (turn.globalRoute !== undefined ? turn.sourceGuard?.() === true : live.current?.(credentialReference, route) ?? true));
       const executionRoute: ExecutionRoute = route === null ? LOCAL_DETERMINISTIC_ROUTE : route.profile.route as ExecutionRoute;
       const model = route === null ? LOCAL_DETERMINISTIC_MODEL : route.modelProfile.model;
-      const composition = describeComposition(executionRoute, model, promptContractDigest,
-        workspace ? AGENT_WORKSPACE_COMPOSITION_OPTIONS : { sessionLog: true, localTools: localRule !== null });
+      const composition = describeComposition(executionRoute, model, promptContractDigest, workspace ? AGENT_WORKSPACE_COMPOSITION_OPTIONS
+        : scoped !== null ? { version: 2, sessionLog: true, localTools: scoped } : { sessionLog: true, localTools: localRule !== null });
       const localRuntime = live === null ? records.localFixtureRuntime?.() : null;
       if (global && localRuntime != null) throw new DialogueError('GLOBAL_AGENT_POLICY_BLOCKED', '本地夹具没有全域原文字段消费者。');
       const localProfile = localRuntime == null ? undefined : localRuntime.catalog.profile(localRuntime.selectedPolicyIdentity,
@@ -396,10 +415,15 @@ export class DialogueExecutionOwner {
         systemPrompt,
         // The editor's own selected words and question: the local deterministic route, or a remote one whose rule names them.
         outboundDataCategory: global ? 'public-or-synthetic' : DIALOGUE_OUTBOUND_CATEGORY,
-        ...(global ? { contractCategories: new Set(['house-review-preference-excerpt'] as const) } : {}),
+        ...(global ? { contractCategories: new Set<OutboundDataCategory>(['house-review-preference-excerpt',
+          ...((turn.message.globalScope?.books.length ?? 0) > 0 ? ['editor-selected-manuscript-excerpt' as const] : [])]) } : {}),
         ...(global && route?.globalAgentDialogue !== undefined ? { globalAgentScope: {
           ...(turn.qualification === undefined ? {} : { qualification: turn.qualification }),
           rule: route.globalAgentDialogue, payloadCurrent: () => turn.sourceGuard?.() === true,
+        } } : {}),
+        ...(scoped !== null && route?.globalAgentScopedDialogue !== undefined ? { globalAgentScope: {
+          ...(turn.qualification === undefined ? {} : { qualification: turn.qualification }),
+          scopedRule: route.globalAgentScopedDialogue, payloadCurrent: () => turn.sourceGuard?.() === true,
         } } : {}),
         policy: route === null
           ? { operationalScope: 'development-ci', providerProcessingVersion: localRuntime == null ? 'v1' : 'v29', liveTransmissionAllowed: false, authorizedLiveTransmissionCount: 0 }
@@ -414,7 +438,8 @@ export class DialogueExecutionOwner {
       };
       const acceptedOutputDigests = new Set<string>();
       const scope = { currentBindingDigest: () => isCurrent() ? current : null, acceptedOutputDigests, ...(route === null ? {} : { ceilingState: () => 'not-applicable' as const }) };
-      const toolSession = retrieval === null ? null : new PlatformToolSession({ binding: bindingFacts, scope, retrieval, purpose: DIALOGUE_TEST_ITEM_PURPOSE });
+      const toolSession = retrieval === null ? null : new PlatformToolSession({ binding: bindingFacts, scope, retrieval, purpose: DIALOGUE_TEST_ITEM_PURPOSE,
+        ...(scopedTools === undefined ? {} : { scopedTools }) });
       // Development validation only (ADR 0089, Issue #808): the Provider Test Ledger and Result Cache answer, refuse or record
       // the request. A live launch outside one is business, and the request reaches the transport itself.
       // Ordinary production has no development validation, so no answer ever reaches the developer cache or ledger (Issue #811).
@@ -438,6 +463,7 @@ export class DialogueExecutionOwner {
           } catch (error) { if (stopping()) refusedForStop = true; permit.release(); throw error; }
         } }),
         ...(toolSession === null ? {} : { localTools: toolSession }),
+        ...(scoped === null ? {} : { compositionOptions: { version: 2 as const }, localToolsRule: scoped }),
         sessionId,
         route: executionRoute,
         model,
@@ -467,7 +493,8 @@ export class DialogueExecutionOwner {
           // The streaming capability is a declaration, not an admission: it chooses the transport for a model the policy admitted.
           // The SSE request shape is the dialogue's own and admitted for its contracts alone; an Agent 工作区 turn, read only once
           // it has settled, keeps the whole-answer request (Issue #90, slice 13a).
-          const streamShape = !workspace && route.modelProfile.capabilities.streaming === 'chat-completions-sse' ? 'editorial-dialogue-sse' as const : null;
+          // A scoped Global turn keeps the whole-answer request tool rounds use elsewhere: the SSE shape admits no Global tools.
+          const streamShape = !workspace && scoped === null && route.modelProfile.capabilities.streaming === 'chat-completions-sse' ? 'editorial-dialogue-sse' as const : null;
           const adapter = new DeepSeekOpenAiCompatibleAdapter({
             broker: live.broker,
             slotBinding,

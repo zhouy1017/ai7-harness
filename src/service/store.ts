@@ -1,4 +1,4 @@
-import { readProcedureLibrary, resolveProcedurePin, saveProcedureDefinition, selectProcedureForBook, procedureVersionId } from './procedures/editable.js';
+import { procedureStopped, readProcedureLibrary, resolveProcedurePin, saveProcedureDefinition, selectProcedureForBook, procedureVersionId } from './procedures/editable.js';
 import { initializeEditableProcedureSchema } from './procedures/editable-schema.js';
 import { HouseWordLists, initializeHouseWordListSchema } from './review/house-word-list.js';
 import { HouseWordListError, type InspectHouseWordListInput, type SaveHouseWordListInput } from '../shared/protocol/house-word-list.js';
@@ -18,8 +18,9 @@ import type { WordTrackedEditLearningSource } from '../shared/protocol/learning.
 import type { ChangeEditorialLearningInput, CreateEditorialMemoryInput, DeactivateEditorialMemoryInput, InspectEditorialLearningInput, EditorialLearningProjection, LearningReasonAskInput, LearningReasonAskProjection } from '../shared/protocol/learning.js';
 import { buildDialogueMessage, dialogueQuestionDigest } from './dialogue/contract.js';
 import { fragmentsText } from './dialogue/fragments.js';
-import { globalAgentDialogueProjection, readGlobalAgentHistory, type GlobalAgentTurnHistory } from './dialogue/global-agent-session.js';
-import type { AskGlobalAgentInput, GlobalAgentDialogueProjection, GlobalAgentAttemptInput, GlobalMemoryPin, GlobalAgentSourceCandidate, HouseReviewPreferenceVersion, PrepareGlobalAgentTurnInput } from '../shared/protocol.js';
+import { globalAgentDialogueProjection, globalAgentScopedTools, readGlobalAgentHistory, type GlobalAgentTurnHistory } from './dialogue/global-agent-session.js';
+import type { AskGlobalAgentInput, GlobalAgentDialogueProjection, GlobalAgentAttemptInput, GlobalAgentProcedure, GlobalAgentProcedurePin, GlobalAgentScope, GlobalAgentScopeInput, GlobalMemoryPin, GlobalAgentSourceCandidate, HouseReviewPreferenceVersion, PrepareGlobalAgentTurnInput } from '../shared/protocol.js';
+import { PROCEDURE_STAGE_LABELS, type ProcedureDefinitionDocument } from '../shared/protocol/procedures.js';
 import { GLOBAL_AGENT_SCHEMA_VERSION } from './task-authorization.js';
 import { SupervisionDirectives, governedMemoryItems, preferenceItems, initializeSupervisionSchema, supervisionSourceCandidates, editorialMemoryGovernanceItem, type EditorialMemoryGovernanceHooks } from './learning/supervision-directives.js';
 import { GLOBAL_AGENT_POLICY_BLOCKED, type GlobalAgentProjection, type RecordLearningSupervisionInput } from '../shared/protocol.js';
@@ -13844,7 +13845,7 @@ export class EditorialStore {
    * A Book-less read (Issue #1083): entering creates neither a Task nor a Session/Run. `dialogueAdmitted` is the execution
    * owner's own decision for the selected policy; each item reads as a Run or the session would read it, without the house's names.
    */
-  inspectGlobalAgent(live: (attemptId: string) => LiveAnswer | null = () => null, dialogueAdmitted = false): GlobalAgentProjection {
+  inspectGlobalAgent(live: (attemptId: string) => LiveAnswer | null = () => null, dialogueAdmitted = false, scopedAdmitted = false): GlobalAgentProjection {
     return this.#learningCall(() => {
       const operationalScope = this.#baselineAnalysis.launch.operationalScope;
       const preference = new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).history(operationalScope).at(-1) ?? null;
@@ -13875,6 +13876,7 @@ export class EditorialStore {
         itemOffset = page.nextItemOffset;
       }
       return { operationalScope, dialogueState: dialogueAdmitted ? 'available' : GLOBAL_AGENT_POLICY_BLOCKED,
+        scopedDialogueState: scopedAdmitted ? 'available' : GLOBAL_AGENT_POLICY_BLOCKED, procedures: this.#globalAgentProcedures(),
         explanation: dialogueAdmitted ? '只使用明确勾选的已启用记忆版本，不读取稿件；治理仍须单独操作。'
           : '此处暂不能调用模型。记忆与学习监督操作仅在本机记录，不读取稿件。',
         categories: BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.map(({ categoryId, label }) => ({ categoryId, label })),
@@ -13897,6 +13899,61 @@ export class EditorialStore {
   globalAgentSourcesCurrent(pins: ReadonlyArray<GlobalMemoryPin>): boolean {
     const items = this.inspectGlobalAgent().sourceCandidates ?? [];
     return pins.every((pin) => items.some((item) => item.itemId === pin.itemId && item.revisionId === pin.revisionId));
+  }
+
+  /** The library's current enabled versions (#1171): what the Global Agent view inspects and an editor may list for one turn. */
+  #globalAgentProcedures(): GlobalAgentProcedure[] {
+    return this.#authority.prepare('SELECT procedure_id FROM procedure_definitions ORDER BY pre_installed DESC, rowid').all().flatMap((row) => {
+      const { document, pin } = resolveProcedureDefinition(this.#authority, String(row.procedure_id));
+      return procedureStopped(this.#authority, pin) ? [] : [{ ...pin, title: document.title, editorInstruction: document.editorInstruction,
+        stages: document.stages.map((stage) => ({ stageType: stage.stageType, label: PROCEDURE_STAGE_LABELS[stage.stageType] })) }];
+    });
+  }
+
+  /** Pin an explicitly listed scope at ask (#1171): each Book at its primary manuscript's current revision, each procedure exactly. */
+  #pinGlobalAgentScope(input: GlobalAgentScopeInput): GlobalAgentScope {
+    requireStore(input.bookIds.length <= 8 && new Set(input.bookIds).size === input.bookIds.length && input.procedures.length <= 8 &&
+      new Set(input.procedures.map((pin) => pin.procedureId)).size === input.procedures.length, 'GLOBAL_AGENT_SCOPE_CHANGED', '对话范围无效，请重新选择。');
+    const books = input.bookIds.map((bookId) => {
+      const row = this.#authority.prepare(`SELECT b.title, m.manuscript_id, mb.branch_id FROM books b JOIN manuscripts m ON m.book_id = b.book_id AND m.role = 'primary'
+        JOIN manuscript_branches mb ON mb.manuscript_id = m.manuscript_id AND mb.name = '主分支' WHERE b.book_id = ?`).get(bookId) as SqlRow | undefined;
+      requireStore(row !== undefined, 'GLOBAL_AGENT_SCOPE_CHANGED', '所选图书没有可读取的稿件，请重新选择。');
+      const manuscriptId = asString(row.manuscript_id);
+      return { bookId, title: asString(row.title), manuscriptId, revisionId: this.getManuscriptWindow(manuscriptId, asString(row.branch_id), null).revisionId };
+    });
+    const scope = { books, procedures: input.procedures.map((pin) => ({ ...pin, title: this.globalAgentProcedureDocument(pin).title })) };
+    requireStore(this.globalAgentScopeCurrent(scope), 'GLOBAL_AGENT_SCOPE_CHANGED', '所选图书或工序版本已不可用，请重新选择。');
+    return scope;
+  }
+
+  /** Each pinned Book revision still exists and is not excluded from learning; each procedure version is unchanged and enabled. */
+  globalAgentScopeCurrent(scope: GlobalAgentScope): boolean {
+    const excluded = this.#learningLedger().controls().excludedBooks;
+    return scope.books.every((book) => !excluded.has(book.bookId) && this.#authority.prepare(`SELECT 1 FROM manuscript_revisions mr JOIN manuscripts m
+      ON m.manuscript_id = mr.manuscript_id AND m.role = 'primary' WHERE m.book_id = ? AND mr.manuscript_id = ? AND mr.revision_id = ?`)
+      .get(book.bookId, book.manuscriptId, book.revisionId) !== undefined) && scope.procedures.every((pin) => {
+      try {
+        const { document, pin: current } = resolveProcedureDefinition(this.#authority, pin.procedureId, pin.version);
+        return current.digest === pin.digest && document.title === pin.title && !procedureStopped(this.#authority, current);
+      } catch { return false; }
+    });
+  }
+
+  globalAgentProcedureDocument(pin: GlobalAgentProcedurePin): ProcedureDefinitionDocument {
+    const { document, pin: current } = resolveProcedureDefinition(this.#authority, pin.procedureId, pin.version);
+    requireStore(current.digest === pin.digest, 'GLOBAL_AGENT_SCOPE_CHANGED', '工序版本已经变化，请重新选择。');
+    return document;
+  }
+
+  /** The governed item a listed pin names: a preference shares its pin; a memory listing adds its source-state digest. */
+  globalAgentGovernancePin(pin: GlobalMemoryPin): GlobalMemoryPin | null {
+    const item = this.inspectGlobalAgent().items.find((entry) => entry.itemId === pin.itemId &&
+      (entry.revisionId === pin.revisionId || pin.revisionId.startsWith(`${entry.revisionId}@`)));
+    return item === undefined ? null : { itemId: item.itemId, revisionId: item.revisionId };
+  }
+
+  globalAgentScopedTools(message: DialogueTurnStart['message']): ReturnType<typeof globalAgentScopedTools> {
+    return globalAgentScopedTools(this, message);
   }
 
   /** Internal fixture metadata for the actual local callers, derived from this Store's checked selected launch. */
@@ -13986,7 +14043,8 @@ export class EditorialStore {
       this.globalAgentSourcesCurrent(input.sources), 'GLOBAL_AGENT_SCOPE_CHANGED', '记忆版本已经变化，请重新选择。');
     const candidates = this.inspectGlobalAgent().sourceCandidates ?? [];
     return { kind: 'ask', selection: '', question, kept: null, globalSources: input.sources.map((pin) => ({ ...pin,
-      text: candidates.find((entry) => entry.itemId === pin.itemId && entry.revisionId === pin.revisionId)!.text })) };
+      text: candidates.find((entry) => entry.itemId === pin.itemId && entry.revisionId === pin.revisionId)!.text })),
+      ...(input.scope === undefined ? {} : { globalScope: this.#pinGlobalAgentScope(input.scope) }) };
   }
 
   /** Called only after the execution owner admits this exact Book-less policy binding. */
@@ -14035,7 +14093,8 @@ export class EditorialStore {
       const message: DialogueTurnStart['message'] = { kind: kind === 'continue' ? 'continue' : 'ask', selection: '',
         question: prepareText(first.question), globalSources: pins.map((pin) => ({ ...pin,
           text: prepareText(first.globalSources!.find((source) => source.itemId === pin.itemId && source.revisionId === pin.revisionId)!.text) })),
-        kept: kind === 'continue' ? prepareText(fragmentsText(answer.fragments)) : null };
+        kept: kind === 'continue' ? prepareText(fragmentsText(answer.fragments)) : null,
+        ...(first.globalScope === undefined ? {} : { globalScope: first.globalScope }) };
       if (!preview) {
         this.#requireGlobalQualification(qualification, message);
       }

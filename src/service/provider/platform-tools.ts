@@ -1,6 +1,6 @@
 import { canonicalJson, isRecord, sha256Hex } from '../analysis/canonical.js';
 import { isPublicHostName } from '../../shared/network-denial.js';
-import { LOCAL_TOOL_DECLARATION_NAMES, type LocalToolsRule } from './local-tools.js';
+import { GLOBAL_AGENT_SCOPED_TOOL_NAMES, LOCAL_TOOL_DECLARATION_NAMES, type LocalToolsRule } from './local-tools.js';
 
 /**
  * AI7's platform tools, `websearch` and `webfetch` (ADR 0080 §7, Issue #473 S87-f3a): what a Provider Processing rule must
@@ -13,10 +13,10 @@ import { LOCAL_TOOL_DECLARATION_NAMES, type LocalToolsRule } from './local-tools
 /** The two tool names, sorted: the exact set a payload's tools must equal (ADR 0080 §7.2). */
 export const PLATFORM_TOOL_NAMES = ['webfetch', 'websearch'] as const;
 export const LOCAL_TOOL_NAMES = ['exact_fetch', 'retrieve'] as const;
-export type LocalToolName = (typeof LOCAL_TOOL_DECLARATION_NAMES)[number];
+export type LocalToolName = (typeof LOCAL_TOOL_DECLARATION_NAMES)[number] | (typeof GLOBAL_AGENT_SCOPED_TOOL_NAMES)[number];
 export type PlatformToolName = (typeof PLATFORM_TOOL_NAMES)[number] | LocalToolName;
 export function isLocalToolName(name: string): name is LocalToolName {
-  return (LOCAL_TOOL_DECLARATION_NAMES as readonly string[]).includes(name);
+  return (LOCAL_TOOL_DECLARATION_NAMES as readonly string[]).includes(name) || (GLOBAL_AGENT_SCOPED_TOOL_NAMES as readonly string[]).includes(name);
 }
 
 /**
@@ -268,6 +268,15 @@ export const LOCAL_TOOL_SCHEMAS: ReadonlyArray<PlatformToolSchema> = Object.free
     parameters: { type: 'object', properties: { query: { type: 'string', minLength: 1, maxLength: 200 } }, additionalProperties: false } },
   { name: 'search_manuscript', description: '在本次授权固定稿件中精确或分词检索；只返回匹配段落。',
     parameters: { type: 'object', properties: { query: { type: 'string', minLength: 1, maxLength: 1000 }, mode: { type: 'string', enum: ['exact', 'tokenized'] } }, required: ['query', 'mode'], additionalProperties: false } },
+  // The scoped Global Agent's two further tools (#1171); a rule naming neither never registers them.
+  { name: 'read_procedure', description: '读取本次对话明确列入范围的工序（工序与规则）的确切版本；未列入范围的工序或版本不返回。',
+    parameters: { type: 'object', properties: { procedureId: { type: 'string', minLength: 1, maxLength: 200 }, version: { type: 'integer', minimum: 1 } }, required: ['procedureId', 'version'], additionalProperties: false } },
+  { name: 'propose_learning_supervision', description: '提出一条学习监督指令建议，由编辑确认后才记录；本工具不记录指令，也不修改记忆或稿件。',
+    parameters: { type: 'object', properties: {
+      categoryId: { type: 'string', maxLength: 48 }, scope: { type: 'string', enum: ['house', 'category', 'book'] }, bookId: { type: 'string' },
+      effect: { type: 'string', enum: ['guide', 'freeze', 'correct'] }, text: { type: 'string', minLength: 1, maxLength: 200 },
+      targets: { type: 'array', maxItems: 12, items: { type: 'object', properties: { itemId: { type: 'string' }, revisionId: { type: 'string' } }, required: ['itemId', 'revisionId'], additionalProperties: false } },
+    }, required: ['categoryId', 'scope', 'effect', 'text'], additionalProperties: false } },
 ]);
 // Schema objects are immutable through every nested property; freezing changes none of the legacy canonical bytes.
 function freezeSchema(value: unknown): void {
@@ -316,7 +325,10 @@ export type PlatformToolArguments =
   | { readonly tool: 'baseline_facts'; readonly query: string }
   | { readonly tool: 'term_table'; readonly query?: string }
   | { readonly tool: 'guideline_clause'; readonly clauseId?: string }
-  | { readonly tool: 'search_manuscript'; readonly query: string; readonly mode: 'exact' | 'tokenized' };
+  | { readonly tool: 'search_manuscript'; readonly query: string; readonly mode: 'exact' | 'tokenized' }
+  | { readonly tool: 'read_procedure'; readonly procedureId: string; readonly version: number }
+  | { readonly tool: 'propose_learning_supervision'; readonly categoryId: string; readonly scope: 'house' | 'category' | 'book'; readonly bookId?: string;
+      readonly effect: 'guide' | 'freeze' | 'correct'; readonly text: string; readonly targets: ReadonlyArray<{ readonly itemId: string; readonly revisionId: string }> };
 
 /** The longest query AI7 forwards; a longer one is a refusal returned to the model, never a truncation. */
 export const WEBSEARCH_QUERY_MAX_CHARACTERS = 1_000;
@@ -353,6 +365,24 @@ export function canonicalToolArguments(name: string, args: unknown): PlatformToo
     if (!exactKeys(args, ['query', 'mode']) || typeof args.query !== 'string' || !args.query.isWellFormed() ||
       args.query.trim().length === 0 || args.query.length > 1000 || (args.mode !== 'exact' && args.mode !== 'tokenized')) return null;
     return { tool: name, query: args.query.normalize('NFC').trim(), mode: args.mode };
+  }
+  if (name === 'read_procedure') return exactKeys(args, ['procedureId', 'version']) && typeof args.procedureId === 'string' &&
+    args.procedureId.length > 0 && args.procedureId.length <= 200 && Number.isSafeInteger(args.version) && Number(args.version) >= 1
+    ? { tool: name, procedureId: args.procedureId, version: args.version as number } : null;
+  if (name === 'propose_learning_supervision') {
+    // Shape only: the scoped owner validates the proposal as the supervision-directive owner would record it.
+    const keys = Object.keys(args);
+    const targets = args.targets ?? [];
+    if (!['categoryId', 'scope', 'effect', 'text'].every((key) => keys.includes(key)) ||
+        !keys.every((key) => ['categoryId', 'scope', 'bookId', 'effect', 'text', 'targets'].includes(key)) ||
+        typeof args.categoryId !== 'string' || !['house', 'category', 'book'].includes(String(args.scope)) ||
+        (args.bookId !== undefined && typeof args.bookId !== 'string') || !['guide', 'freeze', 'correct'].includes(String(args.effect)) ||
+        typeof args.text !== 'string' || !args.text.isWellFormed() || !Array.isArray(targets) || targets.length > 12 ||
+        !targets.every((pin) => isRecord(pin) && exactKeys(pin, ['itemId', 'revisionId']) && typeof pin.itemId === 'string' && typeof pin.revisionId === 'string')) return null;
+    const text = args.text.normalize('NFC').trim();
+    return text.length === 0 ? null : { tool: name, categoryId: args.categoryId, scope: args.scope as 'house' | 'category' | 'book',
+      ...(args.bookId === undefined ? {} : { bookId: args.bookId as string }), effect: args.effect as 'guide' | 'freeze' | 'correct', text,
+      targets: (targets as Array<{ itemId: string; revisionId: string }>).map(({ itemId, revisionId }) => ({ itemId, revisionId })) };
   }
   if (name === 'exact_fetch') return exactKeys(args, ['candidateId']) && typeof args.candidateId === 'string' && /^[0-9a-f]{64}$/u.test(args.candidateId)
     ? { tool: 'exact_fetch', candidateId: args.candidateId } : null;

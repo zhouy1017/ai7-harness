@@ -20,6 +20,8 @@ export const LOCAL_TOOL_BREAKER_END = '检索未完成';
 export const LOCAL_TOOL_RESULT_MAX_BYTES = 65_536;
 /** The closed local capability vocabulary; registration selects the verified rule's exact named subset. */
 export const LOCAL_TOOL_DECLARATION_NAMES = ['retrieve', 'exact_fetch', 'read_blocks', 'baseline_facts', 'guideline_clause', 'term_table', 'search_manuscript'] as const;
+/** v31's scoped Global Agent rule names exactly these (`scopedTools.names`); only that consumer registers the last two (#1171). */
+export const GLOBAL_AGENT_SCOPED_TOOL_NAMES = ['retrieve', 'exact_fetch', 'read_procedure', 'propose_learning_supervision'] as const;
 
 /** The `localTools` block of one Provider Processing v18 or v19 rule, exactly as the policy states it (the shape the launch projects). */
 export type LocalToolsRule = AdmittedLocalTools;

@@ -37,7 +37,46 @@ export interface LearningSupervisionDirective extends RecordLearningSupervisionI
   readonly operationalScope: TrustedOperationalScope;
   readonly recordedAt: string;
 }
+/** An exact procedure-library version the editor lists for one scoped turn (#1171). */
+export interface GlobalAgentProcedurePin {
+  readonly procedureId: string;
+  readonly version: number;
+  readonly digest: string;
+}
+/** What the editor explicitly lists beyond memory: Books by id, procedures by exact version. Absent: the no-tools dialogue. */
+export interface GlobalAgentScopeInput {
+  readonly bookIds: ReadonlyArray<string>;
+  readonly procedures: ReadonlyArray<GlobalAgentProcedurePin>;
+}
+/** The scope as pinned and sent: each Book at its exact current revision, each procedure at its listed version. */
+export interface GlobalAgentScope {
+  readonly books: ReadonlyArray<{ readonly bookId: string; readonly title: string; readonly manuscriptId: string; readonly revisionId: string }>;
+  readonly procedures: ReadonlyArray<GlobalAgentProcedurePin & { readonly title: string }>;
+}
+export interface GlobalAgentProcedure extends GlobalAgentProcedurePin {
+  readonly title: string;
+  readonly editorInstruction: string;
+  readonly stages: ReadonlyArray<{ readonly stageType: string; readonly label: string }>;
+}
+/** One local tool call of a scoped attempt, read back from the Harness Session Ledger. */
+export interface GlobalAgentToolCall {
+  readonly attemptId: string;
+  readonly callId: string;
+  readonly tool: string;
+  readonly arguments: string;
+  readonly outcome: 'returned' | 'refused' | 'pending';
+  readonly result: string | null;
+}
+/** A proposal the model returned through `propose_learning_supervision`; only the editor's confirmation records it. */
+export interface GlobalAgentSupervisionProposal {
+  readonly attemptId: string;
+  readonly callId: string;
+  readonly input: RecordLearningSupervisionInput;
+}
 export interface GlobalAgentDialogueProjection {
+  readonly scope?: GlobalAgentScope;
+  readonly toolCalls?: ReadonlyArray<GlobalAgentToolCall>;
+  readonly supervisionProposals?: ReadonlyArray<GlobalAgentSupervisionProposal>;
   readonly dialogueId: string;
   readonly bookId: null;
   readonly question: string | null;
@@ -59,6 +98,10 @@ export interface GlobalAgentDialogueProjection {
 export interface GlobalAgentProjection {
   readonly operationalScope: TrustedOperationalScope;
   readonly dialogueState: typeof GLOBAL_AGENT_POLICY_BLOCKED | 'available';
+  /** Whether the scoped tool dialogue is admitted for this launch; it never falls back to the no-tools rule. */
+  readonly scopedDialogueState?: typeof GLOBAL_AGENT_POLICY_BLOCKED | 'available';
+  /** The procedure library's current enabled versions, for inspection and explicit listing. */
+  readonly procedures?: ReadonlyArray<GlobalAgentProcedure>;
   readonly explanation: string;
   readonly categories: ReadonlyArray<{ readonly categoryId: string; readonly label: string }>;
   readonly books: ReadonlyArray<{ readonly bookId: string; readonly title: string }>;
@@ -70,6 +113,7 @@ export interface GlobalAgentProjection {
 export interface AskGlobalAgentInput {
   readonly question: string;
   readonly sources: ReadonlyArray<GlobalMemoryPin>;
+  readonly scope?: GlobalAgentScopeInput;
   readonly disclosureSha256?: string;
 }
 export interface GlobalAgentSourceCandidate extends GlobalMemoryPin {
@@ -78,9 +122,11 @@ export interface GlobalAgentSourceCandidate extends GlobalMemoryPin {
   readonly text: string;
 }
 export type PrepareGlobalAgentTurnInput =
-  | { readonly kind: 'ask'; readonly question: string; readonly sources: ReadonlyArray<GlobalMemoryPin> }
+  | { readonly kind: 'ask'; readonly question: string; readonly sources: ReadonlyArray<GlobalMemoryPin>; readonly scope?: GlobalAgentScopeInput }
   | { readonly kind: 'continue' | 'regenerate'; readonly dialogueId: string; readonly attemptId: string; readonly sources?: ReadonlyArray<GlobalMemoryPin> };
 export interface GlobalAgentDisclosure {
+  /** A scoped turn: the pinned Books and procedures, and the exact local tools the model may call (no shell, file or network tool). */
+  readonly scope?: GlobalAgentScope & { readonly tools: ReadonlyArray<string> };
   readonly textProcessing?: 'qualified-original-fields';
   readonly selectedPolicyIdentity?: SelectedPolicyIdentity;
   readonly retainedInfluences?: ReadonlyArray<GlobalMemoryPin & { readonly textSha256: string; readonly title: string;
