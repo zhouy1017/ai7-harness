@@ -17,7 +17,7 @@ import { prepareRetrievalResult, markRetrievalResult } from '../retrieval/result
 import { liveMaterialContract } from '../task-material-references.js';
 import { buildClarificationAnswerMessage } from '../provider/clarification-contract.js';
 import type { AnalysisAssuranceSampleDispositionProjection, AnalysisGapProjection, AnalysisReusePlanUnitProjection, CoverageManifestProjection, CoverageManifestUnitProjection, ExecutionRouteId, LaunchPolicyProjection, ReviewScopePlanUnitProjection, RunAttemptState, RunReportStageId } from '../../shared/protocol.js';
-import { PLATFORM_TOOL_CALL_PROGRESS, describeComposition, prepareExecution, type HarnessSignal, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
+import { PLATFORM_TOOL_CALL_PROGRESS, describeComposition, prepareExecution, type HarnessSignal, type HarnessTurnOutcome, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../shared/protected-secret-identity.js';
 import {
   ACTIVE_SET_VERSION,
@@ -31,7 +31,7 @@ import {
   type ConfiguredProviderBinding,
 } from '../launch-policy.js';
 import { CredentialBroker, type CredentialSlotBinding, type SecretResolver } from '../provider/credential-broker.js';
-import { evaluateRunBudgetCeiling, totalTokens, type ClassifiedModelFailure, type RunBudgetCeiling, type UsageFacts } from '../provider/classification.js';
+import { classifyModelFailure, evaluateRunBudgetCeiling, totalTokens, type ClassifiedModelFailure, type RunBudgetCeiling, type UsageFacts } from '../provider/classification.js';
 import { DeepSeekOpenAiCompatibleAdapter, modelRequestNotSent, OPENCODE_GO_ROUTE_PROFILE, PROVIDER_ROUTE_PROFILES, type ProviderRouteProfile } from '../provider/deepseek-adapter.js';
 import { transmitOnce } from '../provider/live-transmission.js';
 import { OPENCODE_GO_V41_FLASH_PROFILE, modelProfileFor, type ProviderModelProfile } from '../provider/model-profile.js';
@@ -45,7 +45,8 @@ import {
   type TransmitTicket,
 } from '../provider/egress-gate.js';
 import { Ai7LocalDeterministicAdapter } from '../provider/local-deterministic-adapter.js';
-import type { LocalFixtureExecutionContext, ResolvedModelFixture } from '../provider/model-fixture.js';
+import { STOCK_TYPOS_LEAF_FIXTURE, STOCK_TYPOS_LEAF_LOCAL_TOOLS, requireStockTyposLeafFixture,
+  type LocalFixtureExecutionContext, type ResolvedModelFixture } from '../provider/model-fixture.js';
 import { ProviderResultCache } from '../provider/provider-result-cache.js';
 import {
   assuranceSamplingTurns,
@@ -1039,7 +1040,7 @@ export class BaselineAnalysisExecutionOwner {
     const composition = describeComposition(route, model, definition.promptContractDigest, {
       ...facts.compositionOptions,
       platformTools: webTools,
-      localTools: definition.evidenceAssuranceLevel !== 'quick' ?
+      localTools: facts.compositionOptions?.version === 3 ? STOCK_TYPOS_LEAF_LOCAL_TOOLS : definition.evidenceAssuranceLevel !== 'quick' ?
         kindLocalTools(policy, ledger.definition.kind, facts.origin === 'background-analysis-enrollment' ? 'background' : 'foreground') ?? false : false,
       ...(definition.evidenceAssuranceLevel === 'quick' ? { researchDeclaration: definition.researchDeclaration } :
         webTools ? { researchDeclaration: { webSearch: true, searchEngine: 'user-selected-backend' } as const } : {}),
@@ -1346,7 +1347,7 @@ export class BaselineAnalysisExecutionOwner {
     active.transmissionsAtDispatch = active.transmissions?.() ?? 0;
     context.beginTurn({ stage: 'run-report-reflection', unitOrdinal: null, attemptIndex: 1, adaptationId: null, message,
       requestDigest: sha256Hex(message), inputDigest: canonicalRecord(context.accounting).digest, contractDigest: RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST });
-    const result = await harness.submitUnit(message);
+    const result = await harness.submitStage(message);
     const canonical = context.liveAdapter.instance?.lastCanonicalResult ?? null;
     const usageSignal = result.signals.find((signal) => signal.kind === 'usage');
     const turnUsage = usageSignal?.kind === 'usage'
@@ -1456,9 +1457,23 @@ export class BaselineAnalysisExecutionOwner {
     }
     const blocks = ledger.readRevisionBlocks(facts.checkpoint.manuscriptId, facts.checkpoint.revisionId);
     // 快速整理 registers no local tool (Issue #901; EASSURE-004): its Run lists and locates, and searches nothing.
-    const admittedLocalRule = live === null || definition.evidenceAssuranceLevel === 'quick' ? null
+    const childProfile = facts.compositionOptions?.version === 3;
+    if (childProfile) {
+      if (facts.origin !== 'standard-direct' || facts.startWhen === 'idle' ||
+          definition.kind !== 'editorial-review/typos-and-usage' || testItemPurpose !== 'review-first')
+        throw new ExecutionAdmissionError('EXECUTION_CHILD_PROFILE_REFUSED', '单元子代理与固定前台审阅配置不一致。');
+      if (live === null) {
+        if (fixture === null) throw new ExecutionAdmissionError('EXECUTION_CHILD_PROFILE_REFUSED', '缺少单元子代理夹具。');
+        requireStockTyposLeafFixture(fixture);
+      } else if (production === null || policy.providerProcessing.subAgents === undefined) {
+        throw new ExecutionAdmissionError('EXECUTION_CHILD_PROFILE_REFUSED', '当前策略未声明父尝试子代理。');
+      }
+    } else if (fixture?.identity === STOCK_TYPOS_LEAF_FIXTURE) {
+      throw new ExecutionAdmissionError('EXECUTION_CHILD_PROFILE_REFUSED', '子代理夹具不得回退到父代理执行配置。');
+    }
+    const admittedLocalRule = childProfile ? STOCK_TYPOS_LEAF_LOCAL_TOOLS : live === null || definition.evidenceAssuranceLevel === 'quick' ? null
       : kindLocalTools(policy, definition.kind, facts.origin === 'background-analysis-enrollment' ? 'background' : 'foreground');
-    const localRule = facts.compositionOptions?.version === 2 || admittedLocalRule === null ? admittedLocalRule :
+    const localRule = (facts.compositionOptions?.version ?? 1) >= 2 || admittedLocalRule === null ? admittedLocalRule :
       { targetedRetrieval: admittedLocalRule.targetedRetrieval, breaker: admittedLocalRule.breaker };
     const scopedUnitOrdinals = facts.update === null ? null : new Set(facts.update.reusePlan.units.filter((unit) => unit.disposition === 'recomputed').map((unit) => unit.unitOrdinal));
     const readableBlocks = new Set(facts.manifest.units.filter((unit) => scopedUnitOrdinals === null || scopedUnitOrdinals.has(unit.ordinal)).flatMap((unit) => [...unit.blockIds, ...unit.overlapBlockIds]));
@@ -1530,6 +1545,7 @@ export class BaselineAnalysisExecutionOwner {
       let currentRequestId: string | null = null;
       let clarificationRequestId: string | null = null;
       let turnIdentity: AnalysisTurnIdentity | null = null;
+      let recoverPreSend: ((failure: ClassifiedModelFailure) => Promise<boolean>) | null = null;
       let nextUnitSessionId = firstUnitSessionId;
       let firstTurn = true;
       const closeProducer = (): void => {
@@ -1537,6 +1553,8 @@ export class BaselineAnalysisExecutionOwner {
         producer = null;
       };
       const beginTurn = (identity: NonNullable<typeof turnIdentity>, claim: string | null = null): void => {
+        // The disposed child's tool history is absent from the parent; later parent turns share their own receipts.
+        if (childProfile && turnIdentity?.stage === 'units' && identity.stage !== 'units') platformSession?.startUnit(true);
         if (firstUnitSessionId !== undefined) {
           if (!firstTurn) nextUnitSessionId = randomUUID();
           firstTurn = false;
@@ -1567,7 +1585,7 @@ export class BaselineAnalysisExecutionOwner {
         sourceKind: 'manuscript', sourceId: facts.checkpoint.manuscriptId, digest: facts.checkpoint.revisionDigest,
         read: () => ({
           digest: facts.checkpoint.revisionDigest, segments: ledger.readRevisionBlocks(facts.checkpoint.manuscriptId, facts.checkpoint.revisionId)
-            .filter((block) => facts.compositionOptions?.version !== 2 || readableBlocks.has(block.blockId)).map((block) => ({ blockId: block.blockId, text: block.text }))
+            .filter((block) => (facts.compositionOptions?.version ?? 1) < 2 || readableBlocks.has(block.blockId)).map((block) => ({ blockId: block.blockId, text: block.text }))
         }),
       }], null, null, ledger.pinnedToolSourcesForRun(facts.runRecordId));
       const validationContractOf = (): string => {
@@ -1617,7 +1635,7 @@ export class BaselineAnalysisExecutionOwner {
       try {
         harness = await prepareExecution({
           ...(live === null ? {} : {
-            acquireRequest: async (_payload: import('../provider/payload.js').AssembledModelPayload, signal: AbortSignal) => {
+            acquireRequest: async (_payload: import('../provider/payload.js').AssembledModelPayload, signal: AbortSignal, requestIdentity: import('../harness/primary-agent-harness.js').HarnessRequestIdentity) => {
               if (producer === null || turnIdentity === null) throw new ExecutionAdmissionError('EXECUTION_REQUEST_IDENTITY_ABSENT', '模型请求没有当前单元或阶段标识。');
               const combined = AbortSignal.any([active.requestAbort.signal, signal]);
               const activity = unitActivity();
@@ -1634,7 +1652,7 @@ export class BaselineAnalysisExecutionOwner {
                     currentRequestId = randomUUID();
                     ledger.admitModelRequest(facts.runRecordId, {
                       ...identity, requestId: currentRequestId, producerId,
-                      requestOrdinal: ++requestOrdinal, sessionId: harness.currentSessionId(), payloadDigest: decision.payloadDigest, messageDigest: sha256Hex(message)
+                      requestOrdinal: ++requestOrdinal, sessionId: requestIdentity.sessionId, payloadDigest: decision.payloadDigest, messageDigest: sha256Hex(message)
                     }, clarificationRequestId);
                     clarificationRequestId = null;
                     const admittedAt = new Date().toISOString();
@@ -1703,7 +1721,10 @@ export class BaselineAnalysisExecutionOwner {
               ...(policy.providerProcessing.transport === undefined ? {} : { transportSettings: policy.providerProcessing.transport }),
               profile: routeProfile,
               modelProfile: liveModelProfile,
-              sessionId: () => harness.currentSessionId(),
+              sessionId: (request) => {
+                if (request.sessionId === undefined) throw new ExecutionAdmissionError('EXECUTION_REQUEST_IDENTITY_ABSENT', '请求缺少已核对的会话身份。');
+                return request.sessionId;
+              },
               // Under development validation the captured native `fetch` is reached only through the cache: an identical request
               // replays without transmitting, evidence that already answers the purpose refuses the send, and a live call happens
               // at most once. The bound route profile travels with the call, so the cache step reads a limit the way this route
@@ -1731,8 +1752,14 @@ export class BaselineAnalysisExecutionOwner {
             });
             return liveAdapter.instance;
           },
-          gate: (payload) => {
+          onRequestError: async (failure) => {
+            if (production === null || !liveAdapter.instance?.lastRequestNotSent || recoverPreSend === null) return false;
+            return recoverPreSend(classifyModelFailure(failure, harness.failureCodes));
+          },
+          gate: (payload, identity) => {
             if (bindingFacts === null) return { decision: 'refuse', reason: 'binding-stale', detail: '执行绑定尚未持久化；未发送任何内容。' };
+            if (childProfile && (turnIdentity === null || identity.child !== (turnIdentity.stage === 'units')))
+              return { decision: 'refuse', reason: 'binding-stale', detail: '子代理只能执行当前已授权单元。' };
             capturePendingLoopUsage();
             const decision = evaluateEgress(payload, {
               ...bindingFacts, seriesScopeGuard: () => this.#deps.seriesScopeGuard === undefined || this.#deps.seriesScopeGuard === null
@@ -1801,6 +1828,7 @@ export class BaselineAnalysisExecutionOwner {
         set validationStep(value: string) { validationStep = value; },
         get transmissionsAtDispatch() { return transmissionsAtDispatch; },
         set transmissionsAtDispatch(value: number) { transmissionsAtDispatch = value; },
+        set recoverPreSend(value: ((failure: ClassifiedModelFailure) => Promise<boolean>) | null) { recoverPreSend = value; },
       };
       contexts.add(context);
       return context;
@@ -2132,9 +2160,34 @@ export class BaselineAnalysisExecutionOwner {
           requestDigest: definition.requestDigest(unit.ordinal, unit.digest), inputDigest: unit.digest, contractDigest: promptContractDigest }, clarificationRequestId);
         // Allocate this span's journal identity before launching the turn. Its public join is
         // ordered by unit, while the journal ordinal stays unique across explicit continuations.
-        const recordedSpanOrdinal = ++spanOrdinal;
-        context.platformSession?.startUnit();
-        const turn = await harness.submitUnit(message);
+        let recordedSpanOrdinal = ++spanOrdinal;
+        const recovery: { failure: ClassifiedModelFailure | null; adaptationId: string | null; startSeq: number | null } =
+          { failure: null, adaptationId: null, startSeq: null };
+        context.recoverPreSend = async (failure) => {
+          if (attemptIndex !== 1 || answerMessage !== undefined || recovery.failure !== null ||
+              priorAdaptations.some((entry) => entry.unitOrdinal === unit.ordinal && entry.adaptationClass !== 'contract-retry') ||
+              adaptationMode(facts.editorEdits, 'safe-retry') !== 'automatic' ||
+              active.cancelRequested || active.pauseRequested || active.interrupted || liveInterruption !== null ||
+              scopeChanged() || ceilingState() === 'reached') return false;
+          const boundary = harness.nextSpanStart();
+          ledger.recordSpan(attemptId, recordedSpanOrdinal, { sessionId: boundary.sessionId, startSeq: 0, endSeq: boundary.startSeq - 1 },
+            unit.ordinal, { attemptIndex: 1, payloadDigest: context.admittedPayloadDigest, unitMessageDigest, adaptationId: null });
+          const adaptation = ledger.recordAdaptation({ attemptId, runRecordId: facts.runRecordId, taskIntentId: facts.taskIntentId,
+            ordinal: ++adaptationOrdinal, unitOrdinal: unit.ordinal, classifiedReason: failure.reason, failureCode: failure.code,
+            failureClass: failure.failureClass, failureStatus: failure.status, requestDigest: definition.requestDigest(unit.ordinal, unit.digest),
+            firstPayloadDigest: context.admittedPayloadDigest, firstUnitMessageDigest: unitMessageDigest,
+            planEnvelopeDigest: facts.planEnvelopeDigest, bindingDigest });
+          recovery.failure = failure; recovery.adaptationId = adaptation.adaptationId; recovery.startSeq = boundary.startSeq;
+          recordedSpanOrdinal = ++spanOrdinal;
+          adaptedUnitOrdinals.push(unit.ordinal);
+          countTurn('units', null); active.progress.completedAttempts += 1;
+          context.beginTurn({ stage: 'units', unitOrdinal: unit.ordinal, attemptIndex: 2, adaptationId: adaptation.adaptationId, message,
+            requestDigest: definition.requestDigest(unit.ordinal, unit.digest), inputDigest: unit.digest, contractDigest: promptContractDigest });
+          return true;
+        };
+        context.platformSession?.startUnit(childProfile);
+        let turn: HarnessTurnOutcome;
+        try { turn = await harness.submitUnit(message); } finally { context.recoverPreSend = null; }
         if (context.platformSession?.evidenceNeedsCommander === true) throw new ExecutionAdmissionError('PLATFORM_TOOL_EVIDENCE_MORE_SEARCH_REQUIRED', '本证据项需要第二次新检索；等待 Commander。');
         pendingLoopUsage.length = 0;
         // Read before anything else can start a turn: the adapter clears this at the start of every
@@ -2144,14 +2197,16 @@ export class BaselineAnalysisExecutionOwner {
         // J-10's unit hold (Issue #422): the turn is back and the unit stays in flight until the Journey lets it settle.
         if (this.#deps.unitHold) await this.#deps.unitHold(active.progress.unitsSettled, () => active.interrupted);
         const payloadDigest = context.admittedPayloadDigest;
-        ledger.recordSpan(attemptId, recordedSpanOrdinal, turn.span, unit.ordinal, { attemptIndex, payloadDigest, unitMessageDigest, adaptationId });
+        ledger.recordSpan(attemptId, recordedSpanOrdinal, recovery.startSeq === null ? turn.span : { ...turn.span, startSeq: recovery.startSeq },
+          unit.ordinal, { attemptIndex: recovery.failure === null ? attemptIndex : 2, payloadDigest, unitMessageDigest,
+            adaptationId: recovery.adaptationId ?? adaptationId });
         const usageSignal = turn.signals.find((signal) => signal.kind === 'usage');
         const unitUsage = usageSignal?.kind === 'usage' ? (context.platformSession === null ? { inputTokens: usageSignal.usage.inputTokens, outputTokens: usageSignal.usage.outputTokens } : { ...usageSignal.usage }) : null;
         countTurn('units', unitUsage, turn.signals);
         // One model turn came back. It counts whether it transmitted, replayed from the Provider Result
         // Cache, or read the deterministic fixture: what the reader learns is that the Run is moving.
         active.progress.completedAttempts += 1;
-        return { turn, unitUsage, payloadDigest, unitMessageDigest, canonical, retryDelayMs };
+        return { turn, unitUsage, payloadDigest, unitMessageDigest, canonical, retryDelayMs, recoveredFailure: recovery.failure };
       };
       type SubmittedAttempt = Awaited<ReturnType<typeof submitAttempt>>;
       // The continuation point (CONT-015): a unit is kept the moment it settles, as its revision will hold it, and the
@@ -2608,13 +2663,13 @@ export class BaselineAnalysisExecutionOwner {
         // AI7 stopping under a Run it can continue cut this turn off: the unit is not settled, and 续行 reads it again
         // (CONT-014). A turn that came back whole settles, and is kept, as any other.
         if (attempt.turn.terminal === 'interrupted' && active.interrupted && active.resumableOnInterrupt) return;
-        let attempts = 1;
+        let attempts = attempt.recoveredFailure === null ? 1 : 2;
         let unitUsageTotal = attempt.unitUsage;
-        let firstFailure: ClassifiedModelFailure | null = null;
+        let firstFailure: ClassifiedModelFailure | null = attempt.recoveredFailure;
         // A retry-safe failure the bound plan does not let AI7 retry (Issue #419: the editor said 不允许).
         let withheld: string | null = null;
         // A safe retry is a further transmission, so a Run the editor cancelled meanwhile makes none.
-        if (attempt.turn.terminal === 'failed' && !active.interrupted && !active.cancelRequested && !active.pauseRequested) {
+        if (attempt.recoveredFailure === null && attempt.turn.terminal === 'failed' && !active.interrupted && !active.cancelRequested && !active.pauseRequested) {
           const failed = attempt.turn.signals.find((signal) => signal.kind === 'failed');
           if (failed?.kind === 'failed' && failed.failure.retrySafe &&
               (failed.failure.code !== 'RATE_LIMIT' || rateLimitRetryAllowed(policy))) {
@@ -2987,7 +3042,7 @@ export class BaselineAnalysisExecutionOwner {
           context.beginTurn({ stage: 'cross-unit-reduction', unitOrdinal: null, attemptIndex: 1, adaptationId: null, message,
             requestDigest, inputDigest: reductionInput, contractDigest: reductionContract });
           context.platformSession?.startUnit();
-          const turn = await harness.submitUnit(message);
+          const turn = await harness.submitStage(message);
           if (context.platformSession?.evidenceNeedsCommander === true) throw new ExecutionAdmissionError('PLATFORM_TOOL_EVIDENCE_MORE_SEARCH_REQUIRED', '本证据项需要第二次新检索；等待 Commander。');
           pendingLoopUsage.length = 0;
           // Every later turn of the Run keeps the Run's own category again.
@@ -3354,7 +3409,7 @@ export class BaselineAnalysisExecutionOwner {
       active.transmissionsAtDispatch = active.transmissions?.() ?? 0;
       context.beginTurn({ stage: 'assurance-sampling', unitOrdinal: null, attemptIndex: 1, adaptationId: null, message,
         requestDigest: canonicalRecord(message).digest, inputDigest, contractDigest });
-      const result = await harness.submitUnit(message);
+      const result = await harness.submitStage(message);
       if (this.#deps.stageHold) await this.#deps.stageHold('assurance-sampling');
       const canonical = context.liveAdapter.instance?.lastCanonicalResult ?? null;
       // A sampling turn is a model turn like any other: it counts as a request, its usage counts
@@ -3519,7 +3574,7 @@ function executionBindingRecordOf(input: {
       sidecarSha256: facts.artifactPin.sidecarSha256,
     },
     behaviorCompositionDigest: input.compositionDigest,
-    ...(facts.compositionOptions?.version === 2 ? { compositionVersion: 2 as const } : {}),
+    ...(facts.compositionOptions?.version === 2 || facts.compositionOptions?.version === 3 ? { compositionVersion: facts.compositionOptions.version } : {}),
     promptContractDigest: definition.promptContractDigest,
     contractVersion: definition.contractVersion,
     harnessSessionId: input.harnessSessionId,

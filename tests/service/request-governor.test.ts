@@ -53,7 +53,7 @@ afterEach(async () => {
 });
 
 /** Real production authorization, owner, harness, admission and transport; only the response is synthetic. */
-async function admittedCrash(first: 'held' | 'unit' | 'clarification' = 'held') {
+async function admittedCrash(first: 'held' | 'unit' | 'clarification' = 'held', category = 'typos-and-usage') {
   const roots = await createServiceTestRoots('ai7-request-reader-');
   const opened: EditorialStore[] = [];
   const capacity = governor({ globalCapacity: 1 });
@@ -113,7 +113,7 @@ async function admittedCrash(first: 'held' | 'unit' | 'clarification' = 'held') 
   driver = new ReviewRunDriver(store.reviewRunDriveSteps, owner);
   const book = await importSample1Book(store, roots.codeRoot, '合成读取边界');
   await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
-  let prepared = store.createReviewRunPreparationWork(book.bookId, ['typos-and-usage'],
+  let prepared = store.createReviewRunPreparationWork(book.bookId, [category],
     { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy);
   while (!prepared.done) prepared = store.advanceReviewRunPreparationWork(prepared.workId!);
   const review = prepared.projection!.run!;
@@ -388,7 +388,7 @@ describe('durable request reader compatibility', () => {
   });
 
   it('keeps frozen width3 for the same rule when a resumed caller proposes width1, without appending evidence', async () => {
-    const crash = await admittedCrash(); const ledger = crash.opened[0]!.executionLedgerForRun(crash.runRecordId);
+    const crash = await admittedCrash('held', 'style-and-format'); const ledger = crash.opened[0]!.executionLedgerForRun(crash.runRecordId);
     const receipt = ledger.requestAdmissionOf(crash.runRecordId)!; expect(receipt.width).toBe(3);
     const db = new DatabaseSync(join(crash.roots.dataRoot, 'store', 'ai7.sqlite')); const before = requestRows(db);
     expect(ledger.beginRequestAdmissions(crash.runRecordId, 1, receipt.pins.policyRuleId)).toBe(3);

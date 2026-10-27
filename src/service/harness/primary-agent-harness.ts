@@ -1,13 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import type { Context } from '@deepseek-ai/cordis';
-import type { AgentHandle } from '@deepseek-ai/dsh-agent';
+import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent';
+import type { SubagentRun } from '@deepseek-ai/dsh-subagent';
+import type { ParentAttemptSubagentDeclaration } from '../../shared/protocol.js';
 import type { GenerateOptions, LlmAdapter, LlmRuntime, StreamChunk, TokenUsage } from '@deepseek-ai/dsh-llm';
 import type { SessionEvent, SessionHeader, SessionId } from '@deepseek-ai/dsh-session';
 import type { SessionInspection, SessionPersistenceRevision } from '@deepseek-ai/dsh-session-persistence';
 import type { ToolDefinition, ToolExecution } from '@deepseek-ai/dsh-tools';
 import { canonicalJson, sha256Hex } from '../analysis/canonical.js';
 import { AI7_FAILURE_CODES, classifyModelFailure, type ClassifiedModelFailure, type DshFailureCodes } from '../provider/classification.js';
-import { assistantToolCallDigest, type EgressDecision, type EgressRefusalReason, type ExecutionRoute, type TransmitTicket } from '../provider/egress-gate.js';
+import { LOCAL_DETERMINISTIC_ROUTE, assistantToolCallDigest, type EgressDecision, type EgressRefusalReason, type ExecutionRoute, type TransmitTicket } from '../provider/egress-gate.js';
 import { assistantToolCalls, type AssembledModelPayload } from '../provider/payload.js';
 import {
   PLATFORM_TOOL_NAMES,
@@ -52,8 +54,18 @@ export const PLATFORM_TOOL_CALL_PROGRESS = '平台工具调用';
 export const HARNESS_SERVICE_SET = ['agents', 'sessions', 'llm', 'systemPrompt', 'tools', 'agentLoop'] as const;
 export const PROMPT_SECTION_NAME = 'ai7:baseline-analysis-contract' as const;
 
+export const STOCK_TYPOS_LEAF: ParentAttemptSubagentDeclaration = Object.freeze({
+  profileId: 'ai7-stock-typos-leaf/1', provider: 'spawn', transport: 'same-process', lifetime: 'one-shot',
+  stage: 'units', maxDepth: 1, maxActiveChildren: 1, unitWidth: 1, awaitDisposal: true,
+});
+export const SUBAGENT_PACKAGE_PINS = {
+  '@deepseek-ai/dsh-subagent': '0.1.0-rc.6',
+  '@deepseek-ai/dsh-subagent-in-process-driver': '0.1.0-rc.6',
+  '@deepseek-ai/dsh-subagent-spawn-in-process': '0.1.0-rc.6', zod: '4.4.3',
+} as const;
+
 export interface HarnessCompositionDescriptor {
-  readonly version: 1 | 2;
+  readonly version: 1 | 2 | 3;
   readonly researchDeclaration?: ResearchDeclaration;
   readonly packages: typeof HARNESS_PACKAGE_PINS;
   readonly services: typeof HARNESS_SERVICE_SET;
@@ -61,7 +73,7 @@ export interface HarnessCompositionDescriptor {
   /** `registeredTools` is 0 on every composition but one that registers the two platform tools (Issue #473), where it is 2. */
   readonly tools: { readonly mode: 'native'; readonly maxParallelSubCalls: number; readonly registeredTools: number };
   readonly agentLoop: { readonly maxParallelToolCalls: number; readonly configuredAgents: 0 };
-  readonly subagents: false;
+  readonly subagents: false | (ParentAttemptSubagentDeclaration & { readonly packages: typeof SUBAGENT_PACKAGE_PINS });
   readonly route: ExecutionRoute;
   readonly model: string;
   readonly promptContractDigest: string;
@@ -93,7 +105,8 @@ export interface HarnessCompositionDescriptor {
 export const SESSION_LOG_PACKAGE_PIN = '0.1.0-rc.6' as const;
 
 export interface CompositionOptions {
-  readonly version?: 1 | 2;
+  readonly version?: 1 | 2 | 3;
+  readonly subagents?: ParentAttemptSubagentDeclaration;
   readonly procedure?: ProcedureDefinitionPin;
   readonly stages?: readonly { readonly ordinal: number; readonly stageType: string; readonly digest: string }[];
   readonly sources?: PinnedLocalToolSources;
@@ -111,13 +124,17 @@ export function describeComposition(route: ExecutionRoute, model: string, prompt
   const local = version === 1 ? options.localTools !== undefined && options.localTools !== false : options.localTools ?? false;
   const schemas = ruleNamedToolSchemas(withTools, local);
   const localSchemas = ruleNamedToolSchemas(false, local);
-  const parallel = version === 2 && typeof local === 'object' ? localToolParallelBound(local) : 1;
+  const parallel = version !== 1 && typeof local === 'object' ? localToolParallelBound(local) : 1;
+  if (options.subagents !== undefined && (version !== 3 || withTools || canonicalJson(options.subagents) !== canonicalJson(STOCK_TYPOS_LEAF))) {
+    throw new Error('HARNESS_SUBAGENT_DECLARATION_INVALID');
+  }
+  if (version === 3 && options.subagents === undefined) throw new Error('HARNESS_SUBAGENT_DECLARATION_ABSENT');
   if (options.researchDeclaration !== undefined && (options.researchDeclaration.webSearch !== withTools ||
       options.researchDeclaration.searchEngine !== (withTools ? 'user-selected-backend' : null))) {
     throw new Error('RESEARCH_DECLARATION_COMPOSITION_MISMATCH');
   }
   const body = {
-    ...(version === 2 ? { version: 2 as const, ...(options.procedure === undefined ? {} : { procedure: options.procedure }),
+    ...(version !== 1 ? { version, ...(options.procedure === undefined ? {} : { procedure: options.procedure }),
       ...(options.stages === undefined ? {} : { stages: options.stages }),
       ...(options.sources === undefined ? {} : { sources: options.sources }) } : {}),
     packages: HARNESS_PACKAGE_PINS,
@@ -125,7 +142,7 @@ export function describeComposition(route: ExecutionRoute, model: string, prompt
     systemPrompt: { includeHarnessIdentity: false as const, includeRuntimeContext: false as const, persona: '' as const, completeSection: PROMPT_SECTION_NAME },
     tools: { mode: 'native' as const, maxParallelSubCalls: parallel, registeredTools: schemas.length },
     agentLoop: { maxParallelToolCalls: parallel, configuredAgents: 0 as const },
-    subagents: false as const,
+    subagents: options.subagents === undefined ? false as const : { ...STOCK_TYPOS_LEAF, packages: SUBAGENT_PACKAGE_PINS },
     route,
     model,
     promptContractDigest,
@@ -226,6 +243,9 @@ export interface HarnessRequestAdmission {
   release(): void;
 }
 
+/** Validated against the live registry before capacity and again immediately before final admission. */
+export interface HarnessRequestIdentity { readonly sessionId: string; readonly parentSessionId: string; readonly child: boolean }
+
 export interface HarnessExecutionRequest {
   readonly compositionOptions?: CompositionOptions;
   readonly localToolsRule?: LocalToolsRule;
@@ -241,9 +261,9 @@ export interface HarnessExecutionRequest {
   /** Builds the one bound adapter once the composition has resolved the DSH failure-code constants. */
   readonly adapterFactory: (codes: DshFailureCodes) => LlmAdapter;
   /** Live owners await shared capacity here, before evaluating the final gate or minting a ticket. */
-  readonly acquireRequest?: (payload: AssembledModelPayload, signal: AbortSignal) => Promise<HarnessRequestAdmission>;
+  readonly acquireRequest?: (payload: AssembledModelPayload, signal: AbortSignal, identity: HarnessRequestIdentity) => Promise<HarnessRequestAdmission>;
   /** The final gate, evaluated over the complete assembled payload immediately before every model call. */
-  readonly gate: (payload: AssembledModelPayload) => EgressDecision;
+  readonly gate: (payload: AssembledModelPayload, identity: HarnessRequestIdentity) => EgressDecision;
   /** Receives a `transmit-remote` ticket for the adapter's transmit step; never called under v1. */
   readonly onTransmitTicket: (ticket: TransmitTicket) => void;
   /**
@@ -258,6 +278,8 @@ export interface HarnessExecutionRequest {
    */
   readonly platformTools?: PlatformToolOwner;
   readonly localTools?: PlatformToolOwner;
+  /** Parent adaptation owner; invoked through DSH's request-error waterfall, never an upstream retry plugin. */
+  readonly onRequestError?: (failure: import('../provider/classification.js').ModelFailureFacts, identity: HarnessRequestIdentity) => Promise<boolean>;
 }
 
 export interface PrimaryAgentHarnessHandle {
@@ -272,6 +294,8 @@ export interface PrimaryAgentHarnessHandle {
   bindExecution(binding: { harnessSessionId: string; behaviorCompositionDigest: string; promptContractDigest: string }): void;
   /** Start one turn with authorized unit material and return its ordered signals; the last is terminal. */
   submitUnit(text: string): Promise<HarnessTurnOutcome>;
+  /** Sampling/reflection stay on the parent, outside the declared unit-only delegation seam. */
+  submitStage(text: string): Promise<HarnessTurnOutcome>;
   /**
    * Start one turn as `submitUnit` does, and hand every text delta the model streams to `onText` as DSH records it, in order
    * (Issue #52, S17a). The Interactive Answer Stream reads these; the terminal outcome is the same as `submitUnit`'s.
@@ -320,8 +344,8 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
     CONTEXT_WINDOW_EXCEEDED_CODE: llm.CONTEXT_WINDOW_EXCEEDED_CODE,
   };
   const toolOwner = request.platformTools ?? request.localTools ?? null;
-  const selectedLocal = request.localTools === undefined ? false : request.compositionOptions?.version === 2
-    ? request.localToolsRule ?? request.compositionOptions.localTools ?? true : true;
+  const selectedLocal = request.localTools === undefined ? false : (request.compositionOptions?.version ?? 1) >= 2
+    ? request.localToolsRule ?? request.compositionOptions?.localTools ?? true : true;
   const schemas = ruleNamedToolSchemas(request.platformTools !== undefined, selectedLocal);
   const composition = describeComposition(request.route, request.model, request.promptContractDigest, {
     ...request.compositionOptions,
@@ -347,6 +371,24 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
     return dispatch;
   };
   let handle: AgentHandle | undefined;
+  let activeAgent: Agent | null = null;
+  let inFlight: Promise<HarnessTurnOutcome> | null = null;
+  let childSlot: { child: Agent | null; controller: AbortController } | null = null;
+  const childComposition = composition.subagents !== false;
+  const identityOf = (candidate: Agent): HarnessRequestIdentity => {
+    requireHarness(!disposed && activeAgent === candidate && context.agents.get(candidate.id) === candidate,
+      'HARNESS_REQUEST_IDENTITY_INVALID', '请求不属于当前技术回合。');
+    if (childSlot !== null) {
+      const header = candidate.session.header;
+      requireHarness(handle !== undefined && context.agents.get(handle.agent.id) === handle.agent &&
+        childSlot.child === candidate && context.agents.isOwnedBy(candidate.id, handle.agent) &&
+        candidate.id === header.id && header.parentSession === handle.agent.id && header.origin === 'subagent' &&
+        header.delegationDepth === 1 && (header.seedLength ?? 0) === 0 && header.agentPreset === undefined &&
+        candidate.options.subagentDepth === 1 && candidate.options.provider === request.route && candidate.options.model === request.model,
+      'HARNESS_CHILD_IDENTITY_INVALID', '子代理不属于当前父尝试。');
+    }
+    return { sessionId: candidate.id, parentSessionId: request.sessionId, child: childSlot !== null };
+  };
   const spans: HarnessExecutionSpan[] = [];
   try {
     await context.plugin(agent.AgentRegistry);
@@ -355,14 +397,32 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
     await context.plugin(llm.LlmRuntime);
     await context.plugin(prompt.SystemPrompt, { includeHarnessIdentity: false, includeRuntimeContext: false, persona: '' });
     await context.plugin(tools.ToolRuntime, { mode: 'native', maxParallelSubCalls: composition.tools.maxParallelSubCalls });
-    if (toolOwner !== null) registerPlatformTools(context, toolOwner, schemas, sessions.isJsonValue, dispatchOf, request.localTools, typeof selectedLocal === 'object' ? selectedLocal : undefined);
+    if (toolOwner !== null) await context.plugin({ name: 'ai7-read-only-capabilities', inject: ['tools'], apply(ctx: Context) {
+      // The native plugin carries no authority: every invocation still crosses the Run-bound owner and its sidecar proofs.
+      registerPlatformTools(ctx, toolOwner, schemas, sessions.isJsonValue, dispatchOf, request.localTools, typeof selectedLocal === 'object' ? selectedLocal : undefined);
+    }
+    });
     await context.plugin(loop.AgentLoop, { maxParallelToolCalls: composition.agentLoop.maxParallelToolCalls, agents: [] });
+    if (childComposition) {
+      const [subagent, spawn] = await Promise.all([import('@deepseek-ai/dsh-subagent'), import('@deepseek-ai/dsh-subagent-spawn-in-process')]);
+      await context.plugin(subagent.SubagentRuntime);
+      await context.plugin(spawn, { providerName: 'spawn' });
+      context.on('agent/created', ({ agent: child }) => {
+        if (handle === undefined) return;
+        requireHarness(childSlot !== null && childSlot.child === null && !childSlot.controller.signal.aborted,
+          'HARNESS_CHILD_SLOT_UNAVAILABLE', '当前没有可用的单元子代理位置。');
+        childSlot.child = child;
+        activeAgent = child;
+        identityOf(child); // Synchronous veto before native start can publish or submit its first request.
+      });
+    }
     context.systemPrompt.suppressRuntimeContext();
     context.systemPrompt.section({ name: PROMPT_SECTION_NAME, order: 0, text: request.systemPrompt, complete: true });
     context.llm.registerAdapter([request.route], request.adapterFactory(failureCodes));
     // Each text delta the turn in flight streams, as DSH records it: never a business fact, only what the foreground
     // dialogue shows by complete fragment.
-    context.on('session/event', (_session, event) => {
+    context.on('session/event', (session, event) => {
+      if (activeAgent === null || session.id !== activeAgent.id) return;
       // An assistant message asking for platform tools is accepted for this attempt's history the moment DSH records it,
       // before its calls run and before the next model call carries it back through the gate (Issue #473).
       if (toolOwner !== null && event.type === 'assistant/message' && assistantToolCalls(event.data.message) !== null) {
@@ -375,18 +435,22 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
     });
     context.on('llm/stream', function (this: LlmRuntime, options: GenerateOptions, next: () => AsyncIterable<StreamChunk>) {
       if (!bound) return refusalStream('执行绑定尚未核对；未发送任何内容。');
+      const candidate = activeAgent;
+      if (candidate === null || options.sessionId !== candidate.id || !llm.isAgentLoopRequest(options)) return refusalStream('请求身份不属于当前技术回合。');
+      const identity = identityOf(candidate);
       if (options.signal !== undefined && toolTurn !== null) toolTurns.set(options.signal, toolTurn);
       // Keep the existing turn/signal correlation alive across the wait. The delegated iterator's
       // return/finally finishes body cleanup before release, including early adapter refusals.
       return (async function* (): AsyncGenerator<StreamChunk> {
         let admission: HarnessRequestAdmission | undefined;
         try {
-          if (request.acquireRequest !== undefined) admission = await request.acquireRequest(options, options.signal ?? new AbortController().signal);
+          if (request.acquireRequest !== undefined) admission = await request.acquireRequest(options, options.signal ?? new AbortController().signal, identity);
           if (!bound || disposed || options.signal?.aborted === true) {
             yield* refusalStream('请求已取消或执行已结束；未发送任何内容。');
             return;
           }
-          const decision = request.gate(options);
+          identityOf(candidate);
+          const decision = request.gate(options, identity);
           if (decision.decision === 'refuse') {
             yield* refusalStream(decision.detail, decision.reason);
             return;
@@ -398,6 +462,12 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
           admission?.release();
         }
       })();
+    });
+    context.on('agent/request-error', async ({ agent: failedAgent, failure }, next) => {
+      // A server refusal or unknown result never enters this new recovery path. The parent must also attest transport no-send.
+      if (request.route !== LOCAL_DETERMINISTIC_ROUTE && failure.code === AI7_FAILURE_CODES.TRANSPORT_FAILED &&
+          request.onRequestError !== undefined && await request.onRequestError(failure, identityOf(failedAgent))) return { kind: 'retry' };
+      return next();
     });
     const assembly = await context.systemPrompt.assemble();
     // Zero tools, or exactly the two platform tool schemas when an owner was given: never anything in between or beyond.
@@ -515,23 +585,39 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
     currentSessionId = nextId;
   };
 
-  const submit = async (text: string, onText: ((delta: string) => void) | null): Promise<HarnessTurnOutcome> => {
+  const runTurn = async (text: string, onText: ((delta: string) => void) | null, delegate: boolean): Promise<HarnessTurnOutcome> => {
     requireHarness(!disposed, 'HARNESS_DISPOSED', 'PrimaryAgentHarness 已释放。');
     requireHarness(bound, 'HARNESS_UNBOUND', '执行绑定尚未核对，不能提交单元。');
-    requireHarness(streamReader === null, 'HARNESS_TURN_IN_FLIGHT', '上一个回合尚未结束。');
-    if (sessionMode === 'per-unit') await openUnitSession();
-    const session = live.agent.session;
-    const startSeq = session.seq;
+    if (!childComposition && sessionMode === 'per-unit') await openUnitSession();
+    let session = live.agent.session;
+    let startSeq = session.seq;
     streamReader = onText;
     const turn = { active: true };
     toolTurn = turn;
+    let childRun: SubagentRun | undefined;
     try {
-      live.agent.followup(llm.createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } }));
-      await live.agent.whenIdle();
+      if (childComposition && delegate) {
+        const slot = { child: null as Agent | null, controller: new AbortController() };
+        childSlot = slot;
+        childRun = await context.subagents.start('spawn', {
+          parent: handle.agent, signal: slot.controller.signal, prompt: [{ type: 'text', text }], maxDepth: 1,
+        });
+        requireHarness(childRun.localAgent !== undefined && childRun.localAgent === slot.child && childRun.id === slot.child.id,
+          'HARNESS_CHILD_IDENTITY_INVALID', '返回的子代理与当前单元不一致。');
+        identityOf(childRun.localAgent);
+        session = childRun.localAgent.session;
+        startSeq = 0;
+        currentSessionId = session.id;
+        await childRun.result;
+      } else {
+        activeAgent = live.agent;
+        currentSessionId = session.id;
+        live.agent.followup(llm.createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } }));
+        await live.agent.whenIdle();
+      }
     } finally {
-      turn.active = false;
-      toolTurn = null;
-      streamReader = null;
+      try { await childRun?.dispose(); }
+      finally { turn.active = false; toolTurn = null; streamReader = null; activeAgent = null; childSlot = null; }
     }
     // A persisted log holds the turn once it is flushed: the span names exactly what the Harness Session Ledger keeps.
     if (request.sessionLogRoot !== undefined) await context.sessions.flush(session);
@@ -541,6 +627,12 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
     const span = { sessionId: currentSessionId, startSeq, endSeq };
     spans.push(span);
     return { ...projectTurn(events), span };
+  };
+  const submit = (text: string, onText: ((delta: string) => void) | null, delegate: boolean): Promise<HarnessTurnOutcome> => {
+    requireHarness(inFlight === null, 'HARNESS_TURN_IN_FLIGHT', '上一个回合尚未结束。');
+    const running = runTurn(text, onText, delegate);
+    inFlight = running;
+    return running.finally(() => { inFlight = null; });
   };
 
   return {
@@ -562,22 +654,29 @@ export async function prepareExecution(request: HarnessExecutionRequest): Promis
       bound = true;
     },
     async submitUnit(text) {
-      return submit(text, null);
+      return submit(text, null, true);
+    },
+    async submitStage(text) {
+      return submit(text, null, false);
     },
     async submitStreaming(text, onText) {
-      return submit(text, onText);
+      return submit(text, onText, false);
     },
     nextSpanStart() {
-      return { sessionId: currentSessionId, startSeq: live.agent.session.seq };
+      const session = activeAgent?.session ?? live.agent.session;
+      return { sessionId: session.id, startSeq: session.seq };
     },
     interrupt() {
-      if (!disposed) live.agent.cancel({ kind: 'user' });
+      if (!disposed) { childSlot?.controller.abort(); (activeAgent ?? live.agent).cancel({ kind: 'user' }); }
     },
     async finish() {
       if (disposed) return spans;
       disposed = true;
       bound = false;
+      childSlot?.controller.abort();
+      activeAgent?.cancel({ kind: 'user' });
       try {
+        await inFlight?.catch(() => undefined);
         await live.dispose();
       } finally {
         await context.fiber.dispose();

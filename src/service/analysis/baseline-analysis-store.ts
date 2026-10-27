@@ -1,8 +1,8 @@
 import { MODEL_REQUEST_ADMISSION_SCHEMA_VERSION } from '../task-authorization.js';
 import { procedureIdForKind } from '../procedures/preinstalled.js';
 import { recordProcedurePlanPin, readProcedurePlanPin, resolveProcedureDefinition } from '../procedures/definition-store.js';
-import { withReviewLocalTools, pinnedReviewDefinition } from '../review/review-category-kind.js';
-import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION } from '../review/category-configuration.js';
+import { withReviewLocalTools, pinnedReviewDefinition, reviewCategoryKindDefinition } from '../review/review-category-kind.js';
+import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryEntry, reviewCategoryContractInput } from '../review/category-configuration.js';
 import type { CompositionOptions } from '../harness/primary-agent-harness.js';
 import type { PinnedLocalToolSources } from '../retrieval/index.js';
 import { kindResearchDeclaration } from './live-kind-admission.js';
@@ -15,7 +15,7 @@ import { searchBackend, searchBackendConfigurationDigest } from '../provider/sea
 import { CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES } from '../../shared/provider-configuration.generated.js';
 import type { FrozenWebToolsBackend } from '../../shared/protocol.js';
 import { isResultSetPolicyPin, selectedPolicyIdentityOf, type LocalFixtureProfile, type SelectedPolicyIdentity } from '../../shared/protocol.js';
-import { localFixtureRegisteredProfile, type LocalFixtureRuntimeContext } from '../provider/model-fixture.js';
+import { STOCK_TYPOS_LEAF_FIXTURE, STOCK_TYPOS_LEAF_FIXTURE_SHA256, STOCK_TYPOS_LEAF_LOCAL_TOOLS, localFixtureRegisteredProfile, type LocalFixtureRuntimeContext } from '../provider/model-fixture.js';
 import { providerPlanPolicyMetadata } from './plan-boundary.js';
 import { randomUUID } from 'node:crypto';
 import { liveKindAdmission, liveKindRule } from './live-kind-admission.js';
@@ -166,7 +166,7 @@ import {
 import { assuranceSampleNotRun, type CrossUnitOutcome } from './reducers.js';
 import { baselineAnalysisKindDefinition } from './kind-definition.js';
 import { ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, assuranceSamplingTurns, buildAssuranceSamplingMessage, type AssuranceSampleDraw } from './assurance-sampling-contract.js';
-import { describeComposition } from '../harness/primary-agent-harness.js';
+import { describeComposition, STOCK_TYPOS_LEAF } from '../harness/primary-agent-harness.js';
 import { kindLocalTools } from './live-kind-admission.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from '../provider/egress-gate.js';
 import type { AnalysisOutcomeAttentionReading, AnalysisTaskAttentionReading } from '../global-attention.js';
@@ -757,7 +757,7 @@ export interface ProductionPlanBinding {
 }
 
 export interface ExecutionBindingRecord {
-  readonly compositionVersion?: 2;
+  readonly compositionVersion?: 2 | 3;
   readonly attemptId: string;
   readonly taskIntentId: string;
   readonly runRecordId: string;
@@ -1614,11 +1614,23 @@ export class BaselineAnalysisStore {
     return { ...sources, baseline, terms: baseline.entities.filter((entity) => isRecord(entity) && ['person', 'place', 'term'].includes(String(entity.kind))) };
   }
 
-  #newCompositionOptions(bookId: string): CompositionOptions {
+  #newCompositionOptions(bookId: string, leafMode = false): CompositionOptions {
     const id = procedureIdForKind(this.#definition.kind);
     const resolved = id === null ? null : resolveProcedureDefinition(this.#db, id, this.#definition.contractVersion === 'ai7.editorial-review/1' ? 1 : undefined);
     const procedureOptions = resolved === null ? {} : { procedure: resolved.pin, stages: resolved.document.stages.map((stage, index) =>
       ({ ordinal: index + 1, stageType: stage.stageType, digest: sha256Hex(canonicalJson(stage)) })) };
+    const stock = reviewCategoryEntry('typos-and-usage')!;
+    const expected = withModelClarification(reviewCategoryKindDefinition(reviewCategoryContractInput(stock), 2, STOCK_TYPOS_LEAF_LOCAL_TOOLS));
+    const localLeaf = this.#route?.fixtureIdentity === STOCK_TYPOS_LEAF_FIXTURE;
+    const productionLeaf = leafMode && this.#launch.operationalScope === 'ordinary-production' &&
+      this.#launch.policy?.providerProcessing.subAgents !== undefined && this.#definition.promptContractDigest === expected.promptContractDigest;
+    if (localLeaf || productionLeaf) {
+      requireAnalysis(leafMode && this.#definition.promptContractDigest === expected.promptContractDigest &&
+        resolved?.pin.procedureId === 'ai7-procedure/review-typos-and-usage' && resolved.pin.version === 2,
+      'ANALYSIS_CHILD_PROFILE_REFUSED', '单元子代理只适用于固定的标准错字用词审阅。');
+      return { version: 3, subagents: STOCK_TYPOS_LEAF, ...procedureOptions, localTools: STOCK_TYPOS_LEAF_LOCAL_TOOLS,
+        sources: { baseline: null, guidelines: stock.guidelineDocuments.map(({ documentId, version, clauses }) => ({ documentId, version, clauses })), terms: [] } };
+    }
     const local = kindLocalTools(this.#launch.policy, this.#definition.kind);
     if (local?.declarations === undefined) return { version: 2, ...procedureOptions };
     const row = this.#db.prepare(`SELECT r.* FROM analysis_result_set_revisions r JOIN analysis_result_sets s ON s.result_set_id = r.result_set_id
@@ -1706,12 +1718,13 @@ export class BaselineAnalysisStore {
   #refreshClarificationDefinition(): void {
     const launch = this.#launch;
     const rule = liveKindRule(launch.policy, this.#definition.kind);
-    this.#definition = withReviewLocalTools(this.#definition, kindLocalTools(launch.policy, this.#definition.kind));
+    const leaf = this.#route?.fixtureIdentity === STOCK_TYPOS_LEAF_FIXTURE;
+    this.#definition = withReviewLocalTools(this.#definition, leaf ? STOCK_TYPOS_LEAF_LOCAL_TOOLS : kindLocalTools(launch.policy, this.#definition.kind));
     const base = this.#definition.clarificationBase ?? this.#definition;
     // The factual kind's own definition is its default level's (Issue #901): 标准核查 where the levels apply, else v1 as before.
     if (base.kind === FACTUAL_REVIEW_KIND) this.#definition = this.#factualUnwrapped('standard', rule);
     // The one origin-qualified admitted rule owns eligibility; missing terms deny.
-    if (this.#route?.fixtureIdentity.startsWith('sample1-model-clarification') === true ||
+    if (leaf || this.#route?.fixtureIdentity.startsWith('sample1-model-clarification') === true ||
         rule?.clarificationQuestionAllowed === true) {
       this.#definition = withModelClarification(this.#definition);
     // An unconfigured production route has no current rule, but a stopped Run still owns its frozen binding.
@@ -1915,7 +1928,7 @@ export class BaselineAnalysisStore {
         summary: asString(envelope.summary),
         promptContractDigest: asString(envelope.promptContractDigest),
         behaviorCompositionDigest: asString(envelope.behaviorCompositionDigest),
-        ...(envelope.compositionVersion === 2 ? { compositionVersion: 2 as const } : {}),
+        ...(envelope.compositionVersion === 2 || envelope.compositionVersion === 3 ? { compositionVersion: envelope.compositionVersion } : {}),
         planVersion: typeof envelope.planVersion === 'number' ? envelope.planVersion : null,
         boundary: isRecord(envelope.boundary) ? envelope.boundary as unknown as PlanBoundarySplitProjection : null,
       },
@@ -3013,6 +3026,25 @@ export class BaselineAnalysisStore {
     requireAnalysis(isRecord(records['provider-resolution-plan']), 'ANALYSIS_RECORD_INVALID', '处理策略计划记录无效。');
     providerPlanPolicyMetadata(records['provider-resolution-plan']);
     const envelope = records['plan-envelope'] as Record<string, unknown>;
+    const route = (records['provider-resolution-plan'] as { executionRoute?: { kind: string; model: string; fixtureIdentity?: string; fixtureSha256?: string } }).executionRoute;
+    if (route?.fixtureIdentity === STOCK_TYPOS_LEAF_FIXTURE || envelope.compositionVersion === 3) {
+      const stock = reviewCategoryEntry('typos-and-usage')!;
+      const definition = withModelClarification(reviewCategoryKindDefinition(reviewCategoryContractInput(stock), 2, STOCK_TYPOS_LEAF_LOCAL_TOOLS));
+      const options = envelope.compositionOptions as CompositionOptions | undefined;
+      const procedure = resolveProcedureDefinition(this.#db, 'ai7-procedure/review-typos-and-usage', 2);
+      requireAnalysis(envelope.compositionVersion === 3 && route !== undefined && options?.version === 3 &&
+        (mode === 'any' || mode === 'review-first') && envelope.promptContractDigest === definition.promptContractDigest &&
+        canonicalJson(options.subagents) === canonicalJson(STOCK_TYPOS_LEAF) &&
+        canonicalJson(options.localTools) === canonicalJson(STOCK_TYPOS_LEAF_LOCAL_TOOLS) &&
+        canonicalJson(options.sources) === canonicalJson({ baseline: null, guidelines: stock.guidelineDocuments.map(({ documentId, version, clauses }) => ({ documentId, version, clauses })), terms: [] }) &&
+        procedure !== null && canonicalJson(options.procedure) === canonicalJson(procedure.pin) &&
+        canonicalJson(options.stages) === canonicalJson(procedure.document.stages.map((stage, index) => ({ ordinal: index + 1, stageType: stage.stageType, digest: sha256Hex(canonicalJson(stage)) }))) &&
+        (route.kind !== LOCAL_DETERMINISTIC_ROUTE || route.fixtureIdentity === STOCK_TYPOS_LEAF_FIXTURE &&
+          route.fixtureSha256 === sha256Hex(`${STOCK_TYPOS_LEAF_FIXTURE}:${STOCK_TYPOS_LEAF_FIXTURE_SHA256}`)),
+      'ANALYSIS_CHILD_PROFILE_REFUSED', '冻结的单元子代理配置不属于固定标准审阅。');
+      requireAnalysis(describeComposition(route.kind as ExecutionRouteId, route.model, definition.promptContractDigest, options).digest === envelope.behaviorCompositionDigest,
+        'ANALYSIS_CHILD_PROFILE_REFUSED', '冻结的单元子代理组合摘要不一致。');
+    }
     if (envelope.webToolsBackendDigest !== undefined) {
       const backend = records['web-tools-backend'];
       const provider = records['provider-resolution-plan'] as Record<string, unknown>;
@@ -3132,7 +3164,7 @@ export class BaselineAnalysisStore {
       bindingDigest: asString(row.sha256),
       harnessSessionId: binding.harnessSessionId,
       behaviorCompositionDigest: binding.behaviorCompositionDigest,
-      ...(binding.compositionVersion === 2 ? { compositionVersion: 2 as const } : {}),
+      ...(binding.compositionVersion === 2 || binding.compositionVersion === 3 ? { compositionVersion: binding.compositionVersion } : {}),
       promptContractDigest: binding.promptContractDigest,
       planEnvelopeDigest: binding.planEnvelopeDigest,
       runSourceScopeDigest: binding.runSourceScopeDigest,
@@ -4185,6 +4217,9 @@ export class BaselineAnalysisStore {
     credentialReadiness?: ModelCredentialOperationState;
   }): { planVersionId: string; planEnvelopeDigest: string } {
     const { intent, checkpoint, ordinal, instant } = input;
+    if (this.#route?.fixtureIdentity === STOCK_TYPOS_LEAF_FIXTURE) requireAnalysis(intent.mode === 'review-first' &&
+      intent.selectedRange === null && intent.preparedByEnrollmentVersionId === null,
+    'ANALYSIS_CHILD_PROFILE_REFUSED', '单元子代理只适用于标准前台全文首次审阅。');
     const taskIntentId = intent.taskIntentId;
     // A later version never re-validates the checkpoint against the working head: manuscript edits are non-material.
     const facts = this.#binding(checkpoint.bookId, checkpoint, ordinal === 1);
@@ -4298,10 +4333,11 @@ export class BaselineAnalysisStore {
       webToolsBackend = { backendId: adapter.declaration.id, host: adapter.declaration.host!, configurationDigest: searchBackendConfigurationDigest(adapter.declaration.id), selectedAt: asString(row.selected_at) };
       searchCredentialReference = production === null ? CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES[adapter.declaration.credentialSlot] : asString(row.credential_reference);
     }
+    const leafMode = intent.mode === 'review-first' && intent.selectedRange === null && intent.preparedByEnrollmentVersionId === null;
     const composition = live === null
-      ? describeComposition(LOCAL_DETERMINISTIC_ROUTE, LOCAL_DETERMINISTIC_MODEL, promptContractDigest, this.#newCompositionOptions(checkpoint.bookId))
+      ? describeComposition(LOCAL_DETERMINISTIC_ROUTE, LOCAL_DETERMINISTIC_MODEL, promptContractDigest, this.#newCompositionOptions(checkpoint.bookId, leafMode))
       : describeComposition(live.route, live.model, promptContractDigest, { platformTools: webToolsBackend !== undefined, researchDeclaration,
-        ...this.#newCompositionOptions(checkpoint.bookId),
+        ...this.#newCompositionOptions(checkpoint.bookId, leafMode),
         localTools: intent.preparedByEnrollmentVersionId === null && definition.evidenceAssuranceLevel !== 'quick' ? kindLocalTools(this.#launch.policy, this.#definition.kind) ?? false : false });
     const providerPlan = {
       ...this.#selectedPlanMetadata(input.policy),
@@ -4421,8 +4457,9 @@ export class BaselineAnalysisStore {
       promptContractDigest,
       ...(definition.contractIdentity === undefined ? {} : { contractIdentity: { ...definition.contractIdentity, digest: promptContractDigest } }),
       behaviorCompositionDigest: composition.digest,
-      compositionVersion: 2,
-      compositionOptions: { version: 2, ...(composition.procedure === undefined ? {} : { procedure: composition.procedure }),
+      compositionVersion: composition.version,
+      compositionOptions: { version: composition.version, ...(composition.subagents === false ? {} : { subagents: STOCK_TYPOS_LEAF, localTools: STOCK_TYPOS_LEAF_LOCAL_TOOLS }),
+        ...(composition.procedure === undefined ? {} : { procedure: composition.procedure }),
         ...(composition.stages === undefined ? {} : { stages: composition.stages }),
         ...(composition.sources === undefined ? {} : { sources: composition.sources }) },
       // The plan version and the Plan Boundary Split are part of the canonical envelope (Issue #48).
@@ -4477,6 +4514,8 @@ export class BaselineAnalysisStore {
     start: 'now' | 'when-online' | 'idle' = 'now',
     origin: AnalysisAuthorizationOrigin = STANDARD_DIRECT,
   ): { projection: AnalysisProjection; dispatchRunRecordId: string | null } {
+    if (this.#route?.fixtureIdentity === STOCK_TYPOS_LEAF_FIXTURE) requireAnalysis(start === 'now' && origin.kind === 'standard-direct',
+      'ANALYSIS_CHILD_PROFILE_REFUSED', '单元子代理只适用于直接授权的前台审阅。');
     // The baseline rule of the selected Provider Processing admits one kind and one origin, each refused under its own code, as preparation refuses them.
     requireAnalysis(this.#liveReading() !== MODEL_SERVICE_SETUP_REQUIRED, 'ANALYSIS_MODEL_SERVICE_SETUP_REQUIRED', MODEL_SERVICE_SETUP_REQUIRED_REASON);
     if (this.#launch.live !== null) {
@@ -4500,6 +4539,8 @@ export class BaselineAnalysisStore {
     const prepared = this.inspect(bookId);
     requireAnalysis(prepared.taskIntent?.taskIntentId === taskIntentId && prepared.planEnvelope !== null && prepared.planVersion !== null,
       'ANALYSIS_AUTHORIZATION_STALE', '任务计划已经变化；无法记录该授权。');
+    if (prepared.planEnvelope.compositionVersion === 3) requireAnalysis(start === 'now' && origin.kind === 'standard-direct',
+      'ANALYSIS_CHILD_PROFILE_REFUSED', '单元子代理只适用于直接授权的前台审阅。');
     if (prepared.authorization !== null) {
       requireAnalysis(prepared.planEnvelope.digest === planEnvelopeDigest, 'ANALYSIS_AUTHORIZATION_STALE', '任务计划已经变化；无法记录该授权。');
       return { projection: prepared, dispatchRunRecordId: null };
@@ -5739,7 +5780,7 @@ export class BaselineAnalysisStore {
       artifactPin: { nativeCarrierSha256: artifactPin.nativeCarrierSha256, sidecarRevision: 2, sidecarSha256: artifactPin.sidecarSha256 },
       promptContractDigest: asString(envelope.promptContractDigest),
       behaviorCompositionDigest: asString(envelope.behaviorCompositionDigest),
-      ...(envelope.compositionVersion === 2 ? { compositionOptions: envelope.compositionOptions as CompositionOptions } : {}),
+      ...(envelope.compositionVersion === 2 || envelope.compositionVersion === 3 ? { compositionOptions: envelope.compositionOptions as CompositionOptions } : {}),
       assurancePromptContractDigest: frozenAssurancePromptContractDigest(plan['execution-plan'] as Record<string, unknown>),
       runBudgetCeiling,
       update,

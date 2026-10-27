@@ -10,6 +10,27 @@ import { LOCAL_FIXTURE_POLICY_SHA256, LOCAL_FIXTURE_MANIFEST_SHA256,
 import type { HarnessCompositionDescriptor } from '../harness/primary-agent-harness.js';
 import { SAMPLE1_PUBLIC_SAMPLEBOOK } from '../../shared/public-samplebooks.js';
 import { AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST, DIALOGUE_PROMPT_CONTRACT_DIGEST, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST } from '../dialogue/contract.js';
+import { LOCAL_TOOL_DECLARATION_NAMES, readLocalToolsRule } from './local-tools.js';
+
+/** #1160's standalone authored counterpart; historical parent fixtures never enter this profile. */
+export const STOCK_TYPOS_LEAF_FIXTURE = 'sample1-stock-typos-leaf-authored';
+export const STOCK_TYPOS_LEAF_FIXTURE_SHA256 = '2496ffb4fa58241e37c0ba2651c50c11d1a80220b03235a326f967be5e972714';
+export const STOCK_TYPOS_LEAF_LOCAL_TOOLS = readLocalToolsRule({ localTools: {
+  declarations: LOCAL_TOOL_DECLARATION_NAMES.map((name) => ({ name, readOnly: true, concurrencySafe: true })),
+  parallelCallsAllowed: true,
+  targetedRetrieval: { allowed: true, source: 'authorized-pinned-sources-only', callsPerUnit: 5, candidatesPerCall: 8,
+    exactFetchRequiredBeforeCitation: true, scope: 'no-egress' },
+  breaker: { roundTrips: 128, end: '检索未完成' },
+} })!;
+
+export function requireStockTyposLeafFixture(fixture: ResolvedModelFixture): void {
+  requireFixture(fixture.identity === STOCK_TYPOS_LEAF_FIXTURE && fixture.provenance === 'authored' &&
+    fixture.lineage.length === 1 && fixture.lineage[0]!.identity === STOCK_TYPOS_LEAF_FIXTURE &&
+    fixture.lineage[0]!.sha256 === STOCK_TYPOS_LEAF_FIXTURE_SHA256 &&
+    fixture.sha256 === sha256Hex(`${STOCK_TYPOS_LEAF_FIXTURE}:${STOCK_TYPOS_LEAF_FIXTURE_SHA256}`) &&
+    [...fixture.entries.values()].every((entry) => entry.attempt !== null && entry.capture === undefined && entry.contentDigest === null),
+  '单元子代理必须使用独立的精确已登记创作夹具。');
+}
 
 interface LegacyFixtureTuple {
   readonly fixtureIdentity: string;

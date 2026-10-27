@@ -17,6 +17,7 @@ import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy
 import { parseReviewCategoryUnitMessageHeader, reviewCategoryContract, reviewCategoryContractDigest } from '../../src/service/review/review-category-contract.js';
 import { parseFactualReviewUnitMessageHeader } from '../../src/service/analysis/factual-review-contract.js';
 import { CredentialBroker } from '../../src/service/provider/credential-broker.js';
+import { modelRequestNotSent } from '../../src/service/provider/deepseek-adapter.js';
 import * as harnessExecution from '../../src/service/harness/primary-agent-harness.js';
 import { reviewCategoryEntry, reviewCategoryContractInput } from '../../src/service/review/category-configuration.js';
 import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
@@ -56,6 +57,7 @@ afterEach(async () => {
 interface ReviewRequest { readonly category: string; readonly ordinal: number; readonly body: string; readonly tools: string[]; readonly sentAt: number; abortedAt?: number; abortReason?: unknown }
 
 interface ProductionReviewControl {
+  readonly transportEntry?: (request: RequestInit) => void;
   readonly series?: boolean;
   readonly ready?: (application: { store: EditorialStore; owner: BaselineAnalysisExecutionOwner; bookId: string; reviewRunId: string; policy: LaunchPolicyProjection; transport: typeof fetch }) => void;
   readonly response?: (response: Response, signal: AbortSignal | undefined, body: string) => Promise<Response>;
@@ -161,6 +163,7 @@ async function productionReview(
   }
   const requests: ReviewRequest[] = [];
   const nativeFetch: typeof fetch = async (_url, init) => {
+    control.transportEntry?.(init!);
     const finish = (response: Response): Promise<Response> => control.response?.(response, init?.signal ?? undefined, String(init?.body)) ?? Promise.resolve(response);
     const body = JSON.parse(String(init?.body)) as { messages: Array<{ role: string; content: string }>; tools?: Array<{ function: { name: string } }> };
     const message = body.messages.findLast((entry) => entry.role === 'user')!.content;
@@ -310,9 +313,48 @@ it('prepares selected Series consistency with the current production tool base (
   }
 });
 
+it('recovers one proven no-send inside the native stock child with the same request and a fresh admission', async () => {
+  const bodies: string[] = [];
+  const result = await productionReview(['typos-and-usage'], () => 'valid', undefined, false, false, {
+    transportEntry: (request) => {
+      bodies.push(String(request.body));
+      if (bodies.length === 1) throw modelRequestNotSent(request, new Error('synthetic pre-send refusal'));
+    },
+  });
+  const definition = reviewCategoryKindDefinition(reviewCategoryContractInput(reviewCategoryEntry('typos-and-usage')!), 2);
+  const projection = result.store.inspectReviewCategory(result.bookId, definition);
+  expect(projection.state).toBe('settled');
+  expect(bodies[0]).toBe(bodies[1]);
+  const attempt = projection.run!.attempt!;
+  expect(attempt.executionBinding!.compositionVersion).toBe(3);
+  expect(projection.run!.adaptations).toHaveLength(1);
+  expect(projection.run!.adaptations[0]).toMatchObject({ adaptationClass: 'safe-retry', unitOrdinal: 1, attemptIndex: 2 });
+  const spans = attempt.spans.filter((span) => span.unitOrdinal === 1);
+  expect(spans.map((span) => span.attemptIndex)).toEqual([1, 2]);
+  expect(spans[0]!.harnessSessionId).toBe(spans[1]!.harnessSessionId);
+  expect(spans[0]!.endSeq).toBeLessThan(spans[1]!.startSeq);
+  expect(spans[0]!.payloadDigest).toBe(spans[1]!.payloadDigest);
+  expect(result.store.reviewCategoryLedger(definition).requestAdmissionOf(projection.run!.runRecordId)).toMatchObject({ width: 1 });
+  expect(projection.taskOutcome!.report!.usagePerStage.units.requests).toBe(9);
+  expect(requestGovernor.snapshot()).toMatchObject({ registered: 0, inFlight: 0, waiting: 0 });
+});
+
+it('never resends a stock child after entering transport without a no-send proof', async () => {
+  let calls = 0;
+  const result = await productionReview(['typos-and-usage'], () => 'valid', undefined, false, false, {
+    transportEntry: () => { if (++calls === 1) throw Object.assign(new Error('synthetic connection loss'), { code: 'TRANSPORT_FAILED' }); },
+  });
+  const definition = reviewCategoryKindDefinition(reviewCategoryContractInput(reviewCategoryEntry('typos-and-usage')!), 2);
+  const projection = result.store.inspectReviewCategory(result.bookId, definition);
+  expect(projection.run!.adaptations).toHaveLength(0);
+  expect(projection.run!.attempt!.spans.filter((span) => span.unitOrdinal === 1)).toHaveLength(1);
+  expect(projection.resultSetRevision!.gaps).toContainEqual(expect.objectContaining({ unitOrdinal: 1, code: 'outcome-unknown' }));
+  expect(calls).toBeLessThanOrEqual(9);
+});
+
 it('owns three isolated production units through body cleanup and joins out-of-order results in manifest order (#1131)', async () => {
   const held = heldReviewResponses(3);
-  const working = productionReview(['typos-and-usage'], () => 'valid', undefined, false, false, held);
+  const working = productionReview(['style-and-format'], () => 'valid', undefined, false, false, held);
   void working.catch(() => undefined);
   const [first, second, third] = await Promise.all([held.at(1), held.at(2), held.at(3)]);
   const { runRecordId, ledger } = latestReviewExecution(store!);
@@ -366,7 +408,7 @@ function heldGlobalAnswer(application: Parameters<NonNullable<ProductionReviewCo
   });
 
 function prepareAdditionalReview(opened: EditorialStore, bookId: string, policy: LaunchPolicyProjection) {
-  let preparation = opened.createReviewRunPreparationWork(bookId, ['typos-and-usage'],
+  let preparation = opened.createReviewRunPreparationWork(bookId, ['style-and-format'],
     { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy);
   while (!preparation.done) preparation = opened.advanceReviewRunPreparationWork(preparation.workId!);
   const run = preparation.projection!.run!;
@@ -376,7 +418,7 @@ function prepareAdditionalReview(opened: EditorialStore, bookId: string, policy:
 
 async function sharedCapacityScenario() {
   const held = heldReviewResponses(3); const ready = deferred<Parameters<NonNullable<ProductionReviewControl['ready']>>[0]>();
-  const working = productionReview(['typos-and-usage'], () => 'valid', undefined, false, false, { ...held, ready: ready.resolve });
+  const working = productionReview(['style-and-format'], () => 'valid', undefined, false, false, { ...held, ready: ready.resolve });
   void working.catch(() => undefined);
   const bodies = await Promise.all([held.at(1), held.at(2), held.at(3)]); const application = await ready.promise;
   const firstExecution = latestReviewExecution(application.store);
@@ -450,7 +492,7 @@ it('pauses new units but keeps authorized inner calls at the FIFO tail, then res
     const result = acquire(producer, signal); if (++calls === 3) acquired.resolve(); return result;
   });
   const held = heldReviewResponses(4);
-  const working = productionReview(['typos-and-usage'], (_category, ordinal, prior) => ordinal === 1 && prior === 0 ? 'tools' : 'valid', undefined, false, false, held);
+  const working = productionReview(['style-and-format'], (_category, ordinal, prior) => ordinal === 1 && prior === 0 ? 'tools' : 'valid', undefined, false, false, held);
   void working.catch(() => undefined);
   const first = await held.at(1); await acquired.promise;
   const { runRecordId, ledger } = latestReviewExecution(store!);
@@ -483,7 +525,7 @@ async function reopenToolReview({ coupled, source }: { coupled: boolean; source:
   const category = source === 'material' ? 'typos-and-usage' : source === 'consistency' ? 'series-consistency' : 'academic-integrity';
   const searchReadiness = category === 'academic-integrity' ? vi.spyOn(CredentialBroker.prototype, 'checkPlanReadiness') : null;
   if (searchReadiness !== null) cleanupResources.push(() => searchReadiness.mockRestore());
-  const held = heldReviewResponses(3); const ready = deferred<Parameters<NonNullable<ProductionReviewControl['ready']>>[0]>();
+  const held = heldReviewResponses(source === 'material' && !coupled ? 1 : 3); const ready = deferred<Parameters<NonNullable<ProductionReviewControl['ready']>>[0]>();
   const working = productionReview([category], (_category, _ordinal, prior) => prior === 0 ? 'tools' : 'valid',
     undefined, coupled, coupled, { response: (response, signal, body) => (JSON.parse(body) as { messages: Array<{ role: string }> }).messages.some((message) => message.role === 'tool')
       ? Promise.resolve(response) : held.response(response, signal, body), ready: ready.resolve, series: source === 'series' || source === 'consistency' });
@@ -684,7 +726,7 @@ it.each([{ guard: 'influence', cancel: false, pause: false }, { guard: 'series',
 
 it('cancels every sent production sibling and keeps each unknown checkpoint without admitting another unit (#1131)', async () => {
   const held = heldReviewResponses(3);
-  const working = productionReview(['typos-and-usage'], () => 'valid', undefined, false, false, held);
+  const working = productionReview(['style-and-format'], () => 'valid', undefined, false, false, held);
   void working.catch(() => undefined);
   await Promise.all([held.at(1), held.at(2), held.at(3)]);
   const { runRecordId, ledger } = latestReviewExecution(store!); const facts = ledger.loadExecutionPlan(runRecordId);
@@ -701,7 +743,7 @@ it('cancels every sent production sibling and keeps each unknown checkpoint with
 it('reopens a real crash snapshot with one committed sibling and three unmatched request fences without resending them (#1131)', async () => {
   const held = heldReviewResponses(4);
   const ready = deferred<Parameters<NonNullable<ProductionReviewControl['ready']>>[0]>();
-  const working = productionReview(['typos-and-usage'], () => 'valid', undefined, false, false, { ...held, ready: ready.resolve });
+  const working = productionReview(['style-and-format'], () => 'valid', undefined, false, false, { ...held, ready: ready.resolve });
   void working.catch(() => undefined);
   const [first] = await Promise.all([held.at(1), held.at(2), held.at(3)]);
   const application = await ready.promise; first.release(); await held.at(4);
@@ -743,7 +785,7 @@ it('preserves a committed unit, a possible send and queued unsent siblings disti
     const result = acquire(producer, signal); if (++acquisitions === 4) fourth.resolve(); return result;
   });
   const held = heldReviewResponses(2); const ready = deferred<Parameters<NonNullable<ProductionReviewControl['ready']>>[0]>();
-  const working = productionReview(['typos-and-usage'], () => 'valid', undefined, false, false, { ...held, ready: ready.resolve });
+  const working = productionReview(['style-and-format'], () => 'valid', undefined, false, false, { ...held, ready: ready.resolve });
   void working.catch(() => undefined); const first = await held.at(1); first.release();
   const sent = await held.at(2); await fourth.promise;
   const application = await ready.promise; const { runRecordId, ledger } = latestReviewExecution(application.store);
@@ -787,7 +829,7 @@ it.each(['before-fence', 'fenced-before-native'] as const)('keeps %s crash evide
   const readingSecret = deferred(); const releaseSecret = deferred<string | null>();
   cleanupResources.push(() => { releaseSecret.resolve('public-synthetic-placeholder'); occupied?.release(); if (foreign !== null) requestGovernor.unregisterProducer(foreign); });
   const ready = deferred<Parameters<NonNullable<ProductionReviewControl['ready']>>[0]>();
-  const working = productionReview(['typos-and-usage'], () => 'valid', undefined, false, false, { ready: ready.resolve,
+  const working = productionReview(['style-and-format'], () => 'valid', undefined, false, false, { ready: ready.resolve,
     credential: async (read) => {
       if (phase === 'fenced-before-native' && read === 2) { readingSecret.resolve(); return releaseSecret.promise; }
       return 'public-synthetic-placeholder';
@@ -866,7 +908,7 @@ it('reuses an exact unit checkpoint when a crash occurs before its request-fence
 
 it('refuses a malformed durable receipt before continuation can register or send a producer (#1131)', async () => {
   const held = heldReviewResponses(3);
-  const working = productionReview(['typos-and-usage'], () => 'valid', undefined, false, false, held);
+  const working = productionReview(['style-and-format'], () => 'valid', undefined, false, false, held);
   void working.catch(() => undefined);
   const bodies = await Promise.all([held.at(1), held.at(2), held.at(3)]);
   const { runRecordId, ledger } = latestReviewExecution(store!); const facts = ledger.loadExecutionPlan(runRecordId);
@@ -901,17 +943,17 @@ it('settles an orphan terminal reflection locally as unavailable without inventi
   } finally { reopened.close(); }
 });
 
-it('counts a real reflection tool-call message once, with two physical admissions and aggregate usage once (#1131 rev8)', async () => {
+it('keeps reflection receipts separate from child tool IDs, with two admissions and usage counted once (#1131 rev8)', async () => {
   let reflections = 0;
-  const result = await productionReview(['typos-and-usage'], () => 'valid', undefined, false, false, {
+  const result = await productionReview(['typos-and-usage'], (_category, _ordinal, prior) => prior === 0 ? 'tools' : 'valid', undefined, false, false, {
     response: async (response, _signal, body) => {
       const request = JSON.parse(body) as { model: string; messages: Array<{ role: string; content: string }> };
       if (!request.messages.findLast((entry) => entry.role === 'user')!.content.startsWith('运行反思 ')) return response;
       reflections += 1;
       if (request.messages.some((entry) => entry.role === 'tool')) return response;
       return new Response(JSON.stringify({ model: request.model, choices: [{ message: { content: null, reasoning_content: '合成反思工具回合。', tool_calls: [
-        { id: 'reflection-search-1', type: 'function', function: { name: 'search_manuscript', arguments: JSON.stringify({ query: '的', mode: 'exact' }) } },
-        { id: 'reflection-search-2', type: 'function', function: { name: 'search_manuscript', arguments: JSON.stringify({ query: '了', mode: 'exact' }) } },
+        { id: 'read-1', type: 'function', function: { name: 'search_manuscript', arguments: JSON.stringify({ query: '的', mode: 'exact' }) } },
+        { id: 'search-1', type: 'function', function: { name: 'search_manuscript', arguments: JSON.stringify({ query: '了', mode: 'exact' }) } },
       ] }, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 40, completion_tokens: 20 } }), { status: 200 });
     },
   });

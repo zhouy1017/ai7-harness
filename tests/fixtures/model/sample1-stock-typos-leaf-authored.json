@@ -1,0 +1,172 @@
+{
+  "schema": "ai7.model-fixture/1",
+  "identity": "sample1-stock-typos-leaf-authored",
+  "description": "独立人工撰写的 sample1 标准错字用词单元夹具，固定工具感知与澄清契约；不继承、不声称录制或连接恢复。",
+  "basedOn": null,
+  "provenance": "authored",
+  "provider": "ai7-local-deterministic",
+  "model": "ai7-deterministic-fixture",
+  "entries": [
+    {
+      "unitOrdinal": 1,
+      "requestDigest": "64de35b951693adc2336a82c666b5dffec0bd658b37a06295e32003590926c87",
+      "attempt": 1,
+      "response": {
+        "kind": "tool-calls",
+        "calls": [
+          {
+            "name": "term_table",
+            "arguments": {}
+          }
+        ],
+        "usage": {
+          "inputTokens": 100,
+          "outputTokens": 20
+        }
+      }
+    },
+    {
+      "unitOrdinal": 1,
+      "requestDigest": "a1596bc45298a03bfaf0a6a9d6823ba501f116028fbe7a24266b45c8d9857f02",
+      "attempt": 1,
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"比较特别卜算\",\"blockOrdinal\":10,\"severity\":\"must\",\"note\":\"“特别”与“卜算”之间缺少结构助词“的”。\",\"replacement\":\"比较特别的卜算\",\"clauseId\":\"typos-and-usage/1\"}]}",
+        "usage": {
+          "inputTokens": 200,
+          "outputTokens": 50
+        }
+      }
+    },
+    {
+      "unitOrdinal": 2,
+      "requestDigest": "0b0e1ac5845f670c888ebcb407d4181beda2c8e4ecd157f6470090351bca3b90",
+      "attempt": 1,
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":2,\"findings\":[{\"quote\":\"一九八○年代\",\"blockOrdinal\":7,\"severity\":\"should\",\"note\":\"汉字数字中的零应写作“〇”，不用圆圈符号“○”。\",\"replacement\":\"一九八〇年代\",\"clauseId\":\"typos-and-usage/3\"}]}",
+        "usage": {
+          "inputTokens": 200,
+          "outputTokens": 50
+        }
+      }
+    },
+    {
+      "unitOrdinal": 3,
+      "requestDigest": "6d55a24b0bb6f33d5e0e1a4bf623a888acedcb6e0e49ce36d5bcf80f6765afcc",
+      "attempt": 1,
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":3,\"findings\":[]}",
+        "usage": {
+          "inputTokens": 200,
+          "outputTokens": 50
+        }
+      }
+    },
+    {
+      "unitOrdinal": 4,
+      "requestDigest": "046e5038c53b81a31c5e60fe7e215ec30403e5d896504a513b605775b89a02cc",
+      "attempt": 1,
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":4,\"findings\":[]}",
+        "usage": {
+          "inputTokens": 200,
+          "outputTokens": 50
+        }
+      }
+    },
+    {
+      "unitOrdinal": 5,
+      "requestDigest": "e67030137274f792610dfa39177617e5c406ae0c74314a1c27aae3c94c827bd8",
+      "attempt": 1,
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":5,\"findings\":[]}",
+        "usage": {
+          "inputTokens": 200,
+          "outputTokens": 50
+        }
+      }
+    },
+    {
+      "unitOrdinal": 6,
+      "requestDigest": "ae0bf26463a07e3d06feb2984b22ecaed167f9afb5e1b8e25c0759756e910b72",
+      "attempt": 1,
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":6,\"findings\":[]}",
+        "usage": {
+          "inputTokens": 200,
+          "outputTokens": 50
+        }
+      }
+    },
+    {
+      "unitOrdinal": 7,
+      "requestDigest": "8008ec544ca390c45c9ce33ae544a3c7f7ff9ecd31c00d742b35b1b201f67018",
+      "attempt": 1,
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":7,\"findings\":[]}",
+        "usage": {
+          "inputTokens": 200,
+          "outputTokens": 50
+        }
+      }
+    },
+    {
+      "unitOrdinal": 8,
+      "requestDigest": "7d51ca68e2d05665ceb7b65b3e556bea20e8834244025b6410345bbc53195b7b",
+      "attempt": 1,
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":8,\"findings\":[]}",
+        "usage": {
+          "inputTokens": 200,
+          "outputTokens": 50
+        }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "ff8a1a54e3af6918cbe55094ab2d577df4b1a653f8b6ffbce91a580b84b1d5c0",
+      "attempt": 1,
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"成立\",\"reason\":\"引文在所声明内容块内唯一定位，并支持这条错字用词发现。\"}]}",
+        "usage": {
+          "inputTokens": 100,
+          "outputTokens": 40
+        }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "96df5c28fe0d8b14031c311b7582234aca876672e59f7d6b65e8f1eadfcc0543",
+      "attempt": 1,
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.assurance-sampling-result/1\",\"dispositions\":[{\"ref\":\"{{ref:1}}\",\"disposition\":\"成立\",\"reason\":\"引文在所声明内容块内唯一定位，并支持这条错字用词发现。\"}]}",
+        "usage": {
+          "inputTokens": 100,
+          "outputTokens": 40
+        }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "55458a227769bbc33fae1282b31406331a9c8b965dfbede4ed68a7dad9dceaac",
+      "attempt": 1,
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.run-report-reflection-result/1\",\"items\":[{\"suggestion\":\"保留当前单元范围并继续逐条审阅修改建议。\",\"basis\":\"计划内单元完成，两条发现通过抽样，未发生安全重试。\"}]}",
+        "usage": {
+          "inputTokens": 100,
+          "outputTokens": 40
+        }
+      }
+    }
+  ]
+}
