@@ -7958,7 +7958,9 @@ export class EditorialStore {
     const record = read === 'damaged' ? null : read;
     const state = read === 'damaged' ? 'damaged' : record === null ? 'none' : record.state === 'active' && record.paused ? 'paused' : record.state;
     const next = this.#analysisCall(() => kind === BACKGROUND_ANALYSIS_KIND ? this.#backgroundDecision(bookId, read, runtime) : { kind: 'none' as const,
-      reason: kind === 'factual-recheck' ? '空闲时按最新的要求补充证据决定复核一条冻结断言；未决结果不会自动重新排队。' : '登记已保留；相应工序接入后台处理后，才会按登记开始。' });
+      reason: kind === 'factual-recheck' ? '空闲时按最新的要求补充证据决定复核一条冻结断言；未决结果不会自动重新排队。'
+        : kind === 'material-index' ? '空闲时在本机为这本书可参考的资料建立相似索引，从上次停下的段落接着建；你回来编辑时让开。'
+        : '登记已保留；相应工序接入后台处理后，才会按登记开始。' });
     const binding = this.#enrollmentBinding(bookId, kind);
     const nextOrdinal = record === null ? 1 : record.version.ordinal + 1;
     const reason = state === 'damaged'
@@ -11179,15 +11181,55 @@ export class EditorialStore {
     const pending = this.#materialIndexCall(() => this.#materialIndex.vectorTargets(materialId, this.#embedding.identity, 1));
     requireStore(this.#embedding.readiness().state === 'ready', 'MATERIAL_VECTORS_NEED_MODEL', '相似索引的模型文件不在本机或摘要不符：请在 设置 › 本机 › 相似索引模型 处理。');
     requireStore(!this.replacementFrozen(), 'MATERIAL_INDEX_READ_ONLY', MATERIAL_LAYERS_READ_ONLY);
+    // Asked for by the editor: an item the idle lane queued no longer gives way to the editor's work.
+    this.#idleVectorItems.delete(materialId);
     if (pending.targets.length > 0 && !this.#indexStopped && this.#vectorBuilding !== materialId && !this.#vectorQueue.includes(materialId)) {
       this.#vectorQueue.push(materialId);
-      if (this.#vectorRun === null) {
-        this.#vectorRun = this.#pumpMaterialVectors().finally(() => {
-          this.#vectorRun = null;
-        });
-      }
+      this.#startVectorPump();
     }
     return this.inspectLibraryMaterial(materialId);
+  }
+
+  #startVectorPump(): void {
+    if (this.#vectorRun === null) {
+      this.#vectorRun = this.#pumpMaterialVectors().finally(() => {
+        this.#vectorRun = null;
+      });
+    }
+  }
+
+  /** The items the idle lane queued, which give way while the editor works; and whether the lane is idle now (Issue #1166). */
+  readonly #idleVectorItems = new Set<string>();
+  #vectorLaneIdle = true;
+
+  /**
+   * 资料索引 on the idle lane (Issue #1166; ADR 0095 §3): each pass of the background dispatcher says whether the editor is
+   * quiet. While quiet, every Book with an active 资料索引 Background Processing Enrollment has the items it may refer to —
+   * retained research sources saved as 来源材料 among them — queued for their similarity vectors, beside any the editor asked
+   * for; once the editor is back, those items stop after the batch under way, and the next quiet pass goes on from the first
+   * paragraph still without its vector. A provider that is not ready, or no enrollment in force, builds nothing, and retrieval
+   * ranks those items lexically. Nothing is sent.
+   */
+  indexIdleMaterialVectors(idle: boolean): void {
+    this.#vectorLaneIdle = idle;
+    if (!idle || this.#vectorRun !== null || this.#indexStopped || this.#poisoned || this.replacementFrozen() ||
+      this.#embedding.readiness().state !== 'ready') return;
+    const books = new Set(this.#enrollmentCall(() => this.#enrollments.active())
+      .filter((enrollment) => enrollment.kind === 'material-index' && !enrollment.paused).map((enrollment) => enrollment.bookId));
+    for (const bookId of books) {
+      for (const item of this.#libraryCall(() => this.#libraryMaterials.referable(bookId))) {
+        if (this.#vectorQueue.includes(item.materialId)) continue;
+        try {
+          if (this.#materialIndexCall(() => this.#materialIndex.vectorTargets(item.materialId, this.#embedding.identity, 1)).targets.length === 0) continue;
+        } catch (error) {
+          if (!(error instanceof StoreError)) throw error;
+          continue; // Not yet read, or its index is not ready: a later pass looks again.
+        }
+        this.#idleVectorItems.add(item.materialId);
+        this.#vectorQueue.push(item.materialId);
+      }
+    }
+    if (this.#vectorQueue.length > 0) this.#startVectorPump();
   }
 
   /**
@@ -11202,6 +11244,7 @@ export class EditorialStore {
       try {
         for (;;) {
           if (this.#indexStopped || this.#poisoned || this.replacementFrozen() || this.#embedding.readiness().state !== 'ready') break;
+          if (this.#idleVectorItems.has(materialId) && !this.#vectorLaneIdle) break;
           const next = this.#materialIndexCall(() => this.#materialIndex.vectorTargets(materialId, this.#embedding.identity, MATERIAL_VECTOR_BATCH));
           if (next.targets.length === 0) break;
           const vectors = await this.#embedding.embed(next.targets.map((target) => target.text));
@@ -11217,6 +11260,7 @@ export class EditorialStore {
         // itself failed has already left the store unable to write: `#transaction` poisons it and throws `StoreFatalError`.
       } finally {
         this.#vectorBuilding = null;
+        this.#idleVectorItems.delete(materialId);
       }
     }
   }

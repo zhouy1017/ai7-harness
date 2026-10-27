@@ -24,7 +24,7 @@ export interface BackgroundAnalysisDispatcherDependencies {
     'backgroundAnalysisBooks' | 'backgroundAnalysisDecisionFor' | 'createBackgroundBaselineAnalysisPreparationWork' |
     'advanceBaselineAnalysisPreparationWork' | 'cancelBaselineAnalysisPreparationWork' | 'backgroundMayContinue' |
     'startEnrolledBaselineAnalysis' | 'noteBackgroundNotStarted' | 'replacementFrozen'> & Partial<Pick<EditorialStore, 'backgroundIdleFacts' |
-      'nextFactualRecheck' | 'startFactualRecheck' | 'factualRecheckCurrent' | 'publishFactualRecheck' | 'factualReviewLedger'>>;
+      'nextFactualRecheck' | 'startFactualRecheck' | 'factualRecheckCurrent' | 'publishFactualRecheck' | 'factualReviewLedger' | 'indexIdleMaterialVectors'>>;
   readonly execution: Pick<BaselineAnalysisExecutionOwner, 'full' | 'routeExecutable' | 'admitOrQueue' | 'capacity'> & Partial<Pick<BaselineAnalysisExecutionOwner, 'setBackgroundIdle' | 'startFactualRecheck'>>;
   /** Whether a job the editor asked for is queued or under way: the dispatcher never steps in beside one. */
   readonly editorWorkBusy?: () => boolean;
@@ -118,6 +118,8 @@ export class BackgroundAnalysisDispatcher {
         const online = this.#deps.dispatchReady?.() ?? true;
         lane = { idle: (facts?.idle ?? true) && online, online };
         this.#deps.execution.setBackgroundIdle?.(lane.idle);
+        // 资料索引 is made on this machine (Issue #1166): it waits for quiet, never for the network, and gives way when the editor is back.
+        try { this.#deps.store.indexIdleMaterialVectors?.(facts?.idle ?? true); } catch { /* an item that does not read is looked at again next pass */ }
         books = this.#deps.store.backgroundAnalysisBooks();
       } catch {
         return;

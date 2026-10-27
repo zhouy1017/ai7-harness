@@ -5,7 +5,8 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { BackgroundAnalysisDispatcher } from '../../src/service/background-analysis.js';
 import { FastRoleExecutionOwner, fastRoleLiveRoutes, productionFastRoleRoutes } from '../../src/service/fast-role/fast-role-execution.js';
 import {
   MATERIAL_TRANSLATION_KIND,
@@ -19,12 +20,13 @@ import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy
 import { MATERIAL_INDEX_LAYER_SCHEMA_SQL, MATERIAL_INDEX_LAYER_TRIGGER_SQL } from '../../src/service/material-index.js';
 import { OPENCODE_GO_MODEL } from '../../src/service/provider/egress-gate.js';
 import { PROVIDER_LEDGER_FILE, isItemLine, type ProviderLedgerLine } from '../../src/service/provider/provider-result-cache.js';
-import { EditorialStore, StoreError } from '../../src/service/store.js';
+import { EditorialStore, StoreError, type BackgroundAnalysisRuntime } from '../../src/service/store.js';
 import { LATEST_SCHEMA_VERSION, MATERIAL_INDEX_LAYER_SCHEMA_VERSION, RESEARCH_EVIDENCE_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import type { LibraryMaterialKind, LibraryMaterialProjection } from '../../src/shared/protocol.js';
 import { malformedPdf, sampleTextPdf, syntheticPdf } from '../fixtures/material-formats/synthetic-pdf.js';
 import { dropFactualVerificationRelations, FACTUAL_VERIFICATION_SCHEMA_NAMES, dropMaterialIndexLayerRelations, restoreProposalReviewPredecessor, pre77SchemaRows, restoreTaskIntentDraftPredecessor, pre80SchemaRows } from '../support/pre74-schema.js';
 import { withoutRuleFor } from '../support/policy-rules.js';
+import { importSample1Book, pinEditorialWorkspaceProfileRevision2 } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
 // One explicit model-request capability per test application.
@@ -193,6 +195,118 @@ describe('相似段落检索 over the real store', () => {
       store.decideLibraryMaterial({ materialId: pinned.materialId, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
       expect(await refusal(() => store.queryMaterialVectors(boundary, 'river', 3))).toBe('MATERIAL_REFERENCE_UNAVAILABLE');
       expect(await refusal(() => store.readMaterialIndexForTask(boundary, pinned.materialId, 1))).toBe('MATERIAL_REFERENCE_UNAVAILABLE');
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 120_000);
+});
+
+/** Ordinary production on a configured route, so a 资料索引 Background Processing Enrollment can be recorded (Issue #1166). */
+async function bindProduction(store: EditorialStore): Promise<Awaited<ReturnType<typeof resolveSourceCheckoutLaunchPolicy>>> {
+  const route = ORDINARY_PRODUCTION_ALLOWED_BINDINGS.find((binding) => binding.route === 'deepseek-open-platform')!;
+  const pending = store.saveModelServiceConnection('合成索引模型', null, 'needs-attention', route.route);
+  store.saveModelServiceConnection('合成索引模型', pending.credentialReference, 'ready', route.route);
+  store.selectModelServiceRoute(route.route);
+  const configured = { ...route, credentialReference: pending.credentialReference };
+  const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', configured);
+  store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy, live: { scope: 'ordinary-production', ...configured, runBudgetCeiling: 'unset' } });
+  return policy;
+}
+
+const quiet = (): BackgroundAnalysisRuntime => ({ routeExecutable: true, placeFree: true, capacity: 2, editorWorkBusy: false, now: Date.now(), quietMs: 30_000 });
+
+async function enrolledBook(store: EditorialStore, title: string): Promise<{ bookId: string; enrollmentId: string }> {
+  const { bookId } = await importSample1Book(store, roots.codeRoot, title);
+  await pinEditorialWorkspaceProfileRevision2(store, bookId);
+  return { bookId, enrollmentId: enrollMaterialIndex(store, bookId) };
+}
+
+function enrollMaterialIndex(store: EditorialStore, bookId: string): string {
+  const offer = store.inspectBackgroundAnalysisEnrollment(bookId, quiet(), 'material-index');
+  return store.enrollBackgroundAnalysis(bookId, offer.offer.disclosureDigest!, 'backfill', { kind: 'book', seriesId: null }, 1_000, quiet(), 'material-index').enrollment!.enrollmentId;
+}
+
+/** 600 paragraphs: three batches of the vector pump. */
+const PARAGRAPHS = Array.from({ length: 600 }, (_, index) => `Paragraph ${index + 1}: the ferry crossed the river at dawn.`).join('\n\n');
+
+async function indexedItem(store: EditorialStore, bookId: string): Promise<string> {
+  const item = await put(store, file(`ferry-${bookId}.txt`, PARAGRAPHS), 'Long ferry notes');
+  referable(store, item.materialId);
+  store.startMaterialIndexing();
+  await store.settleMaterialIndexing();
+  return item.materialId;
+}
+
+describe('资料索引 on the idle lane (Issue #1166)', () => {
+  it('builds an enrolled Book\'s items while the editor is quiet, gives way when the editor is back, and goes on where it stopped', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const launchPolicy = await bindProduction(store);
+      const { bookId } = await importSample1Book(store, roots.codeRoot, '索引书');
+      await pinEditorialWorkspaceProfileRevision2(store, bookId);
+      const materialId = await indexedItem(store, bookId);
+      const embedded = vi.spyOn(store.embeddingProvider(), 'embed');
+      let editorBusy = false;
+      const dispatcher = new BackgroundAnalysisDispatcher({ store, launchPolicy, editorWorkBusy: () => editorBusy, tickMs: 3_600_000,
+        execution: { full: false, routeExecutable: true, capacity: 2, admitOrQueue: () => 'queued' } });
+      const pass = async (): Promise<void> => {
+        dispatcher.nudge();
+        await dispatcher.settled();
+      };
+      const vectors = () => store.inspectLibraryMaterial(materialId).index.vectors;
+      try {
+        // No enrollment in force — the editor has not chosen one — builds nothing.
+        await pass();
+        await store.settleMaterialLayers();
+        expect(vectors()).toMatchObject({ state: 'not-built', built: 0, total: 600 });
+        enrollMaterialIndex(store, bookId);
+        expect(store.inspectBackgroundAnalysisEnrollment(bookId, quiet(), 'material-index').next.reason).toContain('空闲时');
+        await pass();
+        // The editor is back while the first batch is made: that batch is kept, the rest waits.
+        editorBusy = true;
+        await pass();
+        await store.settleMaterialLayers();
+        expect(vectors()).toMatchObject({ state: 'not-built', built: 256, total: 600 });
+        editorBusy = false;
+        await pass();
+        await store.settleMaterialLayers();
+        expect(vectors()).toMatchObject({ state: 'complete', built: 600, total: 600 });
+        // Each paragraph was embedded once: the next quiet pass went on from paragraph 257, and a complete item is left alone.
+        await pass();
+        await store.settleMaterialLayers();
+        expect(embedded.mock.calls.reduce((sum, [texts]) => sum + texts.length, 0)).toBe(600);
+      } finally { await dispatcher.dispose(); }
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 120_000);
+
+  it('builds nothing on the idle lane while the provider is not ready or the enrollment is paused, and never stops a build the editor asked for', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      await bindProduction(store);
+      const { bookId, enrollmentId } = await enrolledBook(store, '暂停书');
+      const materialId = await indexedItem(store, bookId);
+      const vectors = () => store.inspectLibraryMaterial(materialId).index.vectors;
+      const readiness = vi.spyOn(store.embeddingProvider(), 'readiness');
+      for (const state of [{ state: 'needs-model', expectedDigest: null }, { state: 'digest-mismatch', expectedDigest: 'a'.repeat(64), actualDigest: 'b'.repeat(64) }] as const) {
+        readiness.mockReturnValue(state);
+        store.indexIdleMaterialVectors(true);
+        await store.settleMaterialLayers();
+        expect(vectors()).toMatchObject({ state: 'needs-model', built: 0 });
+      }
+      readiness.mockRestore();
+      store.holdBackgroundAnalysisEnrollment(bookId, enrollmentId, 'pause', quiet());
+      store.indexIdleMaterialVectors(true);
+      await store.settleMaterialLayers();
+      expect(vectors()).toMatchObject({ state: 'not-built', built: 0 });
+      // 构建相似索引 is the editor's own work: the editor being busy never stops it.
+      store.buildMaterialVectors(materialId);
+      store.indexIdleMaterialVectors(false);
+      await store.settleMaterialLayers();
+      expect(vectors()).toMatchObject({ state: 'complete', built: 600 });
       store.markCleanShutdown();
     } finally {
       store.close();

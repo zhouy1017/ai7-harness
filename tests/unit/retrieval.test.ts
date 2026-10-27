@@ -50,6 +50,18 @@ describe('Run-local pinned retrieval', () => {
     const index = new RetrievalIndex([source('one', 'alpha'), source('two', 'beta')], embeddings([[1, 0], [0, 1], [1, 0]]));
     expect((await index.retrieve('gamma')).map((candidate) => candidate.sourceId)).toEqual(['two']);
   });
+  it('ranks by BM25 alone, embedding nothing, while the provider needs its model or its digest does not match', async () => {
+    const sources = [source('one', 'alpha alpha beta'), source('two', 'beta gamma'), source('three', 'delta')];
+    const lexical = await new RetrievalIndex(sources).retrieve('alpha beta');
+    expect(lexical.map((candidate) => candidate.sourceId)).toEqual(['one', 'two']);
+    for (const readiness of [{ state: 'needs-model', expectedDigest: null }, { state: 'digest-mismatch', expectedDigest: 'a'.repeat(64), actualDigest: 'b'.repeat(64) }] as const) {
+      let calls = 0;
+      const provider = { identity: 'synthetic', dimensions: 2, readiness: () => readiness, embed: async () => { calls += 1; return []; } };
+      const materialVectors = async () => { calls += 1; return []; };
+      expect(await new RetrievalIndex(sources, provider, materialVectors).retrieve('alpha beta')).toEqual(lexical);
+      expect(calls).toBe(0);
+    }
+  });
   it('consumes only pinned material-vector hits and ignores a different build or unpinned source', async () => {
     const material: RetrievalSource = { sourceKind: 'material', sourceId: 'one', digest: 'a'.repeat(64),
       read: () => ({ digest: 'a'.repeat(64), segments: [{ segmentOrdinal: 1, text: 'alpha' }] }) };
