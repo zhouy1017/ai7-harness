@@ -3,6 +3,7 @@ import type { AnalysisKindDefinition } from '../analysis/kind-definition.js';
 import { buildReviewReport } from '../review/review-report.js';
 import { checkLocalPlan } from '../review/deterministic/checker.js';
 import { reduceReviewCategory } from '../review/review-category-reducers.js';
+import { parseFactualClaimVerification } from '../analysis/factual-claim-contract.js';
 
 /** The registry describes existing owners; it neither schedules work nor constructs model messages. */
 export const PROCEDURE_STAGE_LABELS: Readonly<Record<ProcedureStageType, string>> = {
@@ -22,6 +23,7 @@ export type ProcedureStageExecutor =
   | { readonly state: 'available'; readonly executor: 'local-text-check'; readonly check: typeof checkLocalPlan }
   | { readonly state: 'unavailable'; readonly reason: string }
   | { readonly state: 'available'; readonly executor: 'unit-contract'; readonly definition: AnalysisKindDefinition }
+  | { readonly state: 'available'; readonly executor: 'claim-verification'; readonly parse: typeof parseFactualClaimVerification }
   | { readonly state: 'available'; readonly executor: 'cross-unit'; readonly binding: NonNullable<AnalysisKindDefinition['crossUnit']> }
   | { readonly state: 'available'; readonly executor: 'reducer'; readonly reduce: AnalysisKindDefinition['reduce'] }
   | { readonly state: 'available'; readonly executor: 'review-grouping'; readonly reduce: typeof reduceReviewCategory }
@@ -30,6 +32,12 @@ export type ProcedureStageExecutor =
 /** A caller must supply its already admitted kind; no registry entry can introduce another executor. */
 export function resolveProcedureStage(stageType: ProcedureStageType, definition?: AnalysisKindDefinition): ProcedureStageExecutor {
   switch (stageType) {
+    case 'claim-extraction':
+      return definition?.factualClaims === undefined ? unavailable('尚未绑定断言契约。')
+        : { state: 'available', executor: 'unit-contract', definition };
+    case 'web-verification':
+      return definition?.factualClaims === undefined ? unavailable('尚未绑定断言契约。')
+        : { state: 'available', executor: 'claim-verification', parse: parseFactualClaimVerification };
     case 'deterministic-check':
       return { state: 'available', executor: 'local-text-check', check: checkLocalPlan };
     case 'chunked-review':

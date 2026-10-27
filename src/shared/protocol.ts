@@ -5502,6 +5502,7 @@ export interface FactualRunAssuranceProjection {
 
 /** One Evidence Source Card (V2-UX-EVID-003): every check a discrete state, a candidate never quoted (EVID-004). */
 export interface EvidenceSourceCardProjection {
+  excluded?: boolean;
   /** The relation's own identity within the result: stable across pages and pinning. */
   cardId: string;
   sourceRef: string;
@@ -5640,6 +5641,7 @@ export interface FactualDecisionCardProjection {
 
 /** The Assertion-centered Evidence Workspace (V2-UX-EVID-001 to 013): a read, it mutates nothing (EVID-012). */
 export interface EvidenceWorkspaceProjection {
+  claimRecheckAvailable?: boolean;
   bookId: string;
   result: FactualVerificationResultProjection;
   sources: ReadonlyArray<EvidenceSourceCardProjection>;
@@ -5731,6 +5733,7 @@ export interface InspectEvidenceWorkspaceInput {
   sourcesAfter: number | null;
 }
 export interface RecordVerificationReviewDecisionInput {
+  excludedSourceRefs?: readonly string[];
   bookId: string;
   resultId: string;
   /** The result version the editor read; a later version refuses the decision (FREV-011). */
@@ -5746,7 +5749,7 @@ export interface RecordVerificationReviewDecisionInput {
  */
 export interface VerificationReviewDecisionRecordedProjection {
   workspace: EvidenceWorkspaceProjection;
-  supplementary: null | { blockId: string; level: EvidenceAssuranceLevel; statement: string };
+  supplementary: null | { blockId: string; level: EvidenceAssuranceLevel; statement: string; decisionId?: string };
 }
 /** Why 要求补充证据 prepares no Task yet (Issue #901 rev 4; follow-up #905). */
 export const SUPPLEMENTARY_CHECK_DEFERRED = '已记录补充核查的要求（同一段文字、同级或更高级别）。这本书的事实核查目前只能运行一次；补充核查任务将在事实核查的更新方式接入后开放（#905）。' as const;
@@ -7507,6 +7510,7 @@ export interface FrozenSeriesScope {
 }
 
 export interface PrepareReviewRunInput {
+  decisionId?: string;
   localCheck?: import('./protocol/procedures.js').LocalCheckOptions;
   seriesId?: string | null;
   materialIds?: ReadonlyArray<string>;

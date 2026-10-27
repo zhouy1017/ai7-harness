@@ -1,5 +1,5 @@
 import { MODEL_REQUEST_ADMISSION_SCHEMA_VERSION } from '../task-authorization.js';
-import { procedureIdForKind } from '../procedures/preinstalled.js';
+import { procedureIdForKind, FACTUAL_CLAIM_PROCEDURE_ID } from '../procedures/preinstalled.js';
 import { recordProcedurePlanPin, readProcedurePlanPin, resolveProcedureDefinition } from '../procedures/definition-store.js';
 import { withReviewLocalTools, pinnedReviewDefinition, reviewCategoryKindDefinition } from '../review/review-category-kind.js';
 import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryEntry, reviewCategoryContractInput } from '../review/category-configuration.js';
@@ -7,6 +7,7 @@ import type { CompositionOptions } from '../harness/primary-agent-harness.js';
 import type { PinnedLocalToolSources } from '../retrieval/index.js';
 import { kindResearchDeclaration } from './live-kind-admission.js';
 import { factualReviewDefinitionsByDigest, factualReviewKindDefinition, factualReviewLevelDefinition, withFactualResearch } from './kind-definition.js';
+import { factualClaimKindDefinition } from './factual-claim-contract.js';
 import { FACTUAL_REVIEW_KIND, type EvidenceAssuranceLevel, type ProcedureDefinitionPin } from '../../shared/protocol.js';
 import { FACTUAL_VERIFICATION_POLICY_VERSION } from './factual-review-contract.js';
 import { factualReviewUnitResultOfRecordV2 } from './factual-review-contract-v2.js';
@@ -471,6 +472,7 @@ interface PreparationWork {
 
 /** A Task Intent as `prepare` decided it, before it is written. */
 interface PendingIntent {
+  readonly factualDecision?: import('../factual-verification.js').FactualRecheckSelection;
   readonly taskIntentId: string;
   readonly bookId: string;
   readonly goal: string;
@@ -597,6 +599,7 @@ export type BaselineAnalysisPrepareInput =
    */
   | {
     phase: 'start';
+    factualDecision?: import('../factual-verification.js').FactualRecheckSelection;
     bookId: string;
     goal: AnalysisGoal;
     update: BaselineAnalysisUpdateRequest | AnalysisModeRequest | null;
@@ -698,6 +701,7 @@ export interface PlanAdaptationInput {
 
 /** Everything the execution owner needs from the frozen plan before the first model call. */
 export interface ExecutionPlanFacts {
+  readonly factualDecision?: import('../factual-verification.js').FactualRecheckSelection;
   readonly retainedPolicyPin?: ResultSetPolicyPin;
   readonly retainedPolicy?: LaunchPolicyProjection;
   readonly selectedPolicyIdentity?: SelectedPolicyIdentity;
@@ -1099,7 +1103,7 @@ export interface AnalysisRequestIdentity {
   readonly requestOrdinal: number;
   readonly sessionId: string;
   readonly unitOrdinal: number | null;
-  readonly stage: RunProgressStage;
+  readonly stage: RunProgressStage | 'web-verification';
   readonly attemptIndex: number;
   readonly adaptationId: string | null;
   readonly payloadDigest: string;
@@ -1125,7 +1129,7 @@ type RequestAdmissionEvent =
   | { readonly kind: 'execution'; readonly width: 1 | 3; readonly limits: { readonly requests: 4; readonly units: 3; readonly backgroundRequests: 1 } }
   | { readonly kind: 'admit'; readonly request: AnalysisRequestIdentity }
   | { readonly kind: 'resolve'; readonly requests: readonly string[]; readonly evidence: {
-      readonly kind: 'no-send' | 'unit-checkpoint' | 'clarification-checkpoint' | 'stage-checkpoint' | 'reflection-outcome' | 'refused-turn' | 'unavailable';
+      readonly kind: 'no-send' | 'unit-checkpoint' | 'clarification-checkpoint' | 'stage-checkpoint' | 'reflection-outcome' | 'refused-turn' | 'unavailable' | 'factual-checkpoint';
       readonly digest: string;
     } };
 
@@ -1267,12 +1271,17 @@ function readRequestAdmissions(db: DatabaseSync, runRecordId: string): RequestAd
         !Number.isSafeInteger(request.attemptIndex) || request.attemptIndex < 1 || request.attemptIndex > 4 ||
         request.adaptationId !== null && !UUID_PATTERN.test(request.adaptationId) ||
         ![request.payloadDigest, request.messageDigest, request.requestDigest, request.inputDigest, request.contractDigest].every((digest) => typeof digest === 'string' && DIGEST_PATTERN.test(digest)) ||
-        !['units', 'cross-unit-reduction', 'assurance-sampling', 'run-report-reflection'].includes(request.stage) ||
+        !['units', 'cross-unit-reduction', 'assurance-sampling', 'run-report-reflection', 'web-verification'].includes(request.stage) ||
         request.stage === 'units' && (!Number.isSafeInteger(request.unitOrdinal) || request.unitOrdinal! < 1) ||
         request.stage !== 'units' && request.unitOrdinal !== null) return invalid();
       const manifest = requestManifest ??= readAdmissionManifest(db, stored);
       if (request.unitOrdinal !== null && (manifest.units[request.unitOrdinal - 1]?.ordinal !== request.unitOrdinal ||
         manifest.units[request.unitOrdinal - 1]!.digest !== request.inputDigest || request.contractDigest !== stored.binding.promptContractDigest)) return invalid();
+      if (request.stage === 'web-verification') {
+        const session = db.prepare("SELECT canonical_json FROM factual_claim_sessions WHERE session_id = ? AND run_record_id = ? AND stage = 'web-verification'").get(request.sessionId, runRecordId);
+        const pins = session === undefined ? null : JSON.parse(String(session.canonical_json)) as import('../factual-verification.js').FactualClaimSession;
+        if (pins === null || pins.sourceMessageDigest !== request.messageDigest || pins.promptContractDigest !== request.contractDigest || pins.ledgerDigest !== request.inputDigest) return invalid();
+      }
       if (request.adaptationId !== null && !(adaptations ??= readAdmissionAdaptations(db, stored!.attemptId)).some((adaptation) => adaptation.adaptationId === request.adaptationId && adaptation.unitOrdinal === request.unitOrdinal)) return invalid();
       admitted.set(request.requestId, { request, recordedAt: asString(row.recorded_at) });
       seen.add(request.requestId); ordinals.set(request.producerId, request.requestOrdinal); open.set(request.requestId, request);
@@ -1329,6 +1338,9 @@ function readRequestAdmissions(db: DatabaseSync, runRecordId: string): RequestAd
           observed.usage !== null && (!exact(observed.usage, ['inputTokens', 'outputTokens']) ||
             ![observed.usage.inputTokens, observed.usage.outputTokens].every((count) => Number.isSafeInteger(count) && (count as number) >= 0))) return invalid();
         refusalProofs.set(evidence.digest, Number(row.sequence));
+      } else if (evidence.kind === 'factual-checkpoint') {
+        if (requests.some((request) => request.stage !== 'web-verification' || request.sessionId !== requests[0]?.sessionId) ||
+          !db.prepare("SELECT 1 FROM factual_claim_events WHERE session_id = ? AND kind = 'verification-result' AND sha256 = ?").get(requests[0]?.sessionId ?? '', evidence.digest)) return invalid();
       } else if (evidence.kind === 'unavailable') {
         if (canonicalRecord({ requests, reason: 'possible-send-without-durable-result' }).digest !== evidence.digest) return invalid();
         unavailable.push(...requests);
@@ -1607,6 +1619,83 @@ export class BaselineAnalysisStore {
   }
 
   /** The analysis kind this ledger serves; the execution owner reads its contract through this. */
+  factualRecheckUsed(onceKey: string): boolean {
+    return this.#db.prepare("SELECT 1 FROM analysis_run_authorizations WHERE origin = 'background-analysis-enrollment' AND json_extract(canonical_json, '$.factualRecheckOnceKey') = ? LIMIT 1").get(onceKey) !== undefined;
+  }
+
+  startFactualRecheck(candidate: import('./factual-recheck.js').FactualRecheckCandidate): import('./factual-recheck.js').FactualRecheckRun {
+    requireAnalysis(this.#db.isTransaction && !this.factualRecheckUsed(candidate.onceKey), 'FACTUAL_RECHECK_ALREADY_SUBMITTED', '这条断言已按这个登记和决定提交过，不会自动重发。');
+    const taskIntentId = randomUUID(), runRecordId = randomUUID(), authorizationId = randomUUID(), planVersionId = randomUUID();
+    const instant = new Date().toISOString();
+    const { ledger, limits, ...frozen } = candidate;
+    const session = { sessionId: randomUUID(), runRecordId, stage: 'web-verification' as const, scopeId: candidate.selection.claimId,
+      ledgerDigest: ledger.digest, sourceMessageDigest: sha256Hex(candidate.message), promptContractDigest: candidate.promptDigest, limits };
+    const compositionDigest = describeComposition(candidate.binding.route, candidate.binding.model, candidate.promptDigest, {
+      version: 2, procedure: candidate.procedure, platformTools: true, localTools: false,
+      researchDeclaration: { webSearch: true, searchEngine: 'user-selected-backend' } }).digest;
+    const intent = canonicalRecord({ taskIntentId, bookId: candidate.selection.bookId, kind: 'factual-recheck',
+      contractVersion: 'ai7.factual-claim-verification/1', mode: 'factual-recheck', goal: '核查编辑要求补充证据的一条冻结断言',
+      factualDecision: candidate.selection, expectedOutcome: 'versioned-factual-verification', createdAt: instant });
+    this.#db.prepare(`INSERT INTO analysis_task_intents(task_intent_id,book_id,kind,contract_version,goal,created_at,canonical_json,sha256,mode)
+      VALUES (?,?,'factual-recheck','ai7.factual-claim-verification/1',?,?,?,?, 'factual-recheck')`)
+      .run(taskIntentId, candidate.selection.bookId, '核查编辑要求补充证据的一条冻结断言', instant, intent.json, intent.digest);
+    const plan = canonicalRecord({ schema: 'ai7.factual-recheck-plan/1', ...frozen, taskIntentId, runRecordId, authorizationId,
+      session, compositionDigest, policyVersion: 'v31', stages: ['web-verification'], startWhen: 'idle', recordedAt: instant });
+    for (const [component, value] of [['run-source-scope', { selection: candidate.selection, messageDigest: session.sourceMessageDigest,
+      messageByteCount: Buffer.byteLength(candidate.message, 'utf8') }], ['provider-resolution-plan', { binding: candidate.binding, search: candidate.search }], ['plan-envelope', JSON.parse(plan.json)]] as const) {
+      const record = canonicalRecord(value);
+      this.#db.prepare('INSERT INTO analysis_plan_records VALUES (?,1,?,?,?,?)').run(taskIntentId, component, record.json, record.digest, instant);
+    }
+    const version = canonicalRecord({ planVersionId, taskIntentId, ordinal: 1, planEnvelopeDigest: plan.digest, createdAt: instant });
+    this.#db.prepare('INSERT INTO analysis_plan_versions VALUES (?,?,1,NULL,?,?,?,?)').run(planVersionId, taskIntentId, plan.digest, instant, version.json, version.digest);
+    const authorization = canonicalRecord({ authorizationId, taskIntentId, origin: 'background-analysis-enrollment', authority: 'standard-direct-dispatch',
+      startWhen: 'idle',
+      enrollmentId: candidate.enrollmentId, enrollmentVersionId: candidate.enrollmentVersionId, factualRecheckOnceKey: candidate.onceKey,
+      planEnvelopeDigest: plan.digest, runBudgetCeiling: { kind: 'tokens', maxTotalTokens: candidate.maximumTokens }, authorizedAt: instant });
+    this.#db.prepare(`INSERT INTO analysis_run_authorizations VALUES (?,?,?,'background-analysis-enrollment','standard-direct-dispatch',?,?,?,'idle')`)
+      .run(authorizationId, taskIntentId, plan.digest, instant, authorization.json, authorization.digest);
+    const run = canonicalRecord({ runRecordId, taskIntentId, authorizationId, recordedAt: instant });
+    this.#db.prepare('INSERT INTO analysis_run_records VALUES (?,?,?,?,?,?)').run(runRecordId, taskIntentId, authorizationId, instant, run.json, run.digest);
+    this.#insertRunState(runRecordId, 1, 'authorized', { detail: '独立事实复核登记与最新编辑决定已固定；一次性提交身份已保留。' }, instant);
+    this.factualVerification.freezeClaims(runRecordId, ledger);
+    this.factualVerification.admitClaimSession(session);
+    return { ...frozen, taskIntentId, runRecordId, authorizationId, session, compositionDigest, planDigest: plan.digest };
+  }
+
+  bindFactualRecheck(run: import('./factual-recheck.js').FactualRecheckRun): { attemptId: string; bindingDigest: string } {
+    const attemptId = randomUUID(), at = new Date().toISOString();
+    const attempt = canonicalRecord({ attemptId, runRecordId: run.runRecordId, ordinal: 1, startedAt: at });
+    const binding = canonicalRecord({ schema: 'ai7.factual-recheck-binding/1', attemptId, harnessSessionId: run.session.sessionId,
+      planEnvelopeDigest: run.planDigest, selection: run.selection, binding: run.binding, compositionDigest: run.compositionDigest, boundAt: at });
+    transact(this.#db, () => {
+      this.#db.prepare('INSERT INTO analysis_execution_attempts VALUES (?,?,1,?,?,?)').run(attemptId, run.runRecordId, at, attempt.json, attempt.digest);
+      this.#db.prepare('INSERT INTO analysis_execution_bindings VALUES (?,?,?,?,?)').run(attemptId, run.session.sessionId, at, binding.json, binding.digest);
+      this.recordRunState(run.runRecordId, 'admitted', { detail: '单条事实复核执行绑定已固定。', attemptId, bindingDigest: binding.digest });
+    });
+    return { attemptId, bindingDigest: binding.digest };
+  }
+
+  settleFactualRecheck(run: import('./factual-recheck.js').FactualRecheckRun, state: 'completed' | 'failed' | 'interrupted', usage: import('../provider/classification.js').UsageFacts | null): void {
+    transact(this.#db, () => {
+      const reason = state === 'completed' ? '单条事实复核结果已保留。' : '单条事实复核未完成；提交额度保留，不自动重发。';
+      this.recordRunState(run.runRecordId, state, { detail: reason });
+      const outcomeId = randomUUID(), recordedAt = new Date().toISOString();
+      const outcome = canonicalRecord({ schema: 'ai7.factual-recheck-outcome/1', outcomeId, taskIntentId: run.taskIntentId,
+        runRecordId: run.runRecordId, classification: state, resultSetRevisionId: null, selection: run.selection, usage,
+        summary: reason, safeNextAction: '查看核查历史；需要进一步核查时记录新的明确决定。', recordedAt });
+      this.#db.prepare('INSERT INTO analysis_task_outcomes VALUES (?,?,?,?,NULL,?,?,?)').run(outcomeId, run.taskIntentId, run.runRecordId, state, recordedAt, outcome.json, outcome.digest);
+    });
+  }
+
+  reconcileFactualRechecks(): void {
+    for (const row of this.#db.prepare(`SELECT p.canonical_json, p.sha256 FROM analysis_plan_records p JOIN analysis_task_intents t ON t.task_intent_id = p.task_intent_id
+      WHERE t.kind = 'factual-recheck' AND p.component = 'plan-envelope' AND NOT EXISTS
+      (SELECT 1 FROM analysis_task_outcomes o WHERE o.task_intent_id = t.task_intent_id)`).all()) {
+      const plan = JSON.parse(String(row.canonical_json)) as import('./factual-recheck.js').FactualRecheckRun;
+      this.settleFactualRecheck({ ...plan, planDigest: String(row.sha256) }, 'interrupted', null);
+    }
+  }
+
   get definition(): AnalysisKindDefinition {
     this.#refreshClarificationDefinition();
     return this.#definition;
@@ -1626,6 +1715,7 @@ export class BaselineAnalysisStore {
 
   #factualUnwrapped(level: EvidenceAssuranceLevel, rule: ReturnType<typeof liveKindRule>): AnalysisKindDefinition {
     if (level === 'quick') return factualReviewLevelDefinition('quick');
+    if (rule?.claimScopedFactualStages?.evidenceAssuranceLevels.includes(level)) return factualClaimKindDefinition(level);
     if (this.#factualLevelsActive(rule)) return factualReviewLevelDefinition(level);
     const v1 = factualReviewKindDefinition();
     return platformToolsFromProjection(rule) === null ? v1 : withFactualResearch(v1);
@@ -1635,13 +1725,19 @@ export class BaselineAnalysisStore {
   #factualDefinitionFor(level: EvidenceAssuranceLevel): AnalysisKindDefinition {
     const rule = liveKindRule(this.#launch.policy, FACTUAL_REVIEW_KIND);
     const unwrapped = this.#factualUnwrapped(level, rule);
-    return this.#route?.fixtureIdentity.startsWith('sample1-model-clarification') === true || rule?.clarificationQuestionAllowed === true
+    return unwrapped.factualClaims === undefined && (this.#route?.fixtureIdentity.startsWith('sample1-model-clarification') === true || rule?.clarificationQuestionAllowed === true)
       ? withModelClarification(unwrapped) : unwrapped;
   }
 
   /** The definition one plan version executes: its level's for the factual kind (Issue #901), the ledger's own for every other. */
-  #planDefinition(edits: PlanEdits): AnalysisKindDefinition {
-    return this.definition.kind === FACTUAL_REVIEW_KIND ? this.#factualDefinitionFor(planEditAssuranceLevel(edits)) : this.#definition;
+  #planDefinition(edits: PlanEdits, mode?: string): AnalysisKindDefinition {
+    if (this.definition.kind !== FACTUAL_REVIEW_KIND) return this.#definition;
+    if (mode !== undefined && mode !== 'whole-manuscript' && this.#definition.factualClaims !== undefined) {
+      const successor = this.#factualDefinitionFor(planEditAssuranceLevel(edits));
+      return { ...factualReviewLevelDefinition(planEditAssuranceLevel(edits)), outOfScope: successor.outOfScope,
+        modes: successor.modes, updateModes: successor.updateModes, mode: successor.mode };
+    }
+    return this.#factualDefinitionFor(planEditAssuranceLevel(edits));
   }
 
   /**
@@ -1664,6 +1760,10 @@ export class BaselineAnalysisStore {
     }
     if (current.kind.startsWith('editorial-review/')) return pinnedReviewDefinition(current, promptContractDigest);
     if (current.kind !== FACTUAL_REVIEW_KIND) return current;
+    for (const level of ['standard', 'strict'] as const) {
+      const candidate = factualClaimKindDefinition(level);
+      if (candidate.promptContractDigest === promptContractDigest) return candidate;
+    }
     for (const level of ['standard', 'strict', 'quick'] as const) {
       const candidate = this.#factualDefinitionFor(level);
       if (candidate.promptContractDigest === promptContractDigest) return candidate;
@@ -1723,8 +1823,8 @@ export class BaselineAnalysisStore {
     return { ...sources, baseline, terms: baseline.entities.filter((entity) => isRecord(entity) && ['person', 'place', 'term'].includes(String(entity.kind))) };
   }
 
-  #newCompositionOptions(bookId: string, leafMode = false): CompositionOptions {
-    const id = procedureIdForKind(this.#definition.kind);
+  #newCompositionOptions(bookId: string, leafMode = false, definition = this.#definition): CompositionOptions {
+    const id = definition.factualClaims === undefined ? procedureIdForKind(this.#definition.kind) : FACTUAL_CLAIM_PROCEDURE_ID;
     const resolved = id === null ? null : resolveProcedureDefinition(this.#db, id, this.#definition.contractVersion === 'ai7.editorial-review/1' ? 1 : undefined);
     const procedureOptions = resolved === null ? {} : { procedure: resolved.pin, stages: resolved.document.stages.map((stage, index) =>
       ({ ordinal: index + 1, stageType: stage.stageType, digest: sha256Hex(canonicalJson(stage)) })) };
@@ -2941,6 +3041,8 @@ export class BaselineAnalysisStore {
       'ANALYSIS_PLAN_EDIT_INVALID', '只有事实核查任务有证据保证级别。');
     const next = canonicalPlanEdits({ ...input, evidenceAssuranceLevel: input.evidenceAssuranceLevel ?? existing.planVersion?.edits.evidenceAssuranceLevel });
     requireAnalysis(next !== null, 'ANALYSIS_PLAN_EDIT_INVALID', '这项修改不在这份计划可以改的范围内。');
+    if (isRecord(intent.record.factualDecision)) requireAnalysis(planEditAssuranceLevel(next) === intent.record.factualDecision.level || planEditAssuranceLevel(next) === 'strict',
+      'ANALYSIS_PLAN_EDIT_INVALID', '补充核查不能降低编辑决定要求的核查级别。');
     requireAnalysis(!levelBelowPolicyMinimum(planEditAssuranceLevel(next)), 'ANALYSIS_PLAN_EDIT_INVALID', FACTUAL_POLICY_MINIMUM_REASON);
     requireAnalysis(this.#definition.assurance !== null || next.removedSteps.length === 0,
       'ANALYSIS_PLAN_EDIT_INVALID', '这项任务没有核对与抽检步骤，不能修改该步骤。');
@@ -3116,6 +3218,8 @@ export class BaselineAnalysisStore {
    * the edits of the redone Task's last plan version; nothing for any other Task.
    */
   #redoPlanEdits(intent: IntentFacts): PlanEdits {
+    if (isRecord(intent.record.factualDecision)) return intent.record.factualDecision.level === 'strict'
+      ? { ...NO_PLAN_EDITS, evidenceAssuranceLevel: 'strict' } : NO_PLAN_EDITS;
     if (intent.redoOfRunRecordId === null) return NO_PLAN_EDITS;
     const prior = this.#redoneTaskIntentId(intent.redoOfRunRecordId);
     const last = this.#planVersionFacts(prior).at(-1);
@@ -4160,7 +4264,7 @@ export class BaselineAnalysisStore {
     // imported anew since (Issue #427 review): its plan could never execute under this contract, so the preparation is a
     // new Task Intent under the contract that applies now.
     // So is one whose plan froze another assurance sampling contract (Issue #826): the composition does not pin it.
-    const contractCurrent = existing.planEnvelope === null || (existing.planEnvelope.promptContractDigest === this.#planDefinition(existing.planVersion?.edits ?? NO_PLAN_EDITS).promptContractDigest &&
+    const contractCurrent = existing.planEnvelope === null || (existing.planEnvelope.promptContractDigest === this.#planDefinition(existing.planVersion?.edits ?? NO_PLAN_EDITS, existing.taskIntent?.mode).promptContractDigest &&
       (existing.executionPlan === null ||
         !assuranceContractMoved(this.#definition, frozenAssurancePromptContractDigest(existing.executionPlan as unknown as Record<string, unknown>))));
     // Nor is a Task whose frozen scope plan the chain no longer derives (#711 review P3-4): 重新准备 makes it anew.
@@ -4180,6 +4284,7 @@ export class BaselineAnalysisStore {
     // Background preparations and draft promotions write their intent only when the plan freezes. A stopped preparation leaves
     // no orphan intent, and a failed draft promotion leaves its draft editable. Ordinary preparation retains its existing path.
     const pendingIntent: PendingIntent | null = reusable ? null : {
+      ...(input.factualDecision === undefined ? {} : { factualDecision: input.factualDecision }),
       taskIntentId, bookId: input.bookId, goal: input.goal, mode, redoOf,
       preparedByEnrollmentVersionId: background?.enrollmentVersionId ?? null,
       backgroundRunBudgetCeiling: background === null ? null : { kind: 'tokens', maxTotalTokens: background.runBudgetCeiling.maxTotalTokens },
@@ -4217,6 +4322,7 @@ export class BaselineAnalysisStore {
   #insertIntent(intent: PendingIntent): void {
     const createdAt = new Date().toISOString();
     const base = {
+      ...(intent.factualDecision === undefined ? {} : { factualDecision: intent.factualDecision }),
       bookId: intent.bookId,
       contractVersion: this.#definition.contractVersion,
       createdAt,
@@ -4422,7 +4528,7 @@ export class BaselineAnalysisStore {
     // ceiling, so a redo that copies a ceiling the editor once set keeps the rest of the edit and not the ceiling.
     const edits = !launchSetsCeilingOf(live) ? input.edits : withoutCeiling(input.edits);
     // The factual Task's level decides its contract and its research declaration (Issue #901); every other kind's is its own.
-    const definition = this.#planDefinition(edits);
+    const definition = this.#planDefinition(edits, intent.mode);
     const promptContractDigest = definition.promptContractDigest;
     const admittedToolRule = this.#definition.kind === BASELINE_ANALYSIS_KIND || intent.preparedByEnrollmentVersionId !== null ? null
       : liveKindRule(this.#launch.policy, this.#definition.kind);
@@ -4444,10 +4550,11 @@ export class BaselineAnalysisStore {
     }
     const leafMode = intent.mode === 'review-first' && intent.selectedRange === null && intent.preparedByEnrollmentVersionId === null;
     const composition = live === null
-      ? describeComposition(LOCAL_DETERMINISTIC_ROUTE, LOCAL_DETERMINISTIC_MODEL, promptContractDigest, this.#newCompositionOptions(checkpoint.bookId, leafMode))
-      : describeComposition(live.route, live.model, promptContractDigest, { platformTools: webToolsBackend !== undefined, researchDeclaration,
-        ...this.#newCompositionOptions(checkpoint.bookId, leafMode),
-        localTools: intent.preparedByEnrollmentVersionId === null && definition.evidenceAssuranceLevel !== 'quick' ? kindLocalTools(this.#launch.policy, this.#definition.kind) ?? false : false });
+      ? describeComposition(LOCAL_DETERMINISTIC_ROUTE, LOCAL_DETERMINISTIC_MODEL, promptContractDigest, this.#newCompositionOptions(checkpoint.bookId, leafMode, definition))
+      : describeComposition(live.route, live.model, promptContractDigest, { platformTools: webToolsBackend !== undefined && definition.factualClaims === undefined,
+        researchDeclaration: definition.factualClaims === undefined ? researchDeclaration : { webSearch: false, searchEngine: null },
+        ...this.#newCompositionOptions(checkpoint.bookId, leafMode, definition),
+        localTools: intent.preparedByEnrollmentVersionId === null && definition.evidenceAssuranceLevel !== 'quick' && definition.factualClaims === undefined ? kindLocalTools(this.#launch.policy, this.#definition.kind) ?? false : false });
     const providerPlan = {
       ...this.#selectedPlanMetadata(input.policy),
       ...(webToolsBackend === undefined ? {} : { webToolsBackend, searchCredentialReference }),
@@ -4541,6 +4648,7 @@ export class BaselineAnalysisStore {
     if (webToolsBackend !== undefined) records['web-tools-backend'] = canonicalRecord(webToolsBackend);
     if (reusePlan !== null) records['reuse-plan'] = reusePlanRecord(reusePlan);
     const envelopeBase = {
+      ...(intent.record.factualDecision === undefined ? {} : { factualDecision: intent.record.factualDecision }),
       providerStatus: production !== null
         ? 'remote-eligible-ordinary-production'
         : live !== null
@@ -4595,7 +4703,7 @@ export class BaselineAnalysisStore {
       `INSERT INTO analysis_plan_versions(plan_version_id, task_intent_id, ordinal, plan_revision_id, plan_envelope_sha256, created_at, canonical_json, sha256)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(planVersionId, taskIntentId, ordinal, input.planRevisionId, envelope.digest, instant, version.json, version.digest);
-    const procedureId = procedureIdForKind(this.#definition.kind);
+    const procedureId = definition.factualClaims === undefined ? procedureIdForKind(this.#definition.kind) : FACTUAL_CLAIM_PROCEDURE_ID;
     if (procedureId !== null) recordProcedurePlanPin(this.#db, taskIntentId, envelope.digest, procedureId, definition.contractVersion === 'ai7.editorial-review/1' ? 1 : undefined);
     return { planVersionId, planEnvelopeDigest: envelope.digest };
   }
@@ -5542,6 +5650,14 @@ export class BaselineAnalysisStore {
     this.#appendRequestAdmission(runRecordId, reading.pins, { kind: 'resolve', requests: [requestId], evidence: { kind: 'no-send', digest: canonicalRecord(request).digest } });
   }
 
+  checkpointFactualRequests(runRecordId: string, round: import('../factual-verification.js').FactualClaimRound): void {
+    const reading = this.requestAdmissionOf(runRecordId);
+    if (reading === null) return;
+    const requests = [...reading.open.values()].filter((request) => request.stage === 'web-verification' && request.sessionId === round.sessionId).map((request) => request.requestId);
+    if (requests.length > 0) this.#appendRequestAdmission(runRecordId, reading.pins, { kind: 'resolve', requests,
+      evidence: { kind: 'factual-checkpoint', digest: canonicalRecord(round).digest } });
+  }
+
   checkpointModelRequests(runRecordId: string, unitOrdinal: number): void {
     const reading = this.requestAdmissionOf(runRecordId);
     if (reading === null) return;
@@ -5857,6 +5973,7 @@ export class BaselineAnalysisStore {
       bookId: intent.bookId,
       taskIntentId: intent.taskIntentId,
       runRecordId,
+      ...(intent.record.factualDecision === undefined ? {} : { factualDecision: intent.record.factualDecision as import('../factual-verification.js').FactualRecheckSelection }),
       planVersionId: version.planVersionId,
       planVersionOrdinal: version.ordinal,
       origin: origin.origin,

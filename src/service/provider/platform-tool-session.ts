@@ -42,6 +42,7 @@ interface DispatchAccounting {
 }
 
 export interface FactualSearchAccounting {
+  readonly sourceExcluded: (url: string) => boolean;
   readonly reserveTool: (identity: string) => boolean;
   readonly reserveSearch: (queryDigest: string) => boolean;
   readonly searchResult: (queryDigest: string) => { readonly text: string; readonly sourceUrl: string | null } | null;
@@ -69,6 +70,7 @@ export function platformToolModelProfile(profile: ProviderModelProfile, scope: s
 
 export class PlatformToolSession implements PlatformToolOwner {
   readonly #claimAccounting: FactualSearchAccounting | null;
+  readonly #sourceExcluded: (url: string) => boolean;
   readonly #binding: EgressBindingFacts;
   readonly #base: Pick<EgressAttemptScope, 'currentBindingDigest' | 'acceptedOutputDigests' | 'ceilingState'>;
   readonly #fetch: PlatformToolFetch;
@@ -118,6 +120,7 @@ export class PlatformToolSession implements PlatformToolOwner {
 
   constructor(deps: {
     readonly factualClaimAccounting?: FactualSearchAccounting;
+    readonly sourceExcluded?: (url: string) => boolean;
     readonly binding: EgressBindingFacts;
     readonly scope: Pick<EgressAttemptScope, 'currentBindingDigest' | 'acceptedOutputDigests' | 'ceilingState'>;
     readonly fetch?: PlatformToolFetch;
@@ -142,6 +145,7 @@ export class PlatformToolSession implements PlatformToolOwner {
     this.#retrieval = deps.retrieval ?? null;
     this.#localBreaker = new PlatformToolBreaker(deps.binding.localTools?.breaker.roundTrips ?? LOCAL_TOOL_ROUND_TRIP_BREAKER);
     this.#claimAccounting = deps.factualClaimAccounting ?? null;
+    this.#sourceExcluded = deps.sourceExcluded ?? (() => false);
     if (this.#claimAccounting !== null && deps.binding.factualClaimScope?.stage !== 'web-verification') throw new Error('FACTUAL_SEARCH_SCOPE_REQUIRED');
     this.#oneQueryPerUnit = this.#claimAccounting === null && rule !== null && 'backends' in rule.websearch;
     this.#base = deps.scope;
@@ -242,6 +246,7 @@ export class PlatformToolSession implements PlatformToolOwner {
    * failure is returned, never retried.
    */
   async retain(url: string, signal?: AbortSignal): Promise<ResearchSnapshot | { readonly failed: string }> {
+    if (this.#sourceExcluded(url) || this.#claimAccounting?.sourceExcluded(url)) return { failed: '该来源已被编辑排除；不重新读取。' };
     if (this.#book === null) return { failed: '本次尝试未准许联网工具。' };
     if (this.#evidenceOnly) return { failed: '此证据项不取回网页。' };
     const canonical = canonicalPublicUrl(url);
@@ -460,6 +465,7 @@ export class PlatformToolSession implements PlatformToolOwner {
     if (verdict === 'duplicate') return refusal('同一工具调用已在本单元内执行过；不再重复。请使用已有结果。');
     if (verdict === 'tripped') return refusal('联网核查未完成：本单元的工具往返已达到熔断上限。');
     if (args.tool === 'webfetch') {
+      if (this.#sourceExcluded(args.url) || this.#claimAccounting?.sourceExcluded(args.url)) return refusal('该来源已被编辑排除；历史记录仍保留。');
       const fetched = this.#fetchedPages.get(args.url);
       if (fetched !== undefined) {
         if ('failed' in fetched) return refusal(fetched.failed);

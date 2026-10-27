@@ -84,7 +84,13 @@ export function factualClaimKindDefinition(level: 'standard' | 'strict'): Analys
   const verification = factualClaimVerificationPrompt(level);
   const verificationPromptDigest = sha256Hex(canonicalJson(verification));
   const promptContractDigest = sha256Hex(canonicalJson({ extraction: FACTUAL_CLAIM_EXTRACTION_PROMPT, verification }));
-  return { ...base, factualClaims: { level, verificationPrompt: verification.systemPrompt, verificationPromptDigest },
+  const updates: AnalysisKindDefinition['modes'] = [
+    { mode: 'review-again', goal: '再次核查当前全书事实，保留此前核查历史。', label: '再次核查', meaning: '以新的明确授权重读全书并核查事实。', initial: false, rangeBound: false, recompute: 'everything' },
+    { mode: 'review-range', goal: '按编辑最新要求补充证据的决定，对所选原文补充核查。', label: '补充核查', meaning: '对决定所绑定的原文与核查级别补充证据，保留原结果。', initial: false, rangeBound: true, recompute: 'selected-range' },
+  ];
+  return { ...base, outOfScope: 'leave-unreviewed', modes: [...base.modes, ...updates], updateModes: ['review-again', 'review-range'],
+    mode: (mode) => updates.find((entry) => entry.mode === mode) ?? base.mode(mode),
+    factualClaims: { level, verificationPrompt: verification.systemPrompt, verificationPromptDigest },
     systemPrompt: FACTUAL_CLAIM_EXTRACTION_PROMPT.systemPrompt, promptContractDigest,
     unitResultSchema: FACTUAL_CLAIM_EXTRACTION_CONTRACT,
     schemaDigest: sha256Hex(canonicalJson({ promptContractDigest, verificationPromptDigest })),

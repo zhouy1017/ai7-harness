@@ -99,6 +99,8 @@ export interface FactualReductionInput {
   readonly blocks: ReadonlyMap<string, ManifestBlockInput>;
   /** The capability each finding's verification question is put to; it refuses in this slice. */
   readonly research: ResearchCapability;
+  /** Claim stages preserve the complete occurrence identity, including the exact question. */
+  readonly exactOccurrences?: boolean;
 }
 
 export function reduceFactualReview(input: FactualReductionInput): FactualReduction {
@@ -179,7 +181,11 @@ export function reduceFactualReview(input: FactualReductionInput): FactualReduct
     }
     verified += 1;
     const normalized = normalizedQuotation(assertion.quote);
-    const key = `${entry.blockId} ${normalized}`;
+    const key = input.exactOccurrences === true ? canonicalJson({ bookId: manifest.manuscript.bookId,
+      revision: manifest.manuscript.revisionId, block: entry.blockId,
+      exactRange: { fromGrapheme: entry.location.fromGrapheme, toGrapheme: entry.location.toGrapheme },
+      quote: assertion.quote, assertionClass: assertion.assertionClass, question: assertion.question })
+      : `${entry.blockId}\u0000${normalized}`;
     const existing = findingsByKey.get(key);
     if (existing !== undefined) {
       merged += 1;
@@ -190,7 +196,8 @@ export function reduceFactualReview(input: FactualReductionInput): FactualReduct
       };
       continue;
     }
-    const identity = findingId({ kind: 'finding', blockId: entry.blockId, quote: normalized });
+    const identity = input.exactOccurrences === true ? `fnd_${sha256Hex(key).slice(0, 24)}`
+      : findingId({ kind: 'finding', blockId: entry.blockId, quote: normalized });
     const outcome = input.research.lookup(
       { findingId: identity, question: assertion.question, severity: assertion.severity },
       null,

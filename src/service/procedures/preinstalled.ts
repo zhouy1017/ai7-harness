@@ -10,6 +10,15 @@ import { REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, REVIEW_CATEGORY_UNIT_RESULT_SCHEMA_
 import { BASELINE_ANALYSIS_KIND, FACTUAL_REVIEW_KIND, reviewCategoryIdOfKind } from '../../shared/protocol.js';
 
 export const BASELINE_PROCEDURE_ID = 'ai7-procedure/baseline-analysis';
+export const FACTUAL_CLAIM_PROCEDURE_ID = 'ai7-procedure/factual-claim-check';
+
+export function factualClaimProcedureDefinition(): ProcedureDefinitionDocument {
+  return { schema: PROCEDURE_DEFINITION_SCHEMA, id: FACTUAL_CLAIM_PROCEDURE_ID, version: 1,
+    title: '事实核查', role: '抽取精确断言，逐条联网取证，保留来源与未决结果', editorInstruction: '',
+    stages: [stage('claim-extraction', ['manuscript-scope'], 'ai7.factual-claim-ledger/1'),
+      { ...stage('web-verification', ['ai7.factual-claim-ledger/1'], 'ai7.factual-claim-verification-result/1', true), toolWhitelist: ['websearch', 'webfetch'] }],
+    outputKinds: ['annotation'] };
+}
 export function localCheckProcedureDefinition(): ProcedureDefinitionDocument {
   return { schema: PROCEDURE_DEFINITION_SCHEMA, id: 'ai7-procedure/local-text-check', version: 1,
     title: '本地文字检查', role: '以五项有限规则生成供编辑复核的精确批注', editorInstruction: '',
@@ -95,7 +104,8 @@ export function preinstalledProcedureDefinitions(version: 1 | 2 | 3 = 3): readon
 /** Immutable predecessors remain admitted beside the current versions. */
 export function allPreinstalledProcedureDefinitions(): readonly ProcedureDefinitionDocument[] {
   return [...preinstalledProcedureDefinitions(1), ...preinstalledProcedureDefinitions(2).filter((document) => document.version === 2 || document.id === 'ai7-procedure/local-text-check'), localCheckProcedureDefinitionV2(), localCheckProcedureDefinitionV3(),
-    ...preinstalledProcedureDefinitions(3).filter((document) => document.id === reviewProcedureId('style-and-format') || document.id === reviewProcedureId('plot-consistency'))];
+    ...preinstalledProcedureDefinitions(3).filter((document) => document.id === reviewProcedureId('style-and-format') || document.id === reviewProcedureId('plot-consistency')),
+    factualClaimProcedureDefinition()];
 }
 
 /** Only the ten pre-installed definitions are admitted in F-26a. */

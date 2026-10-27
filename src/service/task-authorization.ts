@@ -3185,7 +3185,12 @@ export const CURATION_SCHEMA_SQL: Readonly<Record<string, string>> = {
 };
 
 export const FACTUAL_TASK_INTENTS_SQL = CURATION_SCHEMA_SQL.analysis_task_intents!
-  .replace("AND mode IN ('whole-manuscript', 'range')", "AND mode IN ('whole-manuscript', 'range', 'review-again', 'review-range')");
+  .replace("AND mode IN ('whole-manuscript', 'range')", "AND mode IN ('whole-manuscript', 'range', 'review-again', 'review-range')")
+  .replace('kind IN (', "kind IN ('factual-recheck', ")
+  .replace('contract_version IN (', "contract_version IN ('ai7.factual-claim-verification/1', ")
+  .replace('mode IN (', "mode IN ('factual-recheck', ")
+  .replace('CHECK((kind =', "CHECK((kind = 'factual-recheck' AND contract_version = 'ai7.factual-claim-verification/1' AND mode = 'factual-recheck') OR (kind =")
+  .replace('CHECK((mode IN (', "CHECK((mode IN ('factual-recheck', ");
 
 export function validateTaskAuthorizationSchema(db: DatabaseSync): void {
   requireTask(Number(db.prepare('PRAGMA user_version').get()?.user_version) === LATEST_SCHEMA_VERSION, 'SCHEMA_UNSUPPORTED', '数据库版本不受支持。');

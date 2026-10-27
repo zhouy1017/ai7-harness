@@ -396,6 +396,9 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   learning_supervision_directives: 'house',
   review_run_preference_pins: 'owned',
   factual_verification_results: 'owned',
+  factual_claim_ledgers: 'owned',
+  factual_claim_sessions: 'owned',
+  factual_claim_events: 'owned',
   factual_review_decisions: 'owned',
   correction_proposals: 'owned',
 };

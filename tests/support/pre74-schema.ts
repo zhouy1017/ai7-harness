@@ -1,7 +1,7 @@
 import { IMPORTED_SKILL_SCHEMA_SQL, IMPORTED_SKILL_TRIGGER_SQL, IMPORTED_SKILL_UPDATE_SCHEMA_SQL, IMPORTED_SKILL_UPDATE_TRIGGER_SQL } from '../../src/service/imported-skill-schema.js';
 import { HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL, HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL } from '../../src/service/house-review-preference.js';
 import type { DatabaseSync } from 'node:sqlite';
-import { CURATION_SCHEMA_SQL, ANALYSIS_LEDGER_REVISION_79_SQL, ANALYSIS_LEDGER_REVISION_81_SQL, ANALYSIS_LEDGER_SCHEMA_SQL, ANALYSIS_LEDGER_TRIGGER_SQL, CUSTOM_ANALYSIS_SCHEMA_VERSION, WEB_TOOLS_PLAN_RECORDS_SQL, IDLE_RUN_AUTHORIZATIONS_SQL } from '../../src/service/task-authorization.js';
+import { FACTUAL_TASK_INTENTS_SQL, CURATION_SCHEMA_SQL, ANALYSIS_LEDGER_REVISION_79_SQL, ANALYSIS_LEDGER_REVISION_81_SQL, ANALYSIS_LEDGER_SCHEMA_SQL, ANALYSIS_LEDGER_TRIGGER_SQL, CUSTOM_ANALYSIS_SCHEMA_VERSION, WEB_TOOLS_PLAN_RECORDS_SQL, IDLE_RUN_AUTHORIZATIONS_SQL } from '../../src/service/task-authorization.js';
 import { CUSTOM_ANALYSIS_DIMENSION_SCHEMA_SQL, CUSTOM_ANALYSIS_DIMENSION_TRIGGER_SQL } from '../../src/service/custom-analysis-dimensions.js';
 import { TASK_INTENT_DRAFT_SCHEMA_SQL, TASK_INTENT_DRAFT_TRIGGER_SQL } from '../../src/service/task-intent-drafts.js';
 import { RESEARCH_EVIDENCE_SCHEMA_SQL, RESEARCH_EVIDENCE_TRIGGER_SQL } from '../../src/service/research-evidence-schema.js';
@@ -100,7 +100,8 @@ export function expectedSchema75(rows: readonly { name: string; sql: unknown }[]
     ...Object.entries({ ...TASK_INTENT_DRAFT_SCHEMA_SQL, ...TASK_INTENT_DRAFT_TRIGGER_SQL }).map(([name, sql]) => ({ name, sql })),
     ...Object.entries({ ...CUSTOM_ANALYSIS_DIMENSION_SCHEMA_SQL, ...CUSTOM_ANALYSIS_DIMENSION_TRIGGER_SQL }).map(([name, sql]) => ({ name, sql })),
     ...rows.map((row) => row.name === 'analysis_plan_records' ? { ...row, sql: WEB_TOOLS_PLAN_RECORDS_SQL }
-      : row.name === 'analysis_task_intents' || row.name === 'analysis_run_authorizations' ? { ...row, sql: CURATION_SCHEMA_SQL[row.name] }
+      : row.name === 'analysis_task_intents' ? { ...row, sql: FACTUAL_TASK_INTENTS_SQL }
+      : row.name === 'analysis_run_authorizations' ? { ...row, sql: CURATION_SCHEMA_SQL[row.name] }
       : row.name === 'analysis_result_sets' ? { ...row, sql: ANALYSIS_LEDGER_SCHEMA_SQL.analysis_result_sets }
       : row.name === 'analysis_result_set_revisions' ? { ...row, sql: ANALYSIS_LEDGER_SCHEMA_SQL.analysis_result_set_revisions }
       : row.name === 'proposal_item_decisions' ? { ...row, sql: EDITORIAL_MARK_SCHEMA_SQL.proposal_item_decisions } : row),

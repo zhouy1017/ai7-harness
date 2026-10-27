@@ -75,6 +75,7 @@ export interface EvidenceWorkspaceSurface {
 }
 
 export interface MountEvidenceWorkspaceOptions {
+  readonly prepareSupplementary?: (decisionId: string) => Promise<void>;
   readonly bookId: string;
   readonly resultId: string;
   readonly api: Pick<RendererApi, 'inspectEvidenceWorkspace' | 'recordVerificationReviewDecision' | 'prepareCorrectionProposal' | 'saveCorrectionProposal'>;
@@ -137,6 +138,7 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
   let sources: EvidenceSourceCardProjection[] = [];
   let nextCursor: number | null = null;
   const pinned: string[] = [];
+  const excludedSources = new Set<string>();
   let decision: DecisionForm = { disposition: null, ownWords: '', suggestion: null, reasonText: '', reasonEdited: false, problem: null };
   let draft: CorrectionProposalDraftProjection | null = null;
   let correction: CorrectionForm | null = null;
@@ -256,6 +258,19 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
     if (card.excerpt !== null) article.append(el('blockquote', 'evidence-excerpt', card.excerpt));
     article.append(facts(sourceCardFacts(card, options.instant)));
     const actions = el('div', 'button-row evidence-card-actions');
+    if (card.excluded) article.append(el('p', 'field-note', '已排除；来源及核查历史保留。'));
+    else if (projection?.claimRecheckAvailable && projection.decisionCard.drift === null) {
+      const exclude = el('input');
+      exclude.type = 'checkbox'; exclude.checked = excludedSources.has(card.sourceRef); exclude.disabled = working;
+      exclude.addEventListener('change', () => {
+        if (exclude.checked) {
+          excludedSources.add(card.sourceRef);
+          decision = { ...decision, disposition: 'request-evidence', problem: null };
+        } else excludedSources.delete(card.sourceRef);
+        render();
+      });
+      const label = el('label'); label.append(exclude, el('span', undefined, '排除此来源，并要求补充证据')); actions.append(label);
+    }
     const isPinned = pinned.includes(card.cardId);
     const pin = el('input');
     pin.type = 'checkbox';
@@ -387,6 +402,15 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
       if (recorded.superseded) section.append(el('p', 'field-note', DECISION_SUPERSEDED));
     }
     const card = current.decisionCard;
+    const latest = current.decisions.at(-1);
+    if (current.claimRecheckAvailable && latest?.disposition === 'request-evidence' && latest.resultId === resultId && !latest.superseded && card.drift === null && options.prepareSupplementary !== undefined) {
+      section.append(button('补充核查', 'prepare-supplementary', 'secondary', () => {
+        working = true; render();
+        void options.prepareSupplementary!(latest.decisionId).catch((error: unknown) => {
+          options.setStatus(options.errorMessage(error, '无法准备补充核查计划。'), 'error');
+        }).finally(() => { working = false; if (!destroyed) render(); });
+      }));
+    }
     if (card.recommendation !== null) {
       section.append(el('p', 'evidence-decision-recommendation',
         `AI7 建议「${current.decisionCard.choices.find((choice) => choice.disposition === card.recommendation!.disposition)?.label ?? ''}」：${card.recommendation.rationale}（未预选）`));
@@ -412,6 +436,7 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
       input.dataset['evidenceFocus'] = `choice:${choice.disposition}`;
       input.addEventListener('change', () => {
         decision = { ...decision, disposition: choice.disposition, problem: null };
+        if (choice.disposition !== 'request-evidence') excludedSources.clear();
         render();
       });
       label.append(input, el('span', undefined, choice.label));
@@ -476,6 +501,7 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
     options.setStatus('正在记录核查审阅决定…', 'busy');
     try {
       const recorded = await api.recordVerificationReviewDecision({
+        ...(excludedSources.size === 0 ? {} : { excludedSourceRefs: [...excludedSources] }),
         bookId, resultId, resultVersion: current.result.version, disposition: decision.disposition,
         ownWords: decision.disposition === 'own-words' ? decision.ownWords : null,
         reason: state === null ? null : { state, text: state === 'selected' ? decision.suggestion! : text, suggestion: state === 'replaced' ? null : decision.suggestion },
@@ -484,6 +510,7 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
       projection = recorded.workspace;
       sources = [...recorded.workspace.sources];
       nextCursor = recorded.workspace.nextSourceCursor;
+      excludedSources.clear();
       decision = { disposition: null, ownWords: '', suggestion: null, reasonText: '', reasonEdited: false, problem: null };
       options.setStatus(recorded.supplementary === null ? DECISION_RECORDED : `${DECISION_RECORDED}${recorded.supplementary.statement}`, 'success');
       options.changed();

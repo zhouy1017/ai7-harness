@@ -1,4 +1,4 @@
-import { CURATION_SCHEMA_SQL } from '../../src/service/task-authorization.js';
+import { FACTUAL_TASK_INTENTS_SQL } from '../../src/service/task-authorization.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
@@ -483,7 +483,7 @@ describe('schema revision 80', () => {
   it('rebuilds a revision-79 store\'s Task Intents with every row byte for byte and adds the draft relations empty', async () => {
     expect(TASK_INTENT_DRAFT_SCHEMA_VERSION).toBe(80);
     // Revision 84 follows the imported Skill revisions and adds independent model selections and translation attempt metadata.
-    expect(LATEST_SCHEMA_VERSION).toBe(TASK_INTENT_DRAFT_SCHEMA_VERSION + 16);
+    expect(LATEST_SCHEMA_VERSION).toBe(TASK_INTENT_DRAFT_SCHEMA_VERSION + 17);
     const store = await open();
     let bookId: string;
     try {
@@ -514,8 +514,8 @@ describe('schema revision 80', () => {
     }
     const migrated = new DatabaseSync(path);
     try {
-      expect(migrated.prepare('PRAGMA user_version').get()).toEqual({ user_version: 96 });
-      expect((migrated.prepare("SELECT sql FROM sqlite_schema WHERE name = 'analysis_task_intents'").get() as { sql: string }).sql).toBe(CURATION_SCHEMA_SQL.analysis_task_intents);
+      expect(migrated.prepare('PRAGMA user_version').get()).toEqual({ user_version: 97 });
+      expect((migrated.prepare("SELECT sql FROM sqlite_schema WHERE name = 'analysis_task_intents'").get() as { sql: string }).sql).toBe(FACTUAL_TASK_INTENTS_SQL);
       expect(migrated.prepare('SELECT rowid, * FROM analysis_task_intents ORDER BY rowid').all()).toEqual(intents);
       expect(migrated.prepare('SELECT rowid, * FROM analysis_plan_records ORDER BY rowid').all()).toEqual(plans);
       for (const table of Object.keys(TASK_INTENT_DRAFT_SCHEMA_SQL)) expect(migrated.prepare(`SELECT count(*) AS n FROM ${table}`).get()).toEqual({ n: 0 });

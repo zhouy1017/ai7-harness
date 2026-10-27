@@ -1389,6 +1389,15 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         openSource: (evidenceId) => options.openSource?.(evidenceId),
         goToText: (target) => options.goToText({ manuscriptId: run.manuscript.manuscriptId, branchId: run.manuscript.branchId, blockId: target.blockId, markId: target.markId }),
         changed: () => refresh(true),
+        prepareSupplementary: async (decisionId) => {
+          const initial = await api.prepareReviewRun({ categoryIds: ['factual-review'], decisionId,
+            scope: { kind: 'selection', fromChapterBlockId: result.blockId, toChapterBlockId: result.blockId } });
+          const completed = await options.awaitServiceJob(initial, () => {});
+          const prepared = completed.result;
+          if (completed.kind !== 'review-run-preparation' || prepared === null || !('scopeOptions' in prepared) || prepared.run === null) throw new Error('补充核查计划没有准备完成。');
+          query.reviewRunId = prepared.run.reviewRunId;
+          refresh(true); options.openPlan(prepared.run.reviewRunId);
+        },
       });
       fact.open.set(result.resultId, surface);
       void surface.load().then(() => {

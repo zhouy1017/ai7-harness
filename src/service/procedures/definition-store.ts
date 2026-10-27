@@ -2,7 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { ProcedureDefinitionDocument, ProcedureDefinitionPin } from '../../shared/protocol/procedures.js';
 import { canonicalJson, canonicalRecord, parseCanonicalJson, requireAnalysis, sha256Hex } from '../analysis/canonical.js';
 import { preinstalledProcedureDefinitions, allPreinstalledProcedureDefinitions } from './preinstalled.js';
-import { LOCAL_REVIEW_SCHEMA_VERSION, REVIEW_CONTRACT_SCHEMA_VERSION } from '../task-authorization.js';
+import { FACTUAL_CLAIM_SCHEMA_VERSION, LOCAL_REVIEW_SCHEMA_VERSION, REVIEW_CONTRACT_SCHEMA_VERSION } from '../task-authorization.js';
 import { HOUSE_WORD_LIST_SCHEMA_VERSION } from '../review/house-word-list.js';
 
 export const PROCEDURE_DEFINITION_SCHEMA_SQL = {
@@ -100,9 +100,12 @@ export function initializeProcedureDefinitionSchema(db: DatabaseSync): void {
 export function validateProcedureDefinitions(db: DatabaseSync, allowLegacy = false, allowPreCrossChapter = false): void {
   const identities = db.prepare('SELECT * FROM procedure_definitions').all();
   const versions = db.prepare('SELECT * FROM procedure_definition_versions').all();
-  const preReview = Number(db.prepare('PRAGMA user_version').get()?.user_version) < REVIEW_CONTRACT_SCHEMA_VERSION;
-  const catalog = allPreinstalledProcedureDefinitions().filter((document) => !allowPreCrossChapter ||
-    !((document.id === 'ai7-procedure/review-style-and-format' && document.version === 3) || (document.id === 'ai7-procedure/review-plot-consistency' && document.version === 2)) ||
+  const schemaVersion = Number(db.prepare('PRAGMA user_version').get()?.user_version);
+  const preReview = schemaVersion < REVIEW_CONTRACT_SCHEMA_VERSION;
+  const catalog = allPreinstalledProcedureDefinitions().filter((document) =>
+    !((allowPreCrossChapter && ((document.id === 'ai7-procedure/review-style-and-format' && document.version === 3) ||
+      (document.id === 'ai7-procedure/review-plot-consistency' && document.version === 2))) ||
+      (schemaVersion < FACTUAL_CLAIM_SCHEMA_VERSION && document.id === 'ai7-procedure/factual-claim-check')) ||
     versions.some((row) => row.procedure_id === document.id && row.version === document.version));
   const expected = allowLegacy && preReview && versions.length === 10 ? preinstalledProcedureDefinitions(1)
     : allowLegacy && !identities.some((row) => row.procedure_id === 'ai7-procedure/local-text-check')

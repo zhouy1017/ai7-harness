@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { DEVELOPER_LIVE_POLICY_BINDING, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
+import { DEVELOPER_LIVE_POLICY_BINDING, ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy, resolveSourceCheckoutLaunchPolicySync } from '../../src/service/launch-policy.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import { parseFactualReviewUnitMessageHeader } from '../../src/service/analysis/factual-review-contract.js';
 import { buildFactualReviewUnitMessage, type FactualUnitAssertion } from '../../src/service/analysis/factual-review-contract.js';
@@ -35,7 +35,7 @@ import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissing
 // One explicit model-request capability per test application.
 // Registered first: the stack-ordered final hook runs after existing consumer teardown.
 let requestGovernor: ModelRequestGovernor;
-beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); store = undefined!; owner = undefined!; roots = undefined!; });
 afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Issue #901 (wave 8, slice 8a): 事实核查 at its three Evidence Assurance Levels through the real store, Review Run, frozen plan,
@@ -63,6 +63,10 @@ const PAGES: Record<string, { status: number; body: string }> = {
 
 type Relation = { sourceRef: string; relation: string; excerptRef: string | null; lineage: string | null };
 interface Scenario {
+  claimStages?: boolean;
+  claimSearches?: number;
+  pendingRound?: boolean;
+  claimModelUnknown?: boolean;
   relations: Relation[];
   correction?: boolean;
   offline?: boolean;
@@ -106,7 +110,19 @@ async function setup(initial: Scenario): Promise<void> {
   roots = await createServiceTestRoots('ai7-factual-verification-');
   policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live');
   store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-  const launch = {
+  const ordinary = ORDINARY_PRODUCTION_ALLOWED_BINDINGS.find((entry) => entry.route === 'opencode-go')!;
+  const connection = initial.claimStages ? store.saveModelServiceConnection('合成普通连接', null, 'ready', 'opencode-go') : null;
+  const binding = connection === null ? null : { ...ordinary, credentialReference: connection.credentialReference };
+  if (binding !== null) {
+    store.selectModelServiceRoute('opencode-go');
+    policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', binding);
+    const backend = store.getSearchBackendConnections().find((entry) => entry.backendId === TINYFISH.id);
+    store.saveSearchBackendCredential(TINYFISH.id, backend?.credentialReference ?? null, 'ready');
+    store.selectSearchBackend(TINYFISH.id);
+    connected = true;
+  }
+  const launch = binding !== null ? { operationalScope: 'ordinary-production' as const, policy,
+    live: { ...binding, scope: 'ordinary-production' as const, runBudgetCeiling: 'unset' as const } } : {
     operationalScope: 'developer-live' as const, policy,
     live: { ...DEVELOPER_LIVE_POLICY_BINDING, credentialReference: DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE, runBudgetCeiling: { kind: 'tokens' as const, maxTotalTokens: initial.maxTotalTokens ?? 500_000 } },
   };
@@ -130,7 +146,7 @@ async function setup(initial: Scenario): Promise<void> {
     sends.model += 1;
     const body = JSON.parse(String(init?.body)) as { tools?: unknown[]; messages: Array<{ role: string; content: string | null }> };
     sends.toolSchemas += body.tools?.length ?? 0;
-    const unit = body.messages.find((message) => message.role === 'user')!.content ?? '';
+    const unit = body.messages.findLast((message) => message.role === 'user')!.content ?? '';
     const header = parseFactualReviewUnitMessageHeader(unit);
     const tools = body.messages.filter((message) => message.role === 'tool').length;
     const declared = (body.tools?.length ?? 0) > 0;
@@ -148,11 +164,24 @@ async function setup(initial: Scenario): Promise<void> {
       const citations = cited === null || scenario.noAssertions === true ? [] : [cited, ...(scenario.twoAssertions === true ? [quoteFrom(unit, 12)].filter((entry) => entry !== null) : [])];
       const base = citations.map((citation) => ({ quote: citation.quote, blockOrdinal: citation.blockOrdinal, assertionClass: 'real-world-fact', category: '机构', severity: 'A',
         question: '该器物现藏何处？', basis: '馆藏页记载其收藏地点。' }));
-      if (!v2) return answer({ content: JSON.stringify({ schema: 'ai7.factual-review.unit-result/1', unitOrdinal: header.ordinal, assertions: base }) });
+      if (!v2) return answer({ content: JSON.stringify({ schema: initial.claimStages ? 'ai7.factual-claim-extraction/1' : 'ai7.factual-review.unit-result/1', unitOrdinal: header.ordinal, assertions: base }) });
       const assertions = base.map((assertion) => ({ ...assertion, evidenceRelations: scenario.relations }));
       const corrections = cited !== null && scenario.correction === true
         ? [{ assertionRef: 1, variants: [{ text: `${[...cited.quote].slice(0, -1).join('')}〇`, rationale: '已核对来源与原文所记收藏地点不符。' }] }] : [];
       return answer({ content: JSON.stringify({ schema: 'ai7.factual-review.unit-result/2', unitOrdinal: header.ordinal, assertions, corrections }) });
+    }
+    if (initial.claimStages && unit.startsWith('{')) {
+      if (initial.claimModelUnknown) return new Response('data: {"choices":[{"index":0,"delta":{"content":"synthetic"}}]}\n\n', { headers: { 'content-type': 'text/event-stream' } });
+      const claim = JSON.parse(unit) as { claimId: string };
+      const second = body.messages.filter((message) => message.role === 'user').length > 1;
+      const searches = initial.claimSearches ?? 1;
+      const search = (ordinal: number) => answer({ content: null, tool_calls: [{ id: `search_${ordinal}`, type: 'function', function: {
+        name: 'websearch', arguments: JSON.stringify({ query: `public museum collection fact query ${ordinal}` }) } }] });
+      if (tools < searches) return search(tools + 1);
+      if (initial.pendingRound && second && tools === 2) return search(2);
+      if (tools === searches || initial.pendingRound && second && tools === 3) return answer({ content: null, tool_calls: [{ id: `fetch_${tools}`, type: 'function', function: { name: 'webfetch', arguments: JSON.stringify({ url: MUSEUM }) } }] });
+      return answer({ content: JSON.stringify({ schema: 'ai7.factual-claim-verification-result/1', claimId: claim.claimId,
+        evidenceRelations: initial.pendingRound && !second ? [] : scenario.relations, corrections: [] }) });
     }
     const last = body.messages.at(-1)!.content ?? '';
     const result = last.startsWith('保证抽样 ')
@@ -165,7 +194,9 @@ async function setup(initial: Scenario): Promise<void> {
     ledger: store.factualReviewLedger, launchPolicy: policy, fixture: null,
     secretResolver: { resolve: async () => 'placeholder-development-key' },
     // A business Run (no development validation): no live-once cache stands between Books that read the same sample1 units.
-    developerLive: { launch: { runBudgetCeiling: launch.live.runBudgetCeiling, providerCacheRoot: join(roots.inputRoot, 'cache'), validation: null }, nativeFetch },
+    ...(binding === null ? { developerLive: { launch: { runBudgetCeiling: { kind: 'tokens' as const, maxTotalTokens: initial.maxTotalTokens ?? 500_000 }, providerCacheRoot: join(roots.inputRoot, 'cache'), validation: null }, nativeFetch } }
+      : { production: { scope: 'ordinary-production' as const, nativeFetch }, currentLaunchPolicy: () => policy,
+        productionPolicyFor: (frozen) => resolveSourceCheckoutLaunchPolicySync(roots.codeRoot, 'ordinary-production', frozen) }),
     researchEvidence: (input) => { store.recordResearchEvidence(input); },
     factualRunStart: (input) => { store.recordFactualRunAssurance({ ...input, offline: scenario.offline === true }); },
   });
@@ -180,6 +211,14 @@ afterEach(async () => {
 
 type Book = Awaited<ReturnType<typeof importSample1Book>>;
 
+function enrollFactualRecheck(bookId: string) {
+  const runtime = { routeExecutable: true, placeFree: true, capacity: 2, editorWorkBusy: false, now: Date.now() + 60_000, quietMs: 30_000 };
+  const shown = store.inspectBackgroundAnalysisEnrollment(bookId, runtime, 'factual-recheck');
+  expect(shown.offer.canEnroll, shown.offer.reason ?? '').toBe(true);
+  return { runtime, enrollment: store.enrollBackgroundAnalysis(bookId, shown.offer.disclosureDigest!, 'backfill',
+    { kind: 'book', seriesId: null }, 20_000, runtime, 'factual-recheck').enrollment! };
+}
+
 async function newBook(name: string): Promise<Book> {
   const book = await importSample1Book(store, roots.codeRoot, name);
   await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
@@ -191,10 +230,12 @@ async function newBook(name: string): Promise<Book> {
 
 /** One 事实核查 Review Run of the whole Book, at the level named (left at the default 标准核查 when none is). */
 async function review(book: Book, level?: EvidenceAssuranceLevel, hooks: {
+  decisionId?: string;
   prepared?: (reviewRunId: string) => void;
   steps?: (steps: ReviewRunDriveSteps) => ReviewRunDriveSteps;
 } = {}): Promise<{ reviewRunId: string; results: FactualVerificationResultProjection[] }> {
-  let work = store.createReviewRunPreparationWork(book.bookId, ['factual-review'], { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy);
+  let work = store.createReviewRunPreparationWork(book.bookId, ['factual-review'], { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy,
+    null, [], null, null, null, undefined, hooks.decisionId);
   while (!work.done) work = store.advanceReviewRunPreparationWork(work.workId!);
   const reviewRunId = work.projection!.run!.reviewRunId;
   hooks.prepared?.(reviewRunId);
@@ -306,6 +347,169 @@ function syntheticClaimLedger() {
 }
 
 describe('factual claim occurrence ledger', () => {
+  it('spends an unknown model submission and preserves that claim allowance after reopen', async () => {
+    await setup({ claimStages: true, claimModelUnknown: true, relations: [] });
+    const result = (await review(await newBook('未知单条取证结果'))).results[0]!;
+    const ledger = store.factualReviewLedger.factualVerification;
+    const claims = ledger.claims(result.runRecordId)!;
+    const session = ledger.claimSession(result.runRecordId, 'web-verification', claims.claims[0]!.claimId)!;
+    expect(ledger.claimRounds(session.sessionId)).toMatchObject([{ state: 'unknown', result: null }]);
+    expect(ledger.claimAllowance(session.sessionId)).toEqual({ model: 128, tool: 128, search: 3 });
+    const before = sends.model;
+    await owner.dispose(); store.close(); store = undefined!;
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    expect(store.factualReviewLedger.factualVerification.claimAllowance(session.sessionId).model).toBe(128);
+    expect(sends.model).toBe(before);
+  });
+
+  it('preserves claim reservations and source exclusion history through selected-Book merge', async () => {
+    await setup({ claimStages: true, claimSearches: 3, relations: [{ sourceRef: MUSEUM, relation: '支持', excerptRef: HELD, lineage: 'original' }] });
+    const book = await newBook('合并后的断言额度');
+    const result = (await review(book)).results[0]!;
+    store.recordVerificationReviewDecision({ bookId: book.bookId, resultId: result.resultId, resultVersion: result.version,
+      disposition: 'request-evidence', ownWords: null, reason: null, excludedSourceRefs: [MUSEUM] });
+    const claims = store.factualReviewLedger.factualVerification.claims(result.runRecordId)!;
+    const session = store.factualReviewLedger.factualVerification.claimSession(result.runRecordId, 'web-verification', claims.claims[0]!.claimId)!;
+    const packagePath = join(roots.inputRoot, 'claim-ledger.ai7db');
+    const preparation = await store.prepareDatabaseExport(packagePath, true);
+    expect((await store.approveDatabaseExport(preparation.preparationId, true)).outcome).toBe('created');
+    const targetRoots = await createServiceTestRoots('ai7-claim-merge-target-');
+    let target = await EditorialStore.open(targetRoots.dataRoot, roots.codeRoot);
+    try {
+      const preview = await target.inspectDatabaseImport(packagePath);
+      expect(preview.mergeRefusal).toBeNull();
+      await target.prepareDatabaseMerge(preview.previewId, new Date()); target.close();
+      target = await EditorialStore.open(targetRoots.dataRoot, roots.codeRoot);
+      expect(target.factualReviewLedger.factualVerification.claims(result.runRecordId)?.digest).toBe(claims.digest);
+      expect(target.factualReviewLedger.factualVerification.claimAllowance(session.sessionId).search).toBe(0);
+      expect(target.factualReviewLedger.factualVerification.excludedClaimSources(claims.claims[0]!.claimId)).toEqual([MUSEUM]);
+    } finally { target.close(); await targetRoots.dispose(); }
+  });
+
+  it('runs one claim only under its separate active enrollment and never reschedules an unresolved result', async () => {
+    await setup({ claimStages: true, relations: [] });
+    const book = await newBook('空闲单条事实复核');
+    const result = (await review(book)).results[0]!;
+    store.recordVerificationReviewDecision({ bookId: book.bookId, resultId: result.resultId, resultVersion: result.version,
+      disposition: 'request-evidence', ownWords: null, reason: null });
+    expect(store.nextFactualRecheck()).toBeNull();
+    enrollFactualRecheck(book.bookId);
+    const candidate = store.nextFactualRecheck()!;
+    expect(candidate.selection.claimId).toBeDefined();
+    const before = sends.model;
+    owner.setBackgroundIdle(false); owner.startFactualRecheck(store); await owner.whenIdle();
+    expect(sends.model).toBe(before);
+    owner.setBackgroundIdle(true); owner.startFactualRecheck(store); await owner.whenIdle();
+    expect(store.factualReviewLedger.factualRecheckUsed(candidate.onceKey)).toBe(true);
+    const workspace = store.inspectEvidenceWorkspace({ bookId: book.bookId, resultId: result.resultId, sourcesAfter: null });
+    expect(workspace.history).toHaveLength(2);
+    const completed = sends.model;
+    owner.startFactualRecheck(store); await owner.whenIdle();
+    expect(sends.model).toBe(completed);
+    expect(store.nextFactualRecheck()).toBeNull();
+  });
+
+  it('keeps an authorized one-claim once key across restart without dispatching it again', async () => {
+    await setup({ claimStages: true, relations: [] });
+    const book = await newBook('重启后的事实复核');
+    const result = (await review(book)).results[0]!;
+    store.recordVerificationReviewDecision({ bookId: book.bookId, resultId: result.resultId, resultVersion: result.version,
+      disposition: 'request-evidence', ownWords: null, reason: null });
+    enrollFactualRecheck(book.bookId);
+    const candidate = store.nextFactualRecheck()!;
+    const run = store.startFactualRecheck(candidate);
+    await owner.dispose(); store.close(); store = undefined!;
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    expect(store.factualReviewLedger.currentRunState(run.runRecordId)).toBe('interrupted');
+    expect(store.factualReviewLedger.factualRecheckUsed(candidate.onceKey)).toBe(true);
+    expect(store.factualReviewLedger.factualVerification.claimAllowance(run.session.sessionId).search).toBe(3);
+  });
+
+  it('refuses a frozen one-claim candidate after its enrollment is revoked', async () => {
+    await setup({ claimStages: true, relations: [] });
+    const book = await newBook('撤销事实复核登记');
+    const result = (await review(book)).results[0]!;
+    store.recordVerificationReviewDecision({ bookId: book.bookId, resultId: result.resultId, resultVersion: result.version,
+      disposition: 'request-evidence', ownWords: null, reason: null });
+    const enrolled = enrollFactualRecheck(book.bookId);
+    const candidate = store.nextFactualRecheck()!;
+    store.revokeBackgroundAnalysisEnrollment(book.bookId, enrolled.enrollment.enrollmentId, enrolled.runtime);
+    expect(() => store.startFactualRecheck(candidate)).toThrow('变化');
+  });
+
+  it('prepares a separately approved again check and preserves the earlier version', async () => {
+    await setup({ claimStages: true, relations: [{ sourceRef: MUSEUM, relation: '支持', excerptRef: HELD, lineage: 'original' }] });
+    const book = await newBook('再次核查');
+    const first = await review(book);
+    const second = await review(book);
+    expect(second.results[0]?.version).toBe(2);
+    expect(second.results[0]?.states.factualVerification).toBe('证据支持');
+    const workspace = store.inspectEvidenceWorkspace({ bookId: book.bookId, resultId: second.results[0]!.resultId, sourcesAfter: null });
+    expect(workspace.history).toHaveLength(2);
+    expect(first.reviewRunId).not.toBe(second.reviewRunId);
+  });
+
+  it('excludes a source through an immutable decision and prepares explicit supplemental verification', async () => {
+    await setup({ claimStages: true, relations: [{ sourceRef: MUSEUM, relation: '支持', excerptRef: HELD, lineage: 'original' }] });
+    const book = await newBook('补充核查');
+    const first = (await review(book)).results[0]!;
+    const recorded = store.recordVerificationReviewDecision({ bookId: book.bookId, resultId: first.resultId, resultVersion: first.version,
+      disposition: 'request-evidence', ownWords: null, reason: null, excludedSourceRefs: [MUSEUM] });
+    expect(recorded.workspace.sources[0]).toMatchObject({ excluded: true, sourceRef: MUSEUM });
+    expect(recorded.workspace.history).toHaveLength(1);
+    expect(recorded.workspace.result.sourceCounts.checked).toBe(0);
+    const pages = sends.pages.length;
+    const second = await review(book, undefined, { decisionId: recorded.supplementary!.decisionId! });
+    expect(second.results[0]?.version).toBe(2);
+    expect(second.results[0]?.states.factualVerification).toBe('证据不足');
+    expect(sends.pages).toHaveLength(pages);
+    const current = second.results[0]!;
+    const fresh = store.recordVerificationReviewDecision({ bookId: book.bookId, resultId: current.resultId, resultVersion: current.version,
+      disposition: 'request-evidence', ownWords: null, reason: null, excludedSourceRefs: [MUSEUM] });
+    expect(fresh.workspace.claimRecheckAvailable).toBe(true);
+    expect(fresh.supplementary?.decisionId).toBeDefined();
+    expect(() => store.createReviewRunPreparationWork(book.bookId, ['factual-review'],
+      { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy, null, [], null, null, null, undefined,
+      fresh.supplementary!.decisionId)).not.toThrow();
+  });
+
+  it('refuses supplemental preparation after the editor has replaced the request-evidence decision', async () => {
+    await setup({ claimStages: true, relations: [] });
+    const book = await newBook('旧核查决定');
+    const result = (await review(book)).results[0]!;
+    const input = { bookId: book.bookId, resultId: result.resultId, resultVersion: result.version, ownWords: null, reason: null };
+    const requested = store.recordVerificationReviewDecision({ ...input, disposition: 'request-evidence' });
+    store.recordVerificationReviewDecision({ ...input, disposition: 'keep-pending' });
+    expect(() => store.createReviewRunPreparationWork(book.bookId, ['factual-review'],
+      { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy, null, [], null, null, null, undefined,
+      requested.supplementary!.decisionId)).toThrow('最新');
+  });
+
+  it('runs extraction without tools and limits durable verification to three searches', async () => {
+    await setup({ claimStages: true, claimSearches: 4, relations: [{ sourceRef: MUSEUM, relation: '支持', excerptRef: HELD, lineage: 'original' }] });
+    const book = await newBook('断言核查');
+    const { results } = await review(book);
+    expect(results[0]?.states.factualVerification).toBe('证据支持');
+    expect(sends.search).toBe(3);
+    const ledger = store.factualReviewLedger.factualVerification;
+    const claims = ledger.claims(results[0]!.runRecordId)!;
+    const session = ledger.claimSession(results[0]!.runRecordId, 'web-verification', claims.claims[0]!.claimId)!;
+    expect(ledger.claimAllowance(session.sessionId).search).toBe(0);
+    expect(ledger.claimRounds(session.sessionId)).toMatchObject([{ state: 'closed' }]);
+  });
+
+  it('keeps a pending first round and spends only the remaining claim allowance in the second', async () => {
+    await setup({ claimStages: true, pendingRound: true, relations: [{ sourceRef: MUSEUM, relation: '支持', excerptRef: HELD, lineage: 'original' }] });
+    const { results } = await review(await newBook('剩余核查额度'));
+    expect(results[0]?.states.factualVerification).toBe('证据支持');
+    const ledger = store.factualReviewLedger.factualVerification;
+    const claims = ledger.claims(results[0]!.runRecordId)!;
+    const session = ledger.claimSession(results[0]!.runRecordId, 'web-verification', claims.claims[0]!.claimId)!;
+    expect(ledger.claimRounds(session.sessionId).map((round) => round.state)).toEqual(['pending', 'closed']);
+    expect(ledger.claimAllowance(session.sessionId).search).toBe(1);
+    expect(sends.search).toBe(2);
+  });
+
   it('groups only identical occurrences and keeps both overlapping producers', () => {
     const { ledger } = syntheticClaimLedger();
     expect(ledger.counts).toEqual({ coverageUnits: 2, assertions: 4, eligibleClaims: 2 });

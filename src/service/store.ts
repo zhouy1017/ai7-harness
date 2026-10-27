@@ -46,6 +46,11 @@ import { TASK_MATERIALS_NONE, TASK_MATERIALS_STATEMENT, TASK_MATERIAL_LIVE_UNAVA
 import { createHash, randomUUID } from 'node:crypto';
 import { readProxySetting, writeProxySetting } from './provider/proxy-setting.js';
 import { allowedProductionBindingOf, selectedPolicyIdentityOf, resolveSourceCheckoutLaunchPolicySync, readRetainedBoundAnalysisPolicySync, type ConfiguredProviderBinding } from './launch-policy.js';
+import { factualClaimVerificationInput } from './analysis/factual-claim-ledger.js';
+import { factualClaimVerificationPrompt } from './analysis/factual-claim-contract.js';
+import { resolveProcedureDefinition } from './procedures/definition-store.js';
+import type { FactualRecheckCandidate, FactualRecheckRun } from './analysis/factual-recheck.js';
+import { searchBackend, searchBackendConfigurationDigest } from './provider/search-backends/index.js';
 import { LocalFixturePolicyCatalog, type LocalFixtureRuntimeContext } from './provider/model-fixture.js';
 import { DEVELOPMENT_CREDENTIAL_REFERENCES } from '../shared/protected-secret-identity.js';
 import { MODEL_SERVICE_ROUTE_BINDINGS, MODEL_SERVICE_ROUTES, modelServiceModels, type ModelConnectionTestStatus } from '../shared/protocol.js';
@@ -5011,6 +5016,7 @@ export class EditorialStore {
     this.#researchEvidence = new ResearchEvidenceLedger(authority);
     this.#factualVerification = new FactualVerificationLedger(authority);
     this.#factualReview.bindFactualVerification(this.#factualVerification);
+    this.#factualReview.reconcileFactualRechecks();
     this.#libraryMaterials = new LibraryMaterialLedger(authority, dataRoot, (material) =>
       this.#materialIndex.projection({ materialId: material.materialId, sha256: material.sha256, format: material.source.format },
         this.#indexing === material.materialId ? 'indexing' : 'queued', this.#layerActivity(material.materialId, material.source.sha256)));
@@ -6323,7 +6329,18 @@ export class EditorialStore {
     intentDraft: DraftPromotion | null = null,
     seriesId: string | null = null,
     localCheck?: import('../shared/protocol/procedures.js').LocalCheckOptions,
+    decisionId?: string,
   ): AnalysisPreparationResult<ReviewWorkspaceProjection> {
+    const factualDecision = decisionId === undefined ? undefined : this.#verificationCall(() => {
+      const row = this.#authority.prepare('SELECT result_id FROM factual_review_decisions WHERE decision_id = ? AND book_id = ?').get(decisionId, bookId);
+      requireStore(row !== undefined && categoryIds.length === 1 && categoryIds[0] === 'factual-review', 'FACTUAL_DECISION_INVALID', '补充核查需要当前图书的核查决定。');
+      const { reader } = this.#resultBinding(bookId, String(row.result_id));
+      return this.#factualVerification.recheckSelection(bookId, decisionId, reader);
+    });
+    if (factualDecision !== undefined) {
+      const claim = this.#factualVerification.claims(factualDecision.originalRunRecordId)!.claims.find((entry) => entry.claimId === factualDecision.claimId)!;
+      scope = { kind: 'selection', fromChapterBlockId: claim.occurrence.block, toChapterBlockId: claim.occurrence.block };
+    }
     const procedure = capturedProcedure === null ? null : this.#procedureCall(() => this.#capturedProcedurePin(bookId, capturedProcedure));
     requireStore(seriesId === null || capturedProcedure === null || procedureOffersSeries(this.#requireCapturedVersion(capturedProcedure.versionId).document),
       'SERIES_SCOPE_UNAVAILABLE', '这个工序版本只允许参考当前图书。');
@@ -6336,6 +6353,7 @@ export class EditorialStore {
     }
     const references = this.#prepareTaskMaterials(bookId, materialIds);
     return this.#reviewPreparation(() => this.#reviewRuns.prepare({ phase: 'start', bookId, categoryIds, scope, launchPolicy, procedure, redoOf, seriesId,
+      ...(factualDecision === undefined ? {} : { factualDecision }),
       ...(localCheck === undefined ? {} : { localCheck }),
       ...(references.length === 0 ? {} : { materialReferences: { bookId, references } }),
       ...(intentDraft === null ? {} : { intentDraft }),
@@ -7939,7 +7957,8 @@ export class EditorialStore {
     const read = this.#enrollmentRead(bookId, kind);
     const record = read === 'damaged' ? null : read;
     const state = read === 'damaged' ? 'damaged' : record === null ? 'none' : record.state === 'active' && record.paused ? 'paused' : record.state;
-    const next = this.#analysisCall(() => kind === BACKGROUND_ANALYSIS_KIND ? this.#backgroundDecision(bookId, read, runtime) : { kind: 'none' as const, reason: '登记已保留；相应工序接入后台处理后，才会按登记开始。' });
+    const next = this.#analysisCall(() => kind === BACKGROUND_ANALYSIS_KIND ? this.#backgroundDecision(bookId, read, runtime) : { kind: 'none' as const,
+      reason: kind === 'factual-recheck' ? '空闲时按最新的要求补充证据决定复核一条冻结断言；未决结果不会自动重新排队。' : '登记已保留；相应工序接入后台处理后，才会按登记开始。' });
     const binding = this.#enrollmentBinding(bookId, kind);
     const nextOrdinal = record === null ? 1 : record.version.ordinal + 1;
     const reason = state === 'damaged'
@@ -10525,6 +10544,87 @@ export class EditorialStore {
 
   // ---- Factual verification (Issue #901; FACT, EVID, EASSURE, FREV, CORR) ---------------------------------------------------
 
+  #factualRecheckCandidate(enrollment: BackgroundAnalysisEnrollmentRecord, decisionId: string): FactualRecheckCandidate | null {
+    const launch = this.#baselineAnalysis.launch;
+    const live = launch.live;
+    const policy = selectedPolicyIdentityOf(launch.policy?.selectedPolicyIdentity);
+    const rule = liveKindRule(launch.policy, 'factual-recheck', [], 'background')?.factualRecheck;
+    if (enrollment.kind !== 'factual-recheck' || enrollment.state !== 'active' || enrollment.paused || enrollment.version.share === null ||
+      launch.operationalScope !== 'ordinary-production' || live?.scope !== 'ordinary-production' || policy?.providerProcessingVersion !== 'v31' ||
+      rule?.maximumClaims !== 1 || this.replacementFrozen()) return null;
+    const enrolledBinding = this.#enrollmentBinding(enrollment.bookId, 'factual-recheck');
+    if (enrolledBinding === null || canonicalJson({ ...enrolledBinding, runBudgetCeiling: enrollment.version.binding.runBudgetCeiling }) !== canonicalJson(enrollment.version.binding)) return null;
+    const row = this.#authority.prepare('SELECT result_id FROM factual_review_decisions WHERE decision_id = ? AND book_id = ?').get(decisionId, enrollment.bookId);
+    if (row === undefined) return null;
+    const { reader } = this.#resultBinding(enrollment.bookId, String(row.result_id));
+    const selection = this.#factualVerification.recheckSelection(enrollment.bookId, decisionId, reader);
+    const checkpoint = this.#authority.prepare(`SELECT c.* FROM analysis_task_input_checkpoints c JOIN analysis_run_records r
+      ON r.task_intent_id = c.task_intent_id WHERE r.run_record_id = ?`).get(selection.sourceRunRecordId);
+    const point = this.#factualReview.workingPointOf(enrollment.bookId);
+    if (checkpoint === undefined || checkpoint.revision_id !== point.revisionId || checkpoint.revision_digest !== point.workingDigest ||
+      Number(checkpoint.journal_sequence) !== point.journalSequence) return null;
+    const search = this.getSearchBackendConnections().find((entry) => entry.selected && entry.credentialOperationState === 'ready' && entry.credentialReference !== null);
+    if (search === undefined) return null;
+    const backend = searchBackend(search.backendId);
+    const ledger = this.#factualVerification.claims(selection.originalRunRecordId)!;
+    const message = factualClaimVerificationInput(ledger, selection.claimId, rule.verificationContract.maximumMetadataUtf8Bytes);
+    const prompt = factualClaimVerificationPrompt(selection.level);
+    const { pin } = resolveProcedureDefinition(this.#authority, 'ai7-procedure/factual-claim-check', 1);
+    return { enrollmentId: enrollment.enrollmentId, enrollmentVersionId: enrollment.version.enrollmentVersionId,
+      onceKey: canonicalRecord({ enrollmentId: enrollment.enrollmentId, ledgerDigest: ledger.digest, claimId: selection.claimId, decisionId }).digest,
+      selection, ledger, policy, binding: { route: live.route, endpoint: live.endpoint, model: live.model, credentialSlot: live.credentialSlot, credentialReference: live.credentialReference },
+      search: { backendId: search.backendId, host: backend.declaration.host!, selectedAt: search.selectedAt,
+        configurationDigest: searchBackendConfigurationDigest(search.backendId), credentialReference: search.credentialReference! },
+      procedure: pin, maximumTokens: enrollment.version.share.maxTotalTokens, message: message.message,
+      prompt: prompt.systemPrompt, promptDigest: canonicalRecord(prompt).digest,
+      limits: { model: rule.verificationContract.maximumModelRequestsPerSession, tool: rule.verificationContract.maximumPlatformToolRoundsPerSession,
+        search: rule.verificationContract.maximumSearchSubmissionsPerClaim } };
+  }
+
+  nextFactualRecheck(): FactualRecheckCandidate | null {
+    return this.#verificationCall(() => {
+      for (const enrollment of this.#enrollments.active().filter((entry) => entry.kind === 'factual-recheck' && !entry.paused)) {
+        for (const row of this.#authority.prepare("SELECT decision_id FROM factual_review_decisions WHERE book_id = ? AND disposition = 'request-evidence' ORDER BY rowid").all(enrollment.bookId)) {
+          try {
+            const candidate = this.#factualRecheckCandidate(enrollment, String(row.decision_id));
+            if (candidate !== null && !this.#factualReview.factualRecheckUsed(candidate.onceKey)) return candidate;
+          } catch (error) { if (!(error instanceof FactualVerificationError) && !(error instanceof StoreError)) throw error; }
+        }
+      }
+      return null;
+    });
+  }
+
+  startFactualRecheck(candidate: FactualRecheckCandidate): FactualRecheckRun {
+    return this.#verificationCall(() => this.#transaction(this.#authority, () => {
+      const enrollment = this.#enrollments.forBook(candidate.selection.bookId, 'factual-recheck');
+      requireStore(enrollment !== null && canonicalJson(this.#factualRecheckCandidate(enrollment, candidate.selection.decisionId)) === canonicalJson(candidate),
+        'FACTUAL_RECHECK_STALE', '复核登记、决定或冻结来源已变化。');
+      return this.#factualReview.startFactualRecheck(candidate);
+    }));
+  }
+
+  factualRecheckCurrent(run: FactualRecheckRun): boolean {
+    try {
+      const enrollment = this.#enrollments.forBook(run.selection.bookId, 'factual-recheck');
+      const current = enrollment === null ? null : this.#factualRecheckCandidate(enrollment, run.selection.decisionId);
+      return current !== null && current.enrollmentVersionId === run.enrollmentVersionId && current.onceKey === run.onceKey &&
+        canonicalJson(current.selection) === canonicalJson(run.selection) && canonicalJson(current.binding) === canonicalJson(run.binding) &&
+        canonicalJson(current.policy) === canonicalJson(run.policy) && canonicalJson(current.search) === canonicalJson(run.search) && current.message === run.message;
+    } catch { return false; }
+  }
+
+  publishFactualRecheck(run: FactualRecheckRun, round: import('./factual-verification.js').FactualClaimRound, usage: import('./provider/classification.js').UsageFacts | null): void {
+    this.#verificationCall(() => this.#transaction(this.#authority, () => {
+      requireStore(this.factualRecheckCurrent(run) && round.result !== null, 'FACTUAL_RECHECK_STALE', '复核来源或决定已经变化，未发布结果。');
+      const claim = this.#factualVerification.claims(run.runRecordId)!.claims.find((entry) => entry.claimId === run.selection.claimId)!;
+      this.#researchEvidence.record({ bookId: run.selection.bookId, runRecordId: run.runRecordId,
+        unitOrdinal: claim.producers[0]!.sourceUnitOrdinal, backendId: run.search.backendId, unit: round.evidence });
+      this.#factualVerification.materializeRecheck(run, round.result!);
+      this.#factualReview.settleFactualRecheck(run, 'completed', usage);
+    }));
+  }
+
   #verificationCall<T>(operation: () => T): T {
     return this.#libraryCall(() => {
       try {
@@ -10562,12 +10662,18 @@ export class EditorialStore {
     const working = this.#authority.prepare('SELECT text FROM working_blocks WHERE branch_id = ? AND block_id = ?');
     return {
       rangeUntouched: (runRecordId, blockId, fromGrapheme, toGrapheme) => {
-        const facts = this.#factualReview.loadExecutionPlan(runRecordId);
+        const task = this.#authority.prepare(`SELECT t.kind, t.canonical_json FROM analysis_task_intents t JOIN analysis_run_records r
+          ON r.task_intent_id = t.task_intent_id WHERE r.run_record_id = ?`).get(runRecordId);
+        if (task?.kind === 'factual-recheck') runRecordId = (JSON.parse(String(task.canonical_json)) as { factualDecision: import('./factual-verification.js').FactualRecheckSelection }).factualDecision.sourceRunRecordId;
+        const checkpoint = this.#authority.prepare(`SELECT c.journal_sequence FROM analysis_task_input_checkpoints c
+          JOIN analysis_run_records r ON r.task_intent_id = c.task_intent_id
+          WHERE r.run_record_id = ? AND c.branch_id = ? AND c.manuscript_id = ?`).get(runRecordId, branchId, manuscriptId);
+        requireStore(checkpoint !== undefined, 'FACTUAL_VERIFICATION_RECORD_INVALID', '核查结果的原文固定点缺失。');
         let from = fromGrapheme;
         let to = toGrapheme;
         const edits = this.#authority.prepare(`SELECT from_grapheme, to_grapheme, insert_text FROM edit_journal_entries
           WHERE branch_id = ? AND block_id = ? AND sequence > ? ORDER BY sequence`)
-          .all(branchId, blockId, facts.checkpoint.journalSequence) as SqlRow[];
+          .all(branchId, blockId, asNumber(checkpoint.journal_sequence)) as SqlRow[];
         for (const edit of edits) {
           const start = asNumber(edit.from_grapheme);
           const end = asNumber(edit.to_grapheme);
@@ -10669,6 +10775,16 @@ export class EditorialStore {
         stated.set(id, entry);
       });
     }
+    const claimLedger = this.#factualVerification.claims(runRecordId);
+    if (claimLedger !== null) {
+      relationsStated = true;
+      for (const claim of claimLedger.claims) {
+        const session = this.#factualVerification.claimSession(runRecordId, 'web-verification', claim.claimId);
+        const rounds = session === null ? [] : this.#factualVerification.claimVerifications(session.sessionId);
+        stated.set(`fnd_${claim.claimId.slice(0, 24)}`, { relations: rounds.flatMap((round) => round.evidenceRelations),
+          corrections: rounds.flatMap((round) => round.corrections).slice(0, 3) });
+      }
+    }
     const assurance = this.#factualVerification.runAssurance(runRecordId);
     // Local recovery reads the persisted revision's contract/plan pins; it needs no currently executable provider route.
     const contractLevel = this.#factualReview.definitionForDigest(revision.bindingPin.promptContractDigest).evidenceAssuranceLevel ?? null;
@@ -10693,6 +10809,9 @@ export class EditorialStore {
     }
     this.#transaction(this.#authority, () => this.#factualVerification.materialize({
       bookId, reviewRunId, runRecordId, taskIntentId, revisionId, manuscriptRevisionId, contractLevel,
+      ...(() => { const row = this.#authority.prepare('SELECT canonical_json FROM analysis_task_intents WHERE task_intent_id = ?').get(taskIntentId);
+        const decision = row === undefined ? undefined : (JSON.parse(String(row.canonical_json)) as { factualDecision?: import('./factual-verification.js').FactualRecheckSelection }).factualDecision;
+        return decision === undefined ? {} : { factualDecision: decision }; })(),
       plannedLevel: assurance?.plannedLevel ?? planEditAssuranceLevel(this.#frozenPlanEdits(taskIntentId, revision.provenance.planVersion ?? 1)), findings,
     }));
   }
@@ -10758,11 +10877,20 @@ export class EditorialStore {
   recordVerificationReviewDecision(input: RecordVerificationReviewDecisionInput): VerificationReviewDecisionRecordedProjection {
     return this.#verificationCall(() => {
       const { reader } = this.#resultBinding(input.bookId, input.resultId);
-      const recorded = this.#transaction(this.#authority, () => this.#factualVerification.recordDecision(input, reader));
+      const recorded = this.#transaction(this.#authority, () => {
+        const recorded = this.#factualVerification.recordDecision(input, reader);
+        if (input.excludedSourceRefs !== undefined) {
+          requireStore(input.disposition === 'request-evidence', 'FACTUAL_SOURCE_EXCLUSION_INVALID', '排除来源后请要求补充证据。');
+          this.#factualVerification.excludeClaimSources(input.bookId, input.resultId, recorded.decisionId, input.excludedSourceRefs, reader);
+        }
+        return recorded;
+      });
       const workspace = this.#factualVerification.workspace(input.bookId, input.resultId, null, reader);
       // 要求补充证据 (FREV-008): recorded with its range and level; a Book holds one 事实核查 Run until #905, so no Task is prepared.
       return { workspace, supplementary: recorded.requestedLevel === null ? null
-        : { blockId: workspace.result.blockId, level: recorded.requestedLevel, statement: SUPPLEMENTARY_CHECK_DEFERRED } };
+        : { blockId: workspace.result.blockId, level: recorded.requestedLevel,
+          ...(workspace.claimRecheckAvailable !== true ? { statement: SUPPLEMENTARY_CHECK_DEFERRED }
+            : { statement: '已记录补充核查要求；点「补充核查」准备计划，再批准运行。', decisionId: recorded.decisionId }) } };
     });
   }
 
@@ -19921,8 +20049,16 @@ export class EditorialStore {
     this.#assertAvailable();
     const deliverable = this.#reviewRuns.deliverableGuard(runRecordId, ledger.launch.live !== null);
     if (deliverable !== null) return deliverable;
-    const intent = this.#authority.prepare('SELECT t.task_intent_id, t.book_id FROM analysis_run_records r JOIN analysis_task_intents t ON t.task_intent_id = r.task_intent_id WHERE r.run_record_id = ?').get(runRecordId) as SqlRow | undefined;
+    const intent = this.#authority.prepare('SELECT t.task_intent_id, t.book_id, t.canonical_json FROM analysis_run_records r JOIN analysis_task_intents t ON t.task_intent_id = r.task_intent_id WHERE r.run_record_id = ?').get(runRecordId) as SqlRow | undefined;
     requireStore(intent !== undefined, 'ANALYSIS_RUN_INVALID', '运行记录不存在。');
+    const decision = (JSON.parse(asString(intent.canonical_json)) as { factualDecision?: import('./factual-verification.js').FactualRecheckSelection }).factualDecision;
+    if (decision !== undefined) {
+      try {
+        const { reader } = this.#resultBinding(decision.bookId, decision.resultId);
+        requireStore(canonicalJson(this.#factualVerification.recheckSelection(decision.bookId, decision.decisionId, reader)) === canonicalJson(decision),
+          'FACTUAL_DECISION_DRIFT', '补充核查的决定、断言或来源已变化。');
+      } catch { return { code: 'FACTUAL_DECISION_DRIFT', materialTitle: '核查决定', message: '补充核查的决定、断言或来源已变化；请重新准备并批准。' }; }
+    }
     const boundary = ledger.definition.kind === 'writing'
       ? this.#writingCall(() => this.#writingTasks.materialBoundary(asString(intent.task_intent_id), ledger.definition.promptContractDigest))
       : { bookId: asString(intent.book_id), references: ledger.definition.materialReferences?.sources ?? [] };
