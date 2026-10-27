@@ -188,9 +188,9 @@ export interface CrossUnitStep {
   readonly minimumClosedUnits: number;
   /** Why it did not run with fewer closed units than it needs. */
   readonly notEnoughReason: string;
-  buildMessage(closed: ReadonlyArray<ClosedUnitOutcome<unknown>>, totalUnits: number): string;
-  requestDigest(closed: ReadonlyArray<ClosedUnitOutcome<unknown>>): string;
-  parse(text: string, closed: ReadonlyArray<ClosedUnitOutcome<unknown>>): { ok: true; result: unknown } | { ok: false; code: string; detail: string };
+  buildMessage(closed: ReadonlyArray<ClosedUnitOutcome<unknown>>, totalUnits: number, context?: CrossUnitContext): string;
+  requestDigest(closed: ReadonlyArray<ClosedUnitOutcome<unknown>>, context?: CrossUnitContext): string;
+  parse(text: string, closed: ReadonlyArray<ClosedUnitOutcome<unknown>>, context?: CrossUnitContext): { ok: true; result: unknown } | { ok: false; code: string; detail: string };
   /**
    * The step's own reading of a parsed answer it refused (Issue #432 review): an answer that parsed and was turned away by the
    * kind's rule — never "no parsable result". `null` keeps the common reading.
@@ -201,6 +201,12 @@ export interface CrossUnitStep {
    * 已完成. A kind that declares nothing keeps its Run completed as before.
    */
   readonly requiredForCompletion?: boolean;
+}
+
+/** The already frozen Run input, used to prove cross-unit evidence against exact manuscript coordinates. */
+export interface CrossUnitContext {
+  readonly manifest: CoverageManifestProjection;
+  readonly blocks: ReadonlyMap<string, ManifestBlockInput>;
 }
 
 /**
@@ -246,6 +252,7 @@ export interface ResearchDeclaration {
 }
 
 export interface AnalysisKindDefinition {
+  readonly reviewCrossChapter?: { readonly baseline: import('../../shared/protocol.js').ReviewBaselineSource | null };
   readonly legacyReviewContract?: AnalysisKindDefinition;
   readonly contractIdentity?: import('../../shared/protocol.js').ReviewContractIdentity;
   readonly seriesScopes?: ReadonlyArray<import('../../shared/protocol.js').FrozenSeriesScope>;

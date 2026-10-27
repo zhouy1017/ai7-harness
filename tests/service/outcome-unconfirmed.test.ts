@@ -297,7 +297,7 @@ describe('结果待确认 a completed Run left (Issue #757)', () => {
   }, 300_000);
 
   it('keeps an out-of-scope review gap outcome-unknown across repeated chapter reviews (#765)', async () => {
-    const fixture = dropping(await loadModelFixture(FIXTURES_ROOT, 'sample1-review-authored'), (entry) => entry.unitOrdinal === 3);
+    const fixture = dropping(await loadModelFixture(FIXTURES_ROOT, 'sample1-review-cross-chapter-authored'), (entry) => entry.unitOrdinal === 3);
     const store = await open(fixture);
     const execution = ownerOf(store, fixture);
     const driver = new ReviewRunDriver(store.reviewRunDriveSteps, execution);
@@ -360,7 +360,7 @@ describe('结果待确认 a completed Run left (Issue #757)', () => {
   }, 300_000);
 
   it('lists a range a completed Review Run left 结果待确认, discloses its re-send, and keeps it as a gap on 保留为缺口', async () => {
-    const fixture = dropping(await loadModelFixture(FIXTURES_ROOT, 'sample1-review-authored'), (entry) => entry.unitOrdinal === 3);
+    const fixture = dropping(await loadModelFixture(FIXTURES_ROOT, 'sample1-review-cross-chapter-authored'), (entry) => entry.unitOrdinal === 3);
     const store = await open(fixture);
     const execution = ownerOf(store, fixture);
     const driver = new ReviewRunDriver(store.reviewRunDriveSteps, execution);

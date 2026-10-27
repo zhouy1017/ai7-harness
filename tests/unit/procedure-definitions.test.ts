@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { baselineAnalysisKindDefinition } from '../../src/service/analysis/kind-definition.js';
 import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
-import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, LOCAL_REVIEW_CATEGORY, LOCAL_REVIEW_CATEGORY_V2, reviewCategoryConfigurationDigest } from '../../src/service/review/category-configuration.js';
+import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, LOCAL_REVIEW_CATEGORY, LOCAL_REVIEW_CATEGORY_V2, reviewCategoryConfigurationDigest, reviewCategoryContractInput } from '../../src/service/review/category-configuration.js';
+import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
 import { allPreinstalledProcedureDefinitions, baselineProcedureDefinition, localCheckProcedureDefinition, localCheckProcedureDefinitionV2, localCheckProcedureDefinitionV3, preinstalledProcedureDefinitions } from '../../src/service/procedures/preinstalled.js';
 import { PROCEDURE_STAGE_LABELS, resolveProcedureStage } from '../../src/service/procedures/stage-types.js';
 import { PROCEDURE_STAGE_TYPES } from '../../src/shared/protocol/procedures.js';
@@ -9,6 +10,17 @@ import { renderProcedureLibrary } from '../../src/renderer/procedure-library.js'
 import { installMiniDom } from '../support/mini-dom.js';
 
 describe('pre-installed procedures v1', () => {
+  it('binds exact local grouping and one cross-chapter turn on both current review categories', () => {
+    for (const categoryId of ['style-and-format', 'plot-consistency']) {
+      const entry = BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.find((category) => category.categoryId === categoryId)!;
+      const kind = reviewCategoryKindDefinition(reviewCategoryContractInput(entry));
+      expect(resolveProcedureStage('cross-unit-reduction', kind)).toMatchObject({ state: 'available', executor: 'review-grouping' });
+      expect(resolveProcedureStage('cross-chapter-consistency', kind)).toMatchObject({ state: 'available', executor: 'cross-unit', binding: kind.crossUnit });
+      expect(preinstalledProcedureDefinitions().find((definition) => definition.id === `ai7-procedure/review-${categoryId}`)!.stages.map((stage) => stage.stageType))
+        .toEqual(['chunked-review', 'cross-unit-reduction', 'cross-chapter-consistency', 'synthesis', 'derived-report']);
+      expect(kind.crossUnit?.step).toMatchObject({ minimumClosedUnits: 1, requiredForCompletion: true });
+    }
+  });
   it('retains local@1 canonical bytes and the House predecessor beside the active table successor', () => {
     const legacy = '{"editorInstruction":"","id":"ai7-procedure/local-text-check","outputKinds":["annotation"],"role":"以五项有限规则生成供编辑复核的精确批注","schema":"ai7.procedure-definition/2","stages":[{"budgetShare":0,"exemptionRules":[],"inputs":["frozen-local-plan"],"outputTemplateId":"ai7.review.local-result/1","parallelism":1,"stageType":"deterministic-check","toolWhitelist":[],"web":false},{"budgetShare":0,"exemptionRules":[],"inputs":["review-findings"],"outputTemplateId":"ai7.review.report/1","parallelism":1,"stageType":"derived-report","toolWhitelist":[],"web":false}],"title":"本地文字检查","version":1}';
     expect(canonicalJson(localCheckProcedureDefinition())).toBe(legacy);
@@ -27,7 +39,7 @@ describe('pre-installed procedures v1', () => {
     const available = PROCEDURE_STAGE_TYPES.filter((type) => resolveProcedureStage(type, kind).state === 'available');
     expect(available).toEqual(['chunked-review', 'deterministic-check', 'cross-unit-reduction', 'synthesis', 'derived-report']);
     expect(PROCEDURE_STAGE_TYPES.map((type) => PROCEDURE_STAGE_LABELS[type])).toEqual([
-      '通读记账', '分块审读', '确定性检查', '断言抽取', '联网取证', '跨单元归并与跨章一致性', '综合', '起草', '派生报告',
+      '通读记账', '分块审读', '确定性检查', '断言抽取', '联网取证', '跨单元归并与跨章一致性', '跨章一致性', '综合', '起草', '派生报告',
     ]);
     for (const type of PROCEDURE_STAGE_TYPES.filter((type) => !available.includes(type))) {
       expect(resolveProcedureStage(type, kind)).toMatchObject({ state: 'unavailable', reason: expect.any(String) });

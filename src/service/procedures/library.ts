@@ -3,7 +3,7 @@ import type { PreinstalledProcedureProjection } from '../../shared/protocol/proc
 import { BASELINE_ANALYSIS_KIND } from '../../shared/protocol.js';
 import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION } from '../review/category-configuration.js';
 import { resolveProcedureDefinition } from './definition-store.js';
-import { BASELINE_PROCEDURE_ID, preinstalledProcedureDefinitions, reviewProcedureId } from './preinstalled.js';
+import { BASELINE_PROCEDURE_ID, allPreinstalledProcedureDefinitions, preinstalledProcedureDefinitions, reviewProcedureId } from './preinstalled.js';
 import { PROCEDURE_STAGE_LABELS } from './stage-types.js';
 import { LOCAL_CHECK_CATEGORY, LOCAL_CHECK_PROCEDURE } from '../review/deterministic/rules.js';
 
@@ -22,7 +22,7 @@ export function readPreinstalledProcedures(db: DatabaseSync, reviewRuns: Readonl
   return preinstalledProcedureDefinitions().map((definition) => {
     const { document, pin } = resolveProcedureDefinition(db, definition.id);
     return { ...pin, title: document.title, state: 'enabled' as const, uses: uses.get(document.id) ?? 0,
-      ...(pin.version === 1 ? {} : { previousVersions: preinstalledProcedureDefinitions(1).filter((previous) => previous.id === document.id).map((previous) => {
+      ...(pin.version === 1 ? {} : { previousVersions: allPreinstalledProcedureDefinitions().filter((previous) => previous.id === document.id && previous.version < document.version).map((previous) => {
         const retained = resolveProcedureDefinition(db, previous.id, previous.version);
         return { ...retained.pin, stages: retained.document.stages.map((stage) => ({ stageType: stage.stageType, label: PROCEDURE_STAGE_LABELS[stage.stageType] })) };
       }) }),

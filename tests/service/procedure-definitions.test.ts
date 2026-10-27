@@ -80,7 +80,7 @@ describe('Procedure Definition persistence and exact plan pins', () => {
     expect(db.prepare('PRAGMA user_version').get()!.user_version).toBe(95);
     const originalVersions = db.prepare("SELECT * FROM procedure_definition_versions WHERE version = 1 AND procedure_id <> 'ai7-procedure/local-text-check' ORDER BY version_id").all();
     // A genuine revision85 holds the historical ten definitions, before the new local identity exists.
-    db.exec("DROP TRIGGER procedure_definition_versions_no_delete; DROP TRIGGER procedure_definitions_no_delete; DELETE FROM procedure_definition_versions WHERE version = 2 OR procedure_id = 'ai7-procedure/local-text-check'; DELETE FROM procedure_definitions WHERE procedure_id = 'ai7-procedure/local-text-check'; PRAGMA user_version = 85;");
+    db.exec("DROP TRIGGER procedure_definition_versions_no_delete; DROP TRIGGER procedure_definitions_no_delete; DELETE FROM procedure_definition_versions WHERE version > 1 OR procedure_id = 'ai7-procedure/local-text-check'; DELETE FROM procedure_definitions WHERE procedure_id = 'ai7-procedure/local-text-check'; PRAGMA user_version = 85;");
     db.exec(PROCEDURE_DEFINITION_TRIGGER_SQL['procedure_definition_versions_no_delete']!);
     db.exec(PROCEDURE_DEFINITION_TRIGGER_SQL['procedure_definitions_no_delete']!);
     db.close();

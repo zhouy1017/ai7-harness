@@ -2,9 +2,10 @@ import { createHash, randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { deriveCoverageManifest, UNIT_BUDGET_GRAPHEMES, type ManifestBlockInput } from '../../src/service/analysis/coverage-manifest.js';
 import { OUT_OF_SCOPE_GAP_REASON } from '../../src/service/analysis/reuse-plan.js';
-import { REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, parseReviewCategoryUnitResult, type ReviewUnitFinding } from '../../src/service/review/review-category-contract.js';
+import { REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, REVIEW_CROSS_CHAPTER_RESULT_SCHEMA, parseReviewCategoryUnitResult, parseReviewCrossChapterResult, reviewCrossChapterRequestDigest, type ReviewUnitFinding } from '../../src/service/review/review-category-contract.js';
 import { graphemeCount, locateQuotation, sliceGraphemes } from '../../src/service/analysis/factual-review-contract.js';
-import { reduceReviewCategory, type ReviewUnitOutcome } from '../../src/service/review/review-category-reducers.js';
+import { applyReviewCrossChapter, reduceReviewCategory, reviewCrossChapterInput, type ReviewUnitOutcome } from '../../src/service/review/review-category-reducers.js';
+import type { ReviewBaselineSource } from '../../src/shared/protocol.js';
 import { markRetrievalResult, prepareRetrievalResult } from '../../src/service/retrieval/result-validator.js';
 
 // A review category's reduction over a synthetic manifest (Issue #417): Reference Integrity anchors
@@ -37,6 +38,62 @@ const byId = new Map(blocks.map((entry) => [entry.blockId, entry] as const));
 const manifest = deriveCoverageManifest({
   bookId: randomUUID(), manuscriptId: randomUUID(), branchId: randomUUID(), revisionId: randomUUID(),
   revisionLabel: 'r1', revisionDigest: 'e'.repeat(64), blocks,
+});
+
+function synthesisFixture() {
+  const quoted = blocks[4]!;
+  const localManifest = { ...manifest, units: manifest.units.map((unit) => unit.ordinal === 2 ? { ...unit, overlapBlockIds: [quoted.blockId] } : unit) };
+  const outcomes: ReviewUnitOutcome[] = [1, 2].map((ordinal) => ({ state: 'closed', unitOrdinal: ordinal,
+    result: { schema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, unitOrdinal: ordinal,
+      findings: [{ blockOrdinal: ordinal === 1 ? 5 : 1, quote: '2024', severity: 'should', note: '年份写法需统一。' }] } }));
+  const baseline: ReviewBaselineSource = { resultSetId: 'baseline-set', revisionId: 'baseline-revision', digest: 'a'.repeat(64),
+    manuscriptPin: manifest.manuscript, omitted: 0,
+    leads: [{ ref: 'baseline-1', kind: 'timeline', text: '合成时间线线索。', ranges: [{ blockId: quoted.blockId, fromGrapheme: 6, toGrapheme: 10 }] }] };
+  const input = { categoryId: 'style-and-format', manifest: localManifest, outcomes, blocks: byId, exactOccurrences: true };
+  return { input, baseline, payload: reviewCrossChapterInput(input, baseline, 'c'.repeat(64)) };
+}
+
+describe('bounded review cross-chapter synthesis', () => {
+  it('groups one exact occurrence while preserving both original unit references and source pins', () => {
+    const { payload, baseline } = synthesisFixture();
+    expect(payload.findings).toHaveLength(1);
+    expect(payload.findings[0]!.unitFindingRefs?.map((ref) => ref.unitOrdinal)).toEqual([1, 2]);
+    expect(payload.findings[0]!.unitFindingRefs?.every((ref) => /^[0-9a-f]{64}$/u.test(ref.resultDigest))).toBe(true);
+    expect(payload.baseline).toEqual(baseline);
+    expect(payload.evidence[0]!.quote).toBe('2024');
+    expect(reviewCrossChapterRequestDigest(payload)).not.toBe(reviewCrossChapterRequestDigest({ ...payload, baseline: { ...baseline, revisionId: 'later' } }));
+  });
+
+  it('keeps a grounded card and excludes an invented evidence reference without losing its sibling', () => {
+    const { input, baseline } = synthesisFixture();
+    const payload = reviewCrossChapterInput(input, { ...baseline, leads: [...baseline.leads, { ref: 'baseline-2', kind: 'timeline',
+      text: '另一处合成线索。', ranges: [{ blockId: blocks[1]!.blockId, fromGrapheme: 0, toGrapheme: 2 }] }] }, 'c'.repeat(64));
+    const entry = { anchorRef: 'e1', evidenceRefs: ['e1'], severity: 'should', note: '跨章年份写法不一致，请核对。', clauseId: 'style-and-format/2' };
+    const parsed = parseReviewCrossChapterResult(JSON.stringify({ schema: REVIEW_CROSS_CHAPTER_RESULT_SCHEMA,
+      findings: [{ ...entry, evidenceRefs: ['e1', 'e2'] }, entry, { ...entry, anchorRef: 'invented', evidenceRefs: ['invented'] }] }), payload, ['style-and-format/2']);
+    expect(parsed.ok).toBe(true); if (!parsed.ok) return;
+    const reduced = applyReviewCrossChapter(reduceReviewCategory(input), { state: 'closed', findings: [], usage: null,
+      requestDigest: reviewCrossChapterRequestDigest(payload), result: parsed.result }, input.categoryId);
+    expect(reduced.findings).toHaveLength(1);
+    expect(reduced.findings[0]).toMatchObject({ sourceRange: payload.evidence[0]!.sourceRange, quote: '2024', note: entry.note });
+    expect(reduced.findings[0]!.unitFindingRefs).toHaveLength(2);
+    expect(reduced.findings[0]!.crossChapter?.baseline?.revisionId).toBe('baseline-revision');
+    expect(reduced.findings[0]!.crossChapter?.evidence.map((evidence) => evidence.ref)).toEqual(['e1', 'e2']);
+    expect(reduced.excluded).toHaveLength(1);
+    expect(reduced.excluded[0]!.rawText).toContain('invented');
+    expect(reduced.reducerClosure.state).toBe('closed-with-gaps');
+  });
+
+  it('withholds stale and out-of-scope baseline words from the model input', () => {
+    const { input, baseline } = synthesisFixture();
+    const stale = reviewCrossChapterInput(input, { ...baseline, manuscriptPin: { ...baseline.manuscriptPin, revisionDigest: 'b'.repeat(64) } }, 'c'.repeat(64));
+    expect(stale.baseline?.leads).toEqual([]);
+    expect(stale.omitted.baselineLeads).toBe(1);
+    const narrow = reviewCrossChapterInput({ ...input, outcomes: [input.outcomes[0]!] }, { ...baseline,
+      leads: [{ ...baseline.leads[0]!, ranges: [...baseline.leads[0]!.ranges, { blockId: blocks[6]!.blockId, fromGrapheme: 0, toGrapheme: 2 }] }] }, 'c'.repeat(64));
+    expect(narrow.baseline?.leads).toEqual([]);
+    expect(JSON.stringify(narrow)).not.toContain('合成时间线线索');
+  });
 });
 
 const located: ReviewUnitFinding = { quote: '人来人往', blockOrdinal: 2, severity: 'should', note: '合成的说明。', replacement: '熙熙攘攘', clauseId: 'typos-and-usage/1' };

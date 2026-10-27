@@ -553,7 +553,7 @@ describe('联网后开始任务 of AI7 初评, 审稿意见 and 按我的评分�
 
 describe('联网后开始任务 of a Review Run (Issue #760, S74c)', () => {
   it('approves once and waits; nothing drives it but Reconnect Preflight, which starts it once online, and it reviews as it would have', async () => {
-    await withSession('sample1-review-authored', async (session) => {
+    await withSession('sample1-review-cross-chapter-authored', async (session) => {
       const { store, driver } = session;
       const bookId = await sample1Book(store, '审阅联网后开始');
       const prepared = prepareReview(store, bookId);
@@ -594,7 +594,7 @@ describe('联网后开始任务 of a Review Run (Issue #760, S74c)', () => {
   it('survives a restart waiting, is cancelled directly, and is blocked 需要重新确认计划 when its plans moved while it waited', async () => {
     let bookId = '';
     let waitingRunId = '';
-    await withSession('sample1-review-authored', async (session) => {
+    await withSession('sample1-review-cross-chapter-authored', async (session) => {
       const { store } = session;
       bookId = await sample1Book(store, '审阅取消与变化');
       const prepared = prepareReview(store, bookId);
@@ -602,7 +602,7 @@ describe('联网后开始任务 of a Review Run (Issue #760, S74c)', () => {
       const planDigests = (await planOf(store, bookId, 'review-run', waitingRunId, 'offline')).start.categoryDigests;
       store.startTaskWhenOnline({ bookId, kind: 'review-run', ref: waitingRunId, planEnvelopeDigest: null, planDigests });
     });
-    await withSession('sample1-review-authored', async (session) => {
+    await withSession('sample1-review-cross-chapter-authored', async (session) => {
       const { store, driver } = session;
       // AI7 closed and opened again (OFF-013): it still waits, untouched by the startup reconciliation.
       expect(store.inspectReviewWorkspace(bookId, waitingRunId).run!.state).toBe('waiting');

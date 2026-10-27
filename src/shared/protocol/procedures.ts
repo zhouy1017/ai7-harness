@@ -2,7 +2,7 @@
 export const PROCEDURE_DEFINITION_SCHEMA = 'ai7.procedure-definition/2' as const;
 export const PROCEDURE_STAGE_TYPES = [
   'read-through-ledger', 'chunked-review', 'deterministic-check', 'claim-extraction', 'web-verification',
-  'cross-unit-reduction', 'synthesis', 'drafting', 'derived-report',
+  'cross-unit-reduction', 'cross-chapter-consistency', 'synthesis', 'drafting', 'derived-report',
 ] as const;
 export type ProcedureStageType = (typeof PROCEDURE_STAGE_TYPES)[number];
 

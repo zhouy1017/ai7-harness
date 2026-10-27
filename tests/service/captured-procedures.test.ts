@@ -1,7 +1,7 @@
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
-import { parseReviewCategoryUnitMessageHeader } from '../../src/service/review/review-category-contract.js';
+import { parseReviewCategoryUnitMessageHeader, parseReviewCrossChapterMessage, REVIEW_CROSS_CHAPTER_RESULT_SCHEMA } from '../../src/service/review/review-category-contract.js';
 import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/assurance-sampling-contract.js';
 import { dirname, join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -16,7 +16,6 @@ import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-poli
 import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
 import type { BaselineAnalysisStore } from '../../src/service/analysis/baseline-analysis-store.js';
 import { ReviewRunDriver, type ReviewRunExecutionOwner } from '../../src/service/review/review-run-driver.js';
-import { LEADS_ABSENT_REASON } from '../../src/service/review/review-scope.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { BASELINE_ANALYSIS_TASK_GOAL, MAX_FRAME_BYTES, type LaunchPolicyProjection, type ReviewRunProjection, type ReviewRunScopeRequest } from '../../src/shared/protocol.js';
@@ -90,7 +89,7 @@ class RefusingFirstDispatch implements ReviewRunExecutionOwner {
 }
 
 async function open(wrap?: (inner: BaselineAnalysisExecutionOwner) => ReviewRunExecutionOwner, dataRoot: string = roots.dataRoot): Promise<Session> {
-  const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-authored');
+  const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-cross-chapter-authored');
   const store = await EditorialStore.open(dataRoot, roots.codeRoot, {
     induceUnprovableReconciliation: false,
     persistLegacyReviewedDraft: false,
@@ -182,7 +181,7 @@ describe('可复用工序 over the real store (ADR 0087)', () => {
       const capture = store.inspectProcedureCapture(source, finished.reviewRunId);
       expect(capture).toMatchObject({ available: true, runLabel: '第 1 次审阅', scopeSlot: 'whole', sourceScopeLabel: '全书', procedures: [] });
       expect(capture.steps.map((step) => [step.categoryId, step.eligible, step.model, step.output])).toEqual([
-        [STYLE, true, true, 'annotation'], [PLOT, true, false, 'annotation'], [LITERARY, true, true, 'change-suggestion'],
+        [STYLE, true, true, 'annotation'], [PLOT, true, true, 'annotation'], [LITERARY, true, true, 'change-suggestion'],
       ]);
       expect(capture.classification).toEqual({
         recommended: 'captured-procedure',
@@ -213,7 +212,7 @@ describe('可复用工序 over the real store (ADR 0087)', () => {
         expect(document).toMatchObject({
           schema: 'ai7.captured-procedure/1', title: '线索与体例复核', runAs: 'review-run', parameters: { scope: 'whole' },
           authorityCeiling: { runSourceScope: 'current-book', outputs: ['annotation'], model: true, searchEngine: false,
-            steps: [{ categoryId: STYLE, executor: 'review-category-contract' }, { categoryId: PLOT, executor: 'baseline-leads' }] },
+            steps: [{ categoryId: STYLE, executor: 'review-category-contract' }, { categoryId: PLOT, executor: 'review-category-contract' }] },
         });
         for (const forbidden of [source, finished.reviewRunId, 'L2 来源书', finished.manuscript.revisionId, 'clauses', 'guideline']) {
           expect(row.document_json.includes(forbidden)).toBe(false);
@@ -242,7 +241,7 @@ describe('可复用工序 over the real store (ADR 0087)', () => {
       expect(run.resolved).toMatchObject({ versionId: first!.versionId, version: 1, scopeSlot: 'whole', guidelineChanges: [] });
       expect(run.resolved!.steps).toEqual([
         { categoryId: STYLE, label: '体例与格式', available: true, unavailableReason: null, chosenApart: false },
-        { categoryId: PLOT, label: '情节逻辑与前后一致', available: false, unavailableReason: LEADS_ABSENT_REASON, chosenApart: false },
+        { categoryId: PLOT, label: '情节逻辑与前后一致', available: true, unavailableReason: null, chosenApart: false },
       ]);
       const pin = { versionId: run.resolved!.versionId, documentSha256: run.resolved!.documentSha256 };
       // Nothing beyond its steps, never a step the Book could take dropped, and the scope its slot says.
@@ -257,22 +256,22 @@ describe('可复用工序 over the real store (ADR 0087)', () => {
       expect(store.inspectCapturedProcedureApplicability(target)).toEqual({
         bookId: target, truncated: false,
         procedures: [{
-          procedureId: saved.procedureId, title: '线索与体例复核', latestEligible: { versionId: first!.versionId, version: 1 }, fit: 'partial',
-          stepCount: 2, availableCount: 1, chosenApart: [], chosenApartSteps: [], leftOut: [{ label: '情节逻辑与前后一致', reason: LEADS_ABSENT_REASON }],
+          procedureId: saved.procedureId, title: '线索与体例复核', latestEligible: { versionId: first!.versionId, version: 1 }, fit: 'all',
+          stepCount: 2, availableCount: 2, chosenApart: [], chosenApartSteps: [], leftOut: [],
         }],
       });
       expect(store.inspectCapturedProcedureApplicability(source).procedures).toEqual([expect.objectContaining({ fit: 'all', stepCount: 2, availableCount: 2, leftOut: [] })]);
       expect(refusal(() => store.inspectCapturedProcedureApplicability('book'))).toBe('BOOK_INVALID');
-      expect(first!.steps.map((step) => step.requirement)).toEqual([null, 'baseline-analysis']);
-      const pinned = prepare(session, target, [STYLE], WHOLE, pin);
+      expect(first!.steps.map((step) => step.requirement)).toEqual([null, null]);
+      const pinned = prepare(session, target, [STYLE, PLOT], WHOLE, pin);
       expect(pinned.procedure).toEqual({
         procedureId: saved.procedureId, versionId: first!.versionId, version: 1, title: '线索与体例复核', documentSha256: pin.documentSha256, stopped: false, missing: false,
-        leftOut: [{ categoryId: PLOT, label: '情节逻辑与前后一致', reason: LEADS_ABSENT_REASON, byChoice: false }],
+        leftOut: [],
       });
       // The ordinary path: its plan, the one approval, the drive.
       const ran = await authorizeAndDrive(session, target, pinned);
       expect(ran.state).toBe('settled');
-      expect(ran.categories.map((category) => category.categoryId)).toEqual([STYLE]);
+      expect(ran.categories.map((category) => category.categoryId)).toEqual([STYLE, PLOT]);
 
       // A next version from a new capture is chained to the first by its digest, and waits for its own validation.
       const second = store.saveCapturedProcedure({ bookId: source, reviewRunId: finished.reviewRunId, categoryIds: [STYLE, LITERARY], scopeSlot: 'chapters', title: '体例与表达复核', procedureId: saved.procedureId });
@@ -285,7 +284,7 @@ describe('可复用工序 over the real store (ADR 0087)', () => {
       expect(store.inspectCapturedProcedure(saved.procedureId, null).versions[1]).toMatchObject({ runCount: 1, runs: [{ bookId: target, bookTitle: 'L2 第二本书', label: '第 1 次' }] });
 
       // A Run prepared from version 1 and not yet authorized when version 1 is stopped is prepared again, never authorized.
-      const waiting = prepare(session, target, [STYLE], WHOLE, pin);
+      const waiting = prepare(session, target, [STYLE, PLOT], WHOLE, pin);
       const stopped = store.stopCapturedProcedure(saved.procedureId, first!.versionId, store.previewCapturedProcedureStop(saved.procedureId, first!.versionId).previewDigest);
       expect(stopped.versions.map((version) => [version.version, version.state])).toEqual([[2, 'pending-validation'], [1, 'stopped']]);
       expect(stopped.runnable).toBe(false);
@@ -377,7 +376,7 @@ describe('可复用工序 over the real store (ADR 0087)', () => {
       try {
         db.exec('DROP TRIGGER captured_procedure_versions_no_update');
         const row = db.prepare('SELECT document_json FROM captured_procedure_versions WHERE version_id = ?').get(versionId) as { document_json: string };
-        const altered = row.document_json.replace('"procedureId":"ai7-review-procedure/style-and-format","version":"1"', '"procedureId":"ai7-review-procedure/style-and-format","version":"9"');
+        const altered = row.document_json.replace('"procedureId":"ai7-review-procedure/style-and-format","version":"2"', '"procedureId":"ai7-review-procedure/style-and-format","version":"9"');
         expect(altered).not.toBe(row.document_json);
         const { createHash } = await import('node:crypto');
         db.prepare('UPDATE captured_procedure_versions SET document_json = ?, document_sha256 = ? WHERE version_id = ?')
@@ -849,7 +848,8 @@ async function openLayered(): Promise<Session> {
       : request.stage === 'assurance-sampling'
         ? { schema: 'ai7.analysis.assurance-sampling-result/1', dispositions: parseAssuranceSamplingListedRefs(message)
           .map((ref) => ({ ref, disposition: '成立', reason: '合成回归抽样。' })) }
-        : request.stage === 'run-report-reflection' ? { schema: 'ai7.analysis.run-report-reflection-result/1', items: [] } : null;
+        : request.stage === 'cross-unit-reduction' && parseReviewCrossChapterMessage(message) !== null ? { schema: REVIEW_CROSS_CHAPTER_RESULT_SCHEMA, findings: [] }
+          : request.stage === 'run-report-reflection' ? { schema: 'ai7.analysis.run-report-reflection-result/1', items: [] } : null;
     return content === null ? undefined : { kind: 'unit-result', text: JSON.stringify(content), usage: { inputTokens: 10, outputTokens: 5 } };
   }, { seriesScopeGuard: (id) => store.seriesScopeGuard(id) });
   launchPolicy = capture.policy;
@@ -937,7 +937,7 @@ describe('a procedure whose enabled versions no longer run (Issue #66, S31b revi
         db.exec('DROP TRIGGER captured_procedure_versions_no_update');
         const row = db.prepare('SELECT document_json, document_sha256, canonical_json FROM captured_procedure_versions WHERE version_id = ?').get(versionId) as
           { document_json: string; document_sha256: string; canonical_json: string };
-        const document = row.document_json.replace('"procedureId":"ai7-review-procedure/style-and-format","version":"1"', '"procedureId":"ai7-review-procedure/style-and-format","version":"9"');
+        const document = row.document_json.replace('"procedureId":"ai7-review-procedure/style-and-format","version":"2"', '"procedureId":"ai7-review-procedure/style-and-format","version":"9"');
         expect(document).not.toBe(row.document_json);
         const documentSha256 = sha256Hex(document);
         const record = row.canonical_json.replace(row.document_sha256, documentSha256);

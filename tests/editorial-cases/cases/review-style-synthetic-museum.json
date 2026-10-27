@@ -14,7 +14,7 @@
     ],
     "scope": "whole"
   },
-  "fixture": "synthetic-editorial-review-authored",
+  "fixture": "synthetic-editorial-review-cross-chapter-authored",
   "measuredPass": null,
   "replay": {
     "route": "deterministic"

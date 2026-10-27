@@ -95,7 +95,7 @@ afterEach(async () => {
 });
 
 async function openStore(): Promise<{ store: EditorialStore; owner: BaselineAnalysisExecutionOwner; driver: ReviewRunDriver }> {
-  const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-authored');
+  const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-cross-chapter-authored');
   const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
     induceUnprovableReconciliation: false,
     persistLegacyReviewedDraft: false,
@@ -244,8 +244,8 @@ describe('知识库 › 审阅规范文件 over the real store', () => {
         ['表达改进条款', 1, 'AI7 内置默认'],
       ]);
       expect(typosDocument(fresh).appliedBy).toEqual([{ categoryId: TYPOS, label: '错别字与规范用语' }]);
-      // 线索条款 and 事实核查契约 are AI7's fixed statements: their categories read no clause of theirs.
-      expect(fresh.documents.map((document) => document.use)).toEqual(['clauses', 'clauses', 'leads', 'factual-kind', 'clauses', 'clauses', 'clauses']);
+      // Current plot-consistency reads clauses; factual review retains its fixed contract.
+      expect(fresh.documents.map((document) => document.use)).toEqual(['clauses', 'clauses', 'clauses', 'factual-kind', 'clauses', 'clauses', 'clauses']);
       expect(typosDocument(fresh).clauses.map((clause) => [clause.clauseId, clause.citations])).toEqual([
         ['typos-and-usage/1', 0], ['typos-and-usage/2', 0], ['typos-and-usage/3', 0], ['typos-and-usage/4', 0],
       ]);
@@ -255,7 +255,7 @@ describe('知识库 › 审阅规范文件 over the real store', () => {
       // Book-dependent availability stays on the ordinary task sheet (跨交付物一致性 runs for a Book with deliverables, #813).
       const freshProcedures = await store.inspectKnowledgeProcedures();
       expect(freshProcedures.preinstalled.map((procedure) => [procedure.title, procedure.state, procedure.uses])).toEqual([
-        ['错别字与规范用语审阅工序', 'enabled', 0], ['体例与格式审阅工序', 'enabled', 0], ['线索转批注', 'enabled', 0], ['断言列举与引文定位', 'enabled', 0],
+        ['错别字与规范用语审阅工序', 'enabled', 0], ['体例与格式与跨章一致性', 'enabled', 0], ['情节逻辑与前后一致与跨章一致性', 'enabled', 0], ['断言列举与引文定位', 'enabled', 0],
         ['引用风险点标注', 'enabled', 0], ['出版风险点标注', 'enabled', 0], ['文学性与表达改进工序', 'enabled', 0],
         ['书系一致性检查', 'enabled', 0], ['跨交付物一致性检查', 'enabled', 0], ['基线分析', 'enabled', 0], ['确定性检查', 'enabled', 0],
       ]);
@@ -386,7 +386,7 @@ describe('知识库 › 审阅规范文件 over the real store', () => {
       expect(await refusal(() => store.previewReviewGuidelineVersion('ai7-builtin/factual-review', file('fact.txt', '1. 本社核查。'))))
         .toBe('REVIEW_GUIDELINE_FIXED:《事实核查契约》是 AI7 的固定说明，不能导入新版本。');
       expect(await refusal(() => store.previewReviewGuidelineVersion('ai7-builtin/plot-consistency', file('plot.txt', '1. 本社线索。'))))
-        .toBe('REVIEW_GUIDELINE_FIXED:《线索条款》是 AI7 的固定说明，不能导入新版本。');
+        .toBe('no-error');
 
       const refused = async (name: string, content: string | Uint8Array) => refusal(() => store.previewReviewGuidelineVersion(TYPOS_DOCUMENT, file(name, content)));
       expect(await refused('none.txt', '这里没有编号。\n也没有条款。'))

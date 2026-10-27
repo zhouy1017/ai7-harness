@@ -189,7 +189,7 @@ describe('the 任务 panel over the real store on exact sample1', () => {
   }, 300_000);
 
   it('lists a 审阅 prepared and not started in 等你处理, and once on the manuscript in 最近完成 with its Run as the result', async () => {
-    const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-authored');
+    const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-cross-chapter-authored');
     const store = await open(fixture);
     const owner = ownerOf(store, fixture);
     const read = (bookId: string): BookTasksProjection => store.inspectBookTasks(bookId, (runRecordId) => owner.progressFor(runRecordId));

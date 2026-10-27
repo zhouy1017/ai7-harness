@@ -14,7 +14,7 @@ import { prepareGlobalAgentDisclosure, startGlobalAgentTurn } from '../../src/se
 import { FastRoleExecutionOwner, productionFastRoleRoutes, testModelServiceConnection } from '../../src/service/fast-role/fast-role-execution.js';
 import { materialTranslator, MATERIAL_TRANSLATION_RESULT_SCHEMA } from '../../src/service/fast-role/material-translation-contract.js';
 import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy, resolveSourceCheckoutLaunchPolicySync } from '../../src/service/launch-policy.js';
-import { parseReviewCategoryUnitMessageHeader, reviewCategoryContract, reviewCategoryContractDigest } from '../../src/service/review/review-category-contract.js';
+import { parseReviewCategoryUnitMessageHeader, parseReviewCrossChapterMessage, REVIEW_CROSS_CHAPTER_RESULT_SCHEMA, reviewCategoryContract, reviewCategoryContractDigest } from '../../src/service/review/review-category-contract.js';
 import { parseFactualReviewUnitMessageHeader } from '../../src/service/analysis/factual-review-contract.js';
 import { CredentialBroker } from '../../src/service/provider/credential-broker.js';
 import { modelRequestNotSent } from '../../src/service/provider/deepseek-adapter.js';
@@ -23,7 +23,7 @@ import { reviewCategoryEntry, reviewCategoryContractInput } from '../../src/serv
 import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
 import { HouseReviewPreferenceLedger } from '../../src/service/house-review-preference.js';
 import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/assurance-sampling-contract.js';
-import type { LaunchPolicyProjection } from '../../src/shared/protocol.js';
+import type { LaunchPolicyProjection, ReviewCrossChapterInput } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2 } from '../support/sample1-baseline.js';
 import { sample1DerivedLibraryItem } from '../editorial-cases/runner/run-setups.js';
@@ -58,6 +58,7 @@ interface ReviewRequest { readonly category: string; readonly ordinal: number; r
 
 interface ProductionReviewControl {
   readonly transportEntry?: (request: RequestInit) => void;
+  readonly synthesis?: (input: ReviewCrossChapterInput) => unknown;
   readonly series?: boolean;
   readonly ready?: (application: { store: EditorialStore; owner: BaselineAnalysisExecutionOwner; bookId: string; reviewRunId: string; policy: LaunchPolicyProjection; transport: typeof fetch }) => void;
   readonly response?: (response: Response, signal: AbortSignal | undefined, body: string) => Promise<Response>;
@@ -168,6 +169,7 @@ async function productionReview(
     const body = JSON.parse(String(init?.body)) as { messages: Array<{ role: string; content: string }>; tools?: Array<{ function: { name: string } }> };
     const message = body.messages.findLast((entry) => entry.role === 'user')!.content;
     const header = parseReviewCategoryUnitMessageHeader(message);
+    const crossChapter = parseReviewCrossChapterMessage(message);
     let content: string;
     if (header !== null) {
       const prior = requests.filter((entry) => entry.category === header.categoryId && entry.ordinal === header.ordinal).length;
@@ -201,11 +203,14 @@ async function productionReview(
         content = JSON.stringify({ schema: 'ai7.editorial-review.unit-result/2', unitOrdinal: header.ordinal,
           findings: shape === 'repeated' && header.ordinal === 1 ? bounded.slice(0, 4).map((entry) => ({ quote: entry.text,
             blockOrdinal: entry.ordinal, severity: 'should', note: '合成同类修改建议。', replacement: `${entry.text}合成` }))
-            : header.ordinal === 1 && block !== undefined && header.categoryId !== 'academic-integrity' && (header.categoryId === 'publication-risk' || body.messages.some((entry) => entry.role === 'tool'))
+            : header.ordinal === 1 && block !== undefined && header.categoryId !== 'academic-integrity' && (['publication-risk', 'style-and-format', 'plot-consistency'].includes(header.categoryId) || body.messages.some((entry) => entry.role === 'tool'))
             ? [{ quote: block.text, blockOrdinal: block.ordinal, severity: 'should', note: '合成审阅发现；请人工复核。',
-              ...(header.categoryId === 'publication-risk' ? { clauseId: 'publication-risk/1' } : { replacement: `${block.text}合成` }) }] : [],
+              ...(['publication-risk', 'style-and-format', 'plot-consistency'].includes(header.categoryId) ? { clauseId: `${header.categoryId}/1` } : { replacement: `${block.text}合成` }) }] : [],
         });
       }
+    } else if (crossChapter !== null) {
+      requests.push({ category: crossChapter.categoryId, ordinal: 0, body: String(init?.body), tools: body.tools?.map((tool) => tool.function.name) ?? [], sentAt: Date.now() });
+      content = JSON.stringify(control.synthesis?.(crossChapter) ?? { schema: REVIEW_CROSS_CHAPTER_RESULT_SCHEMA, findings: [] });
     } else if (message.startsWith('保证抽样 ')) content = JSON.stringify({ schema: 'ai7.analysis.assurance-sampling-result/1',
       dispositions: parseAssuranceSamplingListedRefs(message).map((ref) => ({ ref, disposition: '成立', reason: '合成回归抽样。' })) });
     else content = JSON.stringify({ schema: 'ai7.analysis.run-report-reflection-result/1', items: [] });
@@ -246,6 +251,53 @@ async function productionReview(
 }
 
 const typosDefinition = () => reviewCategoryKindDefinition(reviewCategoryContractInput(reviewCategoryEntry('typos-and-usage')!));
+
+it.each(['style-and-format', 'plot-consistency'])('runs one bounded %s synthesis and materializes its exact anchored card', async (category) => {
+  let evidence: ReviewCrossChapterInput['evidence'][number] | undefined;
+  const result = await productionReview([category], () => 'valid', undefined, false, false, { synthesis: (input) => {
+    evidence = input.evidence[0];
+    expect(evidence).toBeDefined();
+    expect(input.findings[0]!.unitFindingRefs).toHaveLength(1);
+    return { schema: REVIEW_CROSS_CHAPTER_RESULT_SCHEMA, findings: [{ anchorRef: evidence!.ref, evidenceRefs: [evidence!.ref],
+      severity: 'should', note: '合成跨章一致性发现，待编辑核对。', clauseId: `${category}/1` }] };
+  } });
+  expect(result.requests.filter((request) => request.ordinal === 0)).toHaveLength(1);
+  const definition = reviewCategoryKindDefinition(reviewCategoryContractInput(reviewCategoryEntry(category)!));
+  const settled = result.store.inspectReviewCategory(result.bookId, definition);
+  expect(settled.taskOutcome?.classification).toBe('completed');
+  expect(settled.resultSetRevision?.findings).toHaveLength(1);
+  expect(settled.resultSetRevision!.findings[0]).toMatchObject({ sourceRange: evidence!.sourceRange, quote: evidence!.quote,
+    note: '合成跨章一致性发现，待编辑核对。', crossChapter: { evidence: [evidence!] } });
+  expect(settled.taskOutcome!.report!.usagePerStage['cross-unit-reduction'].requests).toBe(1);
+});
+
+it('keeps unit cards and a disclosed synthesis gap when the selected rule does not grant the extra turn', async () => {
+  const result = await productionReview(['style-and-format'], () => 'valid', (policy) => ({ ...policy,
+    providerProcessing: { ...policy.providerProcessing, admittedRules: policy.providerProcessing.admittedRules?.map((rule) => ({ ...rule, plusOneCrossUnitSynthesisTurn: false })) } }));
+  expect(result.requests.filter((request) => request.ordinal === 0)).toHaveLength(0);
+  const definition = reviewCategoryKindDefinition(reviewCategoryContractInput(reviewCategoryEntry('style-and-format')!));
+  const settled = result.store.inspectReviewCategory(result.bookId, definition);
+  expect(settled.taskOutcome?.classification).toBe('completed-with-gaps');
+  expect(settled.resultSetRevision?.findings).toHaveLength(1);
+  expect(settled.resultSetRevision?.reducerClosure.stages.find((stage) => stage.stage === 'cross-chapter-consistency')?.state).toBe('closed-with-gaps');
+  expect(settled.taskOutcome!.report!.usagePerStage['cross-unit-reduction'].requests).toBe(0);
+});
+
+it('retains unit evidence when synthesis asks for a tool and sends no second synthesis request', async () => {
+  const result = await productionReview(['style-and-format'], () => 'valid', undefined, false, false, { response: async (response, _signal, body) => {
+    const request = JSON.parse(body) as { messages: Array<{ role: string; content: string }> };
+    const input = parseReviewCrossChapterMessage(request.messages.findLast((entry) => entry.role === 'user')!.content);
+    if (input === null) return response;
+    return new Response(JSON.stringify({ model: ORDINARY_PRODUCTION_ALLOWED_BINDINGS[0].model, choices: [{ message: { content: null, tool_calls: [
+      { id: 'synthesis-read', type: 'function', function: { name: 'read_blocks', arguments: JSON.stringify({ blockId: input.evidence[0]!.sourceRange.blockId, radius: 0 }) } },
+    ] }, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 40, completion_tokens: 20 } }), { status: 200 });
+  } });
+  expect(result.requests.filter((request) => request.ordinal === 0)).toHaveLength(1);
+  const settled = result.store.inspectReviewCategory(result.bookId, reviewCategoryKindDefinition(reviewCategoryContractInput(reviewCategoryEntry('style-and-format')!)));
+  expect(settled.resultSetRevision?.findings).toHaveLength(1);
+  expect(settled.resultSetRevision?.crossChapterSynthesis?.state).toBe('gap');
+  expect(settled.taskOutcome?.classification).toBe('completed-with-gaps');
+});
 
 it('proves current academic Series preparation and exact initial and retained consistency source pins (#1131 rev21)', async () => {
   const result = await productionReview(['academic-integrity'], () => 'valid', undefined, false, false, { series: true });
@@ -370,7 +422,7 @@ it('owns three isolated production units through body cleanup and joins out-of-o
   const checkpoints = ledger.unitCheckpoints(runRecordId);
   expect(checkpoints.map((checkpoint) => checkpoint.unit.unitOrdinal)).toEqual([...checkpoints].map((checkpoint) => checkpoint.unit.unitOrdinal).sort((left, right) => left - right));
   expect(checkpoints.length).toBeGreaterThan(3);
-  expect(result.requests.map((request) => request.ordinal).sort((left, right) => left - right)).toEqual(checkpoints.map((checkpoint) => checkpoint.unit.unitOrdinal));
+  expect(result.requests.map((request) => request.ordinal).sort((left, right) => left - right)).toEqual([0, ...checkpoints.map((checkpoint) => checkpoint.unit.unitOrdinal)]);
   expect(ledger.requestAdmissionOf(runRecordId)!.open.size).toBe(0);
   expect(requestGovernor.snapshot()).toEqual({ registered: 0, waiting: 0, inFlight: 0, backgroundInFlight: 0 });
 });

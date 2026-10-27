@@ -1,5 +1,5 @@
 import { canonicalJson, sha256Hex } from '../analysis/canonical.js';
-import type { ReviewCategoryOutputKind } from '../../shared/protocol.js';
+import type { ReviewCategoryOutputKind, ReviewBaselineSource } from '../../shared/protocol.js';
 import type { ReviewCategoryContractInput } from './review-category-contract.js';
 import type { ResearchDeclaration } from '../analysis/kind-definition.js';
 import type { DatabaseSync } from 'node:sqlite';
@@ -61,6 +61,7 @@ export interface ReviewGuidelineDocument {
 }
 
 export interface ReviewCategoryConfigurationEntry {
+  readonly crossChapter?: { readonly baseline: ReviewBaselineSource | null };
   readonly seriesScopes?: ReadonlyArray<import('../../shared/protocol.js').FrozenSeriesScope>;
   readonly researchDeclaration?: ResearchDeclaration;
   readonly categoryId: string;
@@ -118,7 +119,7 @@ function builtinDocument(documentId: string, title: string, clauses: ReadonlyArr
 }
 
 /** The nine categories in the specification's order, which is also their display order (editor-surfaces §4). */
-export const BUILTIN_REVIEW_CATEGORY_CONFIGURATION: ReviewCategoryConfiguration = {
+export const HISTORICAL_REVIEW_CATEGORY_CONFIGURATION: ReviewCategoryConfiguration = {
   schema: REVIEW_CATEGORY_CONFIGURATION_SCHEMA,
   version: '1',
   categories: [
@@ -275,6 +276,17 @@ export const BUILTIN_REVIEW_CATEGORY_CONFIGURATION: ReviewCategoryConfiguration 
   ],
 };
 
+/** Current categories add the bounded model stage; immutable historical procedure/configuration bytes remain above. */
+export const BUILTIN_REVIEW_CATEGORY_CONFIGURATION: ReviewCategoryConfiguration = {
+  ...HISTORICAL_REVIEW_CATEGORY_CONFIGURATION, version: '2',
+  categories: HISTORICAL_REVIEW_CATEGORY_CONFIGURATION.categories.map((entry) => {
+    if (!['style-and-format', 'plot-consistency'].includes(entry.categoryId)) return entry;
+    return { ...entry, executor: 'review-category-contract', crossChapter: { baseline: null },
+      description: entry.categoryId === 'plot-consistency' ? '逐单元审阅并结合基线线索检查人物、年代、年龄、地点、机构与时间线的跨章一致性，以精确批注提示编辑核对。' : entry.description,
+      procedure: { ...entry.procedure, title: `${entry.label}与跨章一致性`, version: '2' } };
+  }),
+};
+
 /** The digest a Review Run snapshots beside the entries it selected. */
 export function reviewCategoryConfigurationDigest(configuration: ReviewCategoryConfiguration = BUILTIN_REVIEW_CATEGORY_CONFIGURATION): string {
   return sha256Hex(canonicalJson(configuration));
@@ -315,6 +327,7 @@ export function reviewCategoryContractInput(entry: ReviewCategoryConfigurationEn
     clauses: entry.guidelineDocuments.flatMap((document) => document.clauses.map((clause) => ({ clauseId: clause.clauseId, text: clause.text }))),
     procedure: { procedureId: entry.procedure.procedureId, title: entry.procedure.title, version: entry.procedure.version },
     ...(entry.deliverables === undefined ? {} : { deliverables: entry.deliverables.participants }),
+    ...(entry.crossChapter === undefined ? {} : { crossChapter: structuredClone(entry.crossChapter) }),
   };
 }
 
