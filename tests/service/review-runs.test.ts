@@ -30,6 +30,7 @@ import { RECONCILED_INTERRUPTED_DETAIL, type BaselineAnalysisStore } from '../..
 import { graphemeCount, sliceGraphemes } from '../../src/service/analysis/factual-review-contract.js';
 import { resolveFixtureEntry, loadModelFixture, reviewFixtureContractVersion, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
+import { reviewBaselineSource } from '../../src/service/review/review-leads.js';
 import { ReviewRunDriver, type ReviewRunExecutionOwner } from '../../src/service/review/review-run-driver.js';
 import {
   FACTUAL_AGAIN_REASON,
@@ -62,7 +63,7 @@ import {
 } from '../../src/shared/protocol.js';
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { LITERARY_EXPRESSION, STYLE_AND_FORMAT, TYPOS_AND_USAGE } from '../support/review-categories.js';
+import { LITERARY_EXPRESSION, PLOT_CONSISTENCY, STYLE_AND_FORMAT, TYPOS_AND_USAGE } from '../support/review-categories.js';
 import { makeJ13Series } from '../support/series-consistency.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 
@@ -421,6 +422,25 @@ function eventTrail(reviewRunId: string): Array<[string, string]> {
   }
 }
 describe('a Review Run over the real store on exact sample1', () => {
+  it('marks the edited first paragraph in J-16 through its current authored review fixture', async () => {
+    await withBook('sample1-agent-workspace-cross-chapter', async (session, book) => {
+      await runBaseline(session, book);
+      appendToBlockAt(session, book, 1, '〔离开前刚写下的字〕');
+      const first = session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId)[0]!;
+      const definition = reviewCategoryKindDefinition({ ...PLOT_CONSISTENCY, crossChapter: {
+        baseline: reviewBaselineSource(session.store.inspectBaselineAnalysis(book.bookId).resultSetRevision),
+      } });
+      const run = await authorizeAndDrive(session, book, prepare(session, book, [PLOT], {
+        kind: 'selection', fromChapterBlockId: first.blockId, toChapterBlockId: first.blockId,
+      }));
+      expect(run.findings.length).toBeGreaterThan(0);
+      expect(run.findings.every((finding) => finding.blockId === first.blockId && finding.markId !== null)).toBe(true);
+      const category = session.store.inspectReviewCategory(book.bookId, definition);
+      expect(category.resultSetRevision!.crossChapterSynthesis).toMatchObject({ state: 'closed' });
+      expect(category.taskOutcome!.report!.ifRedone.state).toBe('closed');
+    });
+  });
+
   it('reconstructs a saved v1 plan under v1 even after the launch switches to current v2 fixtures (#1084)', async () => {
     const legacy = await open('review-overlap-authored');
     const book = await importBook(legacy);

@@ -29,6 +29,7 @@ import { locateQuotation } from '../../src/service/analysis/factual-review-contr
 import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
 import { REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, REVIEW_CROSS_CHAPTER_RESULT_SCHEMA, parseReviewCrossChapterMessage, reviewCrossChapterFixtureDigest, type ReviewUnitFinding } from '../../src/service/review/review-category-contract.js';
 import { reviewBaselineSource } from '../../src/service/review/review-leads.js';
+import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
 import { fixtureEntryKey, loadModelFixture, parseModelFixture, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { BASELINE_ANALYSIS_TASK_GOAL, BASELINE_ANALYSIS_MODE_GOALS, type CoverageManifestProjection, type LaunchPolicyProjection, type ReviewCategoryProjection, type ReviewCategoryTaskRequest } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
@@ -48,6 +49,7 @@ const J04_EDIT_SUFFIX = '，J-04 结果集形成后的确认编辑';
 // J-04 appends a second sentence to the same block before it opens 审阅, so the Review Run it starts
 // reads unit 1 with both (Issue #417).
 const J04_SECOND_EDIT_SUFFIX = '，J-04 计划版本形成后的确认编辑';
+const J16_EDIT_SUFFIX = '〔离开前刚写下的字〕';
 const ZERO = '一九九○年代';
 
 const NOTE_ZERO = '汉字数字中的零应写作“〇”，不用圆圈符号“○”。';
@@ -137,10 +139,12 @@ const byCategory = new Map(DEFINITIONS.map((entry) => [entry.input.categoryId, e
 
 interface Labelled { entry: ModelFixtureEntry; group: number; order: string }
 const entries = new Map<string, Labelled>();
+const j16Keys = new Set<string>();
 let additions = 0;
 
 function add(entry: ModelFixtureEntry, group: number, order: string): void {
   const key = fixtureEntryKey(entry.unitOrdinal, entry.requestDigest);
+  if (order.startsWith('j16')) j16Keys.add(key);
   if (entries.has(key)) return;
   entries.set(key, { entry, group, order });
   fixture.entries.set(key, entry);
@@ -156,8 +160,16 @@ const fixture: ResolvedModelFixture & { entries: Map<string, ModelFixtureEntry> 
   sha256: 'f'.repeat(64),
 };
 
+function authoredFindings(categoryId: string, unitOrdinal: number, variant: string): ReviewUnitFinding[] {
+  if (variant === 'j16' && categoryId === 'plot-consistency' && unitOrdinal === 1) return [{
+    quote: J16_EDIT_SUFFIX, blockOrdinal: 1, severity: 'note', clauseId: 'plot-consistency/1',
+    note: '新增说明与正文的叙事关系需核对；保留为编辑判断的线索。',
+  }];
+  return AUTHORED[categoryId]![unitOrdinal]!;
+}
+
 function unitEntry(categoryIndex: number, categoryId: string, definition: AnalysisKindDefinition, unitOrdinal: number, unitDigest: string, variant: string): void {
-  const findings = AUTHORED[categoryId]![unitOrdinal]!;
+  const findings = authoredFindings(categoryId, unitOrdinal, variant);
   add({
     unitOrdinal,
     requestDigest: definition.requestDigest(unitOrdinal, unitDigest),
@@ -173,6 +185,7 @@ function unitEntry(categoryIndex: number, categoryId: string, definition: Analys
 
 function manifestEntries(manifest: CoverageManifestProjection, variant: string): void {
   DEFINITIONS.forEach(({ input, definition }, index) => {
+    if (variant === 'j16' && input.categoryId !== 'plot-consistency') return;
     for (const unit of manifest.units) unitEntry(index, input.categoryId, definition, unit.ordinal, unit.digest, variant);
   });
 }
@@ -187,14 +200,14 @@ const REFLECTION_TEXT = JSON.stringify({
   ],
 });
 
-function harvest(categoryIndex: number, definition: AnalysisKindDefinition, settled: ReviewCategoryProjection, label: string, store: EditorialStore): { closed: boolean } {
+function harvest(categoryIndex: number, definition: AnalysisKindDefinition, settled: ReviewCategoryProjection, label: string, store: EditorialStore, variant: string): { closed: boolean } {
   const revision = settled.resultSetRevision!;
   const manifest = settled.coverageManifest!;
   if (definition.crossUnit?.step !== undefined) {
     const gaps = new Set(revision.gaps.map((gap) => gap.unitOrdinal));
     const outcomes = manifest.units.filter((unit) => !gaps.has(unit.ordinal)).map((unit) => {
       const parsed = definition.parseUnitResult(JSON.stringify({ schema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, unitOrdinal: unit.ordinal,
-        findings: AUTHORED[revision.category.categoryId]![unit.ordinal]! }), unit);
+        findings: authoredFindings(revision.category.categoryId, unit.ordinal, variant) }), unit);
       if (!parsed.ok) throw new Error('AUTHORED_UNIT_INVALID');
       return { state: 'closed' as const, unitOrdinal: unit.ordinal, result: parsed.result };
     });
@@ -202,11 +215,11 @@ function harvest(categoryIndex: number, definition: AnalysisKindDefinition, sett
     const input = parseReviewCrossChapterMessage(definition.crossUnit.step.buildMessage(outcomes, manifest.units.length, { manifest, blocks }))!;
     // Authored, bounded evidence only: compare the two numbered headings, or retain the stated dream/scene question.
     const chosen = input.evidence.filter((entry) => revision.category.categoryId === 'style-and-format'
-      ? ['壹', '贰'].includes(entry.quote) : entry.quote === '梦中的那一声沉雷');
+      ? ['壹', '贰'].includes(entry.quote) : entry.quote === (variant === 'j16' ? J16_EDIT_SUFFIX : '梦中的那一声沉雷'));
     add({ unitOrdinal: 0, requestDigest: reviewCrossChapterFixtureDigest(input), attempt: null, contentDigest: null,
       response: { kind: 'unit-result', usage: { inputTokens: 800, outputTokens: 80 }, text: JSON.stringify({ schema: REVIEW_CROSS_CHAPTER_RESULT_SCHEMA,
         findings: chosen.length === 0 ? [] : [{ anchorRef: chosen[0]!.ref, evidenceRefs: chosen.map((entry) => entry.ref), severity: 'note',
-          note: revision.category.categoryId === 'style-and-format' ? '章序使用大写数字，请统一标题层级与呈现。' : '梦境与现场的衔接仍待后文交代；保留这条线索供编辑核对。',
+          note: variant === 'j16' ? '所选段落的新添说明需与原文区分，留给编辑核对。' : revision.category.categoryId === 'style-and-format' ? '章序使用大写数字，请统一标题层级与呈现。' : '梦境与现场的衔接仍待后文交代；保留这条线索供编辑核对。',
           clauseId: `${revision.category.categoryId}/1` }] }) } }, categoryIndex * 10 + 3, label);
   }
   const candidates = definition.assurance!.candidates({ components: { findings: revision.findings } } as unknown as AnalysisReductionResult);
@@ -254,7 +267,7 @@ beforeEach(async () => {
 });
 afterEach(async () => { await roots.dispose(); });
 
-async function withBook<T>(body: (context: { store: EditorialStore; owner: BaselineAnalysisExecutionOwner; bookId: string; manuscriptId: string; branchId: string; revisionId: string }) => Promise<T>): Promise<T> {
+async function withBook<T>(body: (context: { store: EditorialStore; owner: BaselineAnalysisExecutionOwner; bookId: string; manuscriptId: string; branchId: string; revisionId: string }) => Promise<T>, baselineFixture?: ResolvedModelFixture): Promise<T> {
   const scenarioRoots = await createServiceTestRoots('ai7-s69-generate-scenario-');
   const store = await EditorialStore.open(scenarioRoots.dataRoot, scenarioRoots.codeRoot, {
     induceUnprovableReconciliation: false,
@@ -264,7 +277,8 @@ async function withBook<T>(body: (context: { store: EditorialStore; owner: Basel
     interruptAfterAbandonObjectRemoval: false,
     baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
   });
-  const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+  const routedFixture = baselineFixture === undefined ? fixture : { ...fixture, entries: new Map([...fixture.entries, ...baselineFixture.entries]) };
+  const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture: routedFixture, secretResolver: { resolve: async () => null } });
   try {
     const imported = await importSample1Book(store, scenarioRoots.codeRoot, 'S69 夹具生成');
     await pinEditorialWorkspaceProfileRevision2(store, imported.bookId);
@@ -300,7 +314,7 @@ async function run(
   await context.owner.whenIdle();
   const settled = context.store.inspectReviewCategory(context.bookId, definition);
   expect(settled.state).toBe('settled');
-  return { settled, ...harvest(categoryIndex, definition, settled, label, context.store) };
+  return { settled, ...harvest(categoryIndex, definition, settled, label, context.store, variant) };
 }
 
 function appendToFirstBlock(store: EditorialStore, manuscriptId: string, branchId: string, suffix = J04_EDIT_SUFFIX): void {
@@ -323,6 +337,39 @@ async function baseline(context: { store: EditorialStore; owner: BaselineAnalysi
   context.owner.admitAndDispatch(authorized.dispatchRunRecordId!);
   await context.owner.whenIdle();
   expect(context.store.inspectBaselineAnalysis(context.bookId).state).toBe('settled');
+}
+
+async function cancelBaselineAfterSecondUnit(context: { store: EditorialStore; bookId: string }, baselineFixture: ResolvedModelFixture): Promise<void> {
+  const { store, bookId } = context;
+  let work = store.createBaselineAnalysisPreparationWork(bookId, BASELINE_ANALYSIS_MODE_GOALS['reanalyze-book'], { mode: 'reanalyze-book', selectedRange: null }, launchPolicy);
+  while (!work.done) work = store.advanceBaselineAnalysisPreparationWork(work.workId!);
+  const plan = work.projection!;
+  const authorized = store.authorizeBaselineAnalysis(bookId, plan.taskIntent!.taskIntentId, plan.planEnvelope!.digest);
+  const cancelled = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture: baselineFixture,
+    secretResolver: { resolve: async () => null }, unitHold: async (settled) => {
+      if (settled === 1) {
+        const runId = store.requestBaselineAnalysisCancel(bookId, plan.taskIntent!.taskIntentId);
+        if (runId !== null) cancelled.cancelRun(runId);
+      }
+    } });
+  try { cancelled.admitAndDispatch(authorized.dispatchRunRecordId!); await cancelled.whenIdle(); }
+  finally { await cancelled.dispose(); }
+  expect(store.inspectBaselineAnalysis(bookId).state).toBe('cancelled');
+}
+
+async function runJ16Selection(context: { store: EditorialStore; owner: BaselineAnalysisExecutionOwner; bookId: string; branchId: string }): Promise<boolean> {
+  const { store, owner, bookId } = context;
+  const first = store.baselineAnalysisLedger.readWorkingBlocks(context.branchId)[0]!;
+  const definition = reviewCategoryKindDefinition({ ...PLOT_CONSISTENCY, crossChapter: { baseline: reviewBaselineSource(store.inspectBaselineAnalysis(bookId).resultSetRevision) } });
+  let work = store.createReviewRunPreparationWork(bookId, ['plot-consistency'], { kind: 'selection', fromChapterBlockId: first.blockId, toChapterBlockId: first.blockId }, launchPolicy);
+  while (!work.done) work = store.advanceReviewRunPreparationWork(work.workId!);
+  const run = work.projection!.run!;
+  manifestEntries(store.inspectReviewCategory(bookId, definition).coverageManifest!, 'j16');
+  store.authorizeReviewRun(bookId, run.reviewRunId, run.categories.map((category) => ({ categoryId: category.categoryId, planEnvelopeDigest: category.planEnvelopeDigest! })));
+  const driver = new ReviewRunDriver(store.reviewRunDriveSteps, owner);
+  try { await driver.drive(run.reviewRunId); }
+  finally { await driver.dispose(); }
+  return harvest(3, definition, store.inspectReviewCategory(bookId, definition), 'j16-selection', store, 'j16').closed;
 }
 
 async function pass(): Promise<boolean> {
@@ -387,6 +434,14 @@ async function pass(): Promise<boolean> {
       }
     });
   }
+  // J-16 edits the first paragraph before selecting it; its earlier baseline remains pinned and stale there.
+  const workspace = await loadModelFixture(resolve(FIXTURE_PATH, '..'), 'sample1-agent-workspace');
+  for (const cancelled of [false, true]) await withBook(async (context) => {
+    await baseline(context);
+    if (cancelled) await cancelBaselineAfterSecondUnit(context, workspace);
+    appendToFirstBlock(context.store, context.manuscriptId, context.branchId, J16_EDIT_SUFFIX);
+    note(await runJ16Selection(context));
+  }, workspace);
   return allClosed;
 }
 
@@ -419,7 +474,7 @@ it.runIf(process.env['AI7_REGENERATE_REVIEW_FIXTURE'] === '1')('generates the au
     provenance: 'authored',
     provider: 'ai7-local-deterministic',
     model: 'ai7-deterministic-fixture',
-    entries: ordered.filter(({ entry }) => !base.entries.has(fixtureEntryKey(entry.unitOrdinal, entry.requestDigest)))
+    entries: ordered.filter(({ entry, order }) => !order.startsWith('j16') && !base.entries.has(fixtureEntryKey(entry.unitOrdinal, entry.requestDigest)))
       .map(({ entry }) => ({ unitOrdinal: entry.unitOrdinal, requestDigest: entry.requestDigest, response: entry.response })),
   };
   await writeFile(FIXTURE_PATH, `${JSON.stringify(body, null, 2)}\n`, 'utf8');
@@ -431,6 +486,14 @@ it.runIf(process.env['AI7_REGENERATE_REVIEW_FIXTURE'] === '1')('generates the au
   await writeFile(resolve(FIXTURE_PATH, '..', 'sample1-review-cross-chapter-controls.json'), `${JSON.stringify({ ...body,
     identity: 'sample1-review-cross-chapter-controls', description: 'Current cross-chapter review with the identical authored v2 retry controls; historical fixtures are unchanged.',
     entries: [...controlled.values()] }, null, 2)}\n`, 'utf8');
+  // The workspace predecessor is already four layers deep. Keep its exact answers in a sibling successor.
+  const workspace = JSON.parse(await readFile(resolve(FIXTURE_PATH, '..', 'sample1-agent-workspace.json'), 'utf8'));
+  await writeFile(resolve(FIXTURE_PATH, '..', 'sample1-agent-workspace-cross-chapter.json'), `${JSON.stringify({ ...workspace,
+    identity: 'sample1-agent-workspace-cross-chapter',
+    description: 'Current J-16 authored successor: preserves every Agent workspace/dialogue answer and adds exact plot review, one bounded synthesis and assurance for its synthetically edited first-paragraph selection.',
+    entries: [...workspace.entries, ...ordered.filter(({ entry }) => j16Keys.has(fixtureEntryKey(entry.unitOrdinal, entry.requestDigest))).map(({ entry }) =>
+      ({ unitOrdinal: entry.unitOrdinal, requestDigest: entry.requestDigest, response: entry.response }))],
+  }, null, 2)}\n`, 'utf8');
   // eslint-disable-next-line no-console
   console.log(`wrote ${ordered.length} entries: ${ordered.map((entry) => `${entry.group}/${entry.order}`).join(' ')}`);
 }, 600_000);

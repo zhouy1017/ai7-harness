@@ -59,7 +59,7 @@ const SAMPLE1_SHA256 = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f4
  * answered — with the one dialogue question J-16 asks answered over it (Issue #52, S17a), the retrieval stimulus (#893) and
  * the Agent 工作区's two 修改要求 (Issue #90).
  */
-const FIXTURE_IDENTITY = 'sample1-agent-workspace';
+const FIXTURE_IDENTITY = 'sample1-agent-workspace-cross-chapter';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
 const BROWSER_CLOSE_TIMEOUT_MS = 25_000;
@@ -1586,8 +1586,8 @@ async function main() {
     await waitFor(renderer, `(() => { const anchor = getSelection()?.anchorNode ?? null; const block = document.querySelector(${JSON.stringify(`[data-testid="manuscript-editor"] [data-block-id="${taskBlock}"]`)}); return block !== null && anchor !== null && block.contains(anchor) && document.querySelector('#task-drawer')?.dataset.taskDrawerView === 'panel'; })()`, 'selection-task-jumped', 30_000);
 
     at('selection-task-review-run');
-    // Started from its plan, the 审阅 puts the baseline's leads on that paragraph — at least one, every one there — sends
-    // nothing, and stands in 最近完成 with 查看结果 under the same name.
+    // Started from its plan, the current authored unit review and bounded synthesis mark that paragraph alone, send
+    // nothing remotely, and stand in 最近完成 with 查看结果 under the same name.
     await cardAction(renderer, 'review-prepared', 'next', 'selection-task-review-open-plan');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawerView === 'plan' && document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled === false`, 'selection-task-review-plan-ready', 60_000);
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'selection-task-review-start');
