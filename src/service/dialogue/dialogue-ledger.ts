@@ -5,7 +5,7 @@ import { DIGEST_PATTERN, UUID_PATTERN, canonicalJson, hasExactKeys, isRecord, pa
 import { CREDENTIAL_REFERENCE_PATTERN, DEVELOPMENT_CREDENTIAL_REFERENCES } from '../../shared/protected-secret-identity.js';
 import { ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS, isSupportedProviderProcessingVersion, localFixtureProfileOf, selectedPolicyIdentityOf } from '../launch-policy.js';
 import { POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION } from '../task-authorization.js';
-import { GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST } from './global-agent-session.js';
+import { GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST, GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT_DIGEST, GLOBAL_AGENT_SCOPED_RULE_ID } from './global-agent-session.js';
 import { AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST, DIALOGUE_PROMPT_CONTRACT_DIGEST, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST } from './contract.js';
 import type { DialogueMessageInput } from './contract.js';
 
@@ -329,7 +329,8 @@ export type DialogueAttemptKind = 'ask' | 'continue' | 'regenerate';
 export interface QualifiedGlobalAttemptMetadata extends SelectedPolicyIdentity {
   readonly textProcessing: 'qualified-original-fields';
   readonly providerProcessingVersion: 'v30' | 'v31';
-  readonly policyRuleId: 'ordinary-production-global-agent-dialogue';
+  /** The no-tools rule, or v31's scoped tool rule (#1171); a record never moves between them. */
+  readonly policyRuleId: 'ordinary-production-global-agent-dialogue' | typeof GLOBAL_AGENT_SCOPED_RULE_ID;
   readonly route: 'opencode-go' | 'deepseek-open-platform';
   readonly model: string;
   readonly modelRole: 'Fast Interaction Role';
@@ -352,7 +353,8 @@ export function qualifiedGlobalAttemptMetadataOf(value: unknown): QualifiedGloba
     activePolicySetSha256: value.activePolicySetSha256 });
   const route = value.route;
   if (identity === null || (identity.providerProcessingVersion !== 'v30' && identity.providerProcessingVersion !== 'v31') || value.textProcessing !== 'qualified-original-fields' ||
-      value.policyRuleId !== 'ordinary-production-global-agent-dialogue' || value.modelRole !== 'Fast Interaction Role' ||
+      (value.policyRuleId !== 'ordinary-production-global-agent-dialogue' && (value.policyRuleId !== GLOBAL_AGENT_SCOPED_RULE_ID ||
+        identity.providerProcessingVersion !== 'v31')) || value.modelRole !== 'Fast Interaction Role' ||
       (route !== 'opencode-go' && route !== 'deepseek-open-platform') || typeof value.model !== 'string' ||
       typeof value.credentialSlot !== 'string' || !ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS.some((binding) =>
         binding.route === route && binding.model === value.model && binding.credentialSlot === value.credentialSlot) ||
@@ -364,7 +366,7 @@ export function qualifiedGlobalAttemptMetadataOf(value: unknown): QualifiedGloba
       typeof value.messageSha256 !== 'string' || !DIGEST_PATTERN.test(value.messageSha256) ||
       typeof value.retainedAncestrySha256 !== 'string' || !DIGEST_PATTERN.test(value.retainedAncestrySha256)) return null;
   return { ...identity, providerProcessingVersion: identity.providerProcessingVersion, textProcessing: 'qualified-original-fields',
-    policyRuleId: 'ordinary-production-global-agent-dialogue', route, model: value.model, modelRole: 'Fast Interaction Role',
+    policyRuleId: value.policyRuleId, route, model: value.model, modelRole: 'Fast Interaction Role',
     credentialSlot: value.credentialSlot, credentialReference: value.credentialReference, credentialUpdatedAt: value.credentialUpdatedAt,
     requestContextSha256: value.requestContextSha256, messageSha256: value.messageSha256, retainedAncestrySha256: value.retainedAncestrySha256 };
 }
@@ -750,7 +752,8 @@ export class DialogueLedger {
   #verifyQualifiedBinding(qualification: QualifiedGlobalAttemptMetadata, binding: StoredDialogueBinding): void {
     requireDialogue(binding.operationalScope === 'ordinary-production' && binding.route === qualification.route && binding.model === qualification.model &&
       binding.providerProcessingVersion === qualification.providerProcessingVersion && binding.policyRuleId === qualification.policyRuleId &&
-      binding.promptContractSha256 === GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST, 'DIALOGUE_RECORD_INVALID', INVALID);
+      binding.promptContractSha256 === (qualification.policyRuleId === GLOBAL_AGENT_SCOPED_RULE_ID
+        ? GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT_DIGEST : GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST), 'DIALOGUE_RECORD_INVALID', INVALID);
   }
 
   #insertAttempt(dialogueId: string, ordinal: number, kind: DialogueAttemptKind, priorAttemptId: string | null, now: Date,

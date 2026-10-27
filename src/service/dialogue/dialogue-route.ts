@@ -22,6 +22,7 @@ export const DIALOGUE_OUTBOUND_CATEGORY = 'editor-selected-manuscript-excerpt' a
 /** The live route one admitted rule binds, resolved against the declared route and model profiles. */
 export interface AdmittedFastRoleRoute {
   readonly globalAgentDialogue?: AdmittedProviderRule['globalAgentDialogue'];
+  readonly globalAgentScopedDialogue?: AdmittedProviderRule['globalAgentScopedDialogue'];
   readonly localTools?: LocalToolsRule | null;
   readonly ruleId: string;
   /** The live scope whose policy admitted it: developer-live, or ordinary production on the editor's route (Issue #811). */
@@ -97,6 +98,7 @@ export function admittedFastRoleRoute(policy: LaunchPolicyProjection, kindId: st
   if (route === 'openai-platform' && kindId !== 'material-translation' && kindId !== 'model-connection-test') return null;
   return {
     ...(kindId === 'global-agent-dialogue' ? { globalAgentDialogue: rule['globalAgentDialogue'] as AdmittedProviderRule['globalAgentDialogue'] } : {}),
+    ...(kindId === 'global-agent-scoped-dialogue' ? { globalAgentScopedDialogue: rule['globalAgentScopedDialogue'] as AdmittedProviderRule['globalAgentScopedDialogue'] } : {}),
     ruleId,
     operationalScope: scope,
     providerProcessingVersion: processing.version,

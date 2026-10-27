@@ -521,3 +521,97 @@ describe('v30 Book-less Global Agent', () => {
     expect(() => startGlobalAgentTurn(store, owner, () => policy, input(), undefined)).toThrow('发送内容或模型服务已经变化');
   });
 });
+
+describe('v31 scoped Global Agent tools (#1171)', () => {
+  type Body = { messages: Array<{ role: string; content: string | null }> };
+  const reply = (content: string | null, call?: { name: string; args: unknown }) => new Response(JSON.stringify({ model: binding.model,
+    choices: [{ message: { content, reasoning_content: '合成推理。', ...(call === undefined ? {} : { tool_calls: [{ id: `call-${call.name}`, type: 'function',
+      function: { name: call.name, arguments: JSON.stringify(call.args) } }] }) }, finish_reason: call === undefined ? 'stop' : 'tool_calls' }],
+    usage: { prompt_tokens: 30, completion_tokens: 10 } }), { status: 200 });
+  /** One scripted call per round, then a plain answer; each round sees every earlier result. */
+  function scripted(steps: ReadonlyArray<(results: string[]) => { name: string; args: unknown }>): void {
+    transport = async () => {
+      const body = JSON.parse(calls.at(-1)!.body) as Body;
+      const results = body.messages.filter((message) => message.role === 'tool').map((message) => message.content ?? '');
+      const step = steps[results.length];
+      return step === undefined ? reply('依据所列来源，本社偏好保留短句。') : reply(null, step(results));
+    };
+  }
+  async function scopedAsk(question = '这本书的短句偏好如何体现？') {
+    const book = await importSample1Book(store, roots.codeRoot, '合成全域范围之书');
+    governance('保留作者有意使用的短句。');
+    const projection = store.inspectGlobalAgent((id) => owner.liveText(id), true, true);
+    expect(projection.scopedDialogueState).toBe('available');
+    const procedure = projection.procedures![0]!;
+    const ask: PrepareGlobalAgentTurnInput = { ...input(), question,
+      scope: { bookIds: [book.bookId], procedures: [{ procedureId: procedure.procedureId, version: procedure.version, digest: procedure.digest }] } };
+    return { book, procedure, ask, disclosure: prepareGlobalAgentDisclosure(store, owner, policy, ask) };
+  }
+  async function settled(ask: PrepareGlobalAgentTurnInput, sha256: string) {
+    const turn = startGlobalAgentTurn(store, owner, () => policy, ask, sha256);
+    await waitFor(() => inspect(turn.dialogueId).attempts[0]?.state !== 'answering');
+    return { turn, dialogue: inspect(turn.dialogueId) };
+  }
+  const propose = (text: string) => () => ({ name: 'propose_learning_supervision', args: { categoryId: 'typos-and-usage', scope: 'house', effect: 'guide', text } });
+
+  it('discloses the pinned scope and runs the four declared tools with each call read back, mutating nothing', async () => {
+    const { book, procedure, ask, disclosure } = await scopedAsk();
+    expect(disclosure.scope).toMatchObject({ tools: ['retrieve', 'exact_fetch', 'read_procedure', 'propose_learning_supervision'],
+      books: [{ bookId: book.bookId, title: '合成全域范围之书' }], procedures: [{ procedureId: procedure.procedureId, version: procedure.version }] });
+    const directives = store.inspectGlobalAgent().directives.length;
+    const working = store.getManuscriptWindow(book.manuscriptId, book.branchId, null).workingDigest;
+    scripted([() => ({ name: 'retrieve', args: { query: '国宝' } }),
+      (results) => ({ name: 'exact_fetch', args: { candidateId: (JSON.parse(results[0]!) as Array<{ candidateId: string }>)[0]!.candidateId } }),
+      () => ({ name: 'read_procedure', args: { procedureId: procedure.procedureId, version: procedure.version } }), propose('短句不改长句。')]);
+    const { turn, dialogue } = await settled(ask, disclosure.sha256);
+    expect(dialogue.attempts[0]!.state).toBe('completed');
+    expect(JSON.parse(calls[0]!.body).tools.map((tool: { function: { name: string } }) => tool.function.name).sort())
+      .toEqual(['exact_fetch', 'propose_learning_supervision', 'read_procedure', 'retrieve']);
+    expect(dialogue.toolCalls!.map((call) => [call.tool, call.outcome])).toEqual([['retrieve', 'returned'], ['exact_fetch', 'returned'],
+      ['read_procedure', 'returned'], ['propose_learning_supervision', 'returned']]);
+    expect(dialogue.toolCalls![1]!.result).toContain('国宝');
+    expect(JSON.parse(dialogue.toolCalls![2]!.result!)).toMatchObject({ procedureId: procedure.procedureId, title: procedure.title });
+    expect(dialogue.scope?.books.map((entry) => entry.bookId)).toEqual([book.bookId]);
+    expect(dialogue.supervisionProposals).toEqual([{ attemptId: turn.attemptId, callId: 'call-propose_learning_supervision', input: {
+      operation: 'supervise', targets: [], scope: { kind: 'house' }, categoryId: 'typos-and-usage', text: '短句不改长句。', effect: 'guide' } }]);
+    expect(store.inspectGlobalAgent().directives).toHaveLength(directives);
+    expect(store.getManuscriptWindow(book.manuscriptId, book.branchId, null).workingDigest).toBe(working);
+  });
+
+  it('records a proposed direction only when the editor confirms it through the existing supervision owner', async () => {
+    const { ask, disclosure } = await scopedAsk('请提出一条学习方向。');
+    scripted([propose('短句不改长句。')]);
+    const { dialogue } = await settled(ask, disclosure.sha256);
+    const before = store.inspectGlobalAgent().directives.length;
+    const after = store.recordLearningSupervision(dialogue.supervisionProposals![0]!.input);
+    expect(after.directives).toHaveLength(before + 1);
+    expect(after.directives.at(-1)).toMatchObject({ operation: 'supervise', effect: 'guide', text: '短句不改长句。', actor: 'editor' });
+    expect(after.sourceCandidates?.some((entry) => entry.kind === 'supervision' && entry.text === '短句不改长句。')).toBe(true);
+  });
+
+  it('refuses unlisted procedure versions and out-of-scope proposals to the model, and an excluded Book before anything is sent', async () => {
+    const { book, procedure, ask, disclosure } = await scopedAsk();
+    scripted([() => ({ name: 'read_procedure', args: { procedureId: procedure.procedureId, version: procedure.version + 1 } }),
+      () => ({ name: 'propose_learning_supervision', args: { categoryId: 'typos-and-usage', scope: 'book', bookId: randomUUID(), effect: 'guide', text: '外书方向。' } })]);
+    const { dialogue } = await settled(ask, disclosure.sha256);
+    expect(dialogue.toolCalls!.map((call) => call.outcome)).toEqual(['refused', 'refused']);
+    expect(dialogue.supervisionProposals).toEqual([]);
+    const sent = calls.length;
+    store.changeEditorialLearning({ kind: 'book', bookId: book.bookId, excluded: true,
+      expectedEntries: store.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }).controlEntries });
+    expect(() => prepareGlobalAgentDisclosure(store, owner, policy, ask)).toThrow('所选图书或工序版本已不可用');
+    expect(calls).toHaveLength(sent);
+  });
+
+  it('keeps the no-tools rule tool-free and never falls back to it for a scoped turn the launch does not admit', async () => {
+    const { ask } = await scopedAsk();
+    const prepared = prepareGlobalAgentDisclosure(store, owner, policy, input());
+    expect(prepared.scope).toBeUndefined();
+    await settled(input(), prepared.sha256);
+    expect(JSON.parse(calls[0]!.body).tools).toBeUndefined();
+    const withoutScoped = { ...policy, providerProcessing: { ...policy.providerProcessing, admittedRules: policy.providerProcessing.admittedRules
+      .filter((rule) => rule.ruleId !== 'ordinary-production-global-agent-scoped-dialogue') } };
+    expect(() => prepareGlobalAgentDisclosure(store, owner, withoutScoped, ask)).toThrow(GLOBAL_AGENT_POLICY_BLOCKED);
+    expect(calls).toHaveLength(1);
+  });
+});

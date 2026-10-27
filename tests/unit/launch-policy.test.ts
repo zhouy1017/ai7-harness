@@ -46,7 +46,7 @@ describe('accepted original-field declaration reading (#1161)', () => {
     }
   });
 });
-it('admits bounded typed curation while retaining the scoped Global declaration boundary', () => {
+it('admits bounded typed curation and projects the scoped Global declaration for its typed consumer', () => {
   const policy = JSON.parse(readFileSync(join(REPO_ROOT, 'docs/policies/provider-processing-policy.v31.json'), 'utf8'));
   const reading = verifyOrdinaryProductionPolicy(policy);
   expect(reading.declaredRuleIds).toHaveLength(15);
@@ -59,7 +59,9 @@ it('admits bounded typed curation while retaining the scoped Global declaration 
   expect(scoped.scopedTools.names).toEqual(['retrieve', 'exact_fetch', 'read_procedure', 'propose_learning_supervision']);
   expect(scoped.scopedTools).toMatchObject({ editorConfirmationBeforeGovernanceRequired: true,
     directMemoryOrManuscriptMutationAllowed: false, shellFilesystemWebOrUnrestrictedNetworkAllowed: false });
-  expect(reading.rules.some((rule) => rule.ruleId === scoped.ruleId)).toBe(false);
+  // #1171: the typed consumer exists, so the declared blocks are projected as stated; the no-tools rule stays tool-free.
+  expect(reading.rules.find((rule) => rule.ruleId === scoped.ruleId)?.projection).toMatchObject({
+    taskKinds: ['global-agent-scoped-dialogue'], globalAgentScopedDialogue: { source: scoped.source, scopedTools: scoped.scopedTools } });
   expect(reading.rules.find((rule) => rule.ruleId === curation.ruleId)?.projection).toMatchObject({
     taskKinds: ['learning-curation'], enabledLearningEnvelope: curation.enabledLearningEnvelope,
   });
@@ -1603,17 +1605,20 @@ describe('Provider Processing v23 (ordinary-production, inherited from v19 and v
         outboundDataCategories: ['public-or-synthetic', 'editorial-learning-example', 'house-review-preference-excerpt'],
         enabledLearningEnvelope: rulesOf(readPolicySync('docs/policies/provider-processing-policy.v31.json'))
           .find((rule) => rule.ruleId === 'ordinary-production-learning-curation')!.enabledLearningEnvelope,
-      }), factualRecheckRuleExpectation(binding), expect.objectContaining({ ruleId: 'ordinary-production-model-connection-test', taskKinds: ['model-connection-test'], route: binding.route, model: binding.model })],
+      }), factualRecheckRuleExpectation(binding), expect.objectContaining({ ruleId: 'ordinary-production-global-agent-scoped-dialogue',
+        taskKinds: ['global-agent-scoped-dialogue'], modelRole: 'Fast Interaction Role', route: binding.route, model: binding.model,
+        localTools: expect.objectContaining({ targetedRetrieval: expect.objectContaining({ allowed: true }) }) }),
+      expect.objectContaining({ ruleId: 'ordinary-production-model-connection-test', taskKinds: ['model-connection-test'], route: binding.route, model: binding.model })],
       bindingState: 'configured',
       label: '本机生产：实时传输受运行边界约束',
     });
-    expect(projection.providerProcessing.admittedRules).toHaveLength(15);
+    expect(projection.providerProcessing.admittedRules).toHaveLength(16);
     // The two source flags agree with the categories here too: material in review, writing, evaluation and 来源译文; deliverables in review.
     expect(projection.providerProcessing.admittedRules.filter((rule) => rule.materialReferencesAllowed).map((rule) => rule.ruleId))
       .toEqual(['ordinary-production-review', 'ordinary-production-writing', 'ordinary-production-evaluation', 'ordinary-production-material-translation']);
     expect(projection.providerProcessing.admittedRules.filter((rule) => rule.editorialDeliverablesAllowed).map((rule) => rule.ruleId))
       .toEqual(['ordinary-production-review']);
-    for (const rule of projection.providerProcessing.admittedRules.filter((rule) => rule.globalAgentDialogue === undefined)) {
+    for (const rule of projection.providerProcessing.admittedRules.filter((rule) => rule.globalAgentDialogue === undefined && rule.globalAgentScopedDialogue === undefined)) {
       expect(rule.materialReferencesAllowed, rule.ruleId).toBe(rule.outboundDataCategories.includes('frozen-material-reference-excerpt'));
       expect(rule.editorialDeliverablesAllowed, rule.ruleId).toBe(rule.outboundDataCategories.includes('editorial-deliverable-excerpt'));
     }
@@ -1859,7 +1864,8 @@ describe('Provider Processing v22 and v23: enrolled background analysis and mode
     for (const [projection, ids] of [[developerLive, V16_ADMITTED_RULES.map((rule) => rule.ruleId)], [production, PRODUCTION_RULE_ID_ORDER]] as const) {
       const rules = projection.providerProcessing.admittedRules.filter((rule) => rule.ruleId !== 'ordinary-production-model-connection-test' &&
         rule.ruleId !== 'ordinary-production-global-agent-dialogue' && rule.ruleId !== 'ordinary-production-learning-curation' &&
-        rule.ruleId !== 'enrolled-background-processing' && rule.ruleId !== 'enrolled-background-factual-recheck');
+        rule.ruleId !== 'enrolled-background-processing' && rule.ruleId !== 'enrolled-background-factual-recheck' &&
+        rule.ruleId !== 'ordinary-production-global-agent-scoped-dialogue');
       expect(rules.map((rule) => rule.ruleId)).toEqual(ids);
       expect(rules.map((rule) => [rule.clarificationQuestionAllowed, rule.clarificationTimeoutHours, rule.backgroundOrigin])).toEqual(expected);
       // The default-execution-rule origin is projected from each rule's own authorityOrigin: review in both scopes, writing in developer-live only.

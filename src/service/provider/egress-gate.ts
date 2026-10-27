@@ -141,9 +141,10 @@ export interface EgressBindingFacts {
   /** Book-less dialogue's exact listed revisions, disclosure and retained redaction, rechecked at the final gate. */
   readonly globalAgentScope?: {
     readonly qualification?: QualifiedGlobalAttemptMetadata;
-    readonly rule: NonNullable<AdmittedProviderRule['globalAgentDialogue']>;
     readonly payloadCurrent: () => boolean;
-  };
+  } & ({ readonly rule: NonNullable<AdmittedProviderRule['globalAgentDialogue']>; readonly scopedRule?: undefined } |
+    /** v31's scoped tool rule (#1171): its four declared local tools are the only tool set it admits. */
+    { readonly rule?: undefined; readonly scopedRule: NonNullable<AdmittedProviderRule['globalAgentScopedDialogue']> });
   readonly seriesScopeGuard?: () => string | null;
   readonly searchBackend?: SearchBackendBinding;
   readonly bindingDigest: string;
@@ -513,20 +514,28 @@ export function evaluateEgress(
     const messages = [...binding.admittedUserMessages];
     if (qualified === undefined || qualified.providerProcessingVersion !== binding.policy.providerProcessingVersion || selectedPolicyIdentityOf({ providerProcessingVersion: qualified.providerProcessingVersion, providerProcessingSha256: qualified.providerProcessingSha256,
           activePolicySetVersion: qualified.activePolicySetVersion, activePolicySetSha256: qualified.activePolicySetSha256 }) === null ||
-        qualified.textProcessing !== 'qualified-original-fields' || qualified.policyRuleId !== 'ordinary-production-global-agent-dialogue' ||
+        qualified.textProcessing !== 'qualified-original-fields' || qualified.policyRuleId !== (global.scopedRule === undefined
+          ? 'ordinary-production-global-agent-dialogue' : 'ordinary-production-global-agent-scoped-dialogue') ||
         qualified.modelRole !== 'Fast Interaction Role' || qualified.route !== binding.route || qualified.model !== binding.model ||
         messages.length !== 1 || qualified.messageSha256 !== sha256Hex(messages[0]!) ||
         !DIGEST_PATTERN.test(qualified.requestContextSha256) || !DIGEST_PATTERN.test(qualified.retainedAncestrySha256))
       return refuse('payload-out-of-scope', '全域对话缺少与实际负载相符的原文字段身份；未发送任何内容。');
   } else if (global?.qualification !== undefined) return refuse('payload-out-of-scope', '原文字段身份与当前处理策略不一致；未发送任何内容。');
-  const globalAdmitted = global !== undefined && binding.policy.operationalScope === 'ordinary-production' &&
-    global.rule.source.bookRequired === false && global.rule.source.explicitlyListedEligibleMemoryAndPreferenceRevisionsOnly === true &&
-    global.rule.source.eligibleRevisionPinsRequired === true && global.rule.source.editorOwnWordsAllowed === true &&
-    global.rule.source.unlistedSourcesAllowed === false && global.rule.outboundCategoryRestriction === 'none' &&
-    global.rule.outboundDataDisclosureRequired === true && global.rule.redaction.housePeopleNamesAndRolesStripped === true &&
-    global.rule.redaction.remarksAndInternalNotesStripped === true && global.payloadCurrent();
+  const scoped = global?.scopedRule;
+  const globalAdmitted = global !== undefined && binding.policy.operationalScope === 'ordinary-production' && (global.rule !== undefined
+    ? global.rule.source.bookRequired === false && global.rule.source.explicitlyListedEligibleMemoryAndPreferenceRevisionsOnly === true &&
+      global.rule.source.eligibleRevisionPinsRequired === true && global.rule.source.editorOwnWordsAllowed === true &&
+      global.rule.source.unlistedSourcesAllowed === false && global.rule.outboundCategoryRestriction === 'none' &&
+      global.rule.outboundDataDisclosureRequired === true && global.rule.redaction.housePeopleNamesAndRolesStripped === true &&
+      global.rule.redaction.remarksAndInternalNotesStripped === true
+    : binding.policy.providerProcessingVersion === 'v31' && scoped!.source['ambientWholeLibraryReadAllowed'] === false &&
+      scoped!.source['lastOpenBookSuppliesAuthority'] === false && scoped!.source['unlistedSourcesAllowed'] === false &&
+      scoped!.scopedTools['directMemoryOrManuscriptMutationAllowed'] === false && scoped!.scopedTools['shellFilesystemWebOrUnrestrictedNetworkAllowed'] === false &&
+      scoped!.outboundDataDisclosureRequired === true && scoped!.redaction.housePeopleNamesAndRolesStripped === true &&
+      binding.platformTools == null && canonicalJson(ruleNamedToolSchemas(false, binding.localTools).map((schema) => schema.name)) ===
+        canonicalJson([...scoped!.scopedTools.names].sort((a, b) => a.localeCompare(b, 'en')))) && global.payloadCurrent();
   if (global !== undefined && !globalAdmitted) return refuse('payload-out-of-scope', '全域对话的来源、发送披露或隐私过滤已经变化；未发送任何内容。');
-  if (global !== undefined && payload.tools !== undefined && payload.tools.length > 0) return refuse('tools-present', '全域对话没有注册工具；未发送任何内容。');
+  if (global !== undefined && scoped === undefined && payload.tools !== undefined && payload.tools.length > 0) return refuse('tools-present', '全域对话没有注册工具；未发送任何内容。');
   const excluded = seriesScopeRefusal(binding.seriesScopeGuard);
   if (excluded !== null) return refuse('series-retrieval-scope-changed', `书系检索范围已变化 · 需要重新确认计划：${excluded}；未发送任何内容。`);
   if (!DIGEST_PATTERN.test(binding.bindingDigest) || scope.currentBindingDigest() !== binding.bindingDigest) {

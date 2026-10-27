@@ -1,4 +1,4 @@
-import type { GlobalMemoryPin } from '../../shared/protocol.js';
+import type { GlobalAgentScope, GlobalMemoryPin } from '../../shared/protocol.js';
 import { MAX_DIALOGUE_QUESTION_CHARACTERS } from '../../shared/protocol.js';
 import { DIGEST_PATTERN, canonicalJson, sha256Hex } from '../analysis/canonical.js';
 import { DialogueError } from './dialogue-ledger.js';
@@ -67,6 +67,8 @@ export function dialogueRequestDigest(contractDigest: string, kind: DialogueTurn
 
 export interface DialogueMessageInput {
   readonly globalSources?: ReadonlyArray<GlobalMemoryPin & { readonly text: string }>;
+  /** A scoped Global Agent turn's pinned Books and procedures (#1171); absent on the no-tools turn, whose bytes are unchanged. */
+  readonly globalScope?: GlobalAgentScope;
   readonly kind: DialogueTurnKind;
   readonly selection: string;
   readonly question: string;
@@ -76,7 +78,8 @@ export interface DialogueMessageInput {
 
 /** The one user message a turn sends: its header, the selected words, the question, and for `continue` what was kept. */
 export function buildDialogueMessage(input: DialogueMessageInput): string {
-  if (input.globalSources !== undefined) return `AI7 全域对话\n${canonicalJson({ kind: input.kind, sources: input.globalSources, question: input.question, kept: input.kept })}`;
+  if (input.globalSources !== undefined) return `AI7 全域对话\n${canonicalJson({ kind: input.kind, sources: input.globalSources, question: input.question, kept: input.kept,
+    ...(input.globalScope === undefined ? {} : { scope: input.globalScope }) })}`;
   const contract = DIALOGUE_PROMPT_CONTRACT;
   const header = contract.messageHeader
     .replace('{kind}', contract.kindLabels[input.kind])
@@ -107,13 +110,20 @@ export function questionHoldsContractMarks(question: string): boolean {
 export function parseDialogueMessage(text: string): DialogueMessageInput | null {
   if (text.startsWith('AI7 全域对话\n')) {
     try {
-      const record = JSON.parse(text.slice('AI7 全域对话\n'.length)) as { kind: DialogueTurnKind; sources: DialogueMessageInput['globalSources']; question: string; kept: string | null };
+      const record = JSON.parse(text.slice('AI7 全域对话\n'.length)) as { kind: DialogueTurnKind; sources: DialogueMessageInput['globalSources']; question: string; kept: string | null; scope?: GlobalAgentScope };
+      const scope = record.scope;
+      // The round trip below proves the bytes; this proves only the closed shape a scoped reader relies on.
+      if (scope !== undefined && (scope === null || typeof scope !== 'object' || !Array.isArray(scope.books) || !Array.isArray(scope.procedures) ||
+          scope.books.length > 8 || scope.procedures.length > 8 ||
+          !scope.books.every((book) => typeof book?.bookId === 'string' && typeof book.title === 'string' && typeof book.manuscriptId === 'string' && typeof book.revisionId === 'string') ||
+          !scope.procedures.every((pin) => typeof pin?.procedureId === 'string' && Number.isSafeInteger(pin.version) && typeof pin.digest === 'string' && typeof pin.title === 'string'))) return null;
       if ((record.kind !== 'ask' && record.kind !== 'continue') || typeof record.question !== 'string' ||
           !(record.kept === null || typeof record.kept === 'string') || !Array.isArray(record.sources) || record.sources.length > 12 ||
           record.sources.some((source) => source === null || typeof source !== 'object' || Object.keys(source).sort().join(',') !== 'itemId,revisionId,text' ||
             typeof source.itemId !== 'string' || source.itemId.length > 180 || typeof source.revisionId !== 'string' || source.revisionId.length > 180 ||
             typeof source.text !== 'string' || [...source.text].length > 200)) return null;
-      const parsed: DialogueMessageInput = { kind: record.kind, selection: '', question: record.question, kept: record.kept, globalSources: record.sources };
+      const parsed: DialogueMessageInput = { kind: record.kind, selection: '', question: record.question, kept: record.kept, globalSources: record.sources,
+        ...(scope === undefined ? {} : { globalScope: scope }) };
       return buildDialogueMessage(parsed) === text ? parsed : null;
     } catch { return null; }
   }

@@ -18,6 +18,8 @@ import { fragmentsText, splitFragments, type DialogueFragment, type FragmentRead
 /** What one attempt's turn holds in the Harness Session Ledger, read through its span. */
 export interface AttemptTurn {
   readonly exactFetched?: ReadonlyMap<string, RetrievalCandidate>;
+  /** Every local tool call the turn made, with the model-facing result once it arrived (#1171's disclosure). */
+  readonly toolCalls?: ReadonlyArray<{ readonly callId: string; readonly name: string; readonly arguments: string; readonly result: string | null; readonly isError: boolean }>;
   /** The message the turn sent, read back by the dialogue contract; `null` when the turn's message is not there. */
   readonly message: DialogueMessageInput | null;
   /** Every text delta the model streamed in the turn, in order. */
@@ -38,11 +40,16 @@ export function attemptTurn(log: StoredHarnessLog, startSeq: number, endSeq: num
   let streamed = '';
   const exactCalls = new Set<string>();
   const exactFetched = new Map<string, RetrievalCandidate>();
+  const toolCalls: Array<{ callId: string; name: string; arguments: string; result: string | null; isError: boolean }> = [];
   for (const event of log.events.slice(startSeq, last + 1)) {
     const data = event.data as Record<string, unknown> | null;
+    if (event.type === 'tool/call' && typeof data?.name === 'string' && typeof data.callId === 'string')
+      toolCalls.push({ callId: data.callId, name: data.name, arguments: typeof data.arguments === 'string' ? data.arguments : '', result: null, isError: false });
     if (event.type === 'tool/call' && data?.name === 'exact_fetch' && typeof data.callId === 'string') exactCalls.add(data.callId);
     if (event.type === 'tool/result' && isRecord(data?.message)) {
       const result = toolResultOf(data.message as unknown as AssembledMessage);
+      const call = result === null ? undefined : toolCalls.find((entry) => entry.callId === result.callId && entry.result === null);
+      if (call !== undefined) { call.result = result!.text; call.isError = result!.isError || isRefusal(result!.text); }
       if (result !== null && exactCalls.has(result.callId) && !result.isError) {
         try {
           const value: unknown = JSON.parse(result.text);
@@ -60,7 +67,15 @@ export function attemptTurn(log: StoredHarnessLog, startSeq: number, endSeq: num
       if (chunk?.type === 'text-delta' && typeof chunk.text === 'string') streamed += chunk.text;
     }
   }
-  return { message, streamed, ...(exactFetched.size === 0 ? {} : { exactFetched }) };
+  return { message, streamed, ...(exactFetched.size === 0 ? {} : { exactFetched }), ...(toolCalls.length === 0 ? {} : { toolCalls }) };
+}
+
+/** Local tool refusals are returned to the model as plain text; an answered call's result is the JSON its owner returned. */
+function isRefusal(text: string): boolean {
+  try {
+    const value: unknown = JSON.parse(text);
+    return isRecord(value) && typeof value.refused === 'string';
+  } catch { return true; }
 }
 
 /** An attempt's turn, or why there is none: its log is not here, or it is here and does not read. */

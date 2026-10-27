@@ -129,7 +129,7 @@ import type { PublicSampleBookSourceDigest } from './public-samplebooks.js';
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 177 as const;
+export const SERVICE_PROTOCOL_VERSION = 178 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 export interface BookFindingProjection {
@@ -165,7 +165,7 @@ export interface ParagraphAnalysisProjection {
 /** Disposable local search results: UTF-16 offsets in the exact pinned source, previews are never quotations. */
 export interface LocalRetrievalCandidateProjection {
   readonly candidateId: string;
-  readonly sourceKind: 'manuscript' | 'material' | 'retained-source';
+  readonly sourceKind: 'manuscript' | 'material' | 'retained-source' | 'memory';
   readonly sourceId: string;
   readonly revisionOrIndexDigest: string;
   readonly anchor: { readonly blockId?: string; readonly segmentOrdinal?: number; readonly start: number; readonly end: number };
@@ -2927,6 +2927,21 @@ export interface AdmittedProviderRule {
       readonly authorInformationAllowed: true;
       readonly houseNameAllowed: true;
     };
+  };
+  /** v31's scoped Global dialogue (#1171): the declared source and tool blocks, exactly as the policy states them. */
+  readonly globalAgentScopedDialogue?: {
+    readonly source: Readonly<Record<string, boolean>>;
+    readonly scopedTools: {
+      readonly names: readonly string[];
+      readonly callsPerAttempt: number;
+      readonly candidatesPerRetrieval: number;
+      readonly maxResultBytes: number;
+      readonly roundTripBreaker: number;
+      readonly [term: string]: unknown;
+    };
+    readonly outboundCategoryRestriction: 'none';
+    readonly outboundDataDisclosureRequired: true;
+    readonly redaction: NonNullable<AdmittedProviderRule['globalAgentDialogue']>['redaction'];
   };
   readonly taskKindOverrides?: Readonly<Record<string, { readonly webSearch: boolean }>>;
   readonly editorTaskInstruction?: {

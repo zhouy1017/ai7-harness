@@ -25,6 +25,7 @@ import {
   toolArgumentsDigest,
   isLocalToolName,
   ruleNamedToolSchemas,
+  type PlatformToolArguments,
   type PlatformToolName,
   type BreakerVerdict,
 } from './platform-tools.js';
@@ -68,7 +69,14 @@ export function platformToolModelProfile(profile: ProviderModelProfile, scope: s
   return profile;
 }
 
+/** The scoped Global Agent's two non-retrieval tools (#1171): reads and proposals only, answered inside AI7. */
+export interface GlobalAgentScopedToolOwner {
+  readProcedure(procedureId: string, version: number): unknown;
+  proposeLearningSupervision(args: Extract<PlatformToolArguments, { tool: 'propose_learning_supervision' }>): unknown;
+}
+
 export class PlatformToolSession implements PlatformToolOwner {
+  readonly #scopedTools: GlobalAgentScopedToolOwner | null;
   readonly #claimAccounting: FactualSearchAccounting | null;
   readonly #sourceExcluded: (url: string) => boolean;
   readonly #binding: EgressBindingFacts;
@@ -127,6 +135,7 @@ export class PlatformToolSession implements PlatformToolOwner {
     /** Per-ticket host admission: the network denial's `admitTicketHost`, keyed by each fetch ticket's id. */
     readonly admitHost?: TicketHostAdmission;
     readonly retrieval?: RetrievalIndex;
+    readonly scopedTools?: GlobalAgentScopedToolOwner;
     readonly cache?: ProviderResultCache | null;
     readonly snapshots?: ResearchSnapshotCache | null;
     /** The test item purpose every call of this attempt is recorded under. */
@@ -143,6 +152,7 @@ export class PlatformToolSession implements PlatformToolOwner {
     if (rule !== null && (deps.fetch === undefined || deps.admitHost === undefined)) throw new Error('PLATFORM_TOOL_TRANSPORT_REQUIRED');
     this.#binding = deps.binding;
     this.#retrieval = deps.retrieval ?? null;
+    this.#scopedTools = deps.scopedTools ?? null;
     this.#localBreaker = new PlatformToolBreaker(deps.binding.localTools?.breaker.roundTrips ?? LOCAL_TOOL_ROUND_TRIP_BREAKER);
     this.#claimAccounting = deps.factualClaimAccounting ?? null;
     this.#sourceExcluded = deps.sourceExcluded ?? (() => false);
@@ -373,6 +383,12 @@ export class PlatformToolSession implements PlatformToolOwner {
         case 'search_manuscript': value = this.#retrieval.searchManuscript(args.query, args.mode); break;
         case 'baseline_facts': case 'term_table': value = this.#retrieval.pinnedRecords(args.tool, args.query); break;
         case 'guideline_clause': value = this.#retrieval.pinnedRecords(args.tool, args.clauseId); break;
+        case 'read_procedure':
+          if (this.#scopedTools === null) return refuse('本次尝试未准许该工具。');
+          value = this.#scopedTools.readProcedure(args.procedureId, args.version); break;
+        case 'propose_learning_supervision':
+          if (this.#scopedTools === null) return refuse('本次尝试未准许该工具。');
+          value = this.#scopedTools.proposeLearningSupervision(args); break;
         default: return refuse('本次尝试未准许该工具。');
       }
       if (call.signal.aborted || this.#base.currentBindingDigest() !== this.#binding.bindingDigest) return refuse('检索未完成');

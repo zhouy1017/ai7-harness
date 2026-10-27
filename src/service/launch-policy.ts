@@ -1532,7 +1532,7 @@ export interface OrdinaryProductionPolicyReading {
     /** The rule's verified local tools: retrieval allowed on every rule but enrolled background analysis, material translation and custom analysis. */
     readonly localTools: AdmittedLocalTools;
     readonly projection?: Partial<Pick<AdmittedProviderRule, 'taskKinds' | 'outboundDataCategories' | 'crossUnitSynthesisAllowed' |
-      'plusDeclaredContractRetryAdaptations' | 'plusOneCrossUnitSynthesisTurn' | 'globalAgentDialogue' |
+      'plusDeclaredContractRetryAdaptations' | 'plusOneCrossUnitSynthesisTurn' | 'globalAgentDialogue' | 'globalAgentScopedDialogue' |
       'taskKindOverrides' | 'editorTaskInstruction' | 'houseReviewGuidelineClause' | 'enabledLearningEnvelope' | 'claimScopedFactualStages' | 'factualRecheck'>>;
   }>;
 }
@@ -1650,6 +1650,9 @@ const GLOBAL_AGENT_READING: OrdinaryProductionRuleReading = {
   outboundDataCategories: [...PRODUCTION_CATEGORY_VOCABULARY, 'editor-task-instruction', 'house-review-guideline-clause'],
   noRetrieval: true,
 };
+/** v31's separately declared scoped rule; its typed consumer is the Global Agent session (#1171), never the no-tools rule. */
+const GLOBAL_AGENT_SCOPED_RULE_ID = 'ordinary-production-global-agent-scoped-dialogue';
+const GLOBAL_AGENT_SCOPED_READING: OrdinaryProductionRuleReading = { ...GLOBAL_AGENT_READING, noRetrieval: false };
 const BACKGROUND_PROCESSING_RULE_ID = 'enrolled-background-processing';
 const BACKGROUND_PROCESSING_KINDS = ['learning-curation', 'material-index', 'review-reduction', 'factual-recheck'] as const;
 const BACKGROUND_PROCESSING_READING = productionReading('Main Editorial Role', BACKGROUND_PROCESSING_KINDS, ['public-or-synthetic'], {
@@ -1760,6 +1763,7 @@ function projectOriginalFieldPolicy(policy: Record<string, unknown>): OrdinaryPr
       { ...curationBlocks, output: null } as OrdinaryProductionRuleReading['blocks'], false, true))
       : curation ? productionReading('Main Editorial Role', ['learning-curation'], ['editorial-learning-example'],
       { ...curationBlocks, output: null } as OrdinaryProductionRuleReading['blocks'], false, true) : ruleId === GLOBAL_AGENT_RULE_ID ? GLOBAL_AGENT_READING
+      : ruleId === GLOBAL_AGENT_SCOPED_RULE_ID ? GLOBAL_AGENT_SCOPED_READING
       : ruleId === BACKGROUND_PROCESSING_RULE_ID ? BACKGROUND_PROCESSING_READING : ORDINARY_PRODUCTION_RULES[ruleId];
     // These declarations await their separately admitted typed consumers; no generic background fallback.
     if (base === undefined) continue;
@@ -1781,6 +1785,11 @@ function projectOriginalFieldPolicy(policy: Record<string, unknown>): OrdinaryPr
       ...(ruleId === GLOBAL_AGENT_RULE_ID ? { globalAgentDialogue: {
         source: GLOBAL_AGENT_SOURCE, redaction: HOUSE_PEOPLE_REDACTION,
         outboundCategoryRestriction: 'none', outboundDataDisclosureRequired: true,
+      } } : {}),
+      ...(ruleId === GLOBAL_AGENT_SCOPED_RULE_ID ? { globalAgentScopedDialogue: {
+        source: structuredClone(rule['source']) as Record<string, boolean>,
+        scopedTools: structuredClone(rule['scopedTools']) as NonNullable<AdmittedProviderRule['globalAgentScopedDialogue']>['scopedTools'],
+        redaction: HOUSE_PEOPLE_REDACTION, outboundCategoryRestriction: 'none', outboundDataDisclosureRequired: true,
       } } : {}),
     };
     rules.push({ ruleId, reading, projection,
