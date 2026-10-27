@@ -65,6 +65,7 @@ export const SUBAGENT_PACKAGE_PINS = {
 } as const;
 
 export interface HarnessCompositionDescriptor {
+  readonly learningCuration?: { readonly bundleDigest: string; readonly contractDigest: string };
   readonly version: 1 | 2 | 3;
   readonly researchDeclaration?: ResearchDeclaration;
   readonly packages: typeof HARNESS_PACKAGE_PINS;
@@ -105,6 +106,7 @@ export interface HarnessCompositionDescriptor {
 export const SESSION_LOG_PACKAGE_PIN = '0.1.0-rc.6' as const;
 
 export interface CompositionOptions {
+  readonly learningCuration?: { readonly bundleDigest: string; readonly contractDigest: string };
   readonly version?: 1 | 2 | 3;
   readonly subagents?: ParentAttemptSubagentDeclaration;
   readonly procedure?: ProcedureDefinitionPin;
@@ -119,6 +121,10 @@ export interface CompositionOptions {
 }
 
 export function describeComposition(route: ExecutionRoute, model: string, promptContractDigest: string, options: CompositionOptions = {}): HarnessCompositionDescriptor {
+  if (options.learningCuration !== undefined && (options.version !== 2 || options.platformTools || options.localTools ||
+    options.learningCuration.contractDigest !== promptContractDigest || !/^[0-9a-f]{64}$/u.test(options.learningCuration.bundleDigest))) {
+    throw new Error('CURATION_COMPOSITION_INVALID');
+  }
   const withTools = options.platformTools === true;
   const version = options.version ?? 1;
   const local = version === 1 ? options.localTools !== undefined && options.localTools !== false : options.localTools ?? false;
@@ -134,6 +140,7 @@ export function describeComposition(route: ExecutionRoute, model: string, prompt
     throw new Error('RESEARCH_DECLARATION_COMPOSITION_MISMATCH');
   }
   const body = {
+    ...(options.learningCuration === undefined ? {} : { learningCuration: options.learningCuration }),
     ...(version !== 1 ? { version, ...(options.procedure === undefined ? {} : { procedure: options.procedure }),
       ...(options.stages === undefined ? {} : { stages: options.stages }),
       ...(options.sources === undefined ? {} : { sources: options.sources }) } : {}),

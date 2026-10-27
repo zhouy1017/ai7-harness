@@ -1,3 +1,4 @@
+import { execPre74Fixture } from '../support/pre74-schema.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { capturedMapAnswer, capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
 import { BASELINE_PROMPT_CONTRACT_DIGEST, parseUnitMessageHeader, unitRequestDigest } from '../../src/service/analysis/contract.js';
@@ -474,6 +475,7 @@ describe('a Review Run over the real store on exact sample1', () => {
     const db = database();
     try {
       constructPre94PolicyEncoding(db);
+      execPre74Fixture(db, 'PRAGMA user_version = 95');
       db.exec('PRAGMA foreign_keys = OFF; BEGIN IMMEDIATE');
       for (const table of ['analysis_task_intents', 'analysis_result_set_revisions', 'analysis_plan_adaptations']) {
         const sql = String(db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table)!.sql);
@@ -486,13 +488,13 @@ describe('a Review Run over the real store on exact sample1', () => {
         db.exec(`INSERT INTO ${table} SELECT * FROM temp.old_review_rows; DROP TABLE temp.old_review_rows;`);
         for (const trigger of triggers) db.exec(String(trigger.sql));
       }
-      db.exec('DROP TABLE review_excluded_findings; PRAGMA user_version = 84; COMMIT');
+      execPre74Fixture(db, 'DROP TABLE review_excluded_findings; PRAGMA user_version = 84; COMMIT');
     } finally { db.close(); }
     session = await open('review-overlap-authored');
     try {
       const after = database();
       try {
-        expect(after.prepare('PRAGMA user_version').get()!.user_version).toBe(95);
+        expect(after.prepare('PRAGMA user_version').get()!.user_version).toBe(96);
         for (const snapshot of before) expect(after.prepare(`SELECT canonical_json, sha256 FROM ${snapshot.table} ORDER BY rowid`).all()).toEqual(snapshot.rows);
         expect(after.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
       } finally { after.close(); }

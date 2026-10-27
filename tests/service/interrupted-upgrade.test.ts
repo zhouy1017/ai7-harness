@@ -453,7 +453,7 @@ describe('an upgrade interrupted before its version stamp', () => {
 it('reopens idempotently after the reader-only stamp commits before its open-history record (#1131)', async () => {
   expect(await opened()).toBe(LATEST_SCHEMA_VERSION);
   const before = tables();
-  withDatabase((db) => { db.exec('PRAGMA user_version = 91'); initializeTaskAuthorizationSchema(db);
+  withDatabase((db) => { execPre74Fixture(db, 'PRAGMA user_version = 91'); initializeTaskAuthorizationSchema(db);
     expect(db.prepare('PRAGMA user_version').get()!.user_version).toBe(LATEST_SCHEMA_VERSION); });
   expect(tables()).toEqual(before);
   expect(await opened()).toBe(LATEST_SCHEMA_VERSION);

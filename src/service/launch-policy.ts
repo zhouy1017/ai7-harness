@@ -1533,7 +1533,7 @@ export interface OrdinaryProductionPolicyReading {
     readonly localTools: AdmittedLocalTools;
     readonly projection?: Partial<Pick<AdmittedProviderRule, 'taskKinds' | 'outboundDataCategories' | 'crossUnitSynthesisAllowed' |
       'plusDeclaredContractRetryAdaptations' | 'plusOneCrossUnitSynthesisTurn' | 'globalAgentDialogue' |
-      'taskKindOverrides' | 'editorTaskInstruction' | 'houseReviewGuidelineClause'>>;
+      'taskKindOverrides' | 'editorTaskInstruction' | 'houseReviewGuidelineClause' | 'enabledLearningEnvelope'>>;
   }>;
 }
 
@@ -1752,7 +1752,11 @@ function projectOriginalFieldPolicy(policy: Record<string, unknown>): OrdinaryPr
   const rules: OrdinaryProductionPolicyReading['rules'][number][] = [];
   for (const rule of declared) {
     const ruleId = String(rule['ruleId']);
-    const base = ruleId === GLOBAL_AGENT_RULE_ID ? GLOBAL_AGENT_READING
+    const curation = ruleId === 'ordinary-production-learning-curation' && policy['version'] === 'v31';
+    const curationBlocks = Object.fromEntries(['authorityOrigin', 'executionMode', 'scopeLimits', 'clarification', 'source', 'transmissions',
+      'authorizationPreconditions', 'providerAccountLimit'].map((key) => [key, rule[key]]));
+    const base = curation ? productionReading('Main Editorial Role', ['learning-curation'], ['editorial-learning-example'],
+      { ...curationBlocks, output: null } as OrdinaryProductionRuleReading['blocks'], false, true) : ruleId === GLOBAL_AGENT_RULE_ID ? GLOBAL_AGENT_READING
       : ruleId === BACKGROUND_PROCESSING_RULE_ID ? BACKGROUND_PROCESSING_READING : ORDINARY_PRODUCTION_RULES[ruleId];
     // These declarations await their separately admitted typed consumers; no generic background fallback.
     if (base === undefined) continue;
@@ -1761,6 +1765,7 @@ function projectOriginalFieldPolicy(policy: Record<string, unknown>): OrdinaryPr
       blocks: { ...base.blocks, source: rule['source'] as Record<string, unknown>, transmissions: rule['transmissions'] as Record<string, unknown> } };
     const projection: NonNullable<OrdinaryProductionPolicyReading['rules'][number]['projection']> = {
       taskKinds: reading.taskKinds, outboundDataCategories: reading.outboundDataCategories,
+      ...(curation ? { enabledLearningEnvelope: rule['enabledLearningEnvelope'] as NonNullable<AdmittedProviderRule['enabledLearningEnvelope']> } : {}),
       ...(ruleId === 'ordinary-production-review' ? {
         crossUnitSynthesisAllowed: true, plusDeclaredContractRetryAdaptations: true,
         taskKindOverrides: rule['taskKindOverrides'] as NonNullable<AdmittedProviderRule['taskKindOverrides']>,

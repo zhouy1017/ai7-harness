@@ -1,3 +1,4 @@
+import { execPre74Fixture } from '../support/pre74-schema.js';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -62,7 +63,7 @@ describe('Procedure Definition persistence and exact plan pins', () => {
     let db = new DatabaseSync(path);
     const before = db.prepare('SELECT * FROM books').all();
     for (const table of Object.keys(PROCEDURE_DEFINITION_SCHEMA_SQL).reverse()) db.exec(`DROP TABLE ${table}`);
-    db.exec('PRAGMA user_version = 84'); db.close();
+    execPre74Fixture(db, 'PRAGMA user_version = 84'); db.close();
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     expect((await store.inspectKnowledgeProcedures()).preinstalled).toHaveLength(11);
     store.markCleanShutdown(); store.close();
@@ -71,16 +72,16 @@ describe('Procedure Definition persistence and exact plan pins', () => {
     expect(db.prepare('SELECT count(*) total FROM procedure_plan_pins').get()!.total).toBe(0);
     expect(() => db.exec('UPDATE procedure_definition_versions SET version = 2')).toThrow(/PROCEDURE_DEFINITION_IMMUTABLE/u);
     expect(() => db.exec('DELETE FROM procedure_definitions')).toThrow(/PROCEDURE_DEFINITION_IMMUTABLE/u);
-    db.exec('PRAGMA user_version = 84'); db.close(); // Committed tables and seed, interrupted before the stamp.
+    execPre74Fixture(db, 'PRAGMA user_version = 84'); db.close(); // Committed tables and seed, interrupted before the stamp.
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     expect(store.getBookOverview(book.bookId).book.bookId).toBe(book.bookId);
     store.markCleanShutdown(); store.close();
     db = new DatabaseSync(path);
     // Synchronized with #1082, #1083 and #1084: revisions 86 to 88 follow; 88 adds the version-2 review procedures beside version 1.
-    expect(db.prepare('PRAGMA user_version').get()!.user_version).toBe(95);
+    expect(db.prepare('PRAGMA user_version').get()!.user_version).toBe(96);
     const originalVersions = db.prepare("SELECT * FROM procedure_definition_versions WHERE version = 1 AND procedure_id <> 'ai7-procedure/local-text-check' ORDER BY version_id").all();
     // A genuine revision85 holds the historical ten definitions, before the new local identity exists.
-    db.exec("DROP TRIGGER procedure_definition_versions_no_delete; DROP TRIGGER procedure_definitions_no_delete; DELETE FROM procedure_definition_versions WHERE version > 1 OR procedure_id = 'ai7-procedure/local-text-check'; DELETE FROM procedure_definitions WHERE procedure_id = 'ai7-procedure/local-text-check'; PRAGMA user_version = 85;");
+    execPre74Fixture(db, "DROP TRIGGER procedure_definition_versions_no_delete; DROP TRIGGER procedure_definitions_no_delete; DELETE FROM procedure_definition_versions WHERE version > 1 OR procedure_id = 'ai7-procedure/local-text-check'; DELETE FROM procedure_definitions WHERE procedure_id = 'ai7-procedure/local-text-check'; PRAGMA user_version = 85;");
     db.exec(PROCEDURE_DEFINITION_TRIGGER_SQL['procedure_definition_versions_no_delete']!);
     db.exec(PROCEDURE_DEFINITION_TRIGGER_SQL['procedure_definitions_no_delete']!);
     db.close();

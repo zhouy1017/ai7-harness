@@ -1,3 +1,4 @@
+import { CURATION_SCHEMA_SQL } from '../../src/service/task-authorization.js';
 import type { DatabaseSync } from 'node:sqlite';
 import { DEFAULT_EXECUTION_RULE_SCHEMA_SQL } from '../../src/service/default-execution-rules.js';
 import { IDLE_RUN_AUTHORIZATIONS_SQL, ANALYSIS_LEDGER_REVISION_30_SQL, ANALYSIS_LEDGER_REVISION_65_SQL, ANALYSIS_LEDGER_SCHEMA_SQL } from '../../src/service/task-authorization.js';
@@ -89,5 +90,5 @@ export function analysisRunAuthorizationsShape(database: DatabaseSync): 'revisio
   if (row === undefined) return 'other';
   if (normalized(row.sql) === normalized(ANALYSIS_LEDGER_REVISION_30_SQL.analysis_run_authorizations)) return 'revision-30';
   if (normalized(row.sql) === normalized(ANALYSIS_LEDGER_REVISION_65_SQL.analysis_run_authorizations)) return 'revision-65';
-  return normalized(row.sql) === normalized(IDLE_RUN_AUTHORIZATIONS_SQL) ? 'current' : 'other';
+  return normalized(row.sql) === normalized(CURATION_SCHEMA_SQL.analysis_run_authorizations!) ? 'current' : 'other';
 }

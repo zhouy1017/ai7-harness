@@ -127,6 +127,22 @@ async function sourceDecisions() {
   return { subject, book, signals, explicit, inspect, current, make, create, accept, govern, prepare, requests, sourceBook };
 }
 
+it('freezes native curation examples from actual decision and feedback meaning', async () => {
+  const { subject, book, signals } = await sourceDecisions();
+  const bundle = subject.prepareLearningCuration(book.bookId, signals.map((signal) => signal.signalId));
+  expect(bundle.state).toBe('ready');
+  expect(bundle.examples).toHaveLength(4);
+  for (const example of bundle.examples) {
+    expect(example.sourceKind).toBe('proposal-decision');
+    if (example.sourceKind !== 'proposal-decision') throw new Error('Expected native decision');
+    expect(example).toMatchObject({ editorialDimension: 'typos-and-usage', afterSemantics: 'chosen-text-not-apply-proof',
+      reason: '合成编辑判断。', reasonSource: 'reason-field' });
+    expect(example.decision === 'rejected' ? example.after === example.before : example.after.startsWith('合成统一表达')).toBe(true);
+  }
+  subject.changeEditorialLearning({ kind: 'material', signalId: signals[0]!.signalId });
+  expect(subject.prepareLearningCuration(book.bookId, signals.map((signal) => signal.signalId))).toMatchObject({ state: 'held', emittedText: null });
+});
+
 it('publishes two same-category memories with true automatic/explicit ancestry, one real owner each, and atomic governance', async () => {
   const { subject, book, signals, explicit, inspect, current, make, create, accept, govern } = await sourceDecisions();
   const automatic = signals.find((entry) => entry.signalId !== explicit.signalId)!;
@@ -251,7 +267,7 @@ it('refuses changed sources at creation and acceptance and never restores inacti
   const prepared = prepare();
   const preparedTask = prepared.categories.find((entry) => entry.categoryId === 'typos-and-usage')!.taskIntentId!;
   const window = subject.getManuscriptWindow(book.manuscriptId, book.branchId, null);
-  if (signal.kind === 'word-tracked-edit') throw new Error('expected a review decision signal');
+  if (signal.kind === 'word-tracked-edit' || signal.kind === 'manual-edit-journal') throw new Error('expected a review decision signal');
   subject.recordProposalDecisionFeedback({ manuscriptId: book.manuscriptId, branchId: book.branchId, windowStartBlockId: window.blocks[0]!.blockId,
     markId: signal.source.markId!, decisionId: signal.source.decisionId, expectedFeedback: signal.source.reasonRevision,
     action: 'revise', reason: '修订后的合成原因。', reasonSource: 'free-text' });

@@ -1,3 +1,4 @@
+import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { BaselineAnalysisExecutionOwner, ModelRequestGovernor, type ModelRequestPermit, type ModelRequestProducer } from '../../src/service/analysis/execution.js';
 import { join } from 'node:path';
@@ -310,11 +311,11 @@ describe('provider-free local ReviewRun', () => {
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot); const book = await importSample1Book(store, roots.codeRoot, '本地迁移样书');
     store.markCleanShutdown(); store.close(); let db = database(); const prior = db.prepare('SELECT * FROM books').all();
     db.exec('DROP TABLE review_local_stage_artifacts; DROP TRIGGER procedure_definition_versions_no_delete; DROP TRIGGER procedure_definitions_no_delete;');
-    db.exec("DELETE FROM procedure_definition_versions WHERE procedure_id = 'ai7-procedure/local-text-check'; DELETE FROM procedure_definitions WHERE procedure_id = 'ai7-procedure/local-text-check'; PRAGMA user_version = 89");
+    execPre74Fixture(db, "DELETE FROM procedure_definition_versions WHERE procedure_id = 'ai7-procedure/local-text-check'; DELETE FROM procedure_definitions WHERE procedure_id = 'ai7-procedure/local-text-check'; PRAGMA user_version = 89");
     db.exec(PROCEDURE_DEFINITION_TRIGGER_SQL['procedure_definition_versions_no_delete']!); db.exec(PROCEDURE_DEFINITION_TRIGGER_SQL['procedure_definitions_no_delete']!); db.close();
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot); store.markCleanShutdown(); store.close(); db = database();
     expect(db.prepare('SELECT * FROM books').all()).toEqual(prior); expect(db.prepare('PRAGMA user_version').get()!.user_version).toBe(LATEST_SCHEMA_VERSION);
-    db.exec('PRAGMA user_version = 89'); db.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    execPre74Fixture(db, 'PRAGMA user_version = 89'); db.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot); replaceFirst(book, '他停住了…又望向门口。'); const prepared = prepare(book, policy); authorize(book, prepared);
     const driver = new ReviewRunDriver(store.reviewRunDriveSteps, noModel()); await driver.drive(prepared.run.reviewRunId); await driver.dispose(); store.markCleanShutdown(); store.close();
     db = database(); const record = readLocalStageArtifacts(db, prepared.run.reviewRunId).at(-1)!.record;

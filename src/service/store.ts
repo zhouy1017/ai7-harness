@@ -10,6 +10,8 @@ import { backgroundEnrollmentKinds } from './analysis/live-kind-admission.js';
 import { executionBackgroundShare } from './analysis/execution.js';
 import { initializeProcedureDefinitionSchema } from './procedures/definition-store.js';
 import { EditorialLearningLedger, LearningReads, initializeEditorialLearningSchema, type WordLearningProofs } from './learning/ledger.js';
+import { CURATION_CONTRACT_DIGEST, validCurationBudget, parseCurationResult, type CurationRun } from './learning/curation.js';
+import type { EnabledLearningEnvelope, LearningCurationBudget, LearningCurationBundle } from '../shared/protocol/learning.js';
 import type { WordTrackedEditLearningSource } from '../shared/protocol/learning.js';
 import type { ChangeEditorialLearningInput, CreateEditorialMemoryInput, DeactivateEditorialMemoryInput, InspectEditorialLearningInput, EditorialLearningProjection, LearningReasonAskInput, LearningReasonAskProjection } from '../shared/protocol/learning.js';
 import { buildDialogueMessage, dialogueQuestionDigest } from './dialogue/contract.js';
@@ -619,6 +621,7 @@ import {
   wordParentSourcePinRecord,
   createWordSampleDetailContext,
   wordSampleDetailContextCurrent,
+  wordSourceFragmentText,
   resolveWordSampleDetailSource,
   pageWordSampleDetail,
   type WordSampleDetailContext,
@@ -5085,9 +5088,10 @@ export class EditorialStore {
     this.#capturedProcedures = new CapturedProcedures(authority);
     this.#customAnalysisDimensions = new CustomAnalysisDimensions(authority);
     this.#reviewRuns = new ReviewRunStore(authority, this.#editorialMarks, {
+      learningLedger: () => this.#learningLedger(),
       ledgerOf: (entry, materials, digest, bookId, preference, version) => this.#reviewLedgerOf(entry, materials, digest, bookId, preference, version),
       housePreference: (bookId, categoryId, kind, policy) => {
-        const use = new HouseReviewPreferenceLedger(this.#authority).use(this.#baselineAnalysis.launch.operationalScope, bookId, categoryId, this.#housePreferencePeopleNames());
+        const use = new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).use(this.#baselineAnalysis.launch.operationalScope, bookId, categoryId, this.#housePreferencePeopleNames());
         if (use === null) return null;
         // The kind's one foreground rule must name the category; the live admission asks the same again before any dispatch.
         const rules = policy.providerProcessing.admittedRules.filter((rule) => rule.backgroundOrigin !== true && rule.taskKinds.includes(kind));
@@ -5843,7 +5847,7 @@ export class EditorialStore {
         // Current consistency availability is derived from today's knowledge. Its historical Run reconstructs from its
         // snapshot entry instead; mixing today's definition with a prior Run's pins would falsely make a saved step unavailable.
         if (entry.seriesKnowledge === undefined) scopes ??= frozenSeriesScopes(this.#authority, asString(row.task_intent_id));
-        preference = new HouseReviewPreferenceLedger(this.#authority).pinned(asString(row.task_intent_id));
+        preference = new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).pinned(asString(row.task_intent_id));
         const records = this.#authority.prepare("SELECT component, canonical_json, sha256 FROM analysis_plan_records WHERE task_intent_id = ? AND plan_version = (SELECT max(plan_version) FROM analysis_plan_records WHERE task_intent_id = ?) AND component IN ('execution-plan', 'plan-envelope')").all(asString(row.task_intent_id), asString(row.task_intent_id)) as SqlRow[];
         const components = new Map(records.map((record) => {
           const json = asString(record.canonical_json);
@@ -13466,7 +13470,71 @@ export class EditorialStore {
   }
 
   inspectEditorialLearning(input: InspectEditorialLearningInput): EditorialLearningProjection {
-    return this.#learningCall(() => this.#learningLedger().inspect(input, this.#baselineAnalysis.launch.operationalScope));
+    return this.#learningCall(() => {
+      const learning = this.#learningLedger();
+      const current = learning.curationEnvelope();
+      const offered = this.#curationEnvelope({ maxPasses: 1, totalTokens: 20_000, perPassTokens: 20_000 });
+      return { ...learning.inspect(input, this.#baselineAnalysis.launch.operationalScope), curation: {
+        available: offered !== null, disclosure: offered?.disclosure ?? '模型整理尚不可用；当前仅在本机保留学习记录。',
+        envelope: current?.envelope ?? null, ...this.#baselineAnalysis.curationBudgetUse(current?.entryId ?? ''),
+        recentRuns: this.#baselineAnalysis.curationRuns() } };
+    });
+  }
+
+  #curationEnvelope(budget: LearningCurationBudget): EnabledLearningEnvelope | null {
+    const launch = this.#baselineAnalysis.launch;
+    const policy = launch.policy;
+    const identity = selectedPolicyIdentityOf(policy?.selectedPolicyIdentity);
+    const live = launch.live;
+    const rule = policy?.providerProcessing.admittedRules?.find((entry) => entry.ruleId === 'ordinary-production-learning-curation');
+    if (launch.operationalScope !== 'ordinary-production' || live?.scope !== 'ordinary-production' ||
+      policy?.integrityState !== 'verified' || identity?.providerProcessingVersion !== 'v31' || rule?.enabledLearningEnvelope === undefined ||
+      rule.route !== live.route || rule.model !== live.model || rule.endpoint !== live.endpoint || rule.credentialSlot !== live.credentialSlot) return null;
+    return { schema: 'ai7.enabled-learning-envelope/1', budget, contractDigest: CURATION_CONTRACT_DIGEST, policy: identity,
+      binding: { route: live.route, endpoint: live.endpoint, model: live.model, credentialSlot: live.credentialSlot, credentialReference: live.credentialReference },
+      sourceKinds: ['proposal-decision', 'manual-edit-journal', 'word-tracked-edit'], scope: 'eligible-local-books',
+      supervisionDigest: this.#learningLedger().supervisionDigest(), disableStopsLaterDispatchAndUse: true,
+      disclosure: `空闲时将符合范围的直接修改、Word 修订及原生审阅决定的完整修改前后文字和实际原因发送给 ${live.route} · ${live.model} 整理。遵循当前学习监督与排除范围；只生成待接受的本社偏好和记忆，不会自动启用。关闭学习或排除来源会停止后续发送与使用。策略 ${identity.providerProcessingVersion}。` };
+  }
+
+  prepareLearningCuration(bookId: string, signalIds: readonly string[]): LearningCurationBundle {
+    return this.#learningCall(() => this.#learningLedger().prepareCuration(bookId, signalIds));
+  }
+
+  nextLearningCuration(): CurationRun | null {
+    return this.#learningCall(() => this.#transaction(this.#authority, () => {
+      const learning = this.#learningLedger();
+      const current = learning.curationEnvelope();
+      if (current === null || canonicalJson(this.#curationEnvelope(current.envelope.budget)) !== canonicalJson(current.envelope) || this.replacementFrozen()) return null;
+      const use = this.#baselineAnalysis.curationBudgetUse(current.entryId);
+      if (use.passesUsed >= current.envelope.budget.maxPasses || use.reservedTokens + current.envelope.budget.perPassTokens > current.envelope.budget.totalTokens) return null;
+      for (const bookId of learning.curationBooks()) {
+        const bundle = learning.nextCuration(bookId);
+        if (bundle?.state === 'ready') return this.#baselineAnalysis.startCuration(bundle, current);
+      }
+      return null;
+    }));
+  }
+
+  learningCurationCurrent(run: CurationRun): boolean {
+    try {
+      const current = this.#learningLedger().curationEnvelope();
+      return !this.replacementFrozen() && current?.entryId === run.controlEntryId &&
+        canonicalJson(this.#curationEnvelope(run.envelope.budget)) === canonicalJson(run.envelope) &&
+        this.prepareLearningCuration(run.bundle.bookId, run.bundle.signalIds).digest === run.bundle.digest;
+    } catch { return false; }
+  }
+
+  publishLearningCuration(run: CurationRun, text: string, evidence: { usage: import('./provider/classification.js').UsageFacts | null; transmitted: boolean }): number {
+    return this.#learningCall(() => this.#transaction(this.#authority, () => {
+      requireStore(this.learningCurationCurrent(run), 'LEARNING_SOURCE_CHANGED', '学习整理来源或范围已经变化；结果未发布。');
+      const proposals = parseCurationResult(text, run.bundle.examples);
+      requireStore(proposals !== null, 'LEARNING_RESULT_INVALID', '学习整理结果未满足约定；没有发布候选。');
+      this.#learningLedger().proposeCuration(run.bundle, proposals, run);
+      this.#baselineAnalysis.settleCuration(run, 'completed', { ...evidence, proposals: proposals.length,
+        reason: proposals.length === 0 ? '整理完成；证据不足以提出新偏好。' : `已形成 ${proposals.length} 条待接受的偏好与记忆。` });
+      return proposals.length;
+    }));
   }
 
   /** Explicit-Book source detail; historical inspection remains available while current learning is excluded. */
@@ -13538,7 +13606,10 @@ export class EditorialStore {
 
   changeEditorialLearning(input: ChangeEditorialLearningInput): EditorialLearningProjection {
     return this.#learningCall(() => this.#transaction(this.#authority, () => {
-      this.#learningLedger().change(input);
+      const budget = input.kind === 'switch' ? input.curation : undefined;
+      const envelope = budget === undefined ? undefined : this.#curationEnvelope(budget);
+      requireStore(budget === undefined || validCurationBudget(budget) && envelope !== null, 'LEARNING_ENVELOPE_UNAVAILABLE', '学习整理缺少有效的模型、策略或预算范围。');
+      this.#learningLedger().change(input, envelope ?? undefined);
       this.#rebuildHouseReviewPreference();
       return this.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
     }));
@@ -13554,7 +13625,7 @@ export class EditorialStore {
   acceptEditorialMemory(input: import('../shared/protocol/learning.js').AcceptEditorialMemoryInput): EditorialLearningProjection {
     return this.#learningCall(() => this.#transaction(this.#authority, () => {
       this.#learningLedger().accept(input, this.#baselineAnalysis.launch.operationalScope);
-      new HouseReviewPreferenceLedger(this.#authority).refreshGovernance(this.#baselineAnalysis.launch.operationalScope, this.#housePreferencePeopleNames(), 'memory');
+      new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).refreshGovernance(this.#baselineAnalysis.launch.operationalScope, this.#housePreferencePeopleNames(), 'memory');
       return this.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
     }));
   }
@@ -13562,7 +13633,7 @@ export class EditorialStore {
   deactivateEditorialMemory(input: DeactivateEditorialMemoryInput): EditorialLearningProjection {
     return this.#learningCall(() => this.#transaction(this.#authority, () => {
       this.#learningLedger().deactivate(input, this.#baselineAnalysis.launch.operationalScope);
-      new HouseReviewPreferenceLedger(this.#authority).refreshGovernance(this.#baselineAnalysis.launch.operationalScope, this.#housePreferencePeopleNames());
+      new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).refreshGovernance(this.#baselineAnalysis.launch.operationalScope, this.#housePreferencePeopleNames());
       return this.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
     }));
   }
@@ -13580,7 +13651,7 @@ export class EditorialStore {
   inspectGlobalAgent(live: (attemptId: string) => LiveAnswer | null = () => null, dialogueAdmitted = false): GlobalAgentProjection {
     return this.#learningCall(() => {
       const operationalScope = this.#baselineAnalysis.launch.operationalScope;
-      const preference = new HouseReviewPreferenceLedger(this.#authority).history(operationalScope).at(-1) ?? null;
+      const preference = new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).history(operationalScope).at(-1) ?? null;
       const base = preference === null ? null : { ...preference, lines: preference.governance?.baseLines ?? preference.lines };
       const directives = new SupervisionDirectives(this.#authority).history(operationalScope);
       const names = this.#globalOriginalFieldsSelected() ? [] : this.#globalAgentNames(preference);
@@ -13697,7 +13768,7 @@ export class EditorialStore {
 
   /** Reuse the preference consumer's known-people filter. Notes, roles, examples and manuscript references are never assembled. */
   globalAgentRedact(text: string): string {
-    return withoutNames(text, this.#globalAgentNames(new HouseReviewPreferenceLedger(this.#authority)
+    return withoutNames(text, this.#globalAgentNames(new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger())
       .history(this.#baselineAnalysis.launch.operationalScope).at(-1) ?? null));
   }
 
@@ -13792,7 +13863,7 @@ export class EditorialStore {
       // Only an action that adds text is refused at the bound; a guide, freeze or deactivation lets derived lines yield as a rebuild does.
       const addsText = input.operation === 'create' || input.operation === 'merge' || input.operation === 'correct' ||
         input.operation === 'supervise' && input.effect === 'correct';
-      new HouseReviewPreferenceLedger(this.#authority).refreshGovernance(current.operationalScope, this.#housePreferencePeopleNames(),
+      new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).refreshGovernance(current.operationalScope, this.#housePreferencePeopleNames(),
         addsText && (memoryTargets.length > 0 ? 'memory' : true));
     }));
     return this.inspectGlobalAgent();
@@ -13801,7 +13872,7 @@ export class EditorialStore {
   inspectHouseReviewPreference(): HouseReviewPreferenceProjection {
     return this.#learningCall(() => {
       const operationalScope = this.#baselineAnalysis.launch.operationalScope;
-      const history = new HouseReviewPreferenceLedger(this.#authority).history(operationalScope);
+      const history = new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).history(operationalScope);
       // Its disclosure states the basis 学习准入 decisions now record (Issue #1082); the record, lineage and use are unchanged.
       return { operationalScope, current: history.at(-1) ?? null,
         history: history.map(({ versionId, ordinal, recordedAt, sourceCount }) => ({ versionId, ordinal, recordedAt, sourceCount })), basis: LOCAL_LEARNING_POLICY_BASIS.text };
@@ -13836,7 +13907,7 @@ export class EditorialStore {
       sources.push(...housePreferenceSources(this.#authority, scope, { bookId, title: asString(book.title) }, this.#standingMaterials(bookId),
         (categoryId) => reviewCategoryEntry(categoryId)?.label ?? categoryId));
     }
-    new HouseReviewPreferenceLedger(this.#authority).rebuild(scope, sources, names);
+    new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).rebuild(scope, sources, names);
   }
 
   /** Each of one Book's Learning Materials where it stands, a decided one with the newest decision of its chain. */
@@ -14483,11 +14554,23 @@ export class EditorialStore {
   #learningLedger(): EditorialLearningLedger {
     const word = this.#wordLearningProofs !== null && wordSampleDetailContextCurrent(this.#authority, this.#wordLearningProofs.context)
       ? this.#wordLearningProofs.facts : undefined;
-    if (this.#learningCallDepth === 0) return new EditorialLearningLedger(this.#authority, new LearningReads(word), (source) => this.#requireWordLearningSource(source));
     const generation = JSON.stringify({ data: this.#authority.prepare('PRAGMA data_version').get(),
       schema: this.#authority.prepare('PRAGMA schema_version').get(), changes: this.#authority.prepare('SELECT total_changes() changes').get() });
-    if (this.#wordLearningRead?.generation !== generation) this.#wordLearningRead = { generation, reads: new LearningReads(word) };
-    return new EditorialLearningLedger(this.#authority, this.#wordLearningRead.reads, (source) => this.#requireWordLearningSource(source));
+    if (this.#learningCallDepth > 0 && this.#wordLearningRead?.generation !== generation)
+      this.#wordLearningRead = { generation, reads: new LearningReads(word) };
+    const reads = this.#learningCallDepth === 0 ? new LearningReads(word) : this.#wordLearningRead!.reads;
+    return new EditorialLearningLedger(this.#authority, reads, (source) => this.#requireWordLearningSource(source),
+      (source, cursor, budget) => this.#boundedAuthority.readManualCommandSource(source, cursor, budget),
+      (source) => {
+        this.#requireWordLearningSource(source);
+        const context = this.#wordSampleDetailContext!;
+        const sample = context.samples.get(source.sampleId)!.sample;
+        const side = (fragments: typeof sample.before): import('../shared/protocol/learning.js').LearningExampleText[] => fragments.map((fragment) => {
+          const text = wordSourceFragmentText(context.graph, context.decodedAtoms, fragment);
+          return fragment.kind === 'paragraph-boundary' ? { kind: 'paragraph-boundary' } : { kind: 'text', text: text! };
+        });
+        return { before: side(sample.before), after: side(sample.after) };
+      });
   }
 
   /** Actual bounded original bytes and every saved sample meet the fresh compiler before current learning can use a pair. */
@@ -14643,7 +14726,7 @@ export class EditorialStore {
       const result = this.#bookPeople.update(input);
       const scope = this.#baselineAnalysis.launch.operationalScope;
       // An editor's words reach a record by a directive or, from /2 on, by an accepted memory: either is refiltered by the house's names now.
-      const preferences = new HouseReviewPreferenceLedger(this.#authority);
+      const preferences = new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger());
       if (new SupervisionDirectives(this.#authority).history(scope).length > 0 || preferences.history(scope).at(-1)?.schema === 'ai7.house-review-preference/2')
         preferences.refreshGovernance(scope, this.#housePreferencePeopleNames());
       return result;
@@ -18715,7 +18798,13 @@ export class EditorialStore {
   }
 
   flushJournalEdit(input: JournalEditInput): JournalAcknowledgement {
-    return this.#boundedCall(() => this.#bounded.flushJournalEdit(input, this.#lifetimeId));
+    return this.#boundedCall(() => this.#bounded.flushJournalEdit(input, this.#lifetimeId, (source) =>
+      new EditorialLearningLedger(this.#journal).captureManual(source, this.#baselineAnalysis.launch.operationalScope)));
+  }
+
+  inspectManualLearningSource(signalId: string, cursor: import('./bounded-manuscript.js').ManualCommandSourceCursor | null = null,
+    budgetBytes = MAX_FRAME_BYTES): import('./bounded-manuscript.js').ManualCommandSourcePage {
+    return this.#learningCall(() => this.#learningLedger().manualSourcePage(signalId, cursor, budgetBytes));
   }
 
   /**
@@ -19183,7 +19272,8 @@ export class EditorialStore {
   }
 
   commitReplacement(previewId: string): ReplacementCommitProjection {
-    return this.#boundedCall(() => this.#bounded.commitReplacement(previewId, this.#lifetimeId));
+    return this.#boundedCall(() => this.#bounded.commitReplacement(previewId, this.#lifetimeId, (source) =>
+      new EditorialLearningLedger(this.#journal).captureManual(source, this.#baselineAnalysis.launch.operationalScope)));
   }
 
   cancelReplacement(previewId: string): boolean {
@@ -19816,7 +19906,7 @@ export class EditorialStore {
     const run = this.#authority.prepare('SELECT task_intent_id FROM analysis_run_records WHERE run_record_id = ?').get(runRecordId) as SqlRow | undefined;
     if (run === undefined) return null;
     try {
-      return new HouseReviewPreferenceLedger(this.#authority).governanceChanged(asString(run.task_intent_id), () => this.#housePreferencePeopleNames())
+      return new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).governanceChanged(asString(run.task_intent_id), () => this.#housePreferencePeopleNames())
         ? '本社审阅偏好的学习监督已变化' : null;
     } catch (error) {
       if (!(error instanceof LearningEligibilityError)) throw error;

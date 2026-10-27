@@ -1087,6 +1087,8 @@ async function main() {
       requireJourney(comment.body === annotation && (mode === 'suggestions'
         ? suggestion.suggestion?.changeType === 'replace' && suggestion.suggestion.currentText === deletion && suggestion.suggestion.proposedText === insertion && suggestion.suggestion.application === null
         : suggestion === undefined), `${name}-exact-comment-and-replacement`);
+      requireJourney(await native.evaluate(`window.ai7.inspectEditorialLearning({signalOffset:0,itemOffset:0})
+        .then(page=>page.signals.length===0 && page.nextSignalOffset===null)`), `${name}-opt-out-no-import-signals`);
       await acknowledgedEdit(native, FIRST_EDIT, `${name}-edited-ancestry`);
       expected[0] += FIRST_EDIT;
       await openDeliverables(native, name);
@@ -1160,8 +1162,10 @@ async function main() {
       // The exported revision is the edited current revision itself, not merely some revision after the import.
       requireJourney(beforeReopen.revisionId === review.target.revisionId, `${name}-exported-current-revision`);
       const history = await native.evaluate(`window.ai7.inspectDeliverables().then(value=>JSON.stringify(value.exports))`);
-      const noWordSignals = `window.ai7.inspectEditorialLearning({signalOffset:0,itemOffset:0}).then(page=>page.signals.length===0 && page.nextSignalOffset===null)`;
-      requireJourney(await native.evaluate(noWordSignals), `${name}-opt-out-no-word-signals`);
+      const manualOnlySignals = `window.ai7.inspectEditorialLearning({signalOffset:0,itemOffset:0}).then(page=>
+        page.signals.length>0 && page.signals.every(signal=>signal.kind==='manual-edit-journal' && signal.source.bookId===${JSON.stringify(nativeBookId)}) &&
+        page.nextSignalOffset===null)`;
+      requireJourney(await native.evaluate(manualOnlySignals), `${name}-opt-out-no-word-signals`);
       at('restart-keeps-everything');
       await close();
       native = await launch({ root });
@@ -1173,7 +1177,7 @@ async function main() {
       requireJourney(JSON.stringify(reopened) === JSON.stringify(beforeReopen), `${name}-reopen-complete-text-marks-and-version`);
       await openDeliverables(native, name);
       requireJourney(await native.evaluate(`window.ai7.inspectDeliverables().then(value=>JSON.stringify(value.exports))`) === history &&
-        await native.evaluate(noWordSignals) && digest(await readFile(manuscript)) === sourceDigest, `${name}-reopen-history-opt-out-original`);
+        await native.evaluate(manualOnlySignals) && digest(await readFile(manuscript)) === sourceDigest, `${name}-reopen-history-opt-out-original`);
       await waitFor(native, `window.__j07.exportRecords().length===1 && window.__j07.exportRecords()[0].dataset.preparationId===${JSON.stringify(receipt.preparationId)}`, `${name}-reopened-receipt-history-ui`);
       requireJourney(loopback.healthy() && loopback.observedRequests() === 0, `${name}-zero-network`);
       await close();

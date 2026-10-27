@@ -136,6 +136,7 @@ export interface SearchBackendBinding {
 }
 
 export interface EgressBindingFacts {
+  readonly learningCurationScope?: { readonly messageDigest: string; readonly current: () => boolean };
   /** Book-less dialogue's exact listed revisions, disclosure and retained redaction, rechecked at the final gate. */
   readonly globalAgentScope?: {
     readonly qualification?: QualifiedGlobalAttemptMetadata;
@@ -493,6 +494,13 @@ export function evaluateEgress(
   binding: EgressBindingFacts,
   scope: EgressAttemptScope,
 ): EgressDecision {
+  if (binding.learningCurationScope !== undefined && (binding.policy.operationalScope !== 'ordinary-production' ||
+    binding.policy.providerProcessingVersion !== 'v31' || binding.outboundDataCategory !== 'editorial-learning-example' ||
+    payload.messages.length !== 1 || payload.tools?.length || payload.messages[0]?.role !== 'user' ||
+    sha256Hex(messageText(payload.messages[0]!) ?? '') !== binding.learningCurationScope.messageDigest ||
+    scope.ceilingState?.() !== 'within' || !binding.learningCurationScope.current())) {
+    return refuse('payload-out-of-scope', '学习整理的完整来源、预算或启用范围已变化；未发送任何内容。');
+  }
   if (!isSupportedProviderProcessingVersion(binding.policy.operationalScope, binding.policy.providerProcessingVersion))
     return refuse('payload-out-of-scope', '处理策略版本无法识别；未发送任何内容。');
   const global = binding.globalAgentScope;

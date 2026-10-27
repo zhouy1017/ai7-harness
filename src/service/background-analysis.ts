@@ -19,6 +19,7 @@ import type { BaselineAnalysisExecutionOwner } from './analysis/execution.js';
  * the next pass.
  */
 export interface BackgroundAnalysisDispatcherDependencies {
+  readonly curate?: () => void;
   readonly store: Pick<EditorialStore,
     'backgroundAnalysisBooks' | 'backgroundAnalysisDecisionFor' | 'createBackgroundBaselineAnalysisPreparationWork' |
     'advanceBaselineAnalysisPreparationWork' | 'cancelBaselineAnalysisPreparationWork' | 'backgroundMayContinue' |
@@ -129,6 +130,7 @@ export class BackgroundAnalysisDispatcher {
           // A Book whose look or start failed is looked at again on the next pass; its records say what was recorded.
         }
       }
+      if (lane.idle && !this.#disposed) this.#deps.curate?.();
     } while (this.#again && !this.#disposed);
   }
 

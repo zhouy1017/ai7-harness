@@ -3254,7 +3254,11 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-memory-item]')?.textContent.includes('已停用')`, 'editorial-memory-inactive');
     await waitForMemoryControl(`Array.from(document.querySelector('[data-memory-item]')?.querySelectorAll('button') ?? []).find(button=>button.textContent==='排除本书')`, 'editorial-memory-exclude-book-ready');
     await assertRenderer(renderer, `(() => { const button=Array.from(document.querySelector('[data-memory-item]').querySelectorAll('button')).find(button=>button.textContent==='排除本书'); if(!button || button.disabled)return false; button.click();return true; })()`, 'editorial-memory-exclude-book');
-    await waitFor(renderer, `document.querySelector('[data-editorial-memory] details')?.textContent.includes('已排除')`, 'editorial-memory-excluded');
+    await waitFor(renderer, `(() => {
+      const exclusions = Array.from(document.querySelectorAll('[data-editorial-memory] details'))
+        .find(panel => panel.querySelector(':scope > summary')?.textContent === '学习排除范围');
+      return exclusions?.textContent.includes('已排除');
+    })()`, 'editorial-memory-excluded');
     await waitForMemoryControl(`document.querySelector('[data-learning-enabled]')`, 'editorial-memory-switch-ready', true);
     await assertRenderer(renderer, `(() => { const input=document.querySelector('[data-learning-enabled]'); if(!(input instanceof HTMLInputElement)||!input.checked||input.disabled)return false;input.click();return true; })()`, 'editorial-memory-switch-off');
     await waitFor(renderer, `document.querySelector('[data-learning-enabled]')?.checked === false && document.querySelector('[data-learning-enabled]')?.disabled === false`, 'editorial-memory-switch-off-saved');

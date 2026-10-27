@@ -1,3 +1,4 @@
+import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { dropFactualVerificationRelations, restoreTaskIntentDraftPredecessor } from '../support/pre74-schema.js';
@@ -337,7 +338,7 @@ describe('Proposal decision workspace', () => {
       db.exec(`INSERT INTO proposal_item_decisions(rowid, ${columns}) SELECT old_rowid, ${columns} FROM saved_decisions ORDER BY old_rowid; DROP TABLE saved_decisions`);
       for (const [name, sql] of Object.entries(EDITORIAL_MARK_TRIGGER_SQL)) if (name.startsWith('proposal_item_decisions_')) db.exec(sql);
       const before = db.prepare('SELECT rowid, * FROM proposal_item_decisions ORDER BY rowid').all();
-      db.exec('PRAGMA user_version = 76; COMMIT'); db.close();
+      execPre74Fixture(db, 'PRAGMA user_version = 76; COMMIT'); db.close();
       store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
       const read = new DatabaseSync(path);
       expect(read.prepare('SELECT rowid, * FROM proposal_item_decisions ORDER BY rowid').all()).toEqual(before);

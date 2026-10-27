@@ -12,7 +12,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, text: string): HTMLEl
 const SIGNAL_KIND_LABELS: Readonly<Record<LearningSignal['kind'], string>> = {
   accepted: '接受', 'accepted-with-edit': '修改后接受', rejected: '拒绝并说明原因', 'review-finding-ignored': '忽略并说明',
   'proactive-reason': '学习询问原因',
-  'word-tracked-edit': 'Word 文件修订',
+  'word-tracked-edit': 'Word 文件修订', 'manual-edit-journal': '直接修改稿件',
 };
 
 /** A signal the opt-out default admitted is never shown as the editor's own 纳入 choice (ADR 0094 §3; the policy's rule 2). */
@@ -52,6 +52,29 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
     enabled.dataset['learningEnabled'] = '';
     enabled.addEventListener('change', () => run(() => api.changeEditorialLearning({ kind: 'switch', enabled: enabled.checked, expectedEntries: page.controlEntries })));
     switchLabel.prepend(enabled); section.append(switchLabel, status);
+    if (page.curation !== undefined) {
+      const curation = page.curation;
+      const panel = el('details', ''); panel.append(el('summary', '空闲时整理学习记录'), el('p', curation.disclosure));
+      panel.append(el('p', curation.envelope === null ? '尚未设置模型整理范围；现有学习记录只保留在本机。'
+        : `已预留 ${curation.passesUsed} / ${curation.envelope.budget.maxPasses} 次整理，${curation.reservedTokens} / ${curation.envelope.budget.totalTokens} tokens。重启不重置；不确定的发送也保留预算。`));
+      for (const entry of curation.recentRuns) panel.append(el('p', entry.summary));
+      if (curation.available) {
+        const form = el('form', '');
+        const number = (label: string, value: number): HTMLInputElement => {
+          const input = el('input', ''); input.type = 'number'; input.min = '1'; input.required = true; input.value = String(value); input.disabled = busy;
+          const row = el('label', label); row.append(input); form.append(row); return input;
+        };
+        const passes = number('最多整理次数', curation.envelope?.budget.maxPasses ?? 3); passes.max = '100';
+        const total = number('本次启用范围的总 token 预算', curation.envelope?.budget.totalTokens ?? 60_000); total.max = '10000000';
+        const perPass = number('每次整理的 token 上限', curation.envelope?.budget.perPassTokens ?? 20_000);
+        const save = el('button', '启用这个学习整理范围'); save.type = 'submit'; save.disabled = busy; form.append(save);
+        form.addEventListener('submit', (event) => { event.preventDefault(); run(() => api.changeEditorialLearning({
+          kind: 'switch', enabled: true, expectedEntries: page.controlEntries,
+          curation: { maxPasses: Number(passes.value), totalTokens: Number(total.value), perPassTokens: Number(perPass.value) } })); });
+        panel.append(form);
+      }
+      section.append(panel);
+    }
     const exclusions = el('details', ''); exclusions.append(el('summary', '学习排除范围'));
     if (page.excludedBooks.length + page.excludedMaterials.length === 0) exclusions.append(el('p', '尚无排除记录。'));
     for (const book of page.excludedBooks) {
@@ -69,12 +92,12 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
     for (const { current, usable, history, sources, nextHistoryOffset, nextSourceOffset } of page.items) {
       const item = el('article', ''); item.className = 'learning-material'; item.dataset['memoryItem'] = current.itemId;
       const state = current.schema === 'ai7.global-editorial-memory/2' ? current.state : current.activation;
-      item.append(el('h4', current.title), el('p', `${current.editorialDimension} · 编辑信心 ${Math.round(current.confidence * 100)}% · ${state === 'proposed' ? '编辑撰写，待接受' : state === 'frozen' ? '已冻结' : state === 'inactive' ? '已停用' : usable ? '已启用' : '来源受限，暂停使用'}`));
+      item.append(el('h4', current.title), el('p', `${current.editorialDimension} · 信心 ${Math.round(current.confidence * 100)}% · ${state === 'proposed' ? current.actor === 'AI7' ? 'AI7 整理，待接受' : '编辑撰写，待接受' : state === 'frozen' ? '已冻结' : state === 'inactive' ? '已停用' : usable ? '已启用' : '来源受限，暂停使用'}`));
       const lineage = el('details', ''); lineage.append(el('summary', '来源与版本历史'));
       for (const source of [...current.positiveExamples, ...current.negativeExamples]) {
         lineage.append(el('p', `图书 ${source.bookId} · 标记 ${source.markId ?? '无'} · 决定 ${source.decisionId} · 修订 ${source.revisionId} · 日志 ${source.journalSequence} · 原因版本 ${source.reasonRevision}`));
       }
-      for (const source of sources ?? []) lineage.append(el('p', `来源 ${source.sourceKey} · 图书 ${source.source.bookId} · ${source.admission.kind === 'automatic' ? '默认本机准入' : `编辑准入 ${source.admission.decisionId}`} · 决定 ${source.source.decisionId}`));
+      for (const source of sources ?? []) lineage.append(el('p', `来源 ${source.sourceKey} · 图书 ${source.source.bookId} · ${source.admission.kind === 'automatic' ? '默认本机准入' : `编辑准入 ${source.admission.decisionId}`} · ${source.sourceKind === undefined ? `决定 ${source.source.decisionId}` : source.sourceKind === 'manual-edit-journal' ? '手动修改观察' : 'Word 修改样本'}`));
       for (const version of history) lineage.append(el('p', `v${version.ordinal} · ${{ proposed: '候选', active: '启用', inactive: '停用', frozen: '冻结' }[version.schema === 'ai7.global-editorial-memory/2' ? version.state : version.activation]} · ${version.recordedAt}`));
       if (nextHistoryOffset != null) lineage.append(action('更早版本', () => {
         void api.inspectEditorialLearning({ signalOffset, itemOffset, detailItemId: current.itemId, historyOffset: nextHistoryOffset })
@@ -133,15 +156,17 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
           detail.replaceChildren();
           void mountWordTrackedEditDetail({ root: detail, api, ...signal.source, openSourceVersion }).load();
         }), detail);
+      } else if (signal.kind === 'manual-edit-journal') {
+        row.append(el('p', `手动编辑 · 日志 ${signal.source.journalSequence} · ${signal.source.memberCount} 个内容块；不代表采纳建议。`));
       } else row.append(el('p', `决定 ${signal.source.decisionId} · 修订 ${signal.source.revisionId} · 日志 ${signal.source.journalSequence}${signal.rewriteDistance === null ? '' : ` · 改写距离 ${signal.rewriteDistance}`}`));
-      if (signal.kind !== 'word-tracked-edit' && signal.memoryCandidate != null) {
+      if (signal.kind !== 'word-tracked-edit' && signal.kind !== 'manual-edit-journal' && signal.memoryCandidate != null) {
         const checkbox = el('input', ''); checkbox.type = 'checkbox'; checkbox.dataset['memorySource'] = signal.signalId; checkbox.checked = selected.has(signal.signalId); checkbox.disabled = busy;
         checkbox.addEventListener('change', () => { if (checkbox.checked) selected.set(signal.signalId, signal); else selected.delete(signal.signalId); });
         const label = el('label', `选为候选来源 · ${signal.memoryCandidate.editorialDimension}`); label.prepend(checkbox); row.append(label);
       }
       if (signal.currentEligibility !== 'excluded' && signal.currentEligibility !== 'superseded') row.append(action('排除此材料', () => run(() => api.changeEditorialLearning({ kind: 'material', signalId: signal.signalId }))));
       if (!page.excludedBooks.some((book) => book.bookId === signal.source.bookId)) row.append(action('排除本书', () => run(() => api.changeEditorialLearning({ kind: 'book', bookId: signal.source.bookId, excluded: true, expectedEntries: page.controlEntries }))));
-      if (signal.kind !== 'word-tracked-edit' && signal.currentEligibility === 'house') {
+      if (signal.kind !== 'word-tracked-edit' && signal.kind !== 'manual-edit-journal' && signal.currentEligibility === 'house') {
         const form = el('form', '');
         const titleLabel = el('label', '记忆标题'); const title = el('input', ''); title.maxLength = 160; title.required = true; title.name = 'memory-title'; titleLabel.append(title);
         const dimensionLabel = el('label', '编辑维度'); const dimension = el('input', ''); dimension.maxLength = 80; dimension.required = true; dimension.name = 'memory-dimension'; dimensionLabel.append(dimension);

@@ -451,7 +451,7 @@ it.each([90, 91])('advances a valid historical reader%s without rewriting Book o
   const before = db.prepare('SELECT rowid, * FROM books ORDER BY rowid').all();
   new DataVersionLedger(db).recordOpen({ softwareVersion: '0.0.9', dataVersion: 1, schemaRevision: revision });
   const history = db.prepare('SELECT rowid, * FROM store_versions ORDER BY rowid').all();
-  db.exec(`PRAGMA user_version = ${revision}`); db.close();
+  execPre74Fixture(db, `PRAGMA user_version = ${revision}`); db.close();
   const marker = (await readDataVersionMarker(roots.dataRoot))!;
   await writeFile(dataVersionMarkerPath(roots.dataRoot), JSON.stringify({ ...marker, schemaRevision: revision }));
   const upgraded = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
@@ -477,7 +477,7 @@ it('refuses a revision-91 store whose current-format learning records are damage
     for (const name of Object.keys(SUPERVISION_TRIGGER_SQL)) db.exec(`DROP TRIGGER ${name}`);
     db.prepare('UPDATE learning_supervision_directives SET canonical_json = ?, sha256 = ? WHERE directive_id = ?').run(tampered.json, tampered.digest, String(row.directive_id));
     for (const sql of Object.values(SUPERVISION_TRIGGER_SQL)) db.exec(sql);
-    db.exec('PRAGMA user_version = 91');
+    execPre74Fixture(db, 'PRAGMA user_version = 91');
   } finally { db.close(); }
   const marker = (await readDataVersionMarker(roots.dataRoot))!;
   await writeFile(dataVersionMarkerPath(roots.dataRoot), JSON.stringify({ ...marker, schemaRevision: 91 }));

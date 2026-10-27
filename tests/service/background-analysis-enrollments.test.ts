@@ -1,3 +1,4 @@
+import { CURATION_SCHEMA_SQL } from '../../src/service/task-authorization.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
@@ -1319,7 +1320,7 @@ it('migrates revision 88 authorizations and enrollment rows without changing his
         if (name === `${table}_no_update` || name === `${table}_no_delete`) db.exec(trigger);
       }
     }
-    db.exec('PRAGMA user_version = 88; COMMIT; PRAGMA foreign_keys = ON');
+    execPre74Fixture(db, 'PRAGMA user_version = 88; COMMIT; PRAGMA foreign_keys = ON');
     return Object.keys({ analysis_run_authorizations: '', ...BACKGROUND_PROCESSING_ENROLLMENT_SCHEMA_SQL }).map((table) => [table,
       db.prepare(`SELECT rowid, canonical_json, sha256 FROM ${table} ORDER BY rowid`).all()] as const);
   });
@@ -1330,7 +1331,7 @@ it('migrates revision 88 authorizations and enrollment rows without changing his
     reopened.markCleanShutdown();
   } finally { reopened.close(); }
   withDatabase(true, (db) => {
-    expect(db.prepare('PRAGMA user_version').get()?.user_version).toBe(95);
+    expect(db.prepare('PRAGMA user_version').get()?.user_version).toBe(96);
     expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
     for (const [table, rows] of before) expect(db.prepare(`SELECT rowid, canonical_json, sha256 FROM ${table} ORDER BY rowid`).all()).toEqual(rows);
     for (const table of Object.keys(BACKGROUND_PROCESSING_ENROLLMENT_SCHEMA_SQL)) expect(db.prepare(`SELECT kind FROM ${table}`).all().every((row) => row.kind === 'baseline-analysis')).toBe(true);
@@ -1375,7 +1376,7 @@ it('recovers only the exact pre-stamp authorization shape and refuses an unexpec
   } finally { store.close(); }
   const snapshot = withDatabase(false, (db) => {
     constructPre94PolicyEncoding(db);
-    db.exec('PRAGMA user_version = 88');
+    execPre74Fixture(db, 'PRAGMA user_version = 88');
     return { rows: db.prepare('SELECT rowid, * FROM analysis_run_authorizations ORDER BY rowid').all(),
       sql: db.prepare("SELECT sql FROM sqlite_schema WHERE name = 'analysis_run_authorizations'").get()?.sql };
   });
@@ -1383,10 +1384,10 @@ it('recovers only the exact pre-stamp authorization shape and refuses an unexpec
   try { expect(recovered.inspectBaselineAnalysis(bookId).authorization?.startWhen).toBe('now'); recovered.markCleanShutdown(); }
   finally { recovered.close(); }
   withDatabase(false, (db) => {
-    expect(db.prepare('PRAGMA user_version').get()?.user_version).toBe(95);
+    expect(db.prepare('PRAGMA user_version').get()?.user_version).toBe(96);
     expect(db.prepare('SELECT rowid, * FROM analysis_run_authorizations ORDER BY rowid').all()).toEqual(snapshot.rows);
-    expect(db.prepare("SELECT sql FROM sqlite_schema WHERE name = 'analysis_run_authorizations'").get()?.sql).toBe(snapshot.sql);
-    db.exec('PRAGMA user_version = 88; ALTER TABLE analysis_run_authorizations ADD COLUMN unexpected INTEGER');
+    expect(db.prepare("SELECT sql FROM sqlite_schema WHERE name = 'analysis_run_authorizations'").get()?.sql).toBe(CURATION_SCHEMA_SQL.analysis_run_authorizations);
+    execPre74Fixture(db, 'PRAGMA user_version = 88; ALTER TABLE analysis_run_authorizations ADD COLUMN unexpected INTEGER');
   });
   await expect(openWithRoute()).rejects.toMatchObject({ code: 'SCHEMA_MIGRATION_FAILED' });
   withDatabase(true, (db) => {

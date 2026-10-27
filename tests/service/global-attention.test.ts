@@ -438,7 +438,7 @@ function conflictedSuggestion(store: EditorialStore, book: { manuscriptId: strin
   }).markId;
   const now = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
   store.flushJournalEdit({
-    clientEditId: randomUUID(), ...book, baseRevisionId: now.revisionId, blockId: block.blockId, windowStartBlockId: now.blocks[0]!.blockId,
+    clientEditId: randomUUID(), manuscriptId: book.manuscriptId, branchId: book.branchId, baseRevisionId: now.revisionId, blockId: block.blockId, windowStartBlockId: now.blocks[0]!.blockId,
     baseBlockDigest: now.blocks.find((candidate) => candidate.blockId === block.blockId)!.digest, expectedJournalSequence: now.journalSequence,
     fromGrapheme: 23, toGrapheme: 23, insertText: '〔改〕',
   });

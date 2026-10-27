@@ -1,3 +1,4 @@
+import { CURATION_SCHEMA_SQL } from '../../src/service/task-authorization.js';
 import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
@@ -823,7 +824,7 @@ describe('the market section and 按我的评分重写评语 over the real store
       expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
       expect(rows(after)).toBe(before!);
       for (const table of KIND_COUPLED_ANALYSIS_RELATIONS) {
-        expect((after.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) as { sql: string }).sql).toBe(ANALYSIS_LEDGER_SCHEMA_SQL[table]);
+        expect((after.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) as { sql: string }).sql).toBe(CURATION_SCHEMA_SQL[table] ?? ANALYSIS_LEDGER_SCHEMA_SQL[table]);
       }
       expect(Object.keys(EVALUATION_REWRITE_TRIGGER_SQL).every((name) => after.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'trigger' AND name = ?").get(name) !== undefined)).toBe(true);
     } finally {
