@@ -1807,7 +1807,7 @@ async function main() {
     await clickSelector(renderer, 'section.review-report [data-review-action="capture"]', 'capture-open');
     const captureSheet = await readCapture(renderer, (read) => read.steps.length === 2 && read.focused, 'capture-sheet');
     requireJourney(JSON.stringify(captureSheet.steps.map(([id, eligible, checked]) => [id, eligible, checked])) === JSON.stringify([['style-and-format', 'true', true], ['literary-expression', 'true', true]]) &&
-      captureSheet.steps[0][3] === '体例与格式 · 体例与格式审阅工序（第 1 版） · 输出批注 · 调用模型 · 不使用搜索引擎' &&
+      captureSheet.steps[0][3] === '体例与格式 · 体例与格式与跨章一致性（第 2 版） · 输出批注 · 调用模型 · 不使用搜索引擎' &&
       JSON.stringify(captureSheet.kinds) === JSON.stringify([['captured-procedure', false, true], ['developer-proposal', false, false], ['skill-draft', true, false], ['workflow-draft', true, false], ['default-rule', true, false]]) &&
       captureSheet.kind === 'captured-procedure' && captureSheet.procedureShown && !captureSheet.proposalShown && captureSheet.notSaved.length === 6 &&
       captureSheet.notSaved[0] === '稿件文字、书名与这本书的身份、章节与书系' && (captureSheet.why ?? '').startsWith('这次审阅的每一步都是 AI7 已有的审阅类别') &&
