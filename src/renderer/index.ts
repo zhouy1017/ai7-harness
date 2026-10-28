@@ -226,7 +226,8 @@ import {
 import { ViewPreferences, mountRegionSeparator, renderViewSettings } from './layout.js';
 import { createGlobalAttentionReader, mountGlobalAttention, mountGlobalAttentionEntry, type GlobalAttentionSurface } from './global-attention.js';
 import { mountProcessingIndicator } from './processing-indicator.js';
-import { MODEL_CONNECTION_TEST_NOTE, mainRoleConnectionTest, modelConnectionTestLabel } from './model-service-roles.js';
+import { bookIdentityRows } from './technical-layer-labels.js';
+import { MODEL_CONNECTION_TEST_NOTE, mainRoleConnectionTest, modelConnectionTestDisclosure, modelConnectionTestLabel } from './model-service-roles.js';
 import { GLOBAL_ATTENTION_ACTIONS, GLOBAL_ATTENTION_STATUS_LINES } from './global-attention-labels.js';
 import { analysisRefusalView } from './overview-refusal-labels.js';
 import {
@@ -1005,6 +1006,10 @@ function technicalDetails(gridClass: string | undefined, ...rows: ReadonlyArray<
   values.append(...rows);
   disclosure.append(element('summary', undefined, '查看技术详情'), values);
   return disclosure;
+}
+/** A 书库 card's identities, one disclosure away (ADR 0096 §3). */
+function bookIdentityDisclosure(book: { bookId: string; stableIdentity: string }): HTMLElement {
+  return technicalDetails(undefined, ...bookIdentityRows(book).flatMap(([term, value]) => [element('dt', undefined, term), element('dd', 'technical-identity', value)]));
 }
 
 /**
@@ -2573,10 +2578,7 @@ async function renderBookWorkbenchChooser(
       });
       open.dataset['bookId'] = summary.bookId;
       const row = element('article', 'book-summary-item');
-      row.append(
-        open,
-        element('p', 'field-note', `图书 ID ${summary.bookId} · 稳定标识 ${summary.stableIdentity}`),
-      );
+      row.append(open, bookIdentityDisclosure(summary));
       list.append(row);
     }
     if (list.childElementCount === 0) {
@@ -4836,7 +4838,8 @@ function renderModelRouteOption(option: ModelServiceRouteOptionProjection): HTML
       models.append(item);
     }
     const testState = option.connection.connectionTest;
-    section.append(element('p', 'field-note', modelConnectionTestLabel(testState)), element('p', 'field-note', MODEL_CONNECTION_TEST_NOTE));
+    const testedModel = (option.models ?? [option.binding]).find((model) => model.modelId === testState?.modelId)?.modelLabel;
+    section.append(element('p', 'field-note', modelConnectionTestLabel(testState, testedModel)), ...modelConnectionTestDisclosure(testState), element('p', 'field-note', MODEL_CONNECTION_TEST_NOTE));
     const test = button('测试文本连接', 'secondary', async () => {
       test.disabled = true;
       try { renderModelServiceSettingsProjection(await window.ai7.testModelServiceConnection({ route: option.route, modelId: models.value })); }
@@ -5732,13 +5735,8 @@ function renderLanding(
       if (peopleLine !== null) row.append(element('p', 'book-people-line', peopleLine));
       const relatedLine = bookCardRelatedLine(summary.people);
       if (relatedLine !== null) row.append(element('p', 'field-note book-related-line', relatedLine));
-      row.append(
-        element(
-          'p',
-          'field-note',
-          `${summary.internalNumber === null ? '' : `内部编号 ${summary.internalNumber} · `}图书 ID ${summary.bookId} · 稳定标识 ${summary.stableIdentity}`,
-        ),
-      );
+      if (summary.internalNumber !== null) row.append(element('p', 'field-note', `内部编号 ${summary.internalNumber}`));
+      row.append(bookIdentityDisclosure(summary));
       list.append(row);
     }
     library.append(list);

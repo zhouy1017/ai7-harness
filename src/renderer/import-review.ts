@@ -12,6 +12,7 @@ import {
 } from '../shared/protocol.js';
 import { renderFidelityReview } from './import-fidelity.js';
 import { STRUCTURE_CHOICE_REQUIRED, renderStructureReview } from './import-structure.js';
+import { bookChoiceWords } from './technical-layer-labels.js';
 import {
   wordIntakeRefusalLabel,
   wordImportModeOption,
@@ -85,6 +86,9 @@ export function createImportReview(options: ImportReviewOptions) {
       abandonAndContinue, appendRecoveryReturnAction, awaitServiceJob, hasErrorCode, identityFindingDisclosure, initializeStartup,
       instantValue, rendererErrorMessage, renderError, renderImported, replaceScreen, setStatus, sourceCard, technicalDetails
   } = options;
+  /** An exact identity of a reimport choice, one disclosure away (ADR 0096 §3, ADR 0071 §1). */
+  const identityDisclosure = (term: string, value: string): HTMLElement =>
+    technicalDetails(undefined, element('dt', undefined, term), element('dd', 'technical-identity', value));
 
   function renderWordIntakeControls(staged: StagedImportProjection): {
     elements: HTMLElement[]; choice(): WordTrackedChangesChoice | undefined; allowed(): boolean;
@@ -180,10 +184,12 @@ export function createImportReview(options: ImportReviewOptions) {
       radio.value = targetChoice.id;
       radio.dataset['importTargetChoice'] = targetChoice.kind;
       if (targetChoice.kind === 'existing-book') radio.dataset['bookId'] = targetChoice.bookId;
-      radio.setAttribute('aria-label', targetChoice.label);
+      // The Book's identity is one disclosure away, beside the choice and outside its label, so opening it chooses nothing.
+      const words = targetChoice.kind === 'existing-book' ? bookChoiceWords(targetChoice.label, targetChoice.bookId) : targetChoice.label;
+      radio.setAttribute('aria-label', words);
       radio.checked = selectedChoiceId === targetChoice.id;
       const copy = element('span');
-      copy.append(element('strong', undefined, targetChoice.label));
+      copy.append(element('strong', undefined, words));
       if (targetChoice.kind === 'new-book') {
         copy.append(element('small', undefined, '选择后仍须另行选择“首份稿件”或“来源材料”关系。'));
       } else {
@@ -196,7 +202,7 @@ export function createImportReview(options: ImportReviewOptions) {
         ));
       }
       choice.append(radio, copy);
-      choices.append(choice);
+      choices.append(choice, ...(targetChoice.kind === 'existing-book' ? [identityDisclosure('图书 ID', targetChoice.bookId)] : []));
       radio.addEventListener('change', () =>
         renderTargetChoice(staged, targetChoice.id, recoveryNotice, recoveryReturn));
     }
@@ -426,14 +432,11 @@ export function createImportReview(options: ImportReviewOptions) {
           radio.value = sourceVersionId;
           radio.dataset['reuseSourceVersionId'] = sourceVersionId;
           radio.checked = reuseSourceVersionId === sourceVersionId;
-          radio.setAttribute('aria-label', `复用来源版本 ${sourceVersionId}`);
+          radio.setAttribute('aria-label', '复用这个同图书精确来源版本');
           const copy = element('span');
-          copy.append(
-            element('strong', undefined, '复用这个同图书精确来源版本'),
-            element('small', 'technical-identity', sourceVersionId),
-          );
+          copy.append(element('strong', undefined, '复用这个同图书精确来源版本'));
           reuseChoice.append(radio, copy);
-          reuseChoices.append(reuseChoice);
+          reuseChoices.append(reuseChoice, identityDisclosure('来源版本', sourceVersionId));
           radio.addEventListener('change', () =>
             renderTargetChoice(staged, selectedChoice.id, recoveryNotice, recoveryReturn, 'source-only', sourceVersionId));
           if (reuseSourceVersionId === undefined) revealedControl = radio;
@@ -482,7 +485,7 @@ export function createImportReview(options: ImportReviewOptions) {
       lineageChoices.setAttribute('aria-label', '稿件重新导入来源关系');
       lineageChoices.dataset['reimportLineageChoices'] = 'unselected-by-default';
       lineageChoices.append(element('legend', undefined, '来源关系（必须明确选择）'));
-      const addLineageChoice = (value: ReimportLineageChoice, title: string, note: string): void => {
+      const addLineageChoice = (value: ReimportLineageChoice, title: string, note: string, identity?: string): void => {
         const choice = element('label', 'choice');
         const radio = element('input');
         radio.type = 'radio';
@@ -495,16 +498,16 @@ export function createImportReview(options: ImportReviewOptions) {
         const copy = element('span');
         copy.append(element('strong', undefined, title), element('small', undefined, note));
         choice.append(radio, copy);
-        lineageChoices.append(choice);
+        lineageChoices.append(choice, ...(identity === undefined ? [] : [identityDisclosure('来源版本', identity)]));
         radio.addEventListener('change', () =>
           renderTargetChoice(staged, selectedChoice.id, recoveryNotice, recoveryReturn, 'reimport',
             reuseSourceVersionId, value));
         if (reimportLineageChoice === undefined) revealedControl = radio;
       };
       addLineageChoice('unconfirmed', '来源关系未确认', '继续保守的两方比较；这不会被解释为来源确认或阻断导入。');
-      for (const sourceVersionId of verifiedLineageSources) {
-        addLineageChoice(sourceVersionId, `确认来源版本 ${sourceVersionId}`, '使用该图书拥有且已关联主稿件结果修订版的精确来源，执行三方比较。');
-      }
+      verifiedLineageSources.forEach((sourceVersionId, index) => addLineageChoice(sourceVersionId,
+        verifiedLineageSources.length === 1 ? '确认这个来源版本' : `确认来源版本（第 ${index + 1} 个）`,
+        '使用该图书拥有且已关联主稿件结果修订版的精确来源，执行三方比较。', sourceVersionId));
       const loadLineagePage = async (after: string | null, control: HTMLButtonElement): Promise<void> => {
         control.disabled = true;
         setStatus('正在读取来源关系版本页…', 'busy');
@@ -572,12 +575,9 @@ export function createImportReview(options: ImportReviewOptions) {
         sourceRadio.setAttribute('aria-label', '创建新的图书来源版本');
       }
       const sourceCopy = element('span');
-      sourceCopy.append(
-        element('strong', undefined, exactSourceVersionId ? '复用这个同图书精确来源版本' : '创建新的图书来源版本'),
-        element('small', 'technical-identity', exactSourceVersionId ?? staged.source.sourceSha256),
-      );
+      sourceCopy.append(element('strong', undefined, exactSourceVersionId ? '复用这个同图书精确来源版本' : '创建新的图书来源版本'));
       sourceChoice.append(sourceRadio, sourceCopy);
-      sourceChoices.append(sourceChoice);
+      sourceChoices.append(sourceChoice, exactSourceVersionId ? identityDisclosure('来源版本', exactSourceVersionId) : identityDisclosure('来源 SHA-256', staged.source.sourceSha256));
       sourceRadio.addEventListener('change', () =>
         renderTargetChoice(staged, selectedChoice.id, recoveryNotice, recoveryReturn, 'reimport',
           exactSourceVersionId, reimportLineageChoice));
@@ -673,14 +673,14 @@ export function createImportReview(options: ImportReviewOptions) {
       } else if (selectedChoice.kind === 'existing-book') {
         setStatus(
           relationshipSelection === 'first-manuscript'
-            ? `已选择“作为首份稿件导入”；可以复核目标图书 ${selectedChoice.bookId}。`
+            ? `已选择“作为首份稿件导入”；可以复核目标图书「${bookChoiceWords(selectedChoice.label, selectedChoice.bookId)}」。`
             : relationshipSelection === 'source-only'
-              ? `已选择“作为来源材料导入”；可以复核目标图书 ${selectedChoice.bookId}。`
+              ? `已选择“作为来源材料导入”；可以复核目标图书「${bookChoiceWords(selectedChoice.label, selectedChoice.bookId)}」。`
               : reimportLineageChoice === undefined
                 ? '已选择“重新导入主稿件”；请明确来源关系。'
                 : reuseSourceVersionId === undefined
                   ? '来源关系已选择；请另行明确来源版本结果。'
-                  : `重新导入决定已明确；可以准备目标图书 ${selectedChoice.bookId} 的逐块比较。`,
+                  : `重新导入决定已明确；可以准备目标图书「${bookChoiceWords(selectedChoice.label, selectedChoice.bookId)}」的逐块比较。`,
         );
       }
     });

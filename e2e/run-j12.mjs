@@ -1260,6 +1260,9 @@ async function main() {
     })()`, 'overview-leads-with-the-manuscript-anchor');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('library')), 'restart-return-library');
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'restart-library');
+    // Identifiers in the technical layer (ADR 0096 §3, #1177): a 书库 card prints no Book identity inline; its 图书 ID and 稳定标识
+    // sit behind a closed 查看技术详情.
+    await waitFor(primary, `(() => { const cards=Array.from(document.querySelectorAll('[data-screen="landing"] article.book-summary-item')); return cards.length>0 && cards.every((card)=>{ const details=card.querySelector('details.technical-details'); const bookId=card.querySelector('button[data-book-id]')?.dataset.bookId; if(!(details instanceof HTMLDetailsElement)||details.open||!bookId||!details.textContent.includes(bookId))return false; const visible=Array.from(card.childNodes).filter((node)=>node!==details).map((node)=>node.textContent??'').join(''); return !/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(visible) && details.querySelector('summary')?.textContent==='查看技术详情'; }); })()`, 'library-card-identity-disclosed');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'data-storage-open-settings');
     await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'data-storage-open-settings-hub');
     await click(primary, '数据与存储', 'data-storage-open');
