@@ -1709,7 +1709,7 @@ const MAX_RENDERER_BLOCKS = 32;
 const MANUSCRIPT_TAIL_PROBE = `(async () => { const work = (await window.ai7.listPriorWork())[0]; const page = await window.ai7.getManuscriptWindowAt({ manuscriptId: work.manuscriptId, branchId: work.branchId, target: { kind: 'proportion', proportion: 1 } }); const last = page.blocks.at(-1); return { blockId: last.blockId, position: last.position, totalBlocks: page.position.totalBlocks }; })()`;
 
 /** What the window shows of the structure paragraph: its text and the paragraph after it, the window size, and the journal. */
-const STRUCTURE_PROBE = `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const s = window.__j02Structure; const block = editor?.querySelector('[data-block-id="' + s.blockId + '"]'); const next = block?.nextElementSibling; return { text: block?.textContent ?? null, nextId: next?.dataset.blockId ?? null, nextText: next?.textContent ?? null, blocks: editor?.children.length ?? 0, journal: ${JOURNAL_SEQUENCE_PROBE}, closeRisk: document.documentElement.dataset.ai7CloseRisk }; })()`;
+const STRUCTURE_PROBE = `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const s = window.__j02Structure; const block = editor?.querySelector('[data-block-id="' + s.blockId + '"]'); const next = block?.nextElementSibling; return { text: block?.textContent ?? null, nextId: next?.dataset.blockId ?? null, nextText: next?.textContent ?? null, blocks: editor?.children.length ?? 0, journal: ${JOURNAL_SEQUENCE_PROBE}, closeRisk: document.documentElement.dataset.ai7CloseRisk, unlocked: editor?.parentElement?.dataset.authoritativeMutation === 'false', redoReady: Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '重做' && !button.disabled) }; })()`;
 
 async function pressStructureKey(renderer, key) {
   const descriptor = key === 'Enter'
@@ -1746,9 +1746,9 @@ async function runStructureJourney(renderer) {
 
   at('structure-undo-redo');
   await clickButton(renderer, '撤销', 'structure-undo-split');
-  await waitForChecks(renderer, `(() => { const p = ${STRUCTURE_PROBE}; const s = window.__j02Structure; return { whole: p.text === s.text, gone: p.nextId !== window.__j02Split, oneStep: p.journal === s.journal + 2, bounded: p.blocks <= ${MAX_RENDERER_BLOCKS} }; })()`, 'structure-undo-is-one-step', 30_000);
+  await waitForChecks(renderer, `(() => { const p = ${STRUCTURE_PROBE}; const s = window.__j02Structure; return { whole: p.text === s.text, gone: p.nextId !== window.__j02Split, oneStep: p.journal === s.journal + 2, bounded: p.blocks <= ${MAX_RENDERER_BLOCKS}, redoReady: p.unlocked && p.redoReady }; })()`, 'structure-undo-is-one-step', 30_000);
   await clickButton(renderer, '重做', 'structure-redo-split');
-  await waitForChecks(renderer, `(() => { const p = ${STRUCTURE_PROBE}; const s = window.__j02Structure; return { head: p.text === s.text.slice(0, 12), again: p.nextId === window.__j02Split, oneStep: p.journal === s.journal + 3 }; })()`, 'structure-redo-is-one-step', 30_000);
+  await waitForChecks(renderer, `(() => { const p = ${STRUCTURE_PROBE}; const s = window.__j02Structure; return { head: p.text === s.text.slice(0, 12), again: p.nextId === window.__j02Split, oneStep: p.journal === s.journal + 3, unlocked: p.unlocked }; })()`, 'structure-redo-is-one-step', 30_000);
 
   at('structure-merge');
   await placeStructureCaret(renderer, await renderer.evaluate('window.__j02Split'), 0, 'structure-merge-caret');

@@ -964,9 +964,9 @@ async function main() {
     await press(renderer, 'Escape');
     // 撤销 steps over the Apply to the split before it; the applied words stay, and 重做 splits again.
     await click(renderer, '撤销', 'undo-over-apply');
-    await waitFor(renderer, `window.__j05.block(window.__j05Split) === null && window.__j05.text(${JSON.stringify(splitBlock)}) === window.__j05Structure.split && window.__j05.text(${JSON.stringify(appliedBlock)}).includes(${JSON.stringify(STRUCTURE_APPLIED_TEXT)})`, 'undo-steps-over-apply', 15_000);
+    await waitFor(renderer, `window.__j05.block(window.__j05Split) === null && window.__j05.text(${JSON.stringify(splitBlock)}) === window.__j05Structure.split && window.__j05.text(${JSON.stringify(appliedBlock)}).includes(${JSON.stringify(STRUCTURE_APPLIED_TEXT)}) && Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '重做' && !button.disabled)`, 'undo-steps-over-apply', 15_000);
     await click(renderer, '重做', 'redo-split');
-    await waitFor(renderer, `window.__j05.block(window.__j05Split)?.previousElementSibling?.dataset.blockId === ${JSON.stringify(splitBlock)} && window.__j05.text(window.__j05Split) === window.__j05Structure.split.slice(${STRUCTURE_SPLIT_AT})`, 'redo-splits-again', 15_000);
+    await waitFor(renderer, `window.__j05.block(window.__j05Split)?.previousElementSibling?.dataset.blockId === ${JSON.stringify(splitBlock)} && window.__j05.text(window.__j05Split) === window.__j05Structure.split.slice(${STRUCTURE_SPLIT_AT}) && document.querySelector('[data-testid="manuscript-editor"]')?.parentElement?.dataset.authoritativeMutation === 'false'`, 'redo-splits-again', 15_000);
 
     at('structure-merge');
     await assertRenderer(renderer, `window.__j05.place(window.__j05Split, 0, 0)`, 'merge-caret');
