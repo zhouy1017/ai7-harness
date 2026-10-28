@@ -203,7 +203,7 @@ export function mountAgentWorkspace(options: MountAgentWorkspaceOptions): { dest
       page = read;
       pages.dataset['agentWorkspaceRevision'] = read.revisionId;
       pages.replaceChildren(...read.blocks.map((block) => {
-        const node = el(block.kind === 'paragraph' ? 'p' : 'h4', 'agent-workspace-block', block.text);
+        const node = el(block.kind === 'paragraph' || block.kind === 'note' ? 'p' : 'h4', 'agent-workspace-block', block.text);
         node.dataset['agentWorkspaceBlock'] = block.blockId;
         node.tabIndex = 0;
         return node;

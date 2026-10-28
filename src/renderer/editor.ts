@@ -146,6 +146,25 @@ const blockAttrs = {
   level: { default: null, validate: 'number|null' },
 };
 
+/** What a note block's label says (Issue #1204): 「脚注 n · 引自第 X 段」, or 「注释」 where the window carries no note record. */
+export function noteLabel(note: ManuscriptBlockProjection['note']): string {
+  if (note === undefined) return '注释';
+  const name = `${note.part === 'endnote' ? '尾注' : '脚注'} ${note.ordinal}`;
+  return note.referencePosition === null ? name : `${name} · 引自第 ${note.referencePosition} 段`;
+}
+
+/**
+ * A note block reads like a paragraph under its label; the label is not text of the block, and when the note names the paragraph
+ * that refers to it, the label goes there (`data-note-reference`).
+ */
+function noteDom(node: ProseMirrorNode): DOMOutputSpec {
+  const reference = node.attrs['noteReference'] as string | null;
+  return ['div', { class: 'manuscript-note', 'data-block-kind': 'note' },
+    ['span', { class: 'manuscript-note-label', contenteditable: 'false', ...(reference === null ? {} : { 'data-note-reference': reference, role: 'link', tabindex: '-1' }) },
+      String(node.attrs['noteLabel'])],
+    ['p', { 'data-block-id': String(node.attrs['blockId']) }, 0]];
+}
+
 const ai7Schema = new Schema({
   nodes: {
     doc: { content: 'block*' },
@@ -171,6 +190,14 @@ const ai7Schema = new Schema({
       marks: '',
       attrs: blockAttrs,
       toDOM: (node) => blockDom('p', node),
+    },
+    note: {
+      group: 'block',
+      content: 'text*',
+      marks: '',
+      attrs: { ...blockAttrs, noteLabel: { default: '注释', validate: 'string' }, noteReference: { default: null, validate: 'string|null' } },
+      defining: true,
+      toDOM: noteDom,
     },
     text: { group: 'inline' },
   },
@@ -241,7 +268,7 @@ function baselineMap(windowProjection: ManuscriptWindowProjection): Map<string, 
       /^blk_[0-9a-f]{24}$/.test(block.blockId) &&
         !map.has(block.blockId) &&
         block.position > previousPosition &&
-        (block.kind === 'title' || block.kind === 'heading' || block.kind === 'paragraph'),
+        (block.kind === 'title' || block.kind === 'heading' || block.kind === 'paragraph' || block.kind === 'note'),
       '稿件窗口内容块绑定无效。',
     );
     validateText(block.text);
@@ -263,6 +290,7 @@ function createDocument(blocks: ReadonlyArray<ManuscriptBlockProjection>): Prose
           position: block.position,
           digest: block.digest,
           level: block.level,
+          ...(block.kind === 'note' ? { noteLabel: noteLabel(block.note), noteReference: block.note?.referenceBlockId ?? null } : {}),
         },
         block.text.length > 0 ? ai7Schema.text(block.text) : undefined,
       ),
@@ -857,7 +885,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     const previous = index > 0 ? state.doc.child(index - 1) : undefined;
     if (key === 'Backspace' && (point.grapheme !== 0 || previous?.type.name !== 'paragraph' || found.node.type.name !== 'paragraph')) return false;
     if (found.node.type.name !== 'paragraph') {
-      options.onAnnouncement('标题不能在这里分段；分段与合并只用于正文段落。', 'error');
+      options.onAnnouncement(found.node.type.name === 'note' ? '注释不能分段；分段与合并只用于正文段落。' : '标题不能在这里分段；分段与合并只用于正文段落。', 'error');
       return true;
     }
     if (structure !== undefined) {

@@ -72,6 +72,8 @@ export interface ComposedRetentionContent {
   readonly field?: { readonly block: number };
   /** A footnote reference after the excerpt's `block`-th paragraph, whose note is the source's `noteSourceBlock`. */
   readonly footnote?: { readonly block: number; readonly noteSourceBlock: number };
+  /** The same as an endnote (Issue #1204), in `word/endnotes.xml`. */
+  readonly endnote?: { readonly block: number; readonly noteSourceBlock: number };
 }
 
 export interface ComposedManuscriptRequest {
@@ -123,13 +125,15 @@ function retentionParts(
   if (box !== undefined) inExcerpt(box.anchorBlock);
   if (retention.field !== undefined) inExcerpt(retention.field.block);
   if (retention.footnote !== undefined) inExcerpt(retention.footnote.block);
+  if (retention.endnote !== undefined) inExcerpt(retention.endnote.block);
   const boxParagraphs = box === undefined ? '' : range(box.sourceStartBlock, box.blocks)
     .map((block) => styledParagraphXml(paragraphOf(block), `<w:r><w:t>${escapeXml(block.text)}</w:t></w:r>`)).join('');
   const body = excerpt.map((block, index) => {
     const position = index + 1;
     const text = `<w:r><w:t>${escapeXml(block.text)}</w:t></w:r>`;
     const displayed = retention.field?.block === position ? `<w:fldSimple w:instr=" TITLE ">${text}</w:fldSimple>` : text;
-    const note = retention.footnote?.block === position ? '<w:r><w:footnoteReference w:id="1"/></w:r>' : '';
+    const note = (retention.footnote?.block === position ? '<w:r><w:footnoteReference w:id="1"/></w:r>' : '') +
+      (retention.endnote?.block === position ? '<w:r><w:endnoteReference w:id="1"/></w:r>' : '');
     const anchored = box?.anchorBlock === position
       ? `<w:r><mc:AlternateContent ${MC}><mc:Choice Requires="wps"><w:drawing><wp:anchor ${WP}><a:graphic ${A}><a:graphicData>` +
         `<wps:wsp ${WPS}><wps:txbx><w:txbxContent>${boxParagraphs}</w:txbxContent></wps:txbx></wps:wsp></a:graphicData>` +
@@ -152,6 +156,14 @@ function retentionParts(
       '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
       '<w:footnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
       `<w:footnote w:id="1"><w:p><w:r><w:t>${escapeXml(note!.text)}</w:t></w:r></w:p></w:footnote></w:footnotes>`,
+    );
+  }
+  if (retention.endnote !== undefined) {
+    const [note] = range(retention.endnote.noteSourceBlock, 1);
+    parts['word/endnotes.xml'] = encoder.encode(
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<w:endnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+      `<w:endnote w:id="1"><w:p><w:r><w:t>${escapeXml(note!.text)}</w:t></w:r></w:p></w:endnote></w:endnotes>`,
     );
   }
   return parts;

@@ -15,8 +15,10 @@ import { CUSTOM_ANALYSIS_DIMENSION_FOREIGN_KEYS, CUSTOM_ANALYSIS_DIMENSION_SCHEM
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { BoundedStoreError, BoundedStoreFatalError, requireBounded, one, asString, asNumber, canonicalJson, sha256, graphemes, fenwickSpan, appendOffsetSegment,
   lastWorkingPosition, workingOffsetPrefix, updateWorkingOffsetNodes, transact, stagedBlockLength, UUID_PATTERN, DIGEST_PATTERN, BLOCK_PATTERN,
-  HISTORY_BATCH, MIGRATION_BATCH, type OffsetSegment } from './manuscript/bounded-kernel.js';
+  HISTORY_BATCH, MIGRATION_BATCH, canonicalSchemaSql, type OffsetSegment } from './manuscript/bounded-kernel.js';
 import { STRUCTURAL_EDIT_FOREIGN_KEYS, STRUCTURAL_EDIT_SCHEMA_SQL } from './manuscript/structural-schema.js';
+import { NOTE_BLOCK_FOREIGN_KEYS, NOTE_BLOCK_SCHEMA_SQL, NOTE_BLOCK_TRIGGER_SQL, widenedBlockKindTables } from './manuscript/note-schema.js';
+import { withNoteReferences } from './manuscript/note-blocks.js';
 import { historyStale, isStructuralGroup, journalHasStructuralEdits, replayStructuralGroup, verifyStructuralReconstruction, writeStructuralEdit } from './manuscript/structural-edits.js';
 import { blockDigest, CommandEvidenceReader, recoveryCommandEvidenceDigest, recoveryWorkingDigest, validateCommandHistoryGroup, type CommandEvidenceHeader, type CommandEvidenceMember } from './manuscript/command-history.js';
 export { BoundedStoreError, BoundedStoreFatalError } from './manuscript/bounded-kernel.js';
@@ -2110,6 +2112,7 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   ...PROCEDURE_DEFINITION_FOREIGN_KEYS,
   ...EDITABLE_PROCEDURE_FOREIGN_KEYS,
   ...STRUCTURAL_EDIT_FOREIGN_KEYS,
+  ...NOTE_BLOCK_FOREIGN_KEYS,
   ...EVALUATION_PROFILE_FOREIGN_KEYS,
   editorial_workspace_profile_sidecar_revisions: [
     'native_artifact_id>native_artifact_installations.artifact_id:NO ACTION/NO ACTION/NONE',
@@ -2362,54 +2365,6 @@ export class EditJournalFaultInjection {
 export function journalWriteUnderFault<T>(fault: EditJournalFaultInjection, write: () => T): T {
   fault.beforeJournalWrite();
   return write();
-}
-
-function canonicalSchemaSql(sql: string): string {
-  let result = '';
-  let quoted: "'" | '"' | '`' | ']' | undefined;
-  let identifierValue = '';
-  for (let index = 0; index < sql.length; index += 1) {
-    const character = sql[index]!;
-    if (quoted !== undefined) {
-      if (quoted === "'") {
-        result += character;
-        if (character === "'" && sql[index + 1] === "'") {
-          result += sql[index + 1]!;
-          index += 1;
-        } else if (character === "'") {
-          quoted = undefined;
-        }
-        continue;
-      }
-      const closing = quoted === ']' ? ']' : quoted;
-      if (character === closing && quoted !== ']' && sql[index + 1] === closing) {
-        identifierValue += closing;
-        index += 1;
-      } else if (character === closing) {
-        const normalized = identifierValue.toLocaleLowerCase('en-US');
-        result += /^[a-z_][a-z0-9_]*$/u.test(normalized) ? normalized : `⟦${normalized}⟧`;
-        identifierValue = '';
-        quoted = undefined;
-      } else {
-        identifierValue += character;
-      }
-      continue;
-    }
-    if (character === "'") {
-      quoted = "'";
-      result += character;
-    } else if (character === '"' || character === '`') {
-      quoted = character;
-      identifierValue = '';
-    } else if (character === '[') {
-      quoted = ']';
-      identifierValue = '';
-    } else if (!/\s/.test(character) && character !== ';') {
-      result += character.toLocaleLowerCase('en-US');
-    }
-  }
-  requireBounded(quoted === undefined && identifierValue.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库结构 SQL 引号无效。');
-  return result.replace(/^createtableifnotexists/, 'createtable');
 }
 
 function tableColumnSignature(row: SqlRow): string {
@@ -2842,6 +2797,7 @@ function requireManuscriptReimportTargetSchema(
   // Revision 85 (Issue #1081, F-26a; ADR 0095 §1): the pre-installed Procedure Definition versions and the plans' sibling pins.
   const includeEditableProcedures = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= 98 || committed(EDITABLE_PROCEDURE_SCHEMA_SQL);
   const includeStructuralEdits = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= 100 || committed({ manuscript_block_lineage: '' });
+  const includeNoteBlocks = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= 101 || committed({ manuscript_note_sources: '' });
   const includeProcedureDefinitions = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= PROCEDURE_DEFINITION_SCHEMA_VERSION || committed(PROCEDURE_DEFINITION_SCHEMA_SQL);
   requireExactSchema(
     db,
@@ -3023,6 +2979,8 @@ function requireManuscriptReimportTargetSchema(
       ...(includeEditableProcedures ? { ...EDITABLE_PROCEDURE_SCHEMA_SQL, procedure_plan_pins: PROCEDURE_PLAN_PINS_V2_SQL } : {}),
       // Revision 100 (Issue #1175) rebuilds the two command relations beside the lineage relation it adds.
       ...(includeStructuralEdits ? STRUCTURAL_EDIT_SCHEMA_SQL : {}),
+      // Revision 101 (Issue #1204) widens every block-kind CHECK to the note kind beside the note sources it adds.
+      ...(includeNoteBlocks ? { ...widenedBlockKindTables(FULL_MANUSCRIPT_REIMPORT_TARGET_SCHEMA_SQL), ...NOTE_BLOCK_SCHEMA_SQL } : {}),
     },
     // The partial index that keeps one primary Manuscript per Book stands with the rebuilt relation, whatever the version.
     {
@@ -3099,6 +3057,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeImportedSkillUpdateTables ? IMPORTED_SKILL_UPDATE_TRIGGER_SQL : {}),
       ...(includeProcedureDefinitions ? PROCEDURE_DEFINITION_TRIGGER_SQL : {}),
       ...(includeEditableProcedures ? EDITABLE_PROCEDURE_TRIGGER_SQL : {}),
+      ...(includeNoteBlocks ? NOTE_BLOCK_TRIGGER_SQL : {}),
     },
   );
   if (includeMaterialTranslationAttempts) validateMaterialTranslationAttemptSchema(db);
@@ -3740,7 +3699,7 @@ function validateStagedDraftContentTruth(db: DatabaseSync, draftId: string, requ
       const shapeValid =
         (kind === 'title' && level === 1) ||
         (kind === 'heading' && level !== null && Number.isSafeInteger(level) && level >= 1 && level <= 6) ||
-        (kind === 'paragraph' && level === null);
+        ((kind === 'paragraph' || kind === 'note') && level === null);
       const length = stagedBlockLength(text);
       requireBounded(
         position === expectedPosition && shapeValid && DIGEST_PATTERN.test(digest) &&
@@ -5762,7 +5721,7 @@ export function initializeBoundedSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === 95 || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === 98 || version === 99 || version === LATEST_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === 95 || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === 98 || version === 99 || version === 100 || version === LATEST_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -5813,7 +5772,7 @@ export function initializeBoundedSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === 95 || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === 98 || version === 99 || version === LATEST_SCHEMA_VERSION)) {
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === 95 || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === 98 || version === 99 || version === 100 || version === LATEST_SCHEMA_VERSION)) {
     transact(db, () => {
       if (validateStoreTruth || version !== LATEST_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(
@@ -7484,14 +7443,14 @@ export class BoundedManuscriptStore {
        FROM working_blocks WHERE branch_id = ? AND position >= ? ORDER BY position LIMIT ?`,
     ).all(branchId, startPosition, MAX_WINDOW_BLOCKS + 1) as SqlRow[];
     const visible = rows.slice(0, MAX_WINDOW_BLOCKS);
-    const blocks = visible.map((row) => ({
+    const blocks = withNoteReferences(this.#db, branchId, visible.map((row) => ({
       blockId: asString(row.block_id),
       position: asNumber(row.position),
       kind: asString(row.kind) as ManuscriptBlockProjection['kind'],
       level: row.level === null ? null : asNumber(row.level),
       text: asString(row.text),
       digest: asString(row.digest),
-    }));
+    })));
     requireBounded(blocks.length > 0 && blocks.length <= MAX_WINDOW_BLOCKS, 'WINDOW_NOT_FOUND', '稿件窗口为空。');
     const first = visible[0]!;
     const last = visible.at(-1)!;

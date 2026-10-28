@@ -7,6 +7,7 @@ import { unzipSync, zipSync } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { fixedArchiveTime } from '../../src/shared/archive-time.js';
 import {
+  DOCX_NOTE_PARSER_IDENTITY,
   DOCX_PARSER_IDENTITY,
   DOCX_PARSER_IDENTITY_V1,
   COMMENTS_REVISIONS_DETAIL,
@@ -500,7 +501,8 @@ describe('explicit tracked Word successor compiler (#1132)', () => {
     expect((await compile(ordinary)).kind).toBe('ordinary');
     const ordinaryBlocks: ParsedDocxBlock[] = [];
     const parsed = await parseDocx(path, 'complete-note.docx', (block) => ordinaryBlocks.push(block));
-    expect(ordinaryBlocks.map((block) => block.text)).toEqual(['A', 'B']);
+    // The retained note is a note block after the body (Issue #1204); the successor compiler still refuses no join here.
+    expect(ordinaryBlocks.map((block) => [block.kind, block.text])).toEqual([['paragraph', 'A'], ['paragraph', 'B'], ['note', 'NOTE01']]);
     expect(parsed.fidelity.find((category) => category.key === 'notes')!.count).toBe(1);
     const joined = await compile('<w:p><w:pPr><w:rPr><w:del w:id="1"/></w:rPr></w:pPr>' +
       `<w:r><w:t>A</w:t></w:r>${note}</w:p><w:p><w:r><w:t>B</w:t></w:r></w:p>`);
@@ -561,6 +563,8 @@ describe('parseDocx', () => {
 
     expect(parsed.parserIdentity).toBe(DOCX_PARSER_IDENTITY);
     expect(DOCX_PARSER_IDENTITY).toBe('ai7-docx-fflate-saxes/3');
+    // Issue #1204: only a reading that makes a note block is recorded under the note reader's identity.
+    expect(DOCX_NOTE_PARSER_IDENTITY).toBe('ai7-docx-fflate-saxes/4');
     expect(parsed.blockCount).toBe(4);
     expect(blocks.map((block) => block.kind)).toEqual(['title', 'heading', 'heading', 'paragraph']);
     expect(blocks.map((block) => block.level)).toEqual([1, 1, 2, null]);
@@ -909,7 +913,7 @@ describe('deriveImportFidelityPlan and isCleanTracerFidelity', () => {
     });
   });
 
-  it('lists a note as 降级导入: neither the reference nor the note is in the manuscript', async () => {
+  it('lists a reference to no note as 降级导入: no note block is made, so neither is in the manuscript', async () => {
     const { parsed } = await parseFixture({
       extraEntries: {
         'word/document.xml': bodyDocumentXml(

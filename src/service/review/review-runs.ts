@@ -3517,7 +3517,7 @@ export class ReviewRunStore {
   #head(bookId: string): ManuscriptHead | null {
     const row = this.#db.prepare(
       `SELECT m.manuscript_id, bws.branch_id, bws.base_revision_id, mr.revision_label, bws.journal_sequence, bws.working_digest,
-              (SELECT count(*) FROM working_blocks wb WHERE wb.branch_id = bws.branch_id) total_blocks
+              (SELECT count(*) FROM working_blocks wb WHERE wb.branch_id = bws.branch_id AND wb.kind <> 'note') total_blocks
        FROM manuscripts m
        JOIN manuscript_branches mb ON mb.manuscript_id = m.manuscript_id
        JOIN branch_working_state bws ON bws.branch_id = mb.branch_id
@@ -3538,7 +3538,8 @@ export class ReviewRunStore {
 
   /**
    * The chapters 选章 offers: the outline's headings, or — for a manuscript without one — the analysis
-   * units the working manuscript derives, which is the structure every category reads by.
+   * units the working manuscript derives, which is the structure every category reads by. The note blocks (Issue #1204),
+   * which follow every body block, belong to no chapter: the last chapter ends at the last body block.
    */
   #chapterOptions(bookId: string, head: ManuscriptHead): ChapterOptions {
     const headings = (this.#db.prepare(
@@ -3558,7 +3559,7 @@ export class ReviewRunStore {
         revisionId: head.revisionId,
         revisionLabel: head.revisionLabel,
         revisionDigest: head.workingDigest,
-        blocks: this.#ledgers.baseline().readWorkingBlocks(head.branchId),
+        blocks: this.#ledgers.baseline().readWorkingBlocks(head.branchId).filter((block) => block.kind !== 'note'),
       });
       return {
         basis: 'analysis-units',

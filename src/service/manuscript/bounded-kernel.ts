@@ -181,3 +181,52 @@ export function stagedBlockLength(
   requireBounded(length <= MAX_BLOCK_GRAPHEMES, code, message);
   return length;
 }
+
+/** A relation's or index's SQL as the exact-schema check compares it: case, whitespace and identifier quoting aside. */
+export function canonicalSchemaSql(sql: string): string {
+  let result = '';
+  let quoted: "'" | '"' | '`' | ']' | undefined;
+  let identifierValue = '';
+  for (let index = 0; index < sql.length; index += 1) {
+    const character = sql[index]!;
+    if (quoted !== undefined) {
+      if (quoted === "'") {
+        result += character;
+        if (character === "'" && sql[index + 1] === "'") {
+          result += sql[index + 1]!;
+          index += 1;
+        } else if (character === "'") {
+          quoted = undefined;
+        }
+        continue;
+      }
+      const closing = quoted === ']' ? ']' : quoted;
+      if (character === closing && quoted !== ']' && sql[index + 1] === closing) {
+        identifierValue += closing;
+        index += 1;
+      } else if (character === closing) {
+        const normalized = identifierValue.toLocaleLowerCase('en-US');
+        result += /^[a-z_][a-z0-9_]*$/u.test(normalized) ? normalized : `⟦${normalized}⟧`;
+        identifierValue = '';
+        quoted = undefined;
+      } else {
+        identifierValue += character;
+      }
+      continue;
+    }
+    if (character === "'") {
+      quoted = "'";
+      result += character;
+    } else if (character === '"' || character === '`') {
+      quoted = character;
+      identifierValue = '';
+    } else if (character === '[') {
+      quoted = ']';
+      identifierValue = '';
+    } else if (!/\s/.test(character) && character !== ';') {
+      result += character.toLocaleLowerCase('en-US');
+    }
+  }
+  requireBounded(quoted === undefined && identifierValue.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库结构 SQL 引号无效。');
+  return result.replace(/^createtableifnotexists/, 'createtable');
+}

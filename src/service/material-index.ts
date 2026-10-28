@@ -646,9 +646,10 @@ export async function extractMaterialText(input: MaterialExtractionInput): Promi
     : `${format === 'DOC' ? DOC_CONVERTER_IDENTITY : format === 'PDF' ? PDF_TEXT_CONVERTER_IDENTITY
       : isMaterialTextFormat(format) ? MATERIAL_FORMAT_CONVERTER_IDENTITIES[format] : TEXT_CONVERTER_IDENTITY}+${DOCX_PARSER_IDENTITY}`;
   try {
+    // A material is read as parser revision 3 reads it: no footnote or endnote becomes a segment (Issue #1204).
     if (input.format === 'DOCX') {
       const parsed = await parseDocx(input.originalPath, input.displayName, onBlock,
-        { digest: input.objectSha256, bytes: input.bytes }, { ...(input.signal === undefined ? {} : { signal: input.signal }), formatIdentified: true });
+        { digest: input.objectSha256, bytes: input.bytes }, { ...(input.signal === undefined ? {} : { signal: input.signal }), formatIdentified: true, noteBlocks: false });
       if (aborted()) throw new MaterialIndexAborted();
       if (blocks.length === 0) return { state: 'failed', reason: 'empty', converter };
       return { state: 'complete', converter, documentTitle: parsed.titleSuggestion.sourceLabel === 'DOCX 标题元数据' ? parsed.titleSuggestion.value : null, blocks };
@@ -695,7 +696,7 @@ export async function extractMaterialText(input: MaterialExtractionInput): Promi
     const work = await inspectCanonicalDataFile(input.dataRoot, directory, `.work-${randomUUID()}.docx`);
     try {
       await writeFile(work.path, docx, { flag: 'wx' });
-      await parseDocx(work.path, 'material.docx', onBlock, undefined, input.signal === undefined ? {} : { signal: input.signal });
+      await parseDocx(work.path, 'material.docx', onBlock, undefined, { ...(input.signal === undefined ? {} : { signal: input.signal }), noteBlocks: false });
     } finally {
       await rm(work.path, { force: true });
     }

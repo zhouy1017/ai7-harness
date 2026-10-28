@@ -1502,6 +1502,11 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
 .ProseMirror h1 { font-size: 2rem; line-height: 1.35; }
 .ProseMirror h2, .ProseMirror h3, .ProseMirror h4, .ProseMirror h5, .ProseMirror h6 { margin-top: 1.8em; line-height: 1.5; }
 .ProseMirror p { margin: 1em 0; }
+/* A note block (Issue #1204): its label above, its words edited like a paragraph's. */
+.ProseMirror .manuscript-note { margin: 1em 0; font-size: .92em; }
+.ProseMirror .manuscript-note > p { margin: .2em 0 0; }
+.ProseMirror .manuscript-note-label { display: block; font-size: .82em; opacity: .75; user-select: none; }
+.ProseMirror .manuscript-note-label[data-note-reference] { cursor: pointer; text-decoration: underline dotted; }
 .ProseMirror [data-block-id] { border-left: 2px solid transparent; padding-left: .65rem; }
 .ProseMirror [data-block-id]:focus-within { border-left-color: var(--boundary); }
 /* A paragraph carrying an open mark shows a 3 px margin line in that mark's color; the text does not shift. */

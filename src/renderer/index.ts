@@ -2007,7 +2007,7 @@ function renderRecoveryViewer(recovery: RecoveryComparisonProjection, projection
   const blocks = element('article', 'recovery-readonly-blocks');
   blocks.setAttribute('aria-label', '恢复证据只读内容窗口');
   for (const block of projection.blocks) {
-    const node = element(block.kind === 'paragraph' ? 'p' : block.kind === 'title' ? 'h1' : 'h2', undefined, block.text);
+    const node = element(block.kind === 'paragraph' || block.kind === 'note' ? 'p' : block.kind === 'title' ? 'h1' : 'h2', undefined, block.text);
     node.dataset['blockId'] = block.blockId;
     blocks.append(node);
   }
@@ -2059,7 +2059,7 @@ function renderHistoricalRevision(projection: HistoricalRevisionProjection): voi
   const blocks = element('article', 'recovery-readonly-blocks historical-revision-blocks');
   blocks.setAttribute('aria-label', '历史修订版只读内容窗口');
   for (const block of projection.blocks) {
-    const tag = block.kind === 'paragraph' ? 'p' : block.kind === 'title' ? 'h1' : 'h2';
+    const tag = block.kind === 'paragraph' || block.kind === 'note' ? 'p' : block.kind === 'title' ? 'h1' : 'h2';
     const node = element(tag, undefined, block.text);
     node.dataset['blockId'] = block.blockId;
     node.dataset['blockPosition'] = String(block.position);
