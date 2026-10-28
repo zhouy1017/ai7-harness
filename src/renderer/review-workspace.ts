@@ -26,10 +26,12 @@ import {
   type ReviewWorkspaceProjection,
   type RendererApi,
   type ResearchEvidenceBookProjection,
+  type ReviewEvidenceSource,
   type ServiceWireJobProjection as ServiceJobProjection,
   type WritingTaskMaterialProjection,
 } from '../shared/protocol.js';
-import { findingResearchLines, readFindingResearch } from './research-evidence-labels.js';
+import { findingResearchLines, readFindingResearch, readFindingSources } from './research-evidence-labels.js';
+import { findingEvidenceList } from './research-evidence.js';
 import { mountEvidenceWorkspace, type EvidenceWorkspaceSurface } from './evidence-workspace.js';
 import {
   FACT_CLOSE_WORKSPACE,
@@ -151,6 +153,8 @@ import {
   REVIEW_REPORT_NOTE,
   REVIEW_REPORT_NO_MUST_ITEMS,
   REVIEW_REPORT_OVERVIEW_COLUMNS,
+  REVIEW_REPORT_STATISTICS_CHAPTER,
+  REVIEW_REPORT_TOTAL,
   REVIEW_REPORT_WAIT_RUNNING,
   REVIEW_RESULTS_HEADING,
   REVIEW_RISK_POINT,
@@ -196,8 +200,12 @@ import {
   reviewReportAppendixLine,
   reviewReportConfigurationLine,
   reviewReportExcludedLine,
+  reviewReportFindingHeading,
+  reviewReportFindingLines,
   reviewReportGeneratedLine,
   reviewReportMustItemLine,
+  reviewReportOmittedLine,
+  reviewReportTotalsLine,
   reviewReportVersionLine,
   reviewResultsCountsLine,
   reviewRunHeading,
@@ -499,6 +507,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
    * lists the sources retained for it, or why there is none. A read that fails leaves the cards as they were.
    */
   let research = new Map<string, ResearchEvidenceBookProjection>();
+  // Each factual finding's sources as its card lists them (Issue #1174): the result's, less the excluded, joined to 来源与证据.
+  let evidence = new Map<string, ReviewEvidenceSource[]>();
   const reasonAsks = new Map<string, HTMLElement>();
   const offerReasonAsk = (findingId: string, decisionId: string | null | undefined): void => {
     if (!decisionId) return;
@@ -575,6 +585,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       }
     }
     research = next;
+    evidence = run === null || task == null ? new Map() : await readFindingSources(api, bookId, run.reviewRunId, next);
   };
 
   /** The workspace with as many pages of findings as the editor has asked to see, read one after another. */
@@ -1479,7 +1490,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       .filter((line, index, all): line is string => line !== null && all.indexOf(line) === index);
     for (const line of lines) article.append(el('p', 'review-finding-state', line));
     const retained = research.get(finding.findingId);
-    const sources = category.categoryId === 'factual-review' && retained !== undefined ? findingResearchLines(retained, finding, localInstantLabel) : null;
+    const attached = category.categoryId === 'factual-review' ? evidence.get(finding.findingId) ?? [] : [];
+    const sources = attached.length > 0 || category.categoryId !== 'factual-review' || retained === undefined ? null : findingResearchLines(retained, finding, localInstantLabel);
+    if (attached.length > 0) article.append(findingEvidenceList(attached, options.openSource === undefined ? undefined : (evidenceId) => options.openSource?.(evidenceId)));
     for (const line of sources ?? []) article.append(el('p', 'review-finding-source', line));
     if (finding.status !== 'pending') article.append(el('p', 'review-finding-status-detail', finding.statusDetail));
     if (finding.ignoreReason !== null) article.append(el('p', 'review-finding-ignore-reason', reviewIgnoreReasonLine(finding.ignoreReason)));
@@ -1806,12 +1819,48 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       );
       summaries.append(block);
     }
+    // Version /2's derived parts (Issue #1174): the totals, the chapter × category table and the 发现详单; a /1 record has none.
+    const derived: HTMLElement[] = [];
+    if (record.statistics !== undefined) {
+      const stats = el('table', 'review-report-table review-report-statistics');
+      const header = el('tr');
+      for (const column of [REVIEW_REPORT_STATISTICS_CHAPTER, ...record.statistics.categories.map((category) => category.label), REVIEW_REPORT_TOTAL]) {
+        const cell = el('th', undefined, column);
+        cell.scope = 'col';
+        header.append(cell);
+      }
+      const statsHead = el('thead');
+      statsHead.append(header);
+      const statsBody = el('tbody');
+      for (const row of [...record.statistics.rows, { label: REVIEW_REPORT_TOTAL, counts: record.statistics.totals, total: record.statistics.total }]) {
+        const tr = el('tr');
+        const name = el('th', undefined, row.label);
+        name.scope = 'row';
+        tr.append(name, ...row.counts.map((count) => el('td', undefined, String(count))), el('td', undefined, String(row.total)));
+        statsBody.append(tr);
+      }
+      stats.append(statsHead, statsBody);
+      derived.push(part('statistics', record.statistics.title, stats));
+    }
+    if (record.findings !== undefined) {
+      const list = el('ol', 'review-report-list review-report-findings');
+      for (const [index, entry] of record.findings.entries.entries()) {
+        const item = el('li');
+        item.dataset['findingIds'] = entry.findingIds.join(' ');
+        item.append(el('p', 'review-report-summary-title', reviewReportFindingHeading(index + 1, entry)), ...reviewReportFindingLines(entry).map((line) => el('p', undefined, line)));
+        if (entry.sources.length > 0) item.append(findingEvidenceList(entry.sources, options.openSource === undefined ? undefined : (evidenceId) => options.openSource?.(evidenceId)));
+        list.append(item);
+      }
+      const omitted = reviewReportOmittedLine(record.findings.omitted);
+      derived.push(part('findings', record.findings.title, list, ...(omitted === null ? [] : [el('p', 'field-note', omitted)])));
+    }
     const appendix = el('ul', 'review-report-list');
     appendix.append(el('li', undefined, reviewReportConfigurationLine(record.appendix.configuration.version)));
     for (const category of record.appendix.categories) appendix.append(el('li', undefined, reviewReportAppendixLine(category)));
     body.append(
-      part('overview', record.overview.title, table),
+      part('overview', record.overview.title, table, ...(record.totals === undefined ? [] : [el('p', 'field-note review-report-totals', reviewReportTotalsLine(record.totals))])),
       part('must-items', record.mustItems.title, must),
+      ...derived,
       part('category-summaries', record.categorySummaries.title, summaries),
       part('appendix', record.appendix.title, appendix, options.technicalDetails(
         'review-facts',

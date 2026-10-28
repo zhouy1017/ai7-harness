@@ -1,4 +1,6 @@
 import { readProposalWorkspace } from './proposal-workspace.js';
+import { readFindingSources } from './research-evidence-labels.js';
+import { findingEvidenceList } from './research-evidence.js';
 import type { ApplyReceiptProjection } from '../shared/protocol.js';
 import { MAX_DIALOGUE_QUESTION_CHARACTERS, SERIES_KNOWLEDGE_CLASSES, SERIES_KNOWLEDGE_CLASS_LABELS } from '../shared/protocol.js';
 import type { AskAboutSelectionInput, DialogueProjection, DialogueSelectionInput, EditorialPolishProjection, FastInteractionRoutesProjection, PolishSelectionInput } from '../shared/protocol.js';
@@ -135,7 +137,9 @@ interface MountOptions {
     RendererApi,
     'createEditorialMark' | 'getEditorialMarkCard' | 'updateEditorialMark' | 'recordChangeSuggestionDecision' |
     'recordProposalDecisionReason' | 'recordProposalDecisionFeedback' | 'recordLearningReasonAsk' | 'runEditorClipboardCommand' | 'applyChangeSuggestion' | 'reverseAppliedChangeSuggestion' |
-    'inspectProposalWorkspace' | 'saveProposalDecisionDraft' | 'inspectApplyReceipt' | 'prepareReverseApply' | 'getManuscriptApplyOutcome' | 'inspectReviewFindingOfMark'
+    'inspectProposalWorkspace' | 'saveProposalDecisionDraft' | 'inspectApplyReceipt' | 'prepareReverseApply' | 'getManuscriptApplyOutcome' | 'inspectReviewFindingOfMark' |
+    // A factual finding's sources on its card (Issue #1174), read as its review card reads them.
+    'inspectFactualVerification' | 'inspectEvidenceWorkspace' | 'inspectResearchEvidence'
   >;
   /**
    * 查看任务 on a mark a Review Run produced (V2-UX-MARK-008): leave for 审阅 with that Run open and the
@@ -928,6 +932,21 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   };
 
   /**
+   * A review mark's factual sources (ADR 0095 §5; Issue #1174): once its Run and finding are found, the sources its review card
+   * lists — the result's, less the excluded, with their retained 来源译文. Nothing for a mark with no factual result.
+   */
+  const findingEvidence = (card: EditorialMarkCardProjection): HTMLElement[] => {
+    if (card.source.origin !== 'review-category') return [];
+    const slot = el('div', 'editorial-mark-evidence');
+    void reviewFindingOf(card.markId).then(async (found) => {
+      if (found === null) return;
+      const sources = (await readFindingSources(api, found.bookId, found.reviewRunId, undefined, found.findingId)).get(found.findingId) ?? [];
+      if (sources.length > 0 && !destroyed && openCardId === card.markId && slot.isConnected) slot.replaceChildren(findingEvidenceList(sources));
+    });
+    return [slot];
+  };
+
+  /**
    * A Correction Proposal's factual lineage (Issue #901; CORR-012, EASSURE-012): the result version it came from with its three
    * states apart, the level, the sources checked and only candidates, the policy version — and 证据核查未完成 with what is
    * missing, kept on the card through decision, Apply and reversal. Nothing for any other mark.
@@ -1044,7 +1063,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
               : '正文里显示的是替换后的样子（预览 · 未应用）；稿件本身仍是原文。'
             : '稿件本身仍是原文。')),
         region('rationale', '修改理由', el('p', undefined, suggestion.rationale.length > 0 ? suggestion.rationale : '没有填写修改理由。')),
-        region('basis', '依据与核查', basisList(card), ...factualLineage(card)),
+        region('basis', '依据与核查', basisList(card), ...factualLineage(card), ...findingEvidence(card)),
       );
       const yours = region('disposition', '你的处理');
       const pendingReceipt = recoveryCards.get(card.markId);
@@ -1208,7 +1227,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         }
         panel.append(region('replies', '回复', replies));
       }
-      if (card.kind === 'annotation' && (card.basis.length > 0 || card.source.kind === 'ai7')) panel.append(region('basis', '依据', basisList(card)));
+      if (card.kind === 'annotation' && (card.basis.length > 0 || card.source.kind === 'ai7')) panel.append(region('basis', '依据', basisList(card), ...findingEvidence(card)));
       const yours = region('disposition', '你的处理');
       if (card.kind === 'annotation') {
         disposition.append(

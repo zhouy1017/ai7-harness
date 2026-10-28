@@ -1,11 +1,14 @@
-import type { RendererApi, ResearchEvidenceBookProjection, ResearchEvidenceProjection } from '../shared/protocol.js';
+import { SOURCE_TRANSLATION_LABEL, type RendererApi, type ResearchEvidenceBookProjection, type ResearchEvidenceProjection, type ReviewEvidenceSource } from '../shared/protocol.js';
+import { FINDING_EVIDENCE_HEADING } from '../shared/report-wording.js';
 import { localInstantLabel } from './plan-preview-labels.js';
 import {
+  FINDING_EVIDENCE_OPEN,
   SOURCES_MORE,
   SOURCES_STATUS,
   SOURCE_ORIGINAL_LABEL,
   SOURCE_SAVE_ACTION,
   SOURCE_SAVE_NOTE,
+  SOURCE_TRANSLATION_MACHINE,
   SOURCE_UNITS_HEADING,
   researchUnitLine,
   sourceAlignmentLine,
@@ -161,4 +164,40 @@ export function mountResearchEvidence(options: MountResearchEvidenceOptions): { 
     }
     if (!records.some((record) => record.evidenceId === target)) options.setStatus('目标来源尚未显示；可继续读取更多来源。');
   } };
+}
+
+/**
+ * A factual finding's sources on its card (ADR 0095 §5; Issue #1174), on the review card and the mark card alike: each one's
+ * name and address, the verification note, the exact excerpt, and its 来源译文 beside a machine-translation note. The rows are
+ * the ones 来源与证据 archives; `openSource` opens that archive on the row when one was retained.
+ */
+export function findingEvidenceList(sources: ReadonlyArray<ReviewEvidenceSource>, openSource?: (evidenceId: string) => void): HTMLElement {
+  const section = el('section', 'finding-evidence');
+  section.dataset['evidenceCount'] = String(sources.length);
+  section.append(el('p', 'finding-evidence-heading', FINDING_EVIDENCE_HEADING));
+  const list = el('ul', 'finding-evidence-list');
+  for (const source of sources) {
+    const item = el('li', 'finding-evidence-source');
+    item.dataset['evidenceId'] = source.evidenceId ?? '';
+    item.append(el('strong', 'finding-evidence-name', source.name));
+    if (source.url !== null) item.append(el('p', 'finding-evidence-url research-evidence-url technical-identity', source.url));
+    item.append(el('p', 'field-note finding-evidence-note', source.note));
+    if (source.snippet !== null) item.append(el('blockquote', 'finding-evidence-snippet research-evidence-passage', source.snippet));
+    if (source.translation !== null) {
+      const translated = el('figure', 'finding-evidence-translation');
+      translated.append(el('figcaption', undefined, SOURCE_TRANSLATION_LABEL), el('blockquote', 'research-evidence-passage', source.translation), el('p', 'field-note', SOURCE_TRANSLATION_MACHINE));
+      item.append(translated);
+    }
+    if (source.evidenceId !== null && openSource !== undefined) {
+      const open = el('button', 'button quiet', FINDING_EVIDENCE_OPEN);
+      open.type = 'button';
+      open.dataset['evidenceAction'] = 'open-source';
+      const evidenceId = source.evidenceId;
+      open.addEventListener('click', () => openSource(evidenceId));
+      item.append(open);
+    }
+    list.append(item);
+  }
+  section.append(list);
+  return section;
 }
