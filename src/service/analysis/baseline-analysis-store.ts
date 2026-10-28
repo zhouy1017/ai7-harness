@@ -169,7 +169,7 @@ import {
 import { assuranceSampleNotRun, type CrossUnitOutcome } from './reducers.js';
 import { baselineAnalysisKindDefinition } from './kind-definition.js';
 import { ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, assuranceSamplingTurns, buildAssuranceSamplingMessage, type AssuranceSampleDraw } from './assurance-sampling-contract.js';
-import { describeComposition, STOCK_TYPOS_LEAF } from '../harness/primary-agent-harness.js';
+import { describeComposition, STOCK_TYPOS_FANOUT, STOCK_TYPOS_LEAF } from '../harness/primary-agent-harness.js';
 import { kindLocalTools } from './live-kind-admission.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from '../provider/egress-gate.js';
 import type { AnalysisOutcomeAttentionReading, AnalysisTaskAttentionReading } from '../global-attention.js';
@@ -764,7 +764,7 @@ export interface ProductionPlanBinding {
 }
 
 export interface ExecutionBindingRecord {
-  readonly compositionVersion?: 2 | 3;
+  readonly compositionVersion?: 2 | 3 | 4;
   readonly attemptId: string;
   readonly taskIntentId: string;
   readonly runRecordId: string;
@@ -1262,7 +1262,7 @@ function readRequestAdmissions(db: DatabaseSync, runRecordId: string): RequestAd
     if (state.reading === null) {
       if (!exact(event, ['kind', 'width', 'limits']) || event.kind !== 'execution' || (event.width !== 1 && event.width !== 3) ||
         !exact(event.limits, ['requests', 'units', 'backgroundRequests']) || event.limits.requests !== 4 || event.limits.units !== 3 || event.limits.backgroundRequests !== 1 ||
-        event.width === 3 && (stored!.binding.compositionVersion !== 2 || stored!.binding.policyPin.operationalScope !== 'ordinary-production' || stored!.binding.runBudgetCeiling !== 'unset')) return invalid();
+        event.width === 3 && (stored!.binding.compositionVersion !== 2 && stored!.binding.compositionVersion !== 4 || stored!.binding.policyPin.operationalScope !== 'ordinary-production' || stored!.binding.runBudgetCeiling !== 'unset')) return invalid();
       width = event.width;
     } else if (event.kind === 'admit') {
       if (!exact(event, ['kind', 'request'])) return invalid();
@@ -1861,7 +1861,7 @@ export class BaselineAnalysisStore {
       requireAnalysis(leafMode && this.#definition.promptContractDigest === expected.promptContractDigest &&
         resolved?.pin.procedureId === 'ai7-procedure/review-typos-and-usage' && resolved.pin.version === 2,
       'ANALYSIS_CHILD_PROFILE_REFUSED', '单元子代理只适用于固定的标准错字用词审阅。');
-      return { version: 3, subagents: STOCK_TYPOS_LEAF, ...procedureOptions, localTools: STOCK_TYPOS_LEAF_LOCAL_TOOLS,
+      return { version: 4, subagents: STOCK_TYPOS_FANOUT, ...procedureOptions, localTools: STOCK_TYPOS_LEAF_LOCAL_TOOLS,
         sources: { baseline: null, guidelines: stock.guidelineDocuments.map(({ documentId, version, clauses }) => ({ documentId, version, clauses })), terms: [] } };
     }
     const local = kindLocalTools(this.#launch.policy, this.#definition.kind);
@@ -2161,7 +2161,7 @@ export class BaselineAnalysisStore {
         summary: asString(envelope.summary),
         promptContractDigest: asString(envelope.promptContractDigest),
         behaviorCompositionDigest: asString(envelope.behaviorCompositionDigest),
-        ...(envelope.compositionVersion === 2 || envelope.compositionVersion === 3 ? { compositionVersion: envelope.compositionVersion } : {}),
+        ...(envelope.compositionVersion === 2 || envelope.compositionVersion === 3 || envelope.compositionVersion === 4 ? { compositionVersion: envelope.compositionVersion } : {}),
         planVersion: typeof envelope.planVersion === 'number' ? envelope.planVersion : null,
         boundary: isRecord(envelope.boundary) ? envelope.boundary as unknown as PlanBoundarySplitProjection : null,
       },
@@ -3275,14 +3275,14 @@ export class BaselineAnalysisStore {
     providerPlanPolicyMetadata(records['provider-resolution-plan']);
     const envelope = records['plan-envelope'] as Record<string, unknown>;
     const route = (records['provider-resolution-plan'] as { executionRoute?: { kind: string; model: string; fixtureIdentity?: string; fixtureSha256?: string } }).executionRoute;
-    if (route?.fixtureIdentity === STOCK_TYPOS_LEAF_FIXTURE || envelope.compositionVersion === 3) {
+    if (route?.fixtureIdentity === STOCK_TYPOS_LEAF_FIXTURE || envelope.compositionVersion === 3 || envelope.compositionVersion === 4) {
       const stock = reviewCategoryEntry('typos-and-usage')!;
       const definition = withModelClarification(reviewCategoryKindDefinition(reviewCategoryContractInput(stock), 2, STOCK_TYPOS_LEAF_LOCAL_TOOLS));
       const options = envelope.compositionOptions as CompositionOptions | undefined;
       const procedure = resolveProcedureDefinition(this.#db, 'ai7-procedure/review-typos-and-usage', 2);
-      requireAnalysis(envelope.compositionVersion === 3 && route !== undefined && options?.version === 3 &&
+      requireAnalysis((envelope.compositionVersion === 3 || envelope.compositionVersion === 4) && route !== undefined && options?.version === envelope.compositionVersion &&
         (mode === 'any' || mode === 'review-first') && envelope.promptContractDigest === definition.promptContractDigest &&
-        canonicalJson(options.subagents) === canonicalJson(STOCK_TYPOS_LEAF) &&
+        canonicalJson(options.subagents) === canonicalJson(options.version === 4 ? STOCK_TYPOS_FANOUT : STOCK_TYPOS_LEAF) &&
         canonicalJson(options.localTools) === canonicalJson(STOCK_TYPOS_LEAF_LOCAL_TOOLS) &&
         canonicalJson(options.sources) === canonicalJson({ baseline: null, guidelines: stock.guidelineDocuments.map(({ documentId, version, clauses }) => ({ documentId, version, clauses })), terms: [] }) &&
         procedure !== null && canonicalJson(options.procedure) === canonicalJson(procedure.pin) &&
@@ -3412,7 +3412,7 @@ export class BaselineAnalysisStore {
       bindingDigest: asString(row.sha256),
       harnessSessionId: binding.harnessSessionId,
       behaviorCompositionDigest: binding.behaviorCompositionDigest,
-      ...(binding.compositionVersion === 2 || binding.compositionVersion === 3 ? { compositionVersion: binding.compositionVersion } : {}),
+      ...(binding.compositionVersion === 2 || binding.compositionVersion === 3 || binding.compositionVersion === 4 ? { compositionVersion: binding.compositionVersion } : {}),
       promptContractDigest: binding.promptContractDigest,
       planEnvelopeDigest: binding.planEnvelopeDigest,
       runSourceScopeDigest: binding.runSourceScopeDigest,
@@ -4729,7 +4729,7 @@ export class BaselineAnalysisStore {
       ...(definition.contractIdentity === undefined ? {} : { contractIdentity: { ...definition.contractIdentity, digest: promptContractDigest } }),
       behaviorCompositionDigest: composition.digest,
       compositionVersion: composition.version,
-      compositionOptions: { version: composition.version, ...(composition.subagents === false ? {} : { subagents: STOCK_TYPOS_LEAF, localTools: STOCK_TYPOS_LEAF_LOCAL_TOOLS }),
+      compositionOptions: { version: composition.version, ...(composition.subagents === false ? {} : { subagents: composition.version === 4 ? STOCK_TYPOS_FANOUT : STOCK_TYPOS_LEAF, localTools: STOCK_TYPOS_LEAF_LOCAL_TOOLS }),
         ...(composition.procedure === undefined ? {} : { procedure: composition.procedure }),
         ...(composition.stages === undefined ? {} : { stages: composition.stages }),
         ...(composition.sources === undefined ? {} : { sources: composition.sources }) },
@@ -4809,7 +4809,7 @@ export class BaselineAnalysisStore {
     const prepared = this.inspect(bookId);
     requireAnalysis(prepared.taskIntent?.taskIntentId === taskIntentId && prepared.planEnvelope !== null && prepared.planVersion !== null,
       'ANALYSIS_AUTHORIZATION_STALE', '任务计划已经变化；无法记录该授权。');
-    if (prepared.planEnvelope.compositionVersion === 3) requireAnalysis(start === 'now' && origin.kind === 'standard-direct',
+    if (prepared.planEnvelope.compositionVersion === 3 || prepared.planEnvelope.compositionVersion === 4) requireAnalysis(start === 'now' && origin.kind === 'standard-direct',
       'ANALYSIS_CHILD_PROFILE_REFUSED', '单元子代理只适用于直接授权的前台审阅。');
     if (prepared.authorization !== null) {
       requireAnalysis(prepared.planEnvelope.digest === planEnvelopeDigest, 'ANALYSIS_AUTHORIZATION_STALE', '任务计划已经变化；无法记录该授权。');
@@ -6065,7 +6065,7 @@ export class BaselineAnalysisStore {
       artifactPin: { nativeCarrierSha256: artifactPin.nativeCarrierSha256, sidecarRevision: 2, sidecarSha256: artifactPin.sidecarSha256 },
       promptContractDigest: asString(envelope.promptContractDigest),
       behaviorCompositionDigest: asString(envelope.behaviorCompositionDigest),
-      ...(envelope.compositionVersion === 2 || envelope.compositionVersion === 3 ? { compositionOptions: envelope.compositionOptions as CompositionOptions } : {}),
+      ...(envelope.compositionVersion === 2 || envelope.compositionVersion === 3 || envelope.compositionVersion === 4 ? { compositionOptions: envelope.compositionOptions as CompositionOptions } : {}),
       assurancePromptContractDigest: frozenAssurancePromptContractDigest(plan['execution-plan'] as Record<string, unknown>),
       runBudgetCeiling,
       update,

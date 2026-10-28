@@ -58,6 +58,14 @@ export const STOCK_TYPOS_LEAF: ParentAttemptSubagentDeclaration = Object.freeze(
   profileId: 'ai7-stock-typos-leaf/1', provider: 'spawn', transport: 'same-process', lifetime: 'one-shot',
   stage: 'units', maxDepth: 1, maxActiveChildren: 1, unitWidth: 1, awaitDisposal: true,
 });
+/**
+ * Composition v4 (Issue #1200): the same leaf with up to three children of the parent attempt in flight, each in its own unit
+ * composition of this descriptor (ADR 0095 §2). The Run caps the width at run time by the governor's shared capacity.
+ */
+export const STOCK_TYPOS_FANOUT: ParentAttemptSubagentDeclaration = Object.freeze({ ...STOCK_TYPOS_LEAF,
+  profileId: 'ai7-stock-typos-fanout/1', maxActiveChildren: 3 });
+/** The frozen declaration each child-bearing composition version names; plans that pinned v3 keep v3. */
+const CHILD_DECLARATIONS: Readonly<Partial<Record<number, ParentAttemptSubagentDeclaration>>> = { 3: STOCK_TYPOS_LEAF, 4: STOCK_TYPOS_FANOUT };
 export const SUBAGENT_PACKAGE_PINS = {
   '@deepseek-ai/dsh-subagent': '0.1.0-rc.6',
   '@deepseek-ai/dsh-subagent-in-process-driver': '0.1.0-rc.6',
@@ -66,7 +74,7 @@ export const SUBAGENT_PACKAGE_PINS = {
 
 export interface HarnessCompositionDescriptor {
   readonly learningCuration?: { readonly bundleDigest: string; readonly contractDigest: string };
-  readonly version: 1 | 2 | 3;
+  readonly version: 1 | 2 | 3 | 4;
   readonly researchDeclaration?: ResearchDeclaration;
   readonly packages: typeof HARNESS_PACKAGE_PINS;
   readonly services: typeof HARNESS_SERVICE_SET;
@@ -107,7 +115,7 @@ export const SESSION_LOG_PACKAGE_PIN = '0.1.0-rc.6' as const;
 
 export interface CompositionOptions {
   readonly learningCuration?: { readonly bundleDigest: string; readonly contractDigest: string };
-  readonly version?: 1 | 2 | 3;
+  readonly version?: 1 | 2 | 3 | 4;
   readonly subagents?: ParentAttemptSubagentDeclaration;
   readonly procedure?: ProcedureDefinitionPin;
   readonly stages?: readonly { readonly ordinal: number; readonly stageType: string; readonly digest: string }[];
@@ -131,10 +139,11 @@ export function describeComposition(route: ExecutionRoute, model: string, prompt
   const schemas = ruleNamedToolSchemas(withTools, local);
   const localSchemas = ruleNamedToolSchemas(false, local);
   const parallel = version !== 1 && typeof local === 'object' ? localToolParallelBound(local) : 1;
-  if (options.subagents !== undefined && (version !== 3 || withTools || canonicalJson(options.subagents) !== canonicalJson(STOCK_TYPOS_LEAF))) {
+  const declaration = CHILD_DECLARATIONS[version];
+  if (options.subagents !== undefined && (declaration === undefined || withTools || canonicalJson(options.subagents) !== canonicalJson(declaration))) {
     throw new Error('HARNESS_SUBAGENT_DECLARATION_INVALID');
   }
-  if (version === 3 && options.subagents === undefined) throw new Error('HARNESS_SUBAGENT_DECLARATION_ABSENT');
+  if (declaration !== undefined && options.subagents === undefined) throw new Error('HARNESS_SUBAGENT_DECLARATION_ABSENT');
   if (options.researchDeclaration !== undefined && (options.researchDeclaration.webSearch !== withTools ||
       options.researchDeclaration.searchEngine !== (withTools ? 'user-selected-backend' : null))) {
     throw new Error('RESEARCH_DECLARATION_COMPOSITION_MISMATCH');
@@ -149,7 +158,7 @@ export function describeComposition(route: ExecutionRoute, model: string, prompt
     systemPrompt: { includeHarnessIdentity: false as const, includeRuntimeContext: false as const, persona: '' as const, completeSection: PROMPT_SECTION_NAME },
     tools: { mode: 'native' as const, maxParallelSubCalls: parallel, registeredTools: schemas.length },
     agentLoop: { maxParallelToolCalls: parallel, configuredAgents: 0 as const },
-    subagents: options.subagents === undefined ? false as const : { ...STOCK_TYPOS_LEAF, packages: SUBAGENT_PACKAGE_PINS },
+    subagents: declaration === undefined ? false as const : { ...declaration, packages: SUBAGENT_PACKAGE_PINS },
     route,
     model,
     promptContractDigest,

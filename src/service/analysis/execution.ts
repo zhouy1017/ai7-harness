@@ -25,7 +25,7 @@ import { prepareRetrievalResult, markRetrievalResult } from '../retrieval/result
 import { liveMaterialContract } from '../task-material-references.js';
 import { buildClarificationAnswerMessage } from '../provider/clarification-contract.js';
 import type { AnalysisAssuranceSampleDispositionProjection, AnalysisGapProjection, AnalysisReusePlanUnitProjection, CoverageManifestProjection, CoverageManifestUnitProjection, ExecutionRouteId, LaunchPolicyProjection, ReviewScopePlanUnitProjection, RunAttemptState, RunReportStageId } from '../../shared/protocol.js';
-import { PLATFORM_TOOL_CALL_PROGRESS, describeComposition, prepareExecution, type HarnessSignal, type HarnessTurnOutcome, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
+import { PLATFORM_TOOL_CALL_PROGRESS, STOCK_TYPOS_FANOUT, describeComposition, prepareExecution, type HarnessSignal, type HarnessTurnOutcome, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../shared/protected-secret-identity.js';
 import {
   ACTIVE_SET_VERSION,
@@ -1246,7 +1246,7 @@ export class BaselineAnalysisExecutionOwner {
     const composition = describeComposition(route, model, definition.promptContractDigest, {
       ...facts.compositionOptions,
       platformTools: webTools,
-      localTools: facts.compositionOptions?.version === 3 ? STOCK_TYPOS_LEAF_LOCAL_TOOLS : definition.evidenceAssuranceLevel !== 'quick' && definition.factualClaims === undefined ?
+      localTools: facts.compositionOptions?.version === 3 || facts.compositionOptions?.version === 4 ? STOCK_TYPOS_LEAF_LOCAL_TOOLS : definition.evidenceAssuranceLevel !== 'quick' && definition.factualClaims === undefined ?
         kindLocalTools(policy, ledger.definition.kind, facts.origin === 'background-analysis-enrollment' ? 'background' : 'foreground') ?? false : false,
       ...(definition.evidenceAssuranceLevel === 'quick' ? { researchDeclaration: definition.researchDeclaration } :
         webTools ? { researchDeclaration: { webSearch: true, searchEngine: 'user-selected-backend' } as const } : {}),
@@ -1666,7 +1666,7 @@ export class BaselineAnalysisExecutionOwner {
     }
     const blocks = ledger.readRevisionBlocks(facts.checkpoint.manuscriptId, facts.checkpoint.revisionId);
     // 快速整理 registers no local tool (Issue #901; EASSURE-004): its Run lists and locates, and searches nothing.
-    const childProfile = facts.compositionOptions?.version === 3;
+    const childProfile = facts.compositionOptions?.version === 3 || facts.compositionOptions?.version === 4;
     if (childProfile) {
       if (facts.origin !== 'standard-direct' || facts.startWhen === 'idle' ||
           definition.kind !== 'editorial-review/typos-and-usage' || testItemPurpose !== 'review-first')
@@ -2148,11 +2148,16 @@ export class BaselineAnalysisExecutionOwner {
         throw new ExecutionAdmissionError('EXECUTION_KIND_NOT_ADMITTED', '当前策略未唯一准许本任务的实际执行规则；未创建请求准入收据。');
       }
       const execution = policy.providerProcessing.execution;
-      const parallelEligible = definition.factualClaims === undefined && stored === null && production !== null && runBudgetCeiling.kind === 'unset' && facts.compositionOptions?.version === 2 &&
+      // Composition v4 (Issue #1200): its declared children, capped at run time by the governor's shared capacity and the configured
+      // per-Run unit parallelism. Children draw on the one ceiling; a set ceiling keeps one in flight, since nothing reserves in flight.
+      const childWidth = facts.compositionOptions?.version !== 4 || runBudgetCeiling.kind !== 'unset' ? 1 : Math.min(STOCK_TYPOS_FANOUT.maxActiveChildren,
+        this.#deps.requestGovernor.globalCapacity, execution?.perRunUnitParallelism.default ?? STOCK_TYPOS_FANOUT.maxActiveChildren);
+      const parallelEligible = definition.factualClaims === undefined && stored === null && production !== null && runBudgetCeiling.kind === 'unset' &&
+        (facts.compositionOptions?.version === 2 || childWidth === 3) &&
         policy.integrityState === 'verified' && selectedRule !== null && selectedRule.ruleId === (admitted?.ruleId ?? productionRule?.ruleId) &&
         selectedRule.route === route && selectedRule.model === model && selectedRule.credentialSlot === credentialSlot &&
         execution?.maxInFlightRequests.default === 4 && execution.perRunUnitParallelism.default === 3 && execution.backgroundShare.default === 1;
-      const unitWidth = live === null ? 1 : settlingLocally() ? ledger.requestAdmissionOf(facts.runRecordId)?.width ?? 1
+      const unitWidth = live === null ? childWidth : settlingLocally() ? ledger.requestAdmissionOf(facts.runRecordId)?.width ?? 1
         : ledger.beginRequestAdmissions(facts.runRecordId, parallelEligible ? 3 : 1, selectedRule!.ruleId);
       const frozenMaterial = liveMaterialContract(definition.clarificationBase ?? definition);
       const bindingFactsForRun: EgressBindingFacts = {
@@ -3935,7 +3940,7 @@ function executionBindingRecordOf(input: {
       sidecarSha256: facts.artifactPin.sidecarSha256,
     },
     behaviorCompositionDigest: input.compositionDigest,
-    ...(facts.compositionOptions?.version === 2 || facts.compositionOptions?.version === 3 ? { compositionVersion: facts.compositionOptions.version } : {}),
+    ...(facts.compositionOptions?.version === 2 || facts.compositionOptions?.version === 3 || facts.compositionOptions?.version === 4 ? { compositionVersion: facts.compositionOptions.version } : {}),
     promptContractDigest: definition.promptContractDigest,
     contractVersion: definition.contractVersion,
     harnessSessionId: input.harnessSessionId,
@@ -4300,6 +4305,9 @@ export class ModelRequestGovernor {
   #backgroundInFlight = 0;
   #closed = false;
   #idle: { readonly promise: Promise<void>; readonly resolve: () => void } | null = null;
+
+  /** The shared cap on requests in flight, which also bounds a Run's concurrent unit children (Issue #1200). */
+  get globalCapacity(): number { return this.#globalCapacity; }
 
   constructor(options: ModelRequestGovernorOptions = {}) {
     const globalCapacity = options.globalCapacity ?? 4;
