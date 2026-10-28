@@ -2092,8 +2092,10 @@ describe('the 审阅报告 exported in the manuscript\'s formats (Issue #500, S6
       };
       const written = await exported('docx', '审阅报告.docx');
       const documentXml = strFromU8(unzipSync(written)['word/document.xml']!);
-      expect(documentXml.match(/<w:tbl>/gu)?.length).toBe(1);
+      // A /2 record writes 概览表 and 章节与类别统计 as Word tables (Issue #1174).
+      expect(documentXml.match(/<w:tbl>/gu)?.length).toBe(2);
       expect(documentXml).toContain('>概览表<');
+      expect(documentXml).toContain('>章节与类别统计<');
       const markdown = (await exported('markdown', '审阅报告.md')).toString('utf8');
       expect(markdown.startsWith('# L2 sample1 审阅记录 · 审阅报告\n\n第 1 次审阅 · ')).toBe(true);
       expect(markdown).toContain('\n\n## 概览表\n\n| 类别 | 状态 | 发现 |\n| --- | --- | --- |\n');
