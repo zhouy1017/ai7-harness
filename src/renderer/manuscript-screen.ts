@@ -20,6 +20,7 @@ import type {
 } from '../shared/protocol.js';
 import { MAX_REPLACEMENT_EXCLUSIONS, MILESTONE_PURPOSE_KINDS, MILESTONE_PURPOSE_LABELS, type MilestonePurposeKind } from '../shared/protocol.js';
 import { SOURCES_ENTRY_LABEL, SOURCES_STATUS } from './research-evidence-labels.js';
+import { SEARCH_STALE_LINE, replacementRefusal, searchQueryRefusal } from './manuscript-search-labels.js';
 import { shortcutHint } from './commands.js';
 import { EVALUATION_STATUS, EVALUATION_TITLE } from './evaluation-labels.js';
 import { RETURN_CHIP_TITLE, returnChipArrived, returnChipLabel, returnChipPlace } from './task-panel-labels.js';
@@ -486,12 +487,10 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   searchLabel.htmlFor = 'manuscript-search';
   const searchInput = element('input');
   searchInput.id = 'manuscript-search';
-  searchInput.maxLength = 256;
   const replacementLabel = element('label', undefined, '替换为');
   replacementLabel.htmlFor = 'manuscript-replacement';
   const replacementInput = element('input');
   replacementInput.id = 'manuscript-replacement';
-  replacementInput.maxLength = 2048;
   const searchButton = button('查找全稿', 'secondary', () => void runSearch());
   const cancelJob = button('取消当前操作', 'quiet', () => void cancelActiveServiceJob());
   cancelJob.hidden = true;
@@ -1516,18 +1515,28 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     if (replacementPreview?.previewId === preview.previewId) clearReplacementPresentation();
   }
 
-  const clearSearchPresentation = (message: string): void => {
+  // After an edit the result set is marked stale, not discarded (ADR 0096 §3): its rows stay, read as past, and nothing acts on
+  // them until 查找全稿 runs again; the replacement preview and the way back, bound to the exact state, are gone.
+  const clearSearchPresentation = (message: string, stale = false): void => {
     searchPresentationStale = false;
     searchPage = undefined;
     searchReturn = undefined;
     excludedMatchIds.clear();
     updateExclusionSummary();
     clearReplacementPresentation();
-    searchResults.replaceChildren();
+    const keep = stale && searchResults.childElementCount > 0;
+    if (keep) {
+      for (const control of searchResults.querySelectorAll<HTMLButtonElement | HTMLInputElement>('button, input')) control.disabled = true;
+      searchResults.dataset['inclusionLocked'] = 'true';
+      searchResults.dataset['searchStale'] = 'true';
+    } else {
+      searchResults.replaceChildren();
+      delete searchResults.dataset['searchStale'];
+    }
     previousResults.hidden = true;
     nextResults.hidden = true;
     returnFromSearch.hidden = true;
-    searchSummary.textContent = message;
+    searchSummary.textContent = keep ? `${SEARCH_STALE_LINE}${message}` : message;
     updateServiceControls();
   };
 
@@ -1543,7 +1552,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       searchSummary.textContent = reason;
       const preview = replacementPreview;
       if (preview && preview.previewId !== terminalPreviewId) await dismissVisibleReplacementPreview();
-      clearSearchPresentation(reason);
+      clearSearchPresentation(reason, true);
     })();
     searchInvalidation = pending;
     try {
@@ -1569,8 +1578,9 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   async function runSearch(): Promise<void> {
     if (authoritativeMutationBusy() || serviceJobBusy()) return;
     const query = searchInput.value.normalize('NFC');
-    if (!query || query.length > 256) {
-      setStatus('请输入 1–256 个字符的查找文字。', 'error');
+    const refusal = searchQueryRefusal(query);
+    if (refusal !== null) {
+      setStatus(refusal, 'error');
       searchInput.focus();
       return;
     }
@@ -1687,6 +1697,11 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     if (authoritativeMutationBusy() || serviceJobBusy() || !searchPage) return;
     const searchId = searchPage.searchId;
     const replacement = replacementInput.value.normalize('NFC');
+    const tooLong = replacementRefusal(replacement);
+    if (tooLong !== null) {
+      setStatus(tooLong, 'error');
+      return;
+    }
     const exclusions = [...excludedMatchIds];
     if (exclusions.length > MAX_REPLACEMENT_EXCLUSIONS || exclusions.length >= searchPage.totalMatches) {
       setStatus('替换排除清单超出上限或没有保留任何精确匹配。', 'error');
