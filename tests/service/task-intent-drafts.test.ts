@@ -13,6 +13,7 @@ import { ANALYSIS_LEDGER_REVISION_79_SQL, ANALYSIS_LEDGER_SCHEMA_SQL, LATEST_SCH
 import { MERGE_TABLE_POLICY } from '../../src/service/database-merge.js';
 import { TASK_INTENT_DRAFT_SCHEMA_SQL, draftAnswer, goalFromText, resolveDraft, type DraftResolutionFacts } from '../../src/service/task-intent-drafts.js';
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
+import { readSelectionSpan } from '../../src/shared/selection-span.js';
 import {
   BASELINE_ANALYSIS_TASK_GOAL,
   MAX_TASK_INTENT_GOAL_LENGTH,
@@ -83,6 +84,21 @@ function spanOf(store: EditorialStore, book: { manuscriptId: string; branchId: s
     fromGrapheme: from,
     toGrapheme: to,
     selectedText: graphemesOf(block.text).slice(from, to).join(''),
+  };
+}
+
+/** The selection from the third grapheme of paragraph A to the fourth of C, B whole, over three contiguous paragraphs (Issue #1176). */
+function spanAcross(store: EditorialStore, book: { manuscriptId: string; branchId: string }): DialogueSelectionInput {
+  const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+  const at = window.blocks.findIndex((_, index) => window.blocks.slice(index, index + 3).length === 3 &&
+    window.blocks.slice(index, index + 3).every((block) => block.kind === 'paragraph' && graphemesOf(block.text).length >= 16));
+  const reading = readSelectionSpan(window.blocks.slice(at, at + 3), 2, 4);
+  if (reading.kind !== 'span') throw new Error('sample1 holds no three contiguous paragraphs');
+  const first = reading.pins[0]!;
+  return {
+    manuscriptId: book.manuscriptId, branchId: book.branchId, windowStartBlockId: window.blocks[0]!.blockId, baseRevisionId: window.revisionId,
+    expectedJournalSequence: window.journalSequence, blockId: first.blockId, baseBlockDigest: first.blockDigest, fromGrapheme: first.fromGrapheme,
+    toGrapheme: first.toGrapheme, selectedText: reading.text, span: reading.pins,
   };
 }
 
@@ -420,6 +436,85 @@ describe('Task Intent Drafts over the real store on exact sample1', () => {
         expect(JSON.parse(String(recorded.canonical_json)).scope.label).toContain('所选文字已扩展为所在的 1 个完整段落');
       } finally { db.close(); }
       expect(store.inspectTaskIntentDrafts({ bookId: book.bookId, draftId: draft.draftId }).drafts[0]!.version.ranges).toEqual(draft.version.ranges);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 300_000);
+});
+
+describe('a selection across paragraphs (Issue #1176)', () => {
+  it('pins the exact span in a draft and promotes it as a 审阅 of exactly those paragraphs, the plan naming its pins', async () => {
+    fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-cross-chapter-authored');
+    const store = await open();
+    try {
+      const book = await importBook(store, 'L2 草稿 跨段', true);
+      const span = spanAcross(store, book);
+      const pins = span.span!;
+      const draft = store.saveTaskIntentDraft({ bookId: book.bookId, draftId: null, expectedOrdinal: null, origin: 'composer-selection', goal: GOAL,
+        target: { kind: 'ranges', ranges: [{ kind: 'new', span }] }, outcomeClass: 'review' });
+      expect(draft.version.ranges).toMatchObject([{ blockId: span.blockId, fromGrapheme: 2, toGrapheme: span.toGrapheme, text: span.selectedText, span: pins, state: 'exact' }]);
+      const typos = draft.resolution!.state === 'choose' ? draft.resolution!.options.find((option) => option.choice.kind === 'review' && option.choice.categoryId === 'typos-and-usage')! : null;
+      const preparation = store.taskIntentDraftPreparation({ bookId: book.bookId, draftId: draft.draftId, versionId: draft.version.versionId, choice: typos!.choice });
+      expect(preparation).toMatchObject({ kind: 'review', scope: { kind: 'selection', fromChapterBlockId: pins[0]!.blockId, toChapterBlockId: pins[2]!.blockId } });
+      runPreparation(store, book.bookId, preparation);
+      const run = store.inspectReviewWorkspace(book.bookId, null).run!;
+      const plan = store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: run.reviewRunId });
+      expect(plan.scope.process).toContain('所选文字已扩展为所在的 3 个完整段落');
+      expect(plan.technical.find((row) => row.key === 'draft-span')?.value)
+        .toBe(`${pins[0]!.blockId} 第 2 字 → ${pins[2]!.blockId} 第 4 字 · 3 段 · ${pins.map((pin) => pin.blockDigest).join(' / ')}`);
+      const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+      try {
+        const recorded = JSON.parse(String(db.prepare('SELECT canonical_json FROM review_runs WHERE review_run_id = ?').get(run.reviewRunId)!.canonical_json));
+        expect(recorded.scope.label).toContain('所选文字已扩展为所在的 3 个完整段落');
+      } finally { db.close(); }
+      // The promoted draft keeps the exact pins it was prepared from.
+      expect(store.inspectTaskIntentDrafts({ bookId: book.bookId, draftId: draft.draftId }).drafts[0]!.version.ranges[0]!.span).toEqual(pins);
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 300_000);
+
+  it('refuses a span whose paragraph changed by its place, and asks for a kept span to be reselected once its words moved', async () => {
+    const store = await open();
+    try {
+      const book = await importBook(store, 'L2 草稿 跨段失效', true);
+      const span = spanAcross(store, book);
+      const draft = store.saveTaskIntentDraft({ bookId: book.bookId, draftId: null, expectedOrdinal: null, origin: 'composer-selection', goal: GOAL,
+        target: { kind: 'ranges', ranges: [{ kind: 'new', span }] }, outcomeClass: 'analysis' });
+      // A span beside another range — even one inside its first paragraph — is no one place a Task reads.
+      const { span: _pins, ...single } = span;
+      const inside = { ...single, toGrapheme: 4, selectedText: graphemesOf(span.selectedText).slice(0, 2).join('') };
+      const two = store.saveTaskIntentDraft({ bookId: book.bookId, draftId: null, expectedOrdinal: null, origin: 'composer-selection', goal: GOAL,
+        target: { kind: 'ranges', ranges: [{ kind: 'new', span }, { kind: 'new', span: inside }] }, outcomeClass: 'analysis' });
+      expect(two.resolution).toEqual({ state: 'unsupported', reason: '这份草稿的几段文字不在同一段落里；一项任务一次只就一段准备计划。请只保留同一段落里的文字，或分别发起。' });
+      editBlock(store, book, span.span![1]!.blockId, '〔改动〕');
+      expect(() => store.saveTaskIntentDraft({ bookId: book.bookId, draftId: null, expectedOrdinal: null, origin: 'composer-selection', goal: GOAL,
+        target: { kind: 'ranges', ranges: [{ kind: 'new', span }] }, outcomeClass: null }))
+        .toThrow(expect.objectContaining({ code: 'SELECTION_SPAN_STALE', message: '所选文字的第 2 段已改动、拆分或合并；请重新选择。' }));
+      const moved = store.inspectTaskIntentDrafts({ bookId: book.bookId, draftId: draft.draftId }).drafts[0]!;
+      expect(moved.version.ranges.map((range) => range.state)).toEqual(['reselect']);
+      expect(refusal(() => store.taskIntentDraftPreparation({ bookId: book.bookId, draftId: draft.draftId, versionId: draft.version.versionId,
+        choice: { kind: 'baseline', mode: 'reanalyze-range' } }))).toBe('TASK_INTENT_DRAFT_RANGE_RESELECT');
+      store.markCleanShutdown();
+    } finally {
+      store.close();
+    }
+  }, 300_000);
+
+  it('asks 就这段提问 about the exact span, which the dialogue keeps across a restart', async () => {
+    let store = await open();
+    try {
+      const book = await importBook(store, 'L2 跨段提问', true);
+      const span = spanAcross(store, book);
+      const turn = store.askAboutSelection(book.bookId, { selection: span, question: '这三段的语气是否一致？' });
+      expect(turn.message).toMatchObject({ kind: 'ask', selection: span.selectedText });
+      store.markCleanShutdown();
+      store.close();
+      store = await open();
+      expect(store.inspectDialogue(book.bookId, turn.dialogueId, 0, () => null).range)
+        .toEqual({ blockId: span.blockId, fromGrapheme: span.fromGrapheme, toGrapheme: span.toGrapheme, span: span.span });
       store.markCleanShutdown();
     } finally {
       store.close();

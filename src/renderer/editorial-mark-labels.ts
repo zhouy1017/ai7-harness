@@ -5,6 +5,7 @@ import type {
   PersonalHighlightColor,
   ProposalItemDisposition,
 } from '../shared/protocol.js';
+import { SELECTION_SPAN_NOTE } from '../shared/selection-span.js';
 
 /**
  * The editorial wording of the Mark surface (Issue #407): kind names, who a mark comes from
@@ -172,8 +173,9 @@ export function markTimeLabel(iso: string): string {
 }
 
 /** Why the 编辑标记 entries cannot act on what is selected. */
-export function selectionMenuReason(kind: 'none' | 'multiple-blocks' | 'unsettled'): string {
+export function selectionMenuReason(kind: 'none' | 'span' | 'across-note' | 'unsettled'): string {
   if (kind === 'none') return '先选中一段文字，再添加标记。';
-  if (kind === 'multiple-blocks') return '标记需要落在同一段落内；请只选一个段落里的文字。';
+  if (kind === 'span') return '标记需要落在同一段落内；请只选一个段落里的文字。';
+  if (kind === 'across-note') return SELECTION_SPAN_NOTE;
   return '这段文字还有未写入修订日志的改动，请稍候再试。';
 }

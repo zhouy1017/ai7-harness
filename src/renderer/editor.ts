@@ -4,6 +4,8 @@ import { Schema, type DOMOutputSpec, type Node as ProseMirrorNode } from 'prosem
 import { EditorState, Plugin, TextSelection, type Transaction } from 'prosemirror-state';
 import { Decoration, DecorationSet, EditorView } from 'prosemirror-view';
 import { deriveSpanEdit, followSpanEdit } from '../shared/mark-anchor.js';
+import { readSelectionSpan, type SpanSourceBlock } from '../shared/selection-span.js';
+import type { SelectionSpanBlockPin } from '../shared/protocol/selection-span.js';
 import { markPointKind, markPointLabel } from './editorial-mark-labels.js';
 import { newParagraphIdentity, structuralInput, structuralKey, type PendingStructure } from './editor-structure.js';
 import {
@@ -71,7 +73,9 @@ export interface BoundedEditor {
   setActiveMark(active: { markId: string; previewText: string | null } | null): void;
   /**
    * What the editor has selected, in the window's own vocabulary: one block and a grapheme range of
-   * its durable text. `unsettled` while that block holds text the journal has not acknowledged.
+   * its durable text, or — across paragraphs (Issue #1176) — the exact span over the contiguous blocks
+   * it covers, named by its first block's range. `unsettled` while any of those blocks holds text the
+   * journal has not acknowledged; `across-note` when a note block lies inside it.
    */
   selectedRange(): EditorSelectedRange;
   setOperationLocked(locked: boolean): void;
@@ -87,9 +91,10 @@ export interface BoundedEditor {
 
 export type EditorSelectedRange =
   | { kind: 'none' }
-  | { kind: 'multiple-blocks' }
+  | { kind: 'across-note' }
   | { kind: 'unsettled' }
-  | { kind: 'range'; blockId: string; blockDigest: string; fromGrapheme: number; toGrapheme: number; text: string };
+  | { kind: 'range'; blockId: string; blockDigest: string; fromGrapheme: number; toGrapheme: number; text: string }
+  | { kind: 'span'; blockId: string; blockDigest: string; fromGrapheme: number; toGrapheme: number; text: string; span: ReadonlyArray<SelectionSpanBlockPin> };
 
 export interface EditorPoint {
   blockId: string;
@@ -316,6 +321,38 @@ function findBlockPosition(document: ProseMirrorNode, blockId: string): { node: 
     return found === undefined;
   });
   return found;
+}
+
+/**
+ * The selection from `anchor` to `head` across paragraphs (Issue #1176): the exact span over every block between them, read
+ * from their acknowledged text — `unsettled` while any holds input the journal has not acknowledged.
+ */
+function spanBetween(
+  document: ProseMirrorNode,
+  baselines: ReadonlyMap<string, { readonly text: string; readonly digest: string }>,
+  anchor: EditorPoint,
+  head: EditorPoint,
+  settled: boolean,
+): EditorSelectedRange {
+  const blocks: SpanSourceBlock[] = [];
+  let inside = false;
+  let unsettled = !settled;
+  document.forEach((node) => {
+    const blockId = String(node.attrs['blockId']);
+    if (blockId === anchor.blockId) inside = true;
+    if (!inside) return;
+    const baseline = baselines.get(blockId);
+    if (baseline === undefined || node.textContent !== baseline.text) unsettled = true;
+    blocks.push({ blockId, digest: baseline?.digest ?? '', kind: node.type.name, text: node.textContent });
+    if (blockId === head.blockId) inside = false;
+  });
+  if (unsettled) return { kind: 'unsettled' };
+  const reading = readSelectionSpan(blocks, anchor.grapheme, head.grapheme);
+  if (reading.kind === 'none') return { kind: 'none' };
+  if (reading.kind === 'note') return { kind: 'across-note' };
+  const first = reading.kind === 'range' ? reading.pin : reading.pins[0]!;
+  const range = { blockId: first.blockId, blockDigest: first.blockDigest, fromGrapheme: first.fromGrapheme, toGrapheme: first.toGrapheme, text: reading.text };
+  return reading.kind === 'range' ? { kind: 'range', ...range } : { kind: 'span', ...range, span: reading.pins };
 }
 
 function pointAtPosition(document: ProseMirrorNode, position: number): EditorPoint {
@@ -1247,12 +1284,12 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       activeMark = active ?? undefined;
       view.dispatch(view.state.tr.setMeta('ai7-editorial-marks', true));
     },
-    selectedRange: () => {
+    selectedRange: (): EditorSelectedRange => {
       const selection = view.state.selection;
       if (selection.empty) return { kind: 'none' };
       const anchor = pointAtPosition(view.state.doc, selection.from);
       const head = pointAtPosition(view.state.doc, selection.to);
-      if (anchor.blockId !== head.blockId) return { kind: 'multiple-blocks' };
+      if (anchor.blockId !== head.blockId) return spanBetween(view.state.doc, baselines, anchor, head, !saving && !retryRequired);
       const baseline = baselines.get(anchor.blockId);
       const block = findBlock(view.state.doc, anchor.blockId);
       if (!baseline || !block || saving || retryRequired || block.textContent !== baseline.text) return { kind: 'unsettled' };

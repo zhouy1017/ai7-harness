@@ -5,6 +5,8 @@ import { PROPOSAL_CONFLICT_REGENERATION_SCHEMA, type ProposalConflictRegeneratio
 import type { EditorialStore } from '../store.js';
 import { initialResolutions, type ConflictUnitResolution } from '../../shared/conflict-units.js';
 import { graphemesOf } from '../../shared/mark-anchor.js';
+import { spanGraphemes } from '../../shared/selection-span.js';
+import type { WorkingSpanBlock } from '../manuscript/selection-span.js';
 import {
   MAX_DIALOGUE_SELECTION_GRAPHEMES,
   type DialogueSelectionInput,
@@ -36,7 +38,9 @@ import {
   buildEditorialPolishMessage,
   holdsEditorialPolishMarks,
   readEditorialPolishAnswer,
+  type EditorialPolishWithheld,
 } from './polish-contract.js';
+import { EDITORIAL_POLISH_SPAN_ATOMIC_REASON, placeSpanSuggestions, type PolishPlacement } from './polish-span.js';
 
 /**
  * 润色这段 and 基于当前稿件重新生成建议 as the service runs them (Issue #842): the words are read from the working state as the
@@ -47,7 +51,7 @@ import {
  * on its own.
  */
 export type FastRoleStore = Pick<EditorialStore,
-  'getManuscriptWindowAt' | 'dialogueSourceDigest' | 'createProducedEditorialMarks' | 'inspectProposalConflict' | 'saveRegeneratedProposalConflictDraft'>;
+  'getManuscriptWindowAt' | 'verifySelectionSpan' | 'dialogueSourceDigest' | 'createProducedEditorialMarks' | 'inspectProposalConflict' | 'saveRegeneratedProposalConflictDraft'>;
 
 /** The label every 润色这段 mark carries as its source, beside the polish task it came from. */
 export const EDITORIAL_POLISH_MARK_SOURCE_LABEL = '润色这段';
@@ -75,11 +79,12 @@ export function fastInteractionRoutes(owner: FastRoleExecutionOwner, bookId: str
 }
 
 /** The selected words as the working state holds them now, with the bounded window of their paragraph around them. */
-function verifiedSelection(store: FastRoleStore, bookId: string, selection: DialogueSelectionInput): { before: string; text: string; after: string } {
+function verifiedSelection(store: FastRoleStore, bookId: string, selection: DialogueSelectionInput): PolishWords {
   require(selection !== null && typeof selection === 'object' && typeof selection.manuscriptId === 'string' && UUID_PATTERN.test(selection.manuscriptId) &&
     typeof selection.branchId === 'string' && UUID_PATTERN.test(selection.branchId) && typeof selection.blockId === 'string' &&
     typeof selection.selectedText === 'string' && Number.isSafeInteger(selection.fromGrapheme) && Number.isSafeInteger(selection.toGrapheme) &&
     Number.isSafeInteger(selection.expectedJournalSequence), 'POLISH_SELECTION_INVALID', '所选文字无效。');
+  if (selection.span !== undefined) return verifiedSpan(store, bookId, selection);
   const window = store.getManuscriptWindowAt(selection.manuscriptId, selection.branchId, { kind: 'block', blockId: selection.blockId });
   require(window.bookId === bookId, 'POLISH_SELECTION_INVALID', '所选文字不在这本书的稿件中。');
   require(window.revisionId === selection.baseRevisionId && window.journalSequence === selection.expectedJournalSequence,
@@ -92,6 +97,35 @@ function verifiedSelection(store: FastRoleStore, bookId: string, selection: Dial
   require(selection.toGrapheme - selection.fromGrapheme <= MAX_DIALOGUE_SELECTION_GRAPHEMES, 'POLISH_SELECTION_TOO_LONG',
     `所选文字最多 ${MAX_DIALOGUE_SELECTION_GRAPHEMES} 个字；请选短一些再润色。`);
   return polishWordsOf(block.text, selection.fromGrapheme, selection.toGrapheme);
+}
+
+/**
+ * A selection across paragraphs (Issue #1176): every block checked against the working state — a stale one refused by its place
+ * in the span — and the words sent are the span itself as the processing target, with the bounded window before it in its
+ * first paragraph and after it in its last as reading context. No other paragraph is sent.
+ */
+function verifiedSpan(store: FastRoleStore, bookId: string, selection: DialogueSelectionInput): PolishWords {
+  const verified = store.verifySelectionSpan(selection);
+  require(verified.bookId === bookId, 'POLISH_SELECTION_INVALID', '所选文字不在这本书的稿件中。');
+  require(spanGraphemes(selection) <= MAX_DIALOGUE_SELECTION_GRAPHEMES, 'POLISH_SELECTION_TOO_LONG',
+    `所选文字最多 ${MAX_DIALOGUE_SELECTION_GRAPHEMES} 个字；请选短一些再润色。`);
+  const blocks = verified.blocks!;
+  const first = blocks[0]!;
+  const last = blocks.at(-1)!;
+  return {
+    before: polishWordsOf(first.text, first.pin.fromGrapheme, first.pin.toGrapheme).before,
+    text: verified.text,
+    after: polishWordsOf(last.text, last.pin.fromGrapheme, last.pin.toGrapheme).after,
+    blocks,
+  };
+}
+
+/** What 润色这段 sends, and — for a span — the blocks its suggestions are placed in. */
+interface PolishWords {
+  readonly before: string;
+  readonly text: string;
+  readonly after: string;
+  readonly blocks?: ReadonlyArray<WorkingSpanBlock>;
 }
 
 /** The words 润色这段 sends for a range of one block: the selection and the bounded window of the paragraph around it. */
@@ -109,7 +143,7 @@ interface PreparedPolish {
   readonly bookId: string;
   readonly taskId: string;
   readonly selection: DialogueSelectionInput;
-  readonly words: { readonly before: string; readonly text: string; readonly after: string };
+  readonly words: PolishWords;
 }
 
 /** Everything 润色这段 checks before it sends: the route, the Book's source, and the selected words as they stand now. */
@@ -140,34 +174,12 @@ async function finishPolish(owner: FastRoleExecutionOwner, store: FastRoleStore,
   if (answer.kind === 'failed') return polishProjection(prepared, 'failed', answer.message, { outcomeUnknown: answer.outcomeUnknown });
   const reading = readEditorialPolishAnswer(answer.text, words.text);
   if (reading.kind === 'withheld') return polishProjection(prepared, 'withheld', `${reading.reason}；没有新建修改建议。`);
-  const inputs: ProducedEditorialMarkInput[] = reading.suggestions.map((suggestion) => {
-    const fromGrapheme = selection.fromGrapheme + suggestion.fromGrapheme;
-    const toGrapheme = selection.fromGrapheme + suggestion.toGrapheme;
-    const quote = [...suggestion.original].length > BASIS_QUOTE_CHARACTERS ? `${[...suggestion.original].slice(0, BASIS_QUOTE_CHARACTERS).join('')}…` : suggestion.original;
-    return {
-      manuscriptId: selection.manuscriptId,
-      branchId: selection.branchId,
-      blockId: selection.blockId,
-      fromGrapheme,
-      toGrapheme,
-      pinnedText: suggestion.original,
-      kind: 'change-suggestion',
-      body: '',
-      proposedText: suggestion.replacement,
-      rationale: suggestion.reason,
-      atomicGroupId: null,
-      source: { kind: 'ai7', origin: 'task', label: EDITORIAL_POLISH_MARK_SOURCE_LABEL, taskId },
-      basis: [{ label: EDITORIAL_POLISH_MARK_SOURCE_LABEL, blockId: selection.blockId, fromGrapheme, toGrapheme, quote }],
-    };
-  });
-  // Written together, each re-checked against the working state now: words the editor changed meanwhile take no mark.
-  const placed = inputs.length === 0 ? [] : store.createProducedEditorialMarks(inputs, (markIds) => [...markIds]);
-  const markIds: string[] = [];
-  const withheld = [...reading.withheld];
-  placed.forEach((markId, index) => {
-    if (markId === null) withheld.push({ ordinal: reading.suggestions[index]!.ordinal, reason: '所选文字已改动，这条建议没有放到稿件上' });
-    else markIds.push(markId);
-  });
+  const spread = words.blocks === undefined ? null : placeSpanSuggestions(reading.suggestions, words.blocks);
+  const placements: PolishPlacement[] = spread?.placed ?? reading.suggestions.map((suggestion) => ({ ordinal: suggestion.ordinal, reason: suggestion.reason,
+    parts: [{ blockId: selection.blockId, fromGrapheme: selection.fromGrapheme + suggestion.fromGrapheme, toGrapheme: selection.fromGrapheme + suggestion.toGrapheme,
+      original: suggestion.original, replacement: suggestion.replacement }] }));
+  const withheld: EditorialPolishWithheld[] = [...reading.withheld, ...spread?.withheld ?? []];
+  const markIds = placePolishMarks(store, selection, taskId, placements, withheld);
   withheld.sort((left, right) => left.ordinal - right.ordinal);
   const notOffered = withheld.length === 0 ? '' : `另有 ${withheld.length} 条建议没有提供。`;
   if (markIds.length > 0) {
@@ -175,6 +187,65 @@ async function finishPolish(owner: FastRoleExecutionOwner, store: FastRoleStore,
   }
   if (withheld.length > 0) return polishProjection(prepared, 'withheld', `模型给出的 ${withheld.length} 条建议都没有提供；没有新建修改建议。`, { withheld });
   return polishProjection(prepared, 'nothing-to-suggest', '这段文字没有需要润色的地方；没有新建修改建议。');
+}
+
+/** A write that placed a cross-paragraph suggestion in part: rolled back, to be made again without it. */
+class GroupMoved extends Error {
+  constructor(readonly ordinals: ReadonlySet<number>) { super('GROUP_MOVED'); }
+}
+
+/**
+ * Write the placements' 修改建议 together, each re-checked against the working state now: words the editor changed meanwhile
+ * take no mark, and a cross-paragraph suggestion any of whose parts moved takes none of them — the write is made again
+ * without it, so an atomic group is never placed in part. What is not placed is added to `withheld`; the placed marks return.
+ */
+function placePolishMarks(store: FastRoleStore, selection: DialogueSelectionInput, taskId: string, placements: ReadonlyArray<PolishPlacement>,
+  withheld: EditorialPolishWithheld[]): string[] {
+  const moved = (ordinal: number): void => { withheld.push({ ordinal, reason: '所选文字已改动，这条建议没有放到稿件上' }); };
+  let pending = [...placements];
+  while (pending.length > 0) {
+    const groups = pending.map((placement) => placement.parts.length > 1 ? randomUUID() : null);
+    const inputs: ProducedEditorialMarkInput[] = pending.flatMap((placement, index) => placement.parts.map((part) => {
+      const quote = [...part.original].length > BASIS_QUOTE_CHARACTERS ? `${[...part.original].slice(0, BASIS_QUOTE_CHARACTERS).join('')}…` : part.original;
+      return {
+        manuscriptId: selection.manuscriptId,
+        branchId: selection.branchId,
+        blockId: part.blockId,
+        fromGrapheme: part.fromGrapheme,
+        toGrapheme: part.toGrapheme,
+        pinnedText: part.original,
+        kind: 'change-suggestion' as const,
+        body: '',
+        proposedText: part.replacement,
+        rationale: placement.reason,
+        atomicGroupId: groups[index]!,
+        ...(groups[index] === null ? {} : { atomicReason: EDITORIAL_POLISH_SPAN_ATOMIC_REASON }),
+        source: { kind: 'ai7' as const, origin: 'task' as const, label: EDITORIAL_POLISH_MARK_SOURCE_LABEL, taskId },
+        basis: [{ label: EDITORIAL_POLISH_MARK_SOURCE_LABEL, blockId: part.blockId, fromGrapheme: part.fromGrapheme, toGrapheme: part.toGrapheme, quote }],
+      };
+    }));
+    const byPlacement = (markIds: ReadonlyArray<string | null>): Array<ReadonlyArray<string | null>> => {
+      let at = 0;
+      return pending.map((placement) => markIds.slice(at, at += placement.parts.length));
+    };
+    try {
+      const placed = store.createProducedEditorialMarks(inputs, (markIds) => {
+        const partly = new Set(byPlacement(markIds).flatMap((ids, index) =>
+          ids.some((id) => id === null) && ids.some((id) => id !== null) ? [pending[index]!.ordinal] : []));
+        if (partly.size > 0) throw new GroupMoved(partly);
+        return byPlacement(markIds);
+      });
+      return placed.flatMap((ids, index) => {
+        if (ids.every((id) => id === null)) moved(pending[index]!.ordinal);
+        return ids.filter((id): id is string => id !== null);
+      });
+    } catch (error) {
+      if (!(error instanceof GroupMoved)) throw error;
+      error.ordinals.forEach(moved);
+      pending = pending.filter((placement) => !error.ordinals.has(placement.ordinal));
+    }
+  }
+  return [];
 }
 
 /** The current manuscript's words on each side of one unit, bounded, as the regeneration sends them. */

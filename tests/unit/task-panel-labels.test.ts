@@ -195,3 +195,11 @@ describe('查看结果 and 回到<位置>', () => {
     expect(labels.returnChipArrived('第七章')).toBe('已回到第七章。');
   });
 });
+
+describe('the composer range line (Issue #1176)', () => {
+  it('names a span by its first and last block and paragraph count, counting the words without the breaks between them', () => {
+    expect(labels.taskComposerRangeLine(5, 12, 'r1')).toBe('第 5 个内容块 · 12 字 · 修订版 r1');
+    expect(labels.taskComposerRangeLine(5, 20, 'r1', 3)).toBe('第 5–7 个内容块 · 3 段 · 18 字 · 修订版 r1');
+    expect(labels.taskComposerRangeLine(null, 20, 'r1', 3)).toBe('段落已不在当前稿件中 · 18 字 · 修订版 r1');
+  });
+});
