@@ -2,6 +2,7 @@ import { selectedProcedureForBook, resolveProcedurePin, procedureStopped } from 
 import { resolveProcedureDefinition, readProcedurePlanPin } from '../procedures/definition-store.js';
 import { reviewProcedureId } from '../procedures/preinstalled.js';
 import { compositeReviewRun, type CompositeReviewRun } from '../procedures/composite-run.js';
+import { compositeMembers } from '../procedures/composite.js';
 import type { ProcedureDefinitionPin } from '../../shared/protocol/procedures.js';
 import { LOCAL_REVIEW_SCHEMA_VERSION, REVIEW_CONTRACT_SCHEMA_VERSION } from '../task-authorization.js';
 import { LocalCheckError, freezeLocalPlan, freezeLocalPlanV3, freezeLocalPlanV4, isLocalTablePlan, numeralBasis, validLocalOptions, validateAnyLocalPlan, type AnyLocalCheckPlan, type LocalCheckBlock } from './deterministic/plan.js';
@@ -948,6 +949,8 @@ interface CategoryView {
   readonly pending: boolean;
   readonly materialized: CategoryEvent | null;
   readonly retained?: CategoryEvent | null;
+  /** A composite member marked 空闲时处理 whose Run waits on the idle lane (Issue #1200). */
+  readonly idleQueued?: true;
 }
 
 interface RunView {
@@ -967,6 +970,9 @@ interface RunView {
    */
   readonly historicallyAffected: ReadonlyMap<string, string>;
 }
+
+/** A composite member marked 空闲时处理 that has not started (Issue #1200). */
+const REVIEW_CATEGORY_DEFERRED_LABEL = '空闲时处理' as const;
 
 /** An approval made 「空闲时处理」 that has not begun (Issue #1089): it waits for quiet, not for the network. */
 function waitsForIdleStart(view: Pick<RunView, 'state' | 'authorization'>): boolean {
@@ -1019,6 +1025,8 @@ export interface ReviewRunPlanFacts {
     readonly state: ReviewRunCategoryState;
     readonly stateLabel: string;
     readonly detail: string | null;
+    /** A composite member marked 空闲时处理 (Issue #1200): it starts after the others, on the idle lane. */
+    readonly deferred?: true;
     readonly task: null | {
       readonly taskIntentId: string;
       readonly modeLabel: string;
@@ -1906,6 +1914,21 @@ export class ReviewRunStore {
     });
   }
 
+  /**
+   * 取消任务 while a composite member marked 空闲时处理 waits on the idle lane (Issue #1200): its ledger Run, authorized and never
+   * dispatched, is cancelled as a waiting Run is — nothing of it was sent — and its id returned for the owner to let go of.
+   */
+  #cancelQueuedMember(bookId: string, reviewRunId: string): string | null {
+    const deferred = this.#deferredMembers(this.#runOfBook(bookId, reviewRunId));
+    for (const task of this.controlTasks(bookId, reviewRunId)) {
+      const runRecordId = this.#runRecordOf(task.taskIntentId);
+      if (!deferred.has(task.categoryId) || runRecordId === null || task.ledger.currentRunState(runRecordId) !== 'authorized') continue;
+      task.ledger.cancelWaiting(bookId, task.taskIntentId);
+      return runRecordId;
+    }
+    return null;
+  }
+
   /** Cancel categories not yet dispatched; completed findings stay on their original ledgers. */
   cancelRemaining(bookId: string, reviewRunId: string): void {
     const snapshot = this.#runOfBook(bookId, reviewRunId);
@@ -1961,6 +1984,8 @@ export class ReviewRunStore {
   planFacts(bookId: string, reviewRunId: string): ReviewRunPlanFacts {
     const snapshot = this.#runOfBook(bookId, reviewRunId);
     const view = this.#runStateView(snapshot);
+    const deferred = this.#deferredMembers(snapshot);
+    const idleMember = view.categories.some((categoryView) => categoryView.idleQueued === true);
     const categories = view.categories.map((categoryView) => {
       const { category } = categoryView;
       const frozen = category.task === null ? null : this.#categoryLedger(category).frozenPlan(category.task.taskIntentId, category.task.planEnvelopeDigest);
@@ -1980,6 +2005,7 @@ export class ReviewRunStore {
         state: categoryView.state,
         stateLabel: categoryView.stateLabel,
         detail: categoryView.detail,
+        ...(deferred.has(category.categoryId) ? { deferred: true as const } : {}),
         task: category.task === null || frozen === null ? null : {
           taskIntentId: category.task.taskIntentId,
           modeLabel: category.task.modeLabel,
@@ -2044,11 +2070,12 @@ export class ReviewRunStore {
       ordinal: snapshot.ordinal,
       label: `第 ${snapshot.ordinal} 次`,
       createdAt: snapshot.createdAt,
-      state: view.state,
-      stateLabel: runViewStateLabel(view),
+      // While a member marked 空闲时处理 waits on the idle lane the Run waits for quiet, and is cancelled as a waiting Run is (Issue #1200).
+      state: idleMember ? 'waiting' : view.state,
+      stateLabel: idleMember ? RUN_WAITING_IDLE_LABEL : runViewStateLabel(view),
       canContinue: view.canContinue,
       authorizedAt: view.authorization?.authorizedAt ?? null,
-      waitingIdle: waitsForIdleStart(view),
+      waitingIdle: idleMember || waitsForIdleStart(view),
       manuscript: snapshot.manuscript,
       scope: snapshot.scope,
       configuration: snapshot.configuration,
@@ -2194,7 +2221,14 @@ export class ReviewRunStore {
     return record;
   }
 
-  backgroundOrigin(reviewRunId: string): boolean { return this.#authorizationOf(reviewRunId)?.startWhen === 'idle'; }
+  backgroundOrigin(reviewRunId: string, categoryId?: string): boolean {
+    return this.#authorizationOf(reviewRunId)?.startWhen === 'idle' || (categoryId !== undefined && this.#deferredMembers(this.#run(reviewRunId)).has(categoryId));
+  }
+
+  /** The composite members marked 空闲时处理 (Issue #1200), read from the exact version the Run's snapshot pins. */
+  #deferredMembers(snapshot: RunSnapshot): ReadonlySet<string> {
+    return new Set(snapshot.composite === undefined ? [] : compositeMembers(snapshot.composite.document).filter((entry) => entry.deferred).map((entry) => entry.member.categoryId));
+  }
 
   waitsForIdle(reviewRunId: string): boolean {
     return this.#authorizationOf(reviewRunId)?.startWhen === 'idle' && this.#waits(this.#run(reviewRunId));
@@ -2347,15 +2381,22 @@ export class ReviewRunStore {
    * 取消 while the Run waits to start once online (OFF-010): terminal, before anything is sent — every category records the
    * cancellation, so the Run reads 已取消 and offers nothing more. Cancelling twice answers as the first did.
    */
-  cancelWaiting(bookId: string, reviewRunId: string): void {
+  cancelWaiting(bookId: string, reviewRunId: string): string | null {
     const snapshot = this.#runOfBook(bookId, reviewRunId);
-    if (this.#stoppedFor(reviewRunId) === 'cancelled') return;
+    if (this.#stoppedFor(reviewRunId) === 'cancelled') return null;
+    // A composite member marked 空闲时处理 waiting on the idle lane (Issue #1200): its Run and every member after it are cancelled.
+    const queued = this.#waits(snapshot) ? null : this.#cancelQueuedMember(bookId, reviewRunId);
+    if (queued !== null) {
+      this.cancelRemaining(bookId, reviewRunId);
+      return queued;
+    }
     requireReview(this.#waits(snapshot), 'REVIEW_RUN_NOT_WAITING', '只有等待联网后开始的审阅可以在这里取消；它已经开始或已经结束。');
     transact(this.#db, () => {
       for (const category of snapshot.categories) {
         this.#recordEvent(reviewRunId, category.categoryId, 'refused', WAITING_CANCELLED_DETAIL, { extra: { code: REVIEW_RUN_CANCELLED } });
       }
     });
+    return null;
   }
 
   /**
@@ -2546,7 +2587,10 @@ export class ReviewRunStore {
         : stop === 'plan-moved' ? '这次审阅等待联网时计划已经变化，没有开始；请新建一次审阅。'
           : `这次审阅显示「${SERIES_RETRIEVAL_SCOPE_CHANGED_LABEL}」；只能修改计划并重新授权，或取消任务。`);
     this.#driving.set(reviewRunId, snapshot.bookId);
-    return snapshot.categories.map((category) => category.categoryId);
+    // A composite's members marked 空闲时处理 (Issue #1200) take their turn after every other member, in their own order.
+    const deferred = this.#deferredMembers(snapshot);
+    const ids = snapshot.categories.map((category) => category.categoryId);
+    return [...ids.filter((id) => !deferred.has(id)), ...ids.filter((id) => deferred.has(id))];
   }
 
   endDrive(reviewRunId: string): void {
@@ -2644,7 +2688,8 @@ export class ReviewRunStore {
     let dispatchRunRecordId: string | null;
     try {
       const ruleVersionId = this.defaultRuleVersion(reviewRunId);
-      dispatchRunRecordId = ledger.authorize(snapshot.bookId, category.task.taskIntentId, approved, this.#authorizationOf(reviewRunId)?.startWhen === 'idle' ? 'idle' : 'now',
+      // A deferred member starts on the idle lane under the Run's one approval, never sooner (Issue #1200; ADR 0095 §3).
+      dispatchRunRecordId = ledger.authorize(snapshot.bookId, category.task.taskIntentId, approved, this.backgroundOrigin(reviewRunId, categoryId) ? 'idle' : 'now',
         ruleVersionId === null ? { kind: 'standard-direct' } : { kind: 'default-execution-rule', ruleVersionId }).dispatchRunRecordId;
     } catch (error) {
       if (!(error instanceof AnalysisError)) throw error;
@@ -4322,6 +4367,7 @@ export class ReviewRunStore {
     const driving = this.#driving.has(snapshot.reviewRunId);
     const stop = this.#stoppedFor(snapshot.reviewRunId);
     const waiting = this.#waits(snapshot, authorization);
+    const deferred = this.#deferredMembers(snapshot);
     const categories = snapshot.categories.map((category): CategoryView => {
       if (category.executor === 'local-text-check') {
         const last = readLocalStageArtifacts(this.#db, snapshot.reviewRunId).at(-1)?.record;
@@ -4338,9 +4384,11 @@ export class ReviewRunStore {
       const events = this.#events(snapshot.reviewRunId, category.categoryId);
       const last = events.at(-1) ?? null;
       let ledgerRun: ReviewLedgerRunOutcome = 'unfinished';
+      let queued = false;
       if (last?.state === 'dispatched' && last.runRecordId !== null) {
         try {
           const ledgerState = this.#categoryLedger(category).currentRunState(last.runRecordId);
+          queued = ledgerState === 'authorized';
           ledgerRun = ledgerState === 'completed' || ledgerState === 'completed-with-gaps' ? 'completed' : ledgerState === 'failed' ? 'failed' : 'unfinished';
         } catch (error) {
           if (!(error instanceof AnalysisError)) throw error;
@@ -4348,6 +4396,9 @@ export class ReviewRunStore {
       }
       const { state, pending } = reviewRunCategoryState({ authorized: authorization !== null, driving, lastEvent: last?.state ?? null, ledgerRun });
       const waitingForPlace = driving && state === 'waiting' && this.#placeWaits.get(snapshot.reviewRunId) === category.categoryId;
+      // A member marked 空闲时处理 says so until it starts, and 等待空闲 while its Run waits on the idle lane (Issue #1200).
+      const idle = !deferred.has(category.categoryId) ? null : queued ? RUN_WAITING_IDLE_LABEL
+        : last === null && (state === 'prepared' || state === 'waiting') ? REVIEW_CATEGORY_DEFERRED_LABEL : null;
       const derived = !driving && pending && authorization !== null
         ? waiting ? WAITING_DETAIL
           : stop !== null && last === null ? STOPPED_UNSTARTED_DETAIL
@@ -4360,7 +4411,8 @@ export class ReviewRunStore {
         events,
         state,
         // A category the exclusion stopped, or the editor then cancelled, reads the stop's own words (SER-024).
-        stateLabel: reviewRunCategoryStopLabel(last?.record.code) ?? reviewRunCategoryStateLabel(state, waitingForPlace),
+        stateLabel: reviewRunCategoryStopLabel(last?.record.code) ?? idle ?? reviewRunCategoryStateLabel(state, waitingForPlace),
+        ...(idle === RUN_WAITING_IDLE_LABEL ? { idleQueued: true as const } : {}),
         detail: waitingForPlace ? REVIEW_CATEGORY_PLACE_WAIT_DETAIL : derived ?? (last === null || last.state === 'dispatched' ? null : last.detail),
         pending,
         materialized: events.find((event) => event.state === 'materialized') ?? null,

@@ -81,7 +81,8 @@ export async function mountEditableProcedureLibrary(root: HTMLElement, api: Rend
     form.append(node('h4', captureRunId === undefined ? create ? '新建工序' : '改写为新版本' : '从本次运行捕获'),
       label('名称', title), label('编辑任务说明', instruction),
       node('p', '工序沿用所选任务的执行器。阶段按输入依赖顺序运行；不兼容的顺序不能保存。说明和豁免规则合计最多 1200 字，不能覆盖任务契约。'),
-      node('p', '模型阶段的预算份额在运行设置了总预算时生效；0 表示沿用总预算约束。固定本地归并和报告阶段不解释文字豁免，模型预算为零。'));
+      node('p', '模型阶段的预算份额在运行设置了总预算时生效；0 表示沿用总预算约束。固定本地归并和报告阶段不解释文字豁免，模型预算为零。'),
+      ...(entry.document.members === undefined ? [] : [node('p', '成员的模型阶段全部勾选「空闲时处理」时，这个成员在其他成员之后、AI7 空闲时才开始，仍属于同一次审阅的授权。')]));
     let stages = structuredClone(entry.document.stages);
     const stageList = node('ol');
     const renderStages = (): void => {
@@ -98,6 +99,16 @@ export async function mountEditableProcedureLibrary(root: HTMLElement, api: Rend
         };
         row.append(node('strong', PROCEDURE_STAGE_LABELS[stage.stageType]), label('豁免规则（每行一条）', rules), label('预算份额 %', share),
           action('上移', () => move(-1)), action('下移', () => move(1)));
+        // 空闲时处理 (Issue #1200): a composite's model-member stage only; a member runs idle once all its model stages are marked.
+        if (entry.document.members !== undefined && !rules.disabled) {
+          const idle = node('input'); idle.type = 'checkbox'; idle.checked = stage.deferred === true; idle.dataset['procedureField'] = 'deferred';
+          idle.addEventListener('change', () => { stages = stages.map((item, i) => {
+            if (i !== index) return item;
+            const { deferred: _deferred, ...rest } = item;
+            return idle.checked ? { ...rest, deferred: true as const } : rest;
+          }); });
+          row.append(label('空闲时处理', idle));
+        }
         stageList.append(row);
       });
     };

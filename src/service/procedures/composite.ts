@@ -1,4 +1,4 @@
-import type { ProcedureDefinitionDocument, ProcedureDefinitionPin, ProcedureMemberDefinition } from '../../shared/protocol/procedures.js';
+import { procedureStageUsesModel, type ProcedureDefinitionDocument, type ProcedureDefinitionPin, type ProcedureMemberDefinition } from '../../shared/protocol/procedures.js';
 import { canonicalJson, requireAnalysis, sha256Hex } from '../analysis/canonical.js';
 import type { DatabaseSync } from 'node:sqlite';
 import { allPreinstalledProcedureDefinitions, BASELINE_PROCEDURE_ID, FACTUAL_CLAIM_PROCEDURE_ID } from './preinstalled.js';
@@ -19,6 +19,8 @@ export interface CompositeMember {
   readonly executor: ProcedureDefinitionPin;
   /** That version's stages carrying the composite's exemptions and shares, and the composite's instruction. */
   readonly view: ProcedureDefinitionDocument;
+  /** Every model stage of the member is marked 空闲时处理 (Issue #1200): it runs after the others, on the idle lane. */
+  readonly deferred: boolean;
 }
 
 /**
@@ -35,14 +37,19 @@ export function compositeMembers(document: ProcedureDefinitionDocument): readonl
     const own = document.stages.slice(offset, offset + member.stageCount);
     offset += member.stageCount;
     requireAnalysis(own.length === member.stageCount && own.every((stage, index) => {
-      const { exemptionRules: _rules, budgetShare: _share, ...fixed } = stage;
+      const { exemptionRules: _rules, budgetShare: _share, deferred: _deferred, ...fixed } = stage;
       const { exemptionRules: _sourceRules, budgetShare: _sourceShare, ...expected } = source.stages[index] ?? stage;
       return source.stages[index] !== undefined && canonicalJson(fixed) === canonicalJson(expected);
     }), 'PROCEDURE_RECORD_INVALID', '组合工序的阶段与成员版本不一致。');
     const view = { ...source, editorInstruction: document.editorInstruction, stages: source.stages.map((stage, index) =>
       index < own.length ? { ...stage, exemptionRules: own[index]!.exemptionRules, budgetShare: own[index]!.budgetShare } : stage) };
+    const marks = own.filter((stage) => procedureStageUsesModel(stage, own)).map((stage) => stage.deferred === true);
+    requireAnalysis(own.every((stage) => stage.deferred === undefined || stage.deferred === true && procedureStageUsesModel(stage, own)),
+      'PROCEDURE_DEFERRED_INVALID', `「${source.title}」：只有调用模型的阶段可以设为空闲时处理。`);
+    requireAnalysis(marks.every((mark) => mark === marks[0]), 'PROCEDURE_DEFERRED_PARTIAL',
+      `「${source.title}」的模型阶段须全部立即或全部空闲时处理：这个成员作为一次运行开始。`);
     return { member, executorKind: preinstalledExecutorKind(member.procedureId),
-      executor: { procedureId: member.procedureId, version: member.version, digest: member.digest }, view };
+      executor: { procedureId: member.procedureId, version: member.version, digest: member.digest }, view, deferred: marks[0] === true };
   });
   requireAnalysis(offset === document.stages.length - 1 && document.stages.at(-1)?.stageType === 'derived-report' &&
     new Set(members.map((entry) => entry.executorKind)).size === members.length, 'PROCEDURE_RECORD_INVALID', '组合工序的成员结构无效。');

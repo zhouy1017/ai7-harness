@@ -365,7 +365,7 @@ it('prepares selected Series consistency with the current production tool base (
   }
 });
 
-it('recovers one proven no-send inside the native stock child with the same request and a fresh admission', async () => {
+it('recovers one proven no-send inside a fanned-out native stock child with the same request and a fresh admission', async () => {
   const bodies: string[] = [];
   const result = await productionReview(['typos-and-usage'], () => 'valid', undefined, false, false, {
     transportEntry: (request) => {
@@ -376,9 +376,10 @@ it('recovers one proven no-send inside the native stock child with the same requ
   const definition = reviewCategoryKindDefinition(reviewCategoryContractInput(reviewCategoryEntry('typos-and-usage')!), 2);
   const projection = result.store.inspectReviewCategory(result.bookId, definition);
   expect(projection.state).toBe('settled');
-  expect(bodies[0]).toBe(bodies[1]);
+  // Siblings run beside it (composition v4, Issue #1200): the refused body is sent once more, by its own unit alone.
+  expect(bodies.filter((body) => body === bodies[0])).toHaveLength(2);
   const attempt = projection.run!.attempt!;
-  expect(attempt.executionBinding!.compositionVersion).toBe(3);
+  expect(attempt.executionBinding!.compositionVersion).toBe(4);
   expect(projection.run!.adaptations).toHaveLength(1);
   expect(projection.run!.adaptations[0]).toMatchObject({ adaptationClass: 'safe-retry', unitOrdinal: 1, attemptIndex: 2 });
   const spans = attempt.spans.filter((span) => span.unitOrdinal === 1);
@@ -386,7 +387,7 @@ it('recovers one proven no-send inside the native stock child with the same requ
   expect(spans[0]!.harnessSessionId).toBe(spans[1]!.harnessSessionId);
   expect(spans[0]!.endSeq).toBeLessThan(spans[1]!.startSeq);
   expect(spans[0]!.payloadDigest).toBe(spans[1]!.payloadDigest);
-  expect(result.store.reviewCategoryLedger(definition).requestAdmissionOf(projection.run!.runRecordId)).toMatchObject({ width: 1 });
+  expect(result.store.reviewCategoryLedger(definition).requestAdmissionOf(projection.run!.runRecordId)).toMatchObject({ width: 3 });
   expect(projection.taskOutcome!.report!.usagePerStage.units.requests).toBe(9);
   expect(requestGovernor.snapshot()).toMatchObject({ registered: 0, inFlight: 0, waiting: 0 });
 });
@@ -577,7 +578,8 @@ async function reopenToolReview({ coupled, source }: { coupled: boolean; source:
   const category = source === 'material' ? 'typos-and-usage' : source === 'consistency' ? 'series-consistency' : 'academic-integrity';
   const searchReadiness = category === 'academic-integrity' ? vi.spyOn(CredentialBroker.prototype, 'checkPlanReadiness') : null;
   if (searchReadiness !== null) cleanupResources.push(() => searchReadiness.mockRestore());
-  const held = heldReviewResponses(source === 'material' && !coupled ? 1 : 3); const ready = deferred<Parameters<NonNullable<ProductionReviewControl['ready']>>[0]>();
+  // Every category here admits three units at once; the stock 错别字 child too, under composition v4 (Issue #1200).
+  const held = heldReviewResponses(3); const ready = deferred<Parameters<NonNullable<ProductionReviewControl['ready']>>[0]>();
   const working = productionReview([category], (_category, _ordinal, prior) => prior === 0 ? 'tools' : 'valid',
     undefined, coupled, coupled, { response: (response, signal, body) => (JSON.parse(body) as { messages: Array<{ role: string }> }).messages.some((message) => message.role === 'tool')
       ? Promise.resolve(response) : held.response(response, signal, body), ready: ready.resolve, series: source === 'series' || source === 'consistency' });

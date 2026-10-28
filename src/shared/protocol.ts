@@ -129,7 +129,7 @@ import type { PublicSampleBookSourceDigest } from './public-samplebooks.js';
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 179 as const;
+export const SERVICE_PROTOCOL_VERSION = 180 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 export interface BookFindingProjection {
@@ -2592,13 +2592,13 @@ export type RunBudgetCeilingState = 'unset' | { kind: 'tokens'; maxTotalTokens: 
 
 /** ADR 0095 / #1160: a technical leaf inside the parent attempt, never another Task or Run. */
 export interface ParentAttemptSubagentDeclaration {
-  readonly profileId: 'ai7-stock-typos-leaf/1';
+  readonly profileId: 'ai7-stock-typos-leaf/1' | 'ai7-stock-typos-fanout/1';
   readonly provider: 'spawn';
   readonly transport: 'same-process';
   readonly lifetime: 'one-shot';
   readonly stage: 'units';
   readonly maxDepth: 1;
-  readonly maxActiveChildren: 1;
+  readonly maxActiveChildren: 1 | 3;
   readonly unitWidth: 1;
   readonly awaitDisposal: true;
 }
@@ -4838,7 +4838,7 @@ export interface BaselineAnalysisPlanAdaptationProjection {
 export type SafeRetryRepetition = 'byte-identical' | 'differs' | 'unrecorded';
 
 export interface BaselineAnalysisExecutionBindingProjection {
-  compositionVersion?: 2 | 3;
+  compositionVersion?: 2 | 3 | 4;
   attemptId: string;
   bindingDigest: string;
   harnessSessionId: string;
@@ -5123,7 +5123,7 @@ export interface BaselineAnalysisProjection {
     stopCondition: string;
   };
   planEnvelope: null | {
-    compositionVersion?: 2 | 3;
+    compositionVersion?: 2 | 3 | 4;
     digest: string;
     dispatchAllowed: boolean;
     providerStatus: 'remote-denied-local-deterministic' | 'remote-denied-no-route' | 'remote-eligible-developer-live' | 'remote-eligible-ordinary-production';

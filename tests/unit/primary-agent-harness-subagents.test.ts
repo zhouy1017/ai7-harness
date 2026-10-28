@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { GenerateOptions, LlmAdapter, StreamChunk } from '@deepseek-ai/dsh-llm';
 import { describe, expect, it } from 'vitest';
-import { prepareExecution, STOCK_TYPOS_LEAF, type HarnessRequestIdentity } from '../../src/service/harness/primary-agent-harness.js';
+import { describeComposition, prepareExecution, STOCK_TYPOS_FANOUT, STOCK_TYPOS_LEAF, type HarnessRequestIdentity } from '../../src/service/harness/primary-agent-harness.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from '../../src/service/provider/egress-gate.js';
 import { installNodeNetworkDenial } from '../../src/shared/network-denial.js';
 
@@ -78,5 +78,18 @@ describe('parent-attempt native unit leaves', () => {
       expect(identities).toHaveLength(2);
       expect(identities[0]!.sessionId).not.toBe(identities[1]!.sessionId);
     } finally { await harness.finish(); }
+  });
+
+  it('keeps v3 frozen to its one-child leaf and names the fan-out declaration only under v4', () => {
+    const describe = (version: 3 | 4, subagents?: typeof STOCK_TYPOS_LEAF) =>
+      describeComposition(LOCAL_DETERMINISTIC_ROUTE, LOCAL_DETERMINISTIC_MODEL, digest, { version, ...(subagents === undefined ? {} : { subagents }) });
+    const v3 = describe(3, STOCK_TYPOS_LEAF);
+    const v4 = describe(4, STOCK_TYPOS_FANOUT);
+    expect(v3.subagents).toMatchObject({ profileId: 'ai7-stock-typos-leaf/1', maxActiveChildren: 1, unitWidth: 1 });
+    expect(v4.subagents).toMatchObject({ profileId: 'ai7-stock-typos-fanout/1', maxActiveChildren: 3, unitWidth: 1, maxDepth: 1 });
+    expect(v4.digest).not.toBe(v3.digest);
+    expect(() => describe(3, STOCK_TYPOS_FANOUT)).toThrow('HARNESS_SUBAGENT_DECLARATION_INVALID');
+    expect(() => describe(4, STOCK_TYPOS_LEAF)).toThrow('HARNESS_SUBAGENT_DECLARATION_INVALID');
+    expect(() => describe(4)).toThrow('HARNESS_SUBAGENT_DECLARATION_ABSENT');
   });
 });
