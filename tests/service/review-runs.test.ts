@@ -46,6 +46,7 @@ import {
   SELECTION_UNAVAILABLE_REASON,
 } from '../../src/service/review/review-scope.js';
 import { selectionExcludedLine, selectionOutsideLine, UNREAD_WALK_CUT_NOTE } from '../../src/service/review/review-runs.js';
+import { oneActionStart } from '../../src/renderer/one-action-start.js';
 import { CARRIED_GAP_REASON } from '../../src/service/analysis/reuse-plan.js';
 import { ANALYSIS_LEDGER_TRIGGER_SQL } from '../../src/service/task-authorization.js';
 import {
@@ -683,6 +684,26 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect((await session.store.quickStartReviewRun({ bookId: book.bookId, reviewRunId: other.reviewRunId,
         planEnvelopeDigest: otherPlan.edit.planEnvelopeDigest!, ruleVersionId: rule.ruleVersionId }, runtime)).outcome).toBe('fell-back');
       expect(session.store.inspectReviewWorkspace(book.bookId, other.reviewRunId).run!.authorization).toBeNull();
+    });
+  });
+
+  it('starts a ready Review Run plan in one action, and previews a plan whose boundary moved before dispatch (ADR 0096 §3)', async () => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
+      const run = prepare(session, book, [TYPOS], WHOLE);
+      const plan = session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: run.reviewRunId });
+      const decision = oneActionStart(plan);
+      expect(decision).toEqual({ kind: 'authorize', planDigests: approvals(run) });
+      session.store.authorizeReviewRun(book.bookId, run.reviewRunId, decision.kind === 'authorize' ? decision.planDigests : []);
+      expect(workspace(session, book, run.reviewRunId).run!.authorization).not.toBeNull();
+      // The plan stays one disclosure away: the drawer reads the started Run's plan, which offers no second start.
+      expect(oneActionStart(session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: run.reviewRunId }))).toEqual({ kind: 'preview' });
+
+      const moved = prepare(session, book, [STYLE], WHOLE);
+      reenrollCredential();
+      const movedPlan = session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: moved.reviewRunId });
+      expect(movedPlan.start.readiness).toBe('changed');
+      expect(oneActionStart(movedPlan)).toEqual({ kind: 'preview' });
+      expect(workspace(session, book, moved.reviewRunId).run!.authorization).toBeNull();
     });
   });
 

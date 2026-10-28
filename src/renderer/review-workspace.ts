@@ -63,6 +63,7 @@ import {
 } from '../shared/protocol.js';
 import { reportExportLabel } from '../shared/report-wording.js';
 import { applyOnce } from './manuscript-apply.js';
+import { oneActionStart } from './one-action-start.js';
 import { mountHouseWordList } from './house-word-list.js';
 import { parseBookTerms } from '../shared/protocol/deterministic.js';
 import { openProcedureCapture } from './procedure-capture.js';
@@ -248,7 +249,7 @@ export interface ReviewWorkspaceSurface {
 type ReviewApi = Partial<Pick<RendererApi, 'inspectBookSeries' | 'inspectHouseWordList' | 'saveHouseWordList'>> & Pick<
   RendererApi,
   'inspectReviewWorkspace' | 'prepareReviewRun' | 'continueReviewRun' | 'cancelReviewRun' | 'recordReviewFindingDisposition' | 'recordLearningReasonAsk' |
-  'inspectTaskPlan' | 'getTaskPlanPage' | 'quickStartReviewRun' | 'searchReferableMaterials' |
+  'inspectTaskPlan' | 'getTaskPlanPage' | 'quickStartReviewRun' | 'authorizeReviewRun' | 'searchReferableMaterials' |
   'generateReviewReport' | 'cancelServiceJob' | 'applyChangeSuggestion' | 'applyChangeSuggestionBatch' | 'getManuscriptApplyOutcome' | 'inspectApplyReceipt' |
   'updateEditorialMark' | 'getEditorialMarkCard' |
   'reviewManuscriptExport' | 'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport' |
@@ -2570,13 +2571,14 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     progress.setAttribute('aria-live', 'polite');
     const quickReason = el('p', 'field-note review-quick-start-reason', REVIEW_QUICK_START_REASON);
     quickReason.id = uid('quick-start-reason');
-    const prepare = actionButton('prepare', 'primary', () => void prepareRun(state));
-    const quick = actionButton('quick-start', 'secondary', () => void prepareRun(state, true));
+    const start = actionButton('start', 'primary', () => void prepareRun(state, 'start'));
+    const prepare = actionButton('prepare', 'secondary', () => void prepareRun(state));
+    const quick = actionButton('quick-start', 'secondary', () => void prepareRun(state, 'quick'));
     quick.setAttribute('aria-describedby', quickReason.id);
     const cancelPreparation = actionButton('cancel-preparation', 'quiet', () => void cancelJob(state, cancelPreparation));
     const close = actionButton('close-sheet', 'quiet', () => sheet.close());
     const actions = el('div', 'button-row review-sheet-actions');
-    actions.append(prepare, quick, cancelPreparation, close);
+    actions.append(start, prepare, quick, cancelPreparation, close);
     form.append(categories, scopes, materialField, consequences, problem, progress, actions, quickReason);
     form.addEventListener('submit', (event) => event.preventDefault());
 
@@ -2642,6 +2644,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       prepare.disabled = preparing || loading || (state.materialIds.size > 0 && !acceptsMaterials);
       if (local && (invalidTerms || (state.localOptions.punctuation === 'off' && state.localOptions.numerals === 'off' && !state.localOptions.tables?.characters && !state.localOptions.tables?.variantWords && state.localOptions.tables?.bookTerms.length === 0 && state.localOptions.tables?.houseWordList === null) || (state.localOptions.numerals !== 'off' && !state.localOptions.numeralsConfirmed))) prepare.disabled = true;
       quick.disabled = prepare.disabled || state.categories.size === 0 || state.scope === null;
+      start.disabled = quick.disabled;
       close.disabled = preparing;
       cancelPreparation.hidden = !preparing;
       cancelPreparation.disabled = !preparing;
@@ -2668,7 +2671,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     };
   }
 
-  async function prepareRun(state: SheetState, quick = false): Promise<void> {
+  async function prepareRun(state: SheetState, mode: 'preview' | 'quick' | 'start' = 'preview'): Promise<void> {
     if (destroyed || state.job !== null || projection === null) return;
     // The version on show is the version pinned, and never while a choice is still loading (S31 review P2-1; REUSE-054).
     const resolved = state.procedure?.resolved ?? null;
@@ -2726,7 +2729,21 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         throw new Error(REVIEW_STATUS_LINES.preparationFailed);
       }
       let quickNote: string | null = null;
-      if (quick) {
+      if (mode === 'start') {
+        // 开始审阅 (ADR 0096 §3): the one explicit action records the Run Authorization for the plan exactly as its bar shows
+        // it; a plan that is editable, moved or needs a decision opens first, and a refused start says why there.
+        const decision = oneActionStart(await api.inspectTaskPlan({ kind: 'review-run', ref: result.run.reviewRunId }));
+        if (decision.kind === 'authorize') {
+          try {
+            result = await api.authorizeReviewRun({ reviewRunId: result.run.reviewRunId, planDigests: decision.planDigests });
+            quickNote = REVIEW_STATUS_LINES.started;
+          } catch (error) {
+            quickNote = options.errorMessage(error, REVIEW_STATUS_LINES.startFailed);
+          }
+        } else {
+          quickNote = REVIEW_STATUS_LINES.startNeedsPlan;
+        }
+      } else if (mode === 'quick') {
         const plan = await api.inspectTaskPlan({ kind: 'review-run', ref: result.run.reviewRunId });
         const rule = plan.defaultRule.current;
         const digest = plan.edit.planEnvelopeDigest;
@@ -2754,7 +2771,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       if (host.isConnected) show(result);
       options.setStatus(quickNote ?? REVIEW_STATUS_LINES.prepared, 'success');
       // S72 D4: 先看计划 opens the plan the preparation froze in the Task Drawer, which takes focus; closing
-      // it brings focus back to this Run's 查看计划.
+      // it brings focus back to this Run's 查看计划. After 开始审阅 the drawer shows the started Run, its plan one step away.
       options.openPlan(result.run.reviewRunId);
     } catch (error) {
       if (destroyed) return;

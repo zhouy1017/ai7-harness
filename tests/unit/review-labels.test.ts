@@ -106,6 +106,7 @@ describe('the words of the 审阅 destination', () => {
       'new-local-check': '本地文字检查',
       'rereview-changed': '只审改动过的章',
       'open-run': '查看这次审阅',
+      start: '开始审阅',
       prepare: '先看计划',
       'quick-start': '快速开始',
       'cancel-preparation': '取消准备',
