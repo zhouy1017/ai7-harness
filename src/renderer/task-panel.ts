@@ -546,6 +546,8 @@ export interface ComposerRange {
   readonly journalSequence: number;
   readonly state: TaskIntentDraftRangeProjection['state'];
   readonly stateLabel: string | null;
+  /** How many contiguous paragraphs a kept range spans (Issue #1176); a new range reads it from `span`. */
+  readonly paragraphs?: number;
 }
 
 /** What a new composer opens on (TASK-001, 002): its Book, the manuscript as it stands, and the selection, if any. */
@@ -629,6 +631,7 @@ function keptRanges(draft: TaskIntentDraftProjection): ComposerRange[] {
   return draft.version.ranges.map((range) => ({
     key: range.rangeId, rangeId: range.rangeId, span: null, blockId: range.blockId, text: range.text, position: range.position,
     revisionLabel: range.revisionLabel, journalSequence: range.journalSequence, state: range.state, stateLabel: range.stateLabel,
+    paragraphs: range.span?.length ?? 1,
   }));
 }
 
@@ -763,7 +766,7 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
       item.dataset['taskComposerRange'] = range.key;
       item.dataset['rangeState'] = range.state;
       const words = el('blockquote', 'editorial-mark-quote task-composer-range-text', range.text);
-      const where = el('small', 'field-note', taskComposerRangeLine(range.position, [...range.text].length, range.revisionLabel));
+      const where = el('small', 'field-note', taskComposerRangeLine(range.position, [...range.text].length, range.revisionLabel, range.span?.span?.length ?? range.paragraphs ?? 1));
       item.append(words, where);
       if (range.stateLabel !== null) {
         const label = el('span', `status-pill review-pill task-composer-range-state task-composer-range-${range.state}`, range.stateLabel);
