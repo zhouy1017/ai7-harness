@@ -75,7 +75,7 @@ describe('imported Skill store boundary', () => {
     const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
     const planted = new DatabaseSync(path);
     try {
-      expect(Number(planted.prepare('PRAGMA user_version').get()?.user_version)).toBe(98);
+      expect(Number(planted.prepare('PRAGMA user_version').get()?.user_version)).toBe(99);
       for (const trigger of [...Object.keys(IMPORTED_SKILL_UPDATE_TRIGGER_SQL), ...Object.keys(IMPORTED_SKILL_TRIGGER_SQL)]) planted.exec(`DROP TRIGGER ${trigger}`);
       for (const table of [...Object.keys(IMPORTED_SKILL_UPDATE_SCHEMA_SQL), ...Object.keys(IMPORTED_SKILL_SCHEMA_SQL)].reverse()) planted.exec(`DROP TABLE ${table}`);
     } finally { planted.close(); }

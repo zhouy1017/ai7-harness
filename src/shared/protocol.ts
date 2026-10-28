@@ -113,7 +113,7 @@ import type {
   DatabaseImportPreviewProjection,
   DatabaseReplacementsProjection,
 } from './protocol/data-storage.js';
-import type { ProcedureDefinitionPin, PreinstalledProcedureProjection } from './protocol/procedures.js';
+import type { CompositeReviewRunRequest, ProcedureDefinitionPin, PreinstalledProcedureProjection } from './protocol/procedures.js';
 import type {
   ChangeEditorialLearningInput,
   CreateEditorialMemoryInput,
@@ -129,7 +129,7 @@ import type { PublicSampleBookSourceDigest } from './public-samplebooks.js';
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 178 as const;
+export const SERVICE_PROTOCOL_VERSION = 179 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 export interface BookFindingProjection {
@@ -7525,7 +7525,7 @@ export interface FrozenSeriesScope {
   readonly exclusions: ReadonlyArray<{ readonly exclusionId: string; readonly revisionId: string; readonly version: number }>;
 }
 
-export interface PrepareReviewRunInput {
+export interface PrepareReviewRunInput extends CompositeReviewRunRequest {
   decisionId?: string;
   localCheck?: import('./protocol/procedures.js').LocalCheckOptions;
   seriesId?: string | null;
@@ -8721,7 +8721,7 @@ export interface ProcedureRecommendationCandidate {
   readonly version: number;
   readonly documentSha256: string;
   readonly purpose: string;
-  readonly kind: '可复用工序';
+  readonly kind: '可复用工序' | '预装工序' | '本社工序';
   readonly fit: 'all' | 'partial';
   readonly rationale: readonly string[];
   readonly requiredInputs: readonly string[];

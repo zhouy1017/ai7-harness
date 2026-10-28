@@ -1,10 +1,12 @@
-import { PROCEDURE_STAGE_LABELS, procedureStageUsesModel } from '../../shared/protocol/procedures.js';
+import { COMPOSITE_PROCEDURE_EXECUTOR, PROCEDURE_STAGE_LABELS, procedureStageUsesModel } from '../../shared/protocol/procedures.js';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import type { EditableProcedureProjection, ProcedureDefinitionDocument, ProcedureDefinitionPin, ProcedureLibraryProjection, SaveProcedureDefinitionInput } from '../../shared/protocol/procedures.js';
 import { canonicalJson, canonicalRecord, requireAnalysis } from '../analysis/canonical.js';
 import { resolveProcedureDefinition, readProcedurePlanPin, readProcedurePlanDocument } from './definition-store.js';
-import { allPreinstalledProcedureDefinitions, BASELINE_PROCEDURE_ID, FACTUAL_CLAIM_PROCEDURE_ID } from './preinstalled.js';
+import { allPreinstalledProcedureDefinitions, FULL_REVIEW_PROCEDURE_ID } from './preinstalled.js';
+import { compositeMembers, preinstalledExecutorKind } from './composite.js';
+export { resolveProcedureForKind, readProcedurePlanView } from './composite.js';
 
 export const PROCEDURE_INSTRUCTION_LIMIT = 1200;
 const segmenter = new Intl.Segmenter('zh', { granularity: 'grapheme' });
@@ -20,10 +22,7 @@ export function resolveProcedurePin(db: DatabaseSync, pin: ProcedureDefinitionPi
 export function procedureExecutorKind(db: DatabaseSync, pin: ProcedureDefinitionPin): string {
   const origin = db.prepare('SELECT executor_kind FROM procedure_version_origins WHERE version_id = ?').get(procedureVersionId(pin));
   if (origin !== undefined) return String(origin.executor_kind);
-  if (pin.procedureId === BASELINE_PROCEDURE_ID) return 'baseline-manuscript-analysis';
-  if (pin.procedureId === FACTUAL_CLAIM_PROCEDURE_ID || pin.procedureId === 'ai7-procedure/review-factual-review') return 'factual-review';
-  return pin.procedureId.startsWith('ai7-procedure/review-') ? `editorial-review/${pin.procedureId.slice('ai7-procedure/review-'.length)}`
-    : pin.procedureId.slice('ai7-procedure/'.length);
+  return pin.procedureId === FULL_REVIEW_PROCEDURE_ID ? COMPOSITE_PROCEDURE_EXECUTOR : preinstalledExecutorKind(pin.procedureId);
 }
 
 export function procedureStopped(db: DatabaseSync, pin: ProcedureDefinitionPin): boolean {
@@ -32,7 +31,8 @@ export function procedureStopped(db: DatabaseSync, pin: ProcedureDefinitionPin):
 
 /** Executor-owned inputs/templates/tools are fixed; editable order must respect their data dependencies. */
 export function validateProcedureEdit(base: ProcedureDefinitionDocument, input: SaveProcedureDefinitionInput): void {
-  if (base.stages.some((stage) => stage.stageType === 'deterministic-check')) {
+  // A composite's deterministic member keeps its fixed rules stage by stage below; its model members read the text.
+  if (base.members === undefined && base.stages.some((stage) => stage.stageType === 'deterministic-check')) {
     requireAnalysis(input.editorInstruction === '' && input.stages.every((stage) => stage.exemptionRules.length === 0 && stage.budgetShare === 0),
       'PROCEDURE_LOCAL_TEXT_UNSUPPORTED', '确定性检查不发送给模型，不能解释文字说明或豁免规则；请在运行时选择明确的检查选项，模型预算保持为零。');
   }
@@ -100,7 +100,7 @@ export function inspectProcedureDefinition(db: DatabaseSync, id: string): Editab
   return { ...pin, document, executorKind: procedureExecutorKind(db, pin), preInstalled: identity.pre_installed === 1,
     stopped: procedureStopped(db, pin), sourceRunId: origin?.source_run_id == null ? null : String(origin.source_run_id), versions,
     documents: versions.map((version) => resolveProcedurePin(db, version)),
-    uses: Number(db.prepare(`SELECT (SELECT count(*) FROM procedure_plan_pins p JOIN analysis_run_authorizations a ON a.plan_envelope_sha256 = p.plan_envelope_sha256
+    uses: document.members !== undefined ? compositeUses(db, id) : Number(db.prepare(`SELECT (SELECT count(*) FROM procedure_plan_pins p JOIN analysis_run_authorizations a ON a.plan_envelope_sha256 = p.plan_envelope_sha256
       WHERE json_extract(p.canonical_json, '$.procedure.procedureId') = ?) + (SELECT count(*) FROM review_runs r JOIN review_run_authorizations a ON a.review_run_id = r.review_run_id
       WHERE json_extract(r.canonical_json, '$.localPlan.procedure.procedureId') = ?) total`).get(id, id)!.total) };
 }
@@ -112,7 +112,8 @@ export function completedProcedureRuns(db: DatabaseSync, runId?: string): Proced
     WHERE (? IS NULL OR r.run_record_id = ?) AND (SELECT state FROM analysis_run_states s WHERE s.run_record_id = r.run_record_id ORDER BY sequence DESC LIMIT 1)
       IN ('completed','completed-with-gaps') ORDER BY r.rowid DESC LIMIT 50`).all(runId ?? null, runId ?? null).flatMap((row) => {
     const pin = readProcedurePlanPin(db, String(row.plan_envelope_sha256));
-    if (pin === null) return [];
+    // A composite's member Run is one part of its Review Run, never a whole run of the composite to capture.
+    if (pin === null || readProcedurePlanDocument(db, String(row.plan_envelope_sha256))!.members !== undefined) return [];
     return [{ runId: String(row.run_record_id), bookId: String(row.book_id), bookTitle: String(row.title),
       title: readProcedurePlanDocument(db, String(row.plan_envelope_sha256))!.title, procedure: pin,
       document: readProcedurePlanDocument(db, String(row.plan_envelope_sha256))!, executorKind: String(row.kind) }];
@@ -134,11 +135,20 @@ export function readProcedureLibrary(db: DatabaseSync): ProcedureLibraryProjecti
     .map((row) => inspectProcedureDefinition(db, String(row.procedure_id))), completedRuns: completedProcedureRuns(db) };
 }
 
+/** A composite is chosen for its own 审阅 and for each model member's kind; the deterministic member always runs its own version. */
 export function selectProcedureForBook(db: DatabaseSync, bookId: string, pin: ProcedureDefinitionPin): void {
-  resolveProcedurePin(db, pin);
+  const document = resolveProcedurePin(db, pin);
   requireAnalysis(!procedureStopped(db, pin), 'PROCEDURE_STOPPED', '这个工序版本已停用，请选择另一个版本。');
-  db.prepare(`INSERT INTO procedure_run_choices VALUES (?,?,?) ON CONFLICT(book_id, executor_kind) DO UPDATE SET version_id = excluded.version_id`)
-    .run(bookId, procedureExecutorKind(db, pin), procedureVersionId(pin));
+  const kinds = document.members === undefined ? [procedureExecutorKind(db, pin)]
+    : [COMPOSITE_PROCEDURE_EXECUTOR, ...compositeMembers(document).flatMap((member) => member.executorKind === 'local-text-check' ? [] : [member.executorKind])];
+  for (const kind of kinds) db.prepare(`INSERT INTO procedure_run_choices VALUES (?,?,?) ON CONFLICT(book_id, executor_kind) DO UPDATE SET version_id = excluded.version_id`)
+    .run(bookId, kind, procedureVersionId(pin));
+}
+
+/** A composite is used once per approved Review Run that ran it, whatever its members' Tasks pin. */
+export function compositeUses(db: DatabaseSync, procedureId: string): number {
+  return Number(db.prepare(`SELECT count(*) total FROM review_runs r JOIN review_run_authorizations a ON a.review_run_id = r.review_run_id
+    WHERE json_extract(r.canonical_json, '$.composite.procedure.procedureId') = ?`).get(procedureId)!.total);
 }
 
 export function selectedProcedureForBook(db: DatabaseSync, bookId: string, kind: string): ProcedureDefinitionPin | null {

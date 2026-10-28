@@ -1,8 +1,8 @@
-import { currentPreinstalledVersion, selectedProcedureForBook, resolveProcedurePin, procedureStopped, validateProcedureEdit } from '../procedures/editable.js';
+import { currentPreinstalledVersion, selectedProcedureForBook, resolveProcedureForKind, readProcedurePlanView, procedureStopped, validateProcedureEdit } from '../procedures/editable.js';
 import { withProcedureDefinition, procedureInstruction } from '../procedures/execution.js';
 import { MODEL_REQUEST_ADMISSION_SCHEMA_VERSION } from '../task-authorization.js';
 import { procedureIdForKind, FACTUAL_CLAIM_PROCEDURE_ID } from '../procedures/preinstalled.js';
-import { recordProcedurePlanPin, readProcedurePlanPin, readProcedurePlanDocument, resolveProcedureDefinition } from '../procedures/definition-store.js';
+import { recordProcedurePlanPin, readProcedurePlanPin, resolveProcedureDefinition } from '../procedures/definition-store.js';
 import { withReviewLocalTools, pinnedReviewDefinition, reviewCategoryKindDefinition } from '../review/review-category-kind.js';
 import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryEntry, reviewCategoryContractInput } from '../review/category-configuration.js';
 import type { CompositionOptions } from '../harness/primary-agent-harness.js';
@@ -1754,9 +1754,9 @@ export class BaselineAnalysisStore {
       WHERE p.component = 'plan-envelope' AND t.kind = ? AND json_extract(p.canonical_json, '$.promptContractDigest') = ?
       AND json_extract(p.canonical_json, '$.basePromptContractDigest') IS NOT NULL LIMIT 1`).get(this.#definition.kind, promptContractDigest);
     if (row !== undefined) {
-      const plan = parseCanonicalJson(asString(row.canonical_json)) as { basePromptContractDigest: string; compositionOptions: { procedure: ProcedureDefinitionPin } };
-      const pin = plan.compositionOptions.procedure;
-      return withProcedureDefinition(this.#baseDefinitionForDigest(plan.basePromptContractDigest), readProcedurePlanDocument(this.#db, String(row.sha256))!, pin);
+      const plan = parseCanonicalJson(asString(row.canonical_json)) as { basePromptContractDigest: string };
+      const member = readProcedurePlanView(this.#db, String(row.sha256), this.#definition.kind)!;
+      return withProcedureDefinition(this.#baseDefinitionForDigest(plan.basePromptContractDigest), member.document, member.pin);
     }
     return this.#baseDefinitionForDigest(promptContractDigest);
   }
@@ -1804,7 +1804,7 @@ export class BaselineAnalysisStore {
   procedureForRun(runRecordId: string): import('../../shared/protocol/procedures.js').ProcedureDefinitionDocument | null {
     const digest = this.#db.prepare(`SELECT a.plan_envelope_sha256 FROM analysis_run_records r
       JOIN analysis_run_authorizations a ON a.authorization_id = r.authorization_id WHERE r.run_record_id = ?`).get(runRecordId);
-    return digest === undefined ? null : readProcedurePlanDocument(this.#db, String(digest.plan_envelope_sha256));
+    return digest === undefined ? null : readProcedurePlanView(this.#db, String(digest.plan_envelope_sha256), this.#definition.kind)?.document ?? null;
   }
 
   factualRunAssurance(runRecordId: string): import('../../shared/protocol.js').FactualRunAssuranceProjection | null {
@@ -1849,7 +1849,7 @@ export class BaselineAnalysisStore {
   #newCompositionOptions(bookId: string, leafMode = false, definition = this.#definition, selected?: ProcedureDefinitionPin): CompositionOptions {
     const id = definition.factualClaims === undefined ? procedureIdForKind(this.#definition.kind) : FACTUAL_CLAIM_PROCEDURE_ID;
     const resolved = selected === undefined ? id === null ? null : resolveProcedureDefinition(this.#db, id, this.#definition.contractVersion === 'ai7.editorial-review/1' ? 1 : currentPreinstalledVersion(id))
-      : { document: resolveProcedurePin(this.#db, selected), pin: selected };
+      : (({ document, executor }) => ({ document, pin: executor }))(resolveProcedureForKind(this.#db, selected, this.#definition.kind));
     const procedureOptions = resolved === null ? {} : { procedure: resolved.pin, stages: resolved.document.stages.map((stage, index) =>
       ({ ordinal: index + 1, stageType: stage.stageType, digest: sha256Hex(canonicalJson(stage)) })) };
     const stock = reviewCategoryEntry('typos-and-usage')!;
@@ -1857,7 +1857,7 @@ export class BaselineAnalysisStore {
     const localLeaf = this.#route?.fixtureIdentity === STOCK_TYPOS_LEAF_FIXTURE;
     const productionLeaf = leafMode && this.#launch.operationalScope === 'ordinary-production' &&
       this.#launch.policy?.providerProcessing.subAgents !== undefined && this.#definition.promptContractDigest === expected.promptContractDigest;
-    if (localLeaf || productionLeaf) {
+    if ((localLeaf || productionLeaf) && (selected === undefined || selected.procedureId === resolved?.pin.procedureId)) {
       requireAnalysis(leafMode && this.#definition.promptContractDigest === expected.promptContractDigest &&
         resolved?.pin.procedureId === 'ai7-procedure/review-typos-and-usage' && resolved.pin.version === 2,
       'ANALYSIS_CHILD_PROFILE_REFUSED', '单元子代理只适用于固定的标准错字用词审阅。');
@@ -3163,7 +3163,7 @@ export class BaselineAnalysisStore {
    */
   #selectedDefinition(base: AnalysisKindDefinition, bookId: string): AnalysisKindDefinition {
     const pin = selectedProcedureForBook(this.#db, bookId, base.kind);
-    return pin === null ? base : withProcedureDefinition(base, resolveProcedurePin(this.#db, pin), pin);
+    return pin === null ? base : ((member) => withProcedureDefinition(base, member.document, member.pin))(resolveProcedureForKind(this.#db, pin, base.kind));
   }
 
   #derivePlan(
@@ -4495,7 +4495,7 @@ export class BaselineAnalysisStore {
     // The factual Task's level decides its contract and its research declaration (Issue #901); every other kind's is its own.
     const baseDefinition = this.#planDefinition(edits, intent.mode);
     const selected = intent.record.procedure as ProcedureDefinitionPin | undefined;
-    const document = selected === undefined ? null : resolveProcedurePin(this.#db, selected);
+    const document = selected === undefined ? null : resolveProcedureForKind(this.#db, selected, baseDefinition.kind).document;
     if (selected !== undefined && document !== null) {
       const currentId = baseDefinition.factualClaims === undefined ? procedureIdForKind(baseDefinition.kind) : FACTUAL_CLAIM_PROCEDURE_ID;
       if (currentId !== null) validateProcedureEdit(resolveProcedureDefinition(this.#db, currentId, currentPreinstalledVersion(currentId)).document,
@@ -4757,7 +4757,7 @@ export class BaselineAnalysisStore {
       `INSERT INTO analysis_plan_versions(plan_version_id, task_intent_id, ordinal, plan_revision_id, plan_envelope_sha256, created_at, canonical_json, sha256)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(planVersionId, taskIntentId, ordinal, input.planRevisionId, envelope.digest, instant, version.json, version.digest);
-    if (composition.procedure !== undefined) recordProcedurePlanPin(this.#db, taskIntentId, envelope.digest, composition.procedure.procedureId, composition.procedure.version);
+    if (composition.procedure !== undefined) recordProcedurePlanPin(this.#db, taskIntentId, envelope.digest, (selected ?? composition.procedure).procedureId, (selected ?? composition.procedure).version);
     return { planVersionId, planEnvelopeDigest: envelope.digest };
   }
 

@@ -326,7 +326,7 @@ describe('baseline and custom analysis on the same launch', () => {
 describe('schema revision 82', () => {
   it.each([TASK_INTENT_DRAFT_SCHEMA_VERSION, IMPORTED_SKILL_SCHEMA_VERSION])('rebuilds revision %i Result Set relations byte for byte, adds dimensions empty, and refuses a terminal store without them', async (predecessor) => {
     // Synchronized with #89: imported-Skill update ledgers follow revision 82 without rebuilding its relations.
-    expect(LATEST_SCHEMA_VERSION).toBe(98);
+    expect(LATEST_SCHEMA_VERSION).toBe(99);
     let bookId = '';
     await withBook(async (book) => {
       bookId = book.bookId;
@@ -359,7 +359,7 @@ describe('schema revision 82', () => {
     const migrated = new DatabaseSync(path);
     try {
       // Synchronized with #89: revision 83 adds imported-Skill update ledgers after this revision's migration.
-      expect(migrated.prepare('PRAGMA user_version').get()).toEqual({ user_version: 98 });
+      expect(migrated.prepare('PRAGMA user_version').get()).toEqual({ user_version: 99 });
       for (const table of ['analysis_result_sets', 'analysis_result_set_revisions'] as const) {
         expect((migrated.prepare(`SELECT sql FROM sqlite_schema WHERE name = '${table}'`).get() as { sql: string }).sql).toBe(ANALYSIS_RESULT_SET_SCHEMA_SQL[table]);
       }
