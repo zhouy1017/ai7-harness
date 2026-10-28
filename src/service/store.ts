@@ -235,28 +235,21 @@ import type {
   SeriesMemberProjection,
   SeriesMembersCursor,
   SeriesMembersPageProjection,
-  SeriesMembershipChangeProjection,
   SeriesMembershipChangeResultProjection,
   SeriesMembershipPreviewProjection,
   SeriesProjection,
   EditSeriesKnowledgeCandidateInput,
   PromoteSeriesKnowledgeInput,
   ProposeSeriesKnowledgeInput,
-  SeriesKnowledgeCandidateProjection,
   SeriesKnowledgeCandidatesCursor,
   SeriesKnowledgeCandidatesPageProjection,
-  SeriesKnowledgeItemProjection,
   SeriesKnowledgeItemsCursor,
   SeriesKnowledgeItemsPageProjection,
   SeriesKnowledgeRevisionsProjection,
   SeriesKnowledgeConflictsProjection,
   SeriesKnowledgePromotionProjection,
   SeriesKnowledgeProposalProjection,
-  SeriesKnowledgeProvenanceProjection,
   SeriesKnowledgeReviewProjection,
-  SeriesKnowledgeRevisionProjection,
-  SeriesKnowledgeSpanInput,
-  SeriesKnowledgeTarget,
   DataVersionProjection,
   DatabaseExportActivityProjection,
   DatabaseExportContentsProjection,
@@ -891,13 +884,7 @@ import {
   SeriesError,
   SeriesLedger,
   initializeSeriesSchema,
-  seriesMemberAbsent,
-  seriesMemberAlready,
-  seriesMembershipImpact,
-  seriesPreviewDigest,
   weighedPage,
-  type StoredMembershipChange,
-  type StoredSeries,
 } from './series.js';
 import {
   CALIBRATION_MIN_ADJUSTMENTS,
@@ -907,24 +894,8 @@ import {
 } from '../shared/evaluation-calibration.js';
 import {
   MAX_FEEDBACK_HISTORY_ENTRIES,
-  MAX_SERIES_CANDIDATE_QUERY_CHARACTERS,
-  MAX_SERIES_CANDIDATES_PAGE,
-  MAX_SERIES_HISTORY_PAGE,
-  MAX_SERIES_LIST_PAGE,
   MAX_SERIES_MEMBERS_PAGE,
-  MAX_SERIES_TITLE_CHARACTERS,
-  MAX_SERIES_KNOWLEDGE_CONTENT_CHARACTERS,
-  MAX_SERIES_KNOWLEDGE_CANDIDATES_PAGE,
-  MAX_SERIES_KNOWLEDGE_CONFLICTS_SHOWN,
-  MAX_SERIES_KNOWLEDGE_ITEMS_PAGE,
-  MAX_SERIES_KNOWLEDGE_QUERY_CHARACTERS,
-  MAX_SERIES_KNOWLEDGE_REVISIONS_PAGE,
-  MAX_SERIES_KNOWLEDGE_SUBJECT_CHARACTERS,
   PUBLICATION_ACTUALS_RECORDED_STATE,
-  SERIES_KNOWLEDGE_CLASS_LABELS,
-  SERIES_KNOWLEDGE_CONFLICT_LABEL,
-  SERIES_KNOWLEDGE_REUSE_LABELS,
-  SERIES_KNOWLEDGE_REUSE_SCOPES,
 } from '../shared/protocol.js';
 import {
   type ClassifiedSchemaRevision,
@@ -959,46 +930,21 @@ import {
   SeriesExclusionError,
   SeriesExclusionLedger,
   initializeSeriesRetrievalExclusionSchema,
-  isSeriesExclusionAction,
-  isSeriesExclusionTargetKind,
-  coveringExclusions,
-  seriesExclusionCovers,
-  seriesExclusionImpact,
-  seriesExclusionPreviewDigest,
-  seriesExclusionReason,
-  seriesExclusionTarget,
-  knowledgeMaterial,
   type SeriesKnowledgeMaterial,
-  type StoredExclusion,
-  type StoredExclusionRevision,
 } from './series-exclusions.js';
 import {
-  MAX_SERIES_EXCLUSIONS,
-  MAX_SERIES_EXCLUSION_HISTORY_PAGE,
-  MAX_SERIES_EXCLUSION_REASON_CHARACTERS,
-  MAX_SERIES_EXCLUSION_TARGETS_PAGE,
-  SERIES_EXCLUSION_ACTION_LABELS,
-  SERIES_KNOWLEDGE_CLASSES,
   type InspectSeriesExclusionHistoryInput,
   type InspectSeriesExclusionTargetsInput,
   type PreviewSeriesExclusionInput,
   type RecordSeriesExclusionInput,
-  type SeriesExclusionHistoryCursor,
   type SeriesExclusionHistoryPageProjection,
   type SeriesExclusionPreviewProjection,
-  type SeriesExclusionProjection,
   type SeriesExclusionResultProjection,
-  type SeriesExclusionRevisionProjection,
-  type SeriesExclusionTargetKind,
-  type SeriesExclusionTargetProjection,
   type SeriesExclusionTargetsProjection,
-  type SeriesExclusionsProjection,
   type CancelWaitingTaskInput,
   type StartTaskWhenOnlineInput,
   type StartWhenOnlineTaskKind,
 } from '../shared/protocol.js';
-/** How many items or Runs one line of an exclusion's impact preview names before it gives the count. */
-const NAMED_EXCLUSION_ENTRIES = 5;
 import { canonicalRecord, hasExactKeys, isRecord } from './analysis/canonical.js';
 import {
   DIALOGUE_BASIS_QUOTE_CHARACTERS,
@@ -1052,21 +998,6 @@ import {
   SeriesKnowledgeError,
   SeriesKnowledgeLedger,
   initializeSeriesKnowledgeSchema,
-  isSeriesKnowledgeClass,
-  isSeriesKnowledgeReuseScope,
-  SERIES_KNOWLEDGE_PAGE_BYTES,
-  knowledgeQuoteExcerpt,
-  seriesKnowledgeConflicts,
-  seriesKnowledgeContent,
-  seriesKnowledgeReviewSummary,
-  countSeriesKnowledgeConflicts,
-  seriesKnowledgeSubject,
-  type FoundConflict,
-  type ResolvedTarget,
-  type StoredCandidate,
-  type StoredItem,
-  type StoredProvenance,
-  type StoredRevision,
 } from './series-knowledge.js';
 import { MAX_EXEMPLAR_BOOKS_PAGE } from '../shared/protocol.js';
 import { EvaluationProfiles, initializeEvaluationProfileSchema } from './evaluation-profiles.js';
@@ -1239,6 +1170,7 @@ import {
   validateTaskAuthorizationSchema,
   type TaskPreparationResult,
 } from './task-authorization.js';
+import * as seriesOperations from './series.js';
 
 const TOKEN_PATTERN = UUID_PATTERN;
 const CORE_SCHEMA_VERSION = 5;
@@ -14166,7 +14098,7 @@ export class EditorialStore {
       // A Series filters by the Books it holds now (LAUD-002); it widens nothing the editor may read.
       const members = input.seriesId == null
         ? null
-        : new Set(Array.from(this.#series.members(this.#requireSeries(input.seriesId).seriesId), (entry) => entry.bookId));
+        : new Set(Array.from(this.#series.members(seriesOperations.requireStoredSeries(this.#seriesHost, input.seriesId).seriesId), (entry) => entry.bookId));
       const query = input.query == null ? '' : input.query.trim().toLocaleLowerCase('zh-CN');
       const matches = (candidate: LearningMaterialCandidate, standing: string): boolean =>
         (input.kind == null || candidate.kind === input.kind) &&
@@ -19691,223 +19623,59 @@ export class EditorialStore {
 
   // ---- 书系 › 成员与共享范围 (Issue #63, plan slice S28a; V2-UX-SER-001 to SER-012) --------------------------------------
 
-  /** 书系: one page of the house's Series, by name, with how many Books each holds now (Issue #63 review). A read. */
+  /** What the 书系 operations in series.ts reach of the store (Issue #1172): its authority, ledgers and guarded calls, read live. */
+  readonly #seriesHost: seriesOperations.SeriesStoreHost = this.#seriesHostOf();
+
+  #seriesHostOf(): seriesOperations.SeriesStoreHost {
+    const store = this;
+    return {
+      get authority() { return store.#authority; },
+      get editorialMarks() { return store.#editorialMarks; },
+      evaluationBookTitle: this.#evaluationBookTitle.bind(this),
+      learningCandidates: this.#learningCandidates.bind(this),
+      get learningEligibility() { return store.#learningEligibility; },
+      markCall: this.#markCall.bind(this),
+      get reviewRuns() { return store.#reviewRuns; },
+      get series() { return store.#series; },
+      seriesCall: this.#seriesCall.bind(this),
+      get seriesExclusions() { return store.#seriesExclusions; },
+      get seriesKnowledge() { return store.#seriesKnowledge; },
+      seriesMembersPage: this.#seriesMembersPage.bind(this),
+      seriesScopedTaskReach: this.#seriesScopedTaskReach.bind(this),
+      transaction: this.#transaction.bind(this),
+    };
+  }
+
   inspectSeriesList(after: SeriesListCursor | null = null): SeriesListProjection {
-    return this.#seriesCall(() => {
-      requireStore(after === null || (UUID_PATTERN.test(after.seriesId) && typeof after.title === 'string' && after.title.length >= 1 &&
-        after.title.length <= 2 * MAX_SERIES_TITLE_CHARACTERS), 'SERIES_CURSOR_INVALID', '书系列表位置无效。');
-      const rows = this.#series.listAfter(after, MAX_SERIES_LIST_PAGE + 1).map((entry) => ({ ...entry, memberCount: this.#series.memberCount(entry.seriesId) }));
-      const { page, more } = weighedPage(rows, MAX_SERIES_LIST_PAGE);
-      const last = page.at(-1);
-      return { series: page, nextCursor: more && last !== undefined ? { title: last.title, seriesId: last.seriesId } : null };
-    });
+    return seriesOperations.inspectSeriesList(this.#seriesHost, after);
   }
 
-  /** 新建书系: a name the house has not used, and an optional 说明. It holds no Book until one is added; the answer is it alone. */
-  createSeries(input: CreateSeriesInput): SeriesCreationProjection {
-    return this.#seriesCall(() => {
-      const created = this.#transaction(this.#authority, () => this.#series.create(input));
-      return { seriesId: created.seriesId, completionLabel: `已新建书系「${created.title}」`, series: { ...created, memberCount: 0 } };
-    });
-  }
+  createSeries(input: CreateSeriesInput): SeriesCreationProjection { return seriesOperations.createSeries(this.#seriesHost, input); }
 
-  /**
-   * One Series' 成员与共享范围 (SER-001): the first page of its members and of its membership changes, and how many Books it
-   * and the house hold. A read.
-   */
-  inspectSeries(seriesId: string): SeriesProjection {
-    return this.#seriesCall(() => this.#seriesProjection(this.#requireSeries(seriesId)));
-  }
+  inspectSeries(seriesId: string): SeriesProjection { return seriesOperations.inspectSeries(this.#seriesHost, seriesId); }
 
-  /** `更多成员…`: the next page of a Series' members, newest joined first (Issue #63 review). A read. */
   inspectSeriesMembers(seriesId: string, after: SeriesMembersCursor | null): SeriesMembersPageProjection {
-    return this.#seriesCall(() => {
-      const series = this.#requireSeries(seriesId);
-      requireStore(after === null || (UUID_PATTERN.test(after.bookId) && typeof after.joinedAt === 'string' && !Number.isNaN(Date.parse(after.joinedAt))),
-        'SERIES_CURSOR_INVALID', '书系列表位置无效。');
-      const { members, nextCursor } = this.#seriesMembersPage(series.seriesId, after);
-      return { members, nextCursor };
-    });
+    return seriesOperations.inspectSeriesMembers(this.#seriesHost, seriesId, after);
   }
 
-  /**
-   * 加入书系…'s Books (Issue #63 review): a page of every Book the Series does not hold, by title, narrowed to titles holding
-   * the editor's words when they give any — so every Book can be found and added, however many the house holds. A read.
-   */
   inspectSeriesCandidates(seriesId: string, text: string, after: SeriesCandidatesCursor | null): SeriesCandidatesProjection {
-    return this.#seriesCall(() => {
-      const series = this.#requireSeries(seriesId);
-      const words = typeof text === 'string' && text.isWellFormed() ? text.normalize('NFC').trim() : null;
-      requireStore(words !== null && [...words].length <= MAX_SERIES_CANDIDATE_QUERY_CHARACTERS && !/[\r\n]/u.test(words), 'SERIES_QUERY_INVALID',
-        `查找的书名字词最多 ${MAX_SERIES_CANDIDATE_QUERY_CHARACTERS} 个字，写在一行里。`);
-      requireStore(after === null || (UUID_PATTERN.test(after.bookId) && typeof after.title === 'string' && after.title.length >= 1 && after.title.length <= 180),
-        'SERIES_CURSOR_INVALID', '书系列表位置无效。');
-      const rows = this.#authority.prepare(
-        `SELECT b.book_id, b.title FROM books b
-         WHERE NOT EXISTS (
-             SELECT 1 FROM series_membership_changes c WHERE c.series_id = ? AND c.book_id = b.book_id AND c.kind = 'add'
-               AND c.ordinal = (SELECT max(d.ordinal) FROM series_membership_changes d WHERE d.series_id = c.series_id AND d.book_id = c.book_id))
-           AND (? = '' OR instr(lower(b.title), lower(?)) > 0)
-           AND (? IS NULL OR b.title > ? OR (b.title = ? AND b.book_id > ?))
-         ORDER BY b.title, b.book_id LIMIT ?`,
-      ).all(series.seriesId, words, words, after?.title ?? null, after?.title ?? null, after?.title ?? null, after?.bookId ?? null,
-        MAX_SERIES_CANDIDATES_PAGE + 1) as SqlRow[];
-      const { page, more } = weighedPage(rows.map((row) => ({ bookId: asString(row.book_id), title: asString(row.title) })), MAX_SERIES_CANDIDATES_PAGE);
-      const last = page.at(-1);
-      return { candidates: page, nextCursor: more && last !== undefined ? { title: last.title, bookId: last.bookId } : null };
-    });
+    return seriesOperations.inspectSeriesCandidates(this.#seriesHost, seriesId, text, after);
   }
 
-  /** `更早的记录…`: the next page of one Series' or one Book's membership change records, newest first (Issue #63 review). A read. */
   inspectSeriesHistory(filter: { readonly seriesId: string | null; readonly bookId: string | null }, after: SeriesHistoryCursor | null): SeriesHistoryPageProjection {
-    return this.#seriesCall(() => {
-      requireStore((filter.seriesId === null) !== (filter.bookId === null), 'SERIES_HISTORY_INVALID', '成员变更记录要按一个书系或一本书读取。');
-      requireStore(after === null || (typeof after.recordedAt === 'string' && !Number.isNaN(Date.parse(after.recordedAt)) && UUID_PATTERN.test(after.seriesId) &&
-        UUID_PATTERN.test(after.bookId) && Number.isSafeInteger(after.ordinal) && after.ordinal >= 1), 'SERIES_CURSOR_INVALID', '书系列表位置无效。');
-      const read = filter.seriesId !== null
-        ? this.#seriesHistoryPage({ seriesId: this.#requireSeries(filter.seriesId).seriesId }, after)
-        : this.#seriesHistoryPage({ bookId: filter.bookId! }, after);
-      return { history: read.history, nextCursor: read.nextCursor };
-    });
+    return seriesOperations.inspectSeriesHistory(this.#seriesHost, filter, after);
   }
 
-  /**
-   * The Series Membership Impact Preview (SER-003 to SER-007) for 加入书系 or 移出书系 of one exact Book and Series. A read:
-   * nothing is recorded until the editor commits the change against this preview's digest.
-   */
   previewSeriesMembershipChange(input: PreviewSeriesMembershipChangeInput): SeriesMembershipPreviewProjection {
-    return this.#seriesCall(() => this.#seriesPreview(input));
+    return seriesOperations.previewSeriesMembershipChange(this.#seriesHost, input);
   }
 
-  /**
-   * 加入书系 or 移出书系 (SER-008 to SER-010): the preview is recomputed inside the transaction, and a preview the membership
-   * or a governing record has moved past is refused rather than applied; the change record keeps what the preview showed.
-   * The answer is that record alone (Issue #63 review): the page reads the Series again, each list a page at a time.
-   */
   changeSeriesMembership(input: ChangeSeriesMembershipInput): SeriesMembershipChangeResultProjection {
-    return this.#seriesCall(() => {
-      const recorded = this.#transaction(this.#authority, () => {
-        const preview = this.#seriesPreview(input);
-        requireStore(preview.previewDigest === input.previewDigest, 'SERIES_PREVIEW_STALE',
-          '预览之后，书系成员或相关记录有了变化；请重新查看影响，再决定。');
-        const change = this.#series.record({
-          seriesId: preview.seriesId,
-          bookId: preview.bookId,
-          kind: preview.kind,
-          previewDigest: preview.previewDigest,
-          impact: preview.groups,
-          names: { book: preview.bookTitle, series: preview.seriesTitle },
-        });
-        return { change, preview };
-      });
-      const { change, preview } = recorded;
-      return {
-        changeId: change.changeId,
-        completionLabel: `${change.kind === 'add' ? '已加入' : '已移出'}书系「${preview.seriesTitle}」：《${preview.bookTitle}》`,
-        change: this.#seriesChange(change, preview.seriesTitle, preview.bookTitle),
-      };
-    });
+    return seriesOperations.changeSeriesMembership(this.#seriesHost, input);
   }
 
-  /**
-   * A Book's side of 书系 (SER-009): the Series it is in now — at most `MAX_BOOK_SERIES_MEMBERSHIPS`, with how many in all —
-   * and the first page of its membership changes, newest first. A read.
-   */
   inspectBookSeries(bookId: string, after: SeriesListCursor | null = null): BookSeriesProjection {
-    return this.#seriesCall(() => {
-      this.#evaluationBookTitle(bookId);
-      requireStore(after === null || (typeof after.title === 'string' && after.title.isWellFormed() &&
-        after.title.length >= 1 && after.title.length <= 2 * MAX_SERIES_TITLE_CHARACTERS &&
-        typeof after.seriesId === 'string' && UUID_PATTERN.test(after.seriesId)), 'SERIES_CURSOR_INVALID', '书系列表位置无效。');
-      const memberships = this.#series.seriesOf(bookId, after);
-      const history = this.#seriesHistoryPage({ bookId }, null);
-      return {
-        bookId,
-        memberships: memberships.memberships,
-        membershipCount: memberships.count,
-        membershipsNext: memberships.nextCursor,
-        history: history.history,
-        historyCount: history.count,
-        historyNext: history.nextCursor,
-      };
-    });
-  }
-
-  #requireSeries(seriesId: string): StoredSeries {
-    requireStore(typeof seriesId === 'string' && UUID_PATTERN.test(seriesId), 'SERIES_INVALID', '书系标识无效。');
-    const found = this.#series.find(seriesId);
-    requireStore(found !== null, 'SERIES_NOT_FOUND', '书系不存在。');
-    return found;
-  }
-
-  #seriesPreview(input: PreviewSeriesMembershipChangeInput): SeriesMembershipPreviewProjection {
-    const series = this.#requireSeries(input.seriesId);
-    const bookTitle = this.#evaluationBookTitle(input.bookId);
-    requireStore(input.kind === 'add' || input.kind === 'remove', 'SERIES_CHANGE_INVALID', '书系成员变更只有加入书系和移出书系。');
-    const latest = this.#series.latest(series.seriesId, input.bookId);
-    const member = latest?.kind === 'add';
-    requireStore(input.kind !== 'add' || !member, 'SERIES_MEMBER_ALREADY', seriesMemberAlready(bookTitle, series.title));
-    requireStore(input.kind !== 'remove' || member, 'SERIES_MEMBER_ABSENT', seriesMemberAbsent(bookTitle, series.title));
-    // Counts alone cannot detect a new eligibility decision (including a change back to the old choice).
-    // Hash each exact material and its immutable decision ordinal without retaining another collection.
-    const governing = createHash('sha256');
-    let learningMaterials = 0;
-    let learningDecided = 0;
-    for (const material of this.#learningEligibility.projectEntries(input.bookId, this.#learningCandidates(input.bookId, false))) {
-      learningMaterials += 1;
-      if (material.state === 'decided') learningDecided += 1;
-      governing.update(canonicalJson({ materialKey: material.materialKey, digest: material.digest, decisions: material.decisions }));
-      governing.update('\n');
-    }
-    // Knowledge versions govern the same preview even when a revision or candidate edit leaves every count unchanged.
-    for (const item of this.#seriesKnowledge.items(series.seriesId)) {
-      governing.update(canonicalJson({ kind: 'series-knowledge', itemId: item.itemId, revisionId: item.current.revisionId }));
-      governing.update('\n');
-    }
-    for (const candidate of this.#seriesKnowledge.open(series.seriesId)) {
-      governing.update(canonicalJson({ kind: 'series-candidate', candidateId: candidate.candidateId, versionId: candidate.versionId }));
-      governing.update('\n');
-    }
-    const groups = seriesMembershipImpact(input.kind, {
-      seriesTitle: series.title,
-      bookTitle,
-      // Runs whose authorized plan froze this Series and have not ended (Issue #64, 7b; SER-006).
-      seriesScopedRuns: this.#series.liveTaskRuns(series.seriesId),
-      learningMaterials,
-      learningDecided,
-      knowledgeFromBook: this.#seriesKnowledge.itemsFromBook(series.seriesId, input.bookId),
-      knowledgeCandidatesFromBook: this.#seriesKnowledge.openFromBook(series.seriesId, input.bookId),
-    });
-    return {
-      seriesId: series.seriesId,
-      seriesTitle: series.title,
-      bookId: input.bookId,
-      bookTitle,
-      kind: input.kind,
-      actionLabel: input.kind === 'add' ? '加入书系' : '移出书系',
-      groups,
-      previewDigest: seriesPreviewDigest({ seriesId: series.seriesId, bookId: input.bookId, kind: input.kind,
-        chainHead: latest?.changeId ?? null, governingDigest: governing.digest('hex'), groups }),
-    };
-  }
-
-  #seriesProjection(series: StoredSeries): SeriesProjection {
-    const members = this.#seriesMembersPage(series.seriesId, null);
-    const tasks = this.#series.tasks(series.seriesId);
-    const history = this.#seriesHistoryPage({ seriesId: series.seriesId }, null);
-    return {
-      ...series,
-      memberCount: members.count,
-      bookCount: Number((this.#authority.prepare('SELECT count(*) count FROM books').get() as SqlRow).count),
-      members: members.members,
-      membersNext: members.nextCursor,
-      history: history.history,
-      historyCount: history.count,
-      historyNext: history.nextCursor,
-      knowledge: this.#seriesKnowledgeProjection(series.seriesId),
-      exclusions: this.#seriesExclusionsProjection(series.seriesId),
-      ...(tasks.length === 0 ? {} : { tasks }),
-    };
+    return seriesOperations.inspectBookSeries(this.#seriesHost, bookId, after);
   }
 
   /** One page of a Series' members after the one named, newest joined first, and how many it holds in all. */
@@ -19938,155 +19706,22 @@ export class EditorialStore {
     return { members: page, nextCursor: more && last !== undefined ? { joinedAt: last.joinedAt, bookId: last.bookId } : null, count };
   }
 
-  /** One page of one Series' or one Book's membership change records after the one named, newest first, and how many in all. */
-  #seriesHistoryPage(filter: { readonly seriesId: string } | { readonly bookId: string }, after: SeriesHistoryCursor | null):
-  SeriesHistoryPageProjection & { count: number } {
-    const { entries: rest, count } = this.#series.historyPage(filter, after, MAX_SERIES_HISTORY_PAGE + 1);
-    const seriesTitles = new Map<string, string>();
-    const bookTitles = new Map<string, string>();
-    const titleOf = (titles: Map<string, string>, key: string, read: () => string): string => {
-      if (!titles.has(key)) titles.set(key, read());
-      return titles.get(key)!;
-    };
-    const projected = rest.map((change) => this.#seriesChange(
-      change,
-      titleOf(seriesTitles, change.seriesId, () => this.#requireSeries(change.seriesId).title),
-      titleOf(bookTitles, change.bookId, () => this.#evaluationBookTitle(change.bookId)),
-    ));
-    const { page, more } = weighedPage(projected, MAX_SERIES_HISTORY_PAGE);
-    const last = rest[page.length - 1];
-    return {
-      history: page,
-      nextCursor: more && last !== undefined ? { recordedAt: last.recordedAt, seriesId: last.seriesId, bookId: last.bookId, ordinal: last.ordinal } : null,
-      count,
-    };
-  }
-
-  #seriesChange(change: StoredMembershipChange, seriesTitle: string, bookTitle: string): SeriesMembershipChangeProjection {
-    return {
-      changeId: change.changeId,
-      seriesId: change.seriesId,
-      seriesTitle,
-      bookId: change.bookId,
-      bookTitle,
-      kind: change.kind,
-      label: change.kind === 'add' ? '加入书系' : '移出书系',
-      priorMember: change.kind === 'remove',
-      newMember: change.kind === 'add',
-      actor: '本机编辑',
-      recordedAt: change.recordedAt,
-      impact: change.impact,
-    };
-  }
-
   // ---- 书系检索排除 (Issue #64, plan slice S29b; V2-UX-SER-020 to SER-029; ADR 0037) -----------------------------------
 
-  /**
-   * 添加检索排除…'s choices (SER-020): a page of what one kind of target may name in this Series — its knowledge items by name,
-   * the eight classes, its member Books newest joined first, or its members' Source Versions newest first — each saying whether
-   * an exclusion in force names it already. A read.
-   */
   inspectSeriesExclusionTargets(input: InspectSeriesExclusionTargetsInput): SeriesExclusionTargetsProjection {
-    return this.#seriesCall(() => {
-      const series = this.#requireSeries(input.seriesId);
-      requireStore(isSeriesExclusionTargetKind(input.kind), 'SERIES_EXCLUSION_TARGET_INVALID', '检索排除的对象无效。');
-      const after = input.after;
-      requireStore(after === null || (isRecord(after) && typeof after.key === 'string' && after.key.length <= 400 && typeof after.id === 'string' &&
-        after.id.length >= 1 && after.id.length <= 64), 'SERIES_CURSOR_INVALID', '书系列表位置无效。');
-      const effective = this.#seriesExclusions.effective(series.seriesId);
-      const excluded = (kind: SeriesExclusionTargetKind, id: string): boolean => effective.some((entry) => entry.target.kind === kind && entry.target.id === id);
-      const rows: Array<{ target: SeriesExclusionTargetProjection; key: string }> = [];
-      const limit = MAX_SERIES_EXCLUSION_TARGETS_PAGE + 1;
-      if (input.kind === 'knowledge-item') {
-        for (const item of this.#seriesKnowledge.itemsPage(series.seriesId, '', after === null ? null : { subject: after.key, itemId: after.id }, limit)) {
-          rows.push({ key: item.subject, target: seriesExclusionTarget('knowledge-item', item.itemId, { subject: item.subject, knowledgeClass: item.knowledgeClass }) });
-        }
-      } else if (input.kind === 'knowledge-class') {
-        for (const knowledgeClass of SERIES_KNOWLEDGE_CLASSES) rows.push({ key: knowledgeClass, target: seriesExclusionTarget('knowledge-class', knowledgeClass, {}) });
-      } else if (input.kind === 'book') {
-        for (const member of this.#series.members(series.seriesId)) {
-          if (after !== null && (member.joinedAt > after.key || (member.joinedAt === after.key && member.bookId >= after.id))) continue;
-          rows.push({ key: member.joinedAt, target: seriesExclusionTarget('book', member.bookId, { bookTitle: this.#evaluationBookTitle(member.bookId) }) });
-          if (rows.length >= limit) break;
-        }
-      } else {
-        for (const row of this.#authority.prepare(
-          `SELECT sv.source_version_id, sv.display_name, sv.created_at, b.title FROM source_versions sv JOIN books b ON b.book_id = sv.book_id
-           WHERE EXISTS (SELECT 1 FROM series_membership_changes c WHERE c.series_id = ? AND c.book_id = sv.book_id AND c.kind = 'add'
-               AND c.ordinal = (SELECT max(d.ordinal) FROM series_membership_changes d WHERE d.series_id = c.series_id AND d.book_id = c.book_id))
-             AND (? IS NULL OR sv.created_at < ? OR (sv.created_at = ? AND sv.source_version_id < ?))
-           ORDER BY sv.created_at DESC, sv.source_version_id DESC LIMIT ?`,
-        ).all(series.seriesId, after?.key ?? null, after?.key ?? null, after?.key ?? null, after?.id ?? null, limit) as SqlRow[]) {
-          rows.push({ key: asString(row.created_at), target: seriesExclusionTarget('source-version', asString(row.source_version_id),
-            { displayName: asString(row.display_name), bookTitle: asString(row.title) }) });
-        }
-      }
-      const { page, more } = weighedPage(rows, MAX_SERIES_EXCLUSION_TARGETS_PAGE);
-      const last = page.at(-1);
-      return {
-        kind: input.kind,
-        targets: page.map((row) => ({ ...row.target, excluded: excluded(row.target.kind, row.target.id) })),
-        nextCursor: more && last !== undefined ? { key: last.key, id: last.target.id } : null,
-      };
-    });
+    return seriesOperations.inspectSeriesExclusionTargets(this.#seriesHost, input);
   }
 
-  /** `更早的排除记录…`: the next page of one Series' exclusion revisions, newest first. A read. */
   inspectSeriesExclusionHistory(input: InspectSeriesExclusionHistoryInput): SeriesExclusionHistoryPageProjection {
-    return this.#seriesCall(() => {
-      const series = this.#requireSeries(input.seriesId);
-      requireStore(isRecord(input.after) && typeof input.after.recordedAt === 'string' && !Number.isNaN(Date.parse(input.after.recordedAt)) &&
-        typeof input.after.revisionId === 'string' && UUID_PATTERN.test(input.after.revisionId), 'SERIES_CURSOR_INVALID', '书系列表位置无效。');
-      const read = this.#seriesExclusionHistoryPage(series.seriesId, input.after);
-      return { history: read.history, nextCursor: read.nextCursor };
-    });
+    return seriesOperations.inspectSeriesExclusionHistory(this.#seriesHost, input);
   }
 
-  /**
-   * 书系检索排除影响预览 (SER-021, SER-022) for 添加检索排除, 修改检索排除 or 停止此排除. A read: nothing is recorded until the
-   * editor commits the exclusion against this preview's digest.
-   */
   previewSeriesExclusion(input: PreviewSeriesExclusionInput): SeriesExclusionPreviewProjection {
-    return this.#seriesCall(() => this.#seriesExclusionPreview(input).preview);
+    return seriesOperations.previewSeriesExclusion(this.#seriesHost, input);
   }
 
-  /**
-   * 添加检索排除, 修改检索排除 or 停止此排除 (SER-020 to SER-027): the preview is recomputed inside the transaction and a stale one
-   * is refused; the revision keeps what the preview showed. An exclusion takes effect as it is recorded: an approved Run whose
-   * reading of the excluded material has not begun stops in the same transaction, and one reading now stops at the guard
-   * before its next range. Ending one restores nothing it stopped.
-   */
   recordSeriesExclusion(input: RecordSeriesExclusionInput): SeriesExclusionResultProjection {
-    return this.#seriesCall(() => {
-      const { revision, stoppedRuns } = this.#transaction(this.#authority, () => {
-        const { preview, prior, reach } = this.#seriesExclusionPreview(input);
-        requireStore(typeof input.previewDigest === 'string' && preview.previewDigest === input.previewDigest, 'SERIES_EXCLUSION_PREVIEW_STALE',
-          '预览之后，检索排除、书系知识或相关任务有了变化；请重新查看影响，再决定。');
-        const stored = this.#seriesExclusions.record({
-          seriesId: preview.seriesId,
-          action: preview.action,
-          prior,
-          target: preview.target,
-          reason: preview.reason,
-          previewDigest: preview.previewDigest,
-          impact: preview.groups,
-        });
-        let stopped = 0;
-        if (preview.action === 'add') {
-          for (const run of reach.active) {
-            if (!run.started && this.#reviewRuns.stopForSeriesScope(run.reviewRunId, run.categoryId)) stopped += 1;
-          }
-        }
-        return { revision: stored, stoppedRuns: stopped };
-      });
-      return {
-        exclusionId: revision.exclusionId,
-        revisionId: revision.revisionId,
-        completionLabel: revision.action === 'add' ? '书系检索排除已生效' : revision.action === 'change' ? '检索排除已修改' : '已停止此排除',
-        stoppedRuns,
-        revision: this.#seriesExclusionRevision(revision),
-      };
-    });
+    return seriesOperations.recordSeriesExclusion(this.#seriesHost, input);
   }
 
   /**
@@ -20174,38 +19809,6 @@ export class EditorialStore {
     });
   }
 
-  /** What an exclusion target names now, read from the records that own it; refused when this Series cannot name it. */
-  #seriesExclusionTargetOf(series: StoredSeries, input: unknown): SeriesExclusionTargetProjection {
-    requireStore(isRecord(input) && isSeriesExclusionTargetKind(input.kind) && typeof input.id === 'string', 'SERIES_EXCLUSION_TARGET_INVALID', '检索排除的对象无效。');
-    const id = input.id;
-    switch (input.kind) {
-      case 'knowledge-item': {
-        const item = UUID_PATTERN.test(id) ? this.#seriesKnowledge.item(id) : null;
-        requireStore(item !== null && item.seriesId === series.seriesId, 'SERIES_EXCLUSION_TARGET_NOT_FOUND', `书系「${series.title}」没有这个书系知识条目。`);
-        return seriesExclusionTarget('knowledge-item', id, { subject: item.subject, knowledgeClass: item.knowledgeClass });
-      }
-      case 'knowledge-class':
-        requireStore(isSeriesKnowledgeClass(id), 'SERIES_EXCLUSION_TARGET_NOT_FOUND', '没有这个知识类别。');
-        return seriesExclusionTarget('knowledge-class', id, {});
-      case 'book': {
-        requireStore(UUID_PATTERN.test(id), 'SERIES_EXCLUSION_TARGET_INVALID', '检索排除的对象无效。');
-        const bookTitle = this.#evaluationBookTitle(id);
-        requireStore(this.#series.latest(series.seriesId, id)?.kind === 'add', 'SERIES_EXCLUSION_NOT_MEMBER',
-          `《${bookTitle}》不在书系「${series.title}」中；检索排除只针对这个书系的成员图书。`);
-        return seriesExclusionTarget('book', id, { bookTitle });
-      }
-      case 'source-version': {
-        const row = UUID_PATTERN.test(id)
-          ? this.#authority.prepare('SELECT sv.book_id, sv.display_name, b.title FROM source_versions sv JOIN books b ON b.book_id = sv.book_id WHERE sv.source_version_id = ?').get(id) as SqlRow | undefined
-          : undefined;
-        requireStore(row !== undefined, 'SERIES_EXCLUSION_TARGET_NOT_FOUND', '没有这个来源版本。');
-        requireStore(this.#series.latest(series.seriesId, asString(row.book_id))?.kind === 'add', 'SERIES_EXCLUSION_NOT_MEMBER',
-          `《${asString(row.title)}》不在书系「${series.title}」中；检索排除只针对这个书系成员图书的来源版本。`);
-        return seriesExclusionTarget('source-version', id, { displayName: asString(row.display_name), bookTitle: asString(row.title) });
-      }
-    }
-  }
-
   /**
    * The Series-scoped Runs that are not a Review Run's (Issue #64, 7b; SER-022, SER-026): each whose frozen scope a target
    * reaches, as authorized, waiting or running, or as completed. A Review Run's are read from its own snapshot; a Task not yet
@@ -20230,477 +19833,38 @@ export class EditorialStore {
     return { active, completed };
   }
 
-  #seriesExclusionPreview(input: PreviewSeriesExclusionInput): {
-    preview: SeriesExclusionPreviewProjection;
-    prior: StoredExclusion | null;
-    reach: ReturnType<ReviewRunStore['seriesExclusionReach']>;
-  } {
-    const series = this.#requireSeries(input.seriesId);
-    requireStore(isSeriesExclusionAction(input.action), 'SERIES_EXCLUSION_INVALID', '检索排除只有添加、修改和停止。');
-    const reason = seriesExclusionReason(input.reason);
-    requireStore(reason !== null, 'SERIES_EXCLUSION_REASON_INVALID', `排除理由最多 ${MAX_SERIES_EXCLUSION_REASON_CHARACTERS} 个字，写在一行里。`);
-    const effective = this.#seriesExclusions.effective(series.seriesId);
-    let prior: StoredExclusion | null = null;
-    let target: SeriesExclusionTargetProjection;
-    if (input.action === 'add') {
-      requireStore(input.exclusionId === null && input.target !== null, 'SERIES_EXCLUSION_INVALID', '添加检索排除要指定一个对象。');
-      target = this.#seriesExclusionTargetOf(series, input.target);
-      requireStore(!effective.some((entry) => entry.target.kind === target.kind && entry.target.id === target.id), 'SERIES_EXCLUSION_ALREADY',
-        `${target.label}已经排除在书系「${series.title}」的检索之外。`);
-      requireStore(effective.length < MAX_SERIES_EXCLUSIONS, 'SERIES_EXCLUSION_LIMIT',
-        `书系「${series.title}」已有 ${MAX_SERIES_EXCLUSIONS} 条检索排除在生效；先停止不再需要的，再添加。`);
-    } else {
-      requireStore(typeof input.exclusionId === 'string' && UUID_PATTERN.test(input.exclusionId) && input.target === null, 'SERIES_EXCLUSION_INVALID',
-        '要指定修改或停止哪一条检索排除。');
-      prior = this.#seriesExclusions.exclusion(series.seriesId, input.exclusionId);
-      requireStore(prior !== null, 'SERIES_EXCLUSION_NOT_FOUND', '这条检索排除不存在。');
-      requireStore(prior.effective, 'SERIES_EXCLUSION_ENDED', '这条检索排除已经停止；以后的检索已经可以读取它。');
-      requireStore(input.action !== 'change' || reason !== prior.current.reason, 'SERIES_EXCLUSION_UNCHANGED', '排除理由没有变化。');
-      target = prior.target;
-    }
-    const covers = (material: SeriesKnowledgeMaterial): boolean => seriesExclusionCovers(series.seriesId, target, material);
-    // What the target reaches of the Series' knowledge now, and every version governing the preview, hashed one by one.
-    const governing = createHash('sha256');
-    const itemsNamed: string[] = [];
-    let itemCount = 0;
-    // 停止此排除 reopens only what no other exclusion in force still reaches (Issue #64 review).
-    const others = prior === null ? [] : effective.filter((entry) => entry.exclusionId !== prior!.exclusionId);
-    const stillNamed: string[] = [];
-    let stillCount = 0;
-    for (const item of this.#seriesKnowledge.items(series.seriesId)) {
-      const material = knowledgeMaterial(this.#authority, { seriesId: series.seriesId, itemId: item.itemId, revisionId: item.current.revisionId });
-      requireStore(material !== null, 'SERIES_SCOPE_INVALID', '书系知识来源记录无法核对。');
-      if (!covers(material)) continue;
-      itemCount += 1;
-      if (itemsNamed.length < NAMED_EXCLUSION_ENTRIES) itemsNamed.push(`「${item.subject}」`);
-      if (coveringExclusions(others, material).length > 0) {
-        stillCount += 1;
-        if (stillNamed.length < NAMED_EXCLUSION_ENTRIES) stillNamed.push(`「${item.subject}」`);
-      }
-      governing.update(canonicalJson({ kind: 'item', itemId: item.itemId, revisionId: item.current.revisionId }));
-      governing.update('\n');
-    }
-    for (const entry of effective) {
-      governing.update(canonicalJson({ kind: 'exclusion', exclusionId: entry.exclusionId, revisionId: entry.current.revisionId }));
-      governing.update('\n');
-    }
-    const reach = input.action === 'add' ? this.#reviewRuns.seriesExclusionReach(covers) : { active: [], prepared: 0, completed: [] };
-    governing.update(canonicalJson({ kind: 'runs', active: reach.active, prepared: reach.prepared, completed: reach.completed }));
-    // One entry per Review Run, even where two Books share a title (Issue #64 review).
-    const routes = (runs: ReadonlyArray<{ readonly reviewRunId: string; readonly route: string }>): string[] =>
-      [...new Map(runs.map((run) => [run.reviewRunId, run.route] as const)).values()];
-    // A Series-scoped Run outside 审阅 — an AI7 初评 that froze the Series — is named beside them (Issue #64, 7b; SER-022).
-    const tasks = input.action === 'add' ? this.#seriesScopedTaskReach(series.seriesId, covers) : { active: [], completed: [] };
-    if (tasks.active.length + tasks.completed.length > 0) governing.update(canonicalJson({ kind: 'task-runs', active: tasks.active, completed: tasks.completed }));
-    const runRoutes = [...routes(reach.active), ...tasks.active.map((task) => task.route)];
-    const completedRoutes = [...routes(reach.completed), ...tasks.completed.map((task) => task.route)];
-    const groups = seriesExclusionImpact(input.action, {
-      seriesTitle: series.title,
-      target,
-      reason,
-      priorReason: prior?.current.reason ?? null,
-      itemsNamed,
-      itemCount,
-      stillNamed,
-      stillCount,
-      runsNamed: runRoutes.slice(0, NAMED_EXCLUSION_ENTRIES),
-      runCount: runRoutes.length,
-      preparedCount: reach.prepared,
-      completedNamed: completedRoutes.slice(0, NAMED_EXCLUSION_ENTRIES),
-      completedCount: completedRoutes.length,
-    });
-    const preview: SeriesExclusionPreviewProjection = {
-      seriesId: series.seriesId,
-      seriesTitle: series.title,
-      action: input.action,
-      actionLabel: SERIES_EXCLUSION_ACTION_LABELS[input.action],
-      exclusionId: prior?.exclusionId ?? null,
-      target,
-      reason,
-      scope: `只限书系「${series.title}」的书系检索`,
-      effectiveTime: '记录后立即生效',
-      actor: '本机编辑',
-      groups,
-      previewDigest: seriesExclusionPreviewDigest({
-        seriesId: series.seriesId,
-        action: input.action,
-        exclusionId: prior?.exclusionId ?? null,
-        target,
-        reason,
-        chainHead: prior?.current.revisionId ?? null,
-        governingDigest: governing.digest('hex'),
-        groups,
-      }),
-    };
-    return { preview, prior, reach };
-  }
-
-  /** A Series' 检索排除 as its page opens: every exclusion in force, and the first page of revisions. */
-  #seriesExclusionsProjection(seriesId: string): SeriesExclusionsProjection {
-    const effective = this.#seriesExclusions.effective(seriesId).map((entry): SeriesExclusionProjection => ({
-      exclusionId: entry.exclusionId,
-      target: entry.target,
-      reason: entry.current.reason,
-      effectiveSince: entry.since,
-      revision: entry.current.revision,
-    }));
-    const history = this.#seriesExclusionHistoryPage(seriesId, null);
-    return { effective, history: history.history, historyCount: history.count, historyNext: history.nextCursor };
-  }
-
-  #seriesExclusionHistoryPage(seriesId: string, after: SeriesExclusionHistoryCursor | null):
-  SeriesExclusionHistoryPageProjection & { count: number } {
-    const { entries, count } = this.#seriesExclusions.historyPage(seriesId, after, MAX_SERIES_EXCLUSION_HISTORY_PAGE + 1);
-    const { page, more } = weighedPage(entries.map((entry) => this.#seriesExclusionRevision(entry)), MAX_SERIES_EXCLUSION_HISTORY_PAGE);
-    const last = page.at(-1);
-    return { history: page, nextCursor: more && last !== undefined ? { recordedAt: last.recordedAt, revisionId: last.revisionId } : null, count };
-  }
-
-  #seriesExclusionRevision(entry: StoredExclusionRevision): SeriesExclusionRevisionProjection {
-    return {
-      revisionId: entry.revisionId,
-      exclusionId: entry.exclusionId,
-      revision: entry.revision,
-      action: entry.action,
-      actionLabel: SERIES_EXCLUSION_ACTION_LABELS[entry.action],
-      target: entry.target,
-      reason: entry.reason,
-      actor: '本机编辑',
-      recordedAt: entry.recordedAt,
-      impact: entry.impact,
-    };
-  }
-
   // ---- 书系知识 (Issue #63, plan slice S28b; V2-UX-SER-013 to SER-019; ADR 0036) ---------------------------------------
 
-  /**
-   * 提议为书系知识 (SER-013, SER-014): the editor's own words, or the exact span of a member Book's manuscript, becomes a
-   * non-authoritative candidate for a new or an exact existing item. Nothing reads it until it is taken in.
-   */
   proposeSeriesKnowledge(input: ProposeSeriesKnowledgeInput): SeriesKnowledgeProposalProjection {
-    return this.#seriesCall(() => {
-      const created = this.#transaction(this.#authority, () => {
-        const series = this.#requireSeries(input.seriesId);
-        const target = this.#knowledgeTarget(series.seriesId, input.target);
-        const content = seriesKnowledgeContent(input.content);
-        requireStore(content !== null, 'SERIES_KNOWLEDGE_CONTENT_INVALID', `内容要 1–${MAX_SERIES_KNOWLEDGE_CONTENT_CHARACTERS} 个字。`);
-        const provenance = input.span === null ? null : this.#knowledgeSpan(series, input.span);
-        return this.#seriesKnowledge.propose({ seriesId: series.seriesId, target, content, provenance });
-      });
-      const series = this.#requireSeries(input.seriesId);
-      // The answer is the candidate alone (Issue #63 review): the page reads its lists again, each a page at a time.
-      const items = this.#seriesKnowledge.items(series.seriesId);
-      const open = this.#seriesKnowledge.open(series.seriesId);
-      return {
-        candidateId: created.candidateId,
-        completionLabel: `已提议为书系「${series.title}」的知识候选项`,
-        candidate: this.#knowledgeCandidateProjection(created, countSeriesKnowledgeConflicts(seriesKnowledgeConflicts(created, items, open))),
-      };
-    });
+    return seriesOperations.proposeSeriesKnowledge(this.#seriesHost, input);
   }
 
-  /** 书系知识纳入审阅 (SER-015, SER-016, SER-019) of one open candidate as it stands now. A read. */
   inspectSeriesKnowledgeReview(input: InspectSeriesKnowledgeReviewInput): SeriesKnowledgeReviewProjection {
-    return this.#seriesCall(() => {
-      const page = input.conflictsPage;
-      requireStore(page === undefined || (Number.isSafeInteger(page.after) && page.after >= 0), 'SERIES_CURSOR_INVALID', '书系列表位置无效。');
-      const review = this.#seriesKnowledgeReview(input.seriesId, input.candidateId, page?.after ?? 0);
-      requireStore(page === undefined || (review.candidate.version === page.candidateVersion && review.projection.reviewDigest === page.reviewDigest),
-        'SERIES_KNOWLEDGE_REVIEW_STALE', '候选项、条目或冲突在审阅之后有了变化；请重新审阅。');
-      requireStore((page?.after ?? 0) <= review.projection.conflictCount, 'SERIES_CURSOR_INVALID', '书系列表位置无效。');
-      return review.projection;
-    });
+    return seriesOperations.inspectSeriesKnowledgeReview(this.#seriesHost, input);
   }
 
-  /** 编辑候选项 (SER-015): the candidate's next version, read again in review against the item as it stands now. */
   editSeriesKnowledgeCandidate(input: EditSeriesKnowledgeCandidateInput): SeriesKnowledgeReviewProjection {
-    return this.#seriesCall(() => {
-      this.#transaction(this.#authority, () => {
-        const series = this.#requireSeries(input.seriesId);
-        requireStore(typeof input.candidateId === 'string' && UUID_PATTERN.test(input.candidateId), 'SERIES_KNOWLEDGE_CANDIDATE_INVALID', '候选项标识无效。');
-        const candidate = this.#seriesKnowledge.candidate(input.candidateId);
-        requireStore(candidate !== null && candidate.seriesId === series.seriesId, 'SERIES_KNOWLEDGE_CANDIDATE_NOT_FOUND', '这个候选项不存在。');
-        const target = this.#knowledgeTarget(series.seriesId, input.target);
-        const content = seriesKnowledgeContent(input.content);
-        requireStore(content !== null, 'SERIES_KNOWLEDGE_CONTENT_INVALID', `内容要 1–${MAX_SERIES_KNOWLEDGE_CONTENT_CHARACTERS} 个字。`);
-        this.#seriesKnowledge.edit(input.candidateId, input.expectedVersion, target, content);
-      });
-      return this.#seriesKnowledgeReview(input.seriesId, input.candidateId).projection;
-    });
+    return seriesOperations.editSeriesKnowledgeCandidate(this.#seriesHost, input);
   }
 
-  /**
-   * 纳入书系知识 (SER-017 to SER-019): against the exact review the editor read — a moved candidate, item, conflict or
-   * membership refuses it — a conflict kept only by 保留已披露冲突, and where it may later be used chosen by the editor.
-   */
   promoteSeriesKnowledge(input: PromoteSeriesKnowledgeInput): SeriesKnowledgePromotionProjection {
-    return this.#seriesCall(() => {
-      const promoted = this.#transaction(this.#authority, () => {
-        const review = this.#seriesKnowledgeReview(input.seriesId, input.candidateId);
-        requireStore(review.candidate.version === input.candidateVersion && review.projection.reviewDigest === input.reviewDigest,
-          'SERIES_KNOWLEDGE_REVIEW_STALE', '候选项、条目或冲突在审阅之后有了变化；请重新审阅。');
-        requireStore(review.projection.blocked === null, 'SERIES_KNOWLEDGE_BLOCKED', review.projection.blocked ?? '');
-        requireStore(isSeriesKnowledgeReuseScope(input.reuseScope), 'SERIES_KNOWLEDGE_REUSE_INVALID', '请选择以后的用途。');
-        if (review.projection.conflictCount > 0) {
-          requireStore(input.conflictDisposition === 'preserved', 'SERIES_KNOWLEDGE_CONFLICT_UNRESOLVED',
-            `${SERIES_KNOWLEDGE_CONFLICT_LABEL}：请编辑候选项，或选择保留已披露冲突。`);
-        } else {
-          requireStore(input.conflictDisposition === 'none', 'SERIES_KNOWLEDGE_DISPOSITION_INVALID', '没有已披露的冲突可以保留。');
-        }
-        return this.#seriesKnowledge.promote({ candidate: review.candidate, conflicts: review.conflicts(), reuseScope: input.reuseScope, reviewDigest: input.reviewDigest });
-      });
-      return {
-        itemId: promoted.itemId,
-        revisionId: promoted.revisionId,
-        completionLabel: promoted.outcome === 'created' ? '书系知识已纳入' as const : '书系知识已更新' as const,
-        item: this.#knowledgeItemProjection(this.#seriesKnowledge.item(promoted.itemId)!),
-      };
-    });
+    return seriesOperations.promoteSeriesKnowledge(this.#seriesHost, input);
   }
 
-  /** `查找条目` and `更多条目…`: a page of a Series' knowledge items by name, narrowed to names holding the words (Issue #63 review). A read. */
   inspectSeriesKnowledgeItems(seriesId: string, text: string, after: SeriesKnowledgeItemsCursor | null): SeriesKnowledgeItemsPageProjection {
-    return this.#seriesCall(() => {
-      const series = this.#requireSeries(seriesId);
-      const words = typeof text === 'string' && text.isWellFormed() ? text.normalize('NFC').trim() : null;
-      requireStore(words !== null && [...words].length <= MAX_SERIES_KNOWLEDGE_QUERY_CHARACTERS && !/[\r\n]/u.test(words), 'SERIES_KNOWLEDGE_QUERY_INVALID',
-        `查找的条目字词最多 ${MAX_SERIES_KNOWLEDGE_QUERY_CHARACTERS} 个字，写在一行里。`);
-      requireStore(after === null || (typeof after.itemId === 'string' && UUID_PATTERN.test(after.itemId) && typeof after.subject === 'string' &&
-        after.subject.length >= 1 && after.subject.length <= 2 * MAX_SERIES_KNOWLEDGE_SUBJECT_CHARACTERS), 'SERIES_CURSOR_INVALID', '书系列表位置无效。');
-      return this.#knowledgeItemsPage(series.seriesId, words, after);
-    });
+    return seriesOperations.inspectSeriesKnowledgeItems(this.#seriesHost, seriesId, text, after);
   }
 
-  /** `更多候选项…`: the next page of a Series' open candidates, oldest proposed first (Issue #63 review). A read. */
   inspectSeriesKnowledgeCandidates(seriesId: string, after: SeriesKnowledgeCandidatesCursor | null): SeriesKnowledgeCandidatesPageProjection {
-    return this.#seriesCall(() => {
-      const series = this.#requireSeries(seriesId);
-      requireStore(after === null || (typeof after.candidateId === 'string' && UUID_PATTERN.test(after.candidateId) && typeof after.firstAt === 'string' &&
-        !Number.isNaN(Date.parse(after.firstAt))), 'SERIES_CURSOR_INVALID', '书系列表位置无效。');
-      const { candidates, nextCursor } = this.#knowledgeCandidatesPage(series.seriesId, after);
-      return { candidates, nextCursor };
-    });
+    return seriesOperations.inspectSeriesKnowledgeCandidates(this.#seriesHost, seriesId, after);
   }
 
-  /** 历次版本: a page of one item's revisions, newest first, below the ordinal named (Issue #63 review). A read. */
   inspectSeriesKnowledgeConflicts(input: { seriesId: string; itemId: string; revisionId: string; after: number }): SeriesKnowledgeConflictsProjection {
-    return this.#seriesCall(() => {
-      const series = this.#requireSeries(input.seriesId);
-      requireStore(typeof input.itemId === 'string' && UUID_PATTERN.test(input.itemId) && typeof input.revisionId === 'string' && UUID_PATTERN.test(input.revisionId),
-        'SERIES_KNOWLEDGE_ITEM_NOT_FOUND', '这个书系知识条目或版本不存在。');
-      const item = this.#seriesKnowledge.item(input.itemId);
-      requireStore(item !== null && item.seriesId === series.seriesId, 'SERIES_KNOWLEDGE_ITEM_NOT_FOUND', '这个书系知识条目不存在。');
-      const revision = this.#seriesKnowledge.revision(input.itemId, input.revisionId);
-      requireStore(revision !== null, 'SERIES_KNOWLEDGE_ITEM_NOT_FOUND', '这个书系知识版本不存在。');
-      requireStore(Number.isSafeInteger(input.after) && input.after >= 0 && input.after <= revision.conflictCount, 'SERIES_CURSOR_INVALID', '冲突列表位置无效。');
-      const { page, more } = weighedPage(this.#seriesKnowledge.conflictsPage(revision.revisionId, revision.conflictCount, revision.conflictsDigest, input.after, MAX_SERIES_KNOWLEDGE_CONFLICTS_SHOWN + 1),
-        MAX_SERIES_KNOWLEDGE_CONFLICTS_SHOWN, SERIES_KNOWLEDGE_PAGE_BYTES);
-      return { itemId: input.itemId, revisionId: input.revisionId, conflicts: page, total: revision.conflictCount,
-        nextAfter: more ? input.after + page.length : null };
-    });
+    return seriesOperations.inspectSeriesKnowledgeConflicts(this.#seriesHost, input);
   }
 
   inspectSeriesKnowledgeRevisions(seriesId: string, itemId: string, before: number | null): SeriesKnowledgeRevisionsProjection {
-    return this.#seriesCall(() => {
-      const series = this.#requireSeries(seriesId);
-      requireStore(typeof itemId === 'string' && UUID_PATTERN.test(itemId), 'SERIES_KNOWLEDGE_ITEM_NOT_FOUND', '这个书系知识条目不存在。');
-      const item = this.#seriesKnowledge.item(itemId);
-      requireStore(item !== null && item.seriesId === series.seriesId, 'SERIES_KNOWLEDGE_ITEM_NOT_FOUND', '这个书系知识条目不存在。');
-      requireStore(before === null || (Number.isSafeInteger(before) && before >= 1), 'SERIES_CURSOR_INVALID', '书系列表位置无效。');
-      const rest = this.#seriesKnowledge.revisionsPage(itemId, before, MAX_SERIES_KNOWLEDGE_REVISIONS_PAGE + 1);
-      const { page, more } = weighedPage(rest.slice(0, MAX_SERIES_KNOWLEDGE_REVISIONS_PAGE + 1).map((revision) => this.#knowledgeRevisionProjection(revision)),
-        MAX_SERIES_KNOWLEDGE_REVISIONS_PAGE, SERIES_KNOWLEDGE_PAGE_BYTES);
-      return { itemId: item.itemId, revisions: page, nextBefore: more ? page.at(-1)!.ordinal : null };
-    });
-  }
-
-  /** One page of a Series' knowledge items after the one named, each with its current revision only. */
-  #knowledgeItemsPage(seriesId: string, words: string, after: SeriesKnowledgeItemsCursor | null): SeriesKnowledgeItemsPageProjection {
-    const items = this.#seriesKnowledge.itemsPage(seriesId, words, after, MAX_SERIES_KNOWLEDGE_ITEMS_PAGE + 1).map((item) => this.#knowledgeItemProjection(item));
-    const { page, more } = weighedPage(items, MAX_SERIES_KNOWLEDGE_ITEMS_PAGE, SERIES_KNOWLEDGE_PAGE_BYTES);
-    const last = page.at(-1);
-    return { items: page, nextCursor: more && last !== undefined ? { subject: last.subject, itemId: last.itemId } : null };
-  }
-
-  /** One page of a Series' open candidates after the one named, oldest proposed first, each with how many conflicts it discloses. */
-  #knowledgeCandidatesPage(seriesId: string, after: SeriesKnowledgeCandidatesCursor | null): SeriesKnowledgeCandidatesPageProjection {
-    const read = this.#seriesKnowledge.openPage(seriesId, after, MAX_SERIES_KNOWLEDGE_CANDIDATES_PAGE + 1);
-    const projected = read.map(({ candidate }) => this.#knowledgeCandidateProjection(candidate, countSeriesKnowledgeConflicts(seriesKnowledgeConflicts(candidate, this.#seriesKnowledge.items(seriesId), this.#seriesKnowledge.open(seriesId)))));
-    const { page, more } = weighedPage(projected, MAX_SERIES_KNOWLEDGE_CANDIDATES_PAGE, SERIES_KNOWLEDGE_PAGE_BYTES);
-    const last = read[page.length - 1];
-    return { candidates: page, nextCursor: more && last !== undefined ? { firstAt: last.firstAt, candidateId: last.candidate.candidateId } : null };
-  }
-
-  /** The item a candidate proposes, resolved against the Series as it stands: a new name and class, or the exact item now. */
-  #knowledgeTarget(seriesId: string, target: SeriesKnowledgeTarget): ResolvedTarget {
-    requireStore(typeof target === 'object' && target !== null && (target.kind === 'new' || target.kind === 'existing'), 'SERIES_KNOWLEDGE_TARGET_INVALID', '候选项要写明是新条目还是已有条目。');
-    if (target.kind === 'new') {
-      const subject = seriesKnowledgeSubject(target.subject);
-      requireStore(subject !== null, 'SERIES_KNOWLEDGE_SUBJECT_INVALID', `条目名称要 1–${MAX_SERIES_KNOWLEDGE_SUBJECT_CHARACTERS} 个字，写在一行里。`);
-      requireStore(isSeriesKnowledgeClass(target.knowledgeClass), 'SERIES_KNOWLEDGE_CLASS_INVALID', '请选择条目类别。');
-      return { kind: 'new', subject, knowledgeClass: target.knowledgeClass };
-    }
-    requireStore(typeof target.itemId === 'string' && UUID_PATTERN.test(target.itemId), 'SERIES_KNOWLEDGE_TARGET_INVALID', '候选项要写明是新条目还是已有条目。');
-    const item = this.#seriesKnowledge.item(target.itemId);
-    requireStore(item !== null && item.seriesId === seriesId, 'SERIES_KNOWLEDGE_ITEM_NOT_FOUND', '这个书系知识条目不存在。');
-    return { kind: 'existing', itemId: item.itemId, subject: item.subject, knowledgeClass: item.knowledgeClass, baseRevisionId: item.current.revisionId };
-  }
-
-  /** The exact span a provenance-bound candidate cites (SER-013): verified as a mark's is, in a Book the Series holds now. */
-  #knowledgeSpan(series: StoredSeries, span: SeriesKnowledgeSpanInput): StoredProvenance {
-    requireStore(typeof span === 'object' && span !== null, 'SERIES_KNOWLEDGE_SPAN_INVALID', '所选文字无效。');
-    const verified = this.#markCall(() => this.#editorialMarks.verifySpan(span));
-    const bookTitle = this.#evaluationBookTitle(verified.bookId);
-    requireStore(this.#series.latest(series.seriesId, verified.bookId)?.kind === 'add', 'SERIES_KNOWLEDGE_NOT_MEMBER',
-      `《${bookTitle}》不在书系「${series.title}」中；只有成员图书的稿件可以提议为书系知识。`);
-    return {
-      kind: 'manuscript-revision',
-      bookId: verified.bookId,
-      manuscriptId: span.manuscriptId,
-      branchId: span.branchId,
-      revisionId: verified.revisionId,
-      revisionLabel: verified.revisionLabel,
-      journalSequence: verified.journalSequence,
-      blockId: span.blockId,
-      fromGrapheme: span.fromGrapheme,
-      toGrapheme: span.toGrapheme,
-      quote: verified.text,
-    };
-  }
-
-  #seriesKnowledgeReview(seriesId: string, candidateId: string, after = 0): {
-    readonly projection: SeriesKnowledgeReviewProjection;
-    readonly candidate: StoredCandidate;
-    readonly conflicts: () => IterableIterator<FoundConflict>;
-  } {
-    const series = this.#requireSeries(seriesId);
-    requireStore(typeof candidateId === 'string' && UUID_PATTERN.test(candidateId), 'SERIES_KNOWLEDGE_CANDIDATE_INVALID', '候选项标识无效。');
-    const candidate = this.#seriesKnowledge.candidate(candidateId);
-    requireStore(candidate !== null && candidate.seriesId === series.seriesId, 'SERIES_KNOWLEDGE_CANDIDATE_NOT_FOUND', '这个候选项不存在。');
-    requireStore(!candidate.promoted, 'SERIES_KNOWLEDGE_ALREADY_PROMOTED', '这个候选项已经纳入书系知识。');
-    const conflicts = (): IterableIterator<FoundConflict> => seriesKnowledgeConflicts(candidate, this.#seriesKnowledge.items(series.seriesId), this.#seriesKnowledge.open(series.seriesId));
-    const target = candidate.target;
-    const current = target.kind === 'existing' ? this.#seriesKnowledge.item(target.itemId)?.current ?? null : null;
-    // A provenance-bound candidate cites a member Book's manuscript: once the Book has left the Series it cannot be taken in.
-    const blocked = candidate.provenance !== null && this.#series.latest(series.seriesId, candidate.provenance.bookId)?.kind !== 'add'
-      ? `《${this.#evaluationBookTitle(candidate.provenance.bookId)}》已不在书系「${series.title}」中；来自它的候选项不能纳入。`
-      : null;
-    const summary = seriesKnowledgeReviewSummary({ seriesId: series.seriesId, candidateVersionId: candidate.versionId, currentRevisionId: current?.revisionId ?? null, conflicts: conflicts(), blocked, after });
-    const { page } = weighedPage(summary.preview.map((entry) => ({ kind: entry.kind, line: entry.line })),
-      MAX_SERIES_KNOWLEDGE_CONFLICTS_SHOWN, SERIES_KNOWLEDGE_PAGE_BYTES);
-    return {
-      candidate,
-      conflicts,
-      projection: {
-        seriesId: series.seriesId,
-        seriesTitle: series.title,
-        candidate: this.#knowledgeCandidateProjection(candidate, summary.count),
-        current: current === null ? null : this.#knowledgeRevisionProjection(current),
-        conflicts: page,
-        conflictCount: summary.count,
-        conflictsAfter: after,
-        conflictsNextAfter: after + page.length < summary.count ? after + page.length : null,
-        conflictLabel: summary.count === 0 ? null : SERIES_KNOWLEDGE_CONFLICT_LABEL,
-        reuseScopes: SERIES_KNOWLEDGE_REUSE_SCOPES.map((scope) => ({ scope, label: SERIES_KNOWLEDGE_REUSE_LABELS[scope] })),
-        blocked,
-        reviewDigest: summary.digest,
-        actionLabel: '纳入书系知识',
-      },
-    };
-  }
-
-  /** A Series' knowledge as its page first shows it (Issue #63 review): the first page of items and of open candidates, and the counts. */
-  #seriesKnowledgeProjection(seriesId: string): SeriesProjection['knowledge'] {
-    const items = this.#knowledgeItemsPage(seriesId, '', null);
-    const candidates = this.#knowledgeCandidatesPage(seriesId, null);
-    return {
-      items: items.items,
-      itemCount: this.#seriesKnowledge.itemCount(seriesId),
-      itemsNext: items.nextCursor,
-      candidates: candidates.candidates,
-      candidateCount: this.#seriesKnowledge.openCount(seriesId),
-      candidatesNext: candidates.nextCursor,
-    };
-  }
-
-  #knowledgeProvenance(provenance: StoredProvenance | null): SeriesKnowledgeProvenanceProjection | null {
-    if (provenance === null) return null;
-    return {
-      kind: provenance.kind,
-      bookId: provenance.bookId,
-      bookTitle: this.#evaluationBookTitle(provenance.bookId),
-      manuscriptId: provenance.manuscriptId,
-      revisionId: provenance.revisionId,
-      revisionLabel: provenance.revisionLabel,
-      journalSequence: provenance.journalSequence,
-      blockId: provenance.blockId,
-      fromGrapheme: provenance.fromGrapheme,
-      toGrapheme: provenance.toGrapheme,
-      quote: knowledgeQuoteExcerpt(provenance.quote),
-      // Changes waited in the journal beyond the revision when the words were cited (Issue #63 review).
-      // The counter is cumulative across checkpoints. Only entries based on this exact cited revision and present
-      // by the cited position belong to its unsaved suffix; later checkpoints or edits cannot relabel this provenance.
-      uncheckpointed: this.#authority.prepare(
-        `SELECT 1 FROM edit_journal_entries WHERE manuscript_id = ? AND branch_id = ?
-         AND base_revision_id = ? AND sequence <= ? LIMIT 1`,
-      ).get(provenance.manuscriptId, provenance.branchId, provenance.revisionId, provenance.journalSequence) !== undefined,
-    };
-  }
-
-  #knowledgeCandidateProjection(
-    candidate: StoredCandidate,
-    conflicts: number,
-  ): SeriesKnowledgeCandidateProjection {
-    const target = candidate.target;
-    const base = target.kind === 'existing'
-      ? this.#seriesKnowledge.revision(target.itemId, target.baseRevisionId)
-      : null;
-    return {
-      candidateId: candidate.candidateId,
-      version: candidate.version,
-      target: {
-        kind: target.kind,
-        itemId: target.kind === 'existing' ? target.itemId : null,
-        subject: target.subject,
-        knowledgeClass: target.knowledgeClass,
-        classLabel: SERIES_KNOWLEDGE_CLASS_LABELS[target.knowledgeClass],
-        baseRevisionOrdinal: base?.ordinal ?? null,
-      },
-      content: candidate.content,
-      authoring: candidate.authoring,
-      provenance: this.#knowledgeProvenance(candidate.provenance),
-      recordedAt: candidate.recordedAt,
-      conflicts,
-    };
-  }
-
-  #knowledgeRevisionProjection(revision: StoredRevision): SeriesKnowledgeRevisionProjection {
-    return {
-      revisionId: revision.revisionId,
-      ordinal: revision.ordinal,
-      content: revision.content,
-      authoring: revision.authoring,
-      provenance: this.#knowledgeProvenance(revision.provenance),
-      conflicts: revision.conflicts.slice(0, MAX_SERIES_KNOWLEDGE_CONFLICTS_SHOWN),
-      conflictCount: revision.conflictCount,
-      reuseScope: revision.reuseScope,
-      reuseLabel: SERIES_KNOWLEDGE_REUSE_LABELS[revision.reuseScope],
-      decisionId: revision.decisionId,
-      outcome: revision.outcome,
-      recordedAt: revision.recordedAt,
-    };
-  }
-
-  #knowledgeItemProjection(item: StoredItem): SeriesKnowledgeItemProjection {
-    return {
-      itemId: item.itemId,
-      subject: item.subject,
-      knowledgeClass: item.knowledgeClass,
-      classLabel: SERIES_KNOWLEDGE_CLASS_LABELS[item.knowledgeClass],
-      createdAt: item.createdAt,
-      current: this.#knowledgeRevisionProjection(item.current),
-      revisionCount: item.revisionCount,
-    };
+    return seriesOperations.inspectSeriesKnowledgeRevisions(this.#seriesHost, seriesId, itemId, before);
   }
 
   // ---- 设置 › 数据与存储 › 版本 (Issue #433, plan slice S85a; V2-UX-DSTO-016; ADR 0079 §1) --------------------------------
