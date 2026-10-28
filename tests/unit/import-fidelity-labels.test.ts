@@ -139,8 +139,10 @@ describe('the import fidelity review words', () => {
       .toBe('本稿件由 ai7-text-to-docx/1 从 MD 转换为 DOCX 工作表示后读取；下列损失由转换造成，原始文件原样保留。');
   });
 
-  it('keeps the fidelity surface in its own module: index.ts only routes to it', () => {
-    const index = readFileSync(fileURLToPath(new URL('../../src/renderer/index.ts', import.meta.url)), 'utf8');
+  it('keeps the fidelity surface in its own module: the shell and its import review only route to it', () => {
+    // The review before an import lives beside the shell in import-review.ts (Issue #1172).
+    const index = ['index.ts', 'import-review.ts']
+      .map((file) => readFileSync(fileURLToPath(new URL(`../../src/renderer/${file}`, import.meta.url)), 'utf8')).join('\n');
     expect(index).toContain("from './import-fidelity.js'");
     expect(index).not.toContain('function fidelityTable');
     expect(index).not.toContain('function statusIcon');
