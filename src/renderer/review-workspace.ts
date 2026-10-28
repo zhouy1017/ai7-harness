@@ -284,6 +284,8 @@ export interface MountReviewWorkspaceOptions {
   openPlan(reviewRunId: string): void;
   /** The Run on show changed state: the drawer reads its plan again if it shows it. */
   planChanged(): void;
+  /** 开始审阅 recorded this Run's authorization from the sheet, as the drawer's 开始任务 would (ADR 0096 §3). */
+  recorded?(reviewRunId: string): void;
   /** 在来源与证据中查看 (Issue #901): the Book's 来源与证据 view, brought to one retained source. */
   openSource?(evidenceId: string): void;
   /** 查看学习来源链 (Issue #912; LAUD-004): 学习回溯 opened at one material's Learning Lineage Explorer. */
@@ -2737,6 +2739,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
           try {
             result = await api.authorizeReviewRun({ reviewRunId: result.run.reviewRunId, planDigests: decision.planDigests });
             quickNote = REVIEW_STATUS_LINES.started;
+            if (result.run !== null) options.recorded?.(result.run.reviewRunId);
           } catch (error) {
             quickNote = options.errorMessage(error, REVIEW_STATUS_LINES.startFailed);
           }

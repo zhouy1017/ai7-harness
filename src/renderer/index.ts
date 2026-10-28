@@ -2775,6 +2775,7 @@ function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus 
     openProposalWorkspace: (input) => renderProposalWorkspace(input, bookId, bookTitle),
     openPlan: (reviewRunId) => openTaskPlan(bookId, 'review-run', reviewRunId),
     planChanged: () => taskDrawer.refresh('review-run'),
+    recorded: (reviewRunId) => { globalAttentionReader.refresh(); manuscriptOnScreen?.followReviewMarks(bookId, reviewRunId); },
     // 在来源与证据中查看 (Issue #901): the Evidence Workspace's deep link into the Book's retained sources.
     openSource: (evidenceId) => renderBookSources(bookId, bookTitle, evidenceId),
     // 查看学习来源链 (Issue #912): 质量与学习 › 学习回溯 at the material a result's preference came from.
