@@ -29,12 +29,11 @@ import { SkillAcquisitions } from './imported-skills.js';
 import type { ImportedSkillImportProjection, ImportedSkillRevisionProjection, ImportedSkillsProjection, ImportedSkillUpdateCandidateProjection, ImportedSkillUpdateCheckProjection, ImportedSkillUpdateRuleProjection, ProcedureRecommendationInput, ProcedureRecommendationProjection } from '../shared/protocol.js';
 import { initializeImportedSkillSchema, initializeImportedSkillUpdateSchema } from './imported-skill-schema.js';
 import { HOUSE_REVIEW_PREFERENCE_CATEGORY } from './launch-policy.js';
-import { CustomAnalysisDimensionError, CustomAnalysisDimensions, customAnalysisVersionInput, initializeCustomAnalysisDimensionSchema, type CustomAnalysisDimensionVersionRecord } from './custom-analysis-dimensions.js';
-import { CUSTOM_ANALYSIS_FIXED_TERMS, CustomAnalysisDocumentError, customAnalysisTextRefusal } from './analysis/custom-analysis-contract.js';
-import { customAnalysisKindDefinition, customAnalysisPlan } from './analysis/custom-analysis-kind.js';
-import { withModelClarification } from './provider/clarification-contract.js';
-import { CUSTOM_ANALYSIS_DIMENSION_STATE_LABELS, CUSTOM_ANALYSIS_UNIT_PLACEHOLDER, MAX_CUSTOM_ANALYSIS_ROWS_SHOWN, customAnalysisKindId, MAX_CUSTOM_ANALYSIS_VERSIONS_SHOWN, customAnalysisDimensionIdOfKind, customAnalysisModeGoal, isCustomAnalysisDimensionId, isCustomAnalysisKindId } from '../shared/protocol.js';
-import type { CustomAnalysisDimensionProjection, CustomAnalysisDimensionsProjection, CustomAnalysisRevisionSummaryProjection, CustomAnalysisRowProjection, PrepareCustomAnalysisInput, SaveCustomAnalysisDimensionInput } from '../shared/protocol.js';
+import { CustomAnalysisDimensionError, CustomAnalysisDimensions, customAnalysisVersionInput, initializeCustomAnalysisDimensionSchema } from './custom-analysis-dimensions.js';
+import { CustomAnalysisDocumentError } from './analysis/custom-analysis-contract.js';
+import { customAnalysisPlan } from './analysis/custom-analysis-kind.js';
+import { isCustomAnalysisKindId } from '../shared/protocol.js';
+import type { CustomAnalysisDimensionsProjection, PrepareCustomAnalysisInput, SaveCustomAnalysisDimensionInput } from '../shared/protocol.js';
 import { HouseReviewPreferenceLedger, houseReviewPreferenceKindDefinition, initializeHouseReviewPreferenceSchema, preferenceNames, withdrawalOf, withoutNames } from './house-review-preference.js';
 import { inspectEditQualitySignals as readEditQualitySignals } from './edit-quality-signals.js';
 import type { HouseReviewPreferenceProjection, HouseReviewPreferenceUse, EditQualitySignalsProjection } from '../shared/protocol.js';
@@ -393,7 +392,7 @@ import {
   WRITING_MODE_GOALS,
 } from '../shared/protocol.js';
 import { INITIAL_EVALUATION_LIVE_UNAVAILABLE, initialEvaluationKindDefinition } from './evaluation/initial-evaluation-kind.js';
-import { EVALUATION_PAYLOAD_CATEGORIES, liveKindAdmission, liveKindRule, liveMaterialRule, kindLocalTools } from './analysis/live-kind-admission.js';
+import { EVALUATION_PAYLOAD_CATEGORIES, liveKindRule, liveMaterialRule, kindLocalTools } from './analysis/live-kind-admission.js';
 import { reviewCategoryKindId } from '../shared/protocol.js';
 import { producedUnverified } from './evaluation/unverified-disclosure.js';
 import { readersReportKindDefinition } from './evaluation/readers-report-kind.js';
@@ -1124,6 +1123,8 @@ import * as seriesOperations from './series.js';
 import * as capturedProcedureOperations from './captured-procedures.js';
 import * as evaluationRewriteOperations from './evaluation-rewrites.js';
 import * as learningSupervision from './house-review-preference.js';
+import * as customAnalysisOperations from './custom-analysis-dimensions.js';
+export { CUSTOM_ANALYSIS_TEMPLATE_ECHO_REASON, CUSTOM_ANALYSIS_NOT_ADMITTED_REASON } from './custom-analysis-dimensions.js';
 
 const TOKEN_PATTERN = UUID_PATTERN;
 const CORE_SCHEMA_VERSION = 5;
@@ -4541,16 +4542,6 @@ function closeDatabaseQuietly(db: DatabaseSync | null): void {
  */
 export const REVIEW_CATEGORY_CACHE_CAPACITY = 16;
 
-/**
- * 自定义分析维度 (Issue #922, slice 7f): a template echoes manuscript text when this many consecutive graphemes of it, whitespace
- * aside, stand in a Book's text — a phrase, not a shared word. The words of each refusal the store gives for the family.
- */
-const CUSTOM_ANALYSIS_ECHO_GRAPHEMES = 12;
-const CUSTOM_ANALYSIS_GRAPHEMES = new Intl.Segmenter('zh', { granularity: 'grapheme' });
-export const CUSTOM_ANALYSIS_TEMPLATE_ECHO_REASON = '提问模板里有一段文字与书稿原文相同；模板只能写提问，不能包含稿件正文。' as const;
-export const CUSTOM_ANALYSIS_NOT_ADMITTED_REASON = '当前策略未开放自定义分析。' as const;
-const CUSTOM_ANALYSIS_NOT_ENABLED_REASON = '这个维度没有已启用的版本；在「知识库 › 工序与规则 › 自定义分析维度」中启用一个版本后才能运行。';
-
 export const SOURCE_VERSION_PARSER_CHANGED_MESSAGE =
   '这本书里已有同一个文件的来源版本，但它是用旧版 AI7 的读取方式导入的；AI7 现在读取文件的方式已经不同，不能在原来的来源版本上再次导入这个文件。可以把它作为新建图书导入。';
 
@@ -5777,46 +5768,27 @@ export class EditorialStore {
     });
   }
 
-  /** One version's kind definition, built once per version: its frozen contract is a pure function of the version. */
-  #customAnalysisDefinition(version: CustomAnalysisDimensionVersionRecord): AnalysisKindDefinition {
-    return this.#customAnalysisDefinitions.obtain(version.versionId, () => this.#customAnalysisCall(() => customAnalysisKindDefinition(customAnalysisVersionInput(version))));
+  /** What the 自定义分析维度 operations in custom-analysis-dimensions.ts reach of the store (Issue #1172), read live. */
+  readonly #customAnalysisHost: customAnalysisOperations.CustomAnalysisStoreHost = this.#customAnalysisHostOf();
+
+  #customAnalysisHostOf(): customAnalysisOperations.CustomAnalysisStoreHost {
+    const store = this;
+    return {
+      analysisCall: this.#analysisCall.bind(this),
+      assertAvailable: this.#assertAvailable.bind(this),
+      get authority() { return store.#authority; },
+      get baselineAnalysis() { return store.#baselineAnalysis; },
+      get boundedAuthority() { return store.#boundedAuthority; },
+      get control() { return store.#control; },
+      customAnalysisCall: this.#customAnalysisCall.bind(this),
+      get customAnalysisDefinitions() { return store.#customAnalysisDefinitions; },
+      get customAnalysisDimensions() { return store.#customAnalysisDimensions; },
+      get customAnalysisLedgers() { return store.#customAnalysisLedgers; },
+    };
   }
 
-  /**
-   * The append-only ledger of one dimension version: the same ledger class over the same Book database, constructed with that
-   * version's kind definition and bound to the launch the baseline ledger was bound to, so every plan it freezes names the binding
-   * this launch bound. Kept per kind and frozen contract, as a review category's ledger is: one holds the preparations in flight.
-   */
   customAnalysisLedger(definition: AnalysisKindDefinition): BaselineAnalysisStore {
-    this.#assertAvailable();
-    requireStore(isCustomAnalysisKindId(definition.kind), 'CUSTOM_ANALYSIS_KIND_INVALID', '该分析种类不是自定义分析维度。');
-    return this.#customAnalysisLedgers.obtain(`${definition.kind}\n${definition.promptContractDigest}`, () => {
-      const ledger = new BaselineAnalysisStore(this.#authority, this.#boundedAuthority, this.#control.baselineAnalysisRoute, definition);
-      ledger.bindLaunch(this.#baselineAnalysis.launch);
-      return ledger;
-    });
-  }
-
-  /**
-   * The exact version a Task of the family was prepared under: the one whose frozen contract — as this launch's ledger wraps it, or
-   * unwrapped — its latest plan names. A later version or a 停用 never moves it. `null` for a Task of no family kind, one whose plan
-   * never froze, or one whose dimension this store does not hold.
-   */
-  #customAnalysisVersionOfTask(taskIntentId: string): CustomAnalysisDimensionVersionRecord | null {
-    const row = this.#authority.prepare('SELECT kind FROM analysis_task_intents WHERE task_intent_id = ?').get(taskIntentId) as SqlRow | undefined;
-    const dimensionId = customAnalysisDimensionIdOfKind(row?.kind);
-    if (dimensionId === null) return null;
-    const envelope = this.#authority.prepare(`SELECT canonical_json, sha256 FROM analysis_plan_records WHERE task_intent_id = ? AND component = 'plan-envelope'
-      ORDER BY plan_version DESC LIMIT 1`).get(taskIntentId) as SqlRow | undefined;
-    if (envelope === undefined) return null;
-    const json = asString(envelope.canonical_json);
-    requireStore(sha256(json) === envelope.sha256, 'ANALYSIS_RECORD_INVALID', '任务计划记录与摘要不一致。');
-    const frozen = (JSON.parse(json) as Record<string, unknown>).promptContractDigest;
-    const dimension = this.#customAnalysisCall(() => this.#customAnalysisDimensions.dimension(dimensionId));
-    return dimension?.versions.find((version) => {
-      const definition = this.#customAnalysisDefinition(version);
-      return definition.promptContractDigest === frozen || withModelClarification(definition).promptContractDigest === frozen;
-    }) ?? null;
+    return customAnalysisOperations.customAnalysisLedger(this.#customAnalysisHost, definition);
   }
 
   /**
@@ -5827,227 +5799,33 @@ export class EditorialStore {
     if (taskIntentId === null) return this.#baselineAnalysis;
     const row = this.#authority.prepare('SELECT kind FROM analysis_task_intents WHERE book_id = ? AND task_intent_id = ?').get(bookId, taskIntentId) as SqlRow | undefined;
     if (row === undefined || !isCustomAnalysisKindId(row.kind)) return this.#baselineAnalysis;
-    const version = this.#customAnalysisVersionOfTask(taskIntentId);
+    const version = customAnalysisOperations.customAnalysisVersionOfTask(this.#customAnalysisHost, taskIntentId);
     requireStore(version !== null, 'CUSTOM_ANALYSIS_VERSION_UNKNOWN', '这项自定义分析任务所依据的维度版本已无法读取。');
-    return this.customAnalysisLedger(this.#customAnalysisDefinition(version));
+    return this.customAnalysisLedger(customAnalysisOperations.customAnalysisDefinition(this.#customAnalysisHost, version));
   }
 
-  /** The dimension version of a custom Task, for the plan the Task Drawer shows; `null` for any other Task. */
-  #customAnalysisPlanVersion(taskIntentId: string | null): CustomAnalysisDimensionVersionRecord | null {
-    return taskIntentId === null ? null : this.#customAnalysisVersionOfTask(taskIntentId);
-  }
-
-  /**
-   * Whether a template carries manuscript text (ADR 0090 item 4; Provider Processing v22/v23: never manuscript text): any
-   * `CUSTOM_ANALYSIS_ECHO_GRAPHEMES` consecutive graphemes of it, whitespace aside, standing in a block of a Book's latest primary
-   * revision — every Book's when a version is saved or enabled, and the Book's own again when a Run of it is prepared.
-   */
-  #templateEchoesManuscript(template: string, bookId: string | null): boolean {
-    const graphemes = Array.from(CUSTOM_ANALYSIS_GRAPHEMES.segment(template.replace(CUSTOM_ANALYSIS_UNIT_PLACEHOLDER, '')), (part) => part.segment)
-      .filter((part) => part.trim() !== '');
-    if (graphemes.length < CUSTOM_ANALYSIS_ECHO_GRAPHEMES) return false;
-    const windows = new Set<string>();
-    for (let index = 0; index + CUSTOM_ANALYSIS_ECHO_GRAPHEMES <= graphemes.length; index += 1) {
-      windows.add(graphemes.slice(index, index + CUSTOM_ANALYSIS_ECHO_GRAPHEMES).join(''));
-    }
-    const revisions = this.#authority.prepare(`SELECT m.manuscript_id, mr.revision_id FROM manuscripts m
-      JOIN manuscript_revisions mr ON mr.manuscript_id = m.manuscript_id
-      WHERE m.role = 'primary' AND (? IS NULL OR m.book_id = ?)
-        AND mr.ordinal = (SELECT max(latest.ordinal) FROM manuscript_revisions latest WHERE latest.manuscript_id = m.manuscript_id)`)
-      .all(bookId, bookId) as SqlRow[];
-    return revisions.some((revision) => this.#analysisCall(() => this.#baselineAnalysis.readRevisionBlocks(asString(revision.manuscript_id), asString(revision.revision_id)))
-      .some((block) => {
-        const compact = block.text.replace(/\s+/gu, '');
-        for (const window of windows) if (compact.includes(window)) return true;
-        return false;
-      }));
-  }
-
-  /** How many Tasks of any Book each version of a dimension was prepared under, by the contract each Task's plans froze. */
-  #customAnalysisTaskCounts(dimensionId: string, versions: ReadonlyArray<CustomAnalysisDimensionVersionRecord>): Map<string, number> {
-    const rows = this.#authority.prepare(`SELECT DISTINCT p.task_intent_id, json_extract(p.canonical_json, '$.promptContractDigest') AS digest
-      FROM analysis_plan_records p JOIN analysis_task_intents i ON i.task_intent_id = p.task_intent_id
-      WHERE i.kind = ? AND p.component = 'plan-envelope'`).all(customAnalysisKindId(dimensionId)) as SqlRow[];
-    const byDigest = new Map<string, string>();
-    for (const version of versions) {
-      const definition = this.#customAnalysisDefinition(version);
-      byDigest.set(definition.promptContractDigest, version.versionId);
-      byDigest.set(withModelClarification(definition).promptContractDigest, version.versionId);
-    }
-    const tasks = new Map<string, Set<string>>();
-    for (const row of rows) {
-      const versionId = byDigest.get(String(row.digest));
-      if (versionId !== undefined) tasks.set(versionId, (tasks.get(versionId) ?? new Set()).add(asString(row.task_intent_id)));
-    }
-    return new Map([...tasks].map(([versionId, ids]) => [versionId, ids.size] as const));
-  }
-
-  /** The latest revision of one dimension on one Book, as ②A's 自定义 tab reads it. */
-  #customAnalysisRevisionSummary(revision: Readonly<Record<string, unknown>>): CustomAnalysisRevisionSummaryProjection {
-    const typed = revision as unknown as NonNullable<BaselineAnalysisProjection['resultSetRevision']> & {
-      dimension: { versionId: string; version: number; documentDigest: string };
-      rows: ReadonlyArray<CustomAnalysisRowProjection>;
-      rowCounts: CustomAnalysisRevisionSummaryProjection['rowCounts'];
-    };
-    return {
-      revisionId: typed.revisionId,
-      ordinal: typed.ordinal,
-      createdAt: typed.createdAt,
-      dimensionVersion: { versionId: typed.dimension.versionId, version: typed.dimension.version, documentDigest: typed.dimension.documentDigest },
-      manuscriptRevisionLabel: typed.manuscriptPin.revisionLabel,
-      coverage: typed.coverage,
-      freshness: typed.freshness,
-      gaps: typed.gaps.map((gap) => ({ unitOrdinal: gap.unitOrdinal, code: gap.code, reason: gap.reason })),
-      rowCounts: { units: typed.rowCounts.units, rows: typed.rowCounts.rows, located: typed.rowCounts.located, unlocated: typed.rowCounts.unlocated },
-      rows: typed.rows.slice(0, MAX_CUSTOM_ANALYSIS_ROWS_SHOWN),
-      rowsTruncated: typed.rows.length > MAX_CUSTOM_ANALYSIS_ROWS_SHOWN,
-    };
-  }
-
-  /** One dimension on one Book: its latest Task's state, its latest revision, and whether 运行 can prepare now. */
-  #customAnalysisBook(
-    dimensionId: string,
-    enabled: CustomAnalysisDimensionVersionRecord | null,
-    bookId: string,
-    progress?: ProgressReader,
-  ): NonNullable<CustomAnalysisDimensionProjection['book']> {
-    const latestTask = this.#authority.prepare('SELECT task_intent_id FROM analysis_task_intents WHERE book_id = ? AND kind = ? ORDER BY rowid DESC LIMIT 1')
-      .get(bookId, customAnalysisKindId(dimensionId)) as SqlRow | undefined;
-    const version = (latestTask === undefined ? null : this.#customAnalysisVersionOfTask(asString(latestTask.task_intent_id))) ?? enabled;
-    if (version === null) return { taskState: null, latest: null, unavailableReason: CUSTOM_ANALYSIS_NOT_ENABLED_REASON };
-    const projection = this.#analysisCall(() => this.customAnalysisLedger(this.#customAnalysisDefinition(version)).inspect(bookId, progress)) as unknown as BaselineAnalysisProjection;
-    const active = runIsActive(projection.run?.state ?? null);
-    return {
-      taskState: projection.taskIntent === null ? null : { taskIntentId: projection.taskIntent.taskIntentId, state: projection.state, stateLabel: projection.stateLabel },
-      latest: projection.resultSetRevision === null ? null : this.#customAnalysisRevisionSummary(projection.resultSetRevision as unknown as Record<string, unknown>),
-      unavailableReason: enabled === null ? CUSTOM_ANALYSIS_NOT_ENABLED_REASON : active ? '这个维度的上一项任务还在运行；它结束后才能再运行。' : null,
-    };
-  }
-
-  /**
-   * 知识库 › 工序与规则 › 自定义分析维度 (`bookId: null`), or ②A's 自定义 tab over one Book (Issue #922; ANALYSIS-001, ANALYSIS-009):
-   * the house's dimensions, each with its versions and states, and for a Book each dimension with an enabled version or a Task
-   * there, with that Book's latest Result Set Revision of it. Each dimension is its own kind, so each keeps its own Result Set.
-   */
   inspectCustomAnalysisDimensions(bookId: string | null, progress?: ProgressReader): CustomAnalysisDimensionsProjection {
-    this.#assertAvailable();
-    requireStore(bookId === null || (typeof bookId === 'string' && UUID_PATTERN.test(bookId)), 'CUSTOM_ANALYSIS_REQUEST_INVALID', '自定义分析维度请求无效。');
-    if (bookId !== null) requireStore(this.#authority.prepare('SELECT 1 FROM books WHERE book_id = ?').get(bookId) !== undefined, 'BOOK_NOT_FOUND', '这本书不存在。');
-    const listed = this.#customAnalysisCall(() => this.#customAnalysisDimensions.list());
-    const dimensions = listed.dimensions.flatMap((dimension): CustomAnalysisDimensionProjection[] => {
-      const enabled = dimension.versions.find((version) => version.state === 'enabled') ?? null;
-      const counts = this.#customAnalysisTaskCounts(dimension.dimensionId, dimension.versions);
-      const book = bookId === null ? null : this.#customAnalysisBook(dimension.dimensionId, enabled, bookId, progress);
-      // ②A lists what can run on the Book and what already ran there; a dimension with neither is the house's alone.
-      if (book !== null && enabled === null && book.taskState === null) return [];
-      return [{
-        dimensionId: dimension.dimensionId,
-        kind: customAnalysisKindId(dimension.dimensionId),
-        title: dimension.versions[0]!.document.title,
-        enabledVersion: enabled === null ? null : { versionId: enabled.versionId, version: enabled.version },
-        versions: dimension.versions.slice(0, MAX_CUSTOM_ANALYSIS_VERSIONS_SHOWN).map((version) => ({
-          versionId: version.versionId,
-          version: version.version,
-          title: version.document.title,
-          questionTemplate: version.document.questionTemplate,
-          documentDigest: version.documentDigest,
-          supersedes: version.supersedes,
-          state: version.state,
-          stateLabel: CUSTOM_ANALYSIS_DIMENSION_STATE_LABELS[version.state],
-          createdAt: version.createdAt,
-          stateRecordedAt: version.stateRecordedAt,
-          taskCount: counts.get(version.versionId) ?? 0,
-        })),
-        versionsTruncated: dimension.versions.length > MAX_CUSTOM_ANALYSIS_VERSIONS_SHOWN,
-        book,
-      }];
-    });
-    return { bookId, dimensions, truncated: listed.truncated, fixed: structuredClone(CUSTOM_ANALYSIS_FIXED_TERMS) as CustomAnalysisDimensionsProjection['fixed'] };
+    return customAnalysisOperations.inspectCustomAnalysisDimensions(this.#customAnalysisHost, bookId, progress);
   }
 
-  /** The validation 保存 and 验证并启用 share: the document's own rules, and no manuscript text of any Book in its template. */
-  #requireCustomAnalysisTexts(title: unknown, questionTemplate: unknown): void {
-    const refusal = customAnalysisTextRefusal(title, questionTemplate);
-    requireStore(refusal === null, 'CUSTOM_ANALYSIS_DIMENSION_INVALID', refusal ?? '');
-    requireStore(!this.#templateEchoesManuscript(questionTemplate as string, null), 'CUSTOM_ANALYSIS_TEMPLATE_MANUSCRIPT_TEXT', CUSTOM_ANALYSIS_TEMPLATE_ECHO_REASON);
-  }
-
-  /** 保存: version 1 of a new dimension, or the next version superseding the latest; `待验证` until 验证并启用. */
   saveCustomAnalysisDimension(input: SaveCustomAnalysisDimensionInput): CustomAnalysisDimensionsProjection {
-    this.#assertAvailable();
-    requireStore(typeof input === 'object' && input !== null && (input.dimensionId === null || isCustomAnalysisDimensionId(input.dimensionId)),
-      'CUSTOM_ANALYSIS_REQUEST_INVALID', '自定义分析维度请求无效。');
-    this.#requireCustomAnalysisTexts(input.title, input.questionTemplate);
-    this.#customAnalysisCall(() => this.#customAnalysisDimensions.save(
-      { dimensionId: input.dimensionId, title: input.title, questionTemplate: input.questionTemplate }, new Date().toISOString()));
-    return this.inspectCustomAnalysisDimensions(null);
+    return customAnalysisOperations.saveCustomAnalysisDimension(this.#customAnalysisHost, input);
   }
 
-  /** 验证并启用: the version's document validated again, deterministically — its rules, its contract, the Books' text — then `已启用`. */
   enableCustomAnalysisDimension(versionId: string): CustomAnalysisDimensionsProjection {
-    this.#assertAvailable();
-    const version = isCustomAnalysisDimensionId(versionId) ? this.#customAnalysisCall(() => this.#customAnalysisDimensions.version(versionId)) : null;
-    requireStore(version !== null, 'CUSTOM_ANALYSIS_DIMENSION_NOT_FOUND', '这个自定义分析维度版本不存在。');
-    this.#requireCustomAnalysisTexts(version.document.title, version.document.questionTemplate);
-    this.#customAnalysisDefinition(version);
-    this.#customAnalysisCall(() => this.#customAnalysisDimensions.enable(versionId, new Date().toISOString()));
-    return this.inspectCustomAnalysisDimensions(null);
+    return customAnalysisOperations.enableCustomAnalysisDimension(this.#customAnalysisHost, versionId);
   }
 
-  /** 停用: final for the version; a Run prepared under it keeps naming it, and no new Run can be prepared under it. */
   stopCustomAnalysisDimension(versionId: string): CustomAnalysisDimensionsProjection {
-    this.#assertAvailable();
-    requireStore(isCustomAnalysisDimensionId(versionId), 'CUSTOM_ANALYSIS_DIMENSION_NOT_FOUND', '这个自定义分析维度版本不存在。');
-    this.#customAnalysisCall(() => this.#customAnalysisDimensions.stop(versionId, new Date().toISOString()));
-    return this.inspectCustomAnalysisDimensions(null);
+    return customAnalysisOperations.stopCustomAnalysisDimension(this.#customAnalysisHost, versionId);
   }
 
-  /**
-   * ②A 自定义 › 运行 (Issue #922): the dimension's newest enabled version prepared on the Book through the ordinary ②A path — Task
-   * Intent, input checkpoint, Coverage Manifest, Plan Envelope — its plan then opened in the Task Drawer, where 开始任务 records the
-   * standard Run Authorization. Under a live scope the selected policy must admit the family (`custom-analysis/*`, v22/v23); the
-   * local deterministic route needs no policy. The preparation is a few local steps and runs to its end in this one call.
-   */
   prepareCustomAnalysis(input: PrepareCustomAnalysisInput, launchPolicy: LaunchPolicyProjection): { taskIntentId: string; dimensions: CustomAnalysisDimensionsProjection } {
-    this.#assertAvailable();
-    requireStore(typeof input === 'object' && input !== null && typeof input.bookId === 'string' && UUID_PATTERN.test(input.bookId) &&
-      isCustomAnalysisDimensionId(input.dimensionId), 'CUSTOM_ANALYSIS_REQUEST_INVALID', '自定义分析请求无效。');
-    const dimension = this.#customAnalysisCall(() => this.#customAnalysisDimensions.dimension(input.dimensionId));
-    requireStore(dimension !== null, 'CUSTOM_ANALYSIS_DIMENSION_NOT_FOUND', '这个自定义分析维度不存在。');
-    const version = dimension.versions.find((entry) => entry.state === 'enabled') ?? null;
-    requireStore(version !== null, 'CUSTOM_ANALYSIS_DIMENSION_NOT_ENABLED', '这个维度没有已启用的版本；已停用的版本不能再运行。');
-    requireStore(!this.#templateEchoesManuscript(version.document.questionTemplate, input.bookId), 'CUSTOM_ANALYSIS_TEMPLATE_MANUSCRIPT_TEXT', CUSTOM_ANALYSIS_TEMPLATE_ECHO_REASON);
-    const definition = this.#customAnalysisDefinition(version);
-    const live = this.#baselineAnalysis.launch.live;
-    requireStore(live === null || liveKindAdmission(launchPolicy, definition, live) !== null, 'CUSTOM_ANALYSIS_NOT_ADMITTED', CUSTOM_ANALYSIS_NOT_ADMITTED_REASON);
-    const ledger = this.customAnalysisLedger(definition);
-    const mode = input.update?.mode ?? 'first-baseline';
-    let progress = this.#analysisCall(() => ledger.prepare({
-      phase: 'start', bookId: input.bookId, goal: customAnalysisModeGoal(mode), update: input.update ?? null, reconfirm: false, launchPolicy,
-    }));
-    while (!progress.done) {
-      const workId = progress.workId;
-      requireStore(workId !== null, 'ANALYSIS_PREPARATION_INCOMPLETE', '自定义分析的任务计划没有准备完成。');
-      progress = this.#analysisCall(() => ledger.prepare({ phase: 'advance', workId }));
-    }
-    const prepared = progress.projection as unknown as BaselineAnalysisProjection | null;
-    requireStore(prepared !== null && prepared.taskIntent !== null && prepared.planEnvelope !== null, 'ANALYSIS_PREPARATION_INCOMPLETE', '自定义分析的任务计划没有准备完成。');
-    return { taskIntentId: prepared.taskIntent.taskIntentId, dimensions: this.inspectCustomAnalysisDimensions(input.bookId) };
+    return customAnalysisOperations.prepareCustomAnalysis(this.#customAnalysisHost, input, launchPolicy);
   }
 
-  /** Startup reconciliation of every dimension's Runs a stopped service left under way, as each other kind's is. */
   reconcileStoppedCustomAnalysisRuns(): { settled: number } {
-    this.#assertAvailable();
-    // Each dimension's latest Task: only it can have left a Run under way, since a kind holds one active Run at a time.
-    const tasks = this.#authority.prepare(`SELECT t.task_intent_id FROM analysis_task_intents t WHERE t.kind GLOB 'custom-analysis/*'
-      AND t.rowid = (SELECT max(latest.rowid) FROM analysis_task_intents latest WHERE latest.kind = t.kind)`).all() as SqlRow[];
-    let settled = 0;
-    for (const task of tasks) {
-      const version = this.#customAnalysisVersionOfTask(asString(task.task_intent_id));
-      if (version === null) continue;
-      settled += this.#analysisCall(() => this.customAnalysisLedger(this.#customAnalysisDefinition(version)).reconcileStoppedRuns()).settled;
-    }
-    return { settled };
+    return customAnalysisOperations.reconcileStoppedCustomAnalysisRuns(this.#customAnalysisHost);
   }
 
   #taskMaterialReadings(boundary: TaskMaterialBoundary, surface: '审阅' | '评估' = '审阅'): ReadonlyArray<TaskMaterialReading> {
@@ -6462,7 +6240,7 @@ export class EditorialStore {
     if (input.kind === 'baseline-analysis') {
       // A 自定义分析维度 Task's plan is read on the ledger of the exact version it froze, the Book's baseline otherwise (Issue #922).
       const ledger = this.#analysisLedgerOfTask(input.bookId, input.ref);
-      const custom = ledger === this.#baselineAnalysis ? null : this.#customAnalysisPlanVersion(input.ref);
+      const custom = ledger === this.#baselineAnalysis ? null : customAnalysisOperations.customAnalysisPlanVersion(this.#customAnalysisHost, input.ref);
       // The execution owner's progress feeds the activity card of a Run under way (Issue #422, AUTH-011).
       const inspected = this.#analysisCall(() => ledger.inspect(input.bookId, progress)) as BaselineAnalysisProjection;
       // The ledger names a redo only on the baseline's Tasks; a dimension's Task is read as one that redoes nothing.
@@ -6730,7 +6508,7 @@ export class EditorialStore {
   /** A stopped version starts no new Run (ADR 0090 item 4): its prepared Tasks stay readable and keep naming it. */
   #requireCustomAnalysisStartable(ledger: BaselineAnalysisStore, taskIntentId: string): void {
     if (!isCustomAnalysisKindId(ledger.kind)) return;
-    const version = this.#customAnalysisVersionOfTask(taskIntentId);
+    const version = customAnalysisOperations.customAnalysisVersionOfTask(this.#customAnalysisHost, taskIntentId);
     requireStore(version !== null && version.state !== 'stopped', 'CUSTOM_ANALYSIS_DIMENSION_STOPPED',
       `这项任务所依据的维度版本${version === null ? '' : `第 ${version.version} 版`}已停用，不能再开始；请在「分析 › 自定义」中按已启用的版本重新运行。`);
   }
@@ -7219,8 +6997,8 @@ export class EditorialStore {
       WHERE t.kind GLOB 'custom-analysis/*' AND t.rowid =
         (SELECT max(latest.rowid) FROM analysis_task_intents latest WHERE latest.kind = t.kind)`).all() as SqlRow[];
     for (const row of customKinds) {
-      const version = this.#customAnalysisVersionOfTask(asString(row.task_intent_id));
-      if (version !== null) ofLedger('baseline-analysis', this.customAnalysisLedger(this.#customAnalysisDefinition(version)));
+      const version = customAnalysisOperations.customAnalysisVersionOfTask(this.#customAnalysisHost, asString(row.task_intent_id));
+      if (version !== null) ofLedger('baseline-analysis', this.customAnalysisLedger(customAnalysisOperations.customAnalysisDefinition(this.#customAnalysisHost, version)));
     }
     // A kind whose records no longer read is said where its own surface reads it: it never keeps another kind's Run waiting.
     for (const kind of ['initial-evaluation', 'readers-report', 'evaluation-rewrite', 'writing'] as const) {
