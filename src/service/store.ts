@@ -1,4 +1,4 @@
-import { procedureStopped, readProcedureLibrary, resolveProcedurePin, saveProcedureDefinition, selectProcedureForBook, procedureVersionId } from './procedures/editable.js';
+import { procedureStopped } from './procedures/editable.js';
 import { initializeEditableProcedureSchema } from './procedures/editable-schema.js';
 import { HouseWordLists, initializeHouseWordListSchema } from './review/house-word-list.js';
 import { HouseWordListError, type InspectHouseWordListInput, type SaveHouseWordListInput } from '../shared/protocol/house-word-list.js';
@@ -8,12 +8,11 @@ import { IDLE_BACKGROUND_SCHEMA_VERSION, LOCAL_REVIEW_SCHEMA_VERSION, EDITORIAL_
 import { initializeLocalStageSchema } from './review/review-runs.js';
 import { sha256Hex } from './analysis/canonical.js';
 import { graphemeCount } from './analysis/factual-review-contract.js';
-import { backgroundEnrollmentKinds } from './analysis/live-kind-admission.js';
 import { executionBackgroundShare } from './analysis/execution.js';
 import { initializeProcedureDefinitionSchema } from './procedures/definition-store.js';
 import { EditorialLearningLedger, LearningReads, initializeEditorialLearningSchema, type WordLearningProofs } from './learning/ledger.js';
-import { CURATION_CONTRACT_DIGEST, validCurationBudget, parseCurationResult, type CurationRun } from './learning/curation.js';
-import type { EnabledLearningEnvelope, LearningCurationBudget, LearningCurationBundle } from '../shared/protocol/learning.js';
+import { type CurationRun } from './learning/curation.js';
+import type { LearningCurationBundle } from '../shared/protocol/learning.js';
 import type { WordTrackedEditLearningSource } from '../shared/protocol/learning.js';
 import type { ChangeEditorialLearningInput, CreateEditorialMemoryInput, DeactivateEditorialMemoryInput, InspectEditorialLearningInput, EditorialLearningProjection, LearningReasonAskInput, LearningReasonAskProjection } from '../shared/protocol/learning.js';
 import { buildDialogueMessage, dialogueQuestionDigest } from './dialogue/contract.js';
@@ -25,20 +24,16 @@ import { GLOBAL_AGENT_SCHEMA_VERSION } from './task-authorization.js';
 import { SupervisionDirectives, governedMemoryItems, preferenceItems, initializeSupervisionSchema, supervisionSourceCandidates, editorialMemoryGovernanceItem, type EditorialMemoryGovernanceHooks } from './learning/supervision-directives.js';
 import { GLOBAL_AGENT_POLICY_BLOCKED, type GlobalAgentProjection, type RecordLearningSupervisionInput } from '../shared/protocol.js';
 import { analysisBytePage, revisionUnitsPage, analysisOverviewPage, baselineAnalysisSummaryPage } from './analysis/baseline-analysis-wire.js';
-import { acquireSkillPackage, ImportedSkills, ImportedSkillError, SkillAcquisitions, type AcquiredSkillPackage } from './imported-skills.js';
-import { ImportedSkillUpdates } from './imported-skill-updates.js';
-import { recommendProcedures, type RecommendationReading } from './procedure-recommendation.js';
+import { SkillAcquisitions } from './imported-skills.js';
 import type { ImportedSkillImportProjection, ImportedSkillRevisionProjection, ImportedSkillsProjection, ImportedSkillUpdateCandidateProjection, ImportedSkillUpdateCheckProjection, ImportedSkillUpdateRuleProjection, ProcedureRecommendationInput, ProcedureRecommendationProjection } from '../shared/protocol.js';
 import { initializeImportedSkillSchema, initializeImportedSkillUpdateSchema } from './imported-skill-schema.js';
 import { HOUSE_REVIEW_PREFERENCE_CATEGORY } from './launch-policy.js';
-import { CustomAnalysisDimensionError, CustomAnalysisDimensions, customAnalysisVersionInput, initializeCustomAnalysisDimensionSchema, type CustomAnalysisDimensionVersionRecord } from './custom-analysis-dimensions.js';
-import { CUSTOM_ANALYSIS_FIXED_TERMS, CustomAnalysisDocumentError, customAnalysisTextRefusal } from './analysis/custom-analysis-contract.js';
-import { customAnalysisKindDefinition, customAnalysisPlan } from './analysis/custom-analysis-kind.js';
-import { withModelClarification } from './provider/clarification-contract.js';
-import { CUSTOM_ANALYSIS_DIMENSION_STATE_LABELS, CUSTOM_ANALYSIS_UNIT_PLACEHOLDER, MAX_CUSTOM_ANALYSIS_ROWS_SHOWN, customAnalysisKindId, MAX_CUSTOM_ANALYSIS_VERSIONS_SHOWN, customAnalysisDimensionIdOfKind, customAnalysisModeGoal, isCustomAnalysisDimensionId, isCustomAnalysisKindId } from '../shared/protocol.js';
-import type { CustomAnalysisDimensionProjection, CustomAnalysisDimensionsProjection, CustomAnalysisRevisionSummaryProjection, CustomAnalysisRowProjection, PrepareCustomAnalysisInput, SaveCustomAnalysisDimensionInput } from '../shared/protocol.js';
-import { HousePreferenceInfluence, HouseReviewPreferenceLedger, houseReviewPreferenceKindDefinition, housePreferenceSources, initializeHouseReviewPreferenceSchema, preferenceNames, preferenceSourceIdentity, preferenceSourceWithdrawal, withdrawalOf, withoutNames, type HousePreferenceSource, type StandingReviewMaterial } from './house-review-preference.js';
-import { inspectEditQualitySignals as readEditQualitySignals } from './edit-quality-signals.js';
+import { CustomAnalysisDimensionError, CustomAnalysisDimensions, customAnalysisVersionInput, initializeCustomAnalysisDimensionSchema } from './custom-analysis-dimensions.js';
+import { CustomAnalysisDocumentError } from './analysis/custom-analysis-contract.js';
+import { customAnalysisPlan } from './analysis/custom-analysis-kind.js';
+import { isCustomAnalysisKindId } from '../shared/protocol.js';
+import type { CustomAnalysisDimensionsProjection, PrepareCustomAnalysisInput, SaveCustomAnalysisDimensionInput } from '../shared/protocol.js';
+import { HouseReviewPreferenceLedger, houseReviewPreferenceKindDefinition, initializeHouseReviewPreferenceSchema, preferenceNames, withdrawalOf, withoutNames } from './house-review-preference.js';
 import type { HouseReviewPreferenceProjection, HouseReviewPreferenceUse, EditQualitySignalsProjection } from '../shared/protocol.js';
 import type { ApplyReceiptProjection, BatchProposalDecisionDraftInput, InspectApplyReceiptInput, PrepareReverseApplyInput, ProposalDraftBatchProjection, ProposalWorkspaceInput, ProposalWorkspaceProjection, RecordProposalDecisionInput, ReverseApplyPreparationProjection, SaveProposalDecisionDraftInput } from '../shared/protocol.js';
 import { initializeProposalReviewSchema } from './editorial-marks.js';
@@ -61,7 +56,21 @@ import { closeSync, constants, createReadStream, existsSync, fstatSync, lstatSyn
 import { copyFile, lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
-import { acceptedSourceImportRetainedBoundaryLabels, sourceImportRetainedBoundaryLabel, BASELINE_ANALYSIS_MODE_GOALS, BASELINE_ANALYSIS_MODE_LABELS, CAPTURED_PROCEDURE_CAPTURE_SLOTS, CAPTURED_PROCEDURE_STATE_LABELS, MAX_CAPTURED_PROCEDURE_RUNS_SHOWN, MAX_CAPTURED_PROCEDURE_TITLE_GRAPHEMES, MAX_CAPTURED_PROCEDURE_VERSIONS_PAGE, J03_TASK_GOAL, MAX_DIALOGUE_SELECTION_GRAPHEMES, MAX_EVALUATION_CALIBRATION_BOOKS, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_LEARNING_AUDIT_BOOK_CHOICES, MAX_LEARNING_AUDIT_PAGE, MAX_LEARNING_AUDIT_SERIES_CHOICES, MAX_LEARNING_LINEAGE_DECISIONS, MAX_LEARNING_LINEAGE_TASKS, MAX_LEARNING_REMEDIATION_ITEMS, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
+import {
+  DIGEST_PATTERN,
+  StoreError,
+  StoreFatalError,
+  UUID_PATTERN,
+  asNumber,
+  asString,
+  canonicalJson,
+  requireStore,
+  sha256,
+  type SqlRow,
+} from './store-records.js';
+// The store's error types are still read from here by every caller that catches them.
+export { StoreError, StoreFatalError };
+import { acceptedSourceImportRetainedBoundaryLabels, sourceImportRetainedBoundaryLabel, BASELINE_ANALYSIS_MODE_GOALS, BASELINE_ANALYSIS_MODE_LABELS, J03_TASK_GOAL, MAX_DIALOGUE_SELECTION_GRAPHEMES, MAX_EVALUATION_CALIBRATION_BOOKS, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_LEARNING_AUDIT_PAGE, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
 import type {
   ControlTaskRunInput,
   EditTaskPlanInput,
@@ -79,12 +88,10 @@ import type {
   DialogueProjection,
   CapturedProcedureProjection,
   CapturedProceduresProjection,
-  CapturedProcedureApplicabilityEntryProjection,
   CapturedProcedureApplicabilityProjection,
   CapturedProcedureScopeSlot,
   CapturedProcedureRunProjection,
   CapturedProcedureStopPreviewProjection,
-  CapturedProcedureStopRunProjection,
   CapturedProcedureValidationProjection,
   DeveloperProposalProjection,
   DeveloperProposalVersionProjection,
@@ -204,7 +211,6 @@ import type {
   RecordChangeSuggestionDecisionInput,
   RecordProposalDecisionFeedbackInput,
   DecideLearningMaterialInput,
-  FeedbackHistoryEntryProjection,
   InspectEvaluationCalibrationInput,
   EvaluationCalibrationBookProjection,
   BookSeriesProjection,
@@ -221,28 +227,21 @@ import type {
   SeriesMemberProjection,
   SeriesMembersCursor,
   SeriesMembersPageProjection,
-  SeriesMembershipChangeProjection,
   SeriesMembershipChangeResultProjection,
   SeriesMembershipPreviewProjection,
   SeriesProjection,
   EditSeriesKnowledgeCandidateInput,
   PromoteSeriesKnowledgeInput,
   ProposeSeriesKnowledgeInput,
-  SeriesKnowledgeCandidateProjection,
   SeriesKnowledgeCandidatesCursor,
   SeriesKnowledgeCandidatesPageProjection,
-  SeriesKnowledgeItemProjection,
   SeriesKnowledgeItemsCursor,
   SeriesKnowledgeItemsPageProjection,
   SeriesKnowledgeRevisionsProjection,
   SeriesKnowledgeConflictsProjection,
   SeriesKnowledgePromotionProjection,
   SeriesKnowledgeProposalProjection,
-  SeriesKnowledgeProvenanceProjection,
   SeriesKnowledgeReviewProjection,
-  SeriesKnowledgeRevisionProjection,
-  SeriesKnowledgeSpanInput,
-  SeriesKnowledgeTarget,
   DataVersionProjection,
   DatabaseExportActivityProjection,
   DatabaseExportContentsProjection,
@@ -269,7 +268,6 @@ import type {
   LearningAuditBookProjection,
   LearningAuditInput,
   LearningAuditMaterialProjection,
-  LearningAuditChoicesProjection,
   LearningAuditProjection,
   LearningLineageProjection,
   LearningRemediationOutcomeProjection,
@@ -332,7 +330,6 @@ import type {
   DefaultExecutionRuleReference,
   BackgroundAnalysisEnrollmentProjection,
   BackgroundAnalysisScopeKind,
-  BackgroundAnalysisScopeOffer,
   BackgroundAnalysisStartingPoint,
   DefaultExecutionRuleBinding,
   DefaultExecutionRulesProjection,
@@ -340,7 +337,6 @@ import type {
   FactualReviewGoal,
   FactualReviewProjection,
   EvaluationInitialProjection,
-  EvaluationReadersReportProjection,
   InitialEvaluationProjection,
   ReadersReportProjection,
   ReadersReportTemplate,
@@ -349,7 +345,6 @@ import type {
   EvaluationMarketProjection,
   EvaluationRewriteDecision,
   EvaluationRewriteProjection,
-  EvaluationRewriteWorkspaceProjection,
   WritingDraftCreatedProjection,
   WritingProjection,
   WritingTaskProjection,
@@ -364,16 +359,10 @@ import type {
 import { bookFindingsPage, paragraphAnalysis } from './book-findings.js';
 import type { BookFindingProjection, BookFindingsProjection, ParagraphAnalysisProjection } from '../shared/protocol.js';
 import {
-  BACKGROUND_ANALYSIS_CEILING_MAX,
   INITIAL_EVALUATION_MODE_GOALS,
-  READERS_REPORT_LIVE_UNAVAILABLE,
-  READERS_REPORT_MODE_GOALS,
-  EVALUATION_REWRITE_LIVE_UNAVAILABLE,
-  EVALUATION_REWRITE_MODE_GOALS,
   MAX_EVALUATION_COMPARABLES,
   MIN_SERIES_PREDICTION_BOOKS,
   READERS_REPORT_NO_EXEMPLAR,
-  READERS_REPORT_TEMPLATE_LABELS,
   READERS_REPORT_TEMPLATES,
   MAX_WRITING_AUDIENCE_GRAPHEMES,
   MAX_WRITING_CHANNEL_GRAPHEMES,
@@ -395,40 +384,27 @@ import {
   WRITING_MODE_GOALS,
 } from '../shared/protocol.js';
 import { INITIAL_EVALUATION_LIVE_UNAVAILABLE, initialEvaluationKindDefinition } from './evaluation/initial-evaluation-kind.js';
-import { EVALUATION_PAYLOAD_CATEGORIES, liveKindAdmission, liveKindRule, liveMaterialRule, kindLocalTools } from './analysis/live-kind-admission.js';
+import { EVALUATION_PAYLOAD_CATEGORIES, liveKindRule, liveMaterialRule, kindLocalTools } from './analysis/live-kind-admission.js';
 import { reviewCategoryKindId } from '../shared/protocol.js';
 import { producedUnverified } from './evaluation/unverified-disclosure.js';
-import { readersReportKindDefinition } from './evaluation/readers-report-kind.js';
-import { evaluationRewriteKindDefinition } from './evaluation/evaluation-rewrite-kind.js';
-import { evaluationRewriteScoredItems, type EvaluationRewriteContractInput } from './evaluation/evaluation-rewrite-contract.js';
+import { evaluationRewriteScoredItems } from './evaluation/evaluation-rewrite-contract.js';
 import { predictionRange } from './evaluation/pricing-prediction.js';
 import {
   EvaluationRewriteError,
   EvaluationRewrites,
-  evaluationRewriteContractInput,
   evaluationRewriteRefusal,
   initializeEvaluationRewriteSchema,
-  rewriteProposalItems,
-  type RewritableEvaluation,
-  type StoredEvaluationRewriteDecision,
-  type StoredEvaluationRewriteTask,
 } from './evaluation-rewrites.js';
 import {
   MAX_EXEMPLAR_GRAPHEMES,
   MAX_READERS_REPORT_EXEMPLARS,
-  readersReportExemplarLine,
   type ReadersReportContractInput,
   type ReadersReportExemplarInput,
 } from './evaluation/readers-report-contract.js';
 import {
-  READERS_REPORT_NEEDS_FINALIZED,
   ReadersReportError,
   ReadersReports,
   initializeReadersReportSchema,
-  readersReportBlockLength,
-  readersReportContractInput,
-  readersReportDraftBlocks,
-  type StoredReadersReportTask,
 } from './readers-reports.js';
 import {
   MAX_WRITING_CHARACTERS,
@@ -554,7 +530,6 @@ import {
   readApplyOutcomeAttention,
   readRecoveryAttention,
   recentWindowStart,
-  type LearningMaterialsAttentionReading,
   type UnconfirmedAttentionReading,
 } from './global-attention.js';
 import { ALWAYS_ONLINE, type TaskPlanConnectivity } from './connectivity.js';
@@ -567,9 +542,7 @@ import {
   evaluationMaterialPlan,
   analysisTaskStateLabel,
   readersReportPlan,
-  readersReportTaskStateLabel,
   evaluationRewritePlan,
-  evaluationRewriteTaskStateLabel,
   writingPlan,
   writingTaskStateLabel,
   defaultRuleBindingRows,
@@ -700,11 +673,9 @@ import {
   BACKGROUND_NO_CEILING,
   BACKGROUND_NO_RULE,
   BACKGROUND_PAUSED,
-  BACKGROUND_SUSPENDED,
   BACKGROUND_ENROLL_NO_ROUTE,
   BACKGROUND_ENROLL_NO_SHARE,
   BACKGROUND_NO_ROUTE,
-  BACKGROUND_OUTCOME_UNKNOWN,
   BACKGROUND_PLACE_BUSY,
   BACKGROUND_PREPARATION_IN_FLIGHT,
   BACKGROUND_EDITOR_JOB,
@@ -712,14 +683,12 @@ import {
   BACKGROUND_RECORD_DAMAGED,
   BACKGROUND_REPLACEMENT_WAITING,
   BACKGROUND_REVOKED,
-  backgroundNotStartedReason,
   backgroundQuietReason,
   backgroundShareFullReason,
   BACKGROUND_ANALYSIS_KIND,
   BACKGROUND_ANALYSIS_STATEMENT,
   BACKGROUND_ANALYSIS_WHAT,
   BACKGROUND_ENROLL_NO_RULE,
-  BACKGROUND_ENROLL_STALE,
   BACKGROUND_FACTS_UNREADABLE,
   BACKGROUND_REVOKE_CONSEQUENCES,
   BACKGROUND_STARTING_POINT_LABELS,
@@ -729,21 +698,14 @@ import {
   BackgroundAnalysisEnrollmentLedger,
   backgroundAnalysisDecisionOf,
   backgroundAnalysisWhen,
-  backgroundCeilingShares,
   backgroundDriftReason,
   backgroundEnrollmentDrift,
   backgroundEnrollmentName,
-  backgroundCeilingTooLowReason,
-  backgroundRunReportLines,
   backgroundScopeLabel,
-  backgroundScopeMemberActiveReason,
-  backgroundScopeMemberUnreadableReason,
   BACKGROUND_CEILING_REQUIRED,
   initializeBackgroundAnalysisEnrollmentSchema,
   type BackgroundAnalysisDecision,
-  type BackgroundAnalysisEnrollInput,
   type BackgroundAnalysisEnrollmentRecord,
-  type BackgroundAnalysisScope,
 } from './background-analysis-enrollments.js';
 import { initializeClarificationSchema } from './analysis/clarifications.js';
 import { clarificationPlanBaseDigest } from './provider/clarification-contract.js';
@@ -839,36 +801,22 @@ import {
   evaluationProfileDigest,
   initializeEvaluationInitialDraftSchema,
   initializeEvaluationRecordSchema,
-  type AcceptedEvaluationRewrite,
-  type FinalizedEvaluation,
   type InitialEvaluationFacts,
 } from './evaluation-records.js';
-import { AnalysisFeedbackError, AnalysisFeedbackLedger, analysisFeedbackItems, initializeAnalysisFeedbackSchema } from './analysis-feedback.js';
+import { AnalysisFeedbackError, AnalysisFeedbackLedger, initializeAnalysisFeedbackSchema } from './analysis-feedback.js';
 import { OutcomeResolutionLedger, initializeOutcomeResolutionSchema } from './analysis/outcome-resolutions.js';
 import { DecisionFeedbackError, DecisionFeedbackLedger, initializeDecisionFeedbackSchema } from './decision-feedback.js';
 import {
-  DIMENSION_LABELS,
-  DISPOSITION_LABELS,
-  JUDGMENT_LABELS,
   LOCAL_LEARNING_POLICY_BASIS,
   LearningEligibilityError,
-  analysisReasonLabel,
   LearningEligibilityLedger,
   analysisFeedbackCandidate,
-  feedbackHistoryPage,
-  feedbackReasonExcerpt,
   initializeLearningEligibilitySchema,
-  learningAuditChoices,
-  learningAuditStanding,
   learningMaterialDigest,
   wordTrackedEditCandidate,
-  learningMaterialOrder,
-  LEARNING_REMEDIATION_NAMED,
-  learningRemediationPreview,
   proposalDecisionCandidate,
   reviewDispositionCandidate,
   type LearningMaterialCandidate,
-  type LearningRemediationReach,
 } from './learning-eligibility.js';
 import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, HISTORICAL_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryEntry } from './review/category-configuration.js';
 import { EvaluationCalibrationError, EvaluationCalibrationLedger, initializeEvaluationCalibrationSchema } from './evaluation-calibration.js';
@@ -877,13 +825,7 @@ import {
   SeriesError,
   SeriesLedger,
   initializeSeriesSchema,
-  seriesMemberAbsent,
-  seriesMemberAlready,
-  seriesMembershipImpact,
-  seriesPreviewDigest,
   weighedPage,
-  type StoredMembershipChange,
-  type StoredSeries,
 } from './series.js';
 import {
   CALIBRATION_MIN_ADJUSTMENTS,
@@ -892,25 +834,8 @@ import {
   predictionAvailable,
 } from '../shared/evaluation-calibration.js';
 import {
-  MAX_FEEDBACK_HISTORY_ENTRIES,
-  MAX_SERIES_CANDIDATE_QUERY_CHARACTERS,
-  MAX_SERIES_CANDIDATES_PAGE,
-  MAX_SERIES_HISTORY_PAGE,
-  MAX_SERIES_LIST_PAGE,
   MAX_SERIES_MEMBERS_PAGE,
-  MAX_SERIES_TITLE_CHARACTERS,
-  MAX_SERIES_KNOWLEDGE_CONTENT_CHARACTERS,
-  MAX_SERIES_KNOWLEDGE_CANDIDATES_PAGE,
-  MAX_SERIES_KNOWLEDGE_CONFLICTS_SHOWN,
-  MAX_SERIES_KNOWLEDGE_ITEMS_PAGE,
-  MAX_SERIES_KNOWLEDGE_QUERY_CHARACTERS,
-  MAX_SERIES_KNOWLEDGE_REVISIONS_PAGE,
-  MAX_SERIES_KNOWLEDGE_SUBJECT_CHARACTERS,
   PUBLICATION_ACTUALS_RECORDED_STATE,
-  SERIES_KNOWLEDGE_CLASS_LABELS,
-  SERIES_KNOWLEDGE_CONFLICT_LABEL,
-  SERIES_KNOWLEDGE_REUSE_LABELS,
-  SERIES_KNOWLEDGE_REUSE_SCOPES,
 } from '../shared/protocol.js';
 import {
   type ClassifiedSchemaRevision,
@@ -945,46 +870,21 @@ import {
   SeriesExclusionError,
   SeriesExclusionLedger,
   initializeSeriesRetrievalExclusionSchema,
-  isSeriesExclusionAction,
-  isSeriesExclusionTargetKind,
-  coveringExclusions,
-  seriesExclusionCovers,
-  seriesExclusionImpact,
-  seriesExclusionPreviewDigest,
-  seriesExclusionReason,
-  seriesExclusionTarget,
-  knowledgeMaterial,
   type SeriesKnowledgeMaterial,
-  type StoredExclusion,
-  type StoredExclusionRevision,
 } from './series-exclusions.js';
 import {
-  MAX_SERIES_EXCLUSIONS,
-  MAX_SERIES_EXCLUSION_HISTORY_PAGE,
-  MAX_SERIES_EXCLUSION_REASON_CHARACTERS,
-  MAX_SERIES_EXCLUSION_TARGETS_PAGE,
-  SERIES_EXCLUSION_ACTION_LABELS,
-  SERIES_KNOWLEDGE_CLASSES,
   type InspectSeriesExclusionHistoryInput,
   type InspectSeriesExclusionTargetsInput,
   type PreviewSeriesExclusionInput,
   type RecordSeriesExclusionInput,
-  type SeriesExclusionHistoryCursor,
   type SeriesExclusionHistoryPageProjection,
   type SeriesExclusionPreviewProjection,
-  type SeriesExclusionProjection,
   type SeriesExclusionResultProjection,
-  type SeriesExclusionRevisionProjection,
-  type SeriesExclusionTargetKind,
-  type SeriesExclusionTargetProjection,
   type SeriesExclusionTargetsProjection,
-  type SeriesExclusionsProjection,
   type CancelWaitingTaskInput,
   type StartTaskWhenOnlineInput,
   type StartWhenOnlineTaskKind,
 } from '../shared/protocol.js';
-/** How many items or Runs one line of an exclusion's impact preview names before it gives the count. */
-const NAMED_EXCLUSION_ENTRIES = 5;
 import { canonicalRecord, hasExactKeys, isRecord } from './analysis/canonical.js';
 import {
   DIALOGUE_BASIS_QUOTE_CHARACTERS,
@@ -1038,48 +938,14 @@ import {
   SeriesKnowledgeError,
   SeriesKnowledgeLedger,
   initializeSeriesKnowledgeSchema,
-  isSeriesKnowledgeClass,
-  isSeriesKnowledgeReuseScope,
-  SERIES_KNOWLEDGE_PAGE_BYTES,
-  knowledgeQuoteExcerpt,
-  seriesKnowledgeConflicts,
-  seriesKnowledgeContent,
-  seriesKnowledgeReviewSummary,
-  countSeriesKnowledgeConflicts,
-  seriesKnowledgeSubject,
-  type FoundConflict,
-  type ResolvedTarget,
-  type StoredCandidate,
-  type StoredItem,
-  type StoredProvenance,
-  type StoredRevision,
 } from './series-knowledge.js';
 import { MAX_EXEMPLAR_BOOKS_PAGE } from '../shared/protocol.js';
 import { EvaluationProfiles, initializeEvaluationProfileSchema } from './evaluation-profiles.js';
 import { ImportedExemplars, ImportedExemplarError, initializeImportedExemplarSchema } from './imported-exemplars.js';
 import { readExemplarBook, type ExemplarSources } from './exemplars.js';
-import { readKnowledgeProcedures } from './knowledge-procedures.js';
 import {
-  CapturedProcedureError,
   CapturedProcedures,
-  callsModel,
-  capturedProcedureDocument,
-  capturedStepProblem,
-  capturedStepProjections,
-  ceilingWiderThanSource,
-  developerProposalFileText,
-  houseExecutor,
-  boundedPage,
   initializeCapturedProcedureSchema,
-  chosenApartSteps,
-  resolveProcedureVersions,
-  validCapturedProcedureTitle,
-  versionEligible,
-  versionIneligibleReason,
-  type ResolvableVersion,
-  type ReviewRunProcedurePinInput,
-  type StepWords,
-  type StoredCapturedVersion,
 } from './captured-procedures.js';
 import {
   ProductionDocumentOriginError,
@@ -1099,8 +965,6 @@ import {
 } from './production-documents.js';
 import type { WaitingRunBlockCause } from './reconnect-preflight.js';
 import {
-  READERS_REPORT_DOCUMENT_TYPES,
-  READERS_REPORT_DOCUMENT_TYPES_DIGEST,
   productionDocumentType,
   readersReportDocumentType,
   readersReportDocumentTypeId,
@@ -1225,10 +1089,16 @@ import {
   validateTaskAuthorizationSchema,
   type TaskPreparationResult,
 } from './task-authorization.js';
+import * as seriesOperations from './series.js';
+import * as capturedProcedureOperations from './captured-procedures.js';
+import * as evaluationRewriteOperations from './evaluation-rewrites.js';
+import * as learningSupervision from './house-review-preference.js';
+import * as customAnalysisOperations from './custom-analysis-dimensions.js';
+import * as backgroundEnrollments from './background-analysis-enrollments.js';
+import * as readersReportOperations from './readers-reports.js';
+export { CUSTOM_ANALYSIS_TEMPLATE_ECHO_REASON, CUSTOM_ANALYSIS_NOT_ADMITTED_REASON } from './custom-analysis-dimensions.js';
 
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TOKEN_PATTERN = UUID_PATTERN;
-const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const CORE_SCHEMA_VERSION = 5;
 const EDITOR_SCHEMA_VERSION = 6;
 const RECOVERY_SCHEMA_VERSION = 7;
@@ -1757,7 +1627,6 @@ const SOURCE_IMPORT_REBUILT_TRIGGER_SQL = `
   END;
 `;
 
-type SqlRow = Record<string, SQLOutputValue>;
 /** The house's 范例 a writing draft may reference, by type, and the damaged imported versions the scan named and skipped (Issue #789). */
 interface WritingExemplarScan {
   readonly found: Map<string, Array<{ input: WritingExemplarInput; source: WritingExemplarSource }>>;
@@ -1776,27 +1645,6 @@ type StoredImportCommitProjection =
   | ManuscriptReimportCommitProjection;
 type ImmutableManuscriptImportResult = Omit<ManuscriptImportCommitProjection, 'firstWindow' | 'overview'>;
 
-export class StoreError extends Error {
-  constructor(
-    readonly code: string,
-    message: string,
-  ) {
-    super(message);
-    this.name = 'StoreError';
-  }
-}
-
-export class StoreFatalError extends Error {
-  constructor(cause: unknown) {
-    super('AI7 authority transaction boundary failed.', { cause });
-    this.name = 'StoreFatalError';
-  }
-}
-
-function requireStore(condition: unknown, code: string, message: string): asserts condition {
-  if (!condition) throw new StoreError(code, message);
-}
-
 function requireBoundedBookOverview(projection: BookWorkOverviewProjection): BookWorkOverviewProjection {
   requireStore(
     Buffer.byteLength(JSON.stringify(projection), 'utf8') <= MAX_FRAME_BYTES - REIMPORT_WIRE_HEADROOM_BYTES,
@@ -1804,22 +1652,6 @@ function requireBoundedBookOverview(projection: BookWorkOverviewProjection): Boo
     '图书概览历史页超出有界服务帧。',
   );
   return projection;
-}
-
-function canonicalJson(value: unknown): string {
-  if (typeof value === 'string') {
-    requireStore(value.isWellFormed(), 'CANONICAL_VALUE_INVALID', '无法形成规范记录摘要。');
-  }
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
-  if (value !== null && typeof value === 'object') {
-    return `{${Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`)
-      .join(',')}}`;
-  }
-  const encoded = JSON.stringify(value);
-  if (encoded === undefined) throw new StoreError('CANONICAL_VALUE_INVALID', '无法形成规范记录摘要。');
-  return encoded;
 }
 
 /** Which Task kind's plan a kind's 结果待确认 is listed on (Issue #757): a review category's is its Review Run's. */
@@ -1849,10 +1681,6 @@ function unconfirmedDigest(listed: { ranges: ReadonlyArray<{ key: string }>; ste
 
 /** Why 保留为缺口 was refused: the list moved since the editor read it (Issue #757). */
 export const UNCONFIRMED_CHANGED = '结果待确认的列表已经变化；请重新查看后再确认。' as const;
-
-function sha256(value: string | Uint8Array): string {
-  return createHash('sha256').update(value).digest('hex');
-}
 
 function stableUuid(value: string): string {
   const digest = sha256(value).slice(0, 32).split('');
@@ -1899,16 +1727,6 @@ function workflowProjectionJson(profile: BuiltInWorkflowProfile): string {
 function one<T extends SqlRow>(rows: T[], code: string, message: string): T {
   requireStore(rows.length === 1, code, message);
   return rows[0]!;
-}
-
-function asString(value: SQLOutputValue | undefined, code = 'STORE_CORRUPT'): string {
-  requireStore(typeof value === 'string' && value.isWellFormed(), code, '持久化记录类型无效。');
-  return value;
-}
-
-function asNumber(value: SQLOutputValue | undefined, code = 'STORE_CORRUPT'): number {
-  requireStore(typeof value === 'number' && Number.isSafeInteger(value), code, '持久化数字无效。');
-  return value;
 }
 
 /** The material key of one template's 审稿意见 offered into 范例 (Issue #429), on the Learning Eligibility ledger of S26b. */
@@ -3975,7 +3793,7 @@ interface AbandonmentCleanupIntent {
   workingObjectDigest: string | null;
 }
 
-interface StoreControl {
+export interface StoreControl {
   induceUnprovableReconciliation: boolean;
   persistLegacyReviewedDraft: boolean;
   induceReimportProofTamper: boolean;
@@ -4696,16 +4514,6 @@ function closeDatabaseQuietly(db: DatabaseSync | null): void {
  */
 export const REVIEW_CATEGORY_CACHE_CAPACITY = 16;
 
-/**
- * 自定义分析维度 (Issue #922, slice 7f): a template echoes manuscript text when this many consecutive graphemes of it, whitespace
- * aside, stand in a Book's text — a phrase, not a shared word. The words of each refusal the store gives for the family.
- */
-const CUSTOM_ANALYSIS_ECHO_GRAPHEMES = 12;
-const CUSTOM_ANALYSIS_GRAPHEMES = new Intl.Segmenter('zh', { granularity: 'grapheme' });
-export const CUSTOM_ANALYSIS_TEMPLATE_ECHO_REASON = '提问模板里有一段文字与书稿原文相同；模板只能写提问，不能包含稿件正文。' as const;
-export const CUSTOM_ANALYSIS_NOT_ADMITTED_REASON = '当前策略未开放自定义分析。' as const;
-const CUSTOM_ANALYSIS_NOT_ENABLED_REASON = '这个维度没有已启用的版本；在「知识库 › 工序与规则 › 自定义分析维度」中启用一个版本后才能运行。';
-
 export const SOURCE_VERSION_PARSER_CHANGED_MESSAGE =
   '这本书里已有同一个文件的来源版本，但它是用旧版 AI7 的读取方式导入的；AI7 现在读取文件的方式已经不同，不能在原来的来源版本上再次导入这个文件。可以把它作为新建图书导入。';
 
@@ -4756,7 +4564,7 @@ export interface BackgroundAnalysisRuntime {
 }
 
 /** The kinds whose Tasks run on an analysis ledger and wait with 联网后开始任务 through `startTaskWhenOnline` (Issue #760). */
-type LedgerTaskKind = Exclude<StartWhenOnlineTaskKind, 'review-run'>;
+export type LedgerTaskKind = Exclude<StartWhenOnlineTaskKind, 'review-run'>;
 
 /**
  * A Run waiting in Connectivity Wait, of any kind (Issue #760, plan slice S74c): its Book, its Task, and its Run — a Review Run
@@ -5067,11 +4875,11 @@ export class EditorialStore {
       producedUnverified: (revisionId) => producedUnverified((this.#authority.prepare(
         "SELECT json_extract(canonical_json, '$.policyPin.operationalScope') AS scope FROM analysis_result_set_revisions WHERE revision_id = ?").get(revisionId) as SqlRow | undefined)?.scope),
     }, {
-      workspace: (bookId, basis, unreadable) => this.#readersReportWorkspace(bookId, basis, unreadable),
+      workspace: (bookId, basis, unreadable) => readersReportOperations.readersReportWorkspace(this.#readersReportHost, bookId, basis, unreadable),
     }, {
       // The market section's house data and 按我的评分重写评语 of the version on show (Issue #429, S81b2).
       market: (bookId) => this.#evaluationMarket(bookId),
-      rewrite: (bookId, version) => this.#evaluationRewriteWorkspace(bookId, version),
+      rewrite: (bookId, version) => evaluationRewriteOperations.evaluationRewriteWorkspace(this.#evaluationRewriteHost, bookId, version),
     }, {
       // A mark a version's entry records is tied to the 采用 that appended it (Issue #696). A damaged decision row never makes
       // 评估 unreadable (Issue #702 review): the record keeps the marks it holds and says their source cannot be checked, and
@@ -5086,7 +4894,7 @@ export class EditorialStore {
       },
       // After a version that cannot be read, a mark is admitted only when it names a rewrite this Book accepted on an earlier
       // version, over words that rewrite wrote (Issue #708). A decision or words that cannot be read leave the mark unchecked.
-      acceptedRewrite: (analysisRevisionId) => this.#acceptedEvaluationRewrite(analysisRevisionId),
+      acceptedRewrite: (analysisRevisionId) => evaluationRewriteOperations.acceptedEvaluationRewrite(this.#evaluationRewriteHost, analysisRevisionId),
       adoptionStamps: (bookId) => this.#evaluationRewrites.decisionStamps(bookId),
     }, {
       // The house's calibration switch (EVAL-011a): a version begun from AI7's 初评 applies the offset only while it is on. A
@@ -5101,7 +4909,7 @@ export class EditorialStore {
       learningLedger: () => this.#learningLedger(),
       ledgerOf: (entry, materials, digest, bookId, preference, version) => this.#reviewLedgerOf(entry, materials, digest, bookId, preference, version),
       housePreference: (bookId, categoryId, kind, policy) => {
-        const use = new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).use(this.#baselineAnalysis.launch.operationalScope, bookId, categoryId, this.#housePreferencePeopleNames());
+        const use = new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).use(this.#baselineAnalysis.launch.operationalScope, bookId, categoryId, learningSupervision.housePreferencePeopleNames(this.#learningSupervisionHost));
         if (use === null) return null;
         // The kind's one foreground rule must name the category; the live admission asks the same again before any dispatch.
         const rules = policy.providerProcessing.admittedRules.filter((rule) => rule.backgroundOrigin !== true && rule.taskKinds.includes(kind));
@@ -5602,7 +5410,7 @@ export class EditorialStore {
 
   /** ②A's analysis; each update mode carries its quick start (Issue #421). */
   inspectBaselineAnalysis(bookId: string, progress?: ProgressReader, revisionId: string | null = null): BaselineAnalysisProjection {
-    return this.#withBackgroundReport(this.#withQuickStart(this.#analysisCall(() => this.#baselineAnalysis.inspect(bookId, progress, revisionId)) as BaselineAnalysisProjection));
+    return backgroundEnrollments.withBackgroundReport(this.#backgroundEnrollmentHost, this.#withQuickStart(this.#analysisCall(() => this.#baselineAnalysis.inspect(bookId, progress, revisionId)) as BaselineAnalysisProjection));
   }
 
   getBaselineAnalysisPage(input: { bookId: string; taskIntentId: string; revisionId: string | null; path: string; afterOrdinal: number }) {
@@ -5932,46 +5740,27 @@ export class EditorialStore {
     });
   }
 
-  /** One version's kind definition, built once per version: its frozen contract is a pure function of the version. */
-  #customAnalysisDefinition(version: CustomAnalysisDimensionVersionRecord): AnalysisKindDefinition {
-    return this.#customAnalysisDefinitions.obtain(version.versionId, () => this.#customAnalysisCall(() => customAnalysisKindDefinition(customAnalysisVersionInput(version))));
+  /** What the 自定义分析维度 operations in custom-analysis-dimensions.ts reach of the store (Issue #1172), read live. */
+  readonly #customAnalysisHost: customAnalysisOperations.CustomAnalysisStoreHost = this.#customAnalysisHostOf();
+
+  #customAnalysisHostOf(): customAnalysisOperations.CustomAnalysisStoreHost {
+    const store = this;
+    return {
+      analysisCall: this.#analysisCall.bind(this),
+      assertAvailable: this.#assertAvailable.bind(this),
+      get authority() { return store.#authority; },
+      get baselineAnalysis() { return store.#baselineAnalysis; },
+      get boundedAuthority() { return store.#boundedAuthority; },
+      get control() { return store.#control; },
+      customAnalysisCall: this.#customAnalysisCall.bind(this),
+      get customAnalysisDefinitions() { return store.#customAnalysisDefinitions; },
+      get customAnalysisDimensions() { return store.#customAnalysisDimensions; },
+      get customAnalysisLedgers() { return store.#customAnalysisLedgers; },
+    };
   }
 
-  /**
-   * The append-only ledger of one dimension version: the same ledger class over the same Book database, constructed with that
-   * version's kind definition and bound to the launch the baseline ledger was bound to, so every plan it freezes names the binding
-   * this launch bound. Kept per kind and frozen contract, as a review category's ledger is: one holds the preparations in flight.
-   */
   customAnalysisLedger(definition: AnalysisKindDefinition): BaselineAnalysisStore {
-    this.#assertAvailable();
-    requireStore(isCustomAnalysisKindId(definition.kind), 'CUSTOM_ANALYSIS_KIND_INVALID', '该分析种类不是自定义分析维度。');
-    return this.#customAnalysisLedgers.obtain(`${definition.kind}\n${definition.promptContractDigest}`, () => {
-      const ledger = new BaselineAnalysisStore(this.#authority, this.#boundedAuthority, this.#control.baselineAnalysisRoute, definition);
-      ledger.bindLaunch(this.#baselineAnalysis.launch);
-      return ledger;
-    });
-  }
-
-  /**
-   * The exact version a Task of the family was prepared under: the one whose frozen contract — as this launch's ledger wraps it, or
-   * unwrapped — its latest plan names. A later version or a 停用 never moves it. `null` for a Task of no family kind, one whose plan
-   * never froze, or one whose dimension this store does not hold.
-   */
-  #customAnalysisVersionOfTask(taskIntentId: string): CustomAnalysisDimensionVersionRecord | null {
-    const row = this.#authority.prepare('SELECT kind FROM analysis_task_intents WHERE task_intent_id = ?').get(taskIntentId) as SqlRow | undefined;
-    const dimensionId = customAnalysisDimensionIdOfKind(row?.kind);
-    if (dimensionId === null) return null;
-    const envelope = this.#authority.prepare(`SELECT canonical_json, sha256 FROM analysis_plan_records WHERE task_intent_id = ? AND component = 'plan-envelope'
-      ORDER BY plan_version DESC LIMIT 1`).get(taskIntentId) as SqlRow | undefined;
-    if (envelope === undefined) return null;
-    const json = asString(envelope.canonical_json);
-    requireStore(sha256(json) === envelope.sha256, 'ANALYSIS_RECORD_INVALID', '任务计划记录与摘要不一致。');
-    const frozen = (JSON.parse(json) as Record<string, unknown>).promptContractDigest;
-    const dimension = this.#customAnalysisCall(() => this.#customAnalysisDimensions.dimension(dimensionId));
-    return dimension?.versions.find((version) => {
-      const definition = this.#customAnalysisDefinition(version);
-      return definition.promptContractDigest === frozen || withModelClarification(definition).promptContractDigest === frozen;
-    }) ?? null;
+    return customAnalysisOperations.customAnalysisLedger(this.#customAnalysisHost, definition);
   }
 
   /**
@@ -5982,227 +5771,33 @@ export class EditorialStore {
     if (taskIntentId === null) return this.#baselineAnalysis;
     const row = this.#authority.prepare('SELECT kind FROM analysis_task_intents WHERE book_id = ? AND task_intent_id = ?').get(bookId, taskIntentId) as SqlRow | undefined;
     if (row === undefined || !isCustomAnalysisKindId(row.kind)) return this.#baselineAnalysis;
-    const version = this.#customAnalysisVersionOfTask(taskIntentId);
+    const version = customAnalysisOperations.customAnalysisVersionOfTask(this.#customAnalysisHost, taskIntentId);
     requireStore(version !== null, 'CUSTOM_ANALYSIS_VERSION_UNKNOWN', '这项自定义分析任务所依据的维度版本已无法读取。');
-    return this.customAnalysisLedger(this.#customAnalysisDefinition(version));
+    return this.customAnalysisLedger(customAnalysisOperations.customAnalysisDefinition(this.#customAnalysisHost, version));
   }
 
-  /** The dimension version of a custom Task, for the plan the Task Drawer shows; `null` for any other Task. */
-  #customAnalysisPlanVersion(taskIntentId: string | null): CustomAnalysisDimensionVersionRecord | null {
-    return taskIntentId === null ? null : this.#customAnalysisVersionOfTask(taskIntentId);
-  }
-
-  /**
-   * Whether a template carries manuscript text (ADR 0090 item 4; Provider Processing v22/v23: never manuscript text): any
-   * `CUSTOM_ANALYSIS_ECHO_GRAPHEMES` consecutive graphemes of it, whitespace aside, standing in a block of a Book's latest primary
-   * revision — every Book's when a version is saved or enabled, and the Book's own again when a Run of it is prepared.
-   */
-  #templateEchoesManuscript(template: string, bookId: string | null): boolean {
-    const graphemes = Array.from(CUSTOM_ANALYSIS_GRAPHEMES.segment(template.replace(CUSTOM_ANALYSIS_UNIT_PLACEHOLDER, '')), (part) => part.segment)
-      .filter((part) => part.trim() !== '');
-    if (graphemes.length < CUSTOM_ANALYSIS_ECHO_GRAPHEMES) return false;
-    const windows = new Set<string>();
-    for (let index = 0; index + CUSTOM_ANALYSIS_ECHO_GRAPHEMES <= graphemes.length; index += 1) {
-      windows.add(graphemes.slice(index, index + CUSTOM_ANALYSIS_ECHO_GRAPHEMES).join(''));
-    }
-    const revisions = this.#authority.prepare(`SELECT m.manuscript_id, mr.revision_id FROM manuscripts m
-      JOIN manuscript_revisions mr ON mr.manuscript_id = m.manuscript_id
-      WHERE m.role = 'primary' AND (? IS NULL OR m.book_id = ?)
-        AND mr.ordinal = (SELECT max(latest.ordinal) FROM manuscript_revisions latest WHERE latest.manuscript_id = m.manuscript_id)`)
-      .all(bookId, bookId) as SqlRow[];
-    return revisions.some((revision) => this.#analysisCall(() => this.#baselineAnalysis.readRevisionBlocks(asString(revision.manuscript_id), asString(revision.revision_id)))
-      .some((block) => {
-        const compact = block.text.replace(/\s+/gu, '');
-        for (const window of windows) if (compact.includes(window)) return true;
-        return false;
-      }));
-  }
-
-  /** How many Tasks of any Book each version of a dimension was prepared under, by the contract each Task's plans froze. */
-  #customAnalysisTaskCounts(dimensionId: string, versions: ReadonlyArray<CustomAnalysisDimensionVersionRecord>): Map<string, number> {
-    const rows = this.#authority.prepare(`SELECT DISTINCT p.task_intent_id, json_extract(p.canonical_json, '$.promptContractDigest') AS digest
-      FROM analysis_plan_records p JOIN analysis_task_intents i ON i.task_intent_id = p.task_intent_id
-      WHERE i.kind = ? AND p.component = 'plan-envelope'`).all(customAnalysisKindId(dimensionId)) as SqlRow[];
-    const byDigest = new Map<string, string>();
-    for (const version of versions) {
-      const definition = this.#customAnalysisDefinition(version);
-      byDigest.set(definition.promptContractDigest, version.versionId);
-      byDigest.set(withModelClarification(definition).promptContractDigest, version.versionId);
-    }
-    const tasks = new Map<string, Set<string>>();
-    for (const row of rows) {
-      const versionId = byDigest.get(String(row.digest));
-      if (versionId !== undefined) tasks.set(versionId, (tasks.get(versionId) ?? new Set()).add(asString(row.task_intent_id)));
-    }
-    return new Map([...tasks].map(([versionId, ids]) => [versionId, ids.size] as const));
-  }
-
-  /** The latest revision of one dimension on one Book, as ②A's 自定义 tab reads it. */
-  #customAnalysisRevisionSummary(revision: Readonly<Record<string, unknown>>): CustomAnalysisRevisionSummaryProjection {
-    const typed = revision as unknown as NonNullable<BaselineAnalysisProjection['resultSetRevision']> & {
-      dimension: { versionId: string; version: number; documentDigest: string };
-      rows: ReadonlyArray<CustomAnalysisRowProjection>;
-      rowCounts: CustomAnalysisRevisionSummaryProjection['rowCounts'];
-    };
-    return {
-      revisionId: typed.revisionId,
-      ordinal: typed.ordinal,
-      createdAt: typed.createdAt,
-      dimensionVersion: { versionId: typed.dimension.versionId, version: typed.dimension.version, documentDigest: typed.dimension.documentDigest },
-      manuscriptRevisionLabel: typed.manuscriptPin.revisionLabel,
-      coverage: typed.coverage,
-      freshness: typed.freshness,
-      gaps: typed.gaps.map((gap) => ({ unitOrdinal: gap.unitOrdinal, code: gap.code, reason: gap.reason })),
-      rowCounts: { units: typed.rowCounts.units, rows: typed.rowCounts.rows, located: typed.rowCounts.located, unlocated: typed.rowCounts.unlocated },
-      rows: typed.rows.slice(0, MAX_CUSTOM_ANALYSIS_ROWS_SHOWN),
-      rowsTruncated: typed.rows.length > MAX_CUSTOM_ANALYSIS_ROWS_SHOWN,
-    };
-  }
-
-  /** One dimension on one Book: its latest Task's state, its latest revision, and whether 运行 can prepare now. */
-  #customAnalysisBook(
-    dimensionId: string,
-    enabled: CustomAnalysisDimensionVersionRecord | null,
-    bookId: string,
-    progress?: ProgressReader,
-  ): NonNullable<CustomAnalysisDimensionProjection['book']> {
-    const latestTask = this.#authority.prepare('SELECT task_intent_id FROM analysis_task_intents WHERE book_id = ? AND kind = ? ORDER BY rowid DESC LIMIT 1')
-      .get(bookId, customAnalysisKindId(dimensionId)) as SqlRow | undefined;
-    const version = (latestTask === undefined ? null : this.#customAnalysisVersionOfTask(asString(latestTask.task_intent_id))) ?? enabled;
-    if (version === null) return { taskState: null, latest: null, unavailableReason: CUSTOM_ANALYSIS_NOT_ENABLED_REASON };
-    const projection = this.#analysisCall(() => this.customAnalysisLedger(this.#customAnalysisDefinition(version)).inspect(bookId, progress)) as unknown as BaselineAnalysisProjection;
-    const active = runIsActive(projection.run?.state ?? null);
-    return {
-      taskState: projection.taskIntent === null ? null : { taskIntentId: projection.taskIntent.taskIntentId, state: projection.state, stateLabel: projection.stateLabel },
-      latest: projection.resultSetRevision === null ? null : this.#customAnalysisRevisionSummary(projection.resultSetRevision as unknown as Record<string, unknown>),
-      unavailableReason: enabled === null ? CUSTOM_ANALYSIS_NOT_ENABLED_REASON : active ? '这个维度的上一项任务还在运行；它结束后才能再运行。' : null,
-    };
-  }
-
-  /**
-   * 知识库 › 工序与规则 › 自定义分析维度 (`bookId: null`), or ②A's 自定义 tab over one Book (Issue #922; ANALYSIS-001, ANALYSIS-009):
-   * the house's dimensions, each with its versions and states, and for a Book each dimension with an enabled version or a Task
-   * there, with that Book's latest Result Set Revision of it. Each dimension is its own kind, so each keeps its own Result Set.
-   */
   inspectCustomAnalysisDimensions(bookId: string | null, progress?: ProgressReader): CustomAnalysisDimensionsProjection {
-    this.#assertAvailable();
-    requireStore(bookId === null || (typeof bookId === 'string' && UUID_PATTERN.test(bookId)), 'CUSTOM_ANALYSIS_REQUEST_INVALID', '自定义分析维度请求无效。');
-    if (bookId !== null) requireStore(this.#authority.prepare('SELECT 1 FROM books WHERE book_id = ?').get(bookId) !== undefined, 'BOOK_NOT_FOUND', '这本书不存在。');
-    const listed = this.#customAnalysisCall(() => this.#customAnalysisDimensions.list());
-    const dimensions = listed.dimensions.flatMap((dimension): CustomAnalysisDimensionProjection[] => {
-      const enabled = dimension.versions.find((version) => version.state === 'enabled') ?? null;
-      const counts = this.#customAnalysisTaskCounts(dimension.dimensionId, dimension.versions);
-      const book = bookId === null ? null : this.#customAnalysisBook(dimension.dimensionId, enabled, bookId, progress);
-      // ②A lists what can run on the Book and what already ran there; a dimension with neither is the house's alone.
-      if (book !== null && enabled === null && book.taskState === null) return [];
-      return [{
-        dimensionId: dimension.dimensionId,
-        kind: customAnalysisKindId(dimension.dimensionId),
-        title: dimension.versions[0]!.document.title,
-        enabledVersion: enabled === null ? null : { versionId: enabled.versionId, version: enabled.version },
-        versions: dimension.versions.slice(0, MAX_CUSTOM_ANALYSIS_VERSIONS_SHOWN).map((version) => ({
-          versionId: version.versionId,
-          version: version.version,
-          title: version.document.title,
-          questionTemplate: version.document.questionTemplate,
-          documentDigest: version.documentDigest,
-          supersedes: version.supersedes,
-          state: version.state,
-          stateLabel: CUSTOM_ANALYSIS_DIMENSION_STATE_LABELS[version.state],
-          createdAt: version.createdAt,
-          stateRecordedAt: version.stateRecordedAt,
-          taskCount: counts.get(version.versionId) ?? 0,
-        })),
-        versionsTruncated: dimension.versions.length > MAX_CUSTOM_ANALYSIS_VERSIONS_SHOWN,
-        book,
-      }];
-    });
-    return { bookId, dimensions, truncated: listed.truncated, fixed: structuredClone(CUSTOM_ANALYSIS_FIXED_TERMS) as CustomAnalysisDimensionsProjection['fixed'] };
+    return customAnalysisOperations.inspectCustomAnalysisDimensions(this.#customAnalysisHost, bookId, progress);
   }
 
-  /** The validation 保存 and 验证并启用 share: the document's own rules, and no manuscript text of any Book in its template. */
-  #requireCustomAnalysisTexts(title: unknown, questionTemplate: unknown): void {
-    const refusal = customAnalysisTextRefusal(title, questionTemplate);
-    requireStore(refusal === null, 'CUSTOM_ANALYSIS_DIMENSION_INVALID', refusal ?? '');
-    requireStore(!this.#templateEchoesManuscript(questionTemplate as string, null), 'CUSTOM_ANALYSIS_TEMPLATE_MANUSCRIPT_TEXT', CUSTOM_ANALYSIS_TEMPLATE_ECHO_REASON);
-  }
-
-  /** 保存: version 1 of a new dimension, or the next version superseding the latest; `待验证` until 验证并启用. */
   saveCustomAnalysisDimension(input: SaveCustomAnalysisDimensionInput): CustomAnalysisDimensionsProjection {
-    this.#assertAvailable();
-    requireStore(typeof input === 'object' && input !== null && (input.dimensionId === null || isCustomAnalysisDimensionId(input.dimensionId)),
-      'CUSTOM_ANALYSIS_REQUEST_INVALID', '自定义分析维度请求无效。');
-    this.#requireCustomAnalysisTexts(input.title, input.questionTemplate);
-    this.#customAnalysisCall(() => this.#customAnalysisDimensions.save(
-      { dimensionId: input.dimensionId, title: input.title, questionTemplate: input.questionTemplate }, new Date().toISOString()));
-    return this.inspectCustomAnalysisDimensions(null);
+    return customAnalysisOperations.saveCustomAnalysisDimension(this.#customAnalysisHost, input);
   }
 
-  /** 验证并启用: the version's document validated again, deterministically — its rules, its contract, the Books' text — then `已启用`. */
   enableCustomAnalysisDimension(versionId: string): CustomAnalysisDimensionsProjection {
-    this.#assertAvailable();
-    const version = isCustomAnalysisDimensionId(versionId) ? this.#customAnalysisCall(() => this.#customAnalysisDimensions.version(versionId)) : null;
-    requireStore(version !== null, 'CUSTOM_ANALYSIS_DIMENSION_NOT_FOUND', '这个自定义分析维度版本不存在。');
-    this.#requireCustomAnalysisTexts(version.document.title, version.document.questionTemplate);
-    this.#customAnalysisDefinition(version);
-    this.#customAnalysisCall(() => this.#customAnalysisDimensions.enable(versionId, new Date().toISOString()));
-    return this.inspectCustomAnalysisDimensions(null);
+    return customAnalysisOperations.enableCustomAnalysisDimension(this.#customAnalysisHost, versionId);
   }
 
-  /** 停用: final for the version; a Run prepared under it keeps naming it, and no new Run can be prepared under it. */
   stopCustomAnalysisDimension(versionId: string): CustomAnalysisDimensionsProjection {
-    this.#assertAvailable();
-    requireStore(isCustomAnalysisDimensionId(versionId), 'CUSTOM_ANALYSIS_DIMENSION_NOT_FOUND', '这个自定义分析维度版本不存在。');
-    this.#customAnalysisCall(() => this.#customAnalysisDimensions.stop(versionId, new Date().toISOString()));
-    return this.inspectCustomAnalysisDimensions(null);
+    return customAnalysisOperations.stopCustomAnalysisDimension(this.#customAnalysisHost, versionId);
   }
 
-  /**
-   * ②A 自定义 › 运行 (Issue #922): the dimension's newest enabled version prepared on the Book through the ordinary ②A path — Task
-   * Intent, input checkpoint, Coverage Manifest, Plan Envelope — its plan then opened in the Task Drawer, where 开始任务 records the
-   * standard Run Authorization. Under a live scope the selected policy must admit the family (`custom-analysis/*`, v22/v23); the
-   * local deterministic route needs no policy. The preparation is a few local steps and runs to its end in this one call.
-   */
   prepareCustomAnalysis(input: PrepareCustomAnalysisInput, launchPolicy: LaunchPolicyProjection): { taskIntentId: string; dimensions: CustomAnalysisDimensionsProjection } {
-    this.#assertAvailable();
-    requireStore(typeof input === 'object' && input !== null && typeof input.bookId === 'string' && UUID_PATTERN.test(input.bookId) &&
-      isCustomAnalysisDimensionId(input.dimensionId), 'CUSTOM_ANALYSIS_REQUEST_INVALID', '自定义分析请求无效。');
-    const dimension = this.#customAnalysisCall(() => this.#customAnalysisDimensions.dimension(input.dimensionId));
-    requireStore(dimension !== null, 'CUSTOM_ANALYSIS_DIMENSION_NOT_FOUND', '这个自定义分析维度不存在。');
-    const version = dimension.versions.find((entry) => entry.state === 'enabled') ?? null;
-    requireStore(version !== null, 'CUSTOM_ANALYSIS_DIMENSION_NOT_ENABLED', '这个维度没有已启用的版本；已停用的版本不能再运行。');
-    requireStore(!this.#templateEchoesManuscript(version.document.questionTemplate, input.bookId), 'CUSTOM_ANALYSIS_TEMPLATE_MANUSCRIPT_TEXT', CUSTOM_ANALYSIS_TEMPLATE_ECHO_REASON);
-    const definition = this.#customAnalysisDefinition(version);
-    const live = this.#baselineAnalysis.launch.live;
-    requireStore(live === null || liveKindAdmission(launchPolicy, definition, live) !== null, 'CUSTOM_ANALYSIS_NOT_ADMITTED', CUSTOM_ANALYSIS_NOT_ADMITTED_REASON);
-    const ledger = this.customAnalysisLedger(definition);
-    const mode = input.update?.mode ?? 'first-baseline';
-    let progress = this.#analysisCall(() => ledger.prepare({
-      phase: 'start', bookId: input.bookId, goal: customAnalysisModeGoal(mode), update: input.update ?? null, reconfirm: false, launchPolicy,
-    }));
-    while (!progress.done) {
-      const workId = progress.workId;
-      requireStore(workId !== null, 'ANALYSIS_PREPARATION_INCOMPLETE', '自定义分析的任务计划没有准备完成。');
-      progress = this.#analysisCall(() => ledger.prepare({ phase: 'advance', workId }));
-    }
-    const prepared = progress.projection as unknown as BaselineAnalysisProjection | null;
-    requireStore(prepared !== null && prepared.taskIntent !== null && prepared.planEnvelope !== null, 'ANALYSIS_PREPARATION_INCOMPLETE', '自定义分析的任务计划没有准备完成。');
-    return { taskIntentId: prepared.taskIntent.taskIntentId, dimensions: this.inspectCustomAnalysisDimensions(input.bookId) };
+    return customAnalysisOperations.prepareCustomAnalysis(this.#customAnalysisHost, input, launchPolicy);
   }
 
-  /** Startup reconciliation of every dimension's Runs a stopped service left under way, as each other kind's is. */
   reconcileStoppedCustomAnalysisRuns(): { settled: number } {
-    this.#assertAvailable();
-    // Each dimension's latest Task: only it can have left a Run under way, since a kind holds one active Run at a time.
-    const tasks = this.#authority.prepare(`SELECT t.task_intent_id FROM analysis_task_intents t WHERE t.kind GLOB 'custom-analysis/*'
-      AND t.rowid = (SELECT max(latest.rowid) FROM analysis_task_intents latest WHERE latest.kind = t.kind)`).all() as SqlRow[];
-    let settled = 0;
-    for (const task of tasks) {
-      const version = this.#customAnalysisVersionOfTask(asString(task.task_intent_id));
-      if (version === null) continue;
-      settled += this.#analysisCall(() => this.customAnalysisLedger(this.#customAnalysisDefinition(version)).reconcileStoppedRuns()).settled;
-    }
-    return { settled };
+    return customAnalysisOperations.reconcileStoppedCustomAnalysisRuns(this.#customAnalysisHost);
   }
 
   #taskMaterialReadings(boundary: TaskMaterialBoundary, surface: '审阅' | '评估' = '审阅'): ReadonlyArray<TaskMaterialReading> {
@@ -6345,8 +5940,8 @@ export class EditorialStore {
       const claim = this.#factualVerification.claims(factualDecision.originalRunRecordId)!.claims.find((entry) => entry.claimId === factualDecision.claimId)!;
       scope = { kind: 'selection', fromChapterBlockId: claim.occurrence.block, toChapterBlockId: claim.occurrence.block };
     }
-    const procedure = capturedProcedure === null ? null : this.#procedureCall(() => this.#capturedProcedurePin(bookId, capturedProcedure));
-    requireStore(seriesId === null || capturedProcedure === null || procedureOffersSeries(this.#requireCapturedVersion(capturedProcedure.versionId).document),
+    const procedure = capturedProcedure === null ? null : capturedProcedureOperations.procedureCall(this.#capturedProcedureHost, () => capturedProcedureOperations.capturedProcedurePin(this.#capturedProcedureHost, bookId, capturedProcedure));
+    requireStore(seriesId === null || capturedProcedure === null || procedureOffersSeries(capturedProcedureOperations.requireCapturedVersion(this.#capturedProcedureHost, capturedProcedure.versionId).document),
       'SERIES_SCOPE_UNAVAILABLE', '这个工序版本只允许参考当前图书。');
     requireStore(Array.isArray(materialIds) && materialIds.length <= MAX_WRITING_MATERIALS && materialIds.every((id) => typeof id === 'string' && UUID_PATTERN.test(id)) && new Set(materialIds).size === materialIds.length,
       'TASK_MATERIALS_INVALID', '请选择不重复的资料库资料，最多 4 份。');
@@ -6617,7 +6212,7 @@ export class EditorialStore {
     if (input.kind === 'baseline-analysis') {
       // A 自定义分析维度 Task's plan is read on the ledger of the exact version it froze, the Book's baseline otherwise (Issue #922).
       const ledger = this.#analysisLedgerOfTask(input.bookId, input.ref);
-      const custom = ledger === this.#baselineAnalysis ? null : this.#customAnalysisPlanVersion(input.ref);
+      const custom = ledger === this.#baselineAnalysis ? null : customAnalysisOperations.customAnalysisPlanVersion(this.#customAnalysisHost, input.ref);
       // The execution owner's progress feeds the activity card of a Run under way (Issue #422, AUTH-011).
       const inspected = this.#analysisCall(() => ledger.inspect(input.bookId, progress)) as BaselineAnalysisProjection;
       // The ledger names a redo only on the baseline's Tasks; a dimension's Task is read as one that redoes nothing.
@@ -6643,7 +6238,7 @@ export class EditorialStore {
     }
     if (input.kind === 'readers-report') {
       // 审稿意见 (Issue #429, S81c): the reader's report kind's latest Task, on the ledger of the contract its plan froze.
-      const latest = this.#latestReadersReport(input.bookId, progress);
+      const latest = readersReportOperations.latestReadersReport(this.#readersReportHost, input.bookId, progress);
       const projection = latest?.projection ?? null;
       const checkpoint = projection?.checkpoint ?? null;
       requireStore(latest !== null && projection !== null && projection.taskIntent !== null && checkpoint !== null, 'TASK_PLAN_UNAVAILABLE', '审稿意见还没有准备计划。');
@@ -6659,7 +6254,7 @@ export class EditorialStore {
           profile: latest.task.input.record.profile,
           // The frozen plan's own line (Issue #792): the exemplars this draft kept, and — as 评估 names them — the damaged
           // records and the decision ledgers that were skipped when it was prepared.
-          exemplars: this.#readersReportExemplarStatement({
+          exemplars: readersReportOperations.readersReportExemplarStatement(this.#readersReportHost, {
             exemplars: latest.task.input.exemplars,
             damaged: latest.task.skippedExemplars.filter((entry) => entry.reason === 'record').map((entry) => entry.title),
             ledgerDamaged: latest.task.skippedExemplars.filter((entry) => entry.reason === 'ledger').map((entry) => entry.title),
@@ -6670,7 +6265,7 @@ export class EditorialStore {
     }
     if (input.kind === 'evaluation-rewrite') {
       // 按我的评分重写评语 (Issue #429, S81b2): the rewrite kind's latest Task, on the ledger of the contract its plan froze.
-      const latest = this.#latestEvaluationRewrite(input.bookId, progress);
+      const latest = evaluationRewriteOperations.latestEvaluationRewrite(this.#evaluationRewriteHost, input.bookId, progress);
       const projection = latest?.projection ?? null;
       const checkpoint = projection?.checkpoint ?? null;
       requireStore(latest !== null && projection !== null && projection.taskIntent !== null && checkpoint !== null, 'TASK_PLAN_UNAVAILABLE', '按我的评分重写评语还没有准备计划。');
@@ -6885,7 +6480,7 @@ export class EditorialStore {
   /** A stopped version starts no new Run (ADR 0090 item 4): its prepared Tasks stay readable and keep naming it. */
   #requireCustomAnalysisStartable(ledger: BaselineAnalysisStore, taskIntentId: string): void {
     if (!isCustomAnalysisKindId(ledger.kind)) return;
-    const version = this.#customAnalysisVersionOfTask(taskIntentId);
+    const version = customAnalysisOperations.customAnalysisVersionOfTask(this.#customAnalysisHost, taskIntentId);
     requireStore(version !== null && version.state !== 'stopped', 'CUSTOM_ANALYSIS_DIMENSION_STOPPED',
       `这项任务所依据的维度版本${version === null ? '' : `第 ${version.version} 版`}已停用，不能再开始；请在「分析 › 自定义」中按已启用的版本重新运行。`);
   }
@@ -6961,8 +6556,8 @@ export class EditorialStore {
     const materialIds = ledger.definition.materialReferences?.sources.map((source) => source.materialId) ?? [];
     switch (input.kind) {
       case 'initial-evaluation': return { kind: input.kind, redoOf, materialIds };
-      case 'readers-report': return { kind: input.kind, redoOf, materialIds, template: this.#latestReadersReport(input.bookId)!.task.template };
-      case 'evaluation-rewrite': return { kind: input.kind, redoOf, recordId: this.#latestEvaluationRewrite(input.bookId)!.task.recordId };
+      case 'readers-report': return { kind: input.kind, redoOf, materialIds, template: readersReportOperations.latestReadersReport(this.#readersReportHost, input.bookId)!.task.template };
+      case 'evaluation-rewrite': return { kind: input.kind, redoOf, recordId: evaluationRewriteOperations.latestEvaluationRewrite(this.#evaluationRewriteHost, input.bookId)!.task.recordId };
       case 'writing': {
         const task = this.#latestWriting(input.bookId)!.task;
         return { kind: input.kind, redoOf, request: { typeId: task.typeId, audience: task.input.audience,
@@ -7374,8 +6969,8 @@ export class EditorialStore {
       WHERE t.kind GLOB 'custom-analysis/*' AND t.rowid =
         (SELECT max(latest.rowid) FROM analysis_task_intents latest WHERE latest.kind = t.kind)`).all() as SqlRow[];
     for (const row of customKinds) {
-      const version = this.#customAnalysisVersionOfTask(asString(row.task_intent_id));
-      if (version !== null) ofLedger('baseline-analysis', this.customAnalysisLedger(this.#customAnalysisDefinition(version)));
+      const version = customAnalysisOperations.customAnalysisVersionOfTask(this.#customAnalysisHost, asString(row.task_intent_id));
+      if (version !== null) ofLedger('baseline-analysis', this.customAnalysisLedger(customAnalysisOperations.customAnalysisDefinition(this.#customAnalysisHost, version)));
     }
     // A kind whose records no longer read is said where its own surface reads it: it never keeps another kind's Run waiting.
     for (const kind of ['initial-evaluation', 'readers-report', 'evaluation-rewrite', 'writing'] as const) {
@@ -7460,10 +7055,10 @@ export class EditorialStore {
         return;
       case 'readers-report':
         this.#requireEvaluationMaterialScope(this.#evaluationMaterialPlan(taskIntentId) !== null, READERS_REPORT_KIND);
-        this.#requireReadersReportScope();
+        readersReportOperations.requireReadersReportScope(this.#readersReportHost);
         return;
       case 'evaluation-rewrite':
-        this.#requireEvaluationRewriteScope();
+        evaluationRewriteOperations.requireEvaluationRewriteScope(this.#evaluationRewriteHost);
         return;
       case 'writing':
         this.#assertAvailable();
@@ -7491,13 +7086,13 @@ export class EditorialStore {
         return ledger;
       }
       case 'readers-report': {
-        const latest = this.#latestReadersReport(bookId);
+        const latest = readersReportOperations.latestReadersReport(this.#readersReportHost, bookId);
         requireStore(latest !== null && latest.task.taskIntentId === taskIntentId, 'TASK_PLAN_NOT_CURRENT', TASK_PLAN_NOT_CURRENT_REASON);
         this.#requireEvaluationMaterialReadings(latest.ledger, bookId);
         return latest.ledger;
       }
       case 'evaluation-rewrite': {
-        const latest = this.#latestEvaluationRewrite(bookId);
+        const latest = evaluationRewriteOperations.latestEvaluationRewrite(this.#evaluationRewriteHost, bookId);
         requireStore(latest !== null && latest.task.taskIntentId === taskIntentId, 'TASK_PLAN_NOT_CURRENT', TASK_PLAN_NOT_CURRENT_REASON);
         // The version may have moved since the plan was prepared — saved again, or 定稿 — while the drawer stayed open: a Run then
         // would only write words that can never be 采用 (S81b2 review). Refused here, before any Run is spent.
@@ -7582,8 +7177,8 @@ export class EditorialStore {
     this.#assertAvailable();
     // The ledger itself refuses a 初评 that is not the Book's current Task, as its cancellation always did.
     if (kind === 'initial-evaluation') return this.initialEvaluationLedgerForBook(bookId);
-    const latest = kind === 'readers-report' ? this.#latestReadersReport(bookId)
-      : kind === 'evaluation-rewrite' ? this.#latestEvaluationRewrite(bookId) : this.#latestWriting(bookId);
+    const latest = kind === 'readers-report' ? readersReportOperations.latestReadersReport(this.#readersReportHost, bookId)
+      : kind === 'evaluation-rewrite' ? evaluationRewriteOperations.latestEvaluationRewrite(this.#evaluationRewriteHost, bookId) : this.#latestWriting(bookId);
     requireStore(latest !== null && latest.task.taskIntentId === taskIntentId, 'TASK_PLAN_NOT_CURRENT', TASK_PLAN_NOT_CURRENT_REASON);
     return latest.ledger;
   }
@@ -7597,7 +7192,7 @@ export class EditorialStore {
       }
       case 'evaluation-rewrite': {
         const any = this.#evaluationRewriteCall(() => this.#evaluationRewrites.anyTask());
-        return any === null ? null : this.#evaluationRewriteLedger(any.input);
+        return any === null ? null : evaluationRewriteOperations.evaluationRewriteLedger(this.#evaluationRewriteHost, any.input);
       }
       case 'writing': {
         const any = this.#writingCall(() => this.#writingTasks.anyTask());
@@ -7958,20 +7553,20 @@ export class EditorialStore {
     const book = this.#authority.prepare('SELECT title FROM books WHERE book_id = ?').get(bookId) as SqlRow | undefined;
     requireStore(book !== undefined, 'BACKGROUND_ANALYSIS_ENROLLMENT_INVALID', '这本书不存在。');
     const title = asString(book.title);
-    const read = this.#enrollmentRead(bookId, kind);
+    const read = backgroundEnrollments.enrollmentRead(this.#backgroundEnrollmentHost, bookId, kind);
     const record = read === 'damaged' ? null : read;
     const state = read === 'damaged' ? 'damaged' : record === null ? 'none' : record.state === 'active' && record.paused ? 'paused' : record.state;
     const next = this.#analysisCall(() => kind === BACKGROUND_ANALYSIS_KIND ? this.#backgroundDecision(bookId, read, runtime) : { kind: 'none' as const,
       reason: kind === 'factual-recheck' ? '空闲时按最新的要求补充证据决定复核一条冻结断言；未决结果不会自动重新排队。'
         : kind === 'material-index' ? '空闲时在本机为这本书可参考的资料建立相似索引，从上次停下的段落接着建；你回来编辑时让开。'
         : '登记已保留；相应工序接入后台处理后，才会按登记开始。' });
-    const binding = this.#enrollmentBinding(bookId, kind);
+    const binding = backgroundEnrollments.enrollmentBinding(this.#backgroundEnrollmentHost, bookId, kind);
     const nextOrdinal = record === null ? 1 : record.version.ordinal + 1;
     const reason = state === 'damaged'
       ? BACKGROUND_RECORD_DAMAGED
       : state === 'active' || state === 'paused'
         ? '这本书已经登记了这类后台处理；要改，请先撤销登记再重新登记。'
-        : !this.#backgroundKindEnrollable(kind)
+        : !backgroundEnrollments.backgroundKindEnrollable(this.#backgroundEnrollmentHost, kind)
           ? BACKGROUND_ENROLL_NO_RULE
           : !runtime.routeExecutable
             ? BACKGROUND_ENROLL_NO_ROUTE
@@ -7979,7 +7574,7 @@ export class EditorialStore {
               ? BACKGROUND_ENROLL_NO_SHARE
               : binding === null ? BACKGROUND_FACTS_UNREADABLE : null;
     const scope = backgroundScopeLabel('book', title, 1);
-    const scopes = this.#backgroundScopeOffers(bookId, title);
+    const scopes = backgroundEnrollments.backgroundScopeOffers(this.#backgroundEnrollmentHost, bookId, title);
     const when = backgroundAnalysisWhen(runtime.quietMs);
     const notGranted = kind === BACKGROUND_ANALYSIS_KIND ? BACKGROUND_ANALYSIS_NOT_GRANTED : [
       '不改动稿件，不采纳或应用任何建议，不导出或发布',
@@ -7987,7 +7582,7 @@ export class EditorialStore {
       '登记本身不启动尚未接入的工序，也不授权其他后台工作',
       '不超过登记的预算上限，每次派发前检查；达到上限后停止',
     ];
-    const kinds = this.#backgroundKindOffers();
+    const kinds = backgroundEnrollments.backgroundKindOffers(this.#backgroundEnrollmentHost);
     const kindLabel = kinds.find((entry) => entry.kind === kind)?.label ?? kind;
     const procedure = kind === BACKGROUND_ANALYSIS_KIND ? DEFAULT_EXECUTION_RULE_PROCEDURES['baseline-analysis'] : kindLabel;
     const what = kind === BACKGROUND_ANALYSIS_KIND ? BACKGROUND_ANALYSIS_WHAT : `${kindLabel}：只按这类工序的计划处理；每次派发仍需精确计划、模型绑定与运行授权。`;
@@ -8035,7 +7630,7 @@ export class EditorialStore {
       : this.#enrollmentCall(() => this.#enrollments.history(bookId, BACKGROUND_ANALYSIS_LISTED, kind));
     const look = this.#backgroundLooks.get(bookId) ?? null;
     const notStarted = this.#backgroundNotStarted.get(bookId) ?? null;
-    const enrolledScope = record === null ? null : this.#enrollmentScopeOf(record.version.scope, bookId, title);
+    const enrolledScope = record === null ? null : backgroundEnrollments.enrollmentScopeOf(this.#backgroundEnrollmentHost, record.version.scope, bookId, title);
     return {
       bookId, kind, kinds,
       bookTitle: title,
@@ -8090,17 +7685,29 @@ export class EditorialStore {
     };
   }
 
-  /**
-   * `登记` (ADR 0048; V2-UX-ANALYSIS-017): a separate, explicit decision of the editor, bound to the disclosure they confirmed
-   * by its digest, to the starting point they chose, to the scope it covers and to the tokens ceiling they set, which is required
-   * (Issue #864). Nothing else — setting up a model service, importing, enabling a profile, a rule, a Session or a Run that
-   * succeeded — ever makes one. The same confirmation made twice answers as once. An Enrollment suspended after the local data
-   * was replaced is confirmed this way too, as its next version.
-   *
-   * A Series or all-Books scope enrolls every Book of it in one transaction, in the scope's order, each with its equal share of
-   * the ceiling and the remainder on the first; a Book of it that already has an Enrollment in force, or whose settings cannot be
-   * read, refuses the whole 登记 and is named.
-   */
+  /** What the 后台分析登记 operations in background-analysis-enrollments.ts reach of the store (Issue #1172), read live. */
+  readonly #backgroundEnrollmentHost: backgroundEnrollments.BackgroundEnrollmentStoreHost = this.#backgroundEnrollmentHostOf();
+
+  #backgroundEnrollmentHostOf(): backgroundEnrollments.BackgroundEnrollmentStoreHost {
+    const store = this;
+    return {
+      analysisCall: this.#analysisCall.bind(this),
+      assertAvailable: this.#assertAvailable.bind(this),
+      get authority() { return store.#authority; },
+      backgroundDecision: this.#backgroundDecision.bind(this),
+      get backgroundLooks() { return store.#backgroundLooks; },
+      get backgroundNotStarted() { return store.#backgroundNotStarted; },
+      get baselineAnalysis() { return store.#baselineAnalysis; },
+      baselineProgress: this.#baselineProgress.bind(this),
+      enrollmentCall: this.#enrollmentCall.bind(this),
+      get enrollments() { return store.#enrollments; },
+      get inspectBackgroundAnalysisEnrollment() { return store.inspectBackgroundAnalysisEnrollment.bind(store); },
+      get series() { return store.#series; },
+      seriesCall: this.#seriesCall.bind(this),
+      transaction: this.#transaction.bind(this),
+    };
+  }
+
   enrollBackgroundAnalysis(
     bookId: string,
     disclosureDigest: string,
@@ -8108,144 +7715,34 @@ export class EditorialStore {
     scope: { kind: BackgroundAnalysisScopeKind; seriesId: string | null },
     ceilingTokens: number,
     runtime: BackgroundAnalysisRuntime,
-    kind: string = BACKGROUND_ANALYSIS_KIND,
-  ): BackgroundAnalysisEnrollmentProjection {
-    this.#assertAvailable();
-    requireStore(UUID_PATTERN.test(bookId) && DIGEST_PATTERN.test(disclosureDigest) && (startingPoint === 'prospective' || startingPoint === 'backfill') &&
-      (scope.kind === 'series' ? typeof scope.seriesId === 'string' && UUID_PATTERN.test(scope.seriesId) : (scope.kind === 'book' || scope.kind === 'all-books') && scope.seriesId === null),
-    'BACKGROUND_ANALYSIS_ENROLLMENT_INVALID', '后台分析登记的参数无效。');
-    requireStore(Number.isSafeInteger(ceilingTokens) && ceilingTokens >= 1 && ceilingTokens <= BACKGROUND_ANALYSIS_CEILING_MAX,
-      'BACKGROUND_ANALYSIS_CEILING_REQUIRED', '请设置后台分析的预算上限（tokens）：登记必须有上限。');
-    const current = this.#enrollmentRead(bookId, kind);
-    if (current !== 'damaged' && current !== null && current.state === 'active' && current.version.disclosureDigest === disclosureDigest &&
-        current.version.startingPoint === startingPoint && current.version.ceiling?.maxTotalTokens === ceilingTokens &&
-        current.version.scope.kind === scope.kind && (current.version.scope.kind === 'book' ? null : current.version.scope.seriesId) === scope.seriesId) {
-      return this.inspectBackgroundAnalysisEnrollment(bookId, runtime, kind);
-    }
-    const shown = this.inspectBackgroundAnalysisEnrollment(bookId, runtime, kind);
-    requireStore(shown.offer.canEnroll, 'BACKGROUND_ANALYSIS_ENROLLMENT_UNAVAILABLE', shown.offer.reason ?? BACKGROUND_ENROLL_STALE);
-    requireStore(shown.offer.disclosureDigest === disclosureDigest, 'BACKGROUND_ANALYSIS_ENROLLMENT_STALE', BACKGROUND_ENROLL_STALE);
-    const offered = shown.offer.scopes.find((entry) => entry.kind === scope.kind && entry.seriesId === scope.seriesId);
-    requireStore(offered !== undefined, 'BACKGROUND_ANALYSIS_ENROLLMENT_STALE', BACKGROUND_ENROLL_STALE);
-    requireStore(ceilingTokens >= offered.books.length, 'BACKGROUND_ANALYSIS_CEILING_TOO_LOW', backgroundCeilingTooLowReason(offered.books.length));
-    const shares = backgroundCeilingShares(ceilingTokens, offered.books.length);
-    const scopeEnrollmentId = offered.kind === 'book' ? null : randomUUID();
-    const inputs: BackgroundAnalysisEnrollInput[] = offered.books.map((member, index) => {
-      const memberRead = this.#enrollmentRead(member.bookId, kind);
-      requireStore(member.bookId === bookId || (memberRead !== 'damaged' && (memberRead === null || memberRead.state !== 'active')),
-        'BACKGROUND_ANALYSIS_ENROLLMENT_ACTIVE', backgroundScopeMemberActiveReason(member.title));
-      const memberBinding = this.#enrollmentBinding(member.bookId, kind);
-      requireStore(memberBinding !== null, 'BACKGROUND_ANALYSIS_ENROLLMENT_UNAVAILABLE', backgroundScopeMemberUnreadableReason(member.title));
-      const point = this.#analysisCall(() => this.#baselineAnalysis.workingPointOf(member.bookId));
-      const share = { kind: 'tokens' as const, maxTotalTokens: shares[index]! };
-      const memberScope: BackgroundAnalysisScope = scopeEnrollmentId === null ? { kind: 'book' } : {
-        kind: offered.kind as 'series' | 'all-books', scopeEnrollmentId, seriesId: offered.seriesId,
-        books: offered.books.map((entry) => entry.bookId), position: index + 1,
-      };
-      return {
-        bookId: member.bookId, kind,
-        startingPoint,
-        // What the Enrollment binds holds the Book's share as its budget: each Run it starts is held to it.
-        binding: { ...memberBinding, runBudgetCeiling: share },
-        enrolledAt: { revisionId: point.revisionId, journalSequence: point.journalSequence, workingDigest: point.workingDigest },
-        disclosureDigest,
-        ceiling: { kind: 'tokens', maxTotalTokens: ceilingTokens },
-        share,
-        scope: memberScope,
-      };
-    });
-    this.#enrollmentCall(() => this.#enrollments.enrollAll(inputs));
-    for (const input of inputs) this.#backgroundNotStarted.delete(input.bookId);
-    return this.inspectBackgroundAnalysisEnrollment(bookId, runtime, kind);
+    kind: string = BACKGROUND_ANALYSIS_KIND,): BackgroundAnalysisEnrollmentProjection {
+    return backgroundEnrollments.enrollBackgroundAnalysis(this.#backgroundEnrollmentHost, bookId, disclosureDigest, startingPoint, scope, ceilingTokens, runtime, kind);
   }
 
-  /**
-   * `撤销登记`: a state appended to the Book's Enrollment — to every Book of its scope, for a Series or all-Books Enrollment. No
-   * new Run starts under it; a Run it started goes on as the editor's to pause or cancel, and its results, records and what it
-   * sent stay as they are.
-   */
   revokeBackgroundAnalysisEnrollment(bookId: string, enrollmentId: string, runtime: BackgroundAnalysisRuntime): BackgroundAnalysisEnrollmentProjection {
-    this.#assertAvailable();
-    requireStore(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(enrollmentId), 'BACKGROUND_ANALYSIS_ENROLLMENT_INVALID', '后台分析登记的参数无效。');
-    const current = this.#enrollmentCall(() => this.#enrollments.byId(enrollmentId));
-    requireStore(current !== null && current.enrollmentId === enrollmentId && current.bookId === bookId, 'BACKGROUND_ANALYSIS_ENROLLMENT_NOT_FOUND', '这份后台分析登记不属于这本书。');
-    this.#transaction(this.#authority, () => {
-      for (const member of this.#scopeMembersOf(current)) {
-        if (member.state !== 'revoked') this.#enrollmentCall(() => this.#enrollments.revoke(member.enrollmentId));
-      }
-    });
-    return this.inspectBackgroundAnalysisEnrollment(bookId, runtime, current.kind);
+    return backgroundEnrollments.revokeBackgroundAnalysisEnrollment(this.#backgroundEnrollmentHost, bookId, enrollmentId, runtime);
   }
 
-  /**
-   * `暂停` / `续行` (Issue #864): the Enrollment in force — every Book of its scope — holds or releases what it would start. A Run
-   * it already started is not touched: pausing or cancelling that Run is the Run's own control.
-   */
   holdBackgroundAnalysisEnrollment(bookId: string, enrollmentId: string, hold: 'pause' | 'resume', runtime: BackgroundAnalysisRuntime): BackgroundAnalysisEnrollmentProjection {
-    this.#assertAvailable();
-    requireStore(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(enrollmentId) && (hold === 'pause' || hold === 'resume'),
-      'BACKGROUND_ANALYSIS_ENROLLMENT_INVALID', '后台分析登记的参数无效。');
-    const current = this.#enrollmentCall(() => this.#enrollments.byId(enrollmentId));
-    requireStore(current !== null && current.enrollmentId === enrollmentId && current.bookId === bookId, 'BACKGROUND_ANALYSIS_ENROLLMENT_NOT_FOUND', '这份后台分析登记不属于这本书。');
-    requireStore(current.state === 'active', 'BACKGROUND_ANALYSIS_ENROLLMENT_NOT_ACTIVE', current.state === 'suspended' ? BACKGROUND_SUSPENDED : BACKGROUND_REVOKED);
-    this.#transaction(this.#authority, () => {
-      for (const member of this.#scopeMembersOf(current)) {
-        if (member.state === 'active') this.#enrollmentCall(() => this.#enrollments.hold(member.enrollmentId, hold === 'pause'));
-      }
-    });
-    return this.inspectBackgroundAnalysisEnrollment(bookId, runtime, current.kind);
+    return backgroundEnrollments.holdBackgroundAnalysisEnrollment(this.#backgroundEnrollmentHost, bookId, enrollmentId, hold, runtime);
   }
 
-  /**
-   * Every Book that has an Enrollment, in the order the dispatcher looks at them, read without verifying a record: a Series or
-   * all-Books scope's Books together in the scope's order (Issue #864).
-   */
   backgroundIdleFacts(runtime: BackgroundAnalysisRuntime): { sinceLastEditMs: number | null; editorJobRunning: boolean; idle: boolean } {
-    const last = this.#authority.prepare('SELECT max(durable_at) last FROM edit_journal_entries').get() as SqlRow;
-    const sinceLastEditMs = last.last === null ? null : Math.max(0, runtime.now - Date.parse(asString(last.last)));
-    return { sinceLastEditMs, editorJobRunning: runtime.editorWorkBusy,
-      idle: !runtime.editorWorkBusy && (sinceLastEditMs === null || sinceLastEditMs >= runtime.quietMs) };
+    return backgroundEnrollments.backgroundIdleFacts(this.#backgroundEnrollmentHost, runtime);
   }
 
-  backgroundAnalysisBooks(): ReadonlyArray<string> {
-    this.#assertAvailable();
-    return this.#enrollmentCall(() => this.#enrollments.dispatchOrder());
-  }
+  backgroundAnalysisBooks(): ReadonlyArray<string> { return backgroundEnrollments.backgroundAnalysisBooks(this.#backgroundEnrollmentHost); }
 
-  /**
-   * What the Book's Enrollment would do now, and the version it would name: the dispatcher's one question, answered by the same
-   * function as ②A's `next`. The look is remembered, so ②A can say when AI7 last looked and what it found.
-   */
   backgroundAnalysisDecisionFor(bookId: string, runtime: BackgroundAnalysisRuntime): { decision: BackgroundAnalysisDecision; enrollmentVersionId: string | null } {
-    this.#assertAvailable();
-    const read = this.#enrollmentRead(bookId);
-    const decision = this.#analysisCall(() => this.#backgroundDecision(bookId, read, runtime));
-    this.#backgroundLooks.set(bookId, { at: new Date(runtime.now).toISOString(), kind: decision.kind, reason: decision.reason });
-    return { decision, enrollmentVersionId: read !== 'damaged' && read !== null && read.state === 'active' && !read.paused ? read.version.enrollmentVersionId : null };
+    return backgroundEnrollments.backgroundAnalysisDecisionFor(this.#backgroundEnrollmentHost, bookId, runtime);
   }
 
-  /**
-   * The dispatcher's preparation (the Commander's ruling on #713, P1-2): exactly what 先看计划 prepares, under a Task Intent of
-   * its own marked with the enrollment version — never one the editor asked for — and refused while any preparation of the Book
-   * is under way or the editor's own plan waits to be started. Its checkpoint gives way to any other the Book asks for. Its plan
-   * freezes the Book's share of the Enrollment's ceiling as the Run's own (Issue #864).
-   */
   createBackgroundBaselineAnalysisPreparationWork(
     bookId: string,
     mode: 'first-baseline' | 'sync-current',
     enrollmentVersionId: string,
-    launchPolicy: LaunchPolicyProjection,
-  ): AnalysisPreparationResult<BaselineAnalysisProjection> {
-    this.#assertAvailable();
-    requireStore(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(enrollmentVersionId) && (mode === 'first-baseline' || mode === 'sync-current'),
-      'BACKGROUND_ANALYSIS_START_INVALID', '后台分析的参数无效。');
-    const found = this.#enrollmentCall(() => this.#enrollments.version(enrollmentVersionId));
-    requireStore(found !== null && found.enrollment.bookId === bookId && found.version.share !== null,
-      'BACKGROUND_ANALYSIS_START_INVALID', BACKGROUND_NO_CEILING);
-    return this.#baselineProgress(() => this.#baselineAnalysis.prepare({
-      phase: 'start', bookId, goal: BASELINE_ANALYSIS_MODE_GOALS[mode], update: mode === 'first-baseline' ? null : { mode, selectedRange: null },
-      reconfirm: false, launchPolicy, background: { enrollmentVersionId, runBudgetCeiling: found.version.share! },
-    }));
+    launchPolicy: LaunchPolicyProjection,): AnalysisPreparationResult<BaselineAnalysisProjection> {
+    return backgroundEnrollments.createBackgroundBaselineAnalysisPreparationWork(this.#backgroundEnrollmentHost, bookId, mode, enrollmentVersionId, launchPolicy);
   }
 
   /**
@@ -8256,12 +7753,12 @@ export class EditorialStore {
    */
   backgroundMayContinue(bookId: string, enrollmentVersionId: string, workId: string | null, runtime: BackgroundAnalysisRuntime): string | null {
     this.#assertAvailable();
-    const read = this.#enrollmentRead(bookId);
+    const read = backgroundEnrollments.enrollmentRead(this.#backgroundEnrollmentHost, bookId);
     if (read === 'damaged') return BACKGROUND_RECORD_DAMAGED;
     if (read === null || read.state !== 'active' || read.version.enrollmentVersionId !== enrollmentVersionId) return BACKGROUND_REVOKED;
     if (read.paused) return BACKGROUND_PAUSED;
     if (read.version.share === null) return BACKGROUND_NO_CEILING;
-    if (!this.#backgroundRuleAdmits()) return BACKGROUND_NO_RULE;
+    if (!backgroundEnrollments.backgroundRuleAdmits(this.#backgroundEnrollmentHost)) return BACKGROUND_NO_RULE;
     if (!runtime.routeExecutable) return BACKGROUND_NO_ROUTE;
     if (this.replacementFrozen()) return BACKGROUND_REPLACEMENT_WAITING;
     if (this.#baselineAnalysis.preparationInFlightBesides(bookId, workId)) return BACKGROUND_PREPARATION_IN_FLIGHT;
@@ -8271,7 +7768,7 @@ export class EditorialStore {
     if (!this.backgroundIdleFacts(runtime).idle) return backgroundQuietReason(runtime.quietMs);
     if (!runtime.placeFree) return BACKGROUND_PLACE_BUSY;
     const share = executionBackgroundShare(this.#baselineAnalysis.launch.policy, runtime.capacity);
-    if (this.#backgroundRunningCount() >= share) return backgroundShareFullReason(share);
+    if (backgroundEnrollments.backgroundRunningCount(this.#backgroundEnrollmentHost) >= share) return backgroundShareFullReason(share);
     try {
       const drift = backgroundEnrollmentDrift(read.version.binding, this.#baselineAnalysis.currentRuleFacts(bookId, 'first-baseline'));
       if (drift.length > 0) return backgroundDriftReason(drift);
@@ -8282,71 +7779,18 @@ export class EditorialStore {
     return null;
   }
 
-  /**
-   * The dispatcher's start of the Task it has just prepared, in the same turn as the step that froze its plan (ADR 0048; ADR
-   * 0046): recorded as 开始任务 would record it, its Run Authorization's origin `background-analysis-enrollment` naming the
-   * enrollment version. It starts only the Task Intent the dispatcher created under that version. Anything that would make the
-   * start differ from what the Enrollment binds — it was revoked, paused or changed, this launch's policy does not admit it, the
-   * plan's mode, its key content, what it binds, a ceiling above the Book's share, or a route this launch cannot execute —
-   * records nothing more and says why; the plan stays the Enrollment's, said as such, and is never taken for the editor's.
-   */
   startEnrolledBaselineAnalysis(
     bookId: string,
     taskIntentId: string,
     planEnvelopeDigest: string,
     enrollmentVersionId: string,
     mode: 'first-baseline' | 'sync-current',
-    runtime: BackgroundAnalysisRuntime,
-  ): { dispatchRunRecordId: string | null; reason: string | null } {
-    this.#assertAvailable();
-    requireStore(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(taskIntentId) && DIGEST_PATTERN.test(planEnvelopeDigest) && UUID_PATTERN.test(enrollmentVersionId) &&
-      (mode === 'first-baseline' || mode === 'sync-current'), 'BACKGROUND_ANALYSIS_START_INVALID', '后台分析的参数无效。');
-    const refused = (reason: string) => {
-      this.#backgroundNotStarted.set(bookId, { at: new Date(runtime.now).toISOString(), reason: backgroundNotStartedReason(reason) });
-      return { dispatchRunRecordId: null, reason };
-    };
-    const record = this.#enrollmentRead(bookId);
-    if (record === 'damaged') return refused(BACKGROUND_RECORD_DAMAGED);
-    if (record === null || record.state !== 'active' || record.version.enrollmentVersionId !== enrollmentVersionId) return refused(BACKGROUND_REVOKED);
-    if (record.paused) return refused(BACKGROUND_PAUSED);
-    const share = record.version.share;
-    if (share === null) return refused(BACKGROUND_NO_CEILING);
-    if (!this.#backgroundRuleAdmits()) return refused(BACKGROUND_NO_RULE);
-    if (!runtime.routeExecutable) return refused(BACKGROUND_NO_ROUTE);
-    const projection = this.#analysisCall(() => this.#baselineAnalysis.inspect(bookId)) as BaselineAnalysisProjection;
-    const intent = projection.taskIntent;
-    const envelope = projection.planEnvelope;
-    const version = projection.planVersion;
-    requireStore(intent !== null && intent.taskIntentId === taskIntentId && envelope?.digest === planEnvelopeDigest && version !== null,
-      'ANALYSIS_AUTHORIZATION_STALE', '任务计划已经变化；无法记录该授权。');
-    // Only the Task the dispatcher created under this very version: never a Task the editor asked for.
-    requireStore(intent.preparedByEnrollmentVersionId === enrollmentVersionId, 'BACKGROUND_ANALYSIS_START_INVALID', '后台分析只开始它自己准备的任务。');
-    if (projection.authorization !== null) {
-      // The same start made twice answers as the first did.
-      requireStore(projection.authorization.origin === 'background-analysis-enrollment' && projection.authorization.enrollmentVersionId === enrollmentVersionId,
-        'ANALYSIS_AUTHORIZATION_STALE', '这项任务已经开始了。');
-      return { dispatchRunRecordId: null, reason: null };
-    }
-    requireStore(intent.mode === mode, 'BACKGROUND_ANALYSIS_START_INVALID', '后台分析只做首次基线分析或同步到当前稿件。');
-    if (projection.planRevision !== null) return refused(QUICK_START_PLAN_CHANGED);
-    const drift = backgroundEnrollmentDrift(record.version.binding, version.materialInputs);
-    if (drift.length > 0) return refused(backgroundDriftReason(drift));
-    // The plan holds the Run to the Book's share, or less (Issue #864): never to no ceiling, never to more.
-    const frozen = version.materialInputs.runBudgetCeiling;
-    if (frozen === 'unset' || frozen.maxTotalTokens > share.maxTotalTokens) return refused(BACKGROUND_NO_CEILING);
-    // 结果待确认 (Issue #51, S16c; CTRL-007, CONT-011): a plan that would send again a range whose earlier result could not be
-    // known is never started by the dispatcher, whatever changed between its look and this start.
-    if (this.#analysisCall(() => this.#baselineAnalysis.resendUnitsOf(projection)).length > 0) return refused(BACKGROUND_OUTCOME_UNKNOWN);
-    if (!envelope.dispatchAllowed) return refused(BACKGROUND_NO_ROUTE);
-    const authorized = this.#analysisCall(() => this.#baselineAnalysis.authorize(bookId, taskIntentId, planEnvelopeDigest, 'now',
-      { kind: 'background-analysis-enrollment', enrollmentVersionId }));
-    this.#backgroundNotStarted.delete(bookId);
-    return { dispatchRunRecordId: authorized.dispatchRunRecordId, reason: null };
+    runtime: BackgroundAnalysisRuntime,): { dispatchRunRecordId: string | null; reason: string | null } {
+    return backgroundEnrollments.startEnrolledBaselineAnalysis(this.#backgroundEnrollmentHost, bookId, taskIntentId, planEnvelopeDigest, enrollmentVersionId, mode, runtime);
   }
 
-  /** A pass that stopped after it began preparing says why, on ②A, until the next start or 登记 (#713 review, P2-2). */
   noteBackgroundNotStarted(bookId: string, reason: string, now: number): void {
-    this.#backgroundNotStarted.set(bookId, { at: new Date(now).toISOString(), reason: backgroundNotStartedReason(reason) });
+    return backgroundEnrollments.noteBackgroundNotStarted(this.#backgroundEnrollmentHost, bookId, reason, now);
   }
 
   /**
@@ -8356,152 +7800,6 @@ export class EditorialStore {
    */
   #suspendRestoredEnrollments(): void {
     this.#enrollmentCall(() => this.#enrollments.suspendActive());
-  }
-
-  /** The Book's Enrollment, `null` when it has none, or `damaged` when its record does not read back (#713 review, P3-6). */
-  #enrollmentRead(bookId: string, kind: string = BACKGROUND_ANALYSIS_KIND): BackgroundAnalysisEnrollmentRecord | null | 'damaged' {
-    try {
-      return this.#enrollments.forBook(bookId, kind);
-    } catch (error) {
-      if (error instanceof BackgroundAnalysisEnrollmentError) return 'damaged';
-      throw error;
-    }
-  }
-
-  /**
-   * The Enrollments one decision covers (Issue #864): the Book's own, or — for a Series or all-Books Enrollment — that of every
-   * Book of its scope whose version in force is still of the same 登记. A member whose record does not read back is left alone.
-   */
-  #scopeMembersOf(record: BackgroundAnalysisEnrollmentRecord): ReadonlyArray<BackgroundAnalysisEnrollmentRecord> {
-    const scope = record.version.scope;
-    if (scope.kind === 'book') return [record];
-    return scope.books.flatMap((memberId) => {
-      const member = memberId === record.bookId ? record : this.#enrollmentRead(memberId, record.kind);
-      return member !== null && member !== 'damaged' && member.version.scope.kind !== 'book' &&
-        member.version.scope.scopeEnrollmentId === scope.scopeEnrollmentId ? [member] : [];
-    });
-  }
-
-  /**
-   * The scopes `登记…` offers for the Book (Issue #864): the Book alone; each Series it is in, its Books in the order they joined
-   * it; and every Book of the house in the order they were made, once the house holds more than this one.
-   */
-  #backgroundScopeOffers(bookId: string, title: string): BackgroundAnalysisScopeOffer[] {
-    const offers: BackgroundAnalysisScopeOffer[] = [{ kind: 'book', seriesId: null, label: backgroundScopeLabel('book', title, 1), books: [{ bookId, title }] }];
-    const titleOf = this.#authority.prepare('SELECT title FROM books WHERE book_id = ?');
-    for (const membership of this.#seriesCall(() => this.#series.seriesOf(bookId)).memberships) {
-      const books = this.#seriesCall(() => [...this.#series.members(membership.seriesId)]).reverse().map((member) => ({
-        bookId: member.bookId,
-        title: asString((titleOf.get(member.bookId) as SqlRow).title),
-      }));
-      offers.push({ kind: 'series', seriesId: membership.seriesId, label: backgroundScopeLabel('series', membership.title, books.length), books });
-    }
-    const all = (this.#authority.prepare('SELECT book_id, title FROM books ORDER BY created_at, book_id').all() as SqlRow[])
-      .map((row) => ({ bookId: asString(row.book_id), title: asString(row.title) }));
-    if (all.length > 1) offers.push({ kind: 'all-books', seriesId: null, label: backgroundScopeLabel('all-books', '', all.length), books: all });
-    return offers;
-  }
-
-  /** What a version covers, in ②A's words and with its Books' titles; `null` when a Series it names is no longer on record. */
-  #enrollmentScopeOf(scope: BackgroundAnalysisScope, bookId: string, title: string): NonNullable<BackgroundAnalysisEnrollmentProjection['enrollment']>['scope'] | null {
-    if (scope.kind === 'book') return { kind: 'book', label: backgroundScopeLabel('book', title, 1), books: [{ bookId, title }], position: 1 };
-    const titleOf = this.#authority.prepare('SELECT title FROM books WHERE book_id = ?');
-    const books = scope.books.map((memberId) => ({ bookId: memberId, title: asString(((titleOf.get(memberId) as SqlRow | undefined) ?? { title: '' }).title) }));
-    const name = scope.kind === 'series' ? this.#seriesCall(() => this.#series.find(scope.seriesId!))?.title ?? null : '';
-    if (name === null) return null;
-    return { kind: scope.kind, label: backgroundScopeLabel(scope.kind, name, books.length), books, position: scope.position };
-  }
-
-  /**
-   * Whether this launch's selected policy admits a Run a 后台分析登记 dispatches (Issue #864): development-ci's local route, or —
-   * under developer-live and ordinary production — the one enrolled-background rule of Provider Processing v14 / v15, which v12
-   * and v13 do not have.
-   */
-  #backgroundKindEnrollable(kind: string): boolean {
-    return kind === BACKGROUND_ANALYSIS_KIND && this.#baselineAnalysis.launch.operationalScope === 'development-ci'
-      ? this.#backgroundRuleAdmits() : backgroundEnrollmentKinds(this.#baselineAnalysis.launch.policy).some((entry) => entry.kind === kind);
-  }
-
-  #backgroundKindOffers(): { kind: string; label: string; enabled: boolean; reason: string | null }[] {
-    const labels: Readonly<Record<string, string>> = {
-      [BACKGROUND_ANALYSIS_KIND]: '基线分析', 'learning-curation': '学习整理', 'material-index': '资料索引',
-      'review-reduction': '审阅归并', 'factual-recheck': '事实复核',
-    };
-    const projected = backgroundEnrollmentKinds(this.#baselineAnalysis.launch.policy).map((entry) => entry.kind);
-    // Projected kinds lead; the known catalog adds disabled rows with their reason, never permission.
-    const kinds = [...new Set([...projected, ...Object.keys(labels)])];
-    return kinds.map((kind) => {
-      const enabled = this.#backgroundKindEnrollable(kind);
-      return { kind, label: labels[kind] ?? '后台处理', enabled,
-        reason: enabled ? null : '当前模型服务策略未开放这类后台处理登记。' };
-    });
-  }
-
-  #backgroundRuleAdmits(): boolean {
-    const launch = this.#baselineAnalysis.launch;
-    if (launch.operationalScope === 'development-ci') return launch.live === null;
-    return launch.live !== null && liveKindRule(launch.policy, BASELINE_ANALYSIS_KIND, [], 'background') !== null;
-  }
-
-  /**
-   * How many background Runs hold a place of the governor, or wait for one, now. A Run waiting for the editor's answer to a
-   * question holds none (Issue #865), nor does one waiting to go online, which no background Run does.
-   */
-  #backgroundRunningCount(): number {
-    return asNumber((this.#authority.prepare(
-      `SELECT count(*) n FROM analysis_run_authorizations a
-       JOIN analysis_run_records r ON r.authorization_id = a.authorization_id
-       WHERE (a.origin = 'background-analysis-enrollment' OR a.start_when = 'idle')
-         AND (SELECT s.state FROM analysis_run_states s WHERE s.run_record_id = r.run_record_id ORDER BY s.sequence DESC LIMIT 1)
-           IN ('authorized', 'admitted', 'executing', 'cancelling', 'pausing')`,
-    ).get() as SqlRow).n);
-  }
-
-  /** What the Book's Enrollment binds, read from its facts now; `null` when this launch admits no background Run or they cannot be read. */
-  #enrollmentBinding(bookId: string, kind: string = BACKGROUND_ANALYSIS_KIND): DefaultExecutionRuleBinding | null {
-    if (!this.#backgroundRuleAdmits()) return null;
-    try {
-      const binding = defaultExecutionRuleBindingOf(this.#baselineAnalysis.currentRuleFacts(bookId, 'first-baseline'));
-      if (kind === BACKGROUND_ANALYSIS_KIND) return binding;
-      const label = this.#backgroundKindOffers().find((entry) => entry.kind === kind)?.label ?? kind;
-      return { ...binding, expectedOutcome: `${label}的处理结果；相应工序接入后，每次仍以精确计划为准。` };
-    } catch (error) {
-      if (error instanceof AnalysisError || error instanceof StoreError) return null;
-      throw error;
-    }
-  }
-
-  /**
-   * The Run Report's lines for the Book's latest Task when a 后台分析登记 started it (Issue #864): the version, the scope and
-   * share, and how the Run ended against the ceiling its plan froze. Read beside the report; its record and digest are untouched.
-   */
-  #withBackgroundReport(projection: BaselineAnalysisProjection): BaselineAnalysisProjection {
-    const outcome = projection.taskOutcome;
-    const authorization = projection.authorization;
-    if (outcome === null || outcome.report === null || authorization === null || authorization.origin !== 'background-analysis-enrollment' ||
-        authorization.enrollmentVersionId === null) return projection;
-    const versionId = authorization.enrollmentVersionId;
-    let found: ReturnType<BackgroundAnalysisEnrollmentLedger['version']> = null;
-    try {
-      found = this.#enrollments.version(versionId);
-    } catch (error) {
-      if (!(error instanceof BackgroundAnalysisEnrollmentError)) throw error;
-    }
-    const ours = found !== null && found.enrollment.bookId === projection.bookId ? found.version : null;
-    const bookTitle = (this.#authority.prepare('SELECT title FROM books WHERE book_id = ?').get(projection.bookId) as SqlRow | undefined)?.title;
-    const scope = ours === null || typeof bookTitle !== 'string' ? null : this.#enrollmentScopeOf(ours.scope, projection.bookId, bookTitle);
-    const frozen = projection.planVersion?.materialInputs.runBudgetCeiling ?? 'unset';
-    const used = Object.values(outcome.report.usagePerStage).reduce((total, usage) => total + usage.inputTokens + usage.outputTokens, 0);
-    const background = backgroundRunReportLines({
-      ordinal: ours?.ordinal ?? null,
-      scopeLabel: scope?.label ?? null,
-      ceilingTokens: ours?.ceiling?.maxTotalTokens ?? null,
-      shareTokens: ours?.share?.maxTotalTokens ?? null,
-      frozenTokens: frozen === 'unset' ? null : frozen.maxTotalTokens,
-      usedTokens: outcome.stop?.usedTokens ?? used,
-      reached: outcome.stop?.reason === 'run-budget-ceiling-reached',
-    });
-    return { ...projection, taskOutcome: { ...outcome, report: { ...outcome.report, background } } };
   }
 
   /**
@@ -8521,7 +7819,7 @@ export class EditorialStore {
       enrollment: () => (read === 'damaged' ? 'damaged' : read?.state ?? null),
       paused: () => record!.paused,
       ceiling: () => record!.version.share !== null,
-      ruleAdmits: () => this.#backgroundRuleAdmits(),
+      ruleAdmits: () => backgroundEnrollments.backgroundRuleAdmits(this.#backgroundEnrollmentHost),
       routeExecutable: () => runtime.routeExecutable,
       replacementWaiting: () => this.replacementFrozen(),
       share: () => executionBackgroundShare(this.#baselineAnalysis.launch.policy, runtime.capacity),
@@ -8567,7 +7865,7 @@ export class EditorialStore {
       },
       quietMs: () => runtime.quietMs,
       placeFree: () => runtime.placeFree,
-      backgroundRunning: () => this.#backgroundRunningCount(),
+      backgroundRunning: () => backgroundEnrollments.backgroundRunningCount(this.#backgroundEnrollmentHost),
     });
   }
 
@@ -9730,708 +9028,143 @@ export class EditorialStore {
 
   // ---- 可复用工序 (Issue #65, plan slice S30; ADR 0087; V2-UX-REUSE-001 to 020, 029 to 031, 038 to 054, 063 to 066) -----------
 
-  /** Each step's words from the configuration as it applies now; a category no longer there keeps its identity as its label. */
-  #capturedStepWords(): StepWords {
-    const configuration = this.#reviewGuidelines.configuration();
-    return (categoryId) => {
-      const entry = configuration.categories.find((candidate) => candidate.categoryId === categoryId);
-      return { label: entry?.label ?? categoryId, procedureTitle: entry?.procedure.title ?? categoryId };
+  /** What the 可复用工序 operations in captured-procedures.ts reach of the store (Issue #1172), read live. */
+  readonly #capturedProcedureHost: capturedProcedureOperations.CapturedProcedureStoreHost = this.#capturedProcedureHostOf();
+
+  #capturedProcedureHostOf(): capturedProcedureOperations.CapturedProcedureStoreHost {
+    const store = this;
+    return {
+      analysisCall: this.#analysisCall.bind(this),
+      artifactCall: this.#artifactCall.bind(this),
+      assertAvailable: this.#assertAvailable.bind(this),
+      get authority() { return store.#authority; },
+      get bookDeliveryPackages() { return store.#bookDeliveryPackages; },
+      get capturedProcedures() { return store.#capturedProcedures; },
+      get editorialWorkspaceProfile() { return store.#editorialWorkspaceProfile; },
+      evaluationBookTitle: this.#evaluationBookTitle.bind(this),
+      guidelineCall: this.#guidelineCall.bind(this),
+      reviewCall: this.#reviewCall.bind(this),
+      get reviewGuidelines() { return store.#reviewGuidelines; },
+      get reviewRuns() { return store.#reviewRuns; },
+      get skillAcquisitions() { return store.#skillAcquisitions; },
+      transaction: this.#transaction.bind(this),
     };
   }
 
-  #capturedProcedureProjection(procedureId: string, before: number | null = null): CapturedProcedureProjection {
-    const { eligible } = resolveProcedureVersions(this.#resolvableVersions(this.#capturedProcedures.versions(procedureId)));
-    return this.#capturedProcedures.projection(procedureId, this.#capturedStepWords(), (bookId) => this.#evaluationBookTitle(bookId),
-      (reviewRunId) => this.#reviewRuns.ordinalOf(reviewRunId), (reviewRunId) => this.#reviewRuns.runStatus(reviewRunId).stateLabel,
-      eligible[0]?.versionId ?? null, before, (reviewRunIds, limit) => {
-        // The 图书交付包 versions that hold a report of a Run pinned to the version (Issue #66, S31b; REUSE-031).
-        const held = this.#bookDeliveryPackages.holdingReviewRuns(reviewRunIds, limit);
-        return { packages: held.packages.map((entry) => ({ ...entry, bookTitle: this.#evaluationBookTitle(entry.bookId) })), total: held.total };
-      });
-  }
-
-  /**
-   * Each version as Latest Eligible Version Resolution weighs it (Issue #66, S31; REUSE-043, REUSE-044): its state, and for an
-   * 已启用 one whether it still validates against the configuration as it applies now — deterministic and provider-free.
-   */
-  #resolvableVersions(versions: ReadonlyArray<StoredCapturedVersion>): ResolvableVersion[] {
-    return versions.map((stored) => ({
-      versionId: stored.versionId,
-      version: stored.version,
-      state: stored.state,
-      failedValidation: stored.validationProblems.length > 0,
-      problem: stored.state === 'enabled' ? this.#capturedValidation(stored).problems[0] ?? null : null,
-    }));
-  }
-
-  /** 知识库 › 工序与规则's 可复用工序, apart from the built-in 工序, and the 开发建议 (ADR 0087 §5, §6). A read. */
   inspectCapturedProcedures(): CapturedProceduresProjection {
-    return this.#procedureCall(() => {
-      const { ids, truncated } = this.#capturedProcedures.procedureIds();
-      const proposals = this.#capturedProcedures.proposals();
-      return {
-        procedures: ids.map((procedureId) => this.#capturedProcedures.summary(procedureId)),
-        proceduresTruncated: truncated,
-        proposals: proposals.proposals,
-        proposalsTruncated: proposals.truncated,
-      };
-    });
+    return capturedProcedureOperations.inspectCapturedProcedures(this.#capturedProcedureHost);
   }
 
-  /**
-   * 导入 Skill… (ADR 0090 §2; REUSE-021, REUSE-022): acquisition reads the picked package into memory and discloses it, keeping
-   * nothing; `keep` then keeps exactly those bytes — the source snapshot and an inert working revision — and nothing more.
-   */
-  async importSkillPackage(input: { path: string | null; keep: string | null }): Promise<ImportedSkillImportProjection> {
-    this.#assertAvailable();
-    const { keep } = input;
-    if (keep !== null) {
-      return this.#procedureCall(() => {
-        const acquired = this.#skillAcquisitions.read(keep);
-        const skills = new ImportedSkills(this.#authority);
-        const revision = skills.keep(acquired);
-        this.#skillAcquisitions.release(keep);
-        return { acquisition: skills.disclose(acquired, keep), revision };
-      });
-    }
-    let acquired: AcquiredSkillPackage;
-    try { acquired = await acquireSkillPackage(input.path ?? ''); }
-    catch (error) {
-      if (error instanceof ImportedSkillError) throw new StoreError(error.code, error.message);
-      throw error;
-    }
-    return this.#procedureCall(() => {
-      const acquisition = new ImportedSkills(this.#authority).disclose(acquired, this.#skillAcquisitions.stage(acquired));
-      return { acquisition, revision: null };
-    });
+  importSkillPackage(input: { path: string | null; keep: string | null }): Promise<ImportedSkillImportProjection> {
+    return capturedProcedureOperations.importSkillPackage(this.#capturedProcedureHost, input);
   }
 
   inspectImportedSkills(revisionId: string | null, before: string | null): ImportedSkillsProjection {
-    this.#assertAvailable();
-    return this.#procedureCall(() => this.#skillUpdates().inspect(revisionId, before));
+    return capturedProcedureOperations.inspectImportedSkills(this.#capturedProcedureHost, revisionId, before);
   }
 
-  #skillUpdates(): ImportedSkillUpdates {
-    return new ImportedSkillUpdates(this.#authority, new ImportedSkills(this.#authority));
-  }
-
-  /**
-   * 检查更新（从文件）… (ADR 0090 §3; REUSE-032): the picked package is read and disclosed against the Skill it would update, keeping
-   * nothing; `keep` then keeps exactly those bytes as a new Source Skill Snapshot and one inert update candidate, and nothing more
-   * unless the Skill's own Artifact Update Rule adopts a clean one. A package that is not that Skill is refused with nothing recorded.
-   */
-  async checkImportedSkillUpdate(input: { skillId: string; path: string | null; keep: string | null }): Promise<ImportedSkillUpdateCheckProjection> {
-    this.#assertAvailable();
-    const { keep } = input;
-    if (keep !== null) {
-      return this.#procedureCall(() => {
-        const acquired = this.#skillAcquisitions.read(keep, input.skillId);
-        const result = this.#skillUpdates().keep(input.skillId, acquired, keep);
-        this.#skillAcquisitions.release(keep);
-        return result;
-      });
-    }
-    let acquired: AcquiredSkillPackage;
-    try { acquired = await acquireSkillPackage(input.path ?? ''); }
-    catch (error) {
-      if (error instanceof ImportedSkillError) throw new StoreError(error.code, error.message);
-      throw error;
-    }
-    return this.#procedureCall(() => {
-      // Identity is checked before the package is staged: one that is not this Skill leaves no trace.
-      this.#skillUpdates().verify(input.skillId, acquired);
-      return this.#skillUpdates().disclose(input.skillId, acquired, this.#skillAcquisitions.stage(acquired, input.skillId));
-    });
+  checkImportedSkillUpdate(input: { skillId: string; path: string | null; keep: string | null }): Promise<ImportedSkillUpdateCheckProjection> {
+    return capturedProcedureOperations.checkImportedSkillUpdate(this.#capturedProcedureHost, input);
   }
 
   inspectImportedSkillUpdate(candidateId: string): ImportedSkillUpdateCandidateProjection {
-    this.#assertAvailable();
-    return this.#procedureCall(() => this.#skillUpdates().inspectCandidate(candidateId));
+    return capturedProcedureOperations.inspectImportedSkillUpdate(this.#capturedProcedureHost, candidateId);
   }
 
   adoptImportedSkillUpdate(input: { candidateId: string; reviewDigest: string; acceptItems: readonly string[]; upstreamPaths: readonly string[] }): ImportedSkillUpdateCandidateProjection {
-    this.#assertAvailable();
-    return this.#procedureCall(() => this.#skillUpdates().adopt(input.candidateId, input));
+    return capturedProcedureOperations.adoptImportedSkillUpdate(this.#capturedProcedureHost, input);
   }
 
   dismissImportedSkillUpdate(candidateId: string): ImportedSkillUpdateCandidateProjection {
-    this.#assertAvailable();
-    return this.#procedureCall(() => this.#skillUpdates().dismiss(candidateId));
+    return capturedProcedureOperations.dismissImportedSkillUpdate(this.#capturedProcedureHost, candidateId);
   }
 
   createImportedSkillUpdateRule(skillId: string, confirmation: string): ImportedSkillUpdateRuleProjection {
-    this.#assertAvailable();
-    return this.#procedureCall(() => this.#skillUpdates().createRule(skillId, confirmation));
+    return capturedProcedureOperations.createImportedSkillUpdateRule(this.#capturedProcedureHost, skillId, confirmation);
   }
 
   revokeImportedSkillUpdateRule(skillId: string): ImportedSkillUpdateRuleProjection {
-    this.#assertAvailable();
-    return this.#procedureCall(() => this.#skillUpdates().revokeRule(skillId));
+    return capturedProcedureOperations.revokeImportedSkillUpdateRule(this.#capturedProcedureHost, skillId);
   }
 
   rollbackImportedSkill(skillId: string, revisionId: string): ImportedSkillRevisionProjection {
-    this.#assertAvailable();
-    return this.#procedureCall(() => this.#skillUpdates().rollback(skillId, revisionId));
+    return capturedProcedureOperations.rollbackImportedSkill(this.#capturedProcedureHost, skillId, revisionId);
   }
 
   validateImportedSkill(revisionId: string): ImportedSkillRevisionProjection {
-    this.#assertAvailable();
-    return this.#procedureCall(() => new ImportedSkills(this.#authority).validate(revisionId));
+    return capturedProcedureOperations.validateImportedSkill(this.#capturedProcedureHost, revisionId);
   }
 
   installImportedSkill(revisionId: string, previewDigest: string): ImportedSkillRevisionProjection {
-    this.#assertAvailable();
-    return this.#procedureCall(() => new ImportedSkills(this.#authority).install(revisionId, previewDigest));
+    return capturedProcedureOperations.installImportedSkill(this.#capturedProcedureHost, revisionId, previewDigest);
   }
 
   enableImportedSkill(revisionId: string, bookId: string, previewDigest: string): ImportedSkillRevisionProjection {
-    this.#assertAvailable();
-    return this.#procedureCall(() => new ImportedSkills(this.#authority).enable(revisionId, bookId, previewDigest));
+    return capturedProcedureOperations.enableImportedSkill(this.#capturedProcedureHost, revisionId, bookId, previewDigest);
   }
 
-  /** ADR 0090: recommendations consume existing eligibility; neither this read nor selection writes authority. */
   recommendProcedures(input: ProcedureRecommendationInput): ProcedureRecommendationProjection {
-    this.#assertAvailable();
-    return this.#procedureCall(() => {
-      requireStore(typeof input.goal === 'string' && input.goal.length <= 2000 && input.goal.isWellFormed() &&
-        ['whole', 'chapters', 'selection'].includes(input.scope) && ['review-run', 'baseline-analysis', 'writing', 'unclassified'].includes(input.taskKind) &&
-        Array.isArray(input.categoryIds) && input.categoryIds.length <= 32 && input.categoryIds.every((id) => typeof id === 'string'),
-      'PROCEDURE_RECOMMENDATION_INVALID', '工序推荐的任务条件无效。');
-      const applicability = this.inspectCapturedProcedureApplicability(input.bookId, input.scope === 'selection' ? 'selection' : null);
-      const readings: RecommendationReading[] = [];
-      for (const entry of applicability.procedures) {
-        if (entry.latestEligible === null) continue;
-        const stored = this.#capturedProcedures.version(entry.latestEligible.versionId)!;
-        readings.push({ applicability: entry, document: stored.document, documentSha256: stored.documentSha256,
-          labels: capturedStepProjections(stored.document, this.#capturedStepWords()).map((step) => step.label) });
-      }
-      return recommendProcedures(input, readings);
-    });
+    return capturedProcedureOperations.recommendProcedures(this.#capturedProcedureHost, input);
   }
 
-  /** One Captured Procedure with a page of its versions, newest first, below `before` when it is given (Issue #65 review). */
   inspectCapturedProcedure(procedureId: string, before: number | null): CapturedProcedureProjection {
-    return this.#procedureCall(() => {
-      requireStore(typeof procedureId === 'string' && UUID_PATTERN.test(procedureId), 'CAPTURED_PROCEDURE_INVALID', '可复用工序标识无效。');
-      return this.#capturedProcedureProjection(procedureId, before);
-    });
+    return capturedProcedureOperations.inspectCapturedProcedure(this.#capturedProcedureHost, procedureId, before);
   }
 
-  /** One 开发建议 with a page of its versions, newest first, below `before` when it is given (Issue #65 review). */
   inspectDeveloperProposal(proposalId: string, before: number | null): DeveloperProposalProjection {
-    return this.#procedureCall(() => this.#capturedProcedures.proposal(proposalId, before));
+    return capturedProcedureOperations.inspectDeveloperProposal(this.#capturedProcedureHost, proposalId, before);
   }
 
-  /** One 开发建议 version alone: what 导出为文件… names and writes. */
   inspectDeveloperProposalVersion(proposalVersionId: string): DeveloperProposalVersionProjection {
-    return this.#procedureCall(() => {
-      const version = this.#capturedProcedures.proposalVersion(proposalVersionId);
-      requireStore(version !== null, 'DEVELOPER_PROPOSAL_NOT_FOUND', '这一版开发建议不存在。');
-      const { canonical: _canonical, ...projection } = version;
-      return projection;
-    });
+    return capturedProcedureOperations.inspectDeveloperProposalVersion(this.#capturedProcedureHost, proposalVersionId);
   }
 
-  /**
-   * `将以上工序保存为可复用工序` on one Review Run of the Book (ADR 0087 §2; REUSE-002, REUSE-011 to REUSE-019): its source set —
-   * every category, which may be kept and why not — the scope slot it suggests, the deterministic classification, and the
-   * procedures a next version may join. A read: closing it creates nothing (REUSE-020).
-   */
   inspectProcedureCapture(bookId: string, reviewRunId: string): ProcedureCaptureProjection {
-    return this.#procedureCall(() => {
-      const source = this.#reviewRuns.captureSource(bookId, reviewRunId);
-      const { ids } = this.#capturedProcedures.procedureIds();
-      return {
-        bookId,
-        reviewRunId,
-        runLabel: `第 ${source.ordinal} 次审阅`,
-        available: source.unavailableReason === null,
-        unavailableReason: source.unavailableReason,
-        steps: source.steps.map(({ entry, eligible, excludedReason }) => ({
-          categoryId: entry.categoryId,
-          label: entry.label,
-          procedureTitle: entry.procedure.title,
-          procedureVersion: entry.procedure.version,
-          output: entry.output,
-          model: callsModel(houseExecutor(entry)),
-          searchEngine: entry.searchEngine,
-          eligible,
-          excludedReason,
-        })),
-        scopeSlot: source.scopeKind === 'whole' ? 'whole' : 'chapters',
-        sourceScopeLabel: source.scopeLabel,
-        // A finished Review Run is review work the existing executors already perform: a Captured Procedure. Anything that needs
-        // new code is a Developer Capability Proposal; the native Skill and Workflow drafts and a Default Execution Rule over a
-        // Captured Procedure stay deferred (ADR 0087 §1, §6).
-        classification: {
-          recommended: 'captured-procedure',
-          alternatives: [
-            { kind: 'developer-proposal', available: true },
-            { kind: 'skill-draft', available: false },
-            { kind: 'workflow-draft', available: false },
-            { kind: 'default-rule', available: false },
-          ],
-        },
-        procedures: ids.map((procedureId) => {
-          const latest = this.#capturedProcedures.versions(procedureId)[0]!;
-          return { procedureId, title: latest.document.title, latestVersion: latest.version };
-        }),
-      };
-    });
+    return capturedProcedureOperations.inspectProcedureCapture(this.#capturedProcedureHost, bookId, reviewRunId);
   }
 
-  /**
-   * 保存为可复用工序 (ADR 0087 §2): the kept steps of a finished Review Run, in the configuration's order, saved as version 1 of a
-   * new Captured Procedure or the next version of an existing one, 待验证. Its document holds nothing of the Book; the Run is
-   * named only in the local provenance outside its digest.
-   */
   saveCapturedProcedure(input: SaveCapturedProcedureInput, now: Date = new Date()): CapturedProcedureProjection {
-    return this.#procedureCall(() => {
-      requireStore(typeof input === 'object' && input !== null &&
-        Array.isArray(input.categoryIds) && input.categoryIds.length >= 1 && new Set(input.categoryIds).size === input.categoryIds.length &&
-        input.categoryIds.every((categoryId) => typeof categoryId === 'string'),
-      'CAPTURED_PROCEDURE_STEPS_INVALID', '请至少保留一个步骤，且不要重复。');
-      // A capture sets 全书 or 选定章节; a selection is handed over at each run, never saved as a setting (Issue #423, S77 deferred item a).
-      requireStore((CAPTURED_PROCEDURE_CAPTURE_SLOTS as readonly string[]).includes(input.scopeSlot), 'CAPTURED_PROCEDURE_INVALID', '审阅范围的设定无效。');
-      requireStore(validCapturedProcedureTitle(input.title), 'CAPTURED_PROCEDURE_TITLE_INVALID',
-        `请给这个工序起一个名字（1–${MAX_CAPTURED_PROCEDURE_TITLE_GRAPHEMES} 个字，前后不留空格）。`);
-      const source = this.#reviewRuns.captureSource(input.bookId, input.reviewRunId);
-      requireStore(source.unavailableReason === null, 'CAPTURED_PROCEDURE_SOURCE_INELIGIBLE', source.unavailableReason ?? '');
-      for (const categoryId of input.categoryIds) {
-        const step = source.steps.find((candidate) => candidate.entry.categoryId === categoryId);
-        requireStore(step !== undefined, 'CAPTURED_PROCEDURE_STEPS_INVALID', '要保存的步骤不在这次审阅中。');
-        requireStore(step.eligible, 'CAPTURED_PROCEDURE_STEP_INELIGIBLE', `「${step.entry.label}」不能保存：${step.excludedReason ?? ''}`);
-      }
-      // The steps keep the configuration's order — the Run's own — whatever order they were named in (ADR 0087 §2).
-      const entries = source.steps.filter((step) => input.categoryIds.includes(step.entry.categoryId)).map((step) => step.entry);
-      const document = capturedProcedureDocument(input.title, entries, input.scopeSlot);
-      const stored = this.#transaction(this.#authority, () => this.#capturedProcedures.save({
-        procedureId: input.procedureId,
-        document,
-        sourceBookId: input.bookId,
-        sourceReviewRunId: input.reviewRunId,
-        sourceRunOrdinal: source.ordinal,
-      }, now));
-      return this.#capturedProcedureProjection(stored.procedureId);
-    });
-  }
-
-  /**
-   * `验证并启用…`'s preview of one version (ADR 0087 §3), deterministic and provider-free: each step with its 工序 and version,
-   * its output, its model and search-engine use, the guideline versions a run would apply today against the source Run's, the
-   * scope slot, the Authority Ceiling, and every problem — a step that no longer resolves at the same 工序 version, or a ceiling
-   * wider than the source Run's. Its digest is what enabling confirms.
-   */
-  #capturedValidation(stored: StoredCapturedVersion): CapturedProcedureValidationProjection {
-    const configuration = this.#reviewGuidelines.configuration();
-    const sourceEntries = this.#reviewRuns.snapshotEntries(stored.sourceReviewRunId);
-    const words = this.#capturedStepWords();
-    const steps = stored.document.steps.map((step, index) => {
-      const entry = configuration.categories.find((candidate) => candidate.categoryId === step.categoryId);
-      const source = sourceEntries.find((candidate) => candidate.categoryId === step.categoryId);
-      // 书系一致性's documents are each Book's Series Knowledge, read when it runs; the house's guideline documents are compared.
-      const guidelines = entry === undefined || houseExecutor(entry) === 'series-knowledge' ? [] : entry.guidelineDocuments.map((document) => ({
-        title: document.title,
-        issuer: document.issuer,
-        version: document.version,
-        sourceVersion: source?.guidelineDocuments.find((candidate) => candidate.documentId === document.documentId)?.version ?? null,
-      }));
-      return {
-        ...capturedStepProjections(stored.document, words)[index]!,
-        guidelines,
-        problem: capturedStepProblem(stored.document, index, configuration),
-      };
-    });
-    const problems = [
-      ...steps.flatMap((step) => step.problem === null ? [] : [step.problem]),
-      ...ceilingWiderThanSource(stored.document, sourceEntries),
-    ];
-    const previewDigest = sha256(canonicalJson({
-      versionId: stored.versionId,
-      documentSha256: stored.documentSha256,
-      steps: steps.map((step) => ({ categoryId: step.categoryId, guidelines: step.guidelines, problem: step.problem })),
-      problems,
-    }));
-    return {
-      versionId: stored.versionId,
-      procedureId: stored.procedureId,
-      version: stored.version,
-      title: stored.document.title,
-      state: stored.state,
-      steps,
-      scopeSlot: stored.document.parameters.scope,
-      ceiling: stored.document.authorityCeiling,
-      problems,
-      passes: problems.length === 0,
-      previewDigest,
-    };
-  }
-
-  #requireCapturedVersion(versionId: string): StoredCapturedVersion {
-    requireStore(typeof versionId === 'string' && UUID_PATTERN.test(versionId), 'CAPTURED_PROCEDURE_INVALID', '可复用工序的版本标识无效。');
-    const stored = this.#capturedProcedures.version(versionId);
-    requireStore(stored !== null, 'CAPTURED_PROCEDURE_NOT_FOUND', '这一版可复用工序不存在。');
-    return stored;
+    return capturedProcedureOperations.saveCapturedProcedure(this.#capturedProcedureHost, input, now);
   }
 
   previewCapturedProcedureValidation(versionId: string): CapturedProcedureValidationProjection {
-    return this.#procedureCall(() => this.#capturedValidation(this.#requireCapturedVersion(versionId)));
+    return capturedProcedureOperations.previewCapturedProcedureValidation(this.#capturedProcedureHost, versionId);
   }
 
-  /**
-   * Confirm `验证并启用…` (ADR 0087 §3): exactly the preview the editor saw, by its digest. A version that passes is `已启用`; one
-   * that does not keeps `待验证` with its reasons recorded. Nothing is planned, prepared or run.
-   */
   enableCapturedProcedure(versionId: string, previewDigest: string, now: Date = new Date()): CapturedProcedureProjection {
-    return this.#procedureCall(() => {
-      const stored = this.#requireCapturedVersion(versionId);
-      const preview = this.#capturedValidation(stored);
-      requireStore(typeof previewDigest === 'string' && preview.previewDigest === previewDigest, 'CAPTURED_PROCEDURE_PREVIEW_STALE',
-        '验证的结果在你查看之后有了变化；请重新查看再启用。');
-      this.#transaction(this.#authority, () => this.#capturedProcedures.recordValidation(versionId, preview.problems, preview.previewDigest, now));
-      return this.#capturedProcedureProjection(stored.procedureId);
-    });
+    return capturedProcedureOperations.enableCapturedProcedure(this.#capturedProcedureHost, versionId, previewDigest, now);
   }
 
-  /**
-   * `停用…`'s preview (Issue #66, plan slice S31; REUSE-038, REUSE-040, REUSE-041): the Version Removal Preview for a 停用, which
-   * removes nothing (ADR 0087 §5). For one version, or — with `versionId` `null` — every version not stopped yet: each with the
-   * Review Runs that pinned it — a prepared one not yet approved and still its Book's newest is prepared again, an approved one
-   * not yet finished goes on under the version it was approved with, and every one keeps naming it — and the version a new use
-   * resolves to afterwards. Its digest is what `stopCapturedProcedure` confirms. A read.
-   */
   previewCapturedProcedureStop(procedureId: string, versionId: string | null): CapturedProcedureStopPreviewProjection {
-    return this.#procedureCall(() => this.#capturedStopPreview(procedureId, versionId).projection);
+    return capturedProcedureOperations.previewCapturedProcedureStop(this.#capturedProcedureHost, procedureId, versionId);
   }
 
-  #capturedStopPreview(procedureId: string, versionId: string | null): { projection: CapturedProcedureStopPreviewProjection; stoppingIds: string[] } {
-    requireStore(typeof procedureId === 'string' && UUID_PATTERN.test(procedureId), 'CAPTURED_PROCEDURE_INVALID', '可复用工序标识无效。');
-    requireStore(versionId === null || (typeof versionId === 'string' && UUID_PATTERN.test(versionId)), 'CAPTURED_PROCEDURE_INVALID', '可复用工序的版本标识无效。');
-    const versions = this.#capturedProcedures.versions(procedureId);
-    requireStore(versions.length > 0, 'CAPTURED_PROCEDURE_NOT_FOUND', '这个可复用工序不存在。');
-    if (versionId !== null) {
-      const chosen = versions.find((stored) => stored.versionId === versionId);
-      requireStore(chosen !== undefined, 'CAPTURED_PROCEDURE_NOT_FOUND', '这一版可复用工序不存在。');
-      requireStore(chosen.state !== 'stopped', 'CAPTURED_PROCEDURE_STOPPED', `《${chosen.document.title}》第 ${chosen.version} 版已经停用。`);
-    }
-    const stopping = versions.filter((stored) => stored.state !== 'stopped' && (versionId === null || stored.versionId === versionId));
-    requireStore(stopping.length > 0, 'CAPTURED_PROCEDURE_STOPPED', `《${versions[0]!.document.title}》的全部版本都已停用。`);
-    const link = (reviewRunId: string, status: { bookId: string; ordinal: number; stateLabel: string }): CapturedProcedureStopRunProjection => ({
-      bookId: status.bookId, bookTitle: this.#evaluationBookTitle(status.bookId), reviewRunId, label: `第 ${status.ordinal} 次`, stateLabel: status.stateLabel,
-    });
-    // Every version it takes, each with every Run it touches: the digest binds all of them, the answer shows what one frame holds.
-    const weighed = stopping.map((stored) => {
-      const prepared: CapturedProcedureStopRunProjection[] = [];
-      const active: CapturedProcedureStopRunProjection[] = [];
-      for (const reviewRunId of this.#capturedProcedures.liveCandidateRunIds(stored.versionId)) {
-        const status = this.#reviewRuns.runStatus(reviewRunId);
-        // Prepared and still its Book's newest: its approval would be refused once the version is stopped (ADR 0087 §5).
-        if (!status.authorized && status.newestOfBook) prepared.push(link(reviewRunId, status));
-        // Approved and not finished — running, or with 继续审阅 left: it goes on under the version it was approved with.
-        else if (status.authorized && (status.state === 'running' || status.canContinue)) active.push(link(reviewRunId, status));
-      }
-      return { stored, prepared, active };
-    });
-    const previewVersions = weighed.map(({ stored, prepared, active }) => ({
-      versionId: stored.versionId,
-      version: stored.version,
-      stateLabel: CAPTURED_PROCEDURE_STATE_LABELS[stored.state],
-      runCount: this.#capturedProcedures.pinCounts(stored.versionId).ran,
-      prepared: prepared.slice(-MAX_CAPTURED_PROCEDURE_RUNS_SHOWN).reverse(),
-      preparedCount: prepared.length,
-      active: active.slice(-MAX_CAPTURED_PROCEDURE_RUNS_SHOWN).reverse(),
-      activeCount: active.length,
-    }));
-    const after = resolveProcedureVersions(this.#resolvableVersions(versions), new Set(stopping.map((stored) => stored.versionId))).eligible[0] ?? null;
-    const previewDigest = sha256(canonicalJson({
-      procedureId,
-      versionId,
-      versions: weighed.map(({ stored, prepared, active }) => ({
-        versionId: stored.versionId,
-        state: stored.state,
-        prepared: prepared.map((run) => run.reviewRunId),
-        active: active.map((run) => run.reviewRunId),
-      })),
-      afterVersionId: after?.versionId ?? null,
-    }));
-    return {
-      stoppingIds: stopping.map((stored) => stored.versionId),
-      projection: {
-        procedureId,
-        title: versions[0]!.document.title,
-        versionId,
-        // As many of the newest as one frame holds, at most a page (S31 review P2-2); the rest are counted.
-        versions: boundedPage(previewVersions, MAX_CAPTURED_PROCEDURE_VERSIONS_PAGE),
-        versionCount: previewVersions.length,
-        afterVersion: after?.version ?? null,
-        previewDigest,
-      },
-    };
-  }
-
-  /**
-   * `停用` (ADR 0087 §5): one version, or — with `versionId` `null` — every version not stopped yet, confirming exactly the
-   * `停用…` preview the editor read, by its digest, checked inside the write (Issue #66, S31). Final for each: a stopped version
-   * is never resolved again and stays as its own Historical Version Stub, and every Run that pinned it keeps naming it. Nothing
-   * is deleted or blocked.
-   */
   stopCapturedProcedure(procedureId: string, versionId: string | null, previewDigest: string, now: Date = new Date()): CapturedProcedureProjection {
-    return this.#procedureCall(() => {
-      this.#transaction(this.#authority, () => {
-        const preview = this.#capturedStopPreview(procedureId, versionId);
-        requireStore(typeof previewDigest === 'string' && preview.projection.previewDigest === previewDigest, 'CAPTURED_PROCEDURE_STOP_PREVIEW_STALE',
-          '停用的影响在你查看之后有了变化；请重新查看再停用。');
-        for (const stopping of preview.stoppingIds) this.#capturedProcedures.stop(stopping, previewDigest, now);
-      });
-      return this.#capturedProcedureProjection(procedureId);
-    });
+    return capturedProcedureOperations.stopCapturedProcedure(this.#capturedProcedureHost, procedureId, versionId, previewDigest, now);
   }
 
-  /**
-   * `运行此工序…` / `按已保存的工序` for one Book (ADR 0087 §4; UI ADR 0013; REUSE-043 to REUSE-045, REUSE-054): the newest
-   * `已启用` version that still validates — every newer one passed over and said why — or, with `versionId`, the exact eligible
-   * version the editor chose instead (Issue #66, S31), with its steps as this Book can take them and where today's guideline
-   * versions differ from the source Run's. A version that is not eligible cannot be chosen. A read: the 新建审阅 sheet prepares.
-   */
   inspectCapturedProcedureRun(bookId: string, procedureId: string, versionId: string | null = null, scope: CapturedProcedureScopeSlot | null = null): CapturedProcedureRunProjection {
-    return this.#procedureCall(() => {
-      requireStore(scope === null || scope === 'selection', 'CAPTURED_PROCEDURE_INVALID', '可复用工序的运行范围无效。');
-      const resolution = this.#capturedRunResolution(bookId, procedureId, versionId, { scope });
-      requireStore(resolution.ineligible === null, 'REVIEW_PROCEDURE_VERSION_INELIGIBLE', resolution.ineligible ?? '');
-      return resolution.projection;
-    });
+    return capturedProcedureOperations.inspectCapturedProcedureRun(this.#capturedProcedureHost, bookId, procedureId, versionId, scope);
   }
 
-  /**
-   * One procedure resolved for one Book. `read` lets a caller that weighs many procedures for the same Book (S31b review P3-3)
-   * pass the versions it already read and share the Book's category availability, which depends only on the scope slot — or on
-   * `read.scope`, the 当前选区 a selection menu asks for instead of each version's slot (Issue #423, S77 deferred item a).
-   */
-  #capturedRunResolution(
-    bookId: string,
-    procedureId: string,
-    versionId: string | null,
-    read: { versions?: ReadonlyArray<StoredCapturedVersion>; availability?: Map<CapturedProcedureScopeSlot, ReadonlyMap<string, string | null>>; scope?: CapturedProcedureScopeSlot | null } = {},
-  ): { projection: CapturedProcedureRunProjection; ineligible: string | null } {
-    requireStore(typeof bookId === 'string' && UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
-    requireStore(versionId === null || (typeof versionId === 'string' && UUID_PATTERN.test(versionId)), 'CAPTURED_PROCEDURE_INVALID', '可复用工序的版本标识无效。');
-    const versions = read.versions ?? this.#capturedProcedures.versions(procedureId);
-    requireStore(versions.length > 0, 'CAPTURED_PROCEDURE_NOT_FOUND', '这个可复用工序不存在。');
-    const resolvable = this.#resolvableVersions(versions);
-    const { eligible, passedOver } = resolveProcedureVersions(resolvable);
-    const title = versions[0]!.document.title;
-    const eligibleVersions = eligible.map((version) => ({ versionId: version.versionId, version: version.version }));
-    let chosen = eligible[0] ?? null;
-    let ineligible: string | null = null;
-    if (versionId !== null) {
-      const asked = resolvable.find((version) => version.versionId === versionId);
-      requireStore(asked !== undefined, 'CAPTURED_PROCEDURE_NOT_FOUND', '这一版可复用工序不存在。');
-      if (!versionEligible(asked)) ineligible = `《${title}》第 ${asked.version} 版现在不能选用：${versionIneligibleReason(asked) ?? ''}`;
-      chosen = asked;
-    }
-    if (chosen === null || ineligible !== null) {
-      return {
-        ineligible,
-        projection: {
-          bookId,
-          procedureId,
-          title,
-          resolved: null,
-          passedOver,
-          eligibleVersions,
-          unavailableReason: resolvable.some((version) => version.state === 'enabled')
-            ? '这个工序启用的各版现在都不能按原样运行；请从一次新的审阅重新保存。'
-            : '这个工序还没有启用的版本；先在知识库「工序与规则」里验证并启用。',
-        },
-      };
-    }
-    const stored = versions.find((candidate) => candidate.versionId === chosen.versionId)!;
-    const validation = this.#capturedValidation(stored);
-    const slot = read.scope ?? stored.document.parameters.scope;
-    let availability = read.availability?.get(slot);
-    if (availability === undefined) {
-      availability = this.#reviewRuns.categoryAvailability(bookId, slot);
-      read.availability?.set(slot, availability);
-    }
-    const chosenApart = chosenApartSteps(stored.document);
-    return {
-      ineligible: null,
-      projection: {
-        bookId,
-        procedureId,
-        title,
-        resolved: {
-          ...(procedureOffersSeries(stored.document) ? { runSourceScope: 'series' as const } : {}),
-          versionId: stored.versionId,
-          version: stored.version,
-          latestEligible: stored.versionId === eligible[0]!.versionId,
-          documentSha256: stored.documentSha256,
-          scopeSlot: stored.document.parameters.scope,
-          steps: validation.steps.map((step) => {
-            const reason = availability.has(step.categoryId) ? availability.get(step.categoryId)! : '这一类已不在审阅配置中。';
-            // Series material is chosen apart at each run (Issue #66, S31b; REUSE-049, REUSE-050).
-            return { categoryId: step.categoryId, label: step.label, available: reason === null, unavailableReason: reason, chosenApart: chosenApart.includes(step.categoryId) };
-          }),
-          guidelineChanges: validation.steps.flatMap((step) => step.guidelines
-            .filter((guideline) => guideline.sourceVersion !== guideline.version)
-            .map((guideline) => ({ categoryId: step.categoryId, label: step.label, title: guideline.title, sourceVersion: guideline.sourceVersion, version: guideline.version }))),
-        },
-        passedOver,
-        eligibleVersions,
-        unavailableReason: null,
-      },
-    };
-  }
-
-  /**
-   * The pin a preparation from a Captured Procedure carries (ADR 0087 §4): only exactly the version and digest the sheet was
-   * pre-filled from, and only while it is still eligible for this Book — the latest eligible, or the older eligible one the
-   * editor chose (Issue #66, S31; REUSE-054). A version stopped, or one that no longer validates since, makes the editor choose
-   * again.
-   */
-  #capturedProcedurePin(bookId: string, chosen: { versionId: string; documentSha256: string }): ReviewRunProcedurePinInput {
-    requireStore(typeof chosen === 'object' && chosen !== null && typeof chosen.versionId === 'string' && UUID_PATTERN.test(chosen.versionId) &&
-      typeof chosen.documentSha256 === 'string' && /^[0-9a-f]{64}$/u.test(chosen.documentSha256), 'REVIEW_PROCEDURE_INVALID', '所选的可复用工序无效。');
-    const stored = this.#requireCapturedVersion(chosen.versionId);
-    const run = this.#capturedRunResolution(bookId, stored.procedureId, chosen.versionId);
-    requireStore(run.ineligible === null && run.projection.resolved !== null && run.projection.resolved.versionId === chosen.versionId &&
-      run.projection.resolved.documentSha256 === chosen.documentSha256,
-    'REVIEW_PROCEDURE_STALE', `可复用工序《${stored.document.title}》在你选择之后有了变化；请重新选择它。`);
-    return {
-      procedureId: stored.procedureId,
-      versionId: stored.versionId,
-      version: stored.version,
-      title: stored.document.title,
-      documentSha256: stored.documentSha256,
-      scope: stored.document.parameters.scope,
-      steps: stored.document.steps.map((step) => step.categoryId),
-      chosenApart: chosenApartSteps(stored.document),
-    };
-  }
-
-  /**
-   * 按已保存的工序 on one Book's 新建审阅 (Issue #66, plan slice S31b; REUSE-046, REUSE-053, REUSE-054): every enabled Captured
-   * Procedure of the house, each with the one version a new use takes — its latest eligible — and how many of that version's
-   * steps this Book can take now, the Series steps chosen apart among them, and why each other is left out. Deterministic and
-   * provider-free, and a read: it recommends nothing itself — 工序推荐 reads it (ADR 0090 §1) — and rules none out: a mismatch is said, and the
-   * editor may still choose it by hand. With `scope: 'selection'` (Issue #423, S77 deferred item a) each applies to a 当前选区 of
-   * the Book instead of its own slot, for the selection menu's list of the house's procedures.
-   */
   inspectCapturedProcedureApplicability(bookId: string, scope: CapturedProcedureScopeSlot | null = null): CapturedProcedureApplicabilityProjection {
-    return this.#procedureCall(() => {
-      requireStore(typeof bookId === 'string' && UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
-      requireStore(scope === null || scope === 'selection', 'CAPTURED_PROCEDURE_INVALID', '可复用工序的运行范围无效。');
-      const { ids, truncated } = this.#capturedProcedures.procedureIds();
-      const procedures: CapturedProcedureApplicabilityEntryProjection[] = [];
-      // The Book's category availability once per scope slot, and each procedure's versions read once (S31b review P3-3).
-      const availability = new Map<CapturedProcedureScopeSlot, ReadonlyMap<string, string | null>>();
-      for (const procedureId of ids) {
-        const versions = this.#capturedProcedures.versions(procedureId);
-        if (!versions.some((stored) => stored.state === 'enabled')) continue;
-        const { projection } = this.#capturedRunResolution(bookId, procedureId, null, { versions, availability, scope });
-        const resolved = projection.resolved;
-        if (resolved === null) {
-          procedures.push({ procedureId, title: projection.title, latestEligible: null, fit: 'no-version', stepCount: 0, availableCount: 0, chosenApart: [], chosenApartSteps: [], leftOut: [] });
-          continue;
-        }
-        const available = resolved.steps.filter((step) => step.available);
-        const chosenApart = available.filter((step) => step.chosenApart);
-        procedures.push({
-          procedureId,
-          title: projection.title,
-          latestEligible: { versionId: resolved.versionId, version: resolved.version },
-          fit: available.length === resolved.steps.length ? 'all' : available.length === 0 ? 'none' : 'partial',
-          stepCount: resolved.steps.length,
-          availableCount: available.length,
-          chosenApart: chosenApart.map((step) => step.label),
-          chosenApartSteps: chosenApart.map((step) => ({ categoryId: step.categoryId, label: step.label })),
-          leftOut: resolved.steps.filter((step) => !step.available).map((step) => ({ label: step.label, reason: step.unavailableReason ?? '' })),
-        });
-      }
-      return { bookId, procedures, truncated };
-    });
+    return capturedProcedureOperations.inspectCapturedProcedureApplicability(this.#capturedProcedureHost, bookId, scope);
   }
 
-  /** 保存开发建议 (ADR 0087 §6; REUSE-063, REUSE-064): a new Developer Capability Proposal, or its next version. Sent nowhere. */
   saveDeveloperProposal(input: SaveDeveloperProposalInput, now: Date = new Date()): DeveloperProposalProjection {
-    return this.#procedureCall(() => {
-      const proposalId = this.#transaction(this.#authority, () => this.#capturedProcedures.saveProposal(input, now));
-      return this.#capturedProcedures.proposal(proposalId);
-    });
+    return capturedProcedureOperations.saveDeveloperProposal(this.#capturedProcedureHost, input, now);
   }
 
-  /**
-   * 导出为文件… (ADR 0087 §6): one proposal version written as Markdown to the file the editor chose through the platform Save
-   * dialog — beside it first, synced, then renamed onto the name — and the file's name, digest and length recorded. It holds no
-   * Book material, so it is not an External Export Policy target, and AI7 sends it nowhere.
-   */
-  async writeDeveloperProposalFile(proposalVersionId: string, destination: string, now: Date = new Date()): Promise<DeveloperProposalProjection> {
-    this.#assertAvailable();
-    const version = this.#procedureCall(() => this.#capturedProcedures.proposalVersion(proposalVersionId));
-    requireStore(version !== null, 'DEVELOPER_PROPOSAL_NOT_FOUND', '这一版开发建议不存在。');
-    requireStore(typeof destination === 'string' && destination.isWellFormed() && isAbsolute(destination) && basename(destination).length > 0 &&
-      basename(destination).length <= 255, 'DEVELOPER_PROPOSAL_DESTINATION_INVALID', '保存位置无效。');
-    const existing = await lstat(destination).catch(() => null);
-    requireStore(existing === null || existing.isFile(), 'DEVELOPER_PROPOSAL_DESTINATION_INVALID', '保存位置不是一个文件。');
-    const bytes = new TextEncoder().encode(developerProposalFileText(version));
-    const partial = join(resolve(destination, '..'), `.${randomUUID()}.ai7-partial`);
-    try {
-      const handle = await open(partial, 'wx');
-      try {
-        await handle.writeFile(bytes);
-        await handle.sync();
-      } finally {
-        await handle.close();
-      }
-      await rename(partial, destination);
-    } catch (error) {
-      await rm(partial, { force: true }).catch(() => undefined);
-      if (error instanceof StoreError) throw error;
-      throw new StoreError('DEVELOPER_PROPOSAL_WRITE_FAILED', '无法把开发建议写到所选位置。');
-    }
-    return this.#procedureCall(() => {
-      this.#transaction(this.#authority, () => this.#capturedProcedures.recordProposalFile(proposalVersionId, basename(destination), bytes, now));
-      return this.#capturedProcedures.proposal(version.proposalId);
-    });
+  writeDeveloperProposalFile(proposalVersionId: string, destination: string, now: Date = new Date()): Promise<DeveloperProposalProjection> {
+    return capturedProcedureOperations.writeDeveloperProposalFile(this.#capturedProcedureHost, proposalVersionId, destination, now);
   }
 
-  #procedureCall<T>(operation: () => T): T {
-    return this.#reviewCall(() => {
-      try {
-        return operation();
-      } catch (error) {
-        if (error instanceof CapturedProcedureError || error instanceof ImportedSkillError) throw new StoreError(error.code, error.message);
-        throw error;
-      }
-    });
-  }
-
-  /**
-   * 知识库 › 工序与规则 (Issue #427, S79d; KB-010): the review categories' 工序 as they apply now, and the native artifact as
-   * its owner reads it for the house.
-   */
   procedureLibrary(command: import('../shared/protocol/procedures.js').ProcedureLibraryCommand): import('../shared/protocol/procedures.js').ProcedureLibraryProjection {
-    this.#assertAvailable();
-    return this.#analysisCall(() => {
-      this.#transaction(this.#authority, () => {
-        if (command.action === 'save') saveProcedureDefinition(this.#authority, command.input, new Date());
-        if (command.action === 'stop') {
-          resolveProcedurePin(this.#authority, command.procedure);
-          this.#authority.prepare('INSERT INTO procedure_version_stops VALUES (?,?) ON CONFLICT(version_id) DO NOTHING')
-            .run(procedureVersionId(command.procedure), new Date().toISOString());
-        }
-        if (command.action === 'select') {
-          this.#evaluationBookTitle(command.bookId);
-          selectProcedureForBook(this.#authority, command.bookId, command.procedure);
-        }
-      });
-      return readProcedureLibrary(this.#authority);
-    });
+    return capturedProcedureOperations.procedureLibrary(this.#capturedProcedureHost, command);
   }
 
-  async inspectKnowledgeProcedures(): Promise<KnowledgeProceduresProjection> {
-    const profile = await this.#artifactCall(() => this.#editorialWorkspaceProfile.house());
-    return this.#guidelineCall(() => readKnowledgeProcedures(this.#authority, this.#reviewGuidelines.configuration(), profile));
+  inspectKnowledgeProcedures(): Promise<KnowledgeProceduresProjection> {
+    return capturedProcedureOperations.inspectKnowledgeProcedures(this.#capturedProcedureHost);
   }
 
   /** 导入新版本's first step: the picked file's clauses as the next version of one document would read them; nothing is recorded. */
@@ -10577,7 +9310,7 @@ export class EditorialStore {
     if (enrollment.kind !== 'factual-recheck' || enrollment.state !== 'active' || enrollment.paused || enrollment.version.share === null ||
       launch.operationalScope !== 'ordinary-production' || live?.scope !== 'ordinary-production' || policy?.providerProcessingVersion !== 'v31' ||
       rule?.maximumClaims !== 1 || this.replacementFrozen()) return null;
-    const enrolledBinding = this.#enrollmentBinding(enrollment.bookId, 'factual-recheck');
+    const enrolledBinding = backgroundEnrollments.enrollmentBinding(this.#backgroundEnrollmentHost, enrollment.bookId, 'factual-recheck');
     if (enrolledBinding === null || canonicalJson({ ...enrolledBinding, runBudgetCeiling: enrollment.version.binding.runBudgetCeiling }) !== canonicalJson(enrollment.version.binding)) return null;
     const row = this.#authority.prepare('SELECT result_id FROM factual_review_decisions WHERE decision_id = ? AND book_id = ?').get(decisionId, enrollment.bookId);
     if (row === undefined) return null;
@@ -11838,29 +10571,43 @@ export class EditorialStore {
 
   // ---- 审稿意见 (Issue #429, plan slice S81c; V2-UX-EVAL-013; editor-surfaces §5 ②C) -------------------------------------
 
-  /**
-   * The reader's report ledger of one frozen contract — a template and one 定稿 version's words — made when first asked for. As
-   * a review category's, only the `REVIEW_CATEGORY_CACHE_CAPACITY` most recently used are kept besides those with a preparation
-   * in flight, which only that instance holds (Issue #672); any other is made afresh from the Book database and reads exactly
-   * what the one let go would have. It takes the launch the baseline ledger was bound to.
-   */
-  readersReportLedger(input: ReadersReportContractInput, materials?: TaskMaterialBoundary, frozenPromptDigest?: string): BaselineAnalysisStore {
-    this.#assertAvailable();
-    const base = this.#analysisCall(() => readersReportKindDefinition(input));
-    const readings = materials === undefined || materials.references.length === 0 ? [] : this.#taskMaterialReadings(materials, '评估');
-    const definition = materials === undefined ? base : this.#analysisCall(() => taskMaterialKindDefinition(base, materials, readings, frozenPromptDigest));
-    const make = (): BaselineAnalysisStore => {
-      const ledger = new BaselineAnalysisStore(this.#authority, this.#boundedAuthority, this.#control.baselineAnalysisRoute, definition);
-      ledger.bindLaunch(this.#baselineAnalysis.launch);
-      return ledger;
+  /** What the 审稿意见 operations in readers-reports.ts reach of the store (Issue #1172), read live. */
+  readonly #readersReportHost: readersReportOperations.ReadersReportStoreHost = this.#readersReportHostOf();
+
+  #readersReportHostOf(): readersReportOperations.ReadersReportStoreHost {
+    const store = this;
+    return {
+      analysisCall: this.#analysisCall.bind(this),
+      assertAvailable: this.#assertAvailable.bind(this),
+      get authority() { return store.#authority; },
+      get baselineAnalysis() { return store.#baselineAnalysis; },
+      get boundedAuthority() { return store.#boundedAuthority; },
+      boundedCall: this.#boundedCall.bind(this),
+      get control() { return store.#control; },
+      documentCall: this.#documentCall.bind(this),
+      get documentWorkflow() { return store.#documentWorkflow; },
+      evaluationCall: this.#evaluationCall.bind(this),
+      evaluationLiveRefused: this.#evaluationLiveRefused.bind(this),
+      evaluationMaterialPlan: this.#evaluationMaterialPlan.bind(this),
+      evaluationRecordOrdinal: this.#evaluationRecordOrdinal.bind(this),
+      get evaluations() { return store.#evaluations; },
+      get inspectEvaluation() { return store.inspectEvaluation.bind(store); },
+      ledgerTaskOf: this.#ledgerTaskOf.bind(this),
+      prepareTaskMaterials: this.#prepareTaskMaterials.bind(this),
+      get productionDocuments() { return store.#productionDocuments; },
+      readersReportCall: this.#readersReportCall.bind(this),
+      readersReportExemplars: this.#readersReportExemplars.bind(this),
+      get readersReportLedgers() { return store.#readersReportLedgers; },
+      get readersReports() { return store.#readersReports; },
+      requireEvaluationMaterialScope: this.#requireEvaluationMaterialScope.bind(this),
+      requireLedgerKindScope: this.#requireLedgerKindScope.bind(this),
+      taskMaterialReadings: this.#taskMaterialReadings.bind(this),
+      transaction: this.#transaction.bind(this),
     };
-    return readings.some((reading) => reading.refusal !== null) ? make() : this.#readersReportLedgers.obtain(definition.promptContractDigest, make);
   }
 
-  /** The kept reader's report ledger that holds the preparation `workId`, if one does: a ledger preparing is never let go. */
-  #readersReportLedgerPreparing(workId: string): BaselineAnalysisStore | undefined {
-    for (const ledger of this.#readersReportLedgers.values()) if (ledger.holdsPreparation(workId)) return ledger;
-    return undefined;
+  readersReportLedger(input: ReadersReportContractInput, materials?: TaskMaterialBoundary, frozenPromptDigest?: string): BaselineAnalysisStore {
+    return readersReportOperations.readersReportLedger(this.#readersReportHost, input, materials, frozenPromptDigest);
   }
 
   #readersReportCall<T>(operation: () => T): T {
@@ -11875,48 +10622,14 @@ export class EditorialStore {
     }
   }
 
-  /** One Task's 定稿 version and template — the one its frozen plan names when it froze one. */
-  #readersReportTaskOf(taskIntentId: string): { task: StoredReadersReportTask; ledger: BaselineAnalysisStore } | null {
-    const frozen = this.#evaluationMaterialPlan(taskIntentId);
-    const planContract = frozen?.baseDigest ?? this.#readersReportCall(() => this.#readersReports.planContract(taskIntentId));
-    const task = this.#readersReportCall(() => this.#readersReports.task(taskIntentId, planContract));
-    if (task === null) {
-      requireStore(planContract === null, 'READERS_REPORT_RECORD_INVALID', '审稿意见任务的计划与它的记录不一致。');
-      return null;
-    }
-    return { task, ledger: this.readersReportLedger(task.input, frozen?.boundary, frozen?.promptDigest) };
-  }
-
-  /** The Book's latest 审稿意见 Task with its ledger and projection; `null` before the first, or for one no record names. */
-  #latestReadersReport(bookId: string, progress?: ProgressReader): { task: StoredReadersReportTask; ledger: BaselineAnalysisStore; projection: ReadersReportProjection } | null {
-    const intentId = this.#readersReportCall(() => this.#readersReports.latestTaskIntentId(bookId));
-    if (intentId === null) return null;
-    const found = this.#readersReportTaskOf(intentId);
-    if (found === null) return null;
-    const projection = this.#analysisCall(() => found.ledger.inspect(bookId, progress)) as ReadersReportProjection;
-    return { ...found, projection };
-  }
-
-  /** The Book's latest 审稿意见 Task as its ledger reads it, or `null`; `progress` is the execution owner's reader. */
   inspectReadersReport(bookId: string, progress?: ProgressReader): ReadersReportProjection | null {
-    this.#assertAvailable();
-    return this.#latestReadersReport(bookId, progress)?.projection ?? null;
+    return readersReportOperations.inspectReadersReport(this.#readersReportHost, bookId, progress);
   }
 
   #evaluationRecordOrdinal(recordId: string): number {
     const row = this.#authority.prepare('SELECT ordinal FROM evaluation_records WHERE record_id = ?').get(recordId) as SqlRow | undefined;
     requireStore(row !== undefined, 'READERS_REPORT_RECORD_INVALID', '审稿意见所依据的评估版本缺失。');
     return asNumber(row.ordinal);
-  }
-
-  /**
-   * 审稿意见 runs only where it may be sent (EVAL-013, as 初评): under a live scope only a rule naming the kind with the editor's
-   * record and the house exemplars admits it; otherwise nothing is prepared or started there, and 评估 says why. The
-   * provider-free scope is unaffected.
-   */
-  #requireReadersReportScope(): void {
-    this.#assertAvailable();
-    if (this.#evaluationLiveRefused(READERS_REPORT_KIND)) throw new StoreError('READERS_REPORT_UNAVAILABLE', READERS_REPORT_LIVE_UNAVAILABLE);
   }
 
   /**
@@ -11982,281 +10695,32 @@ export class EditorialStore {
     return { exemplars, damaged, ledgerDamaged };
   }
 
-  /**
-   * What 评估 says of the house's 审稿意见 exemplars (Issue #778, #792): the ones that read, then what cannot be read — a
-   * damaged record, or one whose decision ledger alone will not read, each under its own plain reason and named as it would
-   * be listed, so one damaged record leaves only itself out. When nothing readable precedes the damage, 「另有」 is not used.
-   */
-  #readersReportExemplarStatement(readings: { exemplars: ReadonlyArray<ReadersReportExemplarInput>; damaged: ReadonlyArray<string>; ledgerDamaged: ReadonlyArray<string> }): string {
-    const clauses: string[] = [];
-    const clause = (count: number, subject: string, titles: ReadonlyArray<string>): void => {
-      if (count === 0) return;
-      const names = titles.map((title) => `《${title}》`).join('、');
-      clauses.push(clauses.length === 0 && readings.exemplars.length === 0
-        ? `本社有 ${count} 份审稿意见范例${subject}已损坏，无法读取，本次不参考范例：${names}`
-        : `另有 ${count} 份范例${subject}已损坏，无法读取，本次不参考：${names}`);
-    };
-    clause(readings.damaged.length, '记录', readings.damaged);
-    clause(readings.ledgerDamaged.length, '的学习准入记录', readings.ledgerDamaged);
-    if (clauses.length === 0) return readersReportExemplarLine(readings.exemplars);
-    return readings.exemplars.length === 0
-      ? clauses.join('；')
-      : `${readersReportExemplarLine(readings.exemplars)}；${clauses.join('；')}`;
-  }
-
-  /**
-   * 起草审稿意见 (EVAL-013): the reader's report kind's Task, drafted from the Book's latest 定稿 version under one template, in
-   * the mode that applies — the first draft, or another once one settled. Refused under a live scope, while no version is
-   * 定稿, or once the template has its draft document. Its plan opens in the Task Drawer.
-   */
   createReadersReportPreparationWork(bookId: string, template: ReadersReportTemplate, launchPolicy: LaunchPolicyProjection, materialIds: ReadonlyArray<string> = [], redoOf: string | null = null): AnalysisPreparationResult<ReadersReportProjection> {
-    this.#requireEvaluationMaterialScope(materialIds.length > 0, READERS_REPORT_KIND);
-    this.#requireReadersReportScope();
-    requireStore(UUID_PATTERN.test(bookId) && READERS_REPORT_TEMPLATES.includes(template), 'READERS_REPORT_INVALID', '审稿意见参数无效。');
-    const basis = this.#evaluationCall(() => this.#evaluations.latestFinalized(bookId));
-    requireStore(basis !== null, 'READERS_REPORT_NEEDS_FINALIZED', READERS_REPORT_NEEDS_FINALIZED);
-    requireStore(this.#documentCall(() => this.#productionDocuments.documentOfType(bookId, readersReportDocumentTypeId(template))) === undefined,
-      'READERS_REPORT_DRAFT_EXISTS', `这本书已经有「${READERS_REPORT_TEMPLATE_LABELS[template]}」的草稿；请打开它继续修改。`);
-    const readings = this.#readersReportExemplars(bookId);
-    const input = this.#readersReportCall(() => readersReportContractInput(template, basis, readings.exemplars));
-    const ledger = this.readersReportLedger(input, { bookId, references: this.#prepareTaskMaterials(bookId, materialIds) });
-    const latest = this.#latestReadersReport(bookId);
-    const mode = latest === null || latest.projection.resultSetRevision === null ? 'readers-report-first' : 'readers-report-again';
-    // What this preparation skipped for damage, and the contract it is recorded under (Issue #792).
-    const skippedExemplars = [
-      ...readings.damaged.map((title) => ({ title, reason: 'record' as const })),
-      ...readings.ledgerDamaged.map((title) => ({ title, reason: 'ledger' as const })),
-    ];
-    const promptContractSha256 = ledger.definition.materialReferences?.basePromptContractDigest ?? ledger.definition.promptContractDigest;
-    // A row is written once per contract, so re-preparing under a digest already recorded would keep its first note. When only
-    // the damage set changed — a damaged exemplar repaired or replaced — prepare a new Task, whose fresh row names the current
-    // set, as the frozen plan's exemplar line must (Issue #803).
-    // An interrupted preparation can record several contracts before any plan freezes. Compare the requested contract's
-    // row, even when another template's contract was recorded more recently on that same Task.
-    const recorded = latest === null ? null : this.#readersReportCall(() =>
-      this.#readersReports.task(latest.task.taskIntentId, promptContractSha256));
-    const noteChanged = recorded !== null && canonicalJson(recorded.skippedExemplars) !== canonicalJson(skippedExemplars);
-    const result = this.#analysisCall(() => ledger.prepare({
-      phase: 'start',
-      bookId,
-      goal: READERS_REPORT_MODE_GOALS[mode],
-      redoOf,
-      update: mode === 'readers-report-first' ? null : { mode, selectedRange: null },
-      reconfirm: false,
-      launchPolicy,
-      ...(noteChanged || canonicalJson(latest?.ledger.definition.materialReferences?.sources ?? []) !== canonicalJson(ledger.definition.materialReferences?.sources ?? []) ? { newTask: true } : {}),
-    }));
-    // Which 定稿 version and template the Task drafts from, recorded once for it and this contract, and what that preparation
-    // left out for damage: a plan is frozen, so its exemplar line names what was skipped when it was drafted (Issue #792).
-    const taskIntentId = this.#readersReportCall(() => this.#readersReports.latestTaskIntentId(bookId));
-    requireStore(taskIntentId !== null, 'READERS_REPORT_RECORD_INVALID', '审稿意见任务没有准备出来。');
-    this.#readersReportCall(() => this.#transaction(this.#authority, () => this.#readersReports.recordTask({
-      taskIntentId,
-      bookId,
-      recordId: basis.recordId,
-      finalizedEntrySha256: basis.entrySha256,
-      contract: input,
-      skippedExemplars,
-      promptContractSha256,
-    })));
-    return { ...result, projection: result.projection as ReadersReportProjection | null };
+    return readersReportOperations.createReadersReportPreparationWork(this.#readersReportHost, bookId, template, launchPolicy, materialIds, redoOf);
   }
 
   advanceReadersReportPreparationWork(workId: string): AnalysisPreparationResult<ReadersReportProjection> {
-    this.#assertAvailable();
-    const ledger = this.#readersReportLedgerPreparing(workId);
-    requireStore(ledger !== undefined, 'ANALYSIS_PREPARATION_NOT_FOUND', '审稿意见的计划准备已不存在。');
-    const result = this.#analysisCall(() => ledger.prepare({ phase: 'advance', workId }));
-    return { ...result, projection: result.projection as ReadersReportProjection | null };
+    return readersReportOperations.advanceReadersReportPreparationWork(this.#readersReportHost, workId);
   }
 
   cancelReadersReportPreparationWork(workId: string): boolean {
-    this.#assertAvailable();
-    const ledger = this.#readersReportLedgerPreparing(workId);
-    if (ledger === undefined) return false;
-    this.#analysisCall(() => ledger.prepare({ phase: 'cancel', workId }));
-    return true;
+    return readersReportOperations.cancelReadersReportPreparationWork(this.#readersReportHost, workId);
   }
 
-  /** 开始任务 in the drawer's bar: the Run Authorization and the Run on the ledger of the plan's contract, for the owner. */
   authorizeReadersReport(
     bookId: string,
     taskIntentId: string,
     planEnvelopeDigest: string,
-    start: 'now' | 'when-online' | 'idle' = 'now',
-  ): { dispatchRunRecordId: string | null; ledger: BaselineAnalysisStore } {
-    this.#requireLedgerKindScope('readers-report', bookId, taskIntentId);
-    const ledger = this.#ledgerTaskOf('readers-report', bookId, taskIntentId);
-    const authorized = this.#analysisCall(() => ledger.authorize(bookId, taskIntentId, planEnvelopeDigest, start));
-    return { dispatchRunRecordId: authorized.dispatchRunRecordId, ledger };
+    start: 'now' | 'when-online' | 'idle' = 'now',): { dispatchRunRecordId: string | null; ledger: BaselineAnalysisStore } {
+    return readersReportOperations.authorizeReadersReport(this.#readersReportHost, bookId, taskIntentId, planEnvelopeDigest, start);
   }
 
-  /** Reconcile stranded Runs to their kept continuation points; queued starts still require an explicit new start. */
   reconcileStoppedReadersReportRuns(): { settled: number } {
-    this.#assertAvailable();
-    const any = this.#readersReportCall(() => this.#readersReports.anyTask());
-    if (any === null) return { settled: 0 };
-    return { settled: this.#analysisCall(() => this.readersReportLedger(any.input).reconcileStoppedRuns()).settled };
+    return readersReportOperations.reconcileStoppedReadersReportRuns(this.#readersReportHost);
   }
 
-  /**
-   * 审稿意见 on ②C (EVAL-013): the 定稿 version a new one drafts from, the Book's latest Task, and per template whether it can be
-   * drafted, its newest result not yet opened, and its draft document.
-   */
-  #readersReportWorkspace(bookId: string, basis: FinalizedEvaluation | null, unreadable: string | null): EvaluationReadersReportProjection {
-    const readings = this.#readersReportExemplars(bookId);
-    let latest: { task: StoredReadersReportTask; ledger: BaselineAnalysisStore; projection: ReadersReportProjection } | null = null;
-    let unavailable: string | null = unreadable;
-    try {
-      latest = this.#latestReadersReport(bookId);
-    } catch (error) {
-      if (!(error instanceof StoreError)) throw error;
-      unavailable = `审稿意见暂不可用：${error.message}`;
-    }
-    const runState = latest?.projection.run?.state ?? null;
-    const drafts = this.#readersReportCall(() => this.#readersReports.drafts(bookId));
-    const revisions = this.#readersReportCall(() => this.#readersReports.revisions(bookId));
-    const templates = READERS_REPORT_TEMPLATES.map((template) => {
-      const label = READERS_REPORT_TEMPLATE_LABELS[template];
-      const typeId = readersReportDocumentTypeId(template);
-      const stored = drafts.find((draft) => draft.template === template);
-      const row = stored === undefined ? undefined : this.#documentCall(() => this.#productionDocuments.documentById(bookId, stored.documentId));
-      const draft = stored === undefined || row === undefined ? null : {
-        typeId,
-        typeLabel: readersReportDocumentType(typeId)!.label,
-        recordOrdinal: this.#evaluationRecordOrdinal(stored.recordId),
-        document: this.#documentCall(() => this.#productionDocuments.document(row)),
-      };
-      // The newest result of this template whose synthesis wrote the draft, while the template has no draft document yet.
-      let drafted: { revisionId: string; recordOrdinal: number; createdAt: string } | null = null;
-      if (draft === null && unavailable === null) {
-        for (const revision of revisions) {
-          const found = this.#readersReportTaskOf(revision.taskIntentId);
-          if (found === null || found.task.template !== template) continue;
-          const inspected = this.#analysisCall(() => found.ledger.inspect(bookId, undefined, revision.revisionId)) as ReadersReportProjection;
-          if (inspected.inspectedRevision?.revision.readersReport.sections !== null) {
-            drafted = { revisionId: revision.revisionId, recordOrdinal: this.#evaluationRecordOrdinal(found.task.recordId), createdAt: revision.createdAt };
-          }
-          break;
-        }
-      }
-      const prepare: EvaluationReadersReportProjection['templates'][number]['prepare'] =
-        this.#evaluationLiveRefused(READERS_REPORT_KIND) ? { allowed: false, reason: READERS_REPORT_LIVE_UNAVAILABLE }
-        : unavailable !== null ? { allowed: false, reason: unavailable }
-        : basis === null ? { allowed: false, reason: READERS_REPORT_NEEDS_FINALIZED }
-        : draft !== null ? { allowed: false, reason: `这本书已经有「${label}」的草稿；请打开它继续修改。` }
-        : runIsActive(runState) ? { allowed: false, reason: activeRunReason(runState, READERS_REPORT_KIND) }
-        : { allowed: true, mode: latest === null || latest.projection.resultSetRevision === null ? 'readers-report-first' : 'readers-report-again' };
-      return { template, label, prepare, drafted, draft };
-    });
-    const task = latest?.projection.taskIntent ?? null;
-    return {
-      basis: basis === null ? null : { recordId: basis.recordId, ordinal: basis.ordinal, revisionLabel: basis.revisionLabel, finalizedAt: basis.finalizedAt },
-      exemplars: { count: readings.exemplars.length, statement: this.#readersReportExemplarStatement(readings) },
-      task: latest === null || task === null ? null : {
-        taskIntentId: task.taskIntentId,
-        template: latest.task.template,
-        state: latest.projection.state,
-        label: readersReportTaskStateLabel(latest.projection),
-      },
-      templates,
-    };
-  }
-
-  /**
-   * 打开草稿 (EVAL-013): one drafted result made its template's draft document — an Editorial Artifact in the same block store
-   * as a Production Document, edited on the manuscript surface with the same marks, saved as `版本 N` and exported as DOCX —
-   * in one transaction with the record of which result and which 定稿 version it was made from. Once per template of a Book:
-   * the draft is then edited in place. It is a draft: nothing is delivered or sent, and the Evaluation Record is unchanged.
-   */
   createReadersReportDraft(bookId: string, revisionId: string): EvaluationWorkspaceProjection {
-    this.#assertAvailable();
-    requireStore(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(revisionId), 'READERS_REPORT_INVALID', '审稿意见参数无效。');
-    const revision = this.#readersReportCall(() => this.#readersReports.revisions(bookId)).find((entry) => entry.revisionId === revisionId);
-    requireStore(revision !== undefined, 'READERS_REPORT_NOT_FOUND', '这本书没有这一次起草的审稿意见。');
-    const found = this.#readersReportTaskOf(revision.taskIntentId);
-    requireStore(found !== null, 'READERS_REPORT_RECORD_INVALID', '这一次起草没有记下它依据的评估版本。');
-    const inspected = this.#analysisCall(() => found.ledger.inspect(bookId, undefined, revisionId)) as ReadersReportProjection;
-    const sections = inspected.inspectedRevision?.revision.readersReport.sections ?? null;
-    requireStore(sections !== null, 'READERS_REPORT_NOT_DRAFTED', '这一次起草没有写出审稿意见，不能打开草稿。');
-    const template = found.task.template;
-    const typeId = readersReportDocumentTypeId(template);
-    const type = readersReportDocumentType(typeId)!;
-    const book = this.#authority.prepare('SELECT title FROM books WHERE book_id = ?').get(bookId) as SqlRow | undefined;
-    requireStore(book !== undefined, 'BOOK_NOT_FOUND', '图书不存在。');
-    // Every revision names a Source Version; a draft's names the manuscript file its 定稿 version evaluated (the export writes
-    // the draft fresh from its own words, never from that file).
-    const source = this.#authority.prepare(
-      `SELECT mr.source_version_id FROM evaluation_records er JOIN manuscript_revisions mr ON mr.revision_id = er.revision_id
-       WHERE er.record_id = ? AND er.book_id = ?`,
-    ).get(found.task.recordId, bookId) as SqlRow | undefined;
-    requireStore(source !== undefined, 'READERS_REPORT_RECORD_INVALID', '审稿意见所依据的评估版本缺失。');
-    const sourceVersionId = asString(source.source_version_id);
-    const blocks = readersReportDraftBlocks(asString(book.title), template, sections).map((block) => ({
-      ...block,
-      digest: sha256(canonicalJson({ kind: block.kind, level: block.level, text: block.text })),
-      graphemeLength: readersReportBlockLength(block.text),
-    }));
-    const now = new Date().toISOString();
-    const documentId = randomUUID();
-    const branchId = randomUUID();
-    const draftRevisionId = randomUUID();
-    const characterCount = blocks.reduce((total, block) => total + block.graphemeLength, 0);
-    const revisionDigest = ReadersReports.draftRevisionDigest(documentId, revisionId, blocks.map(({ kind, level, text }) => ({ kind, level, text })));
-    this.#documentCall(() => this.#readersReportCall(() => this.#transaction(this.#authority, () => {
-      // The checks again, inside the transaction that writes: a second 打开草稿 of the template refuses this one.
-      requireStore(this.#productionDocuments.documentOfType(bookId, typeId) === undefined, 'READERS_REPORT_DRAFT_EXISTS',
-        `这本书已经有「${READERS_REPORT_TEMPLATE_LABELS[template]}」的草稿；请打开它继续修改。`);
-      this.#authority.prepare("INSERT INTO manuscripts(manuscript_id, book_id, role, created_at) VALUES (?, ?, 'production-document', ?)")
-        .run(documentId, bookId, now);
-      this.#authority.prepare('INSERT INTO manuscript_branches(branch_id, manuscript_id, name, created_at) VALUES (?, ?, ?, ?)')
-        .run(branchId, documentId, type.label, now);
-      this.#authority.prepare(
-        `INSERT INTO manuscript_revisions(
-           revision_id, manuscript_id, branch_id, ordinal, revision_label, parent_revision_id,
-           source_version_id, revision_digest, created_at
-         ) VALUES (?, ?, ?, 1, 'r1', NULL, ?, ?, ?)`,
-      ).run(draftRevisionId, documentId, branchId, sourceVersionId, revisionDigest, now);
-      this.#authority.prepare('UPDATE manuscript_branches SET base_revision_id = ? WHERE branch_id = ?').run(draftRevisionId, branchId);
-      const insertBlock = this.#authority.prepare('INSERT INTO manuscript_blocks(block_id, manuscript_id, created_revision_id) VALUES (?, ?, ?)');
-      const insertVersion = this.#authority.prepare(
-        `INSERT INTO manuscript_block_versions(
-           revision_id, block_id, position, kind, level, text, digest, start_offset, grapheme_length
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      );
-      const insertWorking = this.#authority.prepare(
-        `INSERT INTO working_blocks(branch_id, block_id, position, kind, level, text, digest, grapheme_length)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      );
-      let offset = 0;
-      blocks.forEach((block, index) => {
-        const position = index + 1;
-        const blockId = `blk_${sha256(`${draftRevisionId}\u0000${position}\u0000${block.digest}`).slice(0, 24)}`;
-        insertBlock.run(blockId, documentId, draftRevisionId);
-        insertVersion.run(draftRevisionId, blockId, position, block.kind, block.level, block.text, block.digest, offset, block.graphemeLength);
-        insertWorking.run(branchId, blockId, position, block.kind, block.level, block.text, block.digest, block.graphemeLength);
-        offset += block.graphemeLength;
-      });
-      this.#authority.prepare(
-        `INSERT INTO branch_working_state(
-           branch_id, manuscript_id, base_revision_id, journal_sequence, working_digest,
-           total_graphemes, history_sequence, last_checkpoint_sequence
-         ) VALUES (?, ?, ?, 0, ?, ?, 0, 0)`,
-      ).run(branchId, documentId, draftRevisionId, revisionDigest, characterCount);
-      requireStore(
-        this.#boundedCall(() => this.#boundedAuthority.initializeImportedBranch(branchId)) === characterCount,
-        'READERS_REPORT_INVALID', '审稿意见草稿的索引无法由它的文字精确建立。',
-      );
-      this.#productionDocuments.record({
-        documentId, bookId, typeId, originSourceVersionId: sourceVersionId, parserIdentity: 'ai7.readers-report-draft/1', createdAt: now,
-      }, { types: READERS_REPORT_DOCUMENT_TYPES, digest: READERS_REPORT_DOCUMENT_TYPES_DIGEST });
-      this.#documentWorkflow.recordInstance(documentId, now);
-      this.#productionDocuments.recordVersion(documentId, draftRevisionId, revisionDigest, 'created');
-      this.#readersReports.recordDraft({
-        documentId, bookId, template, analysisRevisionId: revisionId, taskIntentId: revision.taskIntentId, recordId: found.task.recordId, recordedAt: now,
-      });
-    })));
-    return this.inspectEvaluation(bookId, null);
+    return readersReportOperations.createReadersReportDraft(this.#readersReportHost, bookId, revisionId);
   }
 
   // ---- 写作任务 (Issue #432, plan slice S84a; V2-UX-DELIV-007, KB-004; editor-surfaces §9 新建文档 · 写作任务) -----------------
@@ -13205,17 +11669,31 @@ export class EditorialStore {
     };
   }
 
-  /**
-   * The rewrite ledger of one frozen contract — one version's words at one saved entry — made when first asked for and kept
-   * while it prepares, as 审稿意见's is. It takes the launch the baseline ledger was bound to.
-   */
-  #evaluationRewriteLedger(input: EvaluationRewriteContractInput): BaselineAnalysisStore {
-    const definition = this.#analysisCall(() => evaluationRewriteKindDefinition(input));
-    return this.#evaluationRewriteLedgers.obtain(definition.promptContractDigest, () => {
-      const ledger = new BaselineAnalysisStore(this.#authority, this.#boundedAuthority, this.#control.baselineAnalysisRoute, definition);
-      ledger.bindLaunch(this.#baselineAnalysis.launch);
-      return ledger;
-    });
+  /** What the 按我的评分重写评语 operations in evaluation-rewrites.ts reach of the store (Issue #1172), read live. */
+  readonly #evaluationRewriteHost: evaluationRewriteOperations.EvaluationRewriteStoreHost = this.#evaluationRewriteHostOf();
+
+  #evaluationRewriteHostOf(): evaluationRewriteOperations.EvaluationRewriteStoreHost {
+    const store = this;
+    return {
+      analysisCall: this.#analysisCall.bind(this),
+      assertAvailable: this.#assertAvailable.bind(this),
+      get authority() { return store.#authority; },
+      get baselineAnalysis() { return store.#baselineAnalysis; },
+      get boundedAuthority() { return store.#boundedAuthority; },
+      get control() { return store.#control; },
+      evaluationCall: this.#evaluationCall.bind(this),
+      evaluationLiveRefused: this.#evaluationLiveRefused.bind(this),
+      evaluationRecordOrdinal: this.#evaluationRecordOrdinal.bind(this),
+      evaluationRewriteCall: this.#evaluationRewriteCall.bind(this),
+      get evaluationRewriteLedgers() { return store.#evaluationRewriteLedgers; },
+      get evaluationRewrites() { return store.#evaluationRewrites; },
+      get evaluationRewriteWork() { return store.#evaluationRewriteWork; },
+      get evaluations() { return store.#evaluations; },
+      get inspectEvaluation() { return store.inspectEvaluation.bind(store); },
+      ledgerTaskOf: this.#ledgerTaskOf.bind(this),
+      requireLedgerKindScope: this.#requireLedgerKindScope.bind(this),
+      transaction: this.#transaction.bind(this),
+    };
   }
 
   #evaluationRewriteCall<T>(operation: () => T): T {
@@ -13230,276 +11708,40 @@ export class EditorialStore {
     }
   }
 
-  /**
-   * One rewrite the editor accepted, as the evaluation record checks a mark that names it (Issue #708): the Book and version of
-   * the 采用, its Task and the words it wrote; `null` when no decision accepted it, `'unreadable'` when the decision cannot be
-   * read, and words `null` when they cannot be.
-   */
-  #acceptedEvaluationRewrite(analysisRevisionId: string): AcceptedEvaluationRewrite | null | 'unreadable' {
-    let decision: StoredEvaluationRewriteDecision | null;
-    try {
-      decision = this.#evaluationRewrites.decisionOf(analysisRevisionId);
-    } catch (error) {
-      if (error instanceof EvaluationRewriteError) return 'unreadable';
-      throw error;
-    }
-    if (decision === null || decision.decision !== 'accepted') return null;
-    let words: AcceptedEvaluationRewrite['words'] = null;
-    try {
-      const found = this.#evaluationRewriteTaskOf(decision.taskIntentId);
-      if (found !== null) {
-        const inspected = this.#analysisCall(() => found.ledger.inspect(decision.bookId, undefined, analysisRevisionId)) as EvaluationRewriteProjection;
-        const read = inspected.inspectedRevision?.revision.rewrite.words ?? null;
-        words = read === null ? null : { items: read.items.map((item) => ({ itemId: item.itemId, comment: item.comment })), verdict: read.verdict };
-      }
-    } catch (error) {
-      if (!(error instanceof StoreError)) throw error;
-    }
-    return { bookId: decision.bookId, recordId: decision.recordId, taskIntentId: decision.taskIntentId, words };
-  }
-
-  /** One Task's version and entry — the one its frozen plan names when it froze one. */
-  #evaluationRewriteTaskOf(taskIntentId: string): { task: StoredEvaluationRewriteTask; ledger: BaselineAnalysisStore } | null {
-    let task = this.#evaluationRewriteCall(() => this.#evaluationRewrites.task(taskIntentId));
-    if (task === null) return null;
-    let ledger = this.#evaluationRewriteLedger(task.input);
-    const planContract = this.#evaluationRewriteCall(() => this.#evaluationRewrites.planContract(taskIntentId));
-    if (planContract !== null && planContract !== task.promptContractSha256) {
-      task = this.#evaluationRewriteCall(() => this.#evaluationRewrites.task(taskIntentId, planContract));
-      requireStore(task !== null, 'EVALUATION_REWRITE_RECORD_INVALID', '评语重写任务的计划与它的记录不一致。');
-      ledger = this.#evaluationRewriteLedger(task.input);
-    }
-    return { task, ledger };
-  }
-
-  /** The Book's latest rewrite Task with its ledger and projection; `null` before the first, or for one no record names. */
-  #latestEvaluationRewrite(bookId: string, progress?: ProgressReader): { task: StoredEvaluationRewriteTask; ledger: BaselineAnalysisStore; projection: EvaluationRewriteProjection } | null {
-    const intentId = this.#evaluationRewriteCall(() => this.#evaluationRewrites.latestTaskIntentId(bookId));
-    if (intentId === null) return null;
-    const found = this.#evaluationRewriteTaskOf(intentId);
-    if (found === null) return null;
-    const projection = this.#analysisCall(() => found.ledger.inspect(bookId, progress)) as EvaluationRewriteProjection;
-    return { ...found, projection };
-  }
-
-  /** The Book's latest rewrite Task as its ledger reads it, or `null`; `progress` is the execution owner's reader. */
   inspectEvaluationRewrite(bookId: string, progress?: ProgressReader): EvaluationRewriteProjection | null {
-    this.#assertAvailable();
-    return this.#latestEvaluationRewrite(bookId, progress)?.projection ?? null;
+    return evaluationRewriteOperations.inspectEvaluationRewrite(this.#evaluationRewriteHost, bookId, progress);
   }
 
-  /**
-   * 按我的评分重写评语 runs only where it may be sent (EVAL-008, as 初评): under a live scope only a rule naming the kind with the
-   * editor's saved words admits it; otherwise nothing is prepared or started there, and 评估 says why. The provider-free scope
-   * is unaffected.
-   */
-  #requireEvaluationRewriteScope(): void {
-    this.#assertAvailable();
-    if (this.#evaluationLiveRefused(EVALUATION_REWRITE_KIND)) throw new StoreError('EVALUATION_REWRITE_UNAVAILABLE', EVALUATION_REWRITE_LIVE_UNAVAILABLE);
-  }
-
-  /**
-   * 按我的评分重写评语 (EVAL-008): the rewrite kind's Task over one version of the Book at its latest saved entry, in the mode that
-   * applies. Refused under a live scope, for a 定稿 version, one begun without AI7's 初评, or one whose saved scores do not depart
-   * from AI7's yet — the 评语 then already speak to them. Its plan opens in the Task Drawer.
-   */
   createEvaluationRewritePreparationWork(bookId: string, recordId: string, launchPolicy: LaunchPolicyProjection, redoOf: string | null = null): AnalysisPreparationResult<EvaluationRewriteProjection> {
-    this.#requireEvaluationRewriteScope();
-    requireStore(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(recordId), 'EVALUATION_REWRITE_INVALID', '评语重写参数无效。');
-    const version = this.#evaluationCall(() => this.#evaluations.rewritable(bookId, recordId));
-    const refusal = evaluationRewriteRefusal(version);
-    requireStore(refusal === null, 'EVALUATION_REWRITE_UNAVAILABLE', refusal ?? '');
-    const input = this.#evaluationRewriteCall(() => evaluationRewriteContractInput(version));
-    const ledger = this.#evaluationRewriteLedger(input);
-    const latest = this.#latestEvaluationRewrite(bookId);
-    requireStore(!runIsActive(latest?.projection.run?.state ?? null), 'EVALUATION_REWRITE_UNAVAILABLE', activeRunReason(latest?.projection.run?.state ?? null, EVALUATION_REWRITE_KIND));
-    const mode = latest === null || latest.projection.resultSetRevision === null ? 'evaluation-rewrite-first' : 'evaluation-rewrite-again';
-    const result = this.#analysisCall(() => ledger.prepare({
-      phase: 'start',
-      bookId,
-      goal: EVALUATION_REWRITE_MODE_GOALS[mode],
-      redoOf,
-      update: mode === 'evaluation-rewrite-first' ? null : { mode, selectedRange: null },
-      reconfirm: false,
-      launchPolicy,
-    }));
-    // Which version and saved entry the Task rewrites, recorded once for it and this contract.
-    const taskIntentId = this.#evaluationRewriteCall(() => this.#evaluationRewrites.latestTaskIntentId(bookId));
-    requireStore(taskIntentId !== null, 'EVALUATION_REWRITE_RECORD_INVALID', '评语重写任务没有准备出来。');
-    this.#evaluationRewriteCall(() => this.#transaction(this.#authority, () => this.#evaluationRewrites.recordTask({
-      taskIntentId,
-      bookId,
-      recordId,
-      entryOrdinal: version.entryOrdinal,
-      entrySha256: version.entrySha256,
-      contract: input,
-      promptContractSha256: ledger.definition.promptContractDigest,
-    })));
-    if (result.workId !== null) this.#evaluationRewriteWork.set(result.workId, ledger);
-    return { ...result, projection: result.projection as EvaluationRewriteProjection | null };
+    return evaluationRewriteOperations.createEvaluationRewritePreparationWork(this.#evaluationRewriteHost, bookId, recordId, launchPolicy, redoOf);
   }
 
   advanceEvaluationRewritePreparationWork(workId: string): AnalysisPreparationResult<EvaluationRewriteProjection> {
-    const ledger = this.#evaluationRewriteWork.get(workId);
-    requireStore(ledger !== undefined, 'ANALYSIS_PREPARATION_NOT_FOUND', '评语重写的计划准备已不存在。');
-    const result = this.#analysisCall(() => ledger.prepare({ phase: 'advance', workId }));
-    if (result.done) this.#evaluationRewriteWork.delete(workId);
-    return { ...result, projection: result.projection as EvaluationRewriteProjection | null };
+    return evaluationRewriteOperations.advanceEvaluationRewritePreparationWork(this.#evaluationRewriteHost, workId);
   }
 
   cancelEvaluationRewritePreparationWork(workId: string): boolean {
-    const ledger = this.#evaluationRewriteWork.get(workId);
-    if (ledger === undefined) return false;
-    this.#evaluationRewriteWork.delete(workId);
-    this.#analysisCall(() => ledger.prepare({ phase: 'cancel', workId }));
-    return true;
+    return evaluationRewriteOperations.cancelEvaluationRewritePreparationWork(this.#evaluationRewriteHost, workId);
   }
 
-  /** The version the Book's latest rewrite Task rewrites: what 评估 shows once that Task was prepared or started. */
   evaluationRewriteRecordOf(bookId: string): string | null {
-    this.#assertAvailable();
-    return this.#latestEvaluationRewrite(bookId)?.task.recordId ?? null;
+    return evaluationRewriteOperations.evaluationRewriteRecordOf(this.#evaluationRewriteHost, bookId);
   }
 
-  /** 开始任务 in the drawer's bar: the Run Authorization and the Run on the ledger of the plan's contract, for the owner. */
   authorizeEvaluationRewrite(
     bookId: string,
     taskIntentId: string,
     planEnvelopeDigest: string,
-    start: 'now' | 'when-online' | 'idle' = 'now',
-  ): { dispatchRunRecordId: string | null; ledger: BaselineAnalysisStore; recordId: string } {
-    this.#requireLedgerKindScope('evaluation-rewrite', bookId, taskIntentId);
-    const ledger = this.#ledgerTaskOf('evaluation-rewrite', bookId, taskIntentId);
-    const authorized = this.#analysisCall(() => ledger.authorize(bookId, taskIntentId, planEnvelopeDigest, start));
-    return { dispatchRunRecordId: authorized.dispatchRunRecordId, ledger, recordId: this.#latestEvaluationRewrite(bookId)!.task.recordId };
+    start: 'now' | 'when-online' | 'idle' = 'now',): { dispatchRunRecordId: string | null; ledger: BaselineAnalysisStore; recordId: string } {
+    return evaluationRewriteOperations.authorizeEvaluationRewrite(this.#evaluationRewriteHost, bookId, taskIntentId, planEnvelopeDigest, start);
   }
 
-  /** Reconcile stranded Runs to their kept continuation points; queued starts still require an explicit new start. */
   reconcileStoppedEvaluationRewriteRuns(): { settled: number } {
-    this.#assertAvailable();
-    const any = this.#evaluationRewriteCall(() => this.#evaluationRewrites.anyTask());
-    if (any === null) return { settled: 0 };
-    return { settled: this.#analysisCall(() => this.#evaluationRewriteLedger(any.input).reconcileStoppedRuns()).settled };
+    return evaluationRewriteOperations.reconcileStoppedEvaluationRewriteRuns(this.#evaluationRewriteHost);
   }
 
-  /** The newest rewritten result of one version, with its Task, words and what it read; `null` while the version has none. */
-  #newestEvaluationRewrite(bookId: string, recordId: string): null | {
-    revision: { revisionId: string; createdAt: string; taskIntentId: string };
-    task: StoredEvaluationRewriteTask;
-    words: NonNullable<NonNullable<EvaluationRewriteProjection['inspectedRevision']>['revision']['rewrite']['words']> | null;
-    observations: NonNullable<EvaluationRewriteProjection['inspectedRevision']>['revision']['rewrite']['observations'];
-    /** Produced under the live route: its notes show 未联网核查 (Issue #429). */
-    unverified: boolean;
-    reading: { unitsTotal: number; unitsRead: number };
-  } {
-    for (const revision of this.#evaluationRewriteCall(() => this.#evaluationRewrites.revisions(bookId))) {
-      const found = this.#evaluationRewriteTaskOf(revision.taskIntentId);
-      if (found === null || found.task.recordId !== recordId) continue;
-      const inspected = this.#analysisCall(() => found.ledger.inspect(bookId, undefined, revision.revisionId)) as EvaluationRewriteProjection;
-      const read = inspected.inspectedRevision?.revision ?? null;
-      return {
-        revision,
-        task: found.task,
-        words: read?.rewrite.words ?? null,
-        observations: read?.rewrite.observations ?? [],
-        unverified: producedUnverified(read?.policyPin.operationalScope),
-        reading: { unitsTotal: read?.coverage.unitsTotal ?? 0, unitsRead: read?.coverage.unitsClosed ?? 0 },
-      };
-    }
-    return null;
-  }
-
-  /**
-   * 按我的评分重写评语 on ②C for the version on show (EVAL-008): whether it can be asked, the Book's latest rewrite Task, the newest
-   * rewrite of this version still waiting for the editor — its words beside the version's own, the notes they rest on, how much
-   * of the Book it read and what it set aside — and the version's last decision. Every rewrite row it reads is read under one
-   * guard: a damaged one makes the rewrite unavailable with why, never 评估 unreadable (S81b2 review).
-   */
-  #evaluationRewriteWorkspace(bookId: string, version: RewritableEvaluation | null): EvaluationRewriteWorkspaceProjection {
-    let latest: { task: StoredEvaluationRewriteTask; ledger: BaselineAnalysisStore; projection: EvaluationRewriteProjection } | null = null;
-    let unavailable: string | null = null;
-    let proposal: EvaluationRewriteWorkspaceProjection['proposal'] = null;
-    let decided: EvaluationRewriteWorkspaceProjection['decided'] = null;
-    try {
-      latest = this.#latestEvaluationRewrite(bookId);
-      if (version !== null) {
-        const newest = this.#newestEvaluationRewrite(bookId, version.recordId);
-        if (newest !== null && newest.words !== null && this.#evaluationRewriteCall(() => this.#evaluationRewrites.decisionOf(newest.revision.revisionId)) === null) {
-          const words = newest.words;
-          proposal = {
-            revisionId: newest.revision.revisionId,
-            createdAt: newest.revision.createdAt,
-            entryOrdinal: newest.task.entryOrdinal,
-            current: newest.task.entryOrdinal === version.entryOrdinal && newest.task.entrySha256 === version.entrySha256 && version.state !== 'finalized',
-            reading: newest.reading,
-            // Each beside the version's own, with at most a frame's share of its notes and how many in all (Issue #689).
-            items: rewriteProposalItems(words.items, newest.observations, version.content, newest.unverified),
-            verdict: words.verdict === null ? null : { before: version.content.verdict, after: words.verdict },
-            withheld: words.withheld.map((entry) => entry.reason),
-          };
-        }
-        const last = this.#evaluationRewriteCall(() => this.#evaluationRewrites.latestDecision(version.recordId));
-        // Every 采用 of the version, read under the same guard: a damaged one makes the rewrite unavailable (Issue #702 review).
-        this.#evaluationRewriteCall(() => this.#evaluationRewrites.adoptionsOf(version.recordId));
-        decided = last === null ? null : { decision: last.decision, entryOrdinal: last.entryOrdinal, decidedAt: last.recordedAt };
-      }
-    } catch (error) {
-      if (!(error instanceof StoreError)) throw error;
-      latest = null;
-      proposal = null;
-      decided = null;
-      unavailable = `按我的评分重写评语暂不可用：${error.message}`;
-    }
-    const runState = latest?.projection.run?.state ?? null;
-    const task = latest === null || latest.projection.taskIntent === null ? null : {
-      taskIntentId: latest.projection.taskIntent.taskIntentId,
-      recordId: latest.task.recordId,
-      recordOrdinal: this.#evaluationRecordOrdinal(latest.task.recordId),
-      entryOrdinal: latest.task.entryOrdinal,
-      state: latest.projection.state,
-      label: evaluationRewriteTaskStateLabel(latest.projection),
-    };
-    const refusal = version === null ? '先打开一版评估。' : evaluationRewriteRefusal(version);
-    const prepare: EvaluationRewriteWorkspaceProjection['prepare'] =
-      this.#evaluationLiveRefused(EVALUATION_REWRITE_KIND) ? { allowed: false, reason: EVALUATION_REWRITE_LIVE_UNAVAILABLE }
-      : unavailable !== null ? { allowed: false, reason: unavailable }
-      : refusal !== null ? { allowed: false, reason: refusal }
-      : runIsActive(runState) ? { allowed: false, reason: activeRunReason(runState, EVALUATION_REWRITE_KIND) }
-      : { allowed: true, mode: latest === null || latest.projection.resultSetRevision === null ? 'evaluation-rewrite-first' : 'evaluation-rewrite-again' };
-    return { prepare, task, proposal, decided };
-  }
-
-  /**
-   * 采用 or 放弃 one rewrite (EVAL-008): 采用 appends AI7's rewritten 评语 and 总评 to the version as a new entry — every score as the
-   * editor saved it — only while the version still stands at the entry the rewrite read and the rewrite is its newest; 放弃 sets
-   * it aside. Either is recorded once, in the transaction that makes it, and nothing else of the record changes.
-   */
   decideEvaluationRewrite(bookId: string, revisionId: string, decision: EvaluationRewriteDecision): EvaluationWorkspaceProjection {
-    this.#assertAvailable();
-    requireStore(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(revisionId) && (decision === 'accept' || decision === 'discard'),
-      'EVALUATION_REWRITE_INVALID', '评语重写参数无效。');
-    const revision = this.#evaluationRewriteCall(() => this.#evaluationRewrites.revisions(bookId)).find((entry) => entry.revisionId === revisionId);
-    requireStore(revision !== undefined, 'EVALUATION_REWRITE_NOT_FOUND', '这本书没有这一次重写的评语。');
-    const found = this.#evaluationRewriteTaskOf(revision.taskIntentId);
-    requireStore(found !== null, 'EVALUATION_REWRITE_RECORD_INVALID', '这一次重写没有记下它依据的评估版本。');
-    const inspected = this.#analysisCall(() => found.ledger.inspect(bookId, undefined, revisionId)) as EvaluationRewriteProjection;
-    const words = inspected.inspectedRevision?.revision.rewrite.words ?? null;
-    const recordId = found.task.recordId;
-    this.#evaluationRewriteCall(() => this.#transaction(this.#authority, () => {
-      requireStore(this.#evaluationRewrites.decisionOf(revisionId) === null, 'EVALUATION_REWRITE_DECIDED', '这一次重写已经处理过了。');
-      if (decision === 'discard') {
-        this.#evaluationRewrites.recordDecision({ analysisRevisionId: revisionId, bookId, recordId, taskIntentId: revision.taskIntentId, decision: 'discarded', entryOrdinal: null });
-        return;
-      }
-      requireStore(words !== null, 'EVALUATION_REWRITE_NOT_WRITTEN', '这一次重写没有写出评语，不能采用。');
-      requireStore(this.#newestEvaluationRewrite(bookId, recordId)?.revision.revisionId === revisionId, 'EVALUATION_REWRITE_SUPERSEDED',
-        '这一版评估后来又重写过：请看最新的重写。');
-      requireStore(words.items.length > 0 || words.verdict !== null, 'EVALUATION_REWRITE_NOT_WRITTEN', '这一次重写写出的评语都没有采用的条件，只能放弃。');
-      const entryOrdinal = this.#evaluations.applyRewrite(bookId, recordId, { entryOrdinal: found.task.entryOrdinal, entrySha256: found.task.entrySha256 }, words,
-        { taskIntentId: revision.taskIntentId, analysisRevisionId: revisionId });
-      this.#evaluationRewrites.recordDecision({ analysisRevisionId: revisionId, bookId, recordId, taskIntentId: revision.taskIntentId, decision: 'accepted', entryOrdinal });
-    }));
-    return this.inspectEvaluation(bookId, recordId);
+    return evaluationRewriteOperations.decideEvaluationRewrite(this.#evaluationRewriteHost, bookId, revisionId, decision);
   }
 
   /** 保存评估 or 定稿: the editor's content appended to the version's chain, and the page as it now reads. */
@@ -13546,7 +11788,7 @@ export class EditorialStore {
    */
   inspectAnalysisFeedback(bookId: string, revisionId: string): AnalysisFeedbackProjection {
     return this.#feedbackCall(() => {
-      const revision = this.#feedbackRevision(bookId, revisionId);
+      const revision = learningSupervision.feedbackRevision(this.#learningSupervisionHost, bookId, revisionId);
       return this.#analysisFeedback.projection(bookId, revision.bound, revision.items);
     });
   }
@@ -13554,7 +11796,7 @@ export class EditorialStore {
   /** 记录反馈: one explicit judgment appended as a Quality Signal, and the revision's feedback as it now reads. */
   recordAnalysisFeedback(input: RecordAnalysisFeedbackInput & { bookId: string }): AnalysisFeedbackProjection {
     return this.#feedbackCall(() => {
-      const revision = this.#feedbackRevision(input.bookId, input.revisionId);
+      const revision = learningSupervision.feedbackRevision(this.#learningSupervisionHost, input.bookId, input.revisionId);
       this.#transaction(this.#authority, () => this.#analysisFeedback.record(input.bookId, revision.bound, revision.items, input));
       return this.#analysisFeedback.projection(input.bookId, revision.bound, revision.items);
     });
@@ -13585,7 +11827,7 @@ export class EditorialStore {
         const id = asString(row.book_id);
         const title = asString(row.title);
         if (bookId !== null) namedTitle = title;
-        const materials = this.#learningMaterialsPage(id, id === after?.bookId ? after : null,
+        const materials = learningSupervision.learningMaterialsPage(this.#learningSupervisionHost, id, id === after?.bookId ? after : null,
           MAX_LEARNING_MATERIALS_PAGE + 1 - collected.length);
         for (const { material, orderedAt } of materials) {
           collected.push({ bookId: id, title, material, orderedAt });
@@ -13599,7 +11841,7 @@ export class EditorialStore {
       let more = collected.length > MAX_LEARNING_MATERIALS_PAGE;
       for (const entry of collected.slice(0, MAX_LEARNING_MATERIALS_PAGE)) {
         const book = books.at(-1);
-        const heading = book?.bookId === entry.bookId ? null : this.#learningBookOf(entry.bookId, entry.title);
+        const heading = book?.bookId === entry.bookId ? null : learningSupervision.learningBookOf(this.#learningSupervisionHost, entry.bookId, entry.title);
         const weight = Buffer.byteLength(JSON.stringify(entry.material), 'utf8') + 1 +
           (heading === null ? 0 : Buffer.byteLength(JSON.stringify({ ...heading, materials: [] }), 'utf8') + 1);
         if (shown.length > 0 && bytes + weight > MAX_FRAME_BYTES / 2) {
@@ -13612,7 +11854,7 @@ export class EditorialStore {
         bytes += weight;
       }
       // A Book named by itself is shown even while it has no material.
-      if (bookId !== null && after === null && books.length === 0 && namedTitle !== null) books.push({ ...this.#learningBookOf(bookId, namedTitle), materials: [] });
+      if (bookId !== null && after === null && books.length === 0 && namedTitle !== null) books.push({ ...learningSupervision.learningBookOf(this.#learningSupervisionHost, bookId, namedTitle), materials: [] });
       const last = shown.at(-1);
       return {
         basis: LOCAL_LEARNING_POLICY_BASIS.text,
@@ -13624,114 +11866,51 @@ export class EditorialStore {
     });
   }
 
-  /** One Learning Material as its Review Card reads it: what a decision answers with, and what a refusal reads again. */
-  inspectLearningMaterial(bookId: string, materialKey: string): LearningMaterialProjection {
-    return this.#learningCall(() => {
-      requireStore(UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
-      const candidate = this.#learningCandidateOf(bookId, materialKey, true);
-      requireStore(candidate !== null, 'LEARNING_MATERIAL_NOT_FOUND', '这条材料已经不在学习准入之列。');
-      return { ...this.#learningEligibility.project(bookId, [candidate])[0]!, ...this.#learningMaterialSource(bookId, candidate) };
-    });
+  /** What the 学习素材 and 学习整理 operations in house-review-preference.ts reach of the store (Issue #1172), read live. */
+  readonly #editorialLearningHost: learningSupervision.EditorialLearningStoreHost = this.#editorialLearningHostOf();
+
+  #editorialLearningHostOf(): learningSupervision.EditorialLearningStoreHost {
+    const store = this;
+    return {
+      get authority() { return store.#authority; },
+      get baselineAnalysis() { return store.#baselineAnalysis; },
+      get bookPeople() { return store.#bookPeople; },
+      learningCall: this.#learningCall.bind(this),
+      get learningEligibility() { return store.#learningEligibility; },
+      learningLedger: this.#learningLedger.bind(this),
+      learningMaterialSource: this.#learningMaterialSource.bind(this),
+      get learningSupervisionHost() { return store.#learningSupervisionHost; },
+      get replacementFrozen() { return store.replacementFrozen.bind(store); },
+      transaction: this.#transaction.bind(this),
+    };
   }
 
-  /** 记录学习准入决定 for the exact version the editor read, attributed to the Book's people as they stand (FDBK-013). */
+  inspectLearningMaterial(bookId: string, materialKey: string): LearningMaterialProjection {
+    return learningSupervision.inspectLearningMaterial(this.#editorialLearningHost, bookId, materialKey);
+  }
+
   decideLearningMaterial(input: DecideLearningMaterialInput): LearningMaterialProjection {
-    this.#learningCall(() => {
-      requireStore(UUID_PATTERN.test(input.bookId), 'BOOK_INVALID', '图书标识无效。');
-      this.#transaction(this.#authority, () => {
-        const candidate = this.#learningCandidateOf(input.bookId, input.materialKey, false);
-        requireStore(candidate !== null, 'LEARNING_MATERIAL_NOT_FOUND', '这条材料已经不在学习准入之列。');
-        requireStore(learningMaterialDigest(candidate) === input.materialDigest, 'LEARNING_MATERIAL_CHANGED', '这条材料在你打开后改过；请看过现在的内容再定。');
-        const people = this.#bookPeople.current(input.bookId);
-        this.#learningEligibility.decide({
-          bookId: input.bookId,
-          candidate,
-          expectedDecisions: input.expectedDecisions,
-          choice: input.choice,
-          note: input.note,
-          attribution: { peopleVersion: people.version, authors: people.authors, editors: people.editors },
-        });
-        this.#rebuildHouseReviewPreference();
-      });
-    });
-    // The one material it decided: the page it sits on is never re-sent whole.
-    return this.inspectLearningMaterial(input.bookId, input.materialKey);
+    return learningSupervision.decideLearningMaterial(this.#editorialLearningHost, input);
   }
 
   inspectEditQualitySignals(bookId: string | null, after: import('../shared/protocol/learning.js').PreferenceAdoptionCursor | null = null): EditQualitySignalsProjection {
-    return this.#learningCall(() => {
-      requireStore(bookId === null || UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
-      if (bookId !== null) requireStore(this.#authority.prepare('SELECT 1 FROM books WHERE book_id = ?').get(bookId) !== undefined, 'BOOK_NOT_FOUND', '图书不存在。');
-      return { ...readEditQualitySignals(this.#authority, bookId), ...this.#learningLedger().adoption(bookId, after) };
-    });
+    return learningSupervision.inspectEditQualitySignals(this.#editorialLearningHost, bookId, after);
   }
 
   inspectEditorialLearning(input: InspectEditorialLearningInput): EditorialLearningProjection {
-    return this.#learningCall(() => {
-      const learning = this.#learningLedger();
-      const current = learning.curationEnvelope();
-      const offered = this.#curationEnvelope({ maxPasses: 1, totalTokens: 20_000, perPassTokens: 20_000 });
-      return { ...learning.inspect(input, this.#baselineAnalysis.launch.operationalScope), curation: {
-        available: offered !== null, disclosure: offered?.disclosure ?? '模型整理尚不可用；当前仅在本机保留学习记录。',
-        envelope: current?.envelope ?? null, ...this.#baselineAnalysis.curationBudgetUse(current?.entryId ?? ''),
-        recentRuns: this.#baselineAnalysis.curationRuns() } };
-    });
-  }
-
-  #curationEnvelope(budget: LearningCurationBudget): EnabledLearningEnvelope | null {
-    const launch = this.#baselineAnalysis.launch;
-    const policy = launch.policy;
-    const identity = selectedPolicyIdentityOf(policy?.selectedPolicyIdentity);
-    const live = launch.live;
-    const rule = policy?.providerProcessing.admittedRules?.find((entry) => entry.ruleId === 'ordinary-production-learning-curation');
-    if (launch.operationalScope !== 'ordinary-production' || live?.scope !== 'ordinary-production' ||
-      policy?.integrityState !== 'verified' || identity?.providerProcessingVersion !== 'v31' || rule?.enabledLearningEnvelope === undefined ||
-      rule.route !== live.route || rule.model !== live.model || rule.endpoint !== live.endpoint || rule.credentialSlot !== live.credentialSlot) return null;
-    return { schema: 'ai7.enabled-learning-envelope/1', budget, contractDigest: CURATION_CONTRACT_DIGEST, policy: identity,
-      binding: { route: live.route, endpoint: live.endpoint, model: live.model, credentialSlot: live.credentialSlot, credentialReference: live.credentialReference },
-      sourceKinds: ['proposal-decision', 'manual-edit-journal', 'word-tracked-edit'], scope: 'eligible-local-books',
-      supervisionDigest: this.#learningLedger().supervisionDigest(), disableStopsLaterDispatchAndUse: true,
-      disclosure: `空闲时将符合范围的直接修改、Word 修订及原生审阅决定的完整修改前后文字和实际原因发送给 ${live.route} · ${live.model} 整理。遵循当前学习监督与排除范围；只生成待接受的本社偏好和记忆，不会自动启用。关闭学习或排除来源会停止后续发送与使用。策略 ${identity.providerProcessingVersion}。` };
+    return learningSupervision.inspectEditorialLearning(this.#editorialLearningHost, input);
   }
 
   prepareLearningCuration(bookId: string, signalIds: readonly string[]): LearningCurationBundle {
-    return this.#learningCall(() => this.#learningLedger().prepareCuration(bookId, signalIds));
+    return learningSupervision.prepareLearningCuration(this.#editorialLearningHost, bookId, signalIds);
   }
 
-  nextLearningCuration(): CurationRun | null {
-    return this.#learningCall(() => this.#transaction(this.#authority, () => {
-      const learning = this.#learningLedger();
-      const current = learning.curationEnvelope();
-      if (current === null || canonicalJson(this.#curationEnvelope(current.envelope.budget)) !== canonicalJson(current.envelope) || this.replacementFrozen()) return null;
-      const use = this.#baselineAnalysis.curationBudgetUse(current.entryId);
-      if (use.passesUsed >= current.envelope.budget.maxPasses || use.reservedTokens + current.envelope.budget.perPassTokens > current.envelope.budget.totalTokens) return null;
-      for (const bookId of learning.curationBooks()) {
-        const bundle = learning.nextCuration(bookId);
-        if (bundle?.state === 'ready') return this.#baselineAnalysis.startCuration(bundle, current);
-      }
-      return null;
-    }));
-  }
+  nextLearningCuration(): CurationRun | null { return learningSupervision.nextLearningCuration(this.#editorialLearningHost); }
 
-  learningCurationCurrent(run: CurationRun): boolean {
-    try {
-      const current = this.#learningLedger().curationEnvelope();
-      return !this.replacementFrozen() && current?.entryId === run.controlEntryId &&
-        canonicalJson(this.#curationEnvelope(run.envelope.budget)) === canonicalJson(run.envelope) &&
-        this.prepareLearningCuration(run.bundle.bookId, run.bundle.signalIds).digest === run.bundle.digest;
-    } catch { return false; }
-  }
+  learningCurationCurrent(run: CurationRun): boolean { return learningSupervision.learningCurationCurrent(this.#editorialLearningHost, run); }
 
   publishLearningCuration(run: CurationRun, text: string, evidence: { usage: import('./provider/classification.js').UsageFacts | null; transmitted: boolean }): number {
-    return this.#learningCall(() => this.#transaction(this.#authority, () => {
-      requireStore(this.learningCurationCurrent(run), 'LEARNING_SOURCE_CHANGED', '学习整理来源或范围已经变化；结果未发布。');
-      const proposals = parseCurationResult(text, run.bundle.examples);
-      requireStore(proposals !== null, 'LEARNING_RESULT_INVALID', '学习整理结果未满足约定；没有发布候选。');
-      this.#learningLedger().proposeCuration(run.bundle, proposals, run);
-      this.#baselineAnalysis.settleCuration(run, 'completed', { ...evidence, proposals: proposals.length,
-        reason: proposals.length === 0 ? '整理完成；证据不足以提出新偏好。' : `已形成 ${proposals.length} 条待接受的偏好与记忆。` });
-      return proposals.length;
-    }));
+    return learningSupervision.publishLearningCuration(this.#editorialLearningHost, run, text, evidence);
   }
 
   /** Explicit-Book source detail; historical inspection remains available while current learning is excluded. */
@@ -13798,31 +11977,21 @@ export class EditorialStore {
   }
 
   recordLearningReasonAsk(input: LearningReasonAskInput, frequency: import('../shared/protocol/learning.js').LearningReasonAskFrequency): LearningReasonAskProjection | null {
-    return this.#learningCall(() => this.#transaction(this.#authority, () => this.#learningLedger().reasonAsk(input, frequency)));
+    return learningSupervision.recordLearningReasonAsk(this.#editorialLearningHost, input, frequency);
   }
 
   changeEditorialLearning(input: ChangeEditorialLearningInput): EditorialLearningProjection {
-    return this.#learningCall(() => this.#transaction(this.#authority, () => {
-      const budget = input.kind === 'switch' ? input.curation : undefined;
-      const envelope = budget === undefined ? undefined : this.#curationEnvelope(budget);
-      requireStore(budget === undefined || validCurationBudget(budget) && envelope !== null, 'LEARNING_ENVELOPE_UNAVAILABLE', '学习整理缺少有效的模型、策略或预算范围。');
-      this.#learningLedger().change(input, envelope ?? undefined);
-      this.#rebuildHouseReviewPreference();
-      return this.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
-    }));
+    return learningSupervision.changeEditorialLearning(this.#editorialLearningHost, input);
   }
 
   createEditorialMemory(input: CreateEditorialMemoryInput): EditorialLearningProjection {
-    return this.#learningCall(() => this.#transaction(this.#authority, () => {
-      this.#learningLedger().create(input, this.#baselineAnalysis.launch.operationalScope);
-      return this.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
-    }));
+    return learningSupervision.createEditorialMemory(this.#editorialLearningHost, input);
   }
 
   acceptEditorialMemory(input: import('../shared/protocol/learning.js').AcceptEditorialMemoryInput): EditorialLearningProjection {
     return this.#learningCall(() => this.#transaction(this.#authority, () => {
       this.#learningLedger().accept(input, this.#baselineAnalysis.launch.operationalScope);
-      new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).refreshGovernance(this.#baselineAnalysis.launch.operationalScope, this.#housePreferencePeopleNames(), 'memory');
+      new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).refreshGovernance(this.#baselineAnalysis.launch.operationalScope, learningSupervision.housePreferencePeopleNames(this.#learningSupervisionHost), 'memory');
       return this.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
     }));
   }
@@ -13830,7 +11999,7 @@ export class EditorialStore {
   deactivateEditorialMemory(input: DeactivateEditorialMemoryInput): EditorialLearningProjection {
     return this.#learningCall(() => this.#transaction(this.#authority, () => {
       this.#learningLedger().deactivate(input, this.#baselineAnalysis.launch.operationalScope);
-      new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).refreshGovernance(this.#baselineAnalysis.launch.operationalScope, this.#housePreferencePeopleNames());
+      new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).refreshGovernance(this.#baselineAnalysis.launch.operationalScope, learningSupervision.housePreferencePeopleNames(this.#learningSupervisionHost));
       return this.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
     }));
   }
@@ -14027,7 +12196,7 @@ export class EditorialStore {
 
   /** One name set for listing and the final-gate recheck: the base lines' attributed people and the house's people now. */
   #globalAgentNames(preference: HouseReviewPreferenceVersion | null): string[] {
-    return preferenceNames(preference?.governance?.baseLines ?? preference?.lines ?? [], this.#housePreferencePeopleNames());
+    return preferenceNames(preference?.governance?.baseLines ?? preference?.lines ?? [], learningSupervision.housePreferencePeopleNames(this.#learningSupervisionHost));
   }
 
   /** A disclosure read creates no Task, attempt, log, credential release or transmission. */
@@ -14103,87 +12272,46 @@ export class EditorialStore {
     });
   }
 
+  /** What the 学习监督 operations in house-review-preference.ts reach of the store (Issue #1172), read live. */
+  readonly #learningSupervisionHost: learningSupervision.LearningSupervisionStoreHost = this.#learningSupervisionHostOf();
+
+  #learningSupervisionHostOf(): learningSupervision.LearningSupervisionStoreHost {
+    const store = this;
+    return {
+      get analysisFeedback() { return store.#analysisFeedback; },
+      get authority() { return store.#authority; },
+      get baselineAnalysis() { return store.#baselineAnalysis; },
+      get bookPeople() { return store.#bookPeople; },
+      editorialMemoryGovernanceHooks: this.#editorialMemoryGovernanceHooks.bind(this),
+      evaluationBookTitle: this.#evaluationBookTitle.bind(this),
+      get inspectBaselineAnalysis() { return store.inspectBaselineAnalysis.bind(store); },
+      get inspectGlobalAgent() { return store.inspectGlobalAgent.bind(store); },
+      get inspectLearningMaterial() { return store.inspectLearningMaterial.bind(store); },
+      learningCall: this.#learningCall.bind(this),
+      learningCandidates: this.#learningCandidates.bind(this),
+      get learningEligibility() { return store.#learningEligibility; },
+      learningLedger: this.#learningLedger.bind(this),
+      learningMaterialSource: this.#learningMaterialSource.bind(this),
+      get reviewRuns() { return store.#reviewRuns; },
+      get series() { return store.#series; },
+      transaction: this.#transaction.bind(this),
+    };
+  }
+
   recordLearningSupervision(input: RecordLearningSupervisionInput): GlobalAgentProjection {
-    this.#learningCall(() => this.#transaction(this.#authority, () => {
-      const current = this.inspectGlobalAgent();
-      requireStore(reviewCategoryEntry(input.categoryId) !== null, 'REVIEW_CATEGORY_INVALID', '请选择有效的审阅类别。');
-      if (input.scope.kind === 'book') requireStore(this.#authority.prepare('SELECT 1 FROM books WHERE book_id = ?').get(input.scope.bookId) !== undefined,
-        'BOOK_INVALID', '监督范围的图书不存在。');
-      const memoryTargets = input.targets.filter((pin) => this.#authority.prepare('SELECT 1 FROM global_editorial_memory_items WHERE item_id = ?').get(pin.itemId));
-      requireStore(memoryTargets.length === 0 || memoryTargets.length === input.targets.length, 'LEARNING_SUPERVISION_INVALID', '请分别治理记忆与偏好条目。');
-      const directive = new SupervisionDirectives(this.#authority).record(current.operationalScope, input, current.items);
-      if (memoryTargets.length > 0) {
-        this.#editorialMemoryGovernanceHooks().govern(directive, memoryTargets);
-      }
-      // Only an action that adds text is refused at the bound; a guide, freeze or deactivation lets derived lines yield as a rebuild does.
-      const addsText = input.operation === 'create' || input.operation === 'merge' || input.operation === 'correct' ||
-        input.operation === 'supervise' && input.effect === 'correct';
-      new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).refreshGovernance(current.operationalScope, this.#housePreferencePeopleNames(),
-        addsText && (memoryTargets.length > 0 ? 'memory' : true));
-    }));
-    return this.inspectGlobalAgent();
+    return learningSupervision.recordLearningSupervision(this.#learningSupervisionHost, input);
   }
 
   inspectHouseReviewPreference(): HouseReviewPreferenceProjection {
-    return this.#learningCall(() => {
-      const operationalScope = this.#baselineAnalysis.launch.operationalScope;
-      const history = new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).history(operationalScope);
-      // Its disclosure states the basis 学习准入 decisions now record (Issue #1082); the record, lineage and use are unchanged.
-      return { operationalScope, current: history.at(-1) ?? null,
-        history: history.map(({ versionId, ordinal, recordedAt, sourceCount }) => ({ versionId, ordinal, recordedAt, sourceCount })), basis: LOCAL_LEARNING_POLICY_BASIS.text };
-    });
+    return learningSupervision.inspectHouseReviewPreference(this.#learningSupervisionHost);
   }
 
   rebuildHouseReviewPreference(): HouseReviewPreferenceProjection {
-    this.#learningCall(() => this.#transaction(this.#authority, () => this.#rebuildHouseReviewPreference()));
-    return this.inspectHouseReviewPreference();
+    return learningSupervision.rebuildHouseReviewPreference(this.#learningSupervisionHost);
   }
 
-  /**
-   * The house record from every Book's review material as it stands (Issue #911): the sources are read, and filtered by
-   * eligibility and by the scope of the Result Set Revision each came from, in `house-review-preference.ts`; every person the
-   * house's Books name now is kept out of the lines besides each decision's own attribution.
-   */
-  #housePreferencePeopleNames(): string[] {
-    const names: string[] = [];
-    for (const book of this.#authority.prepare('SELECT book_id FROM books ORDER BY book_id').iterate()) {
-      const people = this.#bookPeople.current(String(book.book_id));
-      names.push(...people.authors, ...people.editors, ...people.related.map((person) => person.name));
-    }
-    return names;
-  }
-
-  #rebuildHouseReviewPreference(): void {
-    const scope = this.#baselineAnalysis.launch.operationalScope;
-    const sources: HousePreferenceSource[] = [];
-    const names = this.#housePreferencePeopleNames();
-    for (const book of this.#authority.prepare('SELECT book_id, title FROM books ORDER BY book_id').iterate() as IterableIterator<SqlRow>) {
-      const bookId = asString(book.book_id);
-      sources.push(...housePreferenceSources(this.#authority, scope, { bookId, title: asString(book.title) }, this.#standingMaterials(bookId),
-        (categoryId) => reviewCategoryEntry(categoryId)?.label ?? categoryId));
-    }
-    new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).rebuild(scope, sources, names);
-  }
-
-  /** Each of one Book's Learning Materials where it stands, a decided one with the newest decision of its chain. */
-  *#standingMaterials(bookId: string): IterableIterator<StandingReviewMaterial> {
-    // Word retention grants no preference-source admission, so its pairs are not even enumerated here.
-    for (const [candidate, projection] of this.#learningEligibility.projectCandidates(bookId, this.#learningCandidates(bookId, false, false))) {
-      const latest = projection.state === 'decided' ? this.#learningEligibility.history(bookId, candidate.materialKey).at(-1) ?? null : null;
-      yield { candidate, state: projection.state, materialDigest: projection.digest,
-        decision: latest === null ? null : { decisionId: latest.decisionId, choice: latest.choice, attribution: latest.attribution } };
-    }
-  }
-
-  /**
-   * 质量与学习 › 反馈历史 (Issue #61, plan slice S26c; FDBK-009, FDBK-010, FDBK-013): the editor's feedback, newest first — each
-   * 修改建议's current decision with its reason as it stands, each analysis item's latest judgment, each 审阅 finding's latest
-   * 忽略 — with where it opens and the Book's people it is attributed to: the version in force when it was given, or the first
-   * saved after it (Issue #61 review). One answer holds what `feedbackHistoryPage` admits, each reason bounded. Passive
-   * history: a read, asking nothing.
-   */
   inspectFeedbackHistory(input: FeedbackHistoryInput = {}): FeedbackHistoryProjection {
-    return this.#readFeedbackHistory(input);
+    return learningSupervision.inspectFeedbackHistory(this.#learningSupervisionHost, input);
   }
 
   /**
@@ -14206,7 +12334,7 @@ export class EditorialStore {
       // A Series filters by the Books it holds now (LAUD-002); it widens nothing the editor may read.
       const members = input.seriesId == null
         ? null
-        : new Set(Array.from(this.#series.members(this.#requireSeries(input.seriesId).seriesId), (entry) => entry.bookId));
+        : new Set(Array.from(this.#series.members(seriesOperations.requireStoredSeries(this.#seriesHost, input.seriesId).seriesId), (entry) => entry.bookId));
       const query = input.query == null ? '' : input.query.trim().toLocaleLowerCase('zh-CN');
       const matches = (candidate: LearningMaterialCandidate, standing: string): boolean =>
         (input.kind == null || candidate.kind === input.kind) &&
@@ -14227,7 +12355,7 @@ export class EditorialStore {
         const id = asString(row.book_id);
         if (members !== null && !members.has(id)) continue;
         const title = asString(row.title);
-        const { page, count } = this.#learningAuditPage(id, id === after?.bookId ? after : null, MAX_LEARNING_AUDIT_PAGE + 1 - collected.length, matches);
+        const { page, count } = learningSupervision.learningAuditPage(this.#learningSupervisionHost, id, id === after?.bookId ? after : null, MAX_LEARNING_AUDIT_PAGE + 1 - collected.length, matches);
         counts.set(id, count);
         for (const { material, orderedAt } of page) {
           collected.push({ bookId: id, title, material, orderedAt });
@@ -14263,388 +12391,21 @@ export class EditorialStore {
         nextCursor: more && last !== undefined
           ? { bookTitle: last.title, bookId: last.bookId, orderedAt: last.orderedAt, materialKey: last.material.materialKey }
           : null,
-        choices: this.#learningAuditChoices(input.bookId ?? null),
+        choices: learningSupervision.readLearningAuditChoices(this.#learningSupervisionHost, input.bookId ?? null),
       };
     });
   }
 
-  /**
-   * 学习回溯's filter choices (LAUD-002; Issue #677): the house's Books and Series by title, read one beyond each bound, and the
-   * Book the filter names. A damaged Series record leaves the Series out rather than failing the audit, which reads none.
-   */
-  #learningAuditChoices(chosenBookId: string | null): LearningAuditChoicesProjection {
-    const books = (this.#authority.prepare('SELECT book_id, title FROM books ORDER BY title, book_id LIMIT ?')
-      .all(MAX_LEARNING_AUDIT_BOOK_CHOICES + 1) as SqlRow[]).map((row) => ({ bookId: asString(row.book_id), title: asString(row.title) }));
-    let series: Array<{ seriesId: string; title: string }> | null;
-    try {
-      series = this.#series.listAfter(null, MAX_LEARNING_AUDIT_SERIES_CHOICES + 1).map((entry) => ({ seriesId: entry.seriesId, title: entry.title }));
-    } catch (error) {
-      if (!(error instanceof SeriesError)) throw error;
-      series = null;
-    }
-    const chosen = chosenBookId === null
-      ? null
-      : this.#authority.prepare('SELECT book_id, title FROM books WHERE book_id = ?').get(chosenBookId) as SqlRow | undefined;
-    return learningAuditChoices(books, series, chosen == null ? null : { bookId: asString(chosen.book_id), title: asString(chosen.title) });
-  }
-
-  /** One Book's matching materials after the cursor, the next `limit` in order, and how many match in all. */
-  #learningAuditPage(
-    bookId: string,
-    after: LearningMaterialCursor | null,
-    limit: number,
-    matches: (candidate: LearningMaterialCandidate, standing: string) => boolean,
-  ): { page: Array<{ material: LearningAuditMaterialProjection; orderedAt: string }>; count: number } {
-    const kept: Array<{ candidate: LearningMaterialCandidate; material: LearningAuditMaterialProjection }> = [];
-    let count = 0;
-    for (const [candidate, projection] of this.#learningEligibility.projectCandidates(bookId, this.#learningCandidates(bookId, true))) {
-      const standing = learningAuditStanding(projection);
-      if (!matches(candidate, standing)) continue;
-      count += 1;
-      if (after !== null && learningMaterialOrder(candidate, after) <= 0) continue;
-      const material: LearningAuditMaterialProjection = {
-        materialKey: projection.materialKey,
-        kind: projection.kind,
-        digest: projection.digest,
-        originLabel: projection.originLabel,
-        recordedAt: projection.recordedAt,
-        excerpt: projection.excerpt,
-        standing,
-        decisions: projection.decisions,
-        decidedAt: projection.decision?.decidedAt ?? null,
-        downstreamTasks: 0,
-      };
-      const index = kept.findIndex((entry) => learningMaterialOrder(candidate, entry.candidate) < 0);
-      if (index < 0) {
-        if (kept.length < limit) kept.push({ candidate, material });
-      } else {
-        kept.splice(index, 0, { candidate, material });
-        if (kept.length > limit) kept.pop();
-      }
-    }
-    // 使用过的任务 for the materials the page keeps (Issue #912; LAUD-001): read once for the page, never for every match.
-    const influence = kept.length === 0 ? null : new HousePreferenceInfluence(this.#authority, this.#baselineAnalysis.launch.operationalScope);
-    return { page: kept.map(({ candidate, material }) => ({
-      material: { ...material, downstreamTasks: this.#materialInfluence(bookId, material.materialKey, influence!).tasks.length,
-        ...(candidate.source.kind === 'word-tracked-edit' ? { wordCurrentEligibility: this.#learningLedger().wordCurrentEligibility(
-          bookId, candidate.source.sampleId, candidate.source.sampleDigest) } : {}),
-        automaticAdmission: this.#learningLedger().automaticAdmissionFor(bookId, material.materialKey, material.digest, this.#baselineAnalysis.launch.operationalScope) },
-      orderedAt: candidate.orderedAt,
-    })), count };
-  }
-
-  /**
-   * What came of one material after its decisions (Issue #912; LAUD-003, LAUD-004): the 本社审阅偏好 versions of this launch's
-   * scope with a line it supports — its 学习信号 — and every Review Run category whose pinned version carried such a line, as
-   * it is now; its 使用过的任务 are those that sent anything. Only real consumption is read.
-   */
-  #materialInfluence(bookId: string, materialKey: string, influence: HousePreferenceInfluence): {
-    signals: ReturnType<HousePreferenceInfluence['signalsOf']>;
-    uses: Array<ReturnType<ReviewRunStore['influenceUses']>[number] & { versionOrdinal: number; withdrawn: boolean }>;
-    tasks: Array<ReturnType<ReviewRunStore['influenceUses']>[number] & { versionOrdinal: number; withdrawn: boolean }>;
-  } {
-    const decisionIds = new Set([...this.#learningEligibility.history(bookId, materialKey).map((entry) => entry.decisionId),
-      ...this.#learningLedger().sourceKeys(bookId, [materialKey])]);
-    const uses = influence.usesOf(decisionIds).flatMap((pin) => {
-      const withdrawn = pin.sources.some((source) => decisionIds.has(preferenceSourceIdentity(source)) &&
-        preferenceSourceWithdrawal(this.#authority, source).withdrawnAt !== null);
-      return this.#reviewRuns.influenceUses([pin]).map((use) => ({ ...use, versionOrdinal: pin.version.ordinal, withdrawn }));
-    });
-    return { signals: influence.signalsOf(decisionIds), uses, tasks: uses.filter((use) => use.consumed) };
-  }
-
-  /**
-   * What 停止今后使用 of the included materials reaches (Issue #912; LAUD-006, LAUD-008): the lines of the current 本社审阅偏好
-   * version they support, and the Review Run category Tasks whose pinned version reads them — approved and not finished, which
-   * stop before their next read; prepared and not approved, whose approval is refused; finished, which keep their result and
-   * gain the marker.
-   */
-  #remediationReach(bookId: string, materialKeys: ReadonlyArray<string>): ReturnType<LearningRemediationReach> & { approved: Array<{ reviewRunId: string; categoryId: string }> } {
-    const influence = new HousePreferenceInfluence(this.#authority, this.#baselineAnalysis.launch.operationalScope);
-    const decisionIds = new Set([...materialKeys.flatMap((key) => this.#learningEligibility.history(bookId, key).map((entry) => entry.decisionId)),
-      ...this.#learningLedger().sourceKeys(bookId, materialKeys)]);
-    const current = influence.versions.at(-1) ?? null;
-    const uses = this.#reviewRuns.influenceUses(influence.usesOf(decisionIds));
-    const running = uses.filter((use) => use.state === 'running' || use.state === 'approved');
-    const completed = uses.filter((use) => use.state === 'completed');
-    return {
-      currentVersion: current?.ordinal ?? null,
-      linesAffected: current?.lines.filter((line) => line.sources.some((source) => decisionIds.has(preferenceSourceIdentity(source)))).length ?? 0,
-      memory: this.#learningLedger().affectedMemoryCount(bookId, materialKeys),
-      running: running.length,
-      prepared: uses.filter((use) => use.state === 'prepared').length,
-      completed: completed.length,
-      runningNamed: running.slice(0, LEARNING_REMEDIATION_NAMED).map((use) => use.label),
-      completedNamed: completed.slice(0, LEARNING_REMEDIATION_NAMED).map((use) => use.label),
-      approved: uses.filter((use) => use.state === 'approved').map(({ reviewRunId, categoryId }) => ({ reviewRunId, categoryId })),
-    };
-  }
-
-  /**
-   * A Learning Lineage Explorer (Issue #62, S27a; LAUD-003 to LAUD-005): the material, every decision of its chain — the one
-   * that stands and each it superseded, none rewritten — and what came of it after. No Learning Signal, Memory Candidate,
-   * enabled memory or Task use is made of learning material in AI7 yet, so those stages count none. A read.
-   */
   inspectLearningLineage(bookId: string, materialKey: string): LearningLineageProjection {
-    return this.#learningCall(() => {
-      const material = this.inspectLearningMaterial(bookId, materialKey);
-      const chain = this.#learningEligibility.history(bookId, materialKey);
-      const shown = chain.slice(-MAX_LEARNING_LINEAGE_DECISIONS);
-      const last = chain.at(-1);
-      return {
-        bookId,
-        bookTitle: this.#evaluationBookTitle(bookId),
-        material,
-        standing: learningAuditStanding(material),
-        automaticAdmission: this.#learningLedger().automaticAdmissionFor(bookId, materialKey, material.digest, this.#baselineAnalysis.launch.operationalScope),
-        decisions: shown.map((entry) => ({
-          decisionId: entry.decisionId,
-          ordinal: entry.ordinal,
-          choice: entry.choice,
-          note: entry.note,
-          recordedAt: entry.recordedAt,
-          superseded: entry !== last,
-          currentVersion: entry.materialDigest === material.digest,
-          via: entry.remediationPreview === null ? 'learning-eligibility' as const : 'learning-audit' as const,
-          attribution: entry.attribution,
-          audit: {
-            materialDigest: entry.materialDigest,
-            supersedes: entry.supersedes,
-            recordDigest: entry.recordDigest,
-            basis: `${entry.basis.policy}@${entry.basis.version} · ${entry.basis.mode}`,
-            remediationPreview: entry.remediationPreview,
-          },
-        })),
-        earlierDecisions: chain.length - shown.length,
-        ...(() => {
-          const { signals, tasks } = this.#materialInfluence(bookId, materialKey, new HousePreferenceInfluence(this.#authority, this.#baselineAnalysis.launch.operationalScope));
-          const current = this.#authority.prepare('SELECT version_id FROM house_review_preference_versions WHERE operational_scope = ? ORDER BY ordinal DESC LIMIT 1')
-            .get(this.#baselineAnalysis.launch.operationalScope) as SqlRow | undefined;
-          const listed = tasks.slice(-MAX_LEARNING_LINEAGE_TASKS);
-          return {
-            downstream: { signals: signals.length, memoryCandidates: this.#learningLedger().candidateMemoryCount(bookId, materialKey),
-              activeMemories: this.#learningLedger().activeMemoryCount(bookId, [materialKey]), tasks: tasks.length },
-            signals: signals.map(({ version, lines }) => ({ versionId: version.versionId, ordinal: version.ordinal, recordedAt: version.recordedAt,
-              current: current !== undefined && asString(current.version_id) === version.versionId, lines })),
-            tasks: listed.map((use) => ({ bookId: use.bookId, reviewRunId: use.reviewRunId, label: use.label, versionOrdinal: use.versionOrdinal,
-              use: use.state === 'completed' ? 'completed' as const : use.state === 'running' ? 'running' as const : 'stopped' as const,
-              marked: use.state === 'completed' && use.withdrawn })),
-            earlierTasks: tasks.length - listed.length,
-          };
-        })(),
-      };
-    });
+    return learningSupervision.inspectLearningLineage(this.#learningSupervisionHost, bookId, materialKey);
   }
 
-  /** 停止今后使用's 学习补救影响预览 (Issue #62, S27a; LAUD-006, LAUD-010, LAUD-011). A read. */
   previewLearningRemediation(input: PreviewLearningRemediationInput): LearningRemediationPreviewProjection {
-    return this.#learningCall(() => this.#learningRemediation(input).preview);
+    return learningSupervision.previewLearningRemediation(this.#learningSupervisionHost, input);
   }
 
-  /**
-   * 确认停止今后使用 (Issue #62, S27a; LAUD-007, LAUD-009, LAUD-011): against the exact preview the editor read — refused once
-   * anything it shows moved — each included material gains one `excluded` Learning Eligibility Decision superseding the one
-   * it had, naming the preview, in one transaction; the earlier decision, the material and the record it came from stay as
-   * they were. The answer names each material's own outcome, those left out with why.
-   */
   recordLearningRemediation(input: RecordLearningRemediationInput): LearningRemediationOutcomeProjection {
-    return this.#learningCall(() => this.#transaction(this.#authority, () => {
-      const { preview, found } = this.#learningRemediation(input);
-      requireStore(preview.previewDigest === input.previewDigest, 'LEARNING_REMEDIATION_PREVIEW_STALE',
-        '预览之后，这些学习材料或它们的准入决定有了变化；请重新查看影响，再决定。');
-      requireStore(preview.included.length > 0, 'LEARNING_REMEDIATION_EMPTY', '所选的学习材料都不能停止今后使用：它们现在都没有纳入学习。');
-      const people = this.#bookPeople.current(input.bookId);
-      for (const entry of preview.included) {
-        this.#learningEligibility.decide({
-          bookId: input.bookId,
-          candidate: found.get(entry.materialKey)!,
-          expectedDecisions: input.items.find((item) => item.materialKey === entry.materialKey)!.expectedDecisions,
-          choice: 'excluded',
-          note: null,
-          attribution: { peopleVersion: people.version, authors: people.authors, editors: people.editors },
-          remediationPreview: preview.previewDigest,
-        });
-      }
-      this.#rebuildHouseReviewPreference();
-      // An approved Review Run category whose pinned version reads them and has not begun stops now (Issue #912; LAUD-008);
-      // one reading now stops before its next range, at the execution owner's guard.
-      for (const run of this.#remediationReach(input.bookId, preview.included.map((entry) => entry.materialKey)).approved) {
-        this.#reviewRuns.stopForWithdrawnInfluence(run.reviewRunId, run.categoryId);
-      }
-      return { bookId: input.bookId, recorded: preview.included, leftOut: preview.leftOut };
-    }));
-  }
-
-  #learningRemediation(input: PreviewLearningRemediationInput): { preview: LearningRemediationPreviewProjection; found: Map<string, LearningMaterialCandidate> } {
-    requireStore(UUID_PATTERN.test(input.bookId), 'BOOK_INVALID', '图书标识无效。');
-    requireStore(input.items.length >= 1 && input.items.length <= MAX_LEARNING_REMEDIATION_ITEMS, 'LEARNING_REMEDIATION_INVALID',
-      `停止今后使用要选 1 到 ${MAX_LEARNING_REMEDIATION_ITEMS} 条学习材料。`);
-    const title = this.#evaluationBookTitle(input.bookId);
-    const wanted = new Set(input.items.map((item) => item.materialKey));
-    const found = new Map<string, LearningMaterialCandidate>();
-    const standings = new Map<string, { candidate: LearningMaterialCandidate; projection: Omit<LearningMaterialProjection, 'target' | 'sourceTask'>; automaticEligibility?: 'house' }>();
-    for (const [candidate, projection] of this.#learningEligibility.projectCandidates(input.bookId, this.#learningCandidates(input.bookId, false))) {
-      if (!wanted.has(candidate.materialKey)) continue;
-      found.set(candidate.materialKey, candidate);
-      const automatic = projection.state === 'pending' && projection.decisions === 0 && projection.decision === null
-        ? this.#learningLedger().automaticAdmissionFor(input.bookId, candidate.materialKey, projection.digest, this.#baselineAnalysis.launch.operationalScope) : null;
-      standings.set(candidate.materialKey, { candidate, projection, ...(automatic === null ? {} : { automaticEligibility: automatic.choice }) });
-    }
-    return { preview: learningRemediationPreview({ bookId: input.bookId, title }, input.items, (key) => standings.get(key) ?? null, (keys) => {
-      const { approved: _approved, ...reach } = this.#remediationReach(input.bookId, keys);
-      return reach;
-    }), found };
-  }
-
-  #readFeedbackHistory(input: FeedbackHistoryInput, exactEntryId: string | null = null): FeedbackHistoryProjection {
-    return this.#learningCall(() => {
-      type Entry = Omit<FeedbackHistoryEntryProjection, 'peopleVersion'>;
-      // Keep only the newest response-sized candidates plus one lookahead, regardless of ledger depth or Book count.
-      const entries: Entry[] = [];
-      const newest = (a: Pick<Entry, 'recordedAt' | 'entryId'>, b: Pick<Entry, 'recordedAt' | 'entryId'>): number => a.recordedAt > b.recordedAt ? -1 : a.recordedAt < b.recordedAt ? 1 : a.entryId < b.entryId ? -1 : a.entryId > b.entryId ? 1 : 0;
-      const consider = (entry: Entry): void => {
-        if (exactEntryId !== null && entry.entryId !== exactEntryId) return;
-        if ((input.bookId != null && entry.bookId !== input.bookId) || (input.origin != null && entry.origin !== input.origin) ||
-            (input.recordedFrom != null && entry.recordedAt < input.recordedFrom) ||
-            (input.recordedBefore != null && entry.recordedAt >= input.recordedBefore) ||
-            (Object.hasOwn(input, 'dimension') && entry.dimension !== input.dimension) ||
-            (input.signal != null && entry.signal !== input.signal) ||
-            (input.after != null && newest(entry, input.after) <= 0)) return;
-        if (input.author != null || input.editor != null) {
-          const people = this.#bookPeople.at(entry.bookId, entry.recordedAt);
-          if ((input.author != null && !people?.authors.includes(input.author)) ||
-              (input.editor != null && !people?.editors.includes(input.editor))) return;
-        }
-        const at = entries.findIndex((held) => newest(entry, held) < 0);
-        entries.splice(at < 0 ? entries.length : at, 0, entry);
-        if (entries.length > MAX_FEEDBACK_HISTORY_ENTRIES + 1) entries.pop();
-      };
-      const reasons = new DecisionFeedbackLedger(this.#authority);
-      const decisions = this.#authority.prepare(
-        `SELECT m.book_id, m.mark_id, m.manuscript_id, m.branch_id, m.block_id, m.anchor_state, m.source_origin, m.source_label,
-                d.decision_id, d.disposition, d.recorded_at, r.reason, r.reason_source, r.recorded_at AS reason_recorded_at,
-                (SELECT f.recorded_at FROM proposal_decision_feedback f WHERE f.decision_id = d.decision_id
-                 ORDER BY f.ordinal DESC LIMIT 1) AS feedback_recorded_at
-         FROM editorial_marks m
-         JOIN proposal_change_items i ON i.mark_id = m.mark_id
-         JOIN proposal_item_decisions d ON d.item_id = i.item_id
-         LEFT JOIN proposal_decision_reasons r ON r.decision_id = d.decision_id
-         WHERE m.status IN ('open', 'resolved', 'applied') AND d.disposition <> 'withdrawn'
-           AND d.ordinal = (SELECT max(latest.ordinal) FROM proposal_item_decisions latest WHERE latest.item_id = i.item_id)`,
-      ).iterate() as IterableIterator<SqlRow>;
-      for (const row of decisions) {
-        const decisionId = asString(row.decision_id);
-        const first = row.reason === null || row.reason === undefined
-          ? null
-          : { reason: asString(row.reason), source: asString(row.reason_source) as 'reason-field' | 'suggested' | 'free-text' };
-        const standing = reasons.standing(decisionId, first);
-        const bookId = asString(row.book_id);
-        consider({
-          entryId: `proposal-decision:${decisionId}`,
-          origin: 'proposal-decision',
-          bookId,
-          // A 修改建议 a 审阅 category made is about that category (Issue #61 review); one the editor or a Task made names none.
-          dimension: row.source_origin === 'review-category' ? asString(row.source_label) : null,
-          signal: DISPOSITION_LABELS[asString(row.disposition)] ?? asString(row.disposition),
-          reason: feedbackReasonExcerpt(standing.reason),
-          reasonState: standing.reasonState,
-          // Attribute the displayed current feedback to when it was given, not the older business decision.
-          recordedAt: standing.reasonRevisedAt ?? (row.reason_recorded_at == null
-            ? row.feedback_recorded_at == null ? asString(row.recorded_at) : asString(row.feedback_recorded_at)
-            : asString(row.reason_recorded_at)),
-          target: {
-            kind: 'mark', bookId, manuscriptId: asString(row.manuscript_id), branchId: asString(row.branch_id), blockId: asString(row.block_id),
-            markId: asString(row.mark_id), detached: row.anchor_state === 'detached',
-          },
-        });
-      }
-      for (const book of this.#authority.prepare('SELECT book_id FROM books').iterate() as IterableIterator<SqlRow>) {
-        const bookId = asString(book.book_id);
-        for (const signal of this.#analysisFeedback.latestEntries(bookId)) {
-          const reason = [analysisReasonLabel(signal), signal.correction === null ? null : `修正：${signal.correction}`].filter((part) => part !== null).join(' · ');
-          consider({
-            entryId: `analysis-feedback:${signal.revisionId}/${signal.itemKey}`,
-            origin: 'analysis-feedback',
-            bookId,
-            dimension: DIMENSION_LABELS[signal.dimension],
-            signal: JUDGMENT_LABELS[signal.judgment],
-            reason: feedbackReasonExcerpt(reason.length === 0 ? null : reason),
-            reasonState: reason.length === 0 ? 'none' : 'given',
-            recordedAt: signal.recordedAt,
-            target: { kind: 'analysis', bookId, revisionId: signal.revisionId, itemKey: signal.itemKey, dimension: signal.dimension },
-          });
-        }
-      }
-      const ignored = this.#authority.prepare(
-        `SELECT book_id, review_run_id, finding_id, category_id, reason, recorded_at FROM quality_signals q
-         WHERE kind = 'review-finding-ignored'
-           AND recorded_at = (SELECT max(latest.recorded_at) FROM quality_signals latest
-                              WHERE latest.review_run_id = q.review_run_id AND latest.finding_id = q.finding_id)`,
-      ).iterate() as IterableIterator<SqlRow>;
-      for (const row of ignored) {
-        const bookId = asString(row.book_id);
-        const categoryId = asString(row.category_id);
-        consider({
-          entryId: `review-disposition:${asString(row.review_run_id)}/${asString(row.finding_id)}`,
-          origin: 'review-disposition',
-          bookId,
-          dimension: reviewCategoryEntry(categoryId)?.label ?? categoryId,
-          signal: '忽略',
-          reason: feedbackReasonExcerpt(asString(row.reason)),
-          reasonState: 'given',
-          recordedAt: asString(row.recorded_at),
-          target: { kind: 'review', bookId, reviewRunId: asString(row.review_run_id), findingId: asString(row.finding_id) },
-        });
-      }
-      // Each entry is attributed to the Book's people as they stood when it was given, or as first saved after it.
-      const attributed: FeedbackHistoryEntryProjection[] = entries.map((entry) => ({
-        ...entry, peopleVersion: this.#bookPeople.at(entry.bookId, entry.recordedAt)?.version ?? 0,
-      }));
-      return feedbackHistoryPage(
-        attributed,
-        (bookId) => {
-          const people = this.#bookPeople.current(bookId);
-          return { bookId, title: this.#evaluationBookTitle(bookId), authors: people.authors, editors: people.editors };
-        },
-        (bookId, version) => this.#bookPeople.version(bookId, version),
-      );
-    });
-  }
-
-  /** A Book's heading on the page: its title, its people, and how many materials it has in all. */
-  #learningBookOf(bookId: string, title: string): Omit<LearningMaterialsBookProjection, 'materials'> {
-    const people = this.#bookPeople.current(bookId);
-    let materialCount = 0;
-    for (const _candidate of this.#learningCandidates(bookId, false)) materialCount += 1;
-    return { bookId, title, authors: people.authors, editors: people.editors, materialCount };
-  }
-
-  /** Scan every candidate, retaining only the next bounded page in its stable display order. */
-  #learningMaterialsPage(bookId: string, after: LearningMaterialCursor | null, limit: number): Array<{ material: LearningMaterialProjection; orderedAt: string }> {
-    const candidates: LearningMaterialCandidate[] = [];
-    for (const candidate of this.#learningCandidates(bookId, true)) {
-      if (after !== null && learningMaterialOrder(candidate, after) <= 0) continue;
-      const index = candidates.findIndex((entry) => learningMaterialOrder(candidate, entry) < 0);
-      if (index < 0) {
-        if (candidates.length < limit) candidates.push(candidate);
-      } else {
-        candidates.splice(index, 0, candidate);
-        if (candidates.length > limit) candidates.pop();
-      }
-    }
-    return this.#learningEligibility.project(bookId, candidates).map((material, index) => ({
-      material: { ...material, ...this.#learningMaterialSource(bookId, candidates[index]!) },
-      orderedAt: candidates[index]!.orderedAt,
-    }));
-  }
-
-  /** Exact lookup still exhausts source-chain validation; it never keeps the other candidates. */
-  #learningCandidateOf(bookId: string, materialKey: string, withExcerpt: boolean): LearningMaterialCandidate | null {
-    let found: LearningMaterialCandidate | null = null;
-    for (const candidate of this.#learningCandidates(bookId, withExcerpt)) {
-      if (candidate.materialKey === materialKey) found = candidate;
-    }
-    return found;
+    return learningSupervision.recordLearningRemediation(this.#learningSupervisionHost, input);
   }
 
   /** Resolve the exact source and its originating Task; neither display fact changes the material digest or eligibility. */
@@ -14770,28 +12531,6 @@ export class EditorialStore {
     if (includeWord) yield* this.#learningLedger().wordCandidates(bookId);
   }
 
-  /** Each Book whose Learning Material waits: how many wait for a decision or changed since one, and how many were deferred. */
-  #learningAttention(limit: number): LearningMaterialsAttentionReading[] {
-    const readings: LearningMaterialsAttentionReading[] = [];
-    for (const row of this.#authority.prepare('SELECT book_id, title FROM books ORDER BY title, book_id').iterate() as IterableIterator<SqlRow>) {
-      const bookId = asString(row.book_id);
-      let pending = 0;
-      let deferred = 0;
-      let at = '';
-      // Word retention waits for a future consumer, not a required human inclusion, so it is not enumerated here.
-      for (const material of this.#learningEligibility.projectEntries(bookId, this.#learningCandidates(bookId, false, false))) {
-        if (material.state === 'pending' || material.state === 'changed') pending += 1;
-        else if (material.state === 'deferred') deferred += 1;
-        else continue;
-        if (material.recordedAt > at) at = material.recordedAt;
-      }
-      if (pending === 0 && deferred === 0) continue;
-      readings.push({ bookId, bookTitle: asString(row.title), pending, deferred, at });
-      if (readings.length >= limit) break;
-    }
-    return readings;
-  }
-
   #learningCall<T>(operation: () => T): T {
     this.#assertAvailable();
     this.#learningCallDepth += 1;
@@ -14905,18 +12644,6 @@ export class EditorialStore {
     } finally { if (descriptor !== null) closeSync(descriptor); }
   }
 
-  /** The revision feedback binds: one of this Book's baseline Result Set Revisions, as ②A shows it, and its items. */
-  #feedbackRevision(bookId: string, revisionId: string) {
-    requireStore(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(revisionId), 'ANALYSIS_FEEDBACK_REVISION_NOT_FOUND', '没有这个分析结果修订版。');
-    const projection = this.inspectBaselineAnalysis(bookId, undefined, revisionId);
-    const revision = projection.inspectedRevision?.revision ?? projection.resultSetRevision;
-    requireStore(revision !== null && revision.revisionId === revisionId, 'ANALYSIS_FEEDBACK_REVISION_NOT_FOUND', '没有这个分析结果修订版。');
-    return {
-      bound: { revisionId: revision.revisionId, digest: revision.digest, ordinal: revision.ordinal },
-      items: analysisFeedbackItems(revision),
-    };
-  }
-
   #feedbackCall<T>(operation: () => T): T {
     this.#assertAvailable();
     try {
@@ -14983,7 +12710,7 @@ export class EditorialStore {
       // An editor's words reach a record by a directive or, from /2 on, by an accepted memory: either is refiltered by the house's names now.
       const preferences = new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger());
       if (new SupervisionDirectives(this.#authority).history(scope).length > 0 || preferences.history(scope).at(-1)?.schema === 'ai7.house-review-preference/2')
-        preferences.refreshGovernance(scope, this.#housePreferencePeopleNames());
+        preferences.refreshGovernance(scope, learningSupervision.housePreferencePeopleNames(this.#learningSupervisionHost));
       return result;
     }));
   }
@@ -19163,7 +16890,7 @@ export class EditorialStore {
       const resolved = this.#bounded.resolveBookWorkbenchRoute(route);
       if (route.kind !== 'book') return resolved;
       if (route.feedbackEntryId !== undefined) {
-        const entry = this.#readFeedbackHistory({ bookId: route.bookId }, route.feedbackEntryId).entries[0];
+        const entry = learningSupervision.readFeedbackHistory(this.#learningSupervisionHost, { bookId: route.bookId }, route.feedbackEntryId).entries[0];
         requireStore(resolved.kind === 'book' && entry !== undefined, 'FEEDBACK_SOURCE_NOT_FOUND', '这条反馈的来源记录不存在。');
         requireStore(entry.target.kind !== 'mark' || !entry.target.detached,
           'FEEDBACK_SOURCE_DETACHED', '这条修改建议所在的段落已不在稿件中。');
@@ -19731,223 +17458,59 @@ export class EditorialStore {
 
   // ---- 书系 › 成员与共享范围 (Issue #63, plan slice S28a; V2-UX-SER-001 to SER-012) --------------------------------------
 
-  /** 书系: one page of the house's Series, by name, with how many Books each holds now (Issue #63 review). A read. */
+  /** What the 书系 operations in series.ts reach of the store (Issue #1172): its authority, ledgers and guarded calls, read live. */
+  readonly #seriesHost: seriesOperations.SeriesStoreHost = this.#seriesHostOf();
+
+  #seriesHostOf(): seriesOperations.SeriesStoreHost {
+    const store = this;
+    return {
+      get authority() { return store.#authority; },
+      get editorialMarks() { return store.#editorialMarks; },
+      evaluationBookTitle: this.#evaluationBookTitle.bind(this),
+      learningCandidates: this.#learningCandidates.bind(this),
+      get learningEligibility() { return store.#learningEligibility; },
+      markCall: this.#markCall.bind(this),
+      get reviewRuns() { return store.#reviewRuns; },
+      get series() { return store.#series; },
+      seriesCall: this.#seriesCall.bind(this),
+      get seriesExclusions() { return store.#seriesExclusions; },
+      get seriesKnowledge() { return store.#seriesKnowledge; },
+      seriesMembersPage: this.#seriesMembersPage.bind(this),
+      seriesScopedTaskReach: this.#seriesScopedTaskReach.bind(this),
+      transaction: this.#transaction.bind(this),
+    };
+  }
+
   inspectSeriesList(after: SeriesListCursor | null = null): SeriesListProjection {
-    return this.#seriesCall(() => {
-      requireStore(after === null || (UUID_PATTERN.test(after.seriesId) && typeof after.title === 'string' && after.title.length >= 1 &&
-        after.title.length <= 2 * MAX_SERIES_TITLE_CHARACTERS), 'SERIES_CURSOR_INVALID', '书系列表位置无效。');
-      const rows = this.#series.listAfter(after, MAX_SERIES_LIST_PAGE + 1).map((entry) => ({ ...entry, memberCount: this.#series.memberCount(entry.seriesId) }));
-      const { page, more } = weighedPage(rows, MAX_SERIES_LIST_PAGE);
-      const last = page.at(-1);
-      return { series: page, nextCursor: more && last !== undefined ? { title: last.title, seriesId: last.seriesId } : null };
-    });
+    return seriesOperations.inspectSeriesList(this.#seriesHost, after);
   }
 
-  /** 新建书系: a name the house has not used, and an optional 说明. It holds no Book until one is added; the answer is it alone. */
-  createSeries(input: CreateSeriesInput): SeriesCreationProjection {
-    return this.#seriesCall(() => {
-      const created = this.#transaction(this.#authority, () => this.#series.create(input));
-      return { seriesId: created.seriesId, completionLabel: `已新建书系「${created.title}」`, series: { ...created, memberCount: 0 } };
-    });
-  }
+  createSeries(input: CreateSeriesInput): SeriesCreationProjection { return seriesOperations.createSeries(this.#seriesHost, input); }
 
-  /**
-   * One Series' 成员与共享范围 (SER-001): the first page of its members and of its membership changes, and how many Books it
-   * and the house hold. A read.
-   */
-  inspectSeries(seriesId: string): SeriesProjection {
-    return this.#seriesCall(() => this.#seriesProjection(this.#requireSeries(seriesId)));
-  }
+  inspectSeries(seriesId: string): SeriesProjection { return seriesOperations.inspectSeries(this.#seriesHost, seriesId); }
 
-  /** `更多成员…`: the next page of a Series' members, newest joined first (Issue #63 review). A read. */
   inspectSeriesMembers(seriesId: string, after: SeriesMembersCursor | null): SeriesMembersPageProjection {
-    return this.#seriesCall(() => {
-      const series = this.#requireSeries(seriesId);
-      requireStore(after === null || (UUID_PATTERN.test(after.bookId) && typeof after.joinedAt === 'string' && !Number.isNaN(Date.parse(after.joinedAt))),
-        'SERIES_CURSOR_INVALID', '书系列表位置无效。');
-      const { members, nextCursor } = this.#seriesMembersPage(series.seriesId, after);
-      return { members, nextCursor };
-    });
+    return seriesOperations.inspectSeriesMembers(this.#seriesHost, seriesId, after);
   }
 
-  /**
-   * 加入书系…'s Books (Issue #63 review): a page of every Book the Series does not hold, by title, narrowed to titles holding
-   * the editor's words when they give any — so every Book can be found and added, however many the house holds. A read.
-   */
   inspectSeriesCandidates(seriesId: string, text: string, after: SeriesCandidatesCursor | null): SeriesCandidatesProjection {
-    return this.#seriesCall(() => {
-      const series = this.#requireSeries(seriesId);
-      const words = typeof text === 'string' && text.isWellFormed() ? text.normalize('NFC').trim() : null;
-      requireStore(words !== null && [...words].length <= MAX_SERIES_CANDIDATE_QUERY_CHARACTERS && !/[\r\n]/u.test(words), 'SERIES_QUERY_INVALID',
-        `查找的书名字词最多 ${MAX_SERIES_CANDIDATE_QUERY_CHARACTERS} 个字，写在一行里。`);
-      requireStore(after === null || (UUID_PATTERN.test(after.bookId) && typeof after.title === 'string' && after.title.length >= 1 && after.title.length <= 180),
-        'SERIES_CURSOR_INVALID', '书系列表位置无效。');
-      const rows = this.#authority.prepare(
-        `SELECT b.book_id, b.title FROM books b
-         WHERE NOT EXISTS (
-             SELECT 1 FROM series_membership_changes c WHERE c.series_id = ? AND c.book_id = b.book_id AND c.kind = 'add'
-               AND c.ordinal = (SELECT max(d.ordinal) FROM series_membership_changes d WHERE d.series_id = c.series_id AND d.book_id = c.book_id))
-           AND (? = '' OR instr(lower(b.title), lower(?)) > 0)
-           AND (? IS NULL OR b.title > ? OR (b.title = ? AND b.book_id > ?))
-         ORDER BY b.title, b.book_id LIMIT ?`,
-      ).all(series.seriesId, words, words, after?.title ?? null, after?.title ?? null, after?.title ?? null, after?.bookId ?? null,
-        MAX_SERIES_CANDIDATES_PAGE + 1) as SqlRow[];
-      const { page, more } = weighedPage(rows.map((row) => ({ bookId: asString(row.book_id), title: asString(row.title) })), MAX_SERIES_CANDIDATES_PAGE);
-      const last = page.at(-1);
-      return { candidates: page, nextCursor: more && last !== undefined ? { title: last.title, bookId: last.bookId } : null };
-    });
+    return seriesOperations.inspectSeriesCandidates(this.#seriesHost, seriesId, text, after);
   }
 
-  /** `更早的记录…`: the next page of one Series' or one Book's membership change records, newest first (Issue #63 review). A read. */
   inspectSeriesHistory(filter: { readonly seriesId: string | null; readonly bookId: string | null }, after: SeriesHistoryCursor | null): SeriesHistoryPageProjection {
-    return this.#seriesCall(() => {
-      requireStore((filter.seriesId === null) !== (filter.bookId === null), 'SERIES_HISTORY_INVALID', '成员变更记录要按一个书系或一本书读取。');
-      requireStore(after === null || (typeof after.recordedAt === 'string' && !Number.isNaN(Date.parse(after.recordedAt)) && UUID_PATTERN.test(after.seriesId) &&
-        UUID_PATTERN.test(after.bookId) && Number.isSafeInteger(after.ordinal) && after.ordinal >= 1), 'SERIES_CURSOR_INVALID', '书系列表位置无效。');
-      const read = filter.seriesId !== null
-        ? this.#seriesHistoryPage({ seriesId: this.#requireSeries(filter.seriesId).seriesId }, after)
-        : this.#seriesHistoryPage({ bookId: filter.bookId! }, after);
-      return { history: read.history, nextCursor: read.nextCursor };
-    });
+    return seriesOperations.inspectSeriesHistory(this.#seriesHost, filter, after);
   }
 
-  /**
-   * The Series Membership Impact Preview (SER-003 to SER-007) for 加入书系 or 移出书系 of one exact Book and Series. A read:
-   * nothing is recorded until the editor commits the change against this preview's digest.
-   */
   previewSeriesMembershipChange(input: PreviewSeriesMembershipChangeInput): SeriesMembershipPreviewProjection {
-    return this.#seriesCall(() => this.#seriesPreview(input));
+    return seriesOperations.previewSeriesMembershipChange(this.#seriesHost, input);
   }
 
-  /**
-   * 加入书系 or 移出书系 (SER-008 to SER-010): the preview is recomputed inside the transaction, and a preview the membership
-   * or a governing record has moved past is refused rather than applied; the change record keeps what the preview showed.
-   * The answer is that record alone (Issue #63 review): the page reads the Series again, each list a page at a time.
-   */
   changeSeriesMembership(input: ChangeSeriesMembershipInput): SeriesMembershipChangeResultProjection {
-    return this.#seriesCall(() => {
-      const recorded = this.#transaction(this.#authority, () => {
-        const preview = this.#seriesPreview(input);
-        requireStore(preview.previewDigest === input.previewDigest, 'SERIES_PREVIEW_STALE',
-          '预览之后，书系成员或相关记录有了变化；请重新查看影响，再决定。');
-        const change = this.#series.record({
-          seriesId: preview.seriesId,
-          bookId: preview.bookId,
-          kind: preview.kind,
-          previewDigest: preview.previewDigest,
-          impact: preview.groups,
-          names: { book: preview.bookTitle, series: preview.seriesTitle },
-        });
-        return { change, preview };
-      });
-      const { change, preview } = recorded;
-      return {
-        changeId: change.changeId,
-        completionLabel: `${change.kind === 'add' ? '已加入' : '已移出'}书系「${preview.seriesTitle}」：《${preview.bookTitle}》`,
-        change: this.#seriesChange(change, preview.seriesTitle, preview.bookTitle),
-      };
-    });
+    return seriesOperations.changeSeriesMembership(this.#seriesHost, input);
   }
 
-  /**
-   * A Book's side of 书系 (SER-009): the Series it is in now — at most `MAX_BOOK_SERIES_MEMBERSHIPS`, with how many in all —
-   * and the first page of its membership changes, newest first. A read.
-   */
   inspectBookSeries(bookId: string, after: SeriesListCursor | null = null): BookSeriesProjection {
-    return this.#seriesCall(() => {
-      this.#evaluationBookTitle(bookId);
-      requireStore(after === null || (typeof after.title === 'string' && after.title.isWellFormed() &&
-        after.title.length >= 1 && after.title.length <= 2 * MAX_SERIES_TITLE_CHARACTERS &&
-        typeof after.seriesId === 'string' && UUID_PATTERN.test(after.seriesId)), 'SERIES_CURSOR_INVALID', '书系列表位置无效。');
-      const memberships = this.#series.seriesOf(bookId, after);
-      const history = this.#seriesHistoryPage({ bookId }, null);
-      return {
-        bookId,
-        memberships: memberships.memberships,
-        membershipCount: memberships.count,
-        membershipsNext: memberships.nextCursor,
-        history: history.history,
-        historyCount: history.count,
-        historyNext: history.nextCursor,
-      };
-    });
-  }
-
-  #requireSeries(seriesId: string): StoredSeries {
-    requireStore(typeof seriesId === 'string' && UUID_PATTERN.test(seriesId), 'SERIES_INVALID', '书系标识无效。');
-    const found = this.#series.find(seriesId);
-    requireStore(found !== null, 'SERIES_NOT_FOUND', '书系不存在。');
-    return found;
-  }
-
-  #seriesPreview(input: PreviewSeriesMembershipChangeInput): SeriesMembershipPreviewProjection {
-    const series = this.#requireSeries(input.seriesId);
-    const bookTitle = this.#evaluationBookTitle(input.bookId);
-    requireStore(input.kind === 'add' || input.kind === 'remove', 'SERIES_CHANGE_INVALID', '书系成员变更只有加入书系和移出书系。');
-    const latest = this.#series.latest(series.seriesId, input.bookId);
-    const member = latest?.kind === 'add';
-    requireStore(input.kind !== 'add' || !member, 'SERIES_MEMBER_ALREADY', seriesMemberAlready(bookTitle, series.title));
-    requireStore(input.kind !== 'remove' || member, 'SERIES_MEMBER_ABSENT', seriesMemberAbsent(bookTitle, series.title));
-    // Counts alone cannot detect a new eligibility decision (including a change back to the old choice).
-    // Hash each exact material and its immutable decision ordinal without retaining another collection.
-    const governing = createHash('sha256');
-    let learningMaterials = 0;
-    let learningDecided = 0;
-    for (const material of this.#learningEligibility.projectEntries(input.bookId, this.#learningCandidates(input.bookId, false))) {
-      learningMaterials += 1;
-      if (material.state === 'decided') learningDecided += 1;
-      governing.update(canonicalJson({ materialKey: material.materialKey, digest: material.digest, decisions: material.decisions }));
-      governing.update('\n');
-    }
-    // Knowledge versions govern the same preview even when a revision or candidate edit leaves every count unchanged.
-    for (const item of this.#seriesKnowledge.items(series.seriesId)) {
-      governing.update(canonicalJson({ kind: 'series-knowledge', itemId: item.itemId, revisionId: item.current.revisionId }));
-      governing.update('\n');
-    }
-    for (const candidate of this.#seriesKnowledge.open(series.seriesId)) {
-      governing.update(canonicalJson({ kind: 'series-candidate', candidateId: candidate.candidateId, versionId: candidate.versionId }));
-      governing.update('\n');
-    }
-    const groups = seriesMembershipImpact(input.kind, {
-      seriesTitle: series.title,
-      bookTitle,
-      // Runs whose authorized plan froze this Series and have not ended (Issue #64, 7b; SER-006).
-      seriesScopedRuns: this.#series.liveTaskRuns(series.seriesId),
-      learningMaterials,
-      learningDecided,
-      knowledgeFromBook: this.#seriesKnowledge.itemsFromBook(series.seriesId, input.bookId),
-      knowledgeCandidatesFromBook: this.#seriesKnowledge.openFromBook(series.seriesId, input.bookId),
-    });
-    return {
-      seriesId: series.seriesId,
-      seriesTitle: series.title,
-      bookId: input.bookId,
-      bookTitle,
-      kind: input.kind,
-      actionLabel: input.kind === 'add' ? '加入书系' : '移出书系',
-      groups,
-      previewDigest: seriesPreviewDigest({ seriesId: series.seriesId, bookId: input.bookId, kind: input.kind,
-        chainHead: latest?.changeId ?? null, governingDigest: governing.digest('hex'), groups }),
-    };
-  }
-
-  #seriesProjection(series: StoredSeries): SeriesProjection {
-    const members = this.#seriesMembersPage(series.seriesId, null);
-    const tasks = this.#series.tasks(series.seriesId);
-    const history = this.#seriesHistoryPage({ seriesId: series.seriesId }, null);
-    return {
-      ...series,
-      memberCount: members.count,
-      bookCount: Number((this.#authority.prepare('SELECT count(*) count FROM books').get() as SqlRow).count),
-      members: members.members,
-      membersNext: members.nextCursor,
-      history: history.history,
-      historyCount: history.count,
-      historyNext: history.nextCursor,
-      knowledge: this.#seriesKnowledgeProjection(series.seriesId),
-      exclusions: this.#seriesExclusionsProjection(series.seriesId),
-      ...(tasks.length === 0 ? {} : { tasks }),
-    };
+    return seriesOperations.inspectBookSeries(this.#seriesHost, bookId, after);
   }
 
   /** One page of a Series' members after the one named, newest joined first, and how many it holds in all. */
@@ -19978,155 +17541,22 @@ export class EditorialStore {
     return { members: page, nextCursor: more && last !== undefined ? { joinedAt: last.joinedAt, bookId: last.bookId } : null, count };
   }
 
-  /** One page of one Series' or one Book's membership change records after the one named, newest first, and how many in all. */
-  #seriesHistoryPage(filter: { readonly seriesId: string } | { readonly bookId: string }, after: SeriesHistoryCursor | null):
-  SeriesHistoryPageProjection & { count: number } {
-    const { entries: rest, count } = this.#series.historyPage(filter, after, MAX_SERIES_HISTORY_PAGE + 1);
-    const seriesTitles = new Map<string, string>();
-    const bookTitles = new Map<string, string>();
-    const titleOf = (titles: Map<string, string>, key: string, read: () => string): string => {
-      if (!titles.has(key)) titles.set(key, read());
-      return titles.get(key)!;
-    };
-    const projected = rest.map((change) => this.#seriesChange(
-      change,
-      titleOf(seriesTitles, change.seriesId, () => this.#requireSeries(change.seriesId).title),
-      titleOf(bookTitles, change.bookId, () => this.#evaluationBookTitle(change.bookId)),
-    ));
-    const { page, more } = weighedPage(projected, MAX_SERIES_HISTORY_PAGE);
-    const last = rest[page.length - 1];
-    return {
-      history: page,
-      nextCursor: more && last !== undefined ? { recordedAt: last.recordedAt, seriesId: last.seriesId, bookId: last.bookId, ordinal: last.ordinal } : null,
-      count,
-    };
-  }
-
-  #seriesChange(change: StoredMembershipChange, seriesTitle: string, bookTitle: string): SeriesMembershipChangeProjection {
-    return {
-      changeId: change.changeId,
-      seriesId: change.seriesId,
-      seriesTitle,
-      bookId: change.bookId,
-      bookTitle,
-      kind: change.kind,
-      label: change.kind === 'add' ? '加入书系' : '移出书系',
-      priorMember: change.kind === 'remove',
-      newMember: change.kind === 'add',
-      actor: '本机编辑',
-      recordedAt: change.recordedAt,
-      impact: change.impact,
-    };
-  }
-
   // ---- 书系检索排除 (Issue #64, plan slice S29b; V2-UX-SER-020 to SER-029; ADR 0037) -----------------------------------
 
-  /**
-   * 添加检索排除…'s choices (SER-020): a page of what one kind of target may name in this Series — its knowledge items by name,
-   * the eight classes, its member Books newest joined first, or its members' Source Versions newest first — each saying whether
-   * an exclusion in force names it already. A read.
-   */
   inspectSeriesExclusionTargets(input: InspectSeriesExclusionTargetsInput): SeriesExclusionTargetsProjection {
-    return this.#seriesCall(() => {
-      const series = this.#requireSeries(input.seriesId);
-      requireStore(isSeriesExclusionTargetKind(input.kind), 'SERIES_EXCLUSION_TARGET_INVALID', '检索排除的对象无效。');
-      const after = input.after;
-      requireStore(after === null || (isRecord(after) && typeof after.key === 'string' && after.key.length <= 400 && typeof after.id === 'string' &&
-        after.id.length >= 1 && after.id.length <= 64), 'SERIES_CURSOR_INVALID', '书系列表位置无效。');
-      const effective = this.#seriesExclusions.effective(series.seriesId);
-      const excluded = (kind: SeriesExclusionTargetKind, id: string): boolean => effective.some((entry) => entry.target.kind === kind && entry.target.id === id);
-      const rows: Array<{ target: SeriesExclusionTargetProjection; key: string }> = [];
-      const limit = MAX_SERIES_EXCLUSION_TARGETS_PAGE + 1;
-      if (input.kind === 'knowledge-item') {
-        for (const item of this.#seriesKnowledge.itemsPage(series.seriesId, '', after === null ? null : { subject: after.key, itemId: after.id }, limit)) {
-          rows.push({ key: item.subject, target: seriesExclusionTarget('knowledge-item', item.itemId, { subject: item.subject, knowledgeClass: item.knowledgeClass }) });
-        }
-      } else if (input.kind === 'knowledge-class') {
-        for (const knowledgeClass of SERIES_KNOWLEDGE_CLASSES) rows.push({ key: knowledgeClass, target: seriesExclusionTarget('knowledge-class', knowledgeClass, {}) });
-      } else if (input.kind === 'book') {
-        for (const member of this.#series.members(series.seriesId)) {
-          if (after !== null && (member.joinedAt > after.key || (member.joinedAt === after.key && member.bookId >= after.id))) continue;
-          rows.push({ key: member.joinedAt, target: seriesExclusionTarget('book', member.bookId, { bookTitle: this.#evaluationBookTitle(member.bookId) }) });
-          if (rows.length >= limit) break;
-        }
-      } else {
-        for (const row of this.#authority.prepare(
-          `SELECT sv.source_version_id, sv.display_name, sv.created_at, b.title FROM source_versions sv JOIN books b ON b.book_id = sv.book_id
-           WHERE EXISTS (SELECT 1 FROM series_membership_changes c WHERE c.series_id = ? AND c.book_id = sv.book_id AND c.kind = 'add'
-               AND c.ordinal = (SELECT max(d.ordinal) FROM series_membership_changes d WHERE d.series_id = c.series_id AND d.book_id = c.book_id))
-             AND (? IS NULL OR sv.created_at < ? OR (sv.created_at = ? AND sv.source_version_id < ?))
-           ORDER BY sv.created_at DESC, sv.source_version_id DESC LIMIT ?`,
-        ).all(series.seriesId, after?.key ?? null, after?.key ?? null, after?.key ?? null, after?.id ?? null, limit) as SqlRow[]) {
-          rows.push({ key: asString(row.created_at), target: seriesExclusionTarget('source-version', asString(row.source_version_id),
-            { displayName: asString(row.display_name), bookTitle: asString(row.title) }) });
-        }
-      }
-      const { page, more } = weighedPage(rows, MAX_SERIES_EXCLUSION_TARGETS_PAGE);
-      const last = page.at(-1);
-      return {
-        kind: input.kind,
-        targets: page.map((row) => ({ ...row.target, excluded: excluded(row.target.kind, row.target.id) })),
-        nextCursor: more && last !== undefined ? { key: last.key, id: last.target.id } : null,
-      };
-    });
+    return seriesOperations.inspectSeriesExclusionTargets(this.#seriesHost, input);
   }
 
-  /** `更早的排除记录…`: the next page of one Series' exclusion revisions, newest first. A read. */
   inspectSeriesExclusionHistory(input: InspectSeriesExclusionHistoryInput): SeriesExclusionHistoryPageProjection {
-    return this.#seriesCall(() => {
-      const series = this.#requireSeries(input.seriesId);
-      requireStore(isRecord(input.after) && typeof input.after.recordedAt === 'string' && !Number.isNaN(Date.parse(input.after.recordedAt)) &&
-        typeof input.after.revisionId === 'string' && UUID_PATTERN.test(input.after.revisionId), 'SERIES_CURSOR_INVALID', '书系列表位置无效。');
-      const read = this.#seriesExclusionHistoryPage(series.seriesId, input.after);
-      return { history: read.history, nextCursor: read.nextCursor };
-    });
+    return seriesOperations.inspectSeriesExclusionHistory(this.#seriesHost, input);
   }
 
-  /**
-   * 书系检索排除影响预览 (SER-021, SER-022) for 添加检索排除, 修改检索排除 or 停止此排除. A read: nothing is recorded until the
-   * editor commits the exclusion against this preview's digest.
-   */
   previewSeriesExclusion(input: PreviewSeriesExclusionInput): SeriesExclusionPreviewProjection {
-    return this.#seriesCall(() => this.#seriesExclusionPreview(input).preview);
+    return seriesOperations.previewSeriesExclusion(this.#seriesHost, input);
   }
 
-  /**
-   * 添加检索排除, 修改检索排除 or 停止此排除 (SER-020 to SER-027): the preview is recomputed inside the transaction and a stale one
-   * is refused; the revision keeps what the preview showed. An exclusion takes effect as it is recorded: an approved Run whose
-   * reading of the excluded material has not begun stops in the same transaction, and one reading now stops at the guard
-   * before its next range. Ending one restores nothing it stopped.
-   */
   recordSeriesExclusion(input: RecordSeriesExclusionInput): SeriesExclusionResultProjection {
-    return this.#seriesCall(() => {
-      const { revision, stoppedRuns } = this.#transaction(this.#authority, () => {
-        const { preview, prior, reach } = this.#seriesExclusionPreview(input);
-        requireStore(typeof input.previewDigest === 'string' && preview.previewDigest === input.previewDigest, 'SERIES_EXCLUSION_PREVIEW_STALE',
-          '预览之后，检索排除、书系知识或相关任务有了变化；请重新查看影响，再决定。');
-        const stored = this.#seriesExclusions.record({
-          seriesId: preview.seriesId,
-          action: preview.action,
-          prior,
-          target: preview.target,
-          reason: preview.reason,
-          previewDigest: preview.previewDigest,
-          impact: preview.groups,
-        });
-        let stopped = 0;
-        if (preview.action === 'add') {
-          for (const run of reach.active) {
-            if (!run.started && this.#reviewRuns.stopForSeriesScope(run.reviewRunId, run.categoryId)) stopped += 1;
-          }
-        }
-        return { revision: stored, stoppedRuns: stopped };
-      });
-      return {
-        exclusionId: revision.exclusionId,
-        revisionId: revision.revisionId,
-        completionLabel: revision.action === 'add' ? '书系检索排除已生效' : revision.action === 'change' ? '检索排除已修改' : '已停止此排除',
-        stoppedRuns,
-        revision: this.#seriesExclusionRevision(revision),
-      };
-    });
+    return seriesOperations.recordSeriesExclusion(this.#seriesHost, input);
   }
 
   /**
@@ -20161,7 +17591,7 @@ export class EditorialStore {
     const run = this.#authority.prepare('SELECT task_intent_id FROM analysis_run_records WHERE run_record_id = ?').get(runRecordId) as SqlRow | undefined;
     if (run === undefined) return null;
     try {
-      return new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).governanceChanged(asString(run.task_intent_id), () => this.#housePreferencePeopleNames())
+      return new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).governanceChanged(asString(run.task_intent_id), () => learningSupervision.housePreferencePeopleNames(this.#learningSupervisionHost))
         ? '本社审阅偏好的学习监督已变化' : null;
     } catch (error) {
       if (!(error instanceof LearningEligibilityError)) throw error;
@@ -20214,38 +17644,6 @@ export class EditorialStore {
     });
   }
 
-  /** What an exclusion target names now, read from the records that own it; refused when this Series cannot name it. */
-  #seriesExclusionTargetOf(series: StoredSeries, input: unknown): SeriesExclusionTargetProjection {
-    requireStore(isRecord(input) && isSeriesExclusionTargetKind(input.kind) && typeof input.id === 'string', 'SERIES_EXCLUSION_TARGET_INVALID', '检索排除的对象无效。');
-    const id = input.id;
-    switch (input.kind) {
-      case 'knowledge-item': {
-        const item = UUID_PATTERN.test(id) ? this.#seriesKnowledge.item(id) : null;
-        requireStore(item !== null && item.seriesId === series.seriesId, 'SERIES_EXCLUSION_TARGET_NOT_FOUND', `书系「${series.title}」没有这个书系知识条目。`);
-        return seriesExclusionTarget('knowledge-item', id, { subject: item.subject, knowledgeClass: item.knowledgeClass });
-      }
-      case 'knowledge-class':
-        requireStore(isSeriesKnowledgeClass(id), 'SERIES_EXCLUSION_TARGET_NOT_FOUND', '没有这个知识类别。');
-        return seriesExclusionTarget('knowledge-class', id, {});
-      case 'book': {
-        requireStore(UUID_PATTERN.test(id), 'SERIES_EXCLUSION_TARGET_INVALID', '检索排除的对象无效。');
-        const bookTitle = this.#evaluationBookTitle(id);
-        requireStore(this.#series.latest(series.seriesId, id)?.kind === 'add', 'SERIES_EXCLUSION_NOT_MEMBER',
-          `《${bookTitle}》不在书系「${series.title}」中；检索排除只针对这个书系的成员图书。`);
-        return seriesExclusionTarget('book', id, { bookTitle });
-      }
-      case 'source-version': {
-        const row = UUID_PATTERN.test(id)
-          ? this.#authority.prepare('SELECT sv.book_id, sv.display_name, b.title FROM source_versions sv JOIN books b ON b.book_id = sv.book_id WHERE sv.source_version_id = ?').get(id) as SqlRow | undefined
-          : undefined;
-        requireStore(row !== undefined, 'SERIES_EXCLUSION_TARGET_NOT_FOUND', '没有这个来源版本。');
-        requireStore(this.#series.latest(series.seriesId, asString(row.book_id))?.kind === 'add', 'SERIES_EXCLUSION_NOT_MEMBER',
-          `《${asString(row.title)}》不在书系「${series.title}」中；检索排除只针对这个书系成员图书的来源版本。`);
-        return seriesExclusionTarget('source-version', id, { displayName: asString(row.display_name), bookTitle: asString(row.title) });
-      }
-    }
-  }
-
   /**
    * The Series-scoped Runs that are not a Review Run's (Issue #64, 7b; SER-022, SER-026): each whose frozen scope a target
    * reaches, as authorized, waiting or running, or as completed. A Review Run's are read from its own snapshot; a Task not yet
@@ -20270,477 +17668,38 @@ export class EditorialStore {
     return { active, completed };
   }
 
-  #seriesExclusionPreview(input: PreviewSeriesExclusionInput): {
-    preview: SeriesExclusionPreviewProjection;
-    prior: StoredExclusion | null;
-    reach: ReturnType<ReviewRunStore['seriesExclusionReach']>;
-  } {
-    const series = this.#requireSeries(input.seriesId);
-    requireStore(isSeriesExclusionAction(input.action), 'SERIES_EXCLUSION_INVALID', '检索排除只有添加、修改和停止。');
-    const reason = seriesExclusionReason(input.reason);
-    requireStore(reason !== null, 'SERIES_EXCLUSION_REASON_INVALID', `排除理由最多 ${MAX_SERIES_EXCLUSION_REASON_CHARACTERS} 个字，写在一行里。`);
-    const effective = this.#seriesExclusions.effective(series.seriesId);
-    let prior: StoredExclusion | null = null;
-    let target: SeriesExclusionTargetProjection;
-    if (input.action === 'add') {
-      requireStore(input.exclusionId === null && input.target !== null, 'SERIES_EXCLUSION_INVALID', '添加检索排除要指定一个对象。');
-      target = this.#seriesExclusionTargetOf(series, input.target);
-      requireStore(!effective.some((entry) => entry.target.kind === target.kind && entry.target.id === target.id), 'SERIES_EXCLUSION_ALREADY',
-        `${target.label}已经排除在书系「${series.title}」的检索之外。`);
-      requireStore(effective.length < MAX_SERIES_EXCLUSIONS, 'SERIES_EXCLUSION_LIMIT',
-        `书系「${series.title}」已有 ${MAX_SERIES_EXCLUSIONS} 条检索排除在生效；先停止不再需要的，再添加。`);
-    } else {
-      requireStore(typeof input.exclusionId === 'string' && UUID_PATTERN.test(input.exclusionId) && input.target === null, 'SERIES_EXCLUSION_INVALID',
-        '要指定修改或停止哪一条检索排除。');
-      prior = this.#seriesExclusions.exclusion(series.seriesId, input.exclusionId);
-      requireStore(prior !== null, 'SERIES_EXCLUSION_NOT_FOUND', '这条检索排除不存在。');
-      requireStore(prior.effective, 'SERIES_EXCLUSION_ENDED', '这条检索排除已经停止；以后的检索已经可以读取它。');
-      requireStore(input.action !== 'change' || reason !== prior.current.reason, 'SERIES_EXCLUSION_UNCHANGED', '排除理由没有变化。');
-      target = prior.target;
-    }
-    const covers = (material: SeriesKnowledgeMaterial): boolean => seriesExclusionCovers(series.seriesId, target, material);
-    // What the target reaches of the Series' knowledge now, and every version governing the preview, hashed one by one.
-    const governing = createHash('sha256');
-    const itemsNamed: string[] = [];
-    let itemCount = 0;
-    // 停止此排除 reopens only what no other exclusion in force still reaches (Issue #64 review).
-    const others = prior === null ? [] : effective.filter((entry) => entry.exclusionId !== prior!.exclusionId);
-    const stillNamed: string[] = [];
-    let stillCount = 0;
-    for (const item of this.#seriesKnowledge.items(series.seriesId)) {
-      const material = knowledgeMaterial(this.#authority, { seriesId: series.seriesId, itemId: item.itemId, revisionId: item.current.revisionId });
-      requireStore(material !== null, 'SERIES_SCOPE_INVALID', '书系知识来源记录无法核对。');
-      if (!covers(material)) continue;
-      itemCount += 1;
-      if (itemsNamed.length < NAMED_EXCLUSION_ENTRIES) itemsNamed.push(`「${item.subject}」`);
-      if (coveringExclusions(others, material).length > 0) {
-        stillCount += 1;
-        if (stillNamed.length < NAMED_EXCLUSION_ENTRIES) stillNamed.push(`「${item.subject}」`);
-      }
-      governing.update(canonicalJson({ kind: 'item', itemId: item.itemId, revisionId: item.current.revisionId }));
-      governing.update('\n');
-    }
-    for (const entry of effective) {
-      governing.update(canonicalJson({ kind: 'exclusion', exclusionId: entry.exclusionId, revisionId: entry.current.revisionId }));
-      governing.update('\n');
-    }
-    const reach = input.action === 'add' ? this.#reviewRuns.seriesExclusionReach(covers) : { active: [], prepared: 0, completed: [] };
-    governing.update(canonicalJson({ kind: 'runs', active: reach.active, prepared: reach.prepared, completed: reach.completed }));
-    // One entry per Review Run, even where two Books share a title (Issue #64 review).
-    const routes = (runs: ReadonlyArray<{ readonly reviewRunId: string; readonly route: string }>): string[] =>
-      [...new Map(runs.map((run) => [run.reviewRunId, run.route] as const)).values()];
-    // A Series-scoped Run outside 审阅 — an AI7 初评 that froze the Series — is named beside them (Issue #64, 7b; SER-022).
-    const tasks = input.action === 'add' ? this.#seriesScopedTaskReach(series.seriesId, covers) : { active: [], completed: [] };
-    if (tasks.active.length + tasks.completed.length > 0) governing.update(canonicalJson({ kind: 'task-runs', active: tasks.active, completed: tasks.completed }));
-    const runRoutes = [...routes(reach.active), ...tasks.active.map((task) => task.route)];
-    const completedRoutes = [...routes(reach.completed), ...tasks.completed.map((task) => task.route)];
-    const groups = seriesExclusionImpact(input.action, {
-      seriesTitle: series.title,
-      target,
-      reason,
-      priorReason: prior?.current.reason ?? null,
-      itemsNamed,
-      itemCount,
-      stillNamed,
-      stillCount,
-      runsNamed: runRoutes.slice(0, NAMED_EXCLUSION_ENTRIES),
-      runCount: runRoutes.length,
-      preparedCount: reach.prepared,
-      completedNamed: completedRoutes.slice(0, NAMED_EXCLUSION_ENTRIES),
-      completedCount: completedRoutes.length,
-    });
-    const preview: SeriesExclusionPreviewProjection = {
-      seriesId: series.seriesId,
-      seriesTitle: series.title,
-      action: input.action,
-      actionLabel: SERIES_EXCLUSION_ACTION_LABELS[input.action],
-      exclusionId: prior?.exclusionId ?? null,
-      target,
-      reason,
-      scope: `只限书系「${series.title}」的书系检索`,
-      effectiveTime: '记录后立即生效',
-      actor: '本机编辑',
-      groups,
-      previewDigest: seriesExclusionPreviewDigest({
-        seriesId: series.seriesId,
-        action: input.action,
-        exclusionId: prior?.exclusionId ?? null,
-        target,
-        reason,
-        chainHead: prior?.current.revisionId ?? null,
-        governingDigest: governing.digest('hex'),
-        groups,
-      }),
-    };
-    return { preview, prior, reach };
-  }
-
-  /** A Series' 检索排除 as its page opens: every exclusion in force, and the first page of revisions. */
-  #seriesExclusionsProjection(seriesId: string): SeriesExclusionsProjection {
-    const effective = this.#seriesExclusions.effective(seriesId).map((entry): SeriesExclusionProjection => ({
-      exclusionId: entry.exclusionId,
-      target: entry.target,
-      reason: entry.current.reason,
-      effectiveSince: entry.since,
-      revision: entry.current.revision,
-    }));
-    const history = this.#seriesExclusionHistoryPage(seriesId, null);
-    return { effective, history: history.history, historyCount: history.count, historyNext: history.nextCursor };
-  }
-
-  #seriesExclusionHistoryPage(seriesId: string, after: SeriesExclusionHistoryCursor | null):
-  SeriesExclusionHistoryPageProjection & { count: number } {
-    const { entries, count } = this.#seriesExclusions.historyPage(seriesId, after, MAX_SERIES_EXCLUSION_HISTORY_PAGE + 1);
-    const { page, more } = weighedPage(entries.map((entry) => this.#seriesExclusionRevision(entry)), MAX_SERIES_EXCLUSION_HISTORY_PAGE);
-    const last = page.at(-1);
-    return { history: page, nextCursor: more && last !== undefined ? { recordedAt: last.recordedAt, revisionId: last.revisionId } : null, count };
-  }
-
-  #seriesExclusionRevision(entry: StoredExclusionRevision): SeriesExclusionRevisionProjection {
-    return {
-      revisionId: entry.revisionId,
-      exclusionId: entry.exclusionId,
-      revision: entry.revision,
-      action: entry.action,
-      actionLabel: SERIES_EXCLUSION_ACTION_LABELS[entry.action],
-      target: entry.target,
-      reason: entry.reason,
-      actor: '本机编辑',
-      recordedAt: entry.recordedAt,
-      impact: entry.impact,
-    };
-  }
-
   // ---- 书系知识 (Issue #63, plan slice S28b; V2-UX-SER-013 to SER-019; ADR 0036) ---------------------------------------
 
-  /**
-   * 提议为书系知识 (SER-013, SER-014): the editor's own words, or the exact span of a member Book's manuscript, becomes a
-   * non-authoritative candidate for a new or an exact existing item. Nothing reads it until it is taken in.
-   */
   proposeSeriesKnowledge(input: ProposeSeriesKnowledgeInput): SeriesKnowledgeProposalProjection {
-    return this.#seriesCall(() => {
-      const created = this.#transaction(this.#authority, () => {
-        const series = this.#requireSeries(input.seriesId);
-        const target = this.#knowledgeTarget(series.seriesId, input.target);
-        const content = seriesKnowledgeContent(input.content);
-        requireStore(content !== null, 'SERIES_KNOWLEDGE_CONTENT_INVALID', `内容要 1–${MAX_SERIES_KNOWLEDGE_CONTENT_CHARACTERS} 个字。`);
-        const provenance = input.span === null ? null : this.#knowledgeSpan(series, input.span);
-        return this.#seriesKnowledge.propose({ seriesId: series.seriesId, target, content, provenance });
-      });
-      const series = this.#requireSeries(input.seriesId);
-      // The answer is the candidate alone (Issue #63 review): the page reads its lists again, each a page at a time.
-      const items = this.#seriesKnowledge.items(series.seriesId);
-      const open = this.#seriesKnowledge.open(series.seriesId);
-      return {
-        candidateId: created.candidateId,
-        completionLabel: `已提议为书系「${series.title}」的知识候选项`,
-        candidate: this.#knowledgeCandidateProjection(created, countSeriesKnowledgeConflicts(seriesKnowledgeConflicts(created, items, open))),
-      };
-    });
+    return seriesOperations.proposeSeriesKnowledge(this.#seriesHost, input);
   }
 
-  /** 书系知识纳入审阅 (SER-015, SER-016, SER-019) of one open candidate as it stands now. A read. */
   inspectSeriesKnowledgeReview(input: InspectSeriesKnowledgeReviewInput): SeriesKnowledgeReviewProjection {
-    return this.#seriesCall(() => {
-      const page = input.conflictsPage;
-      requireStore(page === undefined || (Number.isSafeInteger(page.after) && page.after >= 0), 'SERIES_CURSOR_INVALID', '书系列表位置无效。');
-      const review = this.#seriesKnowledgeReview(input.seriesId, input.candidateId, page?.after ?? 0);
-      requireStore(page === undefined || (review.candidate.version === page.candidateVersion && review.projection.reviewDigest === page.reviewDigest),
-        'SERIES_KNOWLEDGE_REVIEW_STALE', '候选项、条目或冲突在审阅之后有了变化；请重新审阅。');
-      requireStore((page?.after ?? 0) <= review.projection.conflictCount, 'SERIES_CURSOR_INVALID', '书系列表位置无效。');
-      return review.projection;
-    });
+    return seriesOperations.inspectSeriesKnowledgeReview(this.#seriesHost, input);
   }
 
-  /** 编辑候选项 (SER-015): the candidate's next version, read again in review against the item as it stands now. */
   editSeriesKnowledgeCandidate(input: EditSeriesKnowledgeCandidateInput): SeriesKnowledgeReviewProjection {
-    return this.#seriesCall(() => {
-      this.#transaction(this.#authority, () => {
-        const series = this.#requireSeries(input.seriesId);
-        requireStore(typeof input.candidateId === 'string' && UUID_PATTERN.test(input.candidateId), 'SERIES_KNOWLEDGE_CANDIDATE_INVALID', '候选项标识无效。');
-        const candidate = this.#seriesKnowledge.candidate(input.candidateId);
-        requireStore(candidate !== null && candidate.seriesId === series.seriesId, 'SERIES_KNOWLEDGE_CANDIDATE_NOT_FOUND', '这个候选项不存在。');
-        const target = this.#knowledgeTarget(series.seriesId, input.target);
-        const content = seriesKnowledgeContent(input.content);
-        requireStore(content !== null, 'SERIES_KNOWLEDGE_CONTENT_INVALID', `内容要 1–${MAX_SERIES_KNOWLEDGE_CONTENT_CHARACTERS} 个字。`);
-        this.#seriesKnowledge.edit(input.candidateId, input.expectedVersion, target, content);
-      });
-      return this.#seriesKnowledgeReview(input.seriesId, input.candidateId).projection;
-    });
+    return seriesOperations.editSeriesKnowledgeCandidate(this.#seriesHost, input);
   }
 
-  /**
-   * 纳入书系知识 (SER-017 to SER-019): against the exact review the editor read — a moved candidate, item, conflict or
-   * membership refuses it — a conflict kept only by 保留已披露冲突, and where it may later be used chosen by the editor.
-   */
   promoteSeriesKnowledge(input: PromoteSeriesKnowledgeInput): SeriesKnowledgePromotionProjection {
-    return this.#seriesCall(() => {
-      const promoted = this.#transaction(this.#authority, () => {
-        const review = this.#seriesKnowledgeReview(input.seriesId, input.candidateId);
-        requireStore(review.candidate.version === input.candidateVersion && review.projection.reviewDigest === input.reviewDigest,
-          'SERIES_KNOWLEDGE_REVIEW_STALE', '候选项、条目或冲突在审阅之后有了变化；请重新审阅。');
-        requireStore(review.projection.blocked === null, 'SERIES_KNOWLEDGE_BLOCKED', review.projection.blocked ?? '');
-        requireStore(isSeriesKnowledgeReuseScope(input.reuseScope), 'SERIES_KNOWLEDGE_REUSE_INVALID', '请选择以后的用途。');
-        if (review.projection.conflictCount > 0) {
-          requireStore(input.conflictDisposition === 'preserved', 'SERIES_KNOWLEDGE_CONFLICT_UNRESOLVED',
-            `${SERIES_KNOWLEDGE_CONFLICT_LABEL}：请编辑候选项，或选择保留已披露冲突。`);
-        } else {
-          requireStore(input.conflictDisposition === 'none', 'SERIES_KNOWLEDGE_DISPOSITION_INVALID', '没有已披露的冲突可以保留。');
-        }
-        return this.#seriesKnowledge.promote({ candidate: review.candidate, conflicts: review.conflicts(), reuseScope: input.reuseScope, reviewDigest: input.reviewDigest });
-      });
-      return {
-        itemId: promoted.itemId,
-        revisionId: promoted.revisionId,
-        completionLabel: promoted.outcome === 'created' ? '书系知识已纳入' as const : '书系知识已更新' as const,
-        item: this.#knowledgeItemProjection(this.#seriesKnowledge.item(promoted.itemId)!),
-      };
-    });
+    return seriesOperations.promoteSeriesKnowledge(this.#seriesHost, input);
   }
 
-  /** `查找条目` and `更多条目…`: a page of a Series' knowledge items by name, narrowed to names holding the words (Issue #63 review). A read. */
   inspectSeriesKnowledgeItems(seriesId: string, text: string, after: SeriesKnowledgeItemsCursor | null): SeriesKnowledgeItemsPageProjection {
-    return this.#seriesCall(() => {
-      const series = this.#requireSeries(seriesId);
-      const words = typeof text === 'string' && text.isWellFormed() ? text.normalize('NFC').trim() : null;
-      requireStore(words !== null && [...words].length <= MAX_SERIES_KNOWLEDGE_QUERY_CHARACTERS && !/[\r\n]/u.test(words), 'SERIES_KNOWLEDGE_QUERY_INVALID',
-        `查找的条目字词最多 ${MAX_SERIES_KNOWLEDGE_QUERY_CHARACTERS} 个字，写在一行里。`);
-      requireStore(after === null || (typeof after.itemId === 'string' && UUID_PATTERN.test(after.itemId) && typeof after.subject === 'string' &&
-        after.subject.length >= 1 && after.subject.length <= 2 * MAX_SERIES_KNOWLEDGE_SUBJECT_CHARACTERS), 'SERIES_CURSOR_INVALID', '书系列表位置无效。');
-      return this.#knowledgeItemsPage(series.seriesId, words, after);
-    });
+    return seriesOperations.inspectSeriesKnowledgeItems(this.#seriesHost, seriesId, text, after);
   }
 
-  /** `更多候选项…`: the next page of a Series' open candidates, oldest proposed first (Issue #63 review). A read. */
   inspectSeriesKnowledgeCandidates(seriesId: string, after: SeriesKnowledgeCandidatesCursor | null): SeriesKnowledgeCandidatesPageProjection {
-    return this.#seriesCall(() => {
-      const series = this.#requireSeries(seriesId);
-      requireStore(after === null || (typeof after.candidateId === 'string' && UUID_PATTERN.test(after.candidateId) && typeof after.firstAt === 'string' &&
-        !Number.isNaN(Date.parse(after.firstAt))), 'SERIES_CURSOR_INVALID', '书系列表位置无效。');
-      const { candidates, nextCursor } = this.#knowledgeCandidatesPage(series.seriesId, after);
-      return { candidates, nextCursor };
-    });
+    return seriesOperations.inspectSeriesKnowledgeCandidates(this.#seriesHost, seriesId, after);
   }
 
-  /** 历次版本: a page of one item's revisions, newest first, below the ordinal named (Issue #63 review). A read. */
   inspectSeriesKnowledgeConflicts(input: { seriesId: string; itemId: string; revisionId: string; after: number }): SeriesKnowledgeConflictsProjection {
-    return this.#seriesCall(() => {
-      const series = this.#requireSeries(input.seriesId);
-      requireStore(typeof input.itemId === 'string' && UUID_PATTERN.test(input.itemId) && typeof input.revisionId === 'string' && UUID_PATTERN.test(input.revisionId),
-        'SERIES_KNOWLEDGE_ITEM_NOT_FOUND', '这个书系知识条目或版本不存在。');
-      const item = this.#seriesKnowledge.item(input.itemId);
-      requireStore(item !== null && item.seriesId === series.seriesId, 'SERIES_KNOWLEDGE_ITEM_NOT_FOUND', '这个书系知识条目不存在。');
-      const revision = this.#seriesKnowledge.revision(input.itemId, input.revisionId);
-      requireStore(revision !== null, 'SERIES_KNOWLEDGE_ITEM_NOT_FOUND', '这个书系知识版本不存在。');
-      requireStore(Number.isSafeInteger(input.after) && input.after >= 0 && input.after <= revision.conflictCount, 'SERIES_CURSOR_INVALID', '冲突列表位置无效。');
-      const { page, more } = weighedPage(this.#seriesKnowledge.conflictsPage(revision.revisionId, revision.conflictCount, revision.conflictsDigest, input.after, MAX_SERIES_KNOWLEDGE_CONFLICTS_SHOWN + 1),
-        MAX_SERIES_KNOWLEDGE_CONFLICTS_SHOWN, SERIES_KNOWLEDGE_PAGE_BYTES);
-      return { itemId: input.itemId, revisionId: input.revisionId, conflicts: page, total: revision.conflictCount,
-        nextAfter: more ? input.after + page.length : null };
-    });
+    return seriesOperations.inspectSeriesKnowledgeConflicts(this.#seriesHost, input);
   }
 
   inspectSeriesKnowledgeRevisions(seriesId: string, itemId: string, before: number | null): SeriesKnowledgeRevisionsProjection {
-    return this.#seriesCall(() => {
-      const series = this.#requireSeries(seriesId);
-      requireStore(typeof itemId === 'string' && UUID_PATTERN.test(itemId), 'SERIES_KNOWLEDGE_ITEM_NOT_FOUND', '这个书系知识条目不存在。');
-      const item = this.#seriesKnowledge.item(itemId);
-      requireStore(item !== null && item.seriesId === series.seriesId, 'SERIES_KNOWLEDGE_ITEM_NOT_FOUND', '这个书系知识条目不存在。');
-      requireStore(before === null || (Number.isSafeInteger(before) && before >= 1), 'SERIES_CURSOR_INVALID', '书系列表位置无效。');
-      const rest = this.#seriesKnowledge.revisionsPage(itemId, before, MAX_SERIES_KNOWLEDGE_REVISIONS_PAGE + 1);
-      const { page, more } = weighedPage(rest.slice(0, MAX_SERIES_KNOWLEDGE_REVISIONS_PAGE + 1).map((revision) => this.#knowledgeRevisionProjection(revision)),
-        MAX_SERIES_KNOWLEDGE_REVISIONS_PAGE, SERIES_KNOWLEDGE_PAGE_BYTES);
-      return { itemId: item.itemId, revisions: page, nextBefore: more ? page.at(-1)!.ordinal : null };
-    });
-  }
-
-  /** One page of a Series' knowledge items after the one named, each with its current revision only. */
-  #knowledgeItemsPage(seriesId: string, words: string, after: SeriesKnowledgeItemsCursor | null): SeriesKnowledgeItemsPageProjection {
-    const items = this.#seriesKnowledge.itemsPage(seriesId, words, after, MAX_SERIES_KNOWLEDGE_ITEMS_PAGE + 1).map((item) => this.#knowledgeItemProjection(item));
-    const { page, more } = weighedPage(items, MAX_SERIES_KNOWLEDGE_ITEMS_PAGE, SERIES_KNOWLEDGE_PAGE_BYTES);
-    const last = page.at(-1);
-    return { items: page, nextCursor: more && last !== undefined ? { subject: last.subject, itemId: last.itemId } : null };
-  }
-
-  /** One page of a Series' open candidates after the one named, oldest proposed first, each with how many conflicts it discloses. */
-  #knowledgeCandidatesPage(seriesId: string, after: SeriesKnowledgeCandidatesCursor | null): SeriesKnowledgeCandidatesPageProjection {
-    const read = this.#seriesKnowledge.openPage(seriesId, after, MAX_SERIES_KNOWLEDGE_CANDIDATES_PAGE + 1);
-    const projected = read.map(({ candidate }) => this.#knowledgeCandidateProjection(candidate, countSeriesKnowledgeConflicts(seriesKnowledgeConflicts(candidate, this.#seriesKnowledge.items(seriesId), this.#seriesKnowledge.open(seriesId)))));
-    const { page, more } = weighedPage(projected, MAX_SERIES_KNOWLEDGE_CANDIDATES_PAGE, SERIES_KNOWLEDGE_PAGE_BYTES);
-    const last = read[page.length - 1];
-    return { candidates: page, nextCursor: more && last !== undefined ? { firstAt: last.firstAt, candidateId: last.candidate.candidateId } : null };
-  }
-
-  /** The item a candidate proposes, resolved against the Series as it stands: a new name and class, or the exact item now. */
-  #knowledgeTarget(seriesId: string, target: SeriesKnowledgeTarget): ResolvedTarget {
-    requireStore(typeof target === 'object' && target !== null && (target.kind === 'new' || target.kind === 'existing'), 'SERIES_KNOWLEDGE_TARGET_INVALID', '候选项要写明是新条目还是已有条目。');
-    if (target.kind === 'new') {
-      const subject = seriesKnowledgeSubject(target.subject);
-      requireStore(subject !== null, 'SERIES_KNOWLEDGE_SUBJECT_INVALID', `条目名称要 1–${MAX_SERIES_KNOWLEDGE_SUBJECT_CHARACTERS} 个字，写在一行里。`);
-      requireStore(isSeriesKnowledgeClass(target.knowledgeClass), 'SERIES_KNOWLEDGE_CLASS_INVALID', '请选择条目类别。');
-      return { kind: 'new', subject, knowledgeClass: target.knowledgeClass };
-    }
-    requireStore(typeof target.itemId === 'string' && UUID_PATTERN.test(target.itemId), 'SERIES_KNOWLEDGE_TARGET_INVALID', '候选项要写明是新条目还是已有条目。');
-    const item = this.#seriesKnowledge.item(target.itemId);
-    requireStore(item !== null && item.seriesId === seriesId, 'SERIES_KNOWLEDGE_ITEM_NOT_FOUND', '这个书系知识条目不存在。');
-    return { kind: 'existing', itemId: item.itemId, subject: item.subject, knowledgeClass: item.knowledgeClass, baseRevisionId: item.current.revisionId };
-  }
-
-  /** The exact span a provenance-bound candidate cites (SER-013): verified as a mark's is, in a Book the Series holds now. */
-  #knowledgeSpan(series: StoredSeries, span: SeriesKnowledgeSpanInput): StoredProvenance {
-    requireStore(typeof span === 'object' && span !== null, 'SERIES_KNOWLEDGE_SPAN_INVALID', '所选文字无效。');
-    const verified = this.#markCall(() => this.#editorialMarks.verifySpan(span));
-    const bookTitle = this.#evaluationBookTitle(verified.bookId);
-    requireStore(this.#series.latest(series.seriesId, verified.bookId)?.kind === 'add', 'SERIES_KNOWLEDGE_NOT_MEMBER',
-      `《${bookTitle}》不在书系「${series.title}」中；只有成员图书的稿件可以提议为书系知识。`);
-    return {
-      kind: 'manuscript-revision',
-      bookId: verified.bookId,
-      manuscriptId: span.manuscriptId,
-      branchId: span.branchId,
-      revisionId: verified.revisionId,
-      revisionLabel: verified.revisionLabel,
-      journalSequence: verified.journalSequence,
-      blockId: span.blockId,
-      fromGrapheme: span.fromGrapheme,
-      toGrapheme: span.toGrapheme,
-      quote: verified.text,
-    };
-  }
-
-  #seriesKnowledgeReview(seriesId: string, candidateId: string, after = 0): {
-    readonly projection: SeriesKnowledgeReviewProjection;
-    readonly candidate: StoredCandidate;
-    readonly conflicts: () => IterableIterator<FoundConflict>;
-  } {
-    const series = this.#requireSeries(seriesId);
-    requireStore(typeof candidateId === 'string' && UUID_PATTERN.test(candidateId), 'SERIES_KNOWLEDGE_CANDIDATE_INVALID', '候选项标识无效。');
-    const candidate = this.#seriesKnowledge.candidate(candidateId);
-    requireStore(candidate !== null && candidate.seriesId === series.seriesId, 'SERIES_KNOWLEDGE_CANDIDATE_NOT_FOUND', '这个候选项不存在。');
-    requireStore(!candidate.promoted, 'SERIES_KNOWLEDGE_ALREADY_PROMOTED', '这个候选项已经纳入书系知识。');
-    const conflicts = (): IterableIterator<FoundConflict> => seriesKnowledgeConflicts(candidate, this.#seriesKnowledge.items(series.seriesId), this.#seriesKnowledge.open(series.seriesId));
-    const target = candidate.target;
-    const current = target.kind === 'existing' ? this.#seriesKnowledge.item(target.itemId)?.current ?? null : null;
-    // A provenance-bound candidate cites a member Book's manuscript: once the Book has left the Series it cannot be taken in.
-    const blocked = candidate.provenance !== null && this.#series.latest(series.seriesId, candidate.provenance.bookId)?.kind !== 'add'
-      ? `《${this.#evaluationBookTitle(candidate.provenance.bookId)}》已不在书系「${series.title}」中；来自它的候选项不能纳入。`
-      : null;
-    const summary = seriesKnowledgeReviewSummary({ seriesId: series.seriesId, candidateVersionId: candidate.versionId, currentRevisionId: current?.revisionId ?? null, conflicts: conflicts(), blocked, after });
-    const { page } = weighedPage(summary.preview.map((entry) => ({ kind: entry.kind, line: entry.line })),
-      MAX_SERIES_KNOWLEDGE_CONFLICTS_SHOWN, SERIES_KNOWLEDGE_PAGE_BYTES);
-    return {
-      candidate,
-      conflicts,
-      projection: {
-        seriesId: series.seriesId,
-        seriesTitle: series.title,
-        candidate: this.#knowledgeCandidateProjection(candidate, summary.count),
-        current: current === null ? null : this.#knowledgeRevisionProjection(current),
-        conflicts: page,
-        conflictCount: summary.count,
-        conflictsAfter: after,
-        conflictsNextAfter: after + page.length < summary.count ? after + page.length : null,
-        conflictLabel: summary.count === 0 ? null : SERIES_KNOWLEDGE_CONFLICT_LABEL,
-        reuseScopes: SERIES_KNOWLEDGE_REUSE_SCOPES.map((scope) => ({ scope, label: SERIES_KNOWLEDGE_REUSE_LABELS[scope] })),
-        blocked,
-        reviewDigest: summary.digest,
-        actionLabel: '纳入书系知识',
-      },
-    };
-  }
-
-  /** A Series' knowledge as its page first shows it (Issue #63 review): the first page of items and of open candidates, and the counts. */
-  #seriesKnowledgeProjection(seriesId: string): SeriesProjection['knowledge'] {
-    const items = this.#knowledgeItemsPage(seriesId, '', null);
-    const candidates = this.#knowledgeCandidatesPage(seriesId, null);
-    return {
-      items: items.items,
-      itemCount: this.#seriesKnowledge.itemCount(seriesId),
-      itemsNext: items.nextCursor,
-      candidates: candidates.candidates,
-      candidateCount: this.#seriesKnowledge.openCount(seriesId),
-      candidatesNext: candidates.nextCursor,
-    };
-  }
-
-  #knowledgeProvenance(provenance: StoredProvenance | null): SeriesKnowledgeProvenanceProjection | null {
-    if (provenance === null) return null;
-    return {
-      kind: provenance.kind,
-      bookId: provenance.bookId,
-      bookTitle: this.#evaluationBookTitle(provenance.bookId),
-      manuscriptId: provenance.manuscriptId,
-      revisionId: provenance.revisionId,
-      revisionLabel: provenance.revisionLabel,
-      journalSequence: provenance.journalSequence,
-      blockId: provenance.blockId,
-      fromGrapheme: provenance.fromGrapheme,
-      toGrapheme: provenance.toGrapheme,
-      quote: knowledgeQuoteExcerpt(provenance.quote),
-      // Changes waited in the journal beyond the revision when the words were cited (Issue #63 review).
-      // The counter is cumulative across checkpoints. Only entries based on this exact cited revision and present
-      // by the cited position belong to its unsaved suffix; later checkpoints or edits cannot relabel this provenance.
-      uncheckpointed: this.#authority.prepare(
-        `SELECT 1 FROM edit_journal_entries WHERE manuscript_id = ? AND branch_id = ?
-         AND base_revision_id = ? AND sequence <= ? LIMIT 1`,
-      ).get(provenance.manuscriptId, provenance.branchId, provenance.revisionId, provenance.journalSequence) !== undefined,
-    };
-  }
-
-  #knowledgeCandidateProjection(
-    candidate: StoredCandidate,
-    conflicts: number,
-  ): SeriesKnowledgeCandidateProjection {
-    const target = candidate.target;
-    const base = target.kind === 'existing'
-      ? this.#seriesKnowledge.revision(target.itemId, target.baseRevisionId)
-      : null;
-    return {
-      candidateId: candidate.candidateId,
-      version: candidate.version,
-      target: {
-        kind: target.kind,
-        itemId: target.kind === 'existing' ? target.itemId : null,
-        subject: target.subject,
-        knowledgeClass: target.knowledgeClass,
-        classLabel: SERIES_KNOWLEDGE_CLASS_LABELS[target.knowledgeClass],
-        baseRevisionOrdinal: base?.ordinal ?? null,
-      },
-      content: candidate.content,
-      authoring: candidate.authoring,
-      provenance: this.#knowledgeProvenance(candidate.provenance),
-      recordedAt: candidate.recordedAt,
-      conflicts,
-    };
-  }
-
-  #knowledgeRevisionProjection(revision: StoredRevision): SeriesKnowledgeRevisionProjection {
-    return {
-      revisionId: revision.revisionId,
-      ordinal: revision.ordinal,
-      content: revision.content,
-      authoring: revision.authoring,
-      provenance: this.#knowledgeProvenance(revision.provenance),
-      conflicts: revision.conflicts.slice(0, MAX_SERIES_KNOWLEDGE_CONFLICTS_SHOWN),
-      conflictCount: revision.conflictCount,
-      reuseScope: revision.reuseScope,
-      reuseLabel: SERIES_KNOWLEDGE_REUSE_LABELS[revision.reuseScope],
-      decisionId: revision.decisionId,
-      outcome: revision.outcome,
-      recordedAt: revision.recordedAt,
-    };
-  }
-
-  #knowledgeItemProjection(item: StoredItem): SeriesKnowledgeItemProjection {
-    return {
-      itemId: item.itemId,
-      subject: item.subject,
-      knowledgeClass: item.knowledgeClass,
-      classLabel: SERIES_KNOWLEDGE_CLASS_LABELS[item.knowledgeClass],
-      createdAt: item.createdAt,
-      current: this.#knowledgeRevisionProjection(item.current),
-      revisionCount: item.revisionCount,
-    };
+    return seriesOperations.inspectSeriesKnowledgeRevisions(this.#seriesHost, seriesId, itemId, before);
   }
 
   // ---- 设置 › 数据与存储 › 版本 (Issue #433, plan slice S85a; V2-UX-DSTO-016; ADR 0079 §1) --------------------------------
@@ -21717,7 +18676,7 @@ export class EditorialStore {
           reviewCompletions: review.completed,
           maintenance: this.#maintenanceCases.attentionReadings(limit),
           libraryMaterials: this.#libraryMaterials.attentionReadings(limit),
-          learningMaterials: this.#learningAttention(limit),
+          learningMaterials: learningSupervision.learningAttention(this.#learningSupervisionHost, limit),
           materialIndexes: this.#materialIndexAttention(since, limit),
           unconfirmed: this.#unconfirmedAttention(limit),
           // Every Book's unfinished Task Intent Drafts (Issue #423, slice 7a): in 待我处理 only as their own card.
