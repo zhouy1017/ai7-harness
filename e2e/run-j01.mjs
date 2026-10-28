@@ -2138,7 +2138,7 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
   await waitFor(renderer, `document.querySelector('[data-screen="relationship"]')`, 'existing-book-target-selected');
   await assertRenderer(
     renderer,
-    `(() => { const selectedTarget = document.querySelector('input[name="import-target"]:checked'); const relationship = document.querySelector('input[aria-label="作为首份稿件导入"]'); const newBook = document.querySelector('input[aria-label="新建图书"]'); const label = selectedTarget?.getAttribute('aria-label') ?? ''; return selectedTarget?.value === ${JSON.stringify(`existing-book:${bookId}`)} && label.includes(${JSON.stringify(title)}) && label.includes(${JSON.stringify(internalNumber)}) && label.includes(${JSON.stringify(bookId)}) && relationship && !relationship.checked && document.activeElement === relationship && newBook && !newBook.checked && !Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '复核导入到所选图书'); })()`,
+    `(() => { const selectedTarget = document.querySelector('input[name="import-target"]:checked'); const relationship = document.querySelector('input[aria-label="作为首份稿件导入"]'); const newBook = document.querySelector('input[aria-label="新建图书"]'); const label = selectedTarget?.getAttribute('aria-label') ?? ''; const identity = selectedTarget?.closest('label.choice')?.nextElementSibling; const identityTerms = Array.from(identity?.querySelectorAll('dt') ?? [], (term) => term.textContent); const identityValues = Array.from(identity?.querySelectorAll('dd.technical-identity') ?? [], (value) => value.textContent); return selectedTarget?.value === ${JSON.stringify(`existing-book:${bookId}`)} && label.includes(${JSON.stringify(title)}) && label.includes(${JSON.stringify(internalNumber)}) && !label.includes(${JSON.stringify(bookId)}) && identity instanceof HTMLDetailsElement && identity.classList.contains('technical-details') && !identity.open && JSON.stringify(identityTerms) === ${JSON.stringify(JSON.stringify(['图书 ID']))} && JSON.stringify(identityValues) === ${JSON.stringify(JSON.stringify([bookId]))} && relationship && !relationship.checked && document.activeElement === relationship && newBook && !newBook.checked && !Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '复核导入到所选图书'); })()`,
     'existing-target-and-relationship-independent',
   );
   await assertRenderer(
@@ -2153,7 +2153,7 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
   );
   await assertRenderer(
     renderer,
-    `(() => { const review = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '复核导入到所选图书'); return document.activeElement === review && document.querySelector('#persistence-status')?.textContent.includes(${JSON.stringify(bookId)}); })()`,
+    `(() => { const review = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '复核导入到所选图书'); const status = document.querySelector('#persistence-status')?.textContent ?? ''; return document.activeElement === review && status.includes(${JSON.stringify(title)}) && status.includes(${JSON.stringify(internalNumber)}) && !status.includes(${JSON.stringify(bookId)}); })()`,
     'existing-book-relationship-review-focus',
   );
   await clickExactButton(renderer, '复核导入到所选图书', 'existing-book-review-click');
