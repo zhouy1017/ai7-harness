@@ -1,5 +1,5 @@
 ---
-status: accepted by the Owner on 2026-10-12; implementation and runtime-policy activation are separate
+status: accepted by the Owner on 2026-10-12; implementation and runtime-policy activation are separate; amended by the Owner on 2026-10-28 to close Owner direct-merged slices by their merge record
 date: 2026-10-12
 deciders: Owner
 ---
@@ -20,7 +20,7 @@ The model/effort table is deliberately not copied here or into templates.
 
 The Commander splits and assigns work with balanced use of the ChatGPT, Claude and OpenCode Go subscriptions. Every coding Worker has an approved different-subscription Reviewer whose capability pairing is equal or higher. Different models on Go remain the same subscription channel.
 
-The Worker implements, tests and opens a PR to the wave integration branch. After a single-writer handoff, the Reviewer reviews, repairs, tests and merges that slice. The Commander owns ordering, cumulative validation and final wave integration into dev. The protected main/release line remains separate.
+The Worker implements, tests and opens a PR to the wave integration branch. After a single-writer handoff, the Reviewer reviews, repairs, tests and merges that slice. The Commander owns ordering, cumulative validation and final wave integration into dev. The protected main/release line remains separate. Under the Owner's direct-merge authorization (Owner, 2026-10-28), a slice merged into the wave branch by a maintain/admin account without receipts is closed in the integration completion as a direct merge and verified by its merge record; the candidate's own completion and Full Gate release are unchanged.
 
 This replaces fixed old model bindings, the optional read-only Reviewer, Worker prohibitions on creating PRs and the Commander's former monopoly on every external action. It lifts the ADR 0082 dispatch hold as the new rulebook integrates; operational dispatch still requires a verified Orca runtime; product waves require the CI adaptation of [#806](https://github.com/zhouy1017/ai7-harness/issues/806). The infrastructure bootstrap for #806 itself follows rulebook §2 and does not wait on its own completion. An unavailable runtime is a disclosed prerequisite, not permission to call a different mechanism Orca.
 
