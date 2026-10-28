@@ -22,11 +22,17 @@ export {
   REVIEW_REPORT_HEADING,
   REVIEW_REPORT_NO_MUST_ITEMS,
   REVIEW_REPORT_OVERVIEW_COLUMNS,
+  REVIEW_REPORT_STATISTICS_CHAPTER,
+  REVIEW_REPORT_TOTAL,
   reviewCountsLine,
   reviewReportAppendixLine,
   reviewReportConfigurationLine,
   reviewReportExcludedLine,
+  reviewReportFindingHeading,
+  reviewReportFindingLines,
   reviewReportMustItemLine,
+  reviewReportOmittedLine,
+  reviewReportTotalsLine,
   reviewReportVersionLine,
 } from '../shared/report-wording.js';
 

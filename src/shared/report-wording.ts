@@ -1,4 +1,5 @@
-import type { ReviewFindingCountsProjection } from './protocol.js';
+import { SOURCE_TRANSLATION_LABEL } from './protocol.js';
+import type { EvidenceSourceCardProjection, ResearchEvidenceProjection, ReviewEvidenceSource, ReviewFindingCountsProjection } from './protocol.js';
 
 /**
  * The words a 审阅报告 is written in (V2-UX-REV-009), on screen and in the file it exports to (Issue #500, S64b
@@ -61,4 +62,69 @@ export function reviewReportAppendixLine(category: {
     ? '没有规范文件'
     : category.guidelineDocuments.map((document) => `${document.issuer} · ${document.title}（第 ${document.version} 版）`).join('、');
   return `${category.label}：${documents}；工序：${category.procedure.title}（第 ${category.procedure.version} 版）`;
+}
+
+// ---- a factual finding's sources (ADR 0095 §5; Issue #1174) ---------------------------------------------------
+
+export const REVIEW_REPORT_STATISTICS_CHAPTER = '章节';
+export const REVIEW_REPORT_TOTAL = '合计';
+
+/** 概览表's line for the whole Run in a /2 record. */
+export function reviewReportTotalsLine(counts: ReviewFindingCountsProjection): string {
+  return `全部发现：${reviewCountsLine(counts)}`;
+}
+export const FINDING_EVIDENCE_HEADING = '来源';
+export const FINDING_EVIDENCE_SNIPPET = '摘录';
+export const FINDING_EVIDENCE_IN_BOOK = '书内资料';
+
+/**
+ * The sources a factual finding's card and its 审阅报告 row list: the result's own source cards less the ones the editor
+ * excluded, each joined by `evidenceId` to the retained row 来源与证据 archives for its 来源译文. Only an exact excerpt is
+ * quoted (EVID-004); the note is the card's own check state and relation. Pure, so the card and the file say the same.
+ */
+export function findingEvidenceSources(cards: ReadonlyArray<EvidenceSourceCardProjection>, retained: ReadonlyArray<ResearchEvidenceProjection>): ReviewEvidenceSource[] {
+  const rows = new Map(retained.map((record) => [record.evidenceId, record] as const));
+  return cards.filter((card) => card.excluded !== true).map((card) => {
+    const row = card.evidenceId === null ? undefined : rows.get(card.evidenceId);
+    const url = card.sourceKind === 'web' ? card.sourceRef : null;
+    let host: string | null = null;
+    try { host = url === null ? null : new URL(url).hostname; } catch { host = url; }
+    return {
+      name: card.title?.trim() || row?.sourceTitle?.trim() || host || FINDING_EVIDENCE_IN_BOOK,
+      url,
+      snippet: card.excerpt,
+      translation: row?.translation?.state === 'translated' ? row.translation.text : null,
+      note: `${card.checkLabel} · ${card.relation}`,
+      evidenceId: card.evidenceId,
+    };
+  });
+}
+
+/** A merged 发现详单 row's heading: its categories, severity and status, then where it stands. */
+export function reviewReportFindingHeading(index: number, entry: { categoryLabels: ReadonlyArray<string>; severityLabel: string; statusLabel: string }): string {
+  return `第 ${index} 条 · ${entry.categoryLabels.join('、')} · ${entry.severityLabel} · ${entry.statusLabel}`;
+}
+
+/** The lines under a 发现详单 row's heading: place, quotation, suggested text when there is one, and reason. */
+export function reviewReportFindingLines(entry: { chapterLabel: string; locationLabel: string; quote: string; suggestedText: string | null; reason: string }): string[] {
+  return [
+    entry.chapterLabel.length === 0 ? entry.locationLabel : `${entry.chapterLabel} · ${entry.locationLabel}`,
+    `引文：「${entry.quote}」`,
+    ...(entry.suggestedText === null ? [] : [`建议改为：${entry.suggestedText.length === 0 ? '（删去）' : `「${entry.suggestedText}」`}`]),
+    `理由：${entry.reason}`,
+  ];
+}
+
+/** 「另有 3 条发现未列入详单；每一条仍在审阅的卡片上。」, or `null` when every row is listed. */
+export function reviewReportOmittedLine(omitted: number): string | null {
+  return omitted === 0 ? null : `另有 ${omitted} 条发现未列入详单；每一条仍在审阅的卡片上。`;
+}
+
+/** A source's words after its name: the verification note, its excerpt and its 来源译文. */
+export function findingEvidenceLines(source: ReviewEvidenceSource): string[] {
+  return [
+    source.note,
+    ...(source.snippet === null ? [] : [`${FINDING_EVIDENCE_SNIPPET}：「${source.snippet}」`]),
+    ...(source.translation === null ? [] : [`${SOURCE_TRANSLATION_LABEL}：${source.translation}`]),
+  ];
 }

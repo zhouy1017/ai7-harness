@@ -318,11 +318,11 @@ describe('the words of 发稿', () => {
       retention: key.startsWith('document:') ? { preserved: [words(150)], rebuilt: [words(450)], excluded: [words(350)] } : null,
       retentionSummary: key.startsWith('document:') ? words(220) : null,
     });
-    // The 发稿版本 and the five house types carry the manuscript's classes; every other listed file is a report's four.
+    // The 发稿版本 and the five house types carry the manuscript's classes; every other listed file is a /2 report's six (Issue #1174).
     const files = [
       ...Array.from({ length: 6 }, (_, index) => file(`document:${index}`, manuscriptKeys)),
       ...Array.from({ length: MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED - 6 }, (_, index) => file(`report:${index}`,
-        ['report-overview', 'report-must-items', 'report-summaries', 'report-appendix'])),
+        ['report-overview', 'report-must-items', 'report-statistics', 'report-findings', 'report-summaries', 'report-appendix'])),
     ];
     const answer: BookDeliveryPackageExportReviewProjection = {
       bookId: identity, packageVersionId: identity, versionLabel: 'v9999999', options: { includeAnnotations: true, includeSuggestions: true },

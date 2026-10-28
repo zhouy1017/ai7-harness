@@ -66,6 +66,7 @@ import {
   type ReviewFindingSeverity,
   type ReviewFindingStatus,
   type ReviewReportProjection,
+  type ReviewEvidenceSource,
   type ReviewReportRecord,
   type ReviewRunCategoryPlanProjection,
   type ReviewRunCategoryProjection,
@@ -121,7 +122,8 @@ import {
 } from './category-configuration.js';
 import { reviewBaselineSource, reviewLeadBody, reviewLeadsOf } from './review-leads.js';
 import { resolveSeriesConsistency, seriesConsistencyEntry, seriesKnowledgePinsCurrent, freezeSeriesScope, seriesKnowledgeAllowed, frozenSeriesScopes, seriesScopeMaterials, seriesScopeChanged, SERIES_POLICY_CLOSED, type SeriesKnowledgeReadings } from './series-consistency.js';
-import { buildReviewReport, reportQuote, reviewFindingCounts } from './review-report.js';
+import { REVIEW_REPORT_SCHEMAS, buildReviewReport, reportChapterOf, reportQuote, reviewFindingCounts } from './review-report.js';
+export { reviewRunEvidence } from './report-evidence.js';
 import {
   REVIEW_CATEGORY_PLACE_WAIT_DETAIL,
   TERMINAL_CATEGORY_EVENTS,
@@ -3341,12 +3343,15 @@ export class ReviewRunStore {
 
   // ---- the Report (B8) ----------------------------------------------------------------------------
 
-  /** Record the next version of the Run's 审阅报告, over what stands now. */
-  generateReport(bookId: string, reviewRunId: string): void {
+  /** Record the next version of the Run's 审阅报告, over what stands now, with the sources its factual cards list. */
+  generateReport(bookId: string, reviewRunId: string, evidence: () => ReadonlyMap<string, ReadonlyArray<ReviewEvidenceSource>> = () => new Map()): void {
     const snapshot = this.#runOfBook(bookId, reviewRunId);
     const view = this.#runView(snapshot);
     requireReview(view.authorization !== null, 'REVIEW_REPORT_UNAVAILABLE', '这次审阅尚未授权，还没有可以报告的结果。');
     requireReview(!view.driving, 'REVIEW_REPORT_UNAVAILABLE', '审阅进行中；结束后再生成报告。');
+    const sources = view.findings.some((finding) => finding.categoryId === 'factual-review') ? evidence() : new Map<string, ReadonlyArray<ReviewEvidenceSource>>();
+    const head = this.#head(bookId);
+    const chapters = head === null ? [] : this.#chapterOptions(bookId, head).chapters;
     transact(this.#db, () => {
       const last = this.#db.prepare('SELECT max(version) last FROM review_reports WHERE review_run_id = ?').get(reviewRunId) as SqlRow;
       const version = last.last === null ? 1 : integer(last.last) + 1;
@@ -3395,6 +3400,10 @@ export class ReviewRunStore {
           quote: finding.quote,
           note: finding.note,
           locationLabel: finding.blockPosition === null ? '内容块已不在当前稿件中' : `内容块 ${finding.blockPosition}`,
+          place: { blockId: finding.blockId, position: finding.blockPosition, fromGrapheme: finding.fromGrapheme, toGrapheme: finding.toGrapheme },
+          replacement: finding.replacement,
+          chapter: reportChapterOf(chapters, finding.blockPosition),
+          sources: sources.get(finding.findingId) ?? [],
         })),
       });
       // Named as the report names a finding elsewhere (its category and place), never by an internal identity alone.
@@ -3412,7 +3421,7 @@ export class ReviewRunStore {
   #reports(reviewRunId: string): ReviewReportProjection[] {
     return (this.#db.prepare('SELECT * FROM review_reports WHERE review_run_id = ? ORDER BY version').all(reviewRunId) as SqlRow[]).map((row) => {
       const record = recordOf(text(row.canonical_json), text(row.sha256)) as unknown as ReviewReportRecord;
-      requireReview(record.schema === 'ai7.review.report/1' && record.version === integer(row.version), 'REVIEW_RECORD_INVALID', '审阅报告记录无效。');
+      requireReview(REVIEW_REPORT_SCHEMAS.includes(record.schema) && record.version === integer(row.version), 'REVIEW_RECORD_INVALID', '审阅报告记录无效。');
       return { reportId: text(row.report_id), version: integer(row.version), generatedAt: text(row.generated_at), digest: text(row.sha256), record };
     });
   }

@@ -861,6 +861,12 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(report.record.mustItems.items.map((item) => item.findingId).sort()).toEqual(must.map((finding) => finding.findingId).sort());
       expect(report.record.mustItems.items.every((item) => graphemeCount(item.quote) <= 80 && item.locationLabel.startsWith('内容块 '))).toBe(true);
       expect(report.record.overview.rows.find((row) => row.categoryId === TYPOS)!.counts).toMatchObject({ handled: 1, ignored: 1 });
+      // Version /2 (Issue #1174): the chapter table counts each finding once, by position, and the 发现详单 lists each place once.
+      expect(report.record.schema).toBe('ai7.review.report/2');
+      expect(report.record.statistics!.total).toBe(report.record.overview.rows.reduce((total, row) => total + row.counts.must + row.counts.should + row.counts.note, 0));
+      expect(report.record.statistics!.rows.every((row) => /^(章节 \d+（内容块 \d+(–\d+)?）|章节之外|内容块已不在当前稿件中)$/u.test(row.label))).toBe(true);
+      expect(report.record.findings!.omitted).toBe(0);
+      expect(new Set(report.record.findings!.entries.flatMap((entry) => entry.findingIds)).size).toBe(report.record.statistics!.total);
       expect(report.record.appendix.categories.map((category) => [category.categoryId, category.procedure.version, category.guidelineDocuments[0]!.version]))
         .toEqual([[TYPOS, '1', '1'], [STYLE, '2', '1']]);
       expect(report.record.appendix.categories[0]!.adapterPin).toMatchObject({ route: 'ai7-local-deterministic', fixtureIdentity: 'sample1-review-cross-chapter-authored' });
@@ -2060,7 +2066,8 @@ describe('the 审阅报告 exported in the manuscript\'s formats (Issue #500, S6
       expect(docx.formats).toEqual(REPORT_EXPORT_FORMATS);
       const must = report.record.mustItems.items.length;
       expect(docx.fidelity.map((row) => `${row.key}:${row.status}:${row.count}`)).toEqual([
-        'report-overview:preserved:2', `report-must-items:preserved:${must}`, 'report-summaries:preserved:2', 'report-appendix:preserved:3',
+        'report-overview:preserved:2', `report-must-items:preserved:${must}`, `report-statistics:preserved:${report.record.statistics!.rows.length + 1}`,
+        `report-findings:preserved:${report.record.findings!.entries.length}`, 'report-summaries:preserved:2', 'report-appendix:preserved:3',
       ]);
       expect((await review('markdown')).fidelity[0]).toMatchObject({ key: 'report-overview', status: 'degraded' });
 
@@ -2085,8 +2092,10 @@ describe('the 审阅报告 exported in the manuscript\'s formats (Issue #500, S6
       };
       const written = await exported('docx', '审阅报告.docx');
       const documentXml = strFromU8(unzipSync(written)['word/document.xml']!);
-      expect(documentXml.match(/<w:tbl>/gu)?.length).toBe(1);
+      // A /2 record writes 概览表 and 章节与类别统计 as Word tables (Issue #1174).
+      expect(documentXml.match(/<w:tbl>/gu)?.length).toBe(2);
       expect(documentXml).toContain('>概览表<');
+      expect(documentXml).toContain('>章节与类别统计<');
       const markdown = (await exported('markdown', '审阅报告.md')).toString('utf8');
       expect(markdown.startsWith('# L2 sample1 审阅记录 · 审阅报告\n\n第 1 次审阅 · ')).toBe(true);
       expect(markdown).toContain('\n\n## 概览表\n\n| 类别 | 状态 | 发现 |\n| --- | --- | --- |\n');
