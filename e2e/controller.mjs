@@ -940,6 +940,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     // Correction Proposal that keeps 证据核查未完成.
     'factual-level-plan',
     'factual-evidence-workspace',
+    // Issue #1174: the factual finding's review card and mark card list the result's sources.
+    'factual-card-evidence',
     'factual-review-decision',
     'factual-correction-proposal',
     // Issue #922 (slice 7f): a 自定义分析维度 written in 知识库 › 工序与规则, run from ②A's 自定义 tab, its answers read there.
