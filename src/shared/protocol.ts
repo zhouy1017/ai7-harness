@@ -1,5 +1,7 @@
 import type { GlobalAgentOperations, GlobalAgentRendererApi } from './protocol/global-agent.js';
 import type { HouseWordListOperations, HouseWordListApi } from './protocol/house-word-list.js';
+import type { JournalEditInput } from './protocol/manuscript-structure.js';
+export type { JournalEditInput, JournalStructuralEdit } from './protocol/manuscript-structure.js';
 export * from './protocol/global-agent.js';
 export type { ReviewContractIdentity, ReviewExcludedFindingProjection, ReviewContractRejectionReason, ReviewEvidenceSource, ReviewReportSchema, ReviewReportDerivedSections, ReviewReportFindingEntry } from './protocol/review.js';
 import type { ReviewExcludedFindingProjection, ReviewContractRejectionReason, ReviewReportSchema, ReviewReportDerivedSections } from './protocol/review.js';
@@ -129,7 +131,7 @@ import type { PublicSampleBookSourceDigest } from './public-samplebooks.js';
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 180 as const;
+export const SERVICE_PROTOCOL_VERSION = 181 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 export interface BookFindingProjection {
@@ -11725,20 +11727,6 @@ export type ContinueImportProjection =
   | { state: 'reselection-required'; recovery: ImportDraftRecoveryProjection }
   | { state: 'outcome-uncertain'; recovery: ImportDraftRecoveryProjection }
   | { state: 'committed-recovered'; result: ImportCommitProjection };
-
-export interface JournalEditInput {
-  clientEditId: string;
-  manuscriptId: string;
-  branchId: string;
-  baseRevisionId: string;
-  blockId: string;
-  windowStartBlockId: string;
-  baseBlockDigest: string;
-  expectedJournalSequence: number;
-  fromGrapheme: number;
-  toGrapheme: number;
-  insertText: string;
-}
 
 export interface JournalAcknowledgement {
   clientEditId: string;

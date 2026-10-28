@@ -13,6 +13,14 @@ import { HOUSE_REVIEW_PREFERENCE_FOREIGN_KEYS, HOUSE_REVIEW_PREFERENCE_SCHEMA_SQ
 import { TASK_INTENT_DRAFT_FOREIGN_KEYS, TASK_INTENT_DRAFT_SCHEMA_SQL, TASK_INTENT_DRAFT_TRIGGER_SQL } from './task-intent-drafts.js';
 import { CUSTOM_ANALYSIS_DIMENSION_FOREIGN_KEYS, CUSTOM_ANALYSIS_DIMENSION_SCHEMA_SQL, CUSTOM_ANALYSIS_DIMENSION_TRIGGER_SQL } from './custom-analysis-dimensions.js';
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { BoundedStoreError, BoundedStoreFatalError, requireBounded, one, asString, asNumber, canonicalJson, sha256, graphemes, fenwickSpan, appendOffsetSegment,
+  lastWorkingPosition, workingOffsetPrefix, updateWorkingOffsetNodes, transact, stagedBlockLength, UUID_PATTERN, DIGEST_PATTERN, BLOCK_PATTERN,
+  HISTORY_BATCH, MIGRATION_BATCH, type OffsetSegment } from './manuscript/bounded-kernel.js';
+import { STRUCTURAL_EDIT_FOREIGN_KEYS, STRUCTURAL_EDIT_SCHEMA_SQL } from './manuscript/structural-schema.js';
+import { historyStale, isStructuralGroup, journalHasStructuralEdits, replayStructuralGroup, verifyStructuralReconstruction, writeStructuralEdit } from './manuscript/structural-edits.js';
+import { blockDigest, CommandEvidenceReader, recoveryCommandEvidenceDigest, recoveryWorkingDigest, validateCommandHistoryGroup, type CommandEvidenceHeader, type CommandEvidenceMember } from './manuscript/command-history.js';
+export { BoundedStoreError, BoundedStoreFatalError } from './manuscript/bounded-kernel.js';
+export type { CommandEvidenceHeader, CommandEvidenceMember } from './manuscript/command-history.js';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import {
   acceptedSourceImportRetainedBoundaryLabels,
@@ -379,9 +387,6 @@ const PRE_17_ANALYSIS_LEDGER_TRIGGER_SQL: Readonly<Record<string, string>> = Obj
     !ANALYSIS_LEDGER_REVISION_17_TABLES.some((table) => name === `${table}_no_update` || name === `${table}_no_delete`)),
 );
 
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
-const BLOCK_PATTERN = /^blk_[0-9a-f]{24}$/;
 const CONTINUITY_SCHEMA_VERSION = 5;
 const EDITOR_SCHEMA_VERSION = 6;
 const RECOVERY_SCHEMA_VERSION = 7;
@@ -391,9 +396,7 @@ const MANUSCRIPT_REIMPORT_SCHEMA_VERSION = 10;
 const MODEL_SERVICE_SCHEMA_VERSION = 11;
 const NATIVE_ARTIFACT_SCHEMA_VERSION = 12;
 const AUTHORITY_SIDECAR_SCHEMA_VERSION = 13;
-const MIGRATION_BATCH = 256;
 const SEARCH_BATCH = 128;
-const HISTORY_BATCH = 128;
 const WINDOW_STRIDE = Math.floor(MAX_WINDOW_BLOCKS / 2);
 const MAX_RETAINED_TRANSIENT_SEARCHES = 32;
 const MAX_RETAINED_REPLACEMENT_PREVIEWS = 8;
@@ -2106,6 +2109,7 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   ...IMPORTED_SKILL_UPDATE_FOREIGN_KEYS,
   ...PROCEDURE_DEFINITION_FOREIGN_KEYS,
   ...EDITABLE_PROCEDURE_FOREIGN_KEYS,
+  ...STRUCTURAL_EDIT_FOREIGN_KEYS,
   ...EVALUATION_PROFILE_FOREIGN_KEYS,
   editorial_workspace_profile_sidecar_revisions: [
     'native_artifact_id>native_artifact_installations.artifact_id:NO ACTION/NO ACTION/NONE',
@@ -2324,20 +2328,6 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   ],
 };
 
-export class BoundedStoreError extends Error {
-  constructor(readonly code: string, message: string) {
-    super(message);
-    this.name = 'BoundedStoreError';
-  }
-}
-
-export class BoundedStoreFatalError extends Error {
-  constructor(cause: unknown) {
-    super('Bounded SQLite transaction rollback failed.', { cause });
-    this.name = 'BoundedStoreFatalError';
-  }
-}
-
 /**
  * The Edit Journal write-failure injection (Issue #951, wave 12 slice 12a; T0-1): process-local, so a restart starts it
  * `off`. Unarmed — every launch but J-02's armed one — it refuses to change and never fires. Armed, `fail-next` refuses the
@@ -2372,25 +2362,6 @@ export class EditJournalFaultInjection {
 export function journalWriteUnderFault<T>(fault: EditJournalFaultInjection, write: () => T): T {
   fault.beforeJournalWrite();
   return write();
-}
-
-function requireBounded(condition: unknown, code: string, message: string): asserts condition {
-  if (!condition) throw new BoundedStoreError(code, message);
-}
-
-function one(rows: SqlRow[], code: string, message: string): SqlRow {
-  requireBounded(rows.length === 1, code, message);
-  return rows[0]!;
-}
-
-function asString(value: SQLOutputValue | undefined): string {
-  requireBounded(typeof value === 'string' && value.isWellFormed(), 'STORE_CORRUPT', '持久化记录类型无效。');
-  return value;
-}
-
-function asNumber(value: SQLOutputValue | undefined): number {
-  requireBounded(typeof value === 'number' && Number.isSafeInteger(value), 'STORE_CORRUPT', '持久化数字无效。');
-  return value;
 }
 
 function canonicalSchemaSql(sql: string): string {
@@ -2870,6 +2841,7 @@ function requireManuscriptReimportTargetSchema(
   const includeImportedSkillUpdateTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || committed(IMPORTED_SKILL_UPDATE_SCHEMA_SQL);
   // Revision 85 (Issue #1081, F-26a; ADR 0095 §1): the pre-installed Procedure Definition versions and the plans' sibling pins.
   const includeEditableProcedures = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= 98 || committed(EDITABLE_PROCEDURE_SCHEMA_SQL);
+  const includeStructuralEdits = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= 100 || committed({ manuscript_block_lineage: '' });
   const includeProcedureDefinitions = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= PROCEDURE_DEFINITION_SCHEMA_VERSION || committed(PROCEDURE_DEFINITION_SCHEMA_SQL);
   requireExactSchema(
     db,
@@ -3049,6 +3021,8 @@ function requireManuscriptReimportTargetSchema(
       ...(includeImportedSkillUpdateTables ? IMPORTED_SKILL_UPDATE_SCHEMA_SQL : {}),
       ...(includeProcedureDefinitions ? PROCEDURE_DEFINITION_SCHEMA_SQL : {}),
       ...(includeEditableProcedures ? { ...EDITABLE_PROCEDURE_SCHEMA_SQL, procedure_plan_pins: PROCEDURE_PLAN_PINS_V2_SQL } : {}),
+      // Revision 100 (Issue #1175) rebuilds the two command relations beside the lineage relation it adds.
+      ...(includeStructuralEdits ? STRUCTURAL_EDIT_SCHEMA_SQL : {}),
     },
     // The partial index that keeps one primary Manuscript per Book stands with the rebuilt relation, whatever the version.
     {
@@ -3138,18 +3112,6 @@ function requireV7TargetSchema(db: DatabaseSync): void {
 
 function requireV6TargetSchema(db: DatabaseSync): void {
   requireExactSchema(db, FULL_V6_TARGET_SCHEMA_SQL, V6_TARGET_INDEX_SQL, true);
-}
-
-function canonicalJson(value: unknown): string {
-  if (typeof value === 'string') requireBounded(value.isWellFormed(), 'CANONICAL_VALUE_INVALID', '无法形成规范摘要。');
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
-  if (value !== null && typeof value === 'object') {
-    return `{${Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b))
-      .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(',')}}`;
-  }
-  const encoded = JSON.stringify(value);
-  requireBounded(encoded !== undefined, 'CANONICAL_VALUE_INVALID', '无法形成规范摘要。');
-  return encoded;
 }
 
 function validateWorkflowSemanticTruth(db: DatabaseSync, profile: BuiltInWorkflowProfile): void {
@@ -3500,69 +3462,6 @@ function validateSourceImportRecordTruth(db: DatabaseSync): void {
   requireBounded(invalidAttempts.length === 0, 'SCHEMA_INVALID', '导入提交尝试类型与草稿或提交不一致。');
 }
 
-function sha256(value: string): string {
-  return createHash('sha256').update(value).digest('hex');
-}
-
-const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' });
-
-function graphemes(text: string): string[] {
-  return Array.from(segmenter.segment(text), ({ segment }) => segment);
-}
-
-interface OffsetSegment {
-  size: number;
-  total: number;
-}
-
-function fenwickSpan(position: number): number {
-  requireBounded(Number.isSafeInteger(position) && position > 0, 'OFFSET_INDEX_INVALID', '稿件偏移索引位置无效。');
-  let remainder = position;
-  let span = 1;
-  while (remainder % 2 === 0) {
-    remainder /= 2;
-    span *= 2;
-  }
-  return span;
-}
-
-function appendOffsetSegment(stack: OffsetSegment[], position: number, length: number): number {
-  requireBounded(Number.isSafeInteger(length) && length >= 0, 'OFFSET_INDEX_INVALID', '稿件偏移索引长度无效。');
-  let segment: OffsetSegment = { size: 1, total: length };
-  while (stack.at(-1)?.size === segment.size) {
-    const previous = stack.pop()!;
-    const total = previous.total + segment.total;
-    requireBounded(Number.isSafeInteger(total), 'OFFSET_INDEX_INVALID', '稿件偏移索引总量无效。');
-    segment = { size: segment.size * 2, total };
-  }
-  requireBounded(segment.size === fenwickSpan(position), 'OFFSET_INDEX_INVALID', '稿件偏移索引范围无效。');
-  stack.push(segment);
-  return segment.total;
-}
-
-function lastWorkingPosition(db: DatabaseSync, branchId: string): number {
-  const row = db.prepare(
-    'SELECT position FROM working_blocks WHERE branch_id = ? ORDER BY position DESC LIMIT 1',
-  ).get(branchId) as SqlRow | undefined;
-  requireBounded(row !== undefined, 'WINDOW_NOT_FOUND', '稿件窗口为空。');
-  return asNumber(row.position);
-}
-
-function workingOffsetPrefix(db: DatabaseSync, branchId: string, throughPosition: number): number {
-  requireBounded(Number.isSafeInteger(throughPosition) && throughPosition >= 0, 'OFFSET_INDEX_INVALID', '稿件偏移查询位置无效。');
-  let position = throughPosition;
-  let total = 0;
-  const read = db.prepare('SELECT span_graphemes FROM working_offset_nodes WHERE branch_id = ? AND position = ?');
-  while (position > 0) {
-    const row = read.get(branchId, position) as SqlRow | undefined;
-    requireBounded(row !== undefined, 'OFFSET_INDEX_INVALID', '稿件偏移索引节点缺失。');
-    total += asNumber(row.span_graphemes);
-    requireBounded(Number.isSafeInteger(total), 'OFFSET_INDEX_INVALID', '稿件偏移查询总量无效。');
-    position -= fenwickSpan(position);
-  }
-  return total;
-}
-
 function workingOffsetBefore(db: DatabaseSync, branchId: string, position: number): number {
   requireBounded(Number.isSafeInteger(position) && position > 0, 'OFFSET_INDEX_INVALID', '稿件偏移查询位置无效。');
   return workingOffsetPrefix(db, branchId, position - 1);
@@ -3602,33 +3501,6 @@ function resolveWorkingCharacter(
   }
   requireBounded(position < totalBlocks, 'OFFSET_INDEX_INVALID', '全稿字符位置无法解析。');
   return { position: position + 1, startCharacter: prefix };
-}
-
-function updateWorkingOffsetNodes(db: DatabaseSync, branchId: string, position: number, delta: number): number {
-  requireBounded(Number.isSafeInteger(delta), 'OFFSET_INDEX_INVALID', '稿件偏移变化无效。');
-  if (delta === 0) return 0;
-  const totalBlocks = lastWorkingPosition(db, branchId);
-  requireBounded(position <= totalBlocks, 'OFFSET_INDEX_INVALID', '稿件偏移更新位置无效。');
-  const update = db.prepare(
-    'UPDATE working_offset_nodes SET span_graphemes = span_graphemes + ? WHERE branch_id = ? AND position = ?',
-  );
-  let nodePosition = position;
-  let changes = 0;
-  while (nodePosition <= totalBlocks) {
-    requireBounded(
-      update.run(delta, branchId, nodePosition).changes === 1,
-      'OFFSET_INDEX_INVALID',
-      '稿件偏移索引节点无法更新。',
-    );
-    changes += 1;
-    nodePosition += fenwickSpan(nodePosition);
-  }
-  requireBounded(
-    changes <= Math.ceil(Math.log2(totalBlocks)) + 1,
-    'OFFSET_INDEX_INVALID',
-    '稿件偏移索引更新超出对数边界。',
-  );
-  return changes;
 }
 
 function encodedJsonStringBytes(text: string): number {
@@ -3711,115 +3583,6 @@ function boundedSearchContext(text: ReadonlyArray<string>, from: number, to: num
   return context;
 }
 
-function blockDigest(kind: ManuscriptBlockProjection['kind'], level: number | null, text: string): string {
-  return sha256(canonicalJson({ kind, level, text }));
-}
-
-/** The canonical header `ai7.recovery-command-evidence/1` hashes before a command group's members. */
-export interface CommandEvidenceHeader {
-  readonly schema: 'ai7.recovery-command-evidence/1';
-  readonly groupId: string;
-  readonly branchId: string;
-  readonly ordinal: number;
-  readonly kind: 'edit' | 'replacement';
-  readonly sourceGroupId: string | null;
-}
-
-/** One member of a command group exactly as its evidence hashes it: the block's whole text before and after. */
-export interface CommandEvidenceMember {
-  readonly position: number;
-  readonly blockId: string;
-  readonly beforeText: string;
-  readonly beforeDigest: string;
-  readonly afterText: string;
-  readonly afterDigest: string;
-}
-
-/**
- * The one reading of a command group's immutable evidence (Issue #1140). The group is validated whole first; then its
- * canonical header and every member, in position order and in storage batches, pass through the
- * `ai7.recovery-command-evidence/1` digest as they are read. The working-state chain keeps only that digest; the manual
- * source reader also keeps the members of the page it is packing, so the page and the digest that proves it come from
- * one pass over the group.
- */
-class CommandEvidenceReader {
-  readonly header: CommandEvidenceHeader;
-  readonly #db: DatabaseSync;
-  readonly #digest = createHash('sha256');
-  #position = 0;
-  #count = 0;
-  #exhausted = false;
-
-  constructor(db: DatabaseSync, groupId: string) {
-    validateCommandHistoryGroup(db, groupId);
-    const group = one(db.prepare(
-      `SELECT branch_id, ordinal, kind, source_group_id
-       FROM manuscript_command_groups WHERE command_group_id = ?`,
-    ).all(groupId) as SqlRow[], 'HISTORY_CORRUPT', '恢复命令证据缺失。');
-    this.#db = db;
-    this.header = {
-      schema: 'ai7.recovery-command-evidence/1',
-      groupId,
-      branchId: asString(group.branch_id),
-      ordinal: asNumber(group.ordinal),
-      kind: asString(group.kind) as CommandEvidenceHeader['kind'],
-      sourceGroupId: group.source_group_id === null ? null : asString(group.source_group_id),
-    };
-    this.#digest.update(canonicalJson(this.header));
-  }
-
-  /** The next storage batch of members, each already hashed; empty once the last member has been read. */
-  nextBatch(): CommandEvidenceMember[] {
-    if (this.#exhausted) return [];
-    const edits = this.#db.prepare(
-      `SELECT position, block_id, before_text, before_digest, after_text, after_digest
-       FROM manuscript_command_edits
-       WHERE command_group_id = ? AND position > ? ORDER BY position LIMIT ?`,
-    ).all(this.header.groupId, this.#position, HISTORY_BATCH) as SqlRow[];
-    if (edits.length === 0) {
-      this.#exhausted = true;
-      return [];
-    }
-    return edits.map((edit) => {
-      this.#position = asNumber(edit.position);
-      const member: CommandEvidenceMember = {
-        position: this.#position,
-        blockId: asString(edit.block_id),
-        beforeText: asString(edit.before_text),
-        beforeDigest: asString(edit.before_digest),
-        afterText: asString(edit.after_text),
-        afterDigest: asString(edit.after_digest),
-      };
-      this.#digest.update(canonicalJson(member));
-      this.#count += 1;
-      return member;
-    });
-  }
-
-  /** Reads whatever members remain, then the whole group's digest and member count. */
-  finish(): { memberCount: number; digest: string } {
-    while (this.nextBatch().length > 0) { /* hashed as read */ }
-    requireBounded(this.#position > 0, 'HISTORY_CORRUPT', '恢复命令证据为空。');
-    return { memberCount: this.#count, digest: this.#digest.digest('hex') };
-  }
-}
-
-function recoveryCommandEvidenceDigest(db: DatabaseSync, groupId: string): string {
-  return new CommandEvidenceReader(db, groupId).finish().digest;
-}
-
-function recoveryWorkingDigest(
-  previous: string,
-  sequence: number,
-  action: 'edit' | 'replacement' | 'undo' | 'redo',
-  groupId: string,
-  evidenceDigest: string,
-): string {
-  return sha256(canonicalJson({
-    schema: 'ai7.recovery-working-digest/1', previous, sequence, action, groupId, evidenceDigest,
-  }));
-}
-
 function stagedBlockId(draftId: string, position: number, digest: string): string {
   return `blk_${sha256(`${draftId}\u0000${position}\u0000${digest}`).slice(0, 24)}`;
 }
@@ -3870,22 +3633,6 @@ function validateShortText(value: string, maximum: number, code: string, message
   const normalized = value.normalize('NFC').trim();
   requireBounded((allowEmpty || normalized.length > 0) && normalized.length <= maximum, code, message);
   return normalized;
-}
-
-function transact<T>(db: DatabaseSync, operation: () => T): T {
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    const result = operation();
-    db.exec('COMMIT');
-    return result;
-  } catch (error) {
-    try {
-      db.exec('ROLLBACK');
-    } catch (rollbackError) {
-      throw new BoundedStoreFatalError(new AggregateError([error, rollbackError], 'SQLite rollback failed.'));
-    }
-    throw error;
-  }
 }
 
 function recreateImportDraftTable(db: DatabaseSync): void {
@@ -3939,21 +3686,6 @@ function recreateRevisionTable(db: DatabaseSync): void {
     ALTER TABLE manuscript_revisions_v3 RENAME TO manuscript_revisions;
     PRAGMA legacy_alter_table = OFF;
   `);
-}
-
-function stagedBlockLength(
-  text: string,
-  code = 'SCHEMA_MIGRATION_FAILED',
-  message = '暂存稿件包含无法按内容块有界校验的文字。',
-): number {
-  requireBounded(
-    text.isWellFormed() && text.length <= MAX_BLOCK_CODE_UNITS,
-    code,
-    message,
-  );
-  const length = graphemes(text).length;
-  requireBounded(length <= MAX_BLOCK_GRAPHEMES, code, message);
-  return length;
 }
 
 function requirePersistedBlockTextBounds(
@@ -4722,80 +4454,6 @@ function validateLegacyHistoryRoots(db: DatabaseSync): void {
   forEachSchemaId(db, 'branch_working_state', 'branch_id', (branchId) => validateLegacyHistoryRoot(db, branchId));
 }
 
-function validateCommandHistoryGroup(db: DatabaseSync, groupId: string): void {
-  requireBounded(UUID_PATTERN.test(groupId), 'HISTORY_CORRUPT', '历史命令组标识无效。');
-  const group = one(
-    db.prepare(
-      'SELECT branch_id, status, before_working_digest, after_working_digest FROM manuscript_command_groups WHERE command_group_id = ?',
-    ).all(groupId) as SqlRow[],
-    'HISTORY_CORRUPT',
-    '历史命令组缺失。',
-  );
-  requireBounded(
-    UUID_PATTERN.test(asString(group.branch_id)) && DIGEST_PATTERN.test(asString(group.before_working_digest)) &&
-      DIGEST_PATTERN.test(asString(group.after_working_digest)),
-    'HISTORY_CORRUPT',
-    '历史命令组绑定摘要无效。',
-  );
-  const oversized = db.prepare(
-    `SELECT position FROM manuscript_command_edits
-     WHERE command_group_id = ? AND (
-       typeof(before_text) <> 'text' OR typeof(after_text) <> 'text' OR
-       length(CAST(before_text AS BLOB)) > ? OR length(CAST(after_text AS BLOB)) > ?
-     ) ORDER BY position LIMIT 1`,
-  ).get(groupId, MAX_BLOCK_CODE_UNITS * 3, MAX_BLOCK_CODE_UNITS * 3) as SqlRow | undefined;
-  requireBounded(oversized === undefined, 'HISTORY_CORRUPT', '历史命令文字超出有界校验范围。');
-  let position = 0;
-  let expectedPosition = 1;
-  while (true) {
-    const rows = db.prepare(
-      `SELECT ce.position, ce.block_id, ce.before_text, ce.before_digest, ce.after_text, ce.after_digest,
-              wb.kind, wb.level, wb.block_id working_block_id
-       FROM manuscript_command_edits ce
-       JOIN manuscript_command_groups cg ON cg.command_group_id = ce.command_group_id
-       LEFT JOIN working_blocks wb ON wb.branch_id = cg.branch_id AND wb.block_id = ce.block_id
-       WHERE ce.command_group_id = ? AND ce.position > ? ORDER BY ce.position LIMIT ?`,
-    ).all(groupId, position, HISTORY_BATCH) as SqlRow[];
-    if (rows.length === 0) break;
-    for (const row of rows) {
-      position = asNumber(row.position);
-      requireBounded(position === expectedPosition, 'HISTORY_CORRUPT', '历史命令内容块顺序或绑定无效。');
-      let kind: ManuscriptBlockProjection['kind'];
-      let level: number | null;
-      if (typeof row.working_block_id === 'string' && typeof row.kind === 'string') {
-        kind = asString(row.kind) as ManuscriptBlockProjection['kind'];
-        level = row.level === null ? null : asNumber(row.level);
-      } else {
-        requireBounded(asString(group.status) === 'superseded', 'HISTORY_CORRUPT', '历史命令内容块顺序或绑定无效。');
-        const shapes = db.prepare(
-          `SELECT kind, level FROM manuscript_block_versions WHERE block_id = ?
-           GROUP BY kind, level ORDER BY kind, level LIMIT 2`,
-        ).all(asString(row.block_id)) as SqlRow[];
-        requireBounded(shapes.length === 1, 'HISTORY_CORRUPT', '已归档历史命令的内容块结构证据无效。');
-        kind = asString(shapes[0]!.kind) as ManuscriptBlockProjection['kind'];
-        level = shapes[0]!.level === null ? null : asNumber(shapes[0]!.level);
-      }
-      const shapeValid =
-        (kind === 'title' && level === 1) ||
-        (kind === 'heading' && level !== null && Number.isSafeInteger(level) && level >= 1 && level <= 6) ||
-        (kind === 'paragraph' && level === null);
-      const beforeText = asString(row.before_text);
-      const afterText = asString(row.after_text);
-      const beforeLength = stagedBlockLength(beforeText, 'HISTORY_CORRUPT', '历史命令文字超出内容块边界。');
-      const afterLength = stagedBlockLength(afterText, 'HISTORY_CORRUPT', '历史命令文字超出内容块边界。');
-      requireBounded(
-        shapeValid && beforeLength <= MAX_BLOCK_GRAPHEMES && afterLength <= MAX_BLOCK_GRAPHEMES &&
-          blockDigest(kind, level, beforeText) === asString(row.before_digest) &&
-          blockDigest(kind, level, afterText) === asString(row.after_digest),
-        'HISTORY_CORRUPT',
-        '历史命令的前后文字与摘要不一致。',
-      );
-      expectedPosition += 1;
-    }
-  }
-  requireBounded(expectedPosition > 1, 'HISTORY_CORRUPT', '历史命令组没有可重放内容。');
-}
-
 function validateAllCommandHistory(db: DatabaseSync): void {
   let cursor: string | undefined;
   while (true) {
@@ -4862,10 +4520,10 @@ function verifyRecoveryJournalReconstruction(
     for (const entry of entries) {
       const sequence = asNumber(entry.sequence);
       const groupId = asString(entry.command_group_id);
-      const action = asString(entry.command_kind) as 'edit' | 'replacement' | 'undo' | 'redo';
+      const action = asString(entry.command_kind) as 'edit' | 'replacement' | 'split' | 'merge' | 'undo' | 'redo';
       requireBounded(
         sequence === journalCursor + 1 && asString(entry.base_revision_id) === checkpointRevisionId &&
-          UUID_PATTERN.test(groupId) && ['edit', 'replacement', 'undo', 'redo'].includes(action),
+          UUID_PATTERN.test(groupId) && ['edit', 'replacement', 'split', 'merge', 'undo', 'redo'].includes(action),
         'RECOVERY_CLASSIFICATION_UNCERTAIN',
         '修订日志的顺序或命令绑定无法精确重建。',
       );
@@ -4902,7 +4560,7 @@ function verifyRecoveryJournalReconstruction(
         const recomputed = recoveryWorkingDigest(chainDigest, sequence, action, groupId, evidenceDigest);
         requireBounded(
           recomputed === asString(entry.resulting_working_digest) &&
-            ((action === 'edit' || action === 'replacement')
+            (action !== 'undo' && action !== 'redo'
               ? asString(group.before_working_digest) === chainDigest && asString(group.after_working_digest) === recomputed
               : true),
           'RECOVERY_CLASSIFICATION_UNCERTAIN',
@@ -4921,6 +4579,10 @@ function verifyRecoveryJournalReconstruction(
     '修订日志链与最近持久工作状态不一致。',
   );
 
+  // Since a split or merge the checkpoint's blocks no longer stand position for position: its owner replays them by identity.
+  if (journalHasStructuralEdits(db, branchId, checkpointSequence, journalSequence)) {
+    return verifyStructuralReconstruction(db, branchId, checkpointRevisionId, checkpointSequence, journalSequence);
+  }
   const checkpointInventory = one(db.prepare(
     'SELECT count(*) total, coalesce(max(position), 0) maximum FROM manuscript_block_versions WHERE revision_id = ?',
   ).all(checkpointRevisionId) as SqlRow[], 'RECOVERY_CLASSIFICATION_UNCERTAIN', '恢复检查点清单缺失。');
@@ -6100,7 +5762,7 @@ export function initializeBoundedSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === 95 || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === 98 || version === LATEST_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === 95 || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === 98 || version === 99 || version === LATEST_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -6151,7 +5813,7 @@ export function initializeBoundedSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === 95 || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === 98 || version === LATEST_SCHEMA_VERSION)) {
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === 95 || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === 98 || version === 99 || version === LATEST_SCHEMA_VERSION)) {
     transact(db, () => {
       if (validateStoreTruth || version !== LATEST_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(
@@ -8113,6 +7775,9 @@ export class BoundedManuscriptStore {
         'EDIT_BLOCK_CHANGED',
         '编辑窗口已变化，请刷新窗口。',
       );
+      // Enter and Backspace at a paragraph's edge (protocol 181, Issue #1175): a structural command, journaled by its owner.
+      if (input.structure !== undefined) return writeStructuralEdit(this.#db, { ...input, structure: input.structure }, fingerprint, serviceLifetimeId,
+        { binding, recordLifetimeWrite: (sequence, digest, at) => this.#recordLifetimeJournalWrite(serviceLifetimeId, binding, sequence, digest, at) });
       const block = one(this.#db.prepare(
         'SELECT position, kind, level, text, digest, grapheme_length FROM working_blocks WHERE branch_id = ? AND block_id = ?',
       ).all(input.branchId, input.blockId) as SqlRow[], 'EDIT_BLOCK_CHANGED', '稳定内容块不存在。');
@@ -8666,8 +8331,8 @@ export class BoundedManuscriptStore {
    * the recovery chain can replay; what makes it an Apply is the Effect Receipt `record` writes inside
    * this same transaction, so the text and its receipt are published together or not at all.
    *
-   * A committed Apply is a history boundary, as a recovery restoration is: plain 撤销 cannot take it
-   * back, because reversing it is a governed Effect of its own (V2-UX-EREC-013, UI ADR 0003).
+   * A committed Apply is an `apply` command (Issue #1175; ADR 0096 §1): plain 撤销 steps over it and never takes it back,
+   * because reversing it is a governed Effect of its own (V2-UX-EREC-013, UI ADR 0003).
    */
   commitExactReplacements<Result>(
     manuscriptId: string,
@@ -8721,7 +8386,7 @@ export class BoundedManuscriptStore {
         `INSERT INTO manuscript_command_groups(
            command_group_id, branch_id, ordinal, kind, status, source_group_id,
            before_working_digest, after_working_digest, created_at
-         ) VALUES (?, ?, ?, 'replacement', 'applied', NULL, ?, ?, ?)`,
+         ) VALUES (?, ?, ?, 'apply', 'applied', NULL, ?, ?, ?)`,
       ).run(groupId, branchId, ordinal, binding.workingDigest, '0'.repeat(64), now);
       const insertEdit = this.#db.prepare(
         `INSERT INTO manuscript_command_edits(
@@ -8822,17 +8487,13 @@ export class BoundedManuscriptStore {
          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, 'replacement', ?)`,
       ).run(randomUUID(), randomUUID(), sha256(canonicalJson({ applyCommandGroupId: groupId })), manuscriptId, branchId,
         binding.revisionId, sequence, firstBlockId!, firstInsert, firstDigest!, workingDigest, now, groupId, serviceLifetimeId);
-      // Everything typed before this point can no longer be undone past it, and the Apply itself never
-      // by 撤销: the history boundary moves to this command.
-      this.#db.prepare(
-        `UPDATE manuscript_command_groups SET status = 'superseded'
-         WHERE branch_id = ? AND ordinal <= ? AND status IN ('applied', 'undone')`,
-      ).run(branchId, ordinal);
+      // The Apply is one more entry of the history (ADR 0096 §1): 撤销 steps over it to what was typed before it, and only a
+      // new command takes away what was undone.
+      this.#db.prepare("UPDATE manuscript_command_groups SET status = 'superseded' WHERE branch_id = ? AND status = 'undone'").run(branchId);
       const state = this.#db.prepare(
-        `UPDATE branch_working_state SET journal_sequence = ?, working_digest = ?, history_sequence = ?,
-           history_boundary_sequence = ?, total_graphemes = total_graphemes + ?
+        `UPDATE branch_working_state SET journal_sequence = ?, working_digest = ?, history_sequence = ?, total_graphemes = total_graphemes + ?
          WHERE branch_id = ? AND journal_sequence = ? AND working_digest = ?`,
-      ).run(sequence, workingDigest, ordinal, ordinal, totalDelta, branchId, binding.journalSequence, binding.workingDigest);
+      ).run(sequence, workingDigest, ordinal, totalDelta, branchId, binding.journalSequence, binding.workingDigest);
       requireBounded(state.changes === 1, 'APPLY_TARGET_DRIFTED', '应用提交时稿件状态已变化。');
       this.#recordLifetimeJournalWrite(serviceLifetimeId, binding, sequence, workingDigest, now);
       return record({
@@ -8988,14 +8649,16 @@ export class BoundedManuscriptStore {
       requireBounded(binding.workingDigest === expectedWorkingDigest, 'HISTORY_STALE', '稿件已变化，请刷新历史状态。');
       const group = one(this.#db.prepare(
         action === 'undo'
-          ? "SELECT * FROM manuscript_command_groups WHERE branch_id = ? AND status = 'applied' AND ordinal > ? ORDER BY ordinal DESC LIMIT 1"
+          ? "SELECT * FROM manuscript_command_groups WHERE branch_id = ? AND status = 'applied' AND kind <> 'apply' AND ordinal > ? ORDER BY ordinal DESC LIMIT 1"
           : "SELECT * FROM manuscript_command_groups WHERE branch_id = ? AND status = 'undone' AND ordinal > ? ORDER BY ordinal ASC LIMIT 1",
       ).all(branchId, binding.historyBoundarySequence) as SqlRow[], action === 'undo' ? 'NOTHING_TO_UNDO' : 'NOTHING_TO_REDO', action === 'undo' ? '没有可撤销的编辑。' : '没有可重做的编辑。');
       const groupId = asString(group.command_group_id);
       validateCommandHistoryGroup(this.#db, groupId);
       let cursor = 0;
       let totalDelta = 0;
-      while (true) {
+      // A split or merge is one step whichever way it goes, and changes no character count (Issue #1175).
+      if (isStructuralGroup(asString(group.kind))) replayStructuralGroup(this.#db, branchId, groupId, asString(group.kind) as 'split' | 'merge', action, binding.journalSequence + 1);
+      while (!isStructuralGroup(asString(group.kind))) {
         const rows = this.#db.prepare(
           `SELECT position, block_id, before_text, before_digest, after_text, after_digest
            FROM manuscript_command_edits WHERE command_group_id = ? AND position > ? ORDER BY position LIMIT ?`,
@@ -9006,9 +8669,10 @@ export class BoundedManuscriptStore {
           const expectedDigest = action === 'undo' ? asString(row.after_digest) : asString(row.before_digest);
           const targetText = action === 'undo' ? asString(row.before_text) : asString(row.after_text);
           const targetDigest = action === 'undo' ? asString(row.before_digest) : asString(row.after_digest);
-          const current = one(this.#db.prepare(
+          const current = this.#db.prepare(
             'SELECT position, kind, level, text, grapheme_length FROM working_blocks WHERE branch_id = ? AND block_id = ?',
-          ).all(branchId, asString(row.block_id)) as SqlRow[], 'HISTORY_STALE', '稿件历史内容块缺失。');
+          ).get(branchId, asString(row.block_id)) as SqlRow | undefined;
+          if (current === undefined) throw historyStale(this.#db, branchId, groupId, [asString(row.block_id)]);
           const kind = asString(current.kind) as ManuscriptBlockProjection['kind'];
           const level = current.level === null ? null : asNumber(current.level);
           const targetLength = graphemes(targetText).length;
@@ -9016,7 +8680,7 @@ export class BoundedManuscriptStore {
           const update = this.#db.prepare(
             'UPDATE working_blocks SET text = ?, digest = ?, grapheme_length = ? WHERE branch_id = ? AND block_id = ? AND digest = ?',
           ).run(targetText, targetDigest, targetLength, branchId, asString(row.block_id), expectedDigest);
-          requireBounded(update.changes === 1, 'HISTORY_STALE', '稿件历史无法在当前状态精确重放。');
+          if (update.changes !== 1) throw historyStale(this.#db, branchId, groupId, [asString(row.block_id)]);
           updateWorkingOffsetNodes(this.#db, branchId, asNumber(current.position), delta);
           this.#refreshBlockIndexes(branchId, asString(row.block_id), asNumber(current.position), kind, level, targetText, targetDigest);
           followBlockTextChangeForMarks(this.#db, branchId, asString(row.block_id), asString(current.text), targetText, binding.journalSequence + 1);
@@ -9612,7 +9276,7 @@ export class BoundedManuscriptStore {
     return this.#db.prepare(
       `SELECT 1 ok FROM manuscript_command_groups g
        JOIN branch_working_state bws ON bws.branch_id = g.branch_id
-       WHERE g.branch_id = ? AND g.status = ? AND g.ordinal > bws.history_boundary_sequence LIMIT 1`,
+       WHERE g.branch_id = ? AND g.status = ? AND g.kind <> 'apply' AND g.ordinal > bws.history_boundary_sequence LIMIT 1`,
     ).get(branchId, state) !== undefined;
   }
 

@@ -528,7 +528,9 @@ export const FACTUAL_CLAIM_SCHEMA_VERSION = 97;
 export const EDITABLE_PROCEDURE_SCHEMA_VERSION = 98;
 /** Revision 99 (Issue #1173): the pre-installed composite 全文审校 v1 row; no relation changes. */
 export const COMPOSITE_PROCEDURE_SCHEMA_VERSION = 99;
-export const LATEST_SCHEMA_VERSION = COMPOSITE_PROCEDURE_SCHEMA_VERSION;
+/** Revision 100 (Issue #1175): structural edit kinds, the Apply kind and block lineage in the command history. */
+export const STRUCTURAL_EDIT_SCHEMA_VERSION = 100;
+export const LATEST_SCHEMA_VERSION = STRUCTURAL_EDIT_SCHEMA_VERSION;
 /** The custom analysis kind family slice 7f brings (ADR 0090 item 4): admitted here so it needs no second rebuild. */
 const CUSTOM_ANALYSIS_KIND_GLOB = 'custom-analysis/[a-z0-9-]*' as const;
 const CUSTOM_ANALYSIS_CONTRACT_VERSION_GLOB = 'ai7.custom-analysis*/[0-9]*' as const;
@@ -3228,7 +3230,7 @@ function initializeCurationSchema(db: DatabaseSync): void {
 
 export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
   if (Number(db.prepare('PRAGMA user_version').get()?.user_version) === LATEST_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
-  if ([FACTUAL_CLAIM_SCHEMA_VERSION, EDITABLE_PROCEDURE_SCHEMA_VERSION].includes(Number(db.prepare('PRAGMA user_version').get()?.user_version))) {
+  if ([FACTUAL_CLAIM_SCHEMA_VERSION, EDITABLE_PROCEDURE_SCHEMA_VERSION, COMPOSITE_PROCEDURE_SCHEMA_VERSION].includes(Number(db.prepare('PRAGMA user_version').get()?.user_version))) {
     db.exec(`PRAGMA user_version = ${LATEST_SCHEMA_VERSION}`);
     return validateTaskAuthorizationSchema(db);
   }
