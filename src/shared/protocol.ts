@@ -1,12 +1,12 @@
 import type { GlobalAgentOperations, GlobalAgentRendererApi } from './protocol/global-agent.js';
 import type { HouseWordListOperations, HouseWordListApi } from './protocol/house-word-list.js';
-import type { JournalEditInput } from './protocol/manuscript-structure.js';
+import type { JournalEditInput } from './protocol/manuscript-structure.js'; import type { SelectionSpanBlockPin, SelectionSpanField } from './protocol/selection-span.js';
 export type { JournalEditInput, JournalStructuralEdit } from './protocol/manuscript-structure.js';
 import type { ManuscriptBlockProjection } from './protocol/manuscript-notes.js';
 export type { ManuscriptBlockKind, ManuscriptBlockProjection, ManuscriptNoteProjection } from './protocol/manuscript-notes.js';
 import type { ImportStructureChoice, ImportStructureProjection } from './protocol/import-structure.js';
 import type { EditableImportProjection, ImportIdentityFindingProjection, ManuscriptConversionProjection } from './protocol/import-intake.js';
-export type * from './protocol/import-intake.js'; export type * from './protocol/import-structure.js'; export { validStructureChoice } from './protocol/import-structure.js';
+export type * from './protocol/import-intake.js'; export type * from './protocol/import-structure.js'; export type * from './protocol/selection-span.js'; export { validStructureChoice } from './protocol/import-structure.js';
 export * from './protocol/global-agent.js';
 export type { ReviewContractIdentity, ReviewExcludedFindingProjection, ReviewContractRejectionReason, ReviewEvidenceSource, ReviewReportSchema, ReviewReportDerivedSections, ReviewReportFindingEntry } from './protocol/review.js';
 import type { ReviewExcludedFindingProjection, ReviewContractRejectionReason, ReviewReportSchema, ReviewReportDerivedSections } from './protocol/review.js';
@@ -136,7 +136,7 @@ import type { PublicSampleBookSourceDigest } from './public-samplebooks.js';
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 183 as const;
+export const SERVICE_PROTOCOL_VERSION = 184 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 export interface BookFindingProjection {
@@ -2225,7 +2225,7 @@ export interface FastInteractionRoutesProjection {
   readonly conflictRegenerate: FastInteractionRouteProjection;
 }
 
-/** 润色这段: the exact words the editor selected in one block of the Book's manuscript. */
+/** 润色这段: the exact words the editor selected in one block of the Book's manuscript, or across contiguous paragraphs (#1176). */
 export interface PolishSelectionInput {
   readonly selection: DialogueSelectionInput;
 }
@@ -10897,8 +10897,8 @@ export const MAX_DIALOGUE_PROPOSAL_CHARACTERS = 4_000;
 /** The longest selection a dialogue may be asked about, in graphemes. */
 export const MAX_DIALOGUE_SELECTION_GRAPHEMES = 2_000;
 
-/** The exact words of that Book's manuscript the question is about, as the editor selected them (one block). */
-export type DialogueSelectionInput = SeriesKnowledgeSpanInput;
+/** The exact words of that Book's manuscript the question is about, as the editor selected them: in one block, or a span (#1176). */
+export type DialogueSelectionInput = SeriesKnowledgeSpanInput & SelectionSpanField;
 
 export interface AskAboutSelectionInput {
   readonly selection: DialogueSelectionInput;
@@ -10978,7 +10978,7 @@ export interface DialogueProjection {
   /** `null` when the Harness Session Ledger holds no turn of this dialogue here. */
   readonly question: string | null;
   readonly selection: string | null;
-  readonly range: { readonly blockId: string; readonly fromGrapheme: number; readonly toGrapheme: number };
+  readonly range: { readonly blockId: string; readonly fromGrapheme: number; readonly toGrapheme: number; readonly span?: ReadonlyArray<SelectionSpanBlockPin> };
   readonly askedAt: string;
   readonly attempts: ReadonlyArray<DialogueAttemptProjection>;
   readonly actions: { readonly stop: boolean; readonly continue: boolean; readonly regenerate: boolean; readonly convert: boolean };
@@ -11143,7 +11143,7 @@ export interface InspectTaskIntentDraftsInput {
  * a newer revision; checked exactly when the Task's own revision is saved), or `任务范围需要重新选择` (the words are no longer
  * there).
  */
-export interface TaskIntentDraftRangeProjection {
+export interface TaskIntentDraftRangeProjection extends SelectionSpanField {
   readonly rangeId: string;
   readonly manuscriptId: string;
   readonly blockId: string;

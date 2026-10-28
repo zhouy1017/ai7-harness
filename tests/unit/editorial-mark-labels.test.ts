@@ -143,7 +143,7 @@ describe('the wording of the Mark surface', () => {
     expect(DECISION_REASON_CHIPS.rejected).toContain('证据不足');
     expect(DECISION_REASON_CHIPS['accepted-with-edit']).toContain('语言更准确');
     expect(selectionMenuReason('none')).toContain('先选中');
-    expect(selectionMenuReason('multiple-blocks')).toContain('同一段落');
+    expect(selectionMenuReason('span')).toContain('同一段落');
     expect(selectionMenuReason('unsettled')).toContain('修订日志');
   });
 

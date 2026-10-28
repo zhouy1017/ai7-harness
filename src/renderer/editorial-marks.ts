@@ -63,6 +63,7 @@ import {
   selectionMenuReason,
 } from './editorial-mark-labels.js';
 import { applyOnce } from './manuscript-apply.js';
+import { spanGraphemes } from '../shared/selection-span.js';
 import { REVIEW_VIEW_TASK_ABSENT, REVIEW_VIEW_TASK_RESOLVING } from './review-labels.js';
 import { sheetChosenApartLine } from './captured-procedure-labels.js';
 import {
@@ -73,6 +74,7 @@ import {
   SELECTION_TASK_CHOSEN_APART_LEGEND,
   SELECTION_TASK_DOCUMENT_REASON,
   SELECTION_TASK_FIELD,
+  SELECTION_SPAN_PROCEDURE_REASON,
   SELECTION_TASK_MENU_LABEL,
   SELECTION_TASK_NOTE,
   SELECTION_TASK_PICK_RANGE,
@@ -298,6 +300,8 @@ export function menuPlacement(
 }
 
 type SeriesChoice = { readonly seriesId: string; readonly title: string };
+/** Words the AI7 actions take: one block's range, or the exact span across paragraphs (Issue #1176). */
+type SelectedWords = Extract<ReturnType<BoundedEditor['selectedRange']>, { kind: 'range' | 'span' }>;
 
 /**
  * The selection menu's 书系 group (Issue #63, S28b): one entry per Series the Book is in, then the chooser. A Book in no
@@ -648,7 +652,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     options.setStatus(done, 'success');
   }, '标记未能添加。');
 
-  const settledRange = async (): Promise<Extract<ReturnType<BoundedEditor['selectedRange']>, { kind: 'range' }> | null> => {
+  /** The words selected now, settled first — one block's range, or a span across paragraphs (Issue #1176); `null` once the reason was said. */
+  const settledWords = async (): Promise<SelectedWords | null> => {
     composersPending += 1;
     try {
       await editor.flush();
@@ -656,9 +661,31 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       composersPending -= 1;
     }
     const range = editor.selectedRange();
-    if (range.kind === 'range') return range;
+    if (range.kind === 'range' || range.kind === 'span') return range;
     options.setStatus(selectionMenuReason(range.kind), 'error');
     return null;
+  };
+  /** The words selected now inside one paragraph, as a mark names them; a span is refused with the marks' reason. */
+  const settledRange = async (): Promise<Extract<SelectedWords, { kind: 'range' }> | null> => {
+    const words = await settledWords();
+    if (words === null || words.kind === 'range') return words;
+    options.setStatus(selectionMenuReason('span'), 'error');
+    return null;
+  };
+  /** Those words as the service reads them, bound to the window as it stands: a span carries every block's pin. */
+  const selectionInputOf = (range: SelectedWords): DialogueSelectionInput => {
+    const current = editor.currentWindow();
+    return {
+      ...binding(),
+      baseRevisionId: current.revisionId,
+      expectedJournalSequence: current.journalSequence,
+      blockId: range.blockId,
+      baseBlockDigest: range.blockDigest,
+      fromGrapheme: range.fromGrapheme,
+      toGrapheme: range.toGrapheme,
+      selectedText: range.text,
+      ...(range.kind === 'span' ? { span: range.span } : {}),
+    };
   };
 
   /**
@@ -1593,7 +1620,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   const startOnSelection = options.startTaskOnSelection;
   const houseProcedures = startOnSelection === undefined ? null : latestAnswer(() => startOnSelection.procedures(), () => !destroyed);
   void houseProcedures?.refresh();
-  const aiTaskGroup = (selectionReason: string | undefined, procedures: ReadonlyArray<SelectionProcedureEntry> | null): MenuGroup => ({
+  const aiTaskGroup = (selectionReason: string | undefined, procedures: ReadonlyArray<SelectionProcedureEntry> | null, spanned = false): MenuGroup => ({
     label: 'AI7 任务',
     note: selectionTaskGroupNote(options.startTaskOnSelection === undefined ? null : procedures),
     items: [
@@ -1608,7 +1635,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         action: entry.value,
         label: entry.label,
         ...(entry.hint === null ? {} : { hint: entry.hint }),
-        ...(selectionReason !== undefined ? { disabledReason: selectionReason }
+        ...(selectionReason !== undefined ? { disabledReason: selectionReason } : spanned ? { disabledReason: SELECTION_SPAN_PROCEDURE_REASON }
           : entry.disabledReason !== null ? { disabledReason: entry.disabledReason } : { run: () => void composeTask(entry.value) }),
       })),
       polishItem(selectionReason),
@@ -1622,25 +1649,13 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
    */
   const polishSelection = async (): Promise<void> => {
     if (refuseWhileBusy() || polishOptions === undefined) return;
-    const range = await settledRange();
+    const range = await settledWords();
     if (range === null || destroyed) return;
     closeMenu();
-    const current = editor.currentWindow();
     options.setStatus(SELECTION_POLISH_STATUS.requesting, 'busy');
     let settled: EditorialPolishProjection;
     try {
-      settled = await polishOptions.polish({
-        selection: {
-          ...binding(),
-          baseRevisionId: current.revisionId,
-          expectedJournalSequence: current.journalSequence,
-          blockId: range.blockId,
-          baseBlockDigest: range.blockDigest,
-          fromGrapheme: range.fromGrapheme,
-          toGrapheme: range.toGrapheme,
-          selectedText: range.text,
-        },
-      });
+      settled = await polishOptions.polish({ selection: selectionInputOf(range) });
     } catch (error) {
       options.setStatus(options.errorMessage(error, SELECTION_POLISH_STATUS.failed), 'error');
       return;
@@ -1688,20 +1703,11 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   };
   /** The words selected now as the exact span a mark names, settled first; `null` once the reason was said. */
   const spanNow = async (): Promise<SelectionSpanReading | null> => {
-    const range = await settledRange();
+    const range = await settledWords();
     if (range === null || destroyed) return null;
     const current = editor.currentWindow();
     return {
-      span: {
-        ...binding(),
-        baseRevisionId: current.revisionId,
-        expectedJournalSequence: current.journalSequence,
-        blockId: range.blockId,
-        baseBlockDigest: range.blockDigest,
-        fromGrapheme: range.fromGrapheme,
-        toGrapheme: range.toGrapheme,
-        selectedText: range.text,
-      },
+      span: selectionInputOf(range),
       position: current.blocks.find((block) => block.blockId === range.blockId)?.position ?? null,
       revisionLabel: current.revisionLabel,
       journalSequence: current.journalSequence,
@@ -1803,7 +1809,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   const composeQuestion = async (): Promise<void> => {
     if (refuseWhileBusy() || options.askAboutSelection === undefined) return;
     const ask = options.askAboutSelection;
-    const range = await settledRange();
+    const range = await settledWords();
     if (range === null) return;
     openComposer(range.blockId, {
       id: 'ask-about-selection',
@@ -1820,21 +1826,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         }
         try {
           await editor.flush();
-          const current = editor.currentWindow();
           options.setStatus(DIALOGUE_STATUS.asking, 'busy');
-          const dialogue = await ask({
-            selection: {
-              ...binding(),
-              baseRevisionId: current.revisionId,
-              expectedJournalSequence: current.journalSequence,
-              blockId: range.blockId,
-              baseBlockDigest: range.blockDigest,
-              fromGrapheme: range.fromGrapheme,
-              toGrapheme: range.toGrapheme,
-              selectedText: range.text,
-            },
-            question: values.question,
-          });
+          const dialogue = await ask({ selection: selectionInputOf(range), question: values.question });
           options.setStatus(DIALOGUE_STATUS.asked, 'success');
           closeFloating();
           options.onAsked?.(dialogue);
@@ -1930,7 +1923,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     const range = editor.selectedRange();
     const markable = range.kind === 'range' || range.kind === 'unsettled';
     const why = markable ? undefined : selectionMenuReason(range.kind);
-    const selected = range.kind === 'range' ? `已选 ${range.toGrapheme - range.fromGrapheme} 字` : range.kind === 'none' ? '未选中文字' : '已选中文字';
+    const selected = range.kind === 'range' ? `已选 ${range.toGrapheme - range.fromGrapheme} 字`
+      : range.kind === 'span' ? `已选 ${spanGraphemes(range)} 字 · ${range.span.length} 段` : range.kind === 'none' ? '未选中文字' : '已选中文字';
     const needsSelection = range.kind === 'none' ? '先选中文字' : undefined;
     const shown = inSeries?.current() ?? null;
     const shownProcedures = houseProcedures?.current() ?? null;
@@ -1969,7 +1963,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           })),
         ],
       },
-      aiTaskGroup(range.kind === 'range' ? undefined : why ?? selectionMenuReason(range.kind), shownProcedures),
+      // Across paragraphs (Issue #1176) the AI7 actions take the exact span; marks and 书系 knowledge stay in one paragraph.
+      aiTaskGroup(range.kind === 'range' || range.kind === 'span' ? undefined : why ?? selectionMenuReason(range.kind), shownProcedures, range.kind === 'span'),
       ...(knowledge === null ? [] : [knowledge]),
     ], at);
     if (!reread || (inSeries === null && houseProcedures === null && polishRoute === null)) return;
@@ -2196,7 +2191,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     },
     holdsFloating: () => menu !== undefined || floating !== undefined || composersPending > 0,
     selectionSpan: async () => {
-      if (editor.selectedRange().kind !== 'range') return SELECTION_TASK_PICK_RANGE;
+      if (!['range', 'span'].includes(editor.selectedRange().kind)) return SELECTION_TASK_PICK_RANGE;
       return (await spanNow()) ?? SELECTION_TASK_PICK_RANGE;
     },
     composeProcedures: (range) => {

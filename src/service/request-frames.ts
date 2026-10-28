@@ -1,5 +1,6 @@
 import { validLocalOptions } from './review/deterministic/plan.js';
 import { validStructureChoice } from '../shared/protocol/import-structure.js';
+import { MAX_SELECTION_SPAN_BLOCKS } from '../shared/selection-span.js';
 import { validateInspectHouseWordListInput, validateSaveHouseWordListInput } from '../shared/protocol/house-word-list.js';
 import { validSupervisionInput } from './learning/supervision-directives.js';
 import { validCurationBudget } from './learning/curation.js';
@@ -262,6 +263,19 @@ function validKnowledgeSpan(value: unknown): boolean {
     isSafeInteger(value.expectedJournalSequence, 0) && isBoundedString(value.blockId, 28) && MARK_BLOCK_PATTERN.test(value.blockId) &&
     isBoundedString(value.baseBlockDigest, 64) && HEX_DIGEST_PATTERN.test(value.baseBlockDigest) && isSafeInteger(value.fromGrapheme, 0) &&
     isSafeInteger(value.toGrapheme, 1) && isBoundedString(value.selectedText, MAX_BLOCK_CODE_UNITS);
+}
+
+/**
+ * The words the AI7 actions take (Issue #1176): a range as a mark names it, with — across paragraphs — the span of every block
+ * it covers, each block's pin exactly. The owners check that the span is where it says.
+ */
+function validSelection(value: unknown): boolean {
+  if (!isRecord(value) || !('span' in value)) return validKnowledgeSpan(value);
+  const { span, ...range } = value;
+  return validKnowledgeSpan(range) && Array.isArray(span) && span.length >= 2 && span.length <= MAX_SELECTION_SPAN_BLOCKS && span.every((pin) =>
+    isRecord(pin) && hasExactKeys(pin, ['blockId', 'blockDigest', 'fromGrapheme', 'toGrapheme']) && isBoundedString(pin.blockId, 28) &&
+    MARK_BLOCK_PATTERN.test(pin.blockId) && isBoundedString(pin.blockDigest, 64) && HEX_DIGEST_PATTERN.test(pin.blockDigest) &&
+    isSafeInteger(pin.fromGrapheme, 0) && isSafeInteger(pin.toGrapheme, 0));
 }
 
 function validMarkBinding(input: Record<string, unknown>): boolean {
@@ -2649,7 +2663,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     // the dialogue's actions name the dialogue and the attempt the editor sees, a read the fragments it has shown.
     case 'askAboutSelection': {
       const input = requireInput(value.input, ['bookId', 'selection', 'question'], tentativeId);
-      if (!validUuid(input.bookId) || input.selection === null || !validKnowledgeSpan(input.selection) ||
+      if (!validUuid(input.bookId) || input.selection === null || !validSelection(input.selection) ||
           !isBoundedString(input.question, 4 * MAX_DIALOGUE_QUESTION_CHARACTERS)) {
         throw new ProtocolError(tentativeId);
       }
@@ -2723,7 +2737,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       const target = input.target;
       const validRange = (range: unknown): boolean => isRecord(range) && (
         (hasExactKeys(range, ['kind', 'rangeId']) && range.kind === 'kept' && validUuid(range.rangeId)) ||
-        (hasExactKeys(range, ['kind', 'span']) && range.kind === 'new' && range.span !== null && validKnowledgeSpan(range.span)));
+        (hasExactKeys(range, ['kind', 'span']) && range.kind === 'new' && range.span !== null && validSelection(range.span)));
       const validTarget = isRecord(target) && ((hasExactKeys(target, ['kind']) && target.kind === 'book') ||
         (hasExactKeys(target, ['kind', 'ranges']) && target.kind === 'ranges' && Array.isArray(target.ranges) && target.ranges.length >= 1 &&
           target.ranges.length <= MAX_TASK_INTENT_DRAFT_RANGES && target.ranges.every(validRange)));
@@ -2786,7 +2800,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     case 'polishSelection': {
       const input = requireInput(value.input, ['bookId', 'selection'], tentativeId);
-      if (!validUuid(input.bookId) || input.selection === null || !validKnowledgeSpan(input.selection)) throw new ProtocolError(tentativeId);
+      if (!validUuid(input.bookId) || input.selection === null || !validSelection(input.selection)) throw new ProtocolError(tentativeId);
       break;
     }
     case 'inspectFastInteractionRequest': {

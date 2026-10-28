@@ -4,7 +4,7 @@ import { initializeStructuralEditSchema } from './manuscript/structural-schema.j
 import { commitNoteSources, legacyBlockSources, routeBlockSource, type LegacyBlockSources } from './manuscript/note-blocks.js'; import { initializeImportStructureSchema } from './manuscript/structure-schema.js';
 import type { ImportStructureChoice } from '../shared/protocol.js'; import { importedMarksRecord, nonEffects, recordsToCreate } from './import-review-records.js'; export { importedMarksRecord };
 import { recordStructureChoice, recordedStructureChoice, reviewStructureChoice, reviewStructureField, stagedHasPieces, stagedStructureField } from './manuscript/import-structure.js';
-import { insertMergedImportBlocks } from './manuscript/merged-import-blocks.js';
+import { insertMergedImportBlocks } from './manuscript/merged-import-blocks.js'; import { heldSpanPins, selectionSpanRange, verifySelectionSpan, verifyWorkingSpan, type VerifiedSelection } from './manuscript/selection-span.js'; import { SELECTION_SPAN_SEPARATOR, spanGraphemes } from '../shared/selection-span.js';
 import { HouseWordLists, initializeHouseWordListSchema } from './review/house-word-list.js';
 import { HouseWordListError, type InspectHouseWordListInput, type SaveHouseWordListInput } from '../shared/protocol/house-word-list.js';
 import { validateRequestAdmissionRecords } from './analysis/baseline-analysis-store.js';
@@ -917,7 +917,7 @@ import {
   draftGoal,
   draftOutcomeClass,
   goalFromText,
-  initializeTaskIntentDraftSchema,
+  initializeTaskIntentDraftSchema, draftBlockBounds, draftParagraphs, draftRangesPlan,
   isProcedurePin,
   requireDraft,
   resolutionOffers,
@@ -6125,11 +6125,7 @@ export class EditorialStore {
       ? this.#draftCall(() => this.#drafts.promotedInto(plan.ref)) : null;
     if (promoted !== null && promoted.bookId === input.bookId) {
       plan = { ...plan, goal: { ...plan.goal, draft: { draftId: promoted.draftId, sentence: promoted.latest.goal } } };
-      if (promoted.latest.target === 'ranges') {
-        const paragraphs = new Set(promoted.latest.ranges.map((range) => range.blockId)).size;
-        plan = { ...plan, scope: { ...plan.scope,
-          process: `${plan.scope.process}；所选文字已扩展为所在的 ${paragraphs} 个完整段落；任务按包含这些段落的阅读范围处理。` } };
-      }
+      if (promoted.latest.target === 'ranges') plan = draftRangesPlan(plan, promoted.latest.ranges);
     }
     return { ...found, plan: { ...plan, unconfirmed: this.#unconfirmedProjection(input.bookId, input.kind) } };
   }
@@ -18691,8 +18687,8 @@ export class EditorialStore {
         }
       };
       const intentDraft: DraftPromotion = { versionId: draft.latest.versionId, goal: draft.latest.goal, promoted,
-        ...(draft.latest.target === 'ranges' ? { paragraphs: new Set(draft.latest.ranges.map((range) => range.blockId)).size } : {}) };
-      const block = draft.latest.ranges[0]?.blockId ?? null;
+        ...(draft.latest.target === 'ranges' ? { paragraphs: draftParagraphs(draft.latest.ranges) } : {}) };
+      const block = draftBlockBounds(draft.latest.ranges);
       const choice = offered.choice;
       switch (choice.kind) {
         case 'baseline':
@@ -18701,7 +18697,7 @@ export class EditorialStore {
             goal: BASELINE_ANALYSIS_MODE_GOALS[choice.mode],
             update: choice.mode === 'first-baseline' ? null
               : choice.mode === 'reanalyze-range' && block !== null
-                ? { mode: choice.mode, selectedRange: null, selectedBlocks: { fromBlockId: block, toBlockId: block } }
+                ? { mode: choice.mode, selectedRange: null, selectedBlocks: block }
                 : { mode: choice.mode, selectedRange: null },
             intentDraft,
           };
@@ -18711,7 +18707,7 @@ export class EditorialStore {
             categoryId: choice.categoryId,
             scope: block === null
               ? { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }
-              : { kind: 'selection', fromChapterBlockId: block, toChapterBlockId: block },
+              : { kind: 'selection', fromChapterBlockId: block.fromBlockId, toChapterBlockId: block.toBlockId },
             intentDraft,
           };
         case 'writing': {
@@ -18746,7 +18742,8 @@ export class EditorialStore {
       const first = resolved.first;
       requireStore(first !== null && sha256(first.selection) === task.selectionSha256, 'DIALOGUE_HISTORY_MISSING', '这个问题的记录不在本机，不能转为任务意图草稿。');
       const block = this.#authority.prepare('SELECT text, digest FROM working_blocks WHERE branch_id = ? AND block_id = ?').get(task.branchId, task.blockId) as SqlRow | undefined;
-      requireStore(block !== undefined && graphemesOf(asString(block.text)).slice(task.fromGrapheme, task.toGrapheme).join('') === first.selection,
+      const held = task.span === undefined ? undefined : heldSpanPins(this.#authority, task.branchId, { ...task, span: task.span, text: first.selection });
+      requireStore(block !== undefined && (held === undefined ? graphemesOf(asString(block.text)).slice(task.fromGrapheme, task.toGrapheme).join('') === first.selection : held !== null),
         'DIALOGUE_SELECTION_MOVED', '所选文字已经改动或不在当前稿件中；不能把这次回答转为任务意图草稿。');
       const state = this.#draftBranchState(task.branchId);
       const answer = draftAnswer(latest.fragments);
@@ -18756,7 +18753,7 @@ export class EditorialStore {
         range: {
           rangeId: randomUUID(), manuscriptId: task.manuscriptId, branchId: task.branchId, blockId: task.blockId, blockDigest: asString(block.digest),
           fromGrapheme: task.fromGrapheme, toGrapheme: task.toGrapheme, revisionId: state.revisionId, revisionLabel: state.revisionLabel,
-          journalSequence: state.journalSequence, pendingSave: state.pendingSave, text: first.selection,
+          journalSequence: state.journalSequence, pendingSave: state.pendingSave, text: first.selection, ...(held ? { span: held } : {}),
         } satisfies StoredDraftRange,
         answer: {
           dialogueId: task.dialogueId, attemptId: latest.attempt.attemptId, attemptOrdinal: latest.attempt.ordinal, selectionSha256: task.selectionSha256,
@@ -18788,7 +18785,7 @@ export class EditorialStore {
       Number.isSafeInteger(span.fromGrapheme) && Number.isSafeInteger(span.toGrapheme) && span.fromGrapheme >= 0 && span.toGrapheme > span.fromGrapheme &&
       typeof span.selectedText === 'string' && span.selectedText.length > 0,
     'TASK_INTENT_DRAFT_RANGE_INVALID', '所选文字无效。');
-    requireDraft(span.toGrapheme - span.fromGrapheme <= MAX_DIALOGUE_SELECTION_GRAPHEMES,
+    requireDraft(spanGraphemes(span) <= MAX_DIALOGUE_SELECTION_GRAPHEMES,
       'TASK_INTENT_DRAFT_RANGE_INVALID', `所选文字最多 ${MAX_DIALOGUE_SELECTION_GRAPHEMES} 个字。`);
     const manuscript = this.#authority.prepare(
       `SELECT m.book_id, m.role FROM manuscripts m JOIN manuscript_branches b ON b.manuscript_id = m.manuscript_id
@@ -18796,13 +18793,13 @@ export class EditorialStore {
     ).get(span.manuscriptId, span.branchId) as SqlRow | undefined;
     requireDraft(manuscript !== undefined && manuscript.book_id === bookId && manuscript.role === 'primary', 'TASK_INTENT_DRAFT_RANGE_INVALID', '所选文字不在这本书的稿件中。');
     const block = this.#authority.prepare('SELECT text, digest FROM working_blocks WHERE branch_id = ? AND block_id = ?').get(span.branchId, span.blockId) as SqlRow | undefined;
-    const text = block === undefined ? null : graphemesOf(asString(block.text)).slice(span.fromGrapheme, span.toGrapheme).join('');
+    const text = block === undefined ? null : span.span !== undefined ? verifyWorkingSpan(this.#authority, span.branchId, selectionSpanRange({ ...span, span: span.span })).map((entry) => entry.part).join(SELECTION_SPAN_SEPARATOR) : graphemesOf(asString(block.text)).slice(span.fromGrapheme, span.toGrapheme).join('');
     requireDraft(block !== undefined && text === span.selectedText, 'TASK_INTENT_DRAFT_RANGE_MOVED', '所选文字已经改动或不在当前稿件中；请重新选择。');
     const state = this.#draftBranchState(span.branchId);
     return {
       rangeId: randomUUID(), manuscriptId: span.manuscriptId, branchId: span.branchId, blockId: span.blockId, blockDigest: asString(block.digest),
       fromGrapheme: span.fromGrapheme, toGrapheme: span.toGrapheme, revisionId: state.revisionId, revisionLabel: state.revisionLabel,
-      journalSequence: state.journalSequence, pendingSave: state.pendingSave, text: span.selectedText,
+      journalSequence: state.journalSequence, pendingSave: state.pendingSave, text: span.selectedText, ...(span.span === undefined ? {} : { span: span.span }),
     };
   }
 
@@ -18834,7 +18831,7 @@ export class EditorialStore {
   #draftRanges(ranges: ReadonlyArray<StoredDraftRange>): TaskIntentDraftRangeProjection[] {
     return ranges.map((range) => {
       const block = this.#authority.prepare('SELECT text, position FROM working_blocks WHERE branch_id = ? AND block_id = ?').get(range.branchId, range.blockId) as SqlRow | undefined;
-      const holds = block !== undefined && graphemesOf(asString(block.text)).slice(range.fromGrapheme, range.toGrapheme).join('') === range.text;
+      const holds = block !== undefined && (range.span === undefined ? graphemesOf(asString(block.text)).slice(range.fromGrapheme, range.toGrapheme).join('') === range.text : heldSpanPins(this.#authority, range.branchId, { ...range, span: range.span }) !== null);
       const branch = this.#authority.prepare('SELECT base_revision_id, last_checkpoint_sequence FROM branch_working_state WHERE branch_id = ?').get(range.branchId) as SqlRow | undefined;
       const state: TaskIntentDraftRangeProjection['state'] = !holds || branch === undefined ? 'reselect'
         : range.pendingSave && asNumber(branch.last_checkpoint_sequence) < range.journalSequence ? 'pending-save'
@@ -18844,7 +18841,7 @@ export class EditorialStore {
         manuscriptId: range.manuscriptId,
         blockId: range.blockId,
         fromGrapheme: range.fromGrapheme,
-        toGrapheme: range.toGrapheme,
+        toGrapheme: range.toGrapheme, ...(range.span === undefined ? {} : { span: range.span }),
         text: range.text,
         revisionLabel: range.revisionLabel,
         journalSequence: range.journalSequence,
@@ -18982,6 +18979,9 @@ export class EditorialStore {
     });
   }
 
+  /** The selected words checked against the working state: one block's range, or every block of a span (Issue #1176). */
+  verifySelectionSpan(selection: DialogueSelectionInput): Omit<VerifiedSelection, 'blocks'> & Partial<Pick<VerifiedSelection, 'blocks'>> { return this.#markCall(() => selection.span === undefined ? this.#editorialMarks.verifySpan(selection) : verifySelectionSpan(this.#authority, (first) => this.#editorialMarks.verifySpan(first), { ...selection, span: selection.span })); }
+
   /**
    * 就这段提问… (the Owner, 2026-10-07: selecting words and asking is enough — no plan, no 开始任务): a dialogue Task on the
    * exact words selected in the Book's manuscript, verified as a mark's range is, and its first attempt. Nothing is sent here;
@@ -18993,9 +18993,9 @@ export class EditorialStore {
       requireStore(typeof input === 'object' && input !== null && typeof input.selection === 'object' && input.selection !== null,
         'DIALOGUE_SELECTION_INVALID', '所选文字无效。');
       const question = dialogueQuestion(input.question);
-      const verified = this.#markCall(() => this.#editorialMarks.verifySpan(input.selection));
+      const verified = this.verifySelectionSpan(input.selection);
       requireStore(verified.bookId === bookId, 'DIALOGUE_SELECTION_INVALID', '所选文字不在这本书的稿件中。');
-      requireStore(verified.text.length > 0 && input.selection.toGrapheme - input.selection.fromGrapheme <= MAX_DIALOGUE_SELECTION_GRAPHEMES,
+      requireStore(verified.text.length > 0 && spanGraphemes(input.selection) <= MAX_DIALOGUE_SELECTION_GRAPHEMES,
         'DIALOGUE_SELECTION_TOO_LONG', `所选文字最多 ${MAX_DIALOGUE_SELECTION_GRAPHEMES} 个字；请选短一些再提问。`);
       const { task, attemptId } = this.#transaction(this.#authority, () => this.#dialogues.ask({
         bookId,
@@ -19006,7 +19006,7 @@ export class EditorialStore {
         blockId: input.selection.blockId,
         fromGrapheme: input.selection.fromGrapheme,
         toGrapheme: input.selection.toGrapheme,
-        blockDigest: input.selection.baseBlockDigest,
+        blockDigest: input.selection.baseBlockDigest, ...(input.selection.span === undefined ? {} : { span: input.selection.span }),
         selectionSha256: sha256(verified.text),
         questionSha256: sha256(question),
         now,
@@ -19113,7 +19113,7 @@ export class EditorialStore {
         source: { kind: 'ai7', origin: 'task', label: DIALOGUE_MARK_SOURCE_LABEL, taskId: task.dialogueId },
         basis: [{ label: `${DIALOGUE_MARK_SOURCE_LABEL} · 第 ${latest.attempt.ordinal} 次`, blockId: task.blockId, fromGrapheme: task.fromGrapheme, toGrapheme: task.toGrapheme, quote }],
       }], ([created]) => {
-        requireStore(created !== null && created !== undefined, 'MARK_ANCHOR_CHANGED', '所选文字已不在当前稿件中；不能把这次回答转为修改建议。');
+        requireStore(created !== null && created !== undefined, 'MARK_ANCHOR_CHANGED', task.span === undefined ? '所选文字已不在当前稿件中；不能把这次回答转为修改建议。' : '跨段的提问不能直接转为修改建议；请转为任务意图草稿。');
         this.#dialogues.convert(latest.attempt.attemptId, created, now);
         return created;
       }));

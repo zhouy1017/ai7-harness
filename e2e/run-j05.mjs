@@ -520,13 +520,14 @@ async function main() {
     await waitFor(renderer, `window.__j05.menu() === null && document.activeElement === document.querySelector('[data-testid="manuscript-editor"]')`, 'escape-returns-focus', 15_000);
 
     at('selection-menu-cross-paragraph');
-    // A selection across two paragraphs is refused by name: a mark lives inside one paragraph.
+    // A selection across paragraphs is one exact span (Issue #1176): a mark lives inside one paragraph, so the mark entries are
+    // refused by name, while 就这段提问… and 就这段发起任务… take the span and 润色这段 says why this launch cannot run it.
     await rightClickUntil(
       renderer,
       `(() => { const a = window.__j05.block(${JSON.stringify(first)}); const b = window.__j05.block(${JSON.stringify(second)}); const range = document.createRange(); range.setStart(a.firstChild, 2); range.setEnd(b.firstChild, 2); document.querySelector('[data-testid="manuscript-editor"]').focus(); const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range); return !selection.isCollapsed; })()`,
       `window.__j05.block(${JSON.stringify(first)})`,
-      `window.__j05.menu()?.textContent.includes('同一段落') && window.__j05.item('add-annotation')?.disabled === true && window.__j05.item('copy')?.disabled === false`,
-      'cross-paragraph-refused',
+      `(() => { const menu = window.__j05.menu(); const enabled = (action) => window.__j05.item(action)?.disabled === false; const polish = window.__j05.item('preset-polish'); return menu?.textContent.includes('同一段落') && /已选 [0-9]+ 字 · [0-9]+ 段/u.test(menu.textContent) && window.__j05.item('add-annotation')?.disabled === true && window.__j05.item('add-change-suggestion')?.disabled === true && enabled('copy') && enabled('ask-on-selection') && enabled('task-on-selection') && polish instanceof HTMLButtonElement && polish.disabled && polish.title === '当前运行范围未允许润色这段：这次启动没有可用的模型。'; })()`,
+      'cross-paragraph-span',
     );
     await press(renderer, 'Escape');
 
@@ -977,6 +978,42 @@ async function main() {
     await click(renderer, '撤销', 'undo-merge');
     await waitFor(renderer, `window.__j05.text(window.__j05Split) === window.__j05Structure.split.slice(${STRUCTURE_SPLIT_AT}) && window.__j05.text(${JSON.stringify(splitBlock)}) === window.__j05Structure.split.slice(0, ${STRUCTURE_SPLIT_AT})`, 'undo-merge-is-one-step', 15_000);
     await settled(renderer, 'structure-settled');
+
+    // Issue #1176 (W22-S5): words from inside one paragraph to inside the second after it reach 就这段发起任务… as one exact span.
+    // The composer quotes the span; 准备任务 saves a draft — no Task, plan or Run — pinning every paragraph with its digest; 准备计划,
+    // the editor's own step, prepares a 审阅 of exactly those paragraphs, whose plan names the span's pins. Nothing is written.
+    at('selection-span-draft');
+    const spanBlocks = await renderer.evaluate(`(() => { const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }); const clean = (node) => node instanceof HTMLParagraphElement && /^blk_[0-9a-f]{24}$/.test(node.dataset.blockId ?? '') && node.querySelectorAll('.editorial-mark').length === 0 && (node.textContent ?? '').length >= 8 && Array.from(segmenter.segment(node.textContent ?? '')).length === (node.textContent ?? '').length; const start = Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > p[data-block-id]')).find((node) => clean(node) && clean(node.nextElementSibling) && clean(node.nextElementSibling?.nextElementSibling)); return start === undefined ? null : [start, start.nextElementSibling, start.nextElementSibling.nextElementSibling].map((node) => node.dataset.blockId); })()`);
+    requireJourney(Array.isArray(spanBlocks) && spanBlocks.length === 3, 'span-paragraphs');
+    const [spanA, spanB, spanC] = spanBlocks;
+    await assertRenderer(renderer, `(() => { window.__j05Span = { a: window.__j05.text(${JSON.stringify(spanA)}), b: window.__j05.text(${JSON.stringify(spanB)}), c: window.__j05.text(${JSON.stringify(spanC)}) }; window.__j05Span.words = [window.__j05Span.a.slice(2), window.__j05Span.b, window.__j05Span.c.slice(0, 3)].join('\\n'); return window.__j05Span.words.split('\\n').length === 3; })()`, 'span-words-kept');
+    await rightClickUntil(
+      renderer,
+      `(() => { const a = window.__j05.block(${JSON.stringify(spanA)}); const c = window.__j05.block(${JSON.stringify(spanC)}); const range = document.createRange(); range.setStart(a.firstChild, 2); range.setEnd(c.firstChild, 3); document.querySelector('[data-testid="manuscript-editor"]').focus(); const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range); return !selection.isCollapsed; })()`,
+      `window.__j05.block(${JSON.stringify(spanA)})`,
+      `window.__j05.menu()?.textContent.includes('· 3 段') && window.__j05.item('task-on-selection')?.disabled === false`,
+      'span-menu',
+    );
+    await chooseMenuItem(renderer, 'task-on-selection', 'span-task-choose');
+    const composerOf = `document.querySelector('#task-drawer:not([hidden]) .task-composer')`;
+    await waitFor(renderer, `(() => { const composer = ${composerOf}; const quotes = Array.from(composer?.querySelectorAll('li.task-composer-range blockquote') ?? [], (node) => node.textContent); return composer?.dataset.taskComposer === 'new' && quotes.length === 1 && quotes[0] === window.__j05Span.words; })()`, 'span-composer-quotes-span', 30_000);
+    await assertRenderer(renderer, `(() => { const composer = ${composerOf}; const goal = composer.querySelector('[data-task-composer-field="goal"]'); const outcome = composer.querySelector('[data-task-composer-field="outcome-review"]'); if (!(goal instanceof HTMLTextAreaElement) || !(outcome instanceof HTMLInputElement)) return false; goal.focus(); goal.value = '核对这三段的称谓是否前后一致'; goal.dispatchEvent(new Event('input', { bubbles: true })); outcome.click(); return outcome.checked; })()`, 'span-goal-and-outcome');
+    await waitFor(renderer, `${composerOf}?.querySelector('[data-task-composer-action="prepare"]')?.disabled === false`, 'span-prepare-ready', 10_000);
+    await assertRenderer(renderer, `(() => { ${composerOf}.querySelector('[data-task-composer-action="prepare"]').click(); return true; })()`, 'span-prepare');
+    await waitFor(renderer, `${composerOf}?.dataset.taskComposer === 'draft' && ${composerOf}.querySelector('[data-task-composer-resolution]') !== null`, 'span-draft-saved', 30_000);
+    // The draft pins the span exactly — its first paragraph's range, then every paragraph with its digest — and is no Task yet.
+    await assertRenderer(renderer, `(async () => { const read = await window.ai7.inspectTaskIntentDrafts({ draftId: null }); const draft = read.drafts.find((entry) => entry.promotion === null && entry.version.goal === '核对这三段的称谓是否前后一致'); const range = draft?.version.ranges[0]; window.__j05SpanDraft = draft; const review = await window.ai7.inspectReviewWorkspace({ reviewRunId: null }); return draft?.version.ranges.length === 1 && range.blockId === ${JSON.stringify(spanA)} && range.fromGrapheme === 2 && range.text === window.__j05Span.words && JSON.stringify(range.span.map((pin) => [pin.blockId, pin.fromGrapheme, pin.toGrapheme])) === JSON.stringify([[${JSON.stringify(spanA)}, 2, window.__j05Span.a.length], [${JSON.stringify(spanB)}, 0, window.__j05Span.b.length], [${JSON.stringify(spanC)}, 0, 3]]) && range.span.every((pin) => /^[0-9a-f]{64}$/.test(pin.blockDigest)) && review.run === null; })()`, 'span-draft-pins');
+
+    at('selection-span-plan');
+    await assertRenderer(renderer, `(() => { const choice = ${composerOf}.querySelector('[data-task-composer-field^="choice-"]:not(:disabled)'); if (choice instanceof HTMLInputElement) choice.click(); return true; })()`, 'span-choice');
+    await waitFor(renderer, `${composerOf}?.querySelector('[data-task-composer-action="promote"]')?.disabled === false`, 'span-promote-ready', 10_000);
+    await assertRenderer(renderer, `(() => { ${composerOf}.querySelector('[data-task-composer-action="promote"]').click(); return true; })()`, 'span-promote');
+    await waitFor(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); const pins = drawer?.querySelector('[data-task-plan-technical="draft-span"]')?.textContent; const span = window.__j05SpanDraft.version.ranges[0].span; return drawer?.dataset.taskDrawerView === 'plan' && drawer.dataset.taskPlanKind === 'review-run' && (drawer.textContent ?? '').includes('所选文字已扩展为所在的 3 个完整段落') && pins === ${JSON.stringify(spanA)} + ' 第 2 字 → ' + ${JSON.stringify(spanC)} + ' 第 3 字 · 3 段 · ' + span.map((pin) => pin.blockDigest).join(' / '); })()`, 'span-plan-names-pins', 180_000);
+    // The prepared 审阅 waits for 开始任务 on exactly those paragraphs, and the manuscript holds the words it held.
+    await assertRenderer(renderer, `(async () => { const run = (await window.ai7.inspectReviewWorkspace({ reviewRunId: null })).run; const promoted = (await window.ai7.inspectTaskIntentDrafts({ draftId: window.__j05SpanDraft.draftId })).drafts[0]; return run?.state === 'prepared' && run.scope.selection?.fromBlockId === ${JSON.stringify(spanA)} && run.scope.selection.toBlockId === ${JSON.stringify(spanC)} && promoted.promotion?.planRef === run.reviewRunId && JSON.stringify(promoted.version.ranges[0].span) === JSON.stringify(window.__j05SpanDraft.version.ranges[0].span) && window.__j05.text(${JSON.stringify(spanA)}) === window.__j05Span.a && window.__j05.text(${JSON.stringify(spanB)}) === window.__j05Span.b && window.__j05.text(${JSON.stringify(spanC)}) === window.__j05Span.c; })()`, 'span-run-prepared-on-the-span');
+    await assertRenderer(renderer, `(() => { const close = document.querySelector('#task-drawer [data-task-drawer-control="close"]'); if (!(close instanceof HTMLButtonElement)) return false; close.click(); return true; })()`, 'span-drawer-close');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden === true`, 'span-drawer-closed', 15_000);
+    await settled(renderer, 'span-settled');
 
     // #1119 / F-20a: a distinct local procedure on exact admitted sample1 and tester-authored edits.
     // No fixture/model binding is added to launch; the existing network-denied product path is unchanged.
