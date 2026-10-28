@@ -1495,6 +1495,7 @@ async function runJourney(
     degradationItems = [],
     textBoxDisposition = null,
     importedMarks = 0,
+    structure = null,
   } = expectation;
   const {
     start = 'landing',
@@ -1623,6 +1624,22 @@ async function runJourney(
       'text-box-choice-offered',
     );
   }
+  if (structure !== null) {
+    // Issue #1205 (ADR 0096 §2): a heading-less file lists its candidate headings unchecked and the paragraph cut at the block
+    // bound waits for its one choice; 确认书名并复核 refuses until it is made. The first candidate is confirmed, 按句子分段 chosen.
+    await assertRenderer(
+      renderer,
+      `(() => { const offered = document.querySelector('[data-import-structure="offered"]'); const boxes = Array.from(offered?.querySelectorAll('[data-structure-candidate]') ?? []); const radios = Array.from(offered?.querySelectorAll('[data-long-paragraph-choice]') ?? []); return boxes.length === ${structure.candidates} && boxes.every((box) => !box.checked && !box.disabled) && radios.length === 2 && radios.every((radio) => !radio.checked) && offered.querySelectorAll('.structure-lineage').length === 1; })()`,
+      'structure-offered-unchecked',
+    );
+    await clickExactButton(renderer, '确认书名并复核', 'structure-choice-required');
+    await waitFor(renderer, `document.querySelector('#persistence-status')?.dataset.tone === 'error' && document.querySelector('#persistence-status').textContent.includes('按句子分段') && document.querySelector('[data-screen="title"]') !== null`, 'structure-choice-required-refused');
+    await assertRenderer(
+      renderer,
+      `(() => { const offered = document.querySelector('[data-import-structure="offered"]'); offered.querySelector('[data-structure-candidate]').click(); offered.querySelector('[data-long-paragraph-choice="sentences"]').click(); return offered.querySelector('[data-structure-candidate]').checked && offered.querySelector('[data-long-paragraph-choice="sentences"]').checked; })()`,
+      'structure-chosen',
+    );
+  }
   await clickExactButton(renderer, '确认书名并复核', 'review-click');
   await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, 'review-screen');
   at(diagnosticReviewLocation);
@@ -1644,6 +1661,13 @@ async function runJourney(
       renderer,
       `(() => { const stated = document.querySelector('[data-screen="review"] [data-text-box-choice="stated"]'); const checked = stated?.querySelector('input:checked'); const row = document.querySelector('[data-screen="review"] .fidelity-row[data-fidelity-category="text-boxes"]'); return checked?.value === ${JSON.stringify(textBoxDisposition)} && Array.from(stated.querySelectorAll('input')).every((input) => input.disabled) && row?.querySelector('.fidelity-detail')?.textContent.startsWith(${JSON.stringify(textBoxDisposition === 'merge' ? '并入正文：' : '保留为文本框：')}) && (document.querySelector('[data-screen="review"] [data-fidelity-summary="no-decision"]')?.textContent ?? '').includes(${JSON.stringify(textBoxDisposition === 'merge' ? '文本框 · 1 项并入正文' : '文本框 · 1 项随文件保留')}); })()`,
       'review-text-box-choice-stated',
+    );
+  }
+  if (structure !== null) {
+    await assertRenderer(
+      renderer,
+      `(() => { const stated = document.querySelector('[data-screen="review"] [data-import-structure="stated"]'); const boxes = Array.from(stated?.querySelectorAll('[data-structure-candidate]') ?? []); const lineage = stated?.querySelector('.structure-lineage')?.textContent ?? ''; return boxes.length === ${structure.candidates} && boxes.every((box) => box.disabled) && boxes.filter((box) => box.checked).length === 1 && boxes[0].checked && stated.querySelector('[data-long-paragraph-choice="sentences"]')?.checked === true && /^第3段 来自原文第3段（共[0-9]+段）$/.test(lineage); })()`,
+      'review-structure-stated',
     );
   }
   if (degraded) {
@@ -2994,6 +3018,28 @@ async function main() {
       );
       await closeProduct();
     }
+
+    // Issue #1205: a manuscript without heading styles — 儒林外史's first thirty blocks written unstyled, its third to fourteenth
+    // paragraphs joined into one over the block bound — offers its two 第X回 lines as candidates and the long paragraph's choice.
+    // Confirmed, the first candidate is the one heading of r1; spoken of by digest and count alone.
+    const structurePath = resolve(syntheticRoot, 'candidate-structure.docx');
+    const structureTexts = await admittedParagraphs({ source: 'wujingzi-rulin-waishi.docx', startBlock: 1, blocks: 30 });
+    structureTexts.splice(2, 12, structureTexts.slice(2, 14).join(''));
+    await writeFile(structurePath, zipSync({
+      '[Content_Types].xml': strToU8('<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>'),
+      'word/document.xml': strToU8(`<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${structureTexts.map((text) => `<w:p><w:r><w:t>${text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</w:t></w:r></w:p>`).join('')}</w:body></w:document>`),
+    }, { level: 6, mtime: fixedArchiveTime() }), { flag: 'wx' });
+    const structureRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'candidate-structure-data'), checkoutRoot);
+    renderer = await launchProduct({ dataRoot: structureRoot, pickerPath: structurePath, launchScenario: 'candidate-structure' });
+    await runJourney(renderer, { sourceSha256: await digestFile(structurePath), sourceBytes: (await lstat(structurePath)).size, degraded: false,
+      structure: { candidates: 2 } }, { diagnosticReviewLocation: 'structure-review', diagnosticScenario: 'candidate-structure' });
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'candidate-structure-editor-open');
+    await waitFor(
+      renderer,
+      `(() => { const blocks = Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')); return blocks.length > 19 && blocks.filter((block) => block.tagName === 'H2').length === 1 && blocks[1].tagName === 'H2'; })()`,
+      'candidate-structure-heading',
+    );
+    await closeProduct();
 
     // Issue #411: a DOCX's comments and tracked changes enter as 批注 and 修改建议 whose source is the file's
     // author (V2-UX-MARK-009). The manuscript reads as the file reads with every revision rejected, nothing

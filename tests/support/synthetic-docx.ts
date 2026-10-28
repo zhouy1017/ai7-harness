@@ -20,6 +20,8 @@ export interface SyntheticDocxParagraph {
   text: string;
   /** Optional `w:pStyle` value, for example `Title`, `Heading1`, or `标题 2`. */
   style?: string;
+  /** Write each line of `text` as its own run, with a soft line break (`w:br`) between them. */
+  softBreaks?: true;
 }
 
 export interface SyntheticDocxTerminalSection {
@@ -73,7 +75,8 @@ function paragraphXml(paragraph: SyntheticDocxParagraph): string {
   const style = paragraph.style === undefined
     ? ''
     : `<w:pPr><w:pStyle w:val="${escapeXml(paragraph.style)}"/></w:pPr>`;
-  const run = paragraph.text.length === 0 ? '' : `<w:r><w:t>${escapeXml(paragraph.text)}</w:t></w:r>`;
+  const lines = paragraph.softBreaks === true ? paragraph.text.split('\n') : [paragraph.text];
+  const run = paragraph.text.length === 0 ? '' : lines.map((line) => `<w:r><w:t>${escapeXml(line)}</w:t></w:r>`).join('<w:r><w:br/></w:r>');
   return `<w:p>${style}${run}</w:p>`;
 }
 

@@ -1,7 +1,9 @@
 import type { DatabaseSync } from 'node:sqlite';
 import type { ManuscriptBlockProjection } from '../../shared/protocol.js';
+import type { ParsedDocxBlock } from '../docx.js';
 import type { ParsedNoteSource } from '../docx-notes.js';
 import { asNumber, asString, type SqlRow } from './bounded-kernel.js';
+import type { StagedParagraphPiece } from './import-structure.js';
 
 /**
  * The note blocks of a manuscript (Issue #1204; ADR 0096 §1). The native DOCX reading appends one block of kind `note` per
@@ -100,19 +102,27 @@ export function firstNotePosition(db: DatabaseSync, branchId: string): number | 
   return row === undefined || row.position === null ? null : asNumber(row.position);
 }
 
-/** The staged sources a legacy parse's blocks carry: a body block's paragraph, or a note block's note. */
+/**
+ * The staged sources a legacy parse's blocks carry: a body block's paragraph, or a note block's note. A piece of a split paragraph
+ * (Issue #1205) also names its place in that paragraph; only the first piece's paragraph is staged as a block source.
+ */
 export interface LegacyBlockSources {
   blockSourceIndexes: number[];
   notes: StagedNoteSource[];
+  pieces: StagedParagraphPiece[];
 }
 
-export function routeBlockSource(block: { position: number; sourceParagraphIndex: number; note?: ParsedNoteSource }, sources: LegacyBlockSources): void {
+type RoutedBlock = { position: number; sourceParagraphIndex: number; note?: ParsedNoteSource; piece?: ParsedDocxBlock['piece'] };
+
+export function routeBlockSource(block: RoutedBlock, sources: LegacyBlockSources): void {
   if (block.note === undefined) sources.blockSourceIndexes.push(block.sourceParagraphIndex);
   else sources.notes.push({ position: block.position, ...block.note });
+  if (block.piece !== undefined) sources.pieces.push({ position: block.position, sourceParagraphIndex: block.sourceParagraphIndex,
+    pieceOrdinal: block.piece.ordinal, joint: block.piece.joint, sourceParagraphDigest: block.piece.sourceDigest });
 }
 
-export function legacyBlockSources(blocks: ReadonlyArray<{ position: number; sourceParagraphIndex: number; note?: ParsedNoteSource }>): LegacyBlockSources {
-  const sources: LegacyBlockSources = { blockSourceIndexes: [], notes: [] };
+export function legacyBlockSources(blocks: ReadonlyArray<RoutedBlock>): LegacyBlockSources {
+  const sources: LegacyBlockSources = { blockSourceIndexes: [], notes: [], pieces: [] };
   for (const block of blocks) routeBlockSource(block, sources);
   return sources;
 }

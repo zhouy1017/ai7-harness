@@ -1,7 +1,9 @@
 import { procedureStopped } from './procedures/editable.js';
 import { initializeEditableProcedureSchema } from './procedures/editable-schema.js';
 import { initializeStructuralEditSchema } from './manuscript/structural-schema.js'; import { initializeNoteBlockSchema } from './manuscript/note-schema.js';
-import { commitNoteSources, legacyBlockSources, routeBlockSource, type LegacyBlockSources } from './manuscript/note-blocks.js';
+import { commitNoteSources, legacyBlockSources, routeBlockSource, type LegacyBlockSources } from './manuscript/note-blocks.js'; import { initializeImportStructureSchema } from './manuscript/structure-schema.js';
+import type { ImportStructureChoice } from '../shared/protocol.js'; import { importedMarksRecord, nonEffects, recordsToCreate } from './import-review-records.js'; export { importedMarksRecord };
+import { recordStructureChoice, recordedStructureChoice, reviewStructureChoice, reviewStructureField, stagedHasPieces, stagedStructureField } from './manuscript/import-structure.js';
 import { insertMergedImportBlocks } from './manuscript/merged-import-blocks.js';
 import { HouseWordLists, initializeHouseWordListSchema } from './review/house-word-list.js';
 import { HouseWordListError, type InspectHouseWordListInput, type SaveHouseWordListInput } from '../shared/protocol/house-word-list.js';
@@ -485,7 +487,7 @@ import { convertDocManuscript, isDocConversionRefusal } from './doc-manuscript.j
 import {
   buildFidelityReport,
   deriveImportFidelityPlan,
-  DOCX_PARSER_IDENTITY, DOCX_NOTE_PARSER_IDENTITY,
+  DOCX_PARSER_IDENTITY, DOCX_NOTE_PARSER_IDENTITY, DOCX_SPLIT_PARSER_IDENTITY,
   isCleanTracerFidelity,
   MAX_ARCHIVE_BYTES,
   parseDocx,
@@ -1142,31 +1144,6 @@ const BASELINE_EDITORIAL_DIMENSION_SET = {
     { id: 'production-cross-deliverable-consistency', label: '制作与跨交付物一致性', weight: 1 },
   ],
 } as const;
-const BASE_RECORDS_TO_CREATE = [
-  '图书与稳定标识',
-  '图书编辑维度集（8 项）',
-  '源材料版本与来源记录',
-  '导入保真审阅',
-  '主稿件',
-  '稿件分支',
-  '稿件修订版 r1 与有序稳定内容块',
-  // ADR 0086 §3: which source paragraph each block of r1 came from, so an unedited block can be
-  // restored from it on export.
-  '来源段落对应',
-  '工作流程实例与精确方案版本绑定',
-  '稿件导入记录',
-] as const;
-const NON_EFFECTS = [
-  '不创建书系或书系成员关系',
-  '不创建编辑学习准入决定',
-  '不授予或执行模型提供方传输',
-  '不创建发稿版本',
-  '不创建公开发布许可或公开发布事实',
-  '不导出、不发送、不交付、不发布',
-  // ADR 0086 §3: the original stays whole with the Source Version; import reads it and changes nothing.
-  '不修改所选原文件',
-] as const;
-const CLEAN_IMPORT_NON_EFFECT = '符合当前范围的导入不创建导入降级决定';
 const EMPTY_BOOK_NON_EFFECTS = [
   '不创建稿件、来源、修订版、工作流实例或导入记录',
   '不创建书系或书系成员关系',
@@ -2383,7 +2360,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === WRITING_TASK_SCHEMA_VERSION ||
       currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       currentVersion === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || currentVersion === PROPOSAL_REVIEW_SCHEMA_VERSION || currentVersion === FACTUAL_VERIFICATION_SCHEMA_VERSION || currentVersion === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || currentVersion === TASK_INTENT_DRAFT_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_SCHEMA_VERSION || currentVersion === CUSTOM_ANALYSIS_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || currentVersion === MODEL_SELECTION_SCHEMA_VERSION || currentVersion === PROCEDURE_DEFINITION_SCHEMA_VERSION || currentVersion === EDITORIAL_LEARNING_SCHEMA_VERSION || currentVersion === GLOBAL_AGENT_SCHEMA_VERSION || currentVersion === REVIEW_CONTRACT_SCHEMA_VERSION || currentVersion === IDLE_BACKGROUND_SCHEMA_VERSION || currentVersion === LOCAL_REVIEW_SCHEMA_VERSION || currentVersion === EDITORIAL_MEMORY_SCHEMA_VERSION || currentVersion === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || currentVersion === WORD_TRACKED_IMPORT_SCHEMA_VERSION || currentVersion === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || currentVersion === LEARNING_CURATION_SCHEMA_VERSION || currentVersion === 97 || currentVersion === 98 || currentVersion === 99 || currentVersion === 100 || currentVersion === LATEST_SCHEMA_VERSION),
+      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || currentVersion === PROPOSAL_REVIEW_SCHEMA_VERSION || currentVersion === FACTUAL_VERIFICATION_SCHEMA_VERSION || currentVersion === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || currentVersion === TASK_INTENT_DRAFT_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_SCHEMA_VERSION || currentVersion === CUSTOM_ANALYSIS_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || currentVersion === MODEL_SELECTION_SCHEMA_VERSION || currentVersion === PROCEDURE_DEFINITION_SCHEMA_VERSION || currentVersion === EDITORIAL_LEARNING_SCHEMA_VERSION || currentVersion === GLOBAL_AGENT_SCHEMA_VERSION || currentVersion === REVIEW_CONTRACT_SCHEMA_VERSION || currentVersion === IDLE_BACKGROUND_SCHEMA_VERSION || currentVersion === LOCAL_REVIEW_SCHEMA_VERSION || currentVersion === EDITORIAL_MEMORY_SCHEMA_VERSION || currentVersion === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || currentVersion === WORD_TRACKED_IMPORT_SCHEMA_VERSION || currentVersion === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || currentVersion === LEARNING_CURATION_SCHEMA_VERSION || currentVersion === 97 || currentVersion === 98 || currentVersion === 99 || currentVersion === 100 || currentVersion === 101 || currentVersion === LATEST_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2447,7 +2424,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === WRITING_TASK_SCHEMA_VERSION ||
       currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       currentVersion === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || currentVersion === PROPOSAL_REVIEW_SCHEMA_VERSION || currentVersion === FACTUAL_VERIFICATION_SCHEMA_VERSION || currentVersion === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || currentVersion === TASK_INTENT_DRAFT_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_SCHEMA_VERSION || currentVersion === CUSTOM_ANALYSIS_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || currentVersion === MODEL_SELECTION_SCHEMA_VERSION || currentVersion === PROCEDURE_DEFINITION_SCHEMA_VERSION || currentVersion === EDITORIAL_LEARNING_SCHEMA_VERSION || currentVersion === GLOBAL_AGENT_SCHEMA_VERSION || currentVersion === REVIEW_CONTRACT_SCHEMA_VERSION || currentVersion === IDLE_BACKGROUND_SCHEMA_VERSION || currentVersion === LOCAL_REVIEW_SCHEMA_VERSION || currentVersion === EDITORIAL_MEMORY_SCHEMA_VERSION || currentVersion === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || currentVersion === WORD_TRACKED_IMPORT_SCHEMA_VERSION || currentVersion === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || currentVersion === LEARNING_CURATION_SCHEMA_VERSION || currentVersion === 97 || currentVersion === 98 || currentVersion === 99 || currentVersion === 100 || currentVersion === LATEST_SCHEMA_VERSION)
+      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || currentVersion === PROPOSAL_REVIEW_SCHEMA_VERSION || currentVersion === FACTUAL_VERIFICATION_SCHEMA_VERSION || currentVersion === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || currentVersion === TASK_INTENT_DRAFT_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_SCHEMA_VERSION || currentVersion === CUSTOM_ANALYSIS_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || currentVersion === MODEL_SELECTION_SCHEMA_VERSION || currentVersion === PROCEDURE_DEFINITION_SCHEMA_VERSION || currentVersion === EDITORIAL_LEARNING_SCHEMA_VERSION || currentVersion === GLOBAL_AGENT_SCHEMA_VERSION || currentVersion === REVIEW_CONTRACT_SCHEMA_VERSION || currentVersion === IDLE_BACKGROUND_SCHEMA_VERSION || currentVersion === LOCAL_REVIEW_SCHEMA_VERSION || currentVersion === EDITORIAL_MEMORY_SCHEMA_VERSION || currentVersion === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || currentVersion === WORD_TRACKED_IMPORT_SCHEMA_VERSION || currentVersion === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || currentVersion === LEARNING_CURATION_SCHEMA_VERSION || currentVersion === 97 || currentVersion === 98 || currentVersion === 99 || currentVersion === 100 || currentVersion === 101 || currentVersion === LATEST_SCHEMA_VERSION)
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -2825,7 +2802,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === 98 || version === 99 || version === 100 || version === LATEST_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === 98 || version === 99 || version === 100 || version === 101 || version === LATEST_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2878,7 +2855,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === 98 || version === 99 || version === 100 || version === LATEST_SCHEMA_VERSION)) return;
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === 98 || version === 99 || version === 100 || version === 101 || version === LATEST_SCHEMA_VERSION)) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -3023,7 +3000,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === 98 || version === 99 || version === 100 || version === LATEST_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === 98 || version === 99 || version === 100 || version === 101 || version === LATEST_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -3075,7 +3052,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === 98 || version === 99 || version === 100 || version === LATEST_SCHEMA_VERSION)) return;
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === 98 || version === 99 || version === 100 || version === 101 || version === LATEST_SCHEMA_VERSION)) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -3617,7 +3594,7 @@ function initializeModelServiceSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === 98 || version === 99 || version === 100 || version === LATEST_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === 98 || version === 99 || version === 100 || version === 101 || version === LATEST_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -3669,7 +3646,7 @@ function initializeModelServiceSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === 98 || version === 99 || version === 100 || version === LATEST_SCHEMA_VERSION)) {
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === 98 || version === 99 || version === 100 || version === 101 || version === LATEST_SCHEMA_VERSION)) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -3840,41 +3817,6 @@ export interface StoreControl {
 function continuationNotice(access: OriginalFileAccessProjection): string {
   if (access.state === 'available-exact') return '已重新校验完整暂存快照；原始所选文件仍可访问且身份一致。';
   return `${access.label}。已重新校验完整暂存快照，不会从原路径读取或替换暂存内容。`;
-}
-
-/** What an import that converts a file's comments and tracked changes also creates (Issue #411, D4). */
-export function importedMarksRecord(count: number): string {
-  return `来自文件作者的批注与修改建议 ${count} 条`;
-}
-
-function recordsToCreate(
-  plan: ImportFidelityPlan,
-  targetKind: 'new-book' | 'existing-book' = 'new-book',
-  word?: { reusedSourceVersionId: string | null; eligibleSamples: number },
-): ReadonlyArray<string> {
-  let base: ReadonlyArray<string> = targetKind === 'existing-book' ? BASE_RECORDS_TO_CREATE.slice(2) : BASE_RECORDS_TO_CREATE;
-  if (word !== undefined) {
-    // A Word intake maps blocks through its own source segments, never the one-paragraph rows, and may reuse
-    // the exact same-byte Source Version this empty Book already retains instead of creating one.
-    base = base.flatMap((record) => record === '源材料版本与来源记录' && word.reusedSourceVersionId !== null
-      ? [`沿用本书已保留的同一来源版本 ${word.reusedSourceVersionId}（不新建来源版本）`]
-      : record === '来源段落对应'
-        ? ['Word 修订来源、导入选择与稿件来源片段对应',
-          ...(word.eligibleSamples > 0 ? [`Word 修改样本、导入准入与本机学习信号 ${word.eligibleSamples} 条`] : [])]
-        : [record]);
-  }
-  // The marks stand on r1's blocks, so they follow the block-source mapping.
-  const sourcesIndex = base.indexOf(word === undefined ? '来源段落对应' : 'Word 修订来源、导入选择与稿件来源片段对应');
-  const records = plan.importedMarks === 0
-    ? base
-    : [...base.slice(0, sourcesIndex + 1), importedMarksRecord(plan.importedMarks), ...base.slice(sourcesIndex + 1)];
-  if (plan.degradations.length === 0) return records;
-  const fidelityIndex = records.indexOf('导入保真审阅');
-  return [...records.slice(0, fidelityIndex + 1), '导入降级决定', ...records.slice(fidelityIndex + 1)];
-}
-
-function nonEffects(plan: ImportFidelityPlan): ReadonlyArray<string> {
-  return plan.degradations.length === 0 ? [...NON_EFFECTS, CLEAN_IMPORT_NON_EFFECT] : NON_EFFECTS;
 }
 
 function newBookTargetChoice(
@@ -4399,6 +4341,8 @@ interface ReviewedFidelity {
   fidelity: FidelityCategoryProjection[];
   plan: ImportFidelityPlan;
   word?: WordIntakePlan;
+  /** The confirmed structure (Issue #1205); absent or null when the review confirmed none. */
+  structure?: ImportStructureChoice | null;
 }
 
 /**
@@ -4447,6 +4391,7 @@ function createImportReviewDigestV6(
     fidelity: reviewed.fidelity,
     ...(reviewed.word === undefined ? {} : { word: reviewed.word.prepared }),
     textBoxDisposition: plan.textBoxDisposition,
+    ...(reviewed.structure ? { structure: reviewed.structure } : {}),
     degradationDecision: plan.degradations.length === 0
       ? null
       : {
@@ -5238,7 +5183,7 @@ export class EditorialStore {
       initializeModelSelectionSchema(authority);
       initializeMaterialTranslationAttemptSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
       initializeProcedureDefinitionSchema(authority);
-      initializeEditableProcedureSchema(authority); initializeStructuralEditSchema(authority); initializeNoteBlockSchema(authority);
+      initializeEditableProcedureSchema(authority); initializeStructuralEditSchema(authority); initializeNoteBlockSchema(authority); initializeImportStructureSchema(authority);
       // Revision 86 (Issue #1082): reference-only Learning Signals, the learning controls and explicit editorial memory.
       initializeEditorialLearningSchema(authority);
       // Revision 87 (Issue #1083): the editor's Learning Supervision Directives; a damaged chain refuses the store once the
@@ -13951,6 +13896,7 @@ export class EditorialStore {
     acceptDegradation: boolean,
     textBoxDisposition: TextBoxDisposition = 'retain',
     trackedChanges?: WordTrackedChoiceInput,
+    structure?: ImportStructureChoice,
   ): ReviewBeforeImportProjection {
     this.#assertAvailable();
     requireStore(UUID_PATTERN.test(draftId), 'DRAFT_INVALID', '导入草稿标识无效。');
@@ -13967,7 +13913,8 @@ export class EditorialStore {
         structureDigest: word.parsed.structureDigest, blockCount: word.parsed.blockCount, characterCount: word.parsed.characterCount,
         fidelity: word.parsed.fidelity, titleSuggestion: word.parsed.titleSuggestion.value, titleSource: word.parsed.titleSuggestion.sourceLabel };
     }
-    const reviewed = this.#reviewedFidelity(snapshot, textBoxDisposition, word ?? undefined);
+    const reviewed: ReviewedFidelity = { ...this.#reviewedFidelity(snapshot, textBoxDisposition, word ?? undefined), structure: word !== null ? null
+      : this.#boundedCall(() => reviewStructureChoice(this.#authority, snapshot.draftId, snapshot.parserIdentity !== WORD_DOCX_PARSER_IDENTITY, structure)) };
     const { plan } = reviewed;
     if (plan.degradations.length > 0 && !acceptDegradation) {
       if (word !== null) this.#transaction(this.#authority, () => {
@@ -14022,6 +13969,7 @@ export class EditorialStore {
           expectedDraftVersion,
         );
       requireStore(update.changes === 1, 'DRAFT_VERSION_CHANGED', '导入草稿在复核时已变化。');
+      this.#boundedCall(() => recordStructureChoice(this.#authority, draftId, reviewed.structure ?? null));
       if (word !== null) this.#retentionCall(() => recordWordPreparedIntake(this.#authority, word.prepared));
     });
     return this.#reviewProjection(
@@ -14118,8 +14066,10 @@ export class EditorialStore {
     requireStore(snapshot.state === 'staged', 'DRAFT_STATE_CHANGED', '导入草稿状态已变化。');
     requireStore(snapshot.version === expectedDraftVersion, 'DRAFT_VERSION_CHANGED', '导入草稿版本已变化。');
     snapshot = this.#selectLegacyWordStaging(snapshot);
-    // A reimport compares parsed blocks, so a format that was never parsed cannot begin one.
+    // A reimport compares parsed blocks, so a format that was never parsed cannot begin one. A reading that split a paragraph
+    // over the bound (Issue #1205) maps its later pieces to no source paragraph, which a reimport's mapping cannot carry.
     this.#requireEditableFormat(snapshot);
+    requireStore(snapshot.parserIdentity !== DOCX_SPLIT_PARSER_IDENTITY, 'REIMPORT_SPLIT_UNSUPPORTED', '含超出段落上限段落的文件暂不能重新导入稿件；可作为来源材料导入。');
     const binding = this.#reimportManuscriptBinding(targetSelection.bookId);
     requireStore(!Array.from(this.#reimportPreparationWork.values()).some((work) => work.draftId === draftId),
       'SERVICE_BUSY', '该重新导入草稿已有比较准备任务。');
@@ -15005,7 +14955,10 @@ export class EditorialStore {
       const merged = word === undefined && plan.textBoxDisposition === 'merge'
         ? this.#retentionCall(() => stagedTextBoxParagraphs(this.#authority, input.draftId))
         : null;
-      const blockCount = snapshot.blockCount + (merged?.length ?? 0);
+      let blockCount = snapshot.blockCount + (merged?.length ?? 0);
+      // A confirmed structure or a split paragraph (Issue #1205) shapes r1 in the same pass a text-box merge does.
+      const structure = reviewed.structure ?? null;
+      const shaped = merged !== null || structure !== null || this.#boundedCall(() => stagedHasPieces(this.#authority, input.draftId));
       const characterCount = snapshot.characterCount +
         (merged?.reduce((total, paragraph) => total + paragraph.graphemeLength, 0) ?? 0);
 
@@ -15023,7 +14976,7 @@ export class EditorialStore {
       const workflowInstanceId = randomUUID();
       const importRecordId = randomUUID();
       // A merged r1 is not the parse's body alone, so its digest names the paragraphs merged into it.
-      const revisionDigest = sha256(canonicalJson(merged === null
+      const revisionDigest = sha256(canonicalJson({ ...(merged === null
         ? {
             schema: 'ai7.manuscript-revision/2',
             manuscriptId,
@@ -15048,8 +15001,9 @@ export class EditorialStore {
               sourceParagraphIndex: paragraph.sourceParagraphIndex,
               digest: paragraph.digest,
             })),
-          }));
+          }), ...(structure === null ? {} : { schema: 'ai7.manuscript-revision/4', structure }) }));
       const workingDigest = revisionDigest;
+      let unmappedBlocks = 0;
 
       if (target.kind === 'new-book') {
         this.#authority.prepare(
@@ -15142,7 +15096,7 @@ export class EditorialStore {
         )
         .run(revisionId, manuscriptId, branchId, sourceVersionId, revisionDigest, now);
       this.#authority.prepare('UPDATE manuscript_branches SET base_revision_id = ? WHERE branch_id = ?').run(revisionId, branchId);
-      if (merged === null) {
+      if (!shaped) {
         this.#authority.prepare(
           `INSERT INTO manuscript_blocks(block_id, manuscript_id, created_revision_id)
            SELECT staged_block_id, ?, ? FROM staged_import_blocks WHERE draft_id = ? ORDER BY position`,
@@ -15172,7 +15126,8 @@ export class EditorialStore {
         const noted = word === undefined ? commitNoteSources(this.#authority, { revisionId, sourceVersionId, draftId: input.draftId, createdAt: now }) : 0;
         requireStore(mapped === null || Number(mapped.changes) + noted === snapshot.blockCount, 'IMPORT_POSTCONDITION_FAILED', '稿件内容块的来源段落对应不完整。');
       } else {
-        insertMergedImportBlocks(this.#authority, { draftId: input.draftId, manuscriptId, revisionId, branchId, sourceVersionId, now }, merged);
+        ({ blockCount, unmapped: unmappedBlocks } = insertMergedImportBlocks(this.#authority,
+          { draftId: input.draftId, manuscriptId, revisionId, branchId, sourceVersionId, now }, merged ?? [], structure));
       }
       this.#authority
         .prepare(
@@ -15348,6 +15303,7 @@ export class EditorialStore {
         reviewDigest: input.reviewDigest,
         fidelityPlan: plan,
         fidelityCategoryCount: reviewedFidelity.length,
+        unmappedBlocks,
         sourceDigest: snapshot.sourceDigest,
         sourceBytes: snapshot.sourceBytes,
         conversion: snapshot.conversion,
@@ -20090,7 +20046,7 @@ export class EditorialStore {
     const ingestId = randomUUID();
     let inserted = 0;
     let startOffset = 0;
-    const legacySources: LegacyBlockSources = { blockSourceIndexes: [], notes: [] };
+    const legacySources: LegacyBlockSources = legacyBlockSources([]);
     const batch: Array<{
       stagedBlockId: string;
       position: number;
@@ -20728,6 +20684,7 @@ export class EditorialStore {
       nextBookCursor: bookPage.nextCursor,
       fidelity: snapshot.fidelity,
       detectedBlockCount: snapshot.blockCount,
+      ...this.#boundedCall(() => stagedStructureField(this.#authority, snapshot.draftId, snapshot.parserIdentity !== WORD_DOCX_PARSER_IDENTITY)),
       ...(wordTrackedChanges === undefined ? {} : { wordTrackedChanges }),
     };
   }
@@ -21628,7 +21585,7 @@ export class EditorialStore {
     sources: StagedImportSources | null): void {
     requireStore(this.#authority.isTransaction && blocks.length === parsed.blockCount && blocks.length > 0,
       'WORD_STAGING_INVALID', '阅读切换必须形成原子的非空暂存快照。');
-    for (const table of ['staged_import_block_sources', 'staged_import_note_sources', 'staged_import_text_box_paragraphs', 'staged_import_marks', 'staged_import_blocks']) {
+    for (const table of ['staged_import_block_sources', 'staged_import_note_sources', 'staged_import_paragraph_pieces', 'staged_import_text_box_paragraphs', 'staged_import_marks', 'staged_import_blocks']) {
       this.#authority.prepare(`DELETE FROM ${table} WHERE draft_id = ?`).run(snapshot.draftId);
     }
     requireStore(this.#authority.prepare(`UPDATE staged_import_snapshots SET parser_identity = ?, content_digest = ?, structure_digest = ?,
@@ -21669,7 +21626,7 @@ export class EditorialStore {
       offset += block.graphemeLength;
       return valid;
     }), 'WORD_PREPARATION_INVALID', 'Word 暂存没有完整对应已确认的阅读。');
-    for (const table of ['staged_import_block_sources', 'staged_import_note_sources', 'staged_import_text_box_paragraphs', 'staged_import_marks']) requireStore(
+    for (const table of ['staged_import_block_sources', 'staged_import_note_sources', 'staged_import_paragraph_pieces', 'staged_import_text_box_paragraphs', 'staged_import_marks']) requireStore(
       this.#authority.prepare(`SELECT 1 FROM ${table} WHERE draft_id = ? LIMIT 1`).get(snapshot.draftId) === undefined,
       'WORD_PREPARATION_INVALID', 'Word 图与片段不能冒充历史段落或标记暂存。');
   }
@@ -21779,8 +21736,9 @@ export class EditorialStore {
     }
     const staged = this.#requireFidelityPlan(snapshot);
     const dispositions: ReadonlyArray<TextBoxDisposition> = staged.textBoxDisposition === null ? ['retain'] : ['retain', 'merge'];
+    const structure = this.#boundedCall(() => recordedStructureChoice(this.#authority, snapshot.draftId));
     for (const disposition of dispositions) {
-      const reviewed = this.#reviewedFidelity(snapshot, disposition);
+      const reviewed = { ...this.#reviewedFidelity(snapshot, disposition), structure };
       const target = this.#reconstructReviewedImportTarget(snapshot, reviewed, identityFindings);
       if (target !== null) return { target, reviewed };
     }
@@ -21874,6 +21832,8 @@ export class EditorialStore {
       identityFindings,
       fidelity: reviewed.fidelity,
       textBoxDisposition: plan.textBoxDisposition,
+      ...(reviewed.word !== undefined ? {} : this.#boundedCall(() => reviewStructureField(this.#authority, snapshot.draftId,
+        snapshot.parserIdentity !== WORD_DOCX_PARSER_IDENTITY, reviewed.structure))),
       ...(reviewed.word === undefined ? {} : { trackedChanges: reviewed.word.prepared.choice, wordLearning: {
         globalEnabled: reviewed.word.prepared.target.controls.global.enabled,
         bookExcluded: reviewed.word.prepared.target.controls.book.excluded,
@@ -22491,6 +22451,8 @@ export class EditorialStore {
     reviewDigest: string;
     fidelityPlan: ImportFidelityPlan;
     fidelityCategoryCount: number;
+    /** Blocks of r1 no source paragraph maps: the later pieces of split paragraphs (Issue #1205). */
+    unmappedBlocks: number;
     sourceDigest: string;
     sourceBytes: number;
     conversion: ManuscriptConversionProjection | null;
@@ -22594,7 +22556,7 @@ export class EditorialStore {
         asNumber(counts.degradation_decisions) === (input.degradationDecisionId === null ? 0 : 1) &&
         asNumber(counts.workflows) === 1 &&
         asNumber(counts.imports) === 1 &&
-        asNumber(counts.block_sources) === (input.word === undefined ? input.blockCount : 0) &&
+        asNumber(counts.block_sources) === (input.word === undefined ? input.blockCount - input.unmappedBlocks : 0) &&
         // Issue #411: exactly the marks the review counted, every one pinned on r1.
         asNumber(counts.imported_marks) === input.fidelityPlan.importedMarks,
       'IMPORT_POSTCONDITION_FAILED',
