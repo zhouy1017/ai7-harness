@@ -3,7 +3,7 @@ import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'n
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { candidateKind, queueTarget, documentationOnly, receiptCandidate, roleReceipts, mergeAuthorization, hostedGatePassed, testsPrecedeRelease } from './release-authority.mjs';
+import { candidateKind, queueTarget, documentationOnly, receiptCandidate, roleReceipts, sliceClosure, mergeAuthorization, hostedGatePassed, testsPrecedeRelease } from './release-authority.mjs';
 
 // The nightly merge queue of ADR 0081: the scheduled orchestrator lists the candidates, builds the
 // tree each one would land, and merges the ones the full Gate passed. Every pull-request-touching
@@ -345,18 +345,25 @@ function pagedApi(repo, suffix) {
   return parseJson(ghOrThrow(['api', '--paginate', '--slurp', `repos/${repo}/${suffix}`]), 'GitHub paginated API').flat();
 }
 
+const trustedLogins = new Map();
+
+/** The one trust test: a maintain/admin collaborator may publish receipts or direct-merge a slice. */
+function trustedLogin(repo, login) {
+  const key = `${repo} ${login}`;
+  if (!trustedLogins.has(key)) {
+    const permission = api(repo, `collaborators/${encodeURIComponent(login)}/permission`);
+    trustedLogins.set(key, ['admin', 'maintain'].includes(permission.role_name ?? permission.permission));
+  }
+  return trustedLogins.get(key);
+}
+
 function receiptsFor(repo, pr) {
   const comments = pagedApi(repo, `issues/${pr}/comments?per_page=100`);
-  const permissions = new Map();
   for (const comment of comments) {
     if (!receiptCandidate(comment.body)) continue;
     const login = comment.user?.login;
     if (!login || comment.user.type !== 'User') continue;
-    if (!permissions.has(login)) {
-      const permission = api(repo, `collaborators/${encodeURIComponent(login)}/permission`);
-      permissions.set(login, ['admin', 'maintain'].includes(permission.role_name ?? permission.permission));
-    }
-    comment.trusted = permissions.get(login);
+    comment.trusted = trustedLogin(repo, login);
   }
   return roleReceipts(comments);
 }
@@ -391,6 +398,15 @@ function verifyHostedRelease(repo, record, authorization) {
   return true;
 }
 
+/**
+ * An Owner direct-merged slice is closed by its merge record instead of receipts: merged into the
+ * wave branch as the listed commit by a trusted account. Returns the refusal, or null when closed.
+ */
+export function directSliceClosure({ record, source, mergeCommit, mergerTrusted, slice }) {
+  if (record.state !== 'MERGED' || record.baseRefName !== source || mergeCommit !== slice.merge) return 'integration-slice-not-merged';
+  return mergerTrusted === true ? null : 'integration-slice-merger-untrusted';
+}
+
 function verifySliceClosures(repo, authorization, waveHead) {
   if (authorization.assignment.route !== 'integration') return;
   const mergedSlices = pagedApi(repo, `pulls?state=closed&base=${encodeURIComponent(authorization.assignment.source)}&per_page=100`)
@@ -401,7 +417,14 @@ function verifySliceClosures(repo, authorization, waveHead) {
   }
   for (const slice of authorization.complete.slices) {
     const record = pullRequest(repo, slice.pr);
-    const merge = api(repo, `pulls/${slice.pr}`).merge_commit_sha;
+    const { merge_commit_sha: merge, merged_by: merger } = api(repo, `pulls/${slice.pr}`);
+    if (sliceClosure(slice) === 'direct') {
+      const refusal = directSliceClosure({ record, source: authorization.assignment.source, mergeCommit: merge, slice,
+        mergerTrusted: merger?.type === 'User' && trustedLogin(repo, merger.login) });
+      if (refusal !== null) throw new Error(refusal);
+      if (run('git', ['merge-base', '--is-ancestor', slice.merge, waveHead]).status !== 0) throw new Error('integration-slice-not-in-candidate');
+      continue;
+    }
     if (record.state !== 'MERGED' || record.baseRefName !== authorization.assignment.source || merge !== slice.merge) {
       throw new Error('integration-slice-not-merged');
     }

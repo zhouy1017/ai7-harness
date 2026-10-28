@@ -1,5 +1,5 @@
 ---
-status: accepted by the Owner on 2026-10-12; amended by the Owner on 2026-10-26 to allow manual per-Issue dispatch, retire mandatory cross-provider review, and require repair only when E2E or CI tests fail
+status: accepted by the Owner on 2026-10-12; amended by the Owner on 2026-10-26 to allow manual per-Issue dispatch, retire mandatory cross-provider review, and require repair only when E2E or CI tests fail; amended by the Owner on 2026-10-28 to close Owner direct-merged slices by their merge record
 date: 2026-10-12
 deciders: Owner
 ---
@@ -20,7 +20,7 @@ The model/effort table is deliberately not copied here or into templates.
 
 Work may be dispatched either by the Owner manually one Issue at a time to a single coding agent, or through an Orca wave coordinator across available ChatGPT, Claude and OpenCode Go subscriptions. Mandatory cross-provider review (requiring a second agent on a different subscription channel) is retired.
 
-The assigned coding agent implements the Issue brief, runs the applicable CI checks (`check`, `test`, `test:service`, `build`) and E2E Journeys, fixes any failing E2E or CI tests on the branch, and opens or updates the PR to the wave integration branch or `dev`. Follow-up repair or review is triggered only when E2E tests or CI tests fail. Once the required E2E and CI checks pass, the slice may merge without waiting for a cross-provider Reviewer handoff. The protected `main`/release line remains separate.
+The assigned coding agent implements the Issue brief, runs the applicable CI checks (`check`, `test`, `test:service`, `build`) and E2E Journeys, fixes any failing E2E or CI tests on the branch, and opens or updates the PR to the wave integration branch or `dev`. Follow-up repair or review is triggered only when E2E tests or CI tests fail. Once the required E2E and CI checks pass, the slice may merge without waiting for a cross-provider Reviewer handoff. The protected `main`/release line remains separate. Under the Owner's direct-merge authorization (Owner, 2026-10-28), a slice merged into the wave branch by a maintain/admin account without receipts is closed in the integration completion as a direct merge and verified by its merge record; the candidate's own completion and Full Gate release are unchanged.
 
 This replaces fixed old model bindings, the optional read-only Reviewer, Worker prohibitions on creating PRs and the Commander's former monopoly on every external action. It lifts the ADR 0082 dispatch hold as the new rulebook integrates; operational dispatch still requires a verified Orca runtime; product waves require the CI adaptation of [#806](https://github.com/zhouy1017/ai7-harness/issues/806). The infrastructure bootstrap for #806 itself follows rulebook §2 and does not wait on its own completion. An unavailable runtime is a disclosed prerequisite, not permission to call a different mechanism Orca.
 

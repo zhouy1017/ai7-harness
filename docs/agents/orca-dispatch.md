@@ -56,7 +56,7 @@ The Review Gate is strictly test-driven:
 
 Slices merge serially into the wave branch (or `dev` when dispatched directly). For wave integration, once the wave's slices are merged, open the wave-to-`dev` PR, raise `package.json` to the wave's version and add the version-ledger row ([ADR 0098](../adr/0098-adopt-one-x-y-z-version-across-releases-and-internal-management.md)).
 
-The final integration candidate passes the provider-free Gate at its current head/base, updates [PROGRESS](../../PROGRESS.md) and closes implemented Issues. `tools/ci/release-authority.mjs` accepts single-writer completion receipts as well as legacy Worker/Reviewer handoff receipts. Promotion to `main`, release and manuscript publication remain separate Owner decisions.
+The final integration candidate passes the provider-free Gate at its current head/base, updates [PROGRESS](../../PROGRESS.md) and closes implemented Issues. `tools/ci/release-authority.mjs` accepts single-writer completion receipts as well as legacy Worker/Reviewer handoff receipts. Under the Owner's direct-merge authorization (ADR 0089, amended 2026-10-28), a slice merged into the wave branch by a maintain/admin account without receipts is closed in the integration completion as a direct merge and verified by its merge record; the candidate's own completion and Full Gate release are unchanged. Promotion to `main`, release and manuscript publication remain separate Owner decisions.
 
 ## 6. Keep the three model uses separate
 

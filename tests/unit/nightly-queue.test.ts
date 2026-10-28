@@ -65,6 +65,13 @@ const queue = (await import(new URL('../../tools/nightly-queue.mjs', import.meta
   candidateRef: (pr: number, runId: string) => string;
   linkedIssues: (references: unknown, repo: string) => number[];
   closingComment: (options: { pr: number; dev: string; commit: string }) => string;
+  directSliceClosure: (options: {
+    record: { state: string; baseRefName: string };
+    source: string;
+    mergeCommit: string | null;
+    mergerTrusted: boolean;
+    slice: { pr: number; merge: string; directMerge: true };
+  }) => string | null;
   main: (argv: string[]) => number;
 };
 
@@ -415,6 +422,24 @@ describe('the Issues a merged pull request links', () => {
     const comment = queue.closingComment({ pr: 482, dev: 'dev', commit: 'cf9b0a5d97de7220b46763b6267ae4da4cf4774f' });
     expect(comment).toBe('Integrated by pull request #482, squashed onto `dev` by the nightly merge queue (ADR 0081) as `cf9b0a5d97de`. ' +
       'A merge made with the workflow\'s token does not close the Issues a pull request links, so the queue closes this one (#496).');
+  });
+});
+
+describe('the integration closure of an Owner direct-merged slice', () => {
+  it('accepts only a slice merged into the wave as the listed commit by a trusted account', () => {
+    const merge = 'd'.repeat(40);
+    const closure = {
+      record: { state: 'MERGED', baseRefName: 'codex/integration-21c' },
+      source: 'codex/integration-21c',
+      mergeCommit: merge,
+      mergerTrusted: true,
+      slice: { pr: 1191, merge, directMerge: true as const },
+    };
+    expect(queue.directSliceClosure(closure)).toBeNull();
+    expect(queue.directSliceClosure({ ...closure, record: { ...closure.record, state: 'CLOSED' } })).toBe('integration-slice-not-merged');
+    expect(queue.directSliceClosure({ ...closure, record: { ...closure.record, baseRefName: 'dev' } })).toBe('integration-slice-not-merged');
+    expect(queue.directSliceClosure({ ...closure, mergeCommit: 'e'.repeat(40) })).toBe('integration-slice-not-merged');
+    expect(queue.directSliceClosure({ ...closure, mergerTrusted: false })).toBe('integration-slice-merger-untrusted');
   });
 });
 
