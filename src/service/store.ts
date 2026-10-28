@@ -61,6 +61,20 @@ import { closeSync, constants, createReadStream, existsSync, fstatSync, lstatSyn
 import { copyFile, lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
+import {
+  DIGEST_PATTERN,
+  StoreError,
+  StoreFatalError,
+  UUID_PATTERN,
+  asNumber,
+  asString,
+  canonicalJson,
+  requireStore,
+  sha256,
+  type SqlRow,
+} from './store-records.js';
+// The store's error types are still read from here by every caller that catches them.
+export { StoreError, StoreFatalError };
 import { acceptedSourceImportRetainedBoundaryLabels, sourceImportRetainedBoundaryLabel, BASELINE_ANALYSIS_MODE_GOALS, BASELINE_ANALYSIS_MODE_LABELS, CAPTURED_PROCEDURE_CAPTURE_SLOTS, CAPTURED_PROCEDURE_STATE_LABELS, MAX_CAPTURED_PROCEDURE_RUNS_SHOWN, MAX_CAPTURED_PROCEDURE_TITLE_GRAPHEMES, MAX_CAPTURED_PROCEDURE_VERSIONS_PAGE, J03_TASK_GOAL, MAX_DIALOGUE_SELECTION_GRAPHEMES, MAX_EVALUATION_CALIBRATION_BOOKS, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_LEARNING_AUDIT_BOOK_CHOICES, MAX_LEARNING_AUDIT_PAGE, MAX_LEARNING_AUDIT_SERIES_CHOICES, MAX_LEARNING_LINEAGE_DECISIONS, MAX_LEARNING_LINEAGE_TASKS, MAX_LEARNING_REMEDIATION_ITEMS, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
 import type {
   ControlTaskRunInput,
@@ -1226,9 +1240,7 @@ import {
   type TaskPreparationResult,
 } from './task-authorization.js';
 
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TOKEN_PATTERN = UUID_PATTERN;
-const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const CORE_SCHEMA_VERSION = 5;
 const EDITOR_SCHEMA_VERSION = 6;
 const RECOVERY_SCHEMA_VERSION = 7;
@@ -1757,7 +1769,6 @@ const SOURCE_IMPORT_REBUILT_TRIGGER_SQL = `
   END;
 `;
 
-type SqlRow = Record<string, SQLOutputValue>;
 /** The house's 范例 a writing draft may reference, by type, and the damaged imported versions the scan named and skipped (Issue #789). */
 interface WritingExemplarScan {
   readonly found: Map<string, Array<{ input: WritingExemplarInput; source: WritingExemplarSource }>>;
@@ -1776,27 +1787,6 @@ type StoredImportCommitProjection =
   | ManuscriptReimportCommitProjection;
 type ImmutableManuscriptImportResult = Omit<ManuscriptImportCommitProjection, 'firstWindow' | 'overview'>;
 
-export class StoreError extends Error {
-  constructor(
-    readonly code: string,
-    message: string,
-  ) {
-    super(message);
-    this.name = 'StoreError';
-  }
-}
-
-export class StoreFatalError extends Error {
-  constructor(cause: unknown) {
-    super('AI7 authority transaction boundary failed.', { cause });
-    this.name = 'StoreFatalError';
-  }
-}
-
-function requireStore(condition: unknown, code: string, message: string): asserts condition {
-  if (!condition) throw new StoreError(code, message);
-}
-
 function requireBoundedBookOverview(projection: BookWorkOverviewProjection): BookWorkOverviewProjection {
   requireStore(
     Buffer.byteLength(JSON.stringify(projection), 'utf8') <= MAX_FRAME_BYTES - REIMPORT_WIRE_HEADROOM_BYTES,
@@ -1804,22 +1794,6 @@ function requireBoundedBookOverview(projection: BookWorkOverviewProjection): Boo
     '图书概览历史页超出有界服务帧。',
   );
   return projection;
-}
-
-function canonicalJson(value: unknown): string {
-  if (typeof value === 'string') {
-    requireStore(value.isWellFormed(), 'CANONICAL_VALUE_INVALID', '无法形成规范记录摘要。');
-  }
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
-  if (value !== null && typeof value === 'object') {
-    return `{${Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`)
-      .join(',')}}`;
-  }
-  const encoded = JSON.stringify(value);
-  if (encoded === undefined) throw new StoreError('CANONICAL_VALUE_INVALID', '无法形成规范记录摘要。');
-  return encoded;
 }
 
 /** Which Task kind's plan a kind's 结果待确认 is listed on (Issue #757): a review category's is its Review Run's. */
@@ -1849,10 +1823,6 @@ function unconfirmedDigest(listed: { ranges: ReadonlyArray<{ key: string }>; ste
 
 /** Why 保留为缺口 was refused: the list moved since the editor read it (Issue #757). */
 export const UNCONFIRMED_CHANGED = '结果待确认的列表已经变化；请重新查看后再确认。' as const;
-
-function sha256(value: string | Uint8Array): string {
-  return createHash('sha256').update(value).digest('hex');
-}
 
 function stableUuid(value: string): string {
   const digest = sha256(value).slice(0, 32).split('');
@@ -1899,16 +1869,6 @@ function workflowProjectionJson(profile: BuiltInWorkflowProfile): string {
 function one<T extends SqlRow>(rows: T[], code: string, message: string): T {
   requireStore(rows.length === 1, code, message);
   return rows[0]!;
-}
-
-function asString(value: SQLOutputValue | undefined, code = 'STORE_CORRUPT'): string {
-  requireStore(typeof value === 'string' && value.isWellFormed(), code, '持久化记录类型无效。');
-  return value;
-}
-
-function asNumber(value: SQLOutputValue | undefined, code = 'STORE_CORRUPT'): number {
-  requireStore(typeof value === 'number' && Number.isSafeInteger(value), code, '持久化数字无效。');
-  return value;
 }
 
 /** The material key of one template's 审稿意见 offered into 范例 (Issue #429), on the Learning Eligibility ledger of S26b. */
