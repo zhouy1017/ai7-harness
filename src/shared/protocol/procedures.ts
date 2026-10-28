@@ -48,6 +48,11 @@ export interface ProcedureStageDefinition {
   readonly exemptionRules: readonly string[];
   readonly budgetShare: number;
   readonly web: boolean;
+  /**
+   * 空闲时处理 (Issue #1200; ADR 0095 §3): a composite's model-member stage the editor marked non-urgent. A member whose model
+   * stages are all marked runs after the others, on the idle lane, under the Run's one approval. Absent means 立即.
+   */
+  readonly deferred?: true;
 }
 
 /** Immutable configuration, with no Book, manuscript, Provider binding or Run authority. */

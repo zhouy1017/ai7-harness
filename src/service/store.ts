@@ -6048,7 +6048,7 @@ export class EditorialStore {
     const runs = this.#reviewRuns;
     return {
       local: (reviewRunId, stopping) => runs.runLocal(reviewRunId, stopping),
-      background: (reviewRunId) => runs.backgroundOrigin(reviewRunId),
+      background: (reviewRunId, categoryId) => runs.backgroundOrigin(reviewRunId, categoryId),
       begin: (reviewRunId) => this.#reviewCall(() => runs.beginDrive(reviewRunId)),
       end: (reviewRunId) => runs.endDrive(reviewRunId),
       step: (reviewRunId, categoryId) => this.#reviewCall(() => runs.step(reviewRunId, categoryId)),
@@ -6939,8 +6939,7 @@ export class EditorialStore {
   cancelWaitingTask(input: CancelWaitingTaskInput): { dequeue: string | null } {
     this.#assertAvailable();
     if (input.kind === 'review-run') {
-      this.#reviewCall(() => this.#reviewRuns.cancelWaiting(input.bookId, input.ref));
-      return { dequeue: null };
+      return { dequeue: this.#reviewCall(() => this.#reviewRuns.cancelWaiting(input.bookId, input.ref)) };
     }
     // Never through the kind's start checks (Issue #760 review, P2-1): a Run whose version, 范例 or 资料库 item moved while it
     // waited is exactly one the editor must be able to cancel, offline too (OFF-010).

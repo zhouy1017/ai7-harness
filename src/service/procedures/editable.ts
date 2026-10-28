@@ -42,12 +42,14 @@ export function validateProcedureEdit(base: ProcedureDefinitionDocument, input: 
     'PROCEDURE_STAGES_INVALID', '工序须保留所选任务的阶段和输入输出契约。');
   for (const [index, stage] of input.stages.entries()) {
     const expected = base.stages[index]!;
+    // 空闲时处理 (Issue #1200) is a composite member's choice; compositeMembers names a partial or local-stage mark below.
+    requireAnalysis(stage.deferred === undefined || base.members !== undefined, 'PROCEDURE_DEFERRED_INVALID', '只有组合工序的成员阶段可以设为空闲时处理。');
     requireAnalysis(procedureStageUsesModel(expected, base.stages) || stage.exemptionRules.length === 0 && stage.budgetShare === 0,
       'PROCEDURE_DETERMINISTIC_SETTINGS', `「${PROCEDURE_STAGE_LABELS[expected.stageType]}」由固定本地规则生成，不解释文字豁免，模型预算须为零。`);
     requireAnalysis(stage.stageType === expected.stageType, 'PROCEDURE_STAGE_ORDER_INVALID',
       `第 ${index + 1} 阶段须为「${PROCEDURE_STAGE_LABELS[expected.stageType]}」：这个任务的后续阶段依赖前一阶段的结果，不能交换。`);
-    const { exemptionRules: _rules, budgetShare: _share, ...fixed } = expected;
-    const { exemptionRules, budgetShare, ...offered } = stage;
+    const { exemptionRules: _rules, budgetShare: _share, deferred: _was, ...fixed } = expected;
+    const { exemptionRules, budgetShare, deferred: _deferred, ...offered } = stage;
     requireAnalysis(canonicalJson(fixed) === canonicalJson(offered), 'PROCEDURE_STAGE_CONTRACT_INVALID', '阶段类型、输入、工具和输出契约由所选任务固定。');
     requireAnalysis(Array.isArray(exemptionRules) && exemptionRules.length <= 20 && exemptionRules.every((rule) => typeof rule === 'string') &&
       Number.isFinite(budgetShare) && budgetShare >= 0 && budgetShare <= 1,
@@ -57,6 +59,7 @@ export function validateProcedureEdit(base: ProcedureDefinitionDocument, input: 
     'PROCEDURE_INSTRUCTION_TOO_LONG', '编辑任务说明和豁免规则合计不能超过 1200 个字。');
   requireAnalysis(input.stages.reduce((sum, stage) => sum + stage.budgetShare, 0) <= 1.000001,
     'PROCEDURE_BUDGET_INVALID', '阶段预算份额合计不能超过 100%。');
+  if (base.members !== undefined) compositeMembers({ ...base, stages: input.stages });
 }
 
 /** Called inside the Store transaction: every save appends a version, including changes to pre-installed procedures. */

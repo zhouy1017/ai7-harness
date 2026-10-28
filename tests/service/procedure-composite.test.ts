@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
 import { EditorialStore } from '../../src/service/store.js';
@@ -6,6 +6,10 @@ import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy
 import { IMPORTED_SKILL_RECOMMENDATION_EXCLUSION } from '../../src/service/procedure-recommendation.js';
 import { SEARCH_BACKENDS } from '../../src/service/provider/search-backends.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
+import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
+import { fullReviewProcedureDefinition } from '../../src/service/procedures/preinstalled.js';
+import type { BaselineAnalysisStore } from '../../src/service/analysis/baseline-analysis-store.js';
+import { STYLE_AND_FORMAT } from '../support/review-categories.js';
 import type { LaunchPolicyProjection, ProcedureDefinitionPin } from '../../src/shared/protocol.js';
 import type { LocalCheckOptions } from '../../src/shared/protocol/procedures.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
@@ -136,6 +140,99 @@ describe('composite procedures and 全文审校 (#1173)', () => {
     const settled = target.inspectReviewWorkspace(bookId, run.reviewRunId).run!;
     expect(settled.categories.map((category) => category.state)).toEqual(['settled', 'failed', 'failed', 'failed', 'failed']);
     expect(target.procedureLibrary({ action: 'inspect' }).procedures.find((entry) => entry.procedureId === FULL_REVIEW)!.uses).toBe(1);
+    target.markCleanShutdown();
+  });
+
+  /** 全文审校 saved with 体例与格式's model stages marked 空闲时处理 (Issue #1200), chosen on the Book when one is named. */
+  function deferStyle(target: EditorialStore, bookId: string | null, marks = ['chunked-review', 'cross-chapter-consistency']): ProcedureDefinitionPin {
+    const original = target.procedureLibrary({ action: 'inspect' }).procedures.find((entry) => entry.procedureId === FULL_REVIEW)!;
+    const styleFrom = original.document.members!.slice(0, 2).reduce((offset, member) => offset + member.stageCount, 0);
+    const stages = original.document.stages.map(({ deferred: _deferred, ...stage }, index) => index >= styleFrom && index < styleFrom + 4 && marks.includes(stage.stageType)
+      ? { ...stage, deferred: true as const } : stage);
+    const saved = target.procedureLibrary({ action: 'save', input: { procedureId: FULL_REVIEW, basedOn: pinOf(original), title: original.document.title,
+      editorInstruction: original.document.editorInstruction, stages } }).procedures.find((entry) => entry.procedureId === FULL_REVIEW)!;
+    if (bookId !== null) target.procedureLibrary({ action: 'select', bookId, procedure: pinOf(saved) });
+    return pinOf(saved);
+  }
+
+  /** A stand-in owner that sends nothing: an immediate member ends at once, a member started idle waits until it is released. */
+  function idleLaneOwner() {
+    const order: string[] = [];
+    const queued = new Map<string, () => void>();
+    const owner = {
+      admitAndDispatch: (runRecordId: string, ledger: BaselineAnalysisStore) => {
+        order.push(`${ledger.definition.kind}@now`); ledger.recordRunState(runRecordId, 'failed', { detail: '合成测试未发送。', code: 'TEST_NOT_SENT' });
+      },
+      admitOrQueue: (_runRecordId: string, ledger: BaselineAnalysisStore) => { order.push(`${ledger.definition.kind}@idle`); },
+      whenPlaceFree: async () => undefined,
+      whenDone: (runRecordId: string) => order.at(-1)?.endsWith('@idle') === true ? new Promise<void>((resolve) => queued.set(runRecordId, resolve)) : Promise.resolve(),
+    };
+    return { order, queued, owner };
+  }
+
+  it('saves a member marked 空闲时处理 into a new composite version and refuses a partial, local or single-executor mark by name', async () => {
+    const target = await open('ai7-procedure-deferred-save-');
+    const pin = deferStyle(target, null);
+    const saved = target.procedureLibrary({ action: 'inspect' }).procedures.find((entry) => entry.procedureId === FULL_REVIEW && entry.version === pin.version)!;
+    expect(saved.document.stages.filter((stage) => stage.deferred === true).map((stage) => stage.stageType)).toEqual(['chunked-review', 'cross-chapter-consistency']);
+    expect(() => deferStyle(target, null, ['chunked-review'])).toThrow(/的模型阶段须全部立即或全部空闲时处理/);
+    const latest = target.procedureLibrary({ action: 'inspect' }).procedures.find((entry) => entry.procedureId === FULL_REVIEW)!;
+    expect(() => target.procedureLibrary({ action: 'save', input: { procedureId: FULL_REVIEW, basedOn: pinOf(latest), title: latest.document.title,
+      editorInstruction: latest.document.editorInstruction, stages: latest.document.stages.map((stage, index) => index === 0 ? { ...stage, deferred: true as const } : stage) } }))
+      .toThrow(/只有调用模型的阶段可以设为空闲时处理/);
+    const typos = target.procedureLibrary({ action: 'inspect' }).procedures.find((entry) => entry.procedureId === 'ai7-procedure/review-typos-and-usage')!;
+    expect(() => target.procedureLibrary({ action: 'save', input: { procedureId: typos.procedureId, basedOn: pinOf(typos), title: typos.document.title,
+      editorInstruction: '', stages: typos.document.stages.map((stage) => ({ ...stage, deferred: true as const })) } })).toThrow(/只有组合工序的成员阶段/);
+    // 全文审校 v1 itself carries no mark: its bytes, and every plan that pinned it, are unchanged.
+    expect(fullReviewProcedureDefinition().stages.some((stage) => stage.deferred !== undefined)).toBe(false);
+    target.markCleanShutdown();
+  });
+
+  it('starts a member marked 空闲时处理 after the others, on the idle lane, under the one approval, and the drawer says so', async () => {
+    const target = await open('ai7-procedure-deferred-run-');
+    const policy = await ordinaryProduction(target);
+    const bookId = await book(target, '全文审校空闲成员样书');
+    const run = prepare(target, bookId, policy, deferStyle(target, bookId));
+    const plan = target.inspectTaskPlan({ bookId, kind: 'review-run', ref: run.reviewRunId });
+    expect(plan.steps.map((step) => step.label)).toContain('逐章审读：体例与格式（空闲时处理）');
+    expect(run.categories.find((category) => category.categoryId === 'style-and-format')!.stateLabel).toBe('空闲时处理');
+    target.authorizeReviewRun(bookId, run.reviewRunId, plan.start.categoryDigests);
+    const lane = idleLaneOwner();
+    const driver = new ReviewRunDriver(target.reviewRunDriveSteps, lane.owner);
+    const loop = driver.drive(run.reviewRunId);
+    await vi.waitFor(() => expect(lane.queued.size).toBe(1));
+    expect(lane.order).toEqual(['editorial-review/typos-and-usage@now', 'editorial-review/plot-consistency@now', 'factual-review@now', 'editorial-review/style-and-format@idle']);
+    expect(target.inspectTaskPlan({ bookId, kind: 'review-run', ref: run.reviewRunId }).state).toEqual({ key: 'waiting', label: '等待空闲' });
+    const waiting = target.inspectReviewWorkspace(bookId, run.reviewRunId).run!;
+    expect(waiting.categories.find((category) => category.categoryId === 'style-and-format')!.stateLabel).toBe('等待空闲');
+    const [runRecordId, release] = [...lane.queued][0]!;
+    target.reviewRunDriveSteps.refuseDispatch(run.reviewRunId, 'style-and-format', runRecordId, 'TEST_NOT_SENT', '合成测试未发送。');
+    release();
+    await loop;
+    await driver.dispose();
+    expect(target.inspectReviewWorkspace(bookId, run.reviewRunId).run!.categories.map((category) => category.state)).toEqual(['settled', 'failed', 'failed', 'failed', 'failed']);
+    target.markCleanShutdown();
+  });
+
+  it('cancels a member waiting on the idle lane as a waiting Run: nothing of it is dispatched', async () => {
+    const target = await open('ai7-procedure-deferred-cancel-');
+    const policy = await ordinaryProduction(target);
+    const bookId = await book(target, '全文审校取消空闲成员样书');
+    const run = prepare(target, bookId, policy, deferStyle(target, bookId));
+    target.authorizeReviewRun(bookId, run.reviewRunId, target.inspectTaskPlan({ bookId, kind: 'review-run', ref: run.reviewRunId }).start.categoryDigests);
+    const lane = idleLaneOwner();
+    const driver = new ReviewRunDriver(target.reviewRunDriveSteps, lane.owner);
+    const loop = driver.drive(run.reviewRunId);
+    await vi.waitFor(() => expect(lane.queued.size).toBe(1));
+    const [runRecordId, release] = [...lane.queued][0]!;
+    // The owner lets the queued Run go on this answer; that is what ends the Review Run's wait.
+    expect(target.cancelWaitingTask({ bookId, kind: 'review-run', ref: run.reviewRunId })).toEqual({ dequeue: runRecordId });
+    release();
+    await loop;
+    await driver.dispose();
+    expect(target.reviewCategoryLedger(reviewCategoryKindDefinition(STYLE_AND_FORMAT, 2)).currentRunState(runRecordId)).toBe('cancelled');
+    expect(lane.order.filter((entry) => entry.startsWith('editorial-review/style-and-format'))).toEqual(['editorial-review/style-and-format@idle']);
+    expect(target.inspectTaskPlan({ bookId, kind: 'review-run', ref: run.reviewRunId }).state.key).not.toBe('waiting');
     target.markCleanShutdown();
   });
 });

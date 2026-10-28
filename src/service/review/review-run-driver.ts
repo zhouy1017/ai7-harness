@@ -26,7 +26,8 @@ import type { ReviewRunDriveStep, ReviewRunHandOff } from './review-runs.js';
  */
 export interface ReviewRunDriveSteps {
   local?(reviewRunId: string, stopping: () => boolean): Promise<void>;
-  background?(reviewRunId: string): boolean;
+  /** Whether the category waits on the background share: an idle start, or a composite member marked 空闲时处理 (Issue #1200). */
+  background?(reviewRunId: string, categoryId: string): boolean;
   /** Take an approved Run for this lifetime; returns its categories in position order. */
   begin(reviewRunId: string): ReadonlyArray<string>;
   end(reviewRunId: string): void;
@@ -214,10 +215,11 @@ export class ReviewRunDriver {
    * starts already waiting, which take a freed place first — so it reads 等待运行名额, not only 等待审阅 (Issue #632).
    */
   async #place(reviewRunId: string, categoryId: string): Promise<void> {
-    if (this.#owner.busy !== true) return this.#owner.whenPlaceFree(this.#steps.background?.(reviewRunId) === true ? 'background' : 'foreground');
+    const lane = this.#steps.background?.(reviewRunId, categoryId) === true ? 'background' : 'foreground';
+    if (this.#owner.busy !== true) return this.#owner.whenPlaceFree(lane);
     this.#steps.waitingForPlace(reviewRunId, categoryId);
     try {
-      await this.#owner.whenPlaceFree(this.#steps.background?.(reviewRunId) === true ? 'background' : 'foreground');
+      await this.#owner.whenPlaceFree(lane);
     } finally {
       this.#steps.waitingForPlace(reviewRunId, null);
     }

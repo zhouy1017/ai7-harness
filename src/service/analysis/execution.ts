@@ -1083,6 +1083,8 @@ export class BaselineAnalysisExecutionOwner {
     const index = this.#queued.findIndex((entry) => entry.runRecordId === runRecordId);
     if (index < 0) return false;
     this.#queued.splice(index, 1);
+    // A Review Run waiting on this Run's end (a composite member queued for idle, Issue #1200) reads its cancellation now.
+    this.#changed();
     return true;
   }
 
