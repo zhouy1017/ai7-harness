@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "developerLive": { "route": "opencode-go", "model": "deepseek-v4.1-flash" },
+  "legacyDeepSeek": { "route": "deepseek-open-platform", "model": "deepseek-v4-pro" },
+  "policyBaseline": {
+    "main": [
+      { "route": "opencode-go", "model": "deepseek-v4.1-flash" },
+      { "route": "deepseek-open-platform", "model": "deepseek-flash" }
+    ],
+    "fast": [
+      { "route": "opencode-go", "model": "deepseek-v4.1-flash" },
+      { "route": "deepseek-open-platform", "model": "deepseek-flash" },
+      { "route": "openai-platform", "model": "gpt-5.6-luna" },
+      { "route": "openai-platform", "model": "gpt-5.6-sol" }
+    ]
+  },
+  "ordinaryProduction": {
+    "main": [
+      { "route": "opencode-go", "model": "deepseek-v4.1-flash" },
+      { "route": "deepseek-open-platform", "model": "deepseek-flash" }
+    ],
+    "fast": [
+      { "route": "opencode-go", "model": "deepseek-v4.1-flash" },
+      { "route": "deepseek-open-platform", "model": "deepseek-flash" },
+      { "route": "openai-platform", "model": "gpt-5.6-luna" },
+      { "route": "openai-platform", "model": "gpt-5.6-sol" }
+    ]
+  }
+}

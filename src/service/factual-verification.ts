@@ -49,7 +49,9 @@ import { UUID_PATTERN, canonicalJson, canonicalRecord, sha256Hex } from './analy
 import { FACTUAL_VERIFICATION_POLICY_VERSION, graphemeCount } from './analysis/factual-review-contract.js';
 import { retrievalCandidateOf, type FactualEvidenceRelation } from './analysis/factual-review-contract-v2.js';
 import { evidenceStaleness, titleSiteLabel } from './analysis/factual-review-evidence.js';
-import { FACTUAL_VERIFICATION_FOREIGN_KEYS, FACTUAL_VERIFICATION_SCHEMA_SQL, FACTUAL_VERIFICATION_TRIGGER_SQL } from './factual-verification-schema.js';
+import { FACTUAL_CLAIM_SCHEMA_SQL, FACTUAL_CLAIM_TRIGGER_SQL, FACTUAL_VERIFICATION_FOREIGN_KEYS, FACTUAL_VERIFICATION_SCHEMA_SQL, FACTUAL_VERIFICATION_TRIGGER_SQL } from './factual-verification-schema.js';
+import type { FactualClaimLedger } from './analysis/factual-claim-ledger.js';
+import type { FactualClaimVerificationResult } from './analysis/factual-claim-contract.js';
 
 export { FACTUAL_VERIFICATION_FOREIGN_KEYS, FACTUAL_VERIFICATION_SCHEMA_SQL, FACTUAL_VERIFICATION_TRIGGER_SQL };
 
@@ -84,6 +86,51 @@ const DECISION_SCHEMA = 'ai7.factual-review-decision/1';
 const PROPOSAL_SCHEMA = 'ai7.correction-proposal/1';
 const RUN_ASSURANCE_SCHEMA = 'ai7.factual-run-assurance/1';
 const GRAPHEMES = new Intl.Segmenter('zh', { granularity: 'grapheme' });
+
+export function initializeFactualClaimSchema(db: DatabaseSync, version: number): void {
+  for (const [name, sql] of Object.entries({ ...FACTUAL_CLAIM_SCHEMA_SQL, ...FACTUAL_CLAIM_TRIGGER_SQL })) {
+    const row = db.prepare('SELECT sql FROM sqlite_schema WHERE name = ?').get(name);
+    if (row === undefined) {
+      requireVerification(version < 97, 'SCHEMA_INVALID', '事实断言账本结构缺失。');
+      db.exec(sql);
+    } else requireVerification(fold(String(row.sql)) === fold(sql), 'SCHEMA_INVALID', '事实断言账本结构不兼容。');
+  }
+}
+
+export interface FactualClaimSession {
+  readonly sessionId: string;
+  readonly runRecordId: string;
+  readonly stage: 'claim-extraction' | 'web-verification';
+  readonly scopeId: string;
+  readonly ledgerDigest: string | null;
+  readonly sourceMessageDigest: string;
+  readonly promptContractDigest: string;
+  readonly limits: { readonly model: number; readonly tool: number; readonly search: number };
+}
+
+type FactualClaimEventKind = 'model' | 'tool' | 'search' | 'search-result' | 'verification-result' | 'source-exclusion';
+
+export interface FactualClaimRound {
+  readonly sessionId: string;
+  readonly round: number;
+  readonly state: 'pending' | 'closed' | 'incomplete' | 'unknown';
+  readonly result: FactualClaimVerificationResult | null;
+  readonly evidence: import('./analysis/factual-review-evidence.js').RetainedUnit;
+}
+
+export interface FactualRecheckSelection {
+  readonly sourceRunRecordId: string;
+  readonly bookId: string;
+  readonly decisionId: string;
+  readonly decisionDigest: string;
+  readonly resultId: string;
+  readonly resultVersion: number;
+  readonly originalRunRecordId: string;
+  readonly level: 'standard' | 'strict';
+  readonly claimId: string;
+  readonly ledgerDigest: string;
+  readonly excludedSources: readonly string[];
+}
 
 /** Revision 78's relations, created once on a store below it; a store that has them is checked against their exact text. */
 export function initializeFactualVerificationSchema(db: DatabaseSync, version: number): void {
@@ -270,6 +317,7 @@ interface StoredResult {
   readonly claimSupport: FactualEvidenceState;
   readonly recordedAt: string;
   readonly body: {
+    readonly factualDecision?: FactualRecheckSelection;
     readonly taskIntentId: string;
     readonly plannedLevel: EvidenceAssuranceLevel;
     readonly disclosure: string | null;
@@ -351,6 +399,7 @@ const RECOMMENDATIONS: Readonly<Partial<Record<FactualVerificationOutcome, { dis
 };
 
 export interface MaterializeInput {
+  readonly factualDecision?: FactualRecheckSelection;
   readonly bookId: string;
   readonly reviewRunId: string;
   readonly runRecordId: string;
@@ -370,11 +419,183 @@ export class FactualVerificationLedger {
     this.#db = db;
   }
 
+  /** Membership is written once before any claim verification session can be admitted. */
+  freezeClaims(runRecordId: string, ledger: FactualClaimLedger): FactualClaimLedger {
+    const prior = this.claims(runRecordId);
+    requireVerification(prior === null || prior.digest === ledger.digest, 'FACTUAL_CLAIM_MEMBERSHIP_FROZEN', '这次运行的断言集合已经冻结。');
+    if (prior !== null) return prior;
+    const { digest, ...body } = ledger;
+    const record = canonicalRecord(body);
+    requireVerification(record.digest === digest, 'FACTUAL_CLAIM_DIGEST_INVALID', '断言账本摘要不一致。');
+    this.#db.prepare('INSERT INTO factual_claim_ledgers(run_record_id, ledger_digest, canonical_json, recorded_at) VALUES (?, ?, ?, ?)')
+      .run(runRecordId, digest, record.json, new Date().toISOString());
+    return ledger;
+  }
+
+  claims(runRecordId: string): FactualClaimLedger | null {
+    if (this.#db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'factual_claim_ledgers'").get() === undefined) return null;
+    const row = this.#db.prepare('SELECT canonical_json, ledger_digest FROM factual_claim_ledgers WHERE run_record_id = ?').get(runRecordId);
+    return row === undefined ? null : { ...JSON.parse(String(row.canonical_json)) as Omit<FactualClaimLedger, 'digest'>, digest: String(row.ledger_digest) };
+  }
+
+  /** The session key survives restart; a new technical session cannot inherit or reset its counters. */
+  admitClaimSession(input: FactualClaimSession): FactualClaimSession {
+    const prior = this.#db.prepare('SELECT canonical_json FROM factual_claim_sessions WHERE run_record_id = ? AND stage = ? AND scope_id = ?')
+      .get(input.runRecordId, input.stage, input.scopeId);
+    if (prior !== undefined) {
+      const recorded = JSON.parse(String(prior.canonical_json)) as FactualClaimSession;
+      requireVerification(canonicalRecord(recorded).json === canonicalRecord(input).json, 'FACTUAL_CLAIM_SESSION_FROZEN', '断言会话已经固定；不能创建新的会话或重置额度。');
+      return recorded;
+    }
+    if (input.stage === 'web-verification') {
+      const ledger = this.claims(input.runRecordId);
+      requireVerification(ledger?.digest === input.ledgerDigest && ledger.claims.some((claim) => claim.claimId === input.scopeId),
+        'FACTUAL_CLAIM_NOT_ELIGIBLE', '这条断言不属于本次运行冻结的可核查集合。');
+    }
+    const record = canonicalRecord(input);
+    this.#db.prepare(`INSERT INTO factual_claim_sessions(session_id, run_record_id, stage, scope_id, ledger_digest,
+      model_limit, tool_limit, search_limit, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(input.sessionId, input.runRecordId, input.stage, input.scopeId, input.ledgerDigest,
+        input.limits.model, input.limits.tool, input.limits.search, record.json, record.digest);
+    return input;
+  }
+
+  claimSession(runRecordId: string, stage: FactualClaimSession['stage'], scopeId: string): FactualClaimSession | null {
+    const row = this.#db.prepare('SELECT canonical_json FROM factual_claim_sessions WHERE run_record_id = ? AND stage = ? AND scope_id = ?').get(runRecordId, stage, scopeId);
+    return row === undefined ? null : JSON.parse(String(row.canonical_json)) as FactualClaimSession;
+  }
+
+  claimAllowance(sessionId: string): FactualClaimSession['limits'] {
+    const session = this.#db.prepare('SELECT model_limit, tool_limit, search_limit FROM factual_claim_sessions WHERE session_id = ?').get(sessionId);
+    requireVerification(session !== undefined, 'FACTUAL_CLAIM_SESSION_MISSING', '断言会话未准入。');
+    const used = new Map(this.#db.prepare('SELECT kind, count(*) AS n FROM factual_claim_events WHERE session_id = ? GROUP BY kind').all(sessionId)
+      .map((row) => [String(row.kind), Number(row.n)]));
+    return { model: Number(session.model_limit) - (used.get('model') ?? 0), tool: Number(session.tool_limit) - (used.get('tool') ?? 0),
+      search: Number(session.search_limit) - (used.get('search') ?? 0) };
+  }
+
+  /** Reserve synchronously before transport. Failure/unknown outcomes leave this immutable row spent. */
+  reserveClaimCall(sessionId: string, kind: 'model' | 'tool' | 'search', identity: string): boolean {
+    const record = canonicalRecord({ identity });
+    const limit = { model: 'model_limit', tool: 'tool_limit', search: 'search_limit' }[kind];
+    const inserted = this.#db.prepare(`INSERT INTO factual_claim_events(session_id, sequence, kind, identity, canonical_json, sha256, recorded_at)
+      SELECT ?, (SELECT COALESCE(MAX(sequence), 0) + 1 FROM factual_claim_events WHERE session_id = ?), ?, ?, ?, ?, ?
+      WHERE (SELECT count(*) FROM factual_claim_events WHERE session_id = ? AND kind = ?)
+        < (SELECT ${limit} FROM factual_claim_sessions WHERE session_id = ?)
+      ON CONFLICT(session_id, kind, identity) DO NOTHING`)
+      .run(sessionId, sessionId, kind, identity, record.json, record.digest, new Date().toISOString(), sessionId, kind, sessionId);
+    return Number(inserted.changes) === 1;
+  }
+
+  claimSearchResult(sessionId: string, queryDigest: string): { readonly text: string; readonly sourceUrl: string | null } | null {
+    return this.#claimEvent(sessionId, 'search-result', queryDigest) as { readonly text: string; readonly sourceUrl: string | null } | null;
+  }
+
+  recordClaimSearchResult(sessionId: string, queryDigest: string, result: { readonly text: string; readonly sourceUrl: string | null }): void {
+    requireVerification(this.#claimEvent(sessionId, 'search', queryDigest) !== null, 'FACTUAL_SEARCH_NOT_RESERVED', '检索提交尚未记录。');
+    this.#appendClaimEvent(sessionId, 'search-result', queryDigest, result);
+  }
+
+  recordClaimVerification(input: Omit<FactualClaimRound, 'round'>): FactualClaimRound {
+    const prior = this.claimRounds(input.sessionId);
+    requireVerification(prior.length < 2, 'FACTUAL_VERIFICATION_ROUND_LIMIT', '这条断言已经完成两轮取证。');
+    const round = { ...input, round: prior.length + 1 };
+    this.#appendClaimEvent(input.sessionId, 'verification-result', String(round.round), round);
+    return round;
+  }
+
+  claimRounds(sessionId: string): readonly FactualClaimRound[] {
+    return this.#db.prepare("SELECT canonical_json FROM factual_claim_events WHERE session_id = ? AND kind = 'verification-result' ORDER BY sequence").all(sessionId)
+      .map((row) => JSON.parse(String(row.canonical_json)) as FactualClaimRound);
+  }
+
+  claimVerifications(sessionId: string): readonly FactualClaimVerificationResult[] {
+    return this.claimRounds(sessionId).flatMap((round) => round.result === null ? [] : [round.result]);
+  }
+
+  excludedClaimSources(claimId: string): readonly string[] {
+    return [...new Set(this.#db.prepare(`SELECT e.canonical_json FROM factual_claim_events e
+      JOIN factual_claim_sessions s ON s.session_id = e.session_id WHERE s.scope_id = ? AND e.kind = 'source-exclusion'
+      ORDER BY e.rowid`).all(claimId).map((row) => (JSON.parse(String(row.canonical_json)) as { sourceRef: string }).sourceRef))];
+  }
+
+  #claimLineage(result: StoredResult) {
+    const prior = result.body.factualDecision;
+    const runRecordId = prior?.originalRunRecordId ?? result.runRecordId;
+    const ledger = this.claims(runRecordId);
+    if (ledger === null || (prior !== undefined && ledger.digest !== prior.ledgerDigest)) return null;
+    const matching = ledger.claims.filter((claim) => prior === undefined
+      ? `fnd_${claim.claimId.slice(0, 24)}` === result.findingId
+      : claim.claimId === prior.claimId && claim.occurrence.block === result.blockId &&
+        claim.occurrence.exactRange.fromGrapheme === result.fromGrapheme && claim.occurrence.exactRange.toGrapheme === result.toGrapheme &&
+        claim.occurrence.quote === result.body.quote && claim.occurrence.question === result.body.normalizedStatement);
+    return matching.length === 1 ? { ledger, claim: matching[0]!, runRecordId } : null;
+  }
+
+  /** Resolve one exact occurrence under the latest current editor decision, never by similar wording. */
+  recheckSelection(bookId: string, decisionId: string, reader: ManuscriptReader): FactualRecheckSelection {
+    const row = this.#db.prepare('SELECT result_id, canonical_json, sha256 FROM factual_review_decisions WHERE decision_id = ? AND book_id = ?').get(decisionId, bookId);
+    requireVerification(row !== undefined, 'FACTUAL_DECISION_INVALID', '这条核查决定不属于当前图书。');
+    const result = this.#requireResult(bookId, String(row.result_id));
+    const decision = this.#decisions(result.assertionKey).at(-1);
+    requireVerification(decision?.decisionId === decisionId && decision.disposition === 'request-evidence' &&
+      decision.boundVersion === result.version && decision.requestedLevel !== null && decision.requestedLevel !== 'quick',
+    'FACTUAL_DECISION_STALE', '补充核查需要这条结果最新的要求补充证据决定。');
+    const drift = this.#drift(result, this.#projection(result, reader), reader);
+    requireVerification(drift === null, 'FACTUAL_DECISION_DRIFT', drift ?? '');
+    const lineage = this.#claimLineage(result);
+    requireVerification(lineage !== null, 'FACTUAL_CLAIM_NOT_ELIGIBLE', '核查结果没有唯一的冻结断言及出处；请先完成全书断言核查。');
+    return { bookId, decisionId, decisionDigest: String(row.sha256), resultId: result.resultId, resultVersion: result.version,
+      sourceRunRecordId: result.body.factualDecision?.sourceRunRecordId ?? result.runRecordId,
+      originalRunRecordId: lineage.runRecordId, level: decision.requestedLevel as 'standard' | 'strict',
+      claimId: lineage.claim.claimId, ledgerDigest: lineage.ledger.digest, excludedSources: this.excludedClaimSources(lineage.claim.claimId) };
+  }
+
+  excludeClaimSources(bookId: string, resultId: string, decisionId: string, sourceRefs: readonly string[], reader: ManuscriptReader): void {
+    const selection = this.recheckSelection(bookId, decisionId, reader);
+    requireVerification(selection.resultId === resultId && sourceRefs.length > 0 && sourceRefs.length <= 8 && new Set(sourceRefs).size === sourceRefs.length,
+      'FACTUAL_SOURCE_EXCLUSION_INVALID', '请选定这条结果的来源。');
+    const result = this.#requireResult(bookId, resultId);
+    const session = this.claimSession(selection.originalRunRecordId, 'web-verification', selection.claimId);
+    requireVerification(session !== null && sourceRefs.every((sourceRef) => result.body.sources.some((source) => source.sourceRef === sourceRef)),
+      'FACTUAL_SOURCE_EXCLUSION_INVALID', '排除的来源不属于这条核查结果。');
+    for (const sourceRef of sourceRefs) this.#appendClaimEvent(session.sessionId, 'source-exclusion', canonicalRecord({ decisionId, sourceRef }).digest,
+      { bookId, resultId, resultVersion: result.version, decisionId, claimId: selection.claimId, sourceRef });
+  }
+
+  #claimEvent(sessionId: string, kind: FactualClaimEventKind, identity: string): unknown | null {
+    const row = this.#db.prepare('SELECT canonical_json FROM factual_claim_events WHERE session_id = ? AND kind = ? AND identity = ?').get(sessionId, kind, identity);
+    return row === undefined ? null : JSON.parse(String(row.canonical_json)) as unknown;
+  }
+
+  #appendClaimEvent(sessionId: string, kind: FactualClaimEventKind, identity: string, body: unknown): void {
+    const record = canonicalRecord(body);
+    this.#db.prepare(`INSERT INTO factual_claim_events(session_id, sequence, kind, identity, canonical_json, sha256, recorded_at)
+      SELECT ?, COALESCE(MAX(sequence), 0) + 1, ?, ?, ?, ?, ? FROM factual_claim_events WHERE session_id = ?`)
+      .run(sessionId, kind, identity, record.json, record.digest, new Date().toISOString(), sessionId);
+  }
+
   #present(): boolean {
     return this.#db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'factual_verification_results'").get() !== undefined;
   }
 
   // ---- Run assurance (EASSURE-002) ------------------------------------------------------------------------------------
+  materializeRecheck(run: import('./analysis/factual-recheck.js').FactualRecheckRun, result: FactualClaimVerificationResult): number {
+    const prior = this.#requireResult(run.selection.bookId, run.selection.resultId);
+    const claim = this.claims(run.runRecordId)!.claims.find((entry) => entry.claimId === run.selection.claimId)!;
+    const assertion = claim.producers[0]!.assertion;
+    this.recordRunAssurance({ bookId: prior.bookId, runRecordId: run.runRecordId, taskIntentId: run.taskIntentId,
+      plannedLevel: run.selection.level, contractLevel: run.selection.level, offline: false });
+    return this.materialize({ bookId: prior.bookId, reviewRunId: prior.reviewRunId, runRecordId: run.runRecordId,
+      taskIntentId: run.taskIntentId, revisionId: prior.revisionId, manuscriptRevisionId: prior.manuscriptRevisionId,
+      plannedLevel: run.selection.level, contractLevel: run.selection.level, factualDecision: run.selection,
+      findings: [{ assertionClass: claim.occurrence.assertionClass, reviewFindingId: prior.reviewFindingId, findingId: prior.findingId,
+        blockId: prior.blockId, fromGrapheme: prior.fromGrapheme, toGrapheme: prior.toGrapheme, quote: prior.body.quote,
+        pinnedText: prior.body.pinnedText, question: prior.body.normalizedStatement, category: assertion.category, severity: assertion.severity,
+        heading: prior.body.heading, markId: prior.body.markId, unitOrdinals: [claim.producers[0]!.sourceUnitOrdinal],
+        relations: result.evidenceRelations, corrections: result.corrections }] });
+  }
+
 
   /**
    * The level a 事实核查 Run executes under, decided once as it starts: the planned level, lowered to 快速整理 with its
@@ -460,6 +681,7 @@ export class FactualVerificationLedger {
       const resultId = randomUUID();
       const recordedAt = now.toISOString();
       const body: StoredResult['body'] = {
+        ...(input.factualDecision === undefined ? {} : { factualDecision: input.factualDecision }),
         taskIntentId: input.taskIntentId, plannedLevel, disclosure, quote: finding.quote, pinnedText: finding.pinnedText,
         normalizedStatement: finding.question, category: finding.category, severity: finding.severity, heading: finding.heading, markId: finding.markId,
         gateUnmet: mapped.gateUnmet, research: researchReach, sources, corrections: finding.corrections.slice(0, 3), limitations,
@@ -607,7 +829,10 @@ export class FactualVerificationLedger {
     const decisions = this.#decisions(result.assertionKey);
     const latestDecision = decisions.at(-1) ?? null;
     const anchorCurrent = this.#anchorCurrent(result, reader);
-    const sources = result.body.sources;
+    const excluded = this.#excludedFor(result);
+    const sources = result.body.sources.filter((source) => !excluded.includes(source.sourceRef));
+    const effective = excluded.length === 0 ? { outcome: result.outcome, claimSupport: result.claimSupport }
+      : mapVerificationOutcome({ level: result.level, relationsStated: true, relations: sources, research: result.body.research });
     const checked = sources.filter((source) => source.exact).length;
     const candidates = sources.length - checked;
     const independent = new Set(sources.map((source) => source.group).filter((group) => group !== null)).size;
@@ -621,7 +846,7 @@ export class FactualVerificationLedger {
       markId: result.body.markId, blockId: result.blockId, fromGrapheme: result.fromGrapheme, toGrapheme: result.toGrapheme, quote: result.body.quote,
       normalizedStatement: result.body.normalizedStatement, heading: result.body.heading, category: result.body.category, severity: result.body.severity,
       plannedLevel: result.body.plannedLevel, level: result.level, levelLabel: EVIDENCE_ASSURANCE_LEVEL_LABELS[result.level], disclosure: result.body.disclosure,
-      states: { referenceIntegrity: 'verified', claimSupport: result.claimSupport, factualVerification: result.outcome },
+      states: { referenceIntegrity: 'verified', claimSupport: effective.claimSupport, factualVerification: effective.outcome },
       sourceCondition, actionNeed, sourceCounts: { checked, candidates, independent, reused: sources.filter((source) => source.reused).length },
       limitations: result.body.limitations, policyPin: result.body.policy, producer: FACTUAL_VERIFICATION_PRODUCER, recordedAt: result.recordedAt,
       anchor: anchorCurrent ? { state: 'current', label: null } : { state: 'stale', label: STALE_VERIFICATION_ANCHOR_LABEL },
@@ -637,6 +862,7 @@ export class FactualVerificationLedger {
    * proposal; a result that records no formal outcome offers only an evidence-incomplete one; 证据支持 offers none.
    */
   #correctionOffer(result: StoredResult, decision: StoredDecision | null, anchorCurrent: boolean): null | { incomplete: boolean; decisionId: string | null } {
+    if (this.#excludedFor(result).length > 0) return null;
     if (!anchorCurrent || result.version !== this.#latestVersion(result.assertionKey)) return null;
     const bound = decision !== null && decision.resultId === result.resultId ? decision : null;
     if (bound?.disposition === 'decline') return null;
@@ -695,7 +921,9 @@ export class FactualVerificationLedger {
     const result = this.#requireResult(bookId, resultId);
     requireVerification(sourcesAfter === null || (Number.isSafeInteger(sourcesAfter) && sourcesAfter >= 0), 'FACTUAL_VERIFICATION_INVALID', '来源分页位置无效。');
     const projected = this.#projection(result, reader);
-    const cards = result.body.sources.map((source) => this.#card(result.bookId, source, now));
+    const excluded = this.#excludedFor(result);
+    const cards = result.body.sources.map((source) => ({ ...this.#card(result.bookId, source, now),
+      ...(excluded.includes(source.sourceRef) ? { excluded: true } : {}) }));
     const start = sourcesAfter ?? 0;
     const page = cards.slice(start, start + MAX_EVIDENCE_SOURCE_PAGE);
     const supporting = cards.filter((card) => card.checkState === 'exact' && card.relation === '支持');
@@ -708,7 +936,7 @@ export class FactualVerificationLedger {
       .map((row) => this.#result(row));
     const latestVersion = versions.at(-1)!.version;
     return {
-      bookId, result: projected, sources: page,
+      bookId, result: projected, sources: page, ...(this.#claimLineage(result) === null ? {} : { claimRecheckAvailable: true }),
       nextSourceCursor: start + MAX_EVIDENCE_SOURCE_PAGE < cards.length ? start + MAX_EVIDENCE_SOURCE_PAGE : null,
       totalSources: cards.length, conflicts, summary: comparisonSummary(cards),
       history: versions.map((version) => ({ resultId: version.resultId, version: version.version, outcome: version.outcome, level: version.level, recordedAt: version.recordedAt })),
@@ -742,6 +970,11 @@ export class FactualVerificationLedger {
     if (this.#db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'research_evidence'").get() === undefined) return false;
     return this.#db.prepare("SELECT 1 FROM research_evidence WHERE book_id = ? AND url = ? AND captured_at >= ? AND capture_state = 'full-text' AND content_sha256 <> ? LIMIT 1")
       .get(bookId, url, capturedAt, contentSha256) !== undefined;
+  }
+
+  #excludedFor(result: StoredResult): readonly string[] {
+    const claim = this.#claimLineage(result)?.claim;
+    return claim === undefined ? result.body.factualDecision?.excludedSources ?? [] : this.excludedClaimSources(claim.claimId);
   }
 
   #decisionCard(result: StoredResult, projected: FactualVerificationResultProjection, reader: ManuscriptReader, now: Date): FactualDecisionCardProjection {

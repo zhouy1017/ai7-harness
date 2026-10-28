@@ -5,6 +5,7 @@ import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { DIGEST_PATTERN, canonicalJson, isRecord, parseCanonicalJson } from './analysis/canonical.js';
 import { LIBRARY_OBJECT_DIRECTORY } from './library-materials.js';
 import { HARNESS_SESSION_LOG_DIRECTORY, harnessSessionLogBytes, harnessSessionLogPath, readHarnessSessionLog } from './harness/session-log.js';
+import { importBookLearningControls } from './learning/ledger.js';
 
 /**
  * 只导入其中的图书，与本机合并（重名的另存） (Issue #434, plan slice S86d; V2-UX-DSTO-017; ADR 0079 §1.5). A Book merges with
@@ -108,6 +109,12 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   manuscript_revisions: 'owned',
   manuscript_block_versions: 'owned',
   manuscript_block_sources: 'owned',
+  word_revision_sources: 'owned',
+  word_revision_imports: 'owned',
+  word_manuscript_source_segments: 'owned',
+  word_tracked_edit_samples: 'owned',
+  word_tracked_edit_sample_imports: 'owned',
+  word_import_mark_sources: 'owned',
   manuscript_command_groups: 'owned',
   manuscript_command_edits: 'owned',
   manuscript_entry_positions: 'owned',
@@ -207,9 +214,11 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   default_execution_rules: 'owned',
   default_execution_rule_versions: 'owned',
   default_execution_rule_states: 'owned',
+  house_word_list_versions: 'house', // House settings stay local; a Book carries its frozen Run snapshot.
   review_runs: 'owned',
   review_run_authorizations: 'owned',
   review_run_category_events: 'owned',
+  review_local_stage_artifacts: 'owned',
   review_findings: 'owned',
   review_excluded_findings: 'owned',
   review_finding_dispositions: 'owned',
@@ -300,6 +309,7 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   import_abandonment_cleanup_intents: 'transient',
   import_ingest_blocks: 'transient',
   staged_import_snapshots: 'transient',
+  staged_word_revision_intakes: 'transient',
   staged_import_blocks: 'transient',
   staged_import_block_sources: 'transient',
   staged_import_marks: 'transient',
@@ -324,6 +334,9 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   imported_skill_current_selections: 'house',
   procedure_definitions: 'house',
   procedure_definition_versions: 'house',
+  procedure_version_origins: 'house',
+  procedure_version_stops: 'house',
+  procedure_run_choices: 'transient',
   captured_procedures: 'house',
   captured_procedure_versions: 'house',
   captured_procedure_states: 'house',
@@ -353,6 +366,7 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   series_retrieval_exclusions: 'house',
   // 后台分析登记 (Issue #95, S39; ADR 0048): a standing decision of this house's editor. A Book merged in never brings one — no
   // merge makes AI7 start anything by itself — while its Runs keep naming the enrollment version they were started under.
+  // Per-kind enrollment stays this house's standing authority; importing a Book grants none.
   background_analysis_enrollments: 'house',
   background_analysis_enrollment_versions: 'house',
   background_analysis_enrollment_states: 'house',
@@ -375,9 +389,9 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   material_translation_attempts: 'derived',
   // Factual verification (Issue #901): a Book's results, decisions and Correction Proposal lineage travel with it.
   factual_run_assurance: 'owned',
-  // Local learning (Issue #1082): a Book's signals travel with the decisions they reference; the controls and explicit memory
-  // are the house's own, like 本社审阅偏好.
+  // Local learning (Issue #1082): a Book's signals travel with the decisions they reference; explicit memory stays with the house.
   learning_signals: 'owned',
+  // Mixed ownership: house switches stay here; mergeListedBooks appends only the selected Books' verified controls.
   editorial_learning_controls: 'house',
   global_editorial_memory_items: 'house',
   global_editorial_memory_item_versions: 'house',
@@ -385,6 +399,9 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   learning_supervision_directives: 'house',
   review_run_preference_pins: 'owned',
   factual_verification_results: 'owned',
+  factual_claim_ledgers: 'owned',
+  factual_claim_sessions: 'owned',
+  factual_claim_events: 'owned',
   factual_review_decisions: 'owned',
   correction_proposals: 'owned',
 };
@@ -1155,6 +1172,8 @@ function mergeListedBooks(
          SELECT ${selected.join(', ')} FROM src.${quoted(table)} x ${owned(table, 'x')} WHERE 1 = 1${absent} ORDER BY x.rowid`,
       ).run().changes);
     }
+    const selectedBook = db.prepare('SELECT 1 FROM temp.merge_books WHERE book_id = ?');
+    rows += importBookLearningControls(db, (bookId) => selectedBook.get(bookId) !== undefined);
     // The search index over the working text the Book brought.
     db.prepare(
       `INSERT INTO main.working_block_search (branch_id, block_id, text)

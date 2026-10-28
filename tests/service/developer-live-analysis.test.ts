@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -18,6 +19,9 @@ import {
 } from '../../src/service/analysis/baseline-analysis-store.js';
 import { BASELINE_PROMPT_CONTRACT_DIGEST, unitRequestDigest } from '../../src/service/analysis/contract.js';
 import { RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST } from '../../src/service/analysis/run-report-contract.js';
+import { clarificationPromptContractDigest } from '../../src/service/provider/clarification-contract.js';
+import { reviewCategoryContractInput, reviewCategoryEntry } from '../../src/service/review/category-configuration.js';
+import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
 // The current baseline samples under sampling contract /2 (Issue #826).
 import {
   ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST,
@@ -51,7 +55,7 @@ import { PUBLIC_SAMPLEBOOKS } from '../../src/shared/public-samplebooks.js';
 import {
   BASELINE_ANALYSIS_MODE_GOALS,
   BASELINE_ANALYSIS_TASK_GOAL,
-  FACTUAL_REVIEW_TASK_GOAL,
+  reviewCategoryModeGoal,
   type BaselineAnalysisProjection,
   type DeveloperLiveCeiling,
   type LaunchPolicyProjection,
@@ -64,6 +68,12 @@ import {
   pinEditorialWorkspaceProfileRevision2,
   recordMissingCredentialConnection,
 } from '../support/sample1-baseline.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for the developer-live scope. Everything is real except the
 // transport: the store, the plan, the pinned DSH composition, the Egress Gate, the Credential
@@ -128,6 +138,7 @@ afterEach(async () => {
 function liveBinding(ceiling: Ceiling) {
   return {
     operationalScope: 'developer-live' as const,
+    policy: launchPolicy,
     live: {
       route: DEVELOPER_LIVE_POLICY_BINDING.route,
       model: DEVELOPER_LIVE_POLICY_BINDING.model,
@@ -290,6 +301,7 @@ function owner(
   validation: DevelopmentValidationIntent | null = VALIDATION,
 ): BaselineAnalysisExecutionOwner {
   return new BaselineAnalysisExecutionOwner({
+    requestGovernor,
     ledger: store.baselineAnalysisLedger,
     launchPolicy: policy,
     fixture: null,
@@ -395,29 +407,35 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
   });
   it('refuses undispatched analysis kinds and non-direct origins before a plan or authorization is recorded', async () => {
     const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
-    const factual = store.factualReviewLedger;
-    factual.bindLaunch(liveBinding(CEILING));
-    expect(refusalCode(() => factual.prepare({ phase: 'start', bookId,
-      goal: FACTUAL_REVIEW_TASK_GOAL, update: null, reconfirm: false, launchPolicy,
+    // Current v24 admits factual review. Publication risk remains absent from its actual review rule.
+    const category = reviewCategoryContractInput(reviewCategoryEntry('publication-risk')!);
+    const definition = reviewCategoryKindDefinition(category);
+    const undispatched = store.reviewCategoryLedger(definition);
+    undispatched.bindLaunch(liveBinding(CEILING));
+    expect(refusalCode(() => undispatched.prepare({ phase: 'start', bookId,
+      goal: reviewCategoryModeGoal(category.label, 'review-first'), update: null, reconfirm: false, launchPolicy,
     }))).toBe('ANALYSIS_KIND_NOT_ADMITTED');
-    expect(factual.inspect(bookId).taskIntent).toBeNull();
+    expect(undispatched.inspect(bookId).taskIntent).toBeNull();
     // A plan another launch froze meets the same refusal at authorization and at admission, before either reads it.
-    expect(refusalCode(() => factual.authorize(bookId, randomUUID(), prepared.planEnvelope!.digest))).toBe('ANALYSIS_KIND_NOT_ADMITTED');
+    expect(refusalCode(() => undispatched.authorize(bookId, randomUUID(), prepared.planEnvelope!.digest))).toBe('ANALYSIS_KIND_NOT_ADMITTED');
     const calls: StubCall[] = [];
     const execution = owner(store, stubTransport({ calls, responses: new Map() }));
     try {
-      expect(refusalCode(() => execution.admitAndDispatch(randomUUID(), factual))).toBe('EXECUTION_KIND_NOT_ADMITTED');
+      expect(refusalCode(() => execution.admitAndDispatch(randomUUID(), undispatched))).toBe('EXECUTION_KIND_NOT_ADMITTED');
       expect(calls).toHaveLength(0);
     } finally {
       await execution.dispose();
     }
-    for (const origin of [
-      { kind: 'default-execution-rule', ruleVersionId: randomUUID() },
-      { kind: 'background-analysis-enrollment', enrollmentVersionId: randomUUID() },
-    ] as const) {
-      expect(refusalCode(() => store.baselineAnalysisLedger.authorize(bookId, prepared.taskIntent!.taskIntentId,
-        prepared.planEnvelope!.digest, 'now', origin))).toBe('ANALYSIS_ORIGIN_NOT_ADMITTED');
-    }
+    expect(refusalCode(() => store.baselineAnalysisLedger.authorize(bookId, prepared.taskIntent!.taskIntentId,
+      prepared.planEnvelope!.digest, 'now', { kind: 'default-execution-rule', ruleVersionId: randomUUID() })))
+      .toBe('ANALYSIS_ORIGIN_NOT_ADMITTED');
+    // Current v24 admits the enrolled-background origin. The existing missing-rule negative must bind that same denial
+    // at authorization, rather than accidentally exercising the old launch-without-policy baseline-only default.
+    store.baselineAnalysisLedger.bindLaunch({ ...liveBinding(CEILING), policy: withoutBackgroundRule(launchPolicy) });
+    expect(refusalCode(() => store.baselineAnalysisLedger.authorize(bookId, prepared.taskIntent!.taskIntentId,
+      prepared.planEnvelope!.digest, 'now', { kind: 'background-analysis-enrollment', enrollmentVersionId: randomUUID() })))
+      .toBe('ANALYSIS_ORIGIN_NOT_ADMITTED');
+    store.baselineAnalysisLedger.bindLaunch(liveBinding(CEILING));
     expect(store.inspectBaselineAnalysis(bookId).authorization).toBeNull();
     // A background preparation needs the enrolled-background rule (Issue #864): refused by its origin where the policy has none,
     // and under v14 let past the origin, to be refused only because the editor's own plan waits.
@@ -503,11 +521,13 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
 
     // Every live call is a named test item, numbered by the ledger under the Task mode's purpose.
     const lines = await ledgerLines(cacheRoot);
+    const currentUnitContract = clarificationPromptContractDigest(BASELINE_PROMPT_CONTRACT_DIGEST);
+    expect(prepared.planEnvelope!.promptContractDigest).toBe(currentUnitContract);
     expect(lines.map((line) => line.promptContractDigest)).toEqual([
-      ...Array.from({ length: SAMPLE1_UNITS }, () => BASELINE_PROMPT_CONTRACT_DIGEST),
+      ...Array.from({ length: SAMPLE1_UNITS }, () => currentUnitContract),
       BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST, RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST,
     ]);
-    expect(lines.every((line) => line.taskPromptContractDigest === BASELINE_PROMPT_CONTRACT_DIGEST)).toBe(true);
+    expect(lines.every((line) => line.taskPromptContractDigest === currentUnitContract)).toBe(true);
     expect(lines.map((line) => line.itemId)).toEqual(
       Array.from({ length: FULL_CHAIN_TURNS }, (_unused, index) => `S40/first-baseline/${index + 1}`),
     );
@@ -520,9 +540,8 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
       // The shared once-only transmission writes the analysis path's model-call lines exactly as before (Issue #473).
       expect(line).not.toHaveProperty('kind');
     }
-    // The frozen composition registers zero tools: its digest is the one every plan without platform tools pins, the
-    // literal dev froze before the platform tools existed (dev@29a9831a), so a change to the tool-less body moves it.
-    expect(settled.planEnvelope!.behaviorCompositionDigest).toBe(DEV_LIVE_COMPOSITION_DIGEST);
+    // New plans pin v2; the explicit v1 constructor still reproduces the predecessor's frozen digest.
+    expect(settled.planEnvelope!.compositionVersion).toBe(2);
     expect(describeComposition('opencode-go', 'deepseek-v4.1-flash', BASELINE_PROMPT_CONTRACT_DIGEST).digest).toBe(DEV_LIVE_COMPOSITION_DIGEST);
     await store.close();
   });
@@ -575,7 +594,8 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
 
     // The Run Report's reflection turn is one more transmission this policy does not name either, so
     // it never formed a request: no call carries its header, and the report says exactly why.
-    expect(calls.some((call) => call.body.includes('运行反思'))).toBe(false);
+    expect(calls.some((call) => (JSON.parse(call.body) as { messages: Array<{ role: string; content: string }> })
+      .messages.findLast((message) => message.role === 'user')!.content.startsWith('运行反思 '))).toBe(false);
     const report = settled.taskOutcome!.report!;
     expect(report.ifRedone).toEqual({
       state: 'policy-bounded',
@@ -654,6 +674,7 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     const held = heldTransport({ calls, responses, named });
     let credential: string | null = 'placeholder-development-key';
     const execution = new BaselineAnalysisExecutionOwner({
+      requestGovernor,
       ledger: store.baselineAnalysisLedger,
       launchPolicy,
       fixture: null,
@@ -1282,6 +1303,7 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     const calls: StubCall[] = [];
     const present = owner(store, stubTransport({ calls, responses: new Map() }));
     const absent = new BaselineAnalysisExecutionOwner({
+      requestGovernor,
       ledger: store.baselineAnalysisLedger,
       launchPolicy,
       fixture: null,
@@ -1390,7 +1412,7 @@ async function enrolledLive(policy: LaunchPolicyProjection, ceilingTokens: numbe
   return { store, bookId: imported.bookId, answers };
 }
 
-describe('后台分析登记 under developer-live with a stub transport (Issue #864)', { timeout: 60_000 }, () => {
+describe('后台处理登记 under developer-live with a stub transport (Issue #864)', { timeout: 60_000 }, () => {
   it('holds two foreground places under a live launch and refuses any other capacity', async () => {
     const calls: StubCall[] = [];
     const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
@@ -1400,6 +1422,7 @@ describe('后台分析登记 under developer-live with a stub transport (Issue #
     try {
       expect(execution.capacity).toBe(2);
       expect(() => new BaselineAnalysisExecutionOwner({
+        requestGovernor,
         ledger: store.baselineAnalysisLedger, launchPolicy, fixture: null, capacity: 1, secretResolver: { resolve: async () => null },
         developerLive: { launch: { runBudgetCeiling: CEILING, providerCacheRoot: cacheRoot, validation: VALIDATION }, nativeFetch: held.transport },
       })).toThrowError(/运行名额设置无效/u);
@@ -1434,7 +1457,7 @@ describe('后台分析登记 under developer-live with a stub transport (Issue #
       expect(store.baselineAnalysisLedger.loadExecutionPlan(after.run!.runRecordId).runBudgetCeiling).toEqual(frozen);
       expect(['completed', 'completed-with-gaps']).toContain(after.run!.state);
       expect(calls.length).toBeGreaterThan(0);
-      expect(after.taskOutcome!.report!.background!.slice(0, 2)).toEqual(['由后台分析登记开始 · 按第 1 版登记', `范围：《developer-live 后台分析》这一本书；登记上限 ${share} tokens`]);
+      expect(after.taskOutcome!.report!.background!.slice(0, 2)).toEqual(['由后台处理登记开始 · 按第 1 版登记', `范围：《developer-live 后台分析》这一本书；登记上限 ${share} tokens`]);
       expect(after.taskOutcome!.report!.background![2]).toContain(`这次运行的上限 ${frozen.maxTotalTokens} tokens`);
       // The loader independently re-checks the lower bound; changing the launch cannot silently execute the old plan.
       store.baselineAnalysisLedger.bindLaunch({ ...liveBinding({ kind: 'tokens', maxTotalTokens: 100 }), policy: v14 });
@@ -1468,5 +1491,75 @@ describe('后台分析登记 under developer-live with a stub transport (Issue #
     } finally {
       await execution.dispose();
     }
+  });
+});
+
+
+describe('manual pause at a live bounded-turn boundary (#1114)', () => {
+  it.each(['unit', 'reduction', 'sampling', 'reflection', 'cancel-over-pause'] as const)('%s waits without abort, or lets explicit cancel override it', async (stage) => {
+    const calls: StubCall[] = [];
+    const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
+    const { units: responses, named } = await unitAnswers(prepared);
+    const inner = stubTransport({ calls, responses, named });
+    let release = () => {};
+    let arrived = () => {};
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const ready = new Promise<void>((resolve) => { arrived = resolve; });
+    const observed: { signal: AbortSignal | null; held: boolean } = { signal: null, held: false };
+    const nativeFetch: typeof fetch = async (url, init) => {
+      const body = JSON.parse(String(init?.body)) as { messages: Array<{ content: string }> };
+      const message = body.messages.at(-1)!.content;
+      const matches = stage === 'reflection' ? message.startsWith('运行反思 ') : stage === 'reduction' ? parseCrossUnitMessageHeader(message) !== null
+        : stage === 'sampling' ? parseAssuranceSamplingMessageHeader(message) !== null : message.startsWith('分析单元 1/');
+      if (matches && !observed.held) {
+        observed.held = true; observed.signal = init?.signal ?? null; arrived();
+        await new Promise<void>((resolve, reject) => {
+          const abort = () => reject(new DOMException('synthetic cancelled request', 'AbortError'));
+          observed.signal?.addEventListener('abort', abort, { once: true });
+          held.then(() => { observed.signal?.removeEventListener('abort', abort); resolve(); }, reject);
+        });
+      }
+      return inner(url, init);
+    };
+    const execution = owner(store, nativeFetch, CEILING, launchPolicy, null);
+    const taskIntentId = prepared.taskIntent!.taskIntentId;
+    const runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!;
+    try {
+      execution.admitAndDispatch(runRecordId); await ready;
+      const attemptId = store.baselineAnalysisLedger.executionBindingOf(runRecordId)!.attemptId;
+      const before = calls.length;
+      if (stage === 'reflection') {
+        expect(store.inspectBaselineAnalysis(bookId, () => null).run?.state).toBe('completed');
+        expect(() => store.requestBaselineAnalysisPause(bookId, taskIntentId)).toThrow();
+        expect(observed.signal?.aborted).toBe(false);
+        release(); await execution.whenIdle();
+        expect(calls).toHaveLength(FULL_CHAIN_TURNS);
+        expect(() => execution.admitAndDispatch(runRecordId, store.baselineAnalysisLedger, { resume: true })).toThrow();
+        return;
+      }
+      store.requestBaselineAnalysisPause(bookId, taskIntentId); execution.pauseRun(runRecordId);
+      expect(store.inspectBaselineAnalysis(bookId, (id) => execution.progressFor(id)).state).toBe('pausing');
+      expect(observed.signal?.aborted).toBe(false);
+      expect(calls).toHaveLength(before);
+      if (stage === 'cancel-over-pause') {
+        store.requestBaselineAnalysisCancel(bookId, taskIntentId); execution.cancelRun(runRecordId);
+        expect(observed.signal?.aborted).toBe(true);
+        await execution.whenIdle();
+        const cancelled = store.inspectBaselineAnalysis(bookId, () => null);
+        expect(cancelled.state).toBe('cancelled');
+        expect(cancelled.resultSetRevision?.gaps[0]?.code).toBe('outcome-unknown');
+        expect(calls).toHaveLength(before);
+      } else {
+        release(); await execution.whenIdle();
+        expect(store.inspectBaselineAnalysis(bookId, () => null).state).toBe('paused');
+        expect(calls).toHaveLength(before + 1);
+        execution.admitAndDispatch(runRecordId, store.baselineAnalysisLedger, { resume: true }); await execution.whenIdle();
+        const settled = store.inspectBaselineAnalysis(bookId, () => null);
+        expect(settled.run?.state).toBe('completed');
+        expect(store.baselineAnalysisLedger.executionBindingOf(runRecordId)!.attemptId).toBe(attemptId);
+        expect(calls).toHaveLength(FULL_CHAIN_TURNS);
+        expect(new Set(calls.map((call) => call.body)).size).toBe(FULL_CHAIN_TURNS);
+      }
+    } finally { release(); await execution.dispose(); }
   });
 });

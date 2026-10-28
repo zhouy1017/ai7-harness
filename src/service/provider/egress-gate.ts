@@ -1,13 +1,16 @@
 import { SEARCH_BACKENDS } from './search-backends.js';
-import type { LocalToolsRule } from './local-tools.js';
+import { LOCAL_TOOL_RESULT_MAX_BYTES, type LocalToolsRule } from './local-tools.js';
 import { randomUUID } from 'node:crypto';
-import type { OrdinaryProductionProviderProcessingVersion } from '../../shared/protocol.js';
+import type { AdmittedProviderRule, OrdinaryProductionProviderProcessingVersion } from '../../shared/protocol.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from '../../shared/provider-configuration.generated.js';
+import { CONFIGURED_RUNTIME_MODEL_TABLE } from '../../shared/provider-configuration.generated.js';
 import type { OutboundDataCategoryId } from '../../shared/protocol.js';
 import { MAX_WRITING_MATERIALS, MAX_WRITING_MATERIAL_GRAPHEMES, MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES } from '../../shared/protocol.js';
 import { graphemeLength, writingMaterialDigest } from '../writing-tasks.js';
 import { DIGEST_PATTERN, canonicalJson, sha256Hex, isRecord } from '../analysis/canonical.js';
 import { assistantToolCalls, messageText, toolResultOf, seriesScopeRefusal, type AssembledContentBlock, type AssembledModelPayload } from './payload.js';
+import type { QualifiedGlobalAttemptMetadata } from '../dialogue/dialogue-ledger.js';
+import { selectedPolicyIdentityOf, isSupportedProviderProcessingVersion } from '../../shared/protocol.js';
 import {
   PLATFORM_TOOL_NAMES,
   ruleNamedToolSchemas,
@@ -31,18 +34,15 @@ import {
 export const LOCAL_DETERMINISTIC_ROUTE = 'ai7-local-deterministic' as const;
 export const LOCAL_DETERMINISTIC_MODEL = 'ai7-deterministic-fixture' as const;
 /*
- * The two bindings this gate admits today: the production connection's pair and Provider Processing
- * v9's developer-live pair. Which pairs are bindable is the policy's statement, not the provider
- * documents' (ADR 0073 §3), and moving these four from source constants to a read of the policy's
- * pinned binding is #452's gate share (S87-f3b). Until then each route is checked against the
- * configured set, so a document that renamed or dropped one fails `check` here instead of leaving a
- * binding to a route no document declares.
+ * Retained adapter aliases and the developer-live binding come from reviewed configuration (ADR 0095 §6).
+ * The latter must still match the selected developer-live policy exactly. The gate below checks every
+ * request against its frozen binding and policy; a configuration row alone never permits a send.
  */
-export const DEEPSEEK_ROUTE = 'deepseek-open-platform' as const satisfies ConfiguredRouteId;
-export const DEEPSEEK_MODEL = 'deepseek-v4-pro' as const;
+export const DEEPSEEK_ROUTE = CONFIGURED_RUNTIME_MODEL_TABLE.legacyDeepSeek.route satisfies ConfiguredRouteId;
+export const DEEPSEEK_MODEL = CONFIGURED_RUNTIME_MODEL_TABLE.legacyDeepSeek.model;
 /** The developer-live route of Provider Processing v9 (ADR 0065, ADR 0067): OpenCode Go with the bare model id. */
-export const OPENCODE_GO_ROUTE = 'opencode-go' as const satisfies ConfiguredRouteId;
-export const OPENCODE_GO_MODEL = 'deepseek-v4.1-flash' as const;
+export const OPENCODE_GO_ROUTE = CONFIGURED_RUNTIME_MODEL_TABLE.developerLive.route satisfies ConfiguredRouteId;
+export const OPENCODE_GO_MODEL = CONFIGURED_RUNTIME_MODEL_TABLE.developerLive.model;
 
 /**
  * Every route a Provider Resolution Plan may bind. No configured route beyond these two is here —
@@ -72,7 +72,7 @@ export type CredentialSlot = ConfiguredCredentialSlot;
 export type EgressPolicyPin =
   | {
       readonly operationalScope: 'development-ci';
-      readonly providerProcessingVersion: 'v1';
+      readonly providerProcessingVersion: 'v1' | 'v29';
       readonly liveTransmissionAllowed: false;
       readonly authorizedLiveTransmissionCount: 0;
     }
@@ -136,6 +136,15 @@ export interface SearchBackendBinding {
 }
 
 export interface EgressBindingFacts {
+  readonly factualClaimScope?: { readonly stage: 'claim-extraction' | 'web-verification'; readonly current: () => boolean };
+  readonly learningCurationScope?: { readonly messageDigest: string; readonly current: () => boolean };
+  /** Book-less dialogue's exact listed revisions, disclosure and retained redaction, rechecked at the final gate. */
+  readonly globalAgentScope?: {
+    readonly qualification?: QualifiedGlobalAttemptMetadata;
+    readonly payloadCurrent: () => boolean;
+  } & ({ readonly rule: NonNullable<AdmittedProviderRule['globalAgentDialogue']>; readonly scopedRule?: undefined } |
+    /** v31's scoped tool rule (#1171): its four declared local tools are the only tool set it admits. */
+    { readonly rule?: undefined; readonly scopedRule: NonNullable<AdmittedProviderRule['globalAgentScopedDialogue']> });
   readonly seriesScopeGuard?: () => string | null;
   readonly searchBackend?: SearchBackendBinding;
   readonly bindingDigest: string;
@@ -425,7 +434,7 @@ function evaluateToolMessage(
   const toolCalls = assistantToolCalls(message);
   if (toolCalls !== null) {
     if (message.source.kind !== 'model' || message.source.provider !== binding.route || message.source.model !== binding.model ||
-        !toolCalls.calls.every((call) => ruleNamedToolSchemas(rule !== null, binding.localTools?.targetedRetrieval.allowed === true).some((schema) => schema.name === call.name)) ||
+        !toolCalls.calls.every((call) => ruleNamedToolSchemas(rule !== null, binding.localTools).some((schema) => schema.name === call.name)) ||
         !(scope.acceptedToolCallDigests?.has(assistantToolCallDigest(message.content)) ?? false)) {
       return refuse('payload-out-of-scope', `第 ${index + 1} 条模型工具调用不是本次尝试已接受的输出；未发送任何内容。`);
     }
@@ -457,7 +466,11 @@ export function toolResultKey(callId: string, tool: PlatformToolName): string {
 
 /** Whether a tool result's URL is one its tool may have read: the rule's search host, or a cited public page. */
 function toolResultSourceAdmitted(admitted: AdmittedToolResult, rule: PlatformToolsRule | null, scope: EgressAttemptScope, binding: EgressBindingFacts): boolean {
-  if (admitted.tool === 'retrieve' || admitted.tool === 'exact_fetch') return binding.localTools?.targetedRetrieval.allowed === true && admitted.sourceUrl === null;
+  if (ruleNamedToolSchemas(false, binding.localTools).some((schema) => schema.name === admitted.tool)) {
+    return admitted.sourceUrl === null && admitted.byteCount <= LOCAL_TOOL_RESULT_MAX_BYTES &&
+      (admitted.tool !== 'guideline_clause' || binding.policy.operationalScope !== 'ordinary-production' ||
+        binding.ruleOutboundCategories?.has('house-review-guideline-clause') === true || admitted.sha256 === sha256Hex('[]'));
+  }
   if (admitted.sourceUrl === null) return true;
   if (rule === null) return false;
   if (admitted.tool === 'websearch') {
@@ -483,6 +496,46 @@ export function evaluateEgress(
   binding: EgressBindingFacts,
   scope: EgressAttemptScope,
 ): EgressDecision {
+  if (binding.factualClaimScope !== undefined && (binding.policy.operationalScope !== 'ordinary-production' || !binding.factualClaimScope.current())) {
+    return { decision: 'refuse', reason: 'binding-stale', detail: '断言会话、冻结来源或剩余额度已变化；未发送。' };
+  }
+  if (binding.learningCurationScope !== undefined && (binding.policy.operationalScope !== 'ordinary-production' ||
+    binding.policy.providerProcessingVersion !== 'v31' || binding.outboundDataCategory !== 'editorial-learning-example' ||
+    payload.messages.length !== 1 || payload.tools?.length || payload.messages[0]?.role !== 'user' ||
+    sha256Hex(messageText(payload.messages[0]!) ?? '') !== binding.learningCurationScope.messageDigest ||
+    scope.ceilingState?.() !== 'within' || !binding.learningCurationScope.current())) {
+    return refuse('payload-out-of-scope', '学习整理的完整来源、预算或启用范围已变化；未发送任何内容。');
+  }
+  if (!isSupportedProviderProcessingVersion(binding.policy.operationalScope, binding.policy.providerProcessingVersion))
+    return refuse('payload-out-of-scope', '处理策略版本无法识别；未发送任何内容。');
+  const global = binding.globalAgentScope;
+  if (global !== undefined && (binding.policy.providerProcessingVersion === 'v30' || binding.policy.providerProcessingVersion === 'v31')) {
+    const qualified = global.qualification;
+    const messages = [...binding.admittedUserMessages];
+    if (qualified === undefined || qualified.providerProcessingVersion !== binding.policy.providerProcessingVersion || selectedPolicyIdentityOf({ providerProcessingVersion: qualified.providerProcessingVersion, providerProcessingSha256: qualified.providerProcessingSha256,
+          activePolicySetVersion: qualified.activePolicySetVersion, activePolicySetSha256: qualified.activePolicySetSha256 }) === null ||
+        qualified.textProcessing !== 'qualified-original-fields' || qualified.policyRuleId !== (global.scopedRule === undefined
+          ? 'ordinary-production-global-agent-dialogue' : 'ordinary-production-global-agent-scoped-dialogue') ||
+        qualified.modelRole !== 'Fast Interaction Role' || qualified.route !== binding.route || qualified.model !== binding.model ||
+        messages.length !== 1 || qualified.messageSha256 !== sha256Hex(messages[0]!) ||
+        !DIGEST_PATTERN.test(qualified.requestContextSha256) || !DIGEST_PATTERN.test(qualified.retainedAncestrySha256))
+      return refuse('payload-out-of-scope', '全域对话缺少与实际负载相符的原文字段身份；未发送任何内容。');
+  } else if (global?.qualification !== undefined) return refuse('payload-out-of-scope', '原文字段身份与当前处理策略不一致；未发送任何内容。');
+  const scoped = global?.scopedRule;
+  const globalAdmitted = global !== undefined && binding.policy.operationalScope === 'ordinary-production' && (global.rule !== undefined
+    ? global.rule.source.bookRequired === false && global.rule.source.explicitlyListedEligibleMemoryAndPreferenceRevisionsOnly === true &&
+      global.rule.source.eligibleRevisionPinsRequired === true && global.rule.source.editorOwnWordsAllowed === true &&
+      global.rule.source.unlistedSourcesAllowed === false && global.rule.outboundCategoryRestriction === 'none' &&
+      global.rule.outboundDataDisclosureRequired === true && global.rule.redaction.housePeopleNamesAndRolesStripped === true &&
+      global.rule.redaction.remarksAndInternalNotesStripped === true
+    : binding.policy.providerProcessingVersion === 'v31' && scoped!.source['ambientWholeLibraryReadAllowed'] === false &&
+      scoped!.source['lastOpenBookSuppliesAuthority'] === false && scoped!.source['unlistedSourcesAllowed'] === false &&
+      scoped!.scopedTools['directMemoryOrManuscriptMutationAllowed'] === false && scoped!.scopedTools['shellFilesystemWebOrUnrestrictedNetworkAllowed'] === false &&
+      scoped!.outboundDataDisclosureRequired === true && scoped!.redaction.housePeopleNamesAndRolesStripped === true &&
+      binding.platformTools == null && canonicalJson(ruleNamedToolSchemas(false, binding.localTools).map((schema) => schema.name)) ===
+        canonicalJson([...scoped!.scopedTools.names].sort((a, b) => a.localeCompare(b, 'en')))) && global.payloadCurrent();
+  if (global !== undefined && !globalAdmitted) return refuse('payload-out-of-scope', '全域对话的来源、发送披露或隐私过滤已经变化；未发送任何内容。');
+  if (global !== undefined && scoped === undefined && payload.tools !== undefined && payload.tools.length > 0) return refuse('tools-present', '全域对话没有注册工具；未发送任何内容。');
   const excluded = seriesScopeRefusal(binding.seriesScopeGuard);
   if (excluded !== null) return refuse('series-retrieval-scope-changed', `书系检索范围已变化 · 需要重新确认计划：${excluded}；未发送任何内容。`);
   if (!DIGEST_PATTERN.test(binding.bindingDigest) || scope.currentBindingDigest() !== binding.bindingDigest) {
@@ -520,7 +573,7 @@ export function evaluateEgress(
   // ADR 0080 §7.2: a payload may expose tools only when its tool set equals exactly the platform tools the binding's rule
   // names. A rule that names none — Provider Processing v9's — matches no tool set, so every tool is refused as before.
   const rule = platformToolsOf(binding);
-  const schemas = ruleNamedToolSchemas(rule !== null, binding.localTools?.targetedRetrieval.allowed === true);
+  const schemas = ruleNamedToolSchemas(rule !== null, binding.localTools);
   if (payload.tools !== undefined && payload.tools.length > 0 && !toolSetEqualsPlatformSchemas(payload.tools, schemas)) {
     return refuse('tools-present', '组合运行时向模型暴露了规则未命名的工具；未发送任何内容。');
   }
@@ -568,14 +621,14 @@ export function evaluateEgress(
   const digest = payloadDigest(payload);
   if (binding.route === LOCAL_DETERMINISTIC_ROUTE) return { decision: 'transmit-local', payloadDigest: digest };
   if (binding.policy.operationalScope === 'development-ci') {
-    return refuse('remote-route-denied-under-v1', 'development-ci · Provider Processing v1 允许 0 次实时传输；未发送任何内容。');
+    return refuse('remote-route-denied-under-v1', `development-ci · Provider Processing ${binding.policy.providerProcessingVersion} 允许 0 次实时传输；未发送任何内容。`);
   }
   // Under v9 the ceiling is a precondition of the decision itself, evaluated here from accumulated
   // usage, so no dispatch can precede it and no ceiling state can be assumed from an earlier turn.
   // Ordinary production leaves the per-Run ceiling to the editor (Issue #811; S16a): unset is a Run without one, not a refusal.
   const ceiling = scope.ceilingState?.() ?? 'unset';
   if ((ceiling === 'unset' && binding.policy.operationalScope !== 'ordinary-production') ||
-      (ceiling === 'not-applicable' && !excerptAdmittedByRule(binding))) {
+      (ceiling === 'not-applicable' && !excerptAdmittedByRule(binding) && !globalAdmitted)) {
     return refuse('run-budget-ceiling-unset', 'Provider Processing v9 要求非 unset 的任务运行预算上限；未发送任何内容。');
   }
   if (ceiling === 'reached') {

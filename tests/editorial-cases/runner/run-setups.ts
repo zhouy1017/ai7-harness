@@ -12,7 +12,7 @@ import { withAmbiguousClarificationValidation } from '../../../src/service/provi
 import type { ResolvedModelFixture } from '../../../src/service/provider/model-fixture.js';
 import { BASELINE_ANALYSIS_TASK_GOAL, type LaunchPolicyProjection } from '../../../src/shared/protocol.js';
 import { graphemesOf } from '../../../src/shared/mark-anchor.js';
-import { type CaseRoots, type ImportedBook, workingBlocks } from './session.js';
+import { caseRequestGovernor, type CaseRoots, type ImportedBook, workingBlocks } from './session.js';
 
 /**
  * The inputs three replayed cases need besides the manuscript, each rebuilt exactly as the earlier evidence made it, so the
@@ -27,7 +27,8 @@ export async function clarificationRun(store: EditorialStore, dataRoot: string, 
   const route = { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage };
   const definition = ambiguous ? withAmbiguousClarificationValidation(baselineAnalysisKindDefinition()) : baselineAnalysisKindDefinition();
   const ledger = new BaselineAnalysisStore(database, new BoundedManuscriptStore(database), route, definition);
-  const owner = new BaselineAnalysisExecutionOwner({ ledger, launchPolicy: policy, fixture, secretResolver: { resolve: async () => null } });
+  ledger.bindLaunch({ operationalScope: 'development-ci', live: null, policy, localFixtureRuntime: () => store.localFixtureRuntime() });
+  const owner = new BaselineAnalysisExecutionOwner({ requestGovernor: caseRequestGovernor(store), ledger, launchPolicy: policy, fixture, secretResolver: { resolve: async () => null } });
   try {
     let work = ledger.prepare({ phase: 'start', bookId: book.bookId, goal: BASELINE_ANALYSIS_TASK_GOAL, update: null, reconfirm: false, launchPolicy: policy });
     while (!work.done) work = ledger.prepare({ phase: 'advance', workId: work.workId! });
@@ -101,7 +102,7 @@ export async function finalizedNewsRelease(store: EditorialStore, codeRoot: stri
  * #809's 资料库 item: the first two paragraphs over 40 characters of the Book as one plain-text file titled 「sample1 背景摘录」,
  * attributed to and eligible for this Book, then indexed — exactly `tests/service/live-material-references.test.ts`'s setup.
  */
-export async function sample1DerivedLibraryItem(store: EditorialStore, roots: CaseRoots, book: ImportedBook): Promise<string> {
+export async function sample1DerivedLibraryItem(store: EditorialStore, roots: Pick<CaseRoots, 'inputRoot'>, book: ImportedBook): Promise<string> {
   const paragraphs = workingBlocks(store, book).filter((block) => block.kind === 'paragraph' && block.text.length > 40).slice(0, 2).map((block) => block.text);
   const path = join(roots.inputRoot, `${randomUUID()}.txt`);
   writeFileSync(path, paragraphs.join('\n\n'));

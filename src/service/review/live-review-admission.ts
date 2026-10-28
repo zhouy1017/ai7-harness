@@ -30,7 +30,12 @@ export function liveReviewRule(
     const rule = liveKindRule(policy, reviewCategoryKindId(entry.categoryId), ['public-or-synthetic', 'series-knowledge-excerpt']);
     return entry.categoryId === 'series-consistency' && entry.executor === 'review-category-contract' && rule?.seriesKnowledgeAllowed === true ? rule : null;
   }
-  if (entry.categoryId === 'publication-risk') return null;
+  if (entry.categoryId === 'publication-risk') {
+    const kind = reviewCategoryKindId(entry.categoryId);
+    const rule = liveKindRule(policy, kind, ['public-or-synthetic']);
+    return policy.operationalScope === 'ordinary-production' && entry.executor === 'review-category-contract' &&
+      rule?.taskKindOverrides?.[kind]?.webSearch === false ? rule : null;
+  }
   if (entry.searchEngine) {
     if (!['factual-review', 'academic-integrity'].includes(entry.categoryId)) return null;
     const rule = liveKindRule(policy, reviewCategoryKindId(entry.categoryId), ['public-or-synthetic']);

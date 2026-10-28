@@ -1,5 +1,8 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { copyFile, mkdir, readdir } from 'node:fs/promises';
+import { capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
+import { parseReviewCategoryUnitMessageHeader, parseReviewCrossChapterMessage, REVIEW_CROSS_CHAPTER_RESULT_SCHEMA } from '../../src/service/review/review-category-contract.js';
+import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/assurance-sampling-contract.js';
 import { dirname, join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
@@ -13,7 +16,6 @@ import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-poli
 import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
 import type { BaselineAnalysisStore } from '../../src/service/analysis/baseline-analysis-store.js';
 import { ReviewRunDriver, type ReviewRunExecutionOwner } from '../../src/service/review/review-run-driver.js';
-import { LEADS_ABSENT_REASON } from '../../src/service/review/review-scope.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { BASELINE_ANALYSIS_TASK_GOAL, MAX_FRAME_BYTES, type LaunchPolicyProjection, type ReviewRunProjection, type ReviewRunScopeRequest } from '../../src/shared/protocol.js';
@@ -21,6 +23,12 @@ import { LITERARY_EXPRESSION, STYLE_AND_FORMAT } from '../support/review-categor
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 import { makeJ13Series } from '../support/series-consistency.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for 可复用工序 (Issue #65, plan slice S30; ADR 0087): the real store on a temporary Agent Data
 // Root, exact `sample1` imported through the supported path into two Books, the baseline and the Review Run drive loop over the
@@ -34,8 +42,6 @@ const STYLE = STYLE_AND_FORMAT.categoryId;
 const LITERARY = LITERARY_EXPRESSION.categoryId;
 const PLOT = 'plot-consistency';
 const SERIES = 'series-consistency';
-const SERIES_FIXTURE = 'sample1-series-consistency-authored';
-const LAYERED_FIXTURE = 'l2-review-and-series-consistency';
 
 let roots: ServiceTestRoots;
 let launchPolicy: LaunchPolicyProjection;
@@ -53,6 +59,7 @@ interface Session {
   readonly store: EditorialStore;
   readonly owner: BaselineAnalysisExecutionOwner;
   readonly driver: ReviewRunDriver;
+  readonly capture?: ReturnType<typeof capturedOrdinaryExecution>;
 }
 
 /** The one owner, refusing its first hand-off as a launch without a route would: that category fails, the rest go on. */
@@ -82,7 +89,7 @@ class RefusingFirstDispatch implements ReviewRunExecutionOwner {
 }
 
 async function open(wrap?: (inner: BaselineAnalysisExecutionOwner) => ReviewRunExecutionOwner, dataRoot: string = roots.dataRoot): Promise<Session> {
-  const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-authored');
+  const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-cross-chapter-authored');
   const store = await EditorialStore.open(dataRoot, roots.codeRoot, {
     induceUnprovableReconciliation: false,
     persistLegacyReviewedDraft: false,
@@ -91,7 +98,7 @@ async function open(wrap?: (inner: BaselineAnalysisExecutionOwner) => ReviewRunE
     interruptAfterAbandonObjectRemoval: false,
     baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
   });
-  const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+  const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
   return { store, owner, driver: new ReviewRunDriver(store.reviewRunDriveSteps, wrap === undefined ? owner : wrap(owner)) };
 }
 
@@ -99,8 +106,7 @@ async function close(session: Session): Promise<void> {
   const stopped = session.driver.dispose();
   await session.owner.dispose();
   await stopped;
-  session.store.markCleanShutdown();
-  session.store.close();
+  try { session.capture?.assertMatched(); session.store.markCleanShutdown(); } finally { session.store.close(); }
 }
 
 async function importBook(session: Session, title: string, connection = true): Promise<string> {
@@ -175,7 +181,7 @@ describe('可复用工序 over the real store (ADR 0087)', () => {
       const capture = store.inspectProcedureCapture(source, finished.reviewRunId);
       expect(capture).toMatchObject({ available: true, runLabel: '第 1 次审阅', scopeSlot: 'whole', sourceScopeLabel: '全书', procedures: [] });
       expect(capture.steps.map((step) => [step.categoryId, step.eligible, step.model, step.output])).toEqual([
-        [STYLE, true, true, 'annotation'], [PLOT, true, false, 'annotation'], [LITERARY, true, true, 'change-suggestion'],
+        [STYLE, true, true, 'annotation'], [PLOT, true, true, 'annotation'], [LITERARY, true, true, 'change-suggestion'],
       ]);
       expect(capture.classification).toEqual({
         recommended: 'captured-procedure',
@@ -206,7 +212,7 @@ describe('可复用工序 over the real store (ADR 0087)', () => {
         expect(document).toMatchObject({
           schema: 'ai7.captured-procedure/1', title: '线索与体例复核', runAs: 'review-run', parameters: { scope: 'whole' },
           authorityCeiling: { runSourceScope: 'current-book', outputs: ['annotation'], model: true, searchEngine: false,
-            steps: [{ categoryId: STYLE, executor: 'review-category-contract' }, { categoryId: PLOT, executor: 'baseline-leads' }] },
+            steps: [{ categoryId: STYLE, executor: 'review-category-contract' }, { categoryId: PLOT, executor: 'review-category-contract' }] },
         });
         for (const forbidden of [source, finished.reviewRunId, 'L2 来源书', finished.manuscript.revisionId, 'clauses', 'guideline']) {
           expect(row.document_json.includes(forbidden)).toBe(false);
@@ -235,7 +241,7 @@ describe('可复用工序 over the real store (ADR 0087)', () => {
       expect(run.resolved).toMatchObject({ versionId: first!.versionId, version: 1, scopeSlot: 'whole', guidelineChanges: [] });
       expect(run.resolved!.steps).toEqual([
         { categoryId: STYLE, label: '体例与格式', available: true, unavailableReason: null, chosenApart: false },
-        { categoryId: PLOT, label: '情节逻辑与前后一致', available: false, unavailableReason: LEADS_ABSENT_REASON, chosenApart: false },
+        { categoryId: PLOT, label: '情节逻辑与前后一致', available: true, unavailableReason: null, chosenApart: false },
       ]);
       const pin = { versionId: run.resolved!.versionId, documentSha256: run.resolved!.documentSha256 };
       // Nothing beyond its steps, never a step the Book could take dropped, and the scope its slot says.
@@ -250,22 +256,22 @@ describe('可复用工序 over the real store (ADR 0087)', () => {
       expect(store.inspectCapturedProcedureApplicability(target)).toEqual({
         bookId: target, truncated: false,
         procedures: [{
-          procedureId: saved.procedureId, title: '线索与体例复核', latestEligible: { versionId: first!.versionId, version: 1 }, fit: 'partial',
-          stepCount: 2, availableCount: 1, chosenApart: [], chosenApartSteps: [], leftOut: [{ label: '情节逻辑与前后一致', reason: LEADS_ABSENT_REASON }],
+          procedureId: saved.procedureId, title: '线索与体例复核', latestEligible: { versionId: first!.versionId, version: 1 }, fit: 'all',
+          stepCount: 2, availableCount: 2, chosenApart: [], chosenApartSteps: [], leftOut: [],
         }],
       });
       expect(store.inspectCapturedProcedureApplicability(source).procedures).toEqual([expect.objectContaining({ fit: 'all', stepCount: 2, availableCount: 2, leftOut: [] })]);
       expect(refusal(() => store.inspectCapturedProcedureApplicability('book'))).toBe('BOOK_INVALID');
-      expect(first!.steps.map((step) => step.requirement)).toEqual([null, 'baseline-analysis']);
-      const pinned = prepare(session, target, [STYLE], WHOLE, pin);
+      expect(first!.steps.map((step) => step.requirement)).toEqual([null, null]);
+      const pinned = prepare(session, target, [STYLE, PLOT], WHOLE, pin);
       expect(pinned.procedure).toEqual({
         procedureId: saved.procedureId, versionId: first!.versionId, version: 1, title: '线索与体例复核', documentSha256: pin.documentSha256, stopped: false, missing: false,
-        leftOut: [{ categoryId: PLOT, label: '情节逻辑与前后一致', reason: LEADS_ABSENT_REASON, byChoice: false }],
+        leftOut: [],
       });
       // The ordinary path: its plan, the one approval, the drive.
       const ran = await authorizeAndDrive(session, target, pinned);
       expect(ran.state).toBe('settled');
-      expect(ran.categories.map((category) => category.categoryId)).toEqual([STYLE]);
+      expect(ran.categories.map((category) => category.categoryId)).toEqual([STYLE, PLOT]);
 
       // A next version from a new capture is chained to the first by its digest, and waits for its own validation.
       const second = store.saveCapturedProcedure({ bookId: source, reviewRunId: finished.reviewRunId, categoryIds: [STYLE, LITERARY], scopeSlot: 'chapters', title: '体例与表达复核', procedureId: saved.procedureId });
@@ -278,7 +284,7 @@ describe('可复用工序 over the real store (ADR 0087)', () => {
       expect(store.inspectCapturedProcedure(saved.procedureId, null).versions[1]).toMatchObject({ runCount: 1, runs: [{ bookId: target, bookTitle: 'L2 第二本书', label: '第 1 次' }] });
 
       // A Run prepared from version 1 and not yet authorized when version 1 is stopped is prepared again, never authorized.
-      const waiting = prepare(session, target, [STYLE], WHOLE, pin);
+      const waiting = prepare(session, target, [STYLE, PLOT], WHOLE, pin);
       const stopped = store.stopCapturedProcedure(saved.procedureId, first!.versionId, store.previewCapturedProcedureStop(saved.procedureId, first!.versionId).previewDigest);
       expect(stopped.versions.map((version) => [version.version, version.state])).toEqual([[2, 'pending-validation'], [1, 'stopped']]);
       expect(stopped.runnable).toBe(false);
@@ -370,7 +376,7 @@ describe('可复用工序 over the real store (ADR 0087)', () => {
       try {
         db.exec('DROP TRIGGER captured_procedure_versions_no_update');
         const row = db.prepare('SELECT document_json FROM captured_procedure_versions WHERE version_id = ?').get(versionId) as { document_json: string };
-        const altered = row.document_json.replace('"procedureId":"ai7-review-procedure/style-and-format","version":"1"', '"procedureId":"ai7-review-procedure/style-and-format","version":"9"');
+        const altered = row.document_json.replace('"procedureId":"ai7-review-procedure/style-and-format","version":"2"', '"procedureId":"ai7-review-procedure/style-and-format","version":"9"');
         expect(altered).not.toBe(row.document_json);
         const { createHash } = await import('node:crypto');
         db.prepare('UPDATE captured_procedure_versions SET document_json = ?, document_sha256 = ? WHERE version_id = ?')
@@ -829,41 +835,25 @@ describe('a Book merged from another house (Issue #65 review)', () => {
   }, 300_000);
 });
 
-/**
- * A fixtures root holding every authored fixture and one layered over the review fixture with the 书系一致性 fixture's answers
- * (Issue #66, S31b): one Review Run of 体例与格式 and 书系一致性 in J-13's Series Book is answered whole. It is written for this
- * suite only, under its scratch input root, from the two admitted fixtures' own entries.
- */
-async function layeredFixturesRoot(): Promise<string> {
-  const root = join(roots.inputRoot, 'fixtures');
-  await mkdir(root);
-  for (const name of await readdir(FIXTURES_ROOT)) if (name.endsWith('.json')) await copyFile(join(FIXTURES_ROOT, name), join(root, name));
-  const read = (name: string) => JSON.parse(readFileSync(join(FIXTURES_ROOT, `${name}.json`), 'utf8')) as { entries: unknown[] } & Record<string, unknown>;
-  const review = read('sample1-review-authored');
-  // The review fixture's own entries and base, with the 书系一致性 fixture's entries beside them: no deeper a base chain.
-  writeFileSync(join(root, `${LAYERED_FIXTURE}.json`), JSON.stringify({
-    ...review, identity: LAYERED_FIXTURE, entries: [...review.entries, ...read(SERIES_FIXTURE).entries],
-    description: 'L2 套件专用：审阅夹具的条目之外加上书系一致性夹具的条目，使一次审阅同时覆盖体例与格式和书系一致性。',
-  }));
-  return root;
-}
-
+/** Mixed review/Series business assertions use the admitted ordinary route, without a union fixture partition. */
 async function openLayered(): Promise<Session> {
-  const fixturesRoot = await layeredFixturesRoot();
-  const fixture = await loadModelFixture(fixturesRoot, LAYERED_FIXTURE);
   const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
-    induceUnprovableReconciliation: false,
-    persistLegacyReviewedDraft: false,
-    induceReimportProofTamper: false,
-    induceAbandonObjectRemovalFailure: false,
-    interruptAfterAbandonObjectRemoval: false,
-    baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
+    induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
+    induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false, baselineAnalysisRoute: null,
   });
-  const owner = new BaselineAnalysisExecutionOwner({
-    ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null },
-    seriesScopeGuard: (runRecordId) => store.seriesScopeGuard(runRecordId),
-  });
-  return { store, owner, driver: new ReviewRunDriver(store.reviewRunDriveSteps, owner) };
+  const capture = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, requestGovernor, (request, message) => {
+    const header = parseReviewCategoryUnitMessageHeader(message);
+    const content = request.stage === 'units' && header !== null
+      ? { schema: 'ai7.editorial-review.unit-result/2', unitOrdinal: header.ordinal, findings: [] }
+      : request.stage === 'assurance-sampling'
+        ? { schema: 'ai7.analysis.assurance-sampling-result/1', dispositions: parseAssuranceSamplingListedRefs(message)
+          .map((ref) => ({ ref, disposition: '成立', reason: '合成回归抽样。' })) }
+        : request.stage === 'cross-unit-reduction' && parseReviewCrossChapterMessage(message) !== null ? { schema: REVIEW_CROSS_CHAPTER_RESULT_SCHEMA, findings: [] }
+          : request.stage === 'run-report-reflection' ? { schema: 'ai7.analysis.run-report-reflection-result/1', items: [] } : null;
+    return content === null ? undefined : { kind: 'unit-result', text: JSON.stringify(content), usage: { inputTokens: 10, outputTokens: 5 } };
+  }, { seriesScopeGuard: (id) => store.seriesScopeGuard(id) });
+  launchPolicy = capture.policy;
+  return { store, owner: capture.owner, driver: new ReviewRunDriver(store.reviewRunDriveSteps, capture.owner), capture };
 }
 
 describe('Series material chosen apart, and how each procedure fits a Book (Issue #66, plan slice S31b; REUSE-046, REUSE-049, REUSE-050, REUSE-053)', () => {
@@ -947,7 +937,7 @@ describe('a procedure whose enabled versions no longer run (Issue #66, S31b revi
         db.exec('DROP TRIGGER captured_procedure_versions_no_update');
         const row = db.prepare('SELECT document_json, document_sha256, canonical_json FROM captured_procedure_versions WHERE version_id = ?').get(versionId) as
           { document_json: string; document_sha256: string; canonical_json: string };
-        const document = row.document_json.replace('"procedureId":"ai7-review-procedure/style-and-format","version":"1"', '"procedureId":"ai7-review-procedure/style-and-format","version":"9"');
+        const document = row.document_json.replace('"procedureId":"ai7-review-procedure/style-and-format","version":"2"', '"procedureId":"ai7-review-procedure/style-and-format","version":"9"');
         expect(document).not.toBe(row.document_json);
         const documentSha256 = sha256Hex(document);
         const record = row.canonical_json.replace(row.document_sha256, documentSha256);

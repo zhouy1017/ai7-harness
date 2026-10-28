@@ -1,3 +1,4 @@
+import { ANALYSIS_LEDGER_SCHEMA_SQL, IDLE_RUN_AUTHORIZATIONS_SQL } from '../../src/service/task-authorization.js';
 import { join, resolve } from 'node:path';
 import { cp } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
@@ -268,7 +269,9 @@ describe('revision 83 over earlier stores', () => {
         const added = new Set([...Object.keys(IMPORTED_SKILL_UPDATE_SCHEMA_SQL), ...Object.keys(IMPORTED_SKILL_UPDATE_TRIGGER_SQL)]);
         const rows = after.prepare("SELECT type, name, sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name").all() as Array<{ type: string; name: string; sql: string }>;
         // At 81 the predecessor also traverses 7f's admitted Result Set rebuild; at 82 every pre-existing schema row is exact.
-        expect((predecessor < 82 ? pre82SchemaRows(rows) : rows).filter((row) => !added.has(String(row.name)))).toEqual(before!);
+        expect((predecessor < 82 ? pre82SchemaRows(rows) : rows.map((row) => row.name === 'analysis_task_intents'
+          ? { ...row, sql: ANALYSIS_LEDGER_SCHEMA_SQL.analysis_task_intents } : row.name === 'analysis_run_authorizations'
+            ? { ...row, sql: IDLE_RUN_AUTHORIZATIONS_SQL } : row)).filter((row) => !added.has(String(row.name)))).toEqual(before!);
         for (const table of IMPORTED_SKILL_UPDATE_RELATIONS) {
           expect(after.prepare(`SELECT count(*) AS n FROM ${table}`).get()?.n).toBe(0);
           expect(MERGE_TABLE_POLICY[table as keyof typeof MERGE_TABLE_POLICY]).toBe('house');
@@ -289,7 +292,7 @@ describe('revision 83 over earlier stores', () => {
     store.markCleanShutdown(); store.close();
     const planted = new DatabaseSync(databasePath());
     try {
-      expect(Number(planted.prepare('PRAGMA user_version').get()?.user_version)).toBe(88);
+      expect(Number(planted.prepare('PRAGMA user_version').get()?.user_version)).toBe(98);
       for (const trigger of Object.keys(IMPORTED_SKILL_UPDATE_TRIGGER_SQL)) planted.exec(`DROP TRIGGER ${trigger}`);
       for (const table of Object.keys(IMPORTED_SKILL_UPDATE_SCHEMA_SQL).reverse()) planted.exec(`DROP TABLE ${table}`);
     } finally { planted.close(); }

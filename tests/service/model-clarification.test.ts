@@ -1,19 +1,31 @@
+import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
+import { capturedMapAnswer, capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
+import { BASELINE_CROSS_UNIT_RESULT_SCHEMA } from '../../src/service/analysis/cross-unit-contract.js';
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
-import { resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
+import { cpSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import { globalAttentionReason } from '../../src/renderer/global-attention-labels.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
-import { DEVELOPER_LIVE_POLICY_BINDING, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
+import { DEVELOPER_LIVE_POLICY_BINDING, resolveSourceCheckoutLaunchPolicy, resolveSourceCheckoutLaunchPolicySync } from '../../src/service/launch-policy.js';
+import { ruleFor, withRuleFor } from '../support/policy-rules.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../src/shared/protected-secret-identity.js';
 import { BaselineAnalysisExecutionOwner, holdsGovernorSlot } from '../../src/service/analysis/execution.js';
-import { BASELINE_ANALYSIS_TASK_GOAL, type BaselineAnalysisProjection, type LaunchPolicyProjection } from '../../src/shared/protocol.js';
+import { BASELINE_ANALYSIS_KIND, BASELINE_ANALYSIS_TASK_GOAL, type BaselineAnalysisProjection, type LaunchPolicyProjection } from '../../src/shared/protocol.js';
 import { fixtureEntryKey, loadModelFixture, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { buildClarificationAnswerMessage, clarificationMessageRequestDigest } from '../../src/service/provider/clarification-contract.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 const QUESTION = { question: '本范围按哪个阅读重点处理？', options: ['人物', '事件'], freeTextAllowed: true };
 let roots: ServiceTestRoots;
@@ -21,37 +33,71 @@ let policy: LaunchPolicyProjection;
 let happy: ResolvedModelFixture;
 let store: EditorialStore | undefined;
 let owner: BaselineAnalysisExecutionOwner | undefined;
+let capture: ReturnType<typeof capturedOrdinaryExecution> | undefined;
+let answerBoundary: (() => void) | undefined;
 beforeEach(async () => {
   roots = await createServiceTestRoots('ai7-model-clarification-');
   policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot);
   happy = await loadModelFixture(resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url))), 'sample1-baseline-happy');
 });
-afterEach(async () => { await owner?.dispose(); store?.close(); await roots.dispose(); store = undefined; owner = undefined; });
+afterEach(async () => { await owner?.dispose(); try { capture?.assertMatched(); } finally {
+  store?.close(); await roots.dispose(); store = undefined; owner = undefined; capture = undefined; answerBoundary = undefined;
+} });
 
-async function start(allowed = true): Promise<{ bookId: string; taskIntentId: string; runRecordId: string; entries: Map<string, ModelFixtureEntry> }> {
+async function start(allowed = true, options: { retryUnit?: number; denyClarification?: boolean } = {}): Promise<{ bookId: string; taskIntentId: string; runRecordId: string; entries: Map<string, ModelFixtureEntry> }> {
   const entries = new Map(happy.entries);
-  const fixture = { ...happy, identity: allowed ? 'sample1-model-clarification-test' : happy.identity, entries };
-  store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { baselineAnalysisRoute: {
-    fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage,
-  }, induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
+  store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { baselineAnalysisRoute: allowed ? null
+    : { fixtureIdentity: happy.identity, fixtureSha256: happy.sha256, fixtureLineage: happy.lineage },
+    induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
     induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false });
+  const answer = capturedMapAnswer(entries);
+  if (allowed) {
+    capture = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, requestGovernor,
+      (request, message) => {
+        if (message.includes('澄清回答 /2：')) answerBoundary?.();
+        if (request.stage === 'units' && request.unitOrdinal === options.retryUnit) return {
+          kind: 'adapter-failure', code: 'PROVIDER_ERROR', message: '合成暂时错误', status: 503 };
+        return request.stage === 'run-report-reflection'
+        ? { kind: 'unit-result', text: JSON.stringify({ schema: 'ai7.analysis.run-report-reflection-result/1', items: [] }), usage: { inputTokens: 10, outputTokens: 5 } }
+        : request.stage === 'cross-unit-reduction'
+          ? { kind: 'unit-result', text: JSON.stringify({ schema: BASELINE_CROSS_UNIT_RESULT_SCHEMA, findings: [] }), usage: { inputTokens: 10, outputTokens: 5 } }
+          : answer(request, message);
+      });
+    owner = capture.owner; policy = capture.policy;
+    if (options.denyClarification) {
+      // A deny-only rule guard, not a positive successor admission or a forged predecessor contract.
+      expect(ruleFor(policy, BASELINE_ANALYSIS_KIND).clarificationQuestionAllowed).toBe(true);
+      const denied = (selected: LaunchPolicyProjection) => withRuleFor(selected, BASELINE_ANALYSIS_KIND,
+        { clarificationQuestionAllowed: false, clarificationTimeoutHours: null });
+      policy = denied(policy);
+      store.baselineAnalysisLedger.bindLaunch({ ...capture.launch, policy });
+      await owner.dispose();
+      owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger,
+        launchPolicy: policy, currentLaunchPolicy: () => policy, fixture: null,
+        production: { scope: 'ordinary-production', nativeFetch: capture.nativeFetch },
+        productionPolicyFor: (frozen) => denied(resolveSourceCheckoutLaunchPolicySync(roots.codeRoot, 'ordinary-production', frozen)),
+        secretResolver: { resolve: async () => 'synthetic-captured-transport-placeholder' } });
+    }
+  } else owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy: policy,
+    fixture: happy, secretResolver: { resolve: async () => null } });
   const { bookId } = await importSample1Book(store, roots.codeRoot, '模型问题');
   await pinEditorialWorkspaceProfileRevision2(store, bookId);
   recordMissingCredentialConnection(store, 'L2 connection');
   let work = store.createBaselineAnalysisPreparationWork(bookId, BASELINE_ANALYSIS_TASK_GOAL, null, policy);
   while (!work.done) work = store.advanceBaselineAnalysisPreparationWork(work.workId!);
-  const prepared = work.projection!;
+  let prepared = work.projection!;
+  if (options.retryUnit !== undefined) prepared = store.editBaselineAnalysisPlan({ bookId,
+    taskIntentId: prepared.taskIntent!.taskIntentId, planEnvelopeDigest: prepared.planEnvelope!.digest,
+    removedSteps: [], disallowedAdaptations: [], askFirstAdaptations: ['safe-retry'] });
   const definition = store.baselineAnalysisLedger.definition;
   for (const unit of prepared.coverageManifest!.units) {
     const base = [...happy.entries.values()].find((entry) => entry.unitOrdinal === unit.ordinal)!;
     const digest = definition.requestDigest(unit.ordinal, unit.digest);
     entries.set(fixtureEntryKey(unit.ordinal, digest), { ...base, requestDigest: digest,
-      response: unit.ordinal === 1 ? { kind: 'unit-result', text: JSON.stringify(QUESTION), usage: { inputTokens: 10, outputTokens: 5 } } : base.response });
+      response: allowed && unit.ordinal === 1 ? { kind: 'unit-result', text: JSON.stringify(QUESTION), usage: { inputTokens: 10, outputTokens: 5 } } : base.response });
   }
   const taskIntentId = prepared.taskIntent!.taskIntentId;
   const runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!;
-  owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture,
-    secretResolver: { resolve: async () => null }, capacity: 1 });
   owner.admitAndDispatch(runRecordId);
   await owner.whenIdle();
   return { bookId, taskIntentId, runRecordId, entries };
@@ -89,6 +135,7 @@ describe('one model question per Run unit', () => {
     await owner!.dispose(); owner = undefined;
     store!.close(); store = undefined;
     const db = new DatabaseSync(resolve(roots.dataRoot, 'store', 'ai7.sqlite'));
+    constructPre94PolicyEncoding(db);
     const before = db.prepare('SELECT request_id, canonical_json, sha256 FROM analysis_clarification_requests').all();
     execPre74Fixture(db, 'ALTER TABLE analysis_clarification_requests DROP COLUMN model_question_json; PRAGMA user_version = 72');
     db.close();
@@ -96,7 +143,7 @@ describe('one model question per Run unit', () => {
     const read = new DatabaseSync(resolve(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
     try {
       // Synchronized delta with #66 and #89: revisions 81 (imported Skill relations) and 83 (their updates) follow revision 80 (Task Intent Drafts).
-      expect(read.prepare('PRAGMA user_version').get()!.user_version).toBe(88);
+      expect(read.prepare('PRAGMA user_version').get()!.user_version).toBe(98);
       expect(read.prepare('SELECT request_id, canonical_json, sha256 FROM analysis_clarification_requests').all()).toEqual(before);
       expect(read.prepare('SELECT model_question_json FROM analysis_clarification_requests').get()!.model_question_json).toBeNull();
     } finally { read.close(); }
@@ -128,13 +175,10 @@ describe('one model question per Run unit', () => {
     expect(() => store!.answerBaselineAnalysisClarification({ ...run, requestId: card.requestId, optionId: 'model-option-1', note: null })).toThrow();
   });
   it('keeps a safe-retry question to its own two answers and S76d words beside a model question', async () => {
-    const run = await start();
+    const run = await start(true, { retryUnit: 2 });
     const ledger = store!.baselineAnalysisLedger;
-    const facts = ledger.loadExecutionPlan(run.runRecordId);
-    const requestId = ledger.recordClarificationRequest({ runRecordId: run.runRecordId, taskIntentId: run.taskIntentId, attemptId: randomUUID(), unitOrdinal: 2,
-      planVersion: facts.planVersionOrdinal, planEnvelopeDigest: facts.planEnvelopeDigest, requestDigest: 'a'.repeat(64),
-      failure: { code: 'SYNTHETIC_RETRY', failureClass: 'provider', status: 503, reason: '合成暂时错误' },
-      firstPayloadDigest: null, firstUnitMessageDigest: 'b'.repeat(64), firstUsage: null, firstWallMs: 1 });
+    const requestId = ledger.clarificationsOf(run.runRecordId).find((entry) => entry.unitOrdinal === 2)!.requestId;
+    expect(ledger.clarificationsOf(run.runRecordId).find((entry) => entry.unitOrdinal === 1)!.origin).toBe('model');
     for (const optionId of ['model-option-0', 'free-text', 'no-answer'] as const) {
       expect(() => store!.answerBaselineAnalysisClarification({ ...run, requestId, optionId, note: optionId === 'free-text' ? '合成说明' : null }))
         .toThrowError('请选择一个回答。');
@@ -165,12 +209,41 @@ describe('one model question per Run unit', () => {
     const ledger = store!.baselineAnalysisLedger;
     const request = ledger.clarificationsOf(run.runRecordId)[0]!;
     store!.answerBaselineAnalysisClarification({ ...run, requestId: request.requestId, optionId: 'no-answer', note: null });
-    expect(ledger.claimModelClarificationAnswer(run.runRecordId, request.requestId)).toBe(true);
-    ledger.recordRunState(run.runRecordId, 'awaiting-clarification', { detail: '合成重启边界' });
+    answerEntry(run);
+    const snapshot = join(roots.inputRoot, 'claimed-answer-crash');
+    let snapped = false;
+    answerBoundary = () => {
+      if (snapped) return;
+      snapped = true;
+      // The real answer claim and possible-send admission already exist when nativeFetch is reached.
+      cpSync(roots.dataRoot, snapshot, { recursive: true,
+        filter: (source) => !['ai7.sqlite', 'ai7.sqlite-wal', 'ai7.sqlite-shm'].includes(basename(source)) });
+      const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+      try { db.prepare('VACUUM INTO ?').run(join(snapshot, 'store', 'ai7.sqlite')); } finally { db.close(); }
+    };
     owner!.continueAnswered(run.runRecordId);
     await owner!.whenIdle();
+    expect(snapped).toBe(true);
+    answerBoundary = undefined;
+    await owner!.dispose(); capture!.assertMatched(); store!.close();
+    store = await EditorialStore.open(snapshot, roots.codeRoot, { baselineAnalysisRoute: null,
+      induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
+      induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false });
+    const answer = capturedMapAnswer(run.entries);
+    capture = capturedOrdinaryExecution(store, roots.codeRoot, snapshot, requestGovernor, (request, message) =>
+      request.stage === 'run-report-reflection'
+        ? { kind: 'unit-result', text: JSON.stringify({ schema: 'ai7.analysis.run-report-reflection-result/1', items: [] }), usage: { inputTokens: 10, outputTokens: 5 } }
+        : request.stage === 'cross-unit-reduction'
+          ? { kind: 'unit-result', text: JSON.stringify({ schema: BASELINE_CROSS_UNIT_RESULT_SCHEMA, findings: [] }), usage: { inputTokens: 10, outputTokens: 5 } }
+          : answer(request, message));
+    owner = capture.owner;
+    store.reconcileStoppedBaselineAnalysisRuns();
+    const kept = store.baselineAnalysisLedger;
+    owner.admitAndDispatch(run.runRecordId, kept, { resume: true });
+    await owner.whenIdle();
+    expect(capture.requests.filter((entry) => entry.stage === 'units')).toHaveLength(0);
     expect(store!.inspectBaselineAnalysis(run.bookId).run!.attempt!.spans).toHaveLength(8);
-    expect(ledger.unitCheckpoints(run.runRecordId).find((entry) => entry.unit.unitOrdinal === 1)?.unit.closed)
+    expect(kept.unitCheckpoints(run.runRecordId).find((entry) => entry.unit.unitOrdinal === 1)?.unit.closed)
       .toMatchObject({ state: 'gap', gap: { code: 'outcome-unknown' } });
   });
   it('expires after exactly 24 hours and tells the model 不回答, disclosed by the Run Report', async () => {
@@ -212,8 +285,8 @@ describe('one model question per Run unit', () => {
     expect(done.taskOutcome!.classification).toBe('cancelled');
     expect(done.resultSetRevision!.units.filter((unit) => unit.state === 'closed')).toHaveLength(7);
   });
-  it('never waits for a question on the predecessor contract without admission', async () => {
-    const run = await start(false);
+  it('never waits for a model question when the selected rule denies clarification', async () => {
+    const run = await start(true, { denyClarification: true });
     const done = store!.inspectBaselineAnalysis(run.bookId);
     expect(done.run!.state).not.toBe('awaiting-clarification');
     expect(done.resultSetRevision!.gaps).toContainEqual(expect.objectContaining({ unitOrdinal: 1, code: 'contract-invalid' }));
@@ -250,7 +323,7 @@ describe('one model question per Run unit', () => {
         : entry?.response.kind === 'unit-result' ? entry.response.text : '{"schema":"ai7.analysis.run-report-reflection-result/1","items":[]}';
       return new Response(JSON.stringify({ choices: [{ message: { content: answer }, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 5 } }));
     };
-    owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy: livePolicy, fixture: null,
+    owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy: livePolicy, fixture: null,
       secretResolver: { resolve: async () => 'synthetic-provider-free-key' },
       developerLive: { launch: { runBudgetCeiling: ceiling, providerCacheRoot: resolve(roots.inputRoot, 'cache'),
         validation: { family: 'model-clarification-initial', case: allowed ? 'allowed' : 'denied', delta: null } }, nativeFetch },

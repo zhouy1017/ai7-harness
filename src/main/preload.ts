@@ -271,6 +271,8 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['startBaselineAnalysisWhenOnline']['output']>(IPC_CHANNELS.startBaselineAnalysisWhenOnline, input),
   cancelWaitingBaselineAnalysis: (input: Omit<ServiceOperationMap['cancelWaitingBaselineAnalysis']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['cancelWaitingBaselineAnalysis']['output']>(IPC_CHANNELS.cancelWaitingBaselineAnalysis, input),
+  startTaskWhenIdle: (input: Omit<ServiceOperationMap['startTaskWhenIdle']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['startTaskWhenIdle']['output']>(IPC_CHANNELS.startTaskWhenIdle, input),
   startTaskWhenOnline: (input: Omit<ServiceOperationMap['startTaskWhenOnline']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['startTaskWhenOnline']['output']>(IPC_CHANNELS.startTaskWhenOnline, input),
   cancelWaitingTask: (input: Omit<ServiceOperationMap['cancelWaitingTask']['input'], 'bookId'>) =>
@@ -303,8 +305,8 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['inspectDefaultExecutionRules']['output']>(IPC_CHANNELS.inspectDefaultExecutionRules),
   deactivateDefaultExecutionRule: (input: ServiceOperationMap['deactivateDefaultExecutionRule']['input']) =>
     invoke<ServiceOperationMap['deactivateDefaultExecutionRule']['output']>(IPC_CHANNELS.deactivateDefaultExecutionRule, input),
-  inspectBackgroundAnalysisEnrollment: () =>
-    invoke<ServiceOperationMap['inspectBackgroundAnalysisEnrollment']['output']>(IPC_CHANNELS.inspectBackgroundAnalysisEnrollment),
+  inspectBackgroundAnalysisEnrollment: (input?: { kind?: string }) =>
+    invoke<ServiceOperationMap['inspectBackgroundAnalysisEnrollment']['output']>(IPC_CHANNELS.inspectBackgroundAnalysisEnrollment, input),
   enrollBackgroundAnalysis: (input: Omit<ServiceOperationMap['enrollBackgroundAnalysis']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['enrollBackgroundAnalysis']['output']>(IPC_CHANNELS.enrollBackgroundAnalysis, input),
   revokeBackgroundAnalysisEnrollment: (input: Omit<ServiceOperationMap['revokeBackgroundAnalysisEnrollment']['input'], 'bookId'>) =>
@@ -326,6 +328,7 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['inspectExemplars']['output']>(IPC_CHANNELS.inspectExemplars, input ?? { after: null }),
   admitReadersReportExemplar: (input: ServiceOperationMap['admitReadersReportExemplar']['input']) =>
     invoke<ServiceOperationMap['admitReadersReportExemplar']['output']>(IPC_CHANNELS.admitReadersReportExemplar, input),
+  procedureLibrary: (input: Parameters<RendererApi['procedureLibrary']>[0]) => invoke<ServiceOperationMap['procedureLibrary']['output']>(IPC_CHANNELS.procedureLibrary, input),
   inspectKnowledgeProcedures: () => invoke<ServiceOperationMap['inspectKnowledgeProcedures']['output']>(IPC_CHANNELS.inspectKnowledgeProcedures),
   // 可复用工序 and 开发建议 (Issue #65, S30; ADR 0087).
   inspectCapturedProcedures: () => invoke<ServiceOperationMap['inspectCapturedProcedures']['output']>(IPC_CHANNELS.inspectCapturedProcedures),
@@ -451,6 +454,8 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['inspectAnalysisFeedback']['output']>(IPC_CHANNELS.inspectAnalysisFeedback, input),
   recordAnalysisFeedback: (input: Omit<ServiceOperationMap['recordAnalysisFeedback']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['recordAnalysisFeedback']['output']>(IPC_CHANNELS.recordAnalysisFeedback, input),
+  inspectHouseWordList: (input: ServiceOperationMap['inspectHouseWordList']['input']) => invoke<ServiceOperationMap['inspectHouseWordList']['output']>(IPC_CHANNELS.inspectHouseWordList, input),
+  saveHouseWordList: (input: ServiceOperationMap['saveHouseWordList']['input']) => invoke<ServiceOperationMap['saveHouseWordList']['output']>(IPC_CHANNELS.saveHouseWordList, input),
   inspectReviewWorkspace: (input?: Omit<ServiceOperationMap['inspectReviewWorkspace']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['inspectReviewWorkspace']['output']>(IPC_CHANNELS.inspectReviewWorkspace, input ?? { reviewRunId: null }),
   prepareReviewRun: (input: Omit<ServiceOperationMap['prepareReviewRun']['input'], 'bookId'>) =>
@@ -511,8 +516,12 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
   recordProposalDecisionFeedback: (input: ServiceOperationMap['recordProposalDecisionFeedback']['input']) =>
     invoke<ServiceOperationMap['recordProposalDecisionFeedback']['output']>(IPC_CHANNELS.recordProposalDecisionFeedback, input),
   inspectEditorialLearning: (input: ServiceOperationMap['inspectEditorialLearning']['input']) => invoke<ServiceOperationMap['inspectEditorialLearning']['output']>(IPC_CHANNELS.inspectEditorialLearning, input),
+  inspectWordTrackedEditSample: (input: ServiceOperationMap['inspectWordTrackedEditSample']['input']) =>
+    invoke<ServiceOperationMap['inspectWordTrackedEditSample']['output']>(IPC_CHANNELS.inspectWordTrackedEditSample, input),
+  recordLearningReasonAsk: (input: Parameters<RendererApi['recordLearningReasonAsk']>[0]) => invoke<ServiceOperationMap['recordLearningReasonAsk']['output']>(IPC_CHANNELS.recordLearningReasonAsk, input),
   changeEditorialLearning: (input: ServiceOperationMap['changeEditorialLearning']['input']) => invoke<ServiceOperationMap['changeEditorialLearning']['output']>(IPC_CHANNELS.changeEditorialLearning, input),
   createEditorialMemory: (input: ServiceOperationMap['createEditorialMemory']['input']) => invoke<ServiceOperationMap['createEditorialMemory']['output']>(IPC_CHANNELS.createEditorialMemory, input),
+  acceptEditorialMemory: (input: ServiceOperationMap['acceptEditorialMemory']['input']) => invoke<ServiceOperationMap['acceptEditorialMemory']['output']>(IPC_CHANNELS.acceptEditorialMemory, input),
   deactivateEditorialMemory: (input: ServiceOperationMap['deactivateEditorialMemory']['input']) => invoke<ServiceOperationMap['deactivateEditorialMemory']['output']>(IPC_CHANNELS.deactivateEditorialMemory, input),
   inspectHouseReviewPreference: () => invoke<ServiceOperationMap['inspectHouseReviewPreference']['output']>(IPC_CHANNELS.inspectHouseReviewPreference, {}),
   rebuildHouseReviewPreference: () => invoke<ServiceOperationMap['rebuildHouseReviewPreference']['output']>(IPC_CHANNELS.rebuildHouseReviewPreference, {}),
@@ -751,6 +760,7 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
   inspectGlobalAgent: () => invoke<ServiceOperationMap['inspectGlobalAgent']['output']>(IPC_CHANNELS.inspectGlobalAgent, {}),
   recordLearningSupervision: (input: ServiceOperationMap['recordLearningSupervision']['input']) => invoke<ServiceOperationMap['recordLearningSupervision']['output']>(IPC_CHANNELS.recordLearningSupervision, input),
   askGlobalAgent: (input: ServiceOperationMap['askGlobalAgent']['input']) => invoke<ServiceOperationMap['askGlobalAgent']['output']>(IPC_CHANNELS.askGlobalAgent, input),
+  prepareGlobalAgentTurn: (input: ServiceOperationMap['prepareGlobalAgentTurn']['input']) => invoke<ServiceOperationMap['prepareGlobalAgentTurn']['output']>(IPC_CHANNELS.prepareGlobalAgentTurn, input),
   inspectGlobalAttention: () =>
     invoke<ServiceOperationMap['inspectGlobalAttention']['output']>(IPC_CHANNELS.inspectGlobalAttention, {}),
   reviewManuscriptExport: (input: Parameters<RendererApi['reviewManuscriptExport']>[0]) =>

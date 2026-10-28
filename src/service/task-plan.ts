@@ -39,7 +39,7 @@ import { MODEL_SERVICE_ROUTES, BASELINE_ANALYSIS_MODE_GOALS, BASELINE_ANALYSIS_T
 import { EVIDENCE_ASSURANCE_LEVELS, EVIDENCE_ASSURANCE_LEVEL_CONSEQUENCES, EVIDENCE_ASSURANCE_LEVEL_LABELS, type EvidenceAssuranceLevel } from '../shared/protocol.js';
 import { CONFIGURED_PROVIDER_LABELS } from '../shared/provider-configuration.generated.js';
 import type { ClarificationFacts } from './analysis/clarifications.js';
-import { namedNonEffects } from './analysis/baseline-analysis-store.js';
+import { namedNonEffects, RUN_QUEUED_LABEL, RUN_WAITING_IDLE_LABEL } from './analysis/baseline-analysis-store.js';
 import type { ManifestBlockInput } from './analysis/coverage-manifest.js';
 import { PLAN_CEILING_LAUNCH_REASON, PLAN_EDITABLE_ADAPTATIONS, PLAN_EDIT_ADAPTATION_LABELS, PLAN_EDIT_STEP_LABELS } from './analysis/plan-edits.js';
 import type { Connectivity } from './connectivity.js';
@@ -419,6 +419,8 @@ export function positionLabel(reading: RangeReading): string {
 
 /** The editor's name for each field a stored Plan Revision diff names; the stored label stays in the record. */
 export const DRIFT_FIELD_LABELS: Readonly<Record<string, string>> = {
+  selectedPolicyIdentity: '已选处理策略身份',
+  localFixtureProfile: '本地夹具配置',
   'providerBinding.providerId': '模型服务 · 提供方',
   'providerBinding.modelId': '模型服务 · 模型',
   'providerBinding.adapterRevision': '模型服务 · 接入修订',
@@ -483,6 +485,9 @@ function driftValue(field: string, value: PlanRevisionDiffValue, blocks: Readonl
     return `${positionLabel(reading)} · ${groupedCount(reading.graphemes)} 字`;
   }
   if ('revisionId' in value) return `第 ${value.ordinal} 份分析`;
+  if ('providerProcessingVersion' in value) return `Provider Processing ${value.providerProcessingVersion} · 策略集 ${value.activePolicySetVersion}`;
+  if ('schema' in value) return `本地夹具 ${value.policyVersion} · 策略集 ${value.activePolicySetVersion} · ${value.kind === 'legacy'
+    ? `兼容配置 ${value.registeredProfile}` : `规则 ${value.ruleId}`}`;
   if ('kind' in value) return budgetCeilingLabel(value);
   return countsReading(value);
 }
@@ -741,7 +746,7 @@ function baselineState(projection: BaselineAnalysisProjection, stopped?: Baselin
       return { key: 'waiting', label: WAITING_LABELS.network };
     // 等待运行名额 (Issue #49, S14; CONC-007): authorized, and waiting on the governor for a place.
     case 'queued':
-      return { key: 'queued', label: '等待运行名额' };
+      return { key: 'queued', label: projection.authorization?.startWhen === 'idle' ? RUN_WAITING_IDLE_LABEL : RUN_QUEUED_LABEL };
     // A Run the editor cancelled before it ran anything keeps the dash of a cancelled wait (Issue #502); one it
     // cancelled after it began reading reads 已取消 in its own shape, and 正在取消 while it stops (Issue #422).
     case 'cancelled':
@@ -754,7 +759,7 @@ function baselineState(projection: BaselineAnalysisProjection, stopped?: Baselin
     case 'pausing':
       return { key: 'pausing', label: '正在暂停' };
     case 'paused':
-      return { key: 'paused', label: '已暂停' };
+      return { key: 'paused', label: projection.run?.stateLabel ?? '已暂停' };
     case 'resumable':
       // 模型服务账户限额 (Issue #51, S16b; RUN-012): its own words, never 任务已中断 · 可续行's.
       return stopped?.accountLimit != null ? { ...ACCOUNT_LIMIT_STATE }
@@ -2089,12 +2094,14 @@ export function baselineCancellationImpact(
   const progress = run.progress;
   const asked = kept?.waiting ?? [];
   const unconfirmed = kept?.unconfirmed ?? [];
-  const inFlight = progress?.stage === 'units' && progress.currentUnitOrdinal !== null;
-  const liveRemaining = progress === null ? 0 : Math.max(0, progress.unitsTotal - progress.unitsSettled - asked.length - (inFlight ? 1 : 0));
+  const activeUnits = progress?.stage !== 'units' ? [] : progress.inFlightUnits?.map((unit) => unit.unitOrdinal) ??
+    (progress.currentUnitOrdinal === null ? [] : [progress.currentUnitOrdinal]);
+  const inFlight = activeUnits.length > 0;
+  const liveRemaining = progress === null ? 0 : Math.max(0, progress.unitsTotal - progress.unitsSettled - asked.length - activeUnits.length);
   const stops = progress === null ? '这项任务已经停下；' : progress.stage !== 'units'
     ? `正在进行的${STAGE_WORDS[progress.stage]}会被中止，回答已传回的照常计入；之后的步骤都不再进行，不再发送任何内容。`
     : inFlight
-      ? `停在正在读的第 ${progress.currentUnitOrdinal} 个阅读范围；${restOf(liveRemaining)}之后的归纳、抽样都不再进行，不再发送任何内容。`
+      ? `停在正在读的第 ${activeUnits.join('、')} 个阅读范围；${restOf(liveRemaining)}之后的归纳、抽样都不再进行，不再发送任何内容。`
       : `在这两个阅读范围之间停止；${restOf(liveRemaining)}之后的归纳、抽样都不再进行，不再发送任何内容。`;
   // The existing redo caller supplies only aggregate progress. Preserve that disclosure without inventing zero
   // waiting/unknown counts; the cancellation owner supplies both arrays, even when they are empty.
@@ -2392,7 +2399,7 @@ function reviewState(facts: ReviewRunPlanFacts): TaskPlanProjection['state'] {
       return { key: 'settled', label: '已完成' };
     // 联网后开始任务 (Issue #760, S74c): the label says what it waits for once the service has looked (`withWaitingReason`).
     case 'waiting':
-      return { key: 'waiting', label: WAITING_LABELS.network };
+      return { key: 'waiting', label: facts.waitingIdle === true ? RUN_WAITING_IDLE_LABEL : WAITING_LABELS.network };
     // Its plan moved while it waited (OFF-008): it never started.
     case 'plan-moved':
       return { key: 'plan-moved', label: PLAN_MOVED_LABEL };
@@ -2447,6 +2454,7 @@ export function reviewRunPlan(input: {
   blocks: ReadonlyArray<ManifestBlockInput>;
 }): TaskPlanProjection {
   const { facts, bookTitle, blocks } = input;
+  const local = facts.localPlan;
   const scope = facts.scope;
   const reading = scope.kind === 'whole' ? readRange(blocks, null)
     : scope.selectedRange !== null ? readRange(blocks, scope.selectedRange) : null;
@@ -2499,7 +2507,8 @@ export function reviewRunPlan(input: {
           readiness: routes.includes('none') ? 'no-route' : 'ready',
           needsModelConnection,
           planEnvelopeDigest: null,
-          categoryDigests: tasks.map((category) => ({ categoryId: category.categoryId, planEnvelopeDigest: category.task!.planEnvelopeDigest })),
+          categoryDigests: local === undefined ? tasks.map((category) => ({ categoryId: category.categoryId, planEnvelopeDigest: category.task!.planEnvelopeDigest }))
+            : [{ categoryId: 'local-text-check', planEnvelopeDigest: local.digest }],
           reconfirm: null,
         };
   return {
@@ -2522,7 +2531,7 @@ export function reviewRunPlan(input: {
     scope: {
       process: `《${bookTitle}》${position}${reading === null ? '' : ` · ${groupedCount(reading.graphemes)} 字`} · ${categories.length} 个类别` +
         (spans === null ? (selection ? '；只在所选段落上标出发现' : '') : selection ? `；读取 ${spans} 作为上下文，只在所选段落上标出发现` : `；读取 ${spans}`),
-      reference: [...categories.map((category) => category.modelFree
+      reference: [...categories.map((category) => local !== undefined ? category.basisStatement : category.modelFree
         ? `${category.label}：基线分析的前后不一致线索与未决事项`
         : category.guidelineDocuments.length === 0
           ? `${category.label}：${category.procedure.title}（第 ${category.procedure.version} 版）`
@@ -2534,7 +2543,7 @@ export function reviewRunPlan(input: {
     steps: [
       ...categories.map((category): TaskPlanStepProjection => ({
         id: `category:${category.categoryId}`,
-        label: category.modelFree ? `读取基线分析的线索：${category.label}` : `逐章审读：${category.label}`,
+        label: local !== undefined ? `本机确定性检查：${category.label}` : category.modelFree ? `读取基线分析的线索：${category.label}` : `逐章审读：${category.label}`,
         result: `${category.label}的发现（稿件上的标记）`,
         removable: false,
         removed: false,
@@ -2548,16 +2557,16 @@ export function reviewRunPlan(input: {
     service: {
       role: roleLabel('Main Editorial Role'),
       provider: (route === null ? '不调用模型' : live ? `${route.kind} · ${route.model}` : 'AI7 本地确定性模型适配器') + (webSearchLabels.length === 0 ? '' : ` · 联网检索 · ${webSearchLabels.join('、')}`),
-      decision: (route === null
+      decision: (local !== undefined ? local.options.tables === undefined ? '本机执行五项有限识别规则，数字默认关闭；只生成可能问题批注，不表示整部标准合规' : '在本机按所选字形、词形、本社词表及本书术语表检查；机械修正由你采纳后应用，其余生成批注，数字默认关闭' : route === null
         ? '只读基线分析的线索，不调用模型'
         : live ? `${production ? '本地正式生产' : '开发者实时'}：实时传输受运行边界约束`
           : route.kind === 'none'
             ? '远程模型服务被拒绝，且没有可执行的本地路由；授权后会在派发前阻止'
             : '远程模型服务被拒绝（0 次实时传输）；由 AI7 本地确定性模型适配器执行') + ' · ' + (tasks.length === 0 ? '未联网核查' : tasks.map((category) =>
         researchDecisionLine(category.label, category.task!.researchReport, category.task!.components['web-tools-backend'] as import('../shared/protocol.js').FrozenWebToolsBackend | undefined)).join('；')),
-      send: route === null ? '只读基线分析的线索，不发送任何内容' : live ? `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款${preferenceSent}，发往为审阅配置的模型服务` : NOTHING_SENT,
+      send: local !== undefined ? '本机读取冻结的所选正文，不发送任何内容' : route === null ? '只读基线分析的线索，不发送任何内容' : live ? `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款${preferenceSent}，发往为审阅配置的模型服务` : NOTHING_SENT,
       sendCategory: outboundLabel('public-or-synthetic'),
-      usage: live && allSet ? `至多 ${groupedCount(ceilingTotal)} tokens（${tasks.length} 类合计）` : live && production ? PRODUCTION_UNSET_USAGE : NO_USAGE,
+      usage: local !== undefined ? '本地计算，不产生模型用量' : live && allSet ? `至多 ${groupedCount(ceilingTotal)} tokens（${tasks.length} 类合计）` : live && production ? PRODUCTION_UNSET_USAGE : NO_USAGE,
       usageIsCeiling: live && allSet,
       duration: DURATION_UNKNOWN,
       budgetCeiling: allSet ? `任务运行预算上限：${groupedCount(ceilingTotal)} tokens（${tasks.length} 类合计）` : BUDGET_NOT_SET,
@@ -2591,6 +2600,8 @@ export function reviewRunPlan(input: {
         : '没有开始的类别可以在「审阅」里新建一次审阅再审。',
     },
     technical: [
+      ...(local === undefined ? [] : [{ key: 'local-plan', label: '本地检查计划', value: `ai7.review.local-plan/${local.options.tables === undefined ? '1' : '3'} · ${local.digest} · ${local.paragraphs} 个冻结段落` },
+        { key: 'local-applicability', label: '本次适用范围', value: `标点 ${local.options.punctuation} · 数字 ${local.options.numerals} · 出版物 ${local.options.publication} · 规则 ${local.options.numeralRules.join('、') || '数字未启用'} · 排除 ${local.options.excludedRanges.length} 处${local.options.tables === undefined ? '' : ` · 规范字表 ${local.options.tables.characters ? '启用' : '关闭'} · 异形词 ${local.options.tables.variantWords ? '启用' : '关闭'} · 本社词表 ${local.options.tables.houseWordList === null ? '未选择' : '已冻结选择'} · 本书词表 ${local.options.tables.bookTerms.length} 条`}` }]),
       ...(facts.housePreferences === undefined ? [] : preferences.length === 0 ? [{ key: 'house-review-preference', label: '本社审阅偏好', value: HOUSE_PREFERENCE_CLOSED }]
         : preferences.map(({ categoryLabel, preference }, index) => ({ key: `house-review-preference:${index}`, label: '本社审阅偏好',
           value: `${categoryLabel} · ${housePreferenceLabel(preference)} · ${preference.versionId} · ${preference.materialSetDigest}` }))),
@@ -2603,7 +2614,7 @@ export function reviewRunPlan(input: {
       ...categories.map((category) => ({
         key: `category:${category.categoryId}`,
         label: category.label,
-        value: category.task === null
+        value: local !== undefined ? `${category.procedure.title}（第 ${category.procedure.version} 版）· 本地确定性检查 → 派生报告 · ${local.digest}` : category.task === null
           ? `${category.procedure.title}（第 ${category.procedure.version} 版）· 直接读取基线分析的线索，没有任务`
           : `${category.procedure.title}（第 ${category.procedure.version} 版）· 任务 ${category.task.taskIntentId} · ${category.task.modeLabel} · 计划版本 ${category.task.planVersion} · 计划权限边界 ${category.task.planEnvelopeDigest} · ${category.task.plan.routeLabel} · ${category.task.plan.providerStatusLabel} · ${category.task.plan.budgetCeilingLabel}`,
       })),

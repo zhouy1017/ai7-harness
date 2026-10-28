@@ -3,14 +3,14 @@ import { DIALOGUE_RETRIEVAL_PROMPT_CONTRACT, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_
 import { OPENCODE_GO_ROUTE_PROFILE, assembleProviderRequest, dialogueSseEvents } from '../../src/service/provider/deepseek-adapter.js';
 import { OPENCODE_GO_V41_FLASH_PROFILE } from '../../src/service/provider/model-profile.js';
 import type { AssembledModelPayload } from '../../src/service/provider/payload.js';
-import { LOCAL_TOOL_SCHEMAS, PLATFORM_TOOL_SCHEMAS } from '../../src/service/provider/platform-tools.js';
+import { LEGACY_LOCAL_TOOL_SCHEMAS, PLATFORM_TOOL_SCHEMAS } from '../../src/service/provider/platform-tools.js';
 
 const model = OPENCODE_GO_V41_FLASH_PROFILE;
 const context = { attribution: {}, promptContractDigest: DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST, sessionId: 'retrieval-sse', requestShape: 'editorial-dialogue-sse' as const };
 const first: AssembledModelPayload['messages'][number] = { role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: buildDialogueMessage({ kind: 'ask', selection: '合成选区', question: '找到书中哪里有相似的描写？', kept: null }) }] };
 const call: AssembledModelPayload['messages'][number] = { role: 'assistant', source: { kind: 'model' }, content: [{ type: 'tool-call', id: 'c1', name: 'retrieve', arguments: '{"query":"合成"}' }] };
 const result: AssembledModelPayload['messages'][number] = { role: 'user', source: { kind: 'tool', callId: 'c1' }, content: [{ type: 'tool-result', toolCallId: 'c1', content: [{ type: 'text', text: '[]' }] }] };
-const payload = (messages: AssembledModelPayload['messages'] = [first]): AssembledModelPayload => ({ provider: model.route, model: model.model, system: DIALOGUE_RETRIEVAL_PROMPT_CONTRACT.systemPrompt, tools: LOCAL_TOOL_SCHEMAS, messages });
+const payload = (messages: AssembledModelPayload['messages'] = [first]): AssembledModelPayload => ({ provider: model.route, model: model.model, system: DIALOGUE_RETRIEVAL_PROMPT_CONTRACT.systemPrompt, tools: LEGACY_LOCAL_TOOL_SCHEMAS, messages });
 
 async function decode(deltas: unknown[], finish: string | null, done = true): Promise<unknown[]> {
   const values: unknown[] = deltas.map((delta) => ({ model: model.model, choices: [{ index: 0, delta }] }));
@@ -27,7 +27,7 @@ describe('the /2 dialogue SSE boundary', () => {
     expect(JSON.parse(assemble(payload()))).toMatchObject({ stream: true, stream_options: { include_usage: true } });
     expect(JSON.parse(assemble(payload([first, call, result]))).messages).toHaveLength(4);
     for (const input of [payload([first, call]), payload([first, result]), payload([first, call, result, first]),
-      { ...payload(), tools: [...LOCAL_TOOL_SCHEMAS, ...PLATFORM_TOOL_SCHEMAS] }]) {
+      { ...payload(), tools: [...LEGACY_LOCAL_TOOL_SCHEMAS, ...PLATFORM_TOOL_SCHEMAS] }]) {
       expect(() => assemble(input)).toThrow();
     }
   });

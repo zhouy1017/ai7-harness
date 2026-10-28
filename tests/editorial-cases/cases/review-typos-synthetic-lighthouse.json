@@ -6,7 +6,7 @@
   "manuscript": { "source": "synthetic", "id": "synthetic-lighthouse" },
   "bookTitle": "合成稿甲 · 灯塔守望人",
   "input": { "categories": ["typos-and-usage"], "scope": "whole" },
-  "fixture": "synthetic-editorial-review-authored",
+  "fixture": "synthetic-editorial-review-cross-chapter-authored",
   "measuredPass": null,
   "replay": { "route": "deterministic" },
   "expectedConcerns": [

@@ -6,7 +6,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { strToU8, zipSync } from 'fflate';
-import { fixedArchiveTime } from './composed-docx.mjs';
+import { ADMITTED_BASELINE_DOCX, composeRevisedAdmittedDocx, fixedArchiveTime } from './composed-docx.mjs';
 import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, SIDEBAR_ICONS_ONLY, runJ14DarkPass } from './controller.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -206,10 +206,8 @@ const HOUSE_GUIDELINE = ['本社文字规范（J-15）', '', '1. 指出错字、
   '3. 数字与标点按本社体例手册统一，', '体例手册未写到的，按国家现行规范。', '4. 专名在全书前后写法一致。', '5. 引文与原文核对后再改，不凭记忆改动。'].join('\n');
 const KNOWLEDGE_TABS = ['审阅规范文件', '评估方案', '工序与规则', '社级编辑记忆', '范例', '资料库', '外部来源留存'];
 const GUIDELINE_TITLES = ['文字规范条款', '体例条款', '线索条款', '事实核查契约', '引用与学术规范条款', '出版风险提示条款', '表达改进条款'];
-// 线索条款 and 事实核查契约 are AI7's fixed statements (Issue #427 review): their categories read no clause of theirs, so
-// they say so where the others offer 导入新版本….
+// 事实核查契约 remains fixed; current plot-consistency reads clauses as well as pinned baseline leads (#1167).
 const GUIDELINE_FIXED = new Map([
-  [2, '「情节逻辑与前后一致」把基线分析里的线索变成批注，不按这里的条款找问题。这是 AI7 的固定说明，不能导入新版本。'],
   [3, '「事实核查」按 AI7 固定的事实核查契约执行，不读取这里的条款。这是 AI7 的固定说明，不能导入新版本。'],
 ]);
 /** The 知识库 page as an editor reads it: its tabs, the chosen one, and each guideline card's words. */
@@ -465,9 +463,22 @@ async function constructPredecessorV12(dataRoot, bookId) {
     // Synchronized delta with #66: revision 81's four imported Skill relations follow them.
     // Synchronized delta with Issue #423 (slice 7a): revision 80's three Task Intent Draft relations follow them.
     // Synchronized delta with Issue #1084: revision 88's review_excluded_findings goes with the Review Run relations it extends.
+    // Synchronized delta with Issue #1119: revision 90's review_local_stage_artifacts, a child of review_runs, goes just before it.
+    // Word's revision-93 layer did not exist in this genuine v12 predecessor fixture.
     database.exec(`
       PRAGMA foreign_keys = OFF;
       BEGIN IMMEDIATE;
+      DROP TABLE procedure_run_choices;
+      DROP TABLE procedure_version_stops;
+      DROP TABLE procedure_version_origins;
+      DROP TABLE house_word_list_versions;
+      DROP TABLE word_import_mark_sources;
+      DROP TABLE word_tracked_edit_sample_imports;
+      DROP TABLE word_tracked_edit_samples;
+      DROP TABLE word_manuscript_source_segments;
+      DROP TABLE word_revision_imports;
+      DROP TABLE word_revision_sources;
+      DROP TABLE staged_word_revision_intakes;
       DROP TABLE imported_skill_update_candidates;
       DROP TABLE imported_skill_current_selections;
       DROP TABLE imported_skill_update_rules;
@@ -597,6 +608,7 @@ async function constructPredecessorV12(dataRoot, bookId) {
       DROP TABLE review_excluded_findings;
       DROP TABLE review_run_category_events;
       DROP TABLE review_run_authorizations;
+      DROP TABLE review_local_stage_artifacts;
       DROP TABLE review_runs;
       DROP TABLE manuscript_effect_receipts;
       DROP TABLE manuscript_effect_dispatches;
@@ -845,6 +857,13 @@ async function main() {
     manager = await launch();
     renderer = await waitForRenderer(manager, 'restart-window');
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'restart-ready');
+    const wordMigration = new DatabaseSync(resolve(dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+    try {
+      for (const table of ['staged_word_revision_intakes', 'word_revision_sources', 'word_revision_imports', 'word_manuscript_source_segments',
+        'word_tracked_edit_samples', 'word_tracked_edit_sample_imports', 'word_import_mark_sources']) {
+        requireJourney(wordMigration.prepare(`SELECT count(*) AS total FROM ${table}`).get().total === 0, 'word-predecessor-no-backfill');
+      }
+    } finally { wordMigration.close(); }
     at('restart-open-book-a');
     await clickBook(renderer, bookA, 'open-book-a-after-restart');
     await waitFor(
@@ -1084,12 +1103,13 @@ async function main() {
 
     at('knowledge-procedures');
     // 工序与规则 (Issue #427, S79d; since Issue #1081, F-26a, the pre-installed procedure library): the nine review categories'
-    // 工序 and baseline analysis by what each does, each 已启用 drawn solid with its version and its stages in order — none used
+    // 工序 and baseline analysis by what each does, and since Issue #1164 确定性检查 at version 3 (local-text-check@3) as the
+    // eleventh, plus factual claim stages and four editorial procedures (#1170), each 已启用 drawn solid with its version and its stages in order — none used
     // in this Journey — the review-only predecessor named above 可复用工序, and the 方案
     // in the house's words, 本社方案 v2, installed and enabled for the one Book that enabled it. Both layers (LAYER-008): the
     // words carry no identifier, and 查看技术详情, closed, holds the carrier's and the 权限侧车's identities and each 工序's id.
     await click(renderer, '工序与规则', 'knowledge-procedures-tab');
-    await waitFor(renderer, `document.querySelector('.knowledge-base')?.dataset.knowledgeTab==='rules' && document.querySelector('.knowledge-procedures')?.dataset.procedureCount==='10'`, 'knowledge-procedures-painted');
+    await waitFor(renderer, `document.querySelector('.knowledge-base')?.dataset.knowledgeTab==='rules' && document.querySelector('.knowledge-procedures')?.dataset.procedureCount==='16' && document.querySelectorAll('.knowledge-procedure-list > li').length===16 && document.querySelector('[data-procedure-field=template]')`, 'knowledge-procedures-painted');
     const procedures = await renderer.evaluate(`(() => {
       const section = document.querySelector('.knowledge-procedures');
       const details = section?.querySelector(':scope > details.technical-details') ?? null;
@@ -1109,18 +1129,31 @@ async function main() {
       };
     })()`);
     const library = await renderer.evaluate(`({ stages: Array.from(document.querySelectorAll('.procedure-stages'), (node) => node.textContent), predecessor: document.querySelector('.procedure-predecessor')?.textContent, baseline: document.querySelector('[data-procedure-id="ai7-procedure/baseline-analysis"]')?.textContent })`);
-    requireJourney(library.stages.length === 10 && library.stages.every((value) => value.length > 0) && library.predecessor?.includes('审阅专用前身') && library.baseline?.includes('跨单元归并与跨章一致性'), 'preinstalled-procedure-library', library);
+    requireJourney(library.stages.length === 16 && library.stages.every((value) => value.length > 0) && library.predecessor?.includes('审阅专用前身') && library.baseline?.includes('跨单元归并与跨章一致性'), 'preinstalled-procedure-library', library);
     await assertRenderer(renderer, `(() => { const entries=document.querySelectorAll('.preinstalled-procedure-library li[data-procedure-version="2"]'); if(entries.length!==7)return false; return Array.from(entries).every((entry) => { const history=entry.querySelector('details.procedure-previous-versions'); if(!(history instanceof HTMLDetailsElement))return false; history.open=true; const row=history.querySelector('[data-procedure-previous-version="1"]'); return row?.textContent.startsWith('第 1 版 · ') === true && /^[0-9a-f]{64}$/u.test(row.dataset.procedureDigest ?? '') && !/[0-9a-f]{64}/u.test(row.textContent); }); })()`, 'preinstalled-review-v2-with-v1-history');
+    await assertRenderer(renderer, `(() => {
+      return [['style-and-format', '3', ['1', '2']], ['plot-consistency', '2', ['1']]].every(([category, version, previous]) => {
+        const entry=document.querySelector('.preinstalled-procedure-library [data-procedure-id="ai7-procedure/review-'+category+'"]');
+        const history=entry?.querySelector('details.procedure-previous-versions');
+        if(entry?.dataset.procedureVersion!==version || !(history instanceof HTMLDetailsElement))return false;
+        history.open=true;
+        const rows=Array.from(history.querySelectorAll('[data-procedure-previous-version]'));
+        return entry.querySelector('.procedure-stages')?.textContent.includes('跨单元归并与跨章一致性 → 跨章一致性') &&
+          JSON.stringify(rows.map((row)=>row.dataset.procedurePreviousVersion))===JSON.stringify(previous) &&
+          rows.every((row)=>row.textContent.startsWith('第 '+row.dataset.procedurePreviousVersion+' 版 · ') &&
+            /^[0-9a-f]{64}$/u.test(row.dataset.procedureDigest ?? '') && !/[0-9a-f]{64}/u.test(row.textContent));
+      });
+    })()`, 'preinstalled-cross-chapter-history');
     const technical = new Map(procedures?.technical ?? []);
-    requireJourney(JSON.stringify(procedures?.states) === JSON.stringify(Array(10).fill(['enabled', '已启用', '0', 'solid'])) &&
+    requireJourney(JSON.stringify(procedures?.states) === JSON.stringify(Array(16).fill(['enabled', '已启用', '0', 'solid'])) &&
       // #1084: the review procedures read under contract /2 are version 2, version 1 kept in their closed 历史版本.
-      procedures.first === '已启用 错别字与规范用语审阅工序 · 第 2 版 · 预装 · 已使用 0 次 · 分块审读 → 综合 → 派生报告历史版本第 1 版 · 分块审读 → 综合 → 派生报告' &&
+      procedures.first.includes('错别字与规范用语审阅工序 · 第 2 版') && procedures.first.includes('改写为新版本') && procedures.first.includes('历史版本第 1 版 · 分块审读 → 综合 → 派生报告') &&
       JSON.stringify(procedures.reasons) === '[]' &&
       procedures.artifact === '本社方案 v2 · 已安装 · 已为 1 本书启用' && procedures.identifierInWords === false &&
       procedures.detailsOpen === false && procedures.summary === '查看技术详情' &&
       technical.get('原生载体身份') === '@ai7/editorial-workspace-profile' && technical.get('原生载体版本') === '1.0.0' &&
       /^[0-9a-f]{64}$/u.test(technical.get('SHA-256') ?? '') && technical.get('权限侧车') === 'ai7.editorial-workspace-profile.authority' &&
-      /^[0-9a-f]{64}$/u.test(technical.get('权限侧车 SHA-256') ?? '') && procedures.technical.length === 5 + 10 &&
+      /^[0-9a-f]{64}$/u.test(technical.get('权限侧车 SHA-256') ?? '') && procedures.technical.length === 5 + 16 &&
       procedures.technical.slice(5).every(([, procedureId]) => /^ai7-procedure\//u.test(procedureId ?? '')),
     'knowledge-procedures-list', procedures);
     // 可复用工序 and 开发建议 (Issue #65, S30; ADR 0087) sit apart from the built-in 工序, empty here and saying how one is made;
@@ -1129,6 +1162,27 @@ async function main() {
     const captured = await renderer.evaluate(`[document.querySelector('.knowledge-captured-procedures .captured-procedures-empty')?.textContent ?? null, document.querySelector('.knowledge-developer-proposals .developer-proposals-empty')?.textContent ?? null, document.querySelectorAll('[data-procedure-action]').length]`);
     requireJourney(JSON.stringify(captured) === JSON.stringify(['还没有可复用工序。在一次完成的审阅里点「将以上工序保存为可复用工序」就能保存。', '还没有开发建议。', 0]),
       'knowledge-captured-empty', captured);
+
+    // #1170: the editor creates and revises an immutable definition; incompatible dependency order is refused by name.
+    at('knowledge-procedures');
+    await assertRenderer(renderer, `(() => { document.querySelector('[data-procedure-field="template"]').value='ai7-procedure/baseline-analysis'; return true; })()`, 'editable-template-choice');
+    await click(renderer, '新建工序', 'editable-create-open');
+    await fill(renderer, '[data-procedure-editor] [data-procedure-field="title"]', 'J15 可编辑工序', 'editable-title');
+    await fill(renderer, '[data-procedure-editor] [data-procedure-field="instruction"]', '保留作者短句。', 'editable-instruction');
+    await fill(renderer, '[data-procedure-editor] ol li:first-child textarea', '语境明确时允许省略主语。', 'editable-exemption');
+    await assertRenderer(renderer, `(() => { const rows=document.querySelectorAll('[data-procedure-editor] ol li'); rows[0].querySelector('input').value='60'; rows[0].querySelector('input').dispatchEvent(new Event('input')); rows[1].querySelector('input').value='40'; rows[1].querySelector('input').dispatchEvent(new Event('input')); Array.from(rows[0].querySelectorAll('button')).find(b=>b.textContent==='下移').click(); return true; })()`, 'editable-budget-and-order');
+    await click(renderer, '保存为新版本', 'editable-incompatible-save');
+    await waitFor(renderer, `document.querySelector('.preinstalled-procedure-library [role=status]')?.textContent.includes('阶段须为')`, 'editable-incompatible-order-named');
+    await assertRenderer(renderer, `(() => { Array.from(document.querySelector('[data-procedure-editor] ol li').querySelectorAll('button')).find(b=>b.textContent==='下移').click(); return true; })()`, 'editable-restore-compatible-order');
+    await click(renderer, '保存为新版本', 'editable-save-v1');
+    await waitFor(renderer, `Array.from(document.querySelectorAll('.knowledge-procedure-list > li')).some(li=>li.querySelector('h4')?.textContent==='J15 可编辑工序 · 第 1 版')`, 'editable-created-v1');
+    const editableV1 = await renderer.evaluate(`window.ai7.procedureLibrary({action:'inspect'}).then(page=>page.procedures.find(p=>p.document.title==='J15 可编辑工序'))`);
+    requireJourney(editableV1?.document.editorInstruction==='保留作者短句。' && editableV1.document.stages[0].budgetShare===0.6 && editableV1.document.stages[0].exemptionRules[0]==='语境明确时允许省略主语。', 'editable-version-settings');
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('[data-procedure-id="${editableV1.procedureId}"]'); Array.from(card.querySelectorAll('button')).find(b=>b.textContent==='改写为新版本').click(); return true; })()`, 'editable-edit-v1');
+    await fill(renderer, '[data-procedure-editor] [data-procedure-field="instruction"]', '关注时间线。', 'editable-instruction-v2');
+    await click(renderer, '保存为新版本', 'editable-save-v2');
+    await waitFor(renderer, `document.querySelector('[data-procedure-id="${editableV1.procedureId}"]')?.dataset.procedureVersion==='2'`, 'editable-created-v2');
+    await assertRenderer(renderer, `(async()=>{const p=(await window.ai7.procedureLibrary({action:'inspect'})).procedures.find(p=>p.procedureId==='${editableV1.procedureId}');return p.versions.length===2&&p.versions[1].digest==='${editableV1.digest}'&&p.documents[1].editorInstruction==='保留作者短句。'&&p.document.editorInstruction==='关注时间线。';})()`, 'editable-v1-unchanged');
 
     // ---- 知识库 › 资料库 (Issue #427, plan slice S79c; editor-surfaces §8.4, V2-UX-KB-007, ATTN-009, LEARN-004 to LEARN-007) ----
     at('knowledge-library-add');
@@ -1626,6 +1680,89 @@ async function main() {
       const read=await window.ai7.inspectImportedSkills({revisionId:null,before:null});
       return read.skills.length===1 && read.skills[0].revisionId===${JSON.stringify(firstRevision)} && read.skills[0].state==='installed-disabled' && document.querySelector('.imported-skill-list li')?.dataset.skillState==='installed-disabled';
     })()`, 'skill-rollback-survives-restart');
+
+    at('word-persisted-source-lineage');
+    const wordPath = resolve(runRoot, 'word-persisted-lineage.docx');
+    await composeRevisedAdmittedDocx(wordPath, { source: ADMITTED_BASELINE_DOCX, title: 'Word 来源沿袭旅程', paragraphs: [
+      { runs: [{ text: { block: 8, from: 0, to: 10 } },
+        { text: { block: 9, from: 0, to: 5 }, revision: { kind: 'del', author: '作者甲', date: '2026-10-25T00:00:00Z' } },
+        { text: { block: 10, from: 0, to: 6 }, revision: { kind: 'ins', author: '作者乙', date: '2026-10-25T00:00:01Z' } }] },
+    ] });
+    await closeBrowser(); manager = await launch(wordPath);
+    renderer = await waitForRenderer(manager, 'word-lineage-window');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'word-lineage-landing');
+    await click(renderer, '导入稿件', 'word-lineage-pick');
+    await waitFor(renderer, `document.querySelector('[data-import-target-choice="new-book"]')`, 'word-lineage-target');
+    await assertRenderer(renderer, `(() => { const input=document.querySelector('[data-import-target-choice="new-book"]');if(!(input instanceof HTMLInputElement)||input.checked)return false;input.click();return true;})()`, 'word-lineage-new-book');
+    await waitFor(renderer, `document.querySelector('[data-import-relationship="first-manuscript"]')`, 'word-lineage-relationship');
+    await assertRenderer(renderer, `(() => { const input=document.querySelector('[data-import-relationship="first-manuscript"]');if(!(input instanceof HTMLInputElement)||input.checked)return false;input.click();return true;})()`, 'word-lineage-first-manuscript');
+    await waitFor(renderer, `document.querySelector('[data-word-import-controls="ready"]')`, 'word-lineage-controls');
+    await assertRenderer(renderer, `(() => {const mode=document.querySelector('[data-word-import-mode="accepted-baseline"]');if(!(mode instanceof HTMLInputElement)||mode.disabled)return false;mode.click();const confirm=document.querySelector('[data-word-accepted-baseline-confirmation]');if(!(confirm instanceof HTMLInputElement)||confirm.checked)return false;confirm.click();return document.querySelector('[data-word-learn-from-edits]')?.checked===true;})()`, 'word-lineage-explicit-accepted-choice');
+    await click(renderer, '确认书名并复核', 'word-lineage-prepare');
+    await waitFor(renderer, `document.querySelector('[data-word-reviewed-mode="accepted-baseline"][data-word-reviewed-learning="true"]')`, 'word-lineage-reviewed');
+    await click(renderer, '新建图书并导入稿件', 'word-lineage-commit');
+    await waitFor(renderer, `document.querySelector('[data-screen="imported"]')&&document.documentElement.dataset.ai7ImportCompletionAcknowledged==='true'`, 'word-lineage-committed');
+    const wordSignal = await renderer.evaluate(`window.ai7.inspectEditorialLearning({signalOffset:0,itemOffset:0}).then(page=>page.signals.find(signal=>signal.kind==='word-tracked-edit'))`);
+    requireJourney(wordSignal?.currentEligibility==='house'&&wordSignal.memoryCandidate===null, 'word-lineage-real-admission');
+    const wordRead = `(async()=>{const lineage=await window.ai7.inspectLearningLineage({bookId:${JSON.stringify(wordSignal.source.bookId)},materialKey:${JSON.stringify(wordSignal.source.materialKey)}});const detail=await window.ai7.inspectWordTrackedEditSample({bookId:${JSON.stringify(wordSignal.source.bookId)},sampleId:${JSON.stringify(wordSignal.source.sampleId)},sampleDigest:${JSON.stringify(wordSignal.source.sampleDigest)},after:null});return {lineage,detail};})()`;
+    const wordBefore = await renderer.evaluate(wordRead);
+    requireJourney(wordBefore.lineage.automaticAdmission?.choice==='house'&&wordBefore.lineage.decisions.length===0&&
+      wordBefore.detail.sourceVersionId===wordSignal.source.sourceVersionId&&wordBefore.detail.sourceDigest===wordSignal.source.sourceDigest, 'word-lineage-exact-source-before-restart');
+    await closeBrowser(); manager = await launch();
+    renderer = await waitForRenderer(manager, 'word-lineage-restart-window');
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true'&&document.querySelector('[data-screen="landing"]')`, 'word-lineage-restart-product-ready');
+    // 书库 renders the landing again after its own startup reads; mark the startup landing so paging begins on that new
+    // render, which would otherwise replace pages appended meanwhile (Issue #1156 rev 2).
+    await assertRenderer(renderer, `(() => { const node=document.querySelector('[data-screen="landing"]')?.firstElementChild; if(!(node instanceof HTMLElement))return false; node.dataset.j15StartupLanding='true'; return true; })()`, 'word-lineage-restart-mark-landing');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'word-lineage-restart-library');
+    await waitFor(renderer, `(() => { const node=document.querySelector('[data-screen="landing"]')?.firstElementChild; return node instanceof HTMLElement && node.dataset.j15StartupLanding!=='true'; })()`, 'word-lineage-restart-ready');
+    while (!(await renderer.evaluate(`Boolean(document.querySelector('button[data-book-id="${wordSignal.source.bookId}"]'))`))) {
+      const shownBooks = await renderer.evaluate(`document.querySelectorAll('[data-screen="landing"] .book-summary-item').length`);
+      await click(renderer, '加载更多图书', 'word-lineage-restart-more-books');
+      await waitFor(renderer, `document.querySelectorAll('[data-screen="landing"] .book-summary-item').length > ${shownBooks}`,
+        'word-lineage-restart-next-books');
+    }
+    await clickBook(renderer, wordSignal.source.bookId, 'word-lineage-restart-book');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id="${wordSignal.source.bookId}"] [data-testid="manuscript-editor"] > [data-block-id]')`, 'word-lineage-restart-book-ready');
+    const wordAfter = await renderer.evaluate(wordRead);
+    requireJourney(JSON.stringify(wordAfter)===JSON.stringify(wordBefore), 'word-lineage-and-full-source-survive-restart');
+
+    // Select an editable deterministic version, execute the admitted public Book offline, then capture the completed Run.
+    at('knowledge-procedures');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'editable-run-knowledge');
+    await waitFor(renderer, `document.querySelector('.knowledge-base')`, 'editable-run-knowledge-ready');
+    await click(renderer, '工序与规则', 'editable-run-rules');
+    await waitFor(renderer, `document.querySelector('[data-procedure-field="template"]')`, 'editable-run-library-ready');
+    await assertRenderer(renderer, `(() => { document.querySelector('[data-procedure-field="template"]').value='ai7-procedure/local-text-check'; return true; })()`, 'editable-local-template');
+    await click(renderer, '新建工序', 'editable-local-create');
+    await fill(renderer, '[data-procedure-editor] [data-procedure-field="title"]', 'J15 离线工序', 'editable-local-title');
+    await assertRenderer(renderer, `document.querySelector('[data-procedure-editor] [data-procedure-field="instruction"]')?.disabled===true`, 'editable-local-no-language-interpreter');
+    await click(renderer, '保存为新版本', 'editable-local-save');
+    await waitFor(renderer, `Array.from(document.querySelectorAll('.knowledge-procedure-list h4')).some(h=>h.textContent==='J15 离线工序 · 第 1 版')`, 'editable-local-saved');
+    const localProcedure = await renderer.evaluate(`window.ai7.procedureLibrary({action:'inspect'}).then(page=>page.procedures.find(p=>p.document.title==='J15 离线工序'))`);
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('[data-procedure-id="${localProcedure.procedureId}"]'); Array.from(card.querySelectorAll('button')).find(b=>b.textContent==='运行此工序…').click(); return true; })()`, 'editable-local-run-choice');
+    await waitFor(renderer, `document.querySelector('[data-procedure-field="book"]')?.options.length>0`, 'editable-local-books');
+    await assertRenderer(renderer, `(() => { const select=document.querySelector('[data-procedure-field="book"]'); select.value='${wordSignal.source.bookId}'; return select.value==='${wordSignal.source.bookId}'; })()`, 'editable-local-book-pin');
+    await click(renderer, '打开任务', 'editable-local-open-task');
+    await waitFor(renderer, `document.querySelector('[data-review-action="new-local-check"]')?.disabled===false`, 'editable-local-entry');
+    await assertRenderer(renderer, `(() => { document.querySelector('[data-review-action="new-local-check"]').click(); return true; })()`, 'editable-local-options');
+    await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'editable-local-options-ready');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); sheet.querySelector('[data-local-check-prose]').click(); const button=sheet.querySelector('[data-review-action="prepare"]'); if(button.disabled)return false; button.click(); return true; })()`, 'editable-local-prepare');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanStart==='ready' && document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, 'editable-local-plan');
+    const localRun = await renderer.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(p=>p.run)`);
+    requireJourney(localRun.preinstalledProcedures.some(p=>p.procedure.procedureId===localProcedure.procedureId&&p.procedure.digest===localProcedure.digest), 'editable-run-exact-pin');
+    await assertRenderer(renderer, `(() => { document.querySelector('#task-drawer [data-task-drawer-control="start"]').click(); return true; })()`, 'editable-local-start');
+    await waitFor(renderer, `document.querySelector('[data-local-check="materialized"]') && document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, 'editable-local-completed');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'editable-capture-knowledge');
+    await waitFor(renderer, `document.querySelector('.knowledge-base')`, 'editable-capture-knowledge-ready');
+    await click(renderer, '工序与规则', 'editable-capture-rules');
+    await waitFor(renderer, `document.querySelector('[data-procedure-field="capture-run"]')`, 'editable-capture-available');
+    await assertRenderer(renderer, `(() => { const select=document.querySelector('[data-procedure-field="capture-run"]'); select.value='${localRun.reviewRunId}'; return select.value==='${localRun.reviewRunId}'; })()`, 'editable-capture-source');
+    await click(renderer, '从本次运行捕获', 'editable-capture-open');
+    await fill(renderer, '[data-procedure-editor] [data-procedure-field="title"]', 'J15 已完成运行工序', 'editable-capture-title');
+    await click(renderer, '保存为新版本', 'editable-capture-save');
+    await waitFor(renderer, `Array.from(document.querySelectorAll('.knowledge-procedure-list h4')).some(h=>h.textContent==='J15 已完成运行工序 · 第 1 版')`, 'editable-capture-saved');
+    await assertRenderer(renderer, `(async()=>{const page=await window.ai7.procedureLibrary({action:'inspect'});const p=page.procedures.find(p=>p.document.title==='J15 已完成运行工序');const old=page.procedures.find(p=>p.procedureId==='${editableV1.procedureId}');return p.sourceRunId==='${localRun.reviewRunId}'&&p.executorKind==='local-text-check'&&old.version===2&&old.versions[1].digest==='${editableV1.digest}';})()`, 'editable-capture-and-history-retained');
 
     at('zero-activity');
     await assertRenderer(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && !Object.keys(window.ai7).some((key)=>/provider|session/i.test(key))`, 'exact-service-readiness-remained-zero');

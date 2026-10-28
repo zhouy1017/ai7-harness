@@ -1,3 +1,4 @@
+import { baselineProcedureDefinition } from '../../src/service/procedures/preinstalled.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -25,6 +26,38 @@ import {
 import type { ServiceOperation, ServiceOperationMap, ServiceRequest } from '../../src/shared/protocol.js';
 
 const encoder = new TextEncoder();
+
+describe('editable procedure commands (#1170)', () => {
+  it('carries exact version selections and new versions without accepting execution authority', () => {
+    const document = baselineProcedureDefinition();
+    const procedure = { procedureId: document.id, version: 1, digest: 'a'.repeat(64) };
+    const input = { procedureId: null, basedOn: procedure, title: '新工序', editorInstruction: '保留短句', stages: document.stages };
+    for (const command of [{ action: 'inspect' }, { action: 'save', input }, { action: 'stop', procedure },
+      { action: 'select', bookId: randomUUID(), procedure }]) {
+      const frame = { id: randomUUID(), op: 'procedureLibrary', input: command };
+      expect(decodeRequest(encoder.encode(JSON.stringify(frame)))).toEqual(frame);
+    }
+    for (const invalid of [{ ...input, provider: 'live' }, { ...input, basedOn: { ...procedure, digest: 'latest' } },
+      { ...input, stages: [{ ...document.stages[0], run: true }] }]) {
+      expect(() => decodeRequest(encoder.encode(JSON.stringify({ id: randomUUID(), op: 'procedureLibrary', input: { action: 'save', input: invalid } })))).toThrow(ProtocolError);
+    }
+  });
+});
+
+describe('explicit local review options (#1119)', () => {
+  it('binds finite affirmative options only to the local entry and rejects resource/model additions', () => {
+    const options = { punctuation: 'chinese-prose', numerals: 'off', publication: 'unknown', numeralRules: [], numeralsConfirmed: false, excludedRanges: [], doubledEllipsisBlockIds: [] };
+    const input = { bookId: randomUUID(), categoryIds: ['local-text-check'], scope: { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, localCheck: options };
+    const frame = { id: randomUUID(), op: 'prepareReviewRun', input };
+    expect(decodeRequest(encoder.encode(JSON.stringify(frame)))).toEqual(frame);
+    for (const invalid of [
+      { ...input, localCheck: undefined }, { ...input, categoryIds: ['typos-and-usage'] },
+      { ...input, categoryIds: ['local-text-check', 'style-and-format'] }, { ...input, seriesId: randomUUID() },
+      { ...input, materialIds: [randomUUID()] }, { ...input, localCheck: { ...options, numerals: 'editor-convention', numeralRules: ['N01'] } },
+      { ...input, localCheck: { ...options, provider: 'fixture' } },
+    ]) expect(() => decodeRequest(encoder.encode(JSON.stringify({ ...frame, input: invalid })))).toThrow(ProtocolError);
+  });
+});
 
 describe('whole package archive frames (#953)', () => {
   it('accepts the archive review, exact destination, approval and cancellation through the real decoder', () => {
@@ -1061,6 +1094,47 @@ describe('decodeRequest rejects malformed frames', () => {
     expect(rejectionFor(frameOf({
       id, op: 'prepareNewBookReview', input: { ...input, textBoxDisposition: 'retain', extra: 1 },
     })).requestId).toBe(id);
+  });
+
+  it('binds the Word detail read to an explicit Book/sample and exact code-unit cursor without coercion or extra authority', () => {
+    const input: InputOf<'inspectWordTrackedEditSample'> = { bookId: randomUUID(), sampleId: `wts_${'1'.repeat(64)}`,
+      sampleDigest: '2'.repeat(64), after: null };
+    const frame = { id: randomUUID(), op: 'inspectWordTrackedEditSample', input } satisfies ServiceRequest;
+    expect(decodeRequest(frameOf(frame))).toEqual(frame);
+    const after = { schema: 'ai7.word-sample-cursor/1', sampleDigest: input.sampleDigest, detailDigest: '3'.repeat(64),
+      section: 'events', entryOrdinal: 4, field: 'rawAuthor', codeUnitOffset: 1_500_000 } as const;
+    const continued = { ...frame, input: { ...input, after } } satisfies ServiceRequest;
+    expect(decodeRequest(frameOf(continued))).toEqual(continued);
+    for (const invalid of [null, {}, [], { ...input, bookId: null }, { ...input, sampleId: 'wts_1' },
+      { ...input, activeBookId: input.bookId }, { ...input, path: 'original.docx' },
+      ...[{ ...after, schema: 'ai7.word-sample-cursor/2' }, { ...after, sampleDigest: '4'.repeat(64) },
+        { ...after, section: ['events'] }, { ...after, field: ['rawAuthor'] }, { ...after, field: 'author' },
+        { ...after, entryOrdinal: -1 }, { ...after, codeUnitOffset: 0.5 }, { ...after, codeUnitOffset: Number.MAX_SAFE_INTEGER + 1 },
+        { ...after, field: 'record', codeUnitOffset: 1 }, { ...after, sourceVersionId: randomUUID() }].map((cursor) => ({ ...input, after: cursor }))]) {
+      expect(rejectionFor(frameOf({ ...frame, input: invalid })).requestId).toBe(frame.id);
+    }
+  });
+
+  it('decodes only the exact explicitly confirmed Word reading choice without changing ordinary preparation frames', () => {
+    const input: InputOf<'prepareNewBookReview'> = { draftId: randomUUID(), expectedDraftVersion: 1,
+      target: { kind: 'new-book', choiceId: 'new-book', confirmedTitle: '原始修订导入' }, acceptDegradation: false, textBoxDisposition: 'retain' };
+    const id = randomUUID();
+    const ordinary = { id, op: 'prepareNewBookReview', input } satisfies ServiceRequest;
+    expect(decodeRequest(frameOf(ordinary))).toEqual(ordinary);
+    for (const trackedChanges of [
+      { mode: 'suggestions', learnFromEdits: true, acceptedBaselineConfirmed: false },
+      { mode: 'accepted-baseline', learnFromEdits: false, acceptedBaselineConfirmed: true },
+    ] satisfies Array<NonNullable<InputOf<'prepareNewBookReview'>['trackedChanges']>>) {
+      const frame = { ...ordinary, input: { ...input, trackedChanges } } satisfies ServiceRequest;
+      expect(decodeRequest(frameOf(frame))).toEqual(frame);
+    }
+    for (const trackedChanges of [null, {}, [], { mode: 'suggestions', learnFromEdits: true },
+      { mode: 'suggestions', learnFromEdits: true, acceptedBaselineConfirmed: true },
+      { mode: 'accepted-baseline', learnFromEdits: true, acceptedBaselineConfirmed: false },
+      { mode: 'suggestions', learnFromEdits: 'true', acceptedBaselineConfirmed: false },
+      { mode: 'suggestions', learnFromEdits: true, acceptedBaselineConfirmed: false, approved: true }]) {
+      expect(rejectionFor(frameOf({ ...ordinary, input: { ...input, trackedChanges } })).requestId).toBe(id);
+    }
   });
 
   it('rejects a baseline-analysis preparation whose goal, mode, or range is inconsistent, or whose digest is malformed', () => {

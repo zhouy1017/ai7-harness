@@ -672,7 +672,7 @@ async function main() {
     await mkdir(resolve(shellRoot, 'crashes'));
     await writeFile(resolve(shellRoot, 'crashes', '2026-10-17T00-00-00.000Z-render-process-gone.json'), JSON.stringify({
       instant: '2026-10-17T00:00:00.000Z', kind: 'render-process-gone', reason: 'crashed', exitCode: 1,
-      appVersion: '0.1.0', schemaRevision: 88, protocol: 165, platform: process.platform, arch: process.arch,
+      appVersion: '0.1.0', schemaRevision: 94, protocol: 178, platform: process.platform, arch: process.arch,
       electron: '43.4.1', uptimeSeconds: 1, stack: '    at <redacted-path>:12:3',
     }), { flag: 'wx' });
     const executable = electronExecutable();
@@ -1306,9 +1306,9 @@ async function main() {
     const diagnosticsBundle = resolve(diagnosticsDestination, diagnosticsFolders[0]);
     requireJourney((await readdir(diagnosticsBundle)).sort().join(',') === 'README.txt,crashes,summary.json', 'diagnostics-allowed-files');
     const diagnosticsSummary = JSON.parse(await readFile(resolve(diagnosticsBundle, 'summary.json'), 'utf8'));
-    const builtPolicySet = JSON.parse(await readFile(resolve(ROOT, 'dist/docs/policies/active-policy-set.v18.json'), 'utf8'));
+    const builtPolicySet = JSON.parse(await readFile(resolve(ROOT, 'dist/docs/policies/active-policy-set.v22.json'), 'utf8'));
     // 数据版本 and 数据库修订 named apart (Issue #967): the Data Version is 1, the schema revision the store's own.
-    requireJourney(diagnosticsSummary.appVersion === packageVersion && diagnosticsSummary.dataVersion === 1 && diagnosticsSummary.schemaRevision === CREDENTIAL_CLEANUP_SCHEMA_VERSION && diagnosticsSummary.protocol === 165 &&
+    requireJourney(diagnosticsSummary.appVersion === packageVersion && diagnosticsSummary.dataVersion === 1 && diagnosticsSummary.schemaRevision === CREDENTIAL_CLEANUP_SCHEMA_VERSION && diagnosticsSummary.protocol === 178 &&
       diagnosticsSummary.policySetVersion === builtPolicySet.version && diagnosticsSummary.logs === '无日志文件', 'diagnostics-summary');
     requireJourney((await readFile(resolve(diagnosticsBundle, 'README.txt'), 'utf8')).includes('不含数据库、书稿'), 'diagnostics-exclusions');
     await click(primary, '查看诊断位置', 'diagnostics-reveal');
@@ -1420,8 +1420,8 @@ async function main() {
         firstConnection.binding?.credentialSlot === 'deepseek-api-key' &&
         firstConnection.binding?.approvedFallbackChain?.length === 0 &&
         firstConnection.policy?.operationalScope === 'development-ci' &&
-        // Synchronized delta with Issue #1079: selected active set v18; Provider Processing remains v1.
-        firstConnection.policy?.activePolicySetVersion === 'v18' &&
+        // Synchronized delta with Issue #1163: selected active set v22; new local Plans use Provider Processing v1.
+        firstConnection.policy?.activePolicySetVersion === 'v22' &&
         firstConnection.policy?.providerProcessing?.version === 'v1' &&
         firstConnection.policy?.providerProcessing?.authorizedLiveTransmissionCount === 0 &&
         firstConnection.policy?.externalExport?.version === 'v2' &&
@@ -1591,7 +1591,13 @@ async function main() {
     manager = await launch(databaseExportPath);
     [primary] = await waitForRendererCount(manager, 1, 'database-import-window');
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'database-import-landing');
-    await createEmptyBook(primary, 'J12 替换前的图书');
+    const preReplacementBook = await createEmptyBook(primary, 'J12 替换前的图书');
+    requireJourney(await primary.evaluate(`(async () => {
+      const before = await window.ai7.inspectEditorialLearning({signalOffset:0,itemOffset:0});
+      const excluded = await window.ai7.changeEditorialLearning({kind:'book',bookId:${JSON.stringify(preReplacementBook)},excluded:true,expectedEntries:before.controlEntries});
+      const off = await window.ai7.changeEditorialLearning({kind:'switch',enabled:false,expectedEntries:excluded.controlEntries});
+      return !off.enabled && off.excludedBooks.some(book=>book.bookId===${JSON.stringify(preReplacementBook)});
+    })()`), 'database-backup-book-learning-excluded');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('library')), 'database-import-book-return');
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'database-import-book-returned');
     const titlesBeforeReplace = await bookTitles();
@@ -1650,6 +1656,9 @@ async function main() {
     manager = await launch(resolve(backupLocation, replaceBackup));
     [primary] = await waitForRendererCount(manager, 1, 'database-merge-window');
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'database-merge-landing');
+    // The data replaced from the export never turned learning off, so the file's 本机学习 off can be seen not to travel.
+    const destinationLearningEnabled = await primary.evaluate(`window.ai7.inspectEditorialLearning({signalOffset:0,itemOffset:0}).then(page=>page.enabled)`);
+    requireJourney(destinationLearningEnabled === true, 'database-merge-destination-learning-on', destinationLearningEnabled);
     await openDataAndStorage('database-merge');
     await click(primary, '导入数据库…', 'database-merge-choose');
     await waitFor(primary, `document.querySelector('.database-import-preview')?.dataset.previewId !== undefined`, 'database-merge-previewed');
@@ -1680,6 +1689,21 @@ async function main() {
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'database-merged-landing');
     const titlesMerged = await bookTitles();
     requireJourney(JSON.stringify(titlesMerged) === JSON.stringify(titlesBeforeReplace), 'database-merged-titles', titlesMerged);
+    requireJourney(await primary.evaluate(`(async () => {
+      const page = await window.ai7.inspectEditorialLearning({signalOffset:0,itemOffset:0});
+      const books = await window.ai7.listBooks({after:null});
+      return page.enabled===${JSON.stringify(destinationLearningEnabled)} &&
+        page.excludedBooks.some(book=>book.bookId===${JSON.stringify(preReplacementBook)} && book.title==='J12 替换前的图书') &&
+        books.items.some(book=>book.bookId===${JSON.stringify(preReplacementBook)} && book.title==='J12 替换前的图书');
+    })()`), 'database-merged-book-learning-exclusion');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('knowledge')), 'database-merged-learning-knowledge');
+    await click(primary, '社级编辑记忆', 'database-merged-learning-memory');
+    await waitFor(primary, `(() => {
+      const exclusions = Array.from(document.querySelectorAll('[data-editorial-memory] details'))
+        .find(panel => panel.querySelector(':scope > summary')?.textContent === '学习排除范围');
+      return exclusions?.textContent.includes('已排除《J12 替换前的图书》') &&
+        document.querySelector('[data-learning-enabled]')?.checked===${JSON.stringify(destinationLearningEnabled)};
+    })()`, 'database-merged-learning-display');
     await openDataAndStorage('database-merged');
     // The merge is recorded beside the replacement, and 回退 still offers the replacement's backup.
     await waitFor(primary, `document.querySelector('.database-import')?.dataset.replacements === '2' && document.querySelector('.database-import')?.dataset.rollBackOf === ${JSON.stringify(replacementId)} && (document.querySelector('.database-replacement-record')?.textContent ?? '').endsWith(${JSON.stringify(` · 已从「${replaceBackup}」合并 1 本图书：《J12 替换前的图书》 · 合并前备份「${mergeBackup}」`)})`, 'database-merged-recorded');

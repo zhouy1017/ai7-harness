@@ -55,6 +55,7 @@ const RENDERER_TARGET_QUERY_ABANDONED = new Error('renderer-target query abandon
 const PROTECTION_HEADLINE = '本地写入中断 · 当前更改尚未持久保存';
 const PROTECTION_READ_ONLY_HEADLINE = '保护性只读 · 本地写入中断 · 当前更改尚未持久保存';
 const PROTECTION_CLOSE_BLOCKED = '窗口未关闭：仍有未持久保存的内容。请先重试写入；或复制受影响内容后，待写入恢复再关闭。';
+const PENDING_BUFFER_REFUSED = '尚待确认的编辑已达到单次安全上限，这次输入未被接收；请等待写入确认后分段输入。';
 const JOURNAL_EDIT_GRAPHEMES = 256;
 const PROTECTION_CJK_BASE = 0x7000;
 const STARTUP_FAILURE_MARKERS = Object.freeze([
@@ -1299,6 +1300,58 @@ async function runRestartJourney(renderer) {
   await waitFor(renderer, `document.querySelector('.search-section .field-note')?.textContent.includes('共 24 处')`, 'redo-state-exact', 120_000);
 }
 
+/** Issue #1127: after the durable r2 checkpoint and all fixed sequence assertions. */
+async function runScreenLifecycleJourney(renderer) {
+  at('screen-lifecycle-place');
+  // `assertRenderer` reads its expression synchronously and would pass an async one unawaited, so the async steps here go
+  // through `renderer.evaluate`; the place the screen is left from is held by the runner, not by the page it leaves.
+  const place = await renderer.evaluate(`(async () => {
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const editor = document.querySelector('[data-testid="manuscript-editor"]');
+    const block = editor?.children[16];
+    const text = block?.firstChild;
+    const selection = window.getSelection();
+    if (!(editor instanceof HTMLElement) || !(block instanceof HTMLElement) || !(text instanceof Text) || text.length < 4 || !selection) return null;
+    editor.focus({ preventScroll: true });
+    block.scrollIntoView({ block: 'center' });
+    // Existing workbench entry opens the remembered block at its start; no selected-range restoration is introduced.
+    selection.setBaseAndExtent(text, 0, text, 0);
+    if (!selection.isCollapsed || selection.anchorNode !== text || selection.anchorOffset !== 0) return null;
+    return { bookId: document.querySelector('.editor-shell')?.dataset.bookId ?? null, blockId: block.dataset.blockId ?? null, grapheme: 0, before: block.textContent };
+  })()`);
+  requireJourney(typeof place?.bookId === 'string' && typeof place.blockId === 'string' && typeof place.before === 'string', 'screen-lifecycle-place');
+  const journalBefore = await renderer.evaluate(JOURNAL_SEQUENCE_PROBE);
+  requireJourney(Number.isSafeInteger(journalBefore), 'screen-lifecycle-journal-before');
+  at('screen-lifecycle-leave');
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'screen-lifecycle-leave');
+  await waitForChecks(renderer, `(() => {
+    const status = document.querySelector('#persistence-status');
+    return { overview: document.querySelector('#screen')?.dataset.screen === 'book-overview', editorGone: document.querySelector('[data-testid="manuscript-editor"]') === null,
+      modesGone: document.querySelector('#context-view [data-view-command]') === null, protectionGone: document.querySelector('#editing-protection') === null,
+      saveMenuGone: document.querySelector('#manuscript-save-menu') === null, statusRole: status?.getAttribute('role') === 'status',
+      statusNoActivation: !status?.hasAttribute('tabindex') && !status?.hasAttribute('aria-controls') && !status?.hasAttribute('aria-expanded') };
+  })()`, 'screen-lifecycle-departed');
+  requireJourney(await renderer.evaluate(`(async () => { const overview = await window.ai7.getBookOverview({ bookId: ${JSON.stringify(place.bookId)}, historyCursor: null }); return overview.manuscriptAnchor?.entry?.blockId === ${JSON.stringify(place.blockId)} && overview.manuscriptAnchor.entry.grapheme === ${place.grapheme}; })()`) === true, 'screen-lifecycle-remembered-entry');
+  at('screen-lifecycle-reopen');
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'screen-lifecycle-reopen');
+  await waitForChecks(renderer, `(() => {
+    const selection = window.getSelection();
+    const block = selection?.anchorNode?.parentElement?.closest('[data-block-id]');
+    return { editorOnce: document.querySelectorAll('[data-testid="manuscript-editor"]').length === 1, modesOnce: document.querySelectorAll('#context-view [data-view-command="focus-mode"]').length === 1 && document.querySelectorAll('#context-view [data-view-command="menu"]').length === 1,
+      protectionOnce: document.querySelectorAll('#editing-protection').length === 1, saveMenuOnce: document.querySelectorAll('#manuscript-save-menu').length === 1,
+      rememberedBlock: block?.dataset.blockId === ${JSON.stringify(place.blockId)}, rememberedCaret: selection?.isCollapsed === true && selection.anchorOffset === ${place.grapheme},
+      journalUnchanged: ${JOURNAL_SEQUENCE_PROBE} === ${journalBefore}, navigationClosed: document.querySelector('[data-edge-entry="navigation"]')?.getAttribute('aria-expanded') === 'false', statusButton: document.querySelector('#persistence-status')?.getAttribute('role') === 'button' };
+  })()`, 'screen-lifecycle-reopened');
+  await assertRenderer(renderer, sidebarBookCurrent(null, 'manuscript'), 'screen-lifecycle-current-manuscript');
+  await assertRenderer(renderer, `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const block = Array.from(editor?.children ?? []).find((item) => item.getAttribute('data-block-id') === ${JSON.stringify(place.blockId)}); const text = block?.firstChild; const selection = window.getSelection(); if (!(text instanceof Text) || text.length < 3 || !selection || !(editor instanceof HTMLElement)) return false; editor.focus({ preventScroll: true }); selection.setBaseAndExtent(text, 1, text, 3); if (selection.toString().length !== 2) return false; selection.collapse(text, ${place.grapheme}); return selection.isCollapsed; })()`, 'screen-lifecycle-selection-usable');
+  at('screen-lifecycle-one-edit');
+  const beforeEdit = await renderer.observeIpc();
+  await renderer.send('Input.insertText', { text: '续' });
+  await waitForChecks(renderer, `(() => { const block = Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')).find((item) => item.getAttribute('data-block-id') === ${JSON.stringify(place.blockId)}); const save = Array.from(document.querySelectorAll('button')).find((item) => item.textContent === '保存当前编辑'); return { oneEntry: ${JOURNAL_SEQUENCE_PROBE} === ${journalBefore + 1}, exactEdit: block?.textContent === ${JSON.stringify(place.before.slice(0, place.grapheme) + '续' + place.before.slice(place.grapheme))}, saved: save instanceof HTMLButtonElement && save.disabled, closeRiskClear: document.documentElement.dataset.ai7CloseRisk === 'false' }; })()`, 'screen-lifecycle-one-durable-edit', 120_000);
+  const afterEdit = await renderer.observeIpc();
+  requireJourney((afterEdit.counts.flushJournalEdit ?? 0) - (beforeEdit.counts.flushJournalEdit ?? 0) === 1, 'screen-lifecycle-one-flush');
+}
+
 async function runAccessibilityJourney(renderer) {
   // One `at()` per step: the hosted marker names only `at()` stages, and a stage that holds eight
   // assertions behind one name cannot say which of them a hosted runner failed (#474).
@@ -1573,8 +1626,10 @@ async function runProtectionJourney(renderer) {
   // Even the input before the first unavailable acknowledgement must fit the declared reserve; a large paste is refused intact.
   const initialLength = await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]')?.lastElementChild?.textContent.length`);
   const initialLimit = await renderer.evaluate(`Number(document.querySelector('#editing-protection')?.dataset.bufferSoftLimit)`);
+  requireJourney(Number.isSafeInteger(initialLimit) && initialLimit > 0, 'protection-initial-bound');
+  await assertRenderer(renderer, `(() => { const status = document.querySelector('#persistence-status'); return status instanceof HTMLElement && status.textContent !== ${JSON.stringify(PENDING_BUFFER_REFUSED)}; })()`, 'protection-initial-bound');
   await typeAtWindowEnd(renderer, protectionText(initialLimit + 1, 8_000), 'protection-initial-bound-type');
-  await protectionChecks(renderer, `({ noInput: document.querySelector('[data-testid="manuscript-editor"]')?.lastElementChild?.textContent.length === ${initialLength}, noProtection: !p.shown, noEntry: p.journal === ${durable} })`, 'protection-initial-bound');
+  await protectionChecks(renderer, `({ refused: document.querySelector('#persistence-status')?.textContent === ${JSON.stringify(PENDING_BUFFER_REFUSED)} && document.querySelector('#persistence-status')?.dataset.tone === 'error', noInput: document.querySelector('[data-testid="manuscript-editor"]')?.lastElementChild?.textContent.length === ${initialLength}, noProtection: !p.shown, noEntry: p.journal === ${durable} })`, 'protection-initial-bound');
   requireJourney((await renderer.setJournalFault('fail-all'))?.mode === 'fail-all', 'protection-arm');
   at('protection-enter');
   await typeAtWindowEnd(renderer, protectionText(12), 'protection-enter-type');
@@ -1719,6 +1774,7 @@ async function main() {
     browser = undefined;
     renderer = await launch('restart');
     await runRestartJourney(renderer);
+    await runScreenLifecycleJourney(renderer);
     await runAccessibilityJourney(renderer);
     // Issue #951: 专注模式, the reading typography and Editing Protection Mode, after every pinned stage above.
     await runEditorModesJourney(renderer);

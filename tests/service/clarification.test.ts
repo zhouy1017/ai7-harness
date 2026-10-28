@@ -1,3 +1,5 @@
+import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { IMPORTED_SKILL_RELATIONS, CUSTOM_ANALYSIS_RELATIONS, HOUSE_REVIEW_PREFERENCE_RELATIONS, TASK_INTENT_DRAFT_RELATIONS } from '../support/pre74-schema.js';
 import { execPre74Fixture, FACTUAL_VERIFICATION_RELATIONS, MATERIAL_INDEX_LAYER_RELATIONS, PROPOSAL_REVIEW_RELATIONS, RESEARCH_EVIDENCE_RELATIONS } from '../support/pre74-schema.js';
 import { createHash } from 'node:crypto';
@@ -42,6 +44,12 @@ import { PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER } from '../support/production-
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for Clarification Requests (Issue #422, plan slice S76d; V2-UX-CLAR-001 to CLAR-007,
 // PLAN-011, PLAN-012): the real store on a temporary Agent Data Root, exact `sample1` imported through the supported path,
@@ -89,6 +97,7 @@ function openWithRoute(fixture: ResolvedModelFixture): Promise<EditorialStore> {
 /** `capacity` 1 is the governor with one place (Issue #49, S14), for the cases where another Run takes every place. */
 function owner(store: EditorialStore, fixture: ResolvedModelFixture, held = false, capacity?: number): BaselineAnalysisExecutionOwner {
   return new BaselineAnalysisExecutionOwner({
+    requestGovernor,
     ledger: store.baselineAnalysisLedger,
     launchPolicy,
     fixture,
@@ -182,6 +191,7 @@ describe('schema revision 35 over the real store', () => {
       first.close();
     }
     const before = withDatabase(false, (database) => {
+      constructPre94PolicyEncoding(database);
       plantRevision34Relations(database);
       execPre74Fixture(database, 'PRAGMA user_version = 34');
       downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_58_SQL);
@@ -204,7 +214,7 @@ describe('schema revision 35 over the real store', () => {
       for (const relation of RESEARCH_EVIDENCE_RELATIONS) expect(after.get(relation)?.content).toMatch(/^0:/);
       for (const relation of CLARIFICATION_RELATIONS_DROP_ORDER) expect(after.get(relation)?.content).toMatch(/^0:/);
       // Revision 59 rebuilds the three kind-coupled analysis relations for the evaluation kind (Issue #429), every row kept.
-      expect([...before.truth].filter(([name, was]) => after.get(name)!.sql !== was.sql).map(([name]) => name)).toEqual(['analysis_plan_records', 'analysis_result_set_revisions', 'analysis_result_sets', 'analysis_run_states', 'analysis_task_intents', 'proposal_item_decisions']);
+      expect([...before.truth].filter(([name, was]) => after.get(name)!.sql !== was.sql).map(([name]) => name)).toEqual(['analysis_plan_records', 'analysis_result_set_revisions', 'analysis_result_sets', 'analysis_run_authorizations', 'analysis_run_states', 'analysis_task_intents', 'proposal_item_decisions']);
       expect([...before.truth].filter(([name, was]) => after.get(name)!.content !== was.content).map(([name]) => name)).toEqual(['service_lifetimes']);
       // Still a ledger: nothing rewrites or removes a question or its answer.
       for (const relation of CLARIFICATION_RELATIONS_DROP_ORDER) {
@@ -334,6 +344,7 @@ describe('Clarification Requests over the real store', () => {
     const store = await openWithRoute(transient);
     let withdrawn = false;
     const execution = new BaselineAnalysisExecutionOwner({
+      requestGovernor,
       ledger: store.baselineAnalysisLedger, launchPolicy, fixture: transient, secretResolver: { resolve: async () => null },
       materialGuard: () => (withdrawn ? { code: 'MATERIAL_REFERENCE_UNAVAILABLE', materialTitle: '合成资料', message: '资料《合成资料》现在不能列进这本书任务的「允许参考」。' } : null),
     });

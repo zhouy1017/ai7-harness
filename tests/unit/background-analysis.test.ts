@@ -70,7 +70,7 @@ import {
   backgroundStartedMoreLine,
 } from '../../src/renderer/background-analysis-labels.js';
 
-// Unit suite for 后台分析登记 (Issue #95, plan slice S39; ADR 0048): the dispatcher's decision is a pure reading of the facts,
+// Unit suite for 后台处理登记 (Issue #95, plan slice S39; ADR 0048): the dispatcher's decision is a pure reading of the facts,
 // in a fixed order; the frames carry exactly the route's Book, the confirmed disclosure and one of two starting points; and
 // the block's words.
 
@@ -112,7 +112,7 @@ const READY: BackgroundAnalysisFacts = {
   backgroundRunning: 0,
 };
 
-describe('the 后台分析登记 decision', () => {
+describe('the 后台处理登记 decision', () => {
   it('starts only while every condition holds: sync-current over a stale analysis, the first baseline over none', () => {
     expect(backgroundAnalysisDecision(READY)).toEqual({ kind: 'start', mode: 'sync-current', reason: BACKGROUND_START_SYNC });
     expect(backgroundAnalysisDecision({ ...READY, analysis: 'absent' })).toEqual({ kind: 'start', mode: 'first-baseline', reason: BACKGROUND_START_FIRST });
@@ -216,11 +216,11 @@ describe('the 后台分析登记 decision', () => {
 
   it('names the Enrollment, the share and the ceiling outcome in the Run Report (Issue #864)', () => {
     expect(backgroundRunReportLines({ ordinal: 2, scopeLabel: '书系《乙》的 3 本书', ceilingTokens: 1000, shareTokens: 334, frozenTokens: 334, usedTokens: 120, reached: false }))
-      .toEqual(['由后台分析登记开始 · 按第 2 版登记', '范围：书系《乙》的 3 本书；登记上限 1000 tokens，本书份额 334 tokens', '没有达到上限：用了 120 tokens，这次运行的上限 334 tokens']);
+      .toEqual(['由后台处理登记开始 · 按第 2 版登记', '范围：书系《乙》的 3 本书；登记上限 1000 tokens，本书份额 334 tokens', '没有达到上限：用了 120 tokens，这次运行的上限 334 tokens']);
     expect(backgroundRunReportLines({ ordinal: 1, scopeLabel: '《甲》这一本书', ceilingTokens: 500, shareTokens: 500, frozenTokens: 400, usedTokens: 401, reached: true }))
-      .toEqual(['由后台分析登记开始 · 按第 1 版登记', '范围：《甲》这一本书；登记上限 500 tokens', '达到上限后停下：用了 401 tokens，这次运行的上限 400 tokens']);
+      .toEqual(['由后台处理登记开始 · 按第 1 版登记', '范围：《甲》这一本书；登记上限 500 tokens', '达到上限后停下：用了 401 tokens，这次运行的上限 400 tokens']);
     expect(backgroundRunReportLines({ ordinal: null, scopeLabel: null, ceilingTokens: null, shareTokens: null, frozenTokens: null, usedTokens: 0, reached: false }))
-      .toEqual(['由后台分析登记开始（这份登记的版本不在本机记录里）']);
+      .toEqual(['由后台处理登记开始（这份登记的版本不在本机记录里）']);
     expect([backgroundScopeLabel('book', '甲', 1), backgroundScopeLabel('series', '乙', 3), backgroundScopeLabel('all-books', '', 5)])
       .toEqual(['《甲》这一本书', '书系《乙》的 3 本书', '全部 5 本图书']);
   });
@@ -228,7 +228,7 @@ describe('the 后台分析登记 decision', () => {
   it('words what an Enrollment is, binds, never does, and keeps when revoked', () => {
     expect(BACKGROUND_STATE_LABELS).toEqual({ none: '未登记', active: '已登记', paused: '已暂停', suspended: '待你确认', revoked: '已撤销', damaged: '登记记录无法读取' });
     expect(BACKGROUND_STARTING_POINT_LABELS).toEqual({ prospective: '只分析登记之后的改动', backfill: '现在也分析当前稿件' });
-    expect(backgroundEnrollmentName(2)).toBe('后台分析登记 · 第 2 版');
+    expect(backgroundEnrollmentName(2)).toBe('后台处理登记 · 第 2 版');
     expect(backgroundAnalysisWhen(30_000)).toContain('停下 30 秒后开始');
     expect(backgroundAnalysisWhen(30_000)).toContain('你开始的任务可使用全部运行名额');
     expect(backgroundQuietReason(30_000)).toBe('稿件刚改动过；停下 30 秒后开始。');
@@ -238,7 +238,7 @@ describe('the 后台分析登记 decision', () => {
   });
 });
 
-describe('the 后台分析登记 frames', () => {
+describe('the 后台处理登记 frames', () => {
   it('accepts the read, 登记 and 撤销登记 with their exact inputs, and refuses anything more', () => {
     const bookId = randomUUID();
     const read = { id: randomUUID(), op: 'inspectBackgroundAnalysisEnrollment', input: { bookId } };
@@ -287,15 +287,15 @@ describe('the 后台分析登记 frames', () => {
 describe('the 后台分析 block words', () => {
   const instant = (value: string): string => `〈${value}〉`;
   it('reads the state, the Runs started and the history in the editor\'s words', () => {
-    expect([BACKGROUND_ENROLL_OPEN, BACKGROUND_REVOKE_OPEN]).toEqual(['登记后台分析…', '撤销登记…']);
+    expect([BACKGROUND_ENROLL_OPEN, BACKGROUND_REVOKE_OPEN]).toEqual(['登记后台处理…', '撤销登记…']);
     expect(backgroundNextLine({ kind: 'wait', reason: BACKGROUND_PLACE_BUSY })).toBe(`现在：${BACKGROUND_PLACE_BUSY}`);
     expect(backgroundNextLine({ kind: 'start', reason: BACKGROUND_START_SYNC })).toBe(`马上：${BACKGROUND_START_SYNC}`);
     const enrollment = {
-      enrollmentId: randomUUID(), enrollmentVersionId: randomUUID(), ordinal: 1, name: '后台分析登记 · 第 1 版', startingPoint: 'prospective' as const,
+      enrollmentId: randomUUID(), enrollmentVersionId: randomUUID(), ordinal: 1, name: '后台处理登记 · 第 1 版', startingPoint: 'prospective' as const,
       startingPointLabel: '只分析登记之后的改动', enrolledBy: '本机编辑' as const, enrolledAt: 'T', stateRecordedAt: 'T', binds: [],
       ceilingTokens: 1000, shareTokens: 1000, scope: { kind: 'book' as const, label: '《甲》这一本书', books: [{ bookId: randomUUID(), title: '甲' }], position: 1 },
     };
-    expect(backgroundEnrollmentLine(enrollment, instant)).toBe('后台分析登记 · 第 1 版 · 只分析登记之后的改动 · 本机编辑登记于 〈T〉');
+    expect(backgroundEnrollmentLine(enrollment, instant)).toBe('后台处理登记 · 第 1 版 · 只分析登记之后的改动 · 本机编辑登记于 〈T〉');
     // Issue #864: the scope and the ceiling each Run is held to.
     expect(backgroundCeilingLine(enrollment)).toBe('范围：《甲》这一本书 · 预算上限 1000 tokens');
     expect(backgroundCeilingLine({ ...enrollment, shareTokens: 333, scope: { ...enrollment.scope, kind: 'series', label: '书系《乙》的 3 本书', position: 2 } }))

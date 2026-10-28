@@ -67,19 +67,27 @@ function effective(binding) {
     ['opencode-go/deepseek-v4.1-flash', 'opencode-go/glm-5.3-flash'].includes(binding.model);
 }
 
-/** The explicit approved pairings, not a model-maker comparison or effort-based promotion. */
-export function approvedPair(tier, worker, reviewer) {
-  if (!effective(worker) || !effective(reviewer) || worker.channel === reviewer.channel ||
-      worker.dispatchId === reviewer.dispatchId || worker.terminal === reviewer.terminal) return false;
-  const w = `${worker.channel}/${worker.model}/${worker.effort}`;
-  const r = `${reviewer.channel}/${reviewer.model}/${reviewer.effort}`;
-  if (tier === 'T1') return worker.channel === 'OpenCode Go' && worker.effort === 'low' &&
-    ['ChatGPT/gpt-6.1-sol/medium', 'Claude/claude-sonnet-5-5/high'].includes(r);
-  if (tier === 'T2') return (w === 'ChatGPT/gpt-6.1-sol/medium' && r === 'Claude/claude-opus-5-5/high') ||
-    (w === 'Claude/claude-sonnet-5-5/high' && r === 'ChatGPT/gpt-6.1-sol/high');
-  if (tier === 'T3') return (['ChatGPT/gpt-6.1-sol/high', 'ChatGPT/gpt-6.1-sol/xhigh'].includes(w) && r === 'Claude/claude-opus-5-5/xhigh') ||
-    (['Claude/claude-opus-5-5/high', 'Claude/claude-opus-5-5/xhigh'].includes(w) && r === 'ChatGPT/gpt-6-astra/xhigh');
+function effectiveForTier(tier, binding) {
+  if (!effective(binding)) return false;
+  const spec = `${binding.channel}/${binding.model}/${binding.effort}`;
+  if (tier === 'T1') return (binding.channel === 'OpenCode Go' && binding.effort === 'low') ||
+    ['ChatGPT/gpt-6.1-sol/medium', 'ChatGPT/gpt-6.1-sol/high', 'Claude/claude-sonnet-5-5/high', 'Claude/claude-opus-5-5/high'].includes(spec);
+  if (tier === 'T2') return ['ChatGPT/gpt-6.1-sol/medium', 'ChatGPT/gpt-6.1-sol/high', 'ChatGPT/gpt-6.1-sol/xhigh',
+    'Claude/claude-sonnet-5-5/high', 'Claude/claude-opus-5-5/high', 'Claude/claude-opus-5-5/xhigh'].includes(spec);
+  if (tier === 'T3') return ['ChatGPT/gpt-6.1-sol/high', 'ChatGPT/gpt-6.1-sol/xhigh', 'ChatGPT/gpt-6-astra/xhigh',
+    'Claude/claude-opus-5-5/high', 'Claude/claude-opus-5-5/xhigh'].includes(spec);
   return false;
+}
+
+/**
+ * Under the 2026-10-26 Owner amendment to ADR 0089, mandatory cross-provider review is retired:
+ * a slice may run with a single coding worker (`reviewer` omitted/null) or with an optional reviewer
+ * on any valid subscription channel. Repair is gated strictly on E2E and CI test failures.
+ */
+export function approvedPair(tier, worker, reviewer = null) {
+  if (!effectiveForTier(tier, worker)) return false;
+  if (reviewer === null || reviewer === undefined) return true;
+  return effectiveForTier(tier, reviewer);
 }
 
 /** Decode only unedited, authenticated comments. Malformed trusted receipts fail closed. */
@@ -142,21 +150,25 @@ export function mergeAuthorization(candidate, receipts) {
   if (events.some((entry) => !['handoff', 'complete', 'release', 'revoke'].includes(entry.kind) || entry.assignment !== assignment.id)) return deny('contradictory-receipts');
   if (events.some((entry) => entry.publisher !== assignment.publisher)) return deny('contradictory-publisher');
   if (events.some((entry) => entry.kind === 'revoke')) return deny('revoked');
-  if (kind === 'slice' && (!approvedPair(assignment.class, assignment.worker, assignment.reviewer) ||
+  if (kind === 'slice' && (!approvedPair(assignment.class, assignment.worker, assignment.reviewer ?? null) ||
       assignment.commander.terminal === assignment.worker.terminal ||
-      assignment.commander.terminal === assignment.reviewer.terminal)) return deny('unsupported-binding');
+      (assignment.reviewer && assignment.commander.terminal === assignment.reviewer.terminal))) return deny('unsupported-binding');
   const complete = events.filter((entry) => entry.kind === 'complete').at(-1);
   const release = events.filter((entry) => entry.kind === 'release').at(-1);
   if (!complete || !matches(complete, candidate) || !localTests(complete.tests, candidate)) return deny('missing-current-completion');
   if (kind === 'slice') {
-    // The handoff records the writer change and the base it happened on. A wave that moves on
-    // afterwards needs a fresh completion and release at the new base, not a second handoff.
     const handoff = events.filter((entry) => entry.kind === 'handoff').at(-1);
-    if (!handoff || handoff.id >= complete.id || complete.handoff !== handoff.id ||
-        handoff.from !== assignment.worker.dispatchId || handoff.to !== assignment.reviewer.dispatchId ||
-        handoff.workerReleased !== true || handoff.reviewerAcknowledged !== true ||
-        !SHA.test(handoff.incomingHead ?? '') || !SHA.test(handoff.base ?? '') ||
-        complete.dispatch !== assignment.reviewer.dispatchId || complete.writer !== assignment.reviewer.dispatchId) return deny('invalid-handoff');
+    if (handoff === undefined) {
+      // Single-writer / manual per-Issue flow: the assigned worker completes directly once E2E/CI pass.
+      if (complete.dispatch !== assignment.worker.dispatchId || complete.writer !== assignment.worker.dispatchId) return deny('invalid-handoff');
+    } else {
+      // Legacy Worker -> Reviewer handoff flow remains supported for historical and two-agent slices.
+      if (!assignment.reviewer || handoff.id >= complete.id || complete.handoff !== handoff.id ||
+          handoff.from !== assignment.worker.dispatchId || handoff.to !== assignment.reviewer.dispatchId ||
+          handoff.workerReleased !== true || handoff.reviewerAcknowledged !== true ||
+          !SHA.test(handoff.incomingHead ?? '') || !SHA.test(handoff.base ?? '') ||
+          complete.dispatch !== assignment.reviewer.dispatchId || complete.writer !== assignment.reviewer.dispatchId) return deny('invalid-handoff');
+    }
   } else if (complete.coordinator !== assignment.commander.terminal || complete.writer !== assignment.commander.terminal ||
       !Array.isArray(complete.slices) || complete.slices.length === 0 ||
       new Set(complete.slices.map((slice) => slice.pr)).size !== complete.slices.length ||

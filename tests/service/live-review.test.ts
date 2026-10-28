@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { randomUUID } from 'node:crypto';
 import { sha256Hex } from '../../src/service/analysis/canonical.js';
 import { join } from 'node:path';
@@ -9,9 +10,8 @@ import { DEVELOPER_LIVE_POLICY_BINDING, resolveSourceCheckoutLaunchPolicy } from
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
 import { parseReviewCategoryUnitMessageHeader } from '../../src/service/review/review-category-contract.js';
-import { reviewCategoryEntry, reviewCategoryContractInput } from '../../src/service/review/category-configuration.js';
+import { HISTORICAL_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryEntry, reviewCategoryContractInput } from '../../src/service/review/category-configuration.js';
 import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
-import { LEADS_ABSENT_REASON } from '../../src/service/review/review-scope.js';
 import { SERIES_CONSISTENCY_NO_SERIES_REASON } from '../../src/service/review/series-consistency.js';
 import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/assurance-sampling-contract.js';
 import { normalizedQuotation, sliceGraphemes } from '../../src/service/analysis/factual-review-contract.js';
@@ -27,6 +27,12 @@ import { makeJ13Series, J13_SERIES_TITLE } from '../support/series-consistency.j
 import { liveKindAdmission } from '../../src/service/analysis/live-kind-admission.js';
 import { HOUSE_PREFERENCE_CLOSED } from '../../src/service/task-plan.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // #809 / J-04, J-05: real store, broker, Go adapter, egress, accounting and review drive loop.
 // The transport supplies the real route's JSON shape without a socket or real credential. Quotes
@@ -119,6 +125,7 @@ beforeEach(async () => {
     return new Response(JSON.stringify({ model: launch.live.model, choices: [{ message: { content: capturedText ?? JSON.stringify(result), reasoning_content: '合成推理通道。' }, finish_reason: 'stop' }], usage: { prompt_tokens: responseUsage.inputTokens, completion_tokens: responseUsage.outputTokens } }), { status: 200 });
   };
   owner = new BaselineAnalysisExecutionOwner({
+    requestGovernor,
     ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
     currentLaunchPolicy: () => policy,
     seriesScopeGuard: (runRecordId) => store.seriesScopeGuard(runRecordId),
@@ -274,7 +281,7 @@ describe('reference-free review on the Go execution path', () => {
     if (source === 'recorded') {
       // Re-reduce the unchanged recorded answers under the current locator: unique quotations recover
       // inside their authorized units. This checks exact grounding, not current live-model quality.
-      const counts = (id: string) => (store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(reviewCategoryContractInput(reviewCategoryEntry(id)!), control.baselineAnalysisRoute?.reviewContractVersion === 1 ? 1 : 2))
+      const counts = (id: string) => (store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(reviewCategoryContractInput(HISTORICAL_REVIEW_CATEGORY_CONFIGURATION.categories.find((entry) => entry.categoryId === id)!), 1))
         .resultSetRevision as ReviewCategoryResultSetRevisionProjection).findingCounts;
       expect(counts('typos-and-usage')).toMatchObject({ listed: 27, located: 27, excluded: 0 });
       expect(counts('style-and-format')).toMatchObject({ listed: 9, located: 9, excluded: 0 });
@@ -320,7 +327,7 @@ describe('reference-free review on the Go execution path', () => {
     expect(reason('publication-risk')).toMatch(/涉及联网核查/u);
     // The model-free leads stay on their baseline path (here: no baseline yet), never behind the live rule;
     // 书系一致性 and 跨交付物一致性 keep their own configured reasons.
-    expect(reason('plot-consistency')).toBe(LEADS_ABSENT_REASON);
+    expect(reason('plot-consistency')).toBe('当前处理策略尚未允许这一审阅类别实时执行。');
     expect(reason('series-consistency')).toBe(SERIES_CONSISTENCY_NO_SERIES_REASON);
     expect(reason('cross-deliverable-consistency')).toBe(reviewCategoryEntry('cross-deliverable-consistency')!.unavailableReason);
     expect(() => store.createReviewRunPreparationWork(book.bookId, ['cross-deliverable-consistency'], { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy))

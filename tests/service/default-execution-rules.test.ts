@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { IMPORTED_SKILL_RELATIONS, CUSTOM_ANALYSIS_RELATIONS, HOUSE_REVIEW_PREFERENCE_RELATIONS, TASK_INTENT_DRAFT_RELATIONS } from '../support/pre74-schema.js';
 import { execPre74Fixture, FACTUAL_VERIFICATION_RELATIONS, MATERIAL_INDEX_LAYER_RELATIONS, PROPOSAL_REVIEW_RELATIONS, RESEARCH_EVIDENCE_RELATIONS } from '../support/pre74-schema.js';
 import { createHash, randomUUID } from 'node:crypto';
@@ -41,7 +42,13 @@ import { CLARIFICATION_RELATIONS_DROP_ORDER } from '../support/clarifications.js
 import { REIMPORT_GROUP_RELATIONS_DROP_ORDER } from '../support/reimport-groups.js';
 import { MIGRATION_EMPTY_RELATIONS, PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER } from '../support/production-documents.js';
 import { RUN_CHECKPOINT_RELATIONS_DROP_ORDER } from '../support/run-continuation.js';
-import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
+import { constructPre94PolicyEncoding, downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for 快速开始 under a 默认执行规则 (Issue #421, plan slice S75): the real store on a
 // temporary Agent Data Root, exact `sample1` imported through the supported path, and no Provider, socket or
@@ -130,7 +137,7 @@ async function analysedBook(store: EditorialStore, owner: BaselineAnalysisExecut
 }
 
 function ownerOf(store: EditorialStore): BaselineAnalysisExecutionOwner {
-  return new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+  return new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
 }
 
 /** Every relation's exact text and a digest of its rows, so a migration can say exactly what it moved. */
@@ -163,6 +170,7 @@ describe('schema revision 31 over the real store', () => {
       first.close();
     }
     const before = withDatabase(false, (database) => {
+      constructPre94PolicyEncoding(database);
       plantRevision30Relations(database);
       execPre74Fixture(database, `PRAGMA user_version = ${CONNECTIVITY_WAIT_SCHEMA_VERSION}`);
       downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_58_SQL);
@@ -184,14 +192,14 @@ describe('schema revision 31 over the real store', () => {
     withDatabase(true, (database) => {
       expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
       expect(analysisRunAuthorizationsShape(database)).toBe('current');
-      expect(database.prepare('SELECT rowid, * FROM analysis_run_authorizations ORDER BY rowid').all()).toEqual(before.authorizations);
+      expect(database.prepare('SELECT rowid, * FROM analysis_run_authorizations ORDER BY rowid').all()).toEqual(before.authorizations.map((row) => ({ ...row, start_when: 'now' })));
       const after = relationTruth(database);
       expect([...after.keys()]).toEqual([...before.truth.keys(), ...RESEARCH_EVIDENCE_RELATIONS, ...MATERIAL_INDEX_LAYER_RELATIONS, ...PROPOSAL_REVIEW_RELATIONS, ...FACTUAL_VERIFICATION_RELATIONS, ...HOUSE_REVIEW_PREFERENCE_RELATIONS, ...TASK_INTENT_DRAFT_RELATIONS, ...IMPORTED_SKILL_RELATIONS, ...CUSTOM_ANALYSIS_RELATIONS, ...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER].sort());
       for (const relation of RESEARCH_EVIDENCE_RELATIONS) expect(after.get(relation)?.content).toMatch(/^0:/);
       for (const relation of [...MIGRATION_EMPTY_RELATIONS, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER]) expect(after.get(relation)?.content).toMatch(/^0:/);
       // Revision 59 rebuilds the three kind-coupled analysis relations for the evaluation kind (Issue #429), every row kept.
       expect([...before.truth].filter(([name, was]) => after.get(name)!.sql !== was.sql).map(([name]) => name)).toEqual(['analysis_plan_records', 'analysis_result_set_revisions', 'analysis_result_sets', 'analysis_run_authorizations', 'analysis_task_intents', 'proposal_item_decisions']);
-      expect([...before.truth].filter(([name, was]) => after.get(name)!.content !== was.content).map(([name]) => name)).toEqual(['service_lifetimes']);
+      expect([...before.truth].filter(([name, was]) => after.get(name)!.content !== was.content).map(([name]) => name)).toEqual(['analysis_run_authorizations', 'service_lifetimes']);
       expect(database.prepare("SELECT name FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = 'analysis_run_authorizations' ORDER BY name").all())
         .toEqual([{ name: 'analysis_run_authorizations_no_delete' }, { name: 'analysis_run_authorizations_no_update' }]);
       expect(database.prepare('PRAGMA foreign_key_check').all()).toEqual([]);

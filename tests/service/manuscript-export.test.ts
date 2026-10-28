@@ -7,12 +7,13 @@ import { basename, join } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { canonicalRecord } from '../../src/service/analysis/canonical.js';
+import { canonicalRecord, isRecord } from '../../src/service/analysis/canonical.js';
 import { fixedArchiveTime } from '../../src/shared/archive-time.js';
 import { parseDocx, type ParsedDocxBlock } from '../../src/service/docx.js';
-import { EDITOR_AUTHOR_LABEL } from '../../src/service/docx-export.js';
+import { EDITOR_AUTHOR_LABEL, WORD_DOCX_EXPORT_WRITER_IDENTITY } from '../../src/service/docx-export.js';
 import {
   EXPORT_LEDGER_SCHEMA_SQL,
+  EXPORT_LEDGER_TRIGGER_SQL,
   EXPORT_TARGET_UNREADABLE_DETAIL,
   EXPORT_UNPREFIXED_RESTORATION_LINE,
   stagedPathFor,
@@ -29,7 +30,7 @@ import {
   type ManuscriptExportTargetInput,
   type ManuscriptWindowProjection,
 } from '../../src/shared/protocol.js';
-import { ADMITTED_BASELINE_DOCX, composeManuscriptDocx, sourceSpanText, type ComposedManuscriptRequest } from '../support/composed-fixture.js';
+import { ADMITTED_BASELINE_DOCX, composeManuscriptDocx, composeRevisedDocx, sourceSpanText, type ComposedManuscriptRequest } from '../support/composed-fixture.js';
 import { EXPORT_LEDGER_RELATIONS_DROP_ORDER } from '../support/manuscript-export.js';
 import { DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER } from '../support/default-execution-rules.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
@@ -238,6 +239,200 @@ function relationTruth(database: DatabaseSync): Map<string, { sql: string; conte
     return [relation.name, { sql: String(relation.sql), content: `${rows.length}:${hash.digest('hex')}` }];
   }));
 }
+
+describe('selected native Word reading through the actual export service', () => {
+  it.each(['suggestions', 'accepted-baseline'] as const)('exports %s joins, multi-paragraph moves and a removed paragraph through edited ancestry after restart', async (mode) => {
+    const path = join(roots.inputRoot, `word-structural-export-${mode}.docx`);
+    const spans = await Promise.all([8, 9, 10, 11, 12, 13, 14].map((block) => sourceSpanText(ADMITTED_BASELINE_DOCX, { block, from: 0, to: 8 })));
+    const [left, right, movedA, movedB, middle, removed, tail] = spans;
+    const xml = (value: string): string => value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+    await composeRevisedDocx(path, { source: ADMITTED_BASELINE_DOCX, title: '结构修订导出', paragraphs: [
+      { runs: [{ text: { block: 8, from: 0, to: 8 } }], markRevision: { kind: 'del', author: '作者', date: '2026-10-25T00:00:00Z' } },
+      { runs: [{ text: { block: 9, from: 0, to: 8 } }] },
+    ] });
+    const entries = unzipSync(new Uint8Array(await readFile(path)));
+    const run = (value: string, deleted: boolean): string => `<w:r><w:${deleted ? 'delText' : 't'} xml:space="preserve">${xml(value)}</w:${deleted ? 'delText' : 't'}></w:r>`;
+    const extra = `<w:p><w:moveFromRangeStart w:id="1" w:name="named-pair"/><w:moveFrom w:id="2">${run(movedA!, true)}</w:moveFrom></w:p>` +
+      `<w:p><w:moveFrom w:id="3">${run(movedB!, true)}</w:moveFrom><w:moveFromRangeEnd w:id="1"/></w:p>` +
+      `<w:p>${run(middle!, false)}</w:p>` +
+      `<w:p><w:moveToRangeStart w:id="8" w:name="named-pair"/><w:moveTo w:id="9">${run(movedA!, false)}</w:moveTo></w:p>` +
+      `<w:p><w:moveTo w:id="10">${run(movedB!, false)}</w:moveTo><w:moveToRangeEnd w:id="8"/></w:p>` +
+      `<w:p><w:pPr><w:rPr><w:del w:id="30"/></w:rPr></w:pPr><w:del w:id="31">${run(removed!, true)}</w:del></w:p>` +
+      `<w:p>${run(tail!, false)}</w:p>`;
+    const original = strFromU8(entries['word/document.xml']!);
+    const changed = original.replace('<w:sectPr/>', `${extra}<w:sectPr/>`);
+    expect(changed === original).toBe(false);
+    entries['word/document.xml'] = strToU8(changed);
+    await writeFile(path, zipSync(entries, { mtime: fixedArchiveTime() }));
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const staged = await store.stageSelectedManuscript(randomUUID(), path);
+      expect(staged.wordTrackedChanges?.compatibility === 'unsupported' ? staged.wordTrackedChanges.reasonCodes : []).toEqual([]);
+      const prepared = store.prepareNewBookReview(staged.draftId, staged.draftVersion,
+        { kind: 'new-book', choiceId: 'new-book', confirmedTitle: staged.titleSuggestion.value }, false, 'retain',
+        { mode, learnFromEdits: true, acceptedBaselineConfirmed: mode === 'accepted-baseline' });
+      if (prepared.reviewDigest === null) throw new Error('expected supported structural Word import');
+      const commitId = randomUUID();
+      const book = await store.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: prepared.draftVersion,
+        reviewDigest: prepared.reviewDigest, commitId });
+      await store.acknowledgeImportCompletion(commitId);
+      expect(allBlocks(store, book).map((block) => block.text)).toEqual(mode === 'suggestions'
+        ? [left, right, movedA, movedB, middle, removed, tail] : [`${left}${right}`, middle, movedA, movedB, tail]);
+      const originalAnnotations = window(store, book).marks.filter((entry) => entry.kind === 'annotation').length;
+      if (mode === 'suggestions') expect(originalAnnotations).toBeGreaterThanOrEqual(2);
+      else expect(originalAnnotations).toBe(0);
+      edit(store, book);
+      const viewed = window(store, book);
+      const block = viewed.blocks[0]!;
+      store.createEditorialMark({ manuscriptId: book.manuscriptId, branchId: book.branchId, windowStartBlockId: block.blockId,
+        clientMarkId: randomUUID(), baseRevisionId: viewed.revisionId, expectedJournalSequence: viewed.journalSequence,
+        blockId: block.blockId, baseBlockDigest: block.digest, fromGrapheme: 0, toGrapheme: 1,
+        selectedText: graphemesOf(block.text)[0]!, kind: 'annotation', highlightColor: null,
+        body: '请核对这一句。', proposedText: null, rationale: null });
+      const reviewed = await review(store, book);
+      expect(reviewed.technical.writerIdentity).toBe(WORD_DOCX_EXPORT_WRITER_IDENTITY);
+      const destination = join(outbox, `word-structural-${mode}.docx`);
+      const preparation = await store.prepareManuscriptExport({ bookId: book.bookId, revisionId: reviewed.target.revisionId,
+        target: CURRENT, options: DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, reviewDigest: reviewed.reviewDigest, destination }, true);
+      store.markCleanShutdown(); store.close();
+      store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      expect((await store.approveManuscriptExport({ bookId: book.bookId, preparationId: preparation.preparationId }, true)).outcome).toBe('created');
+      const written = await parseWritten(destination);
+      expect(written.blocks.map((entry) => entry.digest)).toEqual(allBlocks(store, book).map((entry) => entry.digest));
+      expect(written.parsed.importedMarks.filter((entry) => entry.kind === 'annotation')).toHaveLength(originalAnnotations + 1);
+      expect(digest(await readFile(destination))).toBe(preparation.technical.payloadDigest);
+      store.markCleanShutdown();
+    } finally { store.close(); }
+  });
+
+  it.each(['suggestions', 'accepted-baseline'] as const)('exports %s after an edit and preparation restart with its full Word pins and actual writer', async (mode) => {
+    const path = join(roots.inputRoot, `word-export-${mode}.docx`);
+    await composeRevisedDocx(path, { source: ADMITTED_BASELINE_DOCX, title: '阅读导出', paragraphs: [
+      { runs: [{ text: { block: 8, from: 0, to: 10 } },
+        { text: { block: 9, from: 0, to: 5 }, revision: { kind: 'del', author: '作者甲', date: '2026-10-25T00:00:00Z' } },
+        { text: { block: 10, from: 0, to: 6 }, revision: { kind: 'ins', author: '作者乙', date: '2026-10-25T00:00:01Z' } },
+        { text: { block: 11, from: 0, to: 8 } }] },
+      { runs: [{ text: { block: 12, from: 0, to: 10 } }] },
+    ] });
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const staged = await store.stageSelectedManuscript(randomUUID(), path);
+      const importReview = store.prepareNewBookReview(staged.draftId, staged.draftVersion,
+        { kind: 'new-book', choiceId: 'new-book', confirmedTitle: staged.titleSuggestion.value }, false, 'retain',
+        { mode, learnFromEdits: false, acceptedBaselineConfirmed: mode === 'accepted-baseline' });
+      if (importReview.reviewDigest === null) throw new Error('expected complete Word import review');
+      const importCommitId = randomUUID();
+      const imported = await store.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: importReview.draftVersion,
+        reviewDigest: importReview.reviewDigest, commitId: importCommitId });
+      await store.acknowledgeImportCompletion(importCommitId);
+      const book: Imported = imported;
+      if (mode === 'suggestions') {
+        const original = window(store, book);
+        const suggestion = original.marks.find((candidate) => candidate.kind === 'change-suggestion')!;
+        const locators = withDatabase(true, (db) => db.prepare('SELECT * FROM word_import_mark_sources ORDER BY mark_id').all());
+        const binding = { manuscriptId: book.manuscriptId, branchId: book.branchId };
+        const applied = store.applyChangeSuggestion({ ...binding, windowStartBlockId: original.blocks[0]!.blockId,
+          markId: suggestion.markId, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null });
+        expect(applied.card?.status).toBe('applied');
+        store.markCleanShutdown(); store.close();
+        store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+        const reversed = store.reverseAppliedChangeSuggestion({ ...binding, windowStartBlockId: window(store, book).blocks[0]!.blockId,
+          markId: suggestion.markId, clientEffectId: randomUUID() });
+        expect(reversed.card?.status).toBe('open');
+        expect(allBlocks(store, book).map((entry) => entry.digest)).toEqual(original.blocks.map((entry) => entry.digest));
+        expect(withDatabase(true, (db) => db.prepare('SELECT * FROM word_import_mark_sources ORDER BY mark_id').all())).toEqual(locators);
+        store.markCleanShutdown(); store.close();
+        store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      }
+      edit(store, book);
+      const viewed = window(store, book);
+      const block = viewed.blocks[0]!;
+      store.createEditorialMark({ manuscriptId: book.manuscriptId, branchId: book.branchId, windowStartBlockId: block.blockId,
+        clientMarkId: randomUUID(), baseRevisionId: viewed.revisionId, expectedJournalSequence: viewed.journalSequence,
+        blockId: block.blockId, baseBlockDigest: block.digest, fromGrapheme: 0, toGrapheme: 2,
+        selectedText: graphemesOf(block.text).slice(0, 2).join(''), kind: 'annotation', highlightColor: null,
+        body: '请核对这一句。', proposedText: null, rationale: null });
+      const reviewed = await review(store, book);
+      expect(reviewed.savedForExport).toBe(true);
+      expect(reviewed.technical.writerIdentity).toBe(WORD_DOCX_EXPORT_WRITER_IDENTITY);
+      expect(reviewed.degraded).toBe(true);
+      expect(reviewed.fidelity.find((row) => row.key === 'file-revisions')).toMatchObject({ count: 2, status: 'degraded',
+        detail: `正文来源的 2 处原始修订记号不直接恢复；文字按导入时确认的${mode === 'suggestions' ? '拒绝修订' : '接受修订'}阅读对应，之后的编辑按当前稿件写出。待处理修改建议按本次导出选项处理。` });
+      const destination = join(outbox, `word-${mode}.docx`);
+      const preparation = await store.prepareManuscriptExport({ bookId: book.bookId, revisionId: reviewed.target.revisionId,
+        target: CURRENT, options: DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, reviewDigest: reviewed.reviewDigest, destination }, true);
+      expect(preparation.degraded).toBe(true);
+      withDatabase(true, (db) => {
+        const row = db.prepare('SELECT canonical_json FROM export_preparations WHERE preparation_id = ?').get(preparation.preparationId)!;
+        expect(JSON.parse(String(row.canonical_json))).toMatchObject({ writer: WORD_DOCX_EXPORT_WRITER_IDENTITY,
+          wordInputDigest: reviewed.technical.inputDigest, wordSource: { schema: 'ai7.export.word-source-binding/1', mode,
+            sourceVersionId: reviewed.technical.sourceVersionId, importCommitId, mappingAncestorRevisionId: imported.revisionId,
+            revisionId: reviewed.target.revisionId, revisionDigest: reviewed.technical.revisionDigest,
+            writer: WORD_DOCX_EXPORT_WRITER_IDENTITY } });
+        expect(db.prepare('SELECT count(*) total FROM word_tracked_edit_samples').get()!.total).toBe(0);
+      });
+      expect(existsSync(destination)).toBe(false);
+      store.markCleanShutdown(); store.close();
+      store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      expect((await review(store, book)).fidelity).toEqual(reviewed.fidelity);
+      const storedPreparation = withDatabase(true, (db) => {
+        const row = db.prepare('SELECT canonical_json, sha256 FROM export_preparations WHERE preparation_id = ?').get(preparation.preparationId)!;
+        const value: unknown = JSON.parse(String(row.canonical_json));
+        if (!isRecord(value) || !isRecord(value.wordSource)) throw new Error('expected real Word preparation binding');
+        return { json: String(row.canonical_json), sha256: String(row.sha256),
+          changed: canonicalRecord({ ...value, wordSource: { ...value.wordSource, mode: mode === 'suggestions' ? 'accepted-baseline' : 'suggestions' } }) };
+      });
+      const replacePreparation = (json: string, sha256: string): void => withDatabase(false, (db) => {
+        db.exec('DROP TRIGGER export_preparations_no_update');
+        try { db.prepare('UPDATE export_preparations SET canonical_json = ?, sha256 = ? WHERE preparation_id = ?').run(json, sha256, preparation.preparationId); }
+        finally { db.exec(EXPORT_LEDGER_TRIGGER_SQL.export_preparations_no_update!); }
+      });
+      replacePreparation(storedPreparation.changed.json, storedPreparation.changed.digest);
+      try {
+        // The actual render input and payload pin did not change; the corrupted mode pin alone must refuse before approval.
+        expect((await review(store, book)).technical.inputDigest).toBe(reviewed.technical.inputDigest);
+        expect(withDatabase(true, (db) => db.prepare('SELECT payload_sha256 FROM export_preparations WHERE preparation_id = ?')
+          .get(preparation.preparationId)!.payload_sha256)).toBe(preparation.technical.payloadDigest);
+        expect(await refusal(() => store.approveManuscriptExport({ bookId: book.bookId, preparationId: preparation.preparationId }, true)))
+          .toBe('EXPORT_PREPARATION_INVALID');
+        expect(ledgerCounts()).toEqual({ export_preparations: 1, export_approvals: 0, export_receipts: 0 });
+        expect(existsSync(destination)).toBe(false);
+      } finally { replacePreparation(storedPreparation.json, storedPreparation.sha256); }
+      // A missing Word segment refuses review and approval; it never falls back to legacy rows or a fresh file.
+      const segment = withDatabase(true, (db) => db.prepare(`SELECT * FROM word_manuscript_source_segments WHERE revision_id = ?
+        ORDER BY block_id, segment_ordinal LIMIT 1`).get(imported.revisionId)!);
+      const segmentTrigger = withDatabase(true, (db) => String(db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'trigger' AND name = ?")
+        .get('word_manuscript_source_segments_no_delete')!.sql));
+      withDatabase(false, (db) => {
+        db.exec('DROP TRIGGER word_manuscript_source_segments_no_delete');
+        try { db.prepare('DELETE FROM word_manuscript_source_segments WHERE revision_id = ? AND block_id = ? AND segment_ordinal = ?')
+          .run(segment.revision_id!, segment.block_id!, segment.segment_ordinal!); }
+        finally { db.exec(segmentTrigger); }
+      });
+      try {
+        expect(await refusal(() => review(store, book))).toBe('WORD_MAPPING_INVALID');
+        expect(await refusal(() => store.approveManuscriptExport({ bookId: book.bookId, preparationId: preparation.preparationId }, true)))
+          .toBe('WORD_MAPPING_INVALID');
+        expect(ledgerCounts()).toEqual({ export_preparations: 1, export_approvals: 0, export_receipts: 0 });
+        expect(existsSync(destination)).toBe(false);
+      } finally {
+        withDatabase(false, (db) => {
+          const columns = Object.keys(segment);
+          db.prepare(`INSERT INTO word_manuscript_source_segments (${columns.join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`)
+            .run(...columns.map((column) => segment[column]!));
+        });
+      }
+      const receipt = await store.approveManuscriptExport({ bookId: book.bookId, preparationId: preparation.preparationId }, true);
+      expect(receipt.outcome).toBe('created');
+      expect(digest(await readFile(destination))).toBe(preparation.technical.payloadDigest);
+      const written = await parseWritten(destination);
+      expect(written.blocks.map((entry) => entry.digest)).toEqual(allBlocks(store, book).map((entry) => entry.digest));
+      expect(written.parsed.importedMarks.filter((entry) => entry.kind === 'annotation')).toHaveLength(1);
+      expect(written.parsed.importedMarks.filter((entry) => entry.kind === 'change-suggestion')).toHaveLength(mode === 'suggestions' ? 1 : 0);
+      store.markCleanShutdown();
+    } finally { store.close(); }
+  });
+});
 
 describe('④ 导出: the Export Fidelity Review, the preparation, the approval and its receipt', () => {
   it('exports the current revision with its 批注 and 修改建议, leaves 备注 out, and records one receipt', async () => {
@@ -596,7 +791,7 @@ describe('④ 导出: the Export Fidelity Review, the preparation, the approval 
       for (const relation of RESEARCH_EVIDENCE_RELATIONS) expect(truthAfter.get(relation)?.content).toMatch(/^0:/);
       for (const relation of [...MIGRATION_EMPTY_RELATIONS, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER]) expect(truthAfter.get(relation)?.content).toMatch(/^0:/);
       // Revision 59 rebuilds the three kind-coupled analysis relations for the evaluation kind (Issue #429), every row kept.
-      expect([...truthBefore].filter(([name, before]) => truthAfter.get(name)!.sql !== before.sql).map(([name]) => name)).toEqual(['analysis_plan_records', 'analysis_result_set_revisions', 'analysis_result_sets', 'analysis_task_intents', 'proposal_item_decisions']);
+      expect([...truthBefore].filter(([name, before]) => truthAfter.get(name)!.sql !== before.sql).map(([name]) => name)).toEqual(['analysis_plan_records', 'analysis_result_set_revisions', 'analysis_result_sets', 'analysis_run_authorizations', 'analysis_task_intents', 'proposal_item_decisions']);
       expect([...truthBefore].filter(([name, before]) => truthAfter.get(name)!.content !== before.content).map(([name]) => name)).toEqual(['service_lifetimes']);
       expect(database.prepare("SELECT count(*) total FROM sqlite_schema WHERE type = 'trigger' AND tbl_name LIKE 'export_%'").get()).toEqual({ total: 6 });
       expect(database.prepare('PRAGMA foreign_key_check').all()).toEqual([]);

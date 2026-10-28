@@ -3,6 +3,7 @@ import { lstat, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { Client, ProxyAgent, type Dispatcher, buildConnector } from 'undici';
 import { ensureCanonicalDataDirectory, inspectCanonicalDataFile } from '../../shared/data-root.js';
 import { admittedProxyRequest } from '../../shared/network-denial.js';
+import { modelRequestNotSent } from './deepseek-adapter.js';
 import type { ModelServiceProxySetting } from '../../shared/protocol.js';
 
 export const DIRECT_PROXY_SETTING: ModelServiceProxySetting = { mode: 'direct' };
@@ -65,17 +66,43 @@ export async function writeProxySetting(dataRoot: string, input: unknown): Promi
   return setting;
 }
 
+/**
+ * What one model request's own proxy connection physically did (Issue #1131), recorded only by the production connector
+ * below. A model request leaves only through an established tunnel, so a call that never established one, while its proxy
+ * connection failed or its CONNECT was refused, sent nothing. One established tunnel anywhere in the call — native fetch
+ * may reconnect after an HTTP 421 — rules that out for the rest of the call.
+ */
+export class ProxyConnectionEvidence {
+  #refused = false;
+  #tunnelled = false;
+  connectFailed(): void { this.#refused = true; }
+  connectAnswered(statusCode: number): void { if (statusCode === 200) this.#tunnelled = true; else this.#refused = true; }
+  /** The proxy itself was observed to fail or refuse, at any point of the call. */
+  get proxyRefused(): boolean { return this.#refused; }
+  get provesNoModelRequest(): boolean { return this.#refused && !this.#tunnelled; }
+}
+
 /** Factory injection makes construction and physical-stage failures observable without real networking. */
 export type ProxyDispatcherFactory = (uri: string, failed: () => void) => Dispatcher;
-export const createProxyDispatcher: ProxyDispatcherFactory = (uri, failed) => new ProxyAgent({
+export const createProxyDispatcher: ProxyDispatcherFactory = (uri, failed) => observedProxyDispatcher(uri, failed, null);
+
+/** The production connector; only proxyAwareFetch's own per-call record is ever handed to it. */
+const observedProxyDispatcher = (uri: string, failed: () => void, evidence: ProxyConnectionEvidence | null): Dispatcher => new ProxyAgent({
   uri, proxyTunnel: true, connections: 1,
   clientFactory: (origin, options) => {
     const connector = (options as { connect: ReturnType<typeof buildConnector> }).connect;
-    return new Client(origin, { ...options, connect: (opts, callback) => connector(opts, (error, socket) => {
-      if (error !== null) failed();
+    const client = new Client(origin, { ...options, connect: (opts, callback) => connector(opts, (error, socket) => {
+      if (error !== null) { evidence?.connectFailed(); failed(); }
       if (error !== null) callback(error, null);
       else callback(null, socket!);
     }) });
+    // This owned client is the proxy's: ProxyAgent tunnels through its CONNECT answer, which is observed before it is read.
+    const connect = client.connect.bind(client);
+    (client as { connect: unknown }).connect = (params: Dispatcher.ConnectOptions, callback?: (error: Error | null, data: Dispatcher.ConnectData) => void) => {
+      if (callback === undefined) return connect(params).then((data) => { evidence?.connectAnswered(data.statusCode); return data; });
+      return connect(params, (error, data) => { if (error === null) evidence?.connectAnswered(data.statusCode); callback(error, data); });
+    };
+    return client;
   },
 });
 
@@ -109,7 +136,10 @@ export function proxyAwareFetch(nativeFetch: typeof fetch, read: () => Promise<M
   return async (input, init) => {
     const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
     const beforeSend = (): void => {
-      if (signal?.aborted === true) throw Object.assign(new Error('请求在发送前已中止。'), { code: 'TRANSPORT_FAILED', requestSent: false });
+      if (signal?.aborted !== true) return;
+      const cancelled = Object.assign(new Error('请求在发送前已中止。'), { code: 'TRANSPORT_FAILED', requestSent: false });
+      // Observed before the native sender is entered: this exact request was not sent.
+      throw init === undefined ? cancelled : modelRequestNotSent(init, cancelled);
     };
     beforeSend();
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
@@ -126,10 +156,13 @@ export function proxyAwareFetch(nativeFetch: typeof fetch, read: () => Promise<M
     const proxy = new URL(`${setting.protocol}://${setting.hostPort}`);
     const token = admittedProxyRequest(url, { host: proxy.hostname.replace(/^\[|\]$/gu, ''), port: Number(proxy.port || (proxy.protocol === 'https:' ? 443 : 80)) });
     let proxyFailed = false;
+    // Physical evidence exists only for the owned production connector; an injected factory never receives it.
+    const evidence = factory === createProxyDispatcher ? new ProxyConnectionEvidence() : null;
     let dispatcher: Dispatcher | undefined;
     const finish = (): void => { token.revoke(); void dispatcher?.destroy().catch(() => undefined); };
     try {
-      dispatcher = factory(proxy.href, () => { proxyFailed = true; });
+      const failed = (): void => { proxyFailed = true; };
+      dispatcher = evidence === null ? factory(proxy.href, failed) : observedProxyDispatcher(proxy.href, failed, evidence);
       const response = await token.run(() => nativeFetch(input, { ...init, redirect: 'manual', dispatcher } as RequestInit));
       if (response.status === 407) { proxyFailed = true; throw new Error(PROXY_UNREACHABLE); }
       report(null);
@@ -152,9 +185,12 @@ export function proxyAwareFetch(nativeFetch: typeof fetch, read: () => Promise<M
       // Undici's CONNECT refusal is a proxy response, never a model-service HTTP status.
       const cause = error instanceof Error ? error.cause : null;
       const refused = cause instanceof Error && /Proxy response \(407\)/u.test(cause.message);
-      if (proxyFailed || refused) {
+      // The pinned fetch nests a refused CONNECT below its cancellation cause; the owned proxy client observed it directly.
+      if (proxyFailed || refused || evidence?.proxyRefused === true) {
         report('proxy-unreachable');
-        throw Object.assign(new Error('代理不可达：请检查网络代理设置。'), { code: PROXY_UNREACHABLE });
+        const unreachable = Object.assign(new Error('代理不可达：请检查网络代理设置。'), { code: PROXY_UNREACHABLE });
+        // Codes, statuses and messages prove nothing; only this call's own connector proves that no tunnel ever existed.
+        throw init !== undefined && evidence?.provesNoModelRequest === true ? modelRequestNotSent(init, unreachable) : unreachable;
       }
       const timedOut = responseTimedOut(error);
       if (timedOut !== null) throw timedOut;

@@ -1,3 +1,5 @@
+import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { IMPORTED_SKILL_RELATIONS, CUSTOM_ANALYSIS_RELATIONS, HOUSE_REVIEW_PREFERENCE_RELATIONS, TASK_INTENT_DRAFT_RELATIONS } from '../support/pre74-schema.js';
 import { execPre74Fixture, FACTUAL_VERIFICATION_RELATIONS, MATERIAL_INDEX_LAYER_RELATIONS, PROPOSAL_REVIEW_RELATIONS, RESEARCH_EVIDENCE_RELATIONS } from '../support/pre74-schema.js';
 import { createHash } from 'node:crypto';
@@ -27,6 +29,12 @@ import { planRevisionsShapeAt33, plantRevision33Relations } from '../support/pla
 import { SAMPLE1_UNITS, importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for the editable plan (Issue #419, plan slice S73; V2-UX-PLAN-009, PLAN-011): the real
 // store on a temporary Agent Data Root, exact `sample1` imported through the supported path, J-04's deterministic
@@ -67,7 +75,7 @@ function openWithRoute(fixture: ResolvedModelFixture): Promise<EditorialStore> {
 }
 
 function owner(store: EditorialStore, fixture: ResolvedModelFixture): BaselineAnalysisExecutionOwner {
-  return new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+  return new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
 }
 
 function prepare(store: EditorialStore, bookId: string, update: BaselineAnalysisUpdateRequest | null = null, reconfirm = false): BaselineAnalysisProjection {
@@ -147,6 +155,7 @@ describe('schema revision 34 over the real store', () => {
       first.close();
     }
     const before = withDatabase(false, (database) => {
+      constructPre94PolicyEncoding(database);
       plantRevision33Relations(database);
       execPre74Fixture(database, 'PRAGMA user_version = 33');
       downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_58_SQL);
@@ -170,7 +179,7 @@ describe('schema revision 34 over the real store', () => {
       for (const relation of RESEARCH_EVIDENCE_RELATIONS) expect(after.get(relation)?.content).toMatch(/^0:/);
       for (const relation of CLARIFICATION_RELATIONS_DROP_ORDER) expect(after.get(relation)?.content).toMatch(/^0:/);
       // Revision 59 rebuilds the three kind-coupled analysis relations for the evaluation kind (Issue #429), every row kept.
-      expect([...before.truth].filter(([name, was]) => after.get(name)!.sql !== was.sql).map(([name]) => name)).toEqual(['analysis_plan_records', 'analysis_plan_revisions', 'analysis_result_set_revisions', 'analysis_result_sets', 'analysis_task_intents', 'proposal_item_decisions']);
+      expect([...before.truth].filter(([name, was]) => after.get(name)!.sql !== was.sql).map(([name]) => name)).toEqual(['analysis_plan_records', 'analysis_plan_revisions', 'analysis_result_set_revisions', 'analysis_result_sets', 'analysis_run_authorizations', 'analysis_task_intents', 'proposal_item_decisions']);
       expect([...before.truth].filter(([name, was]) => after.get(name)!.content !== was.content).map(([name]) => name)).toEqual(['service_lifetimes']);
       // Still a ledger: nothing rewrites or removes a Plan Revision.
       expect(database.prepare("SELECT name FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = 'analysis_plan_revisions' ORDER BY name").all())

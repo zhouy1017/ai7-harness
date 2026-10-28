@@ -11,6 +11,8 @@ import type {
   RendererApi,
 } from '../shared/protocol.js';
 import { LEARNING_AUDIT_STANDINGS, LEARNING_MATERIAL_KINDS } from '../shared/protocol.js';
+import { mountWordTrackedEditDetail } from './quality-learning.js';
+import { wordLearningStandingLine } from './quality-learning-labels.js';
 import {
   LEARNING_AUDIT_ALL,
   LEARNING_AUDIT_BATCH_MISMATCH,
@@ -92,7 +94,8 @@ import { localInstantLabel } from './plan-preview-labels.js';
 export interface MountLearningAuditOptions {
   readonly root: HTMLElement;
   readonly api: Pick<RendererApi, 'inspectLearningAudit' | 'inspectLearningLineage' | 'previewLearningRemediation' | 'recordLearningRemediation' |
-    'decideLearningMaterial'>;
+    'decideLearningMaterial' | 'inspectWordTrackedEditSample'>;
+  readonly openSourceVersion: (bookId: string, sourceVersionId: string) => Promise<void>;
   readonly setStatus: (message: string, tone?: 'busy' | 'success' | 'error') => void;
   readonly errorMessage: (error: unknown, fallback: string) => string;
   /**
@@ -417,7 +420,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     item.dataset['materialKey'] = material.materialKey;
     item.dataset['learningStanding'] = material.standing;
     const head = el('div', 'learning-material-head');
-    if (material.standing === 'book' || material.standing === 'house') {
+    if (material.standing === 'book' || material.standing === 'house' || material.kind === 'word-tracked-edit' && material.automaticAdmission?.choice === 'house') {
       const check = el('input', 'learning-audit-select');
       check.type = 'checkbox';
       check.checked = selection.has(material.materialKey);
@@ -436,6 +439,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
       el('span', `status-pill learning-state learning-audit-standing learning-audit-standing-${material.standing}`, LEARNING_AUDIT_STANDING_LABELS[material.standing]),
     );
     item.append(head);
+    if (material.wordCurrentEligibility !== undefined) item.append(el('p', 'field-note', wordLearningStandingLine(material.wordCurrentEligibility, material.standing !== 'pending')));
     const reason = material.excerpt.at(-1);
     if (reason !== undefined) item.append(el('p', 'learning-audit-excerpt', reason));
     const use = el('p', 'field-note learning-audit-use', learningAuditUse(material.downstreamTasks));
@@ -737,6 +741,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     const heading = el('h4', undefined, learningLineageHeading(material.originLabel));
     heading.tabIndex = -1;
     section.append(heading, el('p', 'field-note learning-lineage-book', `《${read.bookTitle}》 · ${LEARNING_AUDIT_STANDING_LABELS[read.standing]}`));
+    if (read.automaticAdmission !== undefined && read.automaticAdmission !== null) section.append(el('p', 'field-note', '默认纳入本机学习；没有人工纳入决定。'));
 
     const step = (index: number, body: ReadonlyArray<HTMLElement>, count: number | null): HTMLLIElement => {
       const { step: key, label } = LEARNING_LINEAGE_STEPS[index]!;
@@ -750,6 +755,16 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     const excerpt = el('ul', 'learning-excerpt');
     for (const line of material.excerpt) excerpt.append(el('li', undefined, line));
     const materialBody: HTMLElement[] = [excerpt, el('p', 'field-note', learningOriginLine(material, localInstantLabel))];
+    if (material.target.kind === 'word-tracked-edit') {
+      const target = material.target;
+      const detail = el('div');
+      if (material.wordCurrentEligibility !== undefined) materialBody.push(el('p', 'field-note', wordLearningStandingLine(material.wordCurrentEligibility, material.decision !== null)));
+      materialBody.push(el('p', 'field-note', 'Word 原始修改对尚未用于编辑记忆、审阅偏好或模型任务。'),
+        action('查看完整 Word 修改对', 'secondary', 'word-detail', () => {
+          detail.replaceChildren();
+          void mountWordTrackedEditDetail({ root: detail, api, ...target, openSourceVersion: options.openSourceVersion }).load();
+        }), detail);
+    }
     if (material.sourceTask !== null) materialBody.push(el('p', 'field-note', `来源任务：${material.sourceTask.label}`));
     backward.append(step(0, materialBody, null));
     const decisions = el('ol', 'learning-lineage-decisions');
@@ -769,11 +784,10 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     section.append(backward);
 
     // 后来影响了什么 (LAUD-004): each stage after the decision — the 本社审阅偏好 versions it supports and the 审阅 that read
-    // them (Issue #912), the memory candidates nothing makes yet — an empty stage saying so — and the editorial memory the editor
-    // created explicitly from it (Issue #1082).
+    // them, the editor's actual proposed candidates and active memories, without inventing model curation.
     const forward = el('section', 'learning-lineage-forward');
     forward.setAttribute('aria-label', LEARNING_LINEAGE_FORWARD);
-    forward.append(el('h5', 'learning-lineage-forward-heading', LEARNING_LINEAGE_FORWARD), el('p', 'field-note learning-lineage-why', learningLineageWhy(read.downstream.activeMemories)));
+    forward.append(el('h5', 'learning-lineage-forward-heading', LEARNING_LINEAGE_FORWARD), el('p', 'field-note learning-lineage-why', learningLineageWhy(read.downstream.activeMemories, read.downstream.memoryCandidates)));
     const later = el('ol', 'learning-lineage-steps');
     later.start = 3;
     const counts = [read.downstream.signals, read.downstream.memoryCandidates, read.downstream.activeMemories, read.downstream.tasks];
@@ -788,6 +802,8 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
           list.append(line);
         }
         body.push(list);
+      } else if (offset === 1 && count > 0) {
+        body.push(el('p', 'field-note', `${count} 条编辑撰写的记忆候选引用了它，仍须明确接受后使用。`));
       } else if (offset === 2 && count > 0) {
         body.push(el('p', 'field-note learning-lineage-memories', learningLineageMemories(count)));
       } else if (offset === 3 && read.tasks.length > 0) {
@@ -807,11 +823,13 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     section.append(forward);
 
     const actions = el('div', 'button-row learning-lineage-actions');
-    if (read.standing === 'book' || read.standing === 'house') {
+    if (read.standing === 'book' || read.standing === 'house' || read.automaticAdmission?.choice === 'house') {
       const stop = action(LEARNING_LINEAGE_STOP, 'secondary', 'stop', () => void stopOne());
       stop.disabled = busy || open.panel !== null;
       actions.append(stop);
     }
+    // An excluded standing is an actual recorded exclusion decision, for a Word pair as for any other material: the
+    // existing explicit re-inclusion restores it; a Word pair's automatic admission never offers one before that.
     if (read.standing === 'excluded') {
       const again = action(LEARNING_LINEAGE_REINCLUDE, 'secondary', 'reinclude', () => {
         if (busy || open.panel !== null) return;

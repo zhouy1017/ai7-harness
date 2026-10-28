@@ -1,3 +1,6 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
+import { capturedMapAnswer, capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
+import { clarificationPlanBaseDigest } from '../../src/service/provider/clarification-contract.js';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -7,17 +10,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
-import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
+import { DEVELOPER_LIVE_POLICY_BINDING, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
+import { ruleFor, withRuleFor } from '../support/policy-rules.js';
 import { MATERIAL_INDEX_TRIGGER_SQL } from '../../src/service/material-index.js';
 import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { fixtureEntryKey, loadModelFixture, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { TASK_MATERIAL_LIVE_UNAVAILABLE, type TaskMaterialSource } from '../../src/service/task-material-references.js';
-import { NOTHING_SENT } from '../../src/service/task-plan.js';
 import type { LaunchPolicyProjection, InitialEvaluationProjection, ReadersReportProjection } from '../../src/shared/protocol.js';
 import { INITIAL_EVALUATION_UNIT_RESULT_SCHEMA, INITIAL_EVALUATION_SYNTHESIS_RESULT_SCHEMA } from '../../src/service/evaluation/initial-evaluation-contract.js';
 import { READERS_REPORT_UNIT_RESULT_SCHEMA, READERS_REPORT_SYNTHESIS_RESULT_SCHEMA } from '../../src/service/evaluation/readers-report-contract.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Exact admitted sample1 plus synthetic library inputs; real ledgers/execution, no Provider or Electron.
 const TEXT = '合成资料说明虚构的背景术语。\n另一段只用于资料库参考边界的测试。';
@@ -26,31 +35,36 @@ let launchPolicy: LaunchPolicyProjection;
 let store: EditorialStore;
 let owner: BaselineAnalysisExecutionOwner;
 let entries: Map<string, ModelFixtureEntry>;
-let fixture: ResolvedModelFixture;
+let capture: ReturnType<typeof capturedOrdinaryExecution>;
 let bookId: string;
 let opened = false;
 let unitBoundary: ((settled: number) => void | Promise<void>) | null = null;
 async function open(): Promise<void> {
   store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false,
     induceReimportProofTamper: false, induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false,
-    baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage } });
-  owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, capacity: 1, secretResolver: { resolve: async () => null },
-    materialGuard: (id, ledger) => store.materialGuard(id, ledger), unitHold: async (settled) => { await unitBoundary?.(settled); } });
+    baselineAnalysisRoute: null });
+  const search = store.saveSearchBackendCredential('search-tinyfish', null, 'needs-attention');
+  store.saveSearchBackendCredential('search-tinyfish', search.credentialReference, 'ready'); store.selectSearchBackend('search-tinyfish');
+  const answer = capturedMapAnswer(entries);
+  capture = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, requestGovernor,
+    (request, message) => request.stage === 'run-report-reflection'
+      ? { kind: 'unit-result', text: JSON.stringify({ schema: 'ai7.analysis.run-report-reflection-result/1', items: [] }), usage: { inputTokens: 10, outputTokens: 10 } }
+      : answer(request, message),
+    { materialGuard: (id, ledger) => store.materialGuard(id, ledger), unitHold: async (settled) => { await unitBoundary?.(settled); } });
+  owner = capture.owner; launchPolicy = capture.policy;
   opened = true;
 }
 async function close(): Promise<void> {
   if (!opened) return;
   opened = false;
   await owner.dispose();
-  store.markCleanShutdown();
-  store.close();
+  try { capture.assertMatched(); store.markCleanShutdown(); } finally { store.close(); }
 }
 beforeEach(async () => {
   roots = await createServiceTestRoots('ai7-evaluation-library-');
   launchPolicy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot);
   const base = await loadModelFixture(resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url))), 'sample1-evaluation-authored');
   entries = new Map(base.entries);
-  fixture = { ...base, entries };
   await open();
   const book = await importSample1Book(store, roots.codeRoot, '合成评估参考测试');
   bookId = book.bookId;
@@ -124,7 +138,9 @@ function ledger(kind: Kind) {
   const current = store.inspectReadersReport(bookId)!;
   const taskId = current.taskIntent!.taskIntentId;
   const task = database((db) => JSON.parse(String(db.prepare('SELECT canonical_json FROM readers_report_tasks WHERE task_intent_id = ? ORDER BY rowid DESC LIMIT 1').get(taskId)!.canonical_json)));
-  return store.readersReportLedger(task.input, { bookId, references: pins(taskId) }, current.planEnvelope!.promptContractDigest);
+  const base = clarificationPlanBaseDigest(component(taskId), { promptContractDigest: current.planEnvelope!.promptContractDigest });
+  expect(base).not.toBeNull();
+  return store.readersReportLedger(task.input, { bookId, references: pins(taskId) }, base!);
 }
 function plan(kind: Kind, taskId: string) { return store.inspectTaskPlan({ bookId, kind, ref: taskId }); }
 function frozenRows(kind: Kind): { lines: ReadonlyArray<string>; blocked: boolean } {
@@ -160,21 +176,22 @@ describe.each(['initial-evaluation', 'readers-report'] as const)('评估 referen
   beforeEach(() => { if (kind === 'readers-report') finalize(); });
   it('re-checks a queued ledger when a place becomes free after withdrawal', async () => {
     const targetBook = bookId;
-    const firstBook = await importSample1Book(store, roots.codeRoot, '合成排队占位图书');
-    await pinEditorialWorkspaceProfileRevision2(store, firstBook.bookId);
-    bookId = firstBook.bookId;
-    if (kind === 'readers-report') finalize();
-    const first = prepare(kind);
-    answer(kind, first);
-    const firstAccepted = authorize(kind, first);
+    // The actual ordinary runtime owns two Run places. Hold two real Runs so the material-bearing third really queues.
+    const occupants = [];
+    for (let index = 0; index < 2; index += 1) {
+      const occupied = await importSample1Book(store, roots.codeRoot, `合成排队占位图书${index}`);
+      await pinEditorialWorkspaceProfileRevision2(store, occupied.bookId); bookId = occupied.bookId;
+      if (kind === 'readers-report') finalize();
+      const prepared = prepare(kind); answer(kind, prepared); occupants.push(authorize(kind, prepared));
+    }
     bookId = targetBook;
     let release!: () => void;
     let reached!: () => void;
     const held = new Promise<void>((resolve) => { release = resolve; });
     const boundary = new Promise<void>((resolve) => { reached = resolve; });
     let holding = true;
-    unitBoundary = async () => { if (holding) { holding = false; reached(); await held; } };
-    owner.admitOrQueue(firstAccepted.dispatchRunRecordId!, firstAccepted.ledger);
+    unitBoundary = async () => { if (holding) { reached(); await held; } };
+    for (const occupied of occupants) owner.admitOrQueue(occupied.dispatchRunRecordId!, occupied.ledger);
     await boundary;
     try {
       const id = await material();
@@ -183,7 +200,7 @@ describe.each(['initial-evaluation', 'readers-report'] as const)('评估 referen
       const accepted = authorize(kind, prepared);
       expect(owner.admitOrQueue(accepted.dispatchRunRecordId!, accepted.ledger)).toBe('queued');
       store.decideLibraryMaterial({ materialId: id, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
-      release();
+      holding = false; release();
       await owner.whenIdle();
       expect(accepted.ledger.currentRunState(accepted.dispatchRunRecordId!)).toBe('blocked-before-dispatch');
       const last = database((db) => JSON.parse(String(db.prepare('SELECT canonical_json FROM analysis_run_states WHERE run_record_id = ? ORDER BY rowid DESC LIMIT 1').get(accepted.dispatchRunRecordId!)!.canonical_json)));
@@ -217,7 +234,14 @@ describe.each(['initial-evaluation', 'readers-report'] as const)('评估 referen
 
   it.each((['between-units', 'before-synthesis'] as const).flatMap((when) => (['withdrawn', 'missing', 'corrupt'] as const).map((change) => ({ when, change }))))('interrupts $change $when with completed units kept (Issue #759)', async ({ when, change }) => {
     const id = await material();
-    const prepared = prepare(kind, [id]);
+    let prepared = prepare(kind, [id]);
+    // These assertions concern a particular serial boundary. Select the real finite-ceiling Plan that makes it serial;
+    // ordinary production otherwise admits three concurrent units, unlike the former local fixture route.
+    const input = { bookId, kind, ref: prepared.taskIntent!.taskIntentId };
+    const editable = store.inspectTaskPlan(input);
+    store.editTaskPlan({ ...input, planEnvelopeDigest: editable.edit.planEnvelopeDigest!, removedSteps: [],
+      disallowedAdaptations: [], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 500_000 } });
+    prepared = kind === 'initial-evaluation' ? store.inspectInitialEvaluation(bookId) : store.inspectReadersReport(bookId)!;
     answer(kind, prepared);
     const accepted = authorize(kind, prepared);
     const total = prepared.coverageManifest!.units.length;
@@ -252,13 +276,13 @@ describe.each(['initial-evaluation', 'readers-report'] as const)('评估 referen
     expect(JSON.stringify(original)).not.toContain(TEXT);
     const firstPlan = plan(kind, taskId);
     expect(firstPlan.scope.reference.some((line) => line.includes('合成背景资料'))).toBe(true);
-    expect(firstPlan.scope.send).toContain('只在本机读取');
+    expect(firstPlan.scope.send).toContain('提取文字随稿件一并发往');
     expect(firstPlan.scope.send).toContain('只参照，不照抄');
     expect(firstPlan.technical.find((row) => row.key === 'material-references')?.value).toContain(pins(taskId)[0]!.indexDigest);
     expect(firstPlan.start.readiness).toBe('ready');
     // The references add to the disclosure; they never take away what the plan already said it does not read or send.
     expect(firstPlan.scope.notRead).toContain('其他图书');
-    expect(firstPlan.service.send).toBe(NOTHING_SENT);
+    expect(firstPlan.service.send).toBe(`所读范围内的稿件正文${kind === 'readers-report' ? '与评估记录' : ''}发往 opencode-go · deepseek-v4.1-flash`);
     expect(frozenRows(kind)).toEqual({ lines: [expect.stringContaining('《合成背景资料》')], blocked: false });
     const digest = ledger(kind).definition.promptContractDigest;
     await close(); await open();
@@ -374,7 +398,7 @@ describe.each(['initial-evaluation', 'readers-report'] as const)('评估 referen
     const blockedPlan = plan(kind, prepared.taskIntent!.taskIntentId);
     expect(blockedPlan.state.label).toBe('参考资料的索引记录已损坏');
     expect(blockedPlan.start.readiness).toBe('changed');
-    expect(blockedPlan.scope.send).toContain('也只在本机读取');
+    expect(blockedPlan.scope.send).toContain('提取文字随稿件一并发往');
     expect(blockedPlan.drift?.reasons.join(' ')).toContain('的索引记录已损坏');
     try { authorize(kind, prepared); throw new Error('accepted corrupt records'); } catch (error) {
       expect(error).toBeInstanceOf(StoreError);
@@ -409,11 +433,16 @@ describe.each(['initial-evaluation', 'readers-report'] as const)('评估 referen
       expect(component(prepared.taskIntent!.taskIntentId).materialReferences).toBeDefined();
     } finally { pages.mockRestore(); }
   });
-  it('rejects reference-bearing preparation and frozen-plan authorization in developer-live, and the plan says nothing would be sent', async () => {
+  it('rejects reference-bearing preparation and frozen-plan authorization when the developer-live material permission is denied', async () => {
     const id = await material();
     const prepared = prepare(kind, [id]);
-    expect(plan(kind, prepared.taskIntent!.taskIntentId).scope.send).toContain('也只在本机读取');
-    const live = { operationalScope: 'developer-live', live: { route: 'opencode-go', model: 'deepseek-v4.1-flash', endpoint: 'https://example.invalid/v1', credentialSlot: 'opencode-go', credentialReference: randomUUID(), runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 100_000 } } } as const;
+    expect(plan(kind, prepared.taskIntent!.taskIntentId).scope.send).toContain('提取文字随稿件一并发往');
+    const selected = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live');
+    const taskKind = kind === 'initial-evaluation' ? 'evaluation' : kind;
+    expect(ruleFor(selected, taskKind).materialReferencesAllowed).toBe(true);
+    launchPolicy = withRuleFor(selected, taskKind, { materialReferencesAllowed: false });
+    const live = { operationalScope: 'developer-live', policy: launchPolicy,
+      live: { ...DEVELOPER_LIVE_POLICY_BINDING, credentialReference: randomUUID(), runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 100_000 } } } as const;
     store.baselineAnalysisLedger.bindLaunch(live);
     // The plan prepared provider-free, read under developer-live, names the refusal instead of claiming the references would go.
     expect(plan(kind, prepared.taskIntent!.taskIntentId).scope.send).toBe('不发送任何内容；这份计划列了资料库资料，当前运行范围不能把它们发送给模型，这份计划不能开始');

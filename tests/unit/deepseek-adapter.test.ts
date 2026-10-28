@@ -16,6 +16,7 @@ import {
   assembleDeepSeekRequest,
   assembleProviderRequest,
   classifyTransportError,
+  modelRequestNotSent,
   parseProviderResponse,
   type DeepSeekTransport,
 } from '../../src/service/provider/deepseek-adapter.js';
@@ -39,6 +40,8 @@ import {
 } from '../../src/service/provider/egress-gate.js';
 import { NETWORK_DENIED_CODE, installNodeNetworkDenial } from '../../src/shared/network-denial.js';
 import { CONFIGURED_ROUTE_IDS } from '../../src/shared/provider-configuration.generated.js';
+import { GLOBAL_AGENT_PROMPT_CONTRACT, GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST } from '../../src/service/dialogue/global-agent-session.js';
+import { buildDialogueMessage } from '../../src/service/dialogue/contract.js';
 
 /*
  * The endpoints and routes the provider documents declare (`config/providers/`), pinned here as the bytes they must
@@ -59,6 +62,22 @@ installNodeNetworkDenial();
 const codes = { QUOTA_EXCEEDED_CODE, INVALID_CREDENTIAL_CODE, CONTEXT_WINDOW_EXCEEDED_CODE };
 const SYSTEM = '合成系统提示。';
 const UNIT = `分析单元 1/1 · 单元摘要 ${'1'.repeat(64)}\n[blk_${'a'.repeat(24)}] (paragraph) 合成段落。`;
+
+it('admits only the exact parseable Global Agent contract for the existing zero-tool SSE shape', () => {
+  const message = buildDialogueMessage({ kind: 'ask', selection: '', question: '偏好有什么边界？', kept: null,
+    globalSources: [{ itemId: 'listed-memory', revisionId: 'listed-revision', text: '仅作为数据参考。' }] });
+  const payload = { ...request(), provider: OPENCODE_GO_ROUTE, model: OPENCODE_GO_V41_FLASH_PROFILE.model, system: GLOBAL_AGENT_PROMPT_CONTRACT.systemPrompt,
+    messages: [{ role: 'user' as const, content: [{ type: 'text' as const, text: message }], source: { kind: 'user' as const } }] };
+  const context = { attribution: attributionHeaders(), promptContractDigest: GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST,
+    requestShape: 'editorial-dialogue-sse' as const, sessionId: randomUUID() };
+  const result = assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, OPENCODE_GO_V41_FLASH_PROFILE, payload, context);
+  expect(JSON.parse(result.body)).toMatchObject({ stream: true, stream_options: { include_usage: true } });
+  expect(() => assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, OPENCODE_GO_V41_FLASH_PROFILE,
+    { ...payload, messages: [{ ...payload.messages[0]!, content: [{ type: 'text', text: message.replace('"revisionId":"listed-revision"', '"unlisted":"listed-revision"') }] }] }, context))
+    .toThrow('PROVIDER_DIALOGUE_STREAM_SHAPE_INVALID');
+  expect(() => assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, OPENCODE_GO_V41_FLASH_PROFILE,
+    { ...payload, tools: [{ name: 'shell', description: 'injected', inputSchema: {} }] }, context)).toThrow();
+});
 
 /**
  * The exact bytes each current profile sends for one fixed payload, captured at `dev@5344aa62` before
@@ -107,6 +126,7 @@ async function collect(stream: AsyncIterable<StreamChunk>): Promise<StreamChunk[
 }
 
 function adapter(options: {
+  transportSettings?: NonNullable<ConstructorParameters<typeof DeepSeekOpenAiCompatibleAdapter>[0]['transportSettings']>;
   ticket: TransmitTicket | null;
   secret?: string;
   transport?: DeepSeekTransport;
@@ -115,6 +135,7 @@ function adapter(options: {
   const broker = new CredentialBroker({ resolve: async () => options.secret ?? null });
   let ticket = options.ticket;
   const instance = new DeepSeekOpenAiCompatibleAdapter({
+    ...(options.transportSettings === undefined ? {} : { transportSettings: options.transportSettings }),
     broker,
     slotBinding,
     tickets: { take: () => { const current = ticket; ticket = null; return current; } },
@@ -765,7 +786,9 @@ describe('DeepSeekOpenAiCompatibleAdapter.stream', () => {
     expect(running.calls).toHaveLength(1);
   });
 
-  it.each(['headers', 'body'] as const)('bounds a stalled %s read by the default deadline without resending', async (stage) => {
+  it.each([
+    ['headers', undefined], ['body', undefined], ['headers', 2], ['body', 2],
+  ] as const)('bounds a stalled %s read by the projected or fallback deadline (%s) without resending', async (stage, seconds) => {
     vi.useFakeTimers();
     try {
       let sent = false;
@@ -778,12 +801,12 @@ describe('DeepSeekOpenAiCompatibleAdapter.stream', () => {
         });
         if (stage === 'headers') return pending();
         return { status: 200, json: pending };
-      } });
+      }, ...(seconds === undefined ? {} : { transportSettings: { requestDeadlineSeconds: seconds, rateLimitRetry: { honourRetryAfter: true, maxRetries: 1 } } }) });
       const completed = collect(stalled.adapter.stream(request()));
       await vi.advanceTimersByTimeAsync(0);
       expect(sent).toBe(true);
       expect(signal).toBeInstanceOf(AbortSignal);
-      await vi.advanceTimersByTimeAsync(MODEL_REQUEST_DEADLINE_MS - 1);
+      await vi.advanceTimersByTimeAsync((seconds === undefined ? MODEL_REQUEST_DEADLINE_MS : seconds * 1000) - 1);
       expect(signal?.aborted).toBe(false);
       await vi.advanceTimersByTimeAsync(1);
       expect((await completed).at(-1)).toMatchObject({ reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.OUTCOME_UNKNOWN } } });
@@ -893,12 +916,24 @@ describe('classification', () => {
     expect(retryBackoffMs('invalid', now)).toBe(5_000);
     expect(retryBackoffMs('-1', now)).toBe(5_000);
     expect(classifyTransportError(new TypeError('fetch failed', { cause: { code: 'UND_ERR_BODY_TIMEOUT' } }), true).code).toBe(AI7_FAILURE_CODES.OUTCOME_UNKNOWN);
-    expect(classifyTransportError(new TypeError('fetch failed', { cause: { code: 'UND_ERR_CONNECT_TIMEOUT' } }), true).code).toBe(AI7_FAILURE_CODES.TRANSPORT_FAILED);
+    expect(classifyTransportError(new TypeError('fetch failed', { cause: { code: 'UND_ERR_CONNECT_TIMEOUT' } }), true).code).toBe(AI7_FAILURE_CODES.OUTCOME_UNKNOWN);
     for (const name of ['AbortError', 'TimeoutError']) {
       const error = new DOMException('private', name);
       expect(classifyTransportError(error, false).code).toBe(AI7_FAILURE_CODES.TRANSPORT_FAILED);
       expect(classifyTransportError(error, true).code).toBe(AI7_FAILURE_CODES.OUTCOME_UNKNOWN);
     }
+  });
+
+  it('requires opaque proof for the exact transport call before treating an admitted rejection as unsent (#1131)', () => {
+    const request: Parameters<DeepSeekTransport>[1] = { method: 'POST', headers: {}, body: '{}', signal: new AbortController().signal };
+    const cause = Object.assign(new Error('held before native transport'), { code: 'TRANSPORT_FAILED', requestSent: false });
+    for (const error of [cause, new Error('generic rejection'), Object.assign(new Error('connect'), { code: 'UND_ERR_CONNECT_TIMEOUT' })]) {
+      expect(classifyTransportError(error, true, request).code).toBe(AI7_FAILURE_CODES.OUTCOME_UNKNOWN);
+    }
+    const exact = modelRequestNotSent(request, cause);
+    expect(classifyTransportError(exact, true, request).code).toBe(AI7_FAILURE_CODES.TRANSPORT_FAILED);
+    expect(classifyTransportError(exact, true, { ...request }).code).toBe(AI7_FAILURE_CODES.OUTCOME_UNKNOWN);
+    expect(classifyTransportError(Object.assign(new Error(exact.message), { requestSent: false }), true, request).code).toBe(AI7_FAILURE_CODES.OUTCOME_UNKNOWN);
   });
 
   it('keys failure classes on the DSH constants and the AI7 codes', () => {

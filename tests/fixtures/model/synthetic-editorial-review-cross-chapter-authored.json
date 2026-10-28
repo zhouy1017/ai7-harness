@@ -1,0 +1,59 @@
+{
+  "schema": "ai7.model-fixture/1",
+  "identity": "synthetic-editorial-review-cross-chapter-authored",
+  "description": "编辑价值证据（Issue #812）两部合成稿的人工撰写审阅夹具：合成稿甲《灯塔守望人》的错别字与规范用语、合成稿乙《一座县城博物馆》的体例与格式。两部合成稿由 tests/editorial-cases/synthetic-manuscripts.mjs 从公开的合成文本确定性生成，不含任何书稿文字。回答模拟一位不完美的审阅者：多数注入错误给出正确改法，一处改法需编辑修改，一处漏报，一处把正确用法误判为错误，一处案例未预期的发现，一处引文不在文中；抽样一律「成立」，运行反思只说明账目。用于检验编辑价值证据工具与产品路径，不代表任何模型的编辑质量。",
+  "basedOn": "synthetic-editorial-review-authored",
+  "provenance": "authored",
+  "provider": "ai7-local-deterministic",
+  "model": "ai7-deterministic-fixture",
+  "entries": [
+    {
+      "unitOrdinal": 1,
+      "requestDigest": "ce7d2655f1e39cf601c50be9b40738a7cda57ce5bd8673242da8ce08ab06ee84",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.unit-result/2\",\"unitOrdinal\":1,\"findings\":[{\"quote\":\"三千余件,其中\",\"blockOrdinal\":3,\"severity\":\"should\",\"note\":\"中文行文中误用半角逗号。\"},{\"quote\":\"1985年\",\"blockOrdinal\":4,\"severity\":\"should\",\"note\":\"年份写法与全文汉字数字不一致。\"},{\"quote\":\"「家底」\",\"blockOrdinal\":5,\"severity\":\"note\",\"note\":\"引号与全文“”体例不一致。\"},{\"quote\":\"匆匆走过...\",\"blockOrdinal\":7,\"severity\":\"note\",\"note\":\"省略号应为“……”。\"},{\"quote\":\"全程约3km\",\"blockOrdinal\":9,\"severity\":\"note\",\"note\":\"计量单位写法与中文行文不一致。\"},{\"quote\":\"1∶5000\",\"blockOrdinal\":11,\"severity\":\"note\",\"note\":\"比例尺写法宜统一。\"},{\"quote\":\"前后两进的格局\",\"blockOrdinal\":2,\"severity\":\"note\",\"note\":\"可补充说明格局。\"}]}",
+        "usage": {
+          "inputTokens": 900,
+          "outputTokens": 410
+        }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "0948db5d6bcc8dfa13f10283eb234224da345f70d8f8a33fd112716c6aca4d7b",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.editorial-review.cross-chapter-result/1\",\"findings\":[]}",
+        "usage": {
+          "inputTokens": 800,
+          "outputTokens": 20
+        }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "0a18ca282ffcb594c29868a811588f416c7d98b8f60b2ae01853dda86cec6ad7",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.run-report-reflection-result/1\",\"items\":[{\"suggestion\":\"下一次运行可维持当前的单元预算。\",\"basis\":\"账目中没有预算造成的缺口。\"}]}",
+        "usage": {
+          "inputTokens": 600,
+          "outputTokens": 120
+        }
+      }
+    },
+    {
+      "unitOrdinal": 0,
+      "requestDigest": "9dc667a1eec2c99df55196f4665c2824a01d3cf9c7f36d2c1d6214720f344f58",
+      "response": {
+        "kind": "unit-result",
+        "text": "{\"schema\":\"ai7.analysis.run-report-reflection-result/1\",\"items\":[{\"suggestion\":\"下一次运行可维持当前的单元预算。\",\"basis\":\"账目中没有预算造成的缺口。\"}]}",
+        "usage": {
+          "inputTokens": 600,
+          "outputTokens": 120
+        }
+      }
+    }
+  ]
+}

@@ -46,16 +46,18 @@ describe('actual subscription and effective launch pairings', () => {
     expect(release.approvedPair('T2', { ...reviewer, model: 'claude-sonnet-5-5', effort: 'high' }, worker)).toBe(true);
   });
 
-  it('rejects a Worker and Reviewer on the same subscription channel, whatever the models', () => {
+  it('accepts single-writer completion without a Reviewer or on the same subscription channel', () => {
+    expect(release.approvedPair('T3', worker, undefined as unknown as Record<string, unknown>)).toBe(true);
     expect(release.approvedPair('T3', { ...reviewer, taskId: 'task_other', dispatchId: 'ctx_other', terminal: 'term_other',
-      effort: 'high' }, reviewer)).toBe(false);
+      effort: 'high' }, reviewer)).toBe(true);
     expect(release.approvedPair('T2', { ...worker, effort: 'medium' }, { ...worker, taskId: 'task_other', dispatchId: 'ctx_other',
-      terminal: 'term_other', model: 'gpt-6-astra', effort: 'xhigh' })).toBe(false);
+      terminal: 'term_other', model: 'gpt-6.1-sol', effort: 'high' })).toBe(true);
   });
 
-  it('rejects two Go models on the same subscription and unsupported aliases', () => {
+  it('accepts Go models for T1 single-writer or reviewed work and rejects unsupported aliases', () => {
     const go = { ...worker, channel: 'OpenCode Go', client: 'OpenCode', model: 'opencode-go/deepseek-v4.1-flash', effort: 'low' };
-    expect(release.approvedPair('T1', go, { ...reviewer, channel: 'OpenCode Go', client: 'OpenCode', model: 'opencode-go/glm-5.3-flash', effort: 'low' })).toBe(false);
+    expect(release.approvedPair('T1', go, undefined as unknown as Record<string, unknown>)).toBe(true);
+    expect(release.approvedPair('T1', go, { ...reviewer, channel: 'OpenCode Go', client: 'OpenCode', model: 'opencode-go/glm-5.3-flash', effort: 'low' })).toBe(true);
     expect(release.approvedPair('T1', go, { ...reviewer, channel: 'ChatGPT', client: 'Codex', model: 'gpt-6.1-sol', effort: 'medium' })).toBe(true);
     expect(release.approvedPair('T1', { ...go, model: 'opencode-go/deepseek-flash' }, { ...reviewer, channel: 'ChatGPT', client: 'Codex', model: 'gpt-6.1-sol', effort: 'medium' })).toBe(false);
   });
@@ -104,7 +106,12 @@ describe('single-writer exact-candidate merge release', () => {
   ])('invalidates changed head, base, target, Draft or closed candidate: %j', (change) => {
     expect(release.mergeAuthorization({ ...candidate, ...change }, receipts()).allowed).toBe(false);
   });
-  it('rejects absent handoff, overlapping writers and late ownership changes', () => {
+  it('accepts direct single-writer Worker completion without handoff, and rejects mismatched writers or late handoffs', () => {
+    const singleAssignment = event(1, 'assignment', { repo: 'owner/repo', pr: 806, route: 'slice', source: candidate.headRefName,
+      target: candidate.baseRefName, class: 'T3', worker, commander });
+    const workerComplete = event(3, 'complete', { assignment: 1, dispatch: 'ctx_worker', writer: 'ctx_worker',
+      head: HEAD, base: BASE, target: candidate.baseRefName, tests });
+    expect(release.mergeAuthorization(candidate, [singleAssignment, workerComplete, released]).allowed).toBe(true);
     expect(release.mergeAuthorization(candidate, [assignment, complete, released]).allowed).toBe(false);
     expect(release.mergeAuthorization(candidate, [assignment, { ...handoff, workerReleased: false }, complete, released]).allowed).toBe(false);
     expect(release.mergeAuthorization(candidate, [assignment, handoff, { ...complete, writer: 'ctx_worker' }, released]).allowed).toBe(false);

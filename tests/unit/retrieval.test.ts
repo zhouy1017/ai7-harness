@@ -6,7 +6,7 @@ import { prepareRetrievalResult, markRetrievalResult, notExactFetched, dialogueR
 import { installNodeNetworkDenial } from '../../src/shared/network-denial.js';
 import { PlatformToolSession } from '../../src/service/provider/platform-tool-session.js';
 import { AI7_FAILURE_CODES } from '../../src/service/provider/classification.js';
-import { LOCAL_TOOL_SCHEMAS, PLATFORM_TOOL_SCHEMAS, canonicalToolArguments, readPlatformToolsRule, ruleNamedToolSchemas, toolSetEqualsPlatformSchemas, type PlatformToolsRule } from '../../src/service/provider/platform-tools.js';
+import { LEGACY_LOCAL_TOOL_SCHEMAS, PLATFORM_TOOL_SCHEMAS, canonicalToolArguments, readPlatformToolsRule, ruleNamedToolSchemas, toolSetEqualsPlatformSchemas, type PlatformToolsRule } from '../../src/service/provider/platform-tools.js';
 import { LOCAL_DETERMINISTIC_ROUTE, LOCAL_DETERMINISTIC_MODEL, assistantToolCallDigest, evaluateEgress, toolResultKey, type EgressAttemptScope, type EgressBindingFacts } from '../../src/service/provider/egress-gate.js';
 import type { AssembledContentBlock, AssembledModelPayload } from '../../src/service/provider/payload.js';
 import { localRetrievalRule } from '../support/policy-rules.js';
@@ -49,6 +49,18 @@ describe('Run-local pinned retrieval', () => {
   it('ranks by local vector similarity when wording has no lexical match', async () => {
     const index = new RetrievalIndex([source('one', 'alpha'), source('two', 'beta')], embeddings([[1, 0], [0, 1], [1, 0]]));
     expect((await index.retrieve('gamma')).map((candidate) => candidate.sourceId)).toEqual(['two']);
+  });
+  it('ranks by BM25 alone, embedding nothing, while the provider needs its model or its digest does not match', async () => {
+    const sources = [source('one', 'alpha alpha beta'), source('two', 'beta gamma'), source('three', 'delta')];
+    const lexical = await new RetrievalIndex(sources).retrieve('alpha beta');
+    expect(lexical.map((candidate) => candidate.sourceId)).toEqual(['one', 'two']);
+    for (const readiness of [{ state: 'needs-model', expectedDigest: null }, { state: 'digest-mismatch', expectedDigest: 'a'.repeat(64), actualDigest: 'b'.repeat(64) }] as const) {
+      let calls = 0;
+      const provider = { identity: 'synthetic', dimensions: 2, readiness: () => readiness, embed: async () => { calls += 1; return []; } };
+      const materialVectors = async () => { calls += 1; return []; };
+      expect(await new RetrievalIndex(sources, provider, materialVectors).retrieve('alpha beta')).toEqual(lexical);
+      expect(calls).toBe(0);
+    }
   });
   it('consumes only pinned material-vector hits and ignores a different build or unpinned source', async () => {
     const material: RetrievalSource = { sourceKind: 'material', sourceId: 'one', digest: 'a'.repeat(64),
@@ -146,13 +158,13 @@ describe('registered local tools without egress', () => {
     expect(canonicalToolArguments('retrieve', { query: ' alpha ', k: 8 })).toEqual({ tool: 'retrieve', query: 'alpha', k: 8 });
     expect(canonicalToolArguments('retrieve', { query: 'alpha', k: 9 })).toBeNull();
     expect(canonicalToolArguments('retrieve', { query: 'alpha', sourceKinds: ['other'] })).toBeNull();
-    expect(toolSetEqualsPlatformSchemas(LOCAL_TOOL_SCHEMAS, ruleNamedToolSchemas(false, true))).toBe(true);
+    expect(toolSetEqualsPlatformSchemas(LEGACY_LOCAL_TOOL_SCHEMAS, ruleNamedToolSchemas(false, true))).toBe(true);
     const facts = binding();
-    const payload = { provider: facts.route, model: facts.model, system: facts.systemPrompt, tools: LOCAL_TOOL_SCHEMAS,
+    const payload = { provider: facts.route, model: facts.model, system: facts.systemPrompt, tools: LEGACY_LOCAL_TOOL_SCHEMAS,
       messages: [{ role: 'user' as const, source: { kind: 'user' as const }, content: [{ type: 'text', text: 'synthetic' }] }] };
     const scope = { currentBindingDigest: () => facts.bindingDigest, acceptedOutputDigests: new Set<string>() };
     expect(evaluateEgress(payload, facts, scope).decision).toBe('transmit-local');
-    expect(evaluateEgress({ ...payload, tools: [...LOCAL_TOOL_SCHEMAS, { name: 'unnamed' }] }, facts, scope)).toMatchObject({ decision: 'refuse', reason: 'tools-present' });
+    expect(evaluateEgress({ ...payload, tools: [...LEGACY_LOCAL_TOOL_SCHEMAS, { name: 'unnamed' }] }, facts, scope)).toMatchObject({ decision: 'refuse', reason: 'tools-present' });
   });
   it('executes retrieval and Exact Fetch under installed network denial with no host or transport, and counts cap refusals to the breaker', async () => {
     installNodeNetworkDenial();
@@ -162,11 +174,11 @@ describe('registered local tools without egress', () => {
       retrieval: new RetrievalIndex([source('one', 'alpha')]), purpose: 'synthetic',
       fetch: async () => { socketSeamCalls += 1; throw new Error('socket seam reached'); }, admitHost: () => { socketSeamCalls += 1; throw new Error('host seam reached'); } });
     const signal = new AbortController().signal;
-    const first = await session.execute({ callId: '1', tool: 'retrieve', arguments: { query: 'alpha' }, signal });
+    const first = await session.execute({ callId: '1', tool: 'retrieve', arguments: { query: 'alpha' }, signal, dispatch: { token: Symbol(), active: () => !signal.aborted } });
     const candidates = JSON.parse(first.text) as Array<{ candidateId: string }>;
     expect(first.sourceUrl).toBeNull();
-    expect((await session.execute({ callId: '2', tool: 'exact_fetch', arguments: { candidateId: candidates[0]!.candidateId }, signal })).sourceUrl).toBeNull();
-    for (let i = 3; i <= 129; i += 1) await session.execute({ callId: String(i), tool: 'retrieve', arguments: { query: 'alpha' }, signal });
+    expect((await session.execute({ callId: '2', tool: 'exact_fetch', arguments: { candidateId: candidates[0]!.candidateId }, signal, dispatch: { token: Symbol(), active: () => !signal.aborted } })).sourceUrl).toBeNull();
+    for (let i = 3; i <= 129; i += 1) await session.execute({ callId: String(i), tool: 'retrieve', arguments: { query: 'alpha' }, signal, dispatch: { token: Symbol(), active: () => !signal.aborted } });
     expect(session.usage).toMatchObject({ requests: 0, retrievalCalls: 128, exactFetchCalls: 1, refusedRetrievalCalls: 124 });
     expect(session.egressScope.localBreakerState?.()).toBe('tripped');
     expect(socketSeamCalls).toBe(0);
@@ -195,14 +207,14 @@ describe('the Egress Gate admits exactly the rule-named tool set (#893 review)',
       { currentBindingDigest: () => binding.bindingDigest, acceptedOutputDigests: new Set<string>(), ...scope });
 
   it('compares the payload with the selected rule: web, local, both, or neither', () => {
-    const both = [...LOCAL_TOOL_SCHEMAS, ...PLATFORM_TOOL_SCHEMAS];
+    const both = [...LEGACY_LOCAL_TOOL_SCHEMAS, ...PLATFORM_TOOL_SCHEMAS];
     const cases: Array<[EgressBindingFacts, ReadonlyArray<unknown>, boolean]> = [
-      [facts(web, null), PLATFORM_TOOL_SCHEMAS, true], [facts(web, null), LOCAL_TOOL_SCHEMAS, false], [facts(web, null), both, false],
-      [facts(null, true), LOCAL_TOOL_SCHEMAS, true], [facts(null, true), PLATFORM_TOOL_SCHEMAS, false], [facts(null, true), both, false],
-      [facts(web, true), both, true], [facts(web, true), PLATFORM_TOOL_SCHEMAS, false], [facts(web, true), LOCAL_TOOL_SCHEMAS, false],
-      [facts(null, false), LOCAL_TOOL_SCHEMAS, false], [facts(web, false), both, false], [facts(null, null), LOCAL_TOOL_SCHEMAS, false],
+      [facts(web, null), PLATFORM_TOOL_SCHEMAS, true], [facts(web, null), LEGACY_LOCAL_TOOL_SCHEMAS, false], [facts(web, null), both, false],
+      [facts(null, true), LEGACY_LOCAL_TOOL_SCHEMAS, true], [facts(null, true), PLATFORM_TOOL_SCHEMAS, false], [facts(null, true), both, false],
+      [facts(web, true), both, true], [facts(web, true), PLATFORM_TOOL_SCHEMAS, false], [facts(web, true), LEGACY_LOCAL_TOOL_SCHEMAS, false],
+      [facts(null, false), LEGACY_LOCAL_TOOL_SCHEMAS, false], [facts(web, false), both, false], [facts(null, null), LEGACY_LOCAL_TOOL_SCHEMAS, false],
       [facts(web, true), [...both, { name: 'unnamed', description: '', parameters: {} }], false],
-      [facts(null, true), [LOCAL_TOOL_SCHEMAS[0]!], false],
+      [facts(null, true), [LEGACY_LOCAL_TOOL_SCHEMAS[0]!], false],
     ];
     for (const [binding, tools, admitted] of cases) {
       const decision = decide(binding, tools);
@@ -222,9 +234,9 @@ describe('the Egress Gate admits exactly the rule-named tool set (#893 review)',
       localBreakerState: () => breaker,
     });
     const local = facts(null, true);
-    expect(decide(local, LOCAL_TOOL_SCHEMAS, history('retrieve'), scope('retrieve')).decision).toBe('transmit-local');
-    expect(decide(local, LOCAL_TOOL_SCHEMAS, history('webfetch'), scope('webfetch'))).toMatchObject({ decision: 'refuse', reason: 'payload-out-of-scope' });
-    const tripped = decide(local, LOCAL_TOOL_SCHEMAS, history('retrieve'), scope('retrieve', 'tripped'));
+    expect(decide(local, LEGACY_LOCAL_TOOL_SCHEMAS, history('retrieve'), scope('retrieve')).decision).toBe('transmit-local');
+    expect(decide(local, LEGACY_LOCAL_TOOL_SCHEMAS, history('webfetch'), scope('webfetch'))).toMatchObject({ decision: 'refuse', reason: 'payload-out-of-scope' });
+    const tripped = decide(local, LEGACY_LOCAL_TOOL_SCHEMAS, history('retrieve'), scope('retrieve', 'tripped'));
     expect(tripped).toMatchObject({ decision: 'refuse', reason: 'circuit-breaker-tripped' });
     expect(JSON.stringify(tripped)).toContain('检索未完成');
     expect(JSON.stringify(tripped)).not.toContain('联网核查未完成');

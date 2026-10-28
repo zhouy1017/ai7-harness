@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -22,12 +23,12 @@ function readPair(policyFile: string, schemaFile: string) {
 }
 
 describe('validateAllPolicies', () => {
-  it('discovers all forty-four current and historical pairs and validates every one at this base', () => {
+  it('discovers all current, historical and unselected candidate pairs and validates every one at this base', () => {
     const pairs = discoverPolicyPairs(POLICIES_DIR);
-    expect(pairs).toHaveLength(44);
+    expect(pairs).toHaveLength(53);
 
     const results = validateAllPolicies(POLICIES_DIR);
-    expect(results).toHaveLength(44);
+    expect(results).toHaveLength(53);
     for (const result of results) {
       expect(result.ok, `${result.policyFile}: ${result.reason ?? ''}`).toBe(true);
     }
@@ -847,5 +848,386 @@ describe('Provider Processing v24 and active-set v16 schemas: the ADR 0091 Publi
       expect(policyData.activePolicies['provider-processing-policy'].scopePins[scope]).toEqual(v15.activePolicies['provider-processing-policy'].scopePins[scope]);
     }
     expect(policyData.activePolicies['external-export-policy']).toEqual(v15.activePolicies['external-export-policy']);
+  });
+});
+
+describe('Unselected ordinary v30 and set v21: original-field declaration (Issue #1156)', () => {
+  const { policyData: ordinary, schemaData: ordinarySchema } = readPair('provider-processing-policy.v30.json', 'provider-processing-policy.v30.schema.json');
+  const { policyData: predecessor, schemaData: predecessorSchema } = readPair('provider-processing-policy.v28.json', 'provider-processing-policy.v28.schema.json');
+  const { policyData: set, schemaData: setSchema } = readPair('active-policy-set.v21.json', 'active-policy-set.v21.schema.json');
+  const { policyData: previousSet, schemaData: previousSetSchema } = readPair('active-policy-set.v20.json', 'active-policy-set.v20.schema.json');
+  // Exact Issue §3 constants, independent of the candidate and its generated schema.
+  const expectedQualification = {
+    "qualificationId": "ordinary-production-original-fields-adr0099",
+    "requirements": {
+      "operation": {
+        "operationalScope": "ordinary-production",
+        "independentPurposeSourceAndOriginRequired": true,
+        "identity": "actual-operation-identity-only",
+        "taskPlanRunAndStageWhenPresentRequired": true,
+        "existingDialogueFastOrConnectionActionWhenApplicableRequired": true,
+        "inventedTaskOrRunAllowed": false,
+        "backgroundOrigin": "independently-authorized-explicit-queue-or-matching-enrollment-or-enabled-learning-envelope",
+        "applicableFiniteCeilingSourceEnvelopeAndIdleConditionsRequired": true,
+        "additionalLearningEnrollmentOrPerPassClickRequired": false,
+        "presentationChangesOrigin": false,
+        "newOperationAuthorityGranted": false
+      },
+      "field": {
+        "representation": "original-words-in-an-independently-admitted-typed-field-or-bounded-projection",
+        "exactSourceVersionPurposeCategoryCompletePackageAndRecipeRequired": true,
+        "existingBoundsFidelityAttributionFramingCitationsAndExclusionsRequired": true,
+        "boundsApplyToActualTransmittedValues": true,
+        "newFieldWholeRecordOrSourceReadGranted": false,
+        "missingDataMayBecomeEmptyField": false,
+        "newStructuredPersonnelRoleOrAttributionAdmissionGranted": false,
+        "editorNoteInternalNoteOrPersonalHighlightObjectAdmissionGranted": false,
+        "credentialOrSecretValueAdmissionGranted": false,
+        "excludedContractIds": [
+          "ai7.editorial-learning-example/1"
+        ],
+        "newRawExampleContractGranted": false,
+        "retainedFragments": {
+          "owner": "existing-harness-session-ledger",
+          "completeFragmentAndPermittedContinuationRequired": true,
+          "everyInfluencingSourceProvenanceAndRestrictionRequired": true,
+          "thirdTranscriptReconstructionOrOldAttemptRelabelingAllowed": false,
+          "crossTaskReuseGranted": false,
+          "mixedRestrictionFailure": "hold-affected-processing-without-lossy-elision-or-silent-fallback"
+        }
+      },
+      "modelRecipient": {
+        "actualAttemptOrStageBindingRequired": true,
+        "bindingMembers": [
+          "modelRole",
+          "provider",
+          "route",
+          "model",
+          "protocol",
+          "credentialReference",
+          "credentialGeneration"
+        ],
+        "allConfiguredProvidersOrFallbackChainAllowed": false,
+        "roleReassignmentOrCapabilityProofGranted": false,
+        "credentialBrokerUnchanged": true
+      },
+      "researchRecipients": {
+        "sameOperationIndependentResearchAuthorityRequired": true,
+        "searchField": "already-admitted-model-produced-query",
+        "searchCategory": "web-search-query",
+        "searchRecipient": "selected-policy-admitted-search-backend",
+        "fetchField": "actual-admitted-model-cited-or-search-returned-url",
+        "fetchCategory": "public-source-fetch",
+        "citationAndDestinationChecksRequired": true,
+        "existingDeclaredQueryProtocolSerializationAllowed": true,
+        "separateRawBundleOrAdditionalFieldHeaderReferrerUploadChannelAllowed": false,
+        "manufacturedOrUnboundUrlAllowed": false,
+        "otherModelToolSubagentStageHostOrRecipientGranted": false,
+        "newNetworkCapabilityGranted": false
+      },
+      "recipeAndRule": {
+        "bothActualRecipeAndSelectedRuleMustAuthorizeEveryFieldAndRecipient": true,
+        "missingTypedConsumerContractResult": "hold",
+        "noWebAndToolsFreeRecipesRemainUnchanged": true,
+        "localToolsRemainLocal": true,
+        "curationSearchOrToolCapabilityGranted": false,
+        "retainedGlobalHandlerCapabilityGranted": false,
+        "allInheritedCountsBytesBreakersBudgetsAndAccountStopsRequired": true,
+        "authoredTyposInstructionBranch": {
+          "authority": "ADR0100-section1-as-qualified-by-ADR0099-section5.1",
+          "source": "house-authored-saved-editorInstruction",
+          "taskKind": "editorial-review/typos-and-usage",
+          "modelRole": "Main Editorial Role",
+          "origin": "explicitly-started-foreground",
+          "defaultRuleDeferredStartOrBackgroundOriginAllowed": false,
+          "webToolsSecondaryRecipientsOrSubagentsAllowed": false,
+          "existing1200GraphemeVersionAndFramingLimitsRequired": true
+        },
+        "rawExampleSourceAndConsumerContracts": "separately-typed-and-admitted-under-ADR0101-as-qualified-by-ADR0099-not-created-here"
+      },
+      "currentness": {
+        "owner": "existing-purpose-specific-source-control-policy-and-binding-owners",
+        "checks": [
+          "after-capacity-wait",
+          "immediately-before-each-physical-model-search-or-fetch-send",
+          "before-new-result-publication-when-consumer-contract-requires"
+        ],
+        "exactPreparedPinsAndApplicableCurrentAuthorityRequired": true,
+        "unrelatedChangeOrNewerVersionAloneInvalidatesHistoricalPin": false,
+        "lossOrMismatch": "refuse-affected-new-send-without-silent-refresh-fallback-or-resend",
+        "sentOutcomeCostCheckpointsAndHistoryPreserved": true,
+        "possiblySentAutomaticResendAllowed": false,
+        "frozenVersionRetargetAllowed": false
+      }
+    }
+  };
+  const ruleIds = [
+    'ordinary-production-baseline-analysis', 'ordinary-production-editorial-dialogue',
+    'ordinary-production-review', 'ordinary-production-writing', 'ordinary-production-evaluation',
+    'ordinary-production-editorial-polish', 'ordinary-production-conflict-regenerate',
+    'enrolled-background-manuscript-analysis-processing', 'ordinary-production-material-translation',
+    'ordinary-production-custom-analysis', 'ordinary-production-global-agent-dialogue',
+    'enrolled-background-processing', 'ordinary-production-learning-curation',
+    'enrolled-background-factual-recheck',
+  ];
+  const rule = (document: typeof ordinary, id: string) => document.decision.providerAllowRules.find((entry: { ruleId: string }) => entry.ruleId === id);
+  const oldRedaction = {
+    housePeopleNamesAndRolesStripped: true, remarksAndInternalNotesStripped: true,
+    authorInformationAllowed: true, houseNameAllowed: true,
+  };
+  const nestedLocations = [
+    ['ordinary-production-review', 'houseReviewPreference', { housePeopleNamesAndRolesStripped: true, authorOrEditorNamesAllowed: false }, true],
+    ['ordinary-production-editorial-polish', 'houseReviewPreference', { housePeopleNamesAndRolesStripped: true, authorOrEditorNamesAllowed: false }, true],
+    ['ordinary-production-learning-curation', 'houseReviewPreference', { housePeopleNamesAndRolesStripped: true, authorOrEditorNamesAllowed: false }, true],
+    ['ordinary-production-custom-analysis', 'editorAuthoredQuestionTemplate', { housePeopleNamesAndRolesStripped: true, authorOrEditorNamesAllowed: false }, true],
+    ['ordinary-production-review', 'editorTaskInstruction', { personNamesAllowed: false }, false],
+    ['ordinary-production-review', 'houseReviewGuidelineClause', { personNamesAllowed: false }, false],
+  ] as const;
+  // Exact Issue §5 identity deltas, asserted before any inverse restores a predecessor value.
+  const expectedIdentities = {
+    schemaPath: 'docs/policies/provider-processing-policy.v30.schema.json', version: 'v30', predecessorVersion: 'v28',
+    predecessorCanonicalPath: 'docs/policies/provider-processing-policy.v28.json',
+    canonicalPath: 'docs/policies/provider-processing-policy.v30.json',
+    humanProjectionPath: 'docs/policies/provider-processing-policy.v30.md',
+  };
+  const appendedAuthorities = [
+    'docs/adr/0099-distinguish-public-release-from-scoped-global-agent-processing.md',
+    'docs/adr/0100-admit-scoped-editor-task-instruction-text.md',
+    'docs/adr/0101-admit-scoped-full-fidelity-learned-examples.md',
+  ];
+  const expectedSetIdentities = {
+    schemaPath: 'docs/policies/active-policy-set.v21.schema.json', version: 'v21', predecessorVersion: 'v20',
+    predecessorCanonicalPath: 'docs/policies/active-policy-set.v20.json',
+  };
+  const qualificationRef = 'ordinary-production-original-fields-adr0099';
+  const replacement = '姓名、角色或私密措辞仅在满足本文件原文字段资格时保留，否则沿用原有限制';
+  const sha256 = (path: string) => createHash('sha256').update(readFileSync(resolve(ROOT, path))).digest('hex');
+  const rejectOrdinary = (mutate: (candidate: typeof ordinary) => void) => {
+    const candidate = structuredClone(ordinary);
+    mutate(candidate);
+    expect(() => validatePolicyDocument(candidate, ordinarySchema)).toThrow(/required const/);
+  };
+
+  it('closes both complete documents with the established root const dialect and exact identities', () => {
+    // Each schema keeps its own predecessor's metadata pattern: ordinary keeps a description, the set does not.
+    expect(Object.keys(ordinarySchema)).toEqual(['$schema', 'title', 'description', 'type', 'const']);
+    expect(Object.keys(setSchema)).toEqual(['$schema', 'title', 'type', 'const']);
+    for (const [document, schema, previousSchema] of [[ordinary, ordinarySchema, predecessorSchema], [set, setSchema, previousSetSchema]]) {
+      expect(Object.keys(schema)).toEqual(Object.keys(previousSchema));
+      expect(schema.$schema).toBe('http://json-schema.org/draft-07/schema#');
+      expect(schema.type).toBe('object');
+      expect(schema.const).toEqual(document);
+      expect(() => validatePolicyDocument(document, schema)).not.toThrow();
+    }
+    expect(ordinary).toMatchObject({ ...expectedIdentities, lifecycleStatus: 'active', operationalScope: 'ordinary-production' });
+    expect(set).toMatchObject(expectedSetIdentities);
+    expect(ordinary.originalFieldQualification).toEqual(expectedQualification);
+    expect(ordinary.authorityBasis).toEqual([...predecessor.authorityBasis, ...appendedAuthorities]);
+  });
+
+  it('independently reverses only the exhaustive ordinary deltas and proves complete v28 inheritance', () => {
+    const normalized = structuredClone(ordinary);
+    for (const [key, value] of Object.entries(expectedIdentities)) {
+      expect(normalized[key]).toBe(value);
+      normalized[key] = predecessor[key];
+    }
+    expect(normalized.authorityBasis).toEqual([...predecessor.authorityBasis, ...appendedAuthorities]);
+    normalized.authorityBasis = normalized.authorityBasis.slice(0, -appendedAuthorities.length);
+    expect(normalized.originalFieldQualification).toEqual(expectedQualification);
+    delete normalized.originalFieldQualification;
+    expect(normalized.decision.providerAllowRules.map((entry: { ruleId: string }) => entry.ruleId)).toEqual(ruleIds);
+    for (const id of ruleIds) {
+      const affected = rule(normalized, id);
+      expect(affected.redaction).toEqual({ mode: 'qualified-original-field-processing', qualificationRef,
+        unqualified: oldRedaction, qualifiedOriginalWords: 'preserve-within-existing-field-contract' });
+      expect(affected.redaction.unqualified).toEqual(rule(predecessor, id).redaction);
+      affected.redaction = affected.redaction.unqualified;
+    }
+    for (const [id, key, defaults, hasDescription] of nestedLocations) {
+      const affected = rule(normalized, id)[key];
+      expect(affected.textProcessing).toEqual({ mode: 'qualified-original-field-processing', qualificationRef,
+        unqualified: defaults, qualifiedOriginalWords: 'preserve-within-existing-field-contract' });
+      for (const [member, value] of Object.entries(defaults)) {
+        expect(affected).not.toHaveProperty(member);
+        expect(rule(predecessor, id)[key][member]).toBe(value);
+        affected[member] = value;
+      }
+      delete affected.textProcessing;
+      if (hasDescription) {
+        expect(affected.descriptionZh.split(replacement)).toHaveLength(2);
+        expect(rule(predecessor, id)[key].descriptionZh.split('绝不含作者或编辑姓名')).toHaveLength(2);
+        affected.descriptionZh = affected.descriptionZh.replace(replacement, '绝不含作者或编辑姓名');
+      }
+    }
+    expect(normalized).toEqual(predecessor);
+  });
+
+  it('changes only set identity and the exact ordinary pin, preserving every other pin and selection restriction', () => {
+    expect(set.activePolicies['provider-processing-policy'].scopePins['ordinary-production']).toEqual({
+      policyId: 'provider-processing-policy', policyType: 'provider-processing', version: 'v30',
+      canonicalPath: 'docs/policies/provider-processing-policy.v30.json', sha256: sha256('docs/policies/provider-processing-policy.v30.json'),
+    });
+    const normalized = structuredClone(set);
+    for (const [key, value] of Object.entries(expectedSetIdentities)) {
+      expect(normalized[key]).toBe(value);
+      normalized[key] = previousSet[key];
+    }
+    normalized.activePolicies['provider-processing-policy'].scopePins['ordinary-production'] = previousSet.activePolicies['provider-processing-policy'].scopePins['ordinary-production'];
+    expect(normalized).toEqual(previousSet);
+    for (const pin of [...Object.values(set.activePolicies['provider-processing-policy'].scopePins), set.activePolicies['external-export-policy']] as Array<{ canonicalPath: string; sha256: string }>) {
+      expect(sha256(pin.canonicalPath)).toBe(pin.sha256);
+    }
+  });
+
+  it.each([
+    ['provider-processing-policy.v28.json', 'f8e5f1031f2e923e7693fdc153497349f368a12c5929714c7af9aa5afadcb147'],
+    ['provider-processing-policy.v28.schema.json', '33ce57de4b7275b6ee20786c16060695242ac7ef47621b387af5fdd41a62dae6'],
+    ['provider-processing-policy.v29.json', 'c9545a5f461a7791115c1f4664bbd731757775951f814d39c28b12c85af88c9d'],
+    ['provider-processing-policy.v29.schema.json', 'b7251af2cc84bacb763c8d7993e575abc80c3c5d4728326e9ee36d6235a18435'],
+    ['active-policy-set.v20.json', 'c5587d32e87a6422a09d2c3cb77271d1e0773a016923b91b776c623a7b5ff168'],
+    ['active-policy-set.v20.schema.json', '3136b7313a065c9dd54a1f8b9416117195a98cef685f707f73627ee905c1dd5d'],
+  ])('preserves frozen predecessor bytes: %s', (file, digest) => {
+    expect(sha256(`docs/policies/${file}`)).toBe(digest);
+  });
+
+  it('preserves the nine approved decisions, including complete redacted /1 and the v29 fixture inventory', () => {
+    const curation = rule(ordinary, 'ordinary-production-learning-curation');
+    expect(curation.learningExamples).toEqual(rule(predecessor, curation.ruleId).learningExamples);
+    expect(curation.learningExamples).toMatchObject({ contractId: 'ai7.editorial-learning-example/1',
+      purpose: 'model-driven-learning-curation-only', maxExamplesPerRequest: 10, maxBeforeGraphemes: 2048,
+      maxProposalGraphemes: 2048, maxAfterGraphemes: 2048, maxReasonGraphemes: 512,
+      maxTextGraphemesTotal: 16000, maxEncodedCategoryBytes: 131072, redactionLifted: false,
+      automaticPreferenceActivationAllowed: false, explicitAcceptanceIntoExistingPreferenceOwnerRequired: true });
+    expect(curation.learningExamples.exactModelVisibleFields).toHaveLength(15);
+    expect(curation.houseReviewPreference.purpose).toBe('candidate-reference-and-deduplication-only');
+    const polish = rule(ordinary, 'ordinary-production-editorial-polish');
+    expect(polish.houseReviewPreference).toMatchObject({ maxLines: 12, maxGraphemesTotal: 200,
+      attributedToRecordVersion: true, manuscriptTextAllowed: false });
+    for (const key of ['source', 'allowedTaskKinds', 'providerBinding', 'authorityOrigin', 'executionMode', 'transmissions', 'output', 'localTools']) {
+      expect(polish[key]).toEqual(rule(predecessor, polish.ruleId)[key]);
+    }
+    expect(ordinary.searchConnectionTest).toEqual(predecessor.searchConnectionTest);
+    expect(ordinary.connectionTest).toEqual(predecessor.connectionTest);
+    const review = rule(ordinary, 'ordinary-production-review');
+    expect(review.claimScopedFactualStages).toEqual(rule(predecessor, review.ruleId).claimScopedFactualStages);
+    expect(review.factualClaimContract).toEqual(rule(predecessor, review.ruleId).factualClaimContract);
+    expect(review.factualClaimContract.countContract).toMatchObject({ maximumModelSubmissions: 'U+129*C',
+      maximumSearchSubmissions: '3*C', mandatoryFiniteForegroundCeiling: false, reservationsPersistedDurably: true });
+    const recheck = rule(ordinary, 'enrolled-background-factual-recheck');
+    expect(recheck.factualRecheck).toEqual(rule(predecessor, recheck.ruleId).factualRecheck);
+    expect(recheck.transmissions).toEqual(rule(predecessor, recheck.ruleId).transmissions);
+    expect(review.editorTaskInstruction).toMatchObject({ maxGraphemes: 1200, attributedToProcedureVersion: true, contractFramingOverrideAllowed: false });
+    expect(review.houseReviewGuidelineClause).toMatchObject({ maxClauses: 40, maxGraphemesPerClause: 300, attributedToImportedDocumentVersion: true });
+    const development = readPair('provider-processing-policy.v29.json', 'provider-processing-policy.v29.schema.json').policyData;
+    expect(development.fixtureReplayRules.map((entry: { ruleId: string }) => entry.ruleId)).toEqual([
+      'development-ci-fixture-review', 'development-ci-fixture-global-agent-dialogue', 'development-ci-fixture-learning-curation',
+      'development-ci-fixture-editorial-polish', 'development-ci-fixture-factual-claim-stages', 'development-ci-fixture-factual-recheck',
+    ]);
+    expect(development.legacyLocalFixtureCompatibility.tuples).toHaveLength(47);
+    expect(development.legacyLocalFixtureCompatibility.registeredEvidenceCases).toHaveLength(13);
+    expect(development.legacyLocalFixtureCompatibility.allFixtureFileInventory).toHaveLength(53);
+    expect(development.legacyLocalFixtureCompatibility.manifestSha256).toBe('2572c1b5aa05d6ccc9a60a2a8a03ba2cefc10d5f48c1a85377d53797360bc0d2');
+    expect(set.activePolicies['provider-processing-policy'].scopePins['development-ci'].version).toBe('v29');
+  });
+
+  it.each(Object.keys(expectedQualification.requirements))('rejects missing or changed qualification part %s', (part) => {
+    rejectOrdinary(candidate => { delete candidate.originalFieldQualification.requirements[part]; });
+    rejectOrdinary(candidate => { candidate.originalFieldQualification.requirements[part] = {}; });
+    rejectOrdinary(candidate => { candidate.originalFieldQualification.requirements[part].unknown = true; });
+  });
+
+  it('rejects wrong primitive types for every qualification boolean, including the three conditional subcontracts', () => {
+    const paths = Object.keys(expectedQualification.requirements).map(part => ['originalFieldQualification', 'requirements', part]);
+    paths.push(['originalFieldQualification', 'requirements', 'field', 'retainedFragments'],
+      ['originalFieldQualification', 'requirements', 'recipeAndRule', 'authoredTyposInstructionBranch']);
+    for (const path of paths) {
+      const block = path.reduce((value, key) => value[key], ordinary);
+      for (const [key, value] of Object.entries(block)) {
+        if (typeof value !== 'boolean') continue;
+        for (const wrong of [null, 'true', 1, !value]) {
+          rejectOrdinary(candidate => { path.reduce((value, key) => value[key], candidate)[key] = wrong; });
+        }
+      }
+    }
+  });
+
+  it.each(ruleIds)('rejects divergent wrapper reference, mode, originals or any default on %s', (id) => {
+    const mutateWrapper = (mutate: (wrapper: Record<string, unknown>) => void) => rejectOrdinary(candidate => mutate(rule(candidate, id).redaction));
+    for (const key of ['mode', 'qualificationRef', 'unqualified', 'qualifiedOriginalWords']) {
+      mutateWrapper(wrapper => { delete wrapper[key]; });
+      mutateWrapper(wrapper => { wrapper[key] = 'unknown'; });
+    }
+    mutateWrapper(wrapper => { wrapper.unknown = true; });
+    for (const key of Object.keys(oldRedaction)) {
+      rejectOrdinary(candidate => { delete rule(candidate, id).redaction.unqualified[key]; });
+      for (const wrong of [null, 'false', 0, !oldRedaction[key as keyof typeof oldRedaction]]) {
+        rejectOrdinary(candidate => { rule(candidate, id).redaction.unqualified[key] = wrong; });
+      }
+    }
+  });
+
+  it.each(nestedLocations)('rejects divergent nested defaults and wrapper at %s.%s', (id, key, defaults) => {
+    for (const member of ['mode', 'qualificationRef', 'unqualified', 'qualifiedOriginalWords']) {
+      rejectOrdinary(candidate => { delete rule(candidate, id)[key].textProcessing[member]; });
+      rejectOrdinary(candidate => { rule(candidate, id)[key].textProcessing[member] = 'unknown'; });
+    }
+    for (const [member, value] of Object.entries(defaults)) {
+      rejectOrdinary(candidate => { delete rule(candidate, id)[key].textProcessing.unqualified[member]; });
+      for (const wrong of [null, 'true', 1, !value]) {
+        rejectOrdinary(candidate => { rule(candidate, id)[key].textProcessing.unqualified[member] = wrong; });
+      }
+      rejectOrdinary(candidate => { rule(candidate, id)[key][member] = value; });
+    }
+    rejectOrdinary(candidate => { rule(candidate, id)[key].textProcessing.unknown = true; });
+  });
+
+  it('rejects extra fields, lifted /1, new recipients/categories/roles/kinds, weakened bounds, fragment/currentness or retry/fallback', () => {
+    const mutations: Array<(candidate: typeof ordinary) => void> = [
+      candidate => { candidate.unknown = true; },
+      candidate => { candidate.originalFieldQualification.unknown = true; },
+      candidate => { candidate.originalFieldQualification.qualificationId = 'unknown'; },
+      candidate => { candidate.originalFieldQualification.requirements.field.excludedContractIds = []; },
+      candidate => { rule(candidate, 'ordinary-production-learning-curation').learningExamples.redactionLifted = true; },
+      candidate => { rule(candidate, 'ordinary-production-learning-curation').learningExamples.contractId = 'unknown-raw-contract'; },
+      candidate => { candidate.originalFieldQualification.requirements.modelRecipient.bindingMembers.push('anotherRecipient'); },
+      candidate => { rule(candidate, 'ordinary-production-review').allowedOutboundDataCategories.push('unknown-raw-category'); },
+      candidate => { rule(candidate, 'ordinary-production-review').allowedTaskKinds.push('unknown-kind'); },
+      candidate => { candidate.originalFieldQualification.requirements.recipeAndRule.authoredTyposInstructionBranch.modelRole = 'Fast Interaction Role'; },
+      candidate => { candidate.originalFieldQualification.requirements.recipeAndRule.authoredTyposInstructionBranch.origin = 'background'; },
+      candidate => { candidate.originalFieldQualification.requirements.researchRecipients.searchRecipient = 'unbound-host'; },
+      candidate => { candidate.originalFieldQualification.requirements.field.retainedFragments.completeFragmentAndPermittedContinuationRequired = false; },
+      candidate => { candidate.originalFieldQualification.requirements.field.retainedFragments.everyInfluencingSourceProvenanceAndRestrictionRequired = false; },
+      candidate => { candidate.originalFieldQualification.requirements.currentness.checks.pop(); },
+      candidate => { candidate.originalFieldQualification.requirements.currentness.lossOrMismatch = 'silently-refresh'; },
+      candidate => { rule(candidate, 'ordinary-production-review').editorTaskInstruction.maxGraphemes = 1201; },
+      candidate => { rule(candidate, 'ordinary-production-review').houseReviewGuidelineClause.maxClauses = 41; },
+      candidate => { rule(candidate, 'ordinary-production-review').houseReviewPreference.maxGraphemesTotal = 201; },
+      candidate => { rule(candidate, 'ordinary-production-custom-analysis').editorAuthoredQuestionTemplate.maxGraphemes = 401; },
+      candidate => { rule(candidate, 'ordinary-production-review').claimScopedFactualStages.claimVerification.automaticTransportRetryAllowed = true; },
+      candidate => { rule(candidate, 'ordinary-production-review').claimScopedFactualStages.legacyRuleFallbackAllowed = true; },
+      candidate => { candidate.searchConnectionTest.fallbackAllowed = true; },
+    ];
+    for (const mutate of mutations) rejectOrdinary(mutate);
+  });
+
+  it('rejects set drift and changes to a frozen fixture pin without executing a policy interpreter', () => {
+    for (const scope of ['ordinary-production', 'development-ci', 'fixture-recording', 'developer-live']) {
+      const candidate = structuredClone(set);
+      candidate.activePolicies['provider-processing-policy'].scopePins[scope].sha256 = '0'.repeat(64);
+      expect(() => validatePolicyDocument(candidate, setSchema)).toThrow(/required const/);
+    }
+    for (const mutate of [
+      (candidate: typeof set) => { candidate.extra = true; },
+      (candidate: typeof set) => { delete candidate.trustedOperationalScopeSelection; },
+      (candidate: typeof set) => { candidate.trustedOperationalScopeSelection.crossScopeFallbackAllowed = true; },
+      (candidate: typeof set) => { candidate.activePolicies['external-export-policy'].sha256 = '0'.repeat(64); },
+    ]) {
+      const candidate = structuredClone(set);
+      mutate(candidate);
+      expect(() => validatePolicyDocument(candidate, setSchema)).toThrow(/required const/);
+    }
+    const { policyData: development, schemaData } = readPair('provider-processing-policy.v29.json', 'provider-processing-policy.v29.schema.json');
+    development.legacyLocalFixtureCompatibility.allFixtureFileInventory[0].fixtureFileSha256 = '0'.repeat(64);
+    expect(() => validatePolicyDocument(development, schemaData)).toThrow(/required const/);
   });
 });

@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 // The generator of the authored fixture `sample1-writing-authored` (Issue #432, plan slice S84a). The passages and the draft below
 // (`tests/support/writing-task.ts`) are the authored part: each passage was written after reading one Analysis Unit of exact
 // `sample1` (ADR 0043) and cites, by its position in the unit message, the blocks it rests on; the draft is
@@ -44,6 +45,12 @@ import {
   WRITING_REQUEST,
 } from '../support/writing-task.js';
 import type { WritingProjection } from '../../src/shared/protocol.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 const FIXTURES_ROOT = resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url)));
 const FIXTURE_PATH = resolve(FIXTURES_ROOT, `${WRITING_FIXTURE_IDENTITY}.json`);
@@ -127,7 +134,7 @@ async function pass(layout: boolean): Promise<boolean> {
     interruptAfterAbandonObjectRemoval: false,
     baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
   });
-  const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+  const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
   try {
     const { bookId } = await importSample1Book(store, scenario.codeRoot, WRITING_BOOK_TITLE);
     await pinEditorialWorkspaceProfileRevision2(store, bookId);

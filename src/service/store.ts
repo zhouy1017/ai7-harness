@@ -1,12 +1,28 @@
+import { procedureStopped, readProcedureLibrary, resolveProcedurePin, saveProcedureDefinition, selectProcedureForBook, procedureVersionId } from './procedures/editable.js';
+import { initializeEditableProcedureSchema } from './procedures/editable-schema.js';
+import { HouseWordLists, initializeHouseWordListSchema } from './review/house-word-list.js';
+import { HouseWordListError, type InspectHouseWordListInput, type SaveHouseWordListInput } from '../shared/protocol/house-word-list.js';
+import { validateRequestAdmissionRecords } from './analysis/baseline-analysis-store.js';
+import { MODEL_REQUEST_ADMISSION_SCHEMA_VERSION, WORD_TRACKED_IMPORT_SCHEMA_VERSION, POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION, LEARNING_CURATION_SCHEMA_VERSION } from './task-authorization.js';
+import { IDLE_BACKGROUND_SCHEMA_VERSION, LOCAL_REVIEW_SCHEMA_VERSION, EDITORIAL_MEMORY_SCHEMA_VERSION } from './task-authorization.js';
+import { initializeLocalStageSchema } from './review/review-runs.js';
+import { sha256Hex } from './analysis/canonical.js';
+import { graphemeCount } from './analysis/factual-review-contract.js';
+import { backgroundEnrollmentKinds } from './analysis/live-kind-admission.js';
+import { executionBackgroundShare } from './analysis/execution.js';
 import { initializeProcedureDefinitionSchema } from './procedures/definition-store.js';
-import { EditorialLearningLedger, initializeEditorialLearningSchema } from './learning/ledger.js';
-import type { ChangeEditorialLearningInput, CreateEditorialMemoryInput, DeactivateEditorialMemoryInput, InspectEditorialLearningInput, EditorialLearningProjection } from '../shared/protocol/learning.js';
-import { dialogueQuestionDigest } from './dialogue/contract.js';
+import { EditorialLearningLedger, LearningReads, initializeEditorialLearningSchema, type WordLearningProofs } from './learning/ledger.js';
+import { CURATION_CONTRACT_DIGEST, validCurationBudget, parseCurationResult, type CurationRun } from './learning/curation.js';
+import type { EnabledLearningEnvelope, LearningCurationBudget, LearningCurationBundle } from '../shared/protocol/learning.js';
+import type { WordTrackedEditLearningSource } from '../shared/protocol/learning.js';
+import type { ChangeEditorialLearningInput, CreateEditorialMemoryInput, DeactivateEditorialMemoryInput, InspectEditorialLearningInput, EditorialLearningProjection, LearningReasonAskInput, LearningReasonAskProjection } from '../shared/protocol/learning.js';
+import { buildDialogueMessage, dialogueQuestionDigest } from './dialogue/contract.js';
 import { fragmentsText } from './dialogue/fragments.js';
-import { globalAgentDialogueProjection } from './dialogue/global-agent-session.js';
-import type { AskGlobalAgentInput, GlobalAgentDialogueProjection, GlobalAgentAttemptInput, GlobalMemoryPin } from '../shared/protocol.js';
+import { globalAgentDialogueProjection, globalAgentScopedTools, readGlobalAgentHistory, type GlobalAgentTurnHistory } from './dialogue/global-agent-session.js';
+import type { AskGlobalAgentInput, GlobalAgentDialogueProjection, GlobalAgentAttemptInput, GlobalAgentProcedure, GlobalAgentProcedurePin, GlobalAgentScope, GlobalAgentScopeInput, GlobalMemoryPin, GlobalAgentSourceCandidate, HouseReviewPreferenceVersion, PrepareGlobalAgentTurnInput } from '../shared/protocol.js';
+import { PROCEDURE_STAGE_LABELS, type ProcedureDefinitionDocument } from '../shared/protocol/procedures.js';
 import { GLOBAL_AGENT_SCHEMA_VERSION } from './task-authorization.js';
-import { SupervisionDirectives, governedMemoryItems, preferenceItems, initializeSupervisionSchema } from './learning/supervision-directives.js';
+import { SupervisionDirectives, governedMemoryItems, preferenceItems, initializeSupervisionSchema, supervisionSourceCandidates, editorialMemoryGovernanceItem, type EditorialMemoryGovernanceHooks } from './learning/supervision-directives.js';
 import { GLOBAL_AGENT_POLICY_BLOCKED, type GlobalAgentProjection, type RecordLearningSupervisionInput } from '../shared/protocol.js';
 import { analysisBytePage, revisionUnitsPage, analysisOverviewPage, baselineAnalysisSummaryPage } from './analysis/baseline-analysis-wire.js';
 import { acquireSkillPackage, ImportedSkills, ImportedSkillError, SkillAcquisitions, type AcquiredSkillPackage } from './imported-skills.js';
@@ -21,7 +37,7 @@ import { customAnalysisKindDefinition, customAnalysisPlan } from './analysis/cus
 import { withModelClarification } from './provider/clarification-contract.js';
 import { CUSTOM_ANALYSIS_DIMENSION_STATE_LABELS, CUSTOM_ANALYSIS_UNIT_PLACEHOLDER, MAX_CUSTOM_ANALYSIS_ROWS_SHOWN, customAnalysisKindId, MAX_CUSTOM_ANALYSIS_VERSIONS_SHOWN, customAnalysisDimensionIdOfKind, customAnalysisModeGoal, isCustomAnalysisDimensionId, isCustomAnalysisKindId } from '../shared/protocol.js';
 import type { CustomAnalysisDimensionProjection, CustomAnalysisDimensionsProjection, CustomAnalysisRevisionSummaryProjection, CustomAnalysisRowProjection, PrepareCustomAnalysisInput, SaveCustomAnalysisDimensionInput } from '../shared/protocol.js';
-import { HousePreferenceInfluence, HouseReviewPreferenceLedger, houseReviewPreferenceKindDefinition, housePreferenceSources, initializeHouseReviewPreferenceSchema, preferenceNames, withdrawalOf, withoutNames, type HousePreferenceSource, type StandingReviewMaterial } from './house-review-preference.js';
+import { HousePreferenceInfluence, HouseReviewPreferenceLedger, houseReviewPreferenceKindDefinition, housePreferenceSources, initializeHouseReviewPreferenceSchema, preferenceNames, preferenceSourceIdentity, preferenceSourceWithdrawal, withdrawalOf, withoutNames, type HousePreferenceSource, type StandingReviewMaterial } from './house-review-preference.js';
 import { inspectEditQualitySignals as readEditQualitySignals } from './edit-quality-signals.js';
 import type { HouseReviewPreferenceProjection, HouseReviewPreferenceUse, EditQualitySignalsProjection } from '../shared/protocol.js';
 import type { ApplyReceiptProjection, BatchProposalDecisionDraftInput, InspectApplyReceiptInput, PrepareReverseApplyInput, ProposalDraftBatchProjection, ProposalWorkspaceInput, ProposalWorkspaceProjection, RecordProposalDecisionInput, ReverseApplyPreparationProjection, SaveProposalDecisionDraftInput } from '../shared/protocol.js';
@@ -32,12 +48,18 @@ import { materialRetrievalSources } from './retrieval/source-readers.js';
 import { TASK_MATERIALS_NONE, TASK_MATERIALS_STATEMENT, TASK_MATERIAL_LIVE_UNAVAILABLE, REVIEW_MATERIAL_CATEGORY_REQUIRED, taskMaterialReferenceLine, taskMaterialKindDefinition, taskMaterialSources, taskMaterialWords, taskMaterialRefusal, taskMaterialSettled, TASK_MATERIAL_OFFER_DAMAGED, type MaterialGuardRefusal, type TaskMaterialBoundary, type TaskMaterialReading, type TaskMaterialSource } from './task-material-references.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { readProxySetting, writeProxySetting } from './provider/proxy-setting.js';
-import { allowedProductionBindingOf, type ConfiguredProviderBinding } from './launch-policy.js';
+import { allowedProductionBindingOf, selectedPolicyIdentityOf, resolveSourceCheckoutLaunchPolicySync, readRetainedBoundAnalysisPolicySync, type ConfiguredProviderBinding } from './launch-policy.js';
+import { factualClaimVerificationInput } from './analysis/factual-claim-ledger.js';
+import { factualClaimVerificationPrompt } from './analysis/factual-claim-contract.js';
+import { resolveProcedureDefinition } from './procedures/definition-store.js';
+import type { FactualRecheckCandidate, FactualRecheckRun } from './analysis/factual-recheck.js';
+import { searchBackend, searchBackendConfigurationDigest } from './provider/search-backends/index.js';
+import { LocalFixturePolicyCatalog, type LocalFixtureRuntimeContext } from './provider/model-fixture.js';
 import { DEVELOPMENT_CREDENTIAL_REFERENCES } from '../shared/protected-secret-identity.js';
 import { MODEL_SERVICE_ROUTE_BINDINGS, MODEL_SERVICE_ROUTES, modelServiceModels, type ModelConnectionTestStatus } from '../shared/protocol.js';
-import { closeSync, constants, createReadStream, existsSync, fstatSync, lstatSync, openSync, readSync } from 'node:fs';
+import { closeSync, constants, createReadStream, existsSync, fstatSync, lstatSync, openSync, readSync, realpathSync } from 'node:fs';
 import { copyFile, lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
-import { basename, extname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
+import { basename, dirname, extname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import { acceptedSourceImportRetainedBoundaryLabels, sourceImportRetainedBoundaryLabel, BASELINE_ANALYSIS_MODE_GOALS, BASELINE_ANALYSIS_MODE_LABELS, CAPTURED_PROCEDURE_CAPTURE_SLOTS, CAPTURED_PROCEDURE_STATE_LABELS, MAX_CAPTURED_PROCEDURE_RUNS_SHOWN, MAX_CAPTURED_PROCEDURE_TITLE_GRAPHEMES, MAX_CAPTURED_PROCEDURE_VERSIONS_PAGE, J03_TASK_GOAL, MAX_DIALOGUE_SELECTION_GRAPHEMES, MAX_EVALUATION_CALIBRATION_BOOKS, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_LEARNING_AUDIT_BOOK_CHOICES, MAX_LEARNING_AUDIT_PAGE, MAX_LEARNING_AUDIT_SERIES_CHOICES, MAX_LEARNING_LINEAGE_DECISIONS, MAX_LEARNING_LINEAGE_TASKS, MAX_LEARNING_REMEDIATION_ITEMS, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
 import type {
@@ -373,7 +395,7 @@ import {
   WRITING_MODE_GOALS,
 } from '../shared/protocol.js';
 import { INITIAL_EVALUATION_LIVE_UNAVAILABLE, initialEvaluationKindDefinition } from './evaluation/initial-evaluation-kind.js';
-import { EVALUATION_PAYLOAD_CATEGORIES, liveKindAdmission, liveKindRule, liveMaterialRule } from './analysis/live-kind-admission.js';
+import { EVALUATION_PAYLOAD_CATEGORIES, liveKindAdmission, liveKindRule, liveMaterialRule, kindLocalTools } from './analysis/live-kind-admission.js';
 import { reviewCategoryKindId } from '../shared/protocol.js';
 import { producedUnverified } from './evaluation/unverified-disclosure.js';
 import { readersReportKindDefinition } from './evaluation/readers-report-kind.js';
@@ -463,6 +485,7 @@ import {
 import {
   AnalysisError,
   BaselineAnalysisStore,
+  RUN_WAITING_IDLE_LABEL,
   activeRunReason,
   runIsActive,
   type AnalysisPreparationResult,
@@ -487,11 +510,20 @@ import {
   isCleanTracerFidelity,
   MAX_ARCHIVE_BYTES,
   parseDocx,
+  parseNativeDocxIntake,
+  parseNativeDocxIntakeBytes,
+  compileWordTrackedDocx,
+  compileWordTrackedDocxBytes,
+  WORD_DOCX_PARSER_IDENTITY,
+  wordImportFidelityReport,
   withTextBoxDisposition,
   type FidelityConversionIdentity,
   type ImportFidelityPlan,
   type ParsedDocx,
   type ParsedDocxBlock,
+  type ParsedWordDocx,
+  type NativeDocxIntakeParse,
+  type WordTrackedCompilation,
   type TextBoxDisposition,
 } from './docx.js';
 import {
@@ -568,22 +600,58 @@ import { decisionResolvesConflict, initializeProposalConflictSchema, ProposalCon
 import {
   ImportRetentionError,
   initializeImportRetentionSchema,
+  initializeWordImportRetentionSchema,
+  validateWordImportRetentionVersion,
+  validateWordImportRetentionClosure,
   recordTextBoxChoice,
   recordedTextBoxChoice,
   stageImportSources,
+  stageWordRevisionIntake,
+  requireWordStagedIntake,
+  bindWordReadingBlocks,
+  wordTrackedSamples,
+  wordTrackedSampleRecord,
+  validateWordChoice,
+  wordPreparedChoice,
+  wordPreparedSelection,
+  recordWordPreparedIntake,
+  requireWordPreparedIntake,
   stagedImportSourcesMatch,
   stagedTextBoxParagraphs,
+  readWordParentSourcePin,
+  requireWordParentSourcePin,
+  retainWordRevisionSource,
+  retainWordRevisionImport,
+  bindWordReadingToRevision,
+  retainWordManuscriptSourceSegments,
+  requireWordManuscriptSourceSegments,
+  readWordImportChoiceRecord,
+  wordParentSourcePinRecord,
+  createWordSampleDetailContext,
+  wordSampleDetailContextCurrent,
+  wordSourceFragmentText,
+  resolveWordSampleDetailSource,
+  pageWordSampleDetail,
+  type WordSampleDetailContext,
+  type WordSampleDetailPage,
+  type WordReadingKind,
+  type WordPreparedIntake,
+  type WordCompiledReading,
+  type WordTrackedChoiceInput,
+  type WordImportChoiceRecord,
   type StagedImportSources,
   type StagedTextBoxParagraph,
 } from './import-retention.js';
 import {
   ImportedMarkError,
   createImportedMarks,
+  createWordImportedMarks,
+  validateWordImportedMarkSources,
   initializeImportedMarkSchema,
   stageImportedMarks,
   stagedImportedMarksMatch,
 } from './imported-marks.js';
-import { ExportLedgerError, ManuscriptExportStore, initializeExportLedgerSchema } from './manuscript-export.js';
+import { ExportLedgerError, ManuscriptExportStore, initializeExportLedgerSchema, readWordManuscriptExportSource } from './manuscript-export.js';
 import {
   DEFAULT_EXECUTION_RULES_STATEMENT,
   DEFAULT_EXECUTION_RULE_PROCEDURES,
@@ -644,10 +712,10 @@ import {
   BACKGROUND_RECORD_DAMAGED,
   BACKGROUND_REPLACEMENT_WAITING,
   BACKGROUND_REVOKED,
-  backgroundAnalysisShare,
   backgroundNotStartedReason,
   backgroundQuietReason,
   backgroundShareFullReason,
+  BACKGROUND_ANALYSIS_KIND,
   BACKGROUND_ANALYSIS_STATEMENT,
   BACKGROUND_ANALYSIS_WHAT,
   BACKGROUND_ENROLL_NO_RULE,
@@ -695,7 +763,7 @@ import { RESEARCH_EVIDENCE_INCOMPLETE, RESEARCH_EVIDENCE_READ_ONLY, ResearchEvid
 import {
   FactualVerificationError,
   FactualVerificationLedger,
-  initializeFactualVerificationSchema,
+  initializeFactualVerificationSchema, initializeFactualClaimSchema,
   type ManuscriptReader,
   type MaterializedFactualFinding,
 } from './factual-verification.js';
@@ -793,6 +861,7 @@ import {
   learningAuditChoices,
   learningAuditStanding,
   learningMaterialDigest,
+  wordTrackedEditCandidate,
   learningMaterialOrder,
   LEARNING_REMEDIATION_NAMED,
   learningRemediationPreview,
@@ -801,7 +870,7 @@ import {
   type LearningMaterialCandidate,
   type LearningRemediationReach,
 } from './learning-eligibility.js';
-import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryEntry } from './review/category-configuration.js';
+import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, HISTORICAL_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryEntry } from './review/category-configuration.js';
 import { EvaluationCalibrationError, EvaluationCalibrationLedger, initializeEvaluationCalibrationSchema } from './evaluation-calibration.js';
 import { UsageLedger } from './usage.js';
 import {
@@ -928,6 +997,8 @@ import {
   type DialogueTurnStart,
   type StoredDialogueBinding,
   type StoredDialogueTask,
+  type QualifiedGlobalAttemptMetadata,
+  qualifiedGlobalAttemptMetadataOf,
 } from './dialogue/dialogue-ledger.js';
 import { dialogueProjection, harnessHistoryReader, keptText, resolveAttempts, type DialogueHistoryReader, type LiveAnswer } from './dialogue/dialogue-history.js';
 import { dialogueQuestion } from './dialogue/contract.js';
@@ -1037,7 +1108,7 @@ import {
 import { REIMPORT_GROUP_VERBS, groupReimportMappings, reimportGroupResolutions, reimportGroupVerbs } from './reimport-groups.js';
 import type { ReviewRunDriveSteps } from './review/review-run-driver.js';
 import { reviewCategoryContractInput, type ReviewCategoryConfigurationEntry } from './review/category-configuration.js';
-import { reviewCategoryKindDefinition } from './review/review-category-kind.js';
+import { historicalReviewCategoryDefinitions, reviewCategoryKindDefinition, withReviewLocalTools } from './review/review-category-kind.js';
 import {
   EditorialMarkError,
   EditorialMarkStore,
@@ -1144,7 +1215,7 @@ import {
   MODEL_SERVICE_ROUTES_SCHEMA_VERSION,
   MODEL_CLARIFICATION_SCHEMA_VERSION,
   SEARCH_BACKEND_SCHEMA_VERSION, SEARCH_BACKEND_CONNECTIONS_SQL, RESEARCH_EVIDENCE_SCHEMA_VERSION, MATERIAL_INDEX_LAYER_SCHEMA_VERSION, PROPOSAL_REVIEW_SCHEMA_VERSION, FACTUAL_VERIFICATION_SCHEMA_VERSION, HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION, TASK_INTENT_DRAFT_SCHEMA_VERSION, IMPORTED_SKILL_SCHEMA_VERSION, CUSTOM_ANALYSIS_SCHEMA_VERSION, IMPORTED_SKILL_UPDATE_SCHEMA_VERSION, MODEL_SELECTION_SCHEMA_VERSION, PROCEDURE_DEFINITION_SCHEMA_VERSION, EDITORIAL_LEARNING_SCHEMA_VERSION,
-  LATEST_SCHEMA_VERSION,
+  LATEST_SCHEMA_VERSION, REVIEW_CONTRACT_SCHEMA_VERSION,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
   TEXT_CONVERSION_SCHEMA_VERSION,
@@ -1703,6 +1774,7 @@ type StoredImportCommitProjection =
   | Omit<ManuscriptImportCommitProjection, 'firstWindow'>
   | SourceImportCommitProjection
   | ManuscriptReimportCommitProjection;
+type ImmutableManuscriptImportResult = Omit<ManuscriptImportCommitProjection, 'firstWindow' | 'overview'>;
 
 export class StoreError extends Error {
   constructor(
@@ -1919,10 +1991,67 @@ function fileNameTitleSuggestion(displayName: string): string {
   return withoutExtension.length > 0 ? withoutExtension : displayName;
 }
 
+function draftSourceProjection(snapshot: DraftSnapshot): StagedImportProjection['source'] {
+  return { displayName: snapshot.displayName, format: snapshot.sourceFormat, sourceSha256: snapshot.sourceDigest,
+    sourceBytes: snapshot.sourceBytes, provenanceLabel: '本机文件选择器 · 本地解析 · 未联网',
+    conversion: snapshot.conversion, workingObjectSha256: snapshot.workingObjectDigest };
+}
+
 async function digestFile(path: string): Promise<string> {
   const hash = createHash('sha256');
   for await (const chunk of createReadStream(path)) hash.update(chunk);
   return hash.digest('hex');
+}
+
+function contentObjectPath(objectsRoot: string, objectDigest: string, relativeKey: string): string {
+  requireStore(DIGEST_PATTERN.test(objectDigest) && isManuscriptObjectKey(objectDigest, relativeKey),
+    'OBJECT_PATH_INVALID', '对象摘要或相对路径无效。');
+  const path = resolve(objectsRoot, ...relativeKey.split('/'));
+  requireStore(isInside(objectsRoot, path), 'OBJECT_PATH_INVALID', '对象路径越界。');
+  return path;
+}
+
+/** Read one bounded immutable original, with canonical path and actual byte proof rather than a database generation. */
+async function readRetainedWordOriginal(db: DatabaseSync, dataRoot: string, objectsRoot: string, bookId: string,
+  sourceVersionId: string): Promise<Uint8Array> {
+  const parent = readWordParentSourcePin(db, bookId, sourceVersionId);
+  requireStore(parent.sourceBytes <= MAX_ARCHIVE_BYTES, 'WORD_SOURCE_INVALID', 'Word 原文件超过已支持的包大小。');
+  const object = db.prepare('SELECT relative_key, byte_length FROM content_objects WHERE object_digest = ?').get(parent.objectDigest);
+  requireStore(object && object.byte_length === parent.sourceBytes, 'WORD_SOURCE_INVALID', 'Word 原文件对象记录不完整。');
+  const path = contentObjectPath(objectsRoot, parent.objectDigest, asString(object.relative_key));
+  const inspected = await inspectCanonicalDataFile(dataRoot, dirname(path), basename(path));
+  requireStore(inspected.exists && inspected.path === path, 'WORD_SOURCE_UNAVAILABLE', 'Word 原文件无法读取。');
+  const metadata = await lstat(path);
+  requireStore(metadata.isFile() && !metadata.isSymbolicLink() && metadata.size === parent.sourceBytes,
+    'WORD_SOURCE_UNAVAILABLE', 'Word 原文件不再是完整的留存文件。');
+  const hash = createHash('sha256');
+  const chunks: Buffer[] = [];
+  let bytes = 0;
+  for await (const chunk of createReadStream(path, { highWaterMark: 64 * 1024 })) {
+    bytes += chunk.byteLength;
+    requireStore(bytes <= parent.sourceBytes, 'WORD_SOURCE_UNAVAILABLE', 'Word 原文件在读取时已经变化。');
+    hash.update(chunk); chunks.push(chunk);
+  }
+  requireStore(bytes === parent.sourceBytes && hash.digest('hex') === parent.sourceDigest,
+    'WORD_SOURCE_UNAVAILABLE', 'Word 原文件字节与留存摘要不一致。');
+  return Buffer.concat(chunks, bytes);
+}
+
+/** Before backup or migration, replay every committed Word source and every complete import manifest. */
+async function validateRetainedWordImports(db: DatabaseSync, dataRoot: string, objectsRoot: string): Promise<void> {
+  validateWordImportRetentionClosure(db);
+  const ledger = new EditorialLearningLedger(db);
+  for (const source of db.prepare('SELECT book_id, source_version_id FROM word_revision_sources').iterate()) {
+    const bookId = asString(source.book_id);
+    const sourceVersionId = asString(source.source_version_id);
+    const original = await readRetainedWordOriginal(db, dataRoot, objectsRoot, bookId, sourceVersionId);
+    for (const imported of db.prepare('SELECT commit_id, revision_id FROM word_revision_imports WHERE source_version_id = ?').iterate(sourceVersionId)) {
+      const commitId = asString(imported.commit_id);
+      const { compiled } = readWordManuscriptExportSource(db, bookId, asString(imported.revision_id), sourceVersionId, original);
+      validateWordImportedMarkSources(db, bookId, commitId, compiled);
+      ledger.validateWordImportSamples(bookId, commitId, compiled);
+    }
+  }
 }
 
 /**
@@ -2435,7 +2564,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === WRITING_TASK_SCHEMA_VERSION ||
       currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       currentVersion === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || currentVersion === PROPOSAL_REVIEW_SCHEMA_VERSION || currentVersion === FACTUAL_VERIFICATION_SCHEMA_VERSION || currentVersion === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || currentVersion === TASK_INTENT_DRAFT_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_SCHEMA_VERSION || currentVersion === CUSTOM_ANALYSIS_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || currentVersion === MODEL_SELECTION_SCHEMA_VERSION || currentVersion === PROCEDURE_DEFINITION_SCHEMA_VERSION || currentVersion === EDITORIAL_LEARNING_SCHEMA_VERSION || currentVersion === GLOBAL_AGENT_SCHEMA_VERSION || currentVersion === LATEST_SCHEMA_VERSION),
+      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || currentVersion === PROPOSAL_REVIEW_SCHEMA_VERSION || currentVersion === FACTUAL_VERIFICATION_SCHEMA_VERSION || currentVersion === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || currentVersion === TASK_INTENT_DRAFT_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_SCHEMA_VERSION || currentVersion === CUSTOM_ANALYSIS_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || currentVersion === MODEL_SELECTION_SCHEMA_VERSION || currentVersion === PROCEDURE_DEFINITION_SCHEMA_VERSION || currentVersion === EDITORIAL_LEARNING_SCHEMA_VERSION || currentVersion === GLOBAL_AGENT_SCHEMA_VERSION || currentVersion === REVIEW_CONTRACT_SCHEMA_VERSION || currentVersion === IDLE_BACKGROUND_SCHEMA_VERSION || currentVersion === LOCAL_REVIEW_SCHEMA_VERSION || currentVersion === EDITORIAL_MEMORY_SCHEMA_VERSION || currentVersion === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || currentVersion === WORD_TRACKED_IMPORT_SCHEMA_VERSION || currentVersion === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || currentVersion === LEARNING_CURATION_SCHEMA_VERSION || currentVersion === 97 || currentVersion === LATEST_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2499,7 +2628,7 @@ function initializeSchema(db: DatabaseSync): void {
       currentVersion === WRITING_TASK_SCHEMA_VERSION ||
       currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       currentVersion === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || currentVersion === PROPOSAL_REVIEW_SCHEMA_VERSION || currentVersion === FACTUAL_VERIFICATION_SCHEMA_VERSION || currentVersion === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || currentVersion === TASK_INTENT_DRAFT_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_SCHEMA_VERSION || currentVersion === CUSTOM_ANALYSIS_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || currentVersion === MODEL_SELECTION_SCHEMA_VERSION || currentVersion === PROCEDURE_DEFINITION_SCHEMA_VERSION || currentVersion === EDITORIAL_LEARNING_SCHEMA_VERSION || currentVersion === GLOBAL_AGENT_SCHEMA_VERSION || currentVersion === LATEST_SCHEMA_VERSION)
+      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || currentVersion === PROPOSAL_REVIEW_SCHEMA_VERSION || currentVersion === FACTUAL_VERIFICATION_SCHEMA_VERSION || currentVersion === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || currentVersion === TASK_INTENT_DRAFT_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_SCHEMA_VERSION || currentVersion === CUSTOM_ANALYSIS_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || currentVersion === MODEL_SELECTION_SCHEMA_VERSION || currentVersion === PROCEDURE_DEFINITION_SCHEMA_VERSION || currentVersion === EDITORIAL_LEARNING_SCHEMA_VERSION || currentVersion === GLOBAL_AGENT_SCHEMA_VERSION || currentVersion === REVIEW_CONTRACT_SCHEMA_VERSION || currentVersion === IDLE_BACKGROUND_SCHEMA_VERSION || currentVersion === LOCAL_REVIEW_SCHEMA_VERSION || currentVersion === EDITORIAL_MEMORY_SCHEMA_VERSION || currentVersion === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || currentVersion === WORD_TRACKED_IMPORT_SCHEMA_VERSION || currentVersion === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || currentVersion === LEARNING_CURATION_SCHEMA_VERSION || currentVersion === 97 || currentVersion === LATEST_SCHEMA_VERSION)
   ) return;
   if (currentVersion === 1) {
     migrateSchemaV1ToV2(db);
@@ -2877,7 +3006,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === LATEST_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === LATEST_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -2930,7 +3059,7 @@ function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflow
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === LATEST_SCHEMA_VERSION)) return;
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === LATEST_SCHEMA_VERSION)) return;
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
   );
@@ -3075,7 +3204,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === LATEST_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === LATEST_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -3127,7 +3256,7 @@ function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWo
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === LATEST_SCHEMA_VERSION)) return;
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === LATEST_SCHEMA_VERSION)) return;
   validateSourceImportSchemaTruth(db, profile);
   const legacyAlterTable = asNumber(
     one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
@@ -3543,7 +3672,7 @@ function readModelConnectionTest(row: SqlRow): ModelConnectionTestStatus | null 
   const facts = value.provenance;
   requireStore(value.outcome !== 'passed' || (value.code === null && facts !== undefined), 'MODEL_CONNECTION_TEST_INVALID', '连接测试状态无效。');
   if (facts !== undefined) requireStore(isModelTextAttemptProvenance(facts) && facts.model === value.modelId && facts.route === row.provider_id &&
-    facts.credentialReference === row.credential_reference && facts.credentialSlot === row.credential_slot && (facts.policyVersion === 'v25' || facts.policyVersion === 'v26') && facts.failureCode === value.code &&
+    facts.credentialReference === row.credential_reference && facts.credentialSlot === row.credential_slot && (facts.policyVersion === 'v25' || facts.policyVersion === 'v26' || facts.policyVersion === 'v27' || facts.policyVersion === 'v30' || facts.policyVersion === 'v31') && facts.failureCode === value.code &&
     (facts.credentialUpdatedAt === undefined || facts.credentialUpdatedAt === value.credentialUpdatedAt) &&
     allowedProductionBindingOf({ route: facts.route, endpoint: facts.endpoint, model: facts.model, credentialSlot: facts.credentialSlot, credentialReference: facts.credentialReference }, 'fast-interaction') !== null,
     'MODEL_CONNECTION_TEST_INVALID', '连接测试来历无效。');
@@ -3669,7 +3798,7 @@ function initializeModelServiceSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === LATEST_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === LATEST_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -3721,7 +3850,7 @@ function initializeModelServiceSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === LATEST_SCHEMA_VERSION)) {
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === LATEST_SCHEMA_VERSION)) {
     validateModelServiceSchema(db, profile, validateStoreTruth);
     if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
       validateEditorialWorkspaceProfileNativeSchema(db);
@@ -3790,9 +3919,30 @@ interface DraftSnapshot {
 
 interface IngestedDocx {
   ingestId: string;
-  parsed: ParsedDocx;
+  parsed: ParsedDocx | ParsedWordDocx;
   /** Which source paragraph each ingested block and text-box paragraph came from (ADR 0086 §3). */
-  sources: StagedImportSources;
+  sources: StagedImportSources | null;
+  /** Native evidence keeps its honest preview separate from an explicit reading or real legacy capability. */
+  native: NativeDocxIntakeParse | null;
+}
+
+interface WordIntakePlan {
+  original: Uint8Array;
+  native: Extract<NativeDocxIntakeParse, { kind: 'word' }>;
+  compiled: Extract<WordTrackedCompilation, { kind: 'ready' }>;
+  reading: WordCompiledReading;
+  parsed: ParsedWordDocx;
+  prepared: WordPreparedIntake;
+}
+
+/** What a reviewed Word intake creates beside the ordinary import records: its eligible samples and any reused Source Version. */
+function wordIntakeRecords(word: WordIntakePlan | undefined): { reusedSourceVersionId: string | null; eligibleSamples: number } | undefined {
+  if (word === undefined) return undefined;
+  const { choice, target } = word.prepared;
+  const eligibleSamples = !choice.learnFromEdits || !target.controls.global.enabled || target.controls.book.excluded ? 0
+    : target.kind === 'new-book' ? word.compiled.templates.length
+      : target.controls.materials.filter(({ standing }) => standing.choice === 'book' || standing.choice === 'house').length;
+  return { reusedSourceVersionId: target.kind === 'existing-book' ? target.parentSourcePin?.sourceVersionId ?? null : null, eligibleSamples };
 }
 
 interface CommitAttempt {
@@ -3881,10 +4031,21 @@ export function importedMarksRecord(count: number): string {
 function recordsToCreate(
   plan: ImportFidelityPlan,
   targetKind: 'new-book' | 'existing-book' = 'new-book',
+  word?: { reusedSourceVersionId: string | null; eligibleSamples: number },
 ): ReadonlyArray<string> {
-  const base = targetKind === 'existing-book' ? BASE_RECORDS_TO_CREATE.slice(2) : BASE_RECORDS_TO_CREATE;
+  let base: ReadonlyArray<string> = targetKind === 'existing-book' ? BASE_RECORDS_TO_CREATE.slice(2) : BASE_RECORDS_TO_CREATE;
+  if (word !== undefined) {
+    // A Word intake maps blocks through its own source segments, never the one-paragraph rows, and may reuse
+    // the exact same-byte Source Version this empty Book already retains instead of creating one.
+    base = base.flatMap((record) => record === '源材料版本与来源记录' && word.reusedSourceVersionId !== null
+      ? [`沿用本书已保留的同一来源版本 ${word.reusedSourceVersionId}（不新建来源版本）`]
+      : record === '来源段落对应'
+        ? ['Word 修订来源、导入选择与稿件来源片段对应',
+          ...(word.eligibleSamples > 0 ? [`Word 修改样本、导入准入与本机学习信号 ${word.eligibleSamples} 条`] : [])]
+        : [record]);
+  }
   // The marks stand on r1's blocks, so they follow the block-source mapping.
-  const sourcesIndex = base.indexOf('来源段落对应');
+  const sourcesIndex = base.indexOf(word === undefined ? '来源段落对应' : 'Word 修订来源、导入选择与稿件来源片段对应');
   const records = plan.importedMarks === 0
     ? base
     : [...base.slice(0, sourcesIndex + 1), importedMarksRecord(plan.importedMarks), ...base.slice(sourcesIndex + 1)];
@@ -4418,6 +4579,7 @@ function createSourceImportReviewDigest(
 interface ReviewedFidelity {
   fidelity: FidelityCategoryProjection[];
   plan: ImportFidelityPlan;
+  word?: WordIntakePlan;
 }
 
 /**
@@ -4464,6 +4626,7 @@ function createImportReviewDigestV6(
     },
     identityFindings,
     fidelity: reviewed.fidelity,
+    ...(reviewed.word === undefined ? {} : { word: reviewed.word.prepared }),
     textBoxDisposition: plan.textBoxDisposition,
     degradationDecision: plan.degradations.length === 0
       ? null
@@ -4473,7 +4636,7 @@ function createImportReviewDigestV6(
           state: 'accepted-complete-set',
           items: plan.degradations,
         },
-    recordsToCreate: recordsToCreate(plan, target.kind),
+    recordsToCreate: recordsToCreate(plan, target.kind, wordIntakeRecords(reviewed.word)),
     nonEffects: nonEffects(plan),
     workflowProfile: {
       projection: profile.projection,
@@ -4752,6 +4915,12 @@ export class EditorialStore {
   #translationRun: Promise<void> | null = null;
   readonly #translationFailures = new Map<string, string>();
   readonly #learningEligibility: LearningEligibilityLedger;
+  /** One bounded Word source context; actual original-file availability/hash is checked on every detail read. */
+  #wordSampleDetailContext: WordSampleDetailContext | null = null;
+  #wordSampleDetailReads: { context: WordSampleDetailContext; reads: LearningReads } | null = null;
+  #wordLearningRead: { generation: string; reads: LearningReads } | null = null;
+  #wordLearningProofs: { context: WordSampleDetailContext; facts: WordLearningProofs } | null = null;
+  #learningCallDepth = 0;
   readonly #evaluationCalibration: EvaluationCalibrationLedger;
   readonly #series: SeriesLedger;
   readonly #usage: UsageLedger;
@@ -4771,6 +4940,7 @@ export class EditorialStore {
   #dataVersion: number = DATA_VERSION;
   /** The code this store was opened with: what opens a package's data as a store of its own (Issue #434, S86d). */
   #codeRoot = '';
+  #localFixtureCatalog: LocalFixturePolicyCatalog | null = null;
   /** ②C 评估 (Issue #429, S81a): each Book's versioned Evaluation Records. */
   readonly #evaluations: EvaluationRecords;
   /** ②A 分析反馈 (Issue #94, S38): the editor's judgments of analysis results. */
@@ -4848,13 +5018,16 @@ export class EditorialStore {
     this.#materialIndex = new MaterialIndexLedger(authority);
     this.#researchEvidence = new ResearchEvidenceLedger(authority);
     this.#factualVerification = new FactualVerificationLedger(authority);
+    this.#factualReview.bindFactualVerification(this.#factualVerification);
+    this.#factualReview.reconcileFactualRechecks();
     this.#libraryMaterials = new LibraryMaterialLedger(authority, dataRoot, (material) =>
       this.#materialIndex.projection({ materialId: material.materialId, sha256: material.sha256, format: material.source.format },
         this.#indexing === material.materialId ? 'indexing' : 'queued', this.#layerActivity(material.materialId, material.source.sha256)));
     this.#learningEligibility = new LearningEligibilityLedger(authority);
     this.#evaluationCalibration = new EvaluationCalibrationLedger(authority);
     this.#series = new SeriesLedger(authority);
-    this.#usage = new UsageLedger(authority);
+    this.#usage = new UsageLedger(authority, { sessionLogRoot: join(dataRoot, HARNESS_SESSION_LOG_DIRECTORY),
+      operationalScope: () => this.#baselineAnalysis.launch.operationalScope });
     this.#seriesKnowledge = new SeriesKnowledgeLedger(authority);
     this.#seriesExclusions = new SeriesExclusionLedger(authority);
     this.#dialogues = new DialogueLedger(authority);
@@ -4925,9 +5098,10 @@ export class EditorialStore {
     this.#capturedProcedures = new CapturedProcedures(authority);
     this.#customAnalysisDimensions = new CustomAnalysisDimensions(authority);
     this.#reviewRuns = new ReviewRunStore(authority, this.#editorialMarks, {
+      learningLedger: () => this.#learningLedger(),
       ledgerOf: (entry, materials, digest, bookId, preference, version) => this.#reviewLedgerOf(entry, materials, digest, bookId, preference, version),
       housePreference: (bookId, categoryId, kind, policy) => {
-        const use = new HouseReviewPreferenceLedger(this.#authority).use(this.#baselineAnalysis.launch.operationalScope, bookId, categoryId);
+        const use = new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).use(this.#baselineAnalysis.launch.operationalScope, bookId, categoryId, this.#housePreferencePeopleNames());
         if (use === null) return null;
         // The kind's one foreground rule must name the category; the live admission asks the same again before any dispatch.
         const rules = policy.providerProcessing.admittedRules.filter((rule) => rule.backgroundOrigin !== true && rule.taskKinds.includes(kind));
@@ -4936,7 +5110,8 @@ export class EditorialStore {
       materialReadings: (boundary) => this.#taskMaterialReadings(boundary),
       materialOffers: (bookId) => this.#taskMaterialOffers(bookId),
       baseline: () => this.#baselineAnalysis,
-    }, () => this.#reviewGuidelines.configuration());
+    }, () => this.#control.baselineAnalysisRoute?.reviewContractVersion === 1
+      ? HISTORICAL_REVIEW_CATEGORY_CONFIGURATION : this.#reviewGuidelines.configuration());
     this.#manuscriptExport = new ManuscriptExportStore(authority, {
       readObject: (objectDigest) => this.#readContentObject(objectDigest),
       dataRoot,
@@ -5099,6 +5274,18 @@ export class EditorialStore {
     let ingest: DatabaseSync | null = null;
     try {
       configureDatabase(authority, 'FILE');
+      validateRequestAdmissionRecords(authority, Number(authority.prepare('PRAGMA user_version').get()?.user_version) >= MODEL_REQUEST_ADMISSION_SCHEMA_VERSION);
+      const beforeWordVersion = Number(authority.prepare('PRAGMA user_version').get()?.user_version);
+      // An unknown future schema belongs to the existing unsupported-version refusal, not this Word reader.
+      if (beforeWordVersion <= LATEST_SCHEMA_VERSION) {
+        try {
+          validateWordImportRetentionVersion(authority, beforeWordVersion >= WORD_TRACKED_IMPORT_SCHEMA_VERSION);
+          if (beforeWordVersion >= WORD_TRACKED_IMPORT_SCHEMA_VERSION) await validateRetainedWordImports(authority, dataRoot, objectsRoot);
+        } catch (error) {
+          if (error instanceof ImportRetentionError) throw new StoreError(error.code, error.message);
+          throw error;
+        }
+      }
       // 升级前备份 (Issue #433, S85b; DSTO-016): a store this software must move to a later Data Version is written whole into
       // the backup location before anything migrates it, and a backup that cannot be made opens nothing.
       const { upgrade, earlier } = await backUpBeforeUpgrade(authority, dataRoot, {
@@ -5141,9 +5328,13 @@ export class EditorialStore {
       initializeEditorialMarkSchema(authority);
       initializeManuscriptEffectSchema(authority);
       initializeReviewRunSchema(authority);
+      initializeLocalStageSchema(authority);
+      // Existing House DDL is checked by the structural owner; no historical JSON/hash walk on open.
+      if (authority.prepare("SELECT 1 FROM sqlite_schema WHERE name = 'house_word_list_versions' AND type = 'table'").get() === undefined) initializeHouseWordListSchema(authority);
       initializePublicationVersionSchema(authority);
       initializeProposalConflictSchema(authority);
       initializeImportRetentionSchema(authority);
+      initializeWordImportRetentionSchema(authority);
       initializeImportedMarkSchema(authority);
       initializeExportLedgerSchema(authority);
       initializeDefaultExecutionRuleSchema(authority);
@@ -5222,6 +5413,7 @@ export class EditorialStore {
       initializeMaterialIndexLayerSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
       initializeProposalReviewSchema(authority);
       // Revision 78 (Issue #901): factual verification results, review decisions and Correction Proposal lineage.
+      initializeFactualClaimSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
       initializeFactualVerificationSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
       initializeHouseReviewPreferenceSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
       // Revision 80 (Issue #423, slice 7a): the editor's Task Intent Drafts; `initializeTaskAuthorizationSchema` rebuilds the Task
@@ -5237,17 +5429,34 @@ export class EditorialStore {
       initializeModelSelectionSchema(authority);
       initializeMaterialTranslationAttemptSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
       initializeProcedureDefinitionSchema(authority);
+      initializeEditableProcedureSchema(authority);
       // Revision 86 (Issue #1082): reference-only Learning Signals, the learning controls and explicit editorial memory.
       initializeEditorialLearningSchema(authority);
       // Revision 87 (Issue #1083): the editor's Learning Supervision Directives; a damaged chain refuses the store once the
       // whole-store validation has read the relation itself.
       initializeSupervisionSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
+      // Revision 91 (Issue #1128): the editor-governed memory /2 and 本社审阅偏好 /2 readers add no relation. Before the stamp, a
+      // store that could hold learning records is proved by the revision-90 readers, and none of revision 91's own records may stand.
+      const learningRevision = asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version);
+      if (learningRevision >= EDITORIAL_LEARNING_SCHEMA_VERSION && learningRevision < EDITORIAL_MEMORY_SCHEMA_VERSION) {
+        new EditorialLearningLedger(authority).validate(false);
+        new HouseReviewPreferenceLedger(authority).validate(false);
+        for (const scope of ['development-ci', 'developer-live', 'ordinary-production'] as const) requireStore(
+          new SupervisionDirectives(authority).history(scope).every((directive) => directive.actionId === undefined), 'SCHEMA_INVALID', '学习监督记录与数据库修订不一致。');
+      } else if (learningRevision === EDITORIAL_MEMORY_SCHEMA_VERSION) {
+        // Revision 92 only stamps (Issue #1131): a revision-91 store is proved by its own readers before it claims the successor.
+        new EditorialLearningLedger(authority).validate();
+        new SupervisionDirectives(authority).validate();
+        new HouseReviewPreferenceLedger(authority).validate();
+      }
       initializeTaskAuthorizationSchema(authority);
       initializeBoundedSchema(authority, workflowProfile);
       validateEditorialWorkspaceProfileSchema(authority);
       validateTaskAuthorizationSchema(authority);
       new EditorialLearningLedger(authority).validate();
       new SupervisionDirectives(authority).validate();
+      new HouseReviewPreferenceLedger(authority).validate();
+      validateRequestAdmissionRecords(authority, true);
       journal = new DatabaseSync(databasePath);
       configureDatabase(journal);
       ingest = new DatabaseSync(databasePath);
@@ -5296,6 +5505,12 @@ export class EditorialStore {
       // Every store records the versions that open it (Issue #433, S85a; DSTO-016): a new record only when one changed.
       store.#softwareVersion = softwareVersion;
       store.#codeRoot = codeRoot;
+      const localLaunch = { operationalScope: 'development-ci' as const, live: null,
+        policy: resolveSourceCheckoutLaunchPolicySync(codeRoot), localFixtureRuntime: () => store.localFixtureRuntime(),
+        retainedPolicyFor: (pin: import('../shared/protocol.js').ResultSetPolicyPin, binding: ConfiguredProviderBinding) => readRetainedBoundAnalysisPolicySync(codeRoot, pin, binding) };
+      store.#baselineAnalysis.bindLaunch(localLaunch);
+      store.#factualReview.bindLaunch(localLaunch);
+      store.#initialEvaluation.bindLaunch(localLaunch);
       store.#dataVersion = dataVersionAt(LATEST_SCHEMA_VERSION, classes);
       if (control.interruptUpgradeAt === 'before-record') throw new StoreError('E2E_CONTROL_INTERRUPTED', '打开在记录版本之前停止。');
       // The open that raised the Data Version records the upgrade it made with the backup (S85b), and only then clears the note
@@ -5633,7 +5848,8 @@ export class EditorialStore {
     requireStore(entry.executor === 'review-category-contract', 'REVIEW_CATEGORY_NOT_TASK_BACKED', '这一类没有自己的任务账本。');
     const input = reviewCategoryContractInput(entry);
     const contractVersion = frozenVersion ?? this.#control.baselineAnalysisRoute?.reviewContractVersion ?? 2;
-    let base = this.#reviewCategoryDefinitions.obtain(JSON.stringify([input, contractVersion]), () => this.#analysisCall(() => reviewCategoryKindDefinition(input, contractVersion)));
+    const base = this.#reviewCategoryDefinitions.obtain(JSON.stringify([input, contractVersion]), () => this.#analysisCall(() => reviewCategoryKindDefinition(input, contractVersion)));
+    const toolBase = frozenPromptDigest === undefined ? withReviewLocalTools(base, kindLocalTools(this.#baselineAnalysis.launch.policy, base.kind)) : base;
     let scopes = entry.seriesScopes;
     const finish = (definition: AnalysisKindDefinition): AnalysisKindDefinition => scopes === undefined ? definition
       : entry.seriesKnowledge === undefined ? seriesScopeKindDefinition(this.#authority, definition, scopes) : definition;
@@ -5643,7 +5859,7 @@ export class EditorialStore {
         // Current consistency availability is derived from today's knowledge. Its historical Run reconstructs from its
         // snapshot entry instead; mixing today's definition with a prior Run's pins would falsely make a saved step unavailable.
         if (entry.seriesKnowledge === undefined) scopes ??= frozenSeriesScopes(this.#authority, asString(row.task_intent_id));
-        preference = new HouseReviewPreferenceLedger(this.#authority).pinned(asString(row.task_intent_id));
+        preference = new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).pinned(asString(row.task_intent_id));
         const records = this.#authority.prepare("SELECT component, canonical_json, sha256 FROM analysis_plan_records WHERE task_intent_id = ? AND plan_version = (SELECT max(plan_version) FROM analysis_plan_records WHERE task_intent_id = ?) AND component IN ('execution-plan', 'plan-envelope')").all(asString(row.task_intent_id), asString(row.task_intent_id)) as SqlRow[];
         const components = new Map(records.map((record) => {
           const json = asString(record.canonical_json);
@@ -5656,7 +5872,8 @@ export class EditorialStore {
           requireStore(typeof frozenBase === 'string' && /^[0-9a-f]{64}$/u.test(frozenBase), 'ANALYSIS_RECORD_INVALID', '任务参考资料的基础契约记录无效。');
           // A new guideline version is a new current kind contract, not corruption of the previous Task's pins.
           // Its ordinary ledger projection already knows how to offer a fresh preparation under that contract.
-          if (frozenBase !== base.promptContractDigest) return this.reviewCategoryLedger(base);
+          if (frozenBase !== base.promptContractDigest && frozenBase !== toolBase.promptContractDigest &&
+              !historicalReviewCategoryDefinitions(input, contractVersion).some((candidate) => candidate.promptContractDigest === frozenBase)) return this.reviewCategoryLedger(base);
           materials = { bookId: latestForBook, references: this.#analysisCall(() => taskMaterialSources(pins)) };
           const envelope = components.get('plan-envelope');
           requireStore(envelope !== undefined, 'ANALYSIS_RECORD_INVALID', '任务计划记录不完整。');
@@ -5664,19 +5881,42 @@ export class EditorialStore {
         }
       }
     }
-    if (entry.seriesKnowledge !== undefined && scopes !== undefined) base = seriesConsistencyKindDefinition(this.#authority, base, scopes);
-    if (materials === undefined) return this.reviewCategoryLedger(finish(houseReviewPreferenceKindDefinition(base, preference ?? null, true)));
-    const readings = this.#taskMaterialReadings(materials);
+    const readings = materials === undefined ? [] : this.#taskMaterialReadings(materials);
     // The frozen digest is the outermost contract's. A readable pin re-derives the material contract and wraps it again, which
     // must give that digest; an unreadable one is the material wrapper's own blocked definition under it, and never sends.
     const refused = readings.some((reading) => reading.refusal !== null);
-    const material = this.#analysisCall(() => taskMaterialKindDefinition(base, materials!, readings, scopes === undefined && (preference == null || refused) ? frozenPromptDigest : undefined));
-    const definition = refused ? material : houseReviewPreferenceKindDefinition(material, preference ?? null, true);
-    requireStore(scopes !== undefined || preference == null || frozenPromptDigest === undefined || refused || definition.promptContractDigest === frozenPromptDigest,
-      'HOUSE_REVIEW_PREFERENCE_INVALID', '本社审阅偏好与任务计划不一致。');
+    const wrap = (candidate: AnalysisKindDefinition): AnalysisKindDefinition => {
+      const series = entry.seriesKnowledge !== undefined && scopes !== undefined ? seriesConsistencyKindDefinition(this.#authority, candidate, scopes) : candidate;
+      const material = materials === undefined ? series : this.#analysisCall(() => taskMaterialKindDefinition(series, materials, readings,
+        refused && scopes === undefined ? frozenPromptDigest : undefined));
+      return finish(refused ? material : houseReviewPreferenceKindDefinition(material, preference ?? null, true));
+    };
+    let definition: AnalysisKindDefinition;
+    let prior: AnalysisKindDefinition;
+    if (frozenPromptDigest === undefined) {
+      definition = wrap(toolBase);
+      prior = toolBase.promptContractDigest === base.promptContractDigest ? definition : wrap(base);
+    } else {
+      const candidates: AnalysisKindDefinition[] = [];
+      for (const historical of historicalReviewCategoryDefinitions(input, contractVersion)) {
+        try { candidates.push(wrap(historical)); }
+        catch (error) {
+          // Series consistency accepts only its own supported base; another historical form gains no proof.
+          if (!(error instanceof AnalysisError && error.code === 'SERIES_SCOPE_INVALID')) throw error;
+        }
+      }
+      const matched = candidates.find((candidate) => candidate.promptContractDigest === frozenPromptDigest);
+      requireStore(matched !== undefined, materials === undefined ? 'ANALYSIS_RECORD_INVALID' :
+        preference == null ? 'TASK_MATERIAL_RECORD_INVALID' : 'HOUSE_REVIEW_PREFERENCE_INVALID', '固定提示契约与任务计划不一致。');
+      definition = matched;
+      prior = candidates[0]!;
+    }
+    requireStore(materials === undefined || scopes !== undefined || frozenPromptDigest === undefined || refused || definition.promptContractDigest === frozenPromptDigest,
+      preference == null ? 'TASK_MATERIAL_RECORD_INVALID' : 'HOUSE_REVIEW_PREFERENCE_INVALID', '固定提示契约与任务计划不一致。');
+    if (definition !== prior) Object.assign(definition, { toolPromptPredecessor: prior });
     // A pin unreadable now gives a definition that cannot build requests, under the frozen contract's own key: it is never
     // cached, so the same plan runs once the pin reads again, and a cached readable ledger never outlives its pin.
-    return this.reviewCategoryLedger(finish(definition), readings.every((reading) => reading.refusal === null));
+    return this.reviewCategoryLedger(definition, readings.every((reading) => reading.refusal === null));
   }
 
   // ---- 自定义分析维度 (Issue #922, wave 10 slice 7f; ADR 0090 item 4) ---------------------------------------------------
@@ -6059,6 +6299,19 @@ export class EditorialStore {
    * `page` chooses which of the opened Run's findings the answer carries — a cursor and the four filters
    * of the results — and is the first page of every finding when it is left out.
    */
+  inspectHouseWordList(input: InspectHouseWordListInput) {
+    return this.#boundedCall(() => {
+      try { return new HouseWordLists(this.#authority).inspect(input); }
+      catch (error) { if (error instanceof HouseWordListError) throw new StoreError(error.code, error.message); throw error; }
+    });
+  }
+  saveHouseWordList(input: SaveHouseWordListInput) {
+    return this.#boundedCall(() => {
+      try { return new HouseWordLists(this.#authority).save(input); }
+      catch (error) { if (error instanceof HouseWordListError) throw new StoreError(error.code, error.message); throw error; }
+    });
+  }
+
   inspectReviewWorkspace(bookId: string, reviewRunId: string | null, progress?: ProgressReader, page?: ReviewFindingPageRequest): ReviewWorkspaceProjection {
     return this.#reviewCall(() => this.#reviewRuns.workspace(bookId, reviewRunId, progress, page));
   }
@@ -6079,7 +6332,19 @@ export class EditorialStore {
     // 准备计划 on a Task Intent Draft (Issue #423, slice 7a): the draft the one category's Run is prepared from.
     intentDraft: DraftPromotion | null = null,
     seriesId: string | null = null,
+    localCheck?: import('../shared/protocol/procedures.js').LocalCheckOptions,
+    decisionId?: string,
   ): AnalysisPreparationResult<ReviewWorkspaceProjection> {
+    const factualDecision = decisionId === undefined ? undefined : this.#verificationCall(() => {
+      const row = this.#authority.prepare('SELECT result_id FROM factual_review_decisions WHERE decision_id = ? AND book_id = ?').get(decisionId, bookId);
+      requireStore(row !== undefined && categoryIds.length === 1 && categoryIds[0] === 'factual-review', 'FACTUAL_DECISION_INVALID', '补充核查需要当前图书的核查决定。');
+      const { reader } = this.#resultBinding(bookId, String(row.result_id));
+      return this.#factualVerification.recheckSelection(bookId, decisionId, reader);
+    });
+    if (factualDecision !== undefined) {
+      const claim = this.#factualVerification.claims(factualDecision.originalRunRecordId)!.claims.find((entry) => entry.claimId === factualDecision.claimId)!;
+      scope = { kind: 'selection', fromChapterBlockId: claim.occurrence.block, toChapterBlockId: claim.occurrence.block };
+    }
     const procedure = capturedProcedure === null ? null : this.#procedureCall(() => this.#capturedProcedurePin(bookId, capturedProcedure));
     requireStore(seriesId === null || capturedProcedure === null || procedureOffersSeries(this.#requireCapturedVersion(capturedProcedure.versionId).document),
       'SERIES_SCOPE_UNAVAILABLE', '这个工序版本只允许参考当前图书。');
@@ -6092,6 +6357,8 @@ export class EditorialStore {
     }
     const references = this.#prepareTaskMaterials(bookId, materialIds);
     return this.#reviewPreparation(() => this.#reviewRuns.prepare({ phase: 'start', bookId, categoryIds, scope, launchPolicy, procedure, redoOf, seriesId,
+      ...(factualDecision === undefined ? {} : { factualDecision }),
+      ...(localCheck === undefined ? {} : { localCheck }),
       ...(references.length === 0 ? {} : { materialReferences: { bookId, references } }),
       ...(intentDraft === null ? {} : { intentDraft }),
     }));
@@ -6151,7 +6418,7 @@ export class EditorialStore {
     return this.#reviewCall(() => {
       this.#transaction(this.#authority, () => {
         this.#reviewRuns.ignoreFinding(bookId, reviewRunId, findingId, reason);
-        new EditorialLearningLedger(this.#authority).captureIgnoredFinding(bookId, reviewRunId, findingId);
+        this.#learningLedger().captureIgnoredFinding(bookId, reviewRunId, findingId);
       });
       return this.#reviewRuns.workspace(bookId, reviewRunId, progress);
     });
@@ -6185,6 +6452,8 @@ export class EditorialStore {
   get reviewRunDriveSteps(): ReviewRunDriveSteps {
     const runs = this.#reviewRuns;
     return {
+      local: (reviewRunId, stopping) => runs.runLocal(reviewRunId, stopping),
+      background: (reviewRunId) => runs.backgroundOrigin(reviewRunId),
       begin: (reviewRunId) => this.#reviewCall(() => runs.beginDrive(reviewRunId)),
       end: (reviewRunId) => runs.endDrive(reviewRunId),
       step: (reviewRunId, categoryId) => this.#reviewCall(() => runs.step(reviewRunId, categoryId)),
@@ -6192,7 +6461,10 @@ export class EditorialStore {
       recordDispatch: (reviewRunId, categoryId, runRecordId) => this.#reviewCall(() => runs.recordDispatch(reviewRunId, categoryId, runRecordId)),
       refuseDispatch: (reviewRunId, categoryId, runRecordId, code, message) =>
         this.#reviewCall(() => runs.refuseDispatch(reviewRunId, categoryId, runRecordId, code, message)),
-      settle: (reviewRunId, categoryId) => this.#reviewCall(() => runs.settle(reviewRunId, categoryId)),
+      settle: (reviewRunId, categoryId) => {
+        this.#reviewCall(() => runs.settle(reviewRunId, categoryId));
+        if (categoryId === 'factual-review') this.materializeFactualVerification(reviewRunId);
+      },
       write: (reviewRunId, categoryId) => {
         this.#reviewCall(() => runs.write(reviewRunId, categoryId));
         // The settled 事实核查 category's Versioned Verification Results (Issue #901), once its findings are on the manuscript.
@@ -6448,7 +6720,8 @@ export class EditorialStore {
     const reviewRunId = input.ref;
     requireStore(reviewRunId !== null, 'TASK_PLAN_INVALID', '审阅的计划要指明是哪一次审阅。');
     const facts = this.#reviewCall(() => this.#reviewRuns.planFacts(input.bookId, reviewRunId));
-    const blocks = this.#analysisCall(() => this.#baselineAnalysis.readRevisionBlocks(facts.manuscript.manuscriptId, facts.inputRevision.revisionId));
+    const blocks = facts.localPlan?.blocks.map((block) => ({ ...block, kind: 'paragraph' as const, level: null, digest: sha256Hex(block.text), graphemes: graphemeCount(block.text) }))
+      ?? this.#analysisCall(() => this.#baselineAnalysis.readRevisionBlocks(facts.manuscript.manuscriptId, facts.inputRevision.revisionId));
     const scopes = [...new Map(facts.categories.flatMap((category) => {
       const scope = category.task?.components['run-source-scope'] as { seriesScopes?: ReadonlyArray<FrozenSeriesScope> } | undefined;
       return (scope?.seriesScopes ?? []).map((series) => [series.seriesId, series] as const);
@@ -6511,7 +6784,7 @@ export class EditorialStore {
       if (reaches && connectivity.reading() === 'offline') blockers.push(ANSWER_BLOCKED_OFFLINE);
       plan = withAnswerBlockers(plan, blockers);
     }
-    if (plan.state.key !== 'waiting') return plan;
+    if (plan.state.key !== 'waiting' || plan.state.label === RUN_WAITING_IDLE_LABEL) return plan;
     if (reaches && connectivity.reading() === 'offline') return withWaitingReason(plan, 'network');
     if ((await credentialReadiness(binding)) === 'missing') return withWaitingReason(plan, 'connection');
     return withWaitingReason(plan, connectivity.slotBusy() ? 'slot' : 'admitting');
@@ -6594,11 +6867,12 @@ export class EditorialStore {
     bookId: string,
     taskIntentId: string,
     planEnvelopeDigest: string,
+    start: 'now' | 'idle' = 'now',
   ): { projection: BaselineAnalysisProjection; dispatchRunRecordId: string | null; ledger: BaselineAnalysisStore } {
     // A 自定义分析维度 Task (Issue #922) is authorized on its own version's ledger, the same ②A Plan → Run Authorization path.
     const ledger = this.#analysisLedgerOfTask(bookId, taskIntentId);
     this.#requireCustomAnalysisStartable(ledger, taskIntentId);
-    const authorized = this.#analysisCall(() => ledger.authorize(bookId, taskIntentId, planEnvelopeDigest));
+    const authorized = this.#analysisCall(() => ledger.authorize(bookId, taskIntentId, planEnvelopeDigest, start));
     return { projection: authorized.projection as BaselineAnalysisProjection, dispatchRunRecordId: authorized.dispatchRunRecordId, ledger };
   }
 
@@ -6877,30 +7151,50 @@ export class EditorialStore {
   /** Reconcile stranded Runs to their kept continuation points; queued starts still require an explicit new start. */
   reconcileStoppedFactualReviewRuns(): { settled: number } {
     this.#assertAvailable();
-    return {
-      settled: this.#analysisCall(() =>
-        this.#factualReview.reconcileStoppedRuns({ leaveAuthorized: (runRecordId) => this.#reviewRuns.ownsCategoryRun(runRecordId) })).settled,
-    };
+    const result = this.#analysisCall(() =>
+      this.#factualReview.reconcileStoppedRuns({ leaveAuthorized: (runRecordId) => this.#reviewRuns.ownsCategoryRun(runRecordId) }));
+    for (const reviewRunId of this.#reviewCall(() => this.#reviewRuns.retainStoppedFactualRuns())) {
+      try { this.materializeFactualVerification(reviewRunId); } catch { /* one Run never stops startup; the next open records what is still missing */ }
+    }
+    return { settled: result.settled };
   }
 
   /** Reconcile stranded Runs to their kept continuation points; queued starts still require an explicit new start. */
   reconcileStoppedReviewCategoryRuns(): { settled: number } {
     this.#assertAvailable();
-    return { settled: this.#reviewCall(() => this.#analysisCall(() => this.#reviewRuns.reconcileStoppedCategoryRuns())) };
+    const settled = this.#reviewCall(() => this.#analysisCall(() => this.#reviewRuns.reconcileStoppedCategoryRuns()));
+    // The category router's existing active-state query excludes terminal reflection and already
+    // paused Runs. Their optional physical-request evidence still requires local settlement.
+    for (const row of this.#authority.prepare(`SELECT DISTINCT r.run_record_id FROM analysis_run_records r
+      JOIN analysis_task_intents i ON i.task_intent_id = r.task_intent_id JOIN analysis_run_states s ON s.run_record_id = r.run_record_id
+      WHERE substr(i.kind, 1, 17) = 'editorial-review/' AND json_type(s.canonical_json, '$.requestAdmission') IS NOT NULL`).all() as SqlRow[]) {
+      try { this.#analysisCall(() => this.executionLedgerForRun(asString(row.run_record_id)).reconcileRequestAdmissions(asString(row.run_record_id))); }
+      catch (error) {
+        if (error instanceof StoreFatalError) throw error;
+        // As with the existing category router, a damaged snapshot is its surface's refusal. Its
+        // continuation validates the same receipt before admission and cannot silently send again.
+      }
+    }
+    // Retention reads terminal outcomes only after the execution ledger has settled their request evidence.
+    for (const reviewRunId of this.#reviewCall(() => this.#reviewRuns.retainStoppedFactualRuns())) {
+      try { this.materializeFactualVerification(reviewRunId); } catch { /* one Run never stops startup; the next open records what is still missing */ }
+    }
+    return { settled };
   }
 
   /** Exact recorded ranges for a live Run's cancellation disclosure; no stopped-Run authority is inferred. */
   #liveCancellationRanges(projection: BaselineAnalysisProjection, ledger: BaselineAnalysisStore): BaselineCancellationRanges | null {
     const run = projection.run;
     if (run === null || run.progress === null) return null;
-    const inFlight = run.progress.stage === 'units' ? run.progress.currentUnitOrdinal : null;
+    const inFlight = new Set(run.progress.stage !== 'units' ? [] : run.progress.inFlightUnits?.map((unit) => unit.unitOrdinal) ??
+      (run.progress.currentUnitOrdinal === null ? [] : [run.progress.currentUnitOrdinal]));
     return this.#analysisCall(() => {
       const checkpoints = ledger.unitCheckpoints(run.runRecordId);
       const settled = new Set(checkpoints.map((checkpoint) => checkpoint.unit.unitOrdinal));
       return {
         // An answered range already in flight is being continued, not waiting to be continued.
         waiting: ledger.clarificationsOf(run.runRecordId)
-          .filter((request) => !settled.has(request.unitOrdinal) && request.unitOrdinal !== inFlight)
+          .filter((request) => !settled.has(request.unitOrdinal) && !inFlight.has(request.unitOrdinal))
           .map((request) => ({ unitOrdinal: request.unitOrdinal, answered: request.answer !== null })),
         unconfirmed: checkpoints.filter((checkpoint) => checkpoint.unit.closed.state === 'gap' && checkpoint.unit.closed.gap.code === 'outcome-unknown')
           .map((checkpoint) => checkpoint.unit.unitOrdinal),
@@ -6976,6 +7270,39 @@ export class EditorialStore {
   baselineAnalysisRunWaits(runRecordId: string): boolean {
     this.#assertAvailable();
     return this.#analysisCall(() => this.#baselineAnalysis.currentRunState(runRecordId)) === 'awaiting-connectivity';
+  }
+
+  // ---- 空闲时处理 for every kind (Issue #1089, F-17a; ADR 0095 §3) -------------------------------------------
+
+  /**
+   * 空闲时处理 (ADR 0095 §3): exactly the Run Authorization 开始任务 records, marked to start when idle — a ledger Task's Run
+   * Record, or a Review Run's one approval. Nothing is sent and no place is taken until the application is quiet.
+   */
+  startTaskWhenIdle(input: import('../shared/protocol.js').ServiceOperationMap['startTaskWhenIdle']['input']): { dispatchRunRecordId: string | null; ledger: BaselineAnalysisStore } | null {
+    this.#assertAvailable();
+    if (input.kind === 'review-run') {
+      this.#reviewCall(() => this.#reviewRuns.recordAuthorization(input.bookId, input.ref, input.planDigests, 'idle'));
+      return null;
+    }
+    requireStore(input.planEnvelopeDigest !== null && input.planDigests.length === 0, 'TASK_PLAN_INVALID', '任务计划请求无效。');
+    const digest = input.planEnvelopeDigest;
+    switch (input.kind) {
+      case 'baseline-analysis': return this.authorizeBaselineAnalysis(input.bookId, input.ref, digest, 'idle');
+      case 'initial-evaluation': return this.authorizeInitialEvaluation(input.bookId, input.ref, digest, 'idle');
+      case 'readers-report': return this.authorizeReadersReport(input.bookId, input.ref, digest, 'idle');
+      case 'evaluation-rewrite': return this.authorizeEvaluationRewrite(input.bookId, input.ref, digest, 'idle');
+      case 'writing': return this.authorizeWriting(input.bookId, input.ref, digest, 'idle');
+    }
+  }
+
+  /** A Review Run approved 「空闲时处理」 begins at the first quiet, after the same preflight 联网后开始任务 makes (OFF-008). */
+  admitIdleReview(reviewRunId: string, drive: () => void): void {
+    this.#reviewCall(() => {
+      if (!this.#reviewRuns.waitsForIdle(reviewRunId)) return;
+      const drift = this.#reviewRuns.preflightDrift(reviewRunId);
+      if (drift.length > 0) { this.#reviewRuns.blockWaiting(reviewRunId, drift, 'plan-moved'); return; }
+      this.#reviewRuns.admitWaiting(reviewRunId, drive);
+    });
   }
 
   // ---- 联网后开始任务 for every kind (Issue #760, plan slice S74c) ----------------------------------------------
@@ -7625,54 +7952,67 @@ export class EditorialStore {
    * order its ceiling is shared in, and the ceiling is the editor's to set — required. A Series or all-Books Enrollment names the
    * Books of its scope the dispatcher's latest look skipped, and why.
    */
-  inspectBackgroundAnalysisEnrollment(bookId: string, runtime: BackgroundAnalysisRuntime): BackgroundAnalysisEnrollmentProjection {
+  inspectBackgroundAnalysisEnrollment(bookId: string, runtime: BackgroundAnalysisRuntime, kind: string = BACKGROUND_ANALYSIS_KIND): BackgroundAnalysisEnrollmentProjection {
     this.#assertAvailable();
     requireStore(UUID_PATTERN.test(bookId), 'BACKGROUND_ANALYSIS_ENROLLMENT_INVALID', '后台分析登记的参数无效。');
     const book = this.#authority.prepare('SELECT title FROM books WHERE book_id = ?').get(bookId) as SqlRow | undefined;
     requireStore(book !== undefined, 'BACKGROUND_ANALYSIS_ENROLLMENT_INVALID', '这本书不存在。');
     const title = asString(book.title);
-    const read = this.#enrollmentRead(bookId);
+    const read = this.#enrollmentRead(bookId, kind);
     const record = read === 'damaged' ? null : read;
     const state = read === 'damaged' ? 'damaged' : record === null ? 'none' : record.state === 'active' && record.paused ? 'paused' : record.state;
-    const next = this.#analysisCall(() => this.#backgroundDecision(bookId, read, runtime));
-    const binding = this.#enrollmentBinding(bookId);
+    const next = this.#analysisCall(() => kind === BACKGROUND_ANALYSIS_KIND ? this.#backgroundDecision(bookId, read, runtime) : { kind: 'none' as const,
+      reason: kind === 'factual-recheck' ? '空闲时按最新的要求补充证据决定复核一条冻结断言；未决结果不会自动重新排队。'
+        : kind === 'material-index' ? '空闲时在本机为这本书可参考的资料建立相似索引，从上次停下的段落接着建；你回来编辑时让开。'
+        : '登记已保留；相应工序接入后台处理后，才会按登记开始。' });
+    const binding = this.#enrollmentBinding(bookId, kind);
     const nextOrdinal = record === null ? 1 : record.version.ordinal + 1;
     const reason = state === 'damaged'
       ? BACKGROUND_RECORD_DAMAGED
       : state === 'active' || state === 'paused'
-        ? '这本书已经登记了后台分析；要改，请先撤销登记再重新登记。'
-        : !this.#backgroundRuleAdmits()
+        ? '这本书已经登记了这类后台处理；要改，请先撤销登记再重新登记。'
+        : !this.#backgroundKindEnrollable(kind)
           ? BACKGROUND_ENROLL_NO_RULE
           : !runtime.routeExecutable
             ? BACKGROUND_ENROLL_NO_ROUTE
-            : backgroundAnalysisShare(runtime.capacity) < 1
+            : executionBackgroundShare(this.#baselineAnalysis.launch.policy, runtime.capacity) < 1
               ? BACKGROUND_ENROLL_NO_SHARE
               : binding === null ? BACKGROUND_FACTS_UNREADABLE : null;
     const scope = backgroundScopeLabel('book', title, 1);
     const scopes = this.#backgroundScopeOffers(bookId, title);
     const when = backgroundAnalysisWhen(runtime.quietMs);
+    const notGranted = kind === BACKGROUND_ANALYSIS_KIND ? BACKGROUND_ANALYSIS_NOT_GRANTED : [
+      '不改动稿件，不采纳或应用任何建议，不导出或发布',
+      '不扩大登记的种类、范围、模型绑定或发送内容',
+      '登记本身不启动尚未接入的工序，也不授权其他后台工作',
+      '不超过登记的预算上限，每次派发前检查；达到上限后停止',
+    ];
+    const kinds = this.#backgroundKindOffers();
+    const kindLabel = kinds.find((entry) => entry.kind === kind)?.label ?? kind;
+    const procedure = kind === BACKGROUND_ANALYSIS_KIND ? DEFAULT_EXECUTION_RULE_PROCEDURES['baseline-analysis'] : kindLabel;
+    const what = kind === BACKGROUND_ANALYSIS_KIND ? BACKGROUND_ANALYSIS_WHAT : `${kindLabel}：只按这类工序的计划处理；每次派发仍需精确计划、模型绑定与运行授权。`;
     // The ceiling is the editor's to set at 登记, never the Book's own setting (Issue #864).
-    const binds = binding === null ? [] : defaultRuleBindingRows(binding, DEFAULT_EXECUTION_RULE_PROCEDURES['baseline-analysis'])
+    const binds = binding === null ? [] : defaultRuleBindingRows(binding, procedure)
       .map((row) => (row.label === '预算上限' ? { label: row.label, value: BACKGROUND_CEILING_REQUIRED } : row));
     const startingPoints = (['prospective', 'backfill'] as const).map((value) => ({
       value, label: BACKGROUND_STARTING_POINT_LABELS[value], note: BACKGROUND_STARTING_POINT_NOTES[value],
     }));
     // The digest of exactly what the disclosure shows: a `登记` that names another is refused as stale.
     const disclosureDigest = reason !== null ? null : sha256(canonicalJson({
-      schema: 'ai7.background-analysis-enrollment.disclosure/2', bookId, ordinal: nextOrdinal, scope, scopes, what: BACKGROUND_ANALYSIS_WHAT, when,
-      binding: { ...binding, runBudgetCeiling: 'required' }, startingPoints, notGranted: BACKGROUND_ANALYSIS_NOT_GRANTED, ceilingRule: BACKGROUND_CEILING_RULE,
+      schema: 'ai7.background-analysis-enrollment.disclosure/3', bookId, kind, ordinal: nextOrdinal, scope, scopes, what, when,
+      binding: { ...binding, runBudgetCeiling: 'required' }, startingPoints, notGranted, ceilingRule: BACKGROUND_CEILING_RULE,
     }));
     // The ten newest Runs the Enrollment started, and how many there are (#713 review, P3-5).
     const startedRows = this.#authority.prepare(
       `SELECT a.task_intent_id, a.authorized_at, a.canonical_json, t.mode FROM analysis_run_authorizations a
        JOIN analysis_task_intents t ON t.task_intent_id = a.task_intent_id
-       WHERE t.book_id = ? AND a.origin = 'background-analysis-enrollment'
+       WHERE t.book_id = ? AND a.origin = 'background-analysis-enrollment' AND t.kind = ?
        ORDER BY a.authorized_at DESC, a.rowid DESC LIMIT ?`,
-    ).all(bookId, BACKGROUND_ANALYSIS_LISTED) as SqlRow[];
+    ).all(bookId, kind === BACKGROUND_ANALYSIS_KIND ? BASELINE_ANALYSIS_KIND : kind, BACKGROUND_ANALYSIS_LISTED) as SqlRow[];
     const startedRunCount = asNumber((this.#authority.prepare(
       `SELECT count(*) n FROM analysis_run_authorizations a JOIN analysis_task_intents t ON t.task_intent_id = a.task_intent_id
-       WHERE t.book_id = ? AND a.origin = 'background-analysis-enrollment'`,
-    ).get(bookId) as SqlRow).n);
+       WHERE t.book_id = ? AND a.origin = 'background-analysis-enrollment' AND t.kind = ?`,
+    ).get(bookId, kind === BACKGROUND_ANALYSIS_KIND ? BASELINE_ANALYSIS_KIND : kind) as SqlRow).n);
     const startedRuns = startedRows.map((row) => {
       const authorization = JSON.parse(asString(row.canonical_json)) as { enrollmentVersionId?: unknown };
       const versionId = typeof authorization.enrollmentVersionId === 'string' ? authorization.enrollmentVersionId : null;
@@ -7692,12 +8032,12 @@ export class EditorialStore {
     });
     const history = read === 'damaged'
       ? { entries: [], count: 0 }
-      : this.#enrollmentCall(() => this.#enrollments.history(bookId, BACKGROUND_ANALYSIS_LISTED));
+      : this.#enrollmentCall(() => this.#enrollments.history(bookId, BACKGROUND_ANALYSIS_LISTED, kind));
     const look = this.#backgroundLooks.get(bookId) ?? null;
     const notStarted = this.#backgroundNotStarted.get(bookId) ?? null;
     const enrolledScope = record === null ? null : this.#enrollmentScopeOf(record.version.scope, bookId, title);
     return {
-      bookId,
+      bookId, kind, kinds,
       bookTitle: title,
       state,
       stateLabel: BACKGROUND_STATE_LABELS[state],
@@ -7712,7 +8052,7 @@ export class EditorialStore {
         enrolledBy: '本机编辑',
         enrolledAt: record.version.createdAt,
         stateRecordedAt: record.stateRecordedAt,
-        binds: defaultRuleBindingRows(record.version.binding, DEFAULT_EXECUTION_RULE_PROCEDURES['baseline-analysis']),
+        binds: defaultRuleBindingRows(record.version.binding, procedure),
         ceilingTokens: record.version.ceiling?.maxTotalTokens ?? null,
         shareTokens: record.version.share?.maxTotalTokens ?? null,
         scope: enrolledScope,
@@ -7738,11 +8078,11 @@ export class EditorialStore {
         disclosureDigest,
         scope,
         scopes,
-        what: BACKGROUND_ANALYSIS_WHAT,
+        what,
         when,
         binds,
         startingPoints,
-        notGranted: BACKGROUND_ANALYSIS_NOT_GRANTED,
+        notGranted,
         ceilingRule: BACKGROUND_CEILING_RULE,
       },
       hold: { canPause: state === 'active', canResume: state === 'paused' },
@@ -7768,6 +8108,7 @@ export class EditorialStore {
     scope: { kind: BackgroundAnalysisScopeKind; seriesId: string | null },
     ceilingTokens: number,
     runtime: BackgroundAnalysisRuntime,
+    kind: string = BACKGROUND_ANALYSIS_KIND,
   ): BackgroundAnalysisEnrollmentProjection {
     this.#assertAvailable();
     requireStore(UUID_PATTERN.test(bookId) && DIGEST_PATTERN.test(disclosureDigest) && (startingPoint === 'prospective' || startingPoint === 'backfill') &&
@@ -7775,13 +8116,13 @@ export class EditorialStore {
     'BACKGROUND_ANALYSIS_ENROLLMENT_INVALID', '后台分析登记的参数无效。');
     requireStore(Number.isSafeInteger(ceilingTokens) && ceilingTokens >= 1 && ceilingTokens <= BACKGROUND_ANALYSIS_CEILING_MAX,
       'BACKGROUND_ANALYSIS_CEILING_REQUIRED', '请设置后台分析的预算上限（tokens）：登记必须有上限。');
-    const current = this.#enrollmentRead(bookId);
+    const current = this.#enrollmentRead(bookId, kind);
     if (current !== 'damaged' && current !== null && current.state === 'active' && current.version.disclosureDigest === disclosureDigest &&
         current.version.startingPoint === startingPoint && current.version.ceiling?.maxTotalTokens === ceilingTokens &&
         current.version.scope.kind === scope.kind && (current.version.scope.kind === 'book' ? null : current.version.scope.seriesId) === scope.seriesId) {
-      return this.inspectBackgroundAnalysisEnrollment(bookId, runtime);
+      return this.inspectBackgroundAnalysisEnrollment(bookId, runtime, kind);
     }
-    const shown = this.inspectBackgroundAnalysisEnrollment(bookId, runtime);
+    const shown = this.inspectBackgroundAnalysisEnrollment(bookId, runtime, kind);
     requireStore(shown.offer.canEnroll, 'BACKGROUND_ANALYSIS_ENROLLMENT_UNAVAILABLE', shown.offer.reason ?? BACKGROUND_ENROLL_STALE);
     requireStore(shown.offer.disclosureDigest === disclosureDigest, 'BACKGROUND_ANALYSIS_ENROLLMENT_STALE', BACKGROUND_ENROLL_STALE);
     const offered = shown.offer.scopes.find((entry) => entry.kind === scope.kind && entry.seriesId === scope.seriesId);
@@ -7790,10 +8131,10 @@ export class EditorialStore {
     const shares = backgroundCeilingShares(ceilingTokens, offered.books.length);
     const scopeEnrollmentId = offered.kind === 'book' ? null : randomUUID();
     const inputs: BackgroundAnalysisEnrollInput[] = offered.books.map((member, index) => {
-      const memberRead = this.#enrollmentRead(member.bookId);
+      const memberRead = this.#enrollmentRead(member.bookId, kind);
       requireStore(member.bookId === bookId || (memberRead !== 'damaged' && (memberRead === null || memberRead.state !== 'active')),
         'BACKGROUND_ANALYSIS_ENROLLMENT_ACTIVE', backgroundScopeMemberActiveReason(member.title));
-      const memberBinding = this.#enrollmentBinding(member.bookId);
+      const memberBinding = this.#enrollmentBinding(member.bookId, kind);
       requireStore(memberBinding !== null, 'BACKGROUND_ANALYSIS_ENROLLMENT_UNAVAILABLE', backgroundScopeMemberUnreadableReason(member.title));
       const point = this.#analysisCall(() => this.#baselineAnalysis.workingPointOf(member.bookId));
       const share = { kind: 'tokens' as const, maxTotalTokens: shares[index]! };
@@ -7802,7 +8143,7 @@ export class EditorialStore {
         books: offered.books.map((entry) => entry.bookId), position: index + 1,
       };
       return {
-        bookId: member.bookId,
+        bookId: member.bookId, kind,
         startingPoint,
         // What the Enrollment binds holds the Book's share as its budget: each Run it starts is held to it.
         binding: { ...memberBinding, runBudgetCeiling: share },
@@ -7815,7 +8156,7 @@ export class EditorialStore {
     });
     this.#enrollmentCall(() => this.#enrollments.enrollAll(inputs));
     for (const input of inputs) this.#backgroundNotStarted.delete(input.bookId);
-    return this.inspectBackgroundAnalysisEnrollment(bookId, runtime);
+    return this.inspectBackgroundAnalysisEnrollment(bookId, runtime, kind);
   }
 
   /**
@@ -7826,14 +8167,14 @@ export class EditorialStore {
   revokeBackgroundAnalysisEnrollment(bookId: string, enrollmentId: string, runtime: BackgroundAnalysisRuntime): BackgroundAnalysisEnrollmentProjection {
     this.#assertAvailable();
     requireStore(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(enrollmentId), 'BACKGROUND_ANALYSIS_ENROLLMENT_INVALID', '后台分析登记的参数无效。');
-    const current = this.#enrollmentCall(() => this.#enrollments.forBook(bookId));
-    requireStore(current !== null && current.enrollmentId === enrollmentId, 'BACKGROUND_ANALYSIS_ENROLLMENT_NOT_FOUND', '这份后台分析登记不属于这本书。');
+    const current = this.#enrollmentCall(() => this.#enrollments.byId(enrollmentId));
+    requireStore(current !== null && current.enrollmentId === enrollmentId && current.bookId === bookId, 'BACKGROUND_ANALYSIS_ENROLLMENT_NOT_FOUND', '这份后台分析登记不属于这本书。');
     this.#transaction(this.#authority, () => {
       for (const member of this.#scopeMembersOf(current)) {
         if (member.state !== 'revoked') this.#enrollmentCall(() => this.#enrollments.revoke(member.enrollmentId));
       }
     });
-    return this.inspectBackgroundAnalysisEnrollment(bookId, runtime);
+    return this.inspectBackgroundAnalysisEnrollment(bookId, runtime, current.kind);
   }
 
   /**
@@ -7844,21 +8185,28 @@ export class EditorialStore {
     this.#assertAvailable();
     requireStore(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(enrollmentId) && (hold === 'pause' || hold === 'resume'),
       'BACKGROUND_ANALYSIS_ENROLLMENT_INVALID', '后台分析登记的参数无效。');
-    const current = this.#enrollmentCall(() => this.#enrollments.forBook(bookId));
-    requireStore(current !== null && current.enrollmentId === enrollmentId, 'BACKGROUND_ANALYSIS_ENROLLMENT_NOT_FOUND', '这份后台分析登记不属于这本书。');
+    const current = this.#enrollmentCall(() => this.#enrollments.byId(enrollmentId));
+    requireStore(current !== null && current.enrollmentId === enrollmentId && current.bookId === bookId, 'BACKGROUND_ANALYSIS_ENROLLMENT_NOT_FOUND', '这份后台分析登记不属于这本书。');
     requireStore(current.state === 'active', 'BACKGROUND_ANALYSIS_ENROLLMENT_NOT_ACTIVE', current.state === 'suspended' ? BACKGROUND_SUSPENDED : BACKGROUND_REVOKED);
     this.#transaction(this.#authority, () => {
       for (const member of this.#scopeMembersOf(current)) {
         if (member.state === 'active') this.#enrollmentCall(() => this.#enrollments.hold(member.enrollmentId, hold === 'pause'));
       }
     });
-    return this.inspectBackgroundAnalysisEnrollment(bookId, runtime);
+    return this.inspectBackgroundAnalysisEnrollment(bookId, runtime, current.kind);
   }
 
   /**
    * Every Book that has an Enrollment, in the order the dispatcher looks at them, read without verifying a record: a Series or
    * all-Books scope's Books together in the scope's order (Issue #864).
    */
+  backgroundIdleFacts(runtime: BackgroundAnalysisRuntime): { sinceLastEditMs: number | null; editorJobRunning: boolean; idle: boolean } {
+    const last = this.#authority.prepare('SELECT max(durable_at) last FROM edit_journal_entries').get() as SqlRow;
+    const sinceLastEditMs = last.last === null ? null : Math.max(0, runtime.now - Date.parse(asString(last.last)));
+    return { sinceLastEditMs, editorJobRunning: runtime.editorWorkBusy,
+      idle: !runtime.editorWorkBusy && (sinceLastEditMs === null || sinceLastEditMs >= runtime.quietMs) };
+  }
+
   backgroundAnalysisBooks(): ReadonlyArray<string> {
     this.#assertAvailable();
     return this.#enrollmentCall(() => this.#enrollments.dispatchOrder());
@@ -7920,9 +8268,9 @@ export class EditorialStore {
     if (runtime.editorWorkBusy) return BACKGROUND_EDITOR_JOB;
     const point = this.#analysisCall(() => this.#baselineAnalysis.workingPointOf(bookId));
     if (this.#boundedCall(() => this.#boundedAuthority.branchUnderRecovery(point.branchId))) return BACKGROUND_RECOVERY_PENDING;
-    if (point.lastEditAt !== null && runtime.now - Date.parse(point.lastEditAt) < runtime.quietMs) return backgroundQuietReason(runtime.quietMs);
+    if (!this.backgroundIdleFacts(runtime).idle) return backgroundQuietReason(runtime.quietMs);
     if (!runtime.placeFree) return BACKGROUND_PLACE_BUSY;
-    const share = backgroundAnalysisShare(runtime.capacity);
+    const share = executionBackgroundShare(this.#baselineAnalysis.launch.policy, runtime.capacity);
     if (this.#backgroundRunningCount() >= share) return backgroundShareFullReason(share);
     try {
       const drift = backgroundEnrollmentDrift(read.version.binding, this.#baselineAnalysis.currentRuleFacts(bookId, 'first-baseline'));
@@ -8011,9 +8359,9 @@ export class EditorialStore {
   }
 
   /** The Book's Enrollment, `null` when it has none, or `damaged` when its record does not read back (#713 review, P3-6). */
-  #enrollmentRead(bookId: string): BackgroundAnalysisEnrollmentRecord | null | 'damaged' {
+  #enrollmentRead(bookId: string, kind: string = BACKGROUND_ANALYSIS_KIND): BackgroundAnalysisEnrollmentRecord | null | 'damaged' {
     try {
-      return this.#enrollments.forBook(bookId);
+      return this.#enrollments.forBook(bookId, kind);
     } catch (error) {
       if (error instanceof BackgroundAnalysisEnrollmentError) return 'damaged';
       throw error;
@@ -8028,7 +8376,7 @@ export class EditorialStore {
     const scope = record.version.scope;
     if (scope.kind === 'book') return [record];
     return scope.books.flatMap((memberId) => {
-      const member = memberId === record.bookId ? record : this.#enrollmentRead(memberId);
+      const member = memberId === record.bookId ? record : this.#enrollmentRead(memberId, record.kind);
       return member !== null && member !== 'damaged' && member.version.scope.kind !== 'book' &&
         member.version.scope.scopeEnrollmentId === scope.scopeEnrollmentId ? [member] : [];
     });
@@ -8069,6 +8417,26 @@ export class EditorialStore {
    * under developer-live and ordinary production — the one enrolled-background rule of Provider Processing v14 / v15, which v12
    * and v13 do not have.
    */
+  #backgroundKindEnrollable(kind: string): boolean {
+    return kind === BACKGROUND_ANALYSIS_KIND && this.#baselineAnalysis.launch.operationalScope === 'development-ci'
+      ? this.#backgroundRuleAdmits() : backgroundEnrollmentKinds(this.#baselineAnalysis.launch.policy).some((entry) => entry.kind === kind);
+  }
+
+  #backgroundKindOffers(): { kind: string; label: string; enabled: boolean; reason: string | null }[] {
+    const labels: Readonly<Record<string, string>> = {
+      [BACKGROUND_ANALYSIS_KIND]: '基线分析', 'learning-curation': '学习整理', 'material-index': '资料索引',
+      'review-reduction': '审阅归并', 'factual-recheck': '事实复核',
+    };
+    const projected = backgroundEnrollmentKinds(this.#baselineAnalysis.launch.policy).map((entry) => entry.kind);
+    // Projected kinds lead; the known catalog adds disabled rows with their reason, never permission.
+    const kinds = [...new Set([...projected, ...Object.keys(labels)])];
+    return kinds.map((kind) => {
+      const enabled = this.#backgroundKindEnrollable(kind);
+      return { kind, label: labels[kind] ?? '后台处理', enabled,
+        reason: enabled ? null : '当前模型服务策略未开放这类后台处理登记。' };
+    });
+  }
+
   #backgroundRuleAdmits(): boolean {
     const launch = this.#baselineAnalysis.launch;
     if (launch.operationalScope === 'development-ci') return launch.live === null;
@@ -8083,17 +8451,20 @@ export class EditorialStore {
     return asNumber((this.#authority.prepare(
       `SELECT count(*) n FROM analysis_run_authorizations a
        JOIN analysis_run_records r ON r.authorization_id = a.authorization_id
-       WHERE a.origin = 'background-analysis-enrollment'
+       WHERE (a.origin = 'background-analysis-enrollment' OR a.start_when = 'idle')
          AND (SELECT s.state FROM analysis_run_states s WHERE s.run_record_id = r.run_record_id ORDER BY s.sequence DESC LIMIT 1)
            IN ('authorized', 'admitted', 'executing', 'cancelling', 'pausing')`,
     ).get() as SqlRow).n);
   }
 
   /** What the Book's Enrollment binds, read from its facts now; `null` when this launch admits no background Run or they cannot be read. */
-  #enrollmentBinding(bookId: string): DefaultExecutionRuleBinding | null {
+  #enrollmentBinding(bookId: string, kind: string = BACKGROUND_ANALYSIS_KIND): DefaultExecutionRuleBinding | null {
     if (!this.#backgroundRuleAdmits()) return null;
     try {
-      return defaultExecutionRuleBindingOf(this.#baselineAnalysis.currentRuleFacts(bookId, 'first-baseline'));
+      const binding = defaultExecutionRuleBindingOf(this.#baselineAnalysis.currentRuleFacts(bookId, 'first-baseline'));
+      if (kind === BACKGROUND_ANALYSIS_KIND) return binding;
+      const label = this.#backgroundKindOffers().find((entry) => entry.kind === kind)?.label ?? kind;
+      return { ...binding, expectedOutcome: `${label}的处理结果；相应工序接入后，每次仍以精确计划为准。` };
     } catch (error) {
       if (error instanceof AnalysisError || error instanceof StoreError) return null;
       throw error;
@@ -8153,7 +8524,7 @@ export class EditorialStore {
       ruleAdmits: () => this.#backgroundRuleAdmits(),
       routeExecutable: () => runtime.routeExecutable,
       replacementWaiting: () => this.replacementFrozen(),
-      share: () => backgroundAnalysisShare(runtime.capacity),
+      share: () => executionBackgroundShare(this.#baselineAnalysis.launch.policy, runtime.capacity),
       recoveryPending: () => this.#boundedCall(() => this.#boundedAuthority.branchUnderRecovery(point().branchId)),
       drift: once(() => {
         try {
@@ -8192,8 +8563,7 @@ export class EditorialStore {
         return task !== null && task.checkpointDigest !== null && task.checkpointDigest === point().workingDigest;
       },
       sinceLastEditMs: () => {
-        const lastEditAt = point().lastEditAt;
-        return lastEditAt === null ? null : Math.max(0, runtime.now - Date.parse(lastEditAt));
+        return this.backgroundIdleFacts(runtime).sinceLastEditMs;
       },
       quietMs: () => runtime.quietMs,
       placeFree: () => runtime.placeFree,
@@ -8480,7 +8850,8 @@ export class EditorialStore {
               wi.profile_digest, wi.native_profile_id, wi.native_profile_version, wi.native_profile_digest,
               wp.projection_json,
               ir.import_record_id, ir.commit_id, ir.fidelity_review_id, ir.degradation_decision_id,
-              ir.provenance_id import_provenance_id, ir.imported_at, fr.outcome fidelity_outcome
+              ir.provenance_id import_provenance_id, ir.imported_at, fr.outcome fidelity_outcome,
+              sp.parser_identity derivation_parser_identity
        FROM manuscripts m
        JOIN manuscript_branches mb ON mb.manuscript_id = m.manuscript_id
        JOIN manuscript_revisions mr
@@ -8552,7 +8923,7 @@ export class EditorialStore {
       asString(row.source_digest),
       asNumber(row.source_bytes),
       sourceConversion,
-      asString(row.parser_identity),
+      this.#manuscriptImportParser(bookId, asString(row.commit_id), sourceVersionId, asString(row.parser_identity), asString(row.derivation_parser_identity)),
       'BOOK_RECORD_GRAPH_INVALID',
       '稿件导入记录的保真结果不完整。',
     );
@@ -10039,6 +10410,25 @@ export class EditorialStore {
    * 知识库 › 工序与规则 (Issue #427, S79d; KB-010): the review categories' 工序 as they apply now, and the native artifact as
    * its owner reads it for the house.
    */
+  procedureLibrary(command: import('../shared/protocol/procedures.js').ProcedureLibraryCommand): import('../shared/protocol/procedures.js').ProcedureLibraryProjection {
+    this.#assertAvailable();
+    return this.#analysisCall(() => {
+      this.#transaction(this.#authority, () => {
+        if (command.action === 'save') saveProcedureDefinition(this.#authority, command.input, new Date());
+        if (command.action === 'stop') {
+          resolveProcedurePin(this.#authority, command.procedure);
+          this.#authority.prepare('INSERT INTO procedure_version_stops VALUES (?,?) ON CONFLICT(version_id) DO NOTHING')
+            .run(procedureVersionId(command.procedure), new Date().toISOString());
+        }
+        if (command.action === 'select') {
+          this.#evaluationBookTitle(command.bookId);
+          selectProcedureForBook(this.#authority, command.bookId, command.procedure);
+        }
+      });
+      return readProcedureLibrary(this.#authority);
+    });
+  }
+
   async inspectKnowledgeProcedures(): Promise<KnowledgeProceduresProjection> {
     const profile = await this.#artifactCall(() => this.#editorialWorkspaceProfile.house());
     return this.#guidelineCall(() => readKnowledgeProcedures(this.#authority, this.#reviewGuidelines.configuration(), profile));
@@ -10179,6 +10569,87 @@ export class EditorialStore {
 
   // ---- Factual verification (Issue #901; FACT, EVID, EASSURE, FREV, CORR) ---------------------------------------------------
 
+  #factualRecheckCandidate(enrollment: BackgroundAnalysisEnrollmentRecord, decisionId: string): FactualRecheckCandidate | null {
+    const launch = this.#baselineAnalysis.launch;
+    const live = launch.live;
+    const policy = selectedPolicyIdentityOf(launch.policy?.selectedPolicyIdentity);
+    const rule = liveKindRule(launch.policy, 'factual-recheck', [], 'background')?.factualRecheck;
+    if (enrollment.kind !== 'factual-recheck' || enrollment.state !== 'active' || enrollment.paused || enrollment.version.share === null ||
+      launch.operationalScope !== 'ordinary-production' || live?.scope !== 'ordinary-production' || policy?.providerProcessingVersion !== 'v31' ||
+      rule?.maximumClaims !== 1 || this.replacementFrozen()) return null;
+    const enrolledBinding = this.#enrollmentBinding(enrollment.bookId, 'factual-recheck');
+    if (enrolledBinding === null || canonicalJson({ ...enrolledBinding, runBudgetCeiling: enrollment.version.binding.runBudgetCeiling }) !== canonicalJson(enrollment.version.binding)) return null;
+    const row = this.#authority.prepare('SELECT result_id FROM factual_review_decisions WHERE decision_id = ? AND book_id = ?').get(decisionId, enrollment.bookId);
+    if (row === undefined) return null;
+    const { reader } = this.#resultBinding(enrollment.bookId, String(row.result_id));
+    const selection = this.#factualVerification.recheckSelection(enrollment.bookId, decisionId, reader);
+    const checkpoint = this.#authority.prepare(`SELECT c.* FROM analysis_task_input_checkpoints c JOIN analysis_run_records r
+      ON r.task_intent_id = c.task_intent_id WHERE r.run_record_id = ?`).get(selection.sourceRunRecordId);
+    const point = this.#factualReview.workingPointOf(enrollment.bookId);
+    if (checkpoint === undefined || checkpoint.revision_id !== point.revisionId || checkpoint.revision_digest !== point.workingDigest ||
+      Number(checkpoint.journal_sequence) !== point.journalSequence) return null;
+    const search = this.getSearchBackendConnections().find((entry) => entry.selected && entry.credentialOperationState === 'ready' && entry.credentialReference !== null);
+    if (search === undefined) return null;
+    const backend = searchBackend(search.backendId);
+    const ledger = this.#factualVerification.claims(selection.originalRunRecordId)!;
+    const message = factualClaimVerificationInput(ledger, selection.claimId, rule.verificationContract.maximumMetadataUtf8Bytes);
+    const prompt = factualClaimVerificationPrompt(selection.level);
+    const { pin } = resolveProcedureDefinition(this.#authority, 'ai7-procedure/factual-claim-check', 1);
+    return { enrollmentId: enrollment.enrollmentId, enrollmentVersionId: enrollment.version.enrollmentVersionId,
+      onceKey: canonicalRecord({ enrollmentId: enrollment.enrollmentId, ledgerDigest: ledger.digest, claimId: selection.claimId, decisionId }).digest,
+      selection, ledger, policy, binding: { route: live.route, endpoint: live.endpoint, model: live.model, credentialSlot: live.credentialSlot, credentialReference: live.credentialReference },
+      search: { backendId: search.backendId, host: backend.declaration.host!, selectedAt: search.selectedAt,
+        configurationDigest: searchBackendConfigurationDigest(search.backendId), credentialReference: search.credentialReference! },
+      procedure: pin, maximumTokens: enrollment.version.share.maxTotalTokens, message: message.message,
+      prompt: prompt.systemPrompt, promptDigest: canonicalRecord(prompt).digest,
+      limits: { model: rule.verificationContract.maximumModelRequestsPerSession, tool: rule.verificationContract.maximumPlatformToolRoundsPerSession,
+        search: rule.verificationContract.maximumSearchSubmissionsPerClaim } };
+  }
+
+  nextFactualRecheck(): FactualRecheckCandidate | null {
+    return this.#verificationCall(() => {
+      for (const enrollment of this.#enrollments.active().filter((entry) => entry.kind === 'factual-recheck' && !entry.paused)) {
+        for (const row of this.#authority.prepare("SELECT decision_id FROM factual_review_decisions WHERE book_id = ? AND disposition = 'request-evidence' ORDER BY rowid").all(enrollment.bookId)) {
+          try {
+            const candidate = this.#factualRecheckCandidate(enrollment, String(row.decision_id));
+            if (candidate !== null && !this.#factualReview.factualRecheckUsed(candidate.onceKey)) return candidate;
+          } catch (error) { if (!(error instanceof FactualVerificationError) && !(error instanceof StoreError)) throw error; }
+        }
+      }
+      return null;
+    });
+  }
+
+  startFactualRecheck(candidate: FactualRecheckCandidate): FactualRecheckRun {
+    return this.#verificationCall(() => this.#transaction(this.#authority, () => {
+      const enrollment = this.#enrollments.forBook(candidate.selection.bookId, 'factual-recheck');
+      requireStore(enrollment !== null && canonicalJson(this.#factualRecheckCandidate(enrollment, candidate.selection.decisionId)) === canonicalJson(candidate),
+        'FACTUAL_RECHECK_STALE', '复核登记、决定或冻结来源已变化。');
+      return this.#factualReview.startFactualRecheck(candidate);
+    }));
+  }
+
+  factualRecheckCurrent(run: FactualRecheckRun): boolean {
+    try {
+      const enrollment = this.#enrollments.forBook(run.selection.bookId, 'factual-recheck');
+      const current = enrollment === null ? null : this.#factualRecheckCandidate(enrollment, run.selection.decisionId);
+      return current !== null && current.enrollmentVersionId === run.enrollmentVersionId && current.onceKey === run.onceKey &&
+        canonicalJson(current.selection) === canonicalJson(run.selection) && canonicalJson(current.binding) === canonicalJson(run.binding) &&
+        canonicalJson(current.policy) === canonicalJson(run.policy) && canonicalJson(current.search) === canonicalJson(run.search) && current.message === run.message;
+    } catch { return false; }
+  }
+
+  publishFactualRecheck(run: FactualRecheckRun, round: import('./factual-verification.js').FactualClaimRound, usage: import('./provider/classification.js').UsageFacts | null): void {
+    this.#verificationCall(() => this.#transaction(this.#authority, () => {
+      requireStore(this.factualRecheckCurrent(run) && round.result !== null, 'FACTUAL_RECHECK_STALE', '复核来源或决定已经变化，未发布结果。');
+      const claim = this.#factualVerification.claims(run.runRecordId)!.claims.find((entry) => entry.claimId === run.selection.claimId)!;
+      this.#researchEvidence.record({ bookId: run.selection.bookId, runRecordId: run.runRecordId,
+        unitOrdinal: claim.producers[0]!.sourceUnitOrdinal, backendId: run.search.backendId, unit: round.evidence });
+      this.#factualVerification.materializeRecheck(run, round.result!);
+      this.#factualReview.settleFactualRecheck(run, 'completed', usage);
+    }));
+  }
+
   #verificationCall<T>(operation: () => T): T {
     return this.#libraryCall(() => {
       try {
@@ -10216,12 +10687,18 @@ export class EditorialStore {
     const working = this.#authority.prepare('SELECT text FROM working_blocks WHERE branch_id = ? AND block_id = ?');
     return {
       rangeUntouched: (runRecordId, blockId, fromGrapheme, toGrapheme) => {
-        const facts = this.#factualReview.loadExecutionPlan(runRecordId);
+        const task = this.#authority.prepare(`SELECT t.kind, t.canonical_json FROM analysis_task_intents t JOIN analysis_run_records r
+          ON r.task_intent_id = t.task_intent_id WHERE r.run_record_id = ?`).get(runRecordId);
+        if (task?.kind === 'factual-recheck') runRecordId = (JSON.parse(String(task.canonical_json)) as { factualDecision: import('./factual-verification.js').FactualRecheckSelection }).factualDecision.sourceRunRecordId;
+        const checkpoint = this.#authority.prepare(`SELECT c.journal_sequence FROM analysis_task_input_checkpoints c
+          JOIN analysis_run_records r ON r.task_intent_id = c.task_intent_id
+          WHERE r.run_record_id = ? AND c.branch_id = ? AND c.manuscript_id = ?`).get(runRecordId, branchId, manuscriptId);
+        requireStore(checkpoint !== undefined, 'FACTUAL_VERIFICATION_RECORD_INVALID', '核查结果的原文固定点缺失。');
         let from = fromGrapheme;
         let to = toGrapheme;
         const edits = this.#authority.prepare(`SELECT from_grapheme, to_grapheme, insert_text FROM edit_journal_entries
           WHERE branch_id = ? AND block_id = ? AND sequence > ? ORDER BY sequence`)
-          .all(branchId, blockId, facts.checkpoint.journalSequence) as SqlRow[];
+          .all(branchId, blockId, asNumber(checkpoint.journal_sequence)) as SqlRow[];
         for (const edit of edits) {
           const start = asNumber(edit.from_grapheme);
           const end = asNumber(edit.to_grapheme);
@@ -10267,22 +10744,25 @@ export class EditorialStore {
   }
 
   /**
-   * The Versioned Verification Results of one Review Run's settled 事实核查 category (FREV-001), recorded once it has put its
+   * The Versioned Verification Results of one Review Run's completed or eligible retained 事实核查 output (FREV-001), recorded once it has put its
    * findings on the manuscript: each finding with the relations and Correction Variants the Run's model stated for its
    * assertions, which the ledger checks against what the Run captured. Repeating it records nothing more.
    */
   #materializeFactualVerification(reviewRunId: string): void {
-    const event = this.#authority.prepare(`SELECT result_set_revision_id FROM review_run_category_events WHERE review_run_id = ? AND category_id = 'factual-review'
+    const event = this.#authority.prepare(`SELECT state, result_set_revision_id, run_record_id FROM review_run_category_events WHERE review_run_id = ? AND category_id = 'factual-review'
+      AND (state = 'materialized' OR (state IN ('failed', 'interrupted') AND json_extract(canonical_json, '$.partialFactualRetentionVersion') = 1))
       AND result_set_revision_id IS NOT NULL ORDER BY sequence DESC LIMIT 1`).get(reviewRunId) as SqlRow | undefined;
     if (event === undefined) return;
     const revisionId = asString(event.result_set_revision_id);
+    if (event.state !== 'materialized' && this.#reviewCall(() => this.#reviewRuns.retainedFactualRevision(reviewRunId)) !== revisionId) return;
     const run = this.#authority.prepare('SELECT book_id, branch_id, manuscript_id FROM review_runs WHERE review_run_id = ?').get(reviewRunId) as SqlRow;
     const bookId = asString(run.book_id);
-    const revisionRow = this.#authority.prepare('SELECT task_intent_id, run_record_id, manuscript_revision_id FROM analysis_result_set_revisions WHERE revision_id = ?')
-      .get(revisionId) as SqlRow | undefined;
+    const revisionRow = this.#authority.prepare(`SELECT v.task_intent_id, v.run_record_id, v.manuscript_revision_id FROM analysis_result_set_revisions v
+      JOIN analysis_result_sets s ON s.result_set_id = v.result_set_id AND s.book_id = ? AND s.kind = 'factual-review'
+      WHERE v.revision_id = ? AND v.run_record_id = ?`)
+      .get(bookId, revisionId, asString(event.run_record_id)) as SqlRow | undefined;
     if (revisionRow === undefined) return;
     const runRecordId = asString(revisionRow.run_record_id);
-    if (this.#authority.prepare('SELECT 1 FROM factual_verification_results WHERE run_record_id = ? LIMIT 1').get(runRecordId) !== undefined) return;
     const inspected = this.#analysisCall(() => this.#factualReview.inspect(bookId, undefined, revisionId)).inspectedRevision;
     if (inspected === null) return;
     const revision = inspected.revision as FactualReviewResultSetRevisionProjection;
@@ -10320,9 +10800,19 @@ export class EditorialStore {
         stated.set(id, entry);
       });
     }
+    const claimLedger = this.#factualVerification.claims(runRecordId);
+    if (claimLedger !== null) {
+      relationsStated = true;
+      for (const claim of claimLedger.claims) {
+        const session = this.#factualVerification.claimSession(runRecordId, 'web-verification', claim.claimId);
+        const rounds = session === null ? [] : this.#factualVerification.claimVerifications(session.sessionId);
+        stated.set(`fnd_${claim.claimId.slice(0, 24)}`, { relations: rounds.flatMap((round) => round.evidenceRelations),
+          corrections: rounds.flatMap((round) => round.corrections).slice(0, 3) });
+      }
+    }
     const assurance = this.#factualVerification.runAssurance(runRecordId);
-    const facts = this.#analysisCall(() => this.#factualReview.loadExecutionPlan(runRecordId));
-    const contractLevel = this.#factualReview.definitionForDigest(facts.promptContractDigest).evidenceAssuranceLevel ?? null;
+    // Local recovery reads the persisted revision's contract/plan pins; it needs no currently executable provider route.
+    const contractLevel = this.#factualReview.definitionForDigest(revision.bindingPin.promptContractDigest).evidenceAssuranceLevel ?? null;
     const findingsById = new Map(revision.findings.map((finding) => [finding.findingId, finding] as const));
     const findings: MaterializedFactualFinding[] = [];
     for (const row of this.#authority.prepare("SELECT finding_id, kind_ref, mark_id FROM review_findings WHERE review_run_id = ? AND category_id = 'factual-review' ORDER BY ordinal")
@@ -10344,7 +10834,10 @@ export class EditorialStore {
     }
     this.#transaction(this.#authority, () => this.#factualVerification.materialize({
       bookId, reviewRunId, runRecordId, taskIntentId, revisionId, manuscriptRevisionId, contractLevel,
-      plannedLevel: assurance?.plannedLevel ?? planEditAssuranceLevel(this.#frozenPlanEdits(facts.taskIntentId, facts.planVersionOrdinal)), findings,
+      ...(() => { const row = this.#authority.prepare('SELECT canonical_json FROM analysis_task_intents WHERE task_intent_id = ?').get(taskIntentId);
+        const decision = row === undefined ? undefined : (JSON.parse(String(row.canonical_json)) as { factualDecision?: import('./factual-verification.js').FactualRecheckSelection }).factualDecision;
+        return decision === undefined ? {} : { factualDecision: decision }; })(),
+      plannedLevel: assurance?.plannedLevel ?? planEditAssuranceLevel(this.#frozenPlanEdits(taskIntentId, revision.provenance.planVersion ?? 1)), findings,
     }));
   }
 
@@ -10409,11 +10902,20 @@ export class EditorialStore {
   recordVerificationReviewDecision(input: RecordVerificationReviewDecisionInput): VerificationReviewDecisionRecordedProjection {
     return this.#verificationCall(() => {
       const { reader } = this.#resultBinding(input.bookId, input.resultId);
-      const recorded = this.#transaction(this.#authority, () => this.#factualVerification.recordDecision(input, reader));
+      const recorded = this.#transaction(this.#authority, () => {
+        const recorded = this.#factualVerification.recordDecision(input, reader);
+        if (input.excludedSourceRefs !== undefined) {
+          requireStore(input.disposition === 'request-evidence', 'FACTUAL_SOURCE_EXCLUSION_INVALID', '排除来源后请要求补充证据。');
+          this.#factualVerification.excludeClaimSources(input.bookId, input.resultId, recorded.decisionId, input.excludedSourceRefs, reader);
+        }
+        return recorded;
+      });
       const workspace = this.#factualVerification.workspace(input.bookId, input.resultId, null, reader);
       // 要求补充证据 (FREV-008): recorded with its range and level; a Book holds one 事实核查 Run until #905, so no Task is prepared.
       return { workspace, supplementary: recorded.requestedLevel === null ? null
-        : { blockId: workspace.result.blockId, level: recorded.requestedLevel, statement: SUPPLEMENTARY_CHECK_DEFERRED } };
+        : { blockId: workspace.result.blockId, level: recorded.requestedLevel,
+          ...(workspace.claimRecheckAvailable !== true ? { statement: SUPPLEMENTARY_CHECK_DEFERRED }
+            : { statement: '已记录补充核查要求；点「补充核查」准备计划，再批准运行。', decisionId: recorded.decisionId }) } };
     });
   }
 
@@ -10702,15 +11204,55 @@ export class EditorialStore {
     const pending = this.#materialIndexCall(() => this.#materialIndex.vectorTargets(materialId, this.#embedding.identity, 1));
     requireStore(this.#embedding.readiness().state === 'ready', 'MATERIAL_VECTORS_NEED_MODEL', '相似索引的模型文件不在本机或摘要不符：请在 设置 › 本机 › 相似索引模型 处理。');
     requireStore(!this.replacementFrozen(), 'MATERIAL_INDEX_READ_ONLY', MATERIAL_LAYERS_READ_ONLY);
+    // Asked for by the editor: an item the idle lane queued no longer gives way to the editor's work.
+    this.#idleVectorItems.delete(materialId);
     if (pending.targets.length > 0 && !this.#indexStopped && this.#vectorBuilding !== materialId && !this.#vectorQueue.includes(materialId)) {
       this.#vectorQueue.push(materialId);
-      if (this.#vectorRun === null) {
-        this.#vectorRun = this.#pumpMaterialVectors().finally(() => {
-          this.#vectorRun = null;
-        });
-      }
+      this.#startVectorPump();
     }
     return this.inspectLibraryMaterial(materialId);
+  }
+
+  #startVectorPump(): void {
+    if (this.#vectorRun === null) {
+      this.#vectorRun = this.#pumpMaterialVectors().finally(() => {
+        this.#vectorRun = null;
+      });
+    }
+  }
+
+  /** The items the idle lane queued, which give way while the editor works; and whether the lane is idle now (Issue #1166). */
+  readonly #idleVectorItems = new Set<string>();
+  #vectorLaneIdle = true;
+
+  /**
+   * 资料索引 on the idle lane (Issue #1166; ADR 0095 §3): each pass of the background dispatcher says whether the editor is
+   * quiet. While quiet, every Book with an active 资料索引 Background Processing Enrollment has the items it may refer to —
+   * retained research sources saved as 来源材料 among them — queued for their similarity vectors, beside any the editor asked
+   * for; once the editor is back, those items stop after the batch under way, and the next quiet pass goes on from the first
+   * paragraph still without its vector. A provider that is not ready, or no enrollment in force, builds nothing, and retrieval
+   * ranks those items lexically. Nothing is sent.
+   */
+  indexIdleMaterialVectors(idle: boolean): void {
+    this.#vectorLaneIdle = idle;
+    if (!idle || this.#vectorRun !== null || this.#indexStopped || this.#poisoned || this.replacementFrozen() ||
+      this.#embedding.readiness().state !== 'ready') return;
+    const books = new Set(this.#enrollmentCall(() => this.#enrollments.active())
+      .filter((enrollment) => enrollment.kind === 'material-index' && !enrollment.paused).map((enrollment) => enrollment.bookId));
+    for (const bookId of books) {
+      for (const item of this.#libraryCall(() => this.#libraryMaterials.referable(bookId))) {
+        if (this.#vectorQueue.includes(item.materialId)) continue;
+        try {
+          if (this.#materialIndexCall(() => this.#materialIndex.vectorTargets(item.materialId, this.#embedding.identity, 1)).targets.length === 0) continue;
+        } catch (error) {
+          if (!(error instanceof StoreError)) throw error;
+          continue; // Not yet read, or its index is not ready: a later pass looks again.
+        }
+        this.#idleVectorItems.add(item.materialId);
+        this.#vectorQueue.push(item.materialId);
+      }
+    }
+    if (this.#vectorQueue.length > 0) this.#startVectorPump();
   }
 
   /**
@@ -10725,6 +11267,7 @@ export class EditorialStore {
       try {
         for (;;) {
           if (this.#indexStopped || this.#poisoned || this.replacementFrozen() || this.#embedding.readiness().state !== 'ready') break;
+          if (this.#idleVectorItems.has(materialId) && !this.#vectorLaneIdle) break;
           const next = this.#materialIndexCall(() => this.#materialIndex.vectorTargets(materialId, this.#embedding.identity, MATERIAL_VECTOR_BATCH));
           if (next.targets.length === 0) break;
           const vectors = await this.#embedding.embed(next.targets.map((target) => target.text));
@@ -10740,6 +11283,7 @@ export class EditorialStore {
         // itself failed has already left the store unable to write: `#transaction` poisons it and throws `StoreFatalError`.
       } finally {
         this.#vectorBuilding = null;
+        this.#idleVectorItems.delete(materialId);
       }
     }
   }
@@ -10874,7 +11418,13 @@ export class EditorialStore {
   /** A Run's disposable index over exactly its pinned sources, ranked lexically and by this store's local vectors (#892). */
   retrievalIndexForRun(runRecordId: string, ledger: BaselineAnalysisStore): RetrievalIndex {
     const { boundary, sources } = this.#runRetrieval(runRecordId, ledger);
-    return new RetrievalIndex(sources, this.#embedding, this.#materialVectorQuery(boundary));
+    const facts = ledger.loadExecutionPlan(runRecordId);
+    const submitted = facts.update === null ? null : new Set(facts.update.reusePlan.units.filter((unit) => unit.disposition === 'recomputed').map((unit) => unit.unitOrdinal));
+    const allowed = new Set(facts.manifest.units.filter((unit) => submitted === null || submitted.has(unit.ordinal)).flatMap((unit) => [...unit.blockIds, ...unit.overlapBlockIds]));
+    const scoped = facts.compositionOptions?.version !== 2 ? sources : sources.map((source) => source.sourceKind !== 'manuscript' ? source : {
+      ...source, read: () => { const reading = source.read(); return { ...reading, segments: reading.segments.filter((segment) => segment.blockId !== undefined && allowed.has(segment.blockId)) }; },
+    });
+    return new RetrievalIndex(scoped, this.#embedding, this.#materialVectorQuery(boundary), ledger.pinnedToolSourcesForRun(runRecordId));
   }
 
   #runRetrieval(runRecordId: string, ledger: BaselineAnalysisStore): { boundary: MaterialReferenceBoundary; sources: RetrievalSource[] } {
@@ -11175,7 +11725,7 @@ export class EditorialStore {
     bookId: string,
     taskIntentId: string,
     planEnvelopeDigest: string,
-    start: 'now' | 'when-online' = 'now',
+    start: 'now' | 'when-online' | 'idle' = 'now',
   ): { dispatchRunRecordId: string | null; ledger: BaselineAnalysisStore } {
     this.#requireLedgerKindScope('initial-evaluation', bookId, taskIntentId);
     const ledger = this.#ledgerTaskOf('initial-evaluation', bookId, taskIntentId);
@@ -11533,7 +12083,7 @@ export class EditorialStore {
     bookId: string,
     taskIntentId: string,
     planEnvelopeDigest: string,
-    start: 'now' | 'when-online' = 'now',
+    start: 'now' | 'when-online' | 'idle' = 'now',
   ): { dispatchRunRecordId: string | null; ledger: BaselineAnalysisStore } {
     this.#requireLedgerKindScope('readers-report', bookId, taskIntentId);
     const ledger = this.#ledgerTaskOf('readers-report', bookId, taskIntentId);
@@ -12149,7 +12699,7 @@ export class EditorialStore {
     bookId: string,
     taskIntentId: string,
     planEnvelopeDigest: string,
-    start: 'now' | 'when-online' = 'now',
+    start: 'now' | 'when-online' | 'idle' = 'now',
   ): { dispatchRunRecordId: string | null; ledger: BaselineAnalysisStore } {
     this.#requireLedgerKindScope('writing', bookId, taskIntentId);
     const ledger = this.#ledgerTaskOf('writing', bookId, taskIntentId);
@@ -12816,7 +13366,7 @@ export class EditorialStore {
     bookId: string,
     taskIntentId: string,
     planEnvelopeDigest: string,
-    start: 'now' | 'when-online' = 'now',
+    start: 'now' | 'when-online' | 'idle' = 'now',
   ): { dispatchRunRecordId: string | null; ledger: BaselineAnalysisStore; recordId: string } {
     this.#requireLedgerKindScope('evaluation-rewrite', bookId, taskIntentId);
     const ledger = this.#ledgerTaskOf('evaluation-rewrite', bookId, taskIntentId);
@@ -13108,57 +13658,234 @@ export class EditorialStore {
     return this.inspectLearningMaterial(input.bookId, input.materialKey);
   }
 
-  inspectEditQualitySignals(bookId: string | null): EditQualitySignalsProjection {
+  inspectEditQualitySignals(bookId: string | null, after: import('../shared/protocol/learning.js').PreferenceAdoptionCursor | null = null): EditQualitySignalsProjection {
     return this.#learningCall(() => {
       requireStore(bookId === null || UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
       if (bookId !== null) requireStore(this.#authority.prepare('SELECT 1 FROM books WHERE book_id = ?').get(bookId) !== undefined, 'BOOK_NOT_FOUND', '图书不存在。');
-      return readEditQualitySignals(this.#authority, bookId);
+      return { ...readEditQualitySignals(this.#authority, bookId), ...this.#learningLedger().adoption(bookId, after) };
     });
   }
 
   inspectEditorialLearning(input: InspectEditorialLearningInput): EditorialLearningProjection {
-    return this.#learningCall(() => new EditorialLearningLedger(this.#authority).inspect(input));
+    return this.#learningCall(() => {
+      const learning = this.#learningLedger();
+      const current = learning.curationEnvelope();
+      const offered = this.#curationEnvelope({ maxPasses: 1, totalTokens: 20_000, perPassTokens: 20_000 });
+      return { ...learning.inspect(input, this.#baselineAnalysis.launch.operationalScope), curation: {
+        available: offered !== null, disclosure: offered?.disclosure ?? '模型整理尚不可用；当前仅在本机保留学习记录。',
+        envelope: current?.envelope ?? null, ...this.#baselineAnalysis.curationBudgetUse(current?.entryId ?? ''),
+        recentRuns: this.#baselineAnalysis.curationRuns() } };
+    });
+  }
+
+  #curationEnvelope(budget: LearningCurationBudget): EnabledLearningEnvelope | null {
+    const launch = this.#baselineAnalysis.launch;
+    const policy = launch.policy;
+    const identity = selectedPolicyIdentityOf(policy?.selectedPolicyIdentity);
+    const live = launch.live;
+    const rule = policy?.providerProcessing.admittedRules?.find((entry) => entry.ruleId === 'ordinary-production-learning-curation');
+    if (launch.operationalScope !== 'ordinary-production' || live?.scope !== 'ordinary-production' ||
+      policy?.integrityState !== 'verified' || identity?.providerProcessingVersion !== 'v31' || rule?.enabledLearningEnvelope === undefined ||
+      rule.route !== live.route || rule.model !== live.model || rule.endpoint !== live.endpoint || rule.credentialSlot !== live.credentialSlot) return null;
+    return { schema: 'ai7.enabled-learning-envelope/1', budget, contractDigest: CURATION_CONTRACT_DIGEST, policy: identity,
+      binding: { route: live.route, endpoint: live.endpoint, model: live.model, credentialSlot: live.credentialSlot, credentialReference: live.credentialReference },
+      sourceKinds: ['proposal-decision', 'manual-edit-journal', 'word-tracked-edit'], scope: 'eligible-local-books',
+      supervisionDigest: this.#learningLedger().supervisionDigest(), disableStopsLaterDispatchAndUse: true,
+      disclosure: `空闲时将符合范围的直接修改、Word 修订及原生审阅决定的完整修改前后文字和实际原因发送给 ${live.route} · ${live.model} 整理。遵循当前学习监督与排除范围；只生成待接受的本社偏好和记忆，不会自动启用。关闭学习或排除来源会停止后续发送与使用。策略 ${identity.providerProcessingVersion}。` };
+  }
+
+  prepareLearningCuration(bookId: string, signalIds: readonly string[]): LearningCurationBundle {
+    return this.#learningCall(() => this.#learningLedger().prepareCuration(bookId, signalIds));
+  }
+
+  nextLearningCuration(): CurationRun | null {
+    return this.#learningCall(() => this.#transaction(this.#authority, () => {
+      const learning = this.#learningLedger();
+      const current = learning.curationEnvelope();
+      if (current === null || canonicalJson(this.#curationEnvelope(current.envelope.budget)) !== canonicalJson(current.envelope) || this.replacementFrozen()) return null;
+      const use = this.#baselineAnalysis.curationBudgetUse(current.entryId);
+      if (use.passesUsed >= current.envelope.budget.maxPasses || use.reservedTokens + current.envelope.budget.perPassTokens > current.envelope.budget.totalTokens) return null;
+      for (const bookId of learning.curationBooks()) {
+        const bundle = learning.nextCuration(bookId);
+        if (bundle?.state === 'ready') return this.#baselineAnalysis.startCuration(bundle, current);
+      }
+      return null;
+    }));
+  }
+
+  learningCurationCurrent(run: CurationRun): boolean {
+    try {
+      const current = this.#learningLedger().curationEnvelope();
+      return !this.replacementFrozen() && current?.entryId === run.controlEntryId &&
+        canonicalJson(this.#curationEnvelope(run.envelope.budget)) === canonicalJson(run.envelope) &&
+        this.prepareLearningCuration(run.bundle.bookId, run.bundle.signalIds).digest === run.bundle.digest;
+    } catch { return false; }
+  }
+
+  publishLearningCuration(run: CurationRun, text: string, evidence: { usage: import('./provider/classification.js').UsageFacts | null; transmitted: boolean }): number {
+    return this.#learningCall(() => this.#transaction(this.#authority, () => {
+      requireStore(this.learningCurationCurrent(run), 'LEARNING_SOURCE_CHANGED', '学习整理来源或范围已经变化；结果未发布。');
+      const proposals = parseCurationResult(text, run.bundle.examples);
+      requireStore(proposals !== null, 'LEARNING_RESULT_INVALID', '学习整理结果未满足约定；没有发布候选。');
+      this.#learningLedger().proposeCuration(run.bundle, proposals, run);
+      this.#baselineAnalysis.settleCuration(run, 'completed', { ...evidence, proposals: proposals.length,
+        reason: proposals.length === 0 ? '整理完成；证据不足以提出新偏好。' : `已形成 ${proposals.length} 条待接受的偏好与记忆。` });
+      return proposals.length;
+    }));
+  }
+
+  /** Explicit-Book source detail; historical inspection remains available while current learning is excluded. */
+  async inspectWordTrackedEditSample(input: { bookId: string; sampleId: string; sampleDigest: string; after: unknown }): Promise<WordSampleDetailPage> {
+    this.#assertAvailable();
+    requireStore(isRecord(input) && hasExactKeys(input, ['bookId', 'sampleId', 'sampleDigest', 'after']) &&
+      typeof input.bookId === 'string' && typeof input.sampleId === 'string' && typeof input.sampleDigest === 'string' &&
+      UUID_PATTERN.test(input.bookId) && /^wts_[0-9a-f]{64}$/u.test(input.sampleId) && DIGEST_PATTERN.test(input.sampleDigest),
+    'WORD_SAMPLE_INVALID', 'Word 修改样本的图书或固定标识无效。');
+    const row = this.#authority.prepare(`SELECT source_version_id FROM word_tracked_edit_samples
+      WHERE book_id = ? AND sample_id = ? AND sha256 = ?`).get(input.bookId, input.sampleId, input.sampleDigest);
+    requireStore(row !== undefined, 'WORD_SAMPLE_INVALID', '这条 Word 修改样本不属于所选图书或摘要已经变化。');
+    const sourceVersionId = asString(row.source_version_id);
+    const parent = this.#retentionCall(() => readWordParentSourcePin(this.#authority, input.bookId, sourceVersionId));
+    requireStore(parent.sourceBytes <= MAX_ARCHIVE_BYTES, 'WORD_SOURCE_INVALID', 'Word 原文件超过已支持的包大小。');
+    const object = one(this.#authority.prepare('SELECT relative_key, byte_length FROM content_objects WHERE object_digest = ?')
+      .all(parent.objectDigest) as SqlRow[], 'WORD_SOURCE_UNAVAILABLE', 'Word 原文件对象记录缺失。');
+    requireStore(object.byte_length === parent.sourceBytes, 'WORD_SOURCE_INVALID', 'Word 原文件长度固定记录不一致。');
+    const path = this.#contentObjectPath(parent.objectDigest, asString(object.relative_key));
+    let context = this.#wordSampleDetailContext;
+    const reusable = context !== null && context.bookId === input.bookId && context.sourceVersionId === sourceVersionId &&
+      context.parentPinDigest === wordParentSourcePinRecord(parent).digest && wordSampleDetailContextCurrent(this.#authority, context);
+    try {
+      const info = await lstat(path);
+      requireStore(info.isFile() && !info.isSymbolicLink() && info.size === parent.sourceBytes,
+        'WORD_SOURCE_UNAVAILABLE', 'Word 原文件不再是完整的留存文件。');
+      if (reusable) {
+        const hash = createHash('sha256');
+        let bytes = 0;
+        for await (const chunk of createReadStream(path, { highWaterMark: 64 * 1024 })) {
+          bytes += chunk.byteLength;
+          requireStore(bytes <= parent.sourceBytes, 'WORD_SOURCE_UNAVAILABLE', 'Word 原文件在读取时已经变化。');
+          hash.update(chunk);
+        }
+        requireStore(bytes === parent.sourceBytes && hash.digest('hex') === parent.sourceDigest,
+          'WORD_SOURCE_UNAVAILABLE', 'Word 原文件字节与留存摘要不一致。');
+        this.#assertAvailable();
+        requireStore(context !== null && wordSampleDetailContextCurrent(this.#authority, context),
+          'WORD_SOURCE_CHANGED', 'Word 详情读取期间记录已变化，请重新查看。');
+      } else {
+        const compiled = await compileWordTrackedDocx(path, { digest: parent.sourceDigest, bytes: parent.sourceBytes });
+        this.#assertAvailable();
+        requireStore(compiled.kind === 'ready', 'WORD_SOURCE_INVALID', 'Word 原文件不再符合留存的修订编译契约。');
+        context = this.#retentionCall(() => createWordSampleDetailContext(this.#authority, input.bookId, sourceVersionId, compiled));
+      }
+    } catch (error) {
+      if (error instanceof StoreError) throw error;
+      if (error instanceof Error && error.message.startsWith('DOCX_REJECTED:')) throw new StoreError('WORD_SOURCE_INVALID', 'Word 原文件无法按留存的修订契约完整读取。');
+      if (isRecord(error) && typeof error.code === 'string' && typeof error.syscall === 'string') {
+        throw new StoreError('WORD_SOURCE_UNAVAILABLE', 'Word 原文件无法读取，无法查看完整修改详情。');
+      }
+      throw error;
+    }
+    requireStore(context !== null, 'WORD_SOURCE_INVALID', 'Word 详情缺少已验证的原始来源。');
+    // Only this Word historical read reuses proofs across detail pages. The context binds the exact database generation,
+    // and actual original bytes were verified again above; controls/current eligibility never come from this cache.
+    if (this.#wordSampleDetailReads?.context !== context) this.#wordSampleDetailReads = { context, reads: new LearningReads() };
+    const imports = this.#learningCall(() => new EditorialLearningLedger(this.#authority, this.#wordSampleDetailReads!.reads)
+      .wordSampleImports(input.bookId, input.sampleId, input.sampleDigest));
+    const source = this.#retentionCall(() => resolveWordSampleDetailSource(this.#authority, context, input.sampleId, input.sampleDigest, imports));
+    const page = this.#retentionCall(() => pageWordSampleDetail(source, input.after));
+    this.#wordSampleDetailContext = context;
+    return page;
+  }
+
+  recordLearningReasonAsk(input: LearningReasonAskInput, frequency: import('../shared/protocol/learning.js').LearningReasonAskFrequency): LearningReasonAskProjection | null {
+    return this.#learningCall(() => this.#transaction(this.#authority, () => this.#learningLedger().reasonAsk(input, frequency)));
   }
 
   changeEditorialLearning(input: ChangeEditorialLearningInput): EditorialLearningProjection {
     return this.#learningCall(() => this.#transaction(this.#authority, () => {
-      new EditorialLearningLedger(this.#authority).change(input);
+      const budget = input.kind === 'switch' ? input.curation : undefined;
+      const envelope = budget === undefined ? undefined : this.#curationEnvelope(budget);
+      requireStore(budget === undefined || validCurationBudget(budget) && envelope !== null, 'LEARNING_ENVELOPE_UNAVAILABLE', '学习整理缺少有效的模型、策略或预算范围。');
+      this.#learningLedger().change(input, envelope ?? undefined);
+      this.#rebuildHouseReviewPreference();
       return this.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
     }));
   }
 
   createEditorialMemory(input: CreateEditorialMemoryInput): EditorialLearningProjection {
     return this.#learningCall(() => this.#transaction(this.#authority, () => {
-      new EditorialLearningLedger(this.#authority).create(input);
+      this.#learningLedger().create(input, this.#baselineAnalysis.launch.operationalScope);
+      return this.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
+    }));
+  }
+
+  acceptEditorialMemory(input: import('../shared/protocol/learning.js').AcceptEditorialMemoryInput): EditorialLearningProjection {
+    return this.#learningCall(() => this.#transaction(this.#authority, () => {
+      this.#learningLedger().accept(input, this.#baselineAnalysis.launch.operationalScope);
+      new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).refreshGovernance(this.#baselineAnalysis.launch.operationalScope, this.#housePreferencePeopleNames(), 'memory');
       return this.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
     }));
   }
 
   deactivateEditorialMemory(input: DeactivateEditorialMemoryInput): EditorialLearningProjection {
     return this.#learningCall(() => this.#transaction(this.#authority, () => {
-      new EditorialLearningLedger(this.#authority).deactivate(input);
+      this.#learningLedger().deactivate(input, this.#baselineAnalysis.launch.operationalScope);
+      new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).refreshGovernance(this.#baselineAnalysis.launch.operationalScope, this.#housePreferencePeopleNames());
       return this.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
     }));
+  }
+
+  #editorialMemoryGovernanceHooks(): EditorialMemoryGovernanceHooks {
+    const learning = this.#learningLedger();
+    return { revisions: () => learning.revisions(this.#baselineAnalysis.launch.operationalScope),
+      govern: (directive, expected) => learning.govern(directive, expected) };
   }
 
   /**
    * A Book-less read (Issue #1083): entering creates neither a Task nor a Session/Run. `dialogueAdmitted` is the execution
    * owner's own decision for the selected policy; each item reads as a Run or the session would read it, without the house's names.
    */
-  inspectGlobalAgent(live: (attemptId: string) => LiveAnswer | null = () => null, dialogueAdmitted = false): GlobalAgentProjection {
+  inspectGlobalAgent(live: (attemptId: string) => LiveAnswer | null = () => null, dialogueAdmitted = false, scopedAdmitted = false): GlobalAgentProjection {
     return this.#learningCall(() => {
       const operationalScope = this.#baselineAnalysis.launch.operationalScope;
-      const preference = new HouseReviewPreferenceLedger(this.#authority).history(operationalScope).at(-1) ?? null;
+      const preference = new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).history(operationalScope).at(-1) ?? null;
       const base = preference === null ? null : { ...preference, lines: preference.governance?.baseLines ?? preference.lines };
       const directives = new SupervisionDirectives(this.#authority).history(operationalScope);
-      const names = preferenceNames(base?.lines ?? [], this.#housePreferencePeopleNames());
+      const names = this.#globalOriginalFieldsSelected() ? [] : this.#globalAgentNames(preference);
+      const legacyDirectives = directives.filter((directive) => !directive.targets.some((pin) =>
+        this.#authority.prepare('SELECT 1 FROM global_editorial_memory_items WHERE item_id = ?').get(pin.itemId)));
+      const items = governedMemoryItems(preferenceItems(base), legacyDirectives).map((item) => ({ ...item, text: withoutNames(item.text, names),
+        revisionId: `${item.revisionId}@${directives.at(-1)?.directiveId ?? 'base'}` }));
+      const memories: GlobalAgentSourceCandidate[] = [];
+      const mutableMemories: import('../shared/protocol.js').GlobalMemoryItem[] = [];
+      const learning = this.#learningLedger();
+      for (const entry of this.#editorialMemoryGovernanceHooks().revisions()) {
+        mutableMemories.push({ ...editorialMemoryGovernanceItem(entry, entry.current.editorialDimension), text: withoutNames(entry.current.title, names) });
+        if (entry.usable && entry.current.schema === 'ai7.global-editorial-memory/2') memories.push({ itemId: entry.current.itemId, revisionId: learning.sourcePinRevision(entry.current.itemId, entry.current.versionId), kind: 'memory',
+          title: withoutNames(entry.current.title, names), text: withoutNames(entry.current.title, names) });
+      }
+      for (let itemOffset: number | null = 0; itemOffset !== null;) {
+        const page = learning.inspect({ signalOffset: 0, itemOffset });
+        for (const entry of page.items) {
+          if (entry.current.schema === 'ai7.global-editorial-memory/2') {
+            continue;
+          }
+          if (entry.usable) memories.push({ itemId: entry.current.itemId, revisionId: entry.current.versionId,
+            kind: 'memory', title: withoutNames(entry.current.title, names), text: withoutNames(entry.current.title, names) });
+        }
+        itemOffset = page.nextItemOffset;
+      }
       return { operationalScope, dialogueState: dialogueAdmitted ? 'available' : GLOBAL_AGENT_POLICY_BLOCKED,
+        scopedDialogueState: scopedAdmitted ? 'available' : GLOBAL_AGENT_POLICY_BLOCKED, procedures: this.#globalAgentProcedures(),
         explanation: dialogueAdmitted ? '只使用明确勾选的已启用记忆版本，不读取稿件；治理仍须单独操作。'
           : '此处暂不能调用模型。记忆与学习监督操作仅在本机记录，不读取稿件。',
         categories: BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.map(({ categoryId, label }) => ({ categoryId, label })),
         books: this.#authority.prepare('SELECT book_id, title FROM books ORDER BY title, book_id').all().map((row) => ({ bookId: String(row.book_id), title: String(row.title) })),
-        items: governedMemoryItems(preferenceItems(base), directives).map((item) => ({ ...item, text: withoutNames(item.text, names),
-          revisionId: `${item.revisionId}@${directives.at(-1)?.directiveId ?? 'base'}` })), directives, history: this.#globalAgentHistory(live) };
+        items: [...items, ...mutableMemories], sourceCandidates: [
+          ...items.filter((item) => item.state === 'active').map((item) => ({ itemId: item.itemId, revisionId: item.revisionId, kind: item.kind,
+            title: `本社审阅偏好 · ${reviewCategoryEntry(item.categoryId)?.label ?? item.categoryId}`, text: item.text })),
+          ...memories, ...supervisionSourceCandidates(directives).map((entry) => ({ ...entry, text: withoutNames(entry.text, names) })),
+        ], directives, history: this.#globalAgentHistory(live) };
     });
   }
 
@@ -13170,20 +13897,163 @@ export class EditorialStore {
   }
 
   globalAgentSourcesCurrent(pins: ReadonlyArray<GlobalMemoryPin>): boolean {
-    const items = this.inspectGlobalAgent().items;
-    return pins.every((pin) => items.some((item) => item.itemId === pin.itemId && item.revisionId === pin.revisionId && item.state === 'active'));
+    const items = this.inspectGlobalAgent().sourceCandidates ?? [];
+    return pins.every((pin) => items.some((item) => item.itemId === pin.itemId && item.revisionId === pin.revisionId));
+  }
+
+  /** The library's current enabled versions (#1171): what the Global Agent view inspects and an editor may list for one turn. */
+  #globalAgentProcedures(): GlobalAgentProcedure[] {
+    return this.#authority.prepare('SELECT procedure_id FROM procedure_definitions ORDER BY pre_installed DESC, rowid').all().flatMap((row) => {
+      const { document, pin } = resolveProcedureDefinition(this.#authority, String(row.procedure_id));
+      return procedureStopped(this.#authority, pin) ? [] : [{ ...pin, title: document.title, editorInstruction: document.editorInstruction,
+        stages: document.stages.map((stage) => ({ stageType: stage.stageType, label: PROCEDURE_STAGE_LABELS[stage.stageType] })) }];
+    });
+  }
+
+  /** Pin an explicitly listed scope at ask (#1171): each Book at its primary manuscript's current revision, each procedure exactly. */
+  #pinGlobalAgentScope(input: GlobalAgentScopeInput): GlobalAgentScope {
+    requireStore(input.bookIds.length <= 8 && new Set(input.bookIds).size === input.bookIds.length && input.procedures.length <= 8 &&
+      new Set(input.procedures.map((pin) => pin.procedureId)).size === input.procedures.length, 'GLOBAL_AGENT_SCOPE_CHANGED', '对话范围无效，请重新选择。');
+    const books = input.bookIds.map((bookId) => {
+      const row = this.#authority.prepare(`SELECT b.title, m.manuscript_id, mb.branch_id FROM books b JOIN manuscripts m ON m.book_id = b.book_id AND m.role = 'primary'
+        JOIN manuscript_branches mb ON mb.manuscript_id = m.manuscript_id AND mb.name = '主分支' WHERE b.book_id = ?`).get(bookId) as SqlRow | undefined;
+      requireStore(row !== undefined, 'GLOBAL_AGENT_SCOPE_CHANGED', '所选图书没有可读取的稿件，请重新选择。');
+      const manuscriptId = asString(row.manuscript_id);
+      return { bookId, title: asString(row.title), manuscriptId, revisionId: this.getManuscriptWindow(manuscriptId, asString(row.branch_id), null).revisionId };
+    });
+    const scope = { books, procedures: input.procedures.map((pin) => ({ ...pin, title: this.globalAgentProcedureDocument(pin).title })) };
+    requireStore(this.globalAgentScopeCurrent(scope), 'GLOBAL_AGENT_SCOPE_CHANGED', '所选图书或工序版本已不可用，请重新选择。');
+    return scope;
+  }
+
+  /** Each pinned Book revision still exists and is not excluded from learning; each procedure version is unchanged and enabled. */
+  globalAgentScopeCurrent(scope: GlobalAgentScope): boolean {
+    const excluded = this.#learningLedger().controls().excludedBooks;
+    return scope.books.every((book) => !excluded.has(book.bookId) && this.#authority.prepare(`SELECT 1 FROM manuscript_revisions mr JOIN manuscripts m
+      ON m.manuscript_id = mr.manuscript_id AND m.role = 'primary' WHERE m.book_id = ? AND mr.manuscript_id = ? AND mr.revision_id = ?`)
+      .get(book.bookId, book.manuscriptId, book.revisionId) !== undefined) && scope.procedures.every((pin) => {
+      try {
+        const { document, pin: current } = resolveProcedureDefinition(this.#authority, pin.procedureId, pin.version);
+        return current.digest === pin.digest && document.title === pin.title && !procedureStopped(this.#authority, current);
+      } catch { return false; }
+    });
+  }
+
+  globalAgentProcedureDocument(pin: GlobalAgentProcedurePin): ProcedureDefinitionDocument {
+    const { document, pin: current } = resolveProcedureDefinition(this.#authority, pin.procedureId, pin.version);
+    requireStore(current.digest === pin.digest, 'GLOBAL_AGENT_SCOPE_CHANGED', '工序版本已经变化，请重新选择。');
+    return document;
+  }
+
+  /** The governed item a listed pin names: a preference shares its pin; a memory listing adds its source-state digest. */
+  globalAgentGovernancePin(pin: GlobalMemoryPin): GlobalMemoryPin | null {
+    const item = this.inspectGlobalAgent().items.find((entry) => entry.itemId === pin.itemId &&
+      (entry.revisionId === pin.revisionId || pin.revisionId.startsWith(`${entry.revisionId}@`)));
+    return item === undefined ? null : { itemId: item.itemId, revisionId: item.revisionId };
+  }
+
+  globalAgentScopedTools(message: DialogueTurnStart['message']): ReturnType<typeof globalAgentScopedTools> {
+    return globalAgentScopedTools(this, message);
+  }
+
+  /** Internal fixture metadata for the actual local callers, derived from this Store's checked selected launch. */
+  localFixtureRuntime(): LocalFixtureRuntimeContext | null {
+    const policy = this.#baselineAnalysis.launch.policy;
+    if (policy?.providerProcessing.version !== 'v29') return null;
+    const selected = selectedPolicyIdentityOf(policy.selectedPolicyIdentity);
+    requireStore(policy.integrityState === 'verified' && policy.operationalScope === 'development-ci' &&
+      selected?.providerProcessingVersion === 'v29', 'LOCAL_FIXTURE_POLICY_INVALID', '本地夹具策略身份无法核实。');
+    this.#localFixtureCatalog ??= LocalFixturePolicyCatalog.read(this.#codeRoot);
+    return { selectedPolicyIdentity: selected, catalog: this.#localFixtureCatalog };
+  }
+
+  #globalOriginalFieldsSelected(): boolean {
+    const policy = this.#baselineAnalysis.launch.policy;
+    if (policy?.providerProcessing.version !== 'v30' && policy?.providerProcessing.version !== 'v31') return false;
+    requireStore(policy.integrityState === 'verified' && policy.operationalScope === 'ordinary-production' &&
+      selectedPolicyIdentityOf(policy.selectedPolicyIdentity)?.providerProcessingVersion === policy.providerProcessing.version,
+    'GLOBAL_AGENT_POLICY_BLOCKED', '当前处理策略身份无法核实；未发送任何内容。');
+    return true;
+  }
+
+  /** Safe existing connection metadata; same-reference credential rotation still changes this exact generation. */
+  globalAgentModelConnection(): { binding: ConfiguredProviderBinding; credentialUpdatedAt: string; policy: LaunchPolicyProjection } {
+    const binding = this.getConfiguredModelRoleBinding('fast-interaction');
+    const connection = binding === null ? undefined : this.getModelServiceConnections().find((entry) =>
+      entry.credentialOperationState === 'ready' && entry.credentialReference === binding.credentialReference &&
+      entry.binding.providerId === binding.route && entry.binding.modelId === binding.model && entry.binding.credentialSlot === binding.credentialSlot);
+    requireStore(binding !== null && connection !== undefined, 'GLOBAL_AGENT_POLICY_BLOCKED', '模型服务连接已变化；未发送任何内容。');
+    const policy = resolveSourceCheckoutLaunchPolicySync(this.#codeRoot, 'ordinary-production',
+      this.getConfiguredModelRoleBinding('main-editorial'), binding);
+    requireStore(policy.integrityState === 'verified' && (policy.providerProcessing.version === 'v30' || policy.providerProcessing.version === 'v31') &&
+      canonicalJson(policy.selectedPolicyIdentity) === canonicalJson(this.#baselineAnalysis.launch.policy?.selectedPolicyIdentity),
+    'GLOBAL_AGENT_POLICY_BLOCKED', '当前策略字节或已选身份无法核实；未发送任何内容。');
+    return { binding, credentialUpdatedAt: connection.credentialUpdatedAt, policy };
+  }
+
+  /** Re-read a specific immutable predecessor prefix even after its new attempt has entered the governed queue. */
+  globalAgentHistory(input: { dialogueId: string; attemptId: string }, kind: 'continue' | 'regenerate'): GlobalAgentTurnHistory {
+    return this.#dialogueCall(() => {
+      const task = this.#dialogues.globalTask(input.dialogueId);
+      requireStore(task?.operationalScope === 'ordinary-production', 'DIALOGUE_NOT_FOUND', '全域对话不存在。');
+      const attempts = this.#dialogues.attempts(input.dialogueId);
+      const through = attempts.findIndex((attempt) => attempt.attemptId === input.attemptId);
+      requireStore(through >= 0, 'DIALOGUE_ATTEMPT_STALE', '回答已经变化，请重新查看。');
+      return readGlobalAgentHistory(task, attempts.slice(0, through + 1), this.#dialogueHistory, kind);
+    });
+  }
+
+  #requireGlobalQualification(qualification: QualifiedGlobalAttemptMetadata | undefined, message: DialogueTurnStart['message']): void {
+    if (!this.#globalOriginalFieldsSelected()) {
+      requireStore(qualification === undefined, 'GLOBAL_AGENT_POLICY_BLOCKED', '当前处理策略不接收原文字段身份。');
+      return;
+    }
+    const metadata = qualifiedGlobalAttemptMetadataOf(qualification);
+    const connection = this.globalAgentModelConnection();
+    requireStore(metadata !== null && metadata.messageSha256 === sha256Hex(buildDialogueMessage(message)) &&
+      canonicalJson({ providerProcessingVersion: metadata.providerProcessingVersion, providerProcessingSha256: metadata.providerProcessingSha256,
+        activePolicySetVersion: metadata.activePolicySetVersion, activePolicySetSha256: metadata.activePolicySetSha256 }) ===
+        canonicalJson(selectedPolicyIdentityOf(this.#baselineAnalysis.launch.policy?.selectedPolicyIdentity)) &&
+      metadata.route === connection.binding.route && metadata.model === connection.binding.model && metadata.credentialSlot === connection.binding.credentialSlot &&
+      metadata.credentialReference === connection.binding.credentialReference && metadata.credentialUpdatedAt === connection.credentialUpdatedAt,
+    'GLOBAL_AGENT_SCOPE_CHANGED', '发送内容或模型服务已经变化；未发送任何内容。');
+  }
+
+  /** Reuse the preference consumer's known-people filter. Notes, roles, examples and manuscript references are never assembled. */
+  globalAgentRedact(text: string): string {
+    return withoutNames(text, this.#globalAgentNames(new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger())
+      .history(this.#baselineAnalysis.launch.operationalScope).at(-1) ?? null));
+  }
+
+  /** One name set for listing and the final-gate recheck: the base lines' attributed people and the house's people now. */
+  #globalAgentNames(preference: HouseReviewPreferenceVersion | null): string[] {
+    return preferenceNames(preference?.governance?.baseLines ?? preference?.lines ?? [], this.#housePreferencePeopleNames());
+  }
+
+  /** A disclosure read creates no Task, attempt, log, credential release or transmission. */
+  prepareGlobalAgentTurn(input: PrepareGlobalAgentTurnInput): DialogueTurnStart['message'] {
+    if (input.kind !== 'ask') {
+      const turn = this.globalAgentAttempt(input, input.kind, new Date(), true);
+      requireStore(typeof turn !== 'string', 'DIALOGUE_INVALID', '回答标识无效。');
+      return turn.message;
+    }
+    const question = this.#globalOriginalFieldsSelected() ? dialogueQuestion(input.question)
+      : dialogueQuestion(this.globalAgentRedact(dialogueQuestion(input.question)));
+    requireStore(input.sources.length <= 12 && new Set(input.sources.map((pin) => pin.itemId)).size === input.sources.length &&
+      this.globalAgentSourcesCurrent(input.sources), 'GLOBAL_AGENT_SCOPE_CHANGED', '记忆版本已经变化，请重新选择。');
+    const candidates = this.inspectGlobalAgent().sourceCandidates ?? [];
+    return { kind: 'ask', selection: '', question, kept: null, globalSources: input.sources.map((pin) => ({ ...pin,
+      text: candidates.find((entry) => entry.itemId === pin.itemId && entry.revisionId === pin.revisionId)!.text })),
+      ...(input.scope === undefined ? {} : { globalScope: this.#pinGlobalAgentScope(input.scope) }) };
   }
 
   /** Called only after the execution owner admits this exact Book-less policy binding. */
-  askGlobalAgent(input: AskGlobalAgentInput, now = new Date()): DialogueTurnStart {
+  askGlobalAgent(input: AskGlobalAgentInput, now = new Date(), qualification?: QualifiedGlobalAttemptMetadata): DialogueTurnStart {
     return this.#dialogueCall(() => {
-      const question = dialogueQuestion(input.question);
-      requireStore(input.sources.length <= 12 && new Set(input.sources.map((pin) => pin.itemId)).size === input.sources.length &&
-        this.globalAgentSourcesCurrent(input.sources), 'GLOBAL_AGENT_SCOPE_CHANGED', '记忆版本已经变化，请重新选择。');
-      const items = this.inspectGlobalAgent().items;
-      const globalSources = input.sources.map((pin) => ({ ...pin, text: items.find((item) => item.itemId === pin.itemId)!.text }));
-      const { task, attemptId } = this.#transaction(this.#authority, () => this.#dialogues.askGlobal(this.#baselineAnalysis.launch.operationalScope, input.sources, dialogueQuestionDigest(question), now));
-      return { dialogueId: task.dialogueId, attemptId, message: { kind: 'ask', selection: '', question, kept: null, globalSources } };
+      const message = this.prepareGlobalAgentTurn({ ...input, kind: 'ask' });
+      this.#requireGlobalQualification(qualification, message);
+      const { task, attemptId } = this.#transaction(this.#authority, () => this.#dialogues.askGlobal(this.#baselineAnalysis.launch.operationalScope, input.sources, dialogueQuestionDigest(message.question), now, qualification));
+      return { dialogueId: task.dialogueId, attemptId, message, ...(qualification === undefined ? {} : { qualification }) };
     });
   }
 
@@ -13195,7 +14065,8 @@ export class EditorialStore {
     });
   }
 
-  globalAgentAttempt(input: GlobalAgentAttemptInput, kind: 'continue' | 'regenerate' | 'stop', now = new Date()): DialogueTurnStart | string {
+  globalAgentAttempt(input: GlobalAgentAttemptInput, kind: 'continue' | 'regenerate' | 'stop', now = new Date(), preview = false,
+    qualification?: QualifiedGlobalAttemptMetadata): DialogueTurnStart | string {
     return this.#dialogueCall(() => {
       const task = this.#dialogues.globalTask(input.dialogueId);
       requireStore(task !== null && task.operationalScope === this.#baselineAnalysis.launch.operationalScope, 'DIALOGUE_NOT_FOUND', '全域对话不存在。');
@@ -13206,13 +14077,29 @@ export class EditorialStore {
         requireStore(last.outcome === null, 'DIALOGUE_NOT_ANSWERING', '回答已结束。');
         return last.attemptId;
       }
-      requireStore(this.globalAgentSourcesCurrent(task.sources), 'GLOBAL_AGENT_SCOPE_CHANGED', '记忆版本已经变化，请重新提问。');
+      const pins = input.sources ?? task.sources;
+      requireStore(pins.length <= 12 && new Set(pins.map((pin) => pin.itemId)).size === pins.length &&
+        pins.every((pin) => task.sources.some((original) => original.itemId === pin.itemId && original.revisionId === pin.revisionId)) &&
+        this.globalAgentSourcesCurrent(pins), 'GLOBAL_AGENT_SCOPE_CHANGED', '记忆版本已经变化，请重新提问。');
+      const qualified = this.#globalOriginalFieldsSelected();
       const resolved = resolveAttempts(attempts, this.#dialogueHistory, () => null);
-      requireStore(resolved.first?.globalSources !== undefined, 'DIALOGUE_HISTORY_MISSING', '对话记录无法读取。');
+      const first = resolved.first;
+      requireStore(first?.globalSources !== undefined, 'DIALOGUE_HISTORY_MISSING', '对话记录无法读取。');
       const answer = resolved.attempts.at(-1)!;
-      const attemptId = this.#transaction(this.#authority, () => this.#dialogues.nextAttempt(task.dialogueId, kind, () => answer.fragments.length, now));
-      return { dialogueId: task.dialogueId, attemptId, message: { ...resolved.first, kind: kind === 'continue' ? 'continue' : 'ask',
-        kept: kind === 'continue' ? fragmentsText(answer.fragments) : null } };
+      const fragmentCount = answer.fragments.length;
+      requireStore(last.outcome !== null && (kind === 'regenerate' ||
+        (last.outcome.outcome === 'stopped' || last.outcome.outcome === 'interrupted') && fragmentCount > 0), 'DIALOGUE_NOT_STOPPED', '回答尚不能继续。');
+      const prepareText = (text: string): string => qualified ? text : this.globalAgentRedact(text);
+      const message: DialogueTurnStart['message'] = { kind: kind === 'continue' ? 'continue' : 'ask', selection: '',
+        question: prepareText(first.question), globalSources: pins.map((pin) => ({ ...pin,
+          text: prepareText(first.globalSources!.find((source) => source.itemId === pin.itemId && source.revisionId === pin.revisionId)!.text) })),
+        kept: kind === 'continue' ? prepareText(fragmentsText(answer.fragments)) : null,
+        ...(first.globalScope === undefined ? {} : { globalScope: first.globalScope }) };
+      if (!preview) {
+        this.#requireGlobalQualification(qualification, message);
+      }
+      const attemptId = preview ? last.attemptId : this.#transaction(this.#authority, () => this.#dialogues.nextAttempt(task.dialogueId, kind, () => fragmentCount, now, qualification));
+      return { dialogueId: task.dialogueId, attemptId, message, ...(qualification === undefined ? {} : { qualification }) };
     });
   }
 
@@ -13222,8 +14109,17 @@ export class EditorialStore {
       requireStore(reviewCategoryEntry(input.categoryId) !== null, 'REVIEW_CATEGORY_INVALID', '请选择有效的审阅类别。');
       if (input.scope.kind === 'book') requireStore(this.#authority.prepare('SELECT 1 FROM books WHERE book_id = ?').get(input.scope.bookId) !== undefined,
         'BOOK_INVALID', '监督范围的图书不存在。');
-      new SupervisionDirectives(this.#authority).record(current.operationalScope, input, current.items);
-      new HouseReviewPreferenceLedger(this.#authority).refreshGovernance(current.operationalScope, this.#housePreferencePeopleNames(), true);
+      const memoryTargets = input.targets.filter((pin) => this.#authority.prepare('SELECT 1 FROM global_editorial_memory_items WHERE item_id = ?').get(pin.itemId));
+      requireStore(memoryTargets.length === 0 || memoryTargets.length === input.targets.length, 'LEARNING_SUPERVISION_INVALID', '请分别治理记忆与偏好条目。');
+      const directive = new SupervisionDirectives(this.#authority).record(current.operationalScope, input, current.items);
+      if (memoryTargets.length > 0) {
+        this.#editorialMemoryGovernanceHooks().govern(directive, memoryTargets);
+      }
+      // Only an action that adds text is refused at the bound; a guide, freeze or deactivation lets derived lines yield as a rebuild does.
+      const addsText = input.operation === 'create' || input.operation === 'merge' || input.operation === 'correct' ||
+        input.operation === 'supervise' && input.effect === 'correct';
+      new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).refreshGovernance(current.operationalScope, this.#housePreferencePeopleNames(),
+        addsText && (memoryTargets.length > 0 ? 'memory' : true));
     }));
     return this.inspectGlobalAgent();
   }
@@ -13231,7 +14127,7 @@ export class EditorialStore {
   inspectHouseReviewPreference(): HouseReviewPreferenceProjection {
     return this.#learningCall(() => {
       const operationalScope = this.#baselineAnalysis.launch.operationalScope;
-      const history = new HouseReviewPreferenceLedger(this.#authority).history(operationalScope);
+      const history = new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).history(operationalScope);
       // Its disclosure states the basis 学习准入 decisions now record (Issue #1082); the record, lineage and use are unchanged.
       return { operationalScope, current: history.at(-1) ?? null,
         history: history.map(({ versionId, ordinal, recordedAt, sourceCount }) => ({ versionId, ordinal, recordedAt, sourceCount })), basis: LOCAL_LEARNING_POLICY_BASIS.text };
@@ -13266,12 +14162,13 @@ export class EditorialStore {
       sources.push(...housePreferenceSources(this.#authority, scope, { bookId, title: asString(book.title) }, this.#standingMaterials(bookId),
         (categoryId) => reviewCategoryEntry(categoryId)?.label ?? categoryId));
     }
-    new HouseReviewPreferenceLedger(this.#authority).rebuild(scope, sources, names);
+    new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).rebuild(scope, sources, names);
   }
 
   /** Each of one Book's Learning Materials where it stands, a decided one with the newest decision of its chain. */
   *#standingMaterials(bookId: string): IterableIterator<StandingReviewMaterial> {
-    for (const [candidate, projection] of this.#learningEligibility.projectCandidates(bookId, this.#learningCandidates(bookId, false))) {
+    // Word retention grants no preference-source admission, so its pairs are not even enumerated here.
+    for (const [candidate, projection] of this.#learningEligibility.projectCandidates(bookId, this.#learningCandidates(bookId, false, false))) {
       const latest = projection.state === 'decided' ? this.#learningEligibility.history(bookId, candidate.materialKey).at(-1) ?? null : null;
       yield { candidate, state: projection.state, materialDigest: projection.digest,
         decision: latest === null ? null : { decisionId: latest.decisionId, choice: latest.choice, attribution: latest.attribution } };
@@ -13428,7 +14325,10 @@ export class EditorialStore {
     // 使用过的任务 for the materials the page keeps (Issue #912; LAUD-001): read once for the page, never for every match.
     const influence = kept.length === 0 ? null : new HousePreferenceInfluence(this.#authority, this.#baselineAnalysis.launch.operationalScope);
     return { page: kept.map(({ candidate, material }) => ({
-      material: { ...material, downstreamTasks: this.#materialInfluence(bookId, material.materialKey, influence!).tasks.length },
+      material: { ...material, downstreamTasks: this.#materialInfluence(bookId, material.materialKey, influence!).tasks.length,
+        ...(candidate.source.kind === 'word-tracked-edit' ? { wordCurrentEligibility: this.#learningLedger().wordCurrentEligibility(
+          bookId, candidate.source.sampleId, candidate.source.sampleDigest) } : {}),
+        automaticAdmission: this.#learningLedger().automaticAdmissionFor(bookId, material.materialKey, material.digest, this.#baselineAnalysis.launch.operationalScope) },
       orderedAt: candidate.orderedAt,
     })), count };
   }
@@ -13443,9 +14343,11 @@ export class EditorialStore {
     uses: Array<ReturnType<ReviewRunStore['influenceUses']>[number] & { versionOrdinal: number; withdrawn: boolean }>;
     tasks: Array<ReturnType<ReviewRunStore['influenceUses']>[number] & { versionOrdinal: number; withdrawn: boolean }>;
   } {
-    const decisionIds = new Set(this.#learningEligibility.history(bookId, materialKey).map((entry) => entry.decisionId));
+    const decisionIds = new Set([...this.#learningEligibility.history(bookId, materialKey).map((entry) => entry.decisionId),
+      ...this.#learningLedger().sourceKeys(bookId, [materialKey])]);
     const uses = influence.usesOf(decisionIds).flatMap((pin) => {
-      const withdrawn = [...pin.decisionIds].some((id) => decisionIds.has(id) && withdrawalOf(this.#authority, id).withdrawnAt !== null);
+      const withdrawn = pin.sources.some((source) => decisionIds.has(preferenceSourceIdentity(source)) &&
+        preferenceSourceWithdrawal(this.#authority, source).withdrawnAt !== null);
       return this.#reviewRuns.influenceUses([pin]).map((use) => ({ ...use, versionOrdinal: pin.version.ordinal, withdrawn }));
     });
     return { signals: influence.signalsOf(decisionIds), uses, tasks: uses.filter((use) => use.consumed) };
@@ -13459,15 +14361,16 @@ export class EditorialStore {
    */
   #remediationReach(bookId: string, materialKeys: ReadonlyArray<string>): ReturnType<LearningRemediationReach> & { approved: Array<{ reviewRunId: string; categoryId: string }> } {
     const influence = new HousePreferenceInfluence(this.#authority, this.#baselineAnalysis.launch.operationalScope);
-    const decisionIds = new Set(materialKeys.flatMap((key) => this.#learningEligibility.history(bookId, key).map((entry) => entry.decisionId)));
+    const decisionIds = new Set([...materialKeys.flatMap((key) => this.#learningEligibility.history(bookId, key).map((entry) => entry.decisionId)),
+      ...this.#learningLedger().sourceKeys(bookId, materialKeys)]);
     const current = influence.versions.at(-1) ?? null;
     const uses = this.#reviewRuns.influenceUses(influence.usesOf(decisionIds));
     const running = uses.filter((use) => use.state === 'running' || use.state === 'approved');
     const completed = uses.filter((use) => use.state === 'completed');
     return {
       currentVersion: current?.ordinal ?? null,
-      linesAffected: current?.lines.filter((line) => line.sources.some((source) => decisionIds.has(source.eligibilityDecisionId))).length ?? 0,
-      memory: new EditorialLearningLedger(this.#authority).activeMemoryCount(bookId, materialKeys),
+      linesAffected: current?.lines.filter((line) => line.sources.some((source) => decisionIds.has(preferenceSourceIdentity(source)))).length ?? 0,
+      memory: this.#learningLedger().affectedMemoryCount(bookId, materialKeys),
       running: running.length,
       prepared: uses.filter((use) => use.state === 'prepared').length,
       completed: completed.length,
@@ -13493,6 +14396,7 @@ export class EditorialStore {
         bookTitle: this.#evaluationBookTitle(bookId),
         material,
         standing: learningAuditStanding(material),
+        automaticAdmission: this.#learningLedger().automaticAdmissionFor(bookId, materialKey, material.digest, this.#baselineAnalysis.launch.operationalScope),
         decisions: shown.map((entry) => ({
           decisionId: entry.decisionId,
           ordinal: entry.ordinal,
@@ -13518,7 +14422,8 @@ export class EditorialStore {
             .get(this.#baselineAnalysis.launch.operationalScope) as SqlRow | undefined;
           const listed = tasks.slice(-MAX_LEARNING_LINEAGE_TASKS);
           return {
-            downstream: { signals: signals.length, memoryCandidates: 0 as const, activeMemories: new EditorialLearningLedger(this.#authority).activeMemoryCount(bookId, [materialKey]), tasks: tasks.length },
+            downstream: { signals: signals.length, memoryCandidates: this.#learningLedger().candidateMemoryCount(bookId, materialKey),
+              activeMemories: this.#learningLedger().activeMemoryCount(bookId, [materialKey]), tasks: tasks.length },
             signals: signals.map(({ version, lines }) => ({ versionId: version.versionId, ordinal: version.ordinal, recordedAt: version.recordedAt,
               current: current !== undefined && asString(current.version_id) === version.versionId, lines })),
             tasks: listed.map((use) => ({ bookId: use.bookId, reviewRunId: use.reviewRunId, label: use.label, versionOrdinal: use.versionOrdinal,
@@ -13577,11 +14482,13 @@ export class EditorialStore {
     const title = this.#evaluationBookTitle(input.bookId);
     const wanted = new Set(input.items.map((item) => item.materialKey));
     const found = new Map<string, LearningMaterialCandidate>();
-    const standings = new Map<string, { candidate: LearningMaterialCandidate; projection: Omit<LearningMaterialProjection, 'target' | 'sourceTask'> }>();
+    const standings = new Map<string, { candidate: LearningMaterialCandidate; projection: Omit<LearningMaterialProjection, 'target' | 'sourceTask'>; automaticEligibility?: 'house' }>();
     for (const [candidate, projection] of this.#learningEligibility.projectCandidates(input.bookId, this.#learningCandidates(input.bookId, false))) {
       if (!wanted.has(candidate.materialKey)) continue;
       found.set(candidate.materialKey, candidate);
-      standings.set(candidate.materialKey, { candidate, projection });
+      const automatic = projection.state === 'pending' && projection.decisions === 0 && projection.decision === null
+        ? this.#learningLedger().automaticAdmissionFor(input.bookId, candidate.materialKey, projection.digest, this.#baselineAnalysis.launch.operationalScope) : null;
+      standings.set(candidate.materialKey, { candidate, projection, ...(automatic === null ? {} : { automaticEligibility: automatic.choice }) });
     }
     return { preview: learningRemediationPreview({ bookId: input.bookId, title }, input.items, (key) => standings.get(key) ?? null, (keys) => {
       const { approved: _approved, ...reach } = this.#remediationReach(input.bookId, keys);
@@ -13741,8 +14648,10 @@ export class EditorialStore {
   }
 
   /** Resolve the exact source and its originating Task; neither display fact changes the material digest or eligibility. */
-  #learningMaterialSource(bookId: string, candidate: LearningMaterialCandidate): Pick<LearningMaterialProjection, 'target' | 'sourceTask'> {
+  #learningMaterialSource(bookId: string, candidate: LearningMaterialCandidate): Pick<LearningMaterialProjection, 'target' | 'sourceTask' | 'wordCurrentEligibility'> {
     const source = candidate.source;
+    if (source.kind === 'word-tracked-edit') return { target: { ...source, bookId }, sourceTask: null,
+      wordCurrentEligibility: this.#learningLedger().wordCurrentEligibility(bookId, source.sampleId, source.sampleDigest) };
     if (source.kind === 'analysis') {
       // The judged revision owns this Task, even after a newer analysis becomes current.
       const row = one(this.#authority.prepare(
@@ -13789,7 +14698,7 @@ export class EditorialStore {
    * carries the editor's reason or their own wording, each analysis item whose latest judgment says why, and each 审阅
    * finding the editor last ignored with a reason. Nothing is asked of the editor to find them.
    */
-  *#learningCandidates(bookId: string, withExcerpt: boolean): IterableIterator<LearningMaterialCandidate> {
+  *#learningCandidates(bookId: string, withExcerpt: boolean, includeWord = true): IterableIterator<LearningMaterialCandidate> {
     const reasons = new DecisionFeedbackLedger(this.#authority);
     const decisions = this.#authority.prepare(
       `SELECT i.current_text, i.proposed_text, d.decision_id, d.disposition, d.edited_text, d.recorded_at, r.reason, r.reason_source
@@ -13857,6 +14766,8 @@ export class EditorialStore {
         recordedAt: asString(row.recorded_at),
       }, withExcerpt);
     }
+    // Retained Word pairs verify their original before projecting; a consumer that never uses them skips that read.
+    if (includeWord) yield* this.#learningLedger().wordCandidates(bookId);
   }
 
   /** Each Book whose Learning Material waits: how many wait for a decision or changed since one, and how many were deferred. */
@@ -13867,7 +14778,8 @@ export class EditorialStore {
       let pending = 0;
       let deferred = 0;
       let at = '';
-      for (const material of this.#learningEligibility.projectEntries(bookId, this.#learningCandidates(bookId, false))) {
+      // Word retention waits for a future consumer, not a required human inclusion, so it is not enumerated here.
+      for (const material of this.#learningEligibility.projectEntries(bookId, this.#learningCandidates(bookId, false, false))) {
         if (material.state === 'pending' || material.state === 'changed') pending += 1;
         else if (material.state === 'deferred') deferred += 1;
         else continue;
@@ -13882,6 +14794,7 @@ export class EditorialStore {
 
   #learningCall<T>(operation: () => T): T {
     this.#assertAvailable();
+    this.#learningCallDepth += 1;
     try {
       return operation();
     } catch (error) {
@@ -13889,7 +14802,107 @@ export class EditorialStore {
         throw new StoreError(error.code, error.message);
       }
       throw error;
-    }
+    } finally { if (--this.#learningCallDepth === 0) this.#wordLearningRead = null; }
+  }
+
+  /** C0's existing per-read proofs, invalidated by any database write; no cache survives the outer local operation. */
+  #learningLedger(): EditorialLearningLedger {
+    const word = this.#wordLearningProofs !== null && wordSampleDetailContextCurrent(this.#authority, this.#wordLearningProofs.context)
+      ? this.#wordLearningProofs.facts : undefined;
+    const generation = JSON.stringify({ data: this.#authority.prepare('PRAGMA data_version').get(),
+      schema: this.#authority.prepare('PRAGMA schema_version').get(), changes: this.#authority.prepare('SELECT total_changes() changes').get() });
+    if (this.#learningCallDepth > 0 && this.#wordLearningRead?.generation !== generation)
+      this.#wordLearningRead = { generation, reads: new LearningReads(word) };
+    const reads = this.#learningCallDepth === 0 ? new LearningReads(word) : this.#wordLearningRead!.reads;
+    return new EditorialLearningLedger(this.#authority, reads, (source) => this.#requireWordLearningSource(source),
+      (source, cursor, budget) => this.#boundedAuthority.readManualCommandSource(source, cursor, budget),
+      (source) => {
+        this.#requireWordLearningSource(source);
+        const context = this.#wordSampleDetailContext!;
+        const sample = context.samples.get(source.sampleId)!.sample;
+        const side = (fragments: typeof sample.before): import('../shared/protocol/learning.js').LearningExampleText[] => fragments.map((fragment) => {
+          const text = wordSourceFragmentText(context.graph, context.decodedAtoms, fragment);
+          return fragment.kind === 'paragraph-boundary' ? { kind: 'paragraph-boundary' } : { kind: 'text', text: text! };
+        });
+        return { before: side(sample.before), after: side(sample.after) };
+      });
+  }
+
+  /** Actual bounded original bytes and every saved sample meet the fresh compiler before current learning can use a pair. */
+  #requireWordLearningSource(source: WordTrackedEditLearningSource): WordLearningProofs {
+    const parent = this.#retentionCall(() => readWordParentSourcePin(this.#authority, source.bookId, source.sourceVersionId));
+    requireStore(parent.sourceDigest === source.sourceDigest && parent.sourceBytes > 0 && parent.sourceBytes <= MAX_ARCHIVE_BYTES,
+      'WORD_SOURCE_INVALID', 'Word 修改样本的原始来源固定记录无效。');
+    const object = this.#authority.prepare('SELECT relative_key, byte_length FROM content_objects WHERE object_digest = ?').get(parent.objectDigest);
+    requireStore(object && object.byte_length === parent.sourceBytes, 'WORD_SOURCE_UNAVAILABLE', 'Word 原文件对象记录不完整。');
+    const path = this.#contentObjectPath(parent.objectDigest, asString(object.relative_key));
+    let descriptor: number | null = null;
+    try {
+      const metadata = lstatSync(path);
+      requireStore(relative(path, realpathSync(path)) === '' && metadata.isFile() && !metadata.isSymbolicLink() && metadata.size === parent.sourceBytes,
+        'WORD_SOURCE_UNAVAILABLE', 'Word 原文件不再是完整的留存文件。');
+      descriptor = openSync(path, constants.O_RDONLY);
+      const opened = fstatSync(descriptor);
+      requireStore(opened.isFile() && opened.size === parent.sourceBytes && opened.dev === metadata.dev && opened.ino === metadata.ino,
+        'WORD_SOURCE_UNAVAILABLE', 'Word 原文件在打开时已变化。');
+      const bytes = Buffer.allocUnsafe(parent.sourceBytes);
+      for (let offset = 0; offset < bytes.byteLength;) {
+        const count = readSync(descriptor, bytes, offset, Math.min(64 * 1024, bytes.byteLength - offset), offset);
+        requireStore(count > 0, 'WORD_SOURCE_UNAVAILABLE', 'Word 原文件在读取时已不完整。'); offset += count;
+      }
+      requireStore(readSync(descriptor, Buffer.alloc(1), 0, 1, bytes.byteLength) === 0 && sha256(bytes) === parent.sourceDigest,
+        'WORD_SOURCE_UNAVAILABLE', 'Word 原文件与留存摘要不一致。');
+      let context = this.#wordSampleDetailContext;
+      let fresh: Extract<WordTrackedCompilation, { kind: 'ready' }> | null = null;
+      if (context === null || context.bookId !== source.bookId || context.sourceVersionId !== source.sourceVersionId ||
+        context.parentPinDigest !== wordParentSourcePinRecord(parent).digest || !wordSampleDetailContextCurrent(this.#authority, context)) {
+        const compiled = compileWordTrackedDocxBytes(bytes);
+        requireStore(compiled.kind === 'ready', 'WORD_SOURCE_INVALID', 'Word 原文件不再符合留存编译契约。');
+        fresh = compiled;
+        context = this.#retentionCall(() => createWordSampleDetailContext(this.#authority, source.bookId, source.sourceVersionId, compiled));
+      }
+      requireStore(context.graphDigest === source.graphDigest, 'WORD_SOURCE_INVALID', 'Word 来源图与原文件不一致。');
+      if (this.#wordLearningProofs?.context !== context) {
+        if (fresh === null) {
+          const compiled = compileWordTrackedDocxBytes(bytes);
+          requireStore(compiled.kind === 'ready', 'WORD_SOURCE_INVALID', 'Word 原文件不再符合留存编译契约。');
+          fresh = compiled;
+        }
+        const reads = new LearningReads();
+        const ledger = new EditorialLearningLedger(this.#authority, reads);
+        const imports = this.#authority.prepare('SELECT commit_id FROM word_revision_imports WHERE book_id = ? AND source_version_id = ?')
+          .all(source.bookId, source.sourceVersionId);
+        requireStore(imports.length > 0, 'WORD_SOURCE_INVALID', 'Word 修改来源没有完整的已提交导入。');
+        for (const imported of imports) ledger.validateWordImportSamples(source.bookId, asString(imported.commit_id), fresh);
+        const provedSamples = new Set([...reads.word.evidence.values()].map((evidence) => evidence.candidate.materialKey));
+        for (const row of this.#authority.prepare('SELECT sample_id, sha256, canonical_json FROM word_tracked_edit_samples WHERE book_id = ? AND source_version_id = ?')
+          .iterate(source.bookId, source.sourceVersionId)) {
+          const found = context.samples.get(asString(row.sample_id));
+          const expected = found === undefined ? null : wordTrackedSampleRecord(found.sample);
+          requireStore(expected !== null && row.sha256 === expected.digest && row.canonical_json === expected.json &&
+            provedSamples.has(`word-sample:${asString(row.sample_id)}`),
+          'WORD_SAMPLE_INVALID', 'Word 修改样本与原文件完整清单不一致。');
+        }
+        for (const row of this.#authority.prepare(`SELECT signal_id FROM learning_signals WHERE book_id = ?
+          AND json_extract(canonical_json, '$.source.sourceVersionId') = ? AND json_extract(canonical_json, '$.kind') = 'word-tracked-edit'`)
+          .iterate(source.bookId, source.sourceVersionId)) {
+          requireStore(reads.word.signals.has(asString(row.signal_id)), 'WORD_SAMPLE_INVALID', 'Word 修改信号不属于完整的历史准入清单。');
+        }
+        requireStore(wordSampleDetailContextCurrent(this.#authority, context), 'WORD_SOURCE_CHANGED', 'Word 学习来源在验证期间已经变化。');
+        this.#wordLearningProofs = { context, facts: reads.word };
+      }
+      const sample = context.samples.get(source.sampleId);
+      requireStore(sample !== undefined && wordTrackedSampleRecord(sample.sample).digest === source.sampleDigest,
+        'WORD_SAMPLE_INVALID', 'Word 修改样本不属于原文件的完整清单。');
+      this.#wordSampleDetailContext = context;
+      return this.#wordLearningProofs.facts;
+    } catch (error) {
+      if (error instanceof StoreError) throw error;
+      if (isRecord(error) && typeof error.code === 'string' && typeof error.syscall === 'string') {
+        throw new StoreError('WORD_SOURCE_UNAVAILABLE', 'Word 原文件无法读取，当前学习不能使用这条修改对。');
+      }
+      throw error;
+    } finally { if (descriptor !== null) closeSync(descriptor); }
   }
 
   /** The revision feedback binds: one of this Book's baseline Result Set Revisions, as ②A shows it, and its items. */
@@ -13967,8 +14980,10 @@ export class EditorialStore {
     return this.#peopleCall(() => this.#transaction(this.#authority, () => {
       const result = this.#bookPeople.update(input);
       const scope = this.#baselineAnalysis.launch.operationalScope;
-      if (new SupervisionDirectives(this.#authority).history(scope).length > 0)
-        new HouseReviewPreferenceLedger(this.#authority).refreshGovernance(scope, this.#housePreferencePeopleNames());
+      // An editor's words reach a record by a directive or, from /2 on, by an accepted memory: either is refiltered by the house's names now.
+      const preferences = new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger());
+      if (new SupervisionDirectives(this.#authority).history(scope).length > 0 || preferences.history(scope).at(-1)?.schema === 'ai7.house-review-preference/2')
+        preferences.refreshGovernance(scope, this.#housePreferencePeopleNames());
       return result;
     }));
   }
@@ -14361,7 +15376,7 @@ export class EditorialStore {
     displayName: string,
   ): Promise<IngestedDocx> {
     try {
-      return await this.#parseIntoIngest(draftId, workingPath, displayName);
+      return await this.#parseIntoIngest(draftId, workingPath, displayName, { workingRepresentation: true });
     } catch (error) {
       if (error instanceof StoreError || error instanceof StoreFatalError) throw error;
       if (error instanceof Error && error.message.startsWith('DOCX_REJECTED:')) {
@@ -15208,19 +16223,30 @@ export class EditorialStore {
     targetSelection: ImportTargetSelection,
     acceptDegradation: boolean,
     textBoxDisposition: TextBoxDisposition = 'retain',
+    trackedChanges?: WordTrackedChoiceInput,
   ): ReviewBeforeImportProjection {
     this.#assertAvailable();
     requireStore(UUID_PATTERN.test(draftId), 'DRAFT_INVALID', '导入草稿标识无效。');
     requireStore(textBoxDisposition === 'retain' || textBoxDisposition === 'merge', 'TEXT_BOX_CHOICE_INVALID', '文本框处理方式无效。');
     this.#requireNoAbandonmentCleanupIntent(draftId);
-    const snapshot = this.#loadDraftSnapshot(draftId);
+    let snapshot = this.#loadDraftSnapshot(draftId);
     requireStore(snapshot.state === 'staged', 'DRAFT_STATE_CHANGED', '导入草稿状态已变化。');
     requireStore(snapshot.version === expectedDraftVersion, 'DRAFT_VERSION_CHANGED', '导入草稿版本已变化。');
     const identityFindings = this.#identityFindings(snapshot);
     const target = this.#resolveImportTarget(targetSelection, identityFindings);
-    const reviewed = this.#reviewedFidelity(snapshot, textBoxDisposition);
+    const word = this.#wordIntakePlan(snapshot, target, textBoxDisposition, trackedChanges, expectedDraftVersion);
+    if (word !== null) {
+      snapshot = { ...snapshot, parserIdentity: word.parsed.parserIdentity, contentDigest: word.parsed.contentDigest,
+        structureDigest: word.parsed.structureDigest, blockCount: word.parsed.blockCount, characterCount: word.parsed.characterCount,
+        fidelity: word.parsed.fidelity, titleSuggestion: word.parsed.titleSuggestion.value, titleSource: word.parsed.titleSuggestion.sourceLabel };
+    }
+    const reviewed = this.#reviewedFidelity(snapshot, textBoxDisposition, word ?? undefined);
     const { plan } = reviewed;
     if (plan.degradations.length > 0 && !acceptDegradation) {
+      if (word !== null) this.#transaction(this.#authority, () => {
+        this.#replaceStagedReading(snapshot, word.parsed, word.reading.blocks, null);
+        this.#retentionCall(() => recordWordPreparedIntake(this.#authority, word.prepared));
+      });
       return this.#reviewProjection(snapshot, null, reviewed, false, target, identityFindings, null);
     }
     requireStore(
@@ -15229,6 +16255,7 @@ export class EditorialStore {
       '本次导入不需要降级接受。',
     );
     const nextVersion = expectedDraftVersion + 1;
+    if (word !== null) word.prepared = { ...word.prepared, draftVersion: nextVersion };
     requireStore(
       !this.#control.persistLegacyReviewedDraft ||
         (target.kind === 'new-book' && target.choiceId === 'new-book' && identityFindings.length === 0),
@@ -15244,6 +16271,7 @@ export class EditorialStore {
       : target.kind === 'new-book' ? target.choiceId : null;
     const reviewedAt = new Date().toISOString();
     this.#transaction(this.#authority, () => {
+      if (word !== null) this.#replaceStagedReading(snapshot, word.parsed, word.reading.blocks, null);
       const update = this.#authority
         .prepare(
           `UPDATE import_drafts
@@ -15267,6 +16295,7 @@ export class EditorialStore {
           expectedDraftVersion,
         );
       requireStore(update.changes === 1, 'DRAFT_VERSION_CHANGED', '导入草稿在复核时已变化。');
+      if (word !== null) this.#retentionCall(() => recordWordPreparedIntake(this.#authority, word.prepared));
     });
     return this.#reviewProjection(
       {
@@ -15298,9 +16327,10 @@ export class EditorialStore {
     this.#assertAvailable();
     requireStore(UUID_PATTERN.test(draftId), 'DRAFT_INVALID', '导入草稿标识无效。');
     this.#requireNoAbandonmentCleanupIntent(draftId);
-    const snapshot = this.#loadDraftSnapshot(draftId);
+    let snapshot = this.#loadDraftSnapshot(draftId);
     requireStore(snapshot.state === 'staged', 'DRAFT_STATE_CHANGED', '导入草稿状态已变化。');
     requireStore(snapshot.version === expectedDraftVersion, 'DRAFT_VERSION_CHANGED', '导入草稿版本已变化。');
+    snapshot = this.#selectLegacyWordStaging(snapshot);
     const identityFindings = this.#identityFindings(snapshot);
     const target = this.#resolveSourceImportTarget(targetSelection, snapshot, identityFindings);
     const nextVersion = expectedDraftVersion + 1;
@@ -15357,9 +16387,10 @@ export class EditorialStore {
     this.#assertAvailable();
     requireStore(UUID_PATTERN.test(draftId), 'DRAFT_INVALID', '导入草稿标识无效。');
     this.#requireNoAbandonmentCleanupIntent(draftId);
-    const snapshot = this.#loadDraftSnapshot(draftId);
+    let snapshot = this.#loadDraftSnapshot(draftId);
     requireStore(snapshot.state === 'staged', 'DRAFT_STATE_CHANGED', '导入草稿状态已变化。');
     requireStore(snapshot.version === expectedDraftVersion, 'DRAFT_VERSION_CHANGED', '导入草稿版本已变化。');
+    snapshot = this.#selectLegacyWordStaging(snapshot);
     // A reimport compares parsed blocks, so a format that was never parsed cannot begin one.
     this.#requireEditableFormat(snapshot);
     const binding = this.#reimportManuscriptBinding(targetSelection.bookId);
@@ -16240,10 +17271,11 @@ export class EditorialStore {
       requireStore(reconstructed !== null, 'REVIEW_CHANGED', '导入前复核摘要无法由当前权威状态重建。');
       const { target, reviewed } = reconstructed;
       const { plan, fidelity: reviewedFidelity } = reviewed;
+      const word = reviewed.word;
       this.#boundedCall(() => this.#boundedAuthority.assertStagedDraftIntegrity(input.draftId));
       // A merged review brings every text-box paragraph into r1 (ADR 0086 §2); any other review's r1 is
       // exactly the staged body.
-      const merged = plan.textBoxDisposition === 'merge'
+      const merged = word === undefined && plan.textBoxDisposition === 'merge'
         ? this.#retentionCall(() => stagedTextBoxParagraphs(this.#authority, input.draftId))
         : null;
       const blockCount = snapshot.blockCount + (merged?.length ?? 0);
@@ -16253,7 +17285,8 @@ export class EditorialStore {
       const now = new Date().toISOString();
       const bookId = target.kind === 'existing-book' ? target.bookId : randomUUID();
       const dimensionSetId = target.kind === 'existing-book' ? target.dimensionSetId : randomUUID();
-      const sourceVersionId = randomUUID();
+      const reusedParent = word?.prepared.target.kind === 'existing-book' ? word.prepared.target.parentSourcePin : null;
+      const sourceVersionId = reusedParent?.sourceVersionId ?? randomUUID();
       const provenanceId = randomUUID();
       const fidelityReviewId = randomUUID();
       const degradationDecisionId = plan.degradations.length > 0 ? randomUUID() : null;
@@ -16305,7 +17338,8 @@ export class EditorialStore {
           '所选图书身份、维度集或稿件状态已变化。',
         );
       }
-      this.#authority
+      if (reusedParent !== null) this.#retentionCall(() => requireWordParentSourcePin(this.#authority, reusedParent));
+      else this.#authority
         .prepare(
           `INSERT INTO source_versions(
              source_version_id, book_id, object_digest, source_digest, content_digest, structure_digest,
@@ -16317,8 +17351,8 @@ export class EditorialStore {
           bookId,
           snapshot.objectDigest,
           snapshot.sourceDigest,
-          snapshot.contentDigest,
-          snapshot.structureDigest,
+          word?.native.parsed.contentDigest ?? snapshot.contentDigest,
+          word?.native.parsed.structureDigest ?? snapshot.structureDigest,
           snapshot.parserIdentity,
           snapshot.sourceFormat,
           snapshot.displayName,
@@ -16399,7 +17433,7 @@ export class EditorialStore {
              FROM staged_import_blocks WHERE draft_id = ? ORDER BY position`,
         ).run(branchId, input.draftId);
         // ADR 0086 §3: every block of r1 is its staged body paragraph, which the staged sources name.
-        const mapped = this.#authority.prepare(
+        const mapped = word === undefined ? this.#authority.prepare(
           `INSERT INTO manuscript_block_sources(
              revision_id, block_id, source_version_id, source_part, source_paragraph_index,
              box_ordinal, box_paragraph_ordinal, source_paragraph_digest, created_at
@@ -16407,8 +17441,8 @@ export class EditorialStore {
              FROM staged_import_blocks b
              JOIN staged_import_block_sources s ON s.draft_id = b.draft_id AND s.position = b.position
              WHERE b.draft_id = ? ORDER BY b.position`,
-        ).run(revisionId, sourceVersionId, now, input.draftId);
-        requireStore(mapped.changes === snapshot.blockCount, 'IMPORT_POSTCONDITION_FAILED', '稿件内容块的来源段落对应不完整。');
+        ).run(revisionId, sourceVersionId, now, input.draftId) : null;
+        requireStore(mapped === null || mapped.changes === snapshot.blockCount, 'IMPORT_POSTCONDITION_FAILED', '稿件内容块的来源段落对应不完整。');
       } else {
         this.#insertMergedImportBlocks(input.draftId, manuscriptId, revisionId, branchId, sourceVersionId, merged, now);
       }
@@ -16473,6 +17507,14 @@ export class EditorialStore {
           this.#workflowProfile.projection.phases[0].label,
           now,
         );
+      const immutableResult: ImmutableManuscriptImportResult = { commitId: input.commitId, importedAt: now, completionLabel: '稿件已导入',
+        bookId, manuscriptId, branchId, revisionId, importRecordId, source: draftSourceProjection(snapshot),
+        fidelityReview: { fidelityReviewId, outcome: plan.outcome, categories: reviewedFidelity },
+        importRecord: { importRecordId, fidelityReviewId, degradationDecision: degradationDecisionId
+          ? { degradationDecisionId, summaryLabel: '含已接受的降级', acceptedItems: plan.degradations } : null } };
+      if (word !== undefined) this.#authority.prepare(`INSERT INTO import_commits(commit_id, draft_id, request_fingerprint,
+        expected_draft_version, review_digest, operation_kind, result_json, committed_at) VALUES (?, ?, ?, ?, ?, 'manuscript-import', ?, ?)`)
+        .run(input.commitId, input.draftId, requestFingerprint, input.expectedDraftVersion, input.reviewDigest, canonicalJson(immutableResult), now);
       this.#authority
         .prepare(
           `INSERT INTO manuscript_import_records(
@@ -16509,7 +17551,9 @@ export class EditorialStore {
       // transaction, whose source is the file's author — all of them, or no import. A staged body block keeps
       // its identity in r1 whether or not text boxes were merged.
       const stagedBlockId = this.#authority.prepare('SELECT staged_block_id FROM staged_import_blocks WHERE draft_id = ? AND position = ?');
-      const importedMarks = this.#importedMarkCall(() => createImportedMarks(this.#authority, this.#editorialMarks, input.draftId, {
+      const importedMarks = word !== undefined ? this.#commitWordEvidence(word, { bookId, sourceVersionId, commitId: input.commitId,
+        fidelityReviewId, revisionId, branchId, reviewDigest: input.reviewDigest, createdAt: now }) :
+        this.#importedMarkCall(() => createImportedMarks(this.#authority, this.#editorialMarks, input.draftId, {
         manuscriptId,
         branchId,
         blockIdOf: (position) => asString(one(stagedBlockId.all(input.draftId, position) as SqlRow[],
@@ -16517,35 +17561,8 @@ export class EditorialStore {
       }));
       requireStore(importedMarks === plan.importedMarks, 'IMPORT_POSTCONDITION_FAILED', '导入的批注与修改建议与保真审阅的数量不一致。');
 
-      result = {
-        commitId: input.commitId,
-        importedAt: now,
-        completionLabel: '稿件已导入',
-        bookId,
-        manuscriptId,
-        branchId,
-        revisionId,
-        importRecordId,
-        source: this.#stagedProjection(snapshot).source,
-        fidelityReview: {
-          fidelityReviewId,
-          outcome: plan.outcome,
-          categories: reviewedFidelity,
-        },
-        importRecord: {
-          importRecordId,
-          fidelityReviewId,
-          degradationDecision: degradationDecisionId
-            ? {
-                degradationDecisionId,
-                summaryLabel: '含已接受的降级',
-                acceptedItems: plan.degradations,
-              }
-            : null,
-        },
-        overview: this.getBookOverview(bookId),
-      };
-      this.#authority
+      result = { ...immutableResult, overview: this.getBookOverview(bookId) };
+      if (word === undefined) this.#authority
         .prepare(
           `INSERT INTO import_commits(
              commit_id, draft_id, request_fingerprint, expected_draft_version, review_digest,
@@ -16607,6 +17624,7 @@ export class EditorialStore {
         sourceBytes: snapshot.sourceBytes,
         conversion: snapshot.conversion,
         parserIdentity: snapshot.parserIdentity!,
+        ...(word === undefined ? {} : { word: { commitId: input.commitId, compiled: word.compiled } }),
       });
       this.#authority.prepare('DELETE FROM staged_import_snapshots WHERE draft_id = ?').run(input.draftId);
       this.#assertForeignKeys(this.#authority);
@@ -17091,6 +18109,9 @@ export class EditorialStore {
         : await this.#revalidateConversion(snapshotBeforeAttempt, objectPath);
       work.converted = converted;
       return this.#parseIntoIngest(input.draftId, converted?.path ?? objectPath, snapshotBeforeAttempt.displayName, {
+        ...(converted !== null ? { workingRepresentation: true } :
+          this.#authority.prepare('SELECT draft_id FROM staged_word_revision_intakes WHERE draft_id = ?').get(input.draftId) === undefined
+            ? { historicalReader: true } : { reading: 'legacy' }),
         signal: abortController.signal,
         onArchiveProgress: (bytes) => {
           if (this.#reimportCommitWork.get(workId) === work) {
@@ -17211,6 +18232,8 @@ export class EditorialStore {
         return { done: false, completed: work.parseBytes, total: work.total, result: null };
       }
       const parsed = work.parsedIngest.parsed;
+      const parsedSources = work.parsedIngest.sources;
+      requireStore(parsedSources !== null, 'SNAPSHOT_RESELECTION_REQUIRED', '重新导入缺少实际历史读法的来源对应。');
       // A converted source is checked against its reproduced working representation, and its fidelity is the
       // conversion's, as revalidation checks it (Issue #597).
       const converted = work.snapshot.conversion === null ? null : work.converted;
@@ -17225,7 +18248,7 @@ export class EditorialStore {
           canonicalJson(converted?.fidelity ?? parsed.fidelity) === canonicalJson(work.snapshot.fidelity) &&
           parsed.titleSuggestion.value === work.snapshot.titleSuggestion &&
           parsed.titleSuggestion.sourceLabel === work.snapshot.titleSource &&
-          this.#retentionCall(() => stagedImportSourcesMatch(this.#authority, work.input.draftId, work.parsedIngest!.sources)),
+          this.#retentionCall(() => stagedImportSourcesMatch(this.#authority, work.input.draftId, parsedSources)),
         'SNAPSHOT_RESELECTION_REQUIRED',
         '暂存来源身份或解析证据无法精确重建。',
       );
@@ -18030,7 +19053,13 @@ export class EditorialStore {
   }
 
   flushJournalEdit(input: JournalEditInput): JournalAcknowledgement {
-    return this.#boundedCall(() => this.#bounded.flushJournalEdit(input, this.#lifetimeId));
+    return this.#boundedCall(() => this.#bounded.flushJournalEdit(input, this.#lifetimeId, (source) =>
+      new EditorialLearningLedger(this.#journal).captureManual(source, this.#baselineAnalysis.launch.operationalScope)));
+  }
+
+  inspectManualLearningSource(signalId: string, cursor: import('./bounded-manuscript.js').ManualCommandSourceCursor | null = null,
+    budgetBytes = MAX_FRAME_BYTES): import('./bounded-manuscript.js').ManualCommandSourcePage {
+    return this.#learningCall(() => this.#learningLedger().manualSourcePage(signalId, cursor, budgetBytes));
   }
 
   /**
@@ -18409,7 +19438,7 @@ export class EditorialStore {
     requireStore(Number.isFinite(Date.parse(result.testedAt)) && (result.outcome !== 'passed' || facts !== undefined), 'MODEL_CONNECTION_TEST_INVALID', '连接测试状态无效。');
     if (facts !== undefined) requireStore(facts.role === 'Fast Interaction Role' && facts.model === result.modelId &&
       facts.credentialReference === connection.credentialReference && facts.route === connection.binding.providerId &&
-      facts.credentialSlot === connection.binding.credentialSlot && DIGEST_PATTERN.test(facts.bindingDigest) && (facts.policyVersion === 'v25' || facts.policyVersion === 'v26') &&
+      facts.credentialSlot === connection.binding.credentialSlot && DIGEST_PATTERN.test(facts.bindingDigest) && (facts.policyVersion === 'v25' || facts.policyVersion === 'v26' || facts.policyVersion === 'v27' || facts.policyVersion === 'v30' || facts.policyVersion === 'v31') &&
       allowedProductionBindingOf({ route: facts.route, endpoint: facts.endpoint, model: facts.model, credentialSlot: facts.credentialSlot, credentialReference: facts.credentialReference }, 'fast-interaction') !== null &&
       (facts.failureCode === null || /^[A-Z0-9_]{1,100}$/u.test(facts.failureCode)) &&
       (counts == null || [counts.inputTokens, counts.outputTokens, ...(counts.reasoningTokens === undefined ? [] : [counts.reasoningTokens]),
@@ -18498,7 +19527,8 @@ export class EditorialStore {
   }
 
   commitReplacement(previewId: string): ReplacementCommitProjection {
-    return this.#boundedCall(() => this.#bounded.commitReplacement(previewId, this.#lifetimeId));
+    return this.#boundedCall(() => this.#bounded.commitReplacement(previewId, this.#lifetimeId, (source) =>
+      new EditorialLearningLedger(this.#journal).captureManual(source, this.#baselineAnalysis.launch.operationalScope)));
   }
 
   cancelReplacement(previewId: string): boolean {
@@ -19131,7 +20161,7 @@ export class EditorialStore {
     const run = this.#authority.prepare('SELECT task_intent_id FROM analysis_run_records WHERE run_record_id = ?').get(runRecordId) as SqlRow | undefined;
     if (run === undefined) return null;
     try {
-      return new HouseReviewPreferenceLedger(this.#authority).governanceChanged(asString(run.task_intent_id), () => this.#housePreferencePeopleNames())
+      return new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).governanceChanged(asString(run.task_intent_id), () => this.#housePreferencePeopleNames())
         ? '本社审阅偏好的学习监督已变化' : null;
     } catch (error) {
       if (!(error instanceof LearningEligibilityError)) throw error;
@@ -19144,8 +20174,16 @@ export class EditorialStore {
     this.#assertAvailable();
     const deliverable = this.#reviewRuns.deliverableGuard(runRecordId, ledger.launch.live !== null);
     if (deliverable !== null) return deliverable;
-    const intent = this.#authority.prepare('SELECT t.task_intent_id, t.book_id FROM analysis_run_records r JOIN analysis_task_intents t ON t.task_intent_id = r.task_intent_id WHERE r.run_record_id = ?').get(runRecordId) as SqlRow | undefined;
+    const intent = this.#authority.prepare('SELECT t.task_intent_id, t.book_id, t.canonical_json FROM analysis_run_records r JOIN analysis_task_intents t ON t.task_intent_id = r.task_intent_id WHERE r.run_record_id = ?').get(runRecordId) as SqlRow | undefined;
     requireStore(intent !== undefined, 'ANALYSIS_RUN_INVALID', '运行记录不存在。');
+    const decision = (JSON.parse(asString(intent.canonical_json)) as { factualDecision?: import('./factual-verification.js').FactualRecheckSelection }).factualDecision;
+    if (decision !== undefined) {
+      try {
+        const { reader } = this.#resultBinding(decision.bookId, decision.resultId);
+        requireStore(canonicalJson(this.#factualVerification.recheckSelection(decision.bookId, decision.decisionId, reader)) === canonicalJson(decision),
+          'FACTUAL_DECISION_DRIFT', '补充核查的决定、断言或来源已变化。');
+      } catch { return { code: 'FACTUAL_DECISION_DRIFT', materialTitle: '核查决定', message: '补充核查的决定、断言或来源已变化；请重新准备并批准。' }; }
+    }
     const boundary = ledger.definition.kind === 'writing'
       ? this.#writingCall(() => this.#writingTasks.materialBoundary(asString(intent.task_intent_id), ledger.definition.promptContractDigest))
       : { bookId: asString(intent.book_id), references: ledger.definition.materialReferences?.sources ?? [] };
@@ -21852,6 +22890,20 @@ export class EditorialStore {
       'COMMIT_PROOF_INCONCLUSIVE',
       '导入提交来源对象摘要无效。',
     );
+    if (result.completionLabel === '稿件已导入') {
+      const imported = this.#authority.prepare(`SELECT mir.source_version_id, sp.parser_identity,
+        wi.commit_id word_commit_id FROM manuscript_import_records mir
+        JOIN source_provenance sp ON sp.provenance_id = mir.provenance_id
+        LEFT JOIN word_revision_imports wi ON wi.commit_id = mir.commit_id WHERE mir.commit_id = ?`).get(result.commitId);
+      requireStore(imported !== undefined, 'COMMIT_PROOF_INCONCLUSIVE', '导入提交来源记录缺失。');
+      if (imported.parser_identity === WORD_DOCX_PARSER_IDENTITY || imported.word_commit_id !== null) {
+        const sourceVersionId = asString(imported.source_version_id);
+        const original = await readRetainedWordOriginal(this.#authority, this.#dataRoot, this.#objectsRoot, result.bookId, sourceVersionId);
+        const { compiled } = readWordManuscriptExportSource(this.#authority, result.bookId, result.revisionId, sourceVersionId, original);
+        this.#importedMarkCall(() => validateWordImportedMarkSources(this.#authority, result.bookId, result.commitId, compiled));
+        this.#learningCall(() => this.#learningLedger().validateWordImportSamples(result.bookId, result.commitId, compiled));
+      }
+    }
   }
 
   async #originalFileAccess(snapshot: DraftSnapshot): Promise<OriginalFileAccessProjection> {
@@ -21939,7 +22991,13 @@ export class EditorialStore {
       // A converted draft was read through its working representation, so that is what the parse is
       // revalidated against, after the conversion itself is reproduced from the retained original.
       const converted = snapshot.conversion === null ? null : await this.#revalidateConversion(snapshot, objectPath);
-      const ingested = await this.#parseIntoIngest(snapshot.draftId, converted?.path ?? objectPath, snapshot.displayName);
+      const wordStaged = this.#authority.prepare('SELECT draft_id FROM staged_word_revision_intakes WHERE draft_id = ?').get(snapshot.draftId) !== undefined;
+      const selection = wordStaged ? this.#retentionCall(() => wordPreparedSelection(this.#authority, snapshot.draftId)) : null;
+      const ingested = await this.#parseIntoIngest(snapshot.draftId, converted?.path ?? objectPath, snapshot.displayName,
+        converted !== null ? { workingRepresentation: true } : !wordStaged ? { historicalReader: true } :
+          snapshot.reviewedRelationship === 'source-only' || snapshot.reviewedRelationship === 'reimport' ? { reading: 'legacy' } :
+            selection === null ? {} : { reading: selection.choice.mode === 'suggestions' ? 'rejected' : 'accepted',
+              textBoxDisposition: selection.textBoxDisposition });
       try {
         const { parsed } = ingested;
         requireStore(
@@ -22159,7 +23217,8 @@ export class EditorialStore {
     draftId: string,
     path: string,
     displayName: string,
-    options: { signal?: AbortSignal; onArchiveProgress?: (bytes: number) => void } = {},
+    options: { signal?: AbortSignal; onArchiveProgress?: (bytes: number) => void;
+      workingRepresentation?: true; historicalReader?: true; reading?: WordReadingKind | 'legacy'; textBoxDisposition?: TextBoxDisposition } = {},
   ): Promise<IngestedDocx> {
     requireStore(UUID_PATTERN.test(draftId), 'DRAFT_INVALID', '导入草稿标识无效。');
     const ingestId = randomUUID();
@@ -22213,7 +23272,7 @@ export class EditorialStore {
       }
     };
     try {
-      const parsed = await parseDocx(path, displayName, (block: ParsedDocxBlock) => {
+      const emit = (block: Pick<ParsedDocxBlock, 'position' | 'digest' | 'kind' | 'level' | 'text' | 'graphemeLength'>): void => {
         const stagedBlockId = `blk_${sha256(`${draftId}\u0000${block.position}\u0000${block.digest}`).slice(0, 24)}`;
         batch.push({
           stagedBlockId,
@@ -22226,18 +23285,54 @@ export class EditorialStore {
           graphemeLength: block.graphemeLength,
         });
         startOffset += block.graphemeLength;
-        blockSourceIndexes.push(block.sourceParagraphIndex);
         if (batch.length === INGEST_BATCH_SIZE) flushBatch();
-      // The router already identified the file as a DOCX from its content, so the display name is
-      // not asked to prove it: a DOCX under any other name is still a DOCX (ADR 0072 §1).
-      }, undefined, { ...options, formatIdentified: true });
+      };
+      const emitLegacy = (block: ParsedDocxBlock): void => { blockSourceIndexes.push(block.sourceParagraphIndex); emit(block); };
+      const parseOptions = { ...(options.signal === undefined ? {} : { signal: options.signal }),
+        ...(options.onArchiveProgress === undefined ? {} : { onArchiveProgress: options.onArchiveProgress }), formatIdentified: true };
+      // Converted working representations and native originals keep their existing, distinct routing.
+      const native = options.workingRepresentation === true || options.historicalReader === true ? null : await parseNativeDocxIntake(path, displayName,
+        { legacy: emitLegacy, wordPreview: () => undefined }, undefined, parseOptions);
+      let parsed: ParsedDocx | ParsedWordDocx;
+      let sources: StagedImportSources | null;
+      if (native === null) {
+        parsed = await parseDocx(path, displayName, emitLegacy, undefined, parseOptions);
+        sources = { blockSourceIndexes, textBoxes: parsed.textBoxes };
+      } else if (native.kind === 'legacy') {
+        parsed = native.parsed;
+        sources = { blockSourceIndexes, textBoxes: parsed.textBoxes };
+      } else if (options.reading === 'legacy') {
+        requireStore(native.legacy.kind === 'ready', 'DOCX_REJECTED', '该 DOCX 的历史读法无法形成现有来源导入或重新导入。');
+        parsed = native.legacy.parsed;
+        for (const block of native.legacy.blocks) { options.signal?.throwIfAborted(); emitLegacy(block); }
+        sources = { blockSourceIndexes, textBoxes: parsed.textBoxes };
+      } else {
+        const disposition = options.textBoxDisposition ?? 'retain';
+        const compiled = disposition === 'retain' ? native.word : await compileWordTrackedDocx(path,
+          { digest: native.word.sourceDigest, bytes: native.word.archiveBytes }, { ...parseOptions, textBoxDisposition: disposition });
+        requireStore(compiled.kind === 'ready' && compiled.graphDigest === native.word.graphDigest &&
+          compiled.templateManifestDigest === native.word.templateManifestDigest,
+        'WORD_READING_UNAVAILABLE', 'Word 阅读与原始来源的完整编译结果不一致。');
+        const reading = compiled.readings[options.reading ?? native.word.previewReading];
+        requireStore(reading.usable && reading.blocks.length > 0, 'WORD_READING_UNAVAILABLE', '所选 Word 阅读没有可用的非空稿件。');
+        let fidelity = native.parsed.fidelity;
+        if (options.reading !== undefined) {
+          const selected = wordImportFidelityReport(fidelity, options.reading === 'rejected' ? 'suggestions' : 'accepted-baseline', reading.marks.length, disposition);
+          requireStore(selected !== undefined, 'WORD_READING_UNAVAILABLE', '所选 Word 阅读没有完整保真计划。');
+          fidelity = selected;
+        }
+        parsed = { ...native.parsed, contentDigest: reading.contentDigest, structureDigest: reading.structureDigest,
+          blockCount: reading.blocks.length, characterCount: reading.characterCount, fidelity };
+        for (const block of reading.blocks) { options.signal?.throwIfAborted(); emit(block); }
+        sources = null;
+      }
       flushBatch();
       requireStore(
         parsed.blockCount === inserted && parsed.characterCount === startOffset && inserted > 0,
         'SNAPSHOT_INCOMPLETE',
         '暂存解析未形成完整有界摄入。',
       );
-      return { ingestId, parsed, sources: { blockSourceIndexes, textBoxes: parsed.textBoxes } };
+      return { ingestId, parsed, sources, native };
     } catch (error) {
       this.#discardIngest(ingestId);
       throw error;
@@ -22297,10 +23392,16 @@ export class EditorialStore {
          FROM import_ingest_blocks WHERE ingest_id = ? AND draft_id = ? ORDER BY position`,
     ).run(draftId, ingested.ingestId, draftId);
     requireStore(inserted.changes === parsed.blockCount, 'SNAPSHOT_INCOMPLETE', '暂存摄入无法完整提升为权威快照。');
-    requireStore(ingested.sources.blockSourceIndexes.length === parsed.blockCount, 'SNAPSHOT_INCOMPLETE', '暂存摄入的来源段落不完整。');
-    this.#retentionCall(() => stageImportSources(this.#authority, draftId, ingested.sources));
-    // The file's comments and tracked changes, pinned in the blocks just staged (Issue #411).
-    this.#importedMarkCall(() => stageImportedMarks(this.#authority, draftId, parsed.importedMarks));
+    if (ingested.sources !== null) {
+      const sources = ingested.sources;
+      requireStore(sources.blockSourceIndexes.length === parsed.blockCount, 'SNAPSHOT_INCOMPLETE', '暂存摄入的来源段落不完整。');
+      this.#retentionCall(() => stageImportSources(this.#authority, draftId, sources));
+      this.#importedMarkCall(() => stageImportedMarks(this.#authority, draftId, parsed.importedMarks));
+    }
+    if (ingested.native !== null) {
+      const native = ingested.native;
+      this.#retentionCall(() => stageWordRevisionIntake(this.#authority, draftId, native));
+    }
     const removed = this.#authority
       .prepare('DELETE FROM import_ingest_blocks WHERE ingest_id = ? AND draft_id = ?')
       .run(ingested.ingestId, draftId);
@@ -22312,8 +23413,14 @@ export class EditorialStore {
    * staged sources and marks.
    */
   #ingestMatchesSnapshot(ingested: IngestedDocx, draftId: string): boolean {
-    return this.#ingestBlocksMatchSnapshot(ingested.ingestId, draftId) &&
-      this.#retentionCall(() => stagedImportSourcesMatch(this.#authority, draftId, ingested.sources)) &&
+    if (!this.#ingestBlocksMatchSnapshot(ingested.ingestId, draftId)) return false;
+    if (ingested.native !== null) {
+      const native = ingested.native;
+      this.#retentionCall(() => requireWordStagedIntake(this.#authority, draftId, native));
+    }
+    if (ingested.sources === null) return true;
+    const sources = ingested.sources;
+    return this.#retentionCall(() => stagedImportSourcesMatch(this.#authority, draftId, sources)) &&
       this.#importedMarkCall(() => stagedImportedMarksMatch(this.#authority, draftId, ingested.parsed.importedMarks));
   }
 
@@ -22339,13 +23446,7 @@ export class EditorialStore {
   }
 
   #contentObjectPath(objectDigest: string, relativeKey: string): string {
-    requireStore(/^[0-9a-f]{64}$/.test(objectDigest), 'OBJECT_PATH_INVALID', '对象摘要无效。');
-    // The retained original keeps the extension of the format it was identified as, so the key is
-    // checked against every admitted one rather than against DOCX alone (ADR 0072 §2).
-    requireStore(isManuscriptObjectKey(objectDigest, relativeKey), 'OBJECT_PATH_INVALID', '对象相对路径无效。');
-    const path = resolve(this.#objectsRoot, ...relativeKey.split('/'));
-    requireStore(isInside(this.#objectsRoot, path), 'OBJECT_PATH_INVALID', '对象路径越界。');
-    return path;
+    return contentObjectPath(this.#objectsRoot, objectDigest, relativeKey);
   }
 
   #loadAbandonmentCleanupIntent(draftId: string): AbandonmentCleanupIntent | null {
@@ -22715,6 +23816,15 @@ export class EditorialStore {
   }
 
   #stagedProjection(snapshot: DraftSnapshot): StagedImportProjection {
+    const wordEvidence = this.#readWordIntake(snapshot);
+    const native = wordEvidence?.native;
+    const wordTrackedChanges: StagedImportProjection['wordTrackedChanges'] = native === undefined ? undefined : native.kind === 'word'
+      ? { compatibility: 'ready', previewReading: native.word.previewReading,
+          readings: { rejected: { usable: native.word.readings.rejected.usable, blockCount: native.word.readings.rejected.blocks.length },
+            accepted: { usable: native.word.readings.accepted.usable, blockCount: native.word.readings.accepted.blocks.length } },
+          savedChoice: this.#retentionCall(() => wordPreparedChoice(this.#authority, snapshot.draftId)) }
+      : { compatibility: 'unsupported', reasonCodes: [...new Set(native.word?.reasons.map((reason) => reason.code) ?? [])],
+          locationCount: native.word?.reasons.length ?? 0 };
     const identityFindings = this.#identityFindings(snapshot);
     const targetChoice = newBookTargetChoice(identityFindings);
     const bookPage = this.listBooks(null);
@@ -22752,6 +23862,7 @@ export class EditorialStore {
       nextBookCursor: bookPage.nextCursor,
       fidelity: snapshot.fidelity,
       detectedBlockCount: snapshot.blockCount,
+      ...(wordTrackedChanges === undefined ? {} : { wordTrackedChanges }),
     };
   }
 
@@ -23552,7 +24663,223 @@ export class EditorialStore {
    * The fidelity a review makes of the staged report with `disposition` for its text boxes. A choice the
    * report cannot state — merging a file that has no text box, or one a converter read — is refused.
    */
-  #reviewedFidelity(snapshot: DraftSnapshot, disposition: TextBoxDisposition): ReviewedFidelity {
+  /** A native Word row is always replayed from bounded original bytes before any reading is prepared. */
+  #readWordIntake(snapshot: DraftSnapshot): { native: NativeDocxIntakeParse; original: Uint8Array } | null {
+    if (this.#authority.prepare('SELECT draft_id FROM staged_word_revision_intakes WHERE draft_id = ?').get(snapshot.draftId) === undefined) return null;
+    requireStore(snapshot.sourceFormat === 'DOCX' && snapshot.conversion === null && snapshot.workingObjectDigest === null &&
+      snapshot.objectDigest === snapshot.sourceDigest && snapshot.sourceBytes > 0 && snapshot.sourceBytes <= MAX_ARCHIVE_BYTES,
+    'WORD_SOURCE_INVALID', 'Word 暂存不是受支持的原始本机 DOCX。');
+    const object = this.#authority.prepare('SELECT relative_key, byte_length FROM content_objects WHERE object_digest = ?').get(snapshot.objectDigest);
+    requireStore(object && object.byte_length === snapshot.sourceBytes, 'WORD_SOURCE_INVALID', 'Word 暂存对象记录不完整。');
+    const path = this.#contentObjectPath(snapshot.objectDigest, asString(object.relative_key));
+    let descriptor: number | null = null;
+    try {
+      requireStore(relative(path, realpathSync(path)) === '', 'WORD_SOURCE_UNAVAILABLE', 'Word 原文件路径已经变化。');
+      const metadata = lstatSync(path);
+      requireStore(metadata.isFile() && !metadata.isSymbolicLink() && metadata.size === snapshot.sourceBytes,
+        'WORD_SOURCE_UNAVAILABLE', 'Word 原文件不再完整。');
+      descriptor = openSync(path, constants.O_RDONLY);
+      const opened = fstatSync(descriptor);
+      requireStore(opened.isFile() && opened.size === snapshot.sourceBytes && opened.dev === metadata.dev && opened.ino === metadata.ino,
+        'WORD_SOURCE_UNAVAILABLE', 'Word 原文件在打开时已经变化。');
+      const bytes = Buffer.allocUnsafe(snapshot.sourceBytes);
+      let offset = 0;
+      while (offset < bytes.byteLength) {
+        const read = readSync(descriptor, bytes, offset, Math.min(64 * 1024, bytes.byteLength - offset), offset);
+        requireStore(read > 0, 'WORD_SOURCE_UNAVAILABLE', 'Word 原文件在读取时已不完整。');
+        offset += read;
+      }
+      requireStore(readSync(descriptor, Buffer.alloc(1), 0, 1, offset) === 0 && sha256(bytes) === snapshot.sourceDigest,
+        'WORD_SOURCE_UNAVAILABLE', 'Word 原文件字节与留存摘要不一致。');
+      const native = parseNativeDocxIntakeBytes(bytes, snapshot.displayName, { formatIdentified: true });
+      this.#retentionCall(() => requireWordStagedIntake(this.#authority, snapshot.draftId, native));
+      return { native, original: bytes };
+    } catch (error) {
+      if (error instanceof StoreError) throw error;
+      if (error instanceof Error && error.message.startsWith('DOCX_REJECTED:')) throw new StoreError('WORD_SOURCE_INVALID', 'Word 原文件无法按暂存契约重新读取。');
+      if (isRecord(error) && typeof error.code === 'string' && typeof error.syscall === 'string') {
+        throw new StoreError('WORD_SOURCE_UNAVAILABLE', 'Word 原文件当前无法读取，请恢复原始来源。');
+      }
+      throw error;
+    } finally { if (descriptor !== null) closeSync(descriptor); }
+  }
+
+  #wordIntakePlan(snapshot: DraftSnapshot, target: ResolvedImportTarget, disposition: TextBoxDisposition,
+    input: unknown, draftVersion: number): WordIntakePlan | null {
+    const evidence = this.#readWordIntake(snapshot);
+    if (evidence === null) {
+      requireStore(input === undefined, 'WORD_CHOICE_INVALID', '普通或转换导入不能选择 Word 修订模式。');
+      return null;
+    }
+    const { native } = evidence;
+    requireStore(native.kind === 'word', 'WORD_INTAKE_UNSUPPORTED', '此文件含当前不支持的 Word 修订；不能作为首份稿件导入。');
+    const choice = this.#retentionCall(() => validateWordChoice(input));
+    const compiled = disposition === 'retain' ? native.word : compileWordTrackedDocxBytes(evidence.original, { textBoxDisposition: disposition });
+    requireStore(compiled.kind === 'ready' && compiled.graphDigest === native.word.graphDigest &&
+      compiled.templateManifestDigest === native.word.templateManifestDigest,
+    'WORD_READING_UNAVAILABLE', 'Word 阅读或来源图无法准确重建。');
+    const reading = compiled.readings[choice.mode === 'suggestions' ? 'rejected' : 'accepted'];
+    requireStore(reading.usable && reading.blocks.length > 0, 'WORD_READING_UNAVAILABLE',
+      choice.mode === 'suggestions' ? '撤销原修订后没有可编辑的非空稿件；请明确选择并确认「直接并入正文（作为定稿基线）」。' : '接受修订后的阅读没有可编辑的非空稿件。');
+    const fidelity = wordImportFidelityReport(native.parsed.fidelity, choice.mode, reading.marks.length, disposition);
+    requireStore(fidelity !== undefined, 'WORD_READING_UNAVAILABLE', '所选 Word 阅读没有完整保真计划。');
+    const ledger = this.#learningLedger();
+    let preparedTarget: WordPreparedIntake['target'];
+    if (target.kind === 'new-book') preparedTarget = { kind: 'new-book', controls: ledger.wordImportControlPins(null) };
+    else {
+      const samples = wordTrackedSamples(target.bookId, compiled.graph, compiled.templates);
+      const materials = samples.map((sample, index) => ({ templateKey: compiled.templates[index]!.templateKey,
+        materialKey: `word-sample:${sample.sampleId}`, materialDigest: learningMaterialDigest(
+          wordTrackedEditCandidate(sample, wordTrackedSampleRecord(sample).digest, snapshot.stagedAt)) }));
+      const parent = this.#authority.prepare('SELECT source_version_id FROM source_versions WHERE book_id = ? AND source_digest = ?')
+        .get(target.bookId, snapshot.sourceDigest);
+      const parentSourcePin = parent === undefined ? null : this.#retentionCall(() => readWordParentSourcePin(this.#authority, target.bookId, asString(parent.source_version_id)));
+      if (parentSourcePin?.parserIdentity === DOCX_PARSER_IDENTITY) {
+        // A retained /3 parent is checked by that same reader's result over these verified bytes; /1 and /2 keep
+        // their recorded historical meaning and are never reparsed.
+        const legacy = native.legacy;
+        requireStore(legacy.kind === 'ready' && legacy.parsed.parserIdentity === DOCX_PARSER_IDENTITY &&
+          legacy.parsed.sourceDigest === parentSourcePin.sourceDigest && legacy.parsed.archiveBytes === parentSourcePin.sourceBytes &&
+          legacy.parsed.contentDigest === parentSourcePin.contentDigest && legacy.parsed.structureDigest === parentSourcePin.structureDigest,
+        'WORD_SOURCE_INVALID', 'Word 复用的历史来源与其 /3 读法的实际结果不一致。');
+      }
+      preparedTarget = { kind: 'existing-book', bookId: target.bookId, controls: ledger.wordImportControls(target.bookId, materials), parentSourcePin };
+    }
+    const bound = bindWordReadingBlocks(reading, reading.blocks.map((block) => ({ sourceBlockId: block.blockId,
+      blockId: `blk_${sha256(`${snapshot.draftId}\u0000${block.position}\u0000${block.digest}`).slice(0, 24)}` })));
+    const pin = (selected: WordCompiledReading) => ({ digest: selected.readingDigest, blockCount: selected.blocks.length, usable: selected.usable });
+    return { original: evidence.original, native, compiled, reading, parsed: { ...native.parsed, contentDigest: reading.contentDigest, structureDigest: reading.structureDigest,
+      blockCount: reading.blocks.length, characterCount: reading.characterCount, fidelity }, prepared: {
+      schema: 'ai7.word-import-preparation/1', draftId: snapshot.draftId, draftVersion, choice, originalDigest: snapshot.sourceDigest,
+      sourceBytes: snapshot.sourceBytes, inventoryDigest: native.word.inventoryDigest, graphDigest: compiled.graphDigest,
+      extractorIdentity: compiled.graph.extractorIdentity, readings: { rejected: pin(compiled.readings.rejected), accepted: pin(compiled.readings.accepted) },
+      mappingDigest: bound.mappingDigest, templateManifestDigest: compiled.templateManifestDigest, textBoxDisposition: disposition, target: preparedTarget } };
+  }
+
+  /** Replace only the transient parse rows; the original compatibility/preview record remains independently pinned. */
+  #replaceStagedReading(snapshot: DraftSnapshot, parsed: ParsedDocx | ParsedWordDocx,
+    blocks: ReadonlyArray<Pick<ParsedDocxBlock, 'position' | 'kind' | 'level' | 'text' | 'digest' | 'graphemeLength'>>,
+    sources: StagedImportSources | null): void {
+    requireStore(this.#authority.isTransaction && blocks.length === parsed.blockCount && blocks.length > 0,
+      'WORD_STAGING_INVALID', '阅读切换必须形成原子的非空暂存快照。');
+    for (const table of ['staged_import_block_sources', 'staged_import_text_box_paragraphs', 'staged_import_marks', 'staged_import_blocks']) {
+      this.#authority.prepare(`DELETE FROM ${table} WHERE draft_id = ?`).run(snapshot.draftId);
+    }
+    requireStore(this.#authority.prepare(`UPDATE staged_import_snapshots SET parser_identity = ?, content_digest = ?, structure_digest = ?,
+      block_count = ?, character_count = ?, fidelity_json = ?, title_suggestion = ?, title_source = ? WHERE draft_id = ?`)
+      .run(parsed.parserIdentity, parsed.contentDigest, parsed.structureDigest, parsed.blockCount, parsed.characterCount,
+        canonicalJson(parsed.fidelity), parsed.titleSuggestion.value, parsed.titleSuggestion.sourceLabel, snapshot.draftId).changes === 1,
+    'WORD_STAGING_INVALID', '阅读切换缺少原始暂存快照。');
+    const insert = this.#authority.prepare(`INSERT INTO staged_import_blocks(draft_id, staged_block_id, position, kind, level, text, digest, start_offset, grapheme_length)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    let offset = 0;
+    for (const block of blocks) {
+      const id = `blk_${sha256(`${snapshot.draftId}\u0000${block.position}\u0000${block.digest}`).slice(0, 24)}`;
+      insert.run(snapshot.draftId, id, block.position, block.kind, block.level, block.text, block.digest, offset, block.graphemeLength);
+      offset += block.graphemeLength;
+    }
+    requireStore(offset === parsed.characterCount, 'WORD_STAGING_INVALID', '所选阅读的完整字符数不一致。');
+    if (sources !== null) {
+      this.#retentionCall(() => stageImportSources(this.#authority, snapshot.draftId, sources));
+      this.#importedMarkCall(() => stageImportedMarks(this.#authority, snapshot.draftId, parsed.importedMarks));
+    }
+    this.#boundedCall(() => this.#boundedAuthority.assertStagedDraftIntegrity(snapshot.draftId));
+  }
+
+  #requireWordStagedReading(snapshot: DraftSnapshot, word: WordIntakePlan): void {
+    const { parsed, reading } = word;
+    requireStore(snapshot.parserIdentity === WORD_DOCX_PARSER_IDENTITY && snapshot.contentDigest === parsed.contentDigest &&
+      snapshot.structureDigest === parsed.structureDigest && snapshot.blockCount === parsed.blockCount && snapshot.characterCount === parsed.characterCount &&
+      canonicalJson(snapshot.fidelity) === canonicalJson(parsed.fidelity) && snapshot.titleSuggestion === parsed.titleSuggestion.value &&
+      snapshot.titleSource === parsed.titleSuggestion.sourceLabel,
+    'WORD_PREPARATION_INVALID', 'Word 暂存元数据与明确选择的阅读不一致。');
+    const rows = this.#authority.prepare('SELECT * FROM staged_import_blocks WHERE draft_id = ? ORDER BY position').all(snapshot.draftId);
+    let offset = 0;
+    requireStore(rows.length === reading.blocks.length && rows.every((row, index) => {
+      const block = reading.blocks[index]!;
+      const id = `blk_${sha256(`${snapshot.draftId}\u0000${block.position}\u0000${block.digest}`).slice(0, 24)}`;
+      const valid = row.staged_block_id === id && row.position === block.position && row.kind === block.kind && row.level === block.level &&
+        row.text === block.text && row.digest === block.digest && row.grapheme_length === block.graphemeLength && row.start_offset === offset;
+      offset += block.graphemeLength;
+      return valid;
+    }), 'WORD_PREPARATION_INVALID', 'Word 暂存没有完整对应已确认的阅读。');
+    for (const table of ['staged_import_block_sources', 'staged_import_text_box_paragraphs', 'staged_import_marks']) requireStore(
+      this.#authority.prepare(`SELECT 1 FROM ${table} WHERE draft_id = ? LIMIT 1`).get(snapshot.draftId) === undefined,
+      'WORD_PREPARATION_INVALID', 'Word 图与片段不能冒充历史段落或标记暂存。');
+  }
+
+  /** Called after the real commit, fidelity, baseline and provenance parents exist in this transaction. */
+  #commitWordEvidence(word: WordIntakePlan, input: { bookId: string; sourceVersionId: string; commitId: string;
+    fidelityReviewId: string; revisionId: string; branchId: string; reviewDigest: string; createdAt: string }): number {
+    requireStore(this.#authority.isTransaction, 'WORD_SOURCE_INVALID', 'Word 来源必须与稿件导入一并提交。');
+    const { bookId, sourceVersionId, commitId, createdAt } = input;
+    const parent = this.#retentionCall(() => readWordParentSourcePin(this.#authority, bookId, sourceVersionId));
+    const reviewedTarget = word.prepared.target;
+    if (reviewedTarget.kind === 'existing-book' && reviewedTarget.parentSourcePin !== null) {
+      this.#retentionCall(() => requireWordParentSourcePin(this.#authority, reviewedTarget.parentSourcePin!));
+      requireStore(reviewedTarget.parentSourcePin.sourceVersionId === sourceVersionId, 'WORD_SOURCE_CHANGED', 'Word 复用来源与已审阅的原始来源不同。');
+    }
+    this.#retentionCall(() => retainWordRevisionSource(this.#authority, parent, word.compiled.graph));
+    const bound = this.#retentionCall(() => bindWordReadingToRevision(this.#authority, bookId, input.revisionId, sourceVersionId, word.reading));
+    requireStore(bound.mappingDigest === word.prepared.mappingDigest, 'WORD_MAPPING_INVALID', 'Word 稿件基线没有按已审阅的对应建立。');
+    const samples = wordTrackedSamples(bookId, word.compiled.graph, word.compiled.templates);
+    const materials = samples.map((sample, index) => ({ templateKey: word.compiled.templates[index]!.templateKey,
+      materialKey: `word-sample:${sample.sampleId}`, materialDigest: learningMaterialDigest(
+        wordTrackedEditCandidate(sample, wordTrackedSampleRecord(sample).digest, createdAt)) }));
+    const ledger = this.#learningLedger();
+    const controls = ledger.wordImportControls(bookId, materials);
+    if (reviewedTarget.kind === 'existing-book') requireStore(canonicalJson(controls) === canonicalJson(reviewedTarget.controls),
+      'WORD_ADMISSION_STALE', 'Word 相关学习设置或材料排除在审阅后已经变化。');
+    else requireStore(canonicalJson({ global: controls.global, book: controls.book }) === canonicalJson(reviewedTarget.controls) &&
+      controls.materials.every(({ standing }) => standing.choice === 'house' && standing.decisionId === null && standing.decisionDigest === null &&
+        standing.basisVersion === LOCAL_LEARNING_POLICY_BASIS.version), 'WORD_ADMISSION_STALE', 'Word 新图书的学习设置或默认准入已变化。');
+    const choice: WordImportChoiceRecord = { schema: 'ai7.word-import-choice/1', sourceVersionId,
+      parentSourcePinDigest: wordParentSourcePinRecord(parent).digest, originalDigest: word.compiled.sourceDigest, workingObjectDigest: null,
+      importReviewId: input.reviewDigest, fidelityReviewId: input.fidelityReviewId, commitId, revisionId: input.revisionId,
+      extractorIdentity: word.compiled.graph.extractorIdentity, graphDigest: word.compiled.graphDigest, ...word.prepared.choice,
+      readings: word.prepared.readings, mappingDigest: bound.mappingDigest, templateManifestDigest: word.compiled.templateManifestDigest,
+      effectiveControls: controls };
+    this.#retentionCall(() => retainWordRevisionImport(this.#authority, bookId, choice, createdAt));
+    this.#retentionCall(() => retainWordManuscriptSourceSegments(this.#authority, bookId, choice, word.reading));
+    const importedMarks = this.#importedMarkCall(() => createWordImportedMarks(this.#authority, this.#editorialMarks, bookId, commitId,
+      word.compiled, input.branchId));
+    this.#learningCall(() => ledger.retainWordImportSamples(bookId, commitId, word.compiled));
+    this.#importedMarkCall(() => validateWordImportedMarkSources(this.#authority, bookId, commitId, word.compiled));
+    this.#learningCall(() => ledger.validateWordImportSamples(bookId, commitId, word.compiled));
+    return importedMarks;
+  }
+
+  /** Derivation has its own provenance; a preserved /1–/3 Source Version keeps its original parser. */
+  #manuscriptImportParser(bookId: string, commitId: string, sourceVersionId: string, parentParser: string, derivationParser: string): string {
+    if (derivationParser === WORD_DOCX_PARSER_IDENTITY) {
+      const { choice } = this.#retentionCall(() => readWordImportChoiceRecord(this.#authority, bookId, commitId));
+      requireStore(choice.sourceVersionId === sourceVersionId, 'WORD_SOURCE_INVALID', 'Word 稿件衍生来源与原始来源不一致。');
+      return WORD_DOCX_PARSER_IDENTITY;
+    }
+    requireStore(parentParser === derivationParser, 'BOOK_RECORD_GRAPH_INVALID', '历史稿件导入的来源解析器不一致。');
+    return parentParser;
+  }
+
+  /** Source-only/reimport consume the actual old reader, including its refusal, never Word preview rows. */
+  #selectLegacyWordStaging(snapshot: DraftSnapshot): DraftSnapshot {
+    const evidence = this.#readWordIntake(snapshot);
+    if (evidence === null || evidence.native.kind === 'legacy') return snapshot;
+    const legacy = evidence.native.legacy;
+    requireStore(legacy.kind === 'ready', 'DOCX_REJECTED', '该 DOCX 的历史读法没有可用于现有来源导入或重新导入的完整稿件。');
+    this.#transaction(this.#authority, () => {
+      this.#replaceStagedReading(snapshot, legacy.parsed, legacy.blocks,
+        { blockSourceIndexes: legacy.blocks.map((block) => block.sourceParagraphIndex), textBoxes: legacy.parsed.textBoxes });
+      this.#authority.prepare('UPDATE staged_word_revision_intakes SET reviewed_json = NULL, reviewed_sha256 = NULL WHERE draft_id = ?').run(snapshot.draftId);
+    });
+    return this.#loadDraftSnapshot(snapshot.draftId);
+  }
+
+  #reviewedFidelity(snapshot: DraftSnapshot, disposition: TextBoxDisposition, word?: WordIntakePlan): ReviewedFidelity {
+    if (word !== undefined) {
+      const plan = deriveImportFidelityPlan(word.parsed.fidelity, snapshot.sourceDigest, snapshot.sourceBytes, undefined, WORD_DOCX_PARSER_IDENTITY);
+      requireStore(plan !== undefined, 'WORD_READING_UNAVAILABLE', 'Word 所选阅读的保真计划无法重建。');
+      return { fidelity: word.parsed.fidelity, plan, word };
+    }
     this.#requireFidelityPlan(snapshot);
     const conversion = fidelityConversion(snapshot.conversion);
     const fidelity = withTextBoxDisposition(snapshot.fidelity, disposition, conversion, snapshot.parserIdentity!);
@@ -23571,6 +24898,19 @@ export class EditorialStore {
     snapshot: DraftSnapshot,
     identityFindings: ReadonlyArray<ImportIdentityFindingProjection>,
   ): { target: ResolvedImportTarget; reviewed: ReviewedFidelity } | null {
+    if (snapshot.parserIdentity === WORD_DOCX_PARSER_IDENTITY) {
+      try {
+        const selection = this.#retentionCall(() => wordPreparedSelection(this.#authority, snapshot.draftId));
+        const target = this.#recordedImportTarget(snapshot, identityFindings);
+        if (selection === null || target === null) return null;
+        const word = this.#wordIntakePlan(snapshot, target, selection.textBoxDisposition, selection.choice, snapshot.version);
+        requireStore(word !== null, 'WORD_PREPARATION_INVALID', 'Word 导入准备缺少完整的原始来源。');
+        this.#retentionCall(() => requireWordPreparedIntake(this.#authority, word.prepared));
+        this.#requireWordStagedReading(snapshot, word);
+        const reviewed = this.#reviewedFidelity(snapshot, selection.textBoxDisposition, word);
+        return this.#reconstructReviewedImportTarget(snapshot, reviewed, identityFindings) === null ? null : { target, reviewed };
+      } catch (error) { if (error instanceof StoreError) return null; throw error; }
+    }
     const staged = this.#requireFidelityPlan(snapshot);
     const dispositions: ReadonlyArray<TextBoxDisposition> = staged.textBoxDisposition === null ? ['retain'] : ['retain', 'merge'];
     for (const disposition of dispositions) {
@@ -23586,8 +24926,15 @@ export class EditorialStore {
     reviewed: ReviewedFidelity,
     identityFindings: ReadonlyArray<ImportIdentityFindingProjection>,
   ): ResolvedImportTarget | null {
-    const { plan } = reviewed;
     if (snapshot.reviewDigest === null) return null;
+    const target = this.#recordedImportTarget(snapshot, identityFindings);
+    if (target === null) return null;
+    if (createImportReviewDigestV6(snapshot, snapshot.version, reviewed, target, identityFindings, this.#workflowProfile) === snapshot.reviewDigest) return target;
+    if (target.kind !== 'new-book' || reviewed.word !== undefined) return null;
+    return reconstructReviewedTargetChoice(snapshot, target.confirmedTitle, reviewed.plan, identityFindings) === target.choiceId ? target : null;
+  }
+
+  #recordedImportTarget(snapshot: DraftSnapshot, identityFindings: ReadonlyArray<ImportIdentityFindingProjection>): ResolvedImportTarget | null {
     if (snapshot.reviewedTargetKind === 'existing-book') {
       if (
         snapshot.reviewedExistingBookId === null ||
@@ -23604,14 +24951,7 @@ export class EditorialStore {
         return null;
       }
       if (target.kind !== 'existing-book' || target.bookStateDigest !== snapshot.reviewedBookStateDigest) return null;
-      return createImportReviewDigestV6(
-        snapshot,
-        snapshot.version,
-        reviewed,
-        target,
-        identityFindings,
-        this.#workflowProfile,
-      ) === snapshot.reviewDigest ? target : null;
+      return target;
     }
     if (snapshot.reviewedTargetKind !== 'new-book' || snapshot.reviewedTitle === null) return null;
     let confirmedTitle: string;
@@ -23628,17 +24968,7 @@ export class EditorialStore {
       confirmedTitle,
       label: currentChoice.label,
     };
-    if (createImportReviewDigestV6(
-      snapshot,
-      snapshot.version,
-      reviewed,
-      target,
-      identityFindings,
-      this.#workflowProfile,
-    ) === snapshot.reviewDigest) return target;
-    return reconstructReviewedTargetChoice(snapshot, confirmedTitle, plan, identityFindings) === currentChoice.id
-      ? target
-      : null;
+    return target;
   }
 
   #reviewProjection(
@@ -23678,7 +25008,13 @@ export class EditorialStore {
       identityFindings,
       fidelity: reviewed.fidelity,
       textBoxDisposition: plan.textBoxDisposition,
-      recordsToCreate: recordsToCreate(plan, target.kind),
+      ...(reviewed.word === undefined ? {} : { trackedChanges: reviewed.word.prepared.choice, wordLearning: {
+        globalEnabled: reviewed.word.prepared.target.controls.global.enabled,
+        bookExcluded: reviewed.word.prepared.target.controls.book.excluded,
+        sourceTemplateCount: reviewed.word.compiled.templates.length,
+        eligibleSampleCount: wordIntakeRecords(reviewed.word)!.eligibleSamples,
+      } }),
+      recordsToCreate: recordsToCreate(plan, target.kind, wordIntakeRecords(reviewed.word)),
       nonEffects: nonEffects(plan),
       workflowProfile: {
         id: this.#workflowProfile.projection.id,
@@ -23700,6 +25036,11 @@ export class EditorialStore {
   }
 
   #identityFindings(snapshot: DraftSnapshot): ImportIdentityFindingProjection[] {
+    if (snapshot.parserIdentity === WORD_DOCX_PARSER_IDENTITY) {
+      const evidence = this.#readWordIntake(snapshot);
+      requireStore(evidence !== null && evidence.native.kind === 'word', 'WORD_SOURCE_INVALID', 'Word 身份提示缺少原始暂存。');
+      snapshot = { ...snapshot, contentDigest: evidence.native.parsed.contentDigest, structureDigest: evidence.native.parsed.structureDigest };
+    }
     const rows = this.#authority
       .prepare(
         `SELECT b.book_id, b.title, sv.source_version_id, sv.source_digest, sv.content_digest,
@@ -24071,12 +25412,15 @@ export class EditorialStore {
         .prepare(
           `SELECT ic.commit_id, ic.committed_at, ir.import_record_id, ir.book_id, ir.manuscript_id,
                   ir.fidelity_review_id, ir.degradation_decision_id, ir.resulting_revision_id,
-                  mr.branch_id, sv.display_name, sv.object_digest, sv.source_digest, sv.format,
+                  mr.branch_id, CASE WHEN sp.parser_identity = '${WORD_DOCX_PARSER_IDENTITY}' THEN d.display_name ELSE sv.display_name END display_name,
+                  sv.source_version_id, sv.object_digest, sv.source_digest, sv.format, sp.parser_identity derivation_parser_identity,
                   sv.working_object_digest, sv.converter_identity, sv.parser_identity, co.byte_length,
                   fr.outcome, fr.round_trip_guaranteed, dd.fidelity_review_id decision_fidelity_review_id,
                   dd.decision
            FROM import_commits ic
+           JOIN import_drafts d ON d.draft_id = ic.draft_id
            JOIN manuscript_import_records ir ON ir.commit_id = ic.commit_id
+           JOIN source_provenance sp ON sp.provenance_id = ir.provenance_id AND sp.source_version_id = ir.source_version_id
            JOIN manuscript_revisions mr
              ON mr.revision_id = ir.resulting_revision_id
             AND mr.manuscript_id = ir.manuscript_id
@@ -24104,7 +25448,8 @@ export class EditorialStore {
     requireStore(asString(row.object_digest) === sourceDigest, 'STORE_CORRUPT', '提交来源对象与来源摘要不一致。');
     const conversion = readConversionColumns(row, requireSourceFormat(asString(row.format)), '来源版本的转换记录不完整。');
     const { categories, plan } = this.#persistedFidelityPlan(
-      fidelityReviewId, sourceDigest, sourceBytes, conversion, asString(row.parser_identity),
+      fidelityReviewId, sourceDigest, sourceBytes, conversion,
+      this.#manuscriptImportParser(asString(row.book_id), commitId, asString(row.source_version_id), asString(row.parser_identity), asString(row.derivation_parser_identity)),
       'STORE_CORRUPT', '导入提交保真记录无效。',
     );
     requireStore(asString(row.outcome) === plan.outcome && asNumber(row.round_trip_guaranteed) === 0, 'STORE_CORRUPT', '导入保真结论无效。');
@@ -24284,6 +25629,7 @@ export class EditorialStore {
     sourceBytes: number;
     conversion: ManuscriptConversionProjection | null;
     parserIdentity: string;
+    word?: { commitId: string; compiled: Extract<WordTrackedCompilation, { kind: 'ready' }> };
   }): void {
     const counts = one(
       this.#authority
@@ -24380,12 +25726,20 @@ export class EditorialStore {
         asNumber(counts.degradation_decisions) === (input.degradationDecisionId === null ? 0 : 1) &&
         asNumber(counts.workflows) === 1 &&
         asNumber(counts.imports) === 1 &&
-        asNumber(counts.block_sources) === input.blockCount &&
+        asNumber(counts.block_sources) === (input.word === undefined ? input.blockCount : 0) &&
         // Issue #411: exactly the marks the review counted, every one pinned on r1.
         asNumber(counts.imported_marks) === input.fidelityPlan.importedMarks,
       'IMPORT_POSTCONDITION_FAILED',
       '导入提交未形成完整记录图。',
     );
+    if (input.word !== undefined) {
+      const word = input.word;
+      const { choice } = this.#retentionCall(() => readWordImportChoiceRecord(this.#authority, input.bookId, word.commitId));
+      this.#retentionCall(() => requireWordManuscriptSourceSegments(this.#authority, input.bookId, choice,
+        word.compiled.readings[choice.mode === 'suggestions' ? 'rejected' : 'accepted']));
+      this.#importedMarkCall(() => validateWordImportedMarkSources(this.#authority, input.bookId, word.commitId, word.compiled));
+      this.#learningCall(() => this.#learningLedger().validateWordImportSamples(input.bookId, word.commitId, word.compiled));
+    }
     const { plan: persistedPlan } = this.#persistedFidelityPlan(
       input.fidelityReviewId,
       input.sourceDigest,
@@ -24492,7 +25846,10 @@ export class EditorialStore {
     try {
       return await operation();
     } catch (error) {
-      if (error instanceof ExportLedgerError || error instanceof AnalysisError) throw new StoreError(error.code, error.message);
+      // A missing or changed Word source mapping is a refusal of this export, never a fallback.
+      if (error instanceof ExportLedgerError || error instanceof AnalysisError || error instanceof ImportRetentionError) {
+        throw new StoreError(error.code, error.message);
+      }
       if (error instanceof BoundedStoreFatalError) {
         this.#poisoned = true;
         throw new StoreFatalError(error);

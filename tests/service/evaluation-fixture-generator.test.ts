@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 // The generator of the authored fixture `sample1-evaluation-authored` (Issue #429, plan slice S81b1). The observations and the
 // synthesis below are the authored part: each observation was written after reading one Analysis Unit of exact `sample1` (ADR
 // 0043) and cites, by its position in the unit message, the blocks it rests on; the synthesis scores the five items of the
@@ -30,6 +31,12 @@ import type { LaunchPolicyProjection } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 import { AUTHORED_MARKET_ANSWER } from '../support/initial-evaluation-market.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 const FIXTURE_IDENTITY = 'sample1-evaluation-authored';
 const FIXTURE_PATH = resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url)), `${FIXTURE_IDENTITY}.json`);
@@ -152,7 +159,7 @@ async function pass(): Promise<boolean> {
     interruptAfterAbandonObjectRemoval: false,
     baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
   });
-  const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+  const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
   try {
     const imported = await importSample1Book(store, scenario.codeRoot, 'S81b 夹具生成');
     await pinEditorialWorkspaceProfileRevision2(store, imported.bookId);

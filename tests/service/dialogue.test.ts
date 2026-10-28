@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -7,7 +8,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DialogueExecutionOwner, dialogueRouteRefusal } from '../../src/service/dialogue/dialogue-execution.js';
-import { DIALOGUE_SCHEMA_SQL, DIALOGUE_TRIGGER_SQL } from '../../src/service/dialogue/dialogue-ledger.js';
+import { DIALOGUE_SCHEMA_SQL, DIALOGUE_TRIGGER_SQL, DialogueLedger } from '../../src/service/dialogue/dialogue-ledger.js';
 import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
 import { HARNESS_SESSION_LOG_DIRECTORY } from '../../src/service/harness/session-log.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
@@ -23,6 +24,14 @@ import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-d
 import { importSample1Book, requireExactSample1 } from '../support/sample1-baseline.js';
 import { DIALOGUE_PROMPT_CONTRACT_DIGEST, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST } from '../../src/service/dialogue/contract.js';
 import { dialogueReasoningLine } from '../../src/renderer/dialogue-labels.js';
+import { AgentWorkspace } from '../../src/service/agent-workspace/workspace.js';
+import { pinEditorialWorkspaceProfileRevision2 } from '../support/sample1-baseline.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for 就这段提问… (Issue #52, plan slice S17a; UI ADR 0014; V2-UX-DIALOG-001 to 016) over the
 // real store, the real PrimaryAgentHarness composition and the AI7 local deterministic adapter: an answer streamed by
@@ -78,6 +87,7 @@ function steppedHold(): { hold: (streamed: number, interrupted: () => boolean) =
 
 function owner(store: EditorialStore, hold: ((streamed: number, interrupted: () => boolean) => Promise<void>) | null, withFixture = true): DialogueExecutionOwner {
   return new DialogueExecutionOwner({
+    requestGovernor,
     records: store,
     fixture: withFixture ? fixture : null,
     sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY),
@@ -131,10 +141,54 @@ function storeBytes(): Buffer {
 }
 
 describe('就这段提问… over the real store and harness', () => {
+  it('runs the retained workspace fixture under lightweight v1 without Global history', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const workspaceFixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-agent-workspace');
+    const dialogues = new DialogueExecutionOwner({ requestGovernor, records: store, fixture: workspaceFixture, live: null,
+      sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY) });
+    const workspace = new AgentWorkspace(store, dialogues);
+    try {
+      const book = await importSample1Book(store, roots.codeRoot, '合成本地工作区配置');
+      await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
+      let cursor: string | null = null;
+      let selection: DialogueSelectionInput | null = null;
+      do {
+        const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, cursor);
+        const block = window.blocks.find((entry) => entry.kind === 'paragraph' && entry.text.includes('其存在的意义被视为国宝中的国宝'));
+        if (block !== undefined) selection = { manuscriptId: book.manuscriptId, branchId: book.branchId, windowStartBlockId: window.blocks[0]!.blockId,
+          baseRevisionId: window.revisionId, expectedJournalSequence: window.journalSequence, blockId: block.blockId, baseBlockDigest: block.digest,
+          fromGrapheme: 0, toGrapheme: graphemesOf(block.text).length, selectedText: block.text };
+        cursor = window.nextCursor;
+      } while (selection === null && cursor !== null);
+      if (selection === null) throw new Error('admitted workspace selection missing');
+      await workspace.propose(book.bookId, { selection, instruction: '请让这段的表达更凝练，给出一组修改。' });
+      const until = Date.now() + 10_000;
+      let projection = await workspace.inspect(book.bookId);
+      while (projection.proposal?.state === 'proposing' && Date.now() < until) {
+        await new Promise((resolveWait) => setTimeout(resolveWait, 10)); projection = await workspace.inspect(book.bookId);
+      }
+      expect(projection.proposal?.state).toBe('ready');
+      expect(store.inspectGlobalAgent().history).toEqual([]);
+
+    } finally { await dialogues.dispose(); await store.close(); }
+  });
+  it('runs the retained dialogue fixture under lightweight v1', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const dialogues = owner(store, null);
+    try {
+      const book = await importSample1Book(store, roots.codeRoot, '合成本地对话配置');
+      const turn = store.askAboutSelection(book.bookId, { selection: selectionOf(store, book), question: QUESTION });
+      dialogues.begin(turn);
+      await waitFor(() => store.inspectDialogue(book.bookId, turn.dialogueId, 0, (id) => dialogues.liveText(id)).attempts[0]?.state,
+        (state) => state === 'completed', 'local profile completed');
+      expect(store.inspectDialogue(book.bookId, turn.dialogueId, 0, () => null).attempts[0]?.state).toBe('completed');
+
+    } finally { await dialogues.dispose(); await store.close(); }
+  });
   it('retrieves and exact-fetches the pinned revision locally and recovers jump anchors from its Session log (#893)', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     const retrievalFixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-dialogue-retrieval');
-    const dialogues = new DialogueExecutionOwner({ records: store, fixture: retrievalFixture, live: null,
+    const dialogues = new DialogueExecutionOwner({ requestGovernor, records: store, fixture: retrievalFixture, live: null,
       sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), retrievalIndex: (id) => store.dialogueRetrievalIndex(id) });
     try {
       const book = await importSample1Book(store, roots.codeRoot, '本机检索回归');
@@ -633,6 +687,7 @@ describe('就这段提问… at its edges (PR #658 review)', () => {
     let refusals = 1;
     const settle = store.settleDialogueAttempt.bind(store);
     const dialogues = new DialogueExecutionOwner({
+      requestGovernor,
       records: {
         bindDialogueAttempt: store.bindDialogueAttempt.bind(store),
         openDialogueSpan: store.openDialogueSpan.bind(store),

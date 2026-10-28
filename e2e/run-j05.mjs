@@ -1,7 +1,7 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 import { existsSync } from 'node:fs';
-import { lstat, mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { arch, platform, release, tmpdir } from 'node:os';
@@ -621,6 +621,9 @@ async function main() {
     at('suggestion-decisions');
     await assertRenderer(renderer, `window.__j05.act('reject')`, 'reject');
     await waitFor(renderer, `window.__j05.card()?.querySelector('[data-mark-decision]')?.dataset.markDecision === 'rejected' && document.querySelector('[data-mark-preview]') === null`, 'rejected-recorded');
+    // Synchronized delta with Issue #1109 (revision 7): a decision no longer opens the reason row by itself, and the default 偶尔
+    // does not ask on a first eligible decision. The editor's own 补充原因… opens the same unpressed reasons, recorded as before.
+    await assertRenderer(renderer, `window.__j05.card()?.querySelector('[data-mark-reasons]') === null && window.__j05.act('reason-add')`, 'reason-add');
     await assertRenderer(renderer, `(() => { const card = window.__j05.card(); const mark = window.__j05.mark('change-suggestion', ${JSON.stringify(first)})[0]; const chips = Array.from(card.querySelectorAll('[data-mark-reason-chip]')); return card.querySelector('[data-mark-decision]').textContent === '已拒绝 · 原文保留' && mark.dataset.markStatus === 'resolved' && mark.dataset.markDisposition === 'rejected' && chips.length >= 2 && chips.every((chip) => chip.getAttribute('aria-pressed') !== 'true') && card.querySelector('[data-mark-action="reason-own"]') !== null && card.querySelector('[data-mark-action="reject"]') === null && window.__j05.block(${JSON.stringify(first)}).dataset.markLine === 'annotation'; })()`, 'rejected-keeps-original-and-offers-reasons');
     await assertRenderer(renderer, `(() => { const group = window.__j05.card().querySelector('[data-mark-reasons]'); const question = group?.querySelector('p'); return group?.getAttribute('role') === 'group' && question?.textContent.trim().length > 0 && document.getElementById(group.getAttribute('aria-labelledby')) === question; })()`, 'reason-options-labelled-by-question');
     await assertRenderer(renderer, `(() => { const chip = window.__j05.card().querySelector('[data-mark-reason-chip="方向不合适"]'); if (!chip) return false; chip.click(); return true; })()`, 'reason-chip');
@@ -931,6 +934,45 @@ async function main() {
     await click(renderer, '返回稿件', 'proposal-return');
     await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, 'proposal-back-to-manuscript');
     await settled(renderer, 'proposal-settled');
+
+    // #1119 / F-20a: a distinct local procedure on exact admitted sample1 and tester-authored edits.
+    // No fixture/model binding is added to launch; the existing network-denied product path is unchanged.
+    at('local-check-exact-sample1');
+    const exactSample = resolve(ROOT, 'SampleBooks', ADMITTED_BASELINE_DOCX);
+    const exactBytes = await readFile(exactSample);
+    requireJourney(exactBytes.length === 29_550 && createHash('sha256').update(exactBytes).digest('hex') === 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483', 'local-exact-admitted-input');
+    await close(); renderer = await launch({ picker: exactSample });
+    await importAndOpen(renderer, '本地文字检查旅程');
+    // importAndOpen's J-14 dark pass names its own locations; a failure from here on is the local sequence's.
+    at('local-check-exact-sample1');
+    await assertRenderer(renderer, PAGE_HELPERS, 'local-page-helpers');
+    await assertRenderer(renderer, `(() => { const block=document.querySelector('[data-testid="manuscript-editor"] > p[data-block-id]'); if(!block)return false; window.__j05LocalBlock=block.dataset.blockId; return window.__j05.place(window.__j05LocalBlock,0,0) && document.execCommand('insertText',false,'本地检查…保留原文。'); })()`, 'local-tester-edit');
+    await settled(renderer, 'local-edit-durable');
+    await assertRenderer(renderer, `(() => { window.__j05LocalOriginal=window.__j05.text(window.__j05LocalBlock); return window.__j05LocalOriginal.startsWith('本地检查…保留原文。'); })()`, 'local-frozen-words-kept');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('review')), 'local-review-entry');
+    await waitFor(renderer, `document.querySelector('[data-review-action="new-local-check"]')?.disabled===false`, 'local-explicit-entry-ready');
+    await assertRenderer(renderer, `(() => { document.querySelector('[data-review-action="new-local-check"]').click(); return true; })()`, 'local-entry-click');
+    await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true && document.querySelector('[data-local-check-options]')?.hidden===false`, 'local-options-open');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const profile=sheet.querySelector('[data-local-check-numerals]'); const prose=sheet.querySelector('[data-local-check-prose]'); if(profile?.value!=='off'||!prose||prose.checked)return false; prose.click(); const button=sheet.querySelector('[data-review-action="prepare"]'); if(!button||button.disabled)return false; button.click(); return true; })()`, 'local-confirm-prose-numerals-off');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanStart==='ready' && document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, 'local-frozen-plan-ready');
+    await assertRenderer(renderer, `(async () => { const workspace=await window.ai7.inspectReviewWorkspace({reviewRunId:null}); const run=workspace.run; const plan=await window.ai7.inspectTaskPlan({kind:'review-run',ref:run.reviewRunId}); window.__j05LocalRun=run.reviewRunId; window.__j05LocalDigest=run.localCheck.planDigest; return run.localCheck.options.numerals==='off' && run.preinstalledProcedures.some((pin)=>pin.procedure.procedureId==='ai7-procedure/local-text-check'&&pin.procedure.version===3) && !plan.start.needsModelConnection && plan.service.provider==='不调用模型' && plan.start.categoryDigests.length===1 && plan.start.categoryDigests[0].planEnvelopeDigest===run.localCheck.planDigest; })()`, 'local-plan-exact-no-model-binding');
+    await assertRenderer(renderer, `(() => { document.querySelector('#task-drawer [data-task-drawer-control="start"]').click(); return true; })()`, 'local-authorize-exact-plan');
+    await waitFor(renderer, `document.querySelector('[data-local-check="materialized"]') && document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, 'local-finding-materialized');
+    await assertRenderer(renderer, `(async () => { const run=(await window.ai7.inspectReviewWorkspace({reviewRunId:window.__j05LocalRun})).run; const finding=run.findings.find((item)=>item.blockId===window.__j05LocalBlock&&item.stateLine?.startsWith('P02/v1')); if(!finding)return false; window.__j05LocalFinding=finding.findingId; window.__j05LocalMark=finding.markId; return finding.output==='change-suggestion'&&finding.replacement==='……'&&finding.fromGrapheme===4&&finding.toGrapheme===5&&run.localCheck.counts.N01.disabled===97&&run.report.record.appendix.categories[0].adapterPin===null&&run.report.record.appendix.categories[0].planEnvelopeDigest===window.__j05LocalDigest; })()`, 'local-exact-rule-run-report-lineage');
+    // #1164 / J-05: one editor action applies the exact non-overlapping mechanical suggestions through the existing batch authority.
+    await assertRenderer(renderer, `(() => { const button=document.querySelector('section[data-review-category="local-text-check"] [data-review-action="batch-prepare"]'); if(!button||button.disabled||button.textContent!=='批量采纳机械修正')return false; button.click(); return true; })()`, 'local-mechanical-batch-one-action');
+    await waitFor(renderer, `(async () => { const {manuscript}=await window.ai7.inspectReviewWorkspace({reviewRunId:window.__j05LocalRun}); const card=await window.ai7.getEditorialMarkCard({manuscriptId:manuscript.manuscriptId,branchId:manuscript.branchId,markId:window.__j05LocalMark}); return card.suggestion?.application!=null; })()`, 'local-batch-committed');
+    await waitFor(renderer, `(() => { const button=document.querySelector('article[data-finding-id="'+window.__j05LocalFinding+'"] [data-review-action="go-to-text"]'); if(!button||button.disabled)return false; button.click(); return true; })()`, 'local-return-to-mark');
+    // The finding retains the same suggestion and Apply lineage; its reverse action restores the tester edit.
+    await waitFor(renderer, `document.querySelector('[data-screen="editor"]') && window.__j05.mark('change-suggestion', window.__j05LocalBlock).length===1`, 'local-batch-suggestion-on-text');
+    await openMarkCard(renderer, 'change-suggestion', await renderer.evaluate('window.__j05LocalBlock'), 'local-suggestion');
+    await waitFor(renderer, `window.__j05.card()?.querySelector('[data-mark-application]') && window.__j05.text(window.__j05LocalBlock).startsWith('本地检查……保留原文。')`, 'local-batch-writes-mechanical-choice');
+    await assertRenderer(renderer, `window.__j05.act('prepare-reverse')`, 'local-prepare-reversal');
+    await waitFor(renderer, `window.__j05.card()?.querySelector('[data-mark-form="reverse-apply"]')`, 'local-reversal-preview');
+    await assertRenderer(renderer, `window.__j05.act('submit')`, 'local-confirm-reversal');
+    await waitFor(renderer, `window.__j05.text(window.__j05LocalBlock)===window.__j05LocalOriginal && window.__j05.card()?.querySelector('[data-mark-state]')?.textContent==='待你处理'`, 'local-reversal-restores-text');
+    await assertRenderer(renderer, `(async () => { const run=(await window.ai7.inspectReviewWorkspace({reviewRunId:window.__j05LocalRun})).run; const finding=run.findings.find((item)=>item.findingId===window.__j05LocalFinding); return run.localCheck.planDigest===window.__j05LocalDigest && run.localCheck.state==='materialized' && finding.categoryId==='local-text-check' && finding.stateLine.startsWith('P02/v1') && run.report!==null; })()`, 'local-lineage-survives-editor-actions');
+    await settled(renderer, 'local-workflow-settled');
 
     at('completion-browser-close');
     await close();

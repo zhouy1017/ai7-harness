@@ -1,3 +1,6 @@
+import { readGlobalAgentHistory } from '../../src/service/dialogue/global-agent-session.js';
+import type { StoredDialogueAttempt, StoredGlobalDialogueTask } from '../../src/service/dialogue/dialogue-ledger.js';
+import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -8,6 +11,7 @@ import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from '../../src/
 import { describeComposition, prepareExecution } from '../../src/service/harness/primary-agent-harness.js';
 import { HarnessSessionLogBackend, readHarnessSessionLog } from '../../src/service/harness/session-log.js';
 import { installNodeNetworkDenial } from '../../src/shared/network-denial.js';
+import { harnessHistoryReader } from '../../src/service/dialogue/dialogue-history.js';
 
 // The Harness Session Ledger made durable (Issue #52, S17a): the composition persists its DSH Session log through DSH's own
 // persistence seam into AI7's JSONL storage, and streams each text delta to a reader while the turn is in flight.
@@ -67,6 +71,18 @@ async function compose(root: string | undefined, adapter: LlmAdapter, sessionId 
   handle.bindExecution({ harnessSessionId: sessionId, behaviorCompositionDigest: handle.composition.digest, promptContractDigest: DIGEST });
   return handle;
 }
+
+it('regenerates from a retained later turn when an earlier parent log is unavailable', () => {
+  const message = { kind: 'ask' as const, selection: '', question: '保留原问题？', kept: null, globalSources: [] };
+  const task: StoredGlobalDialogueTask = { dialogueId: 'dialogue', bookId: null, sources: [], operationalScope: 'ordinary-production',
+    sourcesSha256: sha256Hex(canonicalJson([])), questionSha256: sha256Hex(message.question), askedAt: new Date().toISOString() };
+  const attempts: StoredDialogueAttempt[] = ['parent', 'retained'].map((attemptId, index) => ({ attemptId, dialogueId: task.dialogueId,
+    ordinal: index + 1, kind: index === 0 ? 'ask' : 'regenerate', priorAttemptId: index === 0 ? null : 'parent',
+    createdAt: task.askedAt, binding: null, span: null, outcome: { outcome: 'completed', endSeq: null, causeCode: null, settledAt: task.askedAt }, conversions: [] }));
+  const history = readGlobalAgentHistory(task, attempts, { turn: (attempt) => attempt.attemptId === 'parent' ? 'missing'
+    : { message, streamed: '保留回答。' } }, 'regenerate');
+  expect(history).toMatchObject({ question: message.question, kept: null, retainedInfluences: [] });
+});
 
 describe('Harness Session Ledger', () => {
   it('leaves every composition without a log exactly as it was, and names the log in the one that has it', () => {

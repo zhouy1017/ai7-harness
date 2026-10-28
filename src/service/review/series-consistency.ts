@@ -6,7 +6,7 @@ import type { AnalysisKindDefinition } from '../analysis/kind-definition.js';
 import { initialEvaluationRequestDigest, initialEvaluationSynthesisRequestDigest, initialEvaluationObservationSetDigest, type InitialEvaluationUnitResult } from '../evaluation/initial-evaluation-contract.js';
 import { reviewCategoryRequestDigest } from './review-category-contract.js';
 import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryContractInput } from './category-configuration.js';
-import { reviewCategoryKindDefinition } from './review-category-kind.js';
+import { historicalReviewCategoryDefinitions } from './review-category-kind.js';
 import { graphemeCount, sliceGraphemes } from '../analysis/factual-review-contract.js';
 import { SeriesError, SeriesLedger } from '../series.js';
 import { SeriesKnowledgeError, SeriesKnowledgeLedger } from '../series-knowledge.js';
@@ -378,18 +378,22 @@ export function seriesConsistencyKindDefinition(db: DatabaseSync, base: Analysis
     const sources: SeriesKnowledgeSource[] = scopes.map((scope) => ({ seriesId: scope.seriesId, title: scope.title, items: scope.knowledge.map((pin) => {
       const item = ledger.item(pin.itemId);
       const revision = ledger.revision(pin.itemId, pin.revisionId);
-      requireAnalysis(item !== null && item.seriesId === scope.seriesId && revision !== null && sha256Hex(revision.content) === pin.digest,
+      requireAnalysis(item !== null && item.seriesId === scope.seriesId && revision !== null && revision.ordinal === pin.ordinal && sha256Hex(revision.content) === pin.digest,
         'SERIES_SCOPE_INVALID', '书系一致性依据与冻结的知识版本不一致。');
       return { itemId: pin.itemId, subject: item.subject, knowledgeClass: item.knowledgeClass, revisionId: pin.revisionId, ordinal: revision.ordinal, content: revision.content };
     }) }));
     const resolved = seriesConsistencyFromSources(scopes.map((scope) => ({ seriesId: scope.seriesId, title: scope.title })), sources);
     requireAnalysis(resolved.kind === 'available', 'SERIES_SCOPE_INVALID', '书系一致性依据无法核对。');
     const entry = seriesConsistencyEntry(BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.find((entry) => entry.categoryId === 'series-consistency')!, resolved);
-    const definition = reviewCategoryKindDefinition(reviewCategoryContractInput(entry), base.contractVersion === 'ai7.editorial-review/1' ? 1 : 2);
+    requireAnalysis(base.contractVersion === 'ai7.editorial-review/1' || base.contractVersion === 'ai7.editorial-review/2',
+      'SERIES_SCOPE_INVALID', '书系一致性契约版本无法核对。');
+    const definition = historicalReviewCategoryDefinitions(reviewCategoryContractInput(entry), base.contractVersion === 'ai7.editorial-review/1' ? 1 : 2)
+      .find((candidate) => candidate.kind === base.kind && candidate.contractVersion === base.contractVersion
+        && candidate.promptContractDigest === base.promptContractDigest && candidate.systemPrompt === base.systemPrompt);
+    requireAnalysis(definition !== undefined, 'SERIES_SCOPE_INVALID', '书系一致性契约无法从冻结版本重新派生。');
     return { digest: definition.promptContractDigest, system: definition.systemPrompt };
   };
-  const proof = derive();
-  requireAnalysis(proof.digest === base.promptContractDigest && proof.system === base.systemPrompt, 'SERIES_SCOPE_INVALID', '书系一致性契约无法从冻结版本重新派生。');
+  derive();
   const definition = { ...base, seriesScopes: scopes };
   consistencyDefinitions.set(definition, derive);
   return definition;

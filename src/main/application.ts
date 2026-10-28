@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { registerModelConnectionTestHandler } from './model-connection-test-handler.js';
 import { release } from 'node:os';
 import { readFile, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, resolve } from 'node:path';
@@ -463,10 +464,10 @@ function parseArguments(argv: string[]): LaunchArguments {
   // J-10's unit hold (Issue #422) is guarded the same way — J-10's own, J-16's to hold a Run in its 任务 panel (Issue
   // #423), J-09's to hold several Books' Runs at once (Issue #49), J-11's to keep a Run under way while ②A's follower is held
   // (#641), and J-13's to hold a 书系一致性 Run while an exclusion is recorded (Issue #64, S29b), and absolute — and sits
-  // beside the adapter.
+  // beside the adapter. J-04 uses the same hold for its genuine retained-/1 pause and continuation refusal (#1161).
   const unitHoldPath = values.get('--j10-unit-hold-path');
   requireDesktop(unitHoldPath === undefined ||
-    ((process.env.AI7_E2E_JOURNEY === 'J-09' || process.env.AI7_E2E_JOURNEY === 'J-10' || process.env.AI7_E2E_JOURNEY === 'J-11' ||
+    ((process.env.AI7_E2E_JOURNEY === 'J-04' || process.env.AI7_E2E_JOURNEY === 'J-09' || process.env.AI7_E2E_JOURNEY === 'J-10' || process.env.AI7_E2E_JOURNEY === 'J-11' ||
       process.env.AI7_E2E_JOURNEY === 'J-13' || process.env.AI7_E2E_JOURNEY === 'J-16') && isAbsolute(unitHoldPath)));
   // J-16's answer hold (Issue #52, S17a): J-16's own, absolute, beside the adapter — it holds a dialogue answer mid-stream.
   const answerHoldPath = values.get('--j16-answer-hold-path');
@@ -628,7 +629,10 @@ function registerRendererHandlers(
   saveModelServiceProxy: (input: ServiceOperationMap['saveModelServiceProxy']['input']) => Promise<ModelServiceSettingsProjection>,
   saveModelServiceCredential: (input: ModelServiceCredentialInput) => Promise<ModelServiceSettingsProjection>,
   removeModelServiceCredential: (input?: { route: ModelServiceRouteId }) => Promise<ModelServiceSettingsProjection>,
-  modelOps: Pick<RendererApi, 'selectFastRoleModel' | 'testModelServiceConnection'>,
+  modelOps: Pick<RendererApi, 'selectFastRoleModel'> & {
+    startConnectionTest(input: Parameters<RendererApi['testModelServiceConnection']>[0]): Promise<unknown>;
+    connectionTestSettings(): Promise<ModelServiceSettingsProjection>;
+  },
   searchOps: Pick<RendererApi, 'selectSearchBackend' | 'probeSearchBackend' | 'saveSearchBackendCredential' | 'removeSearchBackendCredential'>,
   consumeLostApplyAcknowledgement: () => boolean,
   consumeInjectedSavePath: () => string | undefined,
@@ -2579,12 +2583,16 @@ function registerRendererHandlers(
       return serializeEffect(() => saveModelServiceProxy(input));
     }),
   );
-  for (const op of ['selectFastRoleModel', 'testModelServiceConnection'] as const) {
+  for (const op of ['selectFastRoleModel'] as const) {
     ipcMain.handle(IPC_CHANNELS[op], (event, input: Parameters<RendererApi[typeof op]>[0]) => envelope(async () => {
       requireSender(event); requireAuthority();
       return serializeEffect(() => modelOps[op](input));
     }));
   }
+  const disposeConnectionTest = registerModelConnectionTestHandler<IpcMainInvokeEvent, ModelServiceSettingsProjection>({
+    ipc: ipcMain, requireSender, requireAuthority, serializeEffect, envelope,
+    start: modelOps.startConnectionTest, project: modelOps.connectionTestSettings,
+  });
   ipcMain.handle(IPC_CHANNELS.getModelServiceSettings, (event) =>
     envelope(async () => {
       requireSender(event);
@@ -3094,6 +3102,31 @@ function registerRendererHandlers(
         });
       }),
   );
+  // 空闲时处理 (Issue #1089): the same exact authorization as 开始任务 within the route's Book, started when AI7 is idle.
+  ipcMain.handle(
+    IPC_CHANNELS.startTaskWhenIdle,
+    (event, input: Omit<ServiceOperationMap['startTaskWhenIdle']['input'], 'bookId'>) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('startTaskWhenIdle', {
+            kind: input.kind,
+            ref: input.ref,
+            planEnvelopeDigest: input.planEnvelopeDigest,
+            planDigests: input.planDigests,
+            bookId: route.bookId,
+          });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          if (result.bookId !== route.bookId || result.kind !== input.kind || result.ref !== input.ref) {
+            throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '空闲时处理的结果不属于当前图书工作台。');
+          }
+          return result;
+        });
+      }),
+  );
   ipcMain.handle(
     IPC_CHANNELS.cancelWaitingTask,
     (event, input: Omit<ServiceOperationMap['cancelWaitingTask']['input'], 'bookId'>) =>
@@ -3331,14 +3364,14 @@ function registerRendererHandlers(
   );
   // 后台分析登记 (Issue #95, S39) is the route's Book's: read, `登记` and `撤销登记`, the two decisions serialized with every other
   // effect of this window's authority.
-  ipcMain.handle(IPC_CHANNELS.inspectBackgroundAnalysisEnrollment, (event) =>
+  ipcMain.handle(IPC_CHANNELS.inspectBackgroundAnalysisEnrollment, (event, input?: { kind?: string }) =>
     envelope(async () => {
       const owned = requireSender(event);
       requireAuthority();
       const route = requireCurrentBookRoute(owned);
       const routeGeneration = owned.routeGeneration;
       const routeRequestSequence = owned.routeRequestSequence;
-      const result = await service.call('inspectBackgroundAnalysisEnrollment', { bookId: route.bookId });
+      const result = await service.call('inspectBackgroundAnalysisEnrollment', { bookId: route.bookId, ...(input?.kind === undefined ? {} : { kind: input.kind }) });
       requireCurrentRouteReadEpoch(owned, routeGeneration, routeRequestSequence);
       if (result.bookId !== route.bookId) {
         throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '后台分析登记不属于当前图书工作台。');
@@ -3356,6 +3389,7 @@ function registerRendererHandlers(
           const route = requireCurrentBookRoute(owned);
           const routeGeneration = owned.routeGeneration;
           const result = await service.call('enrollBackgroundAnalysis', {
+            ...(input.kind === undefined ? {} : { kind: input.kind }),
             disclosureDigest: input.disclosureDigest,
             startingPoint: input.startingPoint,
             // The scope and the required tokens ceiling (Issue #864), copied field by field.
@@ -3482,6 +3516,13 @@ function registerRendererHandlers(
           expectedDecisions: input.expectedDecisions,
         });
       });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.procedureLibrary, (event, input: Parameters<RendererApi['procedureLibrary']>[0]) =>
+    envelope(async () => {
+      requireSender(event);
+      requireAuthority();
+      return service.call('procedureLibrary', input);
     }),
   );
   ipcMain.handle(IPC_CHANNELS.inspectKnowledgeProcedures, (event) =>
@@ -4380,6 +4421,14 @@ function registerRendererHandlers(
     requireAuthority();
     return service.call('inspectEditorialLearning', input);
   }));
+  ipcMain.handle(IPC_CHANNELS.recordLearningReasonAsk, (event, input: Parameters<RendererApi['recordLearningReasonAsk']>[0]) => envelope(async () => {
+    requireSender(event);
+    requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+    return serializeEffect(async () => {
+      requireAuthority();
+      return service.call('recordLearningReasonAsk', { ...input, frequency: preferences.read().values['learning.askFrequency'] });
+    });
+  }));
   ipcMain.handle(IPC_CHANNELS.changeEditorialLearning, (event, input: ServiceOperationMap['changeEditorialLearning']['input']) => envelope(async () => {
     requireSender(event);
     requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
@@ -4395,6 +4444,11 @@ function registerRendererHandlers(
     requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
     return serializeEffect(async () => { requireAuthority(); return service.call('deactivateEditorialMemory', input); });
   }));
+  ipcMain.handle(IPC_CHANNELS.acceptEditorialMemory, (event, input: ServiceOperationMap['acceptEditorialMemory']['input']) => envelope(async () => {
+    requireSender(event);
+    requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
+    return serializeEffect(async () => { requireAuthority(); return service.call('acceptEditorialMemory', input); });
+  }));
   ipcMain.handle(IPC_CHANNELS.inspectGlobalAgentDialogue, (event, input: ServiceOperationMap['inspectGlobalAgentDialogue']['input']) => envelope(async () => {
     requireSender(event); requireAuthority();
     return service.call('inspectGlobalAgentDialogue', input);
@@ -4403,7 +4457,7 @@ function registerRendererHandlers(
     requireSender(event); requireAuthority();
     return service.call('inspectGlobalAgent', {});
   }));
-  for (const operation of ['recordLearningSupervision', 'askGlobalAgent', 'stopGlobalAgentAnswer', 'continueGlobalAgentAnswer', 'regenerateGlobalAgentAnswer'] as const) {
+  for (const operation of ['prepareGlobalAgentTurn', 'recordLearningSupervision', 'askGlobalAgent', 'stopGlobalAgentAnswer', 'continueGlobalAgentAnswer', 'regenerateGlobalAgentAnswer'] as const) {
     ipcMain.handle(IPC_CHANNELS[operation], (event, input: ServiceOperationMap[typeof operation]['input']) => envelope(async () => {
       requireSender(event);
       return serializeEffect(async () => {
@@ -4425,8 +4479,8 @@ function registerRendererHandlers(
   }));
   ipcMain.handle(IPC_CHANNELS.inspectEditQualitySignals, (event, input: ServiceOperationMap['inspectEditQualitySignals']['input']) => envelope(async () => {
     requireSender(event); requireAuthority();
-    requireDesktop(input !== null && typeof input === 'object' && Object.keys(input).length === 1 && (input.bookId === null || (typeof input.bookId === 'string' && UUID_PATTERN.test(input.bookId))), 'AI7_RENDERER_BOUNDARY_INVALID');
-    return service.call('inspectEditQualitySignals', { bookId: input.bookId });
+    requireDesktop(input !== null && typeof input === 'object' && Object.keys(input).every((key) => key === 'bookId' || key === 'preferenceAfter') && (input.bookId === null || (typeof input.bookId === 'string' && UUID_PATTERN.test(input.bookId))), 'AI7_RENDERER_BOUNDARY_INVALID');
+    return service.call('inspectEditQualitySignals', input);
   }));
   // 质量与学习 › 学习准入 (Issue #61, S26b): a house-wide destination like 知识库, bound to no Book route; each decision names
   // its Book and is serialized with every other effect.
@@ -4444,6 +4498,14 @@ function registerRendererHandlers(
       requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
       requireAuthority();
       return service.call('inspectLearningMaterial', { bookId: input.bookId, materialKey: input.materialKey });
+    }),
+  );
+  ipcMain.handle(IPC_CHANNELS.inspectWordTrackedEditSample, (event, input: ServiceOperationMap['inspectWordTrackedEditSample']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireDesktop(input !== null && typeof input === 'object' && typeof input.bookId === 'string', 'AI7_RENDERER_BOUNDARY_INVALID');
+      requireAuthority();
+      return service.call('inspectWordTrackedEditSample', input);
     }),
   );
   // 设置 › 评估校准与预测 (Issue #430, S82): house settings, bound to no Book route; each write is serialized with every other
@@ -4975,6 +5037,16 @@ function registerRendererHandlers(
     }
     return result;
   };
+  for (const operation of ['inspectHouseWordList', 'saveHouseWordList'] as const) {
+    ipcMain.handle(IPC_CHANNELS[operation], (event, input: ServiceOperationMap[typeof operation]['input']) => envelope(async () => {
+      const owned = requireSender(event);
+      return serializeEffect(async () => {
+        requireAuthority();
+        requireCurrentBookRoute(owned);
+        return service.call(operation, input);
+      });
+    }));
+  }
   ipcMain.handle(
     IPC_CHANNELS.inspectReviewWorkspace,
     (event, input?: Omit<ServiceOperationMap['inspectReviewWorkspace']['input'], 'bookId'>) =>
@@ -5016,6 +5088,8 @@ function registerRendererHandlers(
             bookId: route.bookId,
             // A sheet pre-filled from a Captured Procedure (Issue #65, S30) names the version it was filled from.
             ...(input.capturedProcedure === undefined || input.capturedProcedure === null ? {} : { capturedProcedure: input.capturedProcedure }),
+            // 本地文字检查 (Issue #1119) carries the editor's explicit options, which the service's request frame validates.
+            ...(input.localCheck === undefined ? {} : { localCheck: input.localCheck }),
           });
           // A Run of the leads alone is prepared by the job's first step, so its answer may already carry the workspace.
           const prepared = result.result;
@@ -6178,9 +6252,10 @@ function registerRendererHandlers(
   );
 
   return () => {
+    disposeConnectionTest();
     nativeTheme.removeListener('updated', broadcastAppearance);
     ipcMain.removeHandler(APPEARANCE_IPC_CHANNEL);
-    for (const channel of Object.values(IPC_CHANNELS)) ipcMain.removeHandler(channel);
+    for (const channel of Object.values(IPC_CHANNELS)) if (channel !== IPC_CHANNELS.testModelServiceConnection) ipcMain.removeHandler(channel);
     for (const channel of Object.values(PREFERENCE_IPC_CHANNELS)) ipcMain.removeHandler(channel);
     ipcMain.removeHandler(NOTIFICATION_CHANNELS.notify);
     notifier.dispose();
@@ -6514,7 +6589,7 @@ export async function runApplication(): Promise<void> {
     await requireSameCanonicalDataDirectory(shellRoot, app.getPath('userData'));
     // The Data Version (数据版本) and the store's schema revision (数据库修订) apart (Issue #967): the unit suite holds each to its owner.
     const crashFacts = () => ({
-      appVersion: softwareVersion, buildIdentity, dataVersion: buildIdentity.dataVersion, schemaRevision: 88, protocol: SERVICE_PROTOCOL_VERSION,
+      appVersion: softwareVersion, buildIdentity, dataVersion: buildIdentity.dataVersion, schemaRevision: 98, protocol: SERVICE_PROTOCOL_VERSION,
       platform: process.platform, arch: process.arch, electron: process.versions.electron ?? 'unknown',
       uptimeSeconds: process.uptime(),
     });
@@ -6818,7 +6893,7 @@ export async function runApplication(): Promise<void> {
       }
       requireDesktop(parent !== undefined && isAbsolute(parent));
       // Read the shipped policy set, never infer its version from the source branch or preferences.
-      const policySet = JSON.parse(await readFile(resolve(__dirname, '..', 'docs', 'policies', 'active-policy-set.v18.json'), 'utf8')) as { version: string };
+      const policySet = JSON.parse(await readFile(resolve(__dirname, '..', 'docs', 'policies', 'active-policy-set.v22.json'), 'utf8')) as { version: string };
       await writeDiagnosticsBundle(parent, {
         facts: { ...crashFacts(), policySetVersion: policySet.version, node: process.versions.node,
           locale: app.getLocale(), windowCount: ownedWindows.size },
@@ -7097,7 +7172,8 @@ export async function runApplication(): Promise<void> {
       removeModelServiceCredential,
       {
         selectFastRoleModel: async (input) => { await service!.call('selectFastRoleModel', input); return settingsProjection(); },
-        testModelServiceConnection: async (input) => { await service!.call('testModelServiceConnection', input); return settingsProjection(); },
+        startConnectionTest: (input) => service!.call('testModelServiceConnection', input),
+        connectionTestSettings: settingsProjection,
       },
       searchOps,
       (() => {

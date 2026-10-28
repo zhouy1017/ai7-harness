@@ -1,3 +1,10 @@
+import { CURATION_SCHEMA_SQL, FACTUAL_TASK_INTENTS_SQL } from '../../src/service/task-authorization.js';
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
+import { capturedMapAnswer, capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
+import { clarificationPlanBaseDigest, clarificationPromptContractDigest } from '../../src/service/provider/clarification-contract.js';
+import { parseUnitMessageHeader, unitRequestDigest } from '../../src/service/analysis/contract.js';
+import { parseInitialEvaluationUnitMessageHeader, parseInitialEvaluationSynthesisMessageHeader } from '../../src/service/evaluation/initial-evaluation-contract.js';
+import { parseCrossUnitMessageHeader } from '../../src/service/analysis/cross-unit-contract.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
@@ -7,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import { ALWAYS_ONLINE } from '../../src/service/connectivity.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
-import { loadModelFixture, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
+import { fixtureEntryKey, loadModelFixture, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import {
   ANALYSIS_LEDGER_REVISION_64_SQL,
@@ -25,6 +32,7 @@ import {
   exemplarCopied,
   writingContract,
   writingContractDigest,
+  WRITING_UNIT_RESULT_SCHEMA, writingRequestDigest, writingSynthesisRequestDigest, writingPassageSetDigest,
   type WritingContractInput,
 } from '../../src/service/writing/writing-contract.js';
 import { WRITING_EXEMPLAR_REFUSAL_PREFIX } from '../../src/service/writing/writing-kind.js';
@@ -37,7 +45,7 @@ import {
   type LaunchPolicyProjection,
   type WritingProjection,
 } from '../../src/shared/protocol.js';
-import { KIND_COUPLED_ANALYSIS_RELATIONS, downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
+import { constructPre94PolicyEncoding, KIND_COUPLED_ANALYSIS_RELATIONS, downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx } from '../support/composed-fixture.js';
 import { finalizeAsJ11, runInitialEvaluationToEnd } from '../support/readers-report.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
@@ -48,14 +56,19 @@ import {
   WRITING_BOOK_TITLE,
   WRITING_FIXTURE_IDENTITY,
   WRITING_REQUEST,
-  answerWriting,
   answerWritingReflection,
 } from '../support/writing-task.js';
 
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
+
 // Service-integration suite (L2) for 写作任务 (Issue #432, plan slice S84a; V2-UX-DELIV-007, KB-004; editor-surfaces §9): the writing
 // kind over the real store and ledger, the one execution owner and the AI7 local deterministic adapter — over the authored fixture
-// `sample1-writing-authored` for J-07's 宣传文章, and over fixtures built here from the same authored passages where a case needs
-// other words. The manuscript is exact `sample1` (ADR 0043); no Provider, socket or credential value is involved. Assertions name
+// `sample1-writing-authored` for J-07's 宣传文章. Cases requiring other words use actual ordinary captured transport, without
+// another fixture admission. The manuscript is exact `sample1` (ADR 0043); no Provider, socket or credential value is involved. Assertions name
 // states, the draft's own structure and counts, and the service's words, never manuscript text.
 
 const FIXTURES_ROOT = resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url)));
@@ -87,38 +100,89 @@ async function refusal(operation: () => unknown): Promise<string> {
 interface Session {
   readonly store: EditorialStore;
   readonly owner: BaselineAnalysisExecutionOwner;
+  selectRoute(fixture: WritingResponses): Promise<void>;
 }
 
 /** The suites' own controls of the store, beyond the route: the copy rules a new writing Task is recorded under (#707). */
 type SuiteControl = Partial<Pick<NonNullable<Parameters<typeof EditorialStore.open>[2]>, 'writingCopyRules'>>;
 
-async function openStore(fixture: ResolvedModelFixture, control: SuiteControl = {}): Promise<EditorialStore> {
+type WritingResponses = ResolvedModelFixture | { readonly entries: Map<string, ModelFixtureEntry> };
+async function openStore(fixture: WritingResponses, control: SuiteControl = {}): Promise<EditorialStore> {
   return openAt(roots.dataRoot, fixture, control);
 }
 
-async function openAt(dataRoot: string, fixture: ResolvedModelFixture, control: SuiteControl = {}): Promise<EditorialStore> {
-  return EditorialStore.open(dataRoot, roots.codeRoot, {
+async function openAt(dataRoot: string, fixture: WritingResponses, control: SuiteControl = {}): Promise<EditorialStore> {
+  const local = 'identity' in fixture ? fixture : null;
+  const store = await EditorialStore.open(dataRoot, roots.codeRoot, {
     induceUnprovableReconciliation: false,
     persistLegacyReviewedDraft: false,
     induceReimportProofTamper: false,
     induceAbandonObjectRemovalFailure: false,
     interruptAfterAbandonObjectRemoval: false,
-    baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
+    baselineAnalysisRoute: local === null ? null : { fixtureIdentity: local.identity, fixtureSha256: local.sha256, fixtureLineage: local.lineage },
     ...control,
   });
+  if (local === null) {
+    const search = store.saveSearchBackendCredential('search-tinyfish', null, 'needs-attention');
+    store.saveSearchBackendCredential('search-tinyfish', search.credentialReference, 'ready'); store.selectSearchBackend('search-tinyfish');
+    const captured = capturedOrdinaryExecution(store, roots.codeRoot, dataRoot, requestGovernor, () => undefined);
+    launchPolicy = captured.policy;
+    await captured.owner.dispose(); captured.assertMatched();
+  } else launchPolicy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot);
+  return store;
 }
 
-async function withSession(fixture: ResolvedModelFixture, body: (session: Session) => Promise<void>, control: SuiteControl = {}): Promise<void> {
+async function withSession(fixture: WritingResponses, body: (session: Session) => Promise<void>, control: SuiteControl = {}): Promise<void> {
   await requireExactSample1(roots.codeRoot);
-  const store = await openStore(fixture, control);
-  const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
-  try {
-    await body({ store, owner });
-    store.markCleanShutdown();
-  } finally {
-    await owner.dispose();
-    store.close();
+  const initialize = async (fixture: WritingResponses) => {
+    const store = await openStore(fixture, control);
+    const local = 'identity' in fixture ? fixture : null;
+    const answer = capturedMapAnswer(fixture.entries);
+    const captured = local === null ? capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, requestGovernor, (request, message) => {
+      if (request.stage === 'run-report-reflection') return { kind: 'unit-result', text: JSON.stringify({ schema: 'ai7.analysis.run-report-reflection-result/1', items: [] }), usage: { inputTokens: 10, outputTokens: 5 } };
+      const scheduled = answer(request, message);
+      if (scheduled !== undefined) return scheduled;
+      // These private response bytes are selected by the real contract header, never admitted as a fixture payload.
+      const baseline = parseUnitMessageHeader(message), evaluation = parseInitialEvaluationUnitMessageHeader(message);
+      const ordinal = baseline?.ordinal ?? evaluation?.ordinal ?? 0;
+      const schema = baseline !== null ? 'ai7.baseline-manuscript-analysis.unit-result/1' : evaluation !== null ? 'ai7.evaluation.unit-result/1'
+        : parseInitialEvaluationSynthesisMessageHeader(message) !== null ? 'ai7.evaluation.synthesis-result/1'
+          : parseCrossUnitMessageHeader(message) !== null ? 'ai7.baseline-manuscript-analysis.cross-unit-result/1' : null;
+      return schema === null ? undefined : [...fixture.entries.values()].find((entry) => entry.unitOrdinal === ordinal &&
+        entry.response.kind === 'unit-result' && JSON.parse(entry.response.text).schema === schema)?.response;
+    }) : null;
+    launchPolicy = captured?.policy ?? await resolveSourceCheckoutLaunchPolicy(roots.codeRoot);
+    const owner = captured?.owner ?? new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture: local, secretResolver: { resolve: async () => null } });
+    return { store, owner, captured };
+  };
+  let current = await initialize(fixture);
+  const closeCurrent = async (): Promise<void> => {
+    await current.owner.dispose();
+    try { current.captured?.assertMatched(); current.store.markCleanShutdown(); } finally { current.store.close(); }
+  };
+  const session: Session = { get store() { return current.store; }, get owner() { return current.owner; },
+    selectRoute: async (selected) => { await closeCurrent(); current = await initialize(selected); } };
+  try { await body(session); } finally { await closeCurrent(); }
+}
+
+/** Schedule current writing request identities over the genuine frozen contract, including its clarification wrapper. */
+function answerWriting(entries: Map<string, ModelFixtureEntry>, prepared: WritingProjection, synthesis: unknown): void {
+  const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+  let frozen: Record<string, unknown>;
+  try { frozen = JSON.parse(String(db.prepare("SELECT canonical_json FROM analysis_plan_records WHERE task_intent_id = ? AND component = 'execution-plan' ORDER BY plan_version DESC LIMIT 1").get(prepared.taskIntent!.taskIntentId)!.canonical_json)); }
+  finally { db.close(); }
+  const contract = prepared.planEnvelope!.promptContractDigest;
+  const base = clarificationPlanBaseDigest(frozen, { promptContractDigest: contract }); expect(base).not.toBeNull();
+  const closed = prepared.coverageManifest!.units.map((unit) => ({ unitOrdinal: unit.ordinal,
+    result: { schema: WRITING_UNIT_RESULT_SCHEMA, unitOrdinal: unit.ordinal, passages: AUTHORED_WRITING_PASSAGES[unit.ordinal]! } }));
+  for (const unit of prepared.coverageManifest!.units) {
+    const digest = base === contract ? writingRequestDigest(contract, unit.ordinal, unit.digest) : unitRequestDigest(contract, unit.ordinal, unit.digest);
+    entries.set(fixtureEntryKey(unit.ordinal, digest), { unitOrdinal: unit.ordinal, requestDigest: digest, attempt: null, contentDigest: null,
+      response: { kind: 'unit-result', text: JSON.stringify(closed.find((entry) => entry.unitOrdinal === unit.ordinal)!.result), usage: { inputTokens: 1600, outputTokens: 120 } } });
   }
+  const digest = writingSynthesisRequestDigest(base!, writingPassageSetDigest(closed));
+  entries.set(fixtureEntryKey(0, digest), { unitOrdinal: 0, requestDigest: digest, attempt: null, contentDigest: null,
+    response: { kind: 'unit-result', text: JSON.stringify(synthesis), usage: { inputTokens: 2600, outputTokens: 720 } } });
 }
 
 /** 导出数据库 of the store, into the input root. */
@@ -301,7 +365,7 @@ describe('写作任务 over the real store on exact sample1', () => {
     // One in-memory fixture over the baseline and 初评 fixtures, answered here for each writing contract the case asks.
     const base = await loadModelFixture(FIXTURES_ROOT, 'sample1-evaluation-authored');
     const entries = new Map<string, ModelFixtureEntry>(base.entries);
-    const fixture: ResolvedModelFixture = { ...base, identity: 'sample1-writing-l2', lineage: [{ identity: 'sample1-writing-l2', sha256: 'e'.repeat(64) }], sha256: 'f'.repeat(64), entries };
+    const fixture = { entries };
     const otherRoot = join(dirname(roots.dataRoot), 'other-data');
     let third: WritingProjection | undefined;
     let laterPackage = '';
@@ -309,7 +373,7 @@ describe('写作任务 over the real store on exact sample1', () => {
     let parts: { bookId: string; draftedRevision: string } | undefined;
     let promotionRule = '';
     await withSession(fixture, async (session) => {
-      const { store, owner } = session;
+      let { store, owner } = session;
       // Another Book, set as a 发稿版本, delivers a 宣传文章 made from its source material: it stands in 范例.
       const sourcePath = join(roots.inputRoot, '范例来源书.docx');
       await composeRevisedDocx(sourcePath, { source: ADMITTED_BASELINE_DOCX, title: '范例来源书', paragraphs: [{ runs: [{ text: { block: 1 } }] }, { runs: [{ text: { block: 2 } }] }] });
@@ -366,6 +430,16 @@ describe('写作任务 over the real store on exact sample1', () => {
         .toEqual({ count: 1, statement: '参照本社 1 份宣传文章范例（只参照，不照抄）：《范例来源书》版本 1' });
       expect(page.types.find((type) => type.typeId === 'news-release')!.exemplars.count).toBe(0);
 
+      // Quick-start belongs to the unchanged local compatibility route. Freeze one real local preparation and rule
+      // before the separate ordinary business attempts; this adds one unexecuted writing Task, never a success seed.
+      const localFixture = await loadModelFixture(FIXTURES_ROOT, WRITING_FIXTURE_IDENTITY);
+      await session.selectRoute(localFixture);
+      ({ store, owner } = session);
+      const localPlan = prepare(store, bookId);
+      promotionRule = store.setDefaultExecutionRule(bookId, localPlan.taskIntent!.taskIntentId, localPlan.planEnvelope!.digest).ruleVersionId;
+      await session.selectRoute(fixture);
+      ({ store, owner } = session);
+
       // Drafted first without a copy: the draft closes, the 范例 referenced in its Task, never stored there.
       const first = prepare(store, bookId);
       const plan = store.inspectTaskPlan({ bookId, kind: 'writing', ref: first.taskIntent!.taskIntentId });
@@ -379,7 +453,7 @@ describe('写作任务 over the real store on exact sample1', () => {
       const draftedRevision = store.inspectWritingTask(bookId).types.find((type) => type.typeId === 'promotion-article')!.drafted!.revisionId;
       expect(draftedRevision).toBe(drafted.resultSetRevision!.revisionId);
       // The 宣传文章's 默认执行规则 is set from that plan (S84b), and travels with the Book.
-      promotionRule = store.setDefaultExecutionRule(bookId, first.taskIntent!.taskIntentId, first.planEnvelope!.digest).ruleVersionId;
+      expect(promotionRule).toBeTruthy();
 
       // Drafted again, and this time copying the 范例: refused whole — a gap with its own reason, never 已完成, nothing to open.
       const copying = prepare(store, bookId, { ...WRITING_REQUEST, requirements: '篇幅一千字以内' });
@@ -411,7 +485,7 @@ describe('写作任务 over the real store on exact sample1', () => {
       const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
       try {
         const rows = database.prepare('SELECT canonical_json FROM writing_tasks').all() as Array<{ canonical_json: string }>;
-        expect(rows).toHaveLength(3);
+        expect(rows).toHaveLength(4); // One real local rule preparation plus the three ordinary business attempts.
         for (const row of rows) {
           // Another Book's words are referenced, never stored in this Book's rows: the reference names it and pins its text.
           const task = JSON.parse(row.canonical_json) as { exemplarSources: unknown[]; input: { exemplars: unknown[] } };
@@ -471,7 +545,7 @@ describe('写作任务 over the real store on exact sample1', () => {
       target.close();
     }
     expect(notices).toEqual(['writing-exemplar']);
-    target = await openAt(otherRoot, fixture);
+    target = await openAt(otherRoot, await loadModelFixture(FIXTURES_ROOT, WRITING_FIXTURE_IDENTITY));
     try {
       expect(target.reconcileStoppedWritingRuns()).toEqual({ settled: 0 });
       recordMissingCredentialConnection(target, 'L2 合并后的连接');
@@ -594,7 +668,7 @@ describe('写作任务 over the real store on exact sample1', () => {
     // One in-memory fixture over the authored writing fixture, answered here for the `/1` contract the store composes.
     const base = await loadModelFixture(FIXTURES_ROOT, WRITING_FIXTURE_IDENTITY);
     const entries = new Map<string, ModelFixtureEntry>(base.entries);
-    const fixture: ResolvedModelFixture = { ...base, identity: 'sample1-writing-l2-v1', lineage: [{ identity: 'sample1-writing-l2-v1', sha256: 'e'.repeat(64) }], sha256: 'f'.repeat(64), entries };
+    const fixture = { entries };
     const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' });
     const graphemes = (text: string) => Array.from(segmenter.segment(text), ({ segment }) => segment);
     let bookId = '';
@@ -662,8 +736,8 @@ describe('写作任务 over the real store on exact sample1', () => {
       expect(exemplarCopied(draftWords, contractInput, WRITING_COPY_SIZES_V1)).toEqual({ exemplar: 0, kind: 'verbatim', unit: 'character', run: 12 });
       const v1 = writingContract(contractInput, 1);
       expect(v1.schema).toBe(WRITING_PROMPT_CONTRACT_SCHEMA_V1);
-      expect(planContract).toBe(writingContractDigest(v1));
-      expect(planContract).not.toBe(writingContractDigest(writingContract(contractInput, 2)));
+      expect(planContract).toBe(clarificationPromptContractDigest(writingContractDigest(v1)));
+      expect(planContract).not.toBe(clarificationPromptContractDigest(writingContractDigest(writingContract(contractInput, 2))));
 
       // 开始任务 through the governor: the request digests are the `/1` contract's, and the synthesis is judged under `/1`.
       answerWriting(entries, prepared, draft);
@@ -699,7 +773,8 @@ describe('写作任务 over the real store on exact sample1', () => {
 
   it('rebuilds a revision-64 store\'s kind-coupled relations for the writing kind, every row kept byte for byte', async () => {
     const fixture = await loadModelFixture(FIXTURES_ROOT, WRITING_FIXTURE_IDENTITY);
-    await withSession(fixture, async ({ store }) => {
+    const baselineFixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-happy');
+    await withSession(baselineFixture, async ({ store }) => {
       const bookId = await sample1Book(store, WRITING_BOOK_TITLE);
       // A baseline Task, so the rebuilt relations carry rows.
       let progress = store.createBaselineAnalysisPreparationWork(bookId, BASELINE_ANALYSIS_TASK_GOAL, null, launchPolicy);
@@ -710,6 +785,7 @@ describe('写作任务 over the real store on exact sample1', () => {
     const plant = new DatabaseSync(path);
     let before: string;
     try {
+      constructPre94PolicyEncoding(plant);
       // Revision 64 exactly: the three relations as revision 64 left them, and no relation of revision 65.
       execPre74Fixture(plant, `DROP TABLE analysis_outcome_resolutions; DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; PRAGMA user_version = ${EVALUATION_REWRITE_SCHEMA_VERSION};`);
       downgradeKindCoupledRelations(plant, ANALYSIS_LEDGER_REVISION_64_SQL);
@@ -730,7 +806,7 @@ describe('写作任务 over the real store on exact sample1', () => {
       expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
       expect(rows(after)).toBe(before!);
       for (const table of KIND_COUPLED_ANALYSIS_RELATIONS) {
-        expect((after.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) as { sql: string }).sql).toBe(ANALYSIS_LEDGER_SCHEMA_SQL[table]);
+        expect((after.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) as { sql: string }).sql).toBe(table === 'analysis_task_intents' ? FACTUAL_TASK_INTENTS_SQL : CURATION_SCHEMA_SQL[table] ?? ANALYSIS_LEDGER_SCHEMA_SQL[table]);
       }
       expect(Object.keys(WRITING_TASK_TRIGGER_SQL).every((name) => after.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'trigger' AND name = ?").get(name) !== undefined)).toBe(true);
     } finally {

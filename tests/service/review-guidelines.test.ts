@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, writeFileSync } from 'node:fs';
@@ -36,6 +37,12 @@ import { TYPOS_AND_USAGE } from '../support/review-categories.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for 知识库 › 审阅规范文件 (Issue #427, plan slice S79a; V2-UX-KB-001 to KB-003, REV-012): the
 // real store on a temporary Agent Data Root, exact `sample1` imported through the supported path, the Review Run drive loop
@@ -88,7 +95,7 @@ afterEach(async () => {
 });
 
 async function openStore(): Promise<{ store: EditorialStore; owner: BaselineAnalysisExecutionOwner; driver: ReviewRunDriver }> {
-  const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-authored');
+  const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-cross-chapter-authored');
   const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
     induceUnprovableReconciliation: false,
     persistLegacyReviewedDraft: false,
@@ -97,7 +104,7 @@ async function openStore(): Promise<{ store: EditorialStore; owner: BaselineAnal
     interruptAfterAbandonObjectRemoval: false,
     baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
   });
-  const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+  const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
   return { store, owner, driver: new ReviewRunDriver(store.reviewRunDriveSteps, owner) };
 }
 
@@ -237,8 +244,8 @@ describe('知识库 › 审阅规范文件 over the real store', () => {
         ['表达改进条款', 1, 'AI7 内置默认'],
       ]);
       expect(typosDocument(fresh).appliedBy).toEqual([{ categoryId: TYPOS, label: '错别字与规范用语' }]);
-      // 线索条款 and 事实核查契约 are AI7's fixed statements: their categories read no clause of theirs.
-      expect(fresh.documents.map((document) => document.use)).toEqual(['clauses', 'clauses', 'leads', 'factual-kind', 'clauses', 'clauses', 'clauses']);
+      // Current plot-consistency reads clauses; factual review retains its fixed contract.
+      expect(fresh.documents.map((document) => document.use)).toEqual(['clauses', 'clauses', 'clauses', 'factual-kind', 'clauses', 'clauses', 'clauses']);
       expect(typosDocument(fresh).clauses.map((clause) => [clause.clauseId, clause.citations])).toEqual([
         ['typos-and-usage/1', 0], ['typos-and-usage/2', 0], ['typos-and-usage/3', 0], ['typos-and-usage/4', 0],
       ]);
@@ -248,9 +255,10 @@ describe('知识库 › 审阅规范文件 over the real store', () => {
       // Book-dependent availability stays on the ordinary task sheet (跨交付物一致性 runs for a Book with deliverables, #813).
       const freshProcedures = await store.inspectKnowledgeProcedures();
       expect(freshProcedures.preinstalled.map((procedure) => [procedure.title, procedure.state, procedure.uses])).toEqual([
-        ['错别字与规范用语审阅工序', 'enabled', 0], ['体例与格式审阅工序', 'enabled', 0], ['线索转批注', 'enabled', 0], ['断言列举与引文定位', 'enabled', 0],
+        ['错别字与规范用语审阅工序', 'enabled', 0], ['体例与格式与跨章一致性', 'enabled', 0], ['情节逻辑与前后一致与跨章一致性', 'enabled', 0], ['断言列举与引文定位', 'enabled', 0],
         ['引用风险点标注', 'enabled', 0], ['出版风险点标注', 'enabled', 0], ['文学性与表达改进工序', 'enabled', 0],
-        ['书系一致性检查', 'enabled', 0], ['跨交付物一致性检查', 'enabled', 0], ['基线分析', 'enabled', 0],
+        ['书系一致性检查', 'enabled', 0], ['跨交付物一致性检查', 'enabled', 0], ['基线分析', 'enabled', 0], ['确定性检查', 'enabled', 0],
+        ['事实核查', 'enabled', 0], ['AI7 初评', 'enabled', 0], ['审稿意见', 'enabled', 0], ['按我的评分重写评语', 'enabled', 0], ['写作任务', 'enabled', 0],
       ]);
       expect(freshProcedures.artifacts).toEqual([{
         title: '本社方案', revision: null, state: 'available-to-install', enabledBooks: 0,
@@ -379,7 +387,7 @@ describe('知识库 › 审阅规范文件 over the real store', () => {
       expect(await refusal(() => store.previewReviewGuidelineVersion('ai7-builtin/factual-review', file('fact.txt', '1. 本社核查。'))))
         .toBe('REVIEW_GUIDELINE_FIXED:《事实核查契约》是 AI7 的固定说明，不能导入新版本。');
       expect(await refusal(() => store.previewReviewGuidelineVersion('ai7-builtin/plot-consistency', file('plot.txt', '1. 本社线索。'))))
-        .toBe('REVIEW_GUIDELINE_FIXED:《线索条款》是 AI7 的固定说明，不能导入新版本。');
+        .toBe('no-error');
 
       const refused = async (name: string, content: string | Uint8Array) => refusal(() => store.previewReviewGuidelineVersion(TYPOS_DOCUMENT, file(name, content)));
       expect(await refused('none.txt', '这里没有编号。\n也没有条款。'))

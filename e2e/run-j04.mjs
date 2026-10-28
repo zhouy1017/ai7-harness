@@ -3,6 +3,7 @@ import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } fro
 import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createServer } from 'node:http';
+import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, SIDEBAR_ICONS_ONLY, runJ14DarkPass } from './controller.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
@@ -163,7 +164,7 @@ const RETRY_FIXTURE_IDENTITY = 'sample1-baseline-transient-retry';
 // every request the earlier stages froze and the review categories' requests over the manuscript as this
 // Journey leaves it — all three of its edits in the first block (#1084: the v2 controls fixture keys that state, pinned by
 // tests/service/review-runs.test.ts).
-const REVIEW_FIXTURE_IDENTITY = 'sample1-review-contract-v2-controls';
+const REVIEW_FIXTURE_IDENTITY = 'sample1-review-cross-chapter-controls';
 // Issue #901: contract /2 at 标准核查, layered on sample1-factual-authored; provider-free, nothing fetched.
 const FACTUAL_FIXTURE_IDENTITY = 'sample1-factual-verified';
 // Issue #922 (slice 7f): one synthetic 自定义分析维度 on a fresh sample1 Book, layered on sample1-baseline-happy; provider-free.
@@ -178,6 +179,7 @@ const PLAN_MATERIAL_FIELDS = [
   'providerBinding.providerId', 'providerBinding.modelId', 'providerBinding.adapterRevision', 'providerBinding.configurationRevision', 'providerBinding.credentialReference',
   'artifactPin.identity', 'artifactPin.version', 'artifactPin.nativeCarrierSha256', 'artifactPin.sidecarRevision', 'artifactPin.sidecarSha256',
   'selectedRange', 'predecessorRevision', 'runBudgetCeiling', 'outboundDataCategory', 'expectedOutcome',
+  'selectedPolicyIdentity', 'localFixtureProfile',
 ];
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
@@ -361,6 +363,20 @@ async function readBaseline(renderer, revisionId = null) {
   }
   return projection;
 }
+
+/** Read-only custody evidence for a real paused Run; no public projection exposes individual in-progress checkpoints. */
+function pausedCheckpointRows(dataRoot, runRecordId) {
+  const database = new DatabaseSync(resolve(dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+  try {
+    const rows = database.prepare('SELECT unit_ordinal, canonical_json, sha256 FROM analysis_unit_checkpoints WHERE run_record_id = ? ORDER BY unit_ordinal').all(runRecordId);
+    requireJourney(rows.every((row) => sha256Hex(row.canonical_json) === row.sha256), 'recorded-paused-checkpoint-digests');
+    return rows;
+  } finally { database.close(); }
+}
+
+const pausedHistoricalFacts = (projection) => ({ run: projection.run, taskIntent: projection.taskIntent,
+  checkpoint: projection.checkpoint, planEnvelope: projection.planEnvelope, executionPlan: projection.executionPlan,
+  history: projection.history, resultSetRevision: projection.resultSetRevision, taskOutcome: projection.taskOutcome });
 
 async function assertRenderer(renderer, expression, name) {
   requireJourney(await renderer.evaluate(`Promise.resolve(${expression}).then((value)=>Boolean(value))`), name);
@@ -716,8 +732,8 @@ function requireRevisionShape(revision, prepared, attempt, fixtureDigest, name) 
     revision?.bindingPin?.attemptId === attempt.attemptId && revision?.bindingPin?.bindingDigest === attempt.executionBinding.bindingDigest &&
     revision?.bindingPin?.harnessSessionId === attempt.executionBinding.harnessSessionId &&
     revision?.bindingPin?.promptContractDigest === PROMPT_CONTRACT_DIGEST &&
-    // Synchronized delta with Issue #1079: selected active set v18; Provider Processing remains v1.
-    sameRecord(revision?.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v18', liveTransmissions: 0 }) &&
+    // Synchronized delta with Issue #1163: selected active set v22; new local Plans use Provider Processing v1.
+    sameRecord(revision?.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v22', liveTransmissions: 0 }) &&
     revision?.provenance?.taskIntentId === prepared.taskIntent.taskIntentId && revision?.provenance?.attemptId === attempt.attemptId &&
     // Synchronized delta (#274, #275): eight unit turns, the reduction's, and the sample's.
     revision?.usage?.requests === SAMPLE1_UNITS + 1 + SAMPLING_TURNS, `${name}-identity`, { fixtureDigest, revision: revision === null || revision === undefined ? revision : { ...revision, units: undefined, sections: undefined, synthesis: undefined } });
@@ -812,8 +828,8 @@ function requireSuccessorShape(revision, expected, attempt, fixtureDigest, name)
     revision?.adapterPin?.fixtureIdentity === FIXTURE_IDENTITY && revision?.adapterPin?.fixtureSha256 === fixtureDigest &&
     revision?.bindingPin?.attemptId === attempt.attemptId && revision?.bindingPin?.bindingDigest === attempt.executionBinding.bindingDigest &&
     revision?.bindingPin?.promptContractDigest === PROMPT_CONTRACT_DIGEST &&
-    // Synchronized delta with Issue #1079: selected active set v18; Provider Processing remains v1.
-    sameRecord(revision?.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v18', liveTransmissions: 0 }) &&
+    // Synchronized delta with Issue #1163: selected active set v22; new local Plans use Provider Processing v1.
+    sameRecord(revision?.policyPin, { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v22', liveTransmissions: 0 }) &&
     revision?.update?.mode === expected.mode && revision?.update?.modeLabel === expected.modeLabel &&
     sameRecord(revision?.update?.predecessor, expected.predecessor) && revision?.update?.reusePlanDigest === expected.reusePlanDigest &&
     sameRecord(revision?.update?.counts, expected.counts) && sameNullableRecord(revision?.update?.selectedRange ?? null, expected.selectedRange) &&
@@ -864,6 +880,7 @@ async function main() {
   let runRootAcquisition;
   let tempParent;
   let dataRoot;
+  let unitHoldPath;
   let launchForCleanup;
   let electronExecutableForCleanup;
   let credentialMutationReached = false;
@@ -950,6 +967,9 @@ async function main() {
     return true;
   };
   const cleanup = () => (cleanupPromise ??= (async () => {
+    if (unitHoldPath !== undefined) {
+      try { await writeFile(unitHoldPath, 'release'); } catch (error) { cleanupFailure ??= error; }
+    }
     if (browserCloseRejected) throw cleanupFailure ?? journeyCheckFailure('J-04', 'browser-cleanup-failed');
     if (credentialMutationReached && !credentialRemoved) {
       try {
@@ -1052,6 +1072,8 @@ async function main() {
     // the deterministic route as one that reaches its model over the network. Absent, the reading is online, so
     // every stage before Connectivity Wait's reads exactly as it always has.
     const connectivityPath = resolve(runRoot, 'connectivity');
+    unitHoldPath = resolve(runRoot, 'retained-v1-unit-hold');
+    await writeFile(unitHoldPath, 'release');
     // Issue #500 (S64b part 2): the Save dialog's one answer per launch, for the 审阅报告's export, in a folder beside
     // the data and outside it. No other stage opens the dialog, so every launch may carry it.
     const exportsRoot = resolve(runRoot, 'exports');
@@ -1062,10 +1084,12 @@ async function main() {
       '--disable-sync', '--metrics-recording-only', '--no-first-run', '--remote-debugging-pipe', `--user-data-dir=${shellRoot}`,
       resolve(ROOT, 'dist', 'main', 'index.cjs'), '--data-root', dataRoot, '--launcher-pid', String(process.pid),
       '--j04-picker-path', SAMPLE1_PATH, '--j04-model-adapter', modelAdapterIdentity, '--j04-connectivity-path', connectivityPath,
-      '--j04-save-path', reportExportPath,
+      '--j04-save-path', reportExportPath, '--j10-unit-hold-path', unitHoldPath,
     ];
     requireJourney(!launchArgs().some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
     launchForCleanup = async (forCleanup = false) => {
+      // Every ordinary/cleanup relaunch starts released, including after cancellation of the paused subcase.
+      await writeFile(unitHoldPath, 'release');
       if (!forCleanup) cancellation.throwIfRequested();
       const acquisition = chromium.launch({
         executablePath: executable,
@@ -1276,7 +1300,7 @@ async function main() {
       prepared.executionPlan?.effects?.length === 0 && prepared.executionPlan?.unitCount === SAMPLE1_UNITS &&
       prepared.planEnvelope?.dispatchAllowed === true && prepared.planEnvelope?.providerStatus === 'remote-denied-local-deterministic' &&
       DIGEST_PATTERN.test(prepared.planEnvelope?.digest) && prepared.planEnvelope?.promptContractDigest === PROMPT_CONTRACT_DIGEST &&
-      DIGEST_PATTERN.test(prepared.planEnvelope?.behaviorCompositionDigest) &&
+      DIGEST_PATTERN.test(prepared.planEnvelope?.behaviorCompositionDigest) && prepared.planEnvelope?.compositionVersion === 2 &&
       prepared.authorization === null && prepared.run === null && prepared.resultSetRevision === null && prepared.taskOutcome === null &&
       prepared.actions?.canPrepare === false && prepared.actions?.canAuthorize === true,
     'prepared-exact-envelope', { fixtureDigest, plan, executionPlan: prepared.executionPlan, planEnvelope: prepared.planEnvelope, actions: prepared.actions });
@@ -1369,7 +1393,7 @@ async function main() {
       attempt.executionBinding?.model === 'ai7-deterministic-fixture' && attempt.executionBinding?.fixtureIdentity === FIXTURE_IDENTITY &&
       attempt.executionBinding?.fixtureSha256 === fixtureDigest && attempt.executionBinding?.promptContractDigest === PROMPT_CONTRACT_DIGEST &&
       attempt.executionBinding?.planEnvelopeDigest === prepared.planEnvelope.digest && attempt.executionBinding?.coverageManifestDigest === manifest.digest &&
-      attempt.executionBinding?.behaviorCompositionDigest === prepared.planEnvelope.behaviorCompositionDigest &&
+      attempt.executionBinding?.behaviorCompositionDigest === prepared.planEnvelope.behaviorCompositionDigest && attempt.executionBinding?.compositionVersion === 2 &&
       attempt.executionBinding?.nativeCarrierSha256 === NATIVE_CARRIER_DIGEST && attempt.executionBinding?.sidecarRevision === 2 &&
       attempt.spans?.length === SAMPLE1_UNITS &&
       JSON.stringify(attempt.spans.map((span) => span.unitOrdinal)) === JSON.stringify([1, 2, 3, 4, 5, 6, 7, 8]) &&
@@ -2936,6 +2960,14 @@ async function main() {
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const boxes=Array.from(sheet.querySelectorAll('input[type=checkbox][name="review-category"]')); const scopes=Array.from(sheet.querySelectorAll('input[name="review-scope"]')); const disabled=boxes.filter((box)=>box.disabled); const quick=sheet.querySelector('[data-review-action="quick-start"]'); const terms=Array.from(sheet.querySelectorAll('dl.review-consequences dt')).map((term)=>term.textContent); return boxes.length===9 && boxes.every((box)=>!box.checked) && JSON.stringify(disabled.map((box)=>box.value).sort())===JSON.stringify(['cross-deliverable-consistency','series-consistency']) && disabled.every((box)=>(box.dataset.unavailableReason??'').length>0) && scopes.length===4 && scopes.every((scope)=>!scope.checked) && quick instanceof HTMLButtonElement && quick.disabled && sheet.querySelector('.review-quick-start-reason')?.textContent==='快速开始先准备所选类别的计划；只有匹配这本书的默认执行规则才会开始，否则先看计划。' && JSON.stringify(terms)===JSON.stringify(['会读取','会发送','不会做','费用']); })()`, 'review-sheet-contract');
 
     at('review-prepare');
+    // F-05 part 2a (Issue #1109 revisions 6-7): a real governed house rule for this category exists before the review, made through
+    // the public governance action. Fixture requests keep the development-ci v1 policy, which admits no preference excerpt, so the
+    // Run must pin none and disclose none; only the local ask is exercised, at 经常.
+    await renderer.evaluate(`window.ai7.recordLearningSupervision({operation:'create',targets:[],scope:{kind:'house'},categoryId:'typos-and-usage',text:'统一编辑用语，保留有意的节奏。',effect:'guide'}).then(() => true)`);
+    const governedPreference = await renderer.evaluate(`window.ai7.inspectHouseReviewPreference()`);
+    requireJourney(governedPreference?.current?.lines?.some((line) => line.categoryId === 'typos-and-usage' && line.bookId === null && line.text === '统一编辑用语，保留有意的节奏。') === true,
+      'review-governed-preference-exists', governedPreference?.current?.lines);
+    await renderer.evaluate(`window.ai7.savePreference({key:'learning.askFrequency',value:'often'})`);
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for (const id of ['typos-and-usage','style-and-format','plot-consistency']) { const box=sheet.querySelector('input[name="review-category"][value="'+id+'"]'); if(!(box instanceof HTMLInputElement)||box.disabled)return false; box.click(); } const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'review-prepare-start');
     // Synchronized delta with Issue #418 (S72 D4): the prepared Run is one line on ②B; its plan opens in the
     // Task Drawer. Synchronized delta with Issue #420 (S74a A5): the Run's one approval left ②B for the
@@ -2945,17 +2977,16 @@ async function main() {
     const taskBacked = (preparedReview?.categories ?? []).filter((category) => (category.planEnvelopeDigest ?? '').length === 64);
     requireJourney(preparedReview?.state === 'prepared' && UUID_PATTERN.test(preparedReview.reviewRunId) &&
       JSON.stringify(preparedReview.categories.map((category) => category.categoryId)) === JSON.stringify(['typos-and-usage', 'style-and-format', 'plot-consistency']) &&
-      JSON.stringify(taskBacked.map((category) => category.categoryId)) === JSON.stringify(['typos-and-usage', 'style-and-format']), 'review-prepared-run', preparedReview?.categories);
+      JSON.stringify(taskBacked.map((category) => category.categoryId)) === JSON.stringify(['typos-and-usage', 'style-and-format', 'plot-consistency']), 'review-prepared-run', preparedReview?.categories);
     await assertRenderer(renderer, `(() => { const plans=document.querySelector('section.review-plans'); const open=plans?.querySelector('[data-review-action="view-plan"]'); return plans?.querySelector('.task-plan-summary-line')?.textContent===${JSON.stringify(`计划：3 个类别，授权一次后逐类审阅 · ${preparedReview.scope.label} · 任务输入修订版 ${preparedReview.manuscript.revisionLabel}`)} && open instanceof HTMLButtonElement && open.textContent==='查看计划并开始' && open.dataset.taskPlanOpen==='review-run' && plans.querySelector('[data-review-action="revise"]')?.textContent==='返回修改' && document.querySelectorAll('[data-review-action="authorize"]').length===0 && !plans.querySelector('.review-authorize-note') && ${AUTHORIZE_LABELED_BUTTONS}===0 && document.querySelector('dialog.review-sheet')?.open!==true; })()`, 'review-plans');
-    // One step per category — the leads read the baseline and freeze no model plan — and 汇总; each
+    // One model-backed step per category and 汇总; each
     // model-read category's own frozen plan one step away in 查看技术详情 (S72 D7).
     const reviewDrawer = await drawerShowing(renderer, preparedReview.reviewRunId, 'ready', 'review-drawer');
     requireJourney(reviewDrawer?.kind === 'review-run' && reviewDrawer.pill === '尚未开始' && reviewDrawer.version === null &&
       reviewDrawer.chips.position === '全书' && reviewDrawer.steps.length === 4 &&
       reviewDrawer.steps[0].startsWith('逐章审读：') && reviewDrawer.steps[1].startsWith('逐章审读：') &&
-      reviewDrawer.steps[2].startsWith('读取基线分析的线索：') && reviewDrawer.steps[3] === '汇总 → 审阅报告' &&
+      reviewDrawer.steps[2].startsWith('逐章审读：') && reviewDrawer.steps[3] === '汇总 → 审阅报告' &&
       taskBacked.every((category) => reviewDrawer.technical[`category:${category.categoryId}`]?.includes(`计划权限边界 ${category.planEnvelopeDigest}`)) &&
-      reviewDrawer.technical['category:plot-consistency']?.endsWith('直接读取基线分析的线索，没有任务') &&
       JSON.stringify(reviewDrawer.participation) === JSON.stringify(['预计无需中途参与', '结束后：每一类完成后，它的发现立即可以处理：修改建议由你接受并应用，批注由你标记为已处理或忽略并说明']) &&
       reviewDrawer.actions === 0 && reviewDrawer.footer === '计划说明，不是运行授权', 'review-drawer-plan', reviewDrawer);
 
@@ -3030,7 +3061,9 @@ async function main() {
     // #1084: this v2 fixture first returns an invalid envelope, then valid siblings and one invalid finding.
     // The declared retry closes the unit; its rejected finding is readable and never becomes a mark.
     requireJourney(reviewed.run.excluded.some((entry) => entry.reasonCode === 'contract-schema-invalid') &&
-      reviewed.run.findings.every((entry) => entry.quote !== '合成的无效发现'), 'review-v2-rejected-sibling');
+      reviewed.run.findings.every((entry) => entry.quote !== '合成的无效发现') &&
+      reviewed.run.findings.some((entry) => entry.categoryId === 'typos-and-usage' && entry.blockPosition !== null && entry.blockPosition <= SAMPLE1_UNIT_RANGES[0][1]),
+    'review-v2-rejected-sibling');
     await assertRenderer(renderer, `(() => { const details=document.querySelector('details.review-excluded'); if(!(details instanceof HTMLDetailsElement))return false; details.open=true; return details.querySelector('summary')?.textContent==='未列为发现的 4 条' && details.textContent.includes('contract-schema-invalid') && details.textContent.includes('合成的无效发现'); })()`, 'review-v2-visible-excluded');
     await assertRenderer(renderer, `document.querySelectorAll('ol.review-progress > li[data-category-state="settled"]').length===3 && document.querySelectorAll('section.review-group[data-review-category]').length>=2`, 'review-groups');
     // The drawer beside ②B read the plan again as the Run moved; it now states the Run's end.
@@ -3053,8 +3086,17 @@ async function main() {
     // names the category that produced it (MARK-008, MARK-010).
     const typosFinding = reviewed.run.findings.find((finding) => finding.categoryId === 'typos-and-usage' && finding.markId !== null);
     requireJourney(typosFinding !== undefined, 'review-typos-finding-marked');
+    // development-ci v1 admits no preference excerpt: the governed rule above was pinned by no category, and neither lineage nor a
+    // chip may imply it was sent.
+    requireJourney(reviewed.run.influence.length === 0 && reviewed.run.findings.every((finding) => (finding.referencedRuleVersions?.length ?? 0) === 0),
+      'review-no-preference-references-under-ci', reviewed.run.influence);
+    await assertRenderer(renderer, `document.querySelectorAll('article.review-finding [data-referenced-rules]').length===0`, 'review-no-referenced-rules-chip-under-ci');
     await reviewAction(renderer, `article.review-finding[data-finding-id="${typosFinding.findingId}"] [data-review-action="go-to-text"]`, 'review-go-to-text');
     await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] [data-mark-id="${typosFinding.markId}"]')?.dataset.markSource==='ai7' && (document.querySelector('[data-mark-card]')?.textContent??'').includes('AI7 · 审阅「错别字与规范用语」')`, 'review-mark-and-card', 30_000);
+    await assertRenderer(renderer, `(() => {const reject=document.querySelector('[data-mark-card] [data-mark-action="reject"]');if(!(reject instanceof HTMLButtonElement)||reject.disabled)return false;reject.click();return true;})()`, 'review-learning-reject');
+    await waitFor(renderer, `document.querySelector('[data-mark-card] [data-learning-reason-ask]') !== null`, 'review-learning-ask');
+    await assertRenderer(renderer, `(() => {const ask=document.querySelector('[data-learning-reason-ask]');return ask.querySelectorAll('input[type="radio"]').length===3&&ask.querySelectorAll('input:checked').length===0&&ask.querySelector('textarea')?.value===''&&ask.querySelector('[data-learning-ask-answer]')?.disabled===true&&document.querySelector('[data-mark-action="withdraw"]')?.disabled===false;})()`, 'review-learning-ask-unselected-nonblocking');
+    await assertRenderer(renderer, `(() => {document.querySelector('[data-learning-ask-dismiss]').click();return !document.querySelector('[data-learning-reason-ask]');})()`, 'review-learning-ask-dismiss');
     await openReviewDestination(renderer, 'review-destination-again');
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, 'review-destination-again-settled');
 
@@ -3568,6 +3610,54 @@ async function main() {
     requireJourney(JSON.stringify(recordedReopened) === JSON.stringify(recorded) && loopback.healthy() && loopback.observedRequests() === 0,
       'recorded-restart-preserves-result-and-report');
 
+    // #1161 rev6: a separate, unedited sample1 Book owns the genuine paused-/1 execution formerly simulated in L2.
+    // Keep the completed recorded Book above intact. This replay truthfully keeps unit1's schema gap and units2/3 closed.
+    at('recorded-retained-pause');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'recorded-paused-return-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'recorded-paused-library');
+    const recordedPausedBook = await importSample1(renderer, cancellation, true);
+    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'recorded-paused-artifact-ready');
+    await click(renderer, '审阅并为本图书启用 Revision 2', 'recorded-paused-artifact-enable');
+    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'recorded-paused-artifact-enabled');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'recorded-paused-open-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'recorded-paused-open-ready');
+    await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(recordedPausedBook.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'recorded-paused-open-book');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(recordedPausedBook.bookId)}]')`, 'recorded-paused-manuscript');
+    await openAnalysisDestination(renderer, 'recorded-paused-analysis');
+    await reviewAction(renderer, '[data-analysis-action="prepare"]', 'recorded-paused-prepare');
+    await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, 'recorded-paused-prepared', 120_000);
+    const recordedPausedPrepared = await readBaseline(renderer);
+    requireJourney(recordedPausedPrepared.bookId !== recordedBook.bookId && recordedPausedPrepared.checkpoint?.journalSequence === 0 &&
+      recordedPausedPrepared.planEnvelope?.promptContractDigest === RECORDED_PROMPT_CONTRACT_DIGEST &&
+      recordedPausedPrepared.executionPlan !== null && !('assurancePromptContractDigest' in recordedPausedPrepared.executionPlan),
+    'recorded-paused-absent-sampling-pin');
+    let recordedPaused;
+    let recordedPausedCheckpoints;
+    try {
+      await writeFile(unitHoldPath, '2');
+      await startFromBar(renderer, 'recorded-paused-start');
+      await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.run?.state==='executing' && analysis.run.progress?.unitsSettled===2 && analysis.run.progress.currentUnitOrdinal===3)`, 'recorded-paused-third-in-flight', 180_000);
+      const inFlight = await readBaseline(renderer);
+      await reviewAction(renderer, '#task-drawer [data-task-drawer-control="pause"]', 'recorded-paused-pause');
+      await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.run?.state==='pausing' && analysis.run.runRecordId===${JSON.stringify(inFlight.run.runRecordId)})`, 'recorded-paused-pausing');
+      // Release the in-flight unit before awaiting paused; otherwise this would wait for the bounded hold timeout.
+      await writeFile(unitHoldPath, '3');
+      await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.run?.state==='paused')`, 'recorded-paused-settled');
+      recordedPaused = await readBaseline(renderer);
+      recordedPausedCheckpoints = pausedCheckpointRows(dataRoot, recordedPaused.run.runRecordId);
+      const kept = recordedPausedCheckpoints.map((row) => JSON.parse(row.canonical_json).unit);
+      requireJourney(recordedPaused.run.runRecordId === inFlight.run.runRecordId &&
+        recordedPaused.run.attempt?.executionBinding?.promptContractDigest === RECORDED_PROMPT_CONTRACT_DIGEST &&
+        recordedPaused.run.attempt.executionBinding.fixtureIdentity === RECORDED_FIXTURE_IDENTITY &&
+        recordedPaused.run.attempt.executionBinding.fixtureSha256 === recordedFixtureDigest &&
+        sameRecord(recordedPaused.run.attempt.spans.map((span) => span.unitOrdinal), [1, 2, 3]) &&
+        sameRecord(kept.map((unit) => unit.unitOrdinal), [1, 2, 3]) &&
+        kept[0].closed.state === 'gap' && kept[0].closed.gap.code === 'contract-invalid' &&
+        kept[0].closed.gap.reason.includes('schema-invalid') && kept.slice(1).every((unit) => unit.closed.state === 'closed') &&
+        recordedPaused.resultSetRevision === null && recordedPaused.taskOutcome === null,
+      'recorded-paused-authentic-retained-checkpoints');
+    } finally { await writeFile(unitHoldPath, 'release'); }
+
     // Issue #826: the same Book under the current contracts. 重新分析所选范围 over unit 1 recomputes its closure, units 1
     // and 2 (unit 2 reads unit 1's last block as overlap), and reuses the other six /1 results by lineage. The six entries
     // replayed are the reviewed real captures of that recomputation — units 1 and 2 and the reduction from the first
@@ -3594,6 +3684,32 @@ async function main() {
         entry.capture.taskPromptContractDigest === PROMPT_CONTRACT_DIGEST) &&
       rangeFixture.entries.filter((entry) => entry.capture.subject === 'sampling').every((entry) => entry.capture.promptContractDigest === SAMPLING_CONTRACT_DIGEST),
     'range-recorded-source-provenance');
+
+    // This actual /1 -> /2 relaunch also changes fixture/composition. It proves historical incompatibility;
+    // L2 separately isolates sampling-only causality with every persisted field fixed.
+    await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(recordedPausedBook.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'recorded-paused-current-open');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(recordedPausedBook.bookId)}]')`, 'recorded-paused-current-manuscript');
+    await openAnalysisDestination(renderer, 'recorded-paused-current-analysis');
+    const pausedUnderCurrent = await readBaseline(renderer);
+    requireJourney(sameValue(pausedHistoricalFacts(pausedUnderCurrent), pausedHistoricalFacts(recordedPaused)) &&
+      sameValue(pausedCheckpointRows(dataRoot, recordedPaused.run.runRecordId), recordedPausedCheckpoints),
+    'recorded-paused-current-immutable-history');
+    await reviewAction(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', 'recorded-paused-current-plan');
+    const pausedPlan = await renderer.evaluate(`window.ai7.inspectTaskPlan(${JSON.stringify({ kind: 'baseline-analysis', ref: recordedPaused.taskIntent.taskIntentId })})`);
+    requireJourney(pausedPlan.runControl?.runRecordId === recordedPaused.run.runRecordId &&
+      typeof pausedPlan.runControl.resume?.reason === 'string' && pausedPlan.runControl.resume.reason.length > 0,
+    'recorded-paused-current-blocker');
+    await assertRenderer(renderer, `(() => { const button=document.querySelector('#task-drawer [data-task-drawer-control="resume"]'); return button instanceof HTMLButtonElement && button.disabled; })()`, 'recorded-paused-current-resume-disabled');
+    const refusedResume = await renderer.evaluate(`(async()=>{try{await window.ai7.resumeBaselineAnalysisRun(${JSON.stringify({ taskIntentId: recordedPaused.taskIntent.taskIntentId })});return null;}catch(error){return {code:error.code,message:error.message};}})()`);
+    requireJourney(refusedResume?.code === 'ANALYSIS_RESUME_BLOCKED' && refusedResume.message.length > 0,
+      'recorded-paused-current-resume-refused');
+    const pausedAfterRefusal = await readBaseline(renderer);
+    requireJourney(sameValue(pausedHistoricalFacts(pausedAfterRefusal), pausedHistoricalFacts(recordedPaused)) &&
+      sameValue(pausedCheckpointRows(dataRoot, recordedPaused.run.runRecordId), recordedPausedCheckpoints) &&
+      loopback.healthy() && loopback.observedRequests() === 0,
+    'recorded-paused-refusal-no-new-work');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'recorded-paused-current-return-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'recorded-paused-current-library');
     await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(recordedBook.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'range-recorded-open-book');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(recordedBook.bookId)}]')`, 'range-recorded-manuscript');
     await openAnalysisDestination(renderer, 'range-recorded-analysis');
@@ -3687,6 +3803,46 @@ async function main() {
     requireJourney(JSON.stringify(rangeReopened?.resultSetRevision) === JSON.stringify(rangeRevision) &&
       JSON.stringify(rangeReopened.taskOutcome) === JSON.stringify(rangeRecorded.taskOutcome) && loopback.healthy() && loopback.observedRequests() === 0,
     'range-recorded-restart-preserves-result');
+
+    // #1169: a standalone authored stock review, through the normal UI and the same native unit-child
+    // composition the service test verifies by its eight distinct child Session spans. No capture is inherited.
+    at('review-relaunch');
+    await closeOwnedBrowser();
+    cancellation.throwIfRequested();
+    modelAdapterIdentity = 'sample1-stock-typos-leaf-authored';
+    await launchForCleanup();
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'stock-leaf-launch-ready');
+    const leafBook = await importSample1(renderer, cancellation, true);
+    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'stock-leaf-artifact-ready');
+    await click(renderer, '审阅并为本图书启用 Revision 2', 'stock-leaf-artifact-enable');
+    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'stock-leaf-artifact-enabled');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'stock-leaf-return-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'stock-leaf-library');
+    await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(leafBook.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'stock-leaf-open-book');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(leafBook.bookId)}]')`, 'stock-leaf-manuscript-ready');
+    await openReviewDestination(renderer, 'stock-leaf-review-destination');
+    await reviewAction(renderer, '[data-review-action="new-review"]', 'stock-leaf-new-review');
+    await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'stock-leaf-sheet');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); sheet.querySelector('input[name="review-category"][value="typos-and-usage"]').click(); sheet.querySelector('input[name="review-scope"][value="whole"]').click(); sheet.querySelector('[data-review-action="prepare"]').click(); return true; })()`, 'stock-leaf-prepare');
+    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared'`, 'stock-leaf-prepared', 120_000);
+    const leafPrepared = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`)).run;
+    requireJourney(leafPrepared.categories.length === 1 && leafPrepared.categories[0].plan.units === SAMPLE1_UNITS &&
+      leafPrepared.categories[0].plan.recomputed === SAMPLE1_UNITS && leafPrepared.influence.length === 0, 'stock-leaf-complete-scope');
+    await drawerShowing(renderer, leafPrepared.reviewRunId, 'ready', 'stock-leaf-drawer');
+    await reviewAction(renderer, '#task-drawer [data-task-drawer-control="start"]', 'stock-leaf-start');
+    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, 'stock-leaf-settled', 180_000);
+    const leafReviewed = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`)).run;
+    requireJourney(leafReviewed.findings.length === 2 && leafReviewed.findings.every((finding) => finding.anchorState === 'exact' && finding.markId !== null) &&
+      leafReviewed.categories[0].excludedCount === 0, 'stock-leaf-validated-findings');
+    const leafUsage = await renderer.evaluate(`window.ai7.inspectUsage({range:'all',groupBy:'book'})`);
+    const leafRuns = leafUsage.rows.find((row) => row.key === leafBook.bookId).runs;
+    requireJourney(leafRuns.length === 1 && leafRuns[0].taskIntentId === leafPrepared.categories[0].taskIntentId, 'stock-leaf-one-business-run');
+    const leafDetail = await renderer.evaluate(`window.ai7.inspectUsage({range:'all',groupBy:'book',runRecordId:${JSON.stringify(leafRuns[0].runRecordId)}})`);
+    const leafReport = leafDetail.detail.report;
+    requireJourney(leafReport.units.submitted === SAMPLE1_UNITS && leafReport.units.gaps === 0 && leafReport.units.retried === 0 &&
+      leafReport.usagePerStage.units.requests === SAMPLE1_UNITS + 1 && leafReport.usagePerStage['assurance-sampling'].requests === 2 &&
+      leafReport.usagePerStage['run-report-reflection'].requests === 1 && leafReport.assurance.state === 'closed' && leafReport.ifRedone.state === 'closed' &&
+      loopback.observedRequests() === 0, 'stock-leaf-tools-and-parent-stages');
   } finally {
     finalCleanupRequested = true;
     try { await cancellation.cleanup(); } finally { cancellation.dispose(); }

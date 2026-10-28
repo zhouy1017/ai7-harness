@@ -1,5 +1,5 @@
 import type { CallId, LlmAdapter, LlmProviderInfo, LlmResolvedModelInfo, StreamChunk, GenerateOptions } from '@deepseek-ai/dsh-llm';
-import { isRecord } from '../analysis/canonical.js';
+import { isRecord, canonicalJson } from '../analysis/canonical.js';
 import { localToolsFromProjection, type LocalToolsRule } from '../retrieval/local-rule.js';
 import { DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST, parseDialogueMessage, dialogueQuestionDigest, type DialogueMessageInput } from '../dialogue/contract.js';
 import { sha256Hex } from '../analysis/canonical.js';
@@ -23,7 +23,7 @@ import {
   parseRunReportReflectionMessageHeader,
   runReportReflectionRequestDigest,
 } from '../analysis/run-report-contract.js';
-import { parseReviewCategoryUnitMessageHeader, reviewCategoryRequestDigest } from '../review/review-category-contract.js';
+import { parseReviewCategoryUnitMessageHeader, reviewCategoryRequestDigest, parseReviewCrossChapterMessage, reviewCrossChapterFixtureDigest, reviewUnitFixtureDigest } from '../review/review-category-contract.js';
 import {
   initialEvaluationRequestDigest,
   initialEvaluationSynthesisRequestDigest,
@@ -62,7 +62,8 @@ import {
 import { AI7_FAILURE_CODES, type DshFailureCodes } from './classification.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from './egress-gate.js';
 import { lastUserMessageText, messageText, toolResultOf } from './payload.js';
-import { fixtureEntryKey, resolveFixtureEntry, type ModelFixtureEntry, type ResolvedModelFixture } from './model-fixture.js';
+import { fixtureEntryKey, resolveFixtureEntry, type LocalFixtureExecutionContext, type LocalFixturePolicyCatalog,
+  type ModelFixtureEntry, type ResolvedModelFixture } from './model-fixture.js';
 
 /** Explicit authored fixture stimulus only; recorded fixtures and every remote route remain outside this stub. */
 export function dialogueRetrievalFixtureRule(fixture: ResolvedModelFixture, message: DialogueMessageInput): LocalToolsRule | null {
@@ -156,6 +157,11 @@ const BLOCK_KIND_MARKER = /^\((?:title|heading|paragraph)(?: h[1-6])?\) /u;
 /** How a request is matched to a fixture entry: by the request digest, or by the unit's own text alone. */
 export type FixtureResolution = 'request-digest' | 'content-digest';
 
+/** Tool ids are minted per replay; the next authored entry binds ordered result bytes, not those ids. */
+export function fixtureToolResultDigest(results: readonly { readonly text: string; readonly isError: boolean }[]): string {
+  return sha256Hex(canonicalJson(results.map(({ text, isError }) => ({ text, isError }))));
+}
+
 /**
  * The own blocks of a unit message, in order: the `[blk_…]` lines after its kind's own-blocks header — the baseline's, the
  * factual and review kinds' own, or the one the evaluation and writing kinds share — so a `{{block:N}}` a converted capture of
@@ -236,6 +242,7 @@ export function substituteAssuranceSamplingBlockPlaceholders(text: string, messa
 export type AnswerHold = (chunksStreamed: number, interrupted: () => boolean) => Promise<void>;
 
 export class Ai7LocalDeterministicAdapter implements LlmAdapter {
+  readonly #profileEntryKeys: ReadonlySet<string> | null;
   readonly #fixture: ResolvedModelFixture;
   readonly #promptContractDigest: string;
   /** The sampling contract the Run's kind binds (Issue #826): its turns are keyed by it, never by another's. */
@@ -253,6 +260,7 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     promptContractDigest: string,
     codes: DshFailureCodes,
     options: {
+      readonly localFixture?: { readonly catalog: LocalFixturePolicyCatalog; readonly execution: LocalFixtureExecutionContext };
       readonly resolveBy?: FixtureResolution;
       /**
        * What each unit attempted in the Run's earlier executions (Issue #422, S76d): a continuation's attempts carry on
@@ -273,6 +281,9 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     } = {},
   ) {
     this.#fixture = fixture;
+    if (options.localFixture !== undefined && options.resolveBy === 'content-digest')
+      throw new Error('LOCAL_FIXTURE_PROFILE_REQUIRES_EXACT_REQUEST_KEYS');
+    this.#profileEntryKeys = options.localFixture?.catalog.entriesFor(options.localFixture.execution, fixture, promptContractDigest) ?? null;
     this.#promptContractDigest = promptContractDigest;
     this.#assurancePromptContractDigest = options.assurancePromptContractDigest ?? ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST;
     this.#codes = codes;
@@ -293,6 +304,8 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
    * task's captured answer from answering another's.
    */
   #answering(entry: ModelFixtureEntry | undefined): ModelFixtureEntry | undefined {
+    if (entry !== undefined && this.#profileEntryKeys !== null &&
+        !this.#profileEntryKeys.has(fixtureEntryKey(entry.unitOrdinal, entry.requestDigest, entry.attempt))) return undefined;
     const task = entry?.capture?.taskPromptContractDigest ?? null;
     return task === null || task === this.#promptContractDigest ? entry : undefined;
   }
@@ -313,6 +326,7 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
       return;
     }
     const response = entry.response;
+    if (response.kind === 'tool-calls') { yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, '工具脚本只答复分析单元。'); return; }
     if (response.kind === 'outcome-unknown') {
       yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, '结果待确认的夹具响应只答复分析单元。');
       return;
@@ -359,6 +373,9 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     }
     const response = entry.response;
     switch (response.kind) {
+      case 'tool-calls':
+        yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, '工具脚本只答复分析单元。');
+        return;
       case 'unit-result':
         yield { type: 'block-start', index: 0, blockType: 'text' };
         yield { type: 'text-delta', index: 0, text: response.text };
@@ -414,7 +431,10 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
       const first = options.messages.find((message) => message.role === 'user' && message.source.kind === 'user');
       const original = first === undefined ? null : messageText(first);
       const message = original === null ? null : parseDialogueMessage(original);
-      if (message !== null && dialogueRetrievalFixtureRule(this.#fixture, message) !== null) {
+      // The stimulus entry is keyed by the retrieval contract, as dialogueRetrievalFixtureRule reads it; the profile partition must hold that entry.
+      const stimulus = message === null ? undefined : this.#answering(resolveFixtureEntry(this.#fixture.entries, 0,
+        dialogueRequestDigest(DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST, message.kind, dialogueQuestionDigest(message.question)), 1));
+      if (message !== null && stimulus !== undefined && dialogueRetrievalFixtureRule(this.#fixture, message) !== null) {
         const last = options.messages.at(-1);
         const result = last === undefined ? null : toolResultOf(last);
         let value: unknown = null;
@@ -441,7 +461,8 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
         return;
       }
     }
-    const text = lastUserMessageText(options);
+    const originalUser = options.messages.findLast((message) => message.role === 'user' && message.source?.kind === 'user');
+    const text = originalUser === undefined ? lastUserMessageText(options) : messageText(originalUser);
     const dialogue = text === null ? null : parseDialogueMessageHeader(text);
     if (dialogue !== null) {
       yield* this.#dialogue(dialogue, options, failure);
@@ -462,6 +483,7 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     // belongs to is decided by its header alone; its request digest is then keyed by that kind's
     // contract digest, which the adapter was constructed with.
     const crossUnit = text === null ? null : parseCrossUnitMessageHeader(text);
+    const reviewSynthesis = text === null ? null : parseReviewCrossChapterMessage(text);
     // AI7 初评's book-level synthesis (Issue #429, S81b1) is answered as the reduction is, under ordinal `0`, keyed by the
     // observations its header names under the evaluation contract this adapter was built with.
     const synthesis = text === null || crossUnit !== null ? null : parseInitialEvaluationSynthesisMessageHeader(text);
@@ -477,7 +499,7 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     const reflection = text === null || crossUnit !== null || synthesis !== null || report !== null || rewrite !== null || drafting !== null || sampling !== null
       ? null
       : parseRunReportReflectionMessageHeader(text);
-    const named = crossUnit !== null || synthesis !== null || report !== null || rewrite !== null || drafting !== null || sampling !== null || reflection !== null;
+    const named = reviewSynthesis !== null || crossUnit !== null || synthesis !== null || report !== null || rewrite !== null || drafting !== null || sampling !== null || reflection !== null;
     // A review-category unit is a unit like the two others, and its header additionally names the
     // category, which its request digest carries as well. An evaluation unit is one too, under its own header.
     const review = text === null || named ? null : parseReviewCategoryUnitMessageHeader(text);
@@ -499,7 +521,12 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     // Report reflection's, keyed by the Run's own accounting. None can collide, because each digest is
     // taken over its own frozen contract digest as well as its own key set.
     const ordinal = named ? 0 : header!.ordinal;
-    const expectedDigest = (text === null || named ? null : clarificationMessageRequestDigest(text)) ?? (crossUnit !== null
+    const lastUserIndex = options.messages.findLastIndex((message) => message.role === 'user' && (message.source?.kind ?? 'user') === 'user');
+    const lastAssistantIndex = options.messages.findLastIndex((message) => message.role === 'assistant');
+    const toolResults = options.messages.slice(Math.max(lastUserIndex, lastAssistantIndex) + 1).flatMap((message) => {
+      const result = message.source?.kind === 'tool' ? toolResultOf(message) : null; return result === null ? [] : [result];
+    });
+    const expectedDigest = reviewSynthesis !== null ? reviewCrossChapterFixtureDigest(reviewSynthesis) : toolResults.length > 0 ? fixtureToolResultDigest(toolResults) : (text === null || named ? null : clarificationMessageRequestDigest(text)) ?? (crossUnit !== null
       ? crossUnitRequestDigest(BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, crossUnit.unitSetDigest)
       : synthesis !== null
         ? initialEvaluationSynthesisRequestDigest(this.#promptContractDigest, synthesis.setDigest)
@@ -516,7 +543,7 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
             : this.#resolveBy === 'content-digest'
               ? unitContentDigest(ownBlockTextsOf(text!))
               : review !== null
-                ? reviewCategoryRequestDigest(this.#promptContractDigest, review.categoryId, review.ordinal, review.unitDigest)
+                ? reviewCategoryRequestDigest(reviewUnitFixtureDigest(text!) ?? this.#promptContractDigest, review.categoryId, review.ordinal, review.unitDigest)
                 : evaluation !== null
                   ? initialEvaluationRequestDigest(this.#promptContractDigest, evaluation.ordinal, evaluation.unitDigest)
                   : readers !== null
@@ -548,6 +575,21 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     }
     const response = entry.response;
     switch (response.kind) {
+      case 'tool-calls': {
+        if (this.#fixture.provenance !== 'authored' || entry.capture !== undefined) {
+          yield failure(AI7_FAILURE_CODES.FIXTURE_MISMATCH, '只接受显式编写的工具脚本。'); return;
+        }
+        for (const [index, call] of response.calls.entries()) {
+          const id = `fixture-${this.#served}-${index}` as CallId;
+          const args = substituteBlockPlaceholders(JSON.stringify(call.arguments), ownBlockIdsOf(text!));
+          yield { type: 'block-start', index, blockType: 'tool-call' };
+          yield { type: 'tool-call-delta', index, id, name: call.name, argumentsDelta: args };
+          yield { type: 'block-end', index, block: { type: 'tool-call', id, name: call.name, arguments: args } };
+        }
+        yield { type: 'usage', usage: response.usage };
+        yield { type: 'finish', reason: { kind: 'tool-calls' } };
+        return;
+      }
       case 'unit-result': {
         // A sampling response names each finding by `{{ref:N}}` — the N-th finding its turn listed —
         // because the factual kind mints a `findingId` per import and a fixture cannot know one. A

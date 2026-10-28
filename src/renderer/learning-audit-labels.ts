@@ -49,7 +49,7 @@ export const LEARNING_AUDIT_SERIES_UNAVAILABLE = '书系记录无法读取，书
 
 /** The filters LAUD-002 names that are not offered yet, and why. */
 export const LEARNING_AUDIT_FILTERS_LATER =
-  '记忆候选、已启用记忆、后续使用和历史影响暂不能筛选：AI7 还没有从学习材料生成记忆候选或记忆；每条材料被哪些任务使用过，在它的来源链里查看。';
+  '记忆候选、已启用记忆、后续使用和历史影响暂不能筛选；每条材料的编辑记忆状态和实际使用过的任务，在它的来源链里查看。模型自动归纳尚未提供。';
 export const LEARNING_AUDIT_EMPTY = '还没有学习材料。你在修改建议、分析结果和审阅里写下的原因与改动，会在这里留下来源链。';
 export const LEARNING_AUDIT_NONE_MATCH = '没有符合的学习材料。';
 export const LEARNING_AUDIT_OPEN = '查看来源链…';
@@ -62,6 +62,8 @@ export const LEARNING_AUDIT_KIND_LABELS: Readonly<Record<LearningLedgerMaterialK
   'analysis-feedback': '分析反馈',
   'review-disposition': '审阅',
   'readers-report-exemplar': '审稿意见范例',
+  'manual-edit-journal': '直接修改稿件',
+  'word-tracked-edit': 'Word 文件修订',
 };
 
 /** Where a material stands, as a pill on its row and a choice of the filter. */
@@ -103,14 +105,13 @@ export const LEARNING_LINEAGE_NOT_YET = '尚未生成';
 export const LEARNING_LINEAGE_TASKS_NONE = '尚未被任何任务使用';
 /** What the forward stages are, and why two are empty: said once, so an empty stage never reads as a hidden one. */
 export const LEARNING_LINEAGE_WHY_EMPTY =
-  '学习信号是这条材料参与生成的本社审阅偏好版本，使用过的任务是实际参考过这些版本的审阅；AI7 目前还没有生成记忆候选或记忆的功能，这两步因此是空的，并非被隐藏。';
+  '学习信号是这条材料参与生成的本社审阅偏好版本，使用过的任务是实际参考过这些版本的审阅；这条材料目前没有编辑撰写的候选或已启用记忆，并非被隐藏。模型自动归纳尚未提供。';
 /**
- * Once explicit editorial memory references the material (Issue #1082, F-05 part 1), the memory stage says what holds it
- * rather than claiming it is empty; AI7 itself still makes no memory candidate.
+ * Candidate and active states are independent: an editor's proposed memory is real before explicit acceptance.
  */
-export function learningLineageWhy(activeMemories: number): string {
-  return activeMemories === 0 ? LEARNING_LINEAGE_WHY_EMPTY
-    : '学习信号是这条材料参与生成的本社审阅偏好版本，使用过的任务是实际参考过这些版本的审阅；已启用记忆只来自你在「社级编辑记忆」里明确新建的记忆，AI7 目前还不会自己生成记忆候选，那一步因此是空的。';
+export function learningLineageWhy(activeMemories: number, memoryCandidates = 0): string {
+  return activeMemories === 0 && memoryCandidates === 0 ? LEARNING_LINEAGE_WHY_EMPTY
+    : `学习信号是这条材料参与生成的本社审阅偏好版本，使用过的任务是实际参考过这些版本的审阅；当前有 ${memoryCandidates} 条编辑撰写的候选、${activeMemories} 条已启用记忆。候选须明确接受后使用，来源受限时暂停使用；模型自动归纳尚未提供。`;
 }
 export function learningLineageMemories(count: number): string {
   return `${count} 条你明确新建的编辑记忆引用了它；停止今后使用后，这些记忆会暂停使用，记录原样保留。`;
@@ -177,11 +178,11 @@ export const LEARNING_REMEDIATION_GROUPS = [
 export const LEARNING_REMEDIATION_CONFIRM = '确认停止今后使用';
 export const LEARNING_REMEDIATION_CANCEL = '取消';
 export const LEARNING_REMEDIATION_RUNNING = '没有正在运行的任务使用它们。';
-export const LEARNING_REMEDIATION_MEMORY = '没有由它们生成的记忆候选或已启用记忆：AI7 还没有生成这些。';
+export const LEARNING_REMEDIATION_MEMORY = '没有引用这些材料的编辑记忆候选或已启用记忆。';
 /** The memory group once explicit editorial memory references the selection (Issue #1082). */
 export function learningRemediationMemory(count: number): string {
   return count === 0 ? LEARNING_REMEDIATION_MEMORY
-    : `${count} 条你明确新建的编辑记忆引用了它们：记录后这些记忆暂停使用，记忆和它的版本历史原样保留；AI7 还不会自己生成记忆候选。`;
+    : `${count} 条编辑撰写的候选或已启用记忆引用了它们：记录后停止后续使用，候选仍须明确接受，记忆和版本历史原样保留；模型自动归纳尚未提供。`;
 }
 
 function namedTasks(named: ReadonlyArray<string>, count: number): string {

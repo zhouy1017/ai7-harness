@@ -1,3 +1,5 @@
+import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { IMPORTED_SKILL_RELATIONS, CUSTOM_ANALYSIS_RELATIONS, HOUSE_REVIEW_PREFERENCE_RELATIONS, TASK_INTENT_DRAFT_RELATIONS } from '../support/pre74-schema.js';
 import { execPre74Fixture, FACTUAL_VERIFICATION_RELATIONS, MATERIAL_INDEX_LAYER_RELATIONS, PROPOSAL_REVIEW_RELATIONS, RESEARCH_EVIDENCE_RELATIONS } from '../support/pre74-schema.js';
 import { createHash, randomUUID } from 'node:crypto';
@@ -29,6 +31,12 @@ import { REIMPORT_GROUP_RELATIONS_DROP_ORDER } from '../support/reimport-groups.
 import { MIGRATION_EMPTY_RELATIONS, PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER } from '../support/production-documents.js';
 import { RUN_CHECKPOINT_RELATIONS_DROP_ORDER } from '../support/run-continuation.js';
 import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for Connectivity Wait (Issue #502, plan slice S74b): the real store on a
 // temporary Agent Data Root, exact `sample1` imported through the supported path, and no Provider, socket
@@ -155,6 +163,7 @@ describe('schema revision 30 over the real store', () => {
       first.close();
     }
     const before = withDatabase(false, (database) => {
+      constructPre94PolicyEncoding(database);
       // Revision 31 (Issue #421) came after: a store revision 29 left holds neither its rule ledger nor its
       // widened authorization origin.
       plantRevision30Relations(database);
@@ -187,7 +196,7 @@ describe('schema revision 30 over the real store', () => {
       // Revision 59 rebuilds the three kind-coupled analysis relations for the evaluation kind (Issue #429), every row kept.
       expect([...before.truth].filter(([name, was]) => after.get(name)!.sql !== was.sql).map(([name]) => name))
         .toEqual(['analysis_plan_records', 'analysis_result_set_revisions', 'analysis_result_sets', 'analysis_run_authorizations', 'analysis_run_states', 'analysis_task_intents', 'proposal_item_decisions']);
-      expect([...before.truth].filter(([name, was]) => after.get(name)!.content !== was.content).map(([name]) => name)).toEqual(['service_lifetimes']);
+      expect([...before.truth].filter(([name, was]) => after.get(name)!.content !== was.content).map(([name]) => name)).toEqual(['analysis_run_authorizations', 'service_lifetimes']);
       expect(database.prepare("SELECT name FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = 'analysis_run_states' ORDER BY name").all())
         .toEqual([{ name: 'analysis_run_states_no_delete' }, { name: 'analysis_run_states_no_update' }]);
       expect(database.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
@@ -337,7 +346,7 @@ describe('联网后开始任务 and Connectivity Wait over the real store', () =
 
   it('leaves the Run waiting while offline, then admits it through the one slot and runs it to its end once online (OFF-008)', async () => {
     const store = await openWithRoute();
-    const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+    const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
     try {
       const { bookId, prepared } = await preparedBook(store, 'L2 sample1 联网后执行');
       store.startBaselineAnalysisWhenOnline(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
@@ -371,7 +380,7 @@ describe('联网后开始任务 and Connectivity Wait over the real store', () =
       first.close();
     }
     const second = await openWithRoute();
-    const owner = new BaselineAnalysisExecutionOwner({ ledger: second.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+    const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: second.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
     try {
       expect(second.inspectBaselineAnalysis(bookId, () => null).state).toBe('waiting');
       expect(await preflight(second, owner, () => 'online')).toEqual({ admitted: 1, blocked: 0, waiting: 0 });
@@ -386,7 +395,7 @@ describe('联网后开始任务 and Connectivity Wait over the real store', () =
 
   it('blocks a waiting Run whose bound plan no longer stands, naming what moved, and never dispatches it (OFF-008)', async () => {
     const store = await openWithRoute();
-    const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+    const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
     try {
       const { bookId, prepared } = await preparedBook(store, 'L2 sample1 计划已变');
       store.startBaselineAnalysisWhenOnline(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
@@ -396,6 +405,7 @@ describe('联网后开始任务 and Connectivity Wait over the real store', () =
       // the Run Budget Ceiling it froze are material inputs, and neither is what this launch would bind now.
       store.baselineAnalysisLedger.bindLaunch({
         operationalScope: 'developer-live',
+        localFixtureRuntime: () => store.localFixtureRuntime(),
         live: {
           route: 'opencode-go',
           model: 'deepseek-v4.1-flash',
@@ -432,7 +442,8 @@ describe('联网后开始任务 and Connectivity Wait over the real store', () =
       });
       // A blocked Run no longer holds the Book: back under the launch it was prepared for, 重新准备's request prepares the
       // new plan, and the decision is made — nothing of the old Task asks for the editor any more.
-      store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'development-ci', live: null });
+      store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'development-ci', live: null, policy: launchPolicy,
+        localFixtureRuntime: () => store.localFixtureRuntime() });
       let progress = store.createBaselineAnalysisPreparationWork(bookId, plan.reprepare!.prepare.goal, plan.reprepare!.prepare.update, launchPolicy);
       while (!progress.done) progress = store.advanceBaselineAnalysisPreparationWork(progress.workId!);
       expect(progress.projection?.state).toBe('prepared');
@@ -503,7 +514,7 @@ describe('联网后开始任务 and Connectivity Wait over the real store', () =
 
   it('admits a waiting Run only through Reconnect Preflight: the ordinary admission refuses it', async () => {
     const store = await openWithRoute();
-    const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+    const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
     try {
       const { bookId, prepared } = await preparedBook(store, 'L2 sample1 须经预检');
       store.startBaselineAnalysisWhenOnline(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);

@@ -1,3 +1,7 @@
+import { CURATION_SCHEMA_SQL, FACTUAL_TASK_INTENTS_SQL } from '../../src/service/task-authorization.js';
+import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
+import { capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
@@ -11,12 +15,14 @@ import { canonicalRecord, sha256Hex } from '../../src/service/analysis/canonical
 import { EVALUATION_INITIAL_DRAFT_TRIGGER_SQL, EVALUATION_RECORD_TRIGGER_SQL } from '../../src/service/evaluation-records.js';
 import { EVALUATION_REWRITE_SCHEMA_SQL, EVALUATION_REWRITE_TRIGGER_SQL } from '../../src/service/evaluation-rewrites.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
-import { fixtureEntryKey, loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
+import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
+import { RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST, parseRunReportReflectionMessageHeader } from '../../src/service/analysis/run-report-contract.js';
 import {
   EVALUATION_REWRITE_UNIT_RESULT_SCHEMA,
   evaluationRewriteObservationSetDigest,
-  evaluationRewriteRequestDigest,
   evaluationRewriteSynthesisRequestDigest,
+  parseEvaluationRewriteUnitMessageHeader,
+  parseEvaluationRewriteSynthesisMessageHeader,
 } from '../../src/service/evaluation/evaluation-rewrite-contract.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import {
@@ -39,6 +45,12 @@ import { finalizeAsJ11, runInitialEvaluationToEnd } from '../support/readers-rep
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { AUTHORED_MARKET } from '../support/initial-evaluation-market.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for the market section and 按我的评分重写评语 (Issue #429, plan slice S81b2; V2-UX-EVAL-008,
 // EVAL-009) over the real store and ledger, the one execution owner and the AI7 local deterministic adapter over the authored
@@ -94,7 +106,7 @@ async function openStore(): Promise<EditorialStore> {
 async function withBook(body: (book: Book) => Promise<void>): Promise<void> {
   await requireExactSample1(roots.codeRoot);
   const store = await openStore();
-  const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+  const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
   try {
     const imported = await importSample1Book(store, roots.codeRoot, '评语重写之书');
     await pinEditorialWorkspaceProfileRevision2(store, imported.bookId);
@@ -516,7 +528,7 @@ describe('the market section and 按我的评分重写评语 over the real store
         } else {
           expect(settled.state).toBe('resumable');
           expect(settled.taskOutcome).toBeNull();
-          const owner = new BaselineAnalysisExecutionOwner({ ledger: second.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+          const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: second.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
           try {
             const ledger = second.executionLedgerForRun(runRecordId);
             ledger.requestCancel(bookId, settled.taskIntent!.taskIntentId);
@@ -537,45 +549,92 @@ describe('the market section and 按我的评分重写评语 over the real store
   }, 300_000);
 
   it('says how much of the Book a rewrite read, and offers no 总评 that names a conclusion while its 评语 stand', async () => {
-    // A fixture of this test's own over the authored one: the third range never answers, and the synthesis over the other
-    // seven writes a 总评 that chooses a conclusion.
-    const entries = new Map(fixture.entries);
-    fixture = { ...fixture, entries };
-    await withBook(async (book) => {
-      await runInitialEvaluationToEnd(book.store, book.owner, book.bookId, launchPolicy);
-      finalizeAsJ11(book.store, book.bookId);
-      const record = beginRewriteAsJ11(book.store, book.bookId);
-      let progress = book.store.createEvaluationRewritePreparationWork(book.bookId, record.recordId, launchPolicy);
-      while (!progress.done) progress = book.store.advanceEvaluationRewritePreparationWork(progress.workId!);
+    // Keep the actual local fixture for the initial evaluation. The changed partial-reading business response belongs
+    // to ordinary captured transport, never to new payload/key bytes under that admitted fixture's identity/hash.
+    await requireExactSample1(roots.codeRoot);
+    let store = await openStore();
+    let storeOpen = true;
+    let owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+    let captured: ReturnType<typeof capturedOrdinaryExecution> | undefined;
+    try {
+      const { bookId } = await importSample1Book(store, roots.codeRoot, '评语重写之书');
+      await pinEditorialWorkspaceProfileRevision2(store, bookId);
+      recordMissingCredentialConnection(store, 'L2 主编辑连接');
+      await runInitialEvaluationToEnd(store, owner, bookId, launchPolicy);
+      finalizeAsJ11(store, bookId);
+      const record = beginRewriteAsJ11(store, bookId);
+      await owner.dispose();
+      store.markCleanShutdown(); store.close(); storeOpen = false;
+      store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { baselineAnalysisRoute: null,
+        induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
+        induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false });
+      storeOpen = true;
+      let contract = '';
+      let synthesisContract = '';
+      let observationSet = '';
+      const units = new Map<number, { digest: string; requestDigest: string }>();
+      const verdict = '总体较好，建议推荐出版。';
+      captured = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, requestGovernor, (request, message) => {
+        const unit = parseEvaluationRewriteUnitMessageHeader(message);
+        if (request.stage === 'units' && unit !== null) {
+          const expected = units.get(unit.ordinal);
+          if (expected === undefined || unit.total !== 8 || unit.unitDigest !== expected.digest || request.unitOrdinal !== unit.ordinal ||
+            request.attemptIndex !== 1 || request.contractDigest !== contract || request.requestDigest !== expected.requestDigest) return undefined;
+          if (unit.ordinal === 3) return { kind: 'adapter-failure', code: 'SYNTHETIC_UNIT_UNAVAILABLE', status: 400, message: '合成：此阅读范围的请求被永久拒绝。' };
+          return { kind: 'unit-result', text: JSON.stringify({ schema: EVALUATION_REWRITE_UNIT_RESULT_SCHEMA,
+            unitOrdinal: unit.ordinal, observations: AUTHORED_REWRITE_OBSERVATIONS[unit.ordinal]! }), usage: { inputTokens: 100, outputTokens: 50 } };
+        }
+        const synthesis = parseEvaluationRewriteSynthesisMessageHeader(message);
+        if (request.stage === 'cross-unit-reduction' && synthesis !== null && synthesis.closed === 7 && synthesis.total === 8 &&
+          synthesis.setDigest === observationSet && request.contractDigest === synthesisContract &&
+          request.requestDigest === evaluationRewriteSynthesisRequestDigest(synthesisContract, observationSet)) {
+          return { kind: 'unit-result', text: JSON.stringify({ ...AUTHORED_REWRITE_WORDS, verdict }), usage: { inputTokens: 2600, outputTokens: 560 } };
+        }
+        if (request.stage === 'run-report-reflection' && parseRunReportReflectionMessageHeader(message) !== null &&
+          request.contractDigest === RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST && request.requestDigest === sha256Hex(message)) {
+          return { kind: 'unit-result', text: JSON.stringify({ schema: 'ai7.analysis.run-report-reflection-result/1', items: [] }), usage: { inputTokens: 10, outputTokens: 5 } };
+        }
+        return undefined;
+      });
+      owner = captured.owner;
+      const policy = captured.policy;
+      let progress = store.createEvaluationRewritePreparationWork(bookId, record.recordId, policy);
+      while (!progress.done) progress = store.advanceEvaluationRewritePreparationWork(progress.workId!);
       const prepared = progress.projection!;
       const manifest = prepared.coverageManifest!;
-      const contract = prepared.planEnvelope!.promptContractDigest;
+      contract = prepared.planEnvelope!.promptContractDigest;
       const third = manifest.units[2]!;
-      expect(entries.delete(fixtureEntryKey(third.ordinal, evaluationRewriteRequestDigest(contract, third.ordinal, third.digest)))).toBe(true);
       const closed = manifest.units.filter((unit) => unit.ordinal !== third.ordinal).map((unit) => ({
         unitOrdinal: unit.ordinal,
         result: { schema: EVALUATION_REWRITE_UNIT_RESULT_SCHEMA, unitOrdinal: unit.ordinal, observations: AUTHORED_REWRITE_OBSERVATIONS[unit.ordinal]! },
       }));
-      const verdict = '总体较好，建议推荐出版。';
-      const requestDigest = evaluationRewriteSynthesisRequestDigest(contract, evaluationRewriteObservationSetDigest(closed));
-      entries.set(fixtureEntryKey(0, requestDigest), {
-        unitOrdinal: 0, requestDigest, attempt: null, contentDigest: null,
-        response: { kind: 'unit-result', text: JSON.stringify({ ...AUTHORED_REWRITE_WORDS, verdict }), usage: { inputTokens: 2600, outputTokens: 560 } },
-      });
-      const authorized = book.store.authorizeEvaluationRewrite(book.bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
-      book.owner.admitOrQueue(authorized.dispatchRunRecordId!, authorized.ledger);
-      await book.owner.whenIdle();
-      const page = book.store.inspectEvaluation(book.bookId, record.recordId);
+      observationSet = evaluationRewriteObservationSetDigest(closed);
+      const authorized = store.authorizeEvaluationRewrite(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
+      synthesisContract = authorized.ledger.definition.crossUnit!.promptContractDigest;
+      for (const unit of manifest.units) units.set(unit.ordinal, { digest: unit.digest,
+        requestDigest: authorized.ledger.definition.requestDigest(unit.ordinal, unit.digest) });
+      // Ordinary execution keeps its real per-unit Sessions/default three-unit width; this case asserts no serial order.
+      owner.admitOrQueue(authorized.dispatchRunRecordId!, authorized.ledger);
+      await owner.whenIdle();
+      expect(captured.requests.filter((request) => request.stage === 'units').map((request) => request.unitOrdinal).sort((a, b) => a! - b!))
+        .toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+      expect(captured.requests.filter((request) => request.stage === 'cross-unit-reduction')).toHaveLength(1);
+      const page = store.inspectEvaluation(bookId, record.recordId);
       const proposal = page.rewrite.proposal!;
       // Seven of eight ranges read, and said so; the 评语 stand, the 总评 is set aside with why.
       expect(proposal.reading).toEqual({ unitsTotal: 8, unitsRead: 7 });
       expect(proposal.items.map((item) => item.after)).toEqual(AUTHORED_REWRITE_WORDS.items.map((item) => item.comment));
       expect([proposal.verdict, proposal.withheld]).toEqual([null, ['重写的总评写出了结论，没有采用：结论由你选。']]);
       // 采用 takes the 评语 alone: the version's own 总评 stays.
-      const accepted = book.store.decideEvaluationRewrite(book.bookId, proposal.revisionId, 'accept').record!;
+      const accepted = store.decideEvaluationRewrite(bookId, proposal.revisionId, 'accept').record!;
       expect([accepted.entries, accepted.content.verdict]).toEqual([record.entries + 1, record.content.verdict]);
       expect(accepted.content.items.filter((item) => item.score !== null).map((item) => item.comment)).toEqual(AUTHORED_REWRITE_WORDS.items.map((item) => item.comment));
-    });
+      expect(scoresOf(accepted.content)).toEqual(scoresOf(record.content));
+      store.markCleanShutdown();
+    } finally {
+      await owner.dispose();
+      try { captured?.assertMatched(); } finally { if (storeOpen) store.close(); }
+    }
   }, 300_000);
 
   it('offers no rewrite under a live scope, and prepares or starts none there', async () => {
@@ -742,6 +801,7 @@ describe('the market section and 按我的评分重写评语 over the real store
     const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
     const rows = (database: DatabaseSync): string => JSON.stringify(KIND_COUPLED_ANALYSIS_RELATIONS.map((table) => database.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()));
     const plant = new DatabaseSync(path);
+    constructPre94PolicyEncoding(plant);
     let before: string;
     try {
       // Revision 63 exactly: the three relations as revision 62 left them, and no relation of revision 65.
@@ -764,7 +824,7 @@ describe('the market section and 按我的评分重写评语 over the real store
       expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
       expect(rows(after)).toBe(before!);
       for (const table of KIND_COUPLED_ANALYSIS_RELATIONS) {
-        expect((after.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) as { sql: string }).sql).toBe(ANALYSIS_LEDGER_SCHEMA_SQL[table]);
+        expect((after.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) as { sql: string }).sql).toBe(table === 'analysis_task_intents' ? FACTUAL_TASK_INTENTS_SQL : CURATION_SCHEMA_SQL[table] ?? ANALYSIS_LEDGER_SCHEMA_SQL[table]);
       }
       expect(Object.keys(EVALUATION_REWRITE_TRIGGER_SQL).every((name) => after.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'trigger' AND name = ?").get(name) !== undefined)).toBe(true);
     } finally {
@@ -776,6 +836,7 @@ describe('the market section and 按我的评分重写评语 over the real store
     await withBook(async () => undefined);
     const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
     const plant = new DatabaseSync(path);
+    constructPre94PolicyEncoding(plant);
     try {
       execPre74Fixture(plant, `DROP TABLE analysis_outcome_resolutions; DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks; PRAGMA user_version = ${CAPTURED_PROCEDURE_SCHEMA_VERSION};`);
     } finally {

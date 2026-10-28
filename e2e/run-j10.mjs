@@ -117,7 +117,7 @@ const THIRD_HOLD = 1;
 // their unit suites.
 const REDO_REASON = '先暂停，再改计划重做';
 const CANCELLING_NOTE = '已记下你的取消；正在进行的这一步会被中止，此后不会再发送任何内容';
-const PAUSING_NOTE = '已记下你的暂停；正在进行的这一步完成后停下，已完成的部分都会保存';
+const PAUSING_NOTE = '已记下你的暂停；正在进行的这一步完成后停下，不再开始下一步，结果与用量都会保存';
 const PAUSED_NOTE = '已读完 3 / 8 个阅读范围，结果都已保存；续行时从第 4 个接着读，不重复已读完的部分';
 const RESUMABLE_NOTE = '已读完 2 / 8 个阅读范围，结果都已保存；续行时从第 3 个接着读，不重复已读完的部分';
 const THIRD_PAUSED_NOTE = '已读完 2 / 8 个阅读范围，结果都已保存；续行时从第 3 个接着读，不重复已读完的部分';
@@ -837,7 +837,8 @@ async function main() {
     const executing = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     const taskIntentId = executing?.taskIntent?.taskIntentId ?? '';
     requireJourney(UUID_PATTERN.test(taskIntentId) && executing.bookId === bookId && executing.state === 'executing' && executing.run?.state === 'executing' &&
-      executing.run.progress?.unitsSettled === FIRST_HOLD && executing.run.progress.currentUnitOrdinal === FIRST_HOLD + 1 && executing.run.progress.unitsTotal === SAMPLE1_UNITS,
+      executing.run.progress?.unitsSettled === FIRST_HOLD && executing.run.progress.currentUnitOrdinal === FIRST_HOLD + 1 && executing.run.progress.unitsTotal === SAMPLE1_UNITS &&
+      executing.run.progress.inFlightUnits === undefined,
     'run-executing-record', { state: executing?.state, run: executing?.run?.state, progress: executing?.run?.progress });
     const running = await renderer.evaluate(READ_DRAWER);
     requireJourney(running?.ref === taskIntentId && running.kind === 'baseline-analysis' && running.start === 'started' && running.pill === '运行中' && running.status === '运行中', 'drawer-follows-the-run', running);
@@ -846,7 +847,8 @@ async function main() {
     // AUTH-011: the phase, the range in flight, the time on it and since the Run began, the attempt, the last
     // update and the milestones, each a fact the Run holds; nothing is estimated.
     const rows = running.activity?.rows ?? {};
-    requireJourney(running.activity?.title === '运行动态' && rows['阶段'] === '正在逐个阅读范围分析' && rows['当前'] === `第 3 个阅读范围（共 ${SAMPLE1_UNITS} 个）` &&
+    // #1131 retains the v1 fixture's six scalar rows. Governed production lists are service-stub proof, not this Journey's authority.
+    requireJourney(Object.keys(rows).length === 6 && running.activity?.title === '运行动态' && rows['阶段'] === '正在逐个阅读范围分析' && rows['当前'] === `第 3 个阅读范围（共 ${SAMPLE1_UNITS} 个）` &&
       /^本步 \d\d:\d\d · 运行 \d\d:\d\d$/u.test(rows['用时'] ?? '') && rows['尝试'] === '已派发' && typeof rows['上次更新'] === 'string' && rows['上次更新'].length > 0 &&
       rows['进展'] === `已读完 ${FIRST_HOLD} / ${SAMPLE1_UNITS} 个阅读范围 · 已完成模型回合 ${FIRST_HOLD} 次`,
     'activity-card-rows', running.activity);
@@ -867,6 +869,7 @@ async function main() {
     const pausing = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(pausing?.state === 'pausing' && pausing.stateLabel === '正在暂停' && pausing.run?.state === 'pausing' &&
       JSON.stringify(pausing.run.transitions.map((transition) => transition.state)) === JSON.stringify(['authorized', 'admitted', 'executing', 'pausing']) &&
+      pausing.run.transitions.at(-1)?.detail === '编辑暂停了这项任务；正在进行的这一步完成后停下，不再开始下一步，已完成的结果与用量都会保存。' &&
       pausing.run.progress?.unitsSettled === FIRST_HOLD && pausing.run.progress.currentUnitOrdinal === FIRST_HOLD + 1,
     'pausing-record', { state: pausing?.state, run: pausing?.run?.state, progress: pausing?.run?.progress });
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='正在暂停'`, 'pausing-card-label', 30_000);
@@ -1481,8 +1484,11 @@ async function main() {
     // 开始任务: four ranges spend 6,620 tokens and the fifth would pass the ceiling, so it is never sent. The Run stops as
     // 已停止 · 预算已达上限 with what it read and used — 调整预算并重做 and 查看部分结果, never 续行 or 重试 — its partial revision
     // kept, and 待我处理 holds it as an exception whose next step is 调整预算并重做.
+    await assertRenderer(renderer, `(() => { const timing=document.querySelector('#task-drawer select[data-task-start-when]'); if(!(timing instanceof HTMLSelectElement)||timing.value!=='now')return false; timing.value='idle'; timing.dispatchEvent(new Event('change',{bubbles:true})); return true; })()`, 'budget-deferred-start-choice');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'fifth-start');
     await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.taskIntent?.taskIntentId===${JSON.stringify(fifthIntentId)} && analysis.run?.state==='interrupted')`, 'budget-run-stopped', 180_000);
+    const idleBudgetRun = await renderer.evaluate('window.ai7.inspectBaselineAnalysis()');
+    requireJourney(idleBudgetRun.authorization?.startWhen === 'idle' && idleBudgetRun.planVersion?.materialInputs.runBudgetCeiling.maxTotalTokens === BUDGET.maxTotalTokens, 'deferred-budget-still-frozen');
     await waitForBar(renderer, {
       state: 'budget-reached', pill: '已停止 · 预算已达上限', status: '已停止 · 预算已达上限', note: BUDGET_STOP_NOTE,
       actions: [['redo', '调整预算并重做', 'enabled', null], ['run-link', '查看部分结果', 'enabled', null]],
@@ -1675,6 +1681,8 @@ async function main() {
     const seventhIntentId = await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskPlanRef ?? ''`);
     requireJourney(UUID_PATTERN.test(seventhIntentId), 'seventh-task');
     await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis?.run?.progress?.unitsSettled===4 && analysis.run.progress.currentUnitOrdinal===5)`, 'unknown-fifth-in-flight', 180_000);
+    // The service observation can precede the drawer's own refresh; press pause only once this Task's control is enabled.
+    await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); if(drawer?.dataset.taskPlanKind!=='baseline-analysis'||drawer.dataset.taskPlanRef!==${JSON.stringify(seventhIntentId)})return false; const button=drawer.querySelector('[data-task-drawer-control="pause"]'); return button instanceof HTMLButtonElement && !button.disabled; })()`, 'unknown-pause-ready');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="pause"]', 'unknown-pause');
     await writeFile(holdPath, 'release', 'utf8');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState==='paused'`, 'unknown-explicitly-paused', 30_000);
@@ -1857,6 +1865,7 @@ async function main() {
     const reviewStarted = await renderer.evaluate(`window.ai7.inspectTaskPlan({kind:'review-run',ref:${JSON.stringify(reviewRef)}})`);
 
     at('review-controls-pause-resume');
+    await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); if(drawer?.dataset.taskPlanKind!=='review-run'||drawer.dataset.taskPlanRef!==${JSON.stringify(reviewRef)})return false; const button=drawer.querySelector('[data-task-drawer-control="pause"]'); return button instanceof HTMLButtonElement && !button.disabled; })()`, 'review-controls-pause-ready');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="pause"]', 'review-controls-pause');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState==='pausing'`, 'review-controls-pausing');
     await writeFile(holdPath, '1', 'utf8');
@@ -1867,6 +1876,7 @@ async function main() {
       pausedWorkspace.run?.categories?.[1]?.state==='waiting', 'review-controls-checkpoint');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="resume"]', 'review-controls-resume');
     await waitFor(renderer, `window.ai7.inspectTaskPlan({kind:'review-run',ref:${JSON.stringify(reviewRef)}}).then((plan)=>plan.runControl?.activity?.currentUnitOrdinal===2 && plan.runControl.runRecordId===${JSON.stringify(reviewStarted.runControl.runRecordId)})`, 'review-controls-same-run');
+    await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); if(drawer?.dataset.taskPlanKind!=='review-run'||drawer.dataset.taskPlanRef!==${JSON.stringify(reviewRef)})return false; const button=drawer.querySelector('[data-task-drawer-control="cancel-run"]'); return button instanceof HTMLButtonElement && !button.disabled; })()`, 'review-controls-cancel-ready');
 
     at('review-controls-cancel-impact');
     await assertRenderer(renderer, `document.querySelector('#task-drawer [data-task-drawer-control="cancel-run"]')?.textContent==='停止任务'`, 'review-controls-stop-wording');

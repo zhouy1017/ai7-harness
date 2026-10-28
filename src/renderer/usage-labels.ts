@@ -59,6 +59,7 @@ export const usageRangeLabel = (range: UsageRange): string => RANGE_LABELS[range
 export const usageGroupingLabel = (groupBy: UsageGrouping): string => GROUPING_LABELS[groupBy];
 
 const KIND_LABELS: Readonly<Record<string, string>> = {
+  'global-agent-dialogue': '全域对话',
   'baseline-manuscript-analysis': '稿件分析',
   'factual-review': '事实核查',
   evaluation: 'AI7 初评',

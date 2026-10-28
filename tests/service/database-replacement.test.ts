@@ -1,3 +1,4 @@
+import { PROCEDURE_DEFINITION_SCHEMA_SQL, PROCEDURE_DEFINITION_TRIGGER_SQL } from '../../src/service/procedures/definition-store.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { copyFile, readFile, readdir, rename, writeFile } from 'node:fs/promises';
@@ -24,6 +25,10 @@ import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-d
 import { MAX_DATABASE_REPLACEMENTS_LISTED } from '../../src/shared/protocol.js';
 import { fixedArchiveTime } from '../../src/shared/archive-time.js';
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx } from '../support/composed-fixture.js';
+import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
+import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
+import { FACTUAL_REVIEW_TASK_GOAL } from '../../src/shared/protocol.js';
+import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 
 const sourceRead = vi.hoisted(() => ({ path: null as string | null, atEnd: null as (() => Promise<void>) | null }));
 /** While set, every write into a file opened under this directory fails as a full disk fails. */
@@ -100,11 +105,17 @@ async function handmade(name: string, dataVersion: number, schemaRevision: numbe
   mkdirSync(join(other, 'objects'), { recursive: true });
   if (schemaRevision >= 55) {
     const store = await EditorialStore.open(other, roots.codeRoot);
+    if (schemaRevision === 97) createBook(store, '版本97合成图书');
     store.close();
   }
   const database = new DatabaseSync(schemaRevision >= 55 ? join(other, 'store', 'ai7.sqlite') : ':memory:');
   try {
     if (schemaRevision < 55) database.exec('CREATE TABLE marker (value TEXT) STRICT;');
+    if (schemaRevision === 97) {
+      database.exec('DROP TABLE procedure_run_choices; DROP TABLE procedure_version_stops; DROP TABLE procedure_version_origins; DROP TABLE procedure_plan_pins;');
+      database.exec(PROCEDURE_DEFINITION_SCHEMA_SQL.procedure_plan_pins);
+      for (const action of ['update', 'delete']) database.exec(PROCEDURE_DEFINITION_TRIGGER_SQL[`procedure_plan_pins_no_${action}`]!);
+    }
     execPre74Fixture(database, `PRAGMA user_version = ${schemaRevision};`);
     const path = join(roots.inputRoot, name);
     await writeDatabasePackage(database, other, path, () => ({
@@ -119,6 +130,143 @@ async function handmade(name: string, dataVersion: number, schemaRevision: numbe
 const backups = (): string => `${roots.dataRoot}-backups`;
 
 describe('导入数据库 over the real store', () => {
+  it('migrates a genuine revision-97 package through replacement before creating an editable version (#1170)', async () => {
+    const path = await handmade('revision97.ai7db', 1, 97);
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const preview = await store.inspectDatabaseImport(path);
+      expect(preview).toMatchObject({ schemaRevision: 97, compatibility: 'compatible' });
+      await store.prepareDatabaseReplacement(preview.previewId, T);
+      store.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      expect(titles(store)).toEqual(['版本97合成图书']);
+      const original = store.procedureLibrary({ action: 'inspect' }).procedures.find((entry) => entry.executorKind === 'writing')!;
+      const created = store.procedureLibrary({ action: 'save', input: { procedureId: original.procedureId,
+        basedOn: { procedureId: original.procedureId, version: original.version, digest: original.digest },
+        title: '迁移后的写作', editorInstruction: '简明', stages: original.document.stages } });
+      expect(created.procedures.find((entry) => entry.procedureId === original.procedureId)!.documents).toContainEqual(original.document);
+      expect(await store.inspectDatabaseImport(await exported(store, 'revision98.ai7db'))).toMatchObject({ schemaRevision: 98 });
+      store.markCleanShutdown();
+    } finally { store.close(); }
+  });
+
+  it('retains custom versions and their stop state through public database replacement (#1170)', async () => {
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      createBook(store, '本社工序合成图书');
+      const original = store.procedureLibrary({ action: 'inspect' }).procedures.find((entry) => entry.executorKind === 'writing')!;
+      const input = { procedureId: null, basedOn: { procedureId: original.procedureId, version: original.version, digest: original.digest },
+        title: '替换保留的工序', editorInstruction: '保留作者语气', stages: original.document.stages };
+      const created = store.procedureLibrary({ action: 'save', input }).procedures.find((entry) => entry.document.title === input.title)!;
+      const procedure = { procedureId: created.procedureId, version: created.version, digest: created.digest };
+      store.procedureLibrary({ action: 'stop', procedure });
+      const preview = await store.inspectDatabaseImport(await exported(store, 'procedure-replacement.ai7db'));
+      await store.prepareDatabaseReplacement(preview.previewId, T);
+      store.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      expect(store.procedureLibrary({ action: 'inspect' }).procedures.find((entry) => entry.procedureId === procedure.procedureId))
+        .toMatchObject({ ...procedure, document: created.document, stopped: true });
+      store.markCleanShutdown();
+    } finally { store.close(); }
+  });
+
+  it('reopens the genuine revision-96 predecessor with its Book and learning choice intact (#1168)', async () => {
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const bookId = createBook(store, '版本九十六的合成图书');
+    store.changeEditorialLearning({ kind: 'switch', enabled: false, expectedEntries: 0 });
+    store.markCleanShutdown(); store.close();
+    const predecessor = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try { execPre74Fixture(predecessor, 'PRAGMA user_version = 96;'); } finally { predecessor.close(); }
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect(store.getBookOverview(bookId).book.title).toBe('版本九十六的合成图书');
+      expect(store.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }))
+        .toMatchObject({ enabled: false, signals: [], items: [], controlEntries: 1 });
+      const preview = await store.inspectDatabaseImport(await exported(store, 'migrated-v96.ai7db'));
+      expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 98, dataVersion: 1 });
+      store.markCleanShutdown();
+    } finally { store.close(); }
+  });
+
+  it('retains selected v1 Plan metadata through database replacement', async () => {
+    const fixture = await loadModelFixture(join(roots.codeRoot, 'tests/fixtures/model'), 'sample1-factual-authored');
+    const control = { induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
+      induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false,
+      baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage } };
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, control);
+    try {
+      const book = await importSample1Book(store, roots.codeRoot, '合成策略包');
+      await pinEditorialWorkspaceProfileRevision2(store, book.bookId); recordMissingCredentialConnection(store, '合成本地计划连接');
+      const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot);
+      let work = store.createFactualReviewPreparationWork(book.bookId, FACTUAL_REVIEW_TASK_GOAL, policy);
+      while (!work.done) work = store.advanceFactualReviewPreparationWork(work.workId!);
+      const original = work.projection!.providerResolutionPlan!;
+      expect(original.selectedPolicyIdentity).toEqual(policy.selectedPolicyIdentity);
+      expect(original.localFixtureProfile).toBeUndefined();
+      const packagePath = await exported(store, 'selected-v1.ai7db');
+      const preview = await store.inspectDatabaseImport(packagePath);
+      expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 98, dataVersion: 1 });
+      await store.prepareDatabaseReplacement(preview.previewId, T); await store.close();
+      store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, control);
+      expect(store.inspectFactualReview(book.bookId).providerResolutionPlan).toEqual(original);
+    } finally { await store.close(); }
+  });
+  it.each(['suggestions', 'accepted-baseline'] as const)('preserves the whole Word %s layer and original through database export, pre-replace backup, replacement and rollback', async (mode) => {
+    const path = join(roots.inputRoot, `word-database-${mode}.docx`);
+    await composeRevisedDocx(path, { source: ADMITTED_BASELINE_DOCX, title: 'Word 数据库沿袭', paragraphs: [
+      { runs: [{ text: { block: 8, from: 0, to: 10 } },
+        { text: { block: 9, from: 0, to: 5 }, revision: { kind: 'del', author: '作者甲', date: '2026-10-25T00:00:00Z' } },
+        { text: { block: 10, from: 0, to: 6 }, revision: { kind: 'ins', author: '作者乙', date: '2026-10-25T00:00:01Z' } }] },
+    ] });
+    const wordRows = () => {
+      const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+      try { return Object.fromEntries(['word_revision_sources', 'word_revision_imports', 'word_manuscript_source_segments',
+        'word_tracked_edit_samples', 'word_tracked_edit_sample_imports', 'word_import_mark_sources']
+        .map((table) => [table, db.prepare(`SELECT rowid, * FROM ${table} ORDER BY rowid`).all()])); }
+      finally { db.close(); }
+    };
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const staged = await store.stageSelectedManuscript(randomUUID(), path);
+      const reviewed = store.prepareNewBookReview(staged.draftId, staged.draftVersion,
+        { kind: 'new-book', choiceId: 'new-book', confirmedTitle: staged.titleSuggestion.value }, false, 'retain',
+        { mode, learnFromEdits: true, acceptedBaselineConfirmed: mode === 'accepted-baseline' });
+      if (reviewed.reviewDigest === null) throw new Error('expected complete Word database fixture');
+      const commitId = randomUUID();
+      const imported = await store.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: reviewed.draftVersion,
+        reviewDigest: reviewed.reviewDigest, commitId });
+      await store.acknowledgeImportCompletion(commitId);
+      const signal = store.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }).signals[0]!;
+      if (signal.kind !== 'word-tracked-edit') throw new Error('expected actual Word database source');
+      const detailInput = { bookId: imported.bookId, sampleId: signal.source.sampleId, sampleDigest: signal.source.sampleDigest, after: null };
+      const detail = await store.inspectWordTrackedEditSample(detailInput);
+      const originalRows = wordRows();
+      const packagePath = await exported(store, `word-${mode}.ai7db`);
+      const localBookId = createBook(store, '替换前另一本空图书');
+      store.changeEditorialLearning({ kind: 'switch', enabled: false, expectedEntries: 0 });
+      expect(store.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }).signals[0]!.currentEligibility).toBe('excluded');
+      const preview = await store.inspectDatabaseImport(packagePath);
+      expect(preview).toMatchObject({ compatibility: 'compatible', contents: { books: 1, sourceVersions: 1 } });
+      const waiting = await store.prepareDatabaseReplacement(preview.previewId, T);
+      const replacementId = waiting.pending!.replacementId;
+      const backup = unzipSync(await readFile(join(backups(), preReplaceBackupFileName(T))));
+      expect(parseCanonicalJson(strFromU8(backup['manifest.json']!))).toMatchObject({ origin: 'pre-replace-backup', contents: { books: 2, sourceVersions: 1 } });
+      expect(Object.entries(backup).some(([name, bytes]) => name.startsWith('objects/') && sha256Hex(bytes) === signal.source.sourceDigest)).toBe(true);
+      store.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      expect(store.listBooks(null).items.map((book) => book.bookId)).toEqual([imported.bookId]);
+      expect(wordRows()).toEqual(originalRows);
+      expect(await store.inspectWordTrackedEditSample(detailInput)).toEqual(detail);
+      expect(store.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }).signals[0]!.currentEligibility).toBe('house');
+      expect((await store.inspectDatabaseReplacements()).replacements[0]).toMatchObject({ replacementId, outcome: 'applied', backupPresent: true });
+      await store.rollBackDatabaseReplacement(replacementId, LATER);
+      store.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      expect(store.listBooks(null).items.map((book) => book.bookId).sort()).toEqual([imported.bookId, localBookId].sort());
+      expect(wordRows()).toEqual(originalRows);
+      expect(await store.inspectWordTrackedEditSample(detailInput)).toEqual(detail);
+      expect(store.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }).signals[0]!.currentEligibility).toBe('excluded');
+      expect((await store.inspectDatabaseReplacements()).replacements[0]).toMatchObject({ kind: 'roll-back', outcome: 'applied' });
+      store.markCleanShutdown();
+    } finally { store.close(); }
+  });
+
   it('extracts the reviewed archive bytes when the selected file changes after its hash pass', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
@@ -749,4 +897,19 @@ describe('替换本机全部数据 at its second review (Issue #434 review)', ()
       store.close();
     }
   }, 180_000);
+});
+
+
+it('validates and advances a historical reader91 package through the existing replacement open callback (#1131)', async () => {
+  let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  createBook(store, '合成待替换目标');
+  const preview = await store.inspectDatabaseImport(await handmade('reader91.ai7db', 1, 91));
+  expect(preview.compatibility).toBe('compatible');
+  await store.prepareDatabaseReplacement(preview.previewId, T); await store.close();
+  store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  try {
+    expect(store.inspectDataVersion()).toMatchObject({ dataVersion: 1, schemaRevision: LATEST_SCHEMA_VERSION });
+    expect(titles(store)).toEqual([]);
+    expect((await store.inspectDatabaseReplacements()).replacements[0]).toMatchObject({ outcome: 'applied' });
+  } finally { await store.close(); }
 });

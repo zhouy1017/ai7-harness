@@ -1,5 +1,5 @@
 import { canonicalJson, sha256Hex } from '../analysis/canonical.js';
-import type { ReviewCategoryOutputKind } from '../../shared/protocol.js';
+import type { ReviewCategoryOutputKind, ReviewBaselineSource } from '../../shared/protocol.js';
 import type { ReviewCategoryContractInput } from './review-category-contract.js';
 import type { ResearchDeclaration } from '../analysis/kind-definition.js';
 import type { DatabaseSync } from 'node:sqlite';
@@ -35,7 +35,7 @@ export const BUILTIN_GUIDELINE_ISSUER = 'AI7 内置默认' as const;
  * 书系一致性 before it is resolved for one Book (Issue #64, S29a): the contract over that Book's Series Knowledge, or
  * unavailable with the Book's own reason — nothing reads the house entry unresolved.
  */
-export type ReviewCategoryExecutor = 'review-category-contract' | 'baseline-leads' | 'factual-review-kind' | 'series-knowledge' | 'unavailable';
+export type ReviewCategoryExecutor = 'review-category-contract' | 'baseline-leads' | 'factual-review-kind' | 'series-knowledge' | 'unavailable' | 'local-text-check';
 
 /**
  * What a 书系一致性 entry resolved for one Book used (Issue #64, S29a; REV-013): every Series the Book was in, by name, and
@@ -61,6 +61,7 @@ export interface ReviewGuidelineDocument {
 }
 
 export interface ReviewCategoryConfigurationEntry {
+  readonly crossChapter?: { readonly baseline: ReviewBaselineSource | null };
   readonly seriesScopes?: ReadonlyArray<import('../../shared/protocol.js').FrozenSeriesScope>;
   readonly researchDeclaration?: ResearchDeclaration;
   readonly categoryId: string;
@@ -91,12 +92,34 @@ export interface ReviewCategoryConfiguration {
   readonly categories: ReadonlyArray<ReviewCategoryConfigurationEntry>;
 }
 
+/** Separate from the historical nine category entries and their immutable procedure bytes. */
+export const LOCAL_REVIEW_CATEGORY: ReviewCategoryConfigurationEntry = {
+  categoryId: 'local-text-check', label: '本地文字检查',
+  description: '按五项有限标点、数字规则提示可能问题；只生成批注，数字默认不检查。',
+  output: 'annotation', riskPointsOnly: false, batchApply: false, searchEngine: false, executor: 'local-text-check', unavailableReason: null,
+  guidelineDocuments: [], procedure: { procedureId: 'ai7-procedure/local-text-check', title: '本地文字检查', version: '1' },
+};
+
+/** Explicit v2 projection, not the selected historical category. */
+export const LOCAL_REVIEW_CATEGORY_V2: ReviewCategoryConfigurationEntry = {
+  ...LOCAL_REVIEW_CATEGORY,
+  description: '按有限标点、数字规则和明确选定的本社字面词条提示可能问题；只生成批注，请编辑判断。',
+  procedure: { procedureId: 'ai7-procedure/local-text-check', title: '本地文字检查', version: '2' },
+};
+
+export const LOCAL_REVIEW_CATEGORY_V3: ReviewCategoryConfigurationEntry = {
+  ...LOCAL_REVIEW_CATEGORY,
+  label: '确定性检查', description: '离线检查标点、数字、规范字形、异形词、本社词表与本书术语；可批量采纳机械修正，其余生成批注。',
+  output: 'change-suggestion', batchApply: true,
+  procedure: { procedureId: 'ai7-procedure/local-text-check', title: '确定性检查', version: '3' },
+};
+
 function builtinDocument(documentId: string, title: string, clauses: ReadonlyArray<ReviewGuidelineClause>): ReviewGuidelineDocument {
   return { documentId, title, issuer: BUILTIN_GUIDELINE_ISSUER, version: '1', clauses };
 }
 
 /** The nine categories in the specification's order, which is also their display order (editor-surfaces §4). */
-export const BUILTIN_REVIEW_CATEGORY_CONFIGURATION: ReviewCategoryConfiguration = {
+export const HISTORICAL_REVIEW_CATEGORY_CONFIGURATION: ReviewCategoryConfiguration = {
   schema: REVIEW_CATEGORY_CONFIGURATION_SCHEMA,
   version: '1',
   categories: [
@@ -253,6 +276,17 @@ export const BUILTIN_REVIEW_CATEGORY_CONFIGURATION: ReviewCategoryConfiguration 
   ],
 };
 
+/** Current categories add the bounded model stage; immutable historical procedure/configuration bytes remain above. */
+export const BUILTIN_REVIEW_CATEGORY_CONFIGURATION: ReviewCategoryConfiguration = {
+  ...HISTORICAL_REVIEW_CATEGORY_CONFIGURATION, version: '2',
+  categories: HISTORICAL_REVIEW_CATEGORY_CONFIGURATION.categories.map((entry) => {
+    if (!['style-and-format', 'plot-consistency'].includes(entry.categoryId)) return entry;
+    return { ...entry, executor: 'review-category-contract', crossChapter: { baseline: null },
+      description: entry.categoryId === 'plot-consistency' ? '逐单元审阅并结合基线线索检查人物、年代、年龄、地点、机构与时间线的跨章一致性，以精确批注提示编辑核对。' : entry.description,
+      procedure: { ...entry.procedure, title: `${entry.label}与跨章一致性`, version: '2' } };
+  }),
+};
+
 /** The digest a Review Run snapshots beside the entries it selected. */
 export function reviewCategoryConfigurationDigest(configuration: ReviewCategoryConfiguration = BUILTIN_REVIEW_CATEGORY_CONFIGURATION): string {
   return sha256Hex(canonicalJson(configuration));
@@ -293,6 +327,7 @@ export function reviewCategoryContractInput(entry: ReviewCategoryConfigurationEn
     clauses: entry.guidelineDocuments.flatMap((document) => document.clauses.map((clause) => ({ clauseId: clause.clauseId, text: clause.text }))),
     procedure: { procedureId: entry.procedure.procedureId, title: entry.procedure.title, version: entry.procedure.version },
     ...(entry.deliverables === undefined ? {} : { deliverables: entry.deliverables.participants }),
+    ...(entry.crossChapter === undefined ? {} : { crossChapter: structuredClone(entry.crossChapter) }),
   };
 }
 
@@ -312,6 +347,7 @@ export function houseGuidelineDocuments(entry: ReviewCategoryConfigurationEntry)
  */
 export function reviewCategoryBasisStatement(entry: ReviewCategoryConfigurationEntry): string {
   const procedure = `工序：${entry.procedure.title}（第 ${entry.procedure.version} 版）`;
+  if (entry.executor === 'local-text-check') return `依据：GB/T 15834-2011、GB/T 15835-2011 的有限条款识别或编辑明确选择的数字约定 · ${procedure} · 本机确定性检查，不调用模型 · 不表示整部标准合规`;
   if (entry.deliverables !== undefined) {
     const named = entry.deliverables.participants.map((document) => `${document.typeLabel}《${document.title}》${document.versionLabel}（文档 ${document.documentId} · 修订 ${document.revisionId}）`
       + (document.laterSaves === 0 ? '' : `；定稿后另有 ${document.laterSaves} 次保存，未参与`)

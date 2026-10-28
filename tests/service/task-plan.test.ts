@@ -1,6 +1,8 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
@@ -11,6 +13,7 @@ import { validateTaskAuthorizationSchema } from '../../src/service/task-authoriz
 import {
   BASELINE_ANALYSIS_MODE_GOALS,
   BASELINE_ANALYSIS_TASK_GOAL,
+  FACTUAL_REVIEW_TASK_GOAL,
   J03_TASK_GOAL,
   type BaselineAnalysisProjection,
   type BaselineAnalysisSelectedRange,
@@ -22,12 +25,24 @@ import {
 } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { TYPOS_AND_USAGE } from '../support/review-categories.js';
+import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
+import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
+import { prepareExecution, describeComposition } from '../../src/service/harness/primary-agent-harness.js';
+import { Ai7LocalDeterministicAdapter } from '../../src/service/provider/local-deterministic-adapter.js';
+import { evaluateEgress, LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from '../../src/service/provider/egress-gate.js';
+import type { LocalFixtureExecutionContext } from '../../src/service/provider/model-fixture.js';
 import {
   importSample1Book,
   pinEditorialWorkspaceProfileRevision2,
   recordMissingCredentialConnection,
   requireExactSample1,
 } from '../support/sample1-baseline.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for the Task Drawer's plan projection (Issue #418, plan slice S72): the
 // real store over exact `sample1` (ADR 0043), the three Task kinds that hold a plan today, and the AI7
@@ -170,6 +185,45 @@ function technical(projection: TaskPlanProjection, key: string): string | undefi
 }
 
 describe('the Task Drawer plan projection over the real store on exact sample1', () => {
+
+  it('selected policy profile consumes the actual retained baseline adapter with zero credential reads', async () => {
+    const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-cross-chapter-authored');
+    const store = await openWithRoute(fixture);
+    const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture,
+      secretResolver: { resolve: async () => { throw new Error('local profile must not read a credential'); } } });
+    try {
+      const { bookId } = await importBook(store, '合成已选夹具计划');
+      let work = store.createBaselineAnalysisPreparationWork(bookId, BASELINE_ANALYSIS_TASK_GOAL, null, launchPolicy);
+      while (!work.done) work = store.advanceBaselineAnalysisPreparationWork(work.workId!);
+      const prepared = work.projection!;
+      expect(prepared.providerResolutionPlan).toMatchObject({ selectedPolicyIdentity: launchPolicy.selectedPolicyIdentity,
+        remoteBinding: { providerProcessing: { operationalScope: 'development-ci', version: 'v1', decision: 'deny', authorizedLiveTransmissionCount: 0 } } });
+      const run = store.authorizeBaselineAnalysis(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!;
+      expect(store.baselineAnalysisLedger.loadExecutionPlan(run).localFixtureProfile).toEqual(prepared.providerResolutionPlan!.localFixtureProfile);
+      owner.admitAndDispatch(run); await owner.whenIdle();
+      const settled = store.inspectBaselineAnalysis(bookId);
+      // This retained fixture inherits the declared unit-five failure/retry; v1 preserves that outcome.
+      expect(settled.run).toMatchObject({ state: 'completed-with-gaps', adaptations: [expect.objectContaining({ unitOrdinal: 5 })] });
+      expect(settled.resultSetRevision).toMatchObject({ policyPin: { providerProcessingVersion: 'v1' } });
+    } finally { await owner.dispose(); await store.close(); }
+  });
+
+  it('selected policy profile pins no-adapter preparation to the selected lightweight v1 denial', async () => {
+    const store = await openWithRoute(null);
+    try {
+      const { bookId } = await importBook(store, '合成无适配器计划');
+      let work = store.createBaselineAnalysisPreparationWork(bookId, BASELINE_ANALYSIS_TASK_GOAL, null, launchPolicy);
+      while (!work.done) work = store.advanceBaselineAnalysisPreparationWork(work.workId!);
+      expect(work.projection!.providerResolutionPlan).toMatchObject({ selectedPolicyIdentity: launchPolicy.selectedPolicyIdentity,
+        executionRoute: { kind: 'none' }, remoteBinding: { providerProcessing: { version: 'v1' } } });
+      expect(work.projection!.providerResolutionPlan).not.toHaveProperty('localFixtureProfile');
+      let fixed = store.createTaskAuthorizationPreparationWork(bookId, J03_TASK_GOAL, launchPolicy);
+      while (!fixed.done) fixed = store.advanceTaskAuthorizationPreparationWork(fixed.workId!);
+      expect(fixed.projection!.providerResolutionPlan).toMatchObject({ selectedPolicyIdentity: launchPolicy.selectedPolicyIdentity,
+        providerProcessing: { version: 'v1', decision: 'deny', authorizedLiveTransmissionCount: 0 } });
+    } finally { await store.close(); }
+  });
+
   it('reads J-03\'s fixed task in the editor\'s words without moving one stored byte', async () => {
     const store = await openWithRoute(null);
     try {
@@ -276,7 +330,7 @@ describe('the Task Drawer plan projection over the real store on exact sample1',
   it('names the current plan version\'s range after 重新确认计划 while the Task Intent keeps the first (#288)', async () => {
     const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-one-unit-failure');
     const store = await openWithRoute(fixture);
-    const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+    const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
     const prepare = (bookId: string, update: BaselineAnalysisUpdateRequest | null, reconfirm = false): BaselineAnalysisProjection => {
       const goal = update === null ? BASELINE_ANALYSIS_TASK_GOAL : BASELINE_ANALYSIS_MODE_GOALS[update.mode];
       let progress = store.createBaselineAnalysisPreparationWork(bookId, goal, update, launchPolicy, reconfirm);
@@ -302,7 +356,7 @@ describe('the Task Drawer plan projection over the real store on exact sample1',
       expect(firstPlan.edit).toEqual({ editable: true, reason: null, lastEdit: null, planEnvelopeDigest: first.planEnvelope!.digest, budget: { ceiling: 'unset', settable: true, reason: null } });
       expect(technical(firstPlan, 'coverage-manifest')).toContain(first.coverageManifest!.digest);
       expect(technical(firstPlan, 'execution-route')).toContain(fixture.identity);
-      expect(technical(firstPlan, 'material-fields')?.split('、')).toHaveLength(15);
+      expect(technical(firstPlan, 'material-fields')?.split('、')).toHaveLength(17);
 
       // Issue #420 (S74a): the deterministic route sends nothing, so this plan starts without a credential
       // — the Book's is `missing` — and the bar binds the exact envelope version 1 froze.
@@ -405,9 +459,9 @@ describe('the Task Drawer plan projection over the real store on exact sample1',
   }, 300_000);
 
   it('reads a Review Run\'s plan per category and reports the newer Run that supersedes it', async () => {
-    const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-authored');
+    const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-cross-chapter-authored');
     const store = await openWithRoute(fixture);
-    const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+    const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
     const prepareRun = (bookId: string, categoryIds: ReadonlyArray<string>): string => {
       let progress = store.createReviewRunPreparationWork(bookId, categoryIds, WHOLE, launchPolicy);
       while (!progress.done) progress = store.advanceReviewRunPreparationWork(progress.workId!);
@@ -438,7 +492,7 @@ describe('the Task Drawer plan projection over the real store on exact sample1',
       });
       expect(drawer.steps).toEqual([
         { id: `category:${TYPOS_AND_USAGE.categoryId}`, label: `逐章审读：${TYPOS_AND_USAGE.label}`, result: `${TYPOS_AND_USAGE.label}的发现（稿件上的标记）`, removable: false, removed: false },
-        { id: 'category:plot-consistency', label: '读取基线分析的线索：情节逻辑与前后一致', result: '情节逻辑与前后一致的发现（稿件上的标记）', removable: false, removed: false },
+        { id: 'category:plot-consistency', label: '逐章审读：情节逻辑与前后一致', result: '情节逻辑与前后一致的发现（稿件上的标记）', removable: false, removed: false },
         { id: 'report', label: '汇总', result: '审阅报告', removable: false, removed: false },
       ]);
       // Review edits revise its category plans under their existing version ledgers.
@@ -446,16 +500,17 @@ describe('the Task Drawer plan projection over the real store on exact sample1',
       expect(drawer.edit.planEnvelopeDigest).toMatch(/^[a-f0-9]{64}$/u);
       expect(drawer.participation.after).toContain('每一类完成后');
       expect(technical(drawer, `category:${TYPOS_AND_USAGE.categoryId}`)).toMatch(/计划权限边界 [0-9a-f]{64}/u);
-      expect(technical(drawer, 'category:plot-consistency')).toContain('没有任务');
+      expect(technical(drawer, 'category:plot-consistency')).toMatch(/计划权限边界 [0-9a-f]{64}/u);
 
       // Issue #420 (S74a): the Run's one approval binds the exact digest of every Task-backed category — the
       // leads have no Task and bind none — and its deterministic route needs no credential.
       const typosDigest = store.inspectReviewWorkspace(bookId, firstRunId).run!.categories.find((category) => category.categoryId === TYPOS_AND_USAGE.categoryId)!.planEnvelopeDigest!;
+      const plotDigest = store.inspectReviewWorkspace(bookId, firstRunId).run!.categories.find((category) => category.categoryId === 'plot-consistency')!.planEnvelopeDigest!;
       expect(drawer.start).toEqual({
         readiness: 'ready',
         needsModelConnection: false,
         planEnvelopeDigest: null,
-        categoryDigests: [{ categoryId: TYPOS_AND_USAGE.categoryId, planEnvelopeDigest: typosDigest }],
+        categoryDigests: [{ categoryId: TYPOS_AND_USAGE.categoryId, planEnvelopeDigest: typosDigest }, { categoryId: 'plot-consistency', planEnvelopeDigest: plotDigest }],
         reconfirm: null,
       });
       expect(await barPlan(store, bookId, 'review-run', firstRunId, 'missing')).toEqual({ plan: drawer, asked: 0 });

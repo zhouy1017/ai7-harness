@@ -494,7 +494,7 @@ _中文_: 批注
 _Avoid_: Editor Note, Proposal Change Item, Editorial Error Finding without a location, model context
 
 **Editor Note**:
-An editor-private note bound to an exact Manuscript Revision range that does not leave with an export by default and leaves only when the editor includes it in that export, is never transmitted to a Provider and is never part of a Run Source Scope; it may be converted to an Annotation explicitly (ADR 0076).
+An editor-private note bound to an exact Manuscript Revision range that does not leave with an export by default and leaves only when the editor includes it in that export, is never transmitted to a Provider and is never part of a Run Source Scope; it may be converted to an Annotation explicitly (ADR 0076). Words an editor deliberately supplies in an independently admitted typed field, such as a question, a saved Editorial Task Instruction or a Proposal Decision's reason, are that field's content, not the Editor Note: they give AI7 no read of the note or its anchored manuscript, and [ADR 0099 §1](../../adr/0099-distinguish-public-release-from-scoped-global-agent-processing.md#1-proposed-decision-ordinary-production-original-field-processing) governs whether their original wording may keep names, house roles or private wording.
 _中文_: 备注
 _Avoid_: Annotation, exported comment, learning material by default
 

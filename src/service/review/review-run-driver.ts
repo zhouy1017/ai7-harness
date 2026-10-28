@@ -25,6 +25,8 @@ import type { ReviewRunDriveStep, ReviewRunHandOff } from './review-runs.js';
  * starts no further category, the owner interrupts the one in flight, and the driver records that.
  */
 export interface ReviewRunDriveSteps {
+  local?(reviewRunId: string, stopping: () => boolean): Promise<void>;
+  background?(reviewRunId: string): boolean;
   /** Take an approved Run for this lifetime; returns its categories in position order. */
   begin(reviewRunId: string): ReadonlyArray<string>;
   end(reviewRunId: string): void;
@@ -50,7 +52,8 @@ export interface ReviewRunExecutionOwner {
   /** Every place is taken; an owner that does not say is read as having one free. */
   readonly busy?: boolean;
   admitAndDispatch(runRecordId: string, ledger: BaselineAnalysisStore, options?: { resume?: boolean }): void;
-  whenPlaceFree(): Promise<void>;
+  admitOrQueue?(runRecordId: string, ledger: BaselineAnalysisStore): unknown;
+  whenPlaceFree(origin?: 'foreground' | 'background'): Promise<void>;
   whenDone(runRecordId: string): Promise<void>;
 }
 
@@ -165,6 +168,11 @@ export class ReviewRunDriver {
       if (!resume && this.#steps.paused?.(reviewRunId) === true) return;
       const step = this.#steps.step(reviewRunId, categoryId);
       switch (step.kind) {
+        case 'local':
+          if (this.#stopping) return;
+          if (this.#steps.local === undefined) throw new Error('LOCAL_CHECK_UNAVAILABLE');
+          yield this.#steps.local(reviewRunId, () => this.#stopping);
+          return;
         case 'done':
           return;
         case 'write':
@@ -206,10 +214,10 @@ export class ReviewRunDriver {
    * starts already waiting, which take a freed place first — so it reads 等待运行名额, not only 等待审阅 (Issue #632).
    */
   async #place(reviewRunId: string, categoryId: string): Promise<void> {
-    if (this.#owner.busy !== true) return this.#owner.whenPlaceFree();
+    if (this.#owner.busy !== true) return this.#owner.whenPlaceFree(this.#steps.background?.(reviewRunId) === true ? 'background' : 'foreground');
     this.#steps.waitingForPlace(reviewRunId, categoryId);
     try {
-      await this.#owner.whenPlaceFree();
+      await this.#owner.whenPlaceFree(this.#steps.background?.(reviewRunId) === true ? 'background' : 'foreground');
     } finally {
       this.#steps.waitingForPlace(reviewRunId, null);
     }
@@ -217,7 +225,8 @@ export class ReviewRunDriver {
 
   async #dispatch(reviewRunId: string, categoryId: string, handOff: ReviewRunHandOff): Promise<void> {
     try {
-      this.#owner.admitAndDispatch(handOff.runRecordId, handOff.ledger, handOff.resume === true ? { resume: true } : undefined);
+      if (handOff.resume !== true && this.#owner.admitOrQueue !== undefined && handOff.ledger.loadExecutionPlan(handOff.runRecordId).startWhen === 'idle') this.#owner.admitOrQueue(handOff.runRecordId, handOff.ledger);
+      else this.#owner.admitAndDispatch(handOff.runRecordId, handOff.ledger, handOff.resume === true ? { resume: true } : undefined);
     } catch (error) {
       const code = codeOf(error);
       // The last place was taken between the wait and the hand-off: the next step waits again and dispatches.

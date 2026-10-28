@@ -18,7 +18,7 @@ import {
   ASSURANCE_SAMPLING_RESULT_SCHEMA,
 } from '../analysis/assurance-sampling-contract.js';
 import { canonicalJson, sha256Hex } from '../analysis/canonical.js';
-import { countByClass, modeIndex, type AnalysisKindDefinition, type AnalysisModeDefinition, type ModeRecomputeScope } from '../analysis/kind-definition.js';
+import { countByClass, modeIndex, type AnalysisKindDefinition, type AnalysisModeDefinition, type ModeRecomputeScope, type CrossUnitContext } from '../analysis/kind-definition.js';
 import { PRE_ASSURANCE_SAMPLE } from '../analysis/reducers.js';
 import { carryPositionalResult } from '../analysis/reused-result.js';
 import {
@@ -35,8 +35,19 @@ import {
   type ReviewCategoryContractInput,
   type ReviewCategoryUnitResult,
   REVIEW_CATEGORY_UNIT_RESULT_SCHEMA_V1,
+  REVIEW_CROSS_CHAPTER_CONTRACT_DIGEST,
+  REVIEW_CROSS_CHAPTER_RESULT_SCHEMA,
+  reviewCrossChapterMessage,
+  reviewCrossChapterRequestDigest,
+  reviewUnitFixtureContractDigest,
+  parseReviewCrossChapterResult,
+  type ReviewCrossChapterResult,
 } from './review-category-contract.js';
-import { reduceReviewCategory, type ReviewUnitOutcome } from './review-category-reducers.js';
+import { applyReviewCrossChapter, reduceReviewCategory, reviewCrossChapterInput, type ReviewUnitOutcome } from './review-category-reducers.js';
+import type { LocalToolsRule } from '../provider/local-tools.js';
+import { ruleNamedToolSchemas } from '../provider/platform-tools.js';
+import { mapTaskMaterialBase } from '../task-material-references.js';
+import { withModelClarification } from '../provider/clarification-contract.js';
 
 /**
  * One Review Category as an analysis kind (Issue #417, plan slice S69): `editorial-review/<categoryId>`,
@@ -98,11 +109,34 @@ export function reviewCategorySchemaDigest(promptContractDigest: string, version
   }));
 }
 
-export function reviewCategoryKindDefinition(input: ReviewCategoryContractInput, version: 1 | 2 = 2): AnalysisKindDefinition {
-  const contract = reviewCategoryContract(input, version);
+export function reviewCategoryKindDefinition(input: ReviewCategoryContractInput, version: 1 | 2 = 2, tools?: LocalToolsRule): AnalysisKindDefinition {
+  const names = tools?.declarations === undefined ? [] : ruleNamedToolSchemas(false, tools).map((schema) => schema.name);
+  return compileReviewCategory(input, version, names);
+}
+
+// Historical prompt grammar: adding a future tool must not change any of these contracts.
+const HISTORICAL_REVIEW_TOOL_NAMES = Object.freeze([
+  'baseline_facts', 'exact_fetch', 'guideline_clause', 'read_blocks', 'retrieve', 'search_manuscript', 'term_table',
+].sort((name, other) => name.localeCompare(other, 'en')));
+
+/** Reconstruct known prompt bytes only; none of these objects grants tool or transmission authority. */
+export function historicalReviewCategoryDefinitions(input: ReviewCategoryContractInput, version: 1 | 2): readonly AnalysisKindDefinition[] {
+  if (version === 1) return [compileReviewCategory(input, 1, [])];
+  if (version !== 2) throw new Error('REVIEW_CONTRACT_VERSION_UNSUPPORTED');
+  return [compileReviewCategory(input, 2, []), compileReviewCategory(input, 2, HISTORICAL_REVIEW_TOOL_NAMES)];
+}
+
+function compileReviewCategory(input: ReviewCategoryContractInput, version: 1 | 2, names: readonly string[]): AnalysisKindDefinition {
+  const contract = reviewCategoryContract(input, version, names);
   const category = contract.category;
   const promptContractDigest = reviewCategoryContractDigest(contract);
   const clauseIds = category.clauses.map((clause) => clause.clauseId);
+  const synthesis = version === 2 && input.crossChapter !== undefined;
+  const baseline = structuredClone(input.crossChapter?.baseline ?? null);
+  const synthesisInput = (closed: readonly import('../analysis/reducers.js').ClosedUnitOutcome<unknown>[], context?: CrossUnitContext) => {
+    if (context === undefined) throw new Error('REVIEW_CROSS_CHAPTER_CONTEXT_REQUIRED');
+    return reviewCrossChapterInput({ categoryId: category.categoryId, ...context, outcomes: closed as readonly ReviewUnitOutcome[] }, baseline, reviewUnitFixtureContractDigest(contract));
+  };
   const deliverableRefs = category.deliverables?.flatMap((document) => document.paragraphs.map((paragraph) => paragraph.ref));
   const identity: ReviewCategoryIdentityProjection = {
     categoryId: category.categoryId,
@@ -123,6 +157,7 @@ export function reviewCategoryKindDefinition(input: ReviewCategoryContractInput,
   const definition: AnalysisKindDefinition = {
     ...(version === 1 ? {} : { legacyReviewContract: reviewCategoryKindDefinition(input, 1) }),
     kind: reviewCategoryKindId(category.categoryId),
+    ...(synthesis ? { reviewCrossChapter: { baseline } } : {}),
     contractVersion: contract.contractVersion,
     ...(version === 1 ? {} : { contractIdentity: { contractId: 'ai7.editorial-review' as const, version, digest: promptContractDigest, categoryConfiguration: { version: category.procedure.version, digest: sha256Hex(canonicalJson(category)) } } }),
     expectedOutcome: reviewCategoryExpectedOutcome(category.label),
@@ -139,12 +174,18 @@ export function reviewCategoryKindDefinition(input: ReviewCategoryContractInput,
     unitResultSchema: contract.responseSchema,
     revisionSchema: REVIEW_CATEGORY_RESULT_SET_REVISION_SCHEMA,
     successorRevisionSchema: REVIEW_CATEGORY_SUCCESSOR_REVISION_SCHEMA,
-    schemaDigest: reviewCategorySchemaDigest(promptContractDigest, version),
-    reducerDigest: REVIEW_CATEGORY_REDUCER_DIGEST,
-    reducerStages: REVIEW_CATEGORY_REDUCER_STAGES,
-    executionSteps,
-    updateExecutionSteps: ['派生覆盖清单并计算审阅范围计划', '按血缘复用内容一致的已审单元', ...executionSteps.slice(1, 4), '追加结果集修订版'],
-    crossUnit: null,
+    schemaDigest: synthesis ? sha256Hex(canonicalJson({ unitSchemaDigest: reviewCategorySchemaDigest(promptContractDigest, version),
+      crossChapterContractDigest: REVIEW_CROSS_CHAPTER_CONTRACT_DIGEST })) : reviewCategorySchemaDigest(promptContractDigest, version),
+    reducerDigest: synthesis ? sha256Hex(canonicalJson({ predecessor: REVIEW_CATEGORY_REDUCER_DIGEST, mergeRule: 'exact-block-grapheme-occurrence-and-replacement', synthesis: REVIEW_CROSS_CHAPTER_CONTRACT_DIGEST })) : REVIEW_CATEGORY_REDUCER_DIGEST,
+    reducerStages: synthesis ? [...REVIEW_CATEGORY_REDUCER_STAGES, 'cross-unit-reduction', 'cross-chapter-consistency'] : REVIEW_CATEGORY_REDUCER_STAGES,
+    executionSteps: synthesis ? [...executionSteps.slice(0, -1), '按精确位置跨单元归并并保留来源', '一次跨章一致性综合', executionSteps.at(-1)!] : executionSteps,
+    updateExecutionSteps: ['派生覆盖清单并计算审阅范围计划', '按血缘复用内容一致的已审单元', ...executionSteps.slice(1, 4),
+      ...(synthesis ? ['按精确位置跨单元归并并保留来源', '一次跨章一致性综合'] : []), '追加结果集修订版'],
+    crossUnit: synthesis ? { promptContractDigest: REVIEW_CROSS_CHAPTER_CONTRACT_DIGEST, resultSchema: REVIEW_CROSS_CHAPTER_RESULT_SCHEMA,
+      step: { label: '跨章一致性', minimumClosedUnits: 1, notEnoughReason: '没有已闭合单元，跨章一致性未执行。', requiredForCompletion: true,
+        buildMessage: (closed, _total, context) => reviewCrossChapterMessage(synthesisInput(closed, context)),
+        requestDigest: (closed, context) => reviewCrossChapterRequestDigest(synthesisInput(closed, context)),
+        parse: (text, closed, context) => parseReviewCrossChapterResult(text, synthesisInput(closed, context), clauseIds) } } : null,
     crossUnitAbsentReason: REVIEW_CATEGORY_CROSS_UNIT_ABSENT_REASON,
     assurance: {
       prompt: ASSURANCE_SAMPLING_PROMPT_CONTRACT,
@@ -202,13 +243,15 @@ export function reviewCategoryKindDefinition(input: ReviewCategoryContractInput,
       ...(deliverableRefs === undefined ? {} : { deliverableRefs }),
     }),
     reduce: (reductionInput) => {
-      const reduction = reduceReviewCategory({
+      const local = reduceReviewCategory({
         categoryId: category.categoryId,
         manifest: reductionInput.manifest,
         outcomes: reductionInput.outcomes as ReadonlyArray<ReviewUnitOutcome>,
         reusedUnitOrdinals: reductionInput.reusedUnitOrdinals,
         blocks: reductionInput.blocks,
+        exactOccurrences: synthesis,
       });
+      const reduction = synthesis ? applyReviewCrossChapter(local, reductionInput.crossUnit, category.categoryId) : local;
       return {
         coverage: reduction.coverage,
         reducerClosure: reduction.reducerClosure,
@@ -219,6 +262,8 @@ export function reviewCategoryKindDefinition(input: ReviewCategoryContractInput,
           findings: reduction.findings,
           excluded: reduction.excluded,
           findingCounts: reduction.findingCounts,
+          ...(synthesis ? { crossChapterSynthesis: { ...reductionInput.crossUnit,
+            ...(reductionInput.crossUnit.state === 'closed' ? { result: reductionInput.crossUnit.result as ReviewCrossChapterResult } : {}) } } : {}),
         },
         // A review category runs no conflict pass; what it leaves unresolved are its findings.
         conflictCount: 0,
@@ -241,10 +286,46 @@ export function reviewCategoryKindDefinition(input: ReviewCategoryContractInput,
       findings: body.findings,
       excluded: body.excluded,
       findingCounts: body.findingCounts,
+      ...(body.crossChapterSynthesis === undefined ? {} : { crossChapterSynthesis: body.crossChapterSynthesis }),
       assuranceSample: body.assuranceSample ?? PRE_ASSURANCE_SAMPLE,
     }),
     conflictCountOf: () => 0,
     mode: modeIndex(modes),
   };
+  return Object.assign(definition, { reviewToolInput: input, reviewToolPromptDigest: promptContractDigest,
+    ...(names.length === 0 ? {} : { numberedReviewContract: reviewCategoryKindDefinition(input, 2) }) });
+}
+
+/** Policy selects prompt bytes only for new plans; both earlier prompt contracts remain reproducible. */
+export function withReviewLocalTools(definition: AnalysisKindDefinition, tools: LocalToolsRule | null): AnalysisKindDefinition {
+  if (definition.contractVersion === 'ai7.editorial-review/1') return definition;
+  const owned = definition as AnalysisKindDefinition & { reviewToolPromptDigest?: string; numberedReviewContract?: AnalysisKindDefinition; toolPromptPredecessor?: AnalysisKindDefinition };
+  if (tools?.declarations === undefined) return owned.toolPromptPredecessor ??
+    (owned.reviewToolPromptDigest === definition.promptContractDigest ? owned.numberedReviewContract ?? definition : definition);
+  const material = mapTaskMaterialBase(definition, (base) => withReviewLocalTools(base, tools));
+  if (material !== null) return material;
+  const input = (definition as AnalysisKindDefinition & { reviewToolInput?: ReviewCategoryContractInput }).reviewToolInput;
+  if (input === undefined) return definition;
+  const numbered = reviewCategoryKindDefinition(input, 2);
+  const next = reviewCategoryKindDefinition(input, 2, tools);
+  // Other wrappers retain their own proof; only this owner's exact base can be replaced here.
+  if (owned.reviewToolPromptDigest === definition.promptContractDigest || definition.promptContractDigest === numbered.promptContractDigest) {
+    return next.kind === definition.kind && next.contractVersion === definition.contractVersion
+      && next.promptContractDigest === definition.promptContractDigest && next.systemPrompt === definition.systemPrompt
+      && next.schemaDigest === definition.schemaDigest ? definition : next;
+  }
+  return definition;
+}
+export function pinnedReviewDefinition(definition: AnalysisKindDefinition, digest: string): AnalysisKindDefinition {
+  const numbered = (definition as AnalysisKindDefinition & { numberedReviewContract?: AnalysisKindDefinition }).numberedReviewContract;
+  const predecessor = (definition as AnalysisKindDefinition & { toolPromptPredecessor?: AnalysisKindDefinition }).toolPromptPredecessor;
+  for (const candidate of [definition, predecessor, numbered, definition.legacyReviewContract]) {
+    if (candidate === undefined) continue;
+    if (candidate.promptContractDigest === digest) return candidate;
+    if (candidate.clarificationBase === undefined) {
+      const clarified = withModelClarification(candidate);
+      if (clarified.promptContractDigest === digest) return clarified;
+    }
+  }
   return definition;
 }

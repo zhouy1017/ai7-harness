@@ -1,4 +1,5 @@
 import { reviewFixtureContractVersion } from './provider/model-fixture.js';
+import { prepareGlobalAgentDisclosure, startGlobalAgentTurn } from './dialogue/global-agent-session.js';
 import { ImportedExemplarError } from './imported-exemplars.js';
 import { dataVersionStartupRefusal } from '../shared/data-version-labels.js';
 import { isAbsolute, resolve } from 'node:path';
@@ -6,7 +7,6 @@ import { fileURLToPath } from 'node:url';
 import { resolveDevelopmentSampleBook } from '../shared/data-root.js';
 import {
   J04_MODEL_ADAPTER_CONTROL_PATTERN,
-  MAX_FRAME_BYTES,
   PROVIDER_CACHE_ROOT_ARGUMENT,
   RUN_BUDGET_CEILING_ARGUMENT,
   TRUSTED_SCOPE_ARGUMENT,
@@ -47,7 +47,7 @@ import {
 import { DATA_VERSION } from './data-version.js';
 import { readBuiltIdentity } from '../shared/read-build-identity.js';
 import { BACKUP_CHECK_INTERVAL_MS } from './scheduled-backups.js';
-import { decodeRequest, encodeServiceResponse, isSafeInteger, ProtocolError } from './request-frames.js';
+import { isSafeInteger, ProtocolError } from './request-frames.js';
 import { controlledConnectivity, hostConnectivity, type TaskPlanConnectivity } from './connectivity.js';
 import type { WaitingFor } from './task-plan.js';
 import { controlledAnswerHold, controlledUnitHold } from './unit-hold.js';
@@ -72,44 +72,6 @@ import type { LaunchBinding, OrdinaryProductionLaunchBinding } from './analysis/
 import type { ReviewRunDriver } from './review/review-run-driver.js';
 import type { BackgroundAnalysisDispatcher } from './background-analysis.js';
 
-async function* readFrames(): AsyncGenerator<Uint8Array> {
-  const header = Buffer.allocUnsafe(4);
-  let headerOffset = 0;
-  let payload: Buffer | undefined;
-  let payloadOffset = 0;
-
-  for await (const incoming of process.stdin) {
-    const chunk = Buffer.isBuffer(incoming) ? incoming : Buffer.from(incoming as Uint8Array);
-    let chunkOffset = 0;
-    while (chunkOffset < chunk.length) {
-      if (!payload) {
-        const headerBytes = Math.min(4 - headerOffset, chunk.length - chunkOffset);
-        chunk.copy(header, headerOffset, chunkOffset, chunkOffset + headerBytes);
-        headerOffset += headerBytes;
-        chunkOffset += headerBytes;
-        if (headerOffset < 4) continue;
-        const length = header.readUInt32BE(0);
-        if (length === 0 || length > MAX_FRAME_BYTES) throw new ProtocolError();
-        payload = Buffer.allocUnsafe(length);
-        payloadOffset = 0;
-      }
-
-      const payloadBytes = Math.min(payload.length - payloadOffset, chunk.length - chunkOffset);
-      chunk.copy(payload, payloadOffset, chunkOffset, chunkOffset + payloadBytes);
-      payloadOffset += payloadBytes;
-      chunkOffset += payloadBytes;
-      if (payloadOffset === payload.length) {
-        yield payload;
-        payload = undefined;
-        payloadOffset = 0;
-        headerOffset = 0;
-      }
-    }
-  }
-
-  if (headerOffset !== 0 || payload !== undefined) throw new ProtocolError();
-}
-
 function failureResponse(
   requestId: string,
   error: unknown,
@@ -119,13 +81,6 @@ function failureResponse(
     return { id: requestId, ok: false, error: { code: error.code, message: error.message } };
   }
   return { id: requestId, ok: false, error: { code: 'SERVICE_REQUEST_FAILED', message: '服务请求失败。' } };
-}
-
-async function writeResponse(response: ServiceResponse): Promise<void> {
-  const frame = encodeServiceResponse(response);
-  await new Promise<void>((resolve, reject) => {
-    process.stdout.write(frame, (error) => (error ? reject(error) : resolve()));
-  });
 }
 
 /**
@@ -170,8 +125,10 @@ function requireNothingRunning(
 ): void {
   // A dialogue answering writes its outcome when it settles (Issue #52, S17a), so it holds a replacement back as a Run does;
   // so does a 润色这段 or 重新生成建议 request in flight, which writes its marks or draft when its answer arrives (Issue #842).
+  // A detached connection probe writes its result when it settles, as it did when it ran inside dispatch.
   const blocked = replacementBlockedBy({
-    runsIdle: analysisExecution.idle && !dialogues.answering && !fastRole.owner.busy, reviewRunsDriving: reviewRuns.driving, jobsBusy: jobs.busy,
+    runsIdle: analysisExecution.idle && !dialogues.answering && !fastRole.owner.busy && fastRole.connectionTesting?.() !== true,
+    reviewRunsDriving: reviewRuns.driving, jobsBusy: jobs.busy,
     exportRunning: store.databaseExportRunning(), backgroundBusy: background.busy, indexing: store.materialIndexing(),
   });
   if (blocked !== null) throw new StoreErrorClass('DATABASE_REPLACEMENT_BUSY', blocked);
@@ -181,6 +138,8 @@ function requireNothingRunning(
 interface FastRoleContext {
   readonly owner: FastRoleExecutionOwner;
   readonly requests: FastRoleRequests;
+  /** Whether the request loop's one temporary connection-test owner is registered (Issue #1131). */
+  readonly connectionTesting?: () => boolean;
 }
 
 async function dispatch(
@@ -192,7 +151,7 @@ async function dispatch(
   dialogues: DialogueExecutionOwner,
   fastRole: FastRoleContext,
   agentWorkspace: AgentWorkspace,
-  request: ServiceRequest,
+  request: Exclude<ServiceRequest, { op: 'testModelServiceConnection' }>,
   importControl: J01ImportControl | undefined,
   launchPolicy: LaunchPolicyProjection,
   connectivity: ConnectivityContext,
@@ -202,7 +161,6 @@ async function dispatch(
    * results: under ordinary-production the route new Tasks use; under every other scope the launch's own, unchanged.
    */
   modelServiceChanged: () => Promise<LaunchPolicyProjection> = async () => launchPolicy,
-  testConnection: (input: import('../shared/protocol.js').FastModelSelectionInput) => Promise<import('../shared/protocol.js').ModelConnectionTestStatus> = async () => { throw new Error('MODEL_CONNECTION_TEST_UNAVAILABLE'); },
   probeBackend: (id: string) => Promise<import('../shared/protocol.js').SearchBackendProbeProjection> = async () => { throw new Error('SEARCH_PROBE_UNAVAILABLE'); },
 ): Promise<ServiceSuccessResponse> {
   const analysisProgress = (runRecordId: string) => analysisExecution.progressFor(runRecordId);
@@ -245,11 +203,6 @@ async function dispatch(
       store.selectFastRoleModel(request.input.route, request.input.modelId);
       await modelServiceChanged();
       return { id: request.id, ok: true, op: request.op, result: undefined };
-    case 'testModelServiceConnection': {
-      const result = await testConnection(request.input);
-      await modelServiceChanged();
-      return { id: request.id, ok: true, op: request.op, result };
-    }
     case 'getModelServiceStoredState':
       return {
         id: request.id,
@@ -522,6 +475,20 @@ async function dispatch(
         result: store.inspectBaselineAnalysis(request.input.bookId, analysisProgress),
       };
     }
+    // 空闲时处理 (Issue #1089, F-17a; ADR 0095 §3): the kind's own Run Authorization recorded to start when idle — a ledger
+    // Task's queued on the governor, a Review Run's approval driven once AI7 is idle. The answer is the plan.
+    case 'startTaskWhenIdle': {
+      background.nudge();
+      const started = store.startTaskWhenIdle(request.input);
+      if (started?.dispatchRunRecordId != null) analysisExecution.admitOrQueue(started.dispatchRunRecordId, started.ledger);
+      if (request.input.kind === 'review-run') {
+        const reviewRunId = request.input.ref;
+        // A refused admission leaves the approval waiting as recorded; 取消任务 still ends it.
+        void analysisExecution.whenBackgroundIdle().then(() => store.admitIdleReview(reviewRunId, () => driveReviewRun(reviewRuns, reviewRunId))).catch(() => {});
+      }
+      return { id: request.id, ok: true, op: request.op,
+        result: await store.inspectTaskPlan({ bookId: request.input.bookId, kind: request.input.kind, ref: request.input.ref }, analysisProgress) };
+    }
     // 联网后开始任务 for every other kind with a plan (Issue #760, S74c; AUTH-004, OFF-005): the kind's own Run Authorization is
     // recorded waiting, and Reconnect Preflight looks at once — so a start made just as the network came back begins now. The
     // answer is the plan, read as the drawer reads it.
@@ -743,6 +710,8 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.inspectExemplars(request.input.after) };
     case 'admitReadersReportExemplar':
       return { id: request.id, ok: true, op: request.op, result: store.admitReadersReportExemplar(request.input) };
+    case 'procedureLibrary':
+      return { id: request.id, ok: true, op: request.op, result: store.procedureLibrary(request.input) };
     case 'inspectKnowledgeProcedures':
       return { id: request.id, ok: true, op: request.op, result: await store.inspectKnowledgeProcedures() };
     // 可复用工序 and 开发建议 (Issue #65, S30; ADR 0087): deterministic, provider-free; running one is an ordinary Review Run.
@@ -854,10 +823,16 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.decideLibraryMaterial(request.input) };
     case 'inspectEditorialLearning':
       return { id: request.id, ok: true, op: request.op, result: store.inspectEditorialLearning(request.input) };
+    case 'inspectWordTrackedEditSample':
+      return { id: request.id, ok: true, op: request.op, result: await store.inspectWordTrackedEditSample(request.input) };
+    case 'recordLearningReasonAsk':
+      return { id: request.id, ok: true, op: request.op, result: store.recordLearningReasonAsk(request.input, request.input.frequency) };
     case 'changeEditorialLearning':
       return { id: request.id, ok: true, op: request.op, result: store.changeEditorialLearning(request.input) };
     case 'createEditorialMemory':
       return { id: request.id, ok: true, op: request.op, result: store.createEditorialMemory(request.input) };
+    case 'acceptEditorialMemory':
+      return { id: request.id, ok: true, op: request.op, result: store.acceptEditorialMemory(request.input) };
     case 'deactivateEditorialMemory':
       return { id: request.id, ok: true, op: request.op, result: store.deactivateEditorialMemory(request.input) };
     case 'inspectHouseReviewPreference':
@@ -865,7 +840,7 @@ async function dispatch(
     case 'rebuildHouseReviewPreference':
       return { id: request.id, ok: true, op: request.op, result: store.rebuildHouseReviewPreference() };
     case 'inspectEditQualitySignals':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectEditQualitySignals(request.input.bookId) };
+      return { id: request.id, ok: true, op: request.op, result: store.inspectEditQualitySignals(request.input.bookId, request.input.preferenceAfter ?? null) };
     case 'inspectLearningMaterials':
       return { id: request.id, ok: true, op: request.op, result: store.inspectLearningMaterials(request.input.bookId, request.input.after) };
     case 'inspectLearningMaterial':
@@ -1102,10 +1077,10 @@ async function dispatch(
     // 后台分析登记 (Issue #95, plan slice S39; ADR 0048): read with what it would do now; `登记` and `撤销登记` are the editor's
     // two decisions, and the dispatcher looks at once after either, so a backfill starts without waiting for the next tick.
     case 'inspectBackgroundAnalysisEnrollment':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectBackgroundAnalysisEnrollment(request.input.bookId, background.runtime()) };
+      return { id: request.id, ok: true, op: request.op, result: store.inspectBackgroundAnalysisEnrollment(request.input.bookId, background.runtime(), request.input.kind) };
     case 'enrollBackgroundAnalysis': {
       const result = store.enrollBackgroundAnalysis(request.input.bookId, request.input.disclosureDigest, request.input.startingPoint,
-        request.input.scope, request.input.ceilingTokens, background.runtime());
+        request.input.scope, request.input.ceilingTokens, background.runtime(), request.input.kind);
       background.nudge();
       return { id: request.id, ok: true, op: request.op, result };
     }
@@ -1134,13 +1109,17 @@ async function dispatch(
           chapterBlockId: request.input.chapterBlockId ?? null,
         }),
       };
+    case 'inspectHouseWordList':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectHouseWordList(request.input) };
+    case 'saveHouseWordList':
+      return { id: request.id, ok: true, op: request.op, result: store.saveHouseWordList(request.input) };
     case 'prepareReviewRun':
       return {
         id: request.id,
         ok: true,
         op: request.op,
         result: jobs.startReviewRunPreparation(request.input.bookId, request.input.categoryIds, request.input.scope, launchPolicy,
-          request.input.capturedProcedure ?? null, request.input.materialIds ?? [], null, null, request.input.seriesId ?? null),
+          request.input.capturedProcedure ?? null, request.input.materialIds ?? [], null, null, request.input.seriesId ?? null, request.input.localCheck, request.input.decisionId),
       };
     case 'authorizeReviewRun':
       // The one approval, then the drive loop at once: an approved Run nobody drives reads `partial`, so
@@ -1217,6 +1196,7 @@ async function dispatch(
           request.input.target,
           request.input.acceptDegradation,
           request.input.textBoxDisposition,
+          request.input.trackedChanges,
         ),
       };
     case 'commitNewBookImport':
@@ -1540,14 +1520,14 @@ async function dispatch(
     // slot say which Run is in flight, exactly as the analysis inspections read them; nothing is written.
     // 全域智能体 (Issue #1083): no Book route. The disclosed state is the execution owner's own decision for the selected policy.
     case 'inspectGlobalAgent':
-      return { id: request.id, ok: true, op: request.op, result: store.inspectGlobalAgent((id) => dialogues.liveText(id), globalDialogueAdmitted(dialogues, launchPolicy)) };
+      return { id: request.id, ok: true, op: request.op, result: store.inspectGlobalAgent((id) => dialogues.liveText(id), globalDialogueAdmitted(dialogues, launchPolicy), globalDialogueAdmitted(dialogues, launchPolicy, true)) };
     case 'recordLearningSupervision':
       store.recordLearningSupervision(request.input);
-      return { id: request.id, ok: true, op: request.op, result: store.inspectGlobalAgent((id) => dialogues.liveText(id), globalDialogueAdmitted(dialogues, launchPolicy)) };
+      return { id: request.id, ok: true, op: request.op, result: store.inspectGlobalAgent((id) => dialogues.liveText(id), globalDialogueAdmitted(dialogues, launchPolicy), globalDialogueAdmitted(dialogues, launchPolicy, true)) };
+    case 'prepareGlobalAgentTurn':
+      return { id: request.id, ok: true, op: request.op, result: globalDialogueCall(() => prepareGlobalAgentDisclosure(store, dialogues, launchPolicy, request.input)) };
     case 'askGlobalAgent': {
-      const route = globalDialogueReady(dialogues, launchPolicy);
-      const turn = store.askGlobalAgent(request.input);
-      dialogues.beginGlobal(turn, route, () => store.globalAgentSourcesCurrent(request.input.sources));
+      const turn = globalDialogueCall(() => startGlobalAgentTurn(store, dialogues, () => launchPolicy, { ...request.input, kind: 'ask' }, request.input.disclosureSha256));
       return { id: request.id, ok: true, op: request.op, result: store.inspectGlobalAgentDialogue(turn.dialogueId, (id) => dialogues.liveText(id)) };
     }
     case 'inspectGlobalAgentDialogue':
@@ -1560,11 +1540,8 @@ async function dispatch(
     }
     case 'continueGlobalAgentAnswer':
     case 'regenerateGlobalAgentAnswer': {
-      const route = globalDialogueReady(dialogues, launchPolicy);
-      const turn = store.globalAgentAttempt(request.input, request.op === 'continueGlobalAgentAnswer' ? 'continue' : 'regenerate');
-      if (typeof turn === 'string') throw new StoreErrorClass('DIALOGUE_INVALID', '回答标识无效。');
-      const pins = turn.message.globalSources!;
-      dialogues.beginGlobal(turn, route, () => store.globalAgentSourcesCurrent(pins));
+      const turn = globalDialogueCall(() => startGlobalAgentTurn(store, dialogues, () => launchPolicy,
+        { ...request.input, kind: request.op === 'continueGlobalAgentAnswer' ? 'continue' : 'regenerate' }, request.input.disclosureSha256));
       return { id: request.id, ok: true, op: request.op, result: store.inspectGlobalAgentDialogue(turn.dialogueId, (id) => dialogues.liveText(id)) };
     }
     case 'inspectGlobalAttention':
@@ -1695,16 +1672,16 @@ async function dispatch(
 }
 
 /** The Book-less dialogue's route (Issue #1083), refused before anything is recorded unless the selected policy admits one. */
-function globalDialogueReady(dialogues: DialogueExecutionOwner, policy: LaunchPolicyProjection) {
-  try { return dialogues.requireGlobalReady(policy); }
+function globalDialogueCall<T>(operation: () => T): T {
+  try { return operation(); }
   catch (error) {
     if (error instanceof DialogueError) throw new StoreErrorClass(error.code, error.message);
     throw error;
   }
 }
 
-function globalDialogueAdmitted(dialogues: DialogueExecutionOwner, policy: LaunchPolicyProjection): boolean {
-  try { dialogues.requireGlobalReady(policy); return true; } catch (error) {
+function globalDialogueAdmitted(dialogues: DialogueExecutionOwner, policy: LaunchPolicyProjection, scoped = false): boolean {
+  try { if (scoped) dialogues.requireGlobalScopedReady(policy); else dialogues.requireGlobalReady(policy); return true; } catch (error) {
     if (error instanceof DialogueError) return false;
     throw error;
   }
@@ -1865,8 +1842,8 @@ function parseArguments(argv: string[]): {
           process.env.AI7_E2E_JOURNEY !== 'J-07'))) ||
     (connectivityPath !== undefined && (process.env.AI7_E2E_JOURNEY !== 'J-04' || !isAbsolute(connectivityPath))) ||
     // J-11 keeps a Run under way while ②A's follower is held (#641); J-13 holds a 书系一致性 Run while a Series Retrieval
-    // Exclusion is recorded (Issue #64, S29b).
-    (unitHoldPath !== undefined && ((process.env.AI7_E2E_JOURNEY !== 'J-09' && process.env.AI7_E2E_JOURNEY !== 'J-10' &&
+    // Exclusion is recorded (Issue #64, S29b). J-04 holds its genuine retained-/1 Run before pausing (#1161).
+    (unitHoldPath !== undefined && ((process.env.AI7_E2E_JOURNEY !== 'J-04' && process.env.AI7_E2E_JOURNEY !== 'J-09' && process.env.AI7_E2E_JOURNEY !== 'J-10' &&
       process.env.AI7_E2E_JOURNEY !== 'J-11' && process.env.AI7_E2E_JOURNEY !== 'J-13' && process.env.AI7_E2E_JOURNEY !== 'J-16') ||
       !isAbsolute(unitHoldPath))) ||
     (answerHoldPath !== undefined && (process.env.AI7_E2E_JOURNEY !== 'J-16' || !isAbsolute(answerHoldPath))) ||
@@ -1975,8 +1952,8 @@ async function run(): Promise<void> {
     { EditorialStore, StoreError, StoreFatalError },
     { mountDormantHarness },
     { CooperativeJobOwner },
-    { resolveSourceCheckoutLaunchPolicy },
-    { BaselineAnalysisExecutionOwner },
+    { resolveSourceCheckoutLaunchPolicy, resolveSourceCheckoutLaunchPolicySync },
+    { BaselineAnalysisExecutionOwner, ModelRequestGovernor },
     { loadLaunchFixture },
     { createKeyringSecretResolver },
     { ReviewRunDriver },
@@ -1987,6 +1964,7 @@ async function run(): Promise<void> {
     { baselinePromptContractForLaunch },
     { materialTranslator, MATERIAL_TRANSLATION_KIND },
     { AgentWorkspace: AgentWorkspaceClass },
+    { ServiceRequestLoop },
   ] =
     await Promise.all([
       import('./store.js'),
@@ -2004,16 +1982,20 @@ async function run(): Promise<void> {
       import('./analysis/kind-definition.js'),
       import('./fast-role/material-translation-contract.js'),
       import('./agent-workspace/workspace.js'),
+      import('./service-request-loop.js'),
     ]);
   StoreErrorClass = StoreError;
   // The Edit Journal write-failure injection (Issue #951, T0-1): armed only by J-02's armed launch, refused everywhere else.
   const { EditJournalFaultInjection } = await import('./bounded-manuscript.js');
   editJournalFault = new EditJournalFaultInjection(journalFaultArmed);
   fastInteractionRoutesOf = fastInteractionRoutes;
+  const requestGovernor = new ModelRequestGovernor();
   let stopping = false;
+  let requestLoop: InstanceType<typeof ServiceRequestLoop> | undefined;
   const stop = (): void => {
     if (stopping) return;
     stopping = true;
+    requestLoop?.close();
     process.stdin.destroy();
   };
   const parentLease = setInterval(() => {
@@ -2112,7 +2094,7 @@ async function run(): Promise<void> {
           get live() { return productionState.live; },
         }
       : developerLive === null
-      ? { operationalScope: 'development-ci', live: null }
+      ? { operationalScope: 'development-ci', live: null, policy: launchPolicy, localFixtureRuntime: () => openedStore.localFixtureRuntime() }
       : {
           operationalScope: 'developer-live',
           policy: launchPolicy,
@@ -2164,6 +2146,7 @@ async function run(): Promise<void> {
     };
     const guardedStore = store;
     analysisExecution = new BaselineAnalysisExecutionOwner({
+      requestGovernor,
       ledger: store.baselineAnalysisLedger,
       launchPolicy,
       fixture,
@@ -2171,7 +2154,7 @@ async function run(): Promise<void> {
       developerLive,
       production,
       currentLaunchPolicy: () => launchPolicy,
-      productionPolicyFor: (binding) => resolveSourceCheckoutLaunchPolicy(codeRoot, 'ordinary-production', binding),
+      productionPolicyFor: (binding) => resolveSourceCheckoutLaunchPolicySync(codeRoot, 'ordinary-production', binding),
       unitHold: unitHoldPath === undefined ? null : controlledUnitHold(unitHoldPath),
       // The current-read guard over Series material (Issue #64, S29b; SER-023): asked before each reading range of every Run.
       seriesScopeGuard: (runRecordId) => guardedStore.seriesScopeGuard(runRecordId),
@@ -2191,6 +2174,7 @@ async function run(): Promise<void> {
     // nothing running it now. It settles 已暂停 or 任务已中断 · 可续行 before any request is read; one left cancelling is
     // finished by the owner, sending nothing.
     const reconciled = store.reconcileStoppedBaselineAnalysisRuns();
+    store.baselineAnalysisLedger.reconcileCuration();
     for (const runRecordId of reconciled.cancelling) {
       try {
         analysisExecution.cancelRun(runRecordId, store.baselineAnalysisLedger);
@@ -2240,6 +2224,7 @@ async function run(): Promise<void> {
     // under the Agent Data Root. An answer the predecessor left in flight settles 回答中断 before any request is read.
     store.reconcileDialogueAttempts();
     dialogues = new DialogueExecutionOwner({
+      requestGovernor,
       records: store,
       retrievalIndex: (dialogueId) => guardedStore.dialogueRetrievalIndex(dialogueId),
       fixture,
@@ -2256,6 +2241,8 @@ async function run(): Promise<void> {
     // 润色这段 and 基于当前稿件重新生成建议 (Issue #842): the launch's fixture under development-ci, and under developer-live the
     // route the selected policy admits for each kind, if any.
     const fastRoleOwner = new FastRoleExecutionOwner({
+      localFixtureRuntime: () => openedStore.localFixtureRuntime(),
+      requestGovernor,
       fixture,
       live: developerLive !== null
         ? fastRoleLiveRoutes(developerLive, launchPolicy, createKeyringSecretResolver())
@@ -2267,7 +2254,7 @@ async function run(): Promise<void> {
             () => openedStore.getModelServiceConnections().find((connection) => connection.credentialReference === productionState.fast?.credentialReference)?.credentialUpdatedAt ?? null)
           : null,
     });
-    fastRole = { owner: fastRoleOwner, requests: new FastRoleRequestsClass(fastRoleOwner, store) };
+    fastRole = { owner: fastRoleOwner, requests: new FastRoleRequestsClass(fastRoleOwner, store), connectionTesting: () => requestLoop?.probing === true };
     // Agent 工作区 (Issue #90, slice 13a): its rounds run on the dialogue's owner and are held in this service's memory only.
     agentWorkspace = new AgentWorkspaceClass(store, dialogues);
     // 生成来源译文 (Issue #892): the same owner, under the rule the selected policy names for the kind — none, under every
@@ -2360,55 +2347,61 @@ async function run(): Promise<void> {
     // waits in a queue of its own — and after a restart it starts only what an Enrollment in force matches anew.
     const ownedJobs = jobs;
     background = new BackgroundAnalysisDispatcherClass({
-      store: openStore, execution: owner, launchPolicy, editorWorkBusy: () => ownedJobs.busy,
+      store: openStore, execution: owner, launchPolicy, editorWorkBusy: () => ownedJobs.busy, dispatchReady: () => reading() !== 'offline',
+      curate: () => owner.startLearningCuration(openStore),
       // J-09's pace (Issue #95, S39): its quiet period, and a look four times as often, never less than a quarter second.
       ...(backgroundQuietMs === undefined ? {} : { quietMs: backgroundQuietMs, tickMs: Math.max(250, Math.round(backgroundQuietMs / 4)) }),
     });
     background.start();
     reachServiceStartup('serving');
-    for await (const frame of readFrames()) {
-      let request: ServiceRequest;
-      try {
-        request = decodeRequest(frame);
-      } catch (error) {
-        const requestId = error instanceof ProtocolError ? error.requestId : 'invalid';
-        await writeResponse(failureResponse(requestId, error, StoreError));
-        continue;
-      }
-      let response: ServiceResponse;
-      try {
-        response = await dispatch(store, harness, jobs, analysisExecution, reviewRuns, dialogues, fastRole, agentWorkspace, request, importControl, launchPolicy, connectivity,
-          background, modelServiceChanged, (input) => testModelServiceConnection(openedStore, codeRoot, production, input, createKeyringSecretResolver()), probeBackend);
-      } catch (error) {
-        if (error instanceof StoreFatalError) {
-          stop();
-          throw error;
+    // Only the guarded connection probe may wait outside the ordinary effect lane.
+    const serving = { store, harness, jobs, analysisExecution, reviewRuns, dialogues, fastRole, agentWorkspace, background };
+    requestLoop = new ServiceRequestLoop({
+      input: process.stdin, output: process.stdout, requestGovernor,
+      failure: (id, error) => {
+        if (error instanceof StoreFatalError) throw error;
+        return failureResponse(id, error, StoreError);
+      },
+      onFatal: () => stop(),
+      probe: (input, execution) => testModelServiceConnection(openedStore, codeRoot, production, input, createKeyringSecretResolver(), execution),
+      probeCompleted: async () => { await modelServiceChanged(); },
+      // 替换本机全部数据 waits for AI7's next start (Issue #434 review): the probe writes its result, so it is refused as dispatch refuses it.
+      admitProbe: () => {
+        if (serving.store.replacementWaiting()) throw new StoreErrorClass('DATABASE_REPLACEMENT_WAITING', REPLACEMENT_WAITING_MESSAGE);
+      },
+      dispatch: async (request) => {
+        let response: ServiceResponse;
+        try {
+          response = await dispatch(serving.store, serving.harness, serving.jobs, serving.analysisExecution, serving.reviewRuns,
+            serving.dialogues, serving.fastRole, serving.agentWorkspace, request, importControl, launchPolicy, connectivity,
+            serving.background, modelServiceChanged, probeBackend);
+        } catch (error) {
+          if (error instanceof StoreFatalError) throw error;
+          response = failureResponse(request.id, error, StoreError);
         }
-        response = failureResponse(request.id, error, StoreError);
-      }
-      if ((request.op === 'commitNewBookImport' || request.op === 'commitSourceImport') &&
-          importControl === 'after-commit-before-response') {
-        stop();
-        throw new Error('E2E interruption after committed import and before response.');
-      }
-      if (request.op === 'commitSourceImport' && response.ok &&
-          importControl === 'legacy-result-json-without-receipt') {
-        store.rewriteCommittedResultWithoutPresentationForTest(request.input.commitId);
-        stop();
-        throw new Error('E2E interruption after legacy source result_json rewrite.');
-      }
-      if (request.op === 'inspectForegroundExecutionBoundary' && response.ok &&
-          foregroundExecutionControl === 'interrupt-before-foreground-boundary-response') {
-        stop();
-        throw new Error('E2E interruption before foreground boundary response.');
-      }
-      await writeResponse(response);
-      if (request.op === 'flushJournalEdit' && response.ok && recoveryControl === 'interrupt-after-journal-ack') {
-        stop();
-        throw new Error('E2E interruption after acknowledged journal edit.');
-      }
-      if (request.op === 'shutdown') break;
-    }
+        if ((request.op === 'commitNewBookImport' || request.op === 'commitSourceImport') &&
+            importControl === 'after-commit-before-response') {
+          throw new Error('E2E interruption after committed import and before response.');
+        }
+        if (request.op === 'commitSourceImport' && response.ok &&
+            importControl === 'legacy-result-json-without-receipt') {
+          serving.store.rewriteCommittedResultWithoutPresentationForTest(request.input.commitId);
+          throw new Error('E2E interruption after legacy source result_json rewrite.');
+        }
+        if (request.op === 'inspectForegroundExecutionBoundary' && response.ok &&
+            foregroundExecutionControl === 'interrupt-before-foreground-boundary-response') {
+          throw new Error('E2E interruption before foreground boundary response.');
+        }
+        if (response.ok && (request.op === 'flushJournalEdit' || request.op.startsWith('authorize') || request.op.startsWith('prepare'))) serving.background.nudge();
+        return response;
+      },
+      afterResponse: (request, response) => {
+        if (request.op === 'flushJournalEdit' && response.ok && recoveryControl === 'interrupt-after-journal-ack') {
+          throw new Error('E2E interruption after acknowledged journal edit.');
+        }
+      },
+    });
+    await requestLoop.run();
   } finally {
     clearInterval(parentLease);
     if (preflightTimer !== undefined) clearInterval(preflightTimer);
@@ -2435,6 +2428,8 @@ async function run(): Promise<void> {
       await analysisExecution?.dispose();
       await reviewRunsStopped;
       await harness?.dispose();
+      requestGovernor.close();
+      await requestGovernor.whenIdle();
       await backupsStopped;
       await exportsStopped;
     } finally {

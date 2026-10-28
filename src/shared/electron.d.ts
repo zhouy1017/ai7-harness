@@ -51,6 +51,7 @@ declare module 'electron' {
     once(event: string, listener: (...args: any[]) => void): void;
     commandLine: { getSwitchValue(name: string): string; appendSwitch(name: string, value?: string): void };
     enableSandbox(): void;
+    setAppUserModelId(id: string): void;
     getPath(name: 'userData' | 'documents'): string;
     requestSingleInstanceLock(): boolean;
     relaunch(options: { args: string[] }): void;

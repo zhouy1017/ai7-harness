@@ -1,3 +1,7 @@
+import { CURATION_SCHEMA_SQL } from '../../src/service/task-authorization.js';
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
+import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
+import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
@@ -9,7 +13,7 @@ import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execu
 import { BACKGROUND_AUTHORIZED_DETAIL, type LaunchBinding } from '../../src/service/analysis/baseline-analysis-store.js';
 import { BackgroundAnalysisDispatcher, type BackgroundAnalysisDispatcherDependencies } from '../../src/service/background-analysis.js';
 import {
-  BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL,
+  BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL, BACKGROUND_PROCESSING_ENROLLMENT_SCHEMA_SQL,
   BACKGROUND_ANALYSIS_ENROLLMENT_TRIGGER_SQL,
   BACKGROUND_ATTEMPTED,
   BACKGROUND_CHECKPOINT_PREEMPTED,
@@ -43,11 +47,13 @@ import { MATERIAL_INDEX_SCHEMA_SQL } from '../../src/service/material-index.js';
 import { QUICK_START_PLAN_CHANGED } from '../../src/service/default-execution-rules.js';
 import { MERGE_TABLE_POLICY } from '../../src/service/database-merge.js';
 import { controlledUnitHold } from '../../src/service/unit-hold.js';
-import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
+import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { LOCAL_DETERMINISTIC_ROUTE } from '../../src/service/provider/egress-gate.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError, type BackgroundAnalysisRuntime } from '../../src/service/store.js';
 import {
+  canonicalRecord, ANALYSIS_LEDGER_TRIGGER_SQL,
+  ANALYSIS_LEDGER_SCHEMA_SQL,
   ANALYSIS_LEDGER_REVISION_65_SQL,
   BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION,
   LATEST_SCHEMA_VERSION,
@@ -67,7 +73,13 @@ import { TYPOS_AND_USAGE } from '../support/review-categories.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, sample1Path } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 
-// Service-integration suite (L2) for 后台分析登记 (Issue #95, plan slice S39; ADR 0048; ADR 0046; V2-UX-ANALYSIS-016 to 021): the
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
+
+// Service-integration suite (L2) for 后台处理登记 (Issue #95, plan slice S39; ADR 0048; ADR 0046; V2-UX-ANALYSIS-016 to 021): the
 // real store on a temporary Agent Data Root, exact `sample1` imported through the supported path, the J-04 deterministic route,
 // and no Provider, socket or credential value. Schema revision 66 adds the enrollment ledger and widens the Run Authorization
 // origin; an Enrollment is made only from its disclosure, the dispatcher starts a Task of its own only while every condition
@@ -107,7 +119,7 @@ function openWithRoute(route = true): Promise<EditorialStore> {
 }
 
 function ownerOf(store: EditorialStore): BaselineAnalysisExecutionOwner {
-  return new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+  return new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
 }
 
 /** The facts the dispatcher hands the store: a route, a free place of two, no job of the editor's, a clock well past the quiet period. */
@@ -214,20 +226,20 @@ const LIVE: LaunchBinding = {
   },
 };
 
-describe('后台分析登记 over the real store on exact sample1', () => {
+describe('后台处理登记 over the real store on exact sample1', () => {
   it('discloses everything an Enrollment binds before the editor decides, chooses no starting point, and makes none by itself', async () => {
     const store = await openWithRoute();
     const owner = ownerOf(store);
     try {
       recordMissingCredentialConnection(store, 'L2 主编辑连接');
-      const book = await analysedBook(store, owner, 'L2 sample1 后台分析登记');
+      const book = await analysedBook(store, owner, 'L2 sample1 后台处理登记');
       const shown = store.inspectBackgroundAnalysisEnrollment(book.bookId, runtime());
       expect([shown.state, shown.stateLabel, shown.enrollment, shown.history, shown.historyCount, shown.startedRuns, shown.startedRunCount, shown.lastLook, shown.lastNotStarted])
         .toEqual(['none', '未登记', null, [], 0, [], 0, null, null]);
       expect(shown.next).toEqual({ kind: 'none', reason: BACKGROUND_NOT_ENROLLED });
       expect(shown.offer.canEnroll).toBe(true);
       expect(shown.offer.disclosureDigest).toMatch(/^[0-9a-f]{64}$/u);
-      expect(shown.offer.scope).toBe('《L2 sample1 后台分析登记》这一本书');
+      expect(shown.offer.scope).toBe('《L2 sample1 后台处理登记》这一本书');
       expect(shown.offer.binds.map((row) => row.label)).toEqual(['模型服务', '工序', '预算上限', '发送内容类别', '会得到']);
       expect(shown.offer.startingPoints.map((point) => point.value)).toEqual(['prospective', 'backfill']);
       expect(shown.offer.notGranted.length).toBeGreaterThan(0);
@@ -246,7 +258,7 @@ describe('后台分析登记 over the real store on exact sample1', () => {
       expect(await refusal(() => store.enrollBackgroundAnalysis(book.bookId, 'f'.repeat(64), 'prospective', { kind: 'book', seriesId: null }, 1_000_000, runtime()))).toBe('BACKGROUND_ANALYSIS_ENROLLMENT_STALE');
       const enrolled = store.enrollBackgroundAnalysis(book.bookId, shown.offer.disclosureDigest!, 'prospective', { kind: 'book', seriesId: null }, 1_000_000, runtime());
       expect([enrolled.state, enrolled.stateLabel, enrolled.enrollment?.ordinal, enrolled.enrollment?.name, enrolled.enrollment?.startingPoint])
-        .toEqual(['active', '已登记', 1, '后台分析登记 · 第 1 版', 'prospective']);
+        .toEqual(['active', '已登记', 1, '后台处理登记 · 第 1 版', 'prospective']);
       // What it binds is what the disclosure listed, the budget now the ceiling the editor set (Issue #864).
       expect(enrolled.enrollment!.binds).toEqual(shown.offer.binds.map((row) => (row.label === '预算上限' ? { label: row.label, value: '任务运行预算上限：1,000,000 tokens' } : row)));
       expect([enrolled.history.map((entry) => [entry.state, entry.ordinal]), enrolled.historyCount]).toEqual([[['active', 1]], 1]);
@@ -290,8 +302,11 @@ describe('后台分析登记 over the real store on exact sample1', () => {
         .toEqual({ kind: 'wait', reason: BACKGROUND_EDITOR_JOB });
       expect(store.backgroundAnalysisDecisionFor(book.bookId, dispatcher.runtime()).decision)
         .toEqual({ kind: 'start', mode: 'sync-current', reason: BACKGROUND_START_SYNC });
+      expect(store.backgroundAnalysisBooks()).toContain(book.bookId);
+      expect(store.backgroundIdleFacts(dispatcher.runtime()).idle).toBe(true);
       await pass(dispatcher, owner);
       const after = store.inspectBaselineAnalysis(book.bookId, () => null);
+      expect(store.inspectBackgroundAnalysisEnrollment(book.bookId, dispatcher.runtime()).lastNotStarted).toBeNull();
       expect(after.taskIntent!.taskIntentId).not.toBe(before.taskIntent!.taskIntentId);
       expect(after.taskIntent!.mode).toBe('sync-current');
       expect(after.taskIntent!.preparedByEnrollmentVersionId).toBe(enrolled.enrollment!.enrollmentVersionId);
@@ -428,12 +443,13 @@ describe('后台分析登记 over the real store on exact sample1', () => {
       edit(store, book, '〔改动〕');
       expect(store.backgroundAnalysisDecisionFor(book.bookId, runtime({ routeExecutable: false })).decision).toEqual({ kind: 'stopped', reason: BACKGROUND_NO_ROUTE });
       // Developer-live under a policy with no enrolled-background rule (Provider Processing v12; Issue #864): neither an Enrollment nor a start.
-      store.baselineAnalysisLedger.bindLaunch(LIVE);
+      store.baselineAnalysisLedger.bindLaunch({ ...LIVE, localFixtureRuntime: () => store.localFixtureRuntime() });
       const live = store.inspectBackgroundAnalysisEnrollment(book.bookId, runtime());
       expect(live.next).toEqual({ kind: 'stopped', reason: BACKGROUND_NO_RULE });
       expect(store.startEnrolledBaselineAnalysis(book.bookId, randomUUID(), 'a'.repeat(64), live.enrollment!.enrollmentVersionId, 'sync-current', runtime()))
         .toEqual({ dispatchRunRecordId: null, reason: BACKGROUND_NO_RULE });
-      store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'development-ci', live: null });
+      store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'development-ci', live: null, policy: launchPolicy,
+        localFixtureRuntime: () => store.localFixtureRuntime() });
 
       // A plan the editor prepared and has not started is theirs: the Enrollment waits, and never starts it.
       const prepared = prepare(store, book.bookId, 'reanalyze-book');
@@ -517,6 +533,8 @@ describe('后台分析登记 over the real store on exact sample1', () => {
   }, 300_000);
 
   it('a background step that fails leaves nothing behind: the editor\'s 先看计划, 重新导入, J-03 and 审阅 all work after (P1-1)', async () => {
+    // Its unchanged admitted chain serves both the initial baseline and the later review preparation.
+    fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-cross-chapter-authored');
     const store = await openWithRoute();
     const owner = ownerOf(store);
     try {
@@ -870,11 +888,11 @@ describe('后台分析登记 over the real store on exact sample1', () => {
       const book = await importedBook(store, 'L2 sample1 登记不变');
       enroll(store, book.bookId, 'backfill');
       const other = await importedBook(store, 'L2 sample1 开发者实时登记');
-      store.baselineAnalysisLedger.bindLaunch(LIVE);
+      store.baselineAnalysisLedger.bindLaunch({ ...LIVE, localFixtureRuntime: () => store.localFixtureRuntime() });
       const shown = store.inspectBackgroundAnalysisEnrollment(other.bookId, runtime());
       expect([shown.offer.canEnroll, shown.offer.reason, shown.offer.disclosureDigest]).toEqual([false, BACKGROUND_ENROLL_NO_RULE, null]);
       expect(await refusal(() => store.enrollBackgroundAnalysis(other.bookId, 'a'.repeat(64), 'backfill', { kind: 'book', seriesId: null }, 1_000_000, runtime()))).toBe('BACKGROUND_ANALYSIS_ENROLLMENT_UNAVAILABLE');
-      store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'development-ci', live: null });
+      store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'development-ci', live: null, policy: launchPolicy, localFixtureRuntime: () => store.localFixtureRuntime() });
       store.markCleanShutdown();
     } finally {
       await owner.dispose();
@@ -953,6 +971,7 @@ describe('后台分析登记 over the real store on exact sample1', () => {
     const owner = ownerOf(store);
     const holdPath = join(roots.inputRoot, 'unit-hold.txt');
     const held = new BaselineAnalysisExecutionOwner({
+      requestGovernor,
       ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null },
       unitHold: controlledUnitHold(holdPath, { pollMs: 5 }),
     });
@@ -1185,6 +1204,7 @@ describe('后台分析登记 over the real store on exact sample1', () => {
       store.close();
     }
     const before = withDatabase(false, (database) => {
+      constructPre94PolicyEncoding(database);
       database.exec('PRAGMA foreign_keys = OFF');
       // A revision-65 store holds neither revision 67's relations (Issue #428, S80a) nor revision 66's.
       for (const table of [...Object.keys(MATERIAL_INDEX_SCHEMA_SQL).reverse(), ...Object.keys(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL).reverse()]) database.exec(`DROP TABLE ${table}`);
@@ -1206,7 +1226,7 @@ describe('后台分析登记 over the real store on exact sample1', () => {
       // Revision 66's widening and the stamp of the terminal revision, 67 (Issue #428, S80a), in one open.
       expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
       expect(analysisRunAuthorizationsShape(database)).toBe('current');
-      expect(database.prepare('SELECT rowid, * FROM analysis_run_authorizations ORDER BY rowid').all()).toEqual(before);
+      expect(database.prepare('SELECT rowid, * FROM analysis_run_authorizations ORDER BY rowid').all().map(({ start_when, ...row }) => { expect(start_when).toBe('now'); return row; })).toEqual(before);
       for (const table of Object.keys(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL)) {
         expect((database.prepare(`SELECT count(*) n FROM ${table}`).get() as Row).n).toBe(0);
       }
@@ -1214,4 +1234,217 @@ describe('后台分析登记 over the real store on exact sample1', () => {
         .not.toBe(ANALYSIS_LEDGER_REVISION_65_SQL.analysis_run_authorizations);
     });
   }, 300_000);
+});
+
+
+it('reads v27 enrollment eligibility per kind, isolates holds/revocation and never dispatches an unwired consumer (#1089)', async () => {
+  const store = await openWithRoute();
+  try {
+    const route = ORDINARY_PRODUCTION_ALLOWED_BINDINGS.find((binding) => binding.route === 'deepseek-open-platform')!;
+    const pending = store.saveModelServiceConnection('合成登记模型', null, 'needs-attention', route.route);
+    store.saveModelServiceConnection('合成登记模型', pending.credentialReference, 'ready', route.route);
+    store.selectModelServiceRoute(route.route);
+    const configured = { ...route, credentialReference: pending.credentialReference };
+    const selected = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', configured);
+    store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'ordinary-production', policy: selected,
+      live: { scope: 'ordinary-production', ...configured, runBudgetCeiling: 'unset' } });
+    const book = await importedBook(store, '合成按类登记');
+    const baseline = store.inspectBackgroundAnalysisEnrollment(book.bookId, runtime());
+    expect(baseline.kinds!.filter((entry) => entry.enabled).map((entry) => entry.kind)).toEqual([
+      'baseline-analysis', ...selected.providerProcessing.backgroundProcessingEnrollment!.enrollableKinds.map((entry) => entry.kind),
+    ]);
+    const enrolled: string[] = [];
+    for (const permission of selected.providerProcessing.backgroundProcessingEnrollment!.enrollableKinds) {
+      const offer = store.inspectBackgroundAnalysisEnrollment(book.bookId, runtime(), permission.kind);
+      expect(offer.offer.canEnroll).toBe(true);
+      const label = offer.kinds!.find((entry) => entry.kind === permission.kind)!.label;
+      expect(offer.offer.binds.find((row) => row.label === '工序')?.value).toContain(label);
+      expect(offer.offer.binds.find((row) => row.label === '会得到')?.value).toContain(label);
+      expect(() => store.enrollBackgroundAnalysis(book.bookId, offer.offer.disclosureDigest!, 'backfill', { kind: 'book', seriesId: null }, 0, runtime(), permission.kind)).toThrowError(/上限/u);
+      const recorded = store.enrollBackgroundAnalysis(book.bookId, offer.offer.disclosureDigest!, 'backfill', { kind: 'book', seriesId: null }, 1_000, runtime(), permission.kind);
+      expect(recorded.kind).toBe(permission.kind);
+      expect(recorded.enrollment?.shareTokens).toBe(1_000);
+      expect(recorded.next.kind).toBe('none');
+      expect(recorded.enrollment!.binds.find((row) => row.label === '工序')?.value).toContain(label);
+      const canonical = withDatabase(false, (db) => db.prepare('SELECT canonical_json FROM background_analysis_enrollment_versions WHERE enrollment_version_id = ?').get(recorded.enrollment!.enrollmentVersionId));
+      expect(JSON.parse(String(canonical!.canonical_json)).modes).toEqual([]);
+      enrolled.push(recorded.enrollment!.enrollmentId);
+    }
+    expect(new Set(enrolled).size).toBe(enrolled.length);
+    const firstKind = selected.providerProcessing.backgroundProcessingEnrollment!.enrollableKinds[0]!.kind;
+    store.holdBackgroundAnalysisEnrollment(book.bookId, enrolled[0]!, 'pause', runtime());
+    expect(store.inspectBackgroundAnalysisEnrollment(book.bookId, runtime(), firstKind).state).toBe('paused');
+    store.revokeBackgroundAnalysisEnrollment(book.bookId, enrolled[0]!, runtime());
+    expect(store.inspectBackgroundAnalysisEnrollment(book.bookId, runtime(), firstKind).state).toBe('revoked');
+    expect(store.inspectBackgroundAnalysisEnrollment(book.bookId, runtime(), 'material-index').state).toBe('active');
+    expect(store.backgroundAnalysisBooks()).toEqual([]);
+    const unknown = store.inspectBackgroundAnalysisEnrollment(book.bookId, runtime(), 'unlisted-kind');
+    expect(unknown.offer.canEnroll).toBe(false);
+    expect(() => store.enrollBackgroundAnalysis(book.bookId, 'a'.repeat(64), 'backfill', { kind: 'book', seriesId: null }, 1_000, runtime(), 'unlisted-kind')).toThrow();
+    expect(backgroundOrigins()).toBe(0);
+    store.markCleanShutdown();
+  } finally { store.close(); }
+});
+
+it('migrates revision 88 authorizations and enrollment rows without changing historical bytes, then validates recovery (#1089)', async () => {
+  const store = await openWithRoute();
+  let bookId = '';
+  try {
+    recordMissingCredentialConnection(store, '合成迁移连接');
+    const book = await importedBook(store, '合成迁移图书'); bookId = book.bookId;
+    const prepared = prepare(store, bookId);
+    store.authorizeBaselineAnalysis(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
+    enroll(store, bookId, 'backfill');
+    store.markCleanShutdown();
+  } finally { store.close(); }
+  const before = withDatabase(false, (db) => {
+    constructPre94PolicyEncoding(db);
+    db.exec('PRAGMA foreign_keys = OFF');
+    db.exec('BEGIN IMMEDIATE');
+    for (const [table, sql] of Object.entries({ analysis_run_authorizations: ANALYSIS_LEDGER_SCHEMA_SQL.analysis_run_authorizations, ...BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL })) {
+      const omit = table === 'analysis_run_authorizations' ? 'start_when' : 'kind';
+      const columns = db.prepare(`PRAGMA table_info(${table})`).all().map((row) => String(row.name)).filter((name) => name !== omit);
+      db.exec(`CREATE TEMP TABLE old_${table} AS SELECT rowid AS prior_rowid, * FROM ${table}`);
+      db.exec(`DROP TABLE ${table}`); db.exec(sql);
+      db.exec(`INSERT INTO ${table}(rowid, ${columns.join(',')}) SELECT prior_rowid, ${columns.join(',')} FROM old_${table} ORDER BY prior_rowid`);
+      db.exec(`DROP TABLE old_${table}`);
+      // Build genuinely older canonical records, then capture the bytes the migration must preserve.
+      const remove = table === 'analysis_run_authorizations' ? 'startWhen' : 'kind';
+      for (const row of db.prepare(`SELECT rowid, canonical_json FROM ${table}`).all()) {
+        const record = JSON.parse(String(row.canonical_json)); delete record[remove];
+        // Preserve nested canonical structure using the service's canonical writer below.
+        const canonical = canonicalRecord(record);
+        db.prepare(`UPDATE ${table} SET canonical_json = ?, sha256 = ? WHERE rowid = ?`).run(canonical.json, canonical.digest, row.rowid!);
+      }
+      for (const [name, trigger] of Object.entries(table === 'analysis_run_authorizations' ? ANALYSIS_LEDGER_TRIGGER_SQL : BACKGROUND_ANALYSIS_ENROLLMENT_TRIGGER_SQL)) {
+        if (name === `${table}_no_update` || name === `${table}_no_delete`) db.exec(trigger);
+      }
+    }
+    execPre74Fixture(db, 'PRAGMA user_version = 88; COMMIT; PRAGMA foreign_keys = ON');
+    return Object.keys({ analysis_run_authorizations: '', ...BACKGROUND_PROCESSING_ENROLLMENT_SCHEMA_SQL }).map((table) => [table,
+      db.prepare(`SELECT rowid, canonical_json, sha256 FROM ${table} ORDER BY rowid`).all()] as const);
+  });
+  const reopened = await openWithRoute();
+  try {
+    expect(reopened.inspectBaselineAnalysis(bookId).authorization?.startWhen).toBe('now');
+    expect(reopened.inspectBackgroundAnalysisEnrollment(bookId, runtime()).kind).toBe('baseline-analysis');
+    reopened.markCleanShutdown();
+  } finally { reopened.close(); }
+  withDatabase(true, (db) => {
+    expect(db.prepare('PRAGMA user_version').get()?.user_version).toBe(98);
+    expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+    for (const [table, rows] of before) expect(db.prepare(`SELECT rowid, canonical_json, sha256 FROM ${table} ORDER BY rowid`).all()).toEqual(rows);
+    for (const table of Object.keys(BACKGROUND_PROCESSING_ENROLLMENT_SCHEMA_SQL)) expect(db.prepare(`SELECT kind FROM ${table}`).all().every((row) => row.kind === 'baseline-analysis')).toBe(true);
+  });
+  const recovered = await openWithRoute();
+  try { expect(recovered.inspectBackgroundAnalysisEnrollment(bookId, runtime()).state).toBe('active'); recovered.markCleanShutdown(); }
+  finally { recovered.close(); }
+});
+
+
+it('uses the latest confirmed edit across Books and the existing editor-job fact for the 30-second idle boundary (#1089)', async () => {
+  const store = await openWithRoute();
+  try {
+    recordMissingCredentialConnection(store, '合成空闲事实');
+    const first = await importedBook(store, '合成有编辑的书');
+    const second = await importedBook(store, '合成等待空闲的书');
+    enroll(store, second.bookId, 'backfill');
+    edit(store, first, '〔确认编辑〕');
+    const now = Date.now();
+    const recent = runtime({ now, quietMs: 30_000 });
+    expect(store.backgroundIdleFacts(recent)).toMatchObject({ editorJobRunning: false, idle: false });
+    expect(store.backgroundAnalysisDecisionFor(second.bookId, recent).decision).toMatchObject({ kind: 'wait', reason: backgroundQuietReason(30_000) });
+    const quiet = runtime({ now: now + 30_000, quietMs: 30_000 });
+    expect(store.backgroundIdleFacts(quiet).idle).toBe(true);
+    expect(store.backgroundAnalysisDecisionFor(second.bookId, quiet).decision.kind).toBe('start');
+    expect(store.backgroundIdleFacts({ ...quiet, editorWorkBusy: true }).idle).toBe(false);
+    expect(store.backgroundAnalysisDecisionFor(second.bookId, { ...quiet, editorWorkBusy: true }).decision).toMatchObject({ kind: 'wait', reason: BACKGROUND_EDITOR_JOB });
+    expect(backgroundOrigins()).toBe(0);
+  } finally { store.close(); }
+});
+
+
+it('recovers only the exact pre-stamp authorization shape and refuses an unexpected column without rebuilding (#1089)', async () => {
+  const store = await openWithRoute();
+  let bookId = '';
+  try {
+    recordMissingCredentialConnection(store, '合成恢复连接');
+    const book = await importedBook(store, '合成未盖版本印章'); bookId = book.bookId;
+    const prepared = prepare(store, bookId);
+    store.authorizeBaselineAnalysis(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
+    store.markCleanShutdown();
+  } finally { store.close(); }
+  const snapshot = withDatabase(false, (db) => {
+    constructPre94PolicyEncoding(db);
+    execPre74Fixture(db, 'PRAGMA user_version = 88');
+    return { rows: db.prepare('SELECT rowid, * FROM analysis_run_authorizations ORDER BY rowid').all(),
+      sql: db.prepare("SELECT sql FROM sqlite_schema WHERE name = 'analysis_run_authorizations'").get()?.sql };
+  });
+  const recovered = await openWithRoute();
+  try { expect(recovered.inspectBaselineAnalysis(bookId).authorization?.startWhen).toBe('now'); recovered.markCleanShutdown(); }
+  finally { recovered.close(); }
+  withDatabase(false, (db) => {
+    expect(db.prepare('PRAGMA user_version').get()?.user_version).toBe(98);
+    expect(db.prepare('SELECT rowid, * FROM analysis_run_authorizations ORDER BY rowid').all()).toEqual(snapshot.rows);
+    expect(db.prepare("SELECT sql FROM sqlite_schema WHERE name = 'analysis_run_authorizations'").get()?.sql).toBe(CURATION_SCHEMA_SQL.analysis_run_authorizations);
+    execPre74Fixture(db, 'PRAGMA user_version = 88; ALTER TABLE analysis_run_authorizations ADD COLUMN unexpected INTEGER');
+  });
+  await expect(openWithRoute()).rejects.toMatchObject({ code: 'SCHEMA_MIGRATION_FAILED' });
+  withDatabase(true, (db) => {
+    expect(db.prepare('PRAGMA user_version').get()?.user_version).toBe(88);
+    expect(String(db.prepare("SELECT sql FROM sqlite_schema WHERE name = 'analysis_run_authorizations'").get()?.sql)).toContain('unexpected INTEGER');
+    expect(db.prepare('SELECT rowid, canonical_json, sha256 FROM analysis_run_authorizations ORDER BY rowid').all())
+      .toEqual(snapshot.rows.map(({ rowid, canonical_json, sha256 }) => ({ rowid, canonical_json, sha256 })));
+  });
+});
+
+
+it('defers a Review approval on the same driver, propagates idle to its categories and recovers an unstarted approval (#1089)', async () => {
+  fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-cross-chapter-authored');
+  const store = await openWithRoute();
+  const owner = ownerOf(store);
+  const driver = new ReviewRunDriver(store.reviewRunDriveSteps, owner);
+  let bookId = '';
+  let stranded = '';
+  const prepareReview = (book: string) => {
+    let work = store.createReviewRunPreparationWork(book, [TYPOS_AND_USAGE.categoryId], WHOLE, launchPolicy);
+    while (!work.done) work = store.advanceReviewRunPreparationWork(work.workId!);
+    const run = work.projection!.run!;
+    return { bookId: book, kind: 'review-run' as const, ref: run.reviewRunId, planEnvelopeDigest: null,
+      planDigests: run.categories.filter((category) => category.planEnvelopeDigest !== null)
+        .map((category) => ({ categoryId: category.categoryId, planEnvelopeDigest: category.planEnvelopeDigest! })) };
+  };
+  try {
+    recordMissingCredentialConnection(store, '合成空闲审阅');
+    bookId = (await importedBook(store, '合成空闲审阅图书')).bookId;
+    owner.setBackgroundIdle(false);
+    const cancelled = prepareReview(bookId);
+    store.startTaskWhenIdle(cancelled);
+    expect(store.inspectTaskPlan({ bookId, kind: 'review-run', ref: cancelled.ref }).state.label).toBe('等待空闲');
+    expect(store.waitingTaskRuns(null).some((run) => run.ref === cancelled.ref)).toBe(false);
+    store.cancelWaitingTask({ bookId, kind: 'review-run', ref: cancelled.ref });
+    expect(store.inspectReviewWorkspace(bookId, cancelled.ref).run?.state).toBe('cancelled');
+    const input = prepareReview(bookId);
+    store.startTaskWhenIdle(input);
+    expect(store.inspectGlobalAttention(() => null, false).groups.find((group) => group.key === 'active')!.items
+      .some((item) => item.itemId === `review:${input.ref}` && item.state === 'analysis-waiting-idle')).toBe(true);
+    owner.setBackgroundIdle(true);
+    let driven = Promise.resolve();
+    store.admitIdleReview(input.ref, () => { driven = driver.drive(input.ref); });
+    await driven;
+    const categoryRows = withDatabase(true, (db) => db.prepare(`SELECT a.start_when FROM analysis_run_authorizations a
+      JOIN analysis_task_intents t ON t.task_intent_id = a.task_intent_id WHERE t.book_id = ?`).all(bookId));
+    expect(categoryRows.length).toBeGreaterThan(0);
+    expect(categoryRows.every((row) => row.start_when === 'idle')).toBe(true);
+    const pending = prepareReview(bookId); stranded = pending.ref;
+    store.startTaskWhenIdle(pending);
+    store.markCleanShutdown();
+  } finally { const stopped = driver.dispose(); await owner.dispose(); await stopped; store.close(); }
+  const reopened = await openWithRoute();
+  try {
+    reopened.reconcileStoppedReviewCategoryRuns();
+    expect(reopened.inspectTaskPlan({ bookId, kind: 'review-run', ref: stranded }).state.label).not.toBe('等待空闲');
+    expect(reopened.waitingTaskRuns(null).some((run) => run.ref === stranded)).toBe(false);
+    reopened.markCleanShutdown();
+  } finally { reopened.close(); }
 });

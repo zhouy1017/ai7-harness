@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
@@ -35,6 +36,12 @@ import {
   recordMissingCredentialConnection,
   requireExactSample1,
 } from '../support/sample1-baseline.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for the factual review: the real store, the real pinned DSH
 // composition, the AI7 local deterministic adapter over the authored fixture, and a fake secret
@@ -101,6 +108,7 @@ describe('factual review over the real store on exact sample1', () => {
     // A settled baseline analysis first: the factual review must sit beside it, not over it.
     const baselineStore = await openWithRoute(baselineFixture);
     const baselineOwner = new BaselineAnalysisExecutionOwner({
+      requestGovernor,
       ledger: baselineStore.baselineAnalysisLedger, launchPolicy, fixture: baselineFixture, secretResolver: fakeSecretResolver(),
     });
     try {
@@ -130,6 +138,7 @@ describe('factual review over the real store on exact sample1', () => {
     // The factual Task: its own kind, its own contract, its own Result Set, on the same real path.
     const store = await openWithRoute(factualFixture);
     const owner = new BaselineAnalysisExecutionOwner({
+      requestGovernor,
       ledger: store.factualReviewLedger, launchPolicy, fixture: factualFixture, secretResolver: fakeSecretResolver(),
     });
     let settled: FactualReviewProjection;
@@ -163,7 +172,7 @@ describe('factual review over the real store on exact sample1', () => {
       expect(revision.schemaDigest).toBe(FACTUAL_REVIEW_SCHEMA_DIGEST);
       expect(revision.reducerDigest).toBe(FACTUAL_REVIEW_REDUCER_DIGEST);
       expect(revision.adapterPin).toMatchObject({ route: 'ai7-local-deterministic', fixtureIdentity: 'sample1-factual-authored' });
-      expect(revision.policyPin).toMatchObject({ operationalScope: 'development-ci', providerProcessingVersion: 'v1', liveTransmissions: 0 });
+      expect(revision.policyPin).toEqual({ operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: 'v22', liveTransmissions: 0 });
       expect(revision.coverage).toMatchObject({ state: 'complete', unitsTotal: SAMPLE1_UNITS, unitsClosed: SAMPLE1_UNITS, gapCount: 0 });
       expect(revision.gaps).toEqual([]);
       // Synchronized delta (#275): eight unit turns and one assurance sampling turn per anchor unit.
@@ -333,7 +342,7 @@ describe('factual review over the real store on exact sample1', () => {
         } else {
           expect(settled.run).toMatchObject({ runRecordId, state: planted === 'pausing' ? 'paused' : 'resumable' });
           expect(settled.taskOutcome).toBeNull();
-          const execution = new BaselineAnalysisExecutionOwner({ ledger: second.baselineAnalysisLedger, launchPolicy, fixture: factualFixture, secretResolver: { resolve: async () => null } });
+          const execution = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: second.baselineAnalysisLedger, launchPolicy, fixture: factualFixture, secretResolver: { resolve: async () => null } });
           try {
             const ledger = second.factualReviewLedger;
             ledger.requestCancel(bookId, settled.taskIntent!.taskIntentId);

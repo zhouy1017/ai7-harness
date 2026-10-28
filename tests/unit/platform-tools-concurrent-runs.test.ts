@@ -107,8 +107,8 @@ describe('two concurrent live Runs fetching through per-ticket admission', () =>
     const second = await run(rule, 'b'.repeat(64), 'https://example.net/source', fetch);
     const signal = new AbortController().signal;
     const [one, two] = await Promise.all([
-      first.execute({ callId: 'a1', tool: 'webfetch', arguments: { url: 'https://example.org/source' }, signal }),
-      second.execute({ callId: 'b1', tool: 'webfetch', arguments: { url: 'https://example.net/source' }, signal }),
+      first.execute({ callId: 'a1', tool: 'webfetch', arguments: { url: 'https://example.org/source' }, signal, dispatch: { token: Symbol(), active: () => !signal.aborted } }),
+      second.execute({ callId: 'b1', tool: 'webfetch', arguments: { url: 'https://example.net/source' }, signal, dispatch: { token: Symbol(), active: () => !signal.aborted } }),
     ]);
     expect(one).toEqual({ text: '# 新青年\n\n1918 年 5 月号。', sourceUrl: 'https://example.org/source' });
     expect(two).toEqual({ text: '# 新青年\n\n1918 年 5 月号。', sourceUrl: 'https://example.net/source' });
@@ -137,8 +137,8 @@ describe('two concurrent live Runs fetching through per-ticket admission', () =>
     const second = await run(rule, 'b'.repeat(64), 'https://example.org/b', fetch);
     const signal = new AbortController().signal;
     const settled = await Promise.all([
-      first.execute({ callId: 'a1', tool: 'webfetch', arguments: { url: 'https://example.org/a' }, signal }).finally(firstDone),
-      second.execute({ callId: 'b1', tool: 'webfetch', arguments: { url: 'https://example.org/b' }, signal }),
+      first.execute({ callId: 'a1', tool: 'webfetch', arguments: { url: 'https://example.org/a' }, signal, dispatch: { token: Symbol(), active: () => !signal.aborted } }).finally(firstDone),
+      second.execute({ callId: 'b1', tool: 'webfetch', arguments: { url: 'https://example.org/b' }, signal, dispatch: { token: Symbol(), active: () => !signal.aborted } }),
     ]);
     expect(settled.map((outcome) => outcome.sourceUrl)).toEqual(['https://example.org/a', 'https://example.org/b']);
     expect(seenAfterFirst).toEqual([[1, true]]);

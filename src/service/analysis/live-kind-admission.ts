@@ -1,16 +1,18 @@
 import { liveHouseReviewPreferenceContract } from '../house-review-preference.js';
+import { withProcedureDefinition } from '../procedures/execution.js';
 import { CUSTOM_ANALYSIS_KIND_FAMILY, EDITOR_AUTHORED_QUESTION_TEMPLATE_CATEGORY, taskKindListed } from '../launch-policy.js';
 import { liveSeriesContract, liveSeriesConsistencyContract } from '../review/series-consistency.js';
 import { FACTUAL_REVIEW_KIND } from '../../shared/protocol.js';
 import { localToolsFromProjection, type LocalToolsRule } from '../retrieval/local-rule.js';
 import { FACTUAL_REVIEW_PROMPT_CONTRACT_DIGEST } from './factual-review-contract.js';
+import { factualClaimKindDefinition } from './factual-claim-contract.js';
 import { platformToolsFromProjection } from '../provider/search-service.js';
 import { modelProfileFor } from '../provider/model-profile.js';
 import type { RemoteExecutionRoute } from '../provider/egress-gate.js';
 import type { AdmittedProviderRule, LaunchPolicyProjection } from '../../shared/protocol.js';
 import { EVALUATION_REWRITE_KIND, INITIAL_EVALUATION_KIND, READERS_REPORT_KIND, WRITING_KIND, reviewCategoryKindId } from '../../shared/protocol.js';
 import type { OutboundDataCategory } from '../provider/egress-gate.js';
-import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryContractInput } from '../review/category-configuration.js';
+import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, HISTORICAL_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryContractInput } from '../review/category-configuration.js';
 import { reviewCategoryKindDefinition } from '../review/review-category-kind.js';
 import { liveMaterialContract } from '../task-material-references.js';
 import { withModelClarification } from '../provider/clarification-contract.js';
@@ -25,6 +27,19 @@ export interface LiveKindRule {
   readonly crossUnitSynthesisAllowed: boolean;
 }
 
+/** The enabled-learning origin is distinct from enrolled background processing, despite its shared kind name. */
+export function learningCurationRule(policy: LaunchPolicyProjection | undefined, binding: LiveKindBinding): AdmittedProviderRule | null {
+  if (policy?.integrityState !== 'verified' || policy.operationalScope !== 'ordinary-production' ||
+    policy.providerProcessing.version !== 'v31' || policy.providerProcessing.decision !== 'eligible-only' ||
+    policy.providerProcessing.liveTransmissionAllowed !== true) return null;
+  const rules = policy.providerProcessing.admittedRules?.filter((rule) => rule.ruleId === 'ordinary-production-learning-curation') ?? [];
+  const rule = rules.length === 1 ? rules[0]! : null;
+  return rule?.enabledLearningEnvelope?.disableStopsLaterDispatchAndUse === true && rule.taskKinds.length === 1 &&
+    rule.taskKinds[0] === 'learning-curation' && rule.outboundDataCategories.includes('editorial-learning-example') &&
+    rule.modelRole === 'Main Editorial Role' && rule.route === binding.route && rule.endpoint === binding.endpoint &&
+    rule.model === binding.model && rule.credentialSlot === binding.credentialSlot ? rule : null;
+}
+
 /** The launch's live binding facts the rule must name exactly; `LaunchBinding['live']` satisfies it. */
 export interface LiveKindBinding {
   readonly route: string;
@@ -35,6 +50,8 @@ export interface LiveKindBinding {
 
 /** The parts of an analysis kind definition admission reads. */
 export interface LiveKindDefinition {
+  readonly procedureBinding?: AnalysisKindDefinition['procedureBinding'];
+  readonly reviewCrossChapter?: AnalysisKindDefinition['reviewCrossChapter'];
   readonly kind: string;
   readonly contractVersion?: string;
   readonly promptContractDigest: string;
@@ -111,7 +128,8 @@ export function liveKindAdmitted(
     modelRole: rule.modelRole,
     outboundDataCategories: rule.outboundDataCategories,
     // Provider Processing v11's synthesis term (#841); a rule that does not name it never admits a kind's synthesis.
-    crossUnitSynthesisAllowed: rule.crossUnitSynthesisAllowed === true,
+    crossUnitSynthesisAllowed: rule.crossUnitSynthesisAllowed === true &&
+      (definition.reviewCrossChapter === undefined || rule.plusOneCrossUnitSynthesisTurn === true),
   };
 }
 
@@ -151,10 +169,12 @@ function plannedPayloadCategories(kind: string): readonly OutboundDataCategory[]
  * metadata, words and exemplars); a missing owner derivation or a changed declared digest refuses admission. Any other
  * kind has no row and is not admitted.
  */
-function liveKindExpectation(definition: LiveKindDefinition): LiveKindExpectation | null {
+function liveKindExpectation(definition: LiveKindDefinition, policy?: LaunchPolicyProjection): LiveKindExpectation | null {
   if (definition.kind === FACTUAL_REVIEW_KIND) {
     // The research contract (#744) and each Evidence Assurance Level's own (Issue #901): 快速整理 is v1 with no tool declared.
-    const admitted = [withFactualResearch(factualReviewKindDefinition()), factualReviewLevelDefinition('standard'), factualReviewLevelDefinition('strict')]
+    const stages = liveKindRule(policy, FACTUAL_REVIEW_KIND)?.claimScopedFactualStages;
+    const admitted = [withFactualResearch(factualReviewKindDefinition()), factualReviewLevelDefinition('standard'), factualReviewLevelDefinition('strict'),
+      ...(stages === undefined ? [] : [factualClaimKindDefinition('standard'), factualClaimKindDefinition('strict')])]
       .map((entry) => entry.promptContractDigest);
     // v1's bytes are admitted only as the 快速整理 level a plan chose, never as v1 on a launch whose rule hands it no tool.
     const quick = definition.evidenceAssuranceLevel === 'quick' && definition.promptContractDigest === factualReviewLevelDefinition('quick').promptContractDigest;
@@ -170,8 +190,14 @@ function liveKindExpectation(definition: LiveKindDefinition): LiveKindExpectatio
   const review = BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.find((category) => reviewCategoryKindId(category.categoryId) === definition.kind);
   if (review !== undefined) {
     if (review.executor !== 'review-category-contract' || review.seriesKnowledge !== undefined) return null;
+    const input = reviewCategoryContractInput(definition.reviewCrossChapter === undefined
+      ? HISTORICAL_REVIEW_CATEGORY_CONFIGURATION.categories.find((entry) => entry.categoryId === review.categoryId && entry.executor === 'review-category-contract') ?? review
+      : { ...review, crossChapter: definition.reviewCrossChapter });
+    const candidates = [reviewCategoryKindDefinition(input, definition.contractVersion === 'ai7.editorial-review/1' ? 1 : 2),
+      reviewCategoryKindDefinition(input, 2, kindLocalTools(policy, definition.kind) ?? undefined)];
+    const expectedBase = liveMaterialContract(definition)?.basePromptContractDigest ?? definition.promptContractDigest;
     return {
-      promptContractDigest: reviewCategoryKindDefinition(reviewCategoryContractInput(review), definition.contractVersion === 'ai7.editorial-review/1' ? 1 : 2).promptContractDigest,
+      promptContractDigest: candidates.find((entry) => entry.promptContractDigest === expectedBase)?.promptContractDigest ?? null,
       payloadCategories: ['public-or-synthetic'],
     };
   }
@@ -188,6 +214,14 @@ export function liveKindAdmission(
   definition: LiveKindDefinition,
   binding: LiveKindBinding,
 ): LiveKindRule | null {
+  if (definition.procedureBinding !== undefined) {
+    const { base, document, pin } = definition.procedureBinding;
+    const expected = withProcedureDefinition(base, document, pin);
+    const rule = liveKindRule(policy, definition.kind, ['editor-task-instruction']);
+    if (rule?.editorTaskInstruction === undefined || expected.systemPrompt !== definition.systemPrompt ||
+        expected.promptContractDigest !== definition.promptContractDigest) return null;
+    return liveKindAdmission(policy, base, binding);
+  }
   const consistency = liveSeriesConsistencyContract(definition);
   if (consistency !== null) {
     if (definition.kind !== reviewCategoryKindId('series-consistency') || consistency.digest !== definition.promptContractDigest ||
@@ -217,15 +251,18 @@ export function liveKindAdmission(
   }
   const category = BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.find((entry) => reviewCategoryKindId(entry.categoryId) === definition.kind ||
     (definition.kind === FACTUAL_REVIEW_KIND && entry.categoryId === 'factual-review'));
-  if (category?.categoryId === 'publication-risk') return null;
+  if (category?.categoryId === 'publication-risk' &&
+      (policy?.operationalScope !== 'ordinary-production' ||
+        liveKindRule(policy, definition.kind)?.taskKindOverrides?.[definition.kind]?.webSearch !== false)) return null;
   if (category !== undefined && category.searchEngine &&
       (platformToolsFromProjection(liveKindRule(policy, definition.kind)) === null || !modelAdmitsPlatformTools(binding.route, binding.model))) return null;
-  const expectation = liveKindExpectation(definition);
+  const expectation = liveKindExpectation(definition, policy);
   return expectation === null ? null : liveKindAdmitted(policy, definition.kind, definition, binding, expectation);
 }
 
 /** The categories a kind's payload carries besides the binding's own public or synthetic material. */
 export function liveKindContractCategories(kind: string, definition?: LiveKindDefinition): readonly OutboundDataCategory[] {
+  if (definition?.procedureBinding !== undefined) return [...liveKindContractCategories(kind, definition.procedureBinding.base), 'editor-task-instruction'];
   if (definition !== undefined && liveSeriesConsistencyContract(definition) !== null) return ['series-knowledge-excerpt'];
   const series = definition === undefined ? null : liveSeriesContract(definition);
   if (series !== null) return [...liveKindContractCategories(kind, series.base), 'series-knowledge-excerpt'];
@@ -249,7 +286,7 @@ export function modelAdmitsPlatformTools(route: string, model: string): boolean 
 /** Local retrieval never changes web declarations. Baseline and enrolled background remain outside targeted retrieval. */
 export function kindLocalTools(policy: LaunchPolicyProjection | undefined, kind: string, origin: 'foreground' | 'background' = 'foreground'): LocalToolsRule | null {
   if (kind === 'baseline-manuscript-analysis' || origin === 'background') return null;
-  const rule = liveKindRule(policy, kind);
+  const rule = liveKindRule(policy, kind, [], origin);
   return rule === null || !modelAdmitsPlatformTools(rule.route, rule.model) ? null : localToolsFromProjection(rule);
 }
 
@@ -261,6 +298,7 @@ export function kindResearchDeclaration(
 ): ResearchDeclaration {
   const rule = liveKindRule(policy, kind);
   const webSearch = taskDeclaresPlatformTools(kind) && declaration?.webSearch !== false &&
+    rule?.taskKindOverrides?.[kind]?.webSearch !== false &&
     rule?.webSearchToolAllowed === true && platformToolsFromProjection(rule) !== null &&
     modelAdmitsPlatformTools(rule.route, rule.model);
   return { webSearch, searchEngine: webSearch ? 'user-selected-backend' : null };
@@ -276,4 +314,11 @@ export function taskDeclaresPlatformTools(kind: string): boolean {
   const review = BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.find((entry) => reviewCategoryKindId(entry.categoryId) === kind);
   if (review !== undefined) return review.researchDeclaration?.webSearch === true && review.searchEngine && review.categoryId !== 'publication-risk';
   return kind === WRITING_KIND || kind === INITIAL_EVALUATION_KIND;
+}
+
+/** Per-kind enrollment permissions; later consumers still require exact dispatch admission. */
+export function backgroundEnrollmentKinds(policy: LaunchPolicyProjection | undefined): readonly { kind: string; mandatoryCeiling: true }[] {
+  if (policy?.integrityState !== 'verified' || policy.denialReason !== null) return [];
+  const baseline = liveKindRule(policy, 'baseline-manuscript-analysis', [], 'background') === null ? [] : [{ kind: 'baseline-analysis', mandatoryCeiling: true as const }];
+  return [...baseline, ...(policy.providerProcessing.backgroundProcessingEnrollment?.enrollableKinds ?? [])];
 }

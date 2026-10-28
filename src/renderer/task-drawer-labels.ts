@@ -363,6 +363,15 @@ export const TASK_BAR_WAITING_NOTE = '已记录这次授权。联网、并确认
  */
 export const TASK_BAR_WAITING_FOR_SLOT = '已联网 · 名额已满';
 export const TASK_BAR_WAITING_SLOT_NOTE = '已记录这次授权。已经联网，但运行名额已满：有名额空出时，AI7 先核对计划再开始，之后开始的任务可能先开始；在此之前不会发送任何内容';
+/** 空闲时处理 (Issue #1089; ADR 0095 §3): the start choice beside 开始任务, and what a deferred or yielded Run says. */
+export const TASK_BAR_START_WHEN_LABEL = '开始时间';
+export const TASK_BAR_START_WHEN_OPTIONS: ReadonlyArray<readonly ['now' | 'idle', string]> = [['now', '立即'], ['idle', '空闲时处理']];
+export const TASK_BAR_IDLE_RECORDING = '正在记录空闲时处理…';
+export const TASK_BAR_IDLE_RECORDED = '已记录授权；等待空闲';
+export const TASK_BAR_WAITING_FOR_IDLE = '等待空闲';
+export const TASK_BAR_WAITING_IDLE_NOTE = '停下编辑 30 秒且没有编辑操作运行后开始；预算上限不变，可以取消任务';
+export const TASK_BAR_YIELDED = '让位给你的任务';
+export const TASK_BAR_YIELDED_NOTE = '下次空闲后接着处理；运行授权与预算上限不变';
 /** AUTH-010's three controls of a Run under way (Issue #422): 暂停 and 改计划重做 are shown with why they wait. */
 export const TASK_BAR_PAUSE = '暂停';
 export const TASK_BAR_CANCEL_RUN = '停止任务';
@@ -388,7 +397,7 @@ export const TASK_BAR_CANCELLING_NOTE = '已记下你的取消；正在进行的
 /** 取消任务 of a Run nothing was running — one waiting in the queue, or one AI7 left behind when it closed — settles at once. */
 export const TASK_BAR_CANCELLED_NOTE = '已取消这项任务；此后不会再发送任何内容';
 /** CTRL-001: what 正在暂停 says until the Run has reached its boundary — never 已暂停 early. */
-export const TASK_BAR_PAUSING_NOTE = '已记下你的暂停；正在进行的这一步完成后停下，已完成的部分都会保存';
+export const TASK_BAR_PAUSING_NOTE = '已记下你的暂停；正在进行的这一步完成后停下，不再开始下一步，结果与用量都会保存';
 /** CONT-015: 续行 continues the same Run from where it stopped, under its own authorization. */
 export const TASK_BAR_RESUME = '续行';
 /** The fallbacks when 暂停 or 续行 is refused for a reason the service does not word. */
@@ -494,7 +503,7 @@ export function taskBarContinuationNote(unitsSettled: number | null, unitsTotal:
     return `已读完 ${unitsSettled} / ${unitsTotal} 个阅读范围，结果都已保存；续行时先按你的回答处理${which}，再继续未完成的部分，不重复已读完的部分`;
   }
   return unitsSettled >= unitsTotal
-    ? `已读完全部 ${unitsTotal} 个阅读范围，结果都已保存；续行时接着做之后的归纳与抽样`
+    ? `已读完全部 ${unitsTotal} 个阅读范围，结果都已保存；续行时只处理尚未完成的步骤，已保存的步骤不会重做`
     : `已读完 ${unitsSettled} / ${unitsTotal} 个阅读范围，结果都已保存；续行时从第 ${unitsSettled + 1} 个接着读，不重复已读完的部分`;
 }
 
@@ -726,7 +735,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
         readiness,
         summary,
         statement: null,
-        note: TASK_BAR_QUEUED_NOTE,
+        note: plan.state.label === TASK_BAR_WAITING_FOR_IDLE ? TASK_BAR_WAITING_IDLE_NOTE : TASK_BAR_QUEUED_NOTE,
         status: plan.state.label,
         actions: [{ name: 'cancel-wait', label: TASK_BAR_CANCEL_WAIT, tone: 'secondary', disabledReason: null }, runLink],
       };
@@ -736,7 +745,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
         readiness,
         summary,
         statement: null,
-        note: plan.state.label === TASK_BAR_WAITING_FOR_SLOT ? TASK_BAR_WAITING_SLOT_NOTE : TASK_BAR_WAITING_NOTE,
+        note: plan.state.label === TASK_BAR_WAITING_FOR_IDLE ? TASK_BAR_WAITING_IDLE_NOTE : plan.state.label === TASK_BAR_WAITING_FOR_SLOT ? TASK_BAR_WAITING_SLOT_NOTE : TASK_BAR_WAITING_NOTE,
         status: plan.state.label,
         actions: [
           ...(plan.state.label === TASK_BAR_WAITING_FOR_CONNECTION
@@ -832,7 +841,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
           readiness,
           summary,
           statement: null,
-          note: continuation === null ? null : taskBarContinuationNote(continuation.unitsSettled, continuation.unitsTotal, continuation.pendingAnswerUnits,
+          note: plan.state.label === TASK_BAR_YIELDED ? TASK_BAR_YIELDED_NOTE : continuation === null ? null : taskBarContinuationNote(continuation.unitsSettled, continuation.unitsTotal, continuation.pendingAnswerUnits,
             plan.listPages?.['runControl.continuation.pendingAnswerUnits']?.total),
           status: plan.state.label,
           actions: [
@@ -1040,11 +1049,16 @@ export function taskPlanActivityRows(
     ['尝试', activity.attemptState === null ? '—' : attemptStateLabel(activity.attemptState)],
     ['上次更新', localInstantLabel(activity.lastTransitionAt)],
     ['进展', `已读完 ${activity.unitsSettled} / ${activity.unitsTotal} 个阅读范围${update === null ? '' : '（只算要重新分析的）'} · 已完成模型回合 ${activity.completedAttempts} 次`],
+    ...(activity.inFlightUnits ?? []).map((unit): readonly [string, string] => [`阅读范围 ${unit.unitOrdinal}`,
+      [unit.requestState === 'waiting-for-capacity' ? '等待模型请求名额' : unit.requestState === 'admitted' ? attemptStateLabel(unit.attemptState) : '正在处理工具或本地步骤',
+        ...(unit.admittedRequestStartedAt === null ? [] : [`本次请求 ${elapsedLabel(nowMs - Date.parse(unit.admittedRequestStartedAt))}`])].join(' · ')]),
   ];
 }
 
 /** Whether the step in flight has run longer than this Run can account for (LIVE-003), as ②A judges it. */
 export function taskPlanActivityIsStale(activity: NonNullable<TaskPlanRunControlProjection['activity']>, nowMs: number): boolean {
+  if (activity.stage === 'units' && activity.inFlightUnits !== undefined) return activity.inFlightUnits.some((unit) => unit.requestState === 'admitted' &&
+    unit.admittedRequestStartedAt !== null && runStepIsStale(nowMs - Date.parse(unit.admittedRequestStartedAt), activity.longestSettledUnitMs));
   return activity.currentUnitStartedAt !== null && runStepIsStale(nowMs - Date.parse(activity.currentUnitStartedAt), activity.longestSettledUnitMs);
 }
 

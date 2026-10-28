@@ -6,7 +6,7 @@ import { DIGEST_PATTERN, UUID_PATTERN, canonicalRecord, isRecord, parseCanonical
 import { defaultExecutionRuleDrift, isDefaultExecutionRuleBinding } from './default-execution-rules.js';
 
 /**
- * 后台分析登记 — the Background Analysis Enrollment (Issue #95, plan slice S39; ADR 0048; ADR 0046; V2-UX-ANALYSIS-016 to
+ * 后台处理登记 — the Background Analysis Enrollment (Issue #95, plan slice S39; ADR 0048; ADR 0046; V2-UX-ANALYSIS-016 to
  * 021): the one standing origin of an analysis AI7 starts by itself. Schema revision 66 adds three append-only relations, each
  * row carrying canonical JSON and its digest:
  *
@@ -70,6 +70,47 @@ export const BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL = {
 ) STRICT`,
 } as const;
 
+/** Revision 89: independent enrollments per Book and kind; prior canonical bytes are preserved. */
+export const BACKGROUND_PROCESSING_ENROLLMENT_SCHEMA_SQL: Readonly<Record<string, string>> = Object.fromEntries(
+  Object.entries(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL).map(([table, sql]) => [table,
+    sql.replace('book_id TEXT NOT NULL UNIQUE REFERENCES', 'book_id TEXT NOT NULL REFERENCES')
+      .replace("analysis_kind TEXT NOT NULL CHECK(analysis_kind = 'baseline-analysis')", 'analysis_kind TEXT NOT NULL')
+      .replace('  sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64)',
+        "  kind TEXT NOT NULL DEFAULT 'baseline-analysis' CHECK(length(kind) BETWEEN 1 AND 120),\n  sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64)" + (table === 'background_analysis_enrollments' ? ',\n  UNIQUE(book_id, kind)' : '')),
+  ]),
+);
+
+function migrateBackgroundProcessingEnrollments(db: DatabaseSync): void {
+  const shape = db.prepare("SELECT sql FROM sqlite_schema WHERE name = 'background_analysis_enrollments' AND type = 'table'").get()?.sql;
+  if (shape === undefined || (db.prepare('PRAGMA table_info(background_analysis_enrollments)').all()).some((row) => row.name === 'kind')) return;
+  requireEnrollment(Number(db.prepare('PRAGMA user_version').get()?.user_version) < 89, 'SCHEMA_INVALID', '当前版本缺少后台处理登记种类列。');
+  const normalize = (sql: string): string => sql.replace(/\s+/gu, ' ').trim();
+  for (const [table, sql] of Object.entries(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL)) {
+    requireEnrollment(normalize(String(db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table)?.sql)) === normalize(sql), 'SCHEMA_INVALID', '后台处理登记前驱结构不兼容。');
+    for (const row of db.prepare(`SELECT canonical_json, sha256 FROM ${table}`).all()) {
+      requireEnrollment(typeof row.canonical_json === 'string' && sha256Hex(row.canonical_json) === row.sha256, 'BACKGROUND_ANALYSIS_ENROLLMENT_RECORD_INVALID', '后台处理登记记录摘要不一致。');
+    }
+  }
+  const foreignKeys = Number(db.prepare('PRAGMA foreign_keys').get()?.foreign_keys) === 1;
+  db.exec('PRAGMA foreign_keys = OFF');
+  try {
+    db.exec('BEGIN IMMEDIATE');
+    for (const table of Object.keys(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL)) {
+      const columns = db.prepare(`PRAGMA table_info(${table})`).all().map((row) => String(row.name)).join(', ');
+      db.exec(`CREATE TEMP TABLE idle_${table} AS SELECT rowid AS prior_rowid, * FROM ${table}`);
+      db.exec(`DROP TABLE ${table}`);
+      db.exec(BACKGROUND_PROCESSING_ENROLLMENT_SCHEMA_SQL[table]!);
+      db.exec(`INSERT INTO ${table}(rowid, ${columns}) SELECT prior_rowid, ${columns} FROM temp.idle_${table} ORDER BY prior_rowid`);
+      db.exec(`DROP TABLE temp.idle_${table}`);
+      db.exec(BACKGROUND_ANALYSIS_ENROLLMENT_TRIGGER_SQL[`${table}_no_update`]!);
+      db.exec(BACKGROUND_ANALYSIS_ENROLLMENT_TRIGGER_SQL[`${table}_no_delete`]!);
+    }
+    requireEnrollment(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '后台处理登记迁移后引用校验失败。');
+    db.exec('COMMIT');
+  } catch (error) { db.exec('ROLLBACK'); throw error; }
+  finally { if (foreignKeys) db.exec('PRAGMA foreign_keys = ON'); }
+}
+
 /** Every enrollment relation is a ledger: a row is appended once and never rewritten or removed. */
 export const BACKGROUND_ANALYSIS_ENROLLMENT_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
   Object.keys(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL).flatMap((table) => [
@@ -114,10 +155,10 @@ export function requireEnrollment(condition: unknown, code: string, message: str
  */
 export function initializeBackgroundAnalysisEnrollmentSchema(db: DatabaseSync): void {
   const existing = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'background_analysis_enrollments'").get();
-  if (existing !== undefined) return;
+  if (existing !== undefined) return migrateBackgroundProcessingEnrollments(db);
   db.exec('BEGIN IMMEDIATE');
   try {
-    for (const sql of Object.values(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL)) db.exec(sql);
+    for (const sql of Object.values(BACKGROUND_PROCESSING_ENROLLMENT_SCHEMA_SQL)) db.exec(sql);
     for (const sql of Object.values(BACKGROUND_ANALYSIS_ENROLLMENT_TRIGGER_SQL)) db.exec(sql);
     db.exec('COMMIT');
   } catch (error) {
@@ -171,6 +212,7 @@ export type BackgroundAnalysisScope =
   };
 
 export interface BackgroundAnalysisEnrollmentVersionRecord {
+  kind: string;
   enrollmentVersionId: string;
   ordinal: number;
   startingPoint: BackgroundAnalysisStartingPoint;
@@ -191,7 +233,7 @@ export interface BackgroundAnalysisEnrollmentVersionRecord {
  */
 export function backgroundCeilingShares(ceiling: number, books: number): number[] {
   requireEnrollment(Number.isSafeInteger(ceiling) && ceiling >= 1 && Number.isSafeInteger(books) && books >= 1,
-    'BACKGROUND_ANALYSIS_ENROLLMENT_INVALID', '后台分析登记的预算上限无效。');
+    'BACKGROUND_ANALYSIS_ENROLLMENT_INVALID', '后台处理登记的预算上限无效。');
   const each = Math.floor(ceiling / books);
   return Array.from({ length: books }, (_, index) => each + (index === 0 ? ceiling - each * books : 0));
 }
@@ -238,6 +280,7 @@ function isState(value: string): value is BackgroundAnalysisEnrollmentState {
 
 /** One Book's Enrollment as the ledger holds it: the version in force — or the last one, once suspended or revoked — and its state. */
 export interface BackgroundAnalysisEnrollmentRecord {
+  kind: string;
   enrollmentId: string;
   bookId: string;
   createdAt: string;
@@ -250,6 +293,7 @@ export interface BackgroundAnalysisEnrollmentRecord {
 
 /** What `登记` records for one Book: its scope, its share, and the facts every Book of the same 登记 shares. */
 export interface BackgroundAnalysisEnrollInput {
+  kind?: string;
   bookId: string;
   startingPoint: BackgroundAnalysisStartingPoint;
   binding: DefaultExecutionRuleBinding;
@@ -263,12 +307,12 @@ export interface BackgroundAnalysisEnrollInput {
 type SqlRow = Record<string, SQLOutputValue>;
 
 function text(value: SQLOutputValue | undefined): string {
-  requireEnrollment(typeof value === 'string', 'BACKGROUND_ANALYSIS_ENROLLMENT_RECORD_INVALID', '后台分析登记记录无效。');
+  requireEnrollment(typeof value === 'string', 'BACKGROUND_ANALYSIS_ENROLLMENT_RECORD_INVALID', '后台处理登记记录无效。');
   return value;
 }
 
 function integer(value: SQLOutputValue | undefined): number {
-  requireEnrollment(typeof value === 'number' && Number.isSafeInteger(value), 'BACKGROUND_ANALYSIS_ENROLLMENT_RECORD_INVALID', '后台分析登记记录无效。');
+  requireEnrollment(typeof value === 'number' && Number.isSafeInteger(value), 'BACKGROUND_ANALYSIS_ENROLLMENT_RECORD_INVALID', '后台处理登记记录无效。');
   return value;
 }
 
@@ -282,10 +326,10 @@ function isWorkingPoint(value: unknown): value is BackgroundAnalysisWorkingPoint
 function requireRecord(row: SqlRow, facts: Readonly<Record<string, unknown>>): Record<string, unknown> {
   const canonical = text(row.canonical_json);
   const recorded = text(row.sha256);
-  requireEnrollment(DIGEST_PATTERN.test(recorded) && sha256Hex(canonical) === recorded, 'BACKGROUND_ANALYSIS_ENROLLMENT_RECORD_INVALID', '后台分析登记记录与其摘要不一致。');
+  requireEnrollment(DIGEST_PATTERN.test(recorded) && sha256Hex(canonical) === recorded, 'BACKGROUND_ANALYSIS_ENROLLMENT_RECORD_INVALID', '后台处理登记记录与其摘要不一致。');
   const record = parseCanonicalJson(canonical);
   requireEnrollment(isRecord(record) && Object.entries(facts).every(([key, value]) => record[key] === value),
-    'BACKGROUND_ANALYSIS_ENROLLMENT_RECORD_INVALID', '后台分析登记记录与其字段不一致。');
+    'BACKGROUND_ANALYSIS_ENROLLMENT_RECORD_INVALID', '后台处理登记记录与其字段不一致。');
   return record as Record<string, unknown>;
 }
 
@@ -326,10 +370,12 @@ export class BackgroundAnalysisEnrollmentLedger {
       isEnrollmentBinding(input.binding) && isWorkingPoint(input.enrolledAt) && DIGEST_PATTERN.test(input.disclosureDigest) &&
       isTokens(input.ceiling) && isTokens(input.share) && input.share.maxTotalTokens <= input.ceiling.maxTotalTokens &&
       isScope(input.scope, input.bookId) && canonicalRecord(input.binding.runBudgetCeiling).json === canonicalRecord(input.share).json,
-    'BACKGROUND_ANALYSIS_ENROLLMENT_INVALID', '后台分析登记的参数无效。');
+    'BACKGROUND_ANALYSIS_ENROLLMENT_INVALID', '后台处理登记的参数无效。');
     return transact(this.#db, () => {
       const now = new Date().toISOString();
-      let enrollmentId = this.#enrollmentId(input.bookId);
+      const kind = input.kind ?? BACKGROUND_ANALYSIS_KIND;
+      requireEnrollment(kind.length >= 1 && kind.length <= 120, 'BACKGROUND_ANALYSIS_ENROLLMENT_INVALID', '后台处理种类无效。');
+      let enrollmentId = this.#enrollmentId(input.bookId, kind);
       const current = enrollmentId === null ? null : this.#read(enrollmentId);
       if (current !== null && current.state === 'active') {
         requireEnrollment(current.version.disclosureDigest === input.disclosureDigest && current.version.startingPoint === input.startingPoint &&
@@ -339,24 +385,24 @@ export class BackgroundAnalysisEnrollmentLedger {
       }
       if (enrollmentId === null) {
         enrollmentId = randomUUID();
-        const enrollment = canonicalRecord({ schema: ENROLLMENT_SCHEMA, enrollmentId, bookId: input.bookId, scope: 'book', createdAt: now });
+        const enrollment = canonicalRecord({ schema: ENROLLMENT_SCHEMA, enrollmentId, bookId: input.bookId, kind, scope: 'book', createdAt: now });
         this.#db.prepare(
-          `INSERT INTO background_analysis_enrollments(enrollment_id, book_id, scope, created_at, canonical_json, sha256)
-           VALUES (?, ?, 'book', ?, ?, ?)`,
-        ).run(enrollmentId, input.bookId, now, enrollment.json, enrollment.digest);
+          `INSERT INTO background_analysis_enrollments(enrollment_id, book_id, scope, created_at, canonical_json, sha256, kind)
+           VALUES (?, ?, 'book', ?, ?, ?, ?)`,
+        ).run(enrollmentId, input.bookId, now, enrollment.json, enrollment.digest, kind);
       }
       const enrollmentVersionId = randomUUID();
       const ordinal = current === null ? 1 : current.version.ordinal + 1;
       const version = canonicalRecord({
-        schema: VERSION_SCHEMA_CEILING, enrollmentVersionId, enrollmentId, ordinal, analysisKind: BACKGROUND_ANALYSIS_KIND,
-        modes: [...BACKGROUND_ANALYSIS_MODES], startingPoint: input.startingPoint, binding: input.binding, enrolledAt: input.enrolledAt,
+        schema: VERSION_SCHEMA_CEILING, enrollmentVersionId, enrollmentId, ordinal, kind, analysisKind: kind,
+        modes: kind === BACKGROUND_ANALYSIS_KIND ? [...BACKGROUND_ANALYSIS_MODES] : [], startingPoint: input.startingPoint, binding: input.binding, enrolledAt: input.enrolledAt,
         disclosureDigest: input.disclosureDigest, actor: ACTOR, createdAt: now,
         ceiling: input.ceiling, share: input.share, scope: input.scope,
       });
       this.#db.prepare(
-        `INSERT INTO background_analysis_enrollment_versions(enrollment_version_id, enrollment_id, ordinal, analysis_kind, starting_point, disclosure_sha256, actor, created_at, canonical_json, sha256)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(enrollmentVersionId, enrollmentId, ordinal, BACKGROUND_ANALYSIS_KIND, input.startingPoint, input.disclosureDigest, ACTOR, now, version.json, version.digest);
+        `INSERT INTO background_analysis_enrollment_versions(enrollment_version_id, enrollment_id, ordinal, analysis_kind, starting_point, disclosure_sha256, actor, created_at, canonical_json, sha256, kind)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(enrollmentVersionId, enrollmentId, ordinal, kind, input.startingPoint, input.disclosureDigest, ACTOR, now, version.json, version.digest, kind);
       this.#appendState(enrollmentId, 'active', enrollmentVersionId, now);
       return this.#read(enrollmentId)!;
     });
@@ -364,7 +410,7 @@ export class BackgroundAnalysisEnrollmentLedger {
 
   /** A Series or all-Books `登记` (Issue #864): every Book of the scope enrolled in one transaction, or none. */
   enrollAll(inputs: ReadonlyArray<BackgroundAnalysisEnrollInput>): ReadonlyArray<BackgroundAnalysisEnrollmentRecord> {
-    requireEnrollment(inputs.length >= 1, 'BACKGROUND_ANALYSIS_ENROLLMENT_INVALID', '后台分析登记的参数无效。');
+    requireEnrollment(inputs.length >= 1, 'BACKGROUND_ANALYSIS_ENROLLMENT_INVALID', '后台处理登记的参数无效。');
     return transact(this.#db, () => inputs.map((input) => this.enroll(input)));
   }
 
@@ -374,10 +420,10 @@ export class BackgroundAnalysisEnrollmentLedger {
    * cancel — and the same request made twice answers as once.
    */
   hold(enrollmentId: string, paused: boolean): BackgroundAnalysisEnrollmentRecord {
-    requireEnrollment(UUID_PATTERN.test(enrollmentId), 'BACKGROUND_ANALYSIS_ENROLLMENT_INVALID', '后台分析登记标识无效。');
+    requireEnrollment(UUID_PATTERN.test(enrollmentId), 'BACKGROUND_ANALYSIS_ENROLLMENT_INVALID', '后台处理登记标识无效。');
     return transact(this.#db, () => {
       const current = this.#read(enrollmentId);
-      requireEnrollment(current !== null, 'BACKGROUND_ANALYSIS_ENROLLMENT_NOT_FOUND', '这份后台分析登记不存在。');
+      requireEnrollment(current !== null, 'BACKGROUND_ANALYSIS_ENROLLMENT_NOT_FOUND', '这份后台处理登记不存在。');
       requireEnrollment(current.state === 'active', 'BACKGROUND_ANALYSIS_ENROLLMENT_NOT_ACTIVE',
         current.state === 'suspended' ? BACKGROUND_SUSPENDED : BACKGROUND_REVOKED);
       if (current.paused === paused) return current;
@@ -420,8 +466,8 @@ export class BackgroundAnalysisEnrollmentLedger {
     return transact(this.#db, () => {
       const now = new Date().toISOString();
       let suspended = 0;
-      for (const bookId of this.enrolledBooks()) {
-        const enrollmentId = this.#enrollmentId(bookId)!;
+      for (const row of this.#db.prepare('SELECT enrollment_id FROM background_analysis_enrollments').all()) {
+        const enrollmentId = text(row.enrollment_id);
         let current: BackgroundAnalysisEnrollmentRecord | null;
         try {
           current = this.#read(enrollmentId);
@@ -438,12 +484,14 @@ export class BackgroundAnalysisEnrollmentLedger {
     });
   }
 
+  byId(enrollmentId: string): BackgroundAnalysisEnrollmentRecord | null { return this.#read(enrollmentId); }
+
   /** `撤销登记`: the Enrollment stays on record with every version, and no new Run starts under it. Revoking twice answers as once. */
   revoke(enrollmentId: string): BackgroundAnalysisEnrollmentRecord {
-    requireEnrollment(UUID_PATTERN.test(enrollmentId), 'BACKGROUND_ANALYSIS_ENROLLMENT_INVALID', '后台分析登记标识无效。');
+    requireEnrollment(UUID_PATTERN.test(enrollmentId), 'BACKGROUND_ANALYSIS_ENROLLMENT_INVALID', '后台处理登记标识无效。');
     return transact(this.#db, () => {
       const current = this.#read(enrollmentId);
-      requireEnrollment(current !== null, 'BACKGROUND_ANALYSIS_ENROLLMENT_NOT_FOUND', '这份后台分析登记不存在。');
+      requireEnrollment(current !== null, 'BACKGROUND_ANALYSIS_ENROLLMENT_NOT_FOUND', '这份后台处理登记不存在。');
       if (current.state === 'revoked') return current;
       this.#appendState(enrollmentId, 'revoked', current.version.enrollmentVersionId, new Date().toISOString());
       return this.#read(enrollmentId)!;
@@ -451,8 +499,8 @@ export class BackgroundAnalysisEnrollmentLedger {
   }
 
   /** The Book's Enrollment, in force or revoked; `null` when none was ever made. */
-  forBook(bookId: string): BackgroundAnalysisEnrollmentRecord | null {
-    const enrollmentId = this.#enrollmentId(bookId);
+  forBook(bookId: string, kind: string = BACKGROUND_ANALYSIS_KIND): BackgroundAnalysisEnrollmentRecord | null {
+    const enrollmentId = this.#enrollmentId(bookId, kind);
     return enrollmentId === null ? null : this.#read(enrollmentId);
   }
 
@@ -461,16 +509,16 @@ export class BackgroundAnalysisEnrollmentLedger {
    * at, one Book at a time, so a damaged record stops only its own Book (#713 review, P3-6).
    */
   enrolledBooks(): ReadonlyArray<string> {
-    const rows = this.#db.prepare('SELECT book_id FROM background_analysis_enrollments ORDER BY created_at, rowid').all() as SqlRow[];
+    const rows = this.#db.prepare("SELECT book_id FROM background_analysis_enrollments WHERE kind = 'baseline-analysis' ORDER BY created_at, rowid").all() as SqlRow[];
     return rows.map((row) => text(row.book_id));
   }
 
   /** Every Book's Enrollment in force, in the order they were made; a damaged record is left out rather than stopping the rest. */
   active(): ReadonlyArray<BackgroundAnalysisEnrollmentRecord> {
     const records: BackgroundAnalysisEnrollmentRecord[] = [];
-    for (const bookId of this.enrolledBooks()) {
+    for (const row of this.#db.prepare('SELECT enrollment_id FROM background_analysis_enrollments ORDER BY created_at, rowid').all()) {
       try {
-        const record = this.forBook(bookId);
+        const record = this.#read(text(row.enrollment_id));
         if (record !== null && record.state === 'active') records.push(record);
       } catch (error) {
         if (!(error instanceof BackgroundAnalysisEnrollmentError)) throw error;
@@ -481,11 +529,11 @@ export class BackgroundAnalysisEnrollmentLedger {
 
   /** The Enrollment a version belongs to and that version, whichever is in force now: a Run names the one it started under. */
   version(enrollmentVersionId: string): { enrollment: BackgroundAnalysisEnrollmentRecord; version: BackgroundAnalysisEnrollmentVersionRecord } | null {
-    requireEnrollment(UUID_PATTERN.test(enrollmentVersionId), 'BACKGROUND_ANALYSIS_ENROLLMENT_INVALID', '后台分析登记版本标识无效。');
+    requireEnrollment(UUID_PATTERN.test(enrollmentVersionId), 'BACKGROUND_ANALYSIS_ENROLLMENT_INVALID', '后台处理登记版本标识无效。');
     const row = this.#db.prepare('SELECT * FROM background_analysis_enrollment_versions WHERE enrollment_version_id = ?').get(enrollmentVersionId) as SqlRow | undefined;
     if (row === undefined) return null;
     const enrollment = this.#read(text(row.enrollment_id));
-    requireEnrollment(enrollment !== null, 'BACKGROUND_ANALYSIS_ENROLLMENT_RECORD_INVALID', '后台分析登记版本指向的登记不存在。');
+    requireEnrollment(enrollment !== null, 'BACKGROUND_ANALYSIS_ENROLLMENT_RECORD_INVALID', '后台处理登记版本指向的登记不存在。');
     return { enrollment, version: this.#versionOf(row) };
   }
 
@@ -493,11 +541,11 @@ export class BackgroundAnalysisEnrollmentLedger {
    * The Book's Enrollment's newest states, newest first and at most `limit` of them, with how many there are: its history, which
    * revoking never shortens.
    */
-  history(bookId: string, limit: number): {
+  history(bookId: string, limit: number, kind: string = BACKGROUND_ANALYSIS_KIND): {
     entries: ReadonlyArray<{ state: BackgroundAnalysisEnrollmentState; paused: boolean; ordinal: number; recordedAt: string }>;
     count: number;
   } {
-    const enrollmentId = this.#enrollmentId(bookId);
+    const enrollmentId = this.#enrollmentId(bookId, kind);
     if (enrollmentId === null) return { entries: [], count: 0 };
     const rows = this.#db.prepare(
       `SELECT s.state, s.recorded_at, s.canonical_json, v.ordinal FROM background_analysis_enrollment_states s
@@ -508,15 +556,15 @@ export class BackgroundAnalysisEnrollmentLedger {
     return {
       entries: rows.map((row) => {
         const state = text(row.state);
-        requireEnrollment(isState(state), 'BACKGROUND_ANALYSIS_ENROLLMENT_RECORD_INVALID', '后台分析登记状态无效。');
+        requireEnrollment(isState(state), 'BACKGROUND_ANALYSIS_ENROLLMENT_RECORD_INVALID', '后台处理登记状态无效。');
         return { state, paused: pausedOf(recordedRecord(row), state), ordinal: integer(row.ordinal), recordedAt: text(row.recorded_at) };
       }),
       count,
     };
   }
 
-  #enrollmentId(bookId: string): string | null {
-    const row = this.#db.prepare('SELECT enrollment_id FROM background_analysis_enrollments WHERE book_id = ?').get(bookId) as SqlRow | undefined;
+  #enrollmentId(bookId: string, kind: string = BACKGROUND_ANALYSIS_KIND): string | null {
+    const row = this.#db.prepare('SELECT enrollment_id FROM background_analysis_enrollments WHERE book_id = ? AND kind = ?').get(bookId, kind) as SqlRow | undefined;
     return row === undefined ? null : text(row.enrollment_id);
   }
 
@@ -524,15 +572,16 @@ export class BackgroundAnalysisEnrollmentLedger {
     const last = this.#db.prepare('SELECT max(sequence) last FROM background_analysis_enrollment_states WHERE enrollment_id = ?').get(enrollmentId) as SqlRow;
     const sequence = last.last === null ? 1 : integer(last.last) + 1;
     // A suspension is AI7's, after the local data was replaced; every other state is the editor's decision.
+    const kind = text(this.#db.prepare('SELECT kind FROM background_analysis_enrollments WHERE enrollment_id = ?').get(enrollmentId)?.kind);
     const actor = state === 'suspended' ? 'AI7' : ACTOR;
     // An active state says whether the editor paused it (Issue #864); every other state is written as it always was.
     const record = canonicalRecord(state === 'active'
-      ? { schema: STATE_SCHEMA_HOLD, enrollmentId, sequence, state, enrollmentVersionId, actor, recordedAt, paused }
-      : { schema: STATE_SCHEMA, enrollmentId, sequence, state, enrollmentVersionId, actor, recordedAt });
+      ? { schema: STATE_SCHEMA_HOLD, kind, enrollmentId, sequence, state, enrollmentVersionId, actor, recordedAt, paused }
+      : { schema: STATE_SCHEMA, kind, enrollmentId, sequence, state, enrollmentVersionId, actor, recordedAt });
     this.#db.prepare(
-      `INSERT INTO background_analysis_enrollment_states(enrollment_id, sequence, state, enrollment_version_id, actor, recorded_at, canonical_json, sha256)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(enrollmentId, sequence, state, enrollmentVersionId, actor, recordedAt, record.json, record.digest);
+      `INSERT INTO background_analysis_enrollment_states(enrollment_id, sequence, state, enrollment_version_id, actor, recorded_at, canonical_json, sha256, kind)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(enrollmentId, sequence, state, enrollmentVersionId, actor, recordedAt, record.json, record.digest, kind);
   }
 
   #versionOf(row: SqlRow): BackgroundAnalysisEnrollmentVersionRecord {
@@ -541,7 +590,7 @@ export class BackgroundAnalysisEnrollmentLedger {
     const startingPoint = text(row.starting_point);
     const disclosureDigest = text(row.disclosure_sha256);
     const createdAt = text(row.created_at);
-    requireEnrollment(startingPoint === 'prospective' || startingPoint === 'backfill', 'BACKGROUND_ANALYSIS_ENROLLMENT_RECORD_INVALID', '后台分析登记的起点无效。');
+    requireEnrollment(startingPoint === 'prospective' || startingPoint === 'backfill', 'BACKGROUND_ANALYSIS_ENROLLMENT_RECORD_INVALID', '后台处理登记的起点无效。');
     const facts = {
       enrollmentVersionId, enrollmentId: text(row.enrollment_id), ordinal, analysisKind: text(row.analysis_kind),
       startingPoint, disclosureDigest, actor: text(row.actor), createdAt,
@@ -550,15 +599,15 @@ export class BackgroundAnalysisEnrollmentLedger {
     const withCeiling = recordedSchema(row) === VERSION_SCHEMA_CEILING;
     const record = requireRecord(row, { schema: withCeiling ? VERSION_SCHEMA_CEILING : VERSION_SCHEMA, ...facts });
     const bookId = (this.#db.prepare('SELECT book_id FROM background_analysis_enrollments WHERE enrollment_id = ?').get(facts.enrollmentId) as SqlRow | undefined)?.book_id;
-    requireEnrollment(record.analysisKind === BACKGROUND_ANALYSIS_KIND && Array.isArray(record.modes) &&
-      JSON.stringify(record.modes) === JSON.stringify(BACKGROUND_ANALYSIS_MODES) &&
+    requireEnrollment(record.analysisKind === row.kind && (record.kind ?? BACKGROUND_ANALYSIS_KIND) === row.kind && Array.isArray(record.modes) &&
+      JSON.stringify(record.modes) === JSON.stringify(row.kind === BACKGROUND_ANALYSIS_KIND ? BACKGROUND_ANALYSIS_MODES : []) &&
       (withCeiling ? isEnrollmentBinding(record.binding) : isDefaultExecutionRuleBinding(record.binding)) && isWorkingPoint(record.enrolledAt) &&
       (!withCeiling || (isTokens(record.ceiling) && isTokens(record.share) && record.share.maxTotalTokens <= record.ceiling.maxTotalTokens &&
         typeof bookId === 'string' && isScope(record.scope, bookId) &&
         canonicalRecord((record.binding as DefaultExecutionRuleBinding).runBudgetCeiling).json === canonicalRecord(record.share).json)),
-    'BACKGROUND_ANALYSIS_ENROLLMENT_RECORD_INVALID', '后台分析登记记录的绑定无效。');
+    'BACKGROUND_ANALYSIS_ENROLLMENT_RECORD_INVALID', '后台处理登记记录的绑定无效。');
     return {
-      enrollmentVersionId, ordinal, startingPoint, binding: record.binding as DefaultExecutionRuleBinding, enrolledAt: record.enrolledAt as BackgroundAnalysisWorkingPoint,
+      kind: text(row.kind), enrollmentVersionId, ordinal, startingPoint, binding: record.binding as DefaultExecutionRuleBinding, enrolledAt: record.enrolledAt as BackgroundAnalysisWorkingPoint,
       disclosureDigest, createdAt,
       ceiling: withCeiling ? record.ceiling as BackgroundAnalysisTokens : null,
       share: withCeiling ? record.share as BackgroundAnalysisTokens : null,
@@ -572,12 +621,14 @@ export class BackgroundAnalysisEnrollmentLedger {
     if (row === undefined) return null;
     const bookId = text(row.book_id);
     const createdAt = text(row.created_at);
-    requireRecord(row, { schema: ENROLLMENT_SCHEMA, enrollmentId, bookId, scope: text(row.scope), createdAt });
+    const enrollment = requireRecord(row, { schema: ENROLLMENT_SCHEMA, enrollmentId, bookId, scope: text(row.scope), createdAt });
     const stateRow = this.#db.prepare('SELECT * FROM background_analysis_enrollment_states WHERE enrollment_id = ? ORDER BY sequence DESC LIMIT 1').get(enrollmentId) as SqlRow | undefined;
     // An Enrollment, its first version and its first state are written in one transaction: one without a state is not one this ledger wrote.
-    requireEnrollment(stateRow !== undefined, 'BACKGROUND_ANALYSIS_ENROLLMENT_RECORD_INVALID', '后台分析登记缺少状态记录。');
+    requireEnrollment(stateRow !== undefined, 'BACKGROUND_ANALYSIS_ENROLLMENT_RECORD_INVALID', '后台处理登记缺少状态记录。');
+    const kind = text(row.kind);
+    requireEnrollment(kind === stateRow.kind && (enrollment.kind ?? BACKGROUND_ANALYSIS_KIND) === kind, 'BACKGROUND_ANALYSIS_ENROLLMENT_RECORD_INVALID', '后台处理登记种类不一致。');
     const state = text(stateRow.state);
-    requireEnrollment(isState(state), 'BACKGROUND_ANALYSIS_ENROLLMENT_RECORD_INVALID', '后台分析登记状态无效。');
+    requireEnrollment(isState(state), 'BACKGROUND_ANALYSIS_ENROLLMENT_RECORD_INVALID', '后台处理登记状态无效。');
     const stateRecordedAt = text(stateRow.recorded_at);
     const enrollmentVersionId = text(stateRow.enrollment_version_id);
     const stateFacts = { enrollmentId, sequence: integer(stateRow.sequence), state, enrollmentVersionId, actor: text(stateRow.actor), recordedAt: stateRecordedAt };
@@ -586,8 +637,9 @@ export class BackgroundAnalysisEnrollmentLedger {
     const paused = pausedOf(stateRecord, state);
     const versionRow = this.#db.prepare('SELECT * FROM background_analysis_enrollment_versions WHERE enrollment_version_id = ? AND enrollment_id = ?')
       .get(enrollmentVersionId, enrollmentId) as SqlRow | undefined;
-    requireEnrollment(versionRow !== undefined, 'BACKGROUND_ANALYSIS_ENROLLMENT_RECORD_INVALID', '后台分析登记状态指向的版本不存在。');
-    return { enrollmentId, bookId, createdAt, state, paused, stateRecordedAt, version: this.#versionOf(versionRow) };
+    requireEnrollment(versionRow !== undefined, 'BACKGROUND_ANALYSIS_ENROLLMENT_RECORD_INVALID', '后台处理登记状态指向的版本不存在。');
+    requireEnrollment(versionRow.kind === kind && (stateRecord.kind ?? BACKGROUND_ANALYSIS_KIND) === kind, 'BACKGROUND_ANALYSIS_ENROLLMENT_RECORD_INVALID', '后台处理登记状态种类不一致。');
+    return { kind, enrollmentId, bookId, createdAt, state, paused, stateRecordedAt, version: this.#versionOf(versionRow) };
   }
 }
 
@@ -608,7 +660,7 @@ function recordedSchema(row: SqlRow): unknown {
 /** Whether a state record says the editor paused the Enrollment: only an active state `/2` may, and it must say so exactly. */
 function pausedOf(record: unknown, state: string): boolean {
   if (!isRecord(record) || record.schema !== STATE_SCHEMA_HOLD) return false;
-  requireEnrollment(state === 'active' && typeof record.paused === 'boolean', 'BACKGROUND_ANALYSIS_ENROLLMENT_RECORD_INVALID', '后台分析登记状态无效。');
+  requireEnrollment(state === 'active' && typeof record.paused === 'boolean', 'BACKGROUND_ANALYSIS_ENROLLMENT_RECORD_INVALID', '后台处理登记状态无效。');
   return record.paused;
 }
 
@@ -653,7 +705,7 @@ export interface BackgroundAnalysisFacts {
   /** The version in force carries the ceiling set at 登记; one made before a ceiling was required does not (Issue #864). */
   readonly ceiling: boolean;
   /**
-   * This launch's selected policy admits a Run a 后台分析登记 dispatches (Issue #864): the enrolled-background rule of Provider
+   * This launch's selected policy admits a Run a 后台处理登记 dispatches (Issue #864): the enrolled-background rule of Provider
    * Processing v14 (developer-live) or v15 (ordinary production), or the provider-free local route of development-ci.
    */
   readonly ruleAdmits: boolean;
@@ -760,7 +812,7 @@ export const BACKGROUND_STATE_LABELS = {
 } as const;
 /** ②A's statement of what an Enrollment is (ADR 0048; V2-UX-ANALYSIS-017). */
 export const BACKGROUND_ANALYSIS_STATEMENT =
-  '登记后台分析后，这本书的稿件有了已确认的改动、停下一会儿，AI7 会自己开始一次基线分析，把结果带到当前稿件；每次运行都不超过登记时设下的预算上限，并留下那一次的计划和运行授权，写明按哪一版登记开始。暂停后先不开始新的后台分析，续行后照常；撤销后不再开始。';
+  '按种类登记后台处理后，这本书有了已确认的改动并空闲时，AI7 才会按登记准备相应工序；每次运行都不超过登记的预算上限，留下精确计划、模型绑定和运行授权，写明登记版本。暂停先不开始新的处理，续行后照常；撤销后不再开始。尚未接入的工序只保留登记，不会派发。';
 export const BACKGROUND_ANALYSIS_WHAT = '基线分析：还没有结果时做首次基线分析；结果过期时同步到当前稿件，只重算改动过的部分。';
 export function backgroundAnalysisWhen(quietMs: number): string {
   return `稿件有已确认的改动并停下 ${Math.round(quietMs / 1000)} 秒后开始；你正在准备或运行这本书的任务时不开始，也不重做你开始过的任务；你开始的任务可使用全部运行名额；后台分析只在有空位且未达到后台份额时开始，不够时等下一次，不排队等候。`;
@@ -787,8 +839,8 @@ export const BACKGROUND_REVOKE_CONSEQUENCES: ReadonlyArray<string> = [
   '已有的结果、运行记录、已经发送的内容和这份登记的历史都保留，不会撤回或改写',
 ];
 
-export const BACKGROUND_NOT_ENROLLED = '这本书没有登记后台分析：只有你开始的任务才会运行。';
-export const BACKGROUND_RECORD_DAMAGED = '这本书的后台分析登记记录无法读取，后台分析不会开始；其他图书不受影响。';
+export const BACKGROUND_NOT_ENROLLED = '这本书没有登记后台处理：只有你开始的任务才会运行。';
+export const BACKGROUND_RECORD_DAMAGED = '这本书的后台处理登记记录无法读取，后台分析不会开始；其他图书不受影响。';
 export const BACKGROUND_REVOKED = '已撤销：不会再开始新的后台分析。';
 export const BACKGROUND_SUSPENDED = '本机数据替换或回滚后，这份登记待你确认：重新登记之前不会开始后台分析。';
 export const BACKGROUND_PAUSED = '已暂停：续行之前不会开始新的后台分析；已经开始的运行照常进行。';
@@ -816,6 +868,8 @@ export function backgroundQuietReason(quietMs: number): string {
   return `稿件刚改动过；停下 ${Math.round(quietMs / 1000)} 秒后开始。`;
 }
 export const BACKGROUND_PLACE_BUSY = '运行名额已满；有空位后再开始。';
+/** The lane waits for the network as well as for quiet (Issue #1089): nothing starts offline, and ②A says so. */
+export const BACKGROUND_OFFLINE = '现在没有联网；联网后再开始。';
 export function backgroundShareFullReason(share: number): string {
   return `后台分析最多同时占用 ${share} 个运行名额，总给你留一个；有空位后再开始。`;
 }
@@ -855,7 +909,7 @@ export function backgroundNotStartedReason(reason: string): string {
   return `后台分析这次没有开始：${reason}`;
 }
 export function backgroundEnrollmentName(ordinal: number): string {
-  return `后台分析登记 · 第 ${ordinal} 版`;
+  return `后台处理登记 · 第 ${ordinal} 版`;
 }
 
 /** What 预算上限 reads in `登记…`'s disclosure: the ceiling is the editor's to set there, and it is required (Issue #864). */
@@ -883,7 +937,7 @@ export function backgroundCeilingTooLowReason(books: number): string {
 }
 
 /**
- * The Run Report's lines for a Run a 后台分析登记 started (Issue #864): the version that started it, the scope and the share it
+ * The Run Report's lines for a Run a 后台处理登记 started (Issue #864): the version that started it, the scope and the share it
  * was held to, the ceiling its plan froze, and how it ended against that ceiling. Counts only — never manuscript text.
  */
 export function backgroundRunReportLines(input: {
@@ -895,7 +949,7 @@ export function backgroundRunReportLines(input: {
   usedTokens: number;
   reached: boolean;
 }): string[] {
-  const lines = [input.ordinal === null ? '由后台分析登记开始（这份登记的版本不在本机记录里）' : `由后台分析登记开始 · 按第 ${input.ordinal} 版登记`];
+  const lines = [input.ordinal === null ? '由后台处理登记开始（这份登记的版本不在本机记录里）' : `由后台处理登记开始 · 按第 ${input.ordinal} 版登记`];
   if (input.scopeLabel !== null && input.ceilingTokens !== null && input.shareTokens !== null) {
     lines.push(input.shareTokens === input.ceilingTokens
       ? `范围：${input.scopeLabel}；登记上限 ${input.ceilingTokens} tokens`

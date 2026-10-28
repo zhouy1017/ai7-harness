@@ -1,3 +1,4 @@
+import { initializeTaskAuthorizationSchema } from '../../src/service/task-authorization.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { OUTCOME_RESOLUTION_SCHEMA_SQL, initializeOutcomeResolutionSchema } from '../../src/service/analysis/outcome-resolutions.js';
 import { join } from 'node:path';
@@ -178,7 +179,7 @@ const REVISIONS: ReadonlyArray<Revision> = [
     undo: (database) => drop(database, Object.keys(MATERIAL_INDEX_SCHEMA_SQL).reverse()),
   },
   {
-    // Revision 66 (Issue #95, S39): each Book's 后台分析登记, created before the stamp, and the Run Authorizations' origin widened
+    // Revision 66 (Issue #95, S39): each Book's 后台处理登记, created before the stamp, and the Run Authorizations' origin widened
     // for it — a widening the next open performs again from revision 65's text.
     revision: 66,
     step: initializeBackgroundAnalysisEnrollmentSchema,
@@ -446,4 +447,16 @@ describe('an upgrade interrupted before its version stamp', () => {
     }, (error: unknown) => error);
     expect(refused instanceof BoundedStoreError || refused instanceof StoreError ? refused.code : refused).toBe('SCHEMA_MIGRATION_FAILED');
   }, 120_000);
+});
+
+
+it('reopens idempotently after the reader-only stamp commits before its open-history record (#1131)', async () => {
+  expect(await opened()).toBe(LATEST_SCHEMA_VERSION);
+  const before = tables();
+  withDatabase((db) => { execPre74Fixture(db, 'PRAGMA user_version = 91'); initializeTaskAuthorizationSchema(db);
+    expect(db.prepare('PRAGMA user_version').get()!.user_version).toBe(LATEST_SCHEMA_VERSION); });
+  expect(tables()).toEqual(before);
+  expect(await opened()).toBe(LATEST_SCHEMA_VERSION);
+  expect(await opened()).toBe(LATEST_SCHEMA_VERSION);
+  expect(tables()).toEqual(before);
 });

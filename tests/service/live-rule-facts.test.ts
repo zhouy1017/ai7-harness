@@ -86,7 +86,7 @@ describe('default execution rule facts under developer-live (#810)', () => {
   it('refuses every other kind live, and writing under a policy that names no writing rule', () => {
     const baseline = new BaselineAnalysisStore(database, {} as never, null);
     expect(baseline.currentRuleFacts(bookId, 'first-baseline').runBudgetCeiling).toBe('unset');
-    // The baseline kind's facts are read live only for what a 后台分析登记 binds, under the enrolled-background rule (Issue #864).
+    // The baseline kind's facts are read live only for what a 后台处理登记 binds, under the enrolled-background rule (Issue #864).
     baseline.bindLaunch(live(selected));
     expect(refusedCode(() => baseline.currentRuleFacts(bookId, 'first-baseline'))).toBe('read');
     baseline.bindLaunch(live({ ...selected, providerProcessing: { ...selected.providerProcessing,

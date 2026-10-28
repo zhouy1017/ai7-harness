@@ -120,6 +120,8 @@ export function taskPanelCardView(entry: BookTaskItemProjection): TaskPanelCardV
     case 'analysis-running':
       actions = [action('pause', true), action('cancel'), action('plan')];
       break;
+    case 'analysis-waiting-idle':
+    case 'analysis-yielded':
     case 'analysis-queued':
     case 'analysis-pausing':
       actions = [action('cancel'), action('plan')];

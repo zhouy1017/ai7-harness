@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -21,6 +22,12 @@ import {
 } from '../../src/shared/protocol.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for Issue #288 under the Owner's decision of 2026-10-07 (甲): the latest plan version is
 // what a Task's range reads as, wherever a Task names its scope, while the Task Intent row keeps the range it was first
@@ -78,7 +85,7 @@ const blocks = (range: BaselineAnalysisSelectedRange): string => `内容块 ${ra
 describe('a Task\'s range reads as its latest plan version (Issue #288 甲)', () => {
   it('names the revised range on every surface while the Task Intent row keeps the first', async () => {
     const store = await openWithRoute();
-    const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+    const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
     const prepare = (bookId: string, update: BaselineAnalysisUpdateRequest | null, options: { reconfirm?: boolean; redoOf?: string } = {}): BaselineAnalysisProjection => {
       const goal = update === null ? BASELINE_ANALYSIS_TASK_GOAL : BASELINE_ANALYSIS_MODE_GOALS[update.mode];
       let progress = store.createBaselineAnalysisPreparationWork(bookId, goal, update, launchPolicy, options.reconfirm ?? false, options.redoOf ?? null);
@@ -121,6 +128,7 @@ describe('a Task\'s range reads as its latest plan version (Issue #288 甲)', ()
     };
     const live = (): void => store.baselineAnalysisLedger.bindLaunch({
       operationalScope: 'developer-live',
+      localFixtureRuntime: () => store.localFixtureRuntime(),
       live: {
         route: 'opencode-go',
         model: 'deepseek-v4.1-flash',
@@ -130,7 +138,8 @@ describe('a Task\'s range reads as its latest plan version (Issue #288 甲)', ()
         runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 240_000 },
       },
     });
-    const offline = (): void => store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'development-ci', live: null });
+    const offline = (): void => store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'development-ci', live: null,
+      policy: launchPolicy, localFixtureRuntime: () => store.localFixtureRuntime() });
     const preflight = (connectivity: () => Connectivity) => reconnectPreflight({
       waitingRuns: () => store.waitingBaselineAnalysisRuns(null),
       stillWaiting: ({ runRecordId }) => store.baselineAnalysisRunWaits(runRecordId),

@@ -591,7 +591,7 @@ describe('the authorization bar (S74a)', () => {
       runControl: { ...runControl, pausing: true, cancel: { reason: '正在暂停：正在进行的这一步完成后停下', impact: [] }, pause: { reason: '这项任务现在没有在运行，不能暂停；可以取消它' } },
     }));
     expect(pausing).toMatchObject({ status: '正在暂停', note: TASK_BAR_PAUSING_NOTE });
-    expect(TASK_BAR_PAUSING_NOTE).toBe('已记下你的暂停；正在进行的这一步完成后停下，已完成的部分都会保存');
+    expect(TASK_BAR_PAUSING_NOTE).toBe('已记下你的暂停；正在进行的这一步完成后停下，不再开始下一步，结果与用量都会保存');
     expect(names(pausing)).toEqual(['run-link']);
   });
 
@@ -622,7 +622,7 @@ describe('the authorization bar (S74a)', () => {
     }));
     expect(blocked.status).toBe('任务已中断 · 可续行');
     expect(blocked.actions[0]).toEqual({ name: 'resume', label: '续行', tone: 'primary', disabledReason: '运行名额已满：正在运行的任务结束后再续行。' });
-    expect(taskBarContinuationNote(8, 8)).toBe('已读完全部 8 个阅读范围，结果都已保存；续行时接着做之后的归纳与抽样');
+    expect(taskBarContinuationNote(8, 8)).toBe('已读完全部 8 个阅读范围，结果都已保存；续行时只处理尚未完成的步骤，已保存的步骤不会重做');
     // An answer recorded and not yet carried out is handled first; with none, today's words stand (Issue #784).
     expect(taskBarContinuationNote(7, 8, [5])).toBe('已读完 7 / 8 个阅读范围，结果都已保存；续行时先按你的回答处理第 5 个，再继续未完成的部分，不重复已读完的部分');
     expect(taskBarContinuationNote(7, 8, [5, 6])).toContain('先按你的回答处理第 5、6 个，再继续未完成的部分');
@@ -700,6 +700,21 @@ describe('the activity card (Issue #422, AUTH-011)', () => {
     expect(taskPlanActivityIsStale(activity, at('2026-09-24T01:01:11.000Z'))).toBe(true);
     expect(taskPlanActivityIsStale({ ...activity, currentUnitStartedAt: null }, at('2026-09-24T02:00:00.000Z'))).toBe(false);
     expect(TASK_PLAN_ACTIVITY_UNREPORTED).toBe('这项任务现在没有在运行：AI7 上次关闭时它没有结束。可以取消它，再准备新的任务。');
+  });
+
+  it('shows every governed unit and starts stale timing at that request admission (#1131)', () => {
+    const governed = { ...activity, inFlightUnits: [
+      { unitOrdinal: 3, attemptState: 'dispatched' as const, requestState: 'waiting-for-capacity' as const, admittedRequestStartedAt: null },
+      { unitOrdinal: 4, attemptState: 'awaiting-response' as const, requestState: 'admitted' as const, admittedRequestStartedAt: '2026-09-24T01:01:00.000Z' },
+      { unitOrdinal: 5, attemptState: 'dispatched' as const, requestState: 'between-requests' as const, admittedRequestStartedAt: null },
+    ] };
+    const rows = Object.fromEntries(taskPlanActivityRows(governed, null, at('2026-09-24T01:01:05.000Z')));
+    expect(rows['阅读范围 3']).toBe('等待模型请求名额');
+    expect(rows['阅读范围 4']).toBe('等待模型响应 · 本次请求 00:05');
+    expect(rows['阅读范围 5']).toBe('正在处理工具或本地步骤');
+    expect(taskPlanActivityIsStale(governed, at('2026-09-24T01:01:11.000Z'))).toBe(false);
+    expect(taskPlanActivityIsStale(governed, at('2026-09-24T01:01:41.000Z'))).toBe(true);
+    expect(taskPlanActivityIsStale({ ...governed, inFlightUnits: [governed.inFlightUnits[0]!] }, at('2026-09-24T02:00:00.000Z'))).toBe(false);
   });
 });
 

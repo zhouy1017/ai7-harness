@@ -1,10 +1,11 @@
-import { GLOBAL_AGENT_PROMPT_CONTRACT, GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST, admittedGlobalAgentRoute } from './global-agent-session.js';
+import { GLOBAL_AGENT_PROMPT_CONTRACT, GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST, GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT, GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT_DIGEST,
+  admittedGlobalAgentRoute, admittedGlobalAgentScopedRoute } from './global-agent-session.js';
 import { randomUUID } from 'node:crypto';
 import { RetrievalIndex } from '../retrieval/index.js';
-import { PlatformToolSession } from '../provider/platform-tool-session.js';
+import { PlatformToolSession, type GlobalAgentScopedToolOwner } from '../provider/platform-tool-session.js';
 import { DIALOGUE_RETRIEVAL_PROMPT_CONTRACT, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST } from './contract.js';
 import { sha256Hex } from '../analysis/canonical.js';
-import { DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS } from '../analysis/execution.js';
+import { DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS, type ModelRequestGovernor, type ModelRequestProducer } from '../analysis/execution.js';
 import { describeComposition, prepareExecution, type HarnessTurnOutcome, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
 import { isOrdinaryProductionRuntime, type DeveloperLiveRuntime, type LiveRuntime, type OrdinaryProductionRuntime } from '../launch-policy.js';
 import {
@@ -16,7 +17,7 @@ import {
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../shared/protected-secret-identity.js';
 import { CredentialBroker, type CredentialSlotBinding, type SecretResolver } from '../provider/credential-broker.js';
 import { AI7_FAILURE_CODES } from '../provider/classification.js';
-import { DeepSeekOpenAiCompatibleAdapter, type DeepSeekTransport } from '../provider/deepseek-adapter.js';
+import { DeepSeekOpenAiCompatibleAdapter, modelRequestNotSent, type DeepSeekTransport } from '../provider/deepseek-adapter.js';
 import { Ai7LocalDeterministicAdapter, dialogueRetrievalFixtureRule, type AnswerHold } from '../provider/local-deterministic-adapter.js';
 import {
   LOCAL_DETERMINISTIC_MODEL,
@@ -24,10 +25,11 @@ import {
   evaluateEgress,
   type EgressBindingFacts,
   type ExecutionRoute,
+  type OutboundDataCategory,
   type TransmitTicket,
 } from '../provider/egress-gate.js';
 import { transmitOnce } from '../provider/live-transmission.js';
-import type { ResolvedModelFixture } from '../provider/model-fixture.js';
+import type { LocalFixtureExecutionContext, LocalFixtureRuntimeContext, ResolvedModelFixture } from '../provider/model-fixture.js';
 import { ProviderResultCache } from '../provider/provider-result-cache.js';
 import {
   AGENT_WORKSPACE_PROMPT_CONTRACT,
@@ -64,9 +66,12 @@ import { DIALOGUE_OUTBOUND_CATEGORY, DIALOGUE_TASK_KIND, admittedDialogueRoute, 
  * reaches the transport itself every time, and nothing reads or writes the development cache or ledger.
  */
 export interface DialogueRecords {
+  localFixtureRuntime?(): LocalFixtureRuntimeContext | null;
   bindDialogueAttempt(attemptId: string, binding: StoredDialogueBinding): void;
   openDialogueSpan(attemptId: string, harnessSessionId: string, startSeq: number): void;
   settleDialogueAttempt(attemptId: string, outcome: DialogueOutcome, endSeq: number | null, causeCode: string | null): void;
+  /** A scoped Global Agent turn's pinned index and further tools (#1171); without it every scoped turn refuses. */
+  globalAgentScopedTools?(message: DialogueMessageInput): { retrieval: RetrievalIndex; scopedTools: GlobalAgentScopedToolOwner };
 }
 
 /**
@@ -75,6 +80,8 @@ export interface DialogueRecords {
  * attempt, so a route switch reaches the next question.
  */
 export interface DialogueLiveRoute {
+  readonly transportSettings?: LaunchPolicyProjection['providerProcessing']['transport'];
+  readonly current?: (reference: string, route: AdmittedDialogueRoute) => boolean;
   readonly runtime: LiveRuntime;
   readonly broker: CredentialBroker;
   /** The route the selected policy admits for the dialogue; `null` refuses every dialogue under this launch. */
@@ -84,6 +91,7 @@ export interface DialogueLiveRoute {
 }
 
 export interface DialogueExecutionDeps {
+  readonly requestGovernor: ModelRequestGovernor;
   /** The attempt's disposable retrieval index over the dialogue's pinned revision (#893); empty when absent. */
   readonly retrievalIndex?: (dialogueId: string) => RetrievalIndex;
   readonly records: DialogueRecords;
@@ -104,6 +112,7 @@ export interface DialogueExecutionDeps {
 export function dialogueLiveRoute(runtime: DeveloperLiveRuntime, policy: LaunchPolicyProjection, secretResolver: SecretResolver): DialogueLiveRoute {
   return {
     runtime,
+    transportSettings: policy.providerProcessing.transport,
     broker: new CredentialBroker(secretResolver),
     route: admittedDialogueRoute(policy),
     credentialReference: DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE,
@@ -122,6 +131,13 @@ export function productionDialogueRoute(
 ): DialogueLiveRoute {
   return {
     runtime,
+    get transportSettings() { return policy().providerProcessing.transport; },
+    current: (reference, route) => {
+      const current = admittedDialogueRoute(policy());
+      return credentialReference() === reference && current !== null && current.ruleId === route.ruleId &&
+        current.profile.route === route.profile.route && current.profile.endpoint === route.profile.endpoint &&
+        current.modelProfile.model === route.modelProfile.model;
+    },
     broker: new CredentialBroker(secretResolver, { developmentReferences: 'refused' }),
     get route() {
       const admitted = admittedDialogueRoute(policy());
@@ -176,6 +192,8 @@ export function dialogueRouteRefusal(deps: Pick<DialogueExecutionDeps, 'fixture'
 }
 
 interface ActiveAnswer {
+  readonly requestAbort: AbortController;
+  producer: ModelRequestProducer | null;
   retrieval?: RetrievalIndex | null;
   readonly attemptId: string;
   readonly message: DialogueMessageInput;
@@ -212,14 +230,31 @@ export class DialogueExecutionOwner {
   }
 
   requireGlobalReady(policy: LaunchPolicyProjection): AdmittedDialogueRoute {
-    const route = admittedGlobalAgentRoute(policy);
-    if (route === null || this.#deps.live === null || this.#disposed) throw new DialogueError('GLOBAL_AGENT_POLICY_BLOCKED', '当前处理策略未允许');
+    return this.#requireGlobal(admittedGlobalAgentRoute(policy));
+  }
+
+  /** The scoped tool dialogue's own admission (#1171): a launch that admits only the no-tools rule refuses here, never falls back. */
+  requireGlobalScopedReady(policy: LaunchPolicyProjection): AdmittedDialogueRoute {
+    if (this.#deps.records.globalAgentScopedTools === undefined) throw new DialogueError('GLOBAL_AGENT_POLICY_BLOCKED', '当前处理策略未允许');
+    return this.#requireGlobal(admittedGlobalAgentScopedRoute(policy));
+  }
+
+  #requireGlobal(route: AdmittedDialogueRoute | null): AdmittedDialogueRoute {
+    const bound = this.#deps.live?.route;
+    if (route === null || this.#deps.live === null || this.#disposed || !this.#deps.live.credentialReference ||
+        bound?.profile.route !== route.profile.route || bound.modelProfile.model !== route.modelProfile.model)
+      throw new DialogueError('GLOBAL_AGENT_POLICY_BLOCKED', '当前处理策略未允许');
     return route;
   }
 
+  globalDisclosureReference(): string { return this.#deps.live?.credentialReference ?? ''; }
+
   beginGlobal(turn: DialogueTurnStart, route: AdmittedDialogueRoute, sourceGuard: () => boolean): void {
     if (turn.message.globalSources === undefined || !sourceGuard()) throw new DialogueError('GLOBAL_AGENT_SCOPE_CHANGED', '记忆范围已经变化；未发送任何内容。');
-    this.begin({ ...turn, globalRoute: route, globalCredentialReference: this.#deps.live?.credentialReference ?? '', sourceGuard });
+    const credentialReference = this.#deps.live?.credentialReference ?? '';
+    const bindingCurrent = (): boolean => sourceGuard() && this.#deps.live?.credentialReference === credentialReference &&
+      this.#deps.live.route?.profile.route === route.profile.route && this.#deps.live.route.modelProfile.model === route.modelProfile.model;
+    this.begin({ ...turn, globalRoute: route, globalCredentialReference: credentialReference, sourceGuard: bindingCurrent });
   }
 
   /** What the attempt in flight sent and has streamed so far; `null` for any other attempt. */
@@ -255,9 +290,11 @@ export class DialogueExecutionOwner {
     }
     let settle!: () => void;
     const done = new Promise<void>((resolve) => { settle = resolve; });
-    const active: ActiveAnswer = { attemptId: turn.attemptId, message: turn.message, streamed: '', stopRequested: false, harness: null, done };
+    const active: ActiveAnswer = { attemptId: turn.attemptId, message: turn.message, streamed: '', stopRequested: false, harness: null, done,
+      requestAbort: new AbortController(), producer: null };
     this.#active = active;
     void this.#run(active, turn).finally(() => {
+      if (active.producer !== null) this.#deps.requestGovernor.unregisterProducer(active.producer);
       if (this.#active === active) this.#active = null;
       settle();
       this.#beginQueued();
@@ -289,7 +326,8 @@ export class DialogueExecutionOwner {
     const active = this.#active;
     if (active === null || active.attemptId !== attemptId) return;
     active.stopRequested = true;
-    active.harness?.interrupt();
+    active.requestAbort.abort();
+    if (this.#deps.live === null) active.harness?.interrupt();
     await active.done;
   }
 
@@ -303,7 +341,11 @@ export class DialogueExecutionOwner {
       }
     } finally {
       const active = this.#active;
-      if (active !== null) { active.harness?.interrupt(); await active.done; }
+      if (active !== null) {
+        active.requestAbort.abort();
+        if (this.#deps.live === null) active.harness?.interrupt();
+        await active.done;
+      }
     }
   }
 
@@ -314,32 +356,57 @@ export class DialogueExecutionOwner {
     const sessionId = randomUUID();
     // An Agent 工作区 turn registers no tool, whatever the rule or fixture offers the dialogue (Issue #90, slice 13a).
     const global = turn.message.globalSources !== undefined;
+    // A scoped Global turn registers exactly its rule's four declared tools on composition v2 (#1171); the no-tools turn none.
+    const scoped = global && turn.message.globalScope !== undefined ? turn.globalRoute?.localTools ?? null : null;
     const workspace = turn.settled !== undefined;
-    const localRule = workspace || global ? null
+    const admittedLocalRule = workspace || global ? null
       : live?.route?.localTools ?? (live === null && this.#deps.fixture !== null ? dialogueRetrievalFixtureRule(this.#deps.fixture, turn.message) : null);
+    // This caller still pins composition v1; Book dialogue's expanded tool composition belongs to F-18b.
+    const localRule = scoped ?? (admittedLocalRule === null ? null : { targetedRetrieval: admittedLocalRule.targetedRetrieval, breaker: admittedLocalRule.breaker });
     let retrieval: RetrievalIndex | null = null;
-    const promptContractDigest = global ? GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST : workspace ? AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST
-      : localRule === null ? DIALOGUE_PROMPT_CONTRACT_DIGEST : DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST;
-    const systemPrompt = global ? GLOBAL_AGENT_PROMPT_CONTRACT.systemPrompt : workspace ? AGENT_WORKSPACE_PROMPT_CONTRACT.systemPrompt
-      : localRule === null ? DIALOGUE_PROMPT_CONTRACT.systemPrompt : DIALOGUE_RETRIEVAL_PROMPT_CONTRACT.systemPrompt;
+    let scopedTools: GlobalAgentScopedToolOwner | undefined;
+    const promptContractDigest = scoped !== null ? GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT_DIGEST : global ? GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST
+      : workspace ? AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST : localRule === null ? DIALOGUE_PROMPT_CONTRACT_DIGEST : DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST;
+    const systemPrompt = scoped !== null ? GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT.systemPrompt : global ? GLOBAL_AGENT_PROMPT_CONTRACT.systemPrompt
+      : workspace ? AGENT_WORKSPACE_PROMPT_CONTRACT.systemPrompt : localRule === null ? DIALOGUE_PROMPT_CONTRACT.systemPrompt : DIALOGUE_RETRIEVAL_PROMPT_CONTRACT.systemPrompt;
     let current: string | null = null;
     let spanOpened = false;
     let outcome: HarnessTurnOutcome | null = null;
     let failure: string | null = null;
+    const transmission: { read: (() => number) | null } = { read: null };
+    // A stop or close that refuses the next request before it leaves — a tool gap, a capacity wait — still settles as that stop.
+    let refusedForStop = false;
+    const stopping = (): boolean => active.stopRequested || this.#disposed;
     try {
+      if (live !== null) active.producer = this.#deps.requestGovernor.registerProducer({ key: `dialogue:${turn.attemptId}`, kind: 'dialogue', lane: 'foreground' });
       // Inside the attempt: a source that cannot be read settles the attempt as failed rather than leaving it answering.
-      retrieval = localRule === null ? null : this.#deps.retrievalIndex?.(turn.dialogueId) ?? new RetrievalIndex([]);
+      if (global && turn.message.globalScope !== undefined) {
+        if (scoped === null || records.globalAgentScopedTools === undefined) throw new DialogueError('GLOBAL_AGENT_POLICY_BLOCKED', '当前处理策略未允许');
+        ({ retrieval, scopedTools } = records.globalAgentScopedTools(turn.message));
+      } else retrieval = localRule === null ? null : this.#deps.retrievalIndex?.(turn.dialogueId) ?? new RetrievalIndex([]);
       active.retrieval = retrieval;
       const route = live === null ? null : turn.globalRoute ?? live.route!;
       // Read once: under ordinary-production the configured reference may change while this answer is in flight (Issue #811).
       const credentialReference = live === null ? '' : turn.globalCredentialReference ?? live.credentialReference;
+      const isCurrent = (): boolean => turn.sourceGuard?.() !== false && (route === null || live === null ||
+        (turn.globalRoute !== undefined ? turn.sourceGuard?.() === true : live.current?.(credentialReference, route) ?? true));
       const executionRoute: ExecutionRoute = route === null ? LOCAL_DETERMINISTIC_ROUTE : route.profile.route as ExecutionRoute;
       const model = route === null ? LOCAL_DETERMINISTIC_MODEL : route.modelProfile.model;
-      const composition = describeComposition(executionRoute, model, promptContractDigest,
-        workspace ? AGENT_WORKSPACE_COMPOSITION_OPTIONS : { sessionLog: true, localTools: localRule !== null });
+      const composition = describeComposition(executionRoute, model, promptContractDigest, workspace ? AGENT_WORKSPACE_COMPOSITION_OPTIONS
+        : scoped !== null ? { version: 2, sessionLog: true, localTools: scoped } : { sessionLog: true, localTools: localRule !== null });
+      const localRuntime = live === null ? records.localFixtureRuntime?.() : null;
+      if (global && localRuntime != null) throw new DialogueError('GLOBAL_AGENT_POLICY_BLOCKED', '本地夹具没有全域原文字段消费者。');
+      const localProfile = localRuntime == null ? undefined : localRuntime.catalog.profile(localRuntime.selectedPolicyIdentity,
+        this.#deps.fixture!, workspace ? 'workspace' : 'dialogue');
+      const localFixture: { catalog: import('../provider/model-fixture.js').LocalFixturePolicyCatalog; execution: LocalFixtureExecutionContext } | undefined =
+        localRuntime == null || localProfile === undefined ? undefined : { catalog: localRuntime.catalog, execution: {
+          selectedPolicyIdentity: localRuntime.selectedPolicyIdentity, profile: localProfile,
+          kind: null, purpose: workspace ? 'agent-workspace' : 'editorial-dialogue',
+          contractId: workspace ? null : 'ai7.editorial-dialogue/1', composition, categories: [DIALOGUE_OUTBOUND_CATEGORY],
+        } };
       const bindingDigest = sha256Hex(`${turn.attemptId}\u0000${sessionId}\u0000${composition.digest}`);
       const slotBinding: CredentialSlotBinding | null = live === null || route === null ? null : {
-        bindingDigest, modelRole: route.modelRole, slot: route.profile.credentialSlot, credentialReference,
+        bindingDigest, modelRole: route.modelRole, slot: route.profile.credentialSlot, credentialReference, isCurrent,
       };
       const bindingFacts: EgressBindingFacts = {
         bindingDigest,
@@ -348,9 +415,18 @@ export class DialogueExecutionOwner {
         systemPrompt,
         // The editor's own selected words and question: the local deterministic route, or a remote one whose rule names them.
         outboundDataCategory: global ? 'public-or-synthetic' : DIALOGUE_OUTBOUND_CATEGORY,
-        ...(global ? { contractCategories: new Set(['house-review-preference-excerpt'] as const) } : {}),
+        ...(global ? { contractCategories: new Set<OutboundDataCategory>(['house-review-preference-excerpt',
+          ...((turn.message.globalScope?.books.length ?? 0) > 0 ? ['editor-selected-manuscript-excerpt' as const] : [])]) } : {}),
+        ...(global && route?.globalAgentDialogue !== undefined ? { globalAgentScope: {
+          ...(turn.qualification === undefined ? {} : { qualification: turn.qualification }),
+          rule: route.globalAgentDialogue, payloadCurrent: () => turn.sourceGuard?.() === true,
+        } } : {}),
+        ...(scoped !== null && route?.globalAgentScopedDialogue !== undefined ? { globalAgentScope: {
+          ...(turn.qualification === undefined ? {} : { qualification: turn.qualification }),
+          scopedRule: route.globalAgentScopedDialogue, payloadCurrent: () => turn.sourceGuard?.() === true,
+        } } : {}),
         policy: route === null
-          ? { operationalScope: 'development-ci', providerProcessingVersion: 'v1', liveTransmissionAllowed: false, authorizedLiveTransmissionCount: 0 }
+          ? { operationalScope: 'development-ci', providerProcessingVersion: localRuntime == null ? 'v1' : 'v29', liveTransmissionAllowed: false, authorizedLiveTransmissionCount: 0 }
           // The selected version, as the verified projection names it.
           : route.operationalScope === 'ordinary-production'
             ? { operationalScope: 'ordinary-production', providerProcessingVersion: route.providerProcessingVersion as OrdinaryProductionProviderProcessingVersion, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' }
@@ -361,8 +437,9 @@ export class DialogueExecutionOwner {
         ...(route === null ? {} : { ruleOutboundCategories: route.outboundDataCategories }),
       };
       const acceptedOutputDigests = new Set<string>();
-      const scope = { currentBindingDigest: () => turn.sourceGuard?.() === false ? null : current, acceptedOutputDigests, ...(route === null ? {} : { ceilingState: () => 'not-applicable' as const }) };
-      const toolSession = retrieval === null ? null : new PlatformToolSession({ binding: bindingFacts, scope, retrieval, purpose: DIALOGUE_TEST_ITEM_PURPOSE });
+      const scope = { currentBindingDigest: () => isCurrent() ? current : null, acceptedOutputDigests, ...(route === null ? {} : { ceilingState: () => 'not-applicable' as const }) };
+      const toolSession = retrieval === null ? null : new PlatformToolSession({ binding: bindingFacts, scope, retrieval, purpose: DIALOGUE_TEST_ITEM_PURPOSE,
+        ...(scopedTools === undefined ? {} : { scopedTools }) });
       // Development validation only (ADR 0089, Issue #808): the Provider Test Ledger and Result Cache answer, refuse or record
       // the request. A live launch outside one is business, and the request reaches the transport itself.
       // Ordinary production has no development validation, so no answer ever reaches the developer cache or ledger (Issue #811).
@@ -375,7 +452,18 @@ export class DialogueExecutionOwner {
       // The single-use ticket the gate issued for the turn in flight; the live adapter takes it or refuses.
       let pendingTicket: TransmitTicket | null = null;
       const harness: PrimaryAgentHarnessHandle = await prepareExecution({
+        ...(active.producer === null ? {} : { acquireRequest: async (_payload: import('../provider/payload.js').AssembledModelPayload, turnSignal: AbortSignal) => {
+          const combined = AbortSignal.any([active.requestAbort.signal, turnSignal]);
+          const permit = await this.#deps.requestGovernor.acquire(active.producer!, combined)
+            .catch((error: unknown) => { if (stopping()) refusedForStop = true; throw error; });
+          try {
+            combined.throwIfAborted();
+            if (stopping() || !isCurrent()) throw new DialogueError('DIALOGUE_SCOPE_CHANGED', '对话已停止或来源已变化；未发送任何内容。');
+            return { release: () => { pendingTicket = null; permit.release(); } };
+          } catch (error) { if (stopping()) refusedForStop = true; permit.release(); throw error; }
+        } }),
         ...(toolSession === null ? {} : { localTools: toolSession }),
+        ...(scoped === null ? {} : { compositionOptions: { version: 2 as const }, localToolsRule: scoped }),
         sessionId,
         route: executionRoute,
         model,
@@ -384,14 +472,17 @@ export class DialogueExecutionOwner {
         sessionLogRoot: this.#deps.sessionLogRoot,
         adapterFactory: (codes) => {
           if (live === null || route === null || slotBinding === null) {
-            return new Ai7LocalDeterministicAdapter(this.#deps.fixture!, promptContractDigest, codes, { answerHold: this.#deps.answerHold ?? null });
+            return new Ai7LocalDeterministicAdapter(this.#deps.fixture!, promptContractDigest, codes, {
+              answerHold: this.#deps.answerHold ?? null, ...(localFixture === undefined ? {} : { localFixture }) });
           }
           const nativeFetch = live.runtime.nativeFetch;
           // A stop during cache/session/credential setup can precede the Harness turn, when interrupt() is still idle.
           // Check again at both transport boundaries so that neither a cache claim nor an actual send starts after it.
-          // Nothing has left at either boundary, so the adapter reads it as a transport failure, never an unknown result (#1080).
+          // Before the adapter enters its sender (`beforeSend`) the refusal is an observed no-send. Inside the transport the
+          // adapter cannot tell it apart from a sent request's rejection, so it stays unknown unless the wrapper proves no-send.
           const requireRunning = (signal?: AbortSignal): void => {
-            if (active.stopRequested || this.#disposed || signal?.aborted === true) {
+            if (active.stopRequested || this.#disposed || !isCurrent() || signal?.aborted === true) {
+              if (stopping()) refusedForStop = true;
               throw Object.assign(new DOMException('Dialogue interrupted.', 'AbortError'), { requestSent: false });
             }
           };
@@ -402,8 +493,9 @@ export class DialogueExecutionOwner {
           // The streaming capability is a declaration, not an admission: it chooses the transport for a model the policy admitted.
           // The SSE request shape is the dialogue's own and admitted for its contracts alone; an Agent 工作区 turn, read only once
           // it has settled, keeps the whole-answer request (Issue #90, slice 13a).
-          const streamShape = !workspace && route.modelProfile.capabilities.streaming === 'chat-completions-sse' ? 'editorial-dialogue-sse' as const : null;
-          return new DeepSeekOpenAiCompatibleAdapter({
+          // A scoped Global turn keeps the whole-answer request tool rounds use elsewhere: the SSE shape admits no Global tools.
+          const streamShape = !workspace && scoped === null && route.modelProfile.capabilities.streaming === 'chat-completions-sse' ? 'editorial-dialogue-sse' as const : null;
+          const adapter = new DeepSeekOpenAiCompatibleAdapter({
             broker: live.broker,
             slotBinding,
             tickets: { take: () => { const ticket = pendingTicket; pendingTicket = null; return ticket; } },
@@ -412,22 +504,32 @@ export class DialogueExecutionOwner {
             codes,
             profile: route.profile,
             modelProfile: route.modelProfile,
+            signal: active.requestAbort.signal,
+            beforeSend: () => requireRunning(active.requestAbort.signal),
+            ...(live.transportSettings === undefined ? {} : { transportSettings: live.transportSettings }),
             ...(streamShape === null ? {} : { requestShape: streamShape }),
             sessionId: () => harness.currentSessionId(),
             transport: async (url, init) => {
               requireRunning(init.signal);
-              return cache === null || validation === null
-                ? send(url, init)
+              if (cache === null || validation === null) return send(url, init);
+              let nativeEntered = false;
+              const observedSend: DeepSeekTransport = (target, request) => {
+                requireRunning(request.signal); nativeEntered = true; return send(target, request);
+              };
+              try { return await
                 // 重新回答 sends the very request the ask sent, so under the same validation the cache replays the captured
                 // answer instead of paying for it twice; 继续回答 asks a different question and is its own step.
                 // A dialogue turn is its own task: its stage contract and its task contract are the one dialogue contract.
-                : transmitOnce(cache, send, { purpose: DIALOGUE_TEST_ITEM_PURPOSE, slice: 'S17c', promptContractDigest, taskPromptContractDigest: promptContractDigest }, {
+                transmitOnce(cache, observedSend, { purpose: DIALOGUE_TEST_ITEM_PURPOSE, slice: 'S17c', promptContractDigest, taskPromptContractDigest: promptContractDigest }, {
                   intent: validation,
                   step: `${DIALOGUE_TEST_ITEM_PURPOSE}/${turn.message.kind}`,
                   requestShape: streamShape ?? route.modelProfile.capabilities.requestShape,
                 }, route.profile, model, url, init);
+              } catch (error) { if (!nativeEntered) throw modelRequestNotSent(init, error); throw error; }
             },
           });
+          transmission.read = () => adapter.transmissions;
+          return adapter;
         },
         gate: (payload) => evaluateEgress(payload, bindingFacts, toolSession?.egressScope ?? scope),
         onTransmitTicket: (ticket) => {
@@ -452,6 +554,8 @@ export class DialogueExecutionOwner {
             behaviorCompositionSha256: harness.composition.digest,
             promptContractSha256: promptContractDigest,
             fixtureSha256: this.#deps.fixture!.sha256,
+            ...(localRuntime == null || localProfile === undefined ? {} : {
+              selectedPolicyIdentity: localRuntime.selectedPolicyIdentity, localFixtureProfile: localProfile }),
             boundAt: new Date().toISOString(),
           }
           : {
@@ -470,16 +574,16 @@ export class DialogueExecutionOwner {
         // The span is recorded before anything is sent, so an answer AI7 closes under is still found in the ledger.
         records.openDialogueSpan(turn.attemptId, sessionId, harness.nextSpanStart().startSeq);
         spanOpened = true;
-        if (active.stopRequested || this.#disposed) harness.interrupt();
+        if (active.stopRequested || this.#disposed) { active.requestAbort.abort(); if (live === null) harness.interrupt(); }
         outcome = await harness.submitStreaming(message, (delta) => {
           active.streamed += delta;
           // A stop asked before the turn began found the agent idle, which ignores an interruption: it is asked again now.
-          if (active.stopRequested || this.#disposed) harness.interrupt();
+          if (active.stopRequested || this.#disposed) { active.requestAbort.abort(); if (live === null) harness.interrupt(); }
         });
       } finally {
         current = null;
-        await harness.finish();
-        retrieval?.dispose();
+        try { await harness.finish(); }
+        finally { retrieval?.dispose(); }
       }
     } catch (error) {
       failure = error instanceof Error && 'code' in error && typeof (error as { code: unknown }).code === 'string'
@@ -491,15 +595,25 @@ export class DialogueExecutionOwner {
     // A stop or close that aborts the request before it leaves is a transport failure to the adapter (#1080), yet it is still
     // the editor's stop, or AI7 closing, and settles as one: nothing was sent.
     const last = outcome?.signals.at(-1);
-    const stoppedBeforeSend = outcome !== null && outcome.terminal === 'failed' && (active.stopRequested || this.#disposed) &&
-      last?.kind === 'failed' && last.failure.code === AI7_FAILURE_CODES.TRANSPORT_FAILED;
+    const stoppedBeforeSend = stopping() && ((transmission.read?.() ?? 0) === 0 || refusedForStop);
     let settled: DialogueOutcome;
     let cause: string | null = null;
-    if (outcome === null) {
+    if (stoppedBeforeSend) {
+      settled = active.stopRequested ? 'stopped' : 'interrupted';
+      cause = active.stopRequested ? null : DIALOGUE_CLOSED_CAUSE;
+    } else if (outcome === null) {
       settled = 'failed';
       cause = failure ?? 'DIALOGUE_EXECUTION_FAILED';
     } else if (outcome.terminal === 'completed') {
-      settled = 'completed';
+      // The body may already be complete when a recorded usage chunk asks to stop. The
+      // adapter cannot abort that finished body, but this unpublished attempt still stops.
+      settled = active.stopRequested ? 'stopped' : this.#disposed ? 'interrupted' : 'completed';
+      cause = !active.stopRequested && this.#disposed ? DIALOGUE_CLOSED_CAUSE : null;
+    } else if ((active.stopRequested || this.#disposed) && outcome.terminal === 'ambiguous') {
+      // Keep the existing stopped/interrupted record contract. The adapter/cache independently
+      // retains the possibly billed request; a stop never turns it into positive no-send evidence.
+      settled = active.stopRequested ? 'stopped' : 'interrupted';
+      cause = active.stopRequested ? null : DIALOGUE_CLOSED_CAUSE;
     } else if ((outcome.terminal === 'interrupted' || stoppedBeforeSend) && active.stopRequested) {
       settled = 'stopped';
     } else if (stoppedBeforeSend) {

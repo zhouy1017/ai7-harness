@@ -1,8 +1,11 @@
+import { CURATION_SCHEMA_SQL, FACTUAL_TASK_INTENTS_SQL } from '../../src/service/task-authorization.js';
+import { execPre74Fixture } from '../support/pre74-schema.js';
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, beforeEach } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { DialogueExecutionOwner } from '../../src/service/dialogue/dialogue-execution.js';
@@ -19,6 +22,12 @@ import { admittedDialogueRoute } from '../../src/service/dialogue/dialogue-route
 import { OPENCODE_GO_ROUTE_PROFILE } from '../../src/service/provider/deepseek-adapter.js';
 import { OPENCODE_GO_MODEL } from '../../src/service/provider/egress-gate.js';
 import { sha256Hex } from '../../src/service/analysis/canonical.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 let roots: ServiceTestRoots | undefined;
 let store: EditorialStore | undefined;
@@ -104,7 +113,7 @@ describe('the Book-less Global Agent', () => {
 
   it('refuses a model attempt before recording anything when no Book-less rule is admitted', async () => {
     const subject = await open();
-    const owner = new DialogueExecutionOwner({ records: subject, fixture: null, live: null, sessionLogRoot: subject.harnessSessionLogRoot });
+    const owner = new DialogueExecutionOwner({ requestGovernor, records: subject, fixture: null, live: null, sessionLogRoot: subject.harnessSessionLogRoot });
     try {
       // A runtime with no live binding cannot turn public/synthetic classification into an admission.
       const policy = await resolveSourceCheckoutLaunchPolicy(roots!.codeRoot, 'development-ci');
@@ -178,7 +187,7 @@ describe('revision 87 (Issue #1083)', () => {
       planted.exec('DROP TABLE learning_supervision_directives; DROP TRIGGER dialogue_tasks_no_update; DROP TRIGGER dialogue_tasks_no_delete; DROP TABLE dialogue_tasks;');
       planted.exec(DIALOGUE_TASKS_REVISION_86_SQL);
       planted.exec(DIALOGUE_TRIGGER_SQL.dialogue_tasks_no_update!); planted.exec(DIALOGUE_TRIGGER_SQL.dialogue_tasks_no_delete!);
-      planted.exec('PRAGMA user_version = 86');
+      execPre74Fixture(planted, 'PRAGMA user_version = 86');
       before = objects(planted);
     } finally { planted.close(); }
     store = await EditorialStore.open(roots!.dataRoot, roots!.codeRoot);
@@ -186,18 +195,18 @@ describe('revision 87 (Issue #1083)', () => {
     const migrated = new DatabaseSync(path, { enableForeignKeyConstraints: false });
     try {
       // Synchronized with #1084: revision 88 follows, adding only its own relations, which this predecessor already carries.
-      expect(migrated.prepare('PRAGMA user_version').get()).toEqual({ user_version: 88 });
+      expect(migrated.prepare('PRAGMA user_version').get()).toEqual({ user_version: 98 });
       expect((migrated.prepare("SELECT sql FROM sqlite_schema WHERE name = 'learning_supervision_directives'").get() as { sql: string }).sql)
         .toBe(SUPERVISION_SCHEMA_SQL.learning_supervision_directives);
       expect((migrated.prepare("SELECT sql FROM sqlite_schema WHERE name = 'dialogue_tasks'").get() as { sql: string }).sql).toBe(DIALOGUE_SCHEMA_SQL.dialogue_tasks);
-      expect(objects(migrated)).toEqual(before);
+      expect(objects(migrated)).toEqual(before.map((row) => row.name === 'analysis_task_intents' ? { ...row, sql: FACTUAL_TASK_INTENTS_SQL } : CURATION_SCHEMA_SQL[row.name] === undefined ? row : { ...row, sql: CURATION_SCHEMA_SQL[row.name] }));
       for (const trigger of Object.keys(SUPERVISION_TRIGGER_SQL)) migrated.exec(`DROP TRIGGER ${trigger}`);
       migrated.exec('DROP TABLE learning_supervision_directives');
     } finally { migrated.close(); }
     await expect(EditorialStore.open(roots!.dataRoot, roots!.codeRoot).then((opened) => { store = opened; return opened; })).rejects.toThrow();
   }, 120_000);
 
-  it('admits no Book-less turn under the developer-live or ordinary-production policy, even where the Book dialogue is admitted', async () => {
+  it('keeps developer-live refused and resolves the dedicated v27 Book-less rule beside the Book dialogue', async () => {
     roots = await createServiceTestRoots('ai7-global-agent-policy-');
     const live = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live');
     const fast = { route: 'opencode-go', endpoint: OPENCODE_GO_ROUTE_PROFILE.endpoint, model: OPENCODE_GO_MODEL,
@@ -207,8 +216,9 @@ describe('revision 87 (Issue #1083)', () => {
       expect(policy.integrityState).toBe('verified');
       // The Book dialogue's own rule stands, and the session borrows neither it nor any other.
       expect(admittedDialogueRoute(policy)).not.toBeNull();
-      expect(admittedGlobalAgentRoute(policy)).toBeNull();
     }
+    expect(admittedGlobalAgentRoute(live)).toBeNull();
+    expect(admittedGlobalAgentRoute(production)?.ruleId).toBe('ordinary-production-global-agent-dialogue');
   });
 });
 

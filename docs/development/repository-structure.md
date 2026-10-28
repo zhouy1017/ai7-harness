@@ -22,6 +22,8 @@ Start with the [product README](../../README.md) for what AI7 does, [source chec
 
 Generated `node_modules/`, `.pnpm-store/`, `.cache/`, `.runtime/`, `dist/`, `release/` and `test-results/` stay ignored and reconstructable. Product data and credentials stay outside the repository. Cleanup never includes unrelated untracked files or another worktree's state.
 
+[manuscript-screen.ts](../../src/renderer/manuscript-screen.ts) owns the existing Manuscript and Production Document editor rendering, screen-local coordination and destruction. [index.ts](../../src/renderer/index.ts) retains shell composition, routing, shared authorities and one semantic handle to the Manuscript screen on display.
+
 ## Tooling ownership
 
 The existing commands `node tools/nightly-queue.mjs …` and imports from `tools/orca-release.mjs` remain compatible. Their implementations live in [queue.mjs](../../tools/ci/queue.mjs) and [release-authority.mjs](../../tools/ci/release-authority.mjs). The latter authorizes repository merges; it is distinct from creating a product release. Keeping the entry paths stable also preserves trusted control checkouts used by existing workflow runs.
@@ -43,5 +45,6 @@ The review at `dev@f3199a2d` found concentrated ownership in `src/service/store.
 - Extract one cohesive service-store operation group into its existing feature owner while leaving transactions, schema and authoritative state in their present owner.
 - Extract one renderer screen's rendering and event wiring without introducing another view-state store.
 - Separate one native application integration from shell lifecycle while preserving startup and close ordering.
+- Split one manuscript-store or analysis-store responsibility out of `src/service/bounded-manuscript.ts` or `src/service/analysis/baseline-analysis-store.ts` behind its existing owner interface.
 
-Each extraction needs an Issue, unchanged observable behavior, focused regression coverage and the applicable existing Journey. Track priority in the [development plan](development-plan.md); this map is navigation, not a second backlog.
+Each extraction needs an Issue, unchanged observable behavior, focused regression coverage and the applicable existing Journey. The [development plan](development-plan.md) tracks priority and the measured size ceilings (F-25); this map is navigation, not a second backlog.

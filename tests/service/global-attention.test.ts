@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -32,6 +33,12 @@ import {
   recordMissingCredentialConnection,
   requireExactSample1,
 } from '../support/sample1-baseline.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for 待我处理 (Issue #424, plan slice S78; editor-surfaces §8.1, V2-UX-ATTN-001
 // to 008): the real store over exact `sample1` and small manuscripts composed from it, the one execution owner
@@ -76,7 +83,7 @@ function open(route: ResolvedModelFixture | null, control: Partial<typeof CONTRO
 }
 
 function ownerOf(store: EditorialStore, fixture: ResolvedModelFixture): BaselineAnalysisExecutionOwner {
-  return new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+  return new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
 }
 
 async function importBook(store: EditorialStore, title: string, first: boolean): Promise<{ bookId: string; manuscriptId: string; branchId: string }> {
@@ -325,7 +332,7 @@ class RefusingOwner implements ReviewRunExecutionOwner {
 
 describe('待我处理 over Review Runs', () => {
   it('names a Review Run that failed, one in flight, one a stopped service left to continue, and one completed, and writes nothing', async () => {
-    const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-authored');
+    const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-cross-chapter-authored');
     const prepareRun = (store: EditorialStore, bookId: string, categoryIds: ReadonlyArray<string>): ReviewRunProjection => {
       let progress = store.createReviewRunPreparationWork(bookId, categoryIds, WHOLE, launchPolicy);
       while (!progress.done) progress = store.advanceReviewRunPreparationWork(progress.workId!);
@@ -431,7 +438,7 @@ function conflictedSuggestion(store: EditorialStore, book: { manuscriptId: strin
   }).markId;
   const now = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
   store.flushJournalEdit({
-    clientEditId: randomUUID(), ...book, baseRevisionId: now.revisionId, blockId: block.blockId, windowStartBlockId: now.blocks[0]!.blockId,
+    clientEditId: randomUUID(), manuscriptId: book.manuscriptId, branchId: book.branchId, baseRevisionId: now.revisionId, blockId: block.blockId, windowStartBlockId: now.blocks[0]!.blockId,
     baseBlockDigest: now.blocks.find((candidate) => candidate.blockId === block.blockId)!.digest, expectedJournalSequence: now.journalSequence,
     fromGrapheme: 23, toGrapheme: 23, insertText: '〔改〕',
   });

@@ -1,7 +1,8 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
 import { SAMPLE1_SOURCE_DIGEST } from '../../src/service/analysis/baseline-analysis-store.js';
 import { ADR_0091_PUBLIC_SAMPLEBOOKS } from '../../src/shared/public-samplebooks.js';
@@ -17,6 +18,7 @@ import { EditorialStore } from '../../src/service/store.js';
 import type { DevelopmentValidationIntent, FastInteractionRequestProjection, LaunchPolicyProjection } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, requireExactSample1 } from '../support/sample1-baseline.js';
+import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
 import {
   AUTHORED_POLISH_ANSWER,
   AUTHORED_REGENERATION,
@@ -28,6 +30,12 @@ import {
   typoBlock,
   type Sample1Book,
 } from '../support/fast-role.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for 润色这段 and 基于当前稿件重新生成建议 on the live route (Issue #842; ADR 0089; ADR 0067):
 // the real store, PrimaryAgentHarness composition, Egress Gate, Credential Broker, Provider Test Ledger and Result Cache, under
@@ -92,7 +100,7 @@ function live(nativeFetch: typeof fetch, options: { validation?: DevelopmentVali
 }
 
 function requests(routes: FastRoleLiveRoutes): FastRoleRequests {
-  return new FastRoleRequests(new FastRoleExecutionOwner({ fixture: null, live: routes }), store);
+  return new FastRoleRequests(new FastRoleExecutionOwner({ requestGovernor, fixture: null, live: routes }), store);
 }
 
 async function ledgerLines(): Promise<ProviderLedgerLine[]> {
@@ -106,6 +114,19 @@ async function settled(fast: FastRoleRequests, requestId: string): Promise<FastI
 }
 
 describe('the fast-role routes under developer-live', () => {
+  it('runs the retained Fast fixture under lightweight v1 without dialogue history', async () => {
+    const fixture = await loadModelFixture(join(roots.codeRoot, 'tests/fixtures/model'), 'sample1-polish-authored');
+    expect(store.localFixtureRuntime()).toBeNull();
+    const owner = new FastRoleExecutionOwner({ requestGovernor, fixture, live: null, localFixtureRuntime: () => store.localFixtureRuntime() });
+    const fast = new FastRoleRequests(owner, store);
+    try {
+      const started = fast.polish(book.bookId, { selection: polishSelectionOf(store, book) });
+      const result = await settled(fast, started.taskId);
+      expect(result.kind === 'editorial-polish' && result.polish).toMatchObject({ state: 'suggested', outcomeUnknown: false });
+      expect(store.inspectUsage({ range: 'all', groupBy: 'book' }).totals).toMatchObject({ inputTokens: 0, outputTokens: 0 });
+      expect(store.inspectGlobalAgent().history).toEqual([]);
+    } finally { await owner.dispose(); }
+  });
   it('admits each kind only under its own rule, and refuses a Book outside the admitted SampleBooks before anything is sent', async () => {
     const calls: StubCall[] = [];
     const admitted = live(stubTransport(calls, () => AUTHORED_POLISH_ANSWER));
@@ -124,7 +145,7 @@ describe('the fast-role routes under developer-live', () => {
     const unadmitted = live(stubTransport(calls, () => AUTHORED_POLISH_ANSWER), {
       policy: { ...livePolicy, providerProcessing: { ...livePolicy.providerProcessing, admittedRules: withoutFastRules } },
     });
-    const owner = new FastRoleExecutionOwner({ fixture: null, live: unadmitted });
+    const owner = new FastRoleExecutionOwner({ requestGovernor, fixture: null, live: unadmitted });
     expect(fastInteractionRoutes(owner, book.bookId)).toEqual({
       bookId: book.bookId,
       editorialPolish: { available: false, reason: '当前运行范围未允许润色这段：选定的模型处理规则没有准许它使用实时模型。' },

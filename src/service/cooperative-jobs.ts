@@ -376,9 +376,11 @@ export class CooperativeJobOwner {
     redoOf: string | null = null,
     intentDraft: DraftPromotion | null = null,
     seriesId: string | null = null,
+    localCheck?: import('../shared/protocol/procedures.js').LocalCheckOptions,
+    decisionId?: string,
   ): ServiceJobProjection {
     this.#requireCapacity();
-    const work = this.#store.createReviewRunPreparationWork(bookId, categoryIds, scope, launchPolicy, capturedProcedure, materialIds, redoOf, intentDraft, seriesId);
+    const work = this.#store.createReviewRunPreparationWork(bookId, categoryIds, scope, launchPolicy, capturedProcedure, materialIds, redoOf, intentDraft, seriesId, localCheck, decisionId);
     const jobId = randomUUID();
     const job: JobRecord = {
       subjectId: work.workId ?? bookId,

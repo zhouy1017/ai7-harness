@@ -24,6 +24,106 @@ export const CONFIGURED_ROUTE_IDS = [
 ] as const;
 export type ConfiguredRouteId = (typeof CONFIGURED_ROUTE_IDS)[number];
 
+/** Reviewed bindings within declared protocol families (ADR 0095 §6); eligibility still requires the selected policy. */
+export const CONFIGURED_RUNTIME_MODEL_TABLE = {
+  developerLive: {
+    route: 'opencode-go',
+    endpoint: 'https://opencode.ai/zen/go/v1/chat/completions',
+    model: 'deepseek-v4.1-flash',
+    credentialSlot: 'opencode-go',
+  },
+  legacyDeepSeek: {
+    route: 'deepseek-open-platform',
+    endpoint: 'https://api.deepseek.com/chat/completions',
+    model: 'deepseek-v4-pro',
+    credentialSlot: 'deepseek-api-key',
+  },
+  policyBaseline: {
+    main: [
+      {
+        route: 'opencode-go',
+        endpoint: 'https://opencode.ai/zen/go/v1/chat/completions',
+        model: 'deepseek-v4.1-flash',
+        credentialSlot: 'opencode-go',
+      },
+      {
+        route: 'deepseek-open-platform',
+        endpoint: 'https://api.deepseek.com/chat/completions',
+        model: 'deepseek-flash',
+        credentialSlot: 'deepseek-api-key',
+      },
+    ],
+    fast: [
+      {
+        route: 'opencode-go',
+        endpoint: 'https://opencode.ai/zen/go/v1/chat/completions',
+        model: 'deepseek-v4.1-flash',
+        credentialSlot: 'opencode-go',
+      },
+      {
+        route: 'deepseek-open-platform',
+        endpoint: 'https://api.deepseek.com/chat/completions',
+        model: 'deepseek-flash',
+        credentialSlot: 'deepseek-api-key',
+      },
+      {
+        route: 'openai-platform',
+        endpoint: 'https://api.openai.com/v1/responses',
+        model: 'gpt-5.6-luna',
+        credentialSlot: 'openai-platform',
+      },
+      {
+        route: 'openai-platform',
+        endpoint: 'https://api.openai.com/v1/responses',
+        model: 'gpt-5.6-sol',
+        credentialSlot: 'openai-platform',
+      },
+    ],
+  },
+  ordinaryProduction: {
+    main: [
+      {
+        route: 'opencode-go',
+        endpoint: 'https://opencode.ai/zen/go/v1/chat/completions',
+        model: 'deepseek-v4.1-flash',
+        credentialSlot: 'opencode-go',
+      },
+      {
+        route: 'deepseek-open-platform',
+        endpoint: 'https://api.deepseek.com/chat/completions',
+        model: 'deepseek-flash',
+        credentialSlot: 'deepseek-api-key',
+      },
+    ],
+    fast: [
+      {
+        route: 'opencode-go',
+        endpoint: 'https://opencode.ai/zen/go/v1/chat/completions',
+        model: 'deepseek-v4.1-flash',
+        credentialSlot: 'opencode-go',
+      },
+      {
+        route: 'deepseek-open-platform',
+        endpoint: 'https://api.deepseek.com/chat/completions',
+        model: 'deepseek-flash',
+        credentialSlot: 'deepseek-api-key',
+      },
+      {
+        route: 'openai-platform',
+        endpoint: 'https://api.openai.com/v1/responses',
+        model: 'gpt-5.6-luna',
+        credentialSlot: 'openai-platform',
+      },
+      {
+        route: 'openai-platform',
+        endpoint: 'https://api.openai.com/v1/responses',
+        model: 'gpt-5.6-sol',
+        credentialSlot: 'openai-platform',
+      },
+    ],
+  },
+} as const;
+
 /** One credential slot per configured provider (ADR 0073 §4): the members of `CredentialSlotId`, and the Credential Broker's closed set. */
 export const CONFIGURED_CREDENTIAL_SLOTS = [
   'alibaba-model-studio',

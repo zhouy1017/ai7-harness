@@ -1,3 +1,6 @@
+import { CURATION_SCHEMA_SQL, FACTUAL_TASK_INTENTS_SQL } from '../../src/service/task-authorization.js';
+import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
@@ -29,6 +32,12 @@ import {
 import { KIND_COUPLED_ANALYSIS_RELATIONS, downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for AI7 初评 (Issue #429, plan slice S81b1; V2-UX-EVAL-001, EVAL-005 to EVAL-007, EVAL-011):
 // the evaluation kind over the real store and ledger, the one execution owner and the AI7 local deterministic adapter over
@@ -86,7 +95,7 @@ async function openStore(): Promise<EditorialStore> {
 async function withBook(body: (book: Book) => Promise<void>): Promise<void> {
   await requireExactSample1(roots.codeRoot);
   const store = await openStore();
-  const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+  const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
   try {
     const imported = await importSample1Book(store, roots.codeRoot, '初评之书');
     await pinEditorialWorkspaceProfileRevision2(store, imported.bookId);
@@ -306,7 +315,7 @@ describe('AI7 初评 over the real store on exact sample1', () => {
         ...fixture,
         entries: new Map([...fixture.entries].filter(([, entry]) => entry.unitOrdinal === 1)),
       };
-      const owner = new BaselineAnalysisExecutionOwner({ ledger: book.store.baselineAnalysisLedger, launchPolicy, fixture: trimmed, secretResolver: { resolve: async () => null } });
+      const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: book.store.baselineAnalysisLedger, launchPolicy, fixture: trimmed, secretResolver: { resolve: async () => null } });
       try {
         await runInitialEvaluation({ ...book, owner });
       } finally {
@@ -370,7 +379,7 @@ describe('AI7 初评 over the real store on exact sample1', () => {
           expect(settled.state).toBe('resumable');
           expect(settled.run).toMatchObject({ runRecordId, state: 'resumable' });
           expect(settled.taskOutcome).toBeNull();
-          const owner = new BaselineAnalysisExecutionOwner({ ledger: second.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+          const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: second.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
           try {
             const ledger = second.executionLedgerForRun(runRecordId);
             ledger.requestCancel(bookId, settled.taskIntent!.taskIntentId);
@@ -430,6 +439,7 @@ describe('AI7 初评 over the real store on exact sample1', () => {
     const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
     const rows = (database: DatabaseSync): string => JSON.stringify(KIND_COUPLED_ANALYSIS_RELATIONS.map((table) => database.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()));
     const plant = new DatabaseSync(path);
+    constructPre94PolicyEncoding(plant);
     let before: string;
     try {
       // Revision 58 exactly: the three relations as revision 24 left them, and no relation of revision 59 or 60.
@@ -453,7 +463,7 @@ describe('AI7 初评 over the real store on exact sample1', () => {
       expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
       expect(rows(after)).toBe(before!);
       for (const table of KIND_COUPLED_ANALYSIS_RELATIONS) {
-        expect((after.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) as { sql: string }).sql).toBe(ANALYSIS_LEDGER_SCHEMA_SQL[table]);
+        expect((after.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) as { sql: string }).sql).toBe(table === 'analysis_task_intents' ? FACTUAL_TASK_INTENTS_SQL : CURATION_SCHEMA_SQL[table] ?? ANALYSIS_LEDGER_SCHEMA_SQL[table]);
       }
       expect(after.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'evaluation_initial_drafts'").get()).toBeDefined();
     } finally {
@@ -513,6 +523,7 @@ describe('AI7 初评 over the real store on exact sample1', () => {
     await withBook(async () => undefined);
     const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
     const plant = new DatabaseSync(path);
+    constructPre94PolicyEncoding(plant);
     try {
       // Only the version moves back: no store AI7 wrote at revision 58 held these shapes, and none is read as one.
       execPre74Fixture(plant, `DROP TABLE analysis_outcome_resolutions; DROP TABLE material_index_segments; DROP TABLE material_index_builds; DROP TABLE writing_drafts; DROP TABLE writing_tasks; DROP TABLE evaluation_rewrite_decisions; DROP TABLE evaluation_rewrite_tasks; DROP TABLE developer_capability_proposal_exports; DROP TABLE developer_capability_proposals; DROP TABLE review_run_procedure_pins; DROP TABLE captured_procedure_states; DROP TABLE captured_procedure_versions; DROP TABLE captured_procedures; DROP TABLE readers_report_drafts; DROP TABLE readers_report_tasks; DROP TABLE series_retrieval_exclusions; DROP TABLE dialogue_conversions; DROP TABLE dialogue_attempt_outcomes; DROP TABLE dialogue_harness_spans; DROP TABLE dialogue_execution_bindings; DROP TABLE dialogue_attempts; DROP TABLE dialogue_tasks; DROP TABLE evaluation_initial_drafts; PRAGMA user_version = ${DATABASE_MERGE_SCHEMA_VERSION};`);

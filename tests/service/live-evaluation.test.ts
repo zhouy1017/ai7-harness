@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -22,6 +23,12 @@ import { makeJ13Series, J13_SERIES_TITLE } from '../support/series-consistency.j
 import { AUTHORED_SECTIONS, finalizeAsJ11 } from '../support/readers-report.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1, SAMPLE1_UNITS } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // #429 / J-11: AI7 初评, 审稿意见 and 按我的评分重写评语 on the Go execution path — the real store, ledger, execution owner, broker,
 // adapter, Egress Gate, accounting and Provider Test Ledger — under developer-live with the selected Provider Processing v11
@@ -117,6 +124,7 @@ const nativeFetch: typeof fetch = async (_url, init) => {
 function liveOwner(policy: LaunchPolicyProjection, family: string): BaselineAnalysisExecutionOwner {
   activeFamily = family;
   const owner = new BaselineAnalysisExecutionOwner({
+    requestGovernor,
     ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
     seriesScopeGuard: (runRecordId) => {
       const answer = store.seriesScopeGuard(runRecordId);

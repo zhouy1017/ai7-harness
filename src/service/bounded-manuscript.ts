@@ -1,4 +1,9 @@
-import { PROCEDURE_DEFINITION_SCHEMA_SQL, PROCEDURE_DEFINITION_TRIGGER_SQL, PROCEDURE_DEFINITION_FOREIGN_KEYS, validateProcedureDefinitions, validateProcedurePlanPins } from './procedures/definition-store.js';
+import { EDITABLE_PROCEDURE_SCHEMA_SQL, EDITABLE_PROCEDURE_TRIGGER_SQL, EDITABLE_PROCEDURE_FOREIGN_KEYS } from './procedures/editable-schema.js';
+import type { ManualCommandRequestPin, ManualCommandSource } from '../shared/protocol/learning.js';
+import { HOUSE_WORD_LIST_SCHEMA_VERSION, HOUSE_WORD_LIST_SCHEMA_SQL, HOUSE_WORD_LIST_TRIGGER_SQL, HOUSE_WORD_LIST_FOREIGN_KEYS } from './review/house-word-list.js';
+import { IDLE_BACKGROUND_SCHEMA_VERSION, LOCAL_REVIEW_SCHEMA_VERSION } from './task-authorization.js';
+import { LOCAL_STAGE_SCHEMA_SQL, LOCAL_STAGE_TRIGGER_SQL, LOCAL_STAGE_FOREIGN_KEYS, validateLocalStageArtifacts } from './review/review-runs.js';
+import { PROCEDURE_DEFINITION_SCHEMA_SQL, PROCEDURE_PLAN_PINS_V2_SQL, PROCEDURE_DEFINITION_TRIGGER_SQL, PROCEDURE_DEFINITION_FOREIGN_KEYS, validateProcedureDefinitions } from './procedures/definition-store.js';
 import { EDITORIAL_LEARNING_SCHEMA_SQL, EDITORIAL_LEARNING_TRIGGER_SQL, EDITORIAL_LEARNING_FOREIGN_KEYS } from './learning/ledger.js';
 import { DIALOGUE_TASKS_REVISION_86_SQL } from './dialogue/dialogue-ledger.js';
 import { SUPERVISION_SCHEMA_SQL, SUPERVISION_TRIGGER_SQL, SUPERVISION_FOREIGN_KEYS } from './learning/supervision-directives.js';
@@ -89,7 +94,7 @@ import {
   ANALYSIS_LEDGER_REVISION_30_SQL,
   ANALYSIS_LEDGER_REVISION_65_SQL,
   ANALYSIS_LEDGER_REVISION_17_TABLES,
-  ANALYSIS_LEDGER_SCHEMA_SQL, ANALYSIS_LEDGER_REVISION_84_SQL, REVIEW_CONTRACT_SCHEMA_VERSION, WEB_TOOLS_PLAN_RECORDS_SQL, SEARCH_BACKEND_CONNECTIONS_SQL,
+  ANALYSIS_LEDGER_SCHEMA_SQL, CURATION_SCHEMA_SQL, FACTUAL_TASK_INTENTS_SQL, ANALYSIS_LEDGER_REVISION_84_SQL, REVIEW_CONTRACT_SCHEMA_VERSION, WEB_TOOLS_PLAN_RECORDS_SQL, SEARCH_BACKEND_CONNECTIONS_SQL,
   ANALYSIS_LEDGER_TRIGGER_SQL,
   J03_TASK_AUTHORIZATION_SCHEMA_VERSION,
   J04_BASELINE_ANALYSIS_SCHEMA_VERSION,
@@ -147,7 +152,7 @@ import {
   DIALOGUE_LIVE_BINDING_SCHEMA_VERSION,
   MODEL_SERVICE_ROUTES_SCHEMA_VERSION,
   MODEL_CLARIFICATION_SCHEMA_VERSION, SEARCH_BACKEND_SCHEMA_VERSION, RESEARCH_EVIDENCE_SCHEMA_VERSION, MATERIAL_INDEX_LAYER_SCHEMA_VERSION, PROPOSAL_REVIEW_SCHEMA_VERSION, FACTUAL_VERIFICATION_SCHEMA_VERSION, HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION, TASK_INTENT_DRAFT_SCHEMA_VERSION, IMPORTED_SKILL_SCHEMA_VERSION, CUSTOM_ANALYSIS_SCHEMA_VERSION, IMPORTED_SKILL_UPDATE_SCHEMA_VERSION, MODEL_SELECTION_SCHEMA_VERSION, PROCEDURE_DEFINITION_SCHEMA_VERSION, EDITORIAL_LEARNING_SCHEMA_VERSION,
-  LATEST_SCHEMA_VERSION,
+  EDITORIAL_MEMORY_SCHEMA_VERSION, MODEL_REQUEST_ADMISSION_SCHEMA_VERSION, WORD_TRACKED_IMPORT_SCHEMA_VERSION, POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION, LEARNING_CURATION_SCHEMA_VERSION, LATEST_SCHEMA_VERSION, IDLE_RUN_AUTHORIZATIONS_SQL,
   SUCCESSIVE_TASK_SCHEMA_VERSION,
   TASK_AUTHORIZATION_SCHEMA_SQL,
   TASK_AUTHORIZATION_SCHEMA_VERSION,
@@ -254,11 +259,11 @@ import {
 import { EVALUATION_PROFILE_SCHEMA_SQL, EVALUATION_PROFILE_TRIGGER_SQL, EVALUATION_PROFILE_FOREIGN_KEYS } from './evaluation-profiles.js';
 import { IMPORTED_EXEMPLAR_SCHEMA_SQL, IMPORTED_EXEMPLAR_TRIGGER_SQL, IMPORTED_EXEMPLAR_FOREIGN_KEYS } from './imported-exemplars.js';
 import { RESEARCH_EVIDENCE_FOREIGN_KEYS, RESEARCH_EVIDENCE_SCHEMA_SQL, RESEARCH_EVIDENCE_TRIGGER_SQL } from './research-evidence-schema.js';
-import { FACTUAL_VERIFICATION_FOREIGN_KEYS, FACTUAL_VERIFICATION_SCHEMA_SQL, FACTUAL_VERIFICATION_TRIGGER_SQL } from './factual-verification-schema.js';
+import { FACTUAL_CLAIM_SCHEMA_SQL, FACTUAL_CLAIM_FOREIGN_KEYS, FACTUAL_CLAIM_TRIGGER_SQL, FACTUAL_VERIFICATION_FOREIGN_KEYS, FACTUAL_VERIFICATION_SCHEMA_SQL, FACTUAL_VERIFICATION_TRIGGER_SQL } from './factual-verification-schema.js';
 import { OUTCOME_RESOLUTION_FOREIGN_KEYS, OUTCOME_RESOLUTION_SCHEMA_SQL, OUTCOME_RESOLUTION_TRIGGER_SQL } from './analysis/outcome-resolutions.js';
 import {
   BACKGROUND_ANALYSIS_ENROLLMENT_FOREIGN_KEYS,
-  BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL,
+  BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL, BACKGROUND_PROCESSING_ENROLLMENT_SCHEMA_SQL,
   BACKGROUND_ANALYSIS_ENROLLMENT_TRIGGER_SQL,
 } from './background-analysis-enrollments.js';
 import {
@@ -293,6 +298,9 @@ import {
   IMPORT_RETENTION_FOREIGN_KEYS,
   IMPORT_RETENTION_SCHEMA_SQL,
   IMPORT_RETENTION_TRIGGER_SQL,
+  WORD_IMPORT_RETENTION_SCHEMA_SQL,
+  WORD_IMPORT_RETENTION_TRIGGER_SQL,
+  WORD_IMPORT_RETENTION_FOREIGN_KEYS,
 } from './import-retention.js';
 
 /**
@@ -308,6 +316,8 @@ import {
 const ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL: Readonly<Record<string, string | ReadonlyArray<string>>> = {
   ...ANALYSIS_LEDGER_SCHEMA_SQL,
   analysis_task_intents: [
+    FACTUAL_TASK_INTENTS_SQL,
+    CURATION_SCHEMA_SQL['analysis_task_intents']!,
     ANALYSIS_LEDGER_SCHEMA_SQL.analysis_task_intents,
     ANALYSIS_LEDGER_REVISION_84_SQL.analysis_task_intents,
     ANALYSIS_LEDGER_REVISION_79_SQL.analysis_task_intents,
@@ -352,6 +362,8 @@ const ANALYSIS_LEDGER_EXPECTED_SCHEMA_SQL: Readonly<Record<string, string | Read
   analysis_task_outcomes: [ANALYSIS_LEDGER_SCHEMA_SQL.analysis_task_outcomes, ANALYSIS_LEDGER_REVISION_31_SQL.analysis_task_outcomes],
   analysis_plan_revisions: [ANALYSIS_LEDGER_SCHEMA_SQL.analysis_plan_revisions, ANALYSIS_LEDGER_REVISION_33_SQL.analysis_plan_revisions],
   analysis_run_authorizations: [
+    CURATION_SCHEMA_SQL['analysis_run_authorizations']!,
+    IDLE_RUN_AUTHORIZATIONS_SQL,
     ANALYSIS_LEDGER_SCHEMA_SQL.analysis_run_authorizations,
     ANALYSIS_LEDGER_REVISION_65_SQL.analysis_run_authorizations,
     ANALYSIS_LEDGER_REVISION_30_SQL.analysis_run_authorizations,
@@ -511,6 +523,8 @@ export interface ExactReplacementTarget {
   toGrapheme: number;
   expectedText: string;
   insertText: string;
+  /** Internal inverse of one committed Effect target; never supplied by the renderer. */
+  reversalOf?: { effectId: string; itemId: string };
 }
 
 export interface ManuscriptStateIdentity {
@@ -2024,12 +2038,15 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   ...MANUSCRIPT_EFFECT_FOREIGN_KEYS,
   // Revision 24 (Issue #417): the Review Run relations, owned and spelled by `review/review-runs.ts`.
   ...REVIEW_RUN_FOREIGN_KEYS,
+  ...LOCAL_STAGE_FOREIGN_KEYS,
+  ...HOUSE_WORD_LIST_FOREIGN_KEYS,
   // Revision 25 (Issue #414): the Publication Version relations, owned and spelled by `publication-versions.ts`.
   ...PUBLICATION_VERSION_FOREIGN_KEYS,
   // Revision 26 (Issue #57): the proposal-conflict relations, owned and spelled by `proposal-conflicts.ts`.
   ...PROPOSAL_CONFLICT_FOREIGN_KEYS,
   // Revision 27 (Issue #410): the import-retention relations, owned and spelled by `import-retention.ts`.
   ...IMPORT_RETENTION_FOREIGN_KEYS,
+  ...WORD_IMPORT_RETENTION_FOREIGN_KEYS,
   // Revision 28 (Issue #411): the staged imported marks, owned and spelled by `imported-marks.ts`.
   ...IMPORTED_MARK_FOREIGN_KEYS,
   // Revision 29 (Issue #413): the export ledger, owned and spelled by `manuscript-export.ts`.
@@ -2079,6 +2096,7 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   ...MATERIAL_INDEX_LAYER_FOREIGN_KEYS,
   ...MATERIAL_TRANSLATION_ATTEMPT_FOREIGN_KEYS,
   ...FACTUAL_VERIFICATION_FOREIGN_KEYS,
+  ...FACTUAL_CLAIM_FOREIGN_KEYS,
   ...HOUSE_REVIEW_PREFERENCE_FOREIGN_KEYS,
   ...EDITORIAL_LEARNING_FOREIGN_KEYS,
   ...SUPERVISION_FOREIGN_KEYS,
@@ -2087,6 +2105,7 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   ...CUSTOM_ANALYSIS_DIMENSION_FOREIGN_KEYS,
   ...IMPORTED_SKILL_UPDATE_FOREIGN_KEYS,
   ...PROCEDURE_DEFINITION_FOREIGN_KEYS,
+  ...EDITABLE_PROCEDURE_FOREIGN_KEYS,
   ...EVALUATION_PROFILE_FOREIGN_KEYS,
   editorial_workspace_profile_sidecar_revisions: [
     'native_artifact_id>native_artifact_installations.artifact_id:NO ACTION/NO ACTION/NONE',
@@ -2781,6 +2800,8 @@ function requireManuscriptReimportTargetSchema(
     schemaObjectSql(db, 'table', 'review_excluded_findings') === undefined;
   const reviewTables = legacyReview ? Object.fromEntries(Object.entries(REVIEW_RUN_SCHEMA_SQL).filter(([name]) => name !== 'review_excluded_findings')) : REVIEW_RUN_SCHEMA_SQL;
   const reviewTriggers = legacyReview ? Object.fromEntries(Object.entries(REVIEW_RUN_TRIGGER_SQL).filter(([name]) => !name.startsWith('review_excluded_findings_'))) : REVIEW_RUN_TRIGGER_SQL;
+  const includeHouseWordList = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= HOUSE_WORD_LIST_SCHEMA_VERSION || committed(HOUSE_WORD_LIST_SCHEMA_SQL);
+  const includeLocalStage = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= LOCAL_REVIEW_SCHEMA_VERSION || committed(LOCAL_STAGE_SCHEMA_SQL);
   includePublicationVersionTables ||= committed(PUBLICATION_VERSION_SCHEMA_SQL);
   includeProposalConflictTables ||= committed(PROPOSAL_CONFLICT_SCHEMA_SQL);
   includeImportRetentionTables ||= committed(IMPORT_RETENTION_SCHEMA_SQL);
@@ -2830,9 +2851,11 @@ function requireManuscriptReimportTargetSchema(
   const includeMaterialIndexLayerTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= MATERIAL_INDEX_LAYER_SCHEMA_VERSION || committed(MATERIAL_INDEX_LAYER_SCHEMA_SQL);
   const includeMaterialTranslationAttempts = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= MODEL_SELECTION_SCHEMA_VERSION || committed(MATERIAL_TRANSLATION_ATTEMPT_SCHEMA_SQL);
   // Revision 77 (Issue #901): factual verification results, review decisions and Correction Proposal lineage.
+  const includeFactualClaimTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= 97 || committed(FACTUAL_CLAIM_SCHEMA_SQL);
   const includeFactualVerificationTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= FACTUAL_VERIFICATION_SCHEMA_VERSION || committed(FACTUAL_VERIFICATION_SCHEMA_SQL);
   // Revision 86 (Issue #1082): reference-only Learning Signals, the learning controls and explicit editorial memory.
   const includeEditorialLearningTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= EDITORIAL_LEARNING_SCHEMA_VERSION || committed(EDITORIAL_LEARNING_SCHEMA_SQL);
+  const includeWordImportRetentionTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= WORD_TRACKED_IMPORT_SCHEMA_VERSION || committed(WORD_IMPORT_RETENTION_SCHEMA_SQL);
   // Revision 79 (Issue #911): 本社审阅偏好 versions and each review category Task's pin of the version it read.
   const includeHousePreferenceTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || committed(HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL);
   // Revision 87 (Issue #1083): the editor's Learning Supervision Directives.
@@ -2846,6 +2869,7 @@ function requireManuscriptReimportTargetSchema(
   // Revision 83 (Issue #89; ADR 0090 §3): foreign Skill update candidates, the Artifact Update Rule ledger and current selections.
   const includeImportedSkillUpdateTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || committed(IMPORTED_SKILL_UPDATE_SCHEMA_SQL);
   // Revision 85 (Issue #1081, F-26a; ADR 0095 §1): the pre-installed Procedure Definition versions and the plans' sibling pins.
+  const includeEditableProcedures = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= 98 || committed(EDITABLE_PROCEDURE_SCHEMA_SQL);
   const includeProcedureDefinitions = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= PROCEDURE_DEFINITION_SCHEMA_VERSION || committed(PROCEDURE_DEFINITION_SCHEMA_SQL);
   requireExactSchema(
     db,
@@ -2897,6 +2921,8 @@ function requireManuscriptReimportTargetSchema(
       // rebuilds; they join this exact table set, the trigger set and `SCHEMA_FOREIGN_KEYS` behind a
       // flag of their own, as revisions 22 and 23 did.
       ...(includeReviewRunTables ? reviewTables : {}),
+      ...(includeLocalStage ? LOCAL_STAGE_SCHEMA_SQL : {}),
+      ...(includeHouseWordList ? HOUSE_WORD_LIST_SCHEMA_SQL : {}),
       // Revision 25 (Issue #414) adds the Publication Version relations the same way, behind a flag of
       // their own, and revision 26 (Issue #57) the proposal-conflict relations.
       ...(includePublicationVersionTables ? PUBLICATION_VERSION_SCHEMA_SQL : {}),
@@ -2907,6 +2933,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeImportRetentionTables
         ? { ...IMPORT_RETENTION_SCHEMA_SQL, import_fidelity_categories: IMPORT_FIDELITY_CATEGORIES_SQL }
         : {}),
+      ...(includeWordImportRetentionTables ? WORD_IMPORT_RETENTION_SCHEMA_SQL : {}),
       // Revision 28 (Issue #411) adds the staged imported marks the same way and widened
       // `proposal_change_items` in the transaction that created them: a store with them holds only the
       // widened text, and one below it revision 27's — or, planted from this build, the widened one with the
@@ -3001,7 +3028,7 @@ function requireManuscriptReimportTargetSchema(
       // Revision 65 (Issue #432, S84a) adds which type, words and reference set each writing Task drafts from, and its drafts.
       ...(includeWritingTaskTables ? WRITING_TASK_SCHEMA_SQL : {}),
       // Revision 66 (Issue #95, S39) adds each Book's Background Analysis Enrollment, its versions and its states.
-      ...(includeBackgroundAnalysisEnrollmentTables ? BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL : {}),
+      ...(includeBackgroundAnalysisEnrollmentTables ? Object.fromEntries(Object.entries(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL).map(([table, sql]) => [table, [sql, BACKGROUND_PROCESSING_ENROLLMENT_SCHEMA_SQL[table]!]])) : {}),
       // Revision 67 (Issue #428, S80a) adds each 资料库 item's Material Index build and the segments of a complete one.
       ...(includeMaterialIndexTables ? MATERIAL_INDEX_SCHEMA_SQL : {}),
       // Revision 68 (Issue #757) adds the editor's 人工结果确认 over requests whose results cannot be known.
@@ -3012,6 +3039,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeMaterialIndexLayerTables ? MATERIAL_INDEX_LAYER_SCHEMA_SQL : {}),
       ...(includeMaterialTranslationAttempts ? MATERIAL_TRANSLATION_ATTEMPT_SCHEMA_SQL : {}),
       ...(includeFactualVerificationTables ? FACTUAL_VERIFICATION_SCHEMA_SQL : {}),
+      ...(includeFactualClaimTables ? FACTUAL_CLAIM_SCHEMA_SQL : {}),
       ...(includeHousePreferenceTables ? HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL : {}),
       ...(includeEditorialLearningTables ? EDITORIAL_LEARNING_SCHEMA_SQL : {}),
       ...(includeSupervisionTables ? SUPERVISION_SCHEMA_SQL : {}),
@@ -3020,6 +3048,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeCustomAnalysisTables ? CUSTOM_ANALYSIS_DIMENSION_SCHEMA_SQL : {}),
       ...(includeImportedSkillUpdateTables ? IMPORTED_SKILL_UPDATE_SCHEMA_SQL : {}),
       ...(includeProcedureDefinitions ? PROCEDURE_DEFINITION_SCHEMA_SQL : {}),
+      ...(includeEditableProcedures ? { ...EDITABLE_PROCEDURE_SCHEMA_SQL, procedure_plan_pins: PROCEDURE_PLAN_PINS_V2_SQL } : {}),
     },
     // The partial index that keeps one primary Manuscript per Book stands with the rebuilt relation, whatever the version.
     {
@@ -3038,9 +3067,12 @@ function requireManuscriptReimportTargetSchema(
       ...(includeEditorialMarkTables ? EDITORIAL_MARK_TRIGGER_SQL : {}),
       ...(includeManuscriptEffectTables ? MANUSCRIPT_EFFECT_TRIGGER_SQL : {}),
       ...(includeReviewRunTables ? reviewTriggers : {}),
+      ...(includeLocalStage ? LOCAL_STAGE_TRIGGER_SQL : {}),
+      ...(includeHouseWordList ? HOUSE_WORD_LIST_TRIGGER_SQL : {}),
       ...(includePublicationVersionTables ? PUBLICATION_VERSION_TRIGGER_SQL : {}),
       ...(includeProposalConflictTables ? PROPOSAL_CONFLICT_TRIGGER_SQL : {}),
       ...(includeImportRetentionTables ? IMPORT_RETENTION_TRIGGER_SQL : {}),
+      ...(includeWordImportRetentionTables ? WORD_IMPORT_RETENTION_TRIGGER_SQL : {}),
       ...(includeExportLedgerTables ? EXPORT_LEDGER_TRIGGER_SQL : {}),
       ...(includeDefaultExecutionRuleTables ? DEFAULT_EXECUTION_RULE_TRIGGER_SQL : {}),
       ...(includeRunCheckpointTables ? RUN_CHECKPOINT_TRIGGER_SQL : {}),
@@ -3083,6 +3115,7 @@ function requireManuscriptReimportTargetSchema(
       ...(includeMaterialIndexLayerTables ? MATERIAL_INDEX_LAYER_TRIGGER_SQL : {}),
       ...(includeMaterialTranslationAttempts ? MATERIAL_TRANSLATION_ATTEMPT_TRIGGER_SQL : {}),
       ...(includeFactualVerificationTables ? FACTUAL_VERIFICATION_TRIGGER_SQL : {}),
+      ...(includeFactualClaimTables ? FACTUAL_CLAIM_TRIGGER_SQL : {}),
       ...(includeHousePreferenceTables ? HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL : {}),
       ...(includeEditorialLearningTables ? EDITORIAL_LEARNING_TRIGGER_SQL : {}),
       ...(includeSupervisionTables ? SUPERVISION_TRIGGER_SQL : {}),
@@ -3091,10 +3124,12 @@ function requireManuscriptReimportTargetSchema(
       ...(includeCustomAnalysisTables ? CUSTOM_ANALYSIS_DIMENSION_TRIGGER_SQL : {}),
       ...(includeImportedSkillUpdateTables ? IMPORTED_SKILL_UPDATE_TRIGGER_SQL : {}),
       ...(includeProcedureDefinitions ? PROCEDURE_DEFINITION_TRIGGER_SQL : {}),
+      ...(includeEditableProcedures ? EDITABLE_PROCEDURE_TRIGGER_SQL : {}),
     },
   );
   if (includeMaterialTranslationAttempts) validateMaterialTranslationAttemptSchema(db);
-  if (includeProcedureDefinitions) { validateProcedureDefinitions(db, Number(db.prepare('PRAGMA user_version').get()?.user_version) < REVIEW_CONTRACT_SCHEMA_VERSION); validateProcedurePlanPins(db); }
+  if (includeProcedureDefinitions) { validateProcedureDefinitions(db, Number(db.prepare('PRAGMA user_version').get()?.user_version) < HOUSE_WORD_LIST_SCHEMA_VERSION); }
+  if (includeLocalStage) validateLocalStageArtifacts(db);
 }
 
 function requireV7TargetSchema(db: DatabaseSync): void {
@@ -3680,43 +3715,97 @@ function blockDigest(kind: ManuscriptBlockProjection['kind'], level: number | nu
   return sha256(canonicalJson({ kind, level, text }));
 }
 
-function recoveryCommandEvidenceDigest(db: DatabaseSync, groupId: string): string {
-  validateCommandHistoryGroup(db, groupId);
-  const group = one(db.prepare(
-    `SELECT branch_id, ordinal, kind, source_group_id
-     FROM manuscript_command_groups WHERE command_group_id = ?`,
-  ).all(groupId) as SqlRow[], 'HISTORY_CORRUPT', '恢复命令证据缺失。');
-  const digest = createHash('sha256');
-  digest.update(canonicalJson({
-    schema: 'ai7.recovery-command-evidence/1',
-    groupId,
-    branchId: asString(group.branch_id),
-    ordinal: asNumber(group.ordinal),
-    kind: asString(group.kind),
-    sourceGroupId: group.source_group_id === null ? null : asString(group.source_group_id),
-  }));
-  let position = 0;
-  while (true) {
-    const edits = db.prepare(
+/** The canonical header `ai7.recovery-command-evidence/1` hashes before a command group's members. */
+export interface CommandEvidenceHeader {
+  readonly schema: 'ai7.recovery-command-evidence/1';
+  readonly groupId: string;
+  readonly branchId: string;
+  readonly ordinal: number;
+  readonly kind: 'edit' | 'replacement';
+  readonly sourceGroupId: string | null;
+}
+
+/** One member of a command group exactly as its evidence hashes it: the block's whole text before and after. */
+export interface CommandEvidenceMember {
+  readonly position: number;
+  readonly blockId: string;
+  readonly beforeText: string;
+  readonly beforeDigest: string;
+  readonly afterText: string;
+  readonly afterDigest: string;
+}
+
+/**
+ * The one reading of a command group's immutable evidence (Issue #1140). The group is validated whole first; then its
+ * canonical header and every member, in position order and in storage batches, pass through the
+ * `ai7.recovery-command-evidence/1` digest as they are read. The working-state chain keeps only that digest; the manual
+ * source reader also keeps the members of the page it is packing, so the page and the digest that proves it come from
+ * one pass over the group.
+ */
+class CommandEvidenceReader {
+  readonly header: CommandEvidenceHeader;
+  readonly #db: DatabaseSync;
+  readonly #digest = createHash('sha256');
+  #position = 0;
+  #count = 0;
+  #exhausted = false;
+
+  constructor(db: DatabaseSync, groupId: string) {
+    validateCommandHistoryGroup(db, groupId);
+    const group = one(db.prepare(
+      `SELECT branch_id, ordinal, kind, source_group_id
+       FROM manuscript_command_groups WHERE command_group_id = ?`,
+    ).all(groupId) as SqlRow[], 'HISTORY_CORRUPT', '恢复命令证据缺失。');
+    this.#db = db;
+    this.header = {
+      schema: 'ai7.recovery-command-evidence/1',
+      groupId,
+      branchId: asString(group.branch_id),
+      ordinal: asNumber(group.ordinal),
+      kind: asString(group.kind) as CommandEvidenceHeader['kind'],
+      sourceGroupId: group.source_group_id === null ? null : asString(group.source_group_id),
+    };
+    this.#digest.update(canonicalJson(this.header));
+  }
+
+  /** The next storage batch of members, each already hashed; empty once the last member has been read. */
+  nextBatch(): CommandEvidenceMember[] {
+    if (this.#exhausted) return [];
+    const edits = this.#db.prepare(
       `SELECT position, block_id, before_text, before_digest, after_text, after_digest
        FROM manuscript_command_edits
        WHERE command_group_id = ? AND position > ? ORDER BY position LIMIT ?`,
-    ).all(groupId, position, HISTORY_BATCH) as SqlRow[];
-    if (edits.length === 0) break;
-    for (const edit of edits) {
-      position = asNumber(edit.position);
-      digest.update(canonicalJson({
-        position,
+    ).all(this.header.groupId, this.#position, HISTORY_BATCH) as SqlRow[];
+    if (edits.length === 0) {
+      this.#exhausted = true;
+      return [];
+    }
+    return edits.map((edit) => {
+      this.#position = asNumber(edit.position);
+      const member: CommandEvidenceMember = {
+        position: this.#position,
         blockId: asString(edit.block_id),
         beforeText: asString(edit.before_text),
         beforeDigest: asString(edit.before_digest),
         afterText: asString(edit.after_text),
         afterDigest: asString(edit.after_digest),
-      }));
-    }
+      };
+      this.#digest.update(canonicalJson(member));
+      this.#count += 1;
+      return member;
+    });
   }
-  requireBounded(position > 0, 'HISTORY_CORRUPT', '恢复命令证据为空。');
-  return digest.digest('hex');
+
+  /** Reads whatever members remain, then the whole group's digest and member count. */
+  finish(): { memberCount: number; digest: string } {
+    while (this.nextBatch().length > 0) { /* hashed as read */ }
+    requireBounded(this.#position > 0, 'HISTORY_CORRUPT', '恢复命令证据为空。');
+    return { memberCount: this.#count, digest: this.#digest.digest('hex') };
+  }
+}
+
+function recoveryCommandEvidenceDigest(db: DatabaseSync, groupId: string): string {
+  return new CommandEvidenceReader(db, groupId).finish().digest;
 }
 
 function recoveryWorkingDigest(
@@ -6011,7 +6100,7 @@ export function initializeBoundedSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === LATEST_SCHEMA_VERSION),
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === 95 || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === LATEST_SCHEMA_VERSION),
     'SCHEMA_UNSUPPORTED',
     '数据库版本不受支持。',
   );
@@ -6062,7 +6151,7 @@ export function initializeBoundedSchema(
       version === WRITING_TASK_SCHEMA_VERSION ||
       version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
       version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === LATEST_SCHEMA_VERSION)) {
+      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === 95 || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === LATEST_SCHEMA_VERSION)) {
     transact(db, () => {
       if (validateStoreTruth || version !== LATEST_SCHEMA_VERSION) {
         validateManuscriptReimportSchemaTruth(
@@ -6487,6 +6576,94 @@ export type VerifiedRecoverySnapshot =
       limitation: string;
     }
   | { state: 'none' };
+
+export type { ManualCommandRequestPin, ManualCommandSource } from '../shared/protocol/learning.js';
+
+/** Where the next page starts: an exclusive member position of one exact source, and the history it was read against. */
+export interface ManualCommandSourceCursor {
+  readonly commandGroupId: string;
+  readonly evidenceDigest: string;
+  readonly afterPosition: number;
+  /** The `digest` of the history an earlier page reported; null reads the immutable evidence alone. */
+  readonly historyDigest: string | null;
+}
+
+/**
+ * What the editor's history holds now for the command's group, beside its immutable evidence and never part of it: the
+ * branch's current state, whether a history boundary (an Apply or a restoration) has crossed the group, the group's
+ * status and its latest journal action, and the latest restoration made after it. These are facts as they stand, not
+ * whether the change survived, was withdrawn or may be learned from.
+ */
+export interface ManualCommandHistory {
+  readonly revisionId: string;
+  readonly journalSequence: number;
+  readonly workingDigest: string;
+  readonly historySequence: number;
+  readonly historyBoundarySequence: number;
+  readonly boundaryCrossed: boolean;
+  readonly groupStatus: 'applied' | 'undone' | 'superseded';
+  readonly lastAction: { readonly kind: 'edit' | 'replacement' | 'undo' | 'redo'; readonly journalEntryId: string; readonly sequence: number };
+  readonly restoration: {
+    readonly restorationId: string;
+    readonly selectedKind: 'journal' | 'checkpoint' | 'snapshot';
+    readonly selectedSnapshotId: string | null;
+    readonly descendantRevisionId: string;
+  } | null;
+  readonly digest: string;
+}
+
+/** A page member's block in the working state now: gone, holding exactly the recorded after-text, or holding other text. */
+export interface ManualCommandMemberCurrent {
+  readonly position: number;
+  readonly block: 'absent' | 'recorded-after' | 'other-text';
+}
+
+export interface ManualCommandSourcePage {
+  readonly header: CommandEvidenceHeader;
+  readonly memberCount: number;
+  readonly evidenceDigest: string;
+  /** Whole members in position order: a page ends before the first member that would take it past its byte budget. */
+  readonly members: ReadonlyArray<CommandEvidenceMember>;
+  readonly current: ReadonlyArray<ManualCommandMemberCurrent>;
+  readonly next: ManualCommandSourceCursor | null;
+  readonly history: ManualCommandHistory;
+}
+
+const MANUAL_COMMAND_SOURCE_FIELDS = [
+  'bookId', 'manuscriptId', 'branchId', 'baseRevisionId', 'journalEntryId', 'journalSequence', 'clientEditId',
+  'requestFingerprint', 'durableAt', 'commandGroupId', 'commandKind', 'commandOrdinal', 'sourceGroupId',
+  'beforeWorkingDigest', 'afterWorkingDigest', 'evidenceDigest', 'memberCount', 'request',
+] as const;
+
+function hasExactFields(value: object, fields: ReadonlyArray<string>): boolean {
+  const own = Object.keys(value);
+  return own.length === fields.length && fields.every((field) => Object.hasOwn(value, field));
+}
+
+function encodedJsonBytes(value: unknown): number {
+  return Buffer.byteLength(JSON.stringify(value), 'utf8');
+}
+
+function requireManualCommandSource(source: ManualCommandSource): void {
+  const request: ManualCommandRequestPin | null = typeof source?.request === 'object' ? source.request : null;
+  requireBounded(
+    typeof source === 'object' && source !== null && hasExactFields(source, MANUAL_COMMAND_SOURCE_FIELDS) &&
+      [source.bookId, source.manuscriptId, source.branchId, source.baseRevisionId, source.journalEntryId, source.clientEditId, source.commandGroupId]
+        .every((id) => typeof id === 'string' && UUID_PATTERN.test(id)) &&
+      [source.requestFingerprint, source.beforeWorkingDigest, source.afterWorkingDigest, source.evidenceDigest]
+        .every((digest) => typeof digest === 'string' && DIGEST_PATTERN.test(digest)) &&
+      [source.journalSequence, source.commandOrdinal, source.memberCount].every((count) => Number.isSafeInteger(count) && count > 0) &&
+      typeof source.durableAt === 'string' && source.durableAt.isWellFormed() && source.durableAt.length > 0 && source.durableAt.length <= 64 &&
+      source.sourceGroupId === null && request !== null &&
+      (request.origin === 'journal-edit'
+        ? source.commandKind === 'edit' && hasExactFields(request, ['origin', 'windowStartBlockId']) &&
+          typeof request.windowStartBlockId === 'string' && BLOCK_PATTERN.test(request.windowStartBlockId)
+        : request.origin === 'manual-search-replacement' && source.commandKind === 'replacement' &&
+          hasExactFields(request, ['origin', 'previewId']) && typeof request.previewId === 'string' && UUID_PATTERN.test(request.previewId)),
+    'MANUAL_SOURCE_INVALID',
+    '手动编辑来源引用无效。',
+  );
+}
 
 export class BoundedManuscriptStore {
   readonly #db: DatabaseSync;
@@ -7909,7 +8086,7 @@ export class BoundedManuscriptStore {
     return projection;
   }
 
-  flushJournalEdit(input: JournalEditInput, serviceLifetimeId: string): JournalAcknowledgement {
+  flushJournalEdit(input: JournalEditInput, serviceLifetimeId: string, capture?: (source: ManualCommandSource) => void): JournalAcknowledgement {
     validateIdentity(input.manuscriptId, input.branchId);
     requireBounded(UUID_PATTERN.test(serviceLifetimeId), 'LIFETIME_INVALID', '本地服务生命周期标识无效。');
     requireBounded(UUID_PATTERN.test(input.clientEditId) && UUID_PATTERN.test(input.baseRevisionId) && BLOCK_PATTERN.test(input.blockId) && BLOCK_PATTERN.test(input.windowStartBlockId) && DIGEST_PATTERN.test(input.baseBlockDigest), 'EDIT_INVALID', '编辑标识无效。');
@@ -8003,6 +8180,8 @@ export class BoundedManuscriptStore {
       ).run(sequence, workingDigest, delta, historyOrdinal, input.branchId, binding.journalSequence, binding.workingDigest);
       requireBounded(state.changes === 1, 'EDIT_SEQUENCE_CHANGED', '修订日志在保存时已前进。');
       this.#recordLifetimeJournalWrite(serviceLifetimeId, binding, sequence, workingDigest, durableAt);
+      if (capture !== undefined) capture(this.manualCommandSource(input.branchId, sequence,
+        { origin: 'journal-edit', windowStartBlockId: input.windowStartBlockId }));
     });
     const committed = one(this.#db.prepare(
       `SELECT client_edit_id, request_fingerprint, branch_id, base_revision_id, block_id, sequence,
@@ -8341,7 +8520,7 @@ export class BoundedManuscriptStore {
     };
   }
 
-  commitReplacement(previewId: string, serviceLifetimeId: string): ReplacementCommitProjection {
+  commitReplacement(previewId: string, serviceLifetimeId: string, capture?: (source: ManualCommandSource) => void): ReplacementCommitProjection {
     requireBounded(UUID_PATTERN.test(serviceLifetimeId), 'LIFETIME_INVALID', '本地服务生命周期标识无效。');
     const result = transact(this.#db, () => {
       const preview = one(this.#db.prepare('SELECT * FROM manuscript_replacement_previews WHERE preview_id = ?').all(previewId) as SqlRow[], 'REPLACEMENT_NOT_FOUND', '替换预览不存在。');
@@ -8458,6 +8637,8 @@ export class BoundedManuscriptStore {
       ).run(sequence, workingDigest, ordinal, totalDelta, binding.branchId, binding.journalSequence, binding.workingDigest);
       requireBounded(state.changes === 1, 'REPLACEMENT_STALE', '替换提交时稿件状态已变化。');
       this.#recordLifetimeJournalWrite(serviceLifetimeId, binding, sequence, workingDigest, now);
+      if (capture !== undefined) capture(this.manualCommandSource(binding.branchId, sequence,
+        { origin: 'manual-search-replacement', previewId }));
       requireBounded(
         this.#db.prepare("UPDATE manuscript_replacement_previews SET state = 'committed', committed_at = ? WHERE preview_id = ? AND state = 'frozen'").run(now, previewId).changes === 1,
         'REPLACEMENT_STATE_CHANGED',
@@ -8501,7 +8682,24 @@ export class BoundedManuscriptStore {
       const binding = this.#binding(manuscriptId, branchId);
       this.#requireBranchEditable(branchId);
       const byBlock = new Map<string, Array<ExactReplacementTarget & { index: number }>>();
+      const inverses = targets.filter((target) => target.reversalOf !== undefined);
+      const reverseEffect = inverses[0]?.reversalOf?.effectId;
+      requireBounded(inverses.length === 0 || inverses.length === targets.length &&
+        inverses.every((target) => target.reversalOf!.effectId === reverseEffect) && new Set(inverses.map((target) => target.reversalOf!.itemId)).size === targets.length,
+      'APPLY_INVALID', '撤销范围必须完整属于同一次应用。');
+      const originalRanges = new Map<number, { from: number; to: number }>();
       targets.forEach((target, index) => {
+        if (target.reversalOf !== undefined) {
+          const original = this.#db.prepare(`SELECT t.block_id, t.from_grapheme, t.to_grapheme, t.expected_text_digest, t.replacement_text_digest, i.target_count
+            FROM manuscript_effect_targets t JOIN manuscript_effect_intents i ON i.effect_id = t.effect_id AND i.kind = 'apply'
+            JOIN manuscript_effect_receipts r ON r.effect_id = i.effect_id
+            WHERE t.effect_id = ? AND t.item_id = ? AND i.manuscript_id = ? AND i.branch_id = ?`).get(target.reversalOf.effectId, target.reversalOf.itemId, manuscriptId, branchId);
+          requireBounded(original !== undefined && original.block_id === target.blockId && original.target_count === targets.length &&
+            original.expected_text_digest === sha256(target.insertText) && original.replacement_text_digest === sha256(target.expectedText) &&
+            this.#db.prepare('SELECT 1 FROM manuscript_effect_intents WHERE reverses_effect_id = ? LIMIT 1').get(target.reversalOf.effectId) === undefined,
+          'APPLY_INVALID', '撤销范围或文字与原应用凭据不一致。');
+          originalRanges.set(index, { from: asNumber(original.from_grapheme), to: asNumber(original.to_grapheme) });
+        }
         // An empty range is an insertion at that point — reversing an Apply that deleted its words: it
         // expects no text there and brings some.
         requireBounded(
@@ -8546,16 +8744,17 @@ export class BoundedManuscriptStore {
         const blockId = asString(row.block_id);
         const beforeText = asString(row.text);
         const before = graphemes(beforeText);
-        const ordered = byBlock.get(blockId)!.sort((left, right) => left.fromGrapheme - right.fromGrapheme);
+        const ordered = byBlock.get(blockId)!.sort((left, right) => left.fromGrapheme - right.fromGrapheme ||
+          (originalRanges.get(left.index)?.from ?? 0) - (originalRanges.get(right.index)?.from ?? 0));
         ordered.forEach((target, index) => {
-          // Targets never overlap, and an insertion shares its point with no other target, so where each
-          // one lands never depends on the order they were given in. The recheck of an empty range is
-          // its point lying inside the block.
+          // Ordinary Apply never shares an insertion point. A complete committed inverse may use the
+          // original contiguous ranges to order touching targets, including adjacent deletions.
           const previous = index === 0 ? undefined : ordered[index - 1]!;
           requireBounded(
             target.toGrapheme <= before.length &&
               (previous === undefined || previous.toGrapheme < target.fromGrapheme ||
-                (previous.toGrapheme === target.fromGrapheme && previous.toGrapheme > previous.fromGrapheme && target.toGrapheme > target.fromGrapheme)) &&
+                (previous.toGrapheme === target.fromGrapheme && (previous.toGrapheme > previous.fromGrapheme && target.toGrapheme > target.fromGrapheme ||
+                  reverseEffect !== undefined && originalRanges.get(previous.index)!.to === originalRanges.get(target.index)!.from))) &&
               before.slice(target.fromGrapheme, target.toGrapheme).join('') === target.expectedText,
             'APPLY_TARGET_DRIFTED',
             '原文已变，本次应用没有写入稿件。',
@@ -8860,6 +9059,236 @@ export class BoundedManuscriptStore {
         canUndo: this.#hasHistory(branchId, 'applied'), canRedo: this.#hasHistory(branchId, 'undone'),
       };
     });
+  }
+
+  manualCommandSource(branchId: string, sequence: number, request: ManualCommandRequestPin): ManualCommandSource {
+    const entry = one(this.#db.prepare(`SELECT e.*, g.ordinal, g.kind, g.source_group_id, g.before_working_digest,
+      g.after_working_digest, m.book_id FROM edit_journal_entries e
+      JOIN manuscript_command_groups g ON g.command_group_id = e.command_group_id
+      JOIN manuscripts m ON m.manuscript_id = e.manuscript_id WHERE e.branch_id = ? AND e.sequence = ?`)
+      .all(branchId, sequence) as SqlRow[], 'MANUAL_SOURCE_MISMATCH', '手动编辑的原始日志不存在。');
+    requireBounded(entry.command_kind === 'edit' || entry.command_kind === 'replacement', 'MANUAL_SOURCE_MISMATCH', '这不是原始手动编辑。');
+    const evidence = new CommandEvidenceReader(this.#db, asString(entry.command_group_id));
+    while (evidence.nextBatch().length > 0) { /* The existing reader proves every whole member. */ }
+    const complete = evidence.finish();
+    const source: ManualCommandSource = {
+      bookId: asString(entry.book_id), manuscriptId: asString(entry.manuscript_id), branchId,
+      baseRevisionId: asString(entry.base_revision_id), journalEntryId: asString(entry.journal_entry_id), journalSequence: sequence,
+      clientEditId: asString(entry.client_edit_id), requestFingerprint: asString(entry.request_fingerprint), durableAt: asString(entry.durable_at),
+      commandGroupId: asString(entry.command_group_id), commandKind: entry.command_kind, commandOrdinal: asNumber(entry.ordinal),
+      sourceGroupId: null, beforeWorkingDigest: asString(entry.before_working_digest), afterWorkingDigest: asString(entry.after_working_digest),
+      evidenceDigest: complete.digest, memberCount: complete.memberCount, request,
+    };
+    this.readManualCommandSource(source, null, MAX_FRAME_BYTES);
+    return source;
+  }
+
+  /**
+   * One page of an original manual command's exact evidence (Issue #1140). The source must prove itself against the
+   * real records first: its creation journal entry, command group, Book, manuscript, branch and Revision, its producer
+   * request recomputed into the entry's unchanged fingerprint, and the group's working-state chain recomputed over the
+   * evidence digest it names. Every page reads the whole group once through the same evidence the chain hashes, so a
+   * damaged member after the page refuses it as surely as one inside it; the page keeps whole members only, packed
+   * against `budgetBytes` of encoded JSON. The current history is reported beside the evidence and pinned by the
+   * cursor, so pages read across a change refuse rather than mix. Reading writes nothing.
+   */
+  readManualCommandSource(
+    source: ManualCommandSource,
+    cursor: ManualCommandSourceCursor | null,
+    budgetBytes: number,
+  ): ManualCommandSourcePage {
+    requireManualCommandSource(source);
+    requireBounded(Number.isSafeInteger(budgetBytes) && budgetBytes > 0 && budgetBytes <= MAX_FRAME_BYTES, 'MANUAL_SOURCE_INVALID', '手动编辑来源分页预算无效。');
+    requireBounded(
+      cursor === null || (
+        typeof cursor === 'object' && hasExactFields(cursor, ['commandGroupId', 'evidenceDigest', 'afterPosition', 'historyDigest']) &&
+          cursor.commandGroupId === source.commandGroupId && cursor.evidenceDigest === source.evidenceDigest &&
+          Number.isSafeInteger(cursor.afterPosition) && cursor.afterPosition >= 0 && cursor.afterPosition < source.memberCount &&
+          (cursor.historyDigest === null || (typeof cursor.historyDigest === 'string' && DIGEST_PATTERN.test(cursor.historyDigest)))
+      ),
+      'MANUAL_SOURCE_INVALID',
+      '手动编辑来源分页位置无效。',
+    );
+    const creation = this.#requireManualCommandCreation(source);
+    const history = this.#manualCommandHistory(source, creation.group, creation.latestSequence);
+    requireBounded(
+      cursor === null || cursor.historyDigest === null || cursor.historyDigest === history.digest,
+      'MANUAL_SOURCE_HISTORY_CHANGED',
+      '稿件历史已变化，请从第一页重新读取。',
+    );
+    const after = cursor?.afterPosition ?? 0;
+    const historyPin = cursor === null ? history.digest : cursor.historyDigest;
+    const evidence = new CommandEvidenceReader(this.#db, source.commandGroupId);
+    const header = evidence.header;
+    // What the page holds besides its members, with the longest cursor it could end on.
+    let bytes = encodedJsonBytes({
+      header, memberCount: source.memberCount, evidenceDigest: source.evidenceDigest, members: [], current: [],
+      next: { commandGroupId: source.commandGroupId, evidenceDigest: source.evidenceDigest, afterPosition: source.memberCount, historyDigest: history.digest },
+      history,
+    });
+    const currentBlock = this.#db.prepare('SELECT digest FROM working_blocks WHERE branch_id = ? AND block_id = ?');
+    const members: CommandEvidenceMember[] = [];
+    const current: ManualCommandMemberCurrent[] = [];
+    let first: CommandEvidenceMember | undefined;
+    let full = false;
+    for (let batch = evidence.nextBatch(); batch.length > 0; batch = evidence.nextBatch()) {
+      first ??= batch[0];
+      for (const member of batch) {
+        if (full || member.position <= after) continue;
+        const row = currentBlock.get(source.branchId, member.blockId) as SqlRow | undefined;
+        const state: ManualCommandMemberCurrent = {
+          position: member.position,
+          block: row === undefined ? 'absent' : asString(row.digest) === member.afterDigest ? 'recorded-after' : 'other-text',
+        };
+        const added = encodedJsonBytes(member) + encodedJsonBytes(state) + (members.length > 0 ? 2 : 0);
+        if (bytes + added > budgetBytes) {
+          full = true;
+          continue;
+        }
+        members.push(member);
+        current.push(state);
+        bytes += added;
+      }
+    }
+    const { memberCount, digest } = evidence.finish();
+    requireBounded(
+      asString(creation.group.after_working_digest) === recoveryWorkingDigest(
+        asString(creation.group.before_working_digest), source.journalSequence, source.commandKind, source.commandGroupId, digest,
+      ),
+      'HISTORY_CORRUPT',
+      '命令证据与其工作状态链不一致。',
+    );
+    requireBounded(
+      digest === source.evidenceDigest && memberCount === source.memberCount && first !== undefined &&
+        header.branchId === source.branchId && header.ordinal === source.commandOrdinal && header.kind === source.commandKind &&
+        header.sourceGroupId === null && first.blockId === asString(creation.entry.block_id) &&
+        first.afterDigest === asString(creation.entry.resulting_block_digest),
+      'MANUAL_SOURCE_MISMATCH',
+      '手动编辑来源与原始命令证据不一致。',
+    );
+    if (source.request.origin === 'journal-edit') {
+      // Freehand typing is one block: the original request is read back whole and must give the entry's fingerprint.
+      const request: JournalEditInput = {
+        clientEditId: source.clientEditId, manuscriptId: source.manuscriptId, branchId: source.branchId,
+        baseRevisionId: source.baseRevisionId, blockId: first.blockId, windowStartBlockId: source.request.windowStartBlockId,
+        baseBlockDigest: first.beforeDigest, expectedJournalSequence: source.journalSequence - 1,
+        fromGrapheme: asNumber(creation.entry.from_grapheme), toGrapheme: asNumber(creation.entry.to_grapheme),
+        insertText: asString(creation.entry.insert_text),
+      };
+      const before = graphemes(first.beforeText);
+      requireBounded(
+        memberCount === 1 && sha256(canonicalJson(request)) === source.requestFingerprint && request.toGrapheme <= before.length &&
+          [...before.slice(0, request.fromGrapheme), request.insertText, ...before.slice(request.toGrapheme)].join('') === first.afterText,
+        'MANUAL_SOURCE_MISMATCH',
+        '手动编辑来源与原始编辑请求不一致。',
+      );
+    }
+    requireBounded(members.length > 0, 'MANUAL_SOURCE_INVALID', '手动编辑来源分页预算容不下一个完整命令成员。');
+    const last = members.at(-1)!.position;
+    const page: ManualCommandSourcePage = {
+      header, memberCount, evidenceDigest: digest, members, current,
+      next: last < memberCount
+        ? { commandGroupId: source.commandGroupId, evidenceDigest: digest, afterPosition: last, historyDigest: historyPin }
+        : null,
+      history,
+    };
+    requireBounded(encodedJsonBytes(page) <= budgetBytes, 'MANUAL_SOURCE_INVALID', '手动编辑来源分页超出预算。');
+    return page;
+  }
+
+  /**
+   * The source's creation journal entry and command group, proved against everything the source names except the
+   * evidence itself: the entry is the group's one creation, every other entry of the group is a later undo or redo on
+   * the same branch, and the manual Search/Replace commit's preview gives the entry's fingerprint, which no Apply's does.
+   */
+  #requireManualCommandCreation(source: ManualCommandSource): { entry: SqlRow; group: SqlRow; latestSequence: number } {
+    const entry = one(this.#db.prepare(
+      `SELECT client_edit_id, request_fingerprint, manuscript_id, branch_id, base_revision_id, sequence, block_id,
+              from_grapheme, to_grapheme, insert_text, resulting_block_digest, resulting_working_digest, durable_at,
+              command_group_id, command_kind
+       FROM edit_journal_entries WHERE journal_entry_id = ?`,
+    ).all(source.journalEntryId) as SqlRow[], 'MANUAL_SOURCE_MISMATCH', '手动编辑来源的修订日志记录不存在。');
+    const group = one(this.#db.prepare(
+      `SELECT branch_id, ordinal, kind, status, source_group_id, before_working_digest, after_working_digest, created_at
+       FROM manuscript_command_groups WHERE command_group_id = ?`,
+    ).all(source.commandGroupId) as SqlRow[], 'MANUAL_SOURCE_MISMATCH', '手动编辑来源的命令组不存在。');
+    const owner = this.#db.prepare(
+      `SELECT m.book_id, b.manuscript_id branch_manuscript_id, r.manuscript_id revision_manuscript_id, r.branch_id revision_branch_id
+       FROM manuscripts m, manuscript_branches b, manuscript_revisions r
+       WHERE m.manuscript_id = ? AND b.branch_id = ? AND r.revision_id = ?`,
+    ).get(source.manuscriptId, source.branchId, source.baseRevisionId) as SqlRow | undefined;
+    const bindings = one(this.#db.prepare(
+      `SELECT max(sequence) latest,
+              coalesce(sum(CASE WHEN journal_entry_id = ? THEN 0
+                                WHEN command_kind IN ('undo', 'redo') AND branch_id = ? AND sequence > ? THEN 0
+                                ELSE 1 END), 0) stray
+       FROM edit_journal_entries WHERE command_group_id = ?`,
+    ).all(source.journalEntryId, source.branchId, source.journalSequence, source.commandGroupId) as SqlRow[],
+    'MANUAL_SOURCE_MISMATCH', '手动编辑来源的修订日志绑定无法读取。');
+    requireBounded(
+      owner !== undefined && owner.book_id === source.bookId && owner.branch_manuscript_id === source.manuscriptId &&
+        owner.revision_manuscript_id === source.manuscriptId && owner.revision_branch_id === source.branchId &&
+        entry.client_edit_id === source.clientEditId && entry.request_fingerprint === source.requestFingerprint &&
+        entry.manuscript_id === source.manuscriptId && entry.branch_id === source.branchId &&
+        entry.base_revision_id === source.baseRevisionId && entry.sequence === source.journalSequence &&
+        entry.durable_at === source.durableAt && entry.command_group_id === source.commandGroupId &&
+        entry.command_kind === source.commandKind && entry.resulting_working_digest === source.afterWorkingDigest &&
+        group.branch_id === source.branchId && group.ordinal === source.commandOrdinal && group.kind === source.commandKind &&
+        group.source_group_id === null && group.before_working_digest === source.beforeWorkingDigest &&
+        group.after_working_digest === source.afterWorkingDigest && group.created_at === source.durableAt &&
+        bindings.stray === 0,
+      'MANUAL_SOURCE_MISMATCH',
+      '手动编辑来源与原始修订日志、命令组或稿件绑定不一致。',
+    );
+    if (source.request.origin === 'manual-search-replacement') {
+      requireBounded(
+        sha256(canonicalJson({ previewId: source.request.previewId })) === source.requestFingerprint &&
+          entry.from_grapheme === 0 && entry.to_grapheme === 0,
+        'MANUAL_SOURCE_MISMATCH',
+        '手动编辑来源不是该替换预览的手动提交。',
+      );
+    }
+    return { entry, group, latestSequence: asNumber(bindings.latest) };
+  }
+
+  #manualCommandHistory(source: ManualCommandSource, group: SqlRow, latestSequence: number): ManualCommandHistory {
+    const binding = this.#binding(source.manuscriptId, source.branchId);
+    const latest = one(this.#db.prepare(
+      'SELECT journal_entry_id, command_kind, command_group_id FROM edit_journal_entries WHERE branch_id = ? AND sequence = ?',
+    ).all(source.branchId, latestSequence) as SqlRow[], 'HISTORY_CORRUPT', '命令组的最近修订日志记录缺失。');
+    const latestKind = asString(latest.command_kind);
+    requireBounded(
+      latest.command_group_id === source.commandGroupId && ['edit', 'replacement', 'undo', 'redo'].includes(latestKind),
+      'HISTORY_CORRUPT',
+      '命令组的最近修订日志记录不一致。',
+    );
+    const restoration = this.#db.prepare(
+      `SELECT r.restoration_id, r.selected_kind, r.selected_snapshot_id, r.descendant_revision_id
+       FROM recovery_restorations r JOIN recovery_attention a ON a.attention_id = r.attention_id
+       WHERE a.branch_id = ? AND r.pre_restore_journal_sequence >= ?
+       ORDER BY r.pre_restore_journal_sequence DESC, r.created_at DESC, r.restoration_id DESC LIMIT 1`,
+    ).get(source.branchId, source.journalSequence) as SqlRow | undefined;
+    const facts: Omit<ManualCommandHistory, 'digest'> = {
+      revisionId: binding.revisionId,
+      journalSequence: binding.journalSequence,
+      workingDigest: binding.workingDigest,
+      historySequence: binding.historySequence,
+      historyBoundarySequence: binding.historyBoundarySequence,
+      boundaryCrossed: asNumber(group.ordinal) <= binding.historyBoundarySequence,
+      groupStatus: asString(group.status) as ManualCommandHistory['groupStatus'],
+      lastAction: {
+        kind: latestKind as ManualCommandHistory['lastAction']['kind'],
+        journalEntryId: asString(latest.journal_entry_id),
+        sequence: latestSequence,
+      },
+      restoration: restoration === undefined ? null : {
+        restorationId: asString(restoration.restoration_id),
+        selectedKind: asString(restoration.selected_kind) as NonNullable<ManualCommandHistory['restoration']>['selectedKind'],
+        selectedSnapshotId: restoration.selected_snapshot_id === null ? null : asString(restoration.selected_snapshot_id),
+        descendantRevisionId: asString(restoration.descendant_revision_id),
+      },
+    };
+    return { ...facts, digest: sha256(canonicalJson(facts)) };
   }
 
   #binding(manuscriptId: string, branchId: string): BranchBinding {

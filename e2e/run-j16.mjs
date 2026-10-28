@@ -59,7 +59,7 @@ const SAMPLE1_SHA256 = 'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f4
  * answered — with the one dialogue question J-16 asks answered over it (Issue #52, S17a), the retrieval stimulus (#893) and
  * the Agent 工作区's two 修改要求 (Issue #90).
  */
-const FIXTURE_IDENTITY = 'sample1-agent-workspace';
+const FIXTURE_IDENTITY = 'sample1-agent-workspace-cross-chapter';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DEBUG_SELECTORS = new Set(['DEBUG', 'DEBUG_FILE', 'PWDEBUG', 'PWDEBUGIMPL']);
 const BROWSER_CLOSE_TIMEOUT_MS = 25_000;
@@ -914,7 +914,7 @@ async function main() {
     // The 任务 panel is one read; a dialogue (Issue #52, S17a) is asked about a selection and read, stopped, answered again or
     // converted by its own operations — no chat, conversation or stream is exposed to the renderer.
     await assertRenderer(renderer, `typeof globalThis.process === 'undefined' && typeof globalThis.require === 'undefined' && typeof window.ai7.inspectBookTasks === 'function' && typeof window.ai7.askAboutSelection === 'function' && Object.keys(window.ai7).filter((key)=>/dialog/i.test(key)).sort().join(',') === 'continueDialogueAnswer,convertDialogueToChangeSuggestion,inspectDialogue,inspectGlobalAgentDialogue,regenerateDialogueAnswer,stopDialogueAnswer' && !Object.keys(window.ai7).some((key)=>/chat|conversation|stream/i.test(key))`, 'renderer-api-boundary');
-    // v1 has no Book-less allow rule: this Journey proves the disclosed refusal and explicit local governance.
+    // The v29 legacy workspace profile has no Book-less allow rule: this Journey proves the disclosed refusal and explicit local governance.
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('global-agent')), 'global-agent-entry');
     await waitFor(renderer, `document.querySelector('[data-global-agent-policy]')?.textContent.includes('当前处理策略未允许')`, 'global-agent-policy-disclosed');
     await assertRenderer(renderer, `(async () => { const before = await window.ai7.inspectGlobalAgent(); try { await window.ai7.askGlobalAgent({ question: '合成学习方向问题', sources: [] }); return false; } catch (error) { const after = await window.ai7.inspectGlobalAgent(); return error.code === 'GLOBAL_AGENT_POLICY_BLOCKED' && before.history.length === 0 && after.history.length === 0 && after.directives.length === 0; } })()`, 'global-agent-denied-no-attempt');
@@ -1495,8 +1495,8 @@ async function main() {
 
     // ---- 就这段发起任务… (Issue #423, plan slice S77b; TASK-001 to 004, TASK-044, TASK-046) -------------------------------
     at('selection-task-menu');
-    // The paragraph is one the Book's latest analysis anchors a lead on, so 审阅这段 · 「情节逻辑与前后一致」 has something to mark
-    // there: the runner reads the anchors from ②A's projection, and ②A's 回到稿件范围 brings the paragraph into the window.
+    // The paragraph is one the latest analysis anchors a lead on; the current model-backed review reads its unit and freezes
+    // the baseline source for one cross-chapter synthesis. ②A's 回到稿件范围 brings it into the window.
     await assertRenderer(renderer, `(() => { document.querySelector('#task-drawer [data-task-drawer-control="close"]')?.click(); return true; })()`, 'selection-task-drawer-close');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden === true`, 'selection-task-drawer-closed');
     const leadAnchors = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis().then(async (analysis) => { const revision = analysis.resultSetRevision; if (revision === null) return []; const first = (ranges) => ranges?.[0]?.blockId ?? null; const anchors = [...revision.conflicts.map((conflict) => first(conflict.sourceRanges)), ...revision.crossUnitFindings.map((finding) => first(finding.sides.flatMap((side) => side.sourceRanges))), ...[...revision.sections.flatMap((section) => section.unresolved), ...revision.synthesis.unresolved].map((item) => first(item.sourceRanges))].filter((blockId) => blockId !== null); const units = []; if (analysis.taskIntent !== null) { let afterOrdinal = 0; do { const page = await window.ai7.getCoverageManifestUnits({ taskIntentId: analysis.taskIntent.taskIntentId, afterOrdinal }); if (page.manifestDigest !== analysis.coverageManifest?.digest) throw new Error('coverage-manifest-page-digest'); units.push(...page.units); afterOrdinal = page.next; } while (afterOrdinal !== null); } return [...new Set(anchors)].map((blockId) => ({ blockId, unit: units.find((unit) => unit.blockIds.includes(blockId))?.ordinal ?? null })).filter((anchor) => anchor.unit !== null); })`);
@@ -1560,8 +1560,8 @@ async function main() {
     await assertRenderer(renderer, `(() => { const select = window.__j16.composer()?.querySelector('select[data-mark-field="procedure"]'); if (!(select instanceof HTMLSelectElement)) return false; select.value = 'review:plot-consistency'; select.dispatchEvent(new Event('change', { bubbles: true })); return select.value === 'review:plot-consistency'; })()`, 'selection-task-review-choose');
     await assertRenderer(renderer, `window.__j16.act('submit')`, 'selection-task-review-submit');
     await waitFor(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawerView === 'plan' && drawer.dataset.taskPlanKind === 'review-run' && drawer.dataset.taskPlanStart === 'ready' && window.__j16.composer() === null && (drawer.textContent ?? '').includes('按 1 类审阅所选段落：情节逻辑与前后一致') && (drawer.textContent ?? '').includes('只在所选段落上标出发现'); })()`, 'selection-task-review-plan', 120_000);
-    const selectionRun = await renderer.evaluate(`window.ai7.inspectReviewWorkspace({ reviewRunId: null }).then((workspace) => workspace.run === null ? null : { reviewRunId: workspace.run.reviewRunId, state: workspace.run.state, scope: workspace.run.scope, categories: workspace.run.categories.map((category) => category.categoryId) })`);
-    requireJourney(UUID_PATTERN.test(selectionRun?.reviewRunId ?? '') && selectionRun.state === 'prepared' && JSON.stringify(selectionRun.categories) === JSON.stringify(['plot-consistency']) &&
+    const selectionRun = await renderer.evaluate(`window.ai7.inspectReviewWorkspace({ reviewRunId: null }).then((workspace) => workspace.run === null ? null : { reviewRunId: workspace.run.reviewRunId, state: workspace.run.state, scope: workspace.run.scope, categories: workspace.run.categories.map((category) => category.categoryId), modelPlans: workspace.run.categories.every((category) => category.taskIntentId !== null && /^[a-f0-9]{64}$/.test(category.planEnvelopeDigest ?? '')) })`);
+    requireJourney(UUID_PATTERN.test(selectionRun?.reviewRunId ?? '') && selectionRun.state === 'prepared' && selectionRun.modelPlans === true && JSON.stringify(selectionRun.categories) === JSON.stringify(['plot-consistency']) &&
       selectionRun.scope?.kind === 'selection' && selectionRun.scope.label === `当前选区 · 内容块 ${position}–${position}` &&
       selectionRun.scope.selectedRange?.startPosition === Number(position) && selectionRun.scope.selectedRange.endPosition === Number(position) &&
       selectionRun.scope.selection?.fromBlockId === taskBlock && selectionRun.scope.selection.toBlockId === taskBlock,
@@ -1586,8 +1586,8 @@ async function main() {
     await waitFor(renderer, `(() => { const anchor = getSelection()?.anchorNode ?? null; const block = document.querySelector(${JSON.stringify(`[data-testid="manuscript-editor"] [data-block-id="${taskBlock}"]`)}); return block !== null && anchor !== null && block.contains(anchor) && document.querySelector('#task-drawer')?.dataset.taskDrawerView === 'panel'; })()`, 'selection-task-jumped', 30_000);
 
     at('selection-task-review-run');
-    // Started from its plan, the 审阅 puts the baseline's leads on that paragraph — at least one, every one there — sends
-    // nothing, and stands in 最近完成 with 查看结果 under the same name.
+    // Started from its plan, the current authored unit review and bounded synthesis mark that paragraph alone, send
+    // nothing remotely, and stand in 最近完成 with 查看结果 under the same name.
     await cardAction(renderer, 'review-prepared', 'next', 'selection-task-review-open-plan');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawerView === 'plan' && document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled === false`, 'selection-task-review-plan-ready', 60_000);
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'selection-task-review-start');

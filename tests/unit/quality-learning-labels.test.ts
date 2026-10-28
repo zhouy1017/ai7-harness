@@ -20,6 +20,7 @@ import {
   learningDecisionLine,
   learningOriginLine,
   learningPeopleLine,
+  wordLearningStandingLine,
 } from '../../src/renderer/quality-learning-labels.js';
 import {
   LEARNING_ELIGIBILITY_BASIS,
@@ -60,6 +61,14 @@ describe('学习准入 words', () => {
     expect(LEARNING_ELIGIBILITY_BASIS).toContain('仅建议');
   });
 
+  it('says a Word pair house standing is the default only while no human decision exists', () => {
+    expect(wordLearningStandingLine('house', false)).toBe('当前默认纳入本机学习；没有人工纳入决定。');
+    expect(wordLearningStandingLine('house', true)).toBe('当前按人工决定纳入本机学习。');
+    for (const decided of [false, true]) {
+      expect(wordLearningStandingLine('book', decided)).toBe('当前仅纳入本书的本机学习。');
+      expect(wordLearningStandingLine('excluded', decided)).toBe('当前已排除学习；历史修改对仍可查看。');
+    }
+  });
   it('names a Book with its people, a material with its origin, and the decision it has', () => {
     // The Book's materials in all, whichever page shows them.
     expect(learningBookHeading({ title: '样书', materialCount: 2 })).toBe('《样书》 · 2 条');

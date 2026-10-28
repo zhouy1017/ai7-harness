@@ -1,3 +1,5 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
+import { capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
 import { reviewFixtureContractVersion } from '../../src/service/provider/model-fixture.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
@@ -28,6 +30,12 @@ import {
   takeInNewItem,
   takeInRevision,
 } from '../support/series-consistency.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for 书系一致性 (Issue #64, plan slice S29a; V2-UX-REV-013, SER-018): the category offered to a
 // Book only over Series Knowledge taken in for it, the reasons it is not, the exact revisions a Review Run pins and its basis
@@ -69,18 +77,21 @@ afterEach(async () => {
 
 interface Session { store: EditorialStore; owner: BaselineAnalysisExecutionOwner; driver: ReviewRunDriver }
 
-async function withSession(body: (session: Session, bookId: string) => Promise<void>, existingBookId?: string): Promise<void> {
+async function withSession(body: (session: Session, bookId: string) => Promise<void>, existingBookId?: string, fixtureIdentity = FIXTURE): Promise<void> {
   await requireExactSample1(roots.codeRoot);
-  const fixture = await loadModelFixture(FIXTURES_ROOT, FIXTURE);
+  const fixture = fixtureIdentity === 'ordinary-captured' ? null : await loadModelFixture(FIXTURES_ROOT, fixtureIdentity);
   const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
     induceUnprovableReconciliation: false,
     persistLegacyReviewedDraft: false,
     induceReimportProofTamper: false,
     induceAbandonObjectRemovalFailure: false,
     interruptAfterAbandonObjectRemoval: false,
-    baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage, reviewContractVersion: reviewFixtureContractVersion(fixture) },
+    baselineAnalysisRoute: fixture === null ? null : { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage, reviewContractVersion: reviewFixtureContractVersion(fixture) },
   });
-  const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null }, seriesScopeGuard: (runRecordId) => store.seriesScopeGuard(runRecordId) });
+  // This corruption case prepares typos but dispatches nothing. The sole Series local partition cannot admit review/2.
+  const capture = fixture === null ? capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, requestGovernor, () => undefined) : null;
+  if (capture !== null) launchPolicy = capture.policy;
+  const owner = capture?.owner ?? new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null }, seriesScopeGuard: (runRecordId) => store.seriesScopeGuard(runRecordId) });
   const driver = new ReviewRunDriver(store.reviewRunDriveSteps, owner);
   try {
     let bookId = existingBookId;
@@ -94,8 +105,7 @@ async function withSession(body: (session: Session, bookId: string) => Promise<v
     const stopped = driver.dispose();
     await owner.dispose();
     await stopped;
-    store.markCleanShutdown();
-    store.close();
+    try { capture?.assertMatched(); store.markCleanShutdown(); } finally { store.close(); }
   }
 }
 
@@ -266,7 +276,7 @@ describe('书系一致性 over a Book\'s Series Knowledge', () => {
       while (!progress.done) progress = store.advanceReviewRunPreparationWork(progress.workId!);
       expect(progress.projection!.run!.state).toBe('prepared');
       expect(refusal(() => prepare(store, bookId))).toBe(`REVIEW_CATEGORY_UNAVAILABLE:「书系一致性」：${SERIES_CONSISTENCY_UNREADABLE_REASON}`);
-    }, member);
+    }, member, 'ordinary-captured');
   }, 300_000);
 
   it('pins the revisions it used, refuses an approval once they or the Book\'s Series moved, and puts its findings on the manuscript', async () => {

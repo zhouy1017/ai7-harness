@@ -539,7 +539,7 @@ const readKnowledge = (renderer, predicate, name) => readUntil(renderer, READ_KN
 // The capture branch runs Review Runs of 体例与格式 and 文学性与表达改进, so its window binds the J-04 model adapter over the
 // authored fixture `sample1-review-authored` — the local deterministic route, no Provider — and answers one Save dialog with
 // `--j13-save-path`. Its Books are reached through 书库's 查找, since by then the library holds more than one page of Books.
-const REVIEW_FIXTURE_IDENTITY = 'sample1-review-authored';
+const REVIEW_FIXTURE_IDENTITY = 'sample1-review-cross-chapter-authored';
 const CAPTURE_TARGET_TITLE = '工序运行之书';
 const PROCEDURE_TITLE = '体例复核';
 const PROPOSAL_TITLE = '图注核对';
@@ -1807,7 +1807,7 @@ async function main() {
     await clickSelector(renderer, 'section.review-report [data-review-action="capture"]', 'capture-open');
     const captureSheet = await readCapture(renderer, (read) => read.steps.length === 2 && read.focused, 'capture-sheet');
     requireJourney(JSON.stringify(captureSheet.steps.map(([id, eligible, checked]) => [id, eligible, checked])) === JSON.stringify([['style-and-format', 'true', true], ['literary-expression', 'true', true]]) &&
-      captureSheet.steps[0][3] === '体例与格式 · 体例与格式审阅工序（第 1 版） · 输出批注 · 调用模型 · 不使用搜索引擎' &&
+      captureSheet.steps[0][3] === '体例与格式 · 体例与格式与跨章一致性（第 2 版） · 输出批注 · 调用模型 · 不使用搜索引擎' &&
       JSON.stringify(captureSheet.kinds) === JSON.stringify([['captured-procedure', false, true], ['developer-proposal', false, false], ['skill-draft', true, false], ['workflow-draft', true, false], ['default-rule', true, false]]) &&
       captureSheet.kind === 'captured-procedure' && captureSheet.procedureShown && !captureSheet.proposalShown && captureSheet.notSaved.length === 6 &&
       captureSheet.notSaved[0] === '稿件文字、书名与这本书的身份、章节与书系' && (captureSheet.why ?? '').startsWith('这次审阅的每一步都是 AI7 已有的审阅类别') &&
@@ -2024,6 +2024,14 @@ async function main() {
     await click(renderer, '返回', 'stop-all-back');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'stop-all-landing');
 
+    at('procedure-series-fixture-relaunch');
+    // Fresh Series preparations use their matching retained /1 fixture; the earlier style capture stays on review /2.
+    // Keep the same store and the still-unconsumed proposal Save dialog answer. The two Series Runs remain prepared.
+    await closeBrowser();
+    manager = await launch(FIXTURE_IDENTITY, ['--j13-save-path', proposalPath]);
+    renderer = await waitForRenderer(manager, 'series-procedure-window');
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'series-procedure-ready');
+
     // ---- Series material chosen apart, and how a procedure fits a Book (Issue #66, plan slice S31b; REUSE-046, REUSE-048 to
     // REUSE-050, REUSE-053) --------------------------------------------------------------------------------------------------
     at('procedure-series-capture');
@@ -2109,8 +2117,8 @@ async function main() {
     // a model fixture (Issue #842), and 再选一段加入 is refused in words. Its entry opens the 就这段发起任务 composer with it held; 书系一致性 is unticked and
     // the editor's (S31b's reading, ruling 3): left unticked, 准备任务 prepares nothing and says so; ticked, it prepares a 当前选区
     // Run pinned to version 1 with nothing left out, whose plan opens beside the manuscript. Its card in 任务 names the paragraph
-    // and offers 跳到所选文字 (deferred item d), which puts the caret back on it. The Run is left prepared: this window's adapter
-    // answers 体例与格式, not 书系一致性.
+    // and offers 跳到所选文字 (deferred item d), which puts the caret back on it. Under the matching retained Series fixture,
+    // this stage intentionally leaves the Run prepared and claims no selection execution.
     await fill(renderer, '#book-filter-text', MEMBER, 'selection-procedure-find-text');
     await clickSelector(renderer, '[data-book-filter-action="find"]', 'selection-procedure-find');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"] button[data-book-id=${JSON.stringify(member)}]')`, 'selection-procedure-found');

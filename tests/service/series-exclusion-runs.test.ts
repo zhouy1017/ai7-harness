@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { reviewFixtureContractVersion } from '../../src/service/provider/model-fixture.js';
 import { randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
@@ -28,8 +29,16 @@ import { leaveSeries, takeInNewItem, takeInRevision } from '../support/series-co
 import { freezeSeriesScope, seriesScopeKindDefinition, seriesScopeTooManyReason } from '../../src/service/review/series-consistency.js';
 import { reviewCategoryContractInput, reviewCategoryEntry } from '../../src/service/review/category-configuration.js';
 import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
-import { withSeriesKnowledgeFor } from '../support/policy-rules.js';
+import { capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
+import { parseReviewCategoryUnitMessageHeader } from '../../src/service/review/review-category-contract.js';
+import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/assurance-sampling-contract.js';
 import { sheetProcedureOption, SHEET_PROCEDURE_NONE } from '../../src/renderer/captured-procedure-labels.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for the Series Retrieval Exclusion's reach into Review Runs (Issue #64, plan slice S29b;
 // V2-UX-SER-022 to SER-027): a prepared Run's approval refused, an approved Run stopped as the exclusion is recorded, one
@@ -40,8 +49,8 @@ import { sheetProcedureOption, SHEET_PROCEDURE_NONE } from '../../src/renderer/c
 
 const FIXTURES_ROOT = resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url)));
 const FIXTURE = 'sample1-series-consistency-authored';
-/** The authored review fixture, which answers 错别字与规范用语 but not 书系一致性. */
-const REVIEW_FIXTURE = 'sample1-review-authored';
+// Mixed-category business assertions use actual ordinary policy, without a union local partition.
+const ORDINARY = 'ordinary-captured';
 const WHOLE = { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null } as const;
 const ITEM_LABEL = `书系知识条目「${J13_PLACE}」（地点）`;
 
@@ -78,19 +87,29 @@ function gate(): { hold: UnitHold; release(): void; reached: Promise<void> } {
 
 async function withSession(body: (session: Session, bookId: string) => Promise<void>, unitHold: UnitHold | null = null, fixtureIdentity = FIXTURE): Promise<void> {
   await requireExactSample1(roots.codeRoot);
-  const fixture = await loadModelFixture(FIXTURES_ROOT, fixtureIdentity);
+  const fixture = fixtureIdentity === ORDINARY ? null : await loadModelFixture(FIXTURES_ROOT, fixtureIdentity);
   const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
     induceUnprovableReconciliation: false,
     persistLegacyReviewedDraft: false,
     induceReimportProofTamper: false,
     induceAbandonObjectRemovalFailure: false,
     interruptAfterAbandonObjectRemoval: false,
-    baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage, reviewContractVersion: reviewFixtureContractVersion(fixture) },
+    baselineAnalysisRoute: fixture === null ? null : { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage, reviewContractVersion: reviewFixtureContractVersion(fixture) },
   });
-  const owner = new BaselineAnalysisExecutionOwner({
+  const capture = fixture === null ? capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, requestGovernor, (request, message) => {
+    const header = parseReviewCategoryUnitMessageHeader(message);
+    const content = request.stage === 'units' && header !== null
+      ? { schema: 'ai7.editorial-review.unit-result/2', unitOrdinal: header.ordinal, findings: [] }
+      : request.stage === 'assurance-sampling'
+        ? { schema: 'ai7.analysis.assurance-sampling-result/1', dispositions: parseAssuranceSamplingListedRefs(message)
+          .map((ref) => ({ ref, disposition: '成立', reason: '合成回归抽样。' })) }
+        : request.stage === 'run-report-reflection' ? { schema: 'ai7.analysis.run-report-reflection-result/1', items: [] } : null;
+    return content === null ? undefined : { kind: 'unit-result', text: JSON.stringify(content), usage: { inputTokens: 10, outputTokens: 5 } };
+  }, { seriesScopeGuard: (id) => store.seriesScopeGuard(id), unitHold }) : null;
+  if (capture !== null) launchPolicy = capture.policy;
+  const owner = capture?.owner ?? new BaselineAnalysisExecutionOwner({ requestGovernor,
     ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null }, unitHold,
-    seriesScopeGuard: (runRecordId) => store.seriesScopeGuard(runRecordId),
-  });
+    seriesScopeGuard: (runRecordId) => store.seriesScopeGuard(runRecordId) });
   const driver = new ReviewRunDriver(store.reviewRunDriveSteps, owner);
   try {
     const bookId = (await importSample1Book(store, roots.codeRoot, '星河之三')).bookId;
@@ -102,8 +121,7 @@ async function withSession(body: (session: Session, bookId: string) => Promise<v
     const stopped = driver.dispose();
     await owner.dispose();
     await stopped;
-    store.markCleanShutdown();
-    store.close();
+    try { capture?.assertMatched(); store.markCleanShutdown(); } finally { store.close(); }
   }
 }
 
@@ -171,31 +189,30 @@ describe('a Series Retrieval Exclusion over Review Runs', () => {
       expect(store.inspectCapturedProcedureRun(bookId, saved.procedureId).resolved?.runSourceScope).toBe('series');
     });
   }, 300_000);
-  it('pins an opt-in category and an evaluation in the existing plan records, retaining membership pins after removal', async () => {
+  it('pins an admitted review category, refuses evaluation plus Series, and retains membership pins after removal', async () => {
+    // Replaces the former hypothetical successor-policy evaluation positive with actual current-policy coverage (#1161 rev5).
     await withSession(async ({ store, seriesId }, bookId) => {
-      const policy = withSeriesKnowledgeFor(withSeriesKnowledgeFor(launchPolicy, 'editorial-review/typos-and-usage'), 'evaluation');
-      expect(() => store.createReviewRunPreparationWork(bookId, ['typos-and-usage'], WHOLE, launchPolicy, null, [], null, null, seriesId)).toThrow(/当前策略未开放书系知识/u);
+      const policy = launchPolicy;
       expect(() => store.createInitialEvaluationPreparationWork(bookId, launchPolicy, [], null, seriesId)).toThrow(/当前策略未开放书系知识/u);
       let review = store.createReviewRunPreparationWork(bookId, ['typos-and-usage'], WHOLE, policy, null, [], null, null, seriesId);
       while (!review.done) review = store.advanceReviewRunPreparationWork(review.workId!);
       const category = review.projection!.run!.categories[0]!;
       expect(store.inspectTaskPlan({ bookId, kind: 'review-run', ref: review.projection!.run!.reviewRunId }).scope.reference).toContain(`允许参考 · 书系《${J13_SERIES_TITLE}》的知识条目`);
-      let evaluation = store.createInitialEvaluationPreparationWork(bookId, policy, [], null, seriesId);
-      while (!evaluation.done) evaluation = store.advanceInitialEvaluationPreparationWork(evaluation.workId!);
-      const initial = evaluation.projection!;
-      const scopes = initial.runSourceScope!.seriesScopes!;
+      const reviewed = review.projection!.run!;
+      store.authorizeReviewRun(bookId, reviewed.reviewRunId, [{ categoryId: category.categoryId, planEnvelopeDigest: category.planEnvelopeDigest! }]);
+      const authorized = store.reviewRunDriveSteps.start(reviewed.reviewRunId, category.categoryId)!;
+      const ledger = store.executionLedgerForRun(authorized.runRecordId);
+      const scopes = ledger.inspect(bookId).runSourceScope!.seriesScopes!;
       expect(scopes[0]).toMatchObject({ seriesId, title: J13_SERIES_TITLE, members: [expect.objectContaining({ bookId, revisionId: expect.any(String) })], knowledge: [expect.objectContaining({ revisionId: expect.any(String), digest: expect.any(String) })], exclusions: [] });
-      expect(store.inspectTaskPlan({ bookId, kind: 'initial-evaluation', ref: initial.taskIntent!.taskIntentId }).scope.reference).toContain(`允许参考 · 书系《${J13_SERIES_TITLE}》的知识条目`);
-      const authorization = store.authorizeInitialEvaluation(bookId, initial.taskIntent!.taskIntentId, initial.planEnvelope!.digest);
-      expect(store.seriesScopeGuard(authorization.dispatchRunRecordId!)).toBeNull();
-      expect(store.inspectSeries(seriesId).tasks!.map((task) => task.kind).sort()).toEqual(['editorial-review/typos-and-usage', 'evaluation']);
+      expect(store.seriesScopeGuard(authorized.runRecordId)).toBeNull();
+      expect(store.inspectSeries(seriesId).tasks!.map((task) => task.kind)).toEqual(['editorial-review/typos-and-usage']);
       leaveSeries(store, seriesId, bookId);
-      expect(store.inspectInitialEvaluation(bookId).runSourceScope!.seriesScopes).toEqual(scopes);
-      expect(store.seriesScopeGuard(authorization.dispatchRunRecordId!)).toBeNull();
+      expect(ledger.inspect(bookId).runSourceScope!.seriesScopes).toEqual(scopes);
+      expect(store.seriesScopeGuard(authorized.runRecordId)).toBeNull();
       exclude(store, seriesId, 'add', { target: { kind: 'knowledge-item', id: itemOf(store, seriesId) } });
-      expect(store.seriesScopeGuard(authorization.dispatchRunRecordId!)).toContain(ITEM_LABEL);
+      expect(store.seriesScopeGuard(authorized.runRecordId)).toContain(ITEM_LABEL);
       expect(category.planEnvelopeDigest).toBeTruthy();
-    }, null, REVIEW_FIXTURE);
+    }, null, ORDINARY);
   }, 300_000);
 
   it('moves the v2 review identity with the Series knowledge it adds, so units read under a revised item are not reused (#1084)', async () => {
@@ -216,12 +233,12 @@ describe('a Series Retrieval Exclusion over Review Runs', () => {
       const after = identity();
       expect(after.version).toBe(before.version);
       expect(after.digest).not.toBe(before.digest);
-    }, null, REVIEW_FIXTURE);
+    }, null, ORDINARY);
   }, 300_000);
 
-  it('keeps 书系一致性 on its own pins beside a selected Series, names an authorized 初评 in both previews, and stops it for an exact source version', async () => {
+  it('keeps separate consistency and review Series pins, names the admitted review in both previews, and stops it for an exact source version', async () => {
     await withSession(async ({ store, seriesId }, bookId) => {
-      const policy = withSeriesKnowledgeFor(withSeriesKnowledgeFor(launchPolicy, 'editorial-review/typos-and-usage'), 'evaluation');
+      const policy = launchPolicy;
       // An item taken in for consistency review only: 书系一致性 pins it, a Series-scoped Task never reads it.
       const consistencyOnly = takeInNewItem(store, seriesId, { subject: '灯塔', knowledgeClass: 'canon', content: '合成正典说明，只供一致性审阅。', reuseScope: 'consistency-review' });
       let review = store.createReviewRunPreparationWork(bookId, ['series-consistency', 'typos-and-usage'], WHOLE, policy, null, [], null, null, seriesId);
@@ -237,33 +254,35 @@ describe('a Series Retrieval Exclusion over Review Runs', () => {
         expect(pinned('typos-and-usage')).toEqual([store.inspectSeries(seriesId).knowledge.items.find((item) => item.itemId !== consistencyOnly)!.itemId]);
       } finally { db.close(); }
 
-      let evaluation = store.createInitialEvaluationPreparationWork(bookId, policy, [], null, seriesId);
-      while (!evaluation.done) evaluation = store.advanceInitialEvaluationPreparationWork(evaluation.workId!);
-      const initial = evaluation.projection!;
-      const runRecordId = store.authorizeInitialEvaluation(bookId, initial.taskIntent!.taskIntentId, initial.planEnvelope!.digest).dispatchRunRecordId!;
+      expect(() => store.createInitialEvaluationPreparationWork(bookId, policy, [], null, seriesId)).toThrow(/当前策略未开放书系知识/u);
+      const reviewed = review.projection!.run!;
+      store.authorizeReviewRun(bookId, reviewed.reviewRunId, reviewed.categories.map((category) => ({ categoryId: category.categoryId, planEnvelopeDigest: category.planEnvelopeDigest! })));
+      const runRecordId = store.reviewRunDriveSteps.start(reviewed.reviewRunId, 'typos-and-usage')!.runRecordId;
+      const ledger = store.executionLedgerForRun(runRecordId);
+      const scope = ledger.inspect(bookId).runSourceScope!;
       // SER-006: the membership preview counts the authorized Run that froze the Series, and a finished one would not count.
       const membership = store.previewSeriesMembershipChange({ seriesId, bookId, kind: 'remove' });
       expect(membership.groups.find((group) => group.key === 'runs')!.unchanged[0]).toBe(`1 个使用书系「${J13_SERIES_TITLE}」范围的任务已授权或正在运行。`);
-      // The frozen member pin carries the Book's exact Source Version: excluding it reaches the 初评 (SER-022) and stops it (SER-023).
+      // The frozen member pin carries the exact Source Version; its exclusion reaches and stops the admitted review.
       const source = store.inspectSeriesExclusionTargets({ seriesId, kind: 'source-version', after: null }).targets[0]!;
-      expect(initial.runSourceScope!.seriesScopes![0]!.members.map((member) => member.sourceVersionId)).toEqual([source.id]);
+      expect(scope.seriesScopes![0]!.members.map((member) => member.sourceVersionId)).toEqual([source.id]);
       expect(store.seriesScopeGuard(runRecordId)).toBeNull();
       const { preview } = exclude(store, seriesId, 'add', { target: { kind: 'source-version', id: source.id } });
-      expect(preview.groups.find((group) => group.key === 'runs')!.changes.join('')).toContain('《星河之三》AI7 初评');
+      expect(preview.groups.find((group) => group.key === 'runs')!.changes.join('')).toContain('《星河之三》第 1 次审阅');
       expect(store.seriesScopeGuard(runRecordId)).toBe(source.label);
-      expect(store.inspectInitialEvaluation(bookId).runSourceScope!.seriesScopes).toEqual(initial.runSourceScope!.seriesScopes);
-    }, null, REVIEW_FIXTURE);
+      expect(ledger.inspect(bookId).runSourceScope!.seriesScopes).toEqual(scope.seriesScopes);
+    }, null, ORDINARY);
   }, 300_000);
 
   it('refuses a Series whose eligible knowledge passes what one Task may carry, before anything is prepared', async () => {
     await withSession(async ({ store, seriesId }, bookId) => {
-      const policy = withSeriesKnowledgeFor(launchPolicy, 'editorial-review/typos-and-usage');
+      const policy = launchPolicy;
       for (const subject of ['甲', '乙', '丙', '丁', '戊', '己']) {
         takeInNewItem(store, seriesId, { subject, knowledgeClass: 'canon', content: '合成书系知识说明。'.repeat(220), reuseScope: 'series-tasks' });
       }
       expect(refusal(() => store.createReviewRunPreparationWork(bookId, ['typos-and-usage'], WHOLE, policy, null, [], null, null, seriesId)))
         .toBe(`SERIES_SCOPE_UNAVAILABLE:${seriesScopeTooManyReason(J13_SERIES_TITLE)}`);
-    }, null, REVIEW_FIXTURE);
+    }, null, ORDINARY);
   }, 300_000);
 
   it('refuses a prepared plan, stops an approved Run before its turn, and leaves only 修改计划并重新授权 and 取消任务', async () => {
@@ -422,7 +441,7 @@ describe('a Series Retrieval Exclusion over Review Runs', () => {
       const cancelledRun = store.cancelReviewRun(bookId, cancelled.reviewRunId).run!;
       expect([cancelledRun.state, cancelledRun.categories.map((category) => category.stateLabel)]).toEqual(['cancelled', ['已取消', '已取消']]);
       expect(lastState(pending.runRecordId)).toBe('blocked-before-dispatch');
-    });
+    }, null, ORDINARY);
   }, 300_000);
 
   it('never lets a plan prepared before an exclusion be approved after the exclusion ends (Issue #64 review)', async () => {
@@ -574,7 +593,7 @@ describe('a Series Retrieval Exclusion over Review Runs', () => {
       expect(store.cancelReviewRun(bookId, prepared.reviewRunId).run!.state).toBe('cancelled');
       refused(CAPTURE_CANCELLED);
       expect(store.inspectCapturedProcedures().procedures).toEqual([]);
-    }, null, REVIEW_FIXTURE);
+    }, null, ORDINARY);
   }, 300_000);
 
   it('marks a completed result that used material excluded afterwards, rewrites nothing, and keeps the marker once the exclusion ends', async () => {

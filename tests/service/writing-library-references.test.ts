@@ -1,3 +1,6 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
+import { capturedMapAnswer, capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
+import { ruleFor, withRuleFor } from '../support/policy-rules.js';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -6,14 +9,16 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import type { TaskPlanConnectivity } from '../../src/service/connectivity.js';
-import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
+import { DEVELOPER_LIVE_POLICY_BINDING, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { MATERIAL_INDEX_TRIGGER_SQL } from '../../src/service/material-index.js';
 import { syntheticPdf } from '../fixtures/material-formats/synthetic-pdf.js';
 import { LIBRARY_MATERIAL_TRIGGER_SQL } from '../../src/service/library-materials.js';
 import { readPendingReplacement, replacementStagingFor } from '../../src/service/database-replacement.js';
 import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import { LOCAL_DETERMINISTIC_ROUTE } from '../../src/service/provider/egress-gate.js';
-import { loadModelFixture, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
+import { fixtureEntryKey, loadModelFixture, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
+import { unitRequestDigest } from '../../src/service/analysis/contract.js';
+import { clarificationPlanBaseDigest, clarificationPromptContractDigest } from '../../src/service/provider/clarification-contract.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { WRITING_MATERIAL_GONE_LABEL, WRITING_MATERIAL_UNAVAILABLE_LABEL, writingMaterialCopyNotDo, writingMaterialReferenceLine } from '../../src/service/task-plan.js';
 import {
@@ -30,7 +35,8 @@ import {
   writingMaterialsOverTotal,
   WritingTasks,
 } from '../../src/service/writing-tasks.js';
-import { WRITING_PROMPT_CONTRACT_SCHEMA_V3, writingContract, writingContractDigest } from '../../src/service/writing/writing-contract.js';
+import { WRITING_PROMPT_CONTRACT_SCHEMA_V3, WRITING_UNIT_RESULT_SCHEMA, writingContract, writingContractDigest,
+  writingRequestDigest, writingSynthesisRequestDigest, writingPassageSetDigest } from '../../src/service/writing/writing-contract.js';
 import { WRITING_MATERIAL_REFUSAL_PREFIX } from '../../src/service/writing/writing-kind.js';
 import {
   WRITING_LIVE_UNAVAILABLE,
@@ -45,6 +51,7 @@ import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-d
 import {
   AUTHORED_LIBRARY_DRAFT,
   AUTHORED_WRITING_DRAFT,
+  AUTHORED_WRITING_PASSAGES,
   WRITING_BOOK_TITLE,
   WRITING_FIXTURE_IDENTITY,
   WRITING_LIBRARY_FILE,
@@ -53,16 +60,21 @@ import {
   WRITING_LIBRARY_TEXT,
   WRITING_LIBRARY_TITLE,
   WRITING_REQUEST,
-  answerWriting,
   answerWritingReflection,
 } from '../support/writing-task.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 /** How many characters J-07's 资料库 item's index extracts: what its box and its plan line say (`e2e/run-j07.mjs` pins the same). */
 const J07_LIBRARY_CHARACTERS = 85;
 
 // Service-integration suite (L2) for 写作任务's 允许参考 of 资料库 items (Issue #428; V2-UX-TASK-030, TASK-032, KB-007, KB-009):
-// the writing kind over the real store, the Material Index, the one execution owner and the AI7 local deterministic adapter,
-// answered from an in-memory fixture built over the authored passages for each contract a case asks. The manuscript is exact
+// the writing kind over the real store and Material Index. Unchanged admitted tuples retain their local adapter; dynamic
+// business requests use the actual selected ordinary policy and captured native transport, with fixture:null. The manuscript is exact
 // `sample1` (ADR 0043); every 资料库 file is the suite's own synthetic words, never a manuscript. No Provider, socket or credential
 // value is involved.
 
@@ -96,31 +108,53 @@ interface Session {
   readonly owner: BaselineAnalysisExecutionOwner;
 }
 
-async function withSession(fixture: ResolvedModelFixture, body: (session: Session) => Promise<void>, dataRoot = roots.dataRoot, unitBoundary?: (settled: number) => void): Promise<void> {
+type WritingResponses = ResolvedModelFixture | { readonly entries: Map<string, ModelFixtureEntry> };
+async function withSession(fixture: WritingResponses, body: (session: Session) => Promise<void>, dataRoot = roots.dataRoot, unitBoundary?: (settled: number) => void): Promise<void> {
   await requireExactSample1(roots.codeRoot);
+  const local = 'identity' in fixture ? fixture : null;
   const store = await EditorialStore.open(dataRoot, roots.codeRoot, {
     induceUnprovableReconciliation: false,
     persistLegacyReviewedDraft: false,
     induceReimportProofTamper: false,
     induceAbandonObjectRemovalFailure: false,
     interruptAfterAbandonObjectRemoval: false,
-    baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
+    baselineAnalysisRoute: local === null ? null : { fixtureIdentity: local.identity, fixtureSha256: local.sha256, fixtureLineage: local.lineage },
   });
-  const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null }, materialGuard: (id, ledger) => store.materialGuard(id, ledger), unitHold: async (settled) => { unitBoundary?.(settled); } });
+  const priorPolicy = launchPolicy;
+  if (local !== null) {
+    // Retained local Plans still need their checked catalog when this test later opens a live-scope view.
+    const runtime = store.localFixtureRuntime();
+    store.baselineAnalysisLedger.bindLaunch({ ...store.baselineAnalysisLedger.launch, localFixtureRuntime: () => runtime });
+  }
+  if (local === null) {
+    const search = store.saveSearchBackendCredential('search-tinyfish', null, 'needs-attention');
+    store.saveSearchBackendCredential('search-tinyfish', search.credentialReference, 'ready');
+    store.selectSearchBackend('search-tinyfish');
+  }
+  const answer = capturedMapAnswer(fixture.entries);
+  const controls = { materialGuard: (id: string, ledger: Parameters<EditorialStore['materialGuard']>[1]) => store.materialGuard(id, ledger),
+    unitHold: async (settled: number) => { unitBoundary?.(settled); } };
+  const captured = local === null ? capturedOrdinaryExecution(store, roots.codeRoot, dataRoot, requestGovernor,
+    (request, message) => request.stage === 'run-report-reflection'
+      ? { kind: 'unit-result', text: JSON.stringify({ schema: 'ai7.analysis.run-report-reflection-result/1', items: [] }), usage: { inputTokens: 10, outputTokens: 10 } }
+      : answer(request, message), controls) : null;
+  launchPolicy = captured?.policy ?? await resolveSourceCheckoutLaunchPolicy(roots.codeRoot);
+  const owner = captured?.owner ?? new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy,
+    fixture: local, secretResolver: { resolve: async () => null }, ...controls });
   try {
     await body({ store, owner });
     store.markCleanShutdown();
   } finally {
     await owner.dispose();
-    store.close();
+    try { captured?.assertMatched(); } finally { store.close(); launchPolicy = priorPolicy; }
   }
 }
 
-/** One in-memory fixture over the authored writing fixture, answered here for each contract a case asks. */
-async function memoryFixture(): Promise<{ fixture: ResolvedModelFixture; entries: Map<string, ModelFixtureEntry> }> {
+/** Controlled ordinary response bytes for each requested contract; no fixture identity/hash is asserted for this map. */
+async function memoryFixture(): Promise<{ fixture: WritingResponses; entries: Map<string, ModelFixtureEntry> }> {
   const base = await loadModelFixture(FIXTURES_ROOT, WRITING_FIXTURE_IDENTITY);
   const entries = new Map<string, ModelFixtureEntry>(base.entries);
-  const fixture: ResolvedModelFixture = { ...base, identity: 'sample1-writing-library-l2', lineage: [{ identity: 'sample1-writing-library-l2', sha256: 'e'.repeat(64) }], sha256: 'f'.repeat(64), entries };
+  const fixture = { entries };
   return { fixture, entries };
 }
 
@@ -194,6 +228,25 @@ function withDatabase<T>(operation: (database: DatabaseSync) => T, readOnly = tr
   } finally {
     database.close();
   }
+}
+
+/** Schedule the exact current unit and synthesis identities, including the ordinary clarification wrapper. */
+function answerWriting(entries: Map<string, ModelFixtureEntry>, prepared: WritingProjection, synthesis: unknown): void {
+  const frozen = withDatabase((db) => JSON.parse(String(db.prepare(`SELECT canonical_json FROM analysis_plan_records
+    WHERE task_intent_id = ? AND component = 'execution-plan' ORDER BY plan_version DESC LIMIT 1`).get(prepared.taskIntent!.taskIntentId)!.canonical_json)) as Record<string, unknown>);
+  const contract = prepared.planEnvelope!.promptContractDigest;
+  const base = clarificationPlanBaseDigest(frozen, { promptContractDigest: contract });
+  expect(base).not.toBeNull();
+  const closed = prepared.coverageManifest!.units.map((unit) => ({ unitOrdinal: unit.ordinal,
+    result: { schema: WRITING_UNIT_RESULT_SCHEMA, unitOrdinal: unit.ordinal, passages: AUTHORED_WRITING_PASSAGES[unit.ordinal]! } }));
+  for (const unit of prepared.coverageManifest!.units) {
+    const digest = base === contract ? writingRequestDigest(contract, unit.ordinal, unit.digest) : unitRequestDigest(contract, unit.ordinal, unit.digest);
+    entries.set(fixtureEntryKey(unit.ordinal, digest), { unitOrdinal: unit.ordinal, requestDigest: digest, attempt: null, contentDigest: null,
+      response: { kind: 'unit-result', text: JSON.stringify(closed.find((entry) => entry.unitOrdinal === unit.ordinal)!.result), usage: { inputTokens: 1600, outputTokens: 120 } } });
+  }
+  const digest = writingSynthesisRequestDigest(base!, writingPassageSetDigest(closed));
+  entries.set(fixtureEntryKey(0, digest), { unitOrdinal: 0, requestDigest: digest, attempt: null, contentDigest: null,
+    response: { kind: 'unit-result', text: JSON.stringify(synthesis), usage: { inputTokens: 2600, outputTokens: 720 } } });
 }
 
 /** The Material Index's rows: what no writing Task may add to or take from. */
@@ -537,7 +590,7 @@ describe('写作任务 lists 资料库 items under 允许参考 and reads them t
         ],
       });
       expect(contract.schema).toBe(WRITING_PROMPT_CONTRACT_SCHEMA_V3);
-      expect(prepared.planEnvelope!.promptContractDigest).toBe(writingContractDigest(contract));
+      expect(prepared.planEnvelope!.promptContractDigest).toBe(clarificationPromptContractDigest(writingContractDigest(contract)));
       // The Task's row names the items by reference and pins their words by digest; their words are never stored there.
       const row = withDatabase((database) => database.prepare('SELECT canonical_json FROM writing_tasks').get() as { canonical_json: string });
       const stored = JSON.parse(row.canonical_json) as { materialSources: unknown; input: { materials: unknown } };
@@ -657,7 +710,9 @@ describe('写作任务 lists 资料库 items under 允许参考 and reads them t
   }, 300_000);
 
   it('refuses 资料库 items under developer-live in their own words, and never starts a plan that lists one under a 默认执行规则', async () => {
-    const { fixture, entries } = await memoryFixture();
+    // Quick-start rules belong to the retained local route. Its plain writing request is the unchanged admitted tuple;
+    // the later material-bearing Plan is never dispatched, and is refused by the actual default-rule/material owner.
+    const fixture = await loadModelFixture(FIXTURES_ROOT, WRITING_FIXTURE_IDENTITY);
     await withSession(fixture, async (session) => {
       const { store } = session;
       const bookId = await sample1Book(store, WRITING_BOOK_TITLE);
@@ -668,9 +723,7 @@ describe('写作任务 lists 资料库 items under 允许参考 and reads them t
 
       // The 宣传文章's rule, set from a plan that lists nothing.
       const plain = prepare(store, bookId, WRITING_REQUEST);
-      answerWriting(entries, plain, AUTHORED_WRITING_DRAFT);
-      const settled = await run(session, bookId, plain);
-      answerWritingReflection(entries, settled.taskOutcome!.report!.accountingDigest);
+      await run(session, bookId, plain);
       const rule = store.setDefaultExecutionRule(bookId, plain.taskIntent!.taskIntentId, plain.planEnvelope!.digest);
       // 快速开始 with an item ticked prepares the Task as 先看计划 does, and stops at its plan with why.
       const listing = prepare(store, bookId, { ...WRITING_REQUEST, materialIds: [listed.materialId] });
@@ -678,12 +731,18 @@ describe('写作任务 lists 资料库 items under 允许参考 and reads them t
         .toEqual({ outcome: 'fell-back', reasons: [WRITING_QUICK_START_MATERIALS], dispatchRunRecordId: null, ledger: null });
       expect(store.inspectWriting(bookId)!.authorization).toBeNull();
 
-      // Developer-live admits only the Owner-designated Public SampleBooks: no 资料库 item is offered, prepared or started there.
+      // Deny only material permission on the actual selected developer-live rule. Writing itself stays admitted.
       const free = store.baselineAnalysisLedger.launch;
-      store.baselineAnalysisLedger.bindLaunch(LIVE);
+      const localRuntime = store.localFixtureRuntime();
+      const localPolicy = launchPolicy;
+      const selected = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live');
+      expect(ruleFor(selected, 'writing').materialReferencesAllowed).toBe(true);
+      launchPolicy = withRuleFor(selected, 'writing', { materialReferencesAllowed: false });
+      store.baselineAnalysisLedger.bindLaunch({ ...LIVE, live: { ...LIVE.live, ...DEVELOPER_LIVE_POLICY_BINDING }, policy: launchPolicy,
+        localFixtureRuntime: () => localRuntime });
       try {
         const live = store.inspectWritingTask(bookId);
-        expect(live.unavailable).toBe(WRITING_LIVE_UNAVAILABLE);
+        expect(live.unavailable).toBeNull();
         expect(live.references.materials.statement).toBe(WRITING_MATERIAL_LIVE_UNAVAILABLE);
         expect(live.references.materials.items).toEqual([
           { materialId: listed.materialId, title: '参考资料甲', characters: 60, scope: 'book', selectable: false, reason: WRITING_MATERIAL_LIVE_UNAVAILABLE },
@@ -692,10 +751,11 @@ describe('写作任务 lists 资料库 items under 允许参考 and reads them t
           .toBe(`WRITING_UNAVAILABLE:${WRITING_MATERIAL_LIVE_UNAVAILABLE}`);
         expect(await refusal(() => store.authorizeWriting(bookId, listing.taskIntent!.taskIntentId, listing.planEnvelope!.digest)))
           .toBe(`WRITING_UNAVAILABLE:${WRITING_MATERIAL_LIVE_UNAVAILABLE}`);
-        // A plan that lists none is refused as every writing plan is there.
-        expect(await refusal(() => prepare(store, bookId, WRITING_REQUEST))).toBe(`WRITING_UNAVAILABLE:${WRITING_LIVE_UNAVAILABLE}`);
+        // This refusal is specifically about material permission, not an absent kind.
+        expect(launchPolicy.providerProcessing.admittedRules.some((entry) => entry.taskKinds.includes('writing'))).toBe(true);
       } finally {
         store.baselineAnalysisLedger.bindLaunch(free);
+        launchPolicy = localPolicy;
       }
       expect(store.inspectTaskPlan({ bookId, kind: 'writing', ref: listing.taskIntent!.taskIntentId }).start.readiness).toBe('ready');
     });

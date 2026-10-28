@@ -134,3 +134,19 @@ export async function writeSyntheticDocx(path: string, options: SyntheticDocxOpt
   await writeFile(path, archive);
   return archive;
 }
+
+/** Issue #1132's technical OOXML recipes use authored tokens and the existing bounded synthetic carrier. */
+export function buildSyntheticTrackedDocx(body: string, extraEntries: Readonly<Record<string, Uint8Array>> = {}): Uint8Array {
+  const word = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+  const extras: Record<string, Uint8Array> = { ...extraEntries };
+  let types = CONTENT_TYPES_XML;
+  for (const [name, contentType] of [
+    ['word/comments.xml', 'application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml'],
+    ['word/commentsExtended.xml', 'application/vnd.ms-word.commentsExtended+xml'],
+  ]) if (extras[name!] !== undefined) types = types.replace('</Types>', `<Override PartName="/${name}" ContentType="${contentType}"/></Types>`);
+  return buildSyntheticDocx({ extraEntries: {
+    '[Content_Types].xml': strToU8(types),
+    'word/document.xml': strToU8(`<w:document xmlns:w="${word}" xmlns:x="urn:foreign" xmlns:v="urn:schemas-microsoft-com:vml">` +
+      `<w:body>${body}<w:sectPr/></w:body></w:document>`), ...extras,
+  } });
+}

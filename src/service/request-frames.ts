@@ -1,4 +1,7 @@
+import { validLocalOptions } from './review/deterministic/plan.js';
+import { validateInspectHouseWordListInput, validateSaveHouseWordListInput } from '../shared/protocol/house-word-list.js';
 import { validSupervisionInput } from './learning/supervision-directives.js';
+import { validCurationBudget } from './learning/curation.js';
 import { AnalysisError } from './analysis/canonical.js';
 import { baselineAnalysisOutbound } from './analysis/baseline-analysis-wire.js';
 import { taskPlanOutbound } from './task-plan.js';
@@ -135,6 +138,20 @@ export function isSafeInteger(value: unknown, minimum = 0): value is number {
 
 function isBoundedString(value: unknown, maximum: number, allowEmpty = false): value is string {
   return typeof value === 'string' && value.isWellFormed() && value.length <= maximum && (allowEmpty || value.length > 0);
+}
+
+function validGlobalAgentPins(value: unknown): boolean {
+  return Array.isArray(value) && value.length <= 12 && value.every((pin) => isRecord(pin) && hasExactKeys(pin, ['itemId', 'revisionId']) &&
+    isBoundedString(pin.itemId, 180) && isBoundedString(pin.revisionId, 180));
+}
+
+/** A scoped Global Agent turn's explicit Books and exact procedure versions (#1171); absent keeps the no-tools turn. */
+function validGlobalAgentScope(value: unknown): boolean {
+  return value === undefined || (isRecord(value) && hasExactKeys(value, ['bookIds', 'procedures']) &&
+    Array.isArray(value.bookIds) && value.bookIds.length <= 8 && value.bookIds.every(validUuid) &&
+    Array.isArray(value.procedures) && value.procedures.length <= 8 && value.procedures.every((pin) => isRecord(pin) &&
+      hasExactKeys(pin, ['procedureId', 'version', 'digest']) && isBoundedString(pin.procedureId, 200) && isSafeInteger(pin.version, 1) &&
+      typeof pin.digest === 'string' && HEX_DIGEST_PATTERN.test(pin.digest)));
 }
 
 function requireInput(value: unknown, keys: readonly string[], requestId: string): Record<string, unknown> {
@@ -1013,7 +1030,9 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     case 'recordVerificationReviewDecision': {
-      const input = requireInput(value.input, ['bookId', 'resultId', 'resultVersion', 'disposition', 'ownWords', 'reason'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'resultId', 'resultVersion', 'disposition', 'ownWords', 'reason'], ['excludedSourceRefs'], tentativeId);
+      if (input.excludedSourceRefs !== undefined && (input.disposition !== 'request-evidence' || !Array.isArray(input.excludedSourceRefs) ||
+        input.excludedSourceRefs.length < 1 || input.excludedSourceRefs.length > 8 || !input.excludedSourceRefs.every((ref) => isBoundedString(ref, 2048) && ref.startsWith('https://')))) throw new ProtocolError(tentativeId);
       const reason = input.reason;
       if (!validUuid(input.bookId) || !validUuid(input.resultId) || !isSafeInteger(input.resultVersion, 1) ||
           !VERIFICATION_REVIEW_DISPOSITIONS.includes(input.disposition as never) || !(input.ownWords === null || isBoundedString(input.ownWords, 2_000)) ||
@@ -1438,10 +1457,35 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    case 'inspectWordTrackedEditSample': {
+      const input = requireInput(value.input, ['bookId', 'sampleId', 'sampleDigest', 'after'], tentativeId);
+      const after = input.after;
+      const cursorValid = after === null || isRecord(after) &&
+        hasExactKeys(after, ['schema', 'sampleDigest', 'detailDigest', 'section', 'entryOrdinal', 'field', 'codeUnitOffset']) &&
+        after.schema === 'ai7.word-sample-cursor/1' && after.sampleDigest === input.sampleDigest &&
+        typeof after.detailDigest === 'string' && HEX_DIGEST_PATTERN.test(after.detailDigest) &&
+        typeof after.section === 'string' && ['before', 'after', 'events', 'imports'].includes(after.section) &&
+        typeof after.field === 'string' && ['text', 'rawId', 'rawAuthor', 'rawDate', 'rangeName', 'record'].includes(after.field) &&
+        isSafeInteger(after.entryOrdinal, 0) && isSafeInteger(after.codeUnitOffset, 0) && (after.field !== 'record' || after.codeUnitOffset === 0);
+      if (!validUuid(input.bookId) || typeof input.sampleId !== 'string' || !/^wts_[0-9a-f]{64}$/u.test(input.sampleId) ||
+        typeof input.sampleDigest !== 'string' || !HEX_DIGEST_PATTERN.test(input.sampleDigest) || !cursorValid) throw new ProtocolError(tentativeId);
+      break;
+    }
     // 知识库 › 社级编辑记忆 (Issue #911): the house record takes no input; 质量与学习's edit signals, the house or one Book.
     case 'inspectEditorialLearning': {
-      const input = requireInputWithOptional(value.input, ['signalOffset', 'itemOffset'], ['exclusionOffset'], tentativeId);
-      if (![input.signalOffset, input.itemOffset, input.exclusionOffset ?? 0].every((offset) => Number.isSafeInteger(offset) && Number(offset) >= 0 && Number(offset) <= 1_000_000)) throw new ProtocolError(tentativeId);
+      const input = requireInputWithOptional(value.input, ['signalOffset', 'itemOffset'], ['exclusionOffset', 'detailItemId', 'historyOffset', 'sourceOffset'], tentativeId);
+      if (![input.signalOffset, input.itemOffset, input.exclusionOffset ?? 0, input.historyOffset ?? 0, input.sourceOffset ?? 0].every((offset) => Number.isSafeInteger(offset) && Number(offset) >= 0 && Number(offset) <= 1_000_000) ||
+        input.detailItemId !== undefined && !validUuid(input.detailItemId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'recordLearningReasonAsk': {
+      if (!isRecord(value.input)) throw new ProtocolError(tentativeId);
+      const action = value.input.action;
+      const input = requireInput(value.input, action === 'offer' ? ['action', 'decisionId', 'frequency']
+        : action === 'answer' ? ['action', 'askId', 'choice', 'text', 'frequency'] : ['action', 'askId', 'frequency'], tentativeId);
+      if (!['often', 'occasionally', 'off'].includes(String(input.frequency)) ||
+        !(action === 'offer' ? validUuid(input.decisionId) : (action === 'answer' || action === 'dismiss') && validUuid(input.askId)) ||
+        action === 'answer' && (!(input.choice === null || isBoundedString(input.choice, 80)) || !(input.text === null || isBoundedString(input.text, 2_048)))) throw new ProtocolError(tentativeId);
       break;
     }
     case 'changeEditorialLearning': {
@@ -1451,21 +1495,34 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
         const input = requireInput(value.input, ['kind', 'signalId'], tentativeId);
         if (!validUuid(input.signalId)) throw new ProtocolError(tentativeId);
       } else {
-        const input = requireInput(value.input, kind === 'switch' ? ['kind', 'enabled', 'expectedEntries'] : ['kind', 'bookId', 'excluded', 'expectedEntries'], tentativeId);
+        const input = requireInput(value.input, kind === 'switch' ? ['kind', 'enabled', 'expectedEntries', ...(value.input.curation === undefined ? [] : ['curation'])] : ['kind', 'bookId', 'excluded', 'expectedEntries'], tentativeId);
+        if (input.curation !== undefined && (kind !== 'switch' || input.enabled !== true || !validCurationBudget(input.curation))) throw new ProtocolError(tentativeId);
         if (!Number.isSafeInteger(input.expectedEntries) || Number(input.expectedEntries) < 0 ||
             !(kind === 'switch' ? typeof input.enabled === 'boolean' : kind === 'book' && validUuid(input.bookId) && typeof input.excluded === 'boolean')) throw new ProtocolError(tentativeId);
       }
       break;
     }
     case 'createEditorialMemory': {
+      if (isRecord(value.input) && value.input.schema === 'ai7.global-editorial-memory/2') {
+        const input = requireInput(value.input, ['schema', 'actionId', 'signalIds', 'applicability', 'title', 'editorialDimension', 'confidence'], tentativeId);
+        const scope = input.applicability;
+        if (!validUuid(input.actionId) || !Array.isArray(input.signalIds) || input.signalIds.length < 1 || input.signalIds.length > 10 ||
+          !input.signalIds.every(validUuid) || new Set(input.signalIds).size !== input.signalIds.length ||
+          !isRecord(scope) || !(scope.kind === 'house' && hasExactKeys(scope, ['kind']) || scope.kind === 'book' && hasExactKeys(scope, ['kind', 'bookId']) && validUuid(scope.bookId)) ||
+          !isBoundedString(input.title, 160) || !isBoundedString(input.editorialDimension, 80) || typeof input.confidence !== 'number' ||
+          !Number.isFinite(input.confidence) || input.confidence < 0 || input.confidence > 1) throw new ProtocolError(tentativeId);
+        break;
+      }
       const input = requireInput(value.input, ['clientMemoryId', 'signalId', 'title', 'editorialDimension', 'confidence'], tentativeId);
       if (!validUuid(input.clientMemoryId) || !validUuid(input.signalId) || !isBoundedString(input.title, 160) || !isBoundedString(input.editorialDimension, 80) ||
           typeof input.confidence !== 'number' || !Number.isFinite(input.confidence) || input.confidence < 0 || input.confidence > 1) throw new ProtocolError(tentativeId);
       break;
     }
+    case 'acceptEditorialMemory':
     case 'deactivateEditorialMemory': {
-      const input = requireInput(value.input, ['itemId', 'expectedVersionId'], tentativeId);
-      if (!validUuid(input.itemId) || !validUuid(input.expectedVersionId)) throw new ProtocolError(tentativeId);
+      const input = value.op === 'acceptEditorialMemory' ? requireInput(value.input, ['itemId', 'expectedVersionId', 'actionId'], tentativeId)
+        : requireInputWithOptional(value.input, ['itemId', 'expectedVersionId'], ['actionId'], tentativeId);
+      if (!validUuid(input.itemId) || !validUuid(input.expectedVersionId) || input.actionId !== undefined && !validUuid(input.actionId)) throw new ProtocolError(tentativeId);
       break;
     }
     case 'inspectHouseReviewPreference':
@@ -1474,8 +1531,10 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     case 'inspectEditQualitySignals': {
-      const input = requireInput(value.input, ['bookId'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId'], ['preferenceAfter'], tentativeId);
       if (!(input.bookId === null || validUuid(input.bookId))) throw new ProtocolError(tentativeId);
+      const after = input.preferenceAfter;
+      if (!(after == null || isRecord(after) && hasExactKeys(after, ['bookId', 'versionId']) && validUuid(after.bookId) && (after.versionId === null || validUuid(after.versionId)))) throw new ProtocolError(tentativeId);
       break;
     }
     // 质量与学习 › 学习准入 (Issue #61, S26b): every Book's Learning Material, or one Book's.
@@ -1569,15 +1628,15 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     // 后台分析登记 (Issue #95, S39): the route's Book; `登记` names the disclosure it confirmed and one of the two starting points,
     // and `撤销登记` the Enrollment it revokes.
     case 'inspectBackgroundAnalysisEnrollment': {
-      const input = requireInput(value.input, ['bookId'], tentativeId);
-      if (!validUuid(input.bookId)) throw new ProtocolError(tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId'], ['kind'], tentativeId);
+      if (!validUuid(input.bookId) || (input.kind !== undefined && !isBoundedString(input.kind, 120))) throw new ProtocolError(tentativeId);
       break;
     }
     case 'enrollBackgroundAnalysis': {
       // The scope it covers and the tokens ceiling, which 登记 requires (Issue #864).
-      const input = requireInput(value.input, ['bookId', 'disclosureDigest', 'startingPoint', 'scope', 'ceilingTokens'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'disclosureDigest', 'startingPoint', 'scope', 'ceilingTokens'], ['kind'], tentativeId);
       const scope = requireInput(input.scope, ['kind', 'seriesId'], tentativeId);
-      if (!validUuid(input.bookId) || !isBoundedString(input.disclosureDigest, 64) || !HEX_DIGEST_PATTERN.test(input.disclosureDigest) ||
+      if ((input.kind !== undefined && !isBoundedString(input.kind, 120)) || !validUuid(input.bookId) || !isBoundedString(input.disclosureDigest, 64) || !HEX_DIGEST_PATTERN.test(input.disclosureDigest) ||
           (input.startingPoint !== 'prospective' && input.startingPoint !== 'backfill') ||
           !(scope.kind === 'series' ? validUuid(scope.seriesId) : (scope.kind === 'book' || scope.kind === 'all-books') && scope.seriesId === null) ||
           typeof input.ceilingTokens !== 'number' || !Number.isSafeInteger(input.ceilingTokens) || input.ceilingTokens < 1 ||
@@ -1600,10 +1659,14 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     // 联网后开始任务 for every other kind with a plan (Issue #760, S74c): the kind, its Task — a Task Intent or a Review Run —
     // and exactly the digests 开始任务 would bind: one plan envelope's for a ledger Task, every Task-backed category's for a
     // Review Run; never both. Whether they still stand is the store's to decide.
+    // 空闲时处理 (Issue #1089) takes the same shape and also starts a baseline analysis, which 联网后开始任务 leaves to its own
+    // operation; J-03's fixed Task only records an authorization, so it never waits for either.
+    case 'startTaskWhenIdle':
     case 'startTaskWhenOnline': {
       const input = requireInput(value.input, ['bookId', 'kind', 'ref', 'planEnvelopeDigest', 'planDigests'], tentativeId);
       const review = input.kind === 'review-run';
-      if (!validUuid(input.bookId) || !START_WHEN_ONLINE_TASK_KINDS.includes(input.kind as never) || !validUuid(input.ref) ||
+      const kindAdmitted = START_WHEN_ONLINE_TASK_KINDS.includes(input.kind as never) || (value.op === 'startTaskWhenIdle' && input.kind === 'baseline-analysis');
+      if (!validUuid(input.bookId) || !kindAdmitted || !validUuid(input.ref) ||
           !Array.isArray(input.planDigests) ||
           (review
             ? input.planEnvelopeDigest !== null ||
@@ -1650,9 +1713,21 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    case 'inspectHouseWordList':
+    case 'saveHouseWordList': {
+      try {
+        if (value.op === 'inspectHouseWordList') validateInspectHouseWordListInput(value.input);
+        else validateSaveHouseWordListInput(value.input);
+      } catch { throw new ProtocolError(tentativeId); }
+      break;
+    }
     case 'prepareReviewRun': {
       // A sheet pre-filled from a Captured Procedure (Issue #65, S30) names the exact version and digest it was filled from.
-      const input = requireInputWithOptional(value.input, ['bookId', 'categoryIds', 'scope'], ['capturedProcedure', 'materialIds', 'seriesId'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'categoryIds', 'scope'], ['capturedProcedure', 'materialIds', 'seriesId', 'localCheck', 'decisionId'], tentativeId);
+      if (input.decisionId !== undefined && (!validUuid(input.decisionId) || !Array.isArray(input.categoryIds) || input.categoryIds.length !== 1 || input.categoryIds[0] !== 'factual-review')) throw new ProtocolError(tentativeId);
+      if (input.localCheck !== undefined && (!validLocalOptions(input.localCheck) || !Array.isArray(input.categoryIds) || input.categoryIds.length !== 1 || input.categoryIds[0] !== 'local-text-check')) throw new ProtocolError(tentativeId);
+      if (Array.isArray(input.categoryIds) && input.categoryIds.includes('local-text-check') &&
+        (!validLocalOptions(input.localCheck) || input.capturedProcedure != null || input.seriesId != null || (Array.isArray(input.materialIds) && input.materialIds.length > 0))) throw new ProtocolError(tentativeId);
       if (!optionalOrNull(input, 'seriesId', validUuid)) throw new ProtocolError(tentativeId);
       if (!validUuid(input.bookId) || !Array.isArray(input.categoryIds) || !validReviewCategoryIds(input.categoryIds, 1) ||
           !validReviewRunScope(input.scope) ||
@@ -1668,6 +1743,30 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'inspectProcedureCapture': {
       const input = requireInput(value.input, ['bookId', 'reviewRunId'], tentativeId);
       if (!validUuid(input.bookId) || !validUuid(input.reviewRunId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'procedureLibrary': {
+      const input = value.input;
+      const pin = (candidate: unknown): boolean => isRecord(candidate) && hasExactKeys(candidate, ['procedureId', 'version', 'digest']) &&
+        isBoundedString(candidate.procedureId, 160) && isSafeInteger(candidate.version, 1) && typeof candidate.digest === 'string' && /^[a-f0-9]{64}$/u.test(candidate.digest);
+      if (!isRecord(input)) throw new ProtocolError(tentativeId);
+      if (input.action === 'inspect' && hasExactKeys(input, ['action'])) break;
+      if (input.action === 'stop' && hasExactKeys(input, ['action', 'procedure']) && pin(input.procedure)) break;
+      if (input.action === 'select' && hasExactKeys(input, ['action', 'bookId', 'procedure']) && validUuid(input.bookId) && pin(input.procedure)) break;
+      const edit = input.input;
+      if (input.action !== 'save' || !hasExactKeys(input, ['action', 'input']) || !isRecord(edit) ||
+        !hasExactKeys(edit, ['procedureId', 'basedOn', 'title', 'editorInstruction', 'stages', ...(edit.captureRunId === undefined ? [] : ['captureRunId'])]) ||
+        !(edit.procedureId === null || isBoundedString(edit.procedureId, 160)) || !pin(edit.basedOn) || !isBoundedString(edit.title, 1024) ||
+        !isBoundedString(edit.editorInstruction, 12000, true) || (edit.captureRunId !== undefined && !validUuid(edit.captureRunId)) ||
+        !Array.isArray(edit.stages) || edit.stages.length === 0 || edit.stages.length > 16 || !edit.stages.every((stage) => isRecord(stage) &&
+          hasExactKeys(stage, ['stageType', 'inputs', 'toolWhitelist', 'parallelism', 'outputTemplateId', 'exemptionRules', 'budgetShare', 'web']) &&
+          isBoundedString(stage.stageType, 80) && Array.isArray(stage.inputs) && stage.inputs.length <= 16 && stage.inputs.every((item) => isBoundedString(item, 160)) &&
+          Array.isArray(stage.toolWhitelist) && stage.toolWhitelist.length <= 16 && stage.toolWhitelist.every((item) => isBoundedString(item, 80)) &&
+          isSafeInteger(stage.parallelism, 1) && isBoundedString(stage.outputTemplateId, 160) && typeof stage.web === 'boolean' &&
+          typeof stage.budgetShare === 'number' && Number.isFinite(stage.budgetShare) && stage.budgetShare >= 0 && stage.budgetShare <= 1 &&
+          Array.isArray(stage.exemptionRules) && stage.exemptionRules.length <= 20 && stage.exemptionRules.every((rule) => isBoundedString(rule, 12000, true)))) {
+        throw new ProtocolError(tentativeId);
+      }
       break;
     }
     case 'saveCapturedProcedure': {
@@ -1885,9 +1984,10 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     case 'prepareNewBookReview': {
-      const input = requireInput(
+      const input = requireInputWithOptional(
         value.input,
         ['draftId', 'expectedDraftVersion', 'target', 'acceptDegradation', 'textBoxDisposition'],
+        ['trackedChanges'],
         tentativeId,
       );
       const target = input.target;
@@ -1905,7 +2005,12 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
         !isSafeInteger(input.expectedDraftVersion, 1) ||
         !validTarget ||
         typeof input.acceptDegradation !== 'boolean' ||
-        (input.textBoxDisposition !== 'retain' && input.textBoxDisposition !== 'merge')
+        (input.textBoxDisposition !== 'retain' && input.textBoxDisposition !== 'merge') ||
+        (input.trackedChanges !== undefined && !(isRecord(input.trackedChanges) &&
+          hasExactKeys(input.trackedChanges, ['mode', 'learnFromEdits', 'acceptedBaselineConfirmed']) &&
+          typeof input.trackedChanges.learnFromEdits === 'boolean' &&
+          (input.trackedChanges.mode === 'suggestions' && input.trackedChanges.acceptedBaselineConfirmed === false ||
+            input.trackedChanges.mode === 'accepted-baseline' && input.trackedChanges.acceptedBaselineConfirmed === true)))
       ) {
         throw new ProtocolError(tentativeId);
       }
@@ -2533,20 +2638,31 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'stopGlobalAgentAnswer':
     case 'continueGlobalAgentAnswer':
     case 'regenerateGlobalAgentAnswer': {
-      const input = requireInput(value.input, ['dialogueId', 'attemptId'], tentativeId);
-      if (!validUuid(input.dialogueId) || !validUuid(input.attemptId)) throw new ProtocolError(tentativeId);
+      const input = requireInputWithOptional(value.input, ['dialogueId', 'attemptId'], ['disclosureSha256', 'sources'], tentativeId);
+      if (!validUuid(input.dialogueId) || !validUuid(input.attemptId) ||
+          input.disclosureSha256 !== undefined && (typeof input.disclosureSha256 !== 'string' || !HEX_DIGEST_PATTERN.test(input.disclosureSha256)) ||
+          input.sources !== undefined && !validGlobalAgentPins(input.sources)) throw new ProtocolError(tentativeId);
       break;
     }
     case 'recordLearningSupervision': {
-      const input = requireInput(value.input, ['operation', 'targets', 'scope', 'text', 'categoryId', 'effect'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['operation', 'targets', 'scope', 'text', 'categoryId', 'effect'], ['actionId'], tentativeId);
       if (!validSupervisionInput(input)) throw new ProtocolError(tentativeId);
       break;
     }
+    case 'prepareGlobalAgentTurn':
     case 'askGlobalAgent': {
-      const input = requireInput(value.input, ['question', 'sources'], tentativeId);
-      if (!isBoundedString(input.question, MAX_DIALOGUE_QUESTION_CHARACTERS) || !Array.isArray(input.sources) || input.sources.length > 12 ||
-          input.sources.some((pin) => !isRecord(pin) || !hasExactKeys(pin, ['itemId', 'revisionId']) ||
-            !isBoundedString(pin.itemId, 180) || !isBoundedString(pin.revisionId, 180))) throw new ProtocolError(tentativeId);
+      if (value.op === 'prepareGlobalAgentTurn' && isRecord(value.input) && value.input.kind !== 'ask') {
+        const input = requireInputWithOptional(value.input, ['kind', 'dialogueId', 'attemptId'], ['sources'], tentativeId);
+        if ((input.kind !== 'continue' && input.kind !== 'regenerate') || !validUuid(input.dialogueId) || !validUuid(input.attemptId) ||
+            input.sources !== undefined && !validGlobalAgentPins(input.sources)) throw new ProtocolError(tentativeId);
+        break;
+      }
+      const input = value.op === 'prepareGlobalAgentTurn' ? requireInputWithOptional(value.input, ['kind', 'question', 'sources'], ['scope'], tentativeId)
+        : requireInputWithOptional(value.input, ['question', 'sources'], ['disclosureSha256', 'scope'], tentativeId);
+      if (value.op === 'prepareGlobalAgentTurn' && input.kind !== 'ask' ||
+          input.disclosureSha256 !== undefined && (typeof input.disclosureSha256 !== 'string' || !HEX_DIGEST_PATTERN.test(input.disclosureSha256))) throw new ProtocolError(tentativeId);
+      if (!isBoundedString(input.question, MAX_DIALOGUE_QUESTION_CHARACTERS) || !validGlobalAgentPins(input.sources) ||
+          !validGlobalAgentScope(input.scope)) throw new ProtocolError(tentativeId);
       break;
     }
     case 'inspectDialogue': {

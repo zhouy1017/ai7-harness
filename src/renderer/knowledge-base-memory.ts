@@ -1,5 +1,6 @@
 import type { EditorialLearningProjection, HouseReviewPreferenceProjection, LearningSignal, RendererApi } from '../shared/protocol.js';
 import { learningChoiceLabel } from './quality-learning-labels.js';
+import { mountWordTrackedEditDetail } from './quality-learning.js';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, text: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
@@ -10,6 +11,8 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, text: string): HTMLEl
 /** What the editor did, in the words of the decision itself (Issue #1082). */
 const SIGNAL_KIND_LABELS: Readonly<Record<LearningSignal['kind'], string>> = {
   accepted: '接受', 'accepted-with-edit': '修改后接受', rejected: '拒绝并说明原因', 'review-finding-ignored': '忽略并说明',
+  'proactive-reason': '学习询问原因',
+  'word-tracked-edit': 'Word 文件修订', 'manual-edit-journal': '直接修改稿件',
 };
 
 /** A signal the opt-out default admitted is never shown as the editor's own 纳入 choice (ADR 0094 §3; the policy's rule 2). */
@@ -20,7 +23,8 @@ function signalStandingLabel(signal: EditorialLearningProjection['signals'][numb
 }
 
 /** Explicit, reference-only memory management alongside the existing 本社审阅偏好. */
-export async function mountEditorialMemory(root: HTMLElement, api: RendererApi): Promise<void> {
+export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
+  openSourceVersion: (bookId: string, sourceVersionId: string) => Promise<void>): Promise<void> {
   const section = el('section', '');
   section.dataset['editorialMemory'] = '';
   section.className = 'learning-materials'; section.style.overflowWrap = 'anywhere';
@@ -28,11 +32,12 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi):
   let page = await api.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
   let signalOffset = 0; let itemOffset = 0; let exclusionOffset = 0;
   let busy = false;
+  const selected = new Map<string, EditorialLearningProjection['signals'][number]>();
   const status = el('p', ''); status.setAttribute('role', 'status');
   const run = (operation: () => Promise<EditorialLearningProjection>): void => {
     if (busy) return;
     busy = true; paint();
-    void operation().then((next) => { page = next; signalOffset = 0; itemOffset = 0; exclusionOffset = 0; status.textContent = '学习记录已更新。'; })
+    void operation().then((next) => { page = next; selected.clear(); signalOffset = 0; itemOffset = 0; exclusionOffset = 0; status.textContent = '学习记录已更新。'; })
       .catch(() => { status.textContent = '无法更新学习记录，请重新查看。'; })
       .finally(() => { busy = false; if (section.isConnected) paint(); });
   };
@@ -47,6 +52,29 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi):
     enabled.dataset['learningEnabled'] = '';
     enabled.addEventListener('change', () => run(() => api.changeEditorialLearning({ kind: 'switch', enabled: enabled.checked, expectedEntries: page.controlEntries })));
     switchLabel.prepend(enabled); section.append(switchLabel, status);
+    if (page.curation !== undefined) {
+      const curation = page.curation;
+      const panel = el('details', ''); panel.append(el('summary', '空闲时整理学习记录'), el('p', curation.disclosure));
+      panel.append(el('p', curation.envelope === null ? '尚未设置模型整理范围；现有学习记录只保留在本机。'
+        : `已预留 ${curation.passesUsed} / ${curation.envelope.budget.maxPasses} 次整理，${curation.reservedTokens} / ${curation.envelope.budget.totalTokens} tokens。重启不重置；不确定的发送也保留预算。`));
+      for (const entry of curation.recentRuns) panel.append(el('p', entry.summary));
+      if (curation.available) {
+        const form = el('form', '');
+        const number = (label: string, value: number): HTMLInputElement => {
+          const input = el('input', ''); input.type = 'number'; input.min = '1'; input.required = true; input.value = String(value); input.disabled = busy;
+          const row = el('label', label); row.append(input); form.append(row); return input;
+        };
+        const passes = number('最多整理次数', curation.envelope?.budget.maxPasses ?? 3); passes.max = '100';
+        const total = number('本次启用范围的总 token 预算', curation.envelope?.budget.totalTokens ?? 60_000); total.max = '10000000';
+        const perPass = number('每次整理的 token 上限', curation.envelope?.budget.perPassTokens ?? 20_000);
+        const save = el('button', '启用这个学习整理范围'); save.type = 'submit'; save.disabled = busy; form.append(save);
+        form.addEventListener('submit', (event) => { event.preventDefault(); run(() => api.changeEditorialLearning({
+          kind: 'switch', enabled: true, expectedEntries: page.controlEntries,
+          curation: { maxPasses: Number(passes.value), totalTokens: Number(total.value), perPassTokens: Number(perPass.value) } })); });
+        panel.append(form);
+      }
+      section.append(panel);
+    }
     const exclusions = el('details', ''); exclusions.append(el('summary', '学习排除范围'));
     if (page.excludedBooks.length + page.excludedMaterials.length === 0) exclusions.append(el('p', '尚无排除记录。'));
     for (const book of page.excludedBooks) {
@@ -61,17 +89,29 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi):
     }));
     section.append(exclusions, el('h4', '记忆条目'));
     if (page.items.length === 0) section.append(el('p', '尚无编辑记忆。可从下方处理记录新建记忆。'));
-    for (const { current, usable, history } of page.items) {
+    for (const { current, usable, history, sources, nextHistoryOffset, nextSourceOffset } of page.items) {
       const item = el('article', ''); item.className = 'learning-material'; item.dataset['memoryItem'] = current.itemId;
-      item.append(el('h4', current.title), el('p', `${current.editorialDimension} · 信心 ${Math.round(current.confidence * 100)}% · ${current.activation === 'inactive' ? '已停用' : usable ? '已启用' : '来源受限，暂停使用'}`));
+      const state = current.schema === 'ai7.global-editorial-memory/2' ? current.state : current.activation;
+      item.append(el('h4', current.title), el('p', `${current.editorialDimension} · 信心 ${Math.round(current.confidence * 100)}% · ${state === 'proposed' ? current.actor === 'AI7' ? 'AI7 整理，待接受' : '编辑撰写，待接受' : state === 'frozen' ? '已冻结' : state === 'inactive' ? '已停用' : usable ? '已启用' : '来源受限，暂停使用'}`));
       const lineage = el('details', ''); lineage.append(el('summary', '来源与版本历史'));
       for (const source of [...current.positiveExamples, ...current.negativeExamples]) {
         lineage.append(el('p', `图书 ${source.bookId} · 标记 ${source.markId ?? '无'} · 决定 ${source.decisionId} · 修订 ${source.revisionId} · 日志 ${source.journalSequence} · 原因版本 ${source.reasonRevision}`));
       }
-      for (const version of history) lineage.append(el('p', `v${version.ordinal} · ${version.activation === 'active' ? '启用' : '停用'} · ${version.recordedAt}`));
+      for (const source of sources ?? []) lineage.append(el('p', `来源 ${source.sourceKey} · 图书 ${source.source.bookId} · ${source.admission.kind === 'automatic' ? '默认本机准入' : `编辑准入 ${source.admission.decisionId}`} · ${source.sourceKind === undefined ? `决定 ${source.source.decisionId}` : source.sourceKind === 'manual-edit-journal' ? '手动修改观察' : 'Word 修改样本'}`));
+      for (const version of history) lineage.append(el('p', `v${version.ordinal} · ${{ proposed: '候选', active: '启用', inactive: '停用', frozen: '冻结' }[version.schema === 'ai7.global-editorial-memory/2' ? version.state : version.activation]} · ${version.recordedAt}`));
+      if (nextHistoryOffset != null) lineage.append(action('更早版本', () => {
+        void api.inspectEditorialLearning({ signalOffset, itemOffset, detailItemId: current.itemId, historyOffset: nextHistoryOffset })
+          .then((next) => { page = next; paint(); }).catch(() => { status.textContent = '无法读取更早版本。'; });
+      }));
+      if (nextSourceOffset != null) lineage.append(action('更多祖先来源', () => {
+        void api.inspectEditorialLearning({ signalOffset, itemOffset, detailItemId: current.itemId, sourceOffset: nextSourceOffset })
+          .then((next) => { page = next; paint(); }).catch(() => { status.textContent = '无法读取更多来源。'; });
+      }));
       item.append(lineage);
-      if (current.activation === 'active') item.append(action('停用', () => run(() => api.deactivateEditorialMemory({ itemId: current.itemId, expectedVersionId: current.versionId }))));
-      const bookId = [...current.positiveExamples, ...current.negativeExamples][0]?.bookId;
+      if (current.schema === 'ai7.global-editorial-memory/2' && current.state === 'proposed') item.append(action('接受记忆', () => run(() => api.acceptEditorialMemory({ itemId: current.itemId, expectedVersionId: current.versionId, actionId: crypto.randomUUID() }))));
+      if (state === 'active') item.append(action('停用', () => run(() => api.deactivateEditorialMemory({ itemId: current.itemId, expectedVersionId: current.versionId,
+        ...(current.schema === 'ai7.global-editorial-memory/2' ? { actionId: crypto.randomUUID() } : {}) }))));
+      const bookId = sources?.[0]?.source.bookId ?? [...current.positiveExamples, ...current.negativeExamples][0]?.bookId;
       if (bookId !== undefined && !page.excludedBooks.some((book) => book.bookId === bookId)) item.append(action('排除本书', () => run(() => api.changeEditorialLearning({ kind: 'book', bookId, excluded: true, expectedEntries: page.controlEntries }))));
       section.append(item);
     }
@@ -79,16 +119,54 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi):
       itemOffset = page.nextItemOffset!;
       void api.inspectEditorialLearning({ signalOffset, itemOffset, exclusionOffset }).then((next) => { page = next; paint(); }).catch(() => { status.textContent = '无法读取更多记忆。'; });
     }));
-    section.append(el('h4', '学习信号 · 从处理记录新建记忆'), el('p', '这里只记录来源引用；原文、建议和你的改写留在各自的处理记录中。新建记忆由你明确提交，后续任务尚不读取这些记忆。'));
+    const wordOnly = page.signals.length > 0 && page.signals.every((signal) => signal.kind === 'word-tracked-edit');
+    section.append(el('h4', wordOnly ? '学习信号 · Word 原始修改对' : '学习信号 · 从处理记录新建记忆'), el('p', wordOnly
+      ? '查看原始修改对及其导入依据，或排除今后的学习使用；尚未用于编辑记忆、审阅偏好或模型任务。'
+      : '勾选同一审阅类别的 1–10 条来源，撰写记忆候选；接受后，符合范围的审阅可参考它。原文与改写留在原处理记录中。'));
+    const batch = el('form', ''); batch.dataset['memoryCandidateForm'] = '';
+    const title = el('input', ''); title.name = 'candidate-title'; title.maxLength = 160; title.required = true;
+    const titleLabel = el('label', '候选记忆内容'); titleLabel.append(title);
+    const scope = el('select', '');
+    for (const [value, label] of [['house', '本社'], ['book', '所选来源的图书']]) { const option = el('option', label!); option.value = value!; scope.append(option); }
+    const scopeLabel = el('label', '适用范围'); scopeLabel.append(scope);
+    const confidence = el('input', ''); confidence.type = 'number'; confidence.min = '0'; confidence.max = '100'; confidence.value = '50'; confidence.required = true;
+    const confidenceLabel = el('label', '编辑信心（0–100）'); confidenceLabel.append(confidence);
+    const create = el('button', '创建候选记忆'); create.type = 'submit'; create.disabled = busy;
+    batch.append(titleLabel, scopeLabel, confidenceLabel, create);
+    batch.addEventListener('submit', (event) => {
+      event.preventDefault(); if (!batch.reportValidity()) return;
+      const sources = [...selected.values()]; const first = sources[0];
+      if (first?.memoryCandidate == null || sources.length > 10 || sources.some((signal) => signal.memoryCandidate?.editorialDimension !== first.memoryCandidate!.editorialDimension ||
+        scope.value === 'book' && signal.source.bookId !== first.source.bookId)) { status.textContent = '请选择 1–10 条同一审阅类别、符合适用范围的来源。'; return; }
+      run(() => api.createEditorialMemory({ schema: 'ai7.global-editorial-memory/2', actionId: crypto.randomUUID(), signalIds: sources.map((signal) => signal.signalId),
+        applicability: scope.value === 'book' ? { kind: 'book', bookId: first.source.bookId } : { kind: 'house' },
+        title: title.value, editorialDimension: first.memoryCandidate!.editorialDimension, confidence: Number(confidence.value) / 100 }));
+    }); if (!wordOnly) section.append(batch);
     if (page.signals.length === 0) section.append(el('p', '尚无符合准入的学习信号。'));
     for (const signal of page.signals) {
       const row = el('article', ''); row.className = 'learning-material'; row.dataset['learningSignal'] = signal.signalId;
       row.append(el('p', `《${signal.bookTitle}》 · ${SIGNAL_KIND_LABELS[signal.kind]} · ${signal.recordedAt}`),
-        el('p', `作者：${signal.attribution.authors.join('、') || '未记录'} · 责编：${signal.attribution.editors.join('、') || '未记录'} · ${signalStandingLabel(signal)}`),
-        el('p', `决定 ${signal.source.decisionId} · 修订 ${signal.source.revisionId} · 日志 ${signal.source.journalSequence}${signal.rewriteDistance === null ? '' : ` · 改写距离 ${signal.rewriteDistance}`}`));
+        el('p', `作者：${signal.attribution.authors.join('、') || '未记录'} · 责编：${signal.attribution.editors.join('、') || '未记录'} · ${signalStandingLabel(signal)}`));
+      if (signal.kind === 'word-tracked-edit') {
+        row.append(el('p', 'Word 修改对已在本机保留；尚未用于编辑记忆、审阅偏好或模型任务。'));
+        const provenance = el('details', ''); provenance.append(el('summary', '来源与导入记录'),
+          el('p', `原始来源 ${signal.source.sourceVersionId} · 导入 ${signal.source.importCommitId}`)); row.append(provenance);
+        const detail = el('div', '');
+        row.append(action('查看完整 Word 修改对', () => {
+          detail.replaceChildren();
+          void mountWordTrackedEditDetail({ root: detail, api, ...signal.source, openSourceVersion }).load();
+        }), detail);
+      } else if (signal.kind === 'manual-edit-journal') {
+        row.append(el('p', `手动编辑 · 日志 ${signal.source.journalSequence} · ${signal.source.memberCount} 个内容块；不代表采纳建议。`));
+      } else row.append(el('p', `决定 ${signal.source.decisionId} · 修订 ${signal.source.revisionId} · 日志 ${signal.source.journalSequence}${signal.rewriteDistance === null ? '' : ` · 改写距离 ${signal.rewriteDistance}`}`));
+      if (signal.kind !== 'word-tracked-edit' && signal.kind !== 'manual-edit-journal' && signal.memoryCandidate != null) {
+        const checkbox = el('input', ''); checkbox.type = 'checkbox'; checkbox.dataset['memorySource'] = signal.signalId; checkbox.checked = selected.has(signal.signalId); checkbox.disabled = busy;
+        checkbox.addEventListener('change', () => { if (checkbox.checked) selected.set(signal.signalId, signal); else selected.delete(signal.signalId); });
+        const label = el('label', `选为候选来源 · ${signal.memoryCandidate.editorialDimension}`); label.prepend(checkbox); row.append(label);
+      }
       if (signal.currentEligibility !== 'excluded' && signal.currentEligibility !== 'superseded') row.append(action('排除此材料', () => run(() => api.changeEditorialLearning({ kind: 'material', signalId: signal.signalId }))));
       if (!page.excludedBooks.some((book) => book.bookId === signal.source.bookId)) row.append(action('排除本书', () => run(() => api.changeEditorialLearning({ kind: 'book', bookId: signal.source.bookId, excluded: true, expectedEntries: page.controlEntries }))));
-      if (signal.currentEligibility === 'house') {
+      if (signal.kind !== 'word-tracked-edit' && signal.kind !== 'manual-edit-journal' && signal.currentEligibility === 'house') {
         const form = el('form', '');
         const titleLabel = el('label', '记忆标题'); const title = el('input', ''); title.maxLength = 160; title.required = true; title.name = 'memory-title'; titleLabel.append(title);
         const dimensionLabel = el('label', '编辑维度'); const dimension = el('input', ''); dimension.maxLength = 80; dimension.required = true; dimension.name = 'memory-dimension'; dimensionLabel.append(dimension);
@@ -149,7 +227,7 @@ export function renderHouseReviewPreference(root: HTMLElement, projection: House
       const authors = new Map<string, Set<string>>();
       const editors = new Map<string, Set<string>>();
       for (const source of line.sources) {
-        const count = (map: Map<string, Set<string>>, key: string) => map.set(key, new Set([...(map.get(key) ?? []), source.eligibilityDecisionId]));
+        const count = (map: Map<string, Set<string>>, key: string) => map.set(key, new Set([...(map.get(key) ?? []), source.kind === 'editorial-memory' ? source.feedbackKey : source.eligibilityDecisionId]));
         count(books, source.bookId);
         for (const name of source.attribution.authors) count(authors, name);
         for (const name of source.attribution.editors) count(editors, name);

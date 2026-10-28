@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
@@ -38,11 +39,29 @@ import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-d
 import { importSample1Book, requireExactSample1, sample1Path } from '../support/sample1-baseline.js';
 import { withLocalRetrievalFor } from '../support/policy-rules.js';
 
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
+
 // Service-integration suite (L2) for the live editorial dialogue (Issue #52, plan slice S17c; ADR 0088; ADR 0089) over the
 // real store, the real PrimaryAgentHarness composition, Egress Gate, Credential Broker, Provider Test Ledger and Result Cache,
 // under the real selected developer-live policy (Provider Processing v10, Issue #831) and its dialogue allow rule. Only the
 // transport is a stub, so no socket is opened and no credential value beyond a local placeholder exists. Hand-built rules
 // serve only the refusals: the reading takes whatever the selected policy names.
+
+/**
+ * The Store as a predecessor build drove it: no selected v29 local runtime, so a local binding is written in the /1 shape an
+ * older revision really held. A /2 binding planted under an old marker is refused before open, as reader 94 requires.
+ */
+function predecessorLocalRecords(store: EditorialStore): EditorialStore {
+  return new Proxy(store, { get: (target, key) => {
+    if (key === 'localFixtureRuntime') return undefined;
+    const value: unknown = Reflect.get(target, key, target);
+    return typeof value === 'function' ? value.bind(target) : value;
+  } });
+}
 
 const QUESTION = '这段的叙述视角是否一致？';
 /** The synthetic answer the stub gives: the fixture's own words, quoting nothing of the Book. */
@@ -174,7 +193,7 @@ function liveRoute(nativeFetch: typeof fetch, options: { validation?: Developmen
 }
 
 function liveOwner(store: EditorialStore, live: DialogueLiveRoute | null): DialogueExecutionOwner {
-  return new DialogueExecutionOwner({ records: store, fixture: null, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live });
+  return new DialogueExecutionOwner({ requestGovernor, records: store, fixture: null, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live });
 }
 
 function selectionOf(store: EditorialStore, book: { manuscriptId: string; branchId: string }): DialogueSelectionInput {
@@ -277,7 +296,7 @@ describe('the admitted dialogue route, read from the selected policy', () => {
         controller.close();
       } }), { headers: { 'content-type': 'text/event-stream' } });
     }) as unknown as typeof fetch;
-    const dialogues = new DialogueExecutionOwner({ records: store, fixture: null,
+    const dialogues = new DialogueExecutionOwner({ requestGovernor, records: store, fixture: null,
       sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY),
       live: liveRoute(nativeFetch),
       retrievalIndex: (id) => store.dialogueRetrievalIndex(id) });
@@ -296,6 +315,50 @@ describe('the admitted dialogue route, read from the selected policy', () => {
     } finally { await dialogues.dispose(); }
   });
 
+  it.each(['stop', 'dispose'] as const)('%s in a live tool gap settles as that stop before the next request is sent (#1131 review)', async (action) => {
+    const store = await openStore();
+    const book = await importSample1Book(store, roots.codeRoot, '对话工具间隙停止');
+    const selection = selectionOf(store, book);
+    const calls: StubCall[] = [];
+    const nativeFetch = (async (url: string, init: { headers: Record<string, string>; body: string }) => {
+      calls.push({ url, headers: init.headers, body: init.body });
+      const args = JSON.stringify({ query: selection.selectedText, k: 1, sourceKinds: ['manuscript'] });
+      return new Response(new ReadableStream<Uint8Array>({ start(controller) {
+        const event = (delta: unknown, finish_reason: string | null = null): void => {
+          controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ model: OPENCODE_GO_MODEL, choices: [{ index: 0, delta, finish_reason }] })}\n\n`));
+        };
+        event({ tool_calls: [{ index: 0, id: 'retrieval-1', type: 'function', function: { name: 'retrieve', arguments: '' } }] });
+        for (const fragment of [...args]) event({ tool_calls: [{ index: 0, function: { arguments: fragment } }] });
+        event({}, 'tool_calls');
+        controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ model: OPENCODE_GO_MODEL, choices: [], usage: { prompt_tokens: 210, completion_tokens: 48 } })}\n\ndata: [DONE]\n\n`));
+        controller.close();
+      } }), { headers: { 'content-type': 'text/event-stream' } });
+    }) as unknown as typeof fetch;
+    const dialogues = new DialogueExecutionOwner({ requestGovernor, records: store, fixture: null,
+      sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY),
+      live: liveRoute(nativeFetch),
+      retrievalIndex: (id) => store.dialogueRetrievalIndex(id) });
+    const acquire = requestGovernor.acquire.bind(requestGovernor); let acquisitions = 0; let stopping: Promise<void> | undefined;
+    const turn = store.askAboutSelection(book.bookId, { selection, question: '找到书中哪里有相似的描写？' });
+    // The tool result is in; the follow-on model request asks for capacity when the editor stops or AI7 closes.
+    vi.spyOn(requestGovernor, 'acquire').mockImplementation((producer, signal) => {
+      acquisitions += 1;
+      if (acquisitions === 2) stopping = action === 'stop' ? dialogues.stop(turn.attemptId) : dialogues.dispose();
+      return acquire(producer, signal);
+    });
+    try {
+      dialogues.requireReady(store.dialogueSourceDigest(book.bookId, selection));
+      dialogues.begin(turn);
+      await waitFor(() => stopping, (value) => value !== undefined, 'follow-on request asked for capacity');
+      await stopping;
+      const projection = store.inspectDialogue(book.bookId, turn.dialogueId, 0, () => null);
+      expect(calls).toHaveLength(1);
+      expect(projection.attempts[0]!.state).toBe(action === 'stop' ? 'stopped' : 'interrupted');
+      expect(projection.attempts[0]!.causeCode).toBe(action === 'stop' ? null : DIALOGUE_CLOSED_CAUSE);
+      expect(requestGovernor.snapshot()).toMatchObject({ registered: 0, waiting: 0, inFlight: 0 });
+    } finally { await dialogues.dispose(); }
+  });
+
   it('checks the frozen dialogue source after reimport, never a later admitted source in the same Book', async () => {
     const store = await openStore();
     const path = join(roots.inputRoot, 'composed-dialogue.docx');
@@ -309,7 +372,7 @@ describe('the admitted dialogue route, read from the selected policy', () => {
     const selection = selectionOf(store, book);
     const { loadModelFixture } = await import('../../src/service/provider/model-fixture.js');
     const fixture = await loadModelFixture(join(roots.codeRoot, 'tests', 'fixtures', 'model'), 'sample1-dialogue');
-    const local = new DialogueExecutionOwner({ records: store, fixture, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live: null });
+    const local = new DialogueExecutionOwner({ requestGovernor, records: store, fixture, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live: null });
     const { dialogueId } = await ask(store, local, book.bookId, selection);
     await local.dispose();
 
@@ -663,6 +726,7 @@ describe('就这段提问… on the live route (provider-free)', () => {
     const fixture = await loadModelFixture(resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url))), 'sample1-dialogue');
     let streamed = 0;
     const local = new Owner({
+      requestGovernor,
       records: store, fixture, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live: null,
       answerHold: async (count, interrupted) => {
         streamed = count;
@@ -729,7 +793,7 @@ describe('the recorded live answer (Issue #52, S17c fixture)', () => {
     const answer = (recordedEntry.response as unknown as { chunks: string[] }).chunks.join('');
     const store = await openStore();
     const book = await importSample1Book(store, roots.codeRoot, '实录回放');
-    const local = new DialogueExecutionOwner({ records: store, fixture: recorded, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live: null, answerHold: null });
+    const local = new DialogueExecutionOwner({ requestGovernor, records: store, fixture: recorded, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live: null, answerHold: null });
     try {
       const { dialogueId, projection } = await ask(store, local, book.bookId, selectionOf(store, book));
       expect(projection.attempts[0]!.state).toBe('completed');
@@ -771,7 +835,7 @@ describe('revision 71', () => {
     const { fileURLToPath } = await import('node:url');
     const fixture = await loadModelFixture(resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url))), 'sample1-dialogue');
     let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    const local = new Owner({ records: store, fixture, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live: null, answerHold: null });
+    const local = new Owner({ requestGovernor, records: predecessorLocalRecords(store), fixture, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live: null, answerHold: null });
     const book = await importSample1Book(store, roots.codeRoot, '修订71');
     const turn = store.askAboutSelection(book.bookId, { selection: selectionOf(store, book), question: QUESTION });
     local.begin(turn);
@@ -834,7 +898,7 @@ describe('revision 72 (Issue #811)', () => {
     const { fileURLToPath } = await import('node:url');
     const fixture = await loadModelFixture(resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url))), 'sample1-dialogue');
     let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    const local = new Owner({ records: store, fixture, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live: null, answerHold: null });
+    const local = new Owner({ requestGovernor, records: predecessorLocalRecords(store), fixture, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live: null, answerHold: null });
     const book = await importSample1Book(store, roots.codeRoot, '修订72');
     const turn = store.askAboutSelection(book.bookId, { selection: selectionOf(store, book), question: QUESTION });
     local.begin(turn);
@@ -901,7 +965,7 @@ describe('revision 72 (Issue #811)', () => {
     try {
       expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
       // Synchronized delta with #66 and #89: revisions 81 (imported Skill relations) and 83 (their updates) follow revision 80 (Task Intent Drafts).
-      expect(LATEST_SCHEMA_VERSION).toBe(88);
+      expect(LATEST_SCHEMA_VERSION).toBe(98);
       // Revision 8 accepts nullable selection: two NULL rows coexist, but a second 1 or any other integer is refused.
       expect(database.prepare('SELECT selected FROM model_service_connections ORDER BY connection_id').all()).toEqual([{ selected: 1 }, { selected: null }]);
       expect(() => database.exec("UPDATE model_service_connections SET selected = 1 WHERE provider_id = 'opencode-go'")).toThrow();

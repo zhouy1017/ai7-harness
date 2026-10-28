@@ -4,6 +4,9 @@ import type {
   LearningMaterialsBookProjection,
   LearningMaterialsProjection,
   RendererApi,
+  WordSampleCursorProjection,
+  WordSampleDetailItemProjection,
+  WordTrackedEditSampleDetailProjection,
 } from '../shared/protocol.js';
 import {
   LEARNING_CANCEL,
@@ -27,6 +30,7 @@ import {
   learningDecisionLine,
   learningOriginLine,
   learningPeopleLine,
+  wordLearningStandingLine,
 } from './quality-learning-labels.js';
 import { localInstantLabel } from './plan-preview-labels.js';
 
@@ -44,8 +48,9 @@ export interface MountLearningMaterialsOptions {
   readonly root: HTMLElement;
   /** The one Book to show, when the page was opened for it; `null` lists every Book with material. */
   readonly bookId: string | null;
-  readonly api: Pick<RendererApi, 'inspectLearningMaterials' | 'inspectLearningMaterial' | 'decideLearningMaterial'>;
+  readonly api: Pick<RendererApi, 'inspectLearningMaterials' | 'inspectLearningMaterial' | 'decideLearningMaterial' | 'inspectWordTrackedEditSample'>;
   readonly openSource: (bookId: string, materialKey: string) => Promise<void>;
+  readonly openSourceVersion: (bookId: string, sourceVersionId: string) => Promise<void>;
   readonly setStatus: (message: string, tone?: 'busy' | 'success' | 'error') => void;
   readonly errorMessage: (error: unknown, fallback: string) => string;
   readonly technicalDetails: (key: string, ...rows: HTMLElement[]) => HTMLElement;
@@ -64,6 +69,88 @@ function action(label: string, tone: 'primary' | 'secondary' | 'quiet', name: st
   node.dataset['learningAction'] = name;
   node.addEventListener('click', run);
   return node;
+}
+
+/** A page is replaced, never appended: cursors retain positions, not the full source in the DOM. */
+export function mountWordTrackedEditDetail(options: {
+  root: HTMLElement; api: Pick<RendererApi, 'inspectWordTrackedEditSample'>;
+  bookId: string; sampleId: string; sampleDigest: string;
+  openSourceVersion: (bookId: string, sourceVersionId: string) => Promise<void>;
+}): { load(): Promise<void> } {
+  const section = el('section', 'word-sample-detail');
+  section.dataset['wordSampleDetail'] = options.sampleId;
+  const heading = el('h4', undefined, 'Word 完整修改详情');
+  const status = el('p'); status.setAttribute('role', 'status');
+  const pageHost = el('div'); pageHost.dataset['wordDetailPage'] = '';
+  const navigation = el('div', 'button-row');
+  section.append(heading, status, pageHost, navigation); options.root.append(section);
+  let busy = false;
+  let page: WordTrackedEditSampleDetailProjection | null = null;
+  let after: WordSampleCursorProjection | null = null;
+  const previous: Array<WordSampleCursorProjection | null> = [];
+  const sections = { before: '修改前', after: '修改后', events: '原始修订与批注', imports: '导入与历史学习依据' };
+  const fields = { text: '文字', rawId: '原始编号', rawAuthor: '原始作者', rawDate: '原始日期', rangeName: '移动范围名称' };
+  const itemNode = (item: WordSampleDetailItemProjection): HTMLElement => {
+    const entry = el('article', 'word-detail-item');
+    entry.dataset['wordDetailSection'] = item.section; entry.dataset['wordDetailOrdinal'] = String(item.entryOrdinal);
+    entry.append(el('h5', undefined, `${sections[item.section]} · ${item.entryOrdinal + 1}`));
+    if (item.kind === 'text') {
+      entry.dataset['wordDetailField'] = item.field;
+      entry.dataset['wordDetailStart'] = String(item.startCodeUnit);
+      entry.dataset['wordDetailEnd'] = String(item.endCodeUnit);
+      entry.dataset['wordDetailComplete'] = String(item.complete);
+      entry.append(el('p', 'field-note', `${fields[item.field]} · UTF-16 ${item.startCodeUnit}–${item.endCodeUnit} / ${item.totalCodeUnits}${item.complete ? '' : ' · 后续页继续'}`));
+      const text = el('pre', 'word-detail-text', item.text === null ? '（属性未提供）' : item.text === '' ? '（空字符串）' : item.text);
+      text.style.whiteSpace = 'pre-wrap'; text.style.overflowWrap = 'anywhere'; entry.append(text);
+      if (item.sha256 !== null || item.fragment !== null) {
+        const provenance = el('details'); provenance.append(el('summary', undefined, '原始位置与摘要'),
+          el('pre', 'technical-identity', JSON.stringify({ sha256: item.sha256, fragment: item.fragment }, null, 2)));
+        entry.append(provenance);
+      }
+    } else {
+      const record = item.record;
+      const labels = { fragment: '原始片段位置', event: '修订事件', 'event-link': '修订关联', import: '导入选择与版本', 'import-admission': '导入时的本机学习依据' };
+      entry.dataset['wordDetailRecord'] = record.type;
+      entry.append(el('p', undefined, record.type === 'fragment' && record.fragment.kind === 'paragraph-boundary'
+        ? '段落边界（结构变化，不是空文字）' : labels[record.type]));
+      if (record.type === 'import') entry.append(el('p', undefined, record.mode === 'suggestions'
+        ? '修改前阅读作为稿件基线，原修订保留为建议。' : '经单独确认，修改后阅读作为稿件基线。'));
+      const details = el('details'); details.append(el('summary', undefined, '查看完整原始记录'), el('pre', 'technical-identity', JSON.stringify(record, null, 2)));
+      entry.append(details);
+    }
+    return entry;
+  };
+  const paintNavigation = (): void => {
+    navigation.replaceChildren();
+    const back = action('上一页修改详情', 'secondary', 'word-detail-previous', () => {
+      const cursor = previous.at(-1); if (busy || previous.length === 0 || cursor === undefined) return;
+      void read(cursor, 'previous');
+    });
+    back.disabled = busy || previous.length === 0;
+    const next = action('下一页修改详情', 'secondary', 'word-detail-next', () => {
+      if (!busy && page?.nextCursor !== null && page?.nextCursor !== undefined) void read(page.nextCursor, 'next');
+    }); next.disabled = busy || page?.nextCursor == null;
+    const source = action('查看保留的原始来源版本', 'secondary', 'word-detail-source', () => {
+      if (busy || page === null) return;
+      void options.openSourceVersion(options.bookId, page.sourceVersionId).catch(() => { status.textContent = '无法打开原始来源版本。'; });
+    }); source.disabled = busy || page === null;
+    navigation.append(back, next, source);
+  };
+  const read = async (cursor: WordSampleCursorProjection | null, direction: 'initial' | 'next' | 'previous'): Promise<void> => {
+    if (busy) return;
+    busy = true; status.textContent = '正在读取完整原始片段…'; paintNavigation();
+    try {
+      const next = await options.api.inspectWordTrackedEditSample({ bookId: options.bookId, sampleId: options.sampleId, sampleDigest: options.sampleDigest, after: cursor });
+      if (!section.isConnected) return;
+      if (direction === 'next') previous.push(after);
+      else if (direction === 'previous') previous.pop();
+      after = cursor; page = next;
+      pageHost.replaceChildren(...next.items.map(itemNode));
+      status.textContent = `第 ${previous.length + 1} 页 · ${next.nextCursor === null ? '已到完整详情末尾' : '可继续读取'}。历史保留依据与当前学习排除分别记录。`;
+    } catch { if (section.isConnected) status.textContent = '无法读取完整详情：原始来源、样本或页游标已变化。请重新打开这条记录。'; }
+    finally { busy = false; if (section.isConnected) paintNavigation(); }
+  };
+  return { load: () => read(null, 'initial') };
 }
 
 interface Draft {
@@ -163,7 +250,8 @@ export function mountLearningMaterials(options: MountLearningMaterialsOptions): 
     item.dataset['materialKey'] = material.materialKey;
     item.dataset['learningState'] = material.state;
     const head = el('div', 'learning-material-head');
-    const pill = el('span', `status-pill learning-state learning-state-${material.state}`, LEARNING_STATE_LABELS[material.state]);
+    const pill = el('span', `status-pill learning-state learning-state-${material.state}`, material.kind === 'word-tracked-edit'
+      ? '原始修改对已保留' : LEARNING_STATE_LABELS[material.state]);
     head.append(el('span', 'learning-origin', learningOriginLine(material, localInstantLabel)), pill);
     item.append(head);
     const isOpen = open !== null && open.bookId === book.bookId && open.materialKey === material.materialKey;
@@ -202,9 +290,20 @@ export function mountLearningMaterials(options: MountLearningMaterialsOptions): 
     if (material.sourceTask !== null) fact('来源任务', `${material.sourceTask.label} · ${material.sourceTask.taskIntentId}`, 'task');
     fact(LEARNING_CARD_TERMS.rationale, material.rationale, 'rationale');
     fact(LEARNING_CARD_TERMS.basis, projection?.basis ?? '', 'basis');
-    fact(LEARNING_CARD_TERMS.influence, LEARNING_INFLUENCE, 'influence');
+    fact(LEARNING_CARD_TERMS.influence, material.kind === 'word-tracked-edit'
+      ? '尚未用于编辑记忆、审阅偏好或模型任务。' : LEARNING_INFLUENCE, 'influence');
     fact(LEARNING_CARD_TERMS.decision, learningDecisionLine(material, localInstantLabel), 'decision');
     card.append(heading, facts);
+    if (material.target.kind === 'word-tracked-edit') {
+      const target = material.target;
+      if (material.wordCurrentEligibility !== undefined) card.append(el('p', 'field-note', wordLearningStandingLine(material.wordCurrentEligibility, material.decision !== null)));
+      const detail = el('div');
+      const view = action('查看完整 Word 修改对', 'secondary', 'word-detail', () => {
+        detail.replaceChildren();
+        void mountWordTrackedEditDetail({ root: detail, api, ...target, openSourceVersion: options.openSourceVersion }).load();
+      });
+      card.append(el('p', 'field-note', '原始修改对保留在本机，尚未用于编辑记忆、审阅偏好或模型任务。'), view, detail);
+    }
     if (material.target.kind === 'mark' && material.target.detached) {
       card.append(el('p', 'field-note', '来源修改建议所在的段落已不在稿件中。'));
     } else {
@@ -254,6 +353,7 @@ export function mountLearningMaterials(options: MountLearningMaterialsOptions): 
       return wrapper;
     };
     for (const entry of LEARNING_CHOICES) {
+      if (material.kind === 'word-tracked-edit' && entry.choice !== 'excluded') continue;
       const option = radio(entry.choice, entry.label, false);
       if (entry.choice === 'book') option.append(el('span', 'status-pill learning-recommended', LEARNING_RECOMMENDED));
       choices.append(option);
@@ -371,14 +471,35 @@ export async function mountEditQualitySignals(root: HTMLElement, api: Pick<impor
   const body = document.createElement('p');
   body.setAttribute('role', 'status');
   let generation = 0;
-  const load = async () => {
+  const adoption = document.createElement('div'); adoption.dataset['preferenceAdoption'] = '';
+  const adoptionMore = el('button', 'button secondary', '更多规则采纳率…'); adoptionMore.type = 'button'; adoptionMore.hidden = true;
+  let adoptionAfter: import('../shared/protocol.js').PreferenceAdoptionCursor | null = null;
+  let adoptionRows: import('../shared/protocol.js').PreferenceAdoptionProjection[] = [];
+  const load = async (reset = true) => {
     const current = ++generation;
-    const metric = await api.inspectEditQualitySignals({ bookId: select.value || null });
+    adoptionMore.disabled = true;
+    if (reset) { adoptionAfter = null; adoptionRows = []; adoptionMore.hidden = true; }
+    const metric = await api.inspectEditQualitySignals({ bookId: select.value || null, preferenceAfter: adoptionAfter }).catch((error: unknown) => {
+      if (current === generation) adoptionMore.disabled = false;
+      throw error;
+    });
     if (current !== generation) return;
+    adoptionRows = reset ? [...(metric.preferenceAdoption ?? [])] : [...adoptionRows, ...(metric.preferenceAdoption ?? [])];
+    adoptionAfter = metric.preferenceAdoptionNext ?? null;
+    adoptionMore.hidden = adoptionAfter === null;
+    adoptionMore.disabled = false;
     body.textContent = `建议保留率：${metric.applied === 0 ? '暂无已应用的判定' : `${metric.surviving}/${metric.applied}（${Math.round(metric.surviving / metric.applied * 100)}%）`} · 按类别加权的改写量：${metric.editVolume} 字符单位`;
     body.dataset['lineageDigest'] = metric.lineageDigest;
+    adoption.replaceChildren(el('h4', undefined, '已参考规则的采纳率'));
+    const share = (count: { accepted: number; findings: number; rate: number | null }) => count.rate === null ? '暂无发现' : `${count.accepted}/${count.findings}（${Math.round(count.rate * 100)}%）`;
+    if (!adoptionRows.length) adoption.append(el('p', 'field-note', '尚无可比较的审阅发现。'));
+    for (const row of adoptionRows) {
+      adoption.append(el('p', 'field-note', `${row.bookTitle} · ${row.versionId === null ? '全部规则' : `本社审阅偏好 v${row.ordinal} · ${row.versionId}`}：已参考 ${share(row.referenced)}；未参考 ${share(row.unreferenced)}${row.mostlyRejected ? ' · 参考后的发现多数被拒绝，请复核这条规则。' : ''}`));
+    }
+    adoption.append(el('p', 'field-note', '采纳数包含接受、修改后接受及已应用；分母包含尚未处理的发现。此比较不证明规则导致采纳。'));
   };
+  adoptionMore.addEventListener('click', () => void load(false).catch(() => { adoptionMore.disabled = false; body.textContent = '无法读取更多规则采纳率。'; }));
   select.addEventListener('change', () => void load().catch(() => { body.textContent = '无法读取编辑改动质量信号。'; }));
-  section.append(heading, select, more, body); root.append(section);
+  section.append(heading, select, more, body, adoption, adoptionMore); root.append(section);
   await Promise.all([load(), loadBooks()]);
 }

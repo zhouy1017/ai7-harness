@@ -4,11 +4,13 @@ import type { BackgroundAnalysisEnrollmentProjection } from '../shared/protocol.
  * ②A's 后台分析 words (Issue #95, plan slice S39; ADR 0048; V2-UX-ANALYSIS-017). What an Enrollment binds, what it would do now
  * and why, and what revoking keeps are the service's words; these are the block's own.
  */
-export const BACKGROUND_HEADING = '后台分析';
-export const BACKGROUND_ENROLL_OPEN = '登记后台分析…';
+export const BACKGROUND_HEADING = '后台处理登记';
+/** The kind the block reads and enrolls (Issue #1089): the selected policy's enrollable kinds, others shown disabled with why. */
+export const BACKGROUND_KIND_LABEL = '后台处理种类';
+export const BACKGROUND_ENROLL_OPEN = '登记后台处理…';
 export const BACKGROUND_REVOKE_OPEN = '撤销登记…';
-export const BACKGROUND_DISCLOSURE_HEADING = '登记后台分析';
-export const BACKGROUND_REVOKE_HEADING = '撤销后台分析登记';
+export const BACKGROUND_DISCLOSURE_HEADING = '登记后台处理';
+export const BACKGROUND_REVOKE_HEADING = '撤销后台处理登记';
 export const BACKGROUND_SCOPE_LABEL = '范围';
 export const BACKGROUND_WHAT_LABEL = '分析';
 export const BACKGROUND_WHEN_LABEL = '何时开始';
@@ -21,19 +23,19 @@ export const BACKGROUND_CHOOSE_FIRST = '请先选从哪里开始。';
 export const BACKGROUND_STARTED_HEADING = '按登记开始的分析';
 export const BACKGROUND_HISTORY_SUMMARY = '登记记录';
 export const BACKGROUND_BINDS_SUMMARY = '这份登记定下的内容';
-export const BACKGROUND_LOADING = '正在读取后台分析登记…';
-export const BACKGROUND_UNAVAILABLE = '无法读取这本书的后台分析登记。';
-export const BACKGROUND_ENROLLED_STATUS = '已登记后台分析';
-export const BACKGROUND_REVOKED_STATUS = '已撤销后台分析登记';
+export const BACKGROUND_LOADING = '正在读取后台处理登记…';
+export const BACKGROUND_UNAVAILABLE = '无法读取这本书的后台处理登记。';
+export const BACKGROUND_ENROLLED_STATUS = '已登记后台处理';
+export const BACKGROUND_REVOKED_STATUS = '已撤销后台处理登记';
 /** Issue #864: the scope, the required ceiling, and 暂停 / 续行. */
 export const BACKGROUND_SCOPE_LEGEND = '范围';
 export const BACKGROUND_CEILING_LABEL = '预算上限（tokens，必填）';
 export const BACKGROUND_CEILING_FIRST = '请先填写预算上限（tokens）。';
 export const BACKGROUND_PAUSE = '暂停';
 export const BACKGROUND_RESUME = '续行';
-export const BACKGROUND_PAUSED_STATUS = '已暂停后台分析登记';
-export const BACKGROUND_RESUMED_STATUS = '后台分析登记已续行';
-export const BACKGROUND_REPORT_HEADING = '后台分析登记';
+export const BACKGROUND_PAUSED_STATUS = '已暂停后台处理登记';
+export const BACKGROUND_RESUMED_STATUS = '后台处理登记已续行';
+export const BACKGROUND_REPORT_HEADING = '后台处理登记';
 
 /** The ceiling split equally among a scope's Books in order, the remainder to the first — the service's rule, said before 登记. */
 export function backgroundCeilingShares(ceiling: number, books: number): number[] {
@@ -85,7 +87,7 @@ export function backgroundNextLine(next: BackgroundAnalysisEnrollmentProjection[
   return `${next.kind === 'start' ? '马上' : '现在'}：${next.reason}`;
 }
 
-/** `后台分析登记 · 第 1 版 · 只分析登记之后的改动 · 登记于 …`. */
+/** `后台处理登记 · 第 1 版 · 只分析登记之后的改动 · 登记于 …`. */
 export function backgroundEnrollmentLine(
   enrollment: NonNullable<BackgroundAnalysisEnrollmentProjection['enrollment']>,
   instant: (value: string) => string,
@@ -121,7 +123,7 @@ export function backgroundNotStartedLine(note: NonNullable<BackgroundAnalysisEnr
 }
 
 /** ②A's card beside a plan the Enrollment prepared and did not start (#713 review, P2-2). */
-export const BACKGROUND_PREPARED_PLAN_NOTE = '这份计划是后台分析登记准备的，没有开始，也不是你准备的；可以看过后自己开始，或另外准备一份。';
+export const BACKGROUND_PREPARED_PLAN_NOTE = '这份计划是后台处理登记准备的，没有开始，也不是你准备的；可以看过后自己开始，或另外准备一份。';
 
 /** `还有 N 项更早的` beneath the ten newest Runs. */
 export function backgroundStartedMoreLine(hidden: number): string {

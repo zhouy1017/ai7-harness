@@ -1,3 +1,6 @@
+import { CURATION_SCHEMA_SQL, FACTUAL_TASK_INTENTS_SQL } from '../../src/service/task-authorization.js';
+import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { unzipSync } from 'fflate';
@@ -46,6 +49,12 @@ import { KIND_COUPLED_ANALYSIS_RELATIONS, downgradeKindCoupledRelations } from '
 import { AUTHORED_SECTIONS, READERS_REPORT_FIXTURE_IDENTITY, finalizeAsJ11, runInitialEvaluationToEnd } from '../support/readers-report.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection, requireExactSample1 } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 
 // Service-integration suite (L2) for 审稿意见 (Issue #429, plan slice S81c; V2-UX-EVAL-013): the reader's report kind over the real
@@ -103,7 +112,7 @@ async function openStore(): Promise<EditorialStore> {
 async function withBook(body: (book: Book) => Promise<void>): Promise<void> {
   await requireExactSample1(roots.codeRoot);
   const store = await openStore();
-  const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+  const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
   try {
     const imported = await importSample1Book(store, roots.codeRoot, '审稿意见之书');
     await pinEditorialWorkspaceProfileRevision2(store, imported.bookId);
@@ -141,6 +150,7 @@ const REVISIONS_BEFORE_62 = [INITIAL_EVALUATION_SCHEMA_VERSION, DIALOGUE_SCHEMA_
  * the version stamped. Each relation is dropped before the one it refers to.
  */
 function plantRevisionBefore62(plant: DatabaseSync, version: (typeof REVISIONS_BEFORE_62)[number]): void {
+  constructPre94PolicyEncoding(plant);
   const later = [
     ...Object.keys(WRITING_TASK_SCHEMA_SQL).reverse(),
     ...Object.keys(EVALUATION_REWRITE_SCHEMA_SQL).reverse(),
@@ -792,7 +802,7 @@ describe('审稿意见 over the real store on exact sample1', () => {
       expect((after.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
       expect(rows(after)).toBe(before!);
       for (const table of KIND_COUPLED_ANALYSIS_RELATIONS) {
-        expect((after.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) as { sql: string }).sql).toBe(ANALYSIS_LEDGER_SCHEMA_SQL[table]);
+        expect((after.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) as { sql: string }).sql).toBe(table === 'analysis_task_intents' ? FACTUAL_TASK_INTENTS_SQL : CURATION_SCHEMA_SQL[table] ?? ANALYSIS_LEDGER_SCHEMA_SQL[table]);
       }
       expect(Object.keys(READERS_REPORT_TRIGGER_SQL).every((name) => after.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'trigger' AND name = ?").get(name) !== undefined)).toBe(true);
     } finally {

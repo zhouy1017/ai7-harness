@@ -63,6 +63,16 @@ export const SCHEMA_REVISION_CLASSES: ReadonlyArray<ClassifiedSchemaRevision> = 
   { revision: 86, class: 'additive' },
   { revision: 87, class: 'additive' },
   { revision: 88, class: 'additive' },
+  { revision: 89, class: 'additive' },
+  { revision: 90, class: 'additive' },
+  { revision: 91, class: 'additive' },
+  { revision: 92, class: 'additive' },
+  { revision: 93, class: 'additive' },
+  { revision: 94, class: 'additive' },
+  { revision: 95, class: 'additive' }, // #1164: append-only House word-list relation.
+  { revision: 96, class: 'additive' }, // #1165: typed curation Task and enabled-learning origin CHECKs.
+  { revision: 97, class: 'additive' }, // #1168: factual claim membership, reservations and recheck task modes.
+  { revision: 98, class: 'additive' }, // #1170: editable version lineage, stops, choices and portable Plan snapshots.
 ];
 
 /**

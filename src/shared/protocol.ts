@@ -1,4 +1,5 @@
 import type { GlobalAgentOperations, GlobalAgentRendererApi } from './protocol/global-agent.js';
+import type { HouseWordListOperations, HouseWordListApi } from './protocol/house-word-list.js';
 export * from './protocol/global-agent.js';
 export type { ReviewContractIdentity, ReviewExcludedFindingProjection, ReviewContractRejectionReason } from './protocol/review.js';
 import type { ReviewExcludedFindingProjection, ReviewContractRejectionReason } from './protocol/review.js';
@@ -119,6 +120,7 @@ import type {
   DeactivateEditorialMemoryInput,
   EditorialLearningProjection,
   InspectEditorialLearningInput,
+  LearningReasonAskInput, LearningReasonAskProjection, PreferenceAdoptionProjection, PreferenceAdoptionCursor, ReferencedRuleVersion,
 } from './protocol/learning.js';
 import type { AnalysisFeedbackDimension, AnalysisFeedbackJudgment } from './analysis-feedback.js';
 import type { ConflictUnit, ConflictUnitResolution } from './conflict-units.js';
@@ -127,7 +129,7 @@ import type { PublicSampleBookSourceDigest } from './public-samplebooks.js';
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 165 as const;
+export const SERVICE_PROTOCOL_VERSION = 178 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 export interface BookFindingProjection {
@@ -163,7 +165,7 @@ export interface ParagraphAnalysisProjection {
 /** Disposable local search results: UTF-16 offsets in the exact pinned source, previews are never quotations. */
 export interface LocalRetrievalCandidateProjection {
   readonly candidateId: string;
-  readonly sourceKind: 'manuscript' | 'material' | 'retained-source';
+  readonly sourceKind: 'manuscript' | 'material' | 'retained-source' | 'memory';
   readonly sourceId: string;
   readonly revisionOrIndexDigest: string;
   readonly anchor: { readonly blockId?: string; readonly segmentOrdinal?: number; readonly start: number; readonly end: number };
@@ -282,6 +284,8 @@ export const IPC_CHANNELS = {
   authorizeBaselineAnalysis: 'ai7:j04:authorize-baseline-analysis',
   startBaselineAnalysisWhenOnline: 'ai7:j04:start-baseline-analysis-when-online',
   cancelWaitingBaselineAnalysis: 'ai7:j04:cancel-waiting-baseline-analysis',
+  // 空闲时处理 for every kind that dispatches (Issue #1089, F-17a; ADR 0095 §3), keyed by kind.
+  startTaskWhenIdle: 'ai7:j09:start-task-when-idle',
   // 联网后开始任务 and its 取消 for every other kind that has a plan (Issue #760, S74c): one pair, keyed by kind.
   startTaskWhenOnline: 'ai7:j04:start-task-when-online',
   cancelWaitingTask: 'ai7:j04:cancel-waiting-task',
@@ -311,6 +315,7 @@ export const IPC_CHANNELS = {
   decideImportedExemplar: 'ai7:kb:decide-imported-exemplar',
   inspectExemplars: 'ai7:j07:inspect-exemplars',
   admitReadersReportExemplar: 'ai7:j07:admit-readers-report-exemplar',
+  procedureLibrary: 'ai7:procedures:library',
   inspectKnowledgeProcedures: 'ai7:j15:inspect-knowledge-procedures',
   inspectCapturedProcedures: 'ai7:j15:inspect-captured-procedures',
   importSkillPackage: 'ai7:kb:import-skill-package',
@@ -382,6 +387,8 @@ export const IPC_CHANNELS = {
   queryMaterialVectors: 'ai7:j15:query-material-vectors',
   requestMaterialTranslation: 'ai7:j15:request-material-translation',
   searchReferableMaterials: 'ai7:search-referable-materials',
+  inspectHouseWordList: 'ai7:inspect-house-word-list',
+  saveHouseWordList: 'ai7:save-house-word-list',
   inspectReviewWorkspace: 'ai7:j04:inspect-review-workspace',
   prepareReviewRun: 'ai7:j04:prepare-review-run',
   authorizeReviewRun: 'ai7:j04:authorize-review-run',
@@ -414,8 +421,11 @@ export const IPC_CHANNELS = {
   recordProposalDecisionReason: 'ai7:j05:record-proposal-decision-reason',
   recordProposalDecisionFeedback: 'ai7:j11:record-proposal-decision-feedback',
   inspectEditorialLearning: 'ai7:learning:inspect-editorial-learning',
+  inspectWordTrackedEditSample: 'ai7:j11:inspect-word-tracked-edit-sample',
+  recordLearningReasonAsk: 'ai7:learning:record-reason-ask',
   changeEditorialLearning: 'ai7:learning:change-editorial-learning',
   createEditorialMemory: 'ai7:learning:create-editorial-memory',
+  acceptEditorialMemory: 'ai7:learning:accept-editorial-memory',
   deactivateEditorialMemory: 'ai7:learning:deactivate-editorial-memory',
   inspectHouseReviewPreference: 'ai7:j11:inspect-house-review-preference',
   rebuildHouseReviewPreference: 'ai7:j11:rebuild-house-review-preference',
@@ -527,6 +537,7 @@ export const IPC_CHANNELS = {
   inspectGlobalAgent: 'ai7:global-agent:inspect',
   recordLearningSupervision: 'ai7:global-agent:supervise',
   askGlobalAgent: 'ai7:global-agent:ask',
+  prepareGlobalAgentTurn: 'ai7:global-agent:prepare',
   inspectGlobalAttention: 'ai7:j09:inspect-global-attention',
   inspectBookTasks: 'ai7:j16:inspect-book-tasks',
   askAboutSelection: 'ai7:j16:ask-about-selection',
@@ -1202,6 +1213,74 @@ export interface ImportIdentityFindingProjection {
   };
 }
 
+/** An explicit choice for supported native tracked Word intake; accepted mode requires its own confirmation. */
+export interface WordTrackedChangesChoice {
+  mode: 'suggestions' | 'accepted-baseline';
+  learnFromEdits: boolean;
+  acceptedBaselineConfirmed: boolean;
+}
+
+export type WordSampleDetailSection = 'before' | 'after' | 'events' | 'imports';
+export type WordSampleDetailField = 'text' | 'rawId' | 'rawAuthor' | 'rawDate' | 'rangeName' | 'record';
+export interface WordSampleCursorProjection {
+  schema: 'ai7.word-sample-cursor/1'; sampleDigest: string; detailDigest: string; section: WordSampleDetailSection;
+  entryOrdinal: number; field: WordSampleDetailField; codeUnitOffset: number;
+}
+export interface InspectWordTrackedEditSampleInput {
+  bookId: string; sampleId: string; sampleDigest: string; after: WordSampleCursorProjection | null;
+}
+export type WordSourceFragmentProjection =
+  | { kind: 'text'; part: string; paragraphIndex: number; atomOrdinal: number; fromCodeUnit: number; toCodeUnit: number; codeUnits: number; sha256: string }
+  | { kind: 'paragraph-boundary'; part: string; paragraphIndex: number; atomOrdinal: number; sha256: string };
+/** A transport projection of the existing policy basis, whose value remains owned by local learning. */
+export interface WordLocalLearningBasisProjection {
+  policy: 'ai7.learning-eligibility-policy'; mode: 'opt-out-local'; version: 2; authority: 'ADR 0094 §3'; rules: readonly [2, 5]; text: string;
+}
+export type WordControlReferenceProjection = { kind: 'entry'; entryId: string; sha256: string } |
+  { kind: 'default'; basis: WordLocalLearningBasisProjection };
+export interface WordLocalImportAdmissionProjection {
+  schema: 'ai7.word-local-import-admission/1'; sampleId: string; sampleDigest: string; importChoiceDigest: string;
+  basis: WordLocalLearningBasisProjection; reviewedLearnFromEdits: true;
+  global: { enabled: true; reference: WordControlReferenceProjection };
+  book: { excluded: false; reference: WordControlReferenceProjection };
+  standing: { choice: 'book' | 'house'; decisionId: string | null; decisionDigest: string | null; basisVersion: number };
+}
+export type WordSampleDetailRecordProjection =
+  | { type: 'fragment'; fragment: WordSourceFragmentProjection }
+  | { type: 'event'; eventId: string;
+      kind: 'ins' | 'del' | 'moveFrom' | 'moveTo' | 'moveFromRangeStart' | 'moveFromRangeEnd' | 'moveToRangeStart' | 'moveToRangeEnd' |
+        'commentRangeStart' | 'commentRangeEnd' | 'commentReference';
+      context: 'run' | 'paragraph-boundary' | 'range' | 'comment'; part: string; elementOrdinal: number;
+      location: { part: string; paragraphIndex: number; atomOrdinal: number; codeUnitOffset: number };
+      disposition: 'visible-transition' | 'no-visible-transition' | 'range' | 'comment'; parentCount: number; rangeLinkCount: number }
+  | { type: 'event-link'; eventId: string; relation: 'parent' | 'range'; linkedEventId: string; ordinal: number }
+  | { type: 'import'; commitId: string; mode: WordTrackedChangesChoice['mode']; sourceVersionId: string; sourceDigest: string;
+      parentSourcePinDigest: string; importReviewId: string; fidelityReviewId: string; revisionId: string; choiceDigest: string; admissionDigest: string;
+      workingObjectDigest: string | null; compilerIdentity: string; extractorIdentity: 'ai7-word-tracked-extractor/1'; graphDigest: string;
+      readings: Record<'rejected' | 'accepted', { digest: string; blockCount: number; usable: boolean }>;
+      mappingDigest: string; templateManifestDigest: string; learnFromEdits: boolean; acceptedBaselineConfirmed: boolean }
+  | { type: 'import-admission'; commitId: string; basis: WordLocalImportAdmissionProjection };
+export type WordSampleDetailItemProjection = {
+  section: WordSampleDetailSection; entryOrdinal: number; sourceOrdinal: number; childOrdinal: number | null;
+} & (
+  | { kind: 'text'; field: Exclude<WordSampleDetailField, 'record'>; text: string | null; sha256: string | null; fragment: WordSourceFragmentProjection | null;
+      startCodeUnit: number; endCodeUnit: number; totalCodeUnits: number; complete: boolean }
+  | { kind: 'record'; field: 'record'; record: WordSampleDetailRecordProjection; complete: true }
+);
+export interface WordTrackedEditSampleDetailProjection {
+  bookId: string; sampleId: string; sampleDigest: string; detailDigest: string; sourceVersionId: string; sourceDigest: string;
+  operationKind: 'insert' | 'delete' | 'replace' | 'move' | 'paragraph-boundary'; sectionCounts: Record<WordSampleDetailSection, number>;
+  items: WordSampleDetailItemProjection[]; nextCursor: WordSampleCursorProjection | null;
+}
+
+export type WordIntakeRefusalCode = 'table-revision' | 'custom-xml-or-math-revision' | 'story-or-text-box-revision' |
+  'incompatible-paragraph-join' | 'invalid-move-graph' | 'unrepresentable-comment' | 'unusable-reading' | 'resource-limit';
+export type WordTrackedChangesIntakeProjection =
+  | { compatibility: 'ready'; previewReading: 'rejected' | 'accepted';
+      readings: Record<'rejected' | 'accepted', { usable: boolean; blockCount: number }>;
+      savedChoice: WordTrackedChangesChoice | null }
+  | { compatibility: 'unsupported'; reasonCodes: ReadonlyArray<WordIntakeRefusalCode>; locationCount: number };
+
 export interface StagedImportProjection {
   draftId: string;
   draftVersion: number;
@@ -1246,6 +1325,7 @@ export interface StagedImportProjection {
   nextBookCursor: BookSummaryCursor | null;
   fidelity: ReadonlyArray<FidelityCategoryProjection>;
   detectedBlockCount: number;
+  wordTrackedChanges?: WordTrackedChangesIntakeProjection;
 }
 
 export interface ReviewBeforeImportProjection {
@@ -1279,6 +1359,8 @@ export interface ReviewBeforeImportProjection {
    * `retain` (保留为文本框, the default) or `merge` (并入正文); null when the file has none it can choose for.
    */
   textBoxDisposition: TextBoxDisposition | null;
+  trackedChanges?: WordTrackedChangesChoice;
+  wordLearning?: { globalEnabled: boolean; bookExcluded: boolean; sourceTemplateCount: number; eligibleSampleCount: number };
   recordsToCreate: ReadonlyArray<string>;
   nonEffects: ReadonlyArray<string>;
   workflowProfile: {
@@ -2402,12 +2484,124 @@ export type TrustedOperationalScope = 'development-ci' | 'developer-live' | 'ord
  */
 export type DeveloperLiveProviderProcessingVersion = 'v5' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v14' | 'v16' | 'v18' | 'v20' | 'v22' | 'v24';
 /** The ordinary-production version the active set selects: local production over the editor's own configured provider. */
-export type OrdinaryProductionProviderProcessingVersion = 'v13' | 'v15' | 'v17' | 'v19' | 'v21' | 'v23' | 'v25' | 'v26';
+export type OrdinaryProductionProviderProcessingVersion = 'v13' | 'v15' | 'v17' | 'v19' | 'v21' | 'v23' | 'v25' | 'v26' | 'v27' | 'v30' | 'v31';
 /** Historical v5, v7, v8, v9, v10, v11 and v12, the superseded web reservation v6, historical v13, v14 and v15, and selected v16. */
-export type ActivePolicySetVersion = 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v13' | 'v14' | 'v15' | 'v16' | 'v17' | 'v18';
-export type ProviderProcessingVersion = 'v1' | DeveloperLiveProviderProcessingVersion | OrdinaryProductionProviderProcessingVersion;
+export type ActivePolicySetVersion = 'v5' | 'v6' | 'v7' | 'v8' | 'v9' | 'v10' | 'v11' | 'v12' | 'v13' | 'v14' | 'v15' | 'v16' | 'v17' | 'v18' | 'v19' | 'v21' | 'v22';
+export type ProviderProcessingVersion = 'v1' | 'v29' | DeveloperLiveProviderProcessingVersion | OrdinaryProductionProviderProcessingVersion;
+
+/** Accepted identities shared by readers and gates; these constants do not select a policy or authorize a send. */
+export const ORIGINAL_FIELDS_ACTIVE_SET_SHA256 = '4b845e924df777f440b07d53ba6e31447e0fe0b004e86efa89bf76554fb05392';
+export const CURRENT_ACTIVE_SET_SHA256 = '68125ebd3e1266f02fc1cf02c0a548fa652c4cad3ee052bbfaebc68922758ebb';
+export const CURRENT_PRODUCTION_POLICY_SHA256 = '1cf19c82e46adf7a731e4f0c625cc1dd1f8e07e5b744eb06a872cbaa01849bd5';
+export const DEVELOPMENT_CI_POLICY_SHA256 = 'd9dfe8c13a58649d8d9f607364030468ae71832b94c9436291d29000795d725a';
+export const ORIGINAL_FIELDS_POLICY_SHA256 = 'f12df1d43cfc9f52b999c2cc8a6e9bac419177d42210d3bbe8c5008ba8d6a59e';
+export const LOCAL_FIXTURE_POLICY_SHA256 = 'c9545a5f461a7791115c1f4664bbd731757775951f814d39c28b12c85af88c9d';
+export const LOCAL_FIXTURE_MANIFEST_SHA256 = '2572c1b5aa05d6ccc9a60a2a8a03ba2cefc10d5f48c1a85377d53797360bc0d2';
+
+/** Retained known interpretations, never an arbitrary-v-number reader or a selection mechanism. */
+export function isSupportedProviderProcessingVersion(scope: unknown, version: unknown): boolean {
+  if (scope === 'development-ci') return version === 'v1' || version === 'v29';
+  if (scope === 'developer-live') return ['v5', 'v8', 'v9', 'v10', 'v11', 'v12', 'v14', 'v16', 'v18', 'v20', 'v22', 'v24'].some((entry) => entry === version);
+  if (scope === 'ordinary-production') return ['v13', 'v15', 'v17', 'v19', 'v21', 'v23', 'v25', 'v26', 'v27', 'v30', 'v31'].some((entry) => entry === version);
+  return false;
+}
+
+/** Identity of the actual verified selected documents; this metadata grants no execution authority. */
+export interface SelectedPolicyIdentity {
+  readonly providerProcessingVersion: 'v1' | 'v24' | 'v29' | 'v30' | 'v31';
+  readonly providerProcessingSha256: string;
+  readonly activePolicySetVersion: 'v21' | 'v22';
+  readonly activePolicySetSha256: string;
+}
+export type LocalFixtureRegisteredProfile = 'baseline' | 'conflict' | 'custom' | 'dialogue' | 'evaluation' | 'factual' |
+  'polish' | 'readers' | 'review' | 'rewrite' | 'series' | 'workspace' | 'writing';
+export type LocalFixtureRuleId = 'development-ci-fixture-review' | 'development-ci-fixture-global-agent-dialogue' |
+  'development-ci-fixture-learning-curation' | 'development-ci-fixture-editorial-polish' |
+  'development-ci-fixture-factual-claim-stages' | 'development-ci-fixture-factual-recheck';
+interface LocalFixtureProfileIdentity {
+  readonly schema: 'ai7.local-fixture-profile/1';
+  readonly policyVersion: 'v29';
+  readonly policySha256: string;
+  readonly activePolicySetVersion: 'v21';
+  readonly activePolicySetSha256: string;
+}
+export type LocalFixtureProfile = LocalFixtureProfileIdentity & (
+  | { readonly kind: 'legacy'; readonly profileId: 'development-ci-legacy-local-fixture-809c96f2';
+      readonly manifestSha256: string; readonly registeredProfile: LocalFixtureRegisteredProfile }
+  | { readonly kind: 'rule'; readonly ruleId: LocalFixtureRuleId }
+);
+function isPolicyIdentityRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+function hasPolicyIdentityKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  return Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
+}
+
+const SELECTED_PROVIDER_DIGESTS = {
+  v1: DEVELOPMENT_CI_POLICY_SHA256,
+  v24: '1522e203f3ead6a259f93494e25c34526a024f93a757b1c7d22568e219f4a6b6',
+  v29: LOCAL_FIXTURE_POLICY_SHA256,
+  v30: ORIGINAL_FIELDS_POLICY_SHA256,
+  v31: CURRENT_PRODUCTION_POLICY_SHA256,
+} as const;
+const LOCAL_FIXTURE_REGISTERED_PROFILES: readonly LocalFixtureRegisteredProfile[] = [
+  'baseline', 'conflict', 'custom', 'dialogue', 'evaluation', 'factual', 'polish', 'readers', 'review', 'rewrite', 'series', 'workspace', 'writing',
+];
+export const LOCAL_FIXTURE_RULE_IDS: readonly LocalFixtureRuleId[] = [
+  'development-ci-fixture-review', 'development-ci-fixture-global-agent-dialogue', 'development-ci-fixture-learning-curation',
+  'development-ci-fixture-editorial-polish', 'development-ci-fixture-factual-claim-stages', 'development-ci-fixture-factual-recheck',
+];
+
+/** A closed persisted interpretation, without substituting today's selection for an absent historical field. */
+export function selectedPolicyIdentityOf(value: unknown): SelectedPolicyIdentity | null {
+  if (!isPolicyIdentityRecord(value) || !hasPolicyIdentityKeys(value, ['providerProcessingVersion', 'providerProcessingSha256', 'activePolicySetVersion', 'activePolicySetSha256'])) return null;
+  const version = value['providerProcessingVersion'];
+  const set = value['activePolicySetVersion'];
+  const setSha256 = set === 'v21' ? ORIGINAL_FIELDS_ACTIVE_SET_SHA256 : set === 'v22' ? CURRENT_ACTIVE_SET_SHA256 : null;
+  if ((version !== 'v1' && version !== 'v24' && version !== 'v29' && version !== 'v30' && version !== 'v31') ||
+      value['providerProcessingSha256'] !== SELECTED_PROVIDER_DIGESTS[version] || setSha256 === null || value['activePolicySetSha256'] !== setSha256 ||
+      !((set === 'v21' && version !== 'v1' && version !== 'v31') || (set === 'v22' && version !== 'v29' && version !== 'v30'))) return null;
+  return { providerProcessingVersion: version, providerProcessingSha256: SELECTED_PROVIDER_DIGESTS[version],
+    activePolicySetVersion: set as 'v21' | 'v22', activePolicySetSha256: setSha256 };
+}
+
+/** Shape and document equality only; the actual fixture/caller/message conjunction is checked by the fixture owner. */
+export function localFixtureProfileOf(value: unknown, selected: SelectedPolicyIdentity): LocalFixtureProfile | null {
+  if (!isPolicyIdentityRecord(value) || selected.providerProcessingVersion !== 'v29' || selected.activePolicySetVersion !== 'v21' || selectedPolicyIdentityOf(selected) === null ||
+      value['schema'] !== 'ai7.local-fixture-profile/1' || value['policyVersion'] !== 'v29' ||
+      value['policySha256'] !== selected.providerProcessingSha256 || value['activePolicySetVersion'] !== selected.activePolicySetVersion ||
+      value['activePolicySetSha256'] !== selected.activePolicySetSha256) return null;
+  const common = { schema: 'ai7.local-fixture-profile/1', policyVersion: 'v29', policySha256: selected.providerProcessingSha256,
+    activePolicySetVersion: selected.activePolicySetVersion, activePolicySetSha256: selected.activePolicySetSha256 } as const;
+  const keys = ['schema', 'policyVersion', 'policySha256', 'activePolicySetVersion', 'activePolicySetSha256', 'kind'];
+  if (value['kind'] === 'legacy' && hasPolicyIdentityKeys(value, [...keys, 'profileId', 'manifestSha256', 'registeredProfile']) &&
+      value['profileId'] === 'development-ci-legacy-local-fixture-809c96f2' && value['manifestSha256'] === LOCAL_FIXTURE_MANIFEST_SHA256) {
+    const registeredProfile = LOCAL_FIXTURE_REGISTERED_PROFILES.find((profile) => profile === value['registeredProfile']);
+    return registeredProfile === undefined ? null : { ...common, kind: 'legacy', profileId: 'development-ci-legacy-local-fixture-809c96f2',
+      manifestSha256: LOCAL_FIXTURE_MANIFEST_SHA256, registeredProfile };
+  }
+  if (value['kind'] === 'rule' && hasPolicyIdentityKeys(value, [...keys, 'ruleId'])) {
+    const ruleId = LOCAL_FIXTURE_RULE_IDS.find((id) => id === value['ruleId']);
+    return ruleId === undefined ? null : { ...common, kind: 'rule', ruleId };
+  }
+  return null;
+}
+
 /** Exact Run Budget Ceiling state: `unset` under development-ci, an explicit total-token ceiling under developer-live. */
 export type RunBudgetCeilingState = 'unset' | { kind: 'tokens'; maxTotalTokens: number };
+
+/** ADR 0095 / #1160: a technical leaf inside the parent attempt, never another Task or Run. */
+export interface ParentAttemptSubagentDeclaration {
+  readonly profileId: 'ai7-stock-typos-leaf/1';
+  readonly provider: 'spawn';
+  readonly transport: 'same-process';
+  readonly lifetime: 'one-shot';
+  readonly stage: 'units';
+  readonly maxDepth: 1;
+  readonly maxActiveChildren: 1;
+  readonly unitWidth: 1;
+  readonly awaitDisposal: true;
+}
 /**
  * The Run Budget Ceiling a developer-live launch binds: an explicit form ceiling as a total, or the
  * Provider Processing v18 default (unchanged since v9) of 30,000 tokens per frozen Coverage Manifest unit (ADR 0070),
@@ -2427,14 +2621,44 @@ export type RemoteProviderId = ConfiguredRouteId;
 export type CredentialSlotId = ConfiguredCredentialSlot;
 /** The Provider Processing pin a Provider Resolution Plan carries for its trusted scope. */
 export type ProviderProcessingPin =
-  | { operationalScope: 'development-ci'; version: 'v1'; decision: 'deny'; authorizedLiveTransmissionCount: 0 }
+  | { operationalScope: 'development-ci'; version: 'v1' | 'v29'; decision: 'deny'; authorizedLiveTransmissionCount: 0 }
   | { operationalScope: 'developer-live'; version: DeveloperLiveProviderProcessingVersion; decision: 'eligible-only'; authorizedLiveTransmissionCount: 'bounded-by-run' }
   | { operationalScope: 'ordinary-production'; version: OrdinaryProductionProviderProcessingVersion; decision: 'eligible-only'; authorizedLiveTransmissionCount: 'bounded-by-run' };
 /** The policy pin a Result Set Revision records; `liveTransmissions` is the policy's bound, never a usage count. */
 export type ResultSetPolicyPin =
-  | { operationalScope: 'development-ci'; providerProcessingVersion: 'v1'; activePolicySetVersion: ActivePolicySetVersion; liveTransmissions: 0 }
+  | { operationalScope: 'development-ci'; providerProcessingVersion: 'v1' | 'v29'; activePolicySetVersion: ActivePolicySetVersion; liveTransmissions: 0 }
   | { operationalScope: 'developer-live'; providerProcessingVersion: DeveloperLiveProviderProcessingVersion; activePolicySetVersion: ActivePolicySetVersion; liveTransmissions: 'bounded-by-run' }
   | { operationalScope: 'ordinary-production'; providerProcessingVersion: OrdinaryProductionProviderProcessingVersion; activePolicySetVersion: ActivePolicySetVersion; liveTransmissions: 'bounded-by-run' };
+
+/**
+ * Every (scope, Provider Processing, active set) a launch actually pinned: each runtime-selected set's own scope pins, 41
+ * historical tuples plus the three set-v21 tuples this selection introduces. Set v3 predates carrier v2; developer-live v4
+ * (set v4, before #440) is outside today's version type yet authentic. On the accepted lineage sets v6 and v20 and
+ * developer-live v8 were never selected, and ordinary production was not launchable before set v10.
+ */
+const RECORDED_POLICY_PINS: Readonly<Record<TrustedOperationalScope, ReadonlyArray<readonly [string, string]>>> = {
+  'development-ci': [...['v3', 'v4', 'v5', 'v7', 'v8', 'v9', 'v10', 'v11', 'v12', 'v13', 'v14', 'v15', 'v16', 'v17', 'v18', 'v19']
+    .map((set) => ['v1', set] as const), ['v29', 'v21'], ['v1', 'v22']],
+  'developer-live': [['v4', 'v4'], ['v5', 'v5'], ['v9', 'v7'], ['v10', 'v8'], ['v11', 'v9'], ['v12', 'v10'], ['v14', 'v11'], ['v16', 'v12'],
+    ['v18', 'v13'], ['v20', 'v14'], ['v22', 'v15'], ...['v16', 'v17', 'v18', 'v19', 'v21', 'v22'].map((set) => ['v24', set] as const)],
+  'ordinary-production': [['v13', 'v10'], ['v15', 'v11'], ['v17', 'v12'], ['v19', 'v13'], ['v21', 'v14'], ['v23', 'v15'], ['v23', 'v16'],
+    ['v25', 'v17'], ['v26', 'v18'], ['v27', 'v19'], ['v30', 'v21'], ['v31', 'v22']],
+};
+
+/** A Provider Processing version some launch of this scope actually pinned (a frozen Plan names no set). */
+export function isRecordedProviderProcessingVersion(scope: unknown, version: unknown): boolean {
+  return (scope === 'development-ci' || scope === 'developer-live' || scope === 'ordinary-production') &&
+    RECORDED_POLICY_PINS[scope].some(([recorded]) => recorded === version);
+}
+
+/** A recorded pin, read exactly against the tuples above, never as a cross-product of versions and sets. */
+export function isResultSetPolicyPin(value: unknown): value is ResultSetPolicyPin {
+  if (!isPolicyIdentityRecord(value) || !hasPolicyIdentityKeys(value, ['operationalScope', 'providerProcessingVersion', 'activePolicySetVersion', 'liveTransmissions'])) return false;
+  const scope = value.operationalScope;
+  return (scope === 'development-ci' || scope === 'developer-live' || scope === 'ordinary-production') &&
+    RECORDED_POLICY_PINS[scope].some(([version, set]) => version === value.providerProcessingVersion && set === value.activePolicySetVersion) &&
+    value.liveTransmissions === (scope === 'development-ci' ? 0 : 'bounded-by-run');
+}
 
 /** The three launch-form arguments the built entry accepts beside `--data-root`; carried by argv only, never by an environment variable or setting. */
 export const TRUSTED_SCOPE_ARGUMENT = '--trusted-operational-scope';
@@ -2608,6 +2832,9 @@ export function parseTrustedLaunchForm(raw: RawTrustedLaunchForm): TrustedLaunch
  * research.
  */
 export type OutboundDataCategoryId =
+  | 'editorial-learning-example'
+  | 'editor-task-instruction'
+  | 'house-review-guideline-clause'
   | 'public-or-synthetic'
   | 'editor-selected-manuscript-excerpt'
   | 'editor-authored-evaluation-text'
@@ -2630,7 +2857,111 @@ export type OutboundDataCategoryId =
  * admits, the Model Role it binds, that role's exact route, endpoint, model and credential slot, and the outbound data categories
  * it permits. Eligibility only — a rule authorizes no Run, dispatch or Apply on its own.
  */
+export interface AdmittedFactualVerificationStage {
+  readonly contractId: 'ai7.factual-claim-verification/1';
+  readonly stageId: 'web-verification';
+  readonly maximumInitialSessionsPerEligibleClaim: number;
+  readonly maximumModelRequestsPerSession: number;
+  readonly maximumPlatformToolRoundsPerSession: number;
+  readonly maximumSearchSubmissionsPerClaim: number;
+  readonly maximumMetadataUtf8Bytes: number;
+  readonly tools: readonly string[];
+  readonly automaticTransportRetryAllowed: false;
+  readonly contractRetryAllowed: false;
+  readonly counterResetOnResumeAllowed: false;
+}
+
+export interface AdmittedFactualClaimStages {
+  readonly taskKind: 'factual-review';
+  readonly taskMode: 'whole-manuscript';
+  readonly evidenceAssuranceLevels: readonly EvidenceAssuranceLevel[];
+  readonly procedureId: string;
+  readonly procedureVersion: number;
+  readonly claimArtifactSchema: 'ai7.factual-claim-ledger/1';
+  readonly claimExtraction: {
+    readonly contractId: 'ai7.factual-claim-extraction/1';
+    readonly stageId: 'claim-extraction';
+    readonly maximumInitialSessionsPerCoverageUnit: number;
+    readonly maximumModelRequestsPerSession: number;
+    readonly maximumAssertionsPerCoverageUnit: number;
+    readonly tools: readonly string[];
+    readonly automaticTransportRetryAllowed: false;
+    readonly contractRetryAllowed: false;
+  };
+  readonly claimVerification: AdmittedFactualVerificationStage;
+}
+
+export interface AdmittedFactualRecheck {
+  readonly maximumClaims: number;
+  readonly maximumAutomaticRunsPerOnceKey: number;
+  readonly requestedLevels: readonly EvidenceAssuranceLevel[];
+  readonly onlyContractId: 'ai7.factual-claim-verification/1';
+  readonly onlyStageId: 'web-verification';
+  readonly verificationContract: AdmittedFactualVerificationStage;
+  readonly onceKeyPersistedBeforeDispatch: true;
+  readonly latestStillCurrentEditorDecisionRequired: true;
+  readonly sameBookActiveMatchingEnrollmentRequired: true;
+}
+
 export interface AdmittedProviderRule {
+  readonly claimScopedFactualStages?: AdmittedFactualClaimStages;
+  readonly factualRecheck?: AdmittedFactualRecheck;
+  readonly enabledLearningEnvelope?: { readonly pins: readonly string[]; readonly missingStaleRevokedOrExceededResult: 'refuse';
+    readonly extraPerPassClickRequired: false; readonly disableStopsLaterDispatchAndUse: true };
+  /** v27 review names the same bounded synthesis turn as writing/evaluation; eligibility only. */
+  readonly plusOneCrossUnitSynthesisTurn?: boolean;
+  /** Book-less dialogue: category labels record what is sent and do not restrict transmission; ADR 0079 §4.4 redaction still applies. */
+  readonly globalAgentDialogue?: {
+    readonly source: {
+      readonly bookRequired: false;
+      readonly explicitlyListedEligibleMemoryAndPreferenceRevisionsOnly: true;
+      readonly eligibleRevisionPinsRequired: true;
+      readonly editorOwnWordsAllowed: true;
+      readonly unlistedSourcesAllowed: false;
+    };
+    readonly outboundCategoryRestriction: 'none';
+    readonly outboundDataDisclosureRequired: true;
+    readonly redaction: {
+      readonly housePeopleNamesAndRolesStripped: true;
+      readonly remarksAndInternalNotesStripped: true;
+      readonly authorInformationAllowed: true;
+      readonly houseNameAllowed: true;
+    };
+  };
+  /** v31's scoped Global dialogue (#1171): the declared source and tool blocks, exactly as the policy states them. */
+  readonly globalAgentScopedDialogue?: {
+    readonly source: Readonly<Record<string, boolean>>;
+    readonly scopedTools: {
+      readonly names: readonly string[];
+      readonly callsPerAttempt: number;
+      readonly candidatesPerRetrieval: number;
+      readonly maxResultBytes: number;
+      readonly roundTripBreaker: number;
+      readonly [term: string]: unknown;
+    };
+    readonly outboundCategoryRestriction: 'none';
+    readonly outboundDataDisclosureRequired: true;
+    readonly redaction: NonNullable<AdmittedProviderRule['globalAgentDialogue']>['redaction'];
+  };
+  readonly taskKindOverrides?: Readonly<Record<string, { readonly webSearch: boolean }>>;
+  readonly editorTaskInstruction?: {
+    readonly category: 'editor-task-instruction';
+    readonly maxGraphemes: number;
+    readonly attributedToProcedureVersion: true;
+    readonly personNamesAllowed?: false;
+    readonly textProcessing?: { readonly mode: 'qualified-original-field-processing'; readonly qualificationRef: 'ordinary-production-original-fields-adr0099';
+      readonly unqualified: { readonly personNamesAllowed: false }; readonly qualifiedOriginalWords: 'preserve-within-existing-field-contract' };
+    readonly contractFramingOverrideAllowed: false;
+  };
+  readonly houseReviewGuidelineClause?: {
+    readonly category: 'house-review-guideline-clause';
+    readonly maxClauses: number;
+    readonly maxGraphemesPerClause: number;
+    readonly attributedToImportedDocumentVersion: true;
+    readonly personNamesAllowed?: false;
+    readonly textProcessing?: { readonly mode: 'qualified-original-field-processing'; readonly qualificationRef: 'ordinary-production-original-fields-adr0099';
+      readonly unqualified: { readonly personNamesAllowed: false }; readonly qualifiedOriginalWords: 'preserve-within-existing-field-contract' };
+  };
   readonly plusDeclaredContractRetryAdaptations?: boolean;
   /** `true` on the v22/v23 review rule alone (`source.seriesKnowledgeAllowed`); absent on every other rule and policy, which refuses Series knowledge. */
   readonly seriesKnowledgeAllowed?: boolean;
@@ -2644,8 +2975,8 @@ export interface AdmittedProviderRule {
   readonly outboundDataCategories: readonly OutboundDataCategoryId[];
   /**
    * Whether the rule names the kind's one book-level synthesis turn (全书综合 / 综合) as a transmission (Provider Processing
-   * v11). `true` only for writing and the three evaluation contracts; `false` for every rule that does not name the turn,
-   * including the v10 rules, which name their own reduction and reflection steps instead.
+   * v11). Writing and evaluation name it; v26 also declares review eligibility. Review's bounded synthesis consumer
+   * arrives with F-19b and its successor transmission bound. A rule that does not name the turn carries `false`.
    */
   readonly crossUnitSynthesisAllowed: boolean;
   /**
@@ -2739,6 +3070,9 @@ export interface AdmittedSearchBackend {
  * citation needs an Exact Fetch of the pinned revision. Executing the tool belongs to the retrieval slice.
  */
 export interface AdmittedLocalTools {
+  /** Eligibility only; registration belongs to the consuming composition. */
+  readonly declarations?: ReadonlyArray<{ readonly name: string; readonly readOnly: true; readonly concurrencySafe: true }>;
+  readonly parallelCallsAllowed?: boolean;
   readonly targetedRetrieval: {
     /** `false` exactly for enrolled background analysis and material translation: neither may initiate retrieval. */
     readonly allowed: boolean;
@@ -2758,11 +3092,47 @@ export interface AdmittedLocalTools {
 }
 
 export interface LaunchPolicyProjection {
+  /** Present only after the resolver verified the exact selected document bytes. */
+  selectedPolicyIdentity?: SelectedPolicyIdentity;
   integrityState: 'verified' | 'denied';
   denialReason: string | null;
   operationalScope: TrustedOperationalScope | null;
   activePolicySetVersion: ActivePolicySetVersion | null;
   providerProcessing: {
+    /** Per-kind enrollment eligibility only; baseline Background Analysis Enrollment is independent. */
+    readonly backgroundProcessingEnrollment?: {
+      readonly enrollableKinds: ReadonlyArray<{
+        readonly kind: 'learning-curation' | 'material-index' | 'review-reduction' | 'factual-recheck';
+        readonly mandatoryCeiling: true;
+      }>;
+      readonly activeMatchingEnrollmentRequired: true;
+      readonly revocable: true;
+      readonly planEnvelopeRequired: true;
+      readonly exactProviderBindingRequired: true;
+      readonly runAuthorizationRequired: true;
+      readonly runSourceScopeRequired: true;
+      readonly ceilingEvaluatedBeforeEveryDispatch: true;
+      readonly finalProviderPayloadEgressGateRequired: true;
+      readonly openingPageOrImportCreatesEnrollment: false;
+    };
+    readonly subAgents?: {
+      readonly declaredInPlanEnvelopeRequired: true;
+      readonly inheritsParentScopeBindingPolicyAndCeiling: true;
+      readonly countsInsideParentAttemptTransmissionBound: true;
+      readonly finalProviderPayloadEgressGateRequired: true;
+      readonly createsTaskRunOrDecisionRecordAllowed: false;
+    };
+    /** Configurable defaults, not immutable numeric execution caps (ADR 0095 §2). */
+    readonly execution?: {
+      readonly maxInFlightRequests: { readonly configurable: true; readonly default: number };
+      readonly perRunUnitParallelism: { readonly configurable: true; readonly default: number };
+      readonly backgroundShare: { readonly configurable: true; readonly default: number };
+    };
+    readonly transport?: {
+      readonly requestDeadlineSeconds: number;
+      readonly rateLimitRetry: { readonly honourRetryAfter: boolean; readonly maxRetries: number };
+    };
+    readonly research?: { readonly searchesPerClaim: number };
     version: ProviderProcessingVersion | null;
     decision: 'deny' | 'eligible-only';
     /** `0` under development-ci; the verbatim token `bounded-by-run` under developer-live. */
@@ -3016,6 +3386,8 @@ export interface TaskAuthorizationProjection {
     sidecarSha256: '980b565f25bdff29e539365e17344346017b05146a45cfea35c8ed7d528a1bff';
   };
   providerResolutionPlan: null | {
+    selectedPolicyIdentity?: SelectedPolicyIdentity;
+    localFixtureProfile?: LocalFixtureProfile;
     role: 'Main Editorial Role';
     capabilities: readonly [];
     providerId: 'deepseek-open-platform';
@@ -3334,6 +3706,7 @@ export const RUN_REPORT_USAGE_STAGES = ['units', 'cross-unit-reduction', 'assura
 export type RunReportUsageStageId = (typeof RUN_REPORT_USAGE_STAGES)[number];
 
 export interface RunReportUsageProjection {
+  localToolCalls?: Readonly<Record<string, number>>;
   retrievalCalls?: number;
   exactFetchCalls?: number;
   refusedRetrievalCalls?: number;
@@ -3509,6 +3882,7 @@ export interface AnalysisReducerStageProjection {
     | 'section-reduction'
     | 'contradiction-continuity'
     | 'cross-unit-reduction'
+    | 'cross-chapter-consistency'
     | 'book-synthesis'
     | 'reference-integrity'
     | 'finding-reduction'
@@ -4291,10 +4665,14 @@ export type MaterialPlanField =
   | 'predecessorRevision'
   | 'runBudgetCeiling'
   | 'outboundDataCategory'
-  | 'expectedOutcome';
+  | 'expectedOutcome'
+  | 'selectedPolicyIdentity'
+  | 'localFixtureProfile';
 
 /** The material inputs one frozen plan version carries, re-derived from durable state for drift detection. */
 export interface MaterialPlanInputsProjection {
+  selectedPolicyIdentity?: SelectedPolicyIdentity;
+  localFixtureProfile?: LocalFixtureProfile;
   providerBinding: { providerId: string; modelId: string; adapterRevision: number; configurationRevision: number; credentialReference: string };
   artifactPin: { identity: string; version: string; nativeCarrierSha256: string; sidecarRevision: number; sidecarSha256: string };
   selectedRange: BaselineAnalysisSelectedRange | null;
@@ -4308,6 +4686,8 @@ export type PlanRevisionDiffValue =
   | string
   | number
   | null
+  | SelectedPolicyIdentity
+  | LocalFixtureProfile
   | BaselineAnalysisSelectedRange
   | { revisionId: string; ordinal: number; digest: string }
   | AnalysisReusePlanCounts
@@ -4458,6 +4838,7 @@ export interface BaselineAnalysisPlanAdaptationProjection {
 export type SafeRetryRepetition = 'byte-identical' | 'differs' | 'unrecorded';
 
 export interface BaselineAnalysisExecutionBindingProjection {
+  compositionVersion?: 2 | 3;
   attemptId: string;
   bindingDigest: string;
   harnessSessionId: string;
@@ -4657,6 +5038,14 @@ export interface BaselineAnalysisHistoryProjection {
  */
 export type RunAttemptState = 'dispatched' | 'awaiting-response' | 'retrying';
 
+/** Bounded activity for an isolated unit; queued time is never reported as model response time. */
+export interface AnalysisInFlightUnitProjection {
+  unitOrdinal: number;
+  attemptState: RunAttemptState;
+  requestState: 'waiting-for-capacity' | 'admitted' | 'between-requests';
+  admittedRequestStartedAt: string | null;
+}
+
 export interface BaselineAnalysisProjection {
   readonly historicalMarker?: string;
   bookId: string;
@@ -4697,6 +5086,8 @@ export interface BaselineAnalysisProjection {
   coverageManifest: null | CoverageManifestProjection;
   providerResolutionPlan: null | {
     webToolsBackend?: FrozenWebToolsBackend;
+    selectedPolicyIdentity?: SelectedPolicyIdentity;
+    localFixtureProfile?: LocalFixtureProfile;
     searchCredentialReference?: string;
     role: 'Main Editorial Role';
     capabilities: readonly [];
@@ -4732,6 +5123,7 @@ export interface BaselineAnalysisProjection {
     stopCondition: string;
   };
   planEnvelope: null | {
+    compositionVersion?: 2 | 3;
     digest: string;
     dispatchAllowed: boolean;
     providerStatus: 'remote-denied-local-deterministic' | 'remote-denied-no-route' | 'remote-eligible-developer-live' | 'remote-eligible-ordinary-production';
@@ -4762,6 +5154,7 @@ export interface BaselineAnalysisProjection {
      * `default-execution-rule` when 快速开始 started the Task under a 默认执行规则 (Issue #421); `background-analysis-enrollment`
      * when AI7 started it by itself under the Book's 后台分析登记 (Issue #95, S39).
      */
+    startWhen?: 'now' | 'idle';
     origin: 'standard-direct' | 'default-execution-rule' | 'background-analysis-enrollment';
     /** The rule version the authorization names; `null` for a standard-direct start. */
     ruleVersionId: string | null;
@@ -4799,6 +5192,8 @@ export interface BaselineAnalysisProjection {
       /** The instant the current unit's attempt started; `null` between units. */
       currentUnitStartedAt: string | null;
       attemptState: RunAttemptState | null;
+      /** Present on governed live execution; at most three entries in manifest order. */
+      inFlightUnits?: ReadonlyArray<AnalysisInFlightUnitProjection>;
       /** Model turns this Run has completed, live, replayed, or deterministic alike. */
       completedAttempts: number;
       /** The longest step this Run has actually settled, which the stale case is measured against. */
@@ -5123,6 +5518,7 @@ export interface FactualRunAssuranceProjection {
 
 /** One Evidence Source Card (V2-UX-EVID-003): every check a discrete state, a candidate never quoted (EVID-004). */
 export interface EvidenceSourceCardProjection {
+  excluded?: boolean;
   /** The relation's own identity within the result: stable across pages and pinning. */
   cardId: string;
   sourceRef: string;
@@ -5261,6 +5657,7 @@ export interface FactualDecisionCardProjection {
 
 /** The Assertion-centered Evidence Workspace (V2-UX-EVID-001 to 013): a read, it mutates nothing (EVID-012). */
 export interface EvidenceWorkspaceProjection {
+  claimRecheckAvailable?: boolean;
   bookId: string;
   result: FactualVerificationResultProjection;
   sources: ReadonlyArray<EvidenceSourceCardProjection>;
@@ -5352,6 +5749,7 @@ export interface InspectEvidenceWorkspaceInput {
   sourcesAfter: number | null;
 }
 export interface RecordVerificationReviewDecisionInput {
+  excludedSourceRefs?: readonly string[];
   bookId: string;
   resultId: string;
   /** The result version the editor read; a later version refuses the decision (FREV-011). */
@@ -5367,7 +5765,7 @@ export interface RecordVerificationReviewDecisionInput {
  */
 export interface VerificationReviewDecisionRecordedProjection {
   workspace: EvidenceWorkspaceProjection;
-  supplementary: null | { blockId: string; level: EvidenceAssuranceLevel; statement: string };
+  supplementary: null | { blockId: string; level: EvidenceAssuranceLevel; statement: string; decisionId?: string };
 }
 /** Why 要求补充证据 prepares no Task yet (Issue #901 rev 4; follow-up #905). */
 export const SUPPLEMENTARY_CHECK_DEFERRED = '已记录补充核查的要求（同一段文字、同级或更高级别）。这本书的事实核查目前只能运行一次；补充核查任务将在事实核查的更新方式接入后开放（#905）。' as const;
@@ -5656,6 +6054,53 @@ export interface ReviewFindingIdentityProjection {
   findingOrdinal: number;
 }
 
+/** Exact unit evidence retained when overlapping review units name the same occurrence. */
+export interface ReviewUnitFindingReference extends ReviewFindingIdentityProjection {
+  unitDigest: string;
+  resultDigest: string;
+}
+
+/** A baseline is frozen with the category Run; it is a lead, never a replacement for manuscript evidence. */
+export interface ReviewBaselineSource {
+  resultSetId: string;
+  revisionId: string;
+  digest: string;
+  manuscriptPin: BaselineAnalysisResultSetRevisionProjection['manuscriptPin'];
+  leads: ReadonlyArray<{ ref: string; kind: string; text: string; ranges: ReadonlyArray<AnalysisSourceRangeProjection> }>;
+  omitted: number;
+}
+
+export interface ReviewSynthesisEvidence {
+  ref: string;
+  blockPosition: number;
+  sourceRange: FactualSourceRangeProjection;
+  quote: string;
+  unitOrdinal: number;
+  unitFindingRefs: ReadonlyArray<ReviewUnitFindingReference>;
+  baselineLeadRefs: ReadonlyArray<string>;
+}
+
+export interface ReviewCrossChapterInput {
+  schema: 'ai7.editorial-review.cross-chapter-input/1';
+  categoryId: string;
+  categoryContractDigest: string;
+  closedUnitSetDigest: string;
+  units: ReadonlyArray<{ unitOrdinal: number; unitDigest: string; resultDigest: string }>;
+  manuscriptPin: CoverageManifestProjection['manuscript'];
+  baseline: ReviewBaselineSource | null;
+  findings: ReadonlyArray<ReviewCategoryFindingProjection>;
+  evidence: ReadonlyArray<ReviewSynthesisEvidence>;
+  omitted: { units: number; findings: number; evidence: number; baselineLeads: number };
+}
+
+export interface ReviewCrossChapterResult {
+  readonly schema: 'ai7.editorial-review.cross-chapter-result/1';
+  readonly findings: ReadonlyArray<{ readonly anchor: ReviewSynthesisEvidence; readonly evidence: ReadonlyArray<ReviewSynthesisEvidence>;
+    readonly severity: ReviewFindingSeverity; readonly note: string; readonly clauseId: string }>;
+  readonly rejected: ReadonlyArray<{ readonly index: number; readonly text: string; readonly reason: 'schema-invalid' | 'evidence-unknown' }>;
+  readonly input: ReviewCrossChapterInput;
+}
+
 /**
  * One located review finding. `sourceRange` is the exact grapheme range the service found the
  * quotation at in the committed block — never an offset the model supplied — which is the anchor an
@@ -5675,6 +6120,14 @@ export interface ReviewCategoryFindingProjection {
   clauseId: string | null;
   /** The identities of the duplicate findings merged into this record; empty when none were. */
   mergedFrom: ReadonlyArray<ReviewFindingIdentityProjection>;
+  /** Includes the first unit finding as well as every duplicate; historical records may omit it. */
+  unitFindingRefs?: ReadonlyArray<ReviewUnitFindingReference>;
+  crossChapter?: {
+    contractDigest: string;
+    requestDigest: string;
+    evidence: ReadonlyArray<ReviewSynthesisEvidence>;
+    baseline: Omit<ReviewBaselineSource, 'leads' | 'omitted'> | null;
+  };
 }
 
 /**
@@ -5803,6 +6256,10 @@ export type ReviewCategoryUnitProjection =
  * beside every shared component the other kinds carry, computed by the same reducers.
  */
 export interface ReviewCategoryResultSetRevisionProjection {
+  crossChapterSynthesis?:
+    | { state: 'closed'; requestDigest: string; usage: { inputTokens: number; outputTokens: number } | null; result: ReviewCrossChapterResult }
+    | { state: 'gap'; requestDigest: string; code: string; reason: string }
+    | { state: 'not-run'; reason: string };
   resultSetId: string;
   revisionId: string;
   ordinal: number;
@@ -6735,6 +7192,9 @@ export interface ReviewFindingProjection {
   chapterTitle: string | null;
   quote: string;
   note: string;
+  referencedRuleVersions?: ReadonlyArray<ReferencedRuleVersion>;
+  /** The latest local decision's identity, for its optional learning ask. */
+  learningDecisionId?: string | null;
   /** What a 修改建议 proposes in place of the quotation (empty proposes deleting it); `null` for a 批注. */
   replacement: string | null;
   clauseRefs: ReadonlyArray<{ documentTitle: string; clauseId: string; text: string }>;
@@ -6775,6 +7235,8 @@ export interface ReviewRunInfluenceProjection {
     /** `null` where the decision behind it is no longer in this house's records. */
     materialKey: string | null;
     kind: LearningLedgerMaterialKind | null;
+    /** Local historical provenance only; absent on legacy /1 sources. */
+    provenanceAvailability?: 'available' | 'unavailable';
     /** When its 停止今后使用 was recorded after it was admitted; `null` while it stands. */
     withdrawnAt: string | null;
   }>;
@@ -6788,10 +7250,13 @@ export interface HouseReviewPreferenceUse {
   materialSetDigest: string;
   sourceCount: number;
   lines: ReadonlyArray<string>;
+  /** Absent on /1–/3 pins. Indices identify whole lines of the exact version, in retrieval rank order. */
+  selection?: { lineIndexes: ReadonlyArray<number> };
 }
 export interface HouseReviewPreferenceVersion {
-  schema: 'ai7.house-review-preference/1';
+  schema: 'ai7.house-review-preference/1' | 'ai7.house-review-preference/2';
   governance?: { baseLines: HouseReviewPreferenceVersion['lines']; baseMaterialSetDigest: string; headDirectiveId: string };
+  legacyBasis?: { lines: HouseReviewPreferenceVersion['lines']; materialSetDigest: string };
   versionId: string;
   ordinal: number;
   supersedes: string | null;
@@ -6801,10 +7266,25 @@ export interface HouseReviewPreferenceVersion {
   sourceCount: number;
   lines: ReadonlyArray<{
     text: string; categoryId: string; bookId: string | null;
-    sources: ReadonlyArray<{ bookId: string; bookTitle: string; materialDigest: string; decisionId: string; eligibilityDecisionId: string; qualityLineageDigest: string;
-      attribution: { peopleVersion: number; authors: ReadonlyArray<string>; editors: ReadonlyArray<string> } }>;
+    lineId?: string;
+    owner?: { kind: 'legacy-preference'; itemId: string } | { kind: 'editorial-memory'; itemId: string; versionId: string };
+    sources: ReadonlyArray<HouseReviewPreferenceSource>;
   }>;
 }
+export type HouseReviewPreferenceSource = {
+  kind?: 'review-decision'; bookId: string; bookTitle: string; materialDigest: string; decisionId: string;
+  eligibilityDecisionId: string; qualityLineageDigest: string; feedbackKey?: string;
+  attribution: { peopleVersion: number; authors: ReadonlyArray<string>; editors: ReadonlyArray<string> };
+} | {
+  kind: 'editorial-memory'; bookId: string; bookTitle: string; materialDigest: string; decisionId: string | null;
+  /** Automatic admission has no human decision identity. */
+  eligibilityDecisionId?: never;
+  itemId: string; versionId: string; actionId: string; sourceKey: string; feedbackKey: string;
+  captured: import('./protocol/learning.js').EditorialMemorySourceSnapshot;
+  currentAdmission: import('./protocol/learning.js').EditorialMemoryAdmission;
+  currentEligibility: 'book' | 'house';
+  attribution: { peopleVersion: number; authors: ReadonlyArray<string>; editors: ReadonlyArray<string> };
+};
 export interface HouseReviewPreferenceProjection {
   operationalScope: TrustedOperationalScope;
   current: HouseReviewPreferenceVersion | null;
@@ -6817,6 +7297,8 @@ export interface EditQualitySignalsProjection {
   surviving: number;
   editVolume: number;
   lineageDigest: string;
+  preferenceAdoption?: ReadonlyArray<PreferenceAdoptionProjection>;
+  preferenceAdoptionNext?: PreferenceAdoptionCursor | null;
   categories: ReadonlyArray<{ categoryId: string; applied: number; surviving: number; editVolume: number; lineageDigest: string }>;
 }
 
@@ -6863,6 +7345,7 @@ export interface ReviewReportRecord {
   };
   appendix: {
     title: '附录';
+    referencedRules?: ReadonlyArray<{ findingId: string; categoryLabel: string; locationLabel: string; rules: ReadonlyArray<ReferencedRuleVersion> }>;
     configuration: { schema: string; version: string; digest: string };
     categories: ReadonlyArray<{
       categoryId: string;
@@ -6878,6 +7361,14 @@ export interface ReviewReportRecord {
 
 /** The opened Review Run (the latest when none is named) with its categories, findings and Report. */
 export interface ReviewRunProjection {
+  localCheck?: {
+    planDigest: string;
+    options: import('./protocol/procedures.js').LocalCheckOptions;
+    state: string;
+    paragraphs: number;
+    counts: Readonly<Record<string, { checked: number; exempt: number; skipped: number; error: number; findings: number; disabled: number; outOfApplicability: number; notRecognized: number; noFinding: number }>> | null;
+    excluded: readonly { candidateId: string; reason: string }[];
+  };
   reviewRunId: string;
   ordinal: number;
   label: string;
@@ -6950,6 +7441,8 @@ export interface TaskMaterialOffersProjection {
  * basis, the coverage matrix, the scope options, the 审阅记录, and the opened Run.
  */
 export interface ReviewWorkspaceProjection {
+  /** Latest editor-declared Book table, carried by its existing local ReviewRun. */
+  localBookTerms?: readonly import('./protocol/procedures.js').BookTermEntry[];
   listPages?: TaskPlanProjection['listPages'];
   /** Eligible local references offered separately from manuscript scope (Issue #428). */
   materials?: TaskMaterialOffersProjection;
@@ -7033,6 +7526,8 @@ export interface FrozenSeriesScope {
 }
 
 export interface PrepareReviewRunInput {
+  decisionId?: string;
+  localCheck?: import('./protocol/procedures.js').LocalCheckOptions;
   seriesId?: string | null;
   materialIds?: ReadonlyArray<string>;
   bookId: string;
@@ -7671,6 +8166,8 @@ export interface BackgroundAnalysisScopeOffer {
 
 /** One Book's 后台分析登记 on ②A: what it is, its state, what it would do now and why, and the decisions it offers. */
 export interface BackgroundAnalysisEnrollmentProjection {
+  kind?: string;
+  kinds?: readonly { kind: string; label: string; enabled: boolean; reason: string | null }[];
   bookId: string;
   bookTitle: string;
   /**
@@ -9533,13 +10030,13 @@ export interface RecordAnalysisFeedbackInput {
  * Where a Learning Material came from: a 修改建议 decided with the editor's reason or their own wording, a judgment of an
  * analysis result that says why, or a 审阅 finding the editor ignored and said why.
  */
-export type LearningMaterialKind = 'proposal-decision' | 'analysis-feedback' | 'review-disposition';
-export const LEARNING_MATERIAL_KINDS: readonly LearningMaterialKind[] = ['proposal-decision', 'analysis-feedback', 'review-disposition'];
+export type LearningMaterialKind = 'proposal-decision' | 'analysis-feedback' | 'review-disposition' | 'word-tracked-edit';
+export const LEARNING_MATERIAL_KINDS: readonly LearningMaterialKind[] = ['proposal-decision', 'analysis-feedback', 'review-disposition', 'word-tracked-edit'];
 /**
  * What the Learning Eligibility ledger decides about: the three kinds 学习准入 shows a card for, and `readers-report-exemplar`
  * (Issue #429) — 范例's admission of one 审稿意见 at one exact version, decided from 范例 and listed by no card.
  */
-export type LearningLedgerMaterialKind = LearningMaterialKind | 'readers-report-exemplar';
+export type LearningLedgerMaterialKind = LearningMaterialKind | 'readers-report-exemplar' | 'manual-edit-journal';
 
 const LEARNING_UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
 /**
@@ -9548,7 +10045,7 @@ const LEARNING_UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3
  */
 export const LEARNING_MATERIAL_KEY_PATTERN = new RegExp(
   `^(?:proposal-decision:${LEARNING_UUID}|analysis-feedback:${LEARNING_UUID}/(?:synopsis|(?:entities|events|relationships|settings)/\\d{1,6})` +
-  `|review-disposition:${LEARNING_UUID}/rvf_[0-9a-f]{24})$`,
+  `|review-disposition:${LEARNING_UUID}/rvf_[0-9a-f]{24}|word-sample:wts_[0-9a-f]{64})$`,
   'u',
 );
 
@@ -9592,11 +10089,14 @@ export type LearningMaterialTarget =
     readonly itemKey: string;
     readonly dimension: AnalysisFeedbackDimension;
   }
-  | { readonly kind: 'review'; readonly bookId: string; readonly reviewRunId: string; readonly findingId: string };
+  | { readonly kind: 'review'; readonly bookId: string; readonly reviewRunId: string; readonly findingId: string }
+  | { readonly kind: 'word-tracked-edit'; readonly bookId: string; readonly sampleId: string; readonly sampleDigest: string };
 
 /** One Learning Material as its Review Card shows it (LEARN-003). */
 export interface LearningMaterialProjection {
   readonly target: LearningMaterialTarget;
+  /** Word's actual current local controls/standing, separate from its historical capture and any human decision. */
+  readonly wordCurrentEligibility?: LearningEligibilityChoice;
   /** The exact originating Task, when the source record has one (LEARN-003); editor-authored material has none. */
   readonly sourceTask: null | { readonly taskIntentId: string; readonly label: string };
   /** The material's place: its kind and the record it comes from. */
@@ -9688,7 +10188,7 @@ export type FeedbackHistoryTarget =
 export const FEEDBACK_HISTORY_SIGNALS = ['接受', '修改后接受', '拒绝', '准确', '不准确', '不完整', '忽略'] as const;
 export interface FeedbackHistoryInput {
   readonly bookId?: string | null;
-  readonly origin?: LearningMaterialKind | null;
+  readonly origin?: Exclude<LearningMaterialKind, 'word-tracked-edit'> | null;
   readonly author?: string | null;
   readonly editor?: string | null;
   /** Exact projected disposition or judgment; omitted or null means all. */
@@ -9704,7 +10204,7 @@ export interface FeedbackHistoryInput {
 /** One piece of the editor's feedback as the history lists it. */
 export interface FeedbackHistoryEntryProjection {
   readonly entryId: string;
-  readonly origin: LearningMaterialKind;
+  readonly origin: Exclude<LearningMaterialKind, 'word-tracked-edit'>;
   readonly bookId: string;
   /**
    * The Editorial Dimension it is about, in the editor's words: an analysis dimension, a 审阅 category — a 修改建议 a 审阅
@@ -9800,6 +10300,7 @@ export interface LearningAuditInput {
 
 /** One material as 学习回溯 lists it: what it is, where it stands, and what used it (LAUD-001). */
 export interface LearningAuditMaterialProjection {
+  readonly wordCurrentEligibility?: LearningEligibilityChoice;
   readonly materialKey: string;
   readonly kind: LearningLedgerMaterialKind;
   readonly digest: string;
@@ -9807,6 +10308,7 @@ export interface LearningAuditMaterialProjection {
   readonly recordedAt: string;
   readonly excerpt: ReadonlyArray<string>;
   readonly standing: LearningAuditStanding;
+  readonly automaticAdmission?: { readonly choice: 'house'; readonly sourceKeys: ReadonlyArray<string> } | null;
   /** How many decisions it holds: the count the next one names. */
   readonly decisions: number;
   /** When the decision that stands — or, when it changed, the one it had — was made. */
@@ -9915,11 +10417,12 @@ export interface LearningLineageProjection {
   readonly bookTitle: string;
   readonly material: LearningMaterialProjection;
   readonly standing: LearningAuditStanding;
+  readonly automaticAdmission?: { readonly choice: 'house'; readonly sourceKeys: ReadonlyArray<string> } | null;
   /** The newest `MAX_LEARNING_LINEAGE_DECISIONS` decisions, oldest first, the last the one that stands. */
   readonly decisions: ReadonlyArray<LearningLineageDecisionProjection>;
   /** How many earlier decisions the chain holds beyond those. */
   readonly earlierDecisions: number;
-  readonly downstream: { readonly signals: number; readonly memoryCandidates: 0; readonly activeMemories: number; readonly tasks: number };
+  readonly downstream: { readonly signals: number; readonly memoryCandidates: number; readonly activeMemories: number; readonly tasks: number };
   /** Its 学习信号, oldest first. */
   readonly signals: ReadonlyArray<LearningLineageSignalProjection>;
   /** The newest `MAX_LEARNING_LINEAGE_TASKS` Tasks that used it, oldest first. */
@@ -10163,6 +10666,8 @@ export type GlobalAttentionStateKey =
   | 'analysis-waiting-admission'
   // 等待运行名额 on the governor (Issue #49, S14; CONC-007): a start waiting for a place, never a ceiling or a limit.
   | 'analysis-waiting-capacity'
+  | 'analysis-waiting-idle'
+  | 'analysis-yielded'
   | 'analysis-cancelling'
   | 'analysis-pausing'
   | 'analysis-paused'
@@ -11367,7 +11872,7 @@ export interface UsageProjection {
 /** The result of 导出为 CSV…: a file of numbers and ids, written where the editor chose. */
 export type UsageCsvExportResult = { outcome: 'cancelled' } | { outcome: 'written'; rows: number };
 
-export interface ServiceOperationMap extends GlobalAgentOperations {
+export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordListOperations {
   getSearchBackendSettings: { input: Record<string, never>; output: SearchBackendSettingsProjection };
   selectSearchBackend: { input: { backendId: string }; output: SearchBackendSettingsProjection };
   probeSearchBackend: { input: { backendId: string }; output: SearchBackendProbeProjection };
@@ -11614,6 +12119,11 @@ export interface ServiceOperationMap extends GlobalAgentOperations {
     output: ReconnectPreflightProjection;
   };
   /**
+   * 空闲时处理 (Issue #1089, F-17a; ADR 0095 §3): the kind's own exact Run Authorization, recorded to start when AI7 is idle;
+   * it holds no place and sends nothing until then. A fixed Task only records an authorization, so it is not a kind here.
+   */
+  startTaskWhenIdle: { input: Omit<StartTaskWhenOnlineInput, 'kind'> & { kind: Exclude<TaskPlanKind, 'fixed-task'> }; output: TaskPlanProjection };
+  /**
    * 联网后开始任务 for every kind but the baseline's (Issue #760, S74c; AUTH-004, OFF-005): the kind's own exact Run Authorization
    * — a ledger Task's Run Record, or a Review Run's one approval — and the Run waits in Connectivity Wait; nothing is sent, no
    * usage arises, and nothing implies it began. Reconnect Preflight then starts it as 开始任务 would. The answer is the plan.
@@ -11647,7 +12157,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations {
   };
   /** 后台分析登记 of one Book (Issue #95, S39): its state, what it would do now, and its disclosure. */
   inspectBackgroundAnalysisEnrollment: {
-    input: { bookId: string };
+    input: { bookId: string; kind?: string };
     output: BackgroundAnalysisEnrollmentProjection;
   };
   /**
@@ -11657,6 +12167,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations {
   enrollBackgroundAnalysis: {
     input: {
       bookId: string;
+      kind?: string;
       disclosureDigest: string;
       startingPoint: BackgroundAnalysisStartingPoint;
       scope: { kind: BackgroundAnalysisScopeKind; seriesId: string | null };
@@ -11713,6 +12224,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations {
     output: ExemplarBookProjection;
   };
   /** 知识库 › 工序与规则 (Issue #427, S79d): the review categories' 工序 and the native artifact, with their use. */
+  procedureLibrary: { input: import('./protocol/procedures.js').ProcedureLibraryCommand; output: import('./protocol/procedures.js').ProcedureLibraryProjection };
   inspectKnowledgeProcedures: {
     input: Record<string, never>;
     output: KnowledgeProceduresProjection;
@@ -12027,6 +12539,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations {
        * preselects — or `merge`. A file without a text box can only be reviewed with `retain`.
        */
       textBoxDisposition: TextBoxDisposition;
+      trackedChanges?: WordTrackedChangesChoice;
     };
     output: ReviewBeforeImportProjection;
   };
@@ -12110,12 +12623,15 @@ export interface ServiceOperationMap extends GlobalAgentOperations {
   recordProposalDecisionReason: { input: RecordProposalDecisionReasonInput; output: EditorialMarkCommandProjection };
   recordProposalDecisionFeedback: { input: RecordProposalDecisionFeedbackInput; output: EditorialMarkCommandProjection };
   inspectEditorialLearning: { input: InspectEditorialLearningInput; output: EditorialLearningProjection };
+  inspectWordTrackedEditSample: { input: InspectWordTrackedEditSampleInput; output: WordTrackedEditSampleDetailProjection };
+  recordLearningReasonAsk: { input: LearningReasonAskInput & { frequency: import('./preferences.js').LearningAskFrequency }; output: LearningReasonAskProjection | null };
   changeEditorialLearning: { input: ChangeEditorialLearningInput; output: EditorialLearningProjection };
   createEditorialMemory: { input: CreateEditorialMemoryInput; output: EditorialLearningProjection };
+  acceptEditorialMemory: { input: import('./protocol/learning.js').AcceptEditorialMemoryInput; output: EditorialLearningProjection };
   deactivateEditorialMemory: { input: DeactivateEditorialMemoryInput; output: EditorialLearningProjection };
   inspectHouseReviewPreference: { input: Record<string, never>; output: HouseReviewPreferenceProjection };
   rebuildHouseReviewPreference: { input: Record<string, never>; output: HouseReviewPreferenceProjection };
-  inspectEditQualitySignals: { input: { bookId: string | null }; output: EditQualitySignalsProjection };
+  inspectEditQualitySignals: { input: { bookId: string | null; preferenceAfter?: PreferenceAdoptionCursor | null }; output: EditQualitySignalsProjection };
   inspectLearningMaterials: { input: { bookId: string | null; after: LearningMaterialCursor | null }; output: LearningMaterialsProjection };
   /** One material as its Review Card reads it, by its Book and place. */
   inspectLearningMaterial: { input: { bookId: string; materialKey: string }; output: LearningMaterialProjection };
@@ -12445,7 +12961,7 @@ export type PickerReselectResult =
   | { status: 'cancelled' }
   | { status: 'reselected'; continuation: ContinueImportProjection };
 
-export interface RendererApi extends GlobalAgentRendererApi {
+export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   selectSearchBackend(input: { backendId: string }): Promise<ModelServiceSettingsProjection>;
   probeSearchBackend(input: { backendId: string }): Promise<SearchBackendProbeProjection>;
   saveSearchBackendCredential(input: { backendId: string; secret: string }): Promise<ModelServiceSettingsProjection>;
@@ -12503,6 +13019,8 @@ export interface RendererApi extends GlobalAgentRendererApi {
   authorizeBaselineAnalysis(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<BaselineAnalysisWireProjection>;
   startBaselineAnalysisWhenOnline(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<BaselineAnalysisWireProjection>;
   cancelWaitingBaselineAnalysis(input: { taskIntentId: string }): Promise<BaselineAnalysisWireProjection>;
+  /** 空闲时处理 for every kind that dispatches (Issue #1089), within the route's Book. */
+  startTaskWhenIdle(input: Omit<ServiceOperationMap['startTaskWhenIdle']['input'], 'bookId'>): Promise<TaskPlanProjection>;
   /** 联网后开始任务 and its 取消 for every other kind with a plan (Issue #760, S74c), within the route's Book. */
   startTaskWhenOnline(input: Omit<StartTaskWhenOnlineInput, 'bookId'>): Promise<TaskPlanProjection>;
   cancelWaitingTask(input: Omit<CancelWaitingTaskInput, 'bookId'>): Promise<TaskPlanProjection>;
@@ -12536,7 +13054,7 @@ export interface RendererApi extends GlobalAgentRendererApi {
   inspectDefaultExecutionRules(): Promise<DefaultExecutionRulesProjection>;
   deactivateDefaultExecutionRule(input: { ruleId: string }): Promise<DefaultExecutionRuleProjection>;
   /** 后台分析登记 of the Book the window is showing (Issue #95, S39). */
-  inspectBackgroundAnalysisEnrollment(): Promise<BackgroundAnalysisEnrollmentProjection>;
+  inspectBackgroundAnalysisEnrollment(input?: { kind?: string }): Promise<BackgroundAnalysisEnrollmentProjection>;
   enrollBackgroundAnalysis(input: Omit<ServiceOperationMap['enrollBackgroundAnalysis']['input'], 'bookId'>): Promise<BackgroundAnalysisEnrollmentProjection>;
   revokeBackgroundAnalysisEnrollment(input: { enrollmentId: string }): Promise<BackgroundAnalysisEnrollmentProjection>;
   holdBackgroundAnalysisEnrollment(input: { enrollmentId: string; hold: 'pause' | 'resume' }): Promise<BackgroundAnalysisEnrollmentProjection>;
@@ -12553,6 +13071,7 @@ export interface RendererApi extends GlobalAgentRendererApi {
   /** 知识库 › 范例 › 归入范例 (Issue #429): names its Book; the window's route is not involved. */
   admitReadersReportExemplar(input: AdmitReadersReportExemplarInput): Promise<ExemplarBookProjection>;
   /** 知识库 › 工序与规则's expert 工序 (Issue #427, S79d): names no Book. */
+  procedureLibrary(input: import('./protocol/procedures.js').ProcedureLibraryCommand): Promise<import('./protocol/procedures.js').ProcedureLibraryProjection>;
   inspectKnowledgeProcedures(): Promise<KnowledgeProceduresProjection>;
   /** 知识库 › 工序与规则's 可复用工序 and 开发建议 (Issue #65, S30; ADR 0087): names no Book. */
   inspectCapturedProcedures(): Promise<CapturedProceduresProjection>;
@@ -12705,13 +13224,16 @@ export interface RendererApi extends GlobalAgentRendererApi {
   recordProposalDecisionReason(input: RecordProposalDecisionReasonInput): Promise<EditorialMarkCommandProjection>;
   recordProposalDecisionFeedback(input: RecordProposalDecisionFeedbackInput): Promise<EditorialMarkCommandProjection>;
   inspectEditorialLearning(input: InspectEditorialLearningInput): Promise<EditorialLearningProjection>;
+  recordLearningReasonAsk(input: LearningReasonAskInput): Promise<LearningReasonAskProjection | null>;
   changeEditorialLearning(input: ChangeEditorialLearningInput): Promise<EditorialLearningProjection>;
   createEditorialMemory(input: CreateEditorialMemoryInput): Promise<EditorialLearningProjection>;
+  acceptEditorialMemory(input: import('./protocol/learning.js').AcceptEditorialMemoryInput): Promise<EditorialLearningProjection>;
   deactivateEditorialMemory(input: DeactivateEditorialMemoryInput): Promise<EditorialLearningProjection>;
   inspectHouseReviewPreference(): Promise<HouseReviewPreferenceProjection>;
   rebuildHouseReviewPreference(): Promise<HouseReviewPreferenceProjection>;
-  inspectEditQualitySignals(input: { bookId: string | null }): Promise<EditQualitySignalsProjection>;
+  inspectEditQualitySignals(input: { bookId: string | null; preferenceAfter?: PreferenceAdoptionCursor | null }): Promise<EditQualitySignalsProjection>;
   inspectLearningMaterials(input: { bookId: string | null; after?: LearningMaterialCursor | null }): Promise<LearningMaterialsProjection>;
+  inspectWordTrackedEditSample(input: InspectWordTrackedEditSampleInput): Promise<WordTrackedEditSampleDetailProjection>;
   inspectLearningMaterial(input: { bookId: string; materialKey: string }): Promise<LearningMaterialProjection>;
   decideLearningMaterial(input: DecideLearningMaterialInput): Promise<LearningMaterialProjection>;
   inspectFeedbackHistory(input?: FeedbackHistoryInput): Promise<FeedbackHistoryProjection>;

@@ -6,6 +6,8 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { strToU8, zipSync } from 'fflate';
+import { admittedSpanText, ADMITTED_BASELINE_DOCX, fixedArchiveTime } from './composed-docx.mjs';
 import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, SIDEBAR_ICONS_ONLY, runJ14DarkPass } from './controller.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
@@ -990,8 +992,8 @@ async function readAudit(renderer, predicate, name) {
 const auditRow = (key) => `[data-screen="quality-learning"] li.learning-audit-material[data-material-key="${key}"]`;
 // Issue #912: 审阅 Runs read 本社审阅偏好 versions now, so the audit no longer says no Task reads learning material; with no
 // Run having read any in this Journey, every count stays 0 and every empty stage keeps its own words.
-const AUDIT_LATER = '记忆候选、已启用记忆、后续使用和历史影响暂不能筛选：AI7 还没有从学习材料生成记忆候选或记忆；每条材料被哪些任务使用过，在它的来源链里查看。';
-const AUDIT_WHY_EMPTY = '学习信号是这条材料参与生成的本社审阅偏好版本，使用过的任务是实际参考过这些版本的审阅；AI7 目前还没有生成记忆候选或记忆的功能，这两步因此是空的，并非被隐藏。';
+const AUDIT_LATER = '记忆候选、已启用记忆、后续使用和历史影响暂不能筛选；每条材料的编辑记忆状态和实际使用过的任务，在它的来源链里查看。模型自动归纳尚未提供。';
+const AUDIT_WHY_EMPTY = '学习信号是这条材料参与生成的本社审阅偏好版本，使用过的任务是实际参考过这些版本的审阅；这条材料目前没有编辑撰写的候选或已启用记忆，并非被隐藏。模型自动归纳尚未提供。';
 const AUDIT_STALE = '预览之后，这些学习材料或它们的准入决定有了变化；请重新查看影响，再决定。';
 
 async function main() {
@@ -1199,7 +1201,8 @@ async function main() {
     const unitHoldPath = resolve(runRoot, 'j11-unit-hold.txt');
     const sample1Bytes = await readFile(SAMPLE1_PATH);
     const sample1 = { sha256: createHash('sha256').update(sample1Bytes).digest('hex'), bytes: sample1Bytes.length };
-    const launch = async ({ forCleanup = false } = {}) => {
+    let modelFixtureIdentity = FIXTURE_IDENTITY;
+    const launch = async ({ forCleanup = false, pickerPath = SAMPLE1_PATH } = {}) => {
       const args = [
         '--disable-background-networking', '--disable-component-update', '--disable-default-apps', '--disable-domain-reliability',
         '--disable-sync', '--metrics-recording-only', '--no-first-run', '--remote-debugging-pipe', `--user-data-dir=${shellRoot}`,
@@ -1211,7 +1214,7 @@ async function main() {
       if (!forCleanup) {
         // The calibration gate lowered to two Books (Issue #429, EVAL-011a; the Commander's ruling of 2026-10-10): the house offset
         // is proven over 评估旅程丙 and one more Book, with the product's own ten untouched in every other launch.
-        args.push('--j11-picker-path', SAMPLE1_PATH, '--j04-model-adapter', FIXTURE_IDENTITY, '--j10-unit-hold-path', unitHoldPath, '--j11-save-path', draftExportPath,
+        args.push('--j11-picker-path', pickerPath, '--j04-model-adapter', modelFixtureIdentity, '--j10-unit-hold-path', unitHoldPath, '--j11-save-path', draftExportPath,
           '--j11-calibration-min-books', '2');
       }
       requireJourney(!args.some((argument) => /--inspect|--remote-debugging-port|^https?:|^wss?:/i.test(argument)), 'pipe-only-product-transport');
@@ -2159,22 +2162,22 @@ async function main() {
     }
 
     at('decision-feedback-dismiss');
-    // 拒绝 asks why once, under 你的处理: three reasons fitted to a rejection, none chosen, `其他 / 自行输入` beside them, and
-    // `不说明`. 不说明 records no more than that, and closing and reopening the card never asks again.
+    // F-05 part 2a (Issue #1109): a decision no longer opens the reason row by itself; the learning ask follows the persisted
+    // 经常 / 偶尔 / 关闭, 偶尔 by default. Under 关闭 the service offers nothing for an eligible rejection — awaited below through
+    // the same public offer the card makes — and the editor's own 补充原因… remains.
+    requireJourney((await renderer.evaluate(`window.ai7.getPreferences()`))?.values?.['learning.askFrequency'] === 'occasionally', 'learning-ask-frequency-default-before-off');
+    await renderer.evaluate(`window.ai7.savePreference({key:'learning.askFrequency',value:'off'})`);
     await openMarkCard(renderer, 'change-suggestion', rejectBlock, 'decision-reject-card');
     await assertRenderer(renderer, `window.__j11.act('reject')`, 'decision-reject');
-    const asked = await readDecision(renderer, (card) => card.prompt?.mode === 'prompt', 'decision-reject-asked');
-    requireJourney(asked.state === 'none' && asked.prompt.question === '为什么拒绝？（可选）' &&
-      JSON.stringify(asked.prompt.chips) === JSON.stringify([['证据不足', false], ['方向不合适', false], ['保持作者风格', false]]) &&
-      asked.prompt.own === '其他 / 自行输入' && asked.prompt.end === '不说明' && asked.reason === null && asked.later === null, 'decision-reject-asked-words', asked);
-    await assertRenderer(renderer, `window.__j11.act('reason-dismiss')`, 'decision-dismiss');
-    await waitFor(renderer, `${status} === '已记下：这次不说明原因。'`, 'decision-dismiss-status');
-    const dismissed = await readDecision(renderer, (card) => card.state === 'dismissed', 'decision-dismissed');
+    const dismissed = await readDecision(renderer, (card) => card.state === 'none' && card.later === '补充原因…', 'decision-dismissed');
+    const offAfterRejection = await renderer.evaluate(`(async () => { const decisionId = window.__j11.card()?.dataset.learningDecisionId; return decisionId ? { decisionId, ask: await window.ai7.recordLearningReasonAsk({ action: 'offer', decisionId }) } : null; })()`);
+    requireJourney(offAfterRejection !== null && offAfterRejection.ask === null, 'learning-off-offers-nothing-after-rejection', offAfterRejection);
+    await assertRenderer(renderer, `!document.querySelector('[data-learning-reason-ask]')`, 'learning-off-no-ask-after-rejection');
     requireJourney(dismissed.prompt === null && dismissed.reason === null && dismissed.later === '补充原因…', 'decision-dismissed-words', dismissed);
     await pressEscape(renderer);
     await waitFor(renderer, `window.__j11.card() === null`, 'decision-dismissed-closed');
     await openMarkCard(renderer, 'change-suggestion', rejectBlock, 'decision-dismissed-reopen');
-    const reopenedDismissed = await readDecision(renderer, (card) => card.state === 'dismissed', 'decision-dismissed-reopened');
+    const reopenedDismissed = await readDecision(renderer, (card) => card.state === 'none', 'decision-dismissed-reopened');
     requireJourney(reopenedDismissed.prompt === null && reopenedDismissed.later === '补充原因…', 'decision-dismissed-not-asked-again', reopenedDismissed);
 
     at('decision-feedback-own-accord');
@@ -2207,13 +2210,15 @@ async function main() {
     await waitFor(renderer, `window.__j11.card() === null`, 'decision-revised-closed');
 
     at('decision-feedback-after-apply');
-    // 接受并应用 asks why too, with the reasons fitted to an acceptance; moving on without answering ends the prompt and records
-    // nothing: reopened, the card offers 补充原因… and the service holds no entry after the decision.
+    // 接受并应用 under 关闭 asks nothing either: moving on records nothing, and reopened, the card offers 补充原因… with the service
+    // holding no entry after the decision.
     await openMarkCard(renderer, 'change-suggestion', applyBlock, 'decision-apply-card');
     await assertRenderer(renderer, `window.__j11.act('accept-and-apply')`, 'decision-accept-and-apply');
-    const applied = await readDecision(renderer, (card) => card.applied && card.prompt?.mode === 'prompt', 'decision-applied-asked');
-    requireJourney(applied.state === 'none' && applied.prompt.question === '为什么接受？（可选）' &&
-      JSON.stringify(applied.prompt.chips) === JSON.stringify([['语言更准确', false], ['保持作者风格', false]]) && applied.prompt.end === '不说明', 'decision-applied-asked-words', applied);
+    const applied = await readDecision(renderer, (card) => card.applied && card.later === '补充原因…', 'decision-applied-asked');
+    requireJourney(applied.state === 'none' && applied.prompt === null, 'decision-applied-asked-words', applied);
+    const offAfterApply = await renderer.evaluate(`(async () => { const decisionId = window.__j11.card()?.dataset.learningDecisionId; return decisionId ? { decisionId, ask: await window.ai7.recordLearningReasonAsk({ action: 'offer', decisionId }) } : null; })()`);
+    requireJourney(offAfterApply !== null && offAfterApply.ask === null, 'learning-off-offers-nothing-after-apply', offAfterApply);
+    await assertRenderer(renderer, `!document.querySelector('[data-learning-reason-ask]')`, 'learning-off-no-ask-after-apply');
     await pressEscape(renderer);
     await waitFor(renderer, `window.__j11.card() === null`, 'decision-applied-moved-on');
     await openMarkCard(renderer, 'change-suggestion', applyBlock, 'decision-applied-reopen');
@@ -2882,7 +2887,7 @@ async function main() {
     requireJourney(JSON.stringify(stopPreview.preview.groups) === JSON.stringify([
       ['future', '1', '未来使用 · 1', `1 条学习材料今后不再可用于学习（原来是仅纳入《${THIRD.title}》）；它们会显示为明确排除。`],
       ['running', '0', '正在运行 · 0', '没有正在运行的任务使用它们。'],
-      ['memory', '0', '候选或已启用记忆 · 0', '没有由它们生成的记忆候选或已启用记忆：AI7 还没有生成这些。'],
+      ['memory', '0', '候选或已启用记忆 · 0', '没有引用这些材料的编辑记忆候选或已启用记忆。'],
       ['completed', '0', '已完成历史 · 0', '没有已完成的任务用过它们，因此没有结果需要标记；它们来自的反馈与改动，以及此前的 1 个准入决定，都原样保留。'],
     ]) && stopPreview.preview.leftOut.length === 0 && stopPreview.preview.confirm === true &&
       stopPreview.preview.included.length === 1 && stopPreview.preview.included[0].startsWith('修改建议 · 拒绝 · ') && stopPreview.preview.included[0].endsWith(' · 你的原因：分页原因0') &&
@@ -3249,12 +3254,18 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-memory-item]')?.textContent.includes('已停用')`, 'editorial-memory-inactive');
     await waitForMemoryControl(`Array.from(document.querySelector('[data-memory-item]')?.querySelectorAll('button') ?? []).find(button=>button.textContent==='排除本书')`, 'editorial-memory-exclude-book-ready');
     await assertRenderer(renderer, `(() => { const button=Array.from(document.querySelector('[data-memory-item]').querySelectorAll('button')).find(button=>button.textContent==='排除本书'); if(!button || button.disabled)return false; button.click();return true; })()`, 'editorial-memory-exclude-book');
-    await waitFor(renderer, `document.querySelector('[data-editorial-memory] details')?.textContent.includes('已排除')`, 'editorial-memory-excluded');
+    await waitFor(renderer, `(() => {
+      const exclusions = Array.from(document.querySelectorAll('[data-editorial-memory] details'))
+        .find(panel => panel.querySelector(':scope > summary')?.textContent === '学习排除范围');
+      return exclusions?.textContent.includes('已排除');
+    })()`, 'editorial-memory-excluded');
     await waitForMemoryControl(`document.querySelector('[data-learning-enabled]')`, 'editorial-memory-switch-ready', true);
     await assertRenderer(renderer, `(() => { const input=document.querySelector('[data-learning-enabled]'); if(!(input instanceof HTMLInputElement)||!input.checked||input.disabled)return false;input.click();return true; })()`, 'editorial-memory-switch-off');
     await waitFor(renderer, `document.querySelector('[data-learning-enabled]')?.checked === false && document.querySelector('[data-learning-enabled]')?.disabled === false`, 'editorial-memory-switch-off-saved');
 
     at('learning-ask-frequency');
+    // The 关闭 proof above changed the persisted setting; the default it read there is restored so the control reads it again.
+    await renderer.evaluate(`window.ai7.savePreference({key:'learning.askFrequency',value:'occasionally'})`);
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'learning-frequency-settings');
     await waitFor(renderer, `document.querySelector('[data-settings-group="editorial"] [data-learning-ask-frequency]')?.disabled === false`, 'learning-frequency-ready');
     await assertRenderer(renderer, `(() => { const select=document.querySelector('[data-learning-ask-frequency]'); return select.value==='occasionally' && Array.from(select.options,option=>option.textContent).join('/')==='经常/偶尔/关闭'; })()`, 'learning-frequency-default');
@@ -3271,6 +3282,186 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-memory-item]')?.textContent.includes('已停用') && document.querySelector('[data-learning-enabled]')?.checked === false`, 'editorial-memory-restart-state');
     const restartedMemory = await renderer.evaluate(`window.ai7.inspectEditorialLearning({signalOffset:0,itemOffset:0}).then(page => ({enabled:page.enabled,excluded:page.excludedBooks.some(book=>book.bookId===${JSON.stringify(createdMemory.bookId)}),history:page.items[0].history.map(version=>version.activation),itemId:page.items[0].current.itemId,usable:page.items[0].usable}))`);
     requireJourney(!restartedMemory.enabled && restartedMemory.excluded && !restartedMemory.usable && restartedMemory.itemId === createdMemory.itemId && JSON.stringify(restartedMemory.history) === JSON.stringify(['active','inactive']), 'editorial-memory-persisted');
+
+    // C0 keeps the /1 proof above. Source setup reuses the already admitted J-04 review fixture unchanged;
+    // development-ci v29 legacy profiles still admit no preference payload, and no model request is made by memory governance.
+    at('editorial-memory-governance');
+    await waitForMemoryControl(`document.querySelector('[data-learning-enabled]')`, 'memory-governance-enable-ready', false);
+    await assertRenderer(renderer, `(() => { const input=document.querySelector('[data-learning-enabled]'); if(!(input instanceof HTMLInputElement)||input.checked||input.disabled)return false;input.click();return true; })()`, 'memory-governance-enable');
+    await waitFor(renderer, `document.querySelector('[data-learning-enabled]')?.checked === true && document.querySelector('[data-learning-enabled]')?.disabled === false`, 'memory-governance-enabled');
+    await close(); modelFixtureIdentity = 'sample1-review-authored'; await launch();
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'memory-governance-source-launch');
+    const memorySourceBook = await importSample1(renderer, '编辑记忆来源旅程', sample1, 'memory-governance-source', true);
+    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'memory-governance-profile-ready');
+    await click(renderer, '审阅并为本图书启用 Revision 2', 'memory-governance-profile-enable');
+    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision === '2'`, 'memory-governance-profile-enabled');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('review')), 'memory-governance-review');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-review"] [data-review-action="new-review"]')`, 'memory-governance-review-ready');
+    await clickSelector(renderer, '[data-review-action="new-review"]', 'memory-governance-review-new');
+    await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open === true`, 'memory-governance-review-sheet');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); sheet.querySelector('input[name="review-category"][value="typos-and-usage"]').click(); sheet.querySelector('input[name="review-scope"][value="whole"]').click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(prepare.disabled)return false; prepare.click();return true; })()`, 'memory-governance-review-prepare');
+    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState === 'prepared'`, 'memory-governance-review-prepared', 120_000);
+    await clickSelector(renderer, '[data-review-action="view-plan"]', 'memory-governance-review-plan');
+    await waitFor(renderer, `document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled === false`, 'memory-governance-review-start-ready');
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'memory-governance-review-start');
+    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState === 'settled'`, 'memory-governance-review-settled', 180_000);
+    const memorySources = await renderer.evaluate(`(async () => { const run=(await window.ai7.inspectReviewWorkspace()).run; const findings=run.findings.filter(finding=>finding.categoryId==='typos-and-usage' && finding.markId!==null).slice(0,2); if(findings.length!==2)return null; for(const finding of findings) await window.ai7.recordChangeSuggestionDecision({manuscriptId:run.manuscript.manuscriptId,branchId:run.manuscript.branchId,windowStartBlockId:finding.blockId,markId:finding.markId,clientDecisionId:crypto.randomUUID(),disposition:'accepted-with-edit',editedText:'合成编辑记忆来源修订',reason:'保留有意的表达节奏'}); const page=await window.ai7.inspectEditorialLearning({signalOffset:0,itemOffset:0}); return {ids:page.signals.filter(signal=>signal.source.bookId===${JSON.stringify(memorySourceBook)} && signal.memoryCandidate?.editorialDimension==='typos-and-usage').map(signal=>signal.signalId),influence:run.influence.length}; })()`);
+    requireJourney(memorySources?.ids?.length === 2 && memorySources.influence === 0, 'memory-governance-real-sources');
+    const openMemory = async (name) => {
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), `${name}-knowledge`);
+      await click(renderer, '社级编辑记忆', `${name}-tab`);
+      await waitFor(renderer, `document.querySelector('[data-memory-candidate-form]') && document.querySelector('[data-learning-enabled]')?.disabled === false`, `${name}-ready`);
+    };
+    const createCandidate = async (title, name) => {
+      await assertRenderer(renderer, `(() => { for(const id of ${JSON.stringify(memorySources.ids)}) { const checkbox=document.querySelector('[data-memory-source="'+id+'"]'); if(!(checkbox instanceof HTMLInputElement)||checkbox.disabled)return false; if(!checkbox.checked)checkbox.click(); }return true; })()`, `${name}-select`);
+      await fill(renderer, '[data-memory-candidate-form] [name="candidate-title"]', title, `${name}-title`);
+      await clickSelector(renderer, '[data-memory-candidate-form] button[type="submit"]', `${name}-create`);
+      await waitFor(renderer, `Array.from(document.querySelectorAll('[data-memory-item]')).some(item=>item.textContent.includes(${JSON.stringify(title)}) && item.textContent.includes('待接受')) && document.querySelector('[data-learning-enabled]')?.disabled === false`, `${name}-proposed`);
+      const itemId = await renderer.evaluate(`window.ai7.inspectEditorialLearning({signalOffset:0,itemOffset:0}).then(page=>page.items.find(item=>item.current.schema==='ai7.global-editorial-memory/2' && item.current.title===${JSON.stringify(title)}).current.itemId)`);
+      await assertRenderer(renderer, `(() => {const item=document.querySelector('[data-memory-item="${itemId}"]');const button=Array.from(item.querySelectorAll('button')).find(button=>button.textContent==='接受记忆');if(!button||button.disabled)return false;button.click();return true;})()`, `${name}-accept`);
+      await waitFor(renderer, `document.querySelector('[data-memory-item="${itemId}"]')?.textContent.includes('已启用') && document.querySelector('[data-learning-enabled]')?.disabled === false`, `${name}-active`);
+      return itemId;
+    };
+    await openMemory('memory-governance-local');
+    const firstGovernedMemory = await createCandidate('合成记忆：保持术语一致。', 'memory-governance-first');
+    const secondGovernedMemory = await createCandidate('合成记忆：保留表达节奏。', 'memory-governance-second');
+    const lineOwners = await renderer.evaluate(`window.ai7.inspectHouseReviewPreference().then(page=>page.current.lines.filter(line=>line.owner?.kind==='editorial-memory').map(line=>line.owner.itemId))`);
+    requireJourney(lineOwners.includes(firstGovernedMemory) && lineOwners.includes(secondGovernedMemory) && new Set(lineOwners).size === lineOwners.length, 'memory-governance-distinct-lines');
+    const governMemory = async (ids, operation, text, effect, name) => {
+      // renderGlobalAgent awaits leaving the workbench before it remounts, so a second navigation would expose the old form meanwhile.
+      if (await renderer.evaluate(`document.querySelector('[data-global-agent="destination"]')?.isConnected === true`) !== true) {
+        await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('global-agent')), `${name}-global`);
+      }
+      // The destination mounts its form before its projection loads: wait for this projection's exact targets and category.
+      await waitFor(renderer, `(() => { const form=document.querySelector('[data-global-agent-governance]'); const root=form?.closest('[data-global-agent]'); return form?.querySelector('[data-global-agent-save]')?.disabled === false && Array.from(form.querySelectorAll('select')).some((select)=>select.value==='typos-and-usage') && ${JSON.stringify(ids)}.every((id)=>root?.querySelector('[data-global-agent-item="'+id+'"]') instanceof HTMLInputElement); })()`, `${name}-ready`);
+      await assertRenderer(renderer, `(() => {for(const id of ${JSON.stringify(ids)}) {const checkbox=document.querySelector('[data-global-agent-item="'+id+'"]');if(!(checkbox instanceof HTMLInputElement))return false;checkbox.click();}return true;})()`, `${name}-targets`);
+      await choose(renderer, '[data-global-agent-operation]', operation, `${name}-operation`);
+      if (operation === 'supervise') await choose(renderer, '[data-global-agent-effect]', effect, `${name}-effect`);
+      await fill(renderer, '[data-global-agent-text]', text, `${name}-text`);
+      await clickSelector(renderer, '[data-global-agent-save]', `${name}-save`);
+      // Saved only once the answer's own projection shows the new directive, not when the earlier form is merely idle again.
+      await waitFor(renderer, `document.querySelector('[data-global-agent-save]')?.disabled === false && document.querySelector('[data-global-agent-text]')?.value === '' && Array.from(document.querySelectorAll('[data-global-agent] p')).some((line)=>line.textContent.includes(' · ' + ${JSON.stringify(text)} + ' · ')) `, `${name}-saved`);
+    };
+    await governMemory([firstGovernedMemory], 'correct', '合成记忆：统一术语并保留作者节奏。', 'guide', 'memory-governance-correct');
+    await governMemory([firstGovernedMemory, secondGovernedMemory], 'merge', '合成记忆：统一术语，保留节奏。', 'guide', 'memory-governance-merge');
+    const mergedMemoryId = await renderer.evaluate(`window.ai7.inspectGlobalAgent().then(page=>page.items.find(item=>item.kind==='memory' && item.state==='active').itemId)`);
+    requireJourney(mergedMemoryId !== firstGovernedMemory && mergedMemoryId !== secondGovernedMemory, 'memory-governance-merged-owner');
+    await governMemory([mergedMemoryId], 'supervise', '冻结这条合成记忆。', 'freeze', 'memory-governance-freeze');
+    await openMemory('memory-governance-return');
+    const deactivatedMemoryId = await createCandidate('合成记忆：仅供停止使用回归。', 'memory-governance-third');
+    await assertRenderer(renderer, `(() => {const item=document.querySelector('[data-memory-item="${deactivatedMemoryId}"]');const button=Array.from(item.querySelectorAll('button')).find(button=>button.textContent==='停用');if(!button||button.disabled)return false;button.click();return true;})()`, 'memory-governance-deactivate');
+    await waitFor(renderer, `document.querySelector('[data-memory-item="${deactivatedMemoryId}"]')?.textContent.includes('已停用') && document.querySelector('[data-learning-enabled]')?.disabled === false`, 'memory-governance-inactive');
+    // returnToLibrary finishes with initializeStartup: only its landing list proves the leave before the page is reopened.
+    await backToLibrary(renderer, 'memory-governance-leave');
+    await openMemory('memory-governance-reopen');
+    await waitFor(renderer, `document.querySelector('[data-memory-item="${mergedMemoryId}"]')?.textContent.includes('已冻结') && document.querySelector('[data-memory-item="${deactivatedMemoryId}"]')?.textContent.includes('已停用')`, 'memory-governance-reopened-state');
+    await close(); await launch();
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'memory-governance-restart');
+    await openMemory('memory-governance-restarted');
+    const governedRestart = await renderer.evaluate(`window.ai7.inspectEditorialLearning({signalOffset:0,itemOffset:0}).then(page=>({frozen:page.items.find(item=>item.current.itemId===${JSON.stringify(mergedMemoryId)})?.current.state,inactive:page.items.find(item=>item.current.itemId===${JSON.stringify(deactivatedMemoryId)})?.current.state,legacy:page.items.find(item=>item.current.itemId===${JSON.stringify(createdMemory.itemId)})?.history.map(version=>version.activation)}))`);
+    requireJourney(governedRestart.frozen === 'frozen' && governedRestart.inactive === 'inactive' && JSON.stringify(governedRestart.legacy) === JSON.stringify(['active','inactive']), 'memory-governance-restart-persisted');
+
+    // Word local retention is a separate source family. Keep every preceding C0 assertion and compare its real owners again.
+    at('word-local-source-inspection');
+    const c0BeforeWord = await renderer.evaluate(`window.ai7.inspectEditorialLearning({signalOffset:0,itemOffset:0}).then(page=>({enabled:page.enabled,items:JSON.stringify(page.items.map(item=>item.current))}))`);
+    requireJourney(c0BeforeWord.enabled === true, 'word-current-learning-enabled');
+    const wordPath = resolve(runRoot, 'word-source-detail.docx');
+    const escapeWord = (text) => text.replace(/&/gu, '&amp;').replace(/</gu, '&lt;').replace(/>/gu, '&gt;').replace(/"/gu, '&quot;');
+    const wordText = escapeWord(await admittedSpanText(ADMITTED_BASELINE_DOCX, { block: 9, from: 0, to: 5 }));
+    const moveParagraphs = (kind) => Array.from({ length: 24 }, (_, index) => `<w:p><w:${kind} w:id="${(kind === 'moveFrom' ? 1000 : 2000) + index}" w:author="原作者${index}" w:date=""><w:r>` +
+      (kind === 'moveFrom' ? `<w:delText>${wordText}</w:delText>` : `<w:t>${wordText}</w:t>`) + `</w:r></w:${kind}></w:p>`).join('');
+    const wordBody = '<w:moveFromRangeStart w:id="1" w:name="named-move"/>' + moveParagraphs('moveFrom') +
+      '<w:moveFromRangeEnd w:id="1"/>' + `<w:p><w:r><w:t>${wordText}</w:t></w:r></w:p>` +
+      '<w:moveToRangeStart w:id="2" w:name="named-move"/>' + moveParagraphs('moveTo') + '<w:moveToRangeEnd w:id="2"/>';
+    await writeFile(wordPath, zipSync({
+      '[Content_Types].xml': [strToU8('<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/></Types>'), { mtime: fixedArchiveTime() }],
+      '_rels/.rels': [strToU8('<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rDoc" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>'), { mtime: fixedArchiveTime() }],
+      'docProps/core.xml': [strToU8('<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>001 Word 来源详情</dc:title></cp:coreProperties>'), { mtime: fixedArchiveTime() }],
+      'word/document.xml': [strToU8(`<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${wordBody}</w:body></w:document>`), { mtime: fixedArchiveTime() }],
+    }, { mtime: fixedArchiveTime() }));
+    await close(); await launch({ pickerPath: wordPath });
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'word-import-landing');
+    await click(renderer, '导入稿件', 'word-import-stage');
+    await waitFor(renderer, `document.querySelector('[data-import-target-choice="new-book"]')`, 'word-import-target');
+    await assertRenderer(renderer, `(() => { const input=document.querySelector('[data-import-target-choice="new-book"]'); if(!(input instanceof HTMLInputElement)||input.checked)return false;input.click();return true;})()`, 'word-import-new-book');
+    await waitFor(renderer, `document.querySelector('[data-import-relationship="first-manuscript"]')`, 'word-import-relationship');
+    await assertRenderer(renderer, `(() => { const input=document.querySelector('[data-import-relationship="first-manuscript"]'); if(!(input instanceof HTMLInputElement)||input.checked)return false;input.click();return true;})()`, 'word-import-first-manuscript');
+    await waitFor(renderer, `document.querySelector('[data-word-import-controls="ready"] [data-word-learn-from-edits]')?.checked === true`, 'word-learning-default-visible');
+    await click(renderer, '确认书名并复核', 'word-import-prepare');
+    await waitFor(renderer, `document.querySelector('[data-word-reviewed-mode="suggestions"][data-word-reviewed-learning="true"]')`, 'word-import-reviewed');
+    await click(renderer, '新建图书并导入稿件', 'word-import-commit');
+    await waitFor(renderer, `document.querySelector('[data-screen="imported"]') && document.documentElement.dataset.ai7ImportCompletionAcknowledged === 'true'`, 'word-imported');
+    const wordSignal = await renderer.evaluate(`window.ai7.inspectEditorialLearning({signalOffset:0,itemOffset:0}).then(page=>page.signals.find(signal=>signal.kind==='word-tracked-edit'))`);
+    requireJourney(wordSignal?.currentEligibility === 'house' && wordSignal.memoryCandidate === null && !Object.hasOwn(wordSignal.source, 'decisionId'), 'word-distinct-source-currentness');
+    await openMemory('word-memory-source');
+    const wordRow = `[data-learning-signal="${wordSignal.signalId}"]`;
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(wordRow)})?.textContent.includes('尚未用于编辑记忆、审阅偏好或模型任务')`, 'word-pending-consumer-words');
+    await assertRenderer(renderer, `!document.querySelector(${JSON.stringify(`${wordRow} [data-memory-source], ${wordRow} form`)})`, 'word-no-memory-create-affordance');
+    await click(renderer, '查看完整 Word 修改对', 'word-open-full-detail');
+    await waitFor(renderer, `document.querySelector('[data-word-detail-page] > article')`, 'word-full-detail-ready');
+    const readWordPage = () => renderer.evaluate(`(() => { const host=document.querySelector('[data-word-detail-page]'); const items=Array.from(host?.children??[]);return {count:items.length,signature:JSON.stringify(items.map(item=>[item.dataset.wordDetailSection,item.dataset.wordDetailOrdinal,item.dataset.wordDetailField,item.dataset.wordDetailStart])),more:document.querySelector('[data-learning-action="word-detail-next"]')?.disabled===false};})()`);
+    const wordPages = new Set();
+    for (;;) {
+      const page = await readWordPage();
+      requireJourney(page.count > 0 && page.count <= 40 && !wordPages.has(page.signature), 'word-detail-page-replaced-and-progresses'); wordPages.add(page.signature);
+      if (!page.more) break;
+      await clickSelector(renderer, '[data-learning-action="word-detail-next"]', 'word-detail-next');
+      await waitFor(renderer, `JSON.stringify(Array.from(document.querySelector('[data-word-detail-page]')?.children??[],item=>[item.dataset.wordDetailSection,item.dataset.wordDetailOrdinal,item.dataset.wordDetailField,item.dataset.wordDetailStart]))!==${JSON.stringify(page.signature)}`, 'word-detail-next-page');
+    }
+    requireJourney(wordPages.size > 3, 'word-complete-detail-traversal');
+    await clickSelector(renderer, '[data-learning-action="word-detail-source"]', 'word-retained-source-link');
+    await waitFor(renderer, `document.querySelector('.record-detail[data-record-kind="source"]')?.textContent.includes(${JSON.stringify(wordSignal.source.sourceVersionId)})`, 'word-retained-source-exact');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('quality')), 'word-materials-open');
+    await clickSelector(renderer, '#quality-tab-learning', 'word-materials-tab');
+    const wordMaterial = `[data-material-key="${wordSignal.source.materialKey}"]`;
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${wordMaterial} [data-learning-action="open"]`)})`, 'word-material-card');
+    await clickSelector(renderer, `${wordMaterial} [data-learning-action="open"]`, 'word-material-inspect');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(wordMaterial)})?.textContent.includes('当前默认纳入本机学习；没有人工纳入决定')`, 'word-actual-automatic-basis');
+    await assertRenderer(renderer, `!document.querySelector(${JSON.stringify(`${wordMaterial} input[value="book"], ${wordMaterial} input[value="house"]`)})`, 'word-no-human-inclusion-affordance');
+    await assertRenderer(renderer, `(() => { const input=document.querySelector(${JSON.stringify(`${wordMaterial} input[value="excluded"]`)}); if(!(input instanceof HTMLInputElement)||input.disabled)return false;input.click();return input.checked;})()`, 'word-exclusion-select');
+    await clickSelector(renderer, `${wordMaterial} [data-learning-action="record"]`, 'word-exclusion-record');
+    await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent === '学习准入决定已记录。' && document.querySelector(${JSON.stringify(`${wordMaterial} [data-learning-action="open"]`)})`, 'word-exclusion-recorded');
+    await clickSelector(renderer, `${wordMaterial} [data-learning-action="open"]`, 'word-exclusion-reinspect');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(wordMaterial)})?.textContent.includes('当前已排除学习')`, 'word-current-exclusion');
+    await clickSelector(renderer, `${wordMaterial} [data-learning-action="word-detail"]`, 'word-excluded-historical-inspection');
+    await waitFor(renderer, `document.querySelector('[data-word-detail-page] > article')`, 'word-excluded-detail-readable');
+    await clickSelector(renderer, '#quality-tab-audit', 'word-audit-tab');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${wordMaterial} [data-learning-audit-action="open"]`)})`, 'word-audit-row');
+    await clickSelector(renderer, `${wordMaterial} [data-learning-audit-action="open"]`, 'word-audit-lineage');
+    await waitFor(renderer, `document.querySelector('.learning-lineage')?.textContent.includes('Word 原始修改对尚未用于编辑记忆、审阅偏好或模型任务')`, 'word-audit-pending-consumer');
+    const wordAfter = await renderer.evaluate(`Promise.all([window.ai7.inspectEditorialLearning({signalOffset:0,itemOffset:0}),window.ai7.inspectLearningLineage({bookId:${JSON.stringify(wordSignal.source.bookId)},materialKey:${JSON.stringify(wordSignal.source.materialKey)}})]).then(([page,lineage])=>({items:JSON.stringify(page.items.map(item=>item.current)),standing:page.signals.find(signal=>signal.signalId===${JSON.stringify(wordSignal.signalId)})?.currentEligibility,downstream:lineage.downstream}))`);
+    requireJourney(wordAfter.items === c0BeforeWord.items && wordAfter.standing === 'excluded' &&
+      JSON.stringify(wordAfter.downstream) === JSON.stringify({ signals: 0, memoryCandidates: 0, activeMemories: 0, tasks: 0 }), 'word-preserves-c0-memory-owners-and-counts');
+    // Only that actual exclusion offers the existing explicit re-inclusion; it appends one decision and survives a reopen.
+    await clickSelector(renderer, '.learning-lineage [data-learning-audit-action="reinclude"]', 'word-audit-reinclude-open');
+    const wordReincluding = await readAudit(renderer, (page) => page.reinclude !== null, 'word-audit-reinclude-card');
+    requireJourney(JSON.stringify(wordReincluding.reinclude.choices) === JSON.stringify([['book', false], ['house', false]]) &&
+      wordReincluding.reinclude.record === false, 'word-audit-reinclude-explicit-choices', wordReincluding.reinclude);
+    await tick(renderer, '.learning-reinclude input[value="house"]', 'word-audit-reinclude-house');
+    await readAudit(renderer, (page) => page.reinclude?.record === true, 'word-audit-reinclude-chosen');
+    await clickSelector(renderer, '.learning-reinclude [data-learning-audit-action="reinclude-record"]', 'word-audit-reinclude-record');
+    await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent === '学习准入决定已记录。'`, 'word-audit-reinclude-status');
+    const wordHistory = JSON.stringify([['current', '纳入出版社经验'], ['superseded', '明确排除']]);
+    // An explicit house re-inclusion is a human decision; the standing line must not call it the default.
+    const wordDecidedLine = "document.querySelector('.learning-lineage')?.textContent.includes('当前按人工决定纳入本机学习。') && !document.querySelector('.learning-lineage')?.textContent.includes('没有人工纳入决定')";
+    const wordRestored = await readAudit(renderer, (page) => page.lineage?.decisions.length === 2 && page.reinclude === null, 'word-audit-reincluded');
+    requireJourney(wordRestored.lineage.standing === 'house' && JSON.stringify(wordRestored.lineage.decisions.map(([state, , choice]) => [state, choice])) === wordHistory,
+      'word-audit-reincluded-history', wordRestored.lineage);
+    await assertRenderer(renderer, wordDecidedLine, 'word-audit-reincluded-decided-standing-line');
+    await close(); await launch({ pickerPath: wordPath });
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'word-restored-reopen');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('quality')), 'word-restored-quality-open');
+    await clickSelector(renderer, '#quality-tab-audit', 'word-restored-audit-tab');
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`${wordMaterial} [data-learning-audit-action="open"]`)})`, 'word-restored-audit-row');
+    await clickSelector(renderer, `${wordMaterial} [data-learning-audit-action="open"]`, 'word-restored-audit-lineage');
+    const wordReopened = await readAudit(renderer, (page) => page.lineage?.key === wordSignal.source.materialKey && page.lineage.decisions.length === 2, 'word-restored-reopened-lineage');
+    requireJourney(wordReopened.lineage.standing === 'house' && JSON.stringify(wordReopened.lineage.decisions.map(([state, , choice]) => [state, choice])) === wordHistory,
+      'word-restored-history-after-reopen', wordReopened.lineage);
+    await assertRenderer(renderer, wordDecidedLine, 'word-restored-decided-standing-line-after-reopen');
+    const wordRestoredAfter = await renderer.evaluate(`Promise.all([window.ai7.inspectEditorialLearning({signalOffset:0,itemOffset:0}),window.ai7.inspectLearningLineage({bookId:${JSON.stringify(wordSignal.source.bookId)},materialKey:${JSON.stringify(wordSignal.source.materialKey)}})]).then(([page,lineage])=>({items:JSON.stringify(page.items.map(item=>item.current)),words:page.signals.filter(signal=>signal.kind==='word-tracked-edit').map(signal=>[signal.signalId,signal.currentEligibility]),downstream:lineage.downstream}))`);
+    requireJourney(wordRestoredAfter.items === c0BeforeWord.items &&
+      JSON.stringify(wordRestoredAfter.words) === JSON.stringify([[wordSignal.signalId, 'house']]) &&
+      JSON.stringify(wordRestoredAfter.downstream) === JSON.stringify({ signals: 0, memoryCandidates: 0, activeMemories: 0, tasks: 0 }), 'word-restore-no-new-capture-or-downstream');
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');

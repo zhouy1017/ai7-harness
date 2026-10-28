@@ -1,3 +1,7 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
+import { capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
+import { BASELINE_PROMPT_CONTRACT_DIGEST, parseUnitMessageHeader, unitRequestDigest } from '../../src/service/analysis/contract.js';
+import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/assurance-sampling-contract.js';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
@@ -7,7 +11,7 @@ import { BaselineAnalysisExecutionOwner, OUTCOME_UNKNOWN_CARRIED, OUTCOME_UNKNOW
 import { RECONCILED_RESUMABLE_DETAIL } from '../../src/service/analysis/baseline-analysis-store.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { resendDisclosure } from '../../src/service/task-plan.js';
-import { ModelFixtureError, fixtureEntryKey, loadLaunchFixture, loadModelFixture, outcomeUnknownFixtureAllowed, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
+import { ModelFixtureError, fixtureEntryKey, resolveFixtureEntry, loadLaunchFixture, loadModelFixture, outcomeUnknownFixtureAllowed, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { LOCAL_DETERMINISTIC_ROUTE } from '../../src/service/provider/egress-gate.js';
 import { QUICK_START_RESEND } from '../../src/service/default-execution-rules.js';
 import { BACKGROUND_OUTCOME_UNKNOWN } from '../../src/service/background-analysis-enrollments.js';
@@ -16,6 +20,12 @@ import { EditorialStore, StoreError, type BackgroundAnalysisRuntime } from '../.
 import { BASELINE_ANALYSIS_MODE_GOALS, BASELINE_ANALYSIS_TASK_GOAL, FACTUAL_REVIEW_TASK_GOAL, type BaselineAnalysisProjection, type BaselineAnalysisUpdateMode, type LaunchPolicyProjection } from '../../src/shared/protocol.js';
 import { SAMPLE1_UNITS, importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for 结果待确认 (Issue #51, plan slice S16c; V2-UX-CTRL-007, COPY-009, CONT-011, CONT-016; ADR
 // 0034): the real store on a temporary Agent Data Root, exact `sample1` imported through the supported path, and J-04's
@@ -55,7 +65,7 @@ function openWithRoute(): Promise<EditorialStore> {
 }
 
 function owner(store: EditorialStore): BaselineAnalysisExecutionOwner {
-  return new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+  return new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
 }
 
 function prepare(store: EditorialStore, bookId: string): BaselineAnalysisProjection {
@@ -101,6 +111,7 @@ async function pausedHoldingUnit4(store: EditorialStore, title: string): Promise
   const runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!;
   let turns = 0;
   const held: BaselineAnalysisExecutionOwner = new BaselineAnalysisExecutionOwner({
+    requestGovernor,
     ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null },
     unitHold: async () => {
       turns += 1;
@@ -340,6 +351,7 @@ describe('结果待确认 over the real store', () => {
     };
     const store = await openWithRoute();
     const execution = new BaselineAnalysisExecutionOwner({
+      requestGovernor,
       ledger: store.factualReviewLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null },
     });
     try {
@@ -419,13 +431,12 @@ describe('per-unit unknown after completion', () => {
 
   it('never counts a Task\'s own Run against its plan: a 重新分析全书 that first leaves unit 4 结果待确认 names no re-send (#765 review)', async () => {
     // The happy fixture for the first Task; the second Task's unit 4 answers 结果待确认 on its first send.
-    const unknown4 = [...fixture.entries.values()].find((entry) => entry.unitOrdinal === 4 && entry.response.kind === 'outcome-unknown')!;
     const happy = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-happy');
     fixture = happy;
-    const store = await openWithRoute();
+    let store = await openWithRoute();
+    let storeOpen = true;
     const first = owner(store);
-    fixture = { ...happy, entries: new Map([...happy.entries, [fixtureEntryKey(4, unknown4.requestDigest, 1), unknown4]]) };
-    const second = owner(store);
+    let second: BaselineAnalysisExecutionOwner | undefined;
     try {
       const imported = await importSample1Book(store, roots.codeRoot, 'L2 sample1 自身结果待确认');
       const bookId = imported.bookId;
@@ -435,6 +446,10 @@ describe('per-unit unknown after completion', () => {
       first.admitAndDispatch(store.authorizeBaselineAnalysis(bookId, initial.taskIntent!.taskIntentId, initial.planEnvelope!.digest).dispatchRunRecordId!);
       await first.whenIdle();
       expect(store.inspectBaselineAnalysis(bookId, () => null).resultSetRevision!.gaps).toEqual([]);
+      // Reopen on the actual admitted unknown fixture; never change happy's payload under its admitted hash.
+      await first.dispose(); store.markCleanShutdown(); store.close(); storeOpen = false;
+      fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-outcome-unknown');
+      store = await openWithRoute(); storeOpen = true; second = owner(store);
       const book = prepareUpdate(store, bookId, 'reanalyze-book');
       const taskIntentId = book.taskIntent!.taskIntentId;
       expect(resendOf(store, bookId, taskIntentId)).toBeNull();
@@ -451,18 +466,30 @@ describe('per-unit unknown after completion', () => {
       store.markCleanShutdown();
     } finally {
       await first.dispose();
-      await second.dispose();
-      store.close();
+      await second?.dispose();
+      if (storeOpen) store.close();
     }
   }, 300_000);
 
   it('never names an ordinary gap: unit 2 failed for good beside unit 4, and only unit 4 is sent again knowingly', async () => {
     // The one-unit-failure fixture (unit 2 fails for good) with unit 4 answering 结果待确认.
     const failing = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-one-unit-failure');
-    const unknown4 = [...fixture.entries.values()].find((entry) => entry.unitOrdinal === 4 && entry.response.kind === 'outcome-unknown')!;
-    fixture = { ...failing, entries: new Map([...failing.entries, [fixtureEntryKey(4, unknown4.requestDigest, 1), unknown4]]) };
-    const store = await openWithRoute();
-    const execution = owner(store);
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { baselineAnalysisRoute: null,
+      induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
+      induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false });
+    const captured = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, requestGovernor, (request, message) => {
+      const header = parseUnitMessageHeader(message);
+      if (request.stage === 'units' && header !== null) return header.ordinal === 4
+        ? { kind: 'outcome-unknown', message: '合成：已接受的回答没有完整传回。' }
+        : resolveFixtureEntry(failing.entries, header.ordinal, unitRequestDigest(BASELINE_PROMPT_CONTRACT_DIGEST, header.ordinal, header.unitDigest), request.attemptIndex)?.response;
+      const content = request.stage === 'cross-unit-reduction' ? { schema: 'ai7.baseline-manuscript-analysis.cross-unit-result/1', findings: [] }
+        : request.stage === 'assurance-sampling' ? { schema: 'ai7.analysis.assurance-sampling-result/1', dispositions: parseAssuranceSamplingListedRefs(message)
+          .map((ref) => ({ ref, disposition: '成立', reason: '合成回归抽样。' })) }
+          : request.stage === 'run-report-reflection' ? { schema: 'ai7.analysis.run-report-reflection-result/1', items: [] } : null;
+      return content === null ? undefined : { kind: 'unit-result', text: JSON.stringify(content), usage: { inputTokens: 10, outputTokens: 5 } };
+    });
+    launchPolicy = captured.policy;
+    const execution = captured.owner;
     try {
       const { bookId } = await cancelledHoldingUnit4(store, execution, 'L2 sample1 结果待确认与失败');
       expect(store.inspectBaselineAnalysis(bookId, () => null).resultSetRevision?.gaps.map((gap) => [gap.unitOrdinal, gap.code]))
@@ -474,7 +501,7 @@ describe('per-unit unknown after completion', () => {
       store.markCleanShutdown();
     } finally {
       await execution.dispose();
-      store.close();
+      try { captured.assertMatched(); } finally { store.close(); }
     }
   }, 300_000);
 
@@ -616,6 +643,7 @@ describe('结果待确认 carried forward', () => {
       const runRecordId = store.authorizeBaselineAnalysis(bookId, sync.taskIntent!.taskIntentId, sync.planEnvelope!.digest).dispatchRunRecordId!;
       let turns = 0;
       const held: BaselineAnalysisExecutionOwner = new BaselineAnalysisExecutionOwner({
+        requestGovernor,
         ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null },
         unitHold: async () => {
           turns += 1;

@@ -3,14 +3,33 @@ import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import type {
   ChangeEditorialLearningInput, CreateEditorialMemoryInput, DeactivateEditorialMemoryInput,
   EditorialLearningProjection, GlobalEditorialMemoryVersion, InspectEditorialLearningInput,
-  LearningSignal, LearningSignalStanding, LearningSourceReference,
+  LearningSignal, DecisionLearningSignal, WordTrackedEditLearningSignal, WordTrackedEditLearningSource, ManualEditLearningSignal, ManualCommandSource,
+  LearningSignalStanding, LearningSourceReference, EditorialMemoryVersion, EditorialMemorySourceSnapshot,
+  LearningCurationBundle, LearningCurationSource, QualifiedLearningExample, LearningExampleText,
+  EnabledLearningEnvelope,
+  EditorialMemoryApplicability, EditorialMemoryAdmission, AcceptEditorialMemoryInput,
+  LearningReasonAskInput, LearningReasonAskProjection, LearningReasonAskFrequency, PreferenceAdoptionProjection, PreferenceAdoptionCursor, ReferencedRuleVersion,
 } from '../../shared/protocol/learning.js';
-import { canonicalJson, canonicalRecord, sha256Hex } from '../analysis/canonical.js';
+import { LEARNING_REASON_OPTIONS } from '../../shared/protocol/learning.js';
+import { MAX_FRAME_BYTES, type TrustedOperationalScope, type LearningSupervisionDirective, type GlobalMemoryPin, type LearningEligibilityChoice } from '../../shared/protocol.js';
+import { reviewCategoryEntry } from '../review/category-configuration.js';
+import { graphemesOf } from '../../shared/mark-anchor.js';
+import { canonicalJson, canonicalRecord, isRecord, hasExactKeys, sha256Hex, UUID_PATTERN, DIGEST_PATTERN } from '../analysis/canonical.js';
 import { BookPeople } from '../book-people.js';
 import { DecisionFeedbackLedger } from '../decision-feedback.js';
 import { graphemeEditVolume } from '../edit-quality-signals.js';
-import { LearningEligibilityError, LearningEligibilityLedger, LOCAL_LEARNING_POLICY_BASIS,
-  learningMaterialDigest, proposalDecisionCandidate, reviewDispositionCandidate, type LearningMaterialCandidate } from '../learning-eligibility.js';
+import { LearningEligibilityError, LearningEligibilityLedger, LOCAL_LEARNING_POLICY_BASIS, LEARNING_ELIGIBILITY_POLICY_BASIS,
+  learningMaterialDigest, manualEditCandidate, proposalDecisionCandidate, reviewDispositionCandidate, wordTrackedEditCandidate, wordLocalImportAdmissions,
+  type LearningMaterialCandidate } from '../learning-eligibility.js';
+import { readWordParentSourcePin, wordParentSourcePinRecord, requireWordRevisionSource, wordTemplateKey,
+  wordTrackedSampleRecord, wordTrackedSamples, WORD_EXTRACTOR_IDENTITY,
+  readWordImportChoiceRecord, ImportRetentionError,
+  type WordTrackedEditSample, type WordRevisionGraph, type WordImportChoiceRecord, type WordLocalImportAdmission,
+  type WordImportControlsSnapshot, type WordSampleDetailSource } from '../import-retention.js';
+import { WORD_DOCX_PARSER_IDENTITY, type WordTrackedCompilation } from '../docx.js';
+import type { ManualCommandSourceCursor, ManualCommandSourcePage } from '../bounded-manuscript.js';
+import { boundedCurationExamples, CURATION_CONTRACT, validCurationBudget, type CuratedPreference } from './curation.js';
+import { SupervisionDirectives } from './supervision-directives.js';
 
 type Row = Record<string, SQLOutputValue>;
 const PAGE_SIZE = 30;
@@ -71,7 +90,52 @@ function requireLearning(condition: unknown): asserts condition {
 }
 function read<T>(row: Row): T {
   requireLearning(typeof row.canonical_json === 'string' && sha256Hex(row.canonical_json) === row.sha256);
-  return JSON.parse(row.canonical_json) as T;
+  try { return JSON.parse(row.canonical_json) as T; } catch { throw new LearningEligibilityError('EDITORIAL_LEARNING_INVALID', '学习记录无法读取。'); }
+}
+
+/** Also used for carried historical provenance: shape proof grants no current source authority. */
+export function validateEditorialMemorySourceShape(value: unknown): asserts value is EditorialMemorySourceSnapshot {
+  const keys = (record: Record<string, unknown>, expected: string[]) => Object.keys(record).sort().join(',') === expected.sort().join(',');
+  const bounded = (text: unknown, max = 180) => typeof text === 'string' && text.length > 0 && text.length <= max && text.isWellFormed();
+  if (isRecord(value) && (value.sourceKind === 'manual-edit-journal' || value.sourceKind === 'word-tracked-edit')) {
+    requireLearning(keys(value, ['sourceKind', 'sourceKey', 'feedbackKey', 'signalId', 'source', 'operationalScope', 'editorialDimension',
+      'eligibility', 'admission', 'attribution', 'bookTitle']) && value.editorialDimension === null && value.operationalScope === 'ordinary-production' &&
+      typeof value.signalId === 'string' && UUID_PATTERN.test(value.signalId) && isRecord(value.source) &&
+      typeof value.source.bookId === 'string' && UUID_PATTERN.test(value.source.bookId) && bounded(value.source.materialKey) &&
+      typeof value.source.materialDigest === 'string' && DIGEST_PATTERN.test(value.source.materialDigest) &&
+      value.sourceKey === sha256Hex(canonicalJson(value.source)) && value.feedbackKey === sha256Hex(canonicalJson({
+        bookId: value.source.bookId, materialKey: value.source.materialKey, materialDigest: value.source.materialDigest })) &&
+      (value.eligibility === 'house' || value.eligibility === 'book') && isRecord(value.admission) &&
+      value.admission.materialDigest === value.source.materialDigest && isRecord(value.attribution) && bounded(value.bookTitle, 512));
+    return;
+  }
+  requireLearning(isRecord(value) && keys(value, ['sourceKey', 'feedbackKey', 'signalId', 'source', 'operationalScope', 'editorialDimension', 'eligibility', 'admission', 'attribution', 'bookTitle']) &&
+    typeof value.sourceKey === 'string' && DIGEST_PATTERN.test(value.sourceKey) && typeof value.feedbackKey === 'string' && DIGEST_PATTERN.test(value.feedbackKey) &&
+    typeof value.signalId === 'string' && UUID_PATTERN.test(value.signalId) && ['book', 'house'].includes(String(value.eligibility)) &&
+    ['development-ci', 'developer-live', 'ordinary-production'].includes(String(value.operationalScope)) &&
+    typeof value.editorialDimension === 'string' && reviewCategoryEntry(value.editorialDimension) !== null && bounded(value.bookTitle, 512));
+  const source = value.source;
+  requireLearning(isRecord(source) && keys(source, ['bookId', 'manuscriptId', 'branchId', 'markId', 'decisionId', 'revisionId', 'journalSequence',
+    'blockDigest', 'materialKey', 'materialDigest', 'reasonRevision', 'reviewRunId', 'findingId', 'resultSetRevisionId']) &&
+    ['bookId', 'manuscriptId', 'branchId', 'decisionId', 'revisionId', 'materialKey'].every((key) => bounded(source[key])) &&
+    ['markId', 'reviewRunId', 'findingId', 'resultSetRevisionId'].every((key) => source[key] === null || bounded(source[key])) &&
+    typeof source.materialDigest === 'string' && DIGEST_PATTERN.test(source.materialDigest) &&
+    (source.blockDigest === null || typeof source.blockDigest === 'string' && DIGEST_PATTERN.test(source.blockDigest)) &&
+    [source.journalSequence, source.reasonRevision].every((number) => Number.isSafeInteger(number) && Number(number) >= 0));
+  const attribution = value.attribution;
+  requireLearning(isRecord(attribution) && keys(attribution, ['peopleVersion', 'authors', 'editors']) && Number.isSafeInteger(attribution.peopleVersion) &&
+    Number(attribution.peopleVersion) >= 0 && [attribution.authors, attribution.editors].every((list) => Array.isArray(list) && list.every((entry) => bounded(entry, 512))));
+  const admission = value.admission;
+  requireLearning(isRecord(admission) && admission.materialDigest === source.materialDigest && isRecord(admission.controls) &&
+    keys(admission.controls, ['switchEntryId', 'bookEntryId']) && Object.values(admission.controls).every((id) => id === null || typeof id === 'string' && UUID_PATTERN.test(id)));
+  if (admission.kind === 'explicit') requireLearning(keys(admission, ['kind', 'decisionId', 'ordinal', 'basis', 'materialDigest', 'controls']) &&
+    typeof admission.decisionId === 'string' && UUID_PATTERN.test(admission.decisionId) && Number.isSafeInteger(admission.ordinal) && Number(admission.ordinal) > 0 &&
+    [LOCAL_LEARNING_POLICY_BASIS, LEARNING_ELIGIBILITY_POLICY_BASIS].some((basis) => canonicalJson(basis) === canonicalJson(admission.basis)));
+  else requireLearning(admission.kind === 'automatic' && keys(admission, ['kind', 'basis', 'signalId', 'materialDigest', 'controls']) &&
+    admission.signalId === value.signalId && value.eligibility === 'house' && canonicalJson(admission.basis) ===
+      canonicalJson({ policy: LOCAL_LEARNING_POLICY_BASIS.policy, mode: LOCAL_LEARNING_POLICY_BASIS.mode, version: 2 }));
+  requireLearning(value.sourceKey === sha256Hex(canonicalJson({ signalId: value.signalId, materialDigest: source.materialDigest, reasonRevision: source.reasonRevision })) &&
+    value.feedbackKey === sha256Hex(canonicalJson({ bookId: source.bookId, materialKey: source.materialKey, materialDigest: source.materialDigest })));
 }
 
 /** Add all relations atomically. A partial or malformed interrupted upgrade is refused by the whole-store validator. */
@@ -87,21 +151,202 @@ export function initializeEditorialLearningSchema(db: DatabaseSync): void {
 
 interface Controls { enabled: boolean; entries: number; excludedBooks: Set<string> }
 
+interface LearningControl {
+  curation?: EnabledLearningEnvelope;
+  schema: 'ai7.editorial-learning-control/1';
+  entryId: string; ordinal: number; kind: 'switch' | 'book'; bookId: string | null;
+  value: boolean; actor: 'editor'; recordedAt: string; basis: typeof LOCAL_LEARNING_POLICY_BASIS;
+  importedFrom?: { record: LearningControl; sha256: string };
+}
+
+/** One control as `change` writes it, with the provenance a merge adds. */
+function controlRecord(record: unknown): LearningControl {
+  requireLearning(isRecord(record) && record.schema === 'ai7.editorial-learning-control/1' &&
+    typeof record.entryId === 'string' && record.entryId.length > 0 && Number.isSafeInteger(record.ordinal) && Number(record.ordinal) > 0 &&
+    (record.kind === 'switch' || record.kind === 'book') &&
+    (record.kind === 'book' ? typeof record.bookId === 'string' && record.bookId.length > 0 : record.bookId === null) &&
+    typeof record.value === 'boolean' && record.actor === 'editor' && typeof record.recordedAt === 'string' &&
+    Number.isFinite(Date.parse(record.recordedAt)) && canonicalJson(record.basis) === canonicalJson(LOCAL_LEARNING_POLICY_BASIS));
+  const keys = ['schema', 'entryId', 'ordinal', 'kind', 'bookId', 'value', 'actor', 'recordedAt', 'basis'];
+  if (record.curation !== undefined) {
+    requireLearning(record.kind === 'switch' && record.value === true && isRecord(record.curation) && validCurationBudget(record.curation.budget));
+    keys.push('curation');
+  }
+  if (record.importedFrom !== undefined) keys.push('importedFrom');
+  requireLearning(Object.keys(record).length === keys.length && keys.every((key) => Object.hasOwn(record, key)));
+  return record as unknown as LearningControl;
+}
+
+/**
+ * A carried control embeds its source control whole: the embedded record's canonical JSON is the source row's exact bytes, held
+ * to that row's digest, so the original entry, editor attribution, time, ordinal and any earlier merge provenance stay
+ * verifiable. Embedded as a record rather than as escaped text, each merge adds the source once instead of doubling its escapes.
+ */
+function readControl(row: Row): LearningControl {
+  const record = controlRecord(read<unknown>(row));
+  requireLearning(canonicalJson(record) === row.canonical_json && record.entryId === row.entry_id && record.ordinal === row.ordinal &&
+    record.kind === row.kind && record.bookId === row.book_id && Number(record.value) === row.value && record.recordedAt === row.recorded_at);
+  // Walk rather than recurse: repeated Book merges retain the whole provenance chain without growing the call stack.
+  let current = record;
+  while (current.importedFrom !== undefined) {
+    const origin: unknown = current.importedFrom;
+    requireLearning(current.kind === 'book' && isRecord(origin) && Object.keys(origin).length === 2 && typeof origin.sha256 === 'string');
+    const source = controlRecord(origin.record);
+    requireLearning(sha256Hex(canonicalJson(source)) === origin.sha256 &&
+      canonicalJson(current) === canonicalJson({ ...source, ordinal: current.ordinal, importedFrom: origin }));
+    current = source;
+  }
+  return record;
+}
+
+function* controlHistory(db: DatabaseSync, schema: 'main' | 'src'): Generator<{ row: Row; record: LearningControl }> {
+  let ordinal = 0;
+  for (const row of db.prepare(`SELECT * FROM ${schema}.editorial_learning_controls ORDER BY ordinal`).iterate() as Iterable<Row>) {
+    const record = readControl(row);
+    requireLearning(record.ordinal === ++ordinal);
+    yield { row, record };
+  }
+}
+
+/** Only called inside the database merge transaction, after the selected Books have been inserted with their original IDs. */
+export function importBookLearningControls(db: DatabaseSync, selectedBook: (bookId: string) => boolean): number {
+  let destinationEntries = 0;
+  for (const _entry of controlHistory(db, 'main')) destinationEntries += 1;
+  let imported = 0;
+  const insert = db.prepare('INSERT INTO main.editorial_learning_controls VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+  for (const { row, record } of controlHistory(db, 'src')) {
+    if (record.kind !== 'book' || !selectedBook(record.bookId!)) continue;
+    const ordinal = destinationEntries + ++imported;
+    const carried = canonicalRecord({ ...record, ordinal, importedFrom: { record, sha256: String(row.sha256) } });
+    insert.run(record.entryId, ordinal, record.kind, record.bookId, Number(record.value), record.recordedAt, carried.json, carried.digest);
+  }
+  return imported;
+}
+
+interface WordLearningEvidence {
+  candidate: LearningMaterialCandidate;
+  templateKey: string;
+  admission: WordLocalImportAdmission;
+  recordedAt: string;
+}
+
+/** Historical Word facts only. The store may retain these with one byte-verified, generation-bound source context. */
+export class WordLearningProofs {
+  readonly signals = new Map<string, { readonly sha256: string; readonly signal: WordTrackedEditLearningSignal }>();
+  readonly evidence = new Map<string, WordLearningEvidence>();
+  readonly sources = new Map<string, { graphDigest: string; parentPinDigest: string; events: Set<string> }>();
+  readonly imports = new Map<string, { digest: string; choice: WordImportChoiceRecord;
+    materials: Map<string, WordImportControlsSnapshot['materials'][number]> }>();
+}
+
+/** Parsed historical facts have no cycles; a returned projection must never mutate a retained proof through a shared child. */
+function freezeWordLearningFact(value: unknown): void {
+  if (value === null || typeof value !== 'object' || Object.isFrozen(value)) return;
+  for (const child of Object.values(value)) freezeWordLearningFact(child);
+  Object.freeze(value);
+}
+
+/**
+ * One synchronous read's C0 proofs (Issue #1128 revision 7) remain local to that operation. Only separately validated immutable
+ * Word facts may be copied from the store's one generation-bound source context; controls, standing, decisions, directives,
+ * effective memory sources and every other C0 proof are always read afresh and discarded when the operation returns.
+ */
+export class LearningReads {
+  readonly chains = new Map<string, { readonly fingerprint: string; readonly versions: GlobalEditorialMemoryVersion[] }>();
+  readonly effective = new Map<string, EditorialMemorySourceSnapshot[]>();
+  readonly signals = new Map<string, { readonly sha256: string; readonly signal: LearningSignal }>();
+  readonly origins = new Map<string, { operationalScope: TrustedOperationalScope; editorialDimension: string }>();
+  readonly snapshots = new Set<string>();
+  readonly eligibility = new Map<string, ReturnType<LearningEligibilityLedger['history']>>();
+  readonly publications = new Set<string>();
+  readonly word = new WordLearningProofs();
+  readonly wordSources = this.word.sources;
+  readonly wordImports = this.word.imports;
+  readonly availableWordSources = new Set<string>();
+  controls: Array<{ row: Row; record: LearningControl }> | null = null;
+
+  constructor(word?: WordLearningProofs) { if (word !== undefined) this.useWordProofs(word); }
+
+  /** Copy only immutable Word facts; controls, standing and every C0 proof remain local to this operation. */
+  useWordProofs(facts: WordLearningProofs): void {
+    for (const [key, value] of facts.signals) { this.signals.set(key, value); this.word.signals.set(key, value); }
+    for (const [key, value] of facts.evidence) this.word.evidence.set(key, value);
+    for (const [key, value] of facts.sources) this.wordSources.set(key, value);
+    for (const [key, value] of facts.imports) this.wordImports.set(key, value);
+  }
+}
+
 /** Local capture only: no provider, scheduler, retrieval or composition dependency. The caller owns the transaction. */
 export class EditorialLearningLedger {
-  constructor(readonly db: DatabaseSync) {}
+  #reads: LearningReads | null;
+  constructor(readonly db: DatabaseSync, reads?: LearningReads,
+    readonly requireWordSource?: (source: WordTrackedEditLearningSource) => WordLearningProofs | void,
+    readonly readManualSource?: (source: ManualCommandSource, cursor: ManualCommandSourceCursor | null, budget: number) => ManualCommandSourcePage,
+    readonly readWordExample?: (source: WordTrackedEditLearningSource) => { before: LearningExampleText[]; after: LearningExampleText[] }) { this.#reads = reads ?? null; }
+
+  /** One read inside the caller's validated-result context, or inside one discarded as soon as this read returns. */
+  #read<T>(operation: () => T): T {
+    if (this.#reads !== null) return operation();
+    this.#reads = new LearningReads();
+    try { return operation(); } finally { this.#reads = null; }
+  }
+
+  #controlRows(): Array<{ row: Row; record: LearningControl }> {
+    if (this.#reads === null) return [...controlHistory(this.db, 'main')];
+    return this.#reads.controls ??= [...controlHistory(this.db, 'main')];
+  }
+
+  #eligibilityHistory(bookId: string, materialKey: string): ReturnType<LearningEligibilityLedger['history']> {
+    const key = `${bookId}\u0000${materialKey}`;
+    const known = this.#reads?.eligibility.get(key);
+    if (known !== undefined) return known;
+    const history = new LearningEligibilityLedger(this.db).history(bookId, materialKey);
+    this.#reads?.eligibility.set(key, history);
+    return history;
+  }
 
   controls(): Controls {
     const result: Controls = { enabled: true, entries: 0, excludedBooks: new Set() };
-    for (const row of this.db.prepare('SELECT * FROM editorial_learning_controls ORDER BY ordinal').iterate() as Iterable<Row>) {
-      const record = read<{ entryId: string; ordinal: number; kind: string; bookId: string | null; value: boolean; recordedAt: string }>(row);
-      requireLearning(record.entryId === row.entry_id && record.ordinal === ++result.entries && record.kind === row.kind &&
-        record.bookId === row.book_id && typeof record.value === 'boolean' && Number(record.value) === row.value && record.recordedAt === row.recorded_at);
+    for (const { record } of this.#controlRows()) {
+      result.entries += 1;
       if (record.kind === 'switch') result.enabled = record.value;
       else if (record.value) result.excludedBooks.add(record.bookId!);
       else result.excludedBooks.delete(record.bookId!);
     }
     return result;
+  }
+
+  curationEnvelope(): { entryId: string; envelope: EnabledLearningEnvelope } | null {
+    const record = this.#controlRows().map((row) => row.record).filter((row) => row.kind === 'switch').at(-1);
+    return record?.value === true && record.curation !== undefined ? { entryId: record.entryId, envelope: record.curation } : null;
+  }
+
+  supervisionDigest(): string { return sha256Hex(canonicalJson(new SupervisionDirectives(this.db).history('ordinary-production'))); }
+
+  curationBooks(): string[] {
+    return this.db.prepare('SELECT DISTINCT book_id FROM learning_signals ORDER BY book_id').all().map((row) => String(row.book_id));
+  }
+
+  nextCuration(bookId: string): LearningCurationBundle | null {
+    const rows = this.db.prepare(`SELECT s.* FROM learning_signals s WHERE s.book_id = ? AND NOT EXISTS (
+      SELECT 1 FROM analysis_plan_records p, json_each(p.canonical_json, '$.signalIds') member
+      WHERE p.component = 'run-source-scope' AND json_extract(p.canonical_json, '$.schema') = 'ai7.qualified-learning-curation/1'
+        AND member.value = s.signal_id) ORDER BY s.rowid DESC LIMIT 100`).all(bookId) as Row[];
+    const selected: string[] = [];
+    for (const row of rows) {
+      const signal = this.#provedSignal(row);
+      if (!['book', 'house'].includes(this.#currentEligibility(signal, this.controls()))) continue;
+      if (signal.kind === 'proactive-reason' || signal.kind === 'review-finding-ignored') continue;
+      if (signal.kind === 'word-tracked-edit') {
+        const batch = this.db.prepare(`SELECT * FROM learning_signals WHERE book_id = ? AND
+          json_extract(canonical_json, '$.kind') = 'word-tracked-edit' AND
+          json_extract(canonical_json, '$.source.sourceVersionId') = ? ORDER BY rowid`).all(bookId, signal.source.sourceVersionId) as Row[];
+        return this.prepareCuration(bookId, batch.map((entry) => this.#provedSignal(entry).signalId));
+      }
+      selected.push(signal.signalId);
+      if (selected.length === 10) break;
+    }
+    return selected.length === 0 ? null : this.prepareCuration(bookId, selected.reverse());
   }
 
   #attribution(bookId: string, at: string): LearningSignal['attribution'] {
@@ -110,11 +355,11 @@ export class EditorialLearningLedger {
   }
 
   #standing(bookId: string, materialKey: string): LearningSignal['eligibility'] {
-    const last = new LearningEligibilityLedger(this.db).history(bookId, materialKey).at(-1);
+    const last = this.#eligibilityHistory(bookId, materialKey).at(-1);
     return { choice: last?.choice ?? 'house', decisionId: last?.decisionId ?? null, basisVersion: last?.basis.version ?? 2 };
   }
 
-  #candidate(decisionId: string): { candidate: LearningMaterialCandidate; row: Row; reasonRevision: number } | null {
+  #candidate(decisionId: string, allowUnreasoned = false): { candidate: LearningMaterialCandidate; row: Row; reasonRevision: number } | null {
     const row = this.db.prepare(`SELECT d.*, i.current_text, i.proposed_text, m.book_id, m.manuscript_id, m.branch_id, m.mark_id,
       r.reason, r.reason_source FROM proposal_item_decisions d JOIN proposal_change_items i ON i.item_id = d.item_id
       JOIN editorial_marks m ON m.mark_id = i.mark_id LEFT JOIN proposal_decision_reasons r ON r.decision_id = d.decision_id
@@ -122,7 +367,7 @@ export class EditorialLearningLedger {
     if (!row || !['accepted', 'accepted-with-edit', 'rejected'].includes(String(row.disposition))) return null;
     const standing = new DecisionFeedbackLedger(this.db).standing(decisionId, typeof row.reason === 'string'
       ? { reason: row.reason, source: String(row.reason_source) as 'reason-field' | 'suggested' | 'free-text' } : null);
-    if (row.disposition === 'rejected' && standing.reason === null) return null;
+    if (!allowUnreasoned && row.disposition === 'rejected' && standing.reason === null) return null;
     if (standing.reasonRevisedAt === null && this.db.prepare('SELECT 1 FROM proposal_conflict_outcomes WHERE decision_id = ?').get(decisionId)) return null;
     return { row, reasonRevision: standing.feedbackEntries, candidate: proposalDecisionCandidate({
       decisionId, disposition: String(row.disposition), currentText: String(row.current_text), proposedText: String(row.proposed_text),
@@ -141,9 +386,166 @@ export class EditorialLearningLedger {
       blockDigest: row.decided_block_digest === null ? null : String(row.decided_block_digest), materialKey: candidate.materialKey,
       materialDigest: learningMaterialDigest(candidate), reasonRevision, reviewRunId: null, findingId: null, resultSetRevisionId: null,
     };
-    this.#capture(`${decisionId}:${source.materialDigest}`, String(row.disposition) as LearningSignal['kind'], source,
+    this.#capture(`${decisionId}:${source.materialDigest}`, String(row.disposition) as DecisionLearningSignal['kind'], source,
       row.disposition === 'accepted-with-edit' ? graphemeEditVolume(String(row.proposed_text), String(row.edited_text)) : null,
       candidate.recordedAt);
+  }
+
+  /** Called inside the journal writer's transaction with its real producer pin. Retries never backfill disabled capture. */
+  captureManual(source: ManualCommandSource, operationalScope: TrustedOperationalScope): void {
+    const candidate = manualEditCandidate(source);
+    const controls = this.controls();
+    const eligibility = this.#standing(source.bookId, candidate.materialKey);
+    if (!controls.enabled || controls.excludedBooks.has(source.bookId) || !['book', 'house'].includes(eligibility.choice)) return;
+    const sourceKey = candidate.materialKey;
+    if (this.db.prepare('SELECT 1 FROM learning_signals WHERE source_key = ?').get(sourceKey)) return;
+    const signal: ManualEditLearningSignal = { schema: 'ai7.manual-edit-learning-signal/1', signalId: randomUUID(),
+      kind: 'manual-edit-journal', source: { ...source, materialKey: sourceKey, materialDigest: learningMaterialDigest(candidate) },
+      operationalScope, rewriteDistance: null, eligibility, attribution: this.#attribution(source.bookId, source.durableAt), recordedAt: source.durableAt };
+    const record = canonicalRecord({ ...signal, basis: LOCAL_LEARNING_POLICY_BASIS });
+    this.db.prepare('INSERT INTO learning_signals VALUES (?, ?, ?, ?, ?, ?)')
+      .run(signal.signalId, source.bookId, sourceKey, signal.recordedAt, record.json, record.digest);
+  }
+
+  #manualSource(signal: ManualEditLearningSignal): ManualCommandSource {
+    const { materialKey, materialDigest, ...source } = signal.source;
+    const candidate = manualEditCandidate(source);
+    requireLearning(materialKey === candidate.materialKey && materialDigest === learningMaterialDigest(candidate));
+    return source;
+  }
+
+  manualSourcePage(signalId: string, cursor: ManualCommandSourceCursor | null, budgetBytes: number): ManualCommandSourcePage {
+    const signal = this.#signal(signalId);
+    requireLearning(signal.kind === 'manual-edit-journal');
+    requireLearning(this.readManualSource !== undefined);
+    return this.readManualSource(this.#manualSource(signal), cursor, budgetBytes);
+  }
+
+  /** Explicit complete source selection. Held members remain visible and hold the entire emitted packet. */
+  prepareCuration(bookId: string, signalIds: readonly string[]): LearningCurationBundle {
+    return this.#read(() => {
+      requireLearning(UUID_PATTERN.test(bookId) && signalIds.length > 0 && new Set(signalIds).size === signalIds.length);
+      const controls = this.controls();
+      const examples: QualifiedLearningExample[] = [];
+      const sources: LearningCurationSource[] = [];
+      const coverage: LearningCurationBundle['coverage'][number][] = [];
+      const directives = new SupervisionDirectives(this.db).history('ordinary-production').filter((directive) =>
+        directive.scope.kind !== 'book' || directive.scope.bookId === bookId);
+      for (const signalId of signalIds) {
+        const signal = this.#signal(signalId);
+        requireLearning(signal.source.bookId === bookId);
+        const eligibility = this.#currentEligibility(signal, controls);
+        const hold = (reason: string): void => { coverage.push({ signalId, state: 'held', reason }); };
+        if (eligibility !== 'book' && eligibility !== 'house') { hold(eligibility); continue; }
+        const common = { exampleId: `e${coverage.length + 1}`, sourceRef: `s${coverage.length + 1}` };
+        let example: QualifiedLearningExample;
+        let currentness: unknown;
+        if (signal.kind === 'manual-edit-journal') {
+          if (signal.operationalScope !== 'ordinary-production') { hold('source-scope'); continue; }
+          const before: string[] = [], after: string[] = [];
+          let page = this.manualSourcePage(signalId, null, MAX_FRAME_BYTES);
+          currentness = page.history;
+          for (;;) {
+            before.push(...page.members.map((member) => member.beforeText));
+            after.push(...page.members.map((member) => member.afterText));
+            if (page.next === null) break;
+            page = this.manualSourcePage(signalId, page.next, MAX_FRAME_BYTES);
+          }
+          example = { ...common, sourceKind: signal.kind, before, after, operation: signal.source.commandKind };
+        } else if (signal.kind === 'word-tracked-edit') {
+          requireLearning(this.readWordExample !== undefined);
+          const proof = this.#wordEvidence(signal.source);
+          const sample = proof.candidate.content as WordTrackedEditSample;
+          const imported = readWordImportChoiceRecord(this.db, bookId, signal.source.importCommitId).choice;
+          // Import-mode deduplication is the existing sample identity; selection must name the whole admitted batch.
+          const inventory = this.db.prepare(`SELECT signal_id FROM learning_signals WHERE book_id = ?
+            AND json_extract(canonical_json, '$.kind') = 'word-tracked-edit'
+            AND json_extract(canonical_json, '$.source.sourceVersionId') = ?`).all(bookId, signal.source.sourceVersionId);
+          if (inventory.some((row) => !signalIds.includes(String(row.signal_id)))) { hold('incomplete-word-batch'); continue; }
+          example = { ...common, sourceKind: signal.kind, ...this.readWordExample(signal.source), operation: sample.operationKind, intakeMode: imported.mode };
+          currentness = { admission: proof.admission, eligibility: this.#eligibilityHistory(bookId, signal.source.materialKey).at(-1) ?? null };
+        } else {
+          const origin = this.#reviewOrigin(signal, true);
+          if (origin?.operationalScope !== 'ordinary-production' || origin.editorialDimension !== 'typos-and-usage' ||
+            !['accepted', 'accepted-with-edit', 'rejected'].includes(signal.kind)) { hold('unsupported-native-origin'); continue; }
+          const found = this.#candidate(signal.source.decisionId, true);
+          requireLearning(found !== null);
+          const content = found.candidate.content as { currentText: string; proposedText: string; editedText: string | null;
+            reason: string | null; reasonSource: 'reason-field' | 'free-text' | 'suggested' | null };
+          const decision = signal.kind as 'accepted' | 'accepted-with-edit' | 'rejected';
+          requireLearning(decision !== 'accepted-with-edit' || content.editedText !== null);
+          example = { ...common, sourceKind: 'proposal-decision', decision, editorialDimension: 'typos-and-usage',
+            before: content.currentText, proposal: content.proposedText,
+            after: decision === 'rejected' ? content.currentText : decision === 'accepted' ? content.proposedText : content.editedText!,
+            afterSemantics: 'chosen-text-not-apply-proof', reason: content.reason, reasonSource: content.reasonSource, reasonRevision: found.reasonRevision };
+          currentness = this.sourceSnapshot(signalId);
+        }
+        if (directives.some((directive) => directive.effect === 'freeze' &&
+          (directive.scope.kind === 'house' || directive.scope.kind === 'book' ||
+            example.sourceKind === 'proposal-decision' && directive.categoryId === example.editorialDimension))) { hold('supervision-frozen'); continue; }
+        examples.push(example);
+        sources.push({ signalId, sourceKey: sha256Hex(canonicalJson(signal.source)), source: signal.source,
+          sourceKind: example.sourceKind, eligibility, controls: this.#controlSnapshot(bookId), currentnessDigest: sha256Hex(canonicalJson(currentness)) });
+        coverage.push({ signalId, state: 'included', reason: null });
+      }
+      const context = directives.filter((directive) => directive.operation === 'supervise').map((directive) => ({
+        kind: 'supervision' as const, categoryId: directive.categoryId, effect: directive.effect, text: directive.text }));
+      const payload = canonicalJson({ schema: CURATION_CONTRACT.schema, examples, ...(context.length === 0 ? {} : { context }) });
+      const ready = coverage.every((entry) => entry.state === 'included') && boundedCurationExamples(examples) && context.length <= 12 &&
+        context.reduce((total, entry) => total + graphemesOf(entry.text).length, 0) <= 200 && Buffer.byteLength(payload, 'utf8') <= 131072;
+      const emittedText = ready ? payload : null;
+      const body = { schema: CURATION_CONTRACT.schema, bookId, signalIds: [...signalIds], sources, examples,
+        coverage: ready ? coverage : coverage.map((entry) => entry.state === 'held' ? entry : { ...entry, state: 'held' as const, reason: 'whole-bundle-held' }),
+        state: ready ? 'ready' as const : 'held' as const, supervisionDigest: sha256Hex(canonicalJson(directives)), emittedText,
+        emittedDigest: emittedText === null ? null : sha256Hex(emittedText) };
+      return { ...body, digest: sha256Hex(canonicalJson(body)) };
+    });
+  }
+
+  /** Model output enters the existing memory owner as proposals, retaining the complete influencing source bundle. */
+  proposeCuration(bundle: LearningCurationBundle, proposals: readonly CuratedPreference[], run: { taskIntentId: string; runRecordId: string }): void {
+    requireLearning(this.db.isTransaction && bundle.state === 'ready' && proposals.length <= 3);
+    requireLearning(this.db.prepare(`SELECT 1 FROM analysis_run_records r JOIN analysis_task_intents t ON t.task_intent_id = r.task_intent_id
+      WHERE r.run_record_id = ? AND t.task_intent_id = ? AND t.book_id = ? AND t.kind = 'learning-curation'`)
+      .get(run.runRecordId, run.taskIntentId, bundle.bookId));
+    requireLearning(this.prepareCuration(bundle.bookId, bundle.signalIds).digest === bundle.digest);
+    if (this.db.prepare(`SELECT 1 FROM global_editorial_memory_item_versions WHERE json_extract(canonical_json, '$.curation.runRecordId') = ?`)
+      .get(run.runRecordId)) return;
+    const sources = bundle.signalIds.map((signalId) => this.sourceSnapshot(signalId));
+    for (const proposal of proposals) {
+      requireLearning(!new SupervisionDirectives(this.db).history('ordinary-production').some((directive) => directive.effect === 'freeze' &&
+        (directive.scope.kind === 'house' || directive.scope.kind === 'book' && directive.scope.bookId === bundle.bookId ||
+          directive.scope.kind === 'category' && directive.categoryId === proposal.editorialDimension)));
+      requireLearning(proposal.exampleIds.length > 0 && proposal.exampleIds.every((id) => bundle.examples.some((example) => example.exampleId === id)));
+      const version: EditorialMemoryVersion = { schema: 'ai7.global-editorial-memory/2', itemId: randomUUID(), versionId: randomUUID(),
+        ordinal: 1, supersedes: null, recordedAt: new Date().toISOString(), operationalScope: 'ordinary-production',
+        applicability: sources.every((source) => source.eligibility === 'house') ? { kind: 'house' } : { kind: 'book', bookId: bundle.bookId },
+        editorialDimension: proposal.editorialDimension, title: proposal.title, confidence: proposal.confidence,
+        state: 'proposed', actor: 'AI7', actionId: randomUUID(), action: 'create', signalIds: [...bundle.signalIds], sources,
+        positiveExamples: sources.flatMap((source) => source.sourceKind === undefined && this.#signal(source.signalId).kind !== 'rejected' ? [source.source] : []),
+        negativeExamples: sources.flatMap((source) => source.sourceKind === undefined && this.#signal(source.signalId).kind === 'rejected' ? [source.source] : []),
+        parentVersions: [], supervisionDirectiveRefs: [], curation: { taskIntentId: run.taskIntentId, runRecordId: run.runRecordId, bundleDigest: bundle.digest } };
+      this.#validateMemory(version); this.currentSources(version);
+      this.db.prepare('INSERT INTO global_editorial_memory_items VALUES (?, ?, ?, ?)')
+        .run(version.itemId, version.actionId, sources[0]!.signalId, version.recordedAt);
+      this.#append(version);
+    }
+  }
+
+  #manualStanding(signal: ManualEditLearningSignal): LearningSignalStanding {
+    const source = this.#manualSource(signal);
+    if (this.db.prepare("SELECT 1 FROM recovery_attention WHERE branch_id = ? AND status IN ('pending', 'deferred')").get(source.branchId)) return 'deferred';
+    requireLearning(this.readManualSource !== undefined);
+    let page = this.readManualSource(source, null, MAX_FRAME_BYTES);
+    // A restoration/Apply boundary or later block change is not independent support for the original edit.
+    if (page.history.boundaryCrossed || page.history.restoration !== null || page.history.groupStatus === 'superseded') return 'superseded';
+    if (page.history.groupStatus === 'undone') return 'deferred';
+    for (;;) {
+      if (page.current.some((member) => member.block !== 'recorded-after')) return 'superseded';
+      if (page.next === null) break;
+      page = this.readManualSource(source, page.next, MAX_FRAME_BYTES);
+    }
+    return this.#standing(source.bookId, signal.source.materialKey).choice;
   }
 
   captureIgnoredFinding(bookId: string, reviewRunId: string, findingId: string): void {
@@ -159,36 +561,407 @@ export class EditorialLearningLedger {
     this.#capture(String(row.signal_id), 'review-finding-ignored', source, null, candidate.recordedAt);
   }
 
-  #capture(sourceKey: string, kind: LearningSignal['kind'], source: LearningSourceReference, rewriteDistance: number | null, recordedAt: string): void {
+  /** Actual control/standing owners supply the complete reviewed capture vector. */
+  wordImportControlPins(bookId: string | null): Pick<WordImportControlsSnapshot, 'global' | 'book'> {
+    return this.#read(() => {
+      requireLearning(bookId === null || UUID_PATTERN.test(bookId));
+      const rows = this.#controlRows();
+      const global = rows.filter(({ record }) => record.kind === 'switch').at(-1);
+      const book = bookId === null ? undefined : rows.filter(({ record }) => record.kind === 'book' && record.bookId === bookId).at(-1);
+      const reference = (entry: typeof global): WordImportControlsSnapshot['global']['reference'] => entry === undefined
+        ? { kind: 'default', basis: LOCAL_LEARNING_POLICY_BASIS }
+        : { kind: 'entry', entryId: entry.record.entryId, sha256: String(entry.row.sha256) };
+      return { global: { enabled: global?.record.value ?? true, reference: reference(global) },
+        book: { excluded: book?.record.value ?? false, reference: reference(book) } };
+    });
+  }
+
+  wordImportControls(bookId: string, materials: ReadonlyArray<{ templateKey: string; materialKey: string; materialDigest: string }>): WordImportControlsSnapshot {
+    return this.#read(() => {
+      requireLearning(UUID_PATTERN.test(bookId) && new Set(materials.map((material) => material.templateKey)).size === materials.length);
+      return { ...this.wordImportControlPins(bookId),
+        materials: materials.map((material) => {
+          const last = this.#eligibilityHistory(bookId, material.materialKey).at(-1);
+          requireLearning(last === undefined || last.materialDigest === material.materialDigest);
+          return { templateKey: material.templateKey, materialDigest: material.materialDigest,
+            standing: { choice: last?.choice ?? 'house', decisionId: last?.decisionId ?? null,
+              decisionDigest: last?.recordDigest ?? null, basisVersion: last?.basis.version ?? LOCAL_LEARNING_POLICY_BASIS.version } };
+        }) };
+    });
+  }
+
+  /**
+   * The import transaction supplies a compilation of verified original bytes after writing its parent/choice rows.
+   * Derive every admission from that complete manifest and current controls; never accept a caller-selected subset.
+   */
+  retainWordImportSamples(bookId: string, commitId: string, compiled: Extract<WordTrackedCompilation, { kind: 'ready' }>,
+    abortSignal?: AbortSignal): { sources: WordTrackedEditLearningSource[]; signalIds: string[] } {
+    abortSignal?.throwIfAborted();
+    requireLearning(this.db.isTransaction);
+    return this.#read(() => {
+      const { choice, digest: choiceDigest, createdAt } = readWordImportChoiceRecord(this.db, bookId, commitId);
+      requireLearning(compiled.sourceDigest === choice.originalDigest && compiled.graphDigest === choice.graphDigest &&
+        compiled.templateManifestDigest === choice.templateManifestDigest);
+      requireWordRevisionSource(this.db, readWordParentSourcePin(this.db, bookId, choice.sourceVersionId), compiled.graph);
+      for (const kind of ['rejected', 'accepted'] as const) {
+        const reading = compiled.readings[kind];
+        const pin = choice.readings[kind];
+        requireLearning(reading.readingDigest === pin.digest && reading.blocks.length === pin.blockCount && reading.usable === pin.usable);
+      }
+      const samples = wordTrackedSamples(bookId, compiled.graph, compiled.templates);
+      const entries = samples.map((sample, index) => {
+        abortSignal?.throwIfAborted();
+        const candidate = wordTrackedEditCandidate(sample, wordTrackedSampleRecord(sample).digest, createdAt);
+        return { sample, templateKey: compiled.templates[index]!.templateKey,
+          materialKey: candidate.materialKey, materialDigest: learningMaterialDigest(candidate) };
+      });
+      const admissions = wordLocalImportAdmissions({ bookId, samples: entries, choice, choiceDigest,
+        currentControls: this.wordImportControls(bookId, entries), recordedAt: createdAt,
+        ...(abortSignal === undefined ? {} : { signal: abortSignal }) });
+      const previous = this.db.prepare('SELECT * FROM word_tracked_edit_sample_imports WHERE commit_id = ?').all(commitId);
+      const memberships = new Map(previous.map((row) => [String(row.sample_id), row]));
+      requireLearning(previous.length === 0 || previous.length === admissions.length &&
+        admissions.every(({ sample }) => memberships.has(sample.sampleId)));
+      const readSample = this.db.prepare('SELECT * FROM word_tracked_edit_samples WHERE sample_id = ?');
+      const insertSample = this.db.prepare(`INSERT INTO word_tracked_edit_samples(sample_id, book_id, source_version_id, template_key, canonical_json, sha256)
+        VALUES (?, ?, ?, ?, ?, ?)`);
+      const insertMembership = this.db.prepare(`INSERT INTO word_tracked_edit_sample_imports(sample_id, commit_id, sample_digest, choice_digest, canonical_json, sha256, captured_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)`);
+      const sources = admissions.map(({ sample, templateKey, sampleDigest, materialKey, materialDigest, record }): WordTrackedEditLearningSource => {
+        abortSignal?.throwIfAborted();
+        const sampleRecord = wordTrackedSampleRecord(sample);
+        const prior = readSample.get(sample.sampleId);
+        if (prior === undefined) {
+          requireLearning(previous.length === 0);
+          insertSample.run(sample.sampleId, bookId, choice.sourceVersionId, templateKey, sampleRecord.json, sampleDigest);
+        } else requireLearning(prior.book_id === bookId && prior.source_version_id === choice.sourceVersionId &&
+          prior.template_key === templateKey && prior.canonical_json === sampleRecord.json && prior.sha256 === sampleDigest);
+        const membership = memberships.get(sample.sampleId);
+        if (membership === undefined) insertMembership.run(sample.sampleId, commitId, sampleDigest, choiceDigest, record.json, record.digest, createdAt);
+        else requireLearning(membership.sample_digest === sampleDigest && membership.choice_digest === choiceDigest &&
+          membership.canonical_json === record.json && membership.sha256 === record.digest && membership.captured_at === createdAt);
+        return { bookId, sampleId: sample.sampleId, sampleDigest, sourceVersionId: choice.sourceVersionId, sourceDigest: compiled.sourceDigest,
+          graphDigest: compiled.graphDigest, importCommitId: commitId, admissionDigest: record.digest, materialKey, materialDigest };
+      });
+      return { sources, signalIds: this.captureWordSamples(sources, abortSignal) };
+    });
+  }
+
+  /** Reopen/merge replay the complete historical admission vector, independently of today's exclusions. */
+  validateWordImportSamples(bookId: string, commitId: string, compiled: Extract<WordTrackedCompilation, { kind: 'ready' }>): void {
+    this.#read(() => {
+      const { choice, digest: choiceDigest, createdAt } = readWordImportChoiceRecord(this.db, bookId, commitId);
+      requireLearning(compiled.sourceDigest === choice.originalDigest && compiled.graphDigest === choice.graphDigest &&
+        compiled.templateManifestDigest === choice.templateManifestDigest);
+      requireWordRevisionSource(this.db, readWordParentSourcePin(this.db, bookId, choice.sourceVersionId), compiled.graph);
+      const samples = wordTrackedSamples(bookId, compiled.graph, compiled.templates);
+      const admissions = wordLocalImportAdmissions({ bookId, samples: samples.map((sample, index) =>
+        ({ sample, templateKey: compiled.templates[index]!.templateKey })), choice, choiceDigest,
+      currentControls: choice.effectiveControls, recordedAt: createdAt });
+      const rows = this.db.prepare('SELECT * FROM word_tracked_edit_sample_imports WHERE commit_id = ?').all(commitId);
+      const memberships = new Map(rows.map((row) => [String(row.sample_id), row]));
+      requireLearning(rows.length === admissions.length);
+      for (const { sample, templateKey, sampleDigest, materialKey, materialDigest, record } of admissions) {
+        const membership = memberships.get(sample.sampleId);
+        const sampleRow = this.db.prepare('SELECT * FROM word_tracked_edit_samples WHERE sample_id = ?').get(sample.sampleId);
+        requireLearning(membership && membership.sample_digest === sampleDigest && membership.choice_digest === choiceDigest &&
+          membership.canonical_json === record.json && membership.sha256 === record.digest && membership.captured_at === createdAt &&
+          sampleRow && sampleRow.book_id === bookId && sampleRow.source_version_id === choice.sourceVersionId &&
+          sampleRow.template_key === templateKey && sampleRow.canonical_json === wordTrackedSampleRecord(sample).json && sampleRow.sha256 === sampleDigest);
+        this.#wordEvidence({ bookId, sampleId: sample.sampleId, sampleDigest, sourceVersionId: choice.sourceVersionId,
+          sourceDigest: compiled.sourceDigest, graphDigest: compiled.graphDigest, importCommitId: commitId,
+          admissionDigest: record.digest, materialKey, materialDigest });
+        const signalRow = this.db.prepare('SELECT signal_id FROM learning_signals WHERE source_key = ?')
+          .get(`word-sample:${sample.sampleId}:${sampleDigest}`);
+        requireLearning(signalRow);
+        const signal = this.#signal(String(signalRow.signal_id));
+        requireLearning(signal.kind === 'word-tracked-edit' && signal.source.bookId === bookId && signal.source.sampleId === sample.sampleId &&
+          signal.source.sampleDigest === sampleDigest && signal.source.sourceVersionId === choice.sourceVersionId);
+      }
+    });
+  }
+
+  /** One atomic batch shares source/import validation, without copying or rehashing the graph per sample. */
+  captureWordSamples(sources: ReadonlyArray<WordTrackedEditLearningSource>, abortSignal?: AbortSignal): string[] {
+    abortSignal?.throwIfAborted();
+    requireLearning(this.db.isTransaction);
+    return this.#read(() => {
+      const result: string[] = [];
+      const controls = this.controls();
+      if (sources.length === 0) return result;
+      requireLearning(new Set(sources.map((source) => source.sampleId)).size === sources.length &&
+        sources.every((source) => source.bookId === sources[0]!.bookId && source.importCommitId === sources[0]!.importCommitId));
+      const evidenceBySample = sources.map((source) => { abortSignal?.throwIfAborted(); return this.#wordEvidence(source); });
+      const current = this.wordImportControls(sources[0]!.bookId, sources.map((source, index) => ({
+        templateKey: evidenceBySample[index]!.templateKey, materialKey: source.materialKey, materialDigest: source.materialDigest })));
+      let attribution: LearningSignal['attribution'] | null = null;
+      for (let index = 0; index < sources.length; index += 1) {
+        abortSignal?.throwIfAborted();
+        const source = sources[index]!;
+        const evidence = evidenceBySample[index]!;
+        const eligibility = this.#standing(source.bookId, source.materialKey);
+        // The caller must omit ineligible evidence entirely; persisted admissions cannot override current controls.
+        requireLearning(controls.enabled && !controls.excludedBooks.has(source.bookId) &&
+          (eligibility.choice === 'book' || eligibility.choice === 'house'));
+        requireLearning(canonicalJson(current.global) === canonicalJson(evidence.admission.global) &&
+          canonicalJson(current.book) === canonicalJson(evidence.admission.book) &&
+          canonicalJson(current.materials[index]!.standing) === canonicalJson(evidence.admission.standing));
+        const sourceKey = `word-sample:${source.sampleId}:${source.sampleDigest}`;
+        const prior = this.db.prepare('SELECT signal_id FROM learning_signals WHERE source_key = ?').get(sourceKey);
+        if (prior !== undefined) {
+          const signal = this.#signal(String(prior.signal_id));
+          requireLearning(signal.kind === 'word-tracked-edit' && signal.source.bookId === source.bookId &&
+            signal.source.sampleDigest === source.sampleDigest);
+          result.push(signal.signalId); continue;
+        }
+        const signal: WordTrackedEditLearningSignal = { schema: 'ai7.word-import-learning-signal/1', signalId: randomUUID(),
+          kind: 'word-tracked-edit', source, rewriteDistance: null, eligibility,
+          attribution: attribution ??= this.#attribution(source.bookId, evidence.recordedAt), recordedAt: evidence.recordedAt };
+        const record = canonicalRecord({ ...signal, basis: LOCAL_LEARNING_POLICY_BASIS });
+        this.db.prepare('INSERT INTO learning_signals(signal_id, book_id, source_key, recorded_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?)')
+          .run(signal.signalId, source.bookId, sourceKey, signal.recordedAt, record.json, record.digest);
+        result.push(signal.signalId);
+      }
+      return result;
+    });
+  }
+
+  /** Historical inspection stays available under current exclusions; it grants no memory-source admission. */
+  wordSampleImports(bookId: string, sampleId: string, sampleDigest: string): WordSampleDetailSource['imports'] {
+    return this.#read(() => {
+      requireLearning(UUID_PATTERN.test(bookId) && /^wts_[0-9a-f]{64}$/u.test(sampleId) && DIGEST_PATTERN.test(sampleDigest));
+      const sampleRow = this.db.prepare('SELECT * FROM word_tracked_edit_samples WHERE sample_id = ? AND book_id = ?').get(sampleId, bookId);
+      requireLearning(sampleRow && sampleRow.sha256 === sampleDigest);
+      const stored = read<WordTrackedEditSample & { schema: string }>(sampleRow);
+      const { schema, ...sample } = stored;
+      requireLearning(schema === 'ai7.word-tracked-edit-sample/1');
+      const memberships = this.db.prepare(`SELECT si.commit_id, si.sha256, si.captured_at, wi.commit_id retained_commit_id FROM word_tracked_edit_sample_imports si
+        LEFT JOIN word_revision_imports wi ON wi.commit_id = si.commit_id WHERE si.sample_id = ? ORDER BY wi.created_at, si.commit_id`).all(sampleId);
+      requireLearning(memberships.length > 0 && memberships.every((entry) => entry.commit_id === entry.retained_commit_id));
+      return memberships.map((membership) => {
+        const candidate = wordTrackedEditCandidate(sample, sampleDigest, String(membership.captured_at));
+        const source: WordTrackedEditLearningSource = { bookId, sampleId, sampleDigest, sourceVersionId: String(sampleRow.source_version_id),
+          sourceDigest: sample.sourceDigest, graphDigest: sample.graphDigest, importCommitId: String(membership.commit_id),
+          admissionDigest: String(membership.sha256), materialKey: candidate.materialKey, materialDigest: learningMaterialDigest(candidate) };
+        const evidence = this.#wordEvidence(source);
+        const imported = this.#reads?.wordImports.get(source.importCommitId);
+        requireLearning(imported);
+        return { choice: imported.choice, choiceDigest: imported.digest, admission: evidence.admission, admissionDigest: source.admissionDigest };
+      });
+    });
+  }
+
+  /** Retained samples, not a fabricated editorial decision, own these distinct local material cards. */
+  *wordCandidates(bookId: string): IterableIterator<LearningMaterialCandidate> {
+    const ownsRead = this.#reads === null;
+    if (ownsRead) this.#reads = new LearningReads();
+    try {
+      for (const row of this.db.prepare(`SELECT s.sample_id, s.sha256, l.signal_id FROM word_tracked_edit_samples s
+        LEFT JOIN learning_signals l ON l.source_key = 'word-sample:' || s.sample_id || ':' || s.sha256
+        WHERE s.book_id = ? ORDER BY l.recorded_at, s.sample_id`).iterate(bookId)) {
+        requireLearning(typeof row.signal_id === 'string');
+        const signal = this.#signal(row.signal_id);
+        requireLearning(signal.kind === 'word-tracked-edit' && signal.source.bookId === bookId &&
+          signal.source.sampleId === row.sample_id && signal.source.sampleDigest === row.sha256);
+        this.#currentEligibility(signal, this.controls());
+        yield this.#wordEvidence(signal.source).candidate;
+      }
+    } finally { if (ownsRead) this.#reads = null; }
+  }
+
+  wordCurrentEligibility(bookId: string, sampleId: string, sampleDigest: string): LearningEligibilityChoice {
+    return this.#read(() => {
+      const row = this.db.prepare('SELECT signal_id FROM learning_signals WHERE book_id = ? AND source_key = ?')
+        .get(bookId, `word-sample:${sampleId}:${sampleDigest}`);
+      requireLearning(row);
+      const signal = this.#signal(String(row.signal_id));
+      requireLearning(signal.kind === 'word-tracked-edit' && signal.source.bookId === bookId &&
+        signal.source.sampleId === sampleId && signal.source.sampleDigest === sampleDigest);
+      const standing = this.#currentEligibility(signal, this.controls());
+      requireLearning(standing !== 'superseded');
+      return standing;
+    });
+  }
+
+  #wordEvidence(source: WordTrackedEditLearningSource): WordLearningEvidence {
+    const key = canonicalJson(source);
+    const known = this.#reads?.word.evidence.get(key);
+    if (known !== undefined) return known;
+    try {
+      const evidence = this.#provedWordEvidence(source);
+      freezeWordLearningFact(evidence);
+      this.#reads?.word.evidence.set(key, evidence);
+      return evidence;
+    }
+    catch (error) {
+      if (error instanceof ImportRetentionError) throw new LearningEligibilityError(error.code, error.message);
+      throw error;
+    }
+  }
+
+  #provedWordEvidence(source: WordTrackedEditLearningSource): { candidate: LearningMaterialCandidate; templateKey: string;
+    admission: WordLocalImportAdmission; recordedAt: string } {
+    requireLearning(isRecord(source) && hasExactKeys(source, ['bookId', 'sampleId', 'sampleDigest', 'sourceVersionId', 'sourceDigest',
+      'graphDigest', 'importCommitId', 'admissionDigest', 'materialKey', 'materialDigest']) &&
+      [source.bookId, source.sourceVersionId, source.importCommitId].every((id) => UUID_PATTERN.test(id)) &&
+      /^wts_[0-9a-f]{64}$/u.test(source.sampleId) && source.materialKey === `word-sample:${source.sampleId}` &&
+      [source.sampleDigest, source.sourceDigest, source.graphDigest, source.admissionDigest, source.materialDigest].every((digest) => DIGEST_PATTERN.test(digest)));
+    const parent = readWordParentSourcePin(this.db, source.bookId, source.sourceVersionId);
+    const pin = wordParentSourcePinRecord(parent);
+    requireLearning(parent.sourceDigest === source.sourceDigest);
+    let graph = this.#reads?.wordSources.get(source.sourceVersionId);
+    const sourceRow = this.db.prepare(`SELECT book_id, object_digest, parent_parser_identity, parent_source_pin_json,
+      parent_source_pin_digest, compiler_identity, extractor_identity, graph_digest
+      FROM word_revision_sources WHERE source_version_id = ?`).get(source.sourceVersionId);
+    requireLearning(sourceRow && sourceRow.book_id === source.bookId && sourceRow.object_digest === source.sourceDigest &&
+      sourceRow.parent_parser_identity === parent.parserIdentity && sourceRow.parent_source_pin_json === pin.json &&
+      sourceRow.compiler_identity === WORD_DOCX_PARSER_IDENTITY && sourceRow.extractor_identity === WORD_EXTRACTOR_IDENTITY &&
+      sourceRow.parent_source_pin_digest === pin.digest && sourceRow.graph_digest === source.graphDigest);
+    if (graph === undefined) {
+      const row = this.db.prepare('SELECT graph_json canonical_json, graph_digest sha256 FROM word_revision_sources WHERE source_version_id = ?')
+        .get(source.sourceVersionId);
+      requireLearning(row);
+      const compiledGraph = read<WordRevisionGraph>(row);
+      requireWordRevisionSource(this.db, parent, compiledGraph);
+      requireLearning(Array.isArray(compiledGraph.events));
+      graph = { graphDigest: source.graphDigest, parentPinDigest: pin.digest, events: new Set(compiledGraph.events.map((event) => event.eventId)) };
+      this.#reads?.wordSources.set(source.sourceVersionId, graph);
+    }
+    requireLearning(graph.graphDigest === source.graphDigest && graph.parentPinDigest === pin.digest);
+    const sampleRow = this.db.prepare('SELECT * FROM word_tracked_edit_samples WHERE sample_id = ?').get(source.sampleId);
+    requireLearning(sampleRow && sampleRow.book_id === source.bookId && sampleRow.source_version_id === source.sourceVersionId && sampleRow.sha256 === source.sampleDigest);
+    const storedSample = read<WordTrackedEditSample & { schema: string }>(sampleRow);
+    requireLearning(isRecord(storedSample) && hasExactKeys(storedSample, ['schema', 'sampleId', 'bookId', 'sourceDigest', 'extractorIdentity', 'graphDigest',
+      'operationKind', 'eventMembership', 'before', 'after', 'sourceLocation', 'destinationLocation']) &&
+      ['insert', 'delete', 'replace', 'move', 'paragraph-boundary'].includes(storedSample.operationKind));
+    const { schema, ...sample } = storedSample;
+    const { sampleId, bookId, sourceDigest, extractorIdentity, graphDigest, ...template } = sample;
+    const templateKey = wordTemplateKey(sourceDigest, template);
+    requireLearning(schema === 'ai7.word-tracked-edit-sample/1' && sampleId === source.sampleId && bookId === source.bookId &&
+      sourceDigest === source.sourceDigest && graphDigest === source.graphDigest && extractorIdentity === WORD_EXTRACTOR_IDENTITY &&
+      templateKey === sampleRow.template_key && sampleId === `wts_${sha256Hex(canonicalJson({ schema: 'ai7.word-sample-id/1', bookId, templateKey }))}` &&
+      wordTrackedSampleRecord(sample).json === sampleRow.canonical_json && Array.isArray(template.before) && Array.isArray(template.after) &&
+      template.before.length + template.after.length > 0 && Array.isArray(template.eventMembership) &&
+      template.eventMembership.length > 0 && template.eventMembership.every((id) => graph.events.has(id)));
+    let imported = this.#reads?.wordImports.get(source.importCommitId);
+    const importRow = this.db.prepare('SELECT book_id, source_version_id, sha256, created_at FROM word_revision_imports WHERE commit_id = ?').get(source.importCommitId);
+    requireLearning(importRow && importRow.book_id === source.bookId && importRow.source_version_id === source.sourceVersionId);
+    if (imported === undefined) {
+      const { choice, digest } = readWordImportChoiceRecord(this.db, source.bookId, source.importCommitId);
+      requireLearning(digest === importRow.sha256 && choice.learnFromEdits && choice.originalDigest === source.sourceDigest &&
+        choice.parentSourcePinDigest === pin.digest && choice.graphDigest === source.graphDigest &&
+        choice.effectiveControls.global.enabled && !choice.effectiveControls.book.excluded);
+      const materials = new Map(choice.effectiveControls.materials.map((material) => [material.templateKey, material]));
+      imported = { digest, choice, materials };
+      this.#reads?.wordImports.set(source.importCommitId, imported);
+    }
+    requireLearning(imported.digest === importRow.sha256 && imported.choice.parentSourcePinDigest === pin.digest);
+    const membership = this.db.prepare('SELECT * FROM word_tracked_edit_sample_imports WHERE sample_id = ? AND commit_id = ?')
+      .get(source.sampleId, source.importCommitId);
+    requireLearning(membership && membership.sample_digest === source.sampleDigest && membership.choice_digest === imported.digest && membership.sha256 === source.admissionDigest);
+    const admission = read<WordLocalImportAdmission>(membership);
+    requireLearning(isRecord(admission) && hasExactKeys(admission, ['schema', 'sampleId', 'sampleDigest', 'importChoiceDigest', 'basis',
+      'reviewedLearnFromEdits', 'global', 'book', 'standing']));
+    const standing = imported.materials.get(templateKey);
+    requireLearning(standing && standing.materialDigest === source.materialDigest &&
+      admission.schema === 'ai7.word-local-import-admission/1' && admission.sampleId === source.sampleId && admission.sampleDigest === source.sampleDigest &&
+      admission.importChoiceDigest === imported.digest && canonicalJson(admission.basis) === canonicalJson(LOCAL_LEARNING_POLICY_BASIS) &&
+      admission.reviewedLearnFromEdits === true && admission.global.enabled && !admission.book.excluded &&
+      (admission.standing.choice === 'book' || admission.standing.choice === 'house') &&
+      canonicalJson(admission.global) === canonicalJson(imported.choice.effectiveControls.global) &&
+      canonicalJson(admission.book) === canonicalJson(imported.choice.effectiveControls.book) && canonicalJson(admission.standing) === canonicalJson(standing.standing));
+    if (admission.standing.decisionId !== null) {
+      const historical = this.#eligibilityHistory(source.bookId, source.materialKey).find((entry) => entry.decisionId === admission.standing.decisionId);
+      requireLearning(historical && historical.materialDigest === source.materialDigest && historical.recordDigest === admission.standing.decisionDigest &&
+        historical.choice === admission.standing.choice && historical.basis.version === admission.standing.basisVersion);
+    }
+    const recordedAt = String(membership.captured_at);
+    requireLearning(Number.isFinite(Date.parse(recordedAt)) && recordedAt === importRow.created_at);
+    const candidate = wordTrackedEditCandidate(sample, source.sampleDigest, recordedAt);
+    requireLearning(learningMaterialDigest(candidate) === source.materialDigest);
+    return { candidate, templateKey, admission, recordedAt };
+  }
+
+  #provedWordSignal(row: Row, signal: WordTrackedEditLearningSignal & { basis: unknown }): WordTrackedEditLearningSignal {
+    requireLearning(isRecord(signal) && hasExactKeys(signal, ['schema', 'signalId', 'kind', 'source', 'rewriteDistance', 'eligibility', 'attribution', 'recordedAt', 'basis']) &&
+      isRecord(signal.source) && signal.schema === 'ai7.word-import-learning-signal/1' && canonicalJson(signal.basis) === canonicalJson(LOCAL_LEARNING_POLICY_BASIS) &&
+      signal.signalId === row.signal_id && signal.source.bookId === row.book_id && signal.recordedAt === row.recorded_at &&
+      signal.rewriteDistance === null && signal.ask === undefined && UUID_PATTERN.test(signal.signalId) &&
+      row.source_key === `word-sample:${signal.source.sampleId}:${signal.source.sampleDigest}`);
+    requireLearning(isRecord(signal.attribution) && hasExactKeys(signal.attribution, ['peopleVersion', 'authors', 'editors']) &&
+      Number.isSafeInteger(signal.attribution.peopleVersion) && signal.attribution.peopleVersion >= 0 &&
+      [signal.attribution.authors, signal.attribution.editors].every((names) => Array.isArray(names) &&
+        names.every((name) => typeof name === 'string' && name.isWellFormed())));
+    const evidence = this.#wordEvidence(signal.source);
+    requireLearning(signal.recordedAt === evidence.recordedAt && canonicalJson(signal.eligibility) === canonicalJson({
+      choice: evidence.admission.standing.choice, decisionId: evidence.admission.standing.decisionId, basisVersion: evidence.admission.standing.basisVersion }));
+    freezeWordLearningFact(signal);
+    return signal;
+  }
+
+  #capture(sourceKey: string, kind: DecisionLearningSignal['kind'], source: LearningSourceReference, rewriteDistance: number | null, recordedAt: string, ask?: DecisionLearningSignal['ask']): string | null {
     const controls = this.controls();
     const eligibility = this.#standing(source.bookId, source.materialKey);
-    if (!controls.enabled || controls.excludedBooks.has(source.bookId) || eligibility.choice === 'excluded' || eligibility.choice === 'deferred') return;
-    if (this.db.prepare('SELECT 1 FROM learning_signals WHERE source_key = ?').get(sourceKey)) return;
-    const signal: LearningSignal = { signalId: randomUUID(), kind, source, rewriteDistance, eligibility,
-      attribution: this.#attribution(source.bookId, recordedAt), recordedAt };
+    if (!controls.enabled || controls.excludedBooks.has(source.bookId) || eligibility.choice === 'excluded' || eligibility.choice === 'deferred') return null;
+    const prior = this.db.prepare('SELECT signal_id FROM learning_signals WHERE source_key = ?').get(sourceKey);
+    if (prior) return String(prior.signal_id);
+    const signal: DecisionLearningSignal = { signalId: randomUUID(), kind, source, rewriteDistance, eligibility,
+      attribution: this.#attribution(source.bookId, recordedAt), recordedAt, ...(ask === undefined ? {} : { ask }) };
     const record = canonicalRecord({ ...signal, schema: 'ai7.learning-signal/1', basis: LOCAL_LEARNING_POLICY_BASIS });
     this.db.prepare('INSERT INTO learning_signals(signal_id, book_id, source_key, recorded_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?)')
       .run(signal.signalId, source.bookId, sourceKey, recordedAt, record.json, record.digest);
+    return signal.signalId;
   }
 
   #signal(id: string): LearningSignal {
     const row = this.db.prepare('SELECT * FROM learning_signals WHERE signal_id = ?').get(id) as Row | undefined;
     requireLearning(row);
+    const known = this.#reads?.signals.get(id);
+    if (known !== undefined && known.sha256 === row.sha256 && typeof row.canonical_json === 'string' && sha256Hex(row.canonical_json) === row.sha256) return known.signal;
+    const signal = this.#provedSignal(row);
+    this.#reads?.signals.set(id, { sha256: String(row.sha256), signal });
+    if (signal.kind === 'word-tracked-edit') this.#reads?.word.signals.set(id, { sha256: String(row.sha256), signal });
+    return signal;
+  }
+
+  #provedSignal(row: Row): LearningSignal {
     const signal = read<LearningSignal & { schema: string; basis: unknown }>(row);
+    if (signal.kind === 'word-tracked-edit') return this.#provedWordSignal(row, signal);
+    if (signal.kind === 'manual-edit-journal') {
+      requireLearning(signal.schema === 'ai7.manual-edit-learning-signal/1' && canonicalJson(signal.basis) === canonicalJson(LOCAL_LEARNING_POLICY_BASIS) &&
+        signal.signalId === row.signal_id && signal.source.bookId === row.book_id && signal.source.materialKey === row.source_key &&
+        signal.recordedAt === row.recorded_at && signal.recordedAt === signal.source.durableAt && signal.ask === undefined && signal.rewriteDistance === null);
+      this.#manualSource(signal);
+      return signal;
+    }
     requireLearning(signal.schema === 'ai7.learning-signal/1' && canonicalJson(signal.basis) === canonicalJson(LOCAL_LEARNING_POLICY_BASIS) &&
       signal.signalId === row.signal_id && signal.source.bookId === row.book_id && signal.recordedAt === row.recorded_at);
     const source = signal.source;
+    const proactive = signal.kind === 'proactive-reason';
+    if (proactive) requireLearning(signal.ask &&
+      ['offered', 'suppressed', 'answered', 'dismissed'].includes(signal.ask.state) &&
+      UUID_PATTERN.test(signal.ask.askId) && LEARNING_REASON_OPTIONS[signal.ask.disposition] !== undefined &&
+      (signal.ask.choice === null || LEARNING_REASON_OPTIONS[signal.ask.disposition]!.includes(signal.ask.choice)) &&
+      (signal.ask.text === null || typeof signal.ask.text === 'string' && signal.ask.text.isWellFormed() && graphemesOf(signal.ask.text).length <= 200) &&
+      (signal.ask.state === 'answered' ? signal.ask.choice !== null || signal.ask.text !== null : signal.ask.choice === null && signal.ask.text === null) &&
+      row.source_key === `ask:${source.decisionId}:${signal.ask.state}`);
+    if (proactive && (signal.ask!.state === 'answered' || signal.ask!.state === 'dismissed')) {
+      const offered = this.db.prepare('SELECT * FROM learning_signals WHERE source_key = ?').get(`ask:${source.decisionId}:offered`) as Row | undefined;
+      requireLearning(offered);
+      const original = read<LearningSignal>(offered);
+      requireLearning(original.ask?.askId === signal.ask!.askId && canonicalJson(original.source) === canonicalJson(source));
+    }
     if (source.reviewRunId === null) {
       const decision = this.db.prepare(`SELECT d.*, m.book_id, m.manuscript_id, m.branch_id, m.mark_id FROM proposal_item_decisions d
         JOIN proposal_change_items i ON i.item_id = d.item_id JOIN editorial_marks m ON m.mark_id = i.mark_id WHERE d.decision_id = ?`).get(source.decisionId);
       requireLearning(decision && decision.book_id === source.bookId && decision.manuscript_id === source.manuscriptId &&
-        decision.branch_id === source.branchId && decision.mark_id === source.markId && decision.disposition === signal.kind &&
+        decision.branch_id === source.branchId && decision.mark_id === source.markId && decision.disposition === (proactive ? signal.ask!.disposition : signal.kind) &&
         decision.decided_revision_id === source.revisionId && decision.decided_journal_sequence === source.journalSequence &&
-        decision.decided_block_digest === source.blockDigest && row.source_key === `${source.decisionId}:${source.materialDigest}`);
+        decision.decided_block_digest === source.blockDigest && (proactive || row.source_key === `${source.decisionId}:${source.materialDigest}`));
     } else {
       const original = this.db.prepare('SELECT * FROM quality_signals WHERE disposition_id = ?').get(source.decisionId) as Row | undefined;
-      requireLearning(original && signal.kind === 'review-finding-ignored' && original.book_id === source.bookId &&
-        original.review_run_id === source.reviewRunId && original.finding_id === source.findingId && row.source_key === original.signal_id);
+      requireLearning(original && (signal.kind === 'review-finding-ignored' || proactive) && original.book_id === source.bookId &&
+        original.review_run_id === source.reviewRunId && original.finding_id === source.findingId && (proactive || row.source_key === original.signal_id));
       const record = read<{ binding: { manuscript: { manuscriptId: string; branchId: string; revisionId: string; journalSequence: number }; resultSetRevisionId: string | null } }>(original);
       requireLearning(record.binding.manuscript.manuscriptId === source.manuscriptId && record.binding.manuscript.branchId === source.branchId &&
         record.binding.manuscript.revisionId === source.revisionId && record.binding.manuscript.journalSequence === source.journalSequence &&
@@ -200,22 +973,163 @@ export class EditorialLearningLedger {
   /** A later decision on the item, or a revised reason, supersedes the source: never usable, and never shown as 明确排除. */
   #currentEligibility(signal: LearningSignal, controls: Controls): LearningSignalStanding {
     if (!controls.enabled || controls.excludedBooks.has(signal.source.bookId)) return 'excluded';
+    if (signal.kind === 'manual-edit-journal') return this.#manualStanding(signal);
+    if (signal.kind === 'word-tracked-edit') {
+      this.#wordEvidence(signal.source);
+      const last = this.#eligibilityHistory(signal.source.bookId, signal.source.materialKey).at(-1);
+      requireLearning(last === undefined || last.materialDigest === signal.source.materialDigest);
+      const choice = this.#standing(signal.source.bookId, signal.source.materialKey).choice;
+      if (choice === 'house' || choice === 'book') {
+        const identity = `${signal.source.bookId}:${signal.source.sourceVersionId}:${signal.source.sourceDigest}:${signal.source.graphDigest}`;
+        if (!this.#reads?.availableWordSources.has(identity)) {
+          if (this.requireWordSource === undefined) throw new LearningEligibilityError('WORD_SOURCE_UNAVAILABLE', 'Word 原始来源尚未通过实际对象可用性验证。');
+          const facts = this.requireWordSource(signal.source);
+          if (facts !== undefined) this.#reads?.useWordProofs(facts);
+          this.#reads?.availableWordSources.add(identity);
+        }
+      }
+      return choice;
+    }
+    if (signal.kind === 'proactive-reason' && signal.ask?.state !== 'answered') return 'deferred';
     if (signal.source.reviewRunId === null) {
       const current = this.db.prepare(`SELECT decision_id FROM proposal_item_decisions WHERE item_id =
         (SELECT item_id FROM proposal_item_decisions WHERE decision_id = ?) ORDER BY ordinal DESC LIMIT 1`).get(signal.source.decisionId);
       if (current?.decision_id !== signal.source.decisionId) return 'superseded';
-      const candidate = this.#candidate(signal.source.decisionId)?.candidate;
+      const candidate = this.#candidate(signal.source.decisionId, signal.kind === 'proactive-reason')?.candidate;
       if (candidate === undefined || learningMaterialDigest(candidate) !== signal.source.materialDigest) return 'superseded';
     }
     return this.#standing(signal.source.bookId, signal.source.materialKey).choice;
   }
 
-  change(input: ChangeEditorialLearningInput): void {
+  /** Resolve a real decision, including an unreasoned rejection; never accept lineage supplied by the renderer. */
+  #askDecision(decisionId: string): { source: LearningSourceReference; disposition: string; eligible: boolean } | null {
+    const found = this.#candidate(decisionId, true);
+    if (found !== null) {
+      const { row, candidate, reasonRevision } = found;
+      const latest = this.db.prepare('SELECT decision_id FROM proposal_item_decisions WHERE item_id = ? ORDER BY ordinal DESC LIMIT 1').get(row.item_id!);
+      if (latest?.decision_id !== decisionId) return null;
+      const finding = this.db.prepare('SELECT review_run_id, category_id FROM review_findings WHERE mark_id = ? ORDER BY rowid DESC LIMIT 1').get(row.mark_id!);
+      // The third same-category edit of a Run asks once (Issue #1109); later ones in that Run do not, so a batch Apply never fans out.
+      const repeated = finding !== undefined && Number(this.db.prepare(`SELECT count(DISTINCT d.item_id) n FROM proposal_item_decisions d
+        JOIN proposal_change_items i ON i.item_id = d.item_id JOIN review_findings f ON f.mark_id = i.mark_id
+        WHERE f.review_run_id = ? AND f.category_id = ? AND d.disposition IN ('accepted', 'accepted-with-edit')
+          AND d.rowid <= (SELECT rowid FROM proposal_item_decisions WHERE decision_id = ?)`).get(finding.review_run_id!, finding.category_id!, decisionId)?.n) === 3;
+      const disposition = String(row.disposition);
+      return { disposition, eligible: disposition === 'rejected' ||
+        disposition === 'accepted-with-edit' && row.edited_text !== row.proposed_text || repeated,
+        source: { bookId: String(row.book_id), manuscriptId: String(row.manuscript_id), branchId: String(row.branch_id), markId: String(row.mark_id),
+          decisionId, revisionId: String(row.decided_revision_id), journalSequence: Number(row.decided_journal_sequence),
+          blockDigest: row.decided_block_digest === null ? null : String(row.decided_block_digest), materialKey: candidate.materialKey,
+          materialDigest: learningMaterialDigest(candidate), reasonRevision, reviewRunId: null, findingId: null, resultSetRevisionId: null } };
+    }
+    const row = this.db.prepare('SELECT * FROM quality_signals WHERE disposition_id = ?').get(decisionId) as Row | undefined;
+    if (row === undefined) return null;
+    const original = read<{ binding: { manuscript: { manuscriptId: string; branchId: string; revisionId: string; journalSequence: number }; resultSetRevisionId: string | null } }>(row);
+    const candidate = reviewDispositionCandidate({ signalId: String(row.signal_id), reviewRunId: String(row.review_run_id), findingId: String(row.finding_id),
+      categoryLabel: String(row.category_id), reason: String(row.reason), recordedAt: String(row.recorded_at) }, false);
+    return { disposition: 'ignored', eligible: true, source: { bookId: String(row.book_id), ...original.binding.manuscript,
+      markId: row.mark_id === null ? null : String(row.mark_id), decisionId, blockDigest: null,
+      materialKey: candidate.materialKey, materialDigest: learningMaterialDigest(candidate), reasonRevision: 0,
+      reviewRunId: String(row.review_run_id), findingId: String(row.finding_id), resultSetRevisionId: original.binding.resultSetRevisionId } };
+  }
+
+  /** Append-only local asks: frequency survives restart and dismissal; no provider or decision dependency. Caller owns the transaction. */
+  reasonAsk(input: LearningReasonAskInput, frequency: LearningReasonAskFrequency, now = new Date().toISOString()): LearningReasonAskProjection | null {
+    if (input.action !== 'offer') {
+      const row = this.db.prepare(`SELECT signal_id FROM learning_signals WHERE json_extract(canonical_json, '$.ask.askId') = ?
+        AND json_extract(canonical_json, '$.ask.state') = 'offered'`).get(input.askId);
+      requireLearning(row);
+      const offer = this.#signal(String(row.signal_id));
+      requireLearning(offer.kind === 'proactive-reason' && offer.ask);
+      const answer = input.action === 'answer';
+      const choice = answer ? input.choice : null;
+      const own = answer ? input.text?.trim() || null : null;
+      requireLearning(!answer || (choice === null || LEARNING_REASON_OPTIONS[offer.ask.disposition]?.includes(choice)) &&
+        (own === null || own.isWellFormed() && own.length <= 2_048 && graphemesOf(own).length <= 200) && (choice !== null || own !== null));
+      const settled = this.db.prepare(`SELECT canonical_json FROM learning_signals WHERE source_key IN (?, ?)`).get(
+        `ask:${offer.source.decisionId}:answered`, `ask:${offer.source.decisionId}:dismissed`);
+      if (settled) return null;
+      const current = this.#askDecision(offer.source.decisionId);
+      requireLearning(current && current.source.materialDigest === offer.source.materialDigest);
+      requireLearning(this.#capture(`ask:${offer.source.decisionId}:${answer ? 'answered' : 'dismissed'}`, 'proactive-reason', offer.source, null, now,
+        { ...offer.ask, state: answer ? 'answered' : 'dismissed', choice, text: own }) !== null);
+      return null;
+    }
+    if (frequency === 'off') return null;
+    const decision = this.#askDecision(input.decisionId);
+    if (decision === null || !decision.eligible) return null;
+    const { source, disposition } = decision;
+    const controls = this.controls();
+    if (!controls.enabled || controls.excludedBooks.has(source.bookId) || ['excluded', 'deferred'].includes(this.#standing(source.bookId, source.materialKey).choice)) return null;
+    const prior = this.db.prepare(`SELECT signal_id FROM learning_signals WHERE source_key IN (?, ?, ?, ?)`).get(
+      `ask:${input.decisionId}:offered`, `ask:${input.decisionId}:suppressed`, `ask:${input.decisionId}:answered`, `ask:${input.decisionId}:dismissed`);
+    // A decision is considered once, even after a restart or a changed frequency. Reading a card never asks again.
+    if (prior) return null;
+    const last = this.db.prepare(`SELECT rowid, recorded_at FROM learning_signals
+      WHERE json_extract(canonical_json, '$.kind') = 'proactive-reason' AND json_extract(canonical_json, '$.ask.state') = 'offered'
+      ORDER BY rowid DESC LIMIT 1`).get();
+    const since = Number(this.db.prepare(`SELECT count(*) n FROM learning_signals WHERE rowid > ?
+      AND json_extract(canonical_json, '$.kind') = 'proactive-reason'
+      AND json_extract(canonical_json, '$.ask.state') IN ('offered', 'suppressed')`).get(last?.rowid ?? 0)?.n);
+    const show = frequency === 'often' || since >= 2 && (last === undefined || Date.parse(now) - Date.parse(String(last.recorded_at)) >= 60_000);
+    const askId = randomUUID();
+    const saved = this.#capture(`ask:${input.decisionId}:${show ? 'offered' : 'suppressed'}`, 'proactive-reason', source, null, now,
+      { askId, state: show ? 'offered' : 'suppressed', disposition, choice: null, text: null });
+    return !show || saved === null ? null : { askId, decisionId: input.decisionId,
+      question: disposition === 'accepted-with-edit' ? '这次为什么这样改？' : disposition === 'accepted' ? '这类修改为什么合适？' : '这次为什么不采用？',
+      options: LEARNING_REASON_OPTIONS[disposition] ?? [] };
+  }
+
+  /** Passive comparisons from finding/decision records; pending findings remain in the denominator. */
+  adoption(bookId: string | null, after: PreferenceAdoptionCursor | null = null): { preferenceAdoption: PreferenceAdoptionProjection[]; preferenceAdoptionNext: PreferenceAdoptionCursor | null } {
+    const rows = this.db.prepare(`SELECT f.*, r.book_id, b.title book_title, m.status mark_status,
+      (SELECT d.disposition FROM proposal_change_items i JOIN proposal_item_decisions d ON d.item_id = i.item_id
+       WHERE i.mark_id = f.mark_id ORDER BY d.ordinal DESC LIMIT 1) decision,
+      EXISTS(SELECT 1 FROM review_finding_dispositions d WHERE d.review_run_id = f.review_run_id AND d.finding_id = f.finding_id AND d.disposition = 'ignored') ignored
+      FROM review_findings f JOIN review_runs r ON r.review_run_id = f.review_run_id JOIN books b ON b.book_id = r.book_id
+      LEFT JOIN editorial_marks m ON m.mark_id = f.mark_id WHERE (? IS NULL OR r.book_id = ?) ORDER BY r.book_id, f.rowid`).all(bookId, bookId) as Row[];
+    const books = new Map<string, Array<{ refs: readonly ReferencedRuleVersion[]; accepted: boolean; rejected: boolean }>>();
+    const titles = new Map<string, string>();
+    for (const row of rows) {
+      const id = String(row.book_id); titles.set(id, String(row.book_title));
+      const record = read<{ referencedRuleVersions?: readonly ReferencedRuleVersion[] }>(row);
+      const entry = { refs: record.referencedRuleVersions ?? [],
+        accepted: row.ignored !== 1 && row.decision !== 'rejected' && (row.mark_status === 'applied' ||
+          row.output === 'annotation' && row.mark_status === 'resolved' || row.decision === 'accepted' || row.decision === 'accepted-with-edit'),
+        rejected: row.ignored === 1 || row.decision === 'rejected' };
+      const entries = books.get(id) ?? []; entries.push(entry); books.set(id, entries);
+    }
+    const result: PreferenceAdoptionProjection[] = [];
+    for (const [id, entries] of books) {
+      const versions = new Map(entries.flatMap((entry) => entry.refs.map((ref) => [ref.versionId, ref.ordinal] as const)));
+      for (const versionId of [null, ...versions.keys()]) {
+        const counts = (referenced: boolean) => {
+          const cohort = entries.filter((entry) => (versionId === null ? entry.refs.length > 0 : entry.refs.some((ref) => ref.versionId === versionId)) === referenced);
+          const accepted = cohort.filter((entry) => entry.accepted).length;
+          return { findings: cohort.length, accepted, rejected: cohort.filter((entry) => entry.rejected).length,
+            rate: cohort.length === 0 ? null : accepted / cohort.length };
+        };
+        const referenced = counts(true);
+        result.push({ bookId: id, bookTitle: titles.get(id)!, versionId, ordinal: versionId === null ? null : versions.get(versionId)!,
+          referenced, unreferenced: counts(false), mostlyRejected: referenced.rejected > referenced.findings / 2 });
+      }
+    }
+    const key = (row: PreferenceAdoptionCursor) => `${row.bookId}/${row.versionId ?? ''}`;
+    const ordered = result.sort((a, b) => key(a).localeCompare(key(b), 'en'))
+      .filter((row) => after === null || key(row).localeCompare(key(after), 'en') > 0);
+    const preferenceAdoption = ordered.slice(0, 40);
+    const last = preferenceAdoption.at(-1);
+    return { preferenceAdoption, preferenceAdoptionNext: ordered.length <= 40 || last === undefined ? null : { bookId: last.bookId, versionId: last.versionId } };
+  }
+
+  change(input: ChangeEditorialLearningInput, envelope?: EnabledLearningEnvelope): void {
     const controls = this.controls();
     if (input.kind === 'material') {
       const signal = this.#signal(input.signalId);
       let candidate: LearningMaterialCandidate | null = null;
-      if (signal.source.reviewRunId === null) candidate = this.#candidate(signal.source.decisionId)?.candidate ?? null;
+      if (signal.kind === 'word-tracked-edit') candidate = this.#wordEvidence(signal.source).candidate;
+      else if (signal.kind === 'manual-edit-journal') candidate = manualEditCandidate(this.#manualSource(signal));
+      else if (signal.source.reviewRunId === null) candidate = this.#candidate(signal.source.decisionId, signal.kind === 'proactive-reason')?.candidate ?? null;
       else {
         const row = this.db.prepare('SELECT * FROM quality_signals WHERE disposition_id = ?').get(signal.source.decisionId) as Row | undefined;
         if (row) candidate = reviewDispositionCandidate({ signalId: String(row.signal_id), reviewRunId: String(row.review_run_id),
@@ -233,35 +1147,481 @@ export class EditorialLearningLedger {
     const entryId = randomUUID(); const recordedAt = new Date().toISOString();
     const bookId = input.kind === 'book' ? input.bookId : null;
     const value = input.kind === 'switch' ? input.enabled : input.excluded;
+    if (input.kind === 'switch' && input.curation !== undefined) requireLearning(input.enabled && envelope !== undefined && validCurationBudget(input.curation));
     const record = canonicalRecord({ schema: 'ai7.editorial-learning-control/1', entryId, ordinal: controls.entries + 1,
-      kind: input.kind, bookId, value, actor: 'editor', recordedAt, basis: LOCAL_LEARNING_POLICY_BASIS });
+      kind: input.kind, bookId, value, actor: 'editor', recordedAt, basis: LOCAL_LEARNING_POLICY_BASIS,
+      ...(input.kind === 'switch' && input.enabled && envelope !== undefined ? { curation: envelope } : {}) });
     this.db.prepare('INSERT INTO editorial_learning_controls VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
       .run(entryId, controls.entries + 1, input.kind, bookId, Number(value), recordedAt, record.json, record.digest);
   }
 
+  /** Relevant control identities only: another Book's control cannot invalidate this source. */
+  #controlSnapshot(bookId: string): EditorialMemoryAdmission['controls'] {
+    let switchEntryId: string | null = null; let bookEntryId: string | null = null;
+    for (const { record } of this.#controlRows()) {
+      if (record.kind === 'switch') switchEntryId = record.entryId;
+      else if (record.bookId === bookId) bookEntryId = record.entryId;
+    }
+    return { switchEntryId, bookEntryId };
+  }
+
+  /** Prove review category and production scope independently of local automatic capture. */
+  #reviewOrigin(signal: LearningSignal): { operationalScope: TrustedOperationalScope; editorialDimension: string };
+  #reviewOrigin(signal: LearningSignal, allowMissing: true): { operationalScope: TrustedOperationalScope; editorialDimension: string } | null;
+  #reviewOrigin(signal: LearningSignal, allowMissing = false): { operationalScope: TrustedOperationalScope; editorialDimension: string } | null {
+    const known = this.#reads?.origins.get(signal.signalId);
+    if (known !== undefined) return known;
+    const origin = this.#provedOrigin(signal, allowMissing);
+    if (origin !== null) this.#reads?.origins.set(signal.signalId, origin);
+    return origin;
+  }
+
+  #provedOrigin(signal: LearningSignal, allowMissing: boolean): { operationalScope: TrustedOperationalScope; editorialDimension: string } | null {
+    if (signal.kind === 'word-tracked-edit' || signal.kind === 'manual-edit-journal' || !['accepted', 'accepted-with-edit', 'rejected'].includes(signal.kind) || signal.source.reviewRunId !== null) {
+      requireLearning(allowMissing); return null;
+    }
+    const finding = this.db.prepare(`SELECT f.review_run_id, f.category_id FROM proposal_item_decisions d
+      JOIN proposal_change_items i ON i.item_id = d.item_id JOIN review_findings f ON f.mark_id = i.mark_id
+      WHERE d.decision_id = ? ORDER BY f.rowid LIMIT 1`).get(signal.source.decisionId);
+    if (!finding || reviewCategoryEntry(String(finding.category_id)) === null) { requireLearning(allowMissing); return null; }
+    const revision = this.db.prepare(`SELECT r.canonical_json, r.sha256 FROM review_run_category_events e
+      JOIN analysis_result_set_revisions r ON r.revision_id = e.result_set_revision_id
+      WHERE e.review_run_id = ? AND e.category_id = ? AND e.state = 'materialized' ORDER BY e.sequence DESC LIMIT 1`)
+      .get(finding.review_run_id!, finding.category_id!) as Row | undefined;
+    if (revision === undefined) { requireLearning(allowMissing); return null; }
+    const origin = read<{ policyPin?: { operationalScope?: TrustedOperationalScope } }>(revision).policyPin?.operationalScope;
+    if (origin === undefined) { requireLearning(allowMissing); return null; }
+    requireLearning(origin !== undefined && ['ordinary-production', 'developer-live', 'development-ci'].includes(origin));
+    return { operationalScope: origin, editorialDimension: String(finding.category_id) };
+  }
+
+  /** A current proved source, not an inference from old keys or memory existence. Corruption is never swallowed. */
+  automaticAdmissionFor(bookId: string, materialKey: string, materialDigest: string, scope: TrustedOperationalScope): { choice: 'house'; sourceKeys: string[] } | null {
+    if (this.#eligibilityHistory(bookId, materialKey).length > 0) return null;
+    const controls = this.controls();
+    if (!controls.enabled || controls.excludedBooks.has(bookId)) return null;
+    const sourceKeys: string[] = [];
+    for (const row of this.db.prepare('SELECT signal_id FROM learning_signals WHERE book_id = ?').iterate(bookId)) {
+      const signal = this.#signal(String(row.signal_id));
+      if (signal.source.materialKey !== materialKey || signal.source.materialDigest !== materialDigest || this.#currentEligibility(signal, controls) !== 'house') continue;
+      if (signal.kind === 'manual-edit-journal') {
+        if (signal.operationalScope === scope) sourceKeys.push(sha256Hex(canonicalJson(signal.source)));
+        continue;
+      }
+      if (signal.kind === 'word-tracked-edit') {
+        // This proves local policy-2 retention only; it never constructs a review-memory source snapshot.
+        sourceKeys.push(sha256Hex(canonicalJson({ signalId: signal.signalId, materialDigest: signal.source.materialDigest,
+          sampleDigest: signal.source.sampleDigest })));
+        continue;
+      }
+      const origin = this.#reviewOrigin(signal, true);
+      if (origin?.operationalScope !== scope) continue;
+      const snapshot = this.sourceSnapshot(signal.signalId);
+      requireLearning(snapshot.admission.kind === 'automatic'); sourceKeys.push(snapshot.sourceKey);
+    }
+    return sourceKeys.length === 0 ? null : { choice: 'house', sourceKeys: sourceKeys.sort() };
+  }
+
+  sourceSnapshot(signalId: string): EditorialMemorySourceSnapshot {
+    const standing = this.#sourceStanding(signalId);
+    requireLearning('snapshot' in standing);
+    return standing.snapshot;
+  }
+
+  /**
+   * Where one signal stands as a memory source now (Issue #1128 revision 8): its current snapshot, or the normal reason it is
+   * not — learning off, an excluded Book or material, a deferred or superseded source, an admission made for another version of
+   * its material, or a signal outside the review-decision family. Only validated records give such a reason; a malformed or
+   * missing signal, control, decision chain or review origin propagates its refusal and never reads as absence.
+   */
+  #sourceStanding(signalId: string): { readonly snapshot: EditorialMemorySourceSnapshot } | { readonly unavailable: 'not-current' | 'not-review' } {
+    const signal = this.#signal(signalId);
+    const observation = signal.kind === 'word-tracked-edit' || signal.kind === 'manual-edit-journal';
+    if (signal.kind === 'manual-edit-journal' && signal.operationalScope !== 'ordinary-production') return { unavailable: 'not-review' };
+    const eligibility = this.#currentEligibility(signal, this.controls());
+    if (eligibility !== 'book' && eligibility !== 'house') return { unavailable: 'not-current' };
+    const origin = observation ? { operationalScope: 'ordinary-production' as const, editorialDimension: null } : this.#reviewOrigin(signal, true);
+    if (origin === null) return { unavailable: 'not-review' };
+    const last = this.#eligibilityHistory(signal.source.bookId, signal.source.materialKey).at(-1);
+    const controls = this.#controlSnapshot(signal.source.bookId);
+    if (last !== undefined && last.materialDigest !== signal.source.materialDigest) return { unavailable: 'not-current' };
+    const admission: EditorialMemoryAdmission = last === undefined
+      ? { kind: 'automatic', basis: { policy: LOCAL_LEARNING_POLICY_BASIS.policy, mode: LOCAL_LEARNING_POLICY_BASIS.mode, version: 2 },
+        signalId, materialDigest: signal.source.materialDigest, controls }
+      : { kind: 'explicit', decisionId: last.decisionId, ordinal: last.ordinal, basis: last.basis,
+        materialDigest: signal.source.materialDigest, controls };
+    const common = {
+      feedbackKey: sha256Hex(canonicalJson({ bookId: signal.source.bookId, materialKey: signal.source.materialKey, materialDigest: signal.source.materialDigest })),
+      signalId, eligibility, admission, attribution: signal.attribution,
+      bookTitle: String(this.db.prepare('SELECT title FROM books WHERE book_id = ?').get(signal.source.bookId)?.title ?? '') };
+    if (signal.kind === 'manual-edit-journal' || signal.kind === 'word-tracked-edit') return { snapshot: { ...common,
+      sourceKind: signal.kind, source: signal.source, operationalScope: 'ordinary-production', editorialDimension: null,
+      sourceKey: sha256Hex(canonicalJson(signal.source)) } as EditorialMemorySourceSnapshot };
+    requireLearning(origin.editorialDimension !== null);
+    return { snapshot: { ...common, ...origin, source: signal.source, editorialDimension: origin.editorialDimension,
+      sourceKey: sha256Hex(canonicalJson({ signalId, materialDigest: signal.source.materialDigest, reasonRevision: signal.source.reasonRevision })) } };
+  }
+
+  #validateSource(snapshot: EditorialMemorySourceSnapshot): void {
+    validateEditorialMemorySourceShape(snapshot);
+    const key = this.#reads === null ? null : sha256Hex(canonicalJson(snapshot));
+    if (key !== null && this.#reads!.snapshots.has(key)) return;
+    this.#provedSource(snapshot);
+    if (key !== null) this.#reads?.snapshots.add(key);
+  }
+
+  #provedSource(snapshot: EditorialMemorySourceSnapshot): void {
+    const signal = this.#signal(snapshot.signalId);
+    if (snapshot.sourceKind !== undefined) {
+      requireLearning(signal.kind === snapshot.sourceKind && canonicalJson(signal.source) === canonicalJson(snapshot.source) &&
+        canonicalJson(signal.attribution) === canonicalJson(snapshot.attribution));
+    } else {
+      requireLearning(signal.kind !== 'word-tracked-edit' && signal.kind !== 'manual-edit-journal');
+    requireLearning(canonicalJson(snapshot.source) === canonicalJson(signal.source) &&
+      canonicalJson(snapshot.attribution) === canonicalJson(signal.attribution) &&
+      snapshot.sourceKey === sha256Hex(canonicalJson({ signalId: signal.signalId, materialDigest: signal.source.materialDigest, reasonRevision: signal.source.reasonRevision })) &&
+      snapshot.feedbackKey === sha256Hex(canonicalJson({ bookId: signal.source.bookId, materialKey: signal.source.materialKey, materialDigest: signal.source.materialDigest })) &&
+      canonicalJson(this.#reviewOrigin(signal)) === canonicalJson({ operationalScope: snapshot.operationalScope, editorialDimension: snapshot.editorialDimension }));
+    }
+    const admission = snapshot.admission;
+    requireLearning(isRecord(admission) && admission.materialDigest === signal.source.materialDigest && isRecord(admission.controls));
+    if (admission.kind === 'explicit') {
+      const decision = this.#eligibilityHistory(signal.source.bookId, signal.source.materialKey).find((entry) => entry.decisionId === admission.decisionId);
+      requireLearning(decision && decision.ordinal === admission.ordinal && decision.materialDigest === admission.materialDigest &&
+        (decision.choice === 'book' || decision.choice === 'house') && decision.choice === snapshot.eligibility && canonicalJson(decision.basis) === canonicalJson(admission.basis));
+    } else requireLearning(admission.kind === 'automatic' && admission.signalId === signal.signalId && canonicalJson(admission.basis) ===
+      canonicalJson({ policy: LOCAL_LEARNING_POLICY_BASIS.policy, mode: LOCAL_LEARNING_POLICY_BASIS.mode, version: 2 }) && snapshot.eligibility === 'house');
+    for (const [kind, id] of [['switch', admission.controls.switchEntryId], ['book', admission.controls.bookEntryId]] as const) {
+      requireLearning(id === null || this.#controlRows().some(({ record }) => record.entryId === id && record.kind === kind &&
+        (kind === 'switch' ? record.value : record.bookId === signal.source.bookId && !record.value)));
+    }
+  }
+
+  validateSourceSnapshot(snapshot: EditorialMemorySourceSnapshot): void { this.#validateSource(snapshot); }
+
+  /** Validate any Book-owned facts still present, without treating absent House control/memory records as current authority. */
+  validateHistoricalSource(snapshot: EditorialMemorySourceSnapshot): boolean {
+    validateEditorialMemorySourceShape(snapshot);
+    if (!this.db.prepare('SELECT 1 FROM learning_signals WHERE signal_id = ?').get(snapshot.signalId)) return false;
+    const signal = this.#signal(snapshot.signalId);
+    if (snapshot.sourceKind !== undefined) {
+      requireLearning(signal.kind === snapshot.sourceKind && canonicalJson(signal.source) === canonicalJson(snapshot.source));
+      return true;
+    }
+    requireLearning(signal.kind !== 'word-tracked-edit' && signal.kind !== 'manual-edit-journal');
+    requireLearning(canonicalJson(signal.source) === canonicalJson(snapshot.source) && canonicalJson(signal.attribution) === canonicalJson(snapshot.attribution) &&
+      canonicalJson(this.#reviewOrigin(signal)) === canonicalJson({ operationalScope: snapshot.operationalScope, editorialDimension: snapshot.editorialDimension }));
+    return true;
+  }
+
+  /** A withdrawal after this publication's basis stays historical even after a deliberate restore. */
+  sourceWithdrawalAt(snapshot: EditorialMemorySourceSnapshot): string | null {
+    requireLearning(this.validateHistoricalSource(snapshot));
+    const events: string[] = [];
+    const controls = this.#controlRows().map((entry) => entry.record);
+    for (const [kind, id] of [['switch', snapshot.admission.controls.switchEntryId], ['book', snapshot.admission.controls.bookEntryId]] as const) {
+      const basis = id === null ? 0 : controls.find((entry) => entry.entryId === id)?.ordinal;
+      // A missing source-House switch cannot be guessed from this House's unrelated control sequence.
+      if (basis === undefined) continue;
+      const stopped = controls.find((entry) => entry.ordinal > basis && entry.kind === kind &&
+        (kind === 'switch' ? !entry.value : entry.bookId === snapshot.source.bookId && entry.value));
+      if (stopped !== undefined) events.push(stopped.recordedAt);
+    }
+    const chain = this.#eligibilityHistory(snapshot.source.bookId, snapshot.source.materialKey);
+    const admission = snapshot.admission;
+    const basis = admission.kind === 'automatic' ? 0 : chain.find((entry) => entry.decisionId === admission.decisionId)?.ordinal;
+    requireLearning(basis !== undefined);
+    const excluded = chain.find((entry) => entry.ordinal > basis && entry.choice === 'excluded');
+    if (excluded !== undefined) events.push(excluded.recordedAt);
+    return events.sort((a, b) => Date.parse(a) - Date.parse(b))[0] ?? null;
+  }
+
+  #validateMemory(version: EditorialMemoryVersion): void {
+    requireLearning(version.actor === 'editor' || version.actor === 'AI7' && version.curation !== undefined && version.action === 'create');
+    if (version.curation !== undefined) requireLearning(UUID_PATTERN.test(version.curation.taskIntentId) && UUID_PATTERN.test(version.curation.runRecordId) &&
+      DIGEST_PATTERN.test(version.curation.bundleDigest));
+    requireLearning(Object.keys(version).sort().join(',') === ['schema', 'itemId', 'versionId', 'ordinal', 'supersedes', 'recordedAt', 'operationalScope',
+      'applicability', 'editorialDimension', 'title', 'confidence', 'state', 'actor', 'actionId', 'action', 'signalIds', 'positiveExamples',
+      'negativeExamples', 'sources', 'parentVersions', 'supervisionDirectiveRefs', ...(version.curation === undefined ? [] : ['curation'])].sort().join(',') &&
+      UUID_PATTERN.test(version.actionId) && reviewCategoryEntry(version.editorialDimension) !== null &&
+      typeof version.title === 'string' && version.title.trim().length > 0 && version.title.length <= 160 && version.title.isWellFormed() &&
+      !/[\r\n\p{Cc}\p{Zl}\p{Zp}]/u.test(version.title) &&
+      ['development-ci', 'developer-live', 'ordinary-production'].includes(version.operationalScope) &&
+      ['create', 'accept', 'merge', 'correct', 'deactivate', 'freeze'].includes(version.action) &&
+      isRecord(version.applicability) && (version.applicability.kind === 'house' && Object.keys(version.applicability).length === 1 ||
+        version.applicability.kind === 'book' && Object.keys(version.applicability).length === 2 && UUID_PATTERN.test(version.applicability.bookId)) &&
+      Array.isArray(version.signalIds) && version.signalIds.length <= 10 && new Set(version.signalIds).size === version.signalIds.length &&
+      Array.isArray(version.sources) && version.sources.length === version.signalIds.length &&
+      Array.isArray(version.parentVersions) && version.parentVersions.length <= 12 &&
+      new Set(version.parentVersions.map((pin) => pin.itemId)).size === version.parentVersions.length &&
+      Array.isArray(version.supervisionDirectiveRefs) && version.supervisionDirectiveRefs.length <= 1);
+    requireLearning(version.action === 'create' || version.action === 'accept' ? version.supervisionDirectiveRefs.length === 0
+      : version.action === 'deactivate' || version.supervisionDirectiveRefs.length === 1);
+    version.sources.forEach((source, index) => { requireLearning(source.signalId === version.signalIds[index]); this.#validateSource(source); });
+    requireLearning(canonicalJson(version.positiveExamples) === canonicalJson(version.sources.filter((entry) => entry.sourceKind === undefined && this.#signal(entry.signalId).kind !== 'rejected').map((entry) => entry.source)) &&
+      canonicalJson(version.negativeExamples) === canonicalJson(version.sources.filter((entry) => entry.sourceKind === undefined && this.#signal(entry.signalId).kind === 'rejected').map((entry) => entry.source)));
+    requireLearning(version.action === 'create' ? version.ordinal === 1 && version.state === 'proposed' && version.sources.length > 0 && version.parentVersions.length === 0
+      : version.parentVersions.length > 0);
+    for (const id of version.supervisionDirectiveRefs) {
+      const row = this.db.prepare('SELECT * FROM learning_supervision_directives WHERE directive_id = ?').get(id) as Row | undefined;
+      requireLearning(row);
+      const directive = read<LearningSupervisionDirective>(row);
+      requireLearning(directive.schema === 'ai7.learning-supervision-directive/1' && directive.actor === 'editor' && directive.directiveId === id &&
+        directive.directiveId === row.directive_id && directive.operationalScope === row.operational_scope && directive.ordinal === row.ordinal &&
+        directive.recordedAt === row.recorded_at && canonicalJson(directive) === row.canonical_json &&
+        (version.action === 'merge' ? directive.operation === 'merge' : version.action === 'correct'
+          ? directive.operation === 'correct' || directive.operation === 'supervise' && directive.effect === 'correct'
+          : version.action === 'freeze' ? directive.operation === 'supervise' && directive.effect === 'freeze' : directive.operation === 'deactivate') &&
+        (version.action === 'correct' || version.action === 'merge' && version.ordinal === 1 ? version.title === directive.text : true) &&
+        directive.operationalScope === version.operationalScope && directive.actionId === version.actionId &&
+        directive.categoryId === version.editorialDimension && (version.action === 'merge' && version.ordinal === 1
+          ? canonicalJson(directive.targets.map((pin) => ({ itemId: pin.itemId, versionId: pin.revisionId }))) === canonicalJson(version.parentVersions)
+          : version.parentVersions.length === 1 && directive.targets.some((pin) => pin.itemId === version.itemId && pin.revisionId === version.parentVersions[0]!.versionId)));
+    }
+  }
+
+  version(itemId: string, versionId?: string): GlobalEditorialMemoryVersion {
+    return this.#read(() => {
+      const versions = this.#versions(itemId);
+      const version = versionId === undefined ? versions.at(-1) : versions.find((entry) => entry.versionId === versionId);
+      requireLearning(version); return version;
+    });
+  }
+
+  /** Walk all immutable parents, never just the item anchor or the first visible history page; once per exact version in a read. */
+  effectiveSources(version: EditorialMemoryVersion): EditorialMemorySourceSnapshot[] {
+    return this.#read(() => {
+      const key = sha256Hex(canonicalJson(version));
+      const known = this.#reads!.effective.get(key);
+      if (known !== undefined) return known;
+      const sources = this.#walkSources(version);
+      this.#reads!.effective.set(key, sources);
+      return sources;
+    });
+  }
+
+  #walkSources(version: EditorialMemoryVersion): EditorialMemorySourceSnapshot[] {
+    const sources = new Map<string, EditorialMemorySourceSnapshot>();
+    const histories = new Map<string, GlobalEditorialMemoryVersion[]>();
+    const visiting = new Set<string>(); const visited = new Set<string>();
+    const stack: Array<{ version: EditorialMemoryVersion; exit: boolean }> = [{ version, exit: false }];
+    while (stack.length > 0) {
+      const entry = stack.pop()!; const current = entry.version;
+      if (entry.exit) { visiting.delete(current.versionId); visited.add(current.versionId); continue; }
+      requireLearning(!visiting.has(current.versionId));
+      if (visited.has(current.versionId)) continue;
+      requireLearning(current.operationalScope === version.operationalScope && current.editorialDimension === version.editorialDimension &&
+        canonicalJson(current.applicability) === canonicalJson(version.applicability));
+      visiting.add(current.versionId); stack.push({ version: current, exit: true });
+      for (const source of current.sources) {
+        requireLearning(source.operationalScope === version.operationalScope && (source.editorialDimension === null || source.editorialDimension === version.editorialDimension) &&
+          (version.applicability.kind === 'house' || source.source.bookId === version.applicability.bookId));
+        const previous = sources.get(source.sourceKey);
+        requireLearning(previous === undefined || canonicalJson(previous.source) === canonicalJson(source.source) &&
+          previous.operationalScope === source.operationalScope && previous.editorialDimension === source.editorialDimension);
+        if (previous === undefined || canonicalJson(source).localeCompare(canonicalJson(previous), 'en') < 0) sources.set(source.sourceKey, source);
+      }
+      for (const pin of current.parentVersions) {
+        requireLearning(isRecord(pin) && Object.keys(pin).length === 2 && UUID_PATTERN.test(pin.itemId) && UUID_PATTERN.test(pin.versionId));
+        let history = histories.get(pin.itemId);
+        if (history === undefined) { history = this.#versions(pin.itemId); histories.set(pin.itemId, history); }
+        const parent = history.find((entry) => entry.versionId === pin.versionId);
+        requireLearning(parent !== undefined);
+        requireLearning(parent.schema === 'ai7.global-editorial-memory/2'); stack.push({ version: parent, exit: false });
+      }
+    }
+    requireLearning(sources.size > 0);
+    return [...sources.values()].sort((a, b) => a.sourceKey.localeCompare(b.sourceKey, 'en'));
+  }
+
+  currentSources(version: EditorialMemoryVersion): EditorialMemorySourceSnapshot[] {
+    return this.#read(() => {
+      const current = this.#currentOrNone(version);
+      requireLearning(current !== null);
+      return current;
+    });
+  }
+
+  /**
+   * The version's current sources, or `null` when a validated record positively places one outside current use (revision 8): a
+   * source that stands nowhere now, or one restricted to its Book behind House memory. Every integrity failure propagates.
+   */
+  #currentOrNone(version: EditorialMemoryVersion): EditorialMemorySourceSnapshot[] | null {
+    const current: EditorialMemorySourceSnapshot[] = [];
+    for (const source of this.effectiveSources(version)) {
+      const standing = this.#sourceStanding(source.signalId);
+      // The ancestry walk already proved each source's review origin; losing it now is missing lineage, not ordinary standing.
+      if (!('snapshot' in standing)) { requireLearning(standing.unavailable === 'not-current'); return null; }
+      if (version.applicability.kind === 'house' && standing.snapshot.eligibility !== 'house') return null;
+      requireLearning(standing.snapshot.sourceKey === source.sourceKey && standing.snapshot.operationalScope === version.operationalScope &&
+        (version.applicability.kind === 'house' || standing.snapshot.source.bookId === version.applicability.bookId));
+      current.push(standing.snapshot);
+    }
+    return current;
+  }
+
+  usable(version: EditorialMemoryVersion): boolean {
+    return this.#read(() => version.state === 'active' && this.version(version.itemId).versionId === version.versionId && this.#currentOrNone(version) !== null);
+  }
+
+  /** Existing opaque read-pin field, binding this memory version to its relevant current source/control basis only. */
+  sourcePinRevision(itemId: string, versionId: string): string {
+    return this.#read(() => {
+      const version = this.version(itemId, versionId);
+      requireLearning(version.schema === 'ai7.global-editorial-memory/2' && version.state === 'active' && this.version(itemId).versionId === versionId);
+      const sources = this.currentSources(version).map(({ sourceKey, admission, eligibility }) => ({ sourceKey, admission, eligibility }));
+      return `${version.versionId}@${sha256Hex(canonicalJson(sources))}`;
+    });
+  }
+
+  #createMemory(input: Extract<CreateEditorialMemoryInput, { schema: string }>, scope: TrustedOperationalScope): void {
+    requireLearning(input.schema === 'ai7.global-editorial-memory/2' && UUID_PATTERN.test(input.actionId) &&
+      Array.isArray(input.signalIds) && input.signalIds.length >= 1 && input.signalIds.length <= 10 && new Set(input.signalIds).size === input.signalIds.length &&
+      input.signalIds.every((id) => UUID_PATTERN.test(id)) && input.title.trim().length > 0 && input.title.length <= 160 && input.title.isWellFormed() &&
+      reviewCategoryEntry(input.editorialDimension) !== null && Number.isFinite(input.confidence) && input.confidence >= 0 && input.confidence <= 1);
+    const previous = this.db.prepare('SELECT item_id FROM global_editorial_memory_items WHERE client_memory_id = ?').get(input.actionId);
+    if (previous) {
+      const first = this.#versions(String(previous.item_id))[0]!;
+      requireLearning(first.schema === 'ai7.global-editorial-memory/2' && first.actionId === input.actionId && first.operationalScope === scope &&
+        first.title === input.title && first.editorialDimension === input.editorialDimension && first.confidence === input.confidence &&
+        canonicalJson(first.applicability) === canonicalJson(input.applicability) && canonicalJson(first.signalIds) === canonicalJson(input.signalIds));
+      return;
+    }
+    requireLearning(this.#action(input.actionId).length === 0);
+    const sources = input.signalIds.map((id) => this.sourceSnapshot(id));
+    requireLearning(sources.every((source) => source.sourceKind === undefined));
+    const version: EditorialMemoryVersion = { ...input, itemId: randomUUID(), versionId: randomUUID(), ordinal: 1, supersedes: null,
+      recordedAt: new Date().toISOString(), operationalScope: scope, title: input.title, state: 'proposed', actor: 'editor', action: 'create',
+      positiveExamples: sources.flatMap((source) => source.sourceKind === undefined && this.#signal(source.signalId).kind !== 'rejected' ? [source.source] : []),
+      negativeExamples: sources.flatMap((source) => source.sourceKind === undefined && this.#signal(source.signalId).kind === 'rejected' ? [source.source] : []),
+      sources, parentVersions: [], supervisionDirectiveRefs: [] };
+    this.#validateMemory(version); this.currentSources(version);
+    const anchor = this.effectiveSources(version)[0]!.signalId;
+    this.db.prepare('INSERT INTO global_editorial_memory_items VALUES (?, ?, ?, ?)').run(version.itemId, input.actionId, anchor, version.recordedAt);
+    this.#append(version);
+  }
+
+  #action(actionId: string): EditorialMemoryVersion[] {
+    return this.db.prepare(`SELECT item_id, version_id FROM global_editorial_memory_item_versions
+      WHERE json_extract(canonical_json, '$.actionId') = ? ORDER BY rowid`).all(actionId).map((row) => {
+      const version = this.version(String(row.item_id), String(row.version_id));
+      requireLearning(version.schema === 'ai7.global-editorial-memory/2'); return version;
+    });
+  }
+
+  #successor(current: EditorialMemoryVersion, actionId: string, action: EditorialMemoryVersion['action'], state: EditorialMemoryVersion['state'],
+    directiveId: string | null = null, title = current.title): EditorialMemoryVersion {
+    return { ...current, actor: 'editor', versionId: randomUUID(), ordinal: current.ordinal + 1, supersedes: current.versionId, actionId, action, state, title,
+      recordedAt: new Date().toISOString(), signalIds: [], sources: [], positiveExamples: [], negativeExamples: [],
+      parentVersions: [{ itemId: current.itemId, versionId: current.versionId }], supervisionDirectiveRefs: directiveId === null ? [] : [directiveId] };
+  }
+
+  #transition(input: AcceptEditorialMemoryInput, action: 'accept' | 'deactivate', scope?: TrustedOperationalScope): void {
+    requireLearning(UUID_PATTERN.test(input.actionId));
+    const replay = this.#action(input.actionId);
+    if (replay.length > 0) {
+      requireLearning(replay.length === 1 && replay[0]!.itemId === input.itemId && replay[0]!.action === action &&
+        replay[0]!.parentVersions[0]?.versionId === input.expectedVersionId && (scope === undefined || replay[0]!.operationalScope === scope)); return;
+    }
+    const current = this.version(input.itemId);
+    requireLearning(current.schema === 'ai7.global-editorial-memory/2' && current.versionId === input.expectedVersionId &&
+      (scope === undefined || current.operationalScope === scope));
+    if (action === 'accept') { requireLearning(current.state === 'proposed'); this.currentSources(current); }
+    this.#append(this.#successor(current, input.actionId, action, action === 'accept' ? 'active' : 'inactive'));
+  }
+
+  accept(input: AcceptEditorialMemoryInput, scope: TrustedOperationalScope): void { this.#transition(input, 'accept', scope); }
+
+  /** Real memory targets are routed here once, inside the store's directive/publication transaction. */
+  govern(directive: LearningSupervisionDirective, expected: ReadonlyArray<GlobalMemoryPin>): void {
+    requireLearning(directive.actionId !== undefined && UUID_PATTERN.test(directive.actionId));
+    const replay = this.#action(directive.actionId);
+    if (replay.length > 0) { requireLearning(replay.every((version) => version.supervisionDirectiveRefs.includes(directive.directiveId))); return; }
+    const targets = expected.map((pin) => {
+      const version = this.version(pin.itemId);
+      requireLearning(version.schema === 'ai7.global-editorial-memory/2' && version.versionId === pin.revisionId &&
+        version.operationalScope === directive.operationalScope && version.editorialDimension === directive.categoryId &&
+        (version.applicability.kind === 'house' ? directive.scope.kind !== 'book'
+          : directive.scope.kind === 'book' && directive.scope.bookId === version.applicability.bookId));
+      return version;
+    });
+    requireLearning(targets.length > 0);
+    if (directive.operation === 'supervise' && directive.effect === 'guide') return;
+    const action = directive.operation === 'supervise' ? directive.effect : directive.operation;
+    requireLearning(action === 'merge' || action === 'correct' || action === 'deactivate' || action === 'freeze');
+    if (action === 'merge' || action === 'correct') targets.forEach((target) => this.currentSources(target));
+    if (action === 'merge') {
+      requireLearning(targets.length >= 2 && targets.every((target) => canonicalJson(target.applicability) === canonicalJson(targets[0]!.applicability)));
+      const first = targets[0]!;
+      const version: EditorialMemoryVersion = { ...first, actor: 'editor', itemId: randomUUID(), versionId: randomUUID(), ordinal: 1, supersedes: null,
+        recordedAt: directive.recordedAt, actionId: directive.actionId, action: 'merge', title: directive.text,
+        state: targets.every((target) => target.state === 'active') ? 'active' : 'proposed', signalIds: [], sources: [], positiveExamples: [], negativeExamples: [],
+        parentVersions: targets.map((target) => ({ itemId: target.itemId, versionId: target.versionId })), supervisionDirectiveRefs: [directive.directiveId] };
+      const anchor = this.effectiveSources(version)[0]!.signalId;
+      this.#validateMemory(version);
+      this.db.prepare('INSERT INTO global_editorial_memory_items VALUES (?, ?, ?, ?)').run(version.itemId, directive.actionId, anchor, version.recordedAt);
+      for (const target of targets) this.#append(this.#successor(target, directive.actionId, 'merge', 'inactive', directive.directiveId));
+      this.#append(version);
+    } else {
+      requireLearning(targets.length === 1 || action === 'freeze');
+      for (const target of targets) this.#append(this.#successor(target, directive.actionId, action,
+        action === 'correct' ? target.state === 'active' ? 'active' : 'proposed' : action === 'freeze' ? 'frozen' : 'inactive',
+        directive.directiveId, action === 'correct' ? directive.text : target.title));
+    }
+  }
+
   #versions(itemId: string): GlobalEditorialMemoryVersion[] {
+    // A chain this read already proved is reused only while its exact rows are unchanged; otherwise it is read and proved again.
+    const known = this.#reads?.chains.get(itemId);
+    if (known !== undefined && known.fingerprint === this.db.prepare('SELECT version_id, sha256 FROM global_editorial_memory_item_versions WHERE item_id = ? ORDER BY ordinal')
+      .all(itemId).map((row) => `${String(row.version_id)}:${String(row.sha256)}`).join(',')) return known.versions;
     const versions: GlobalEditorialMemoryVersion[] = [];
+    const rows: string[] = [];
     for (const row of this.db.prepare('SELECT * FROM global_editorial_memory_item_versions WHERE item_id = ? ORDER BY ordinal').iterate(itemId) as Iterable<Row>) {
+      rows.push(`${String(row.version_id)}:${String(row.sha256)}`);
       const version = read<GlobalEditorialMemoryVersion>(row);
+      requireLearning(isRecord(version) && canonicalJson(version) === row.canonical_json);
       requireLearning(version.itemId === itemId && version.versionId === row.version_id && version.ordinal === versions.length + 1 &&
         version.ordinal === row.ordinal && version.supersedes === (versions.at(-1)?.versionId ?? null) && version.supersedes === row.supersedes && version.recordedAt === row.recorded_at &&
-        version.actor === 'editor' && (version.activation === 'active' || version.activation === 'inactive') &&
+        (version.actor === 'editor' || version.schema === 'ai7.global-editorial-memory/2' && version.actor === 'AI7') && (version.schema === 'ai7.global-editorial-memory/2'
+          ? ['proposed', 'active', 'inactive', 'frozen'].includes(version.state)
+          : version.schema === 'ai7.global-editorial-memory/1' && (version.activation === 'active' || version.activation === 'inactive')) &&
         typeof version.title === 'string' && version.title.trim().length > 0 && version.title.length <= 160 &&
         typeof version.editorialDimension === 'string' && version.editorialDimension.trim().length > 0 && version.editorialDimension.length <= 80 &&
-        Number.isFinite(version.confidence) && version.confidence >= 0 && version.confidence <= 1);
+        Number.isFinite(version.confidence) && version.confidence >= 0 && version.confidence <= 1 && Number.isFinite(Date.parse(version.recordedAt)));
       versions.push(version);
+      if (version.schema === 'ai7.global-editorial-memory/2') {
+        this.#validateMemory(version);
+        const prior = versions.at(-2);
+        if (prior !== undefined) requireLearning(prior.schema === 'ai7.global-editorial-memory/2' &&
+          version.operationalScope === prior.operationalScope && version.editorialDimension === prior.editorialDimension &&
+          canonicalJson(version.applicability) === canonicalJson(prior.applicability) && version.confidence === prior.confidence &&
+          canonicalJson(version.parentVersions) === canonicalJson([{ itemId, versionId: prior.versionId }]) && version.signalIds.length === 0 &&
+          (version.action === 'accept' ? prior.state === 'proposed' && version.state === 'active'
+            : version.action === 'correct' ? version.state === (prior.state === 'active' ? 'active' : 'proposed')
+              : version.action === 'freeze' ? version.state === 'frozen' : (version.action === 'merge' || version.action === 'deactivate') && version.state === 'inactive'));
+      }
     }
     requireLearning(versions.length > 0);
+    this.#reads?.chains.set(itemId, { fingerprint: rows.join(','), versions });
     return versions;
   }
 
   #append(version: GlobalEditorialMemoryVersion): void {
-    const record = canonicalRecord({ ...version, schema: 'ai7.global-editorial-memory/1' });
+    // Every /2 successor is held to the reader's own contract before it is written, not only when it is read back.
+    if (version.schema === 'ai7.global-editorial-memory/2') this.#validateMemory(version);
+    const record = canonicalRecord({ ...version, schema: version.schema ?? 'ai7.global-editorial-memory/1' });
+    requireLearning(Buffer.byteLength(record.json, 'utf8') <= MAX_FRAME_BYTES / 2);
     this.db.prepare('INSERT INTO global_editorial_memory_item_versions VALUES (?, ?, ?, ?, ?, ?, ?)')
       .run(version.versionId, version.itemId, version.ordinal, version.supersedes, version.recordedAt, record.json, record.digest);
   }
 
-  create(input: CreateEditorialMemoryInput): void {
+  create(input: CreateEditorialMemoryInput, scope?: TrustedOperationalScope): void {
+    if ('schema' in input) {
+      requireLearning(scope !== undefined);
+      this.#createMemory(input, scope);
+      return;
+    }
     const previous = this.db.prepare('SELECT item_id, source_signal_id FROM global_editorial_memory_items WHERE client_memory_id = ?').get(input.clientMemoryId);
     if (previous) {
       const first = this.#versions(String(previous.item_id))[0]!;
@@ -270,20 +1630,27 @@ export class EditorialLearningLedger {
       return;
     }
     const signal = this.#signal(input.signalId);
+    requireLearning(signal.kind !== 'word-tracked-edit' && signal.kind !== 'manual-edit-journal');
     // House memory may never promote a source explicitly restricted to one Book.
     requireLearning(this.#currentEligibility(signal, this.controls()) === 'house');
     requireLearning(input.title.trim().length > 0 && input.title.length <= 160 && input.editorialDimension.trim().length > 0 &&
       input.editorialDimension.length <= 80 && Number.isFinite(input.confidence) && input.confidence >= 0 && input.confidence <= 1);
     const itemId = randomUUID(); const recordedAt = new Date().toISOString();
     this.db.prepare('INSERT INTO global_editorial_memory_items VALUES (?, ?, ?, ?)').run(itemId, input.clientMemoryId, input.signalId, recordedAt);
-    const positive = signal.kind === 'accepted' || signal.kind === 'accepted-with-edit';
+    const disposition = signal.kind === 'proactive-reason' ? signal.ask!.disposition : signal.kind;
+    const positive = disposition === 'accepted' || disposition === 'accepted-with-edit';
     this.#append({ itemId, versionId: randomUUID(), ordinal: 1, supersedes: null, title: input.title.trim(), editorialDimension: input.editorialDimension.trim(),
       positiveExamples: positive ? [signal.source] : [], negativeExamples: positive ? [] : [signal.source], confidence: input.confidence,
       activation: 'active', signalIds: [signal.signalId], supervisionDirectiveRefs: [], actor: 'editor', recordedAt });
   }
 
-  deactivate(input: DeactivateEditorialMemoryInput): void {
+  deactivate(input: DeactivateEditorialMemoryInput, scope?: TrustedOperationalScope): void {
     const current = this.#versions(input.itemId).at(-1)!;
+    if (current.schema === 'ai7.global-editorial-memory/2') {
+      requireLearning(input.actionId !== undefined);
+      this.#transition({ ...input, actionId: input.actionId }, 'deactivate', scope);
+      return;
+    }
     requireLearning(current.versionId === input.expectedVersionId);
     if (current.activation === 'inactive') return;
     this.#append({ ...current, versionId: randomUUID(), ordinal: current.ordinal + 1, supersedes: current.versionId,
@@ -291,30 +1658,133 @@ export class EditorialLearningLedger {
   }
 
   /** Existing 学习回溯 and remediation readers include explicitly created memory without changing house preference use. */
-  activeMemoryCount(bookId: string, materialKeys: ReadonlyArray<string>): number {
+  activeMemoryCount(bookId: string, materialKeys: ReadonlyArray<string>): number { return this.#read(() => this.#activeMemoryCount(bookId, materialKeys)); }
+
+  #activeMemoryCount(bookId: string, materialKeys: ReadonlyArray<string>): number {
     const wanted = new Set(materialKeys);
     let count = 0;
     for (const row of this.db.prepare('SELECT item_id FROM global_editorial_memory_items').iterate()) {
       const current = this.#versions(String(row.item_id)).at(-1)!;
-      if (current.activation === 'active' && [...current.positiveExamples, ...current.negativeExamples]
+      if ((current.schema === 'ai7.global-editorial-memory/2' ? current.state === 'active' : current.activation === 'active') &&
+        (current.schema === 'ai7.global-editorial-memory/2' ? this.effectiveSources(current).map((entry) => entry.source) : [...current.positiveExamples, ...current.negativeExamples])
         .some((source) => source.bookId === bookId && wanted.has(source.materialKey))) count += 1;
     }
     return count;
   }
 
-  inspect(input: InspectEditorialLearningInput): EditorialLearningProjection {
+  sourceKeys(bookId: string, materialKeys: ReadonlyArray<string>): string[] {
+    const wanted = new Set(materialKeys);
+    return this.db.prepare('SELECT signal_id FROM learning_signals WHERE book_id = ?').all(bookId).flatMap((row) => {
+      const signal = this.#signal(String(row.signal_id));
+      if (signal.kind === 'manual-edit-journal') return wanted.has(signal.source.materialKey) ? [sha256Hex(canonicalJson(signal.source))] : [];
+      if (signal.kind === 'word-tracked-edit') return wanted.has(signal.source.materialKey)
+        ? [sha256Hex(canonicalJson({ signalId: signal.signalId, materialDigest: signal.source.materialDigest, sampleDigest: signal.source.sampleDigest }))] : [];
+      return wanted.has(signal.source.materialKey) ? [sha256Hex(canonicalJson({ signalId: signal.signalId,
+        materialDigest: signal.source.materialDigest, reasonRevision: signal.source.reasonRevision }))] : [];
+    });
+  }
+
+  revisions(scope: TrustedOperationalScope): Array<{ current: EditorialMemoryVersion; usable: boolean }> { return this.#read(() => this.#revisions(scope)); }
+
+  #revisions(scope: TrustedOperationalScope): Array<{ current: EditorialMemoryVersion; usable: boolean }> {
+    const revisions: Array<{ current: EditorialMemoryVersion; usable: boolean }> = [];
+    for (let itemOffset: number | null = 0; itemOffset !== null;) {
+      const page = this.inspect({ signalOffset: 0, itemOffset }, scope);
+      for (const entry of page.items) if (entry.current.schema === 'ai7.global-editorial-memory/2' && entry.current.operationalScope === scope)
+        revisions.push({ current: entry.current, usable: entry.usable });
+      itemOffset = page.nextItemOffset;
+    }
+    return revisions;
+  }
+
+  /**
+   * The immutable titles of every still-active /2 owner of one scope, whatever their sources, controls or names allow now: an
+   * accepted memory keeps its place in the house's bounded block through a reversible suppression (Issue #1128 revision 7).
+   */
+  activeTitles(scope: TrustedOperationalScope): string[] { return this.#read(() => this.#activeTitles(scope)); }
+
+  #activeTitles(scope: TrustedOperationalScope): string[] {
+    const titles: string[] = [];
+    for (const row of this.db.prepare('SELECT item_id FROM global_editorial_memory_items ORDER BY item_id').iterate()) {
+      const current = this.version(String(row.item_id));
+      if (current.schema === 'ai7.global-editorial-memory/2' && current.operationalScope === scope && current.state === 'active') titles.push(current.title);
+    }
+    return titles;
+  }
+
+  candidateMemoryCount(bookId: string, materialKey: string): number { return this.#read(() => this.#candidateMemoryCount(bookId, materialKey)); }
+
+  #candidateMemoryCount(bookId: string, materialKey: string): number {
+    let count = 0;
+    for (const row of this.db.prepare('SELECT item_id FROM global_editorial_memory_items').iterate()) {
+      const current = this.version(String(row.item_id));
+      if (current.schema === 'ai7.global-editorial-memory/2' && current.state === 'proposed' && this.effectiveSources(current)
+        .some((source) => source.source.bookId === bookId && source.source.materialKey === materialKey)) count += 1;
+    }
+    return count;
+  }
+
+  affectedMemoryCount(bookId: string, materialKeys: ReadonlyArray<string>): number { return this.#read(() => this.#affectedMemoryCount(bookId, materialKeys)); }
+
+  #affectedMemoryCount(bookId: string, materialKeys: ReadonlyArray<string>): number {
+    const wanted = new Set(materialKeys); let count = 0;
+    for (const row of this.db.prepare('SELECT item_id FROM global_editorial_memory_items').iterate()) {
+      const current = this.version(String(row.item_id));
+      const relevant = current.schema === 'ai7.global-editorial-memory/2' ? current.state === 'proposed' || current.state === 'active' : current.activation === 'active';
+      const sources = current.schema === 'ai7.global-editorial-memory/2' ? this.effectiveSources(current).map((source) => source.source) : [...current.positiveExamples, ...current.negativeExamples];
+      if (relevant && sources.some((source) => source.bookId === bookId && wanted.has(source.materialKey))) count += 1;
+    }
+    return count;
+  }
+
+  inspect(input: InspectEditorialLearningInput, scope?: TrustedOperationalScope): EditorialLearningProjection {
+    return this.#read(() => this.#inspect(input, scope));
+  }
+
+  #inspect(input: InspectEditorialLearningInput, scope?: TrustedOperationalScope): EditorialLearningProjection {
     const controls = this.controls();
-    const rows = this.db.prepare('SELECT signal_id FROM learning_signals ORDER BY rowid DESC LIMIT ? OFFSET ?').all(PAGE_SIZE + 1, input.signalOffset);
+    // A bounded page must not hide a corrupt retained Word signal just beyond it. C0's existing families keep their reader.
+    for (const row of this.db.prepare(`SELECT signal_id FROM learning_signals
+      WHERE source_key LIKE 'word-sample:%' OR json_extract(canonical_json, '$.kind') = 'word-tracked-edit'`).iterate()) {
+      const signal = this.#signal(String(row.signal_id));
+      requireLearning(signal.kind === 'word-tracked-edit');
+      this.#currentEligibility(signal, controls);
+    }
+    // An ask's own bookkeeping (offered, suppressed, dismissed) only paces later asks; the editor's list shows what they told AI7.
+    const rows = this.db.prepare(`SELECT signal_id FROM learning_signals WHERE coalesce(json_extract(canonical_json, '$.ask.state'), 'answered') = 'answered'
+      ORDER BY rowid DESC LIMIT ? OFFSET ?`).all(PAGE_SIZE + 1, input.signalOffset);
     const signals = rows.slice(0, PAGE_SIZE).map((row) => {
       const signal = this.#signal(String(row.signal_id));
+      // Only a normal standing leaves a signal out of candidate selection (revision 8); a corrupt record refuses the whole page.
+      const standing = this.#sourceStanding(signal.signalId);
+      const memoryCandidate = 'snapshot' in standing && standing.snapshot.editorialDimension !== null && (scope === undefined || standing.snapshot.operationalScope === scope)
+        ? { editorialDimension: standing.snapshot.editorialDimension, operationalScope: standing.snapshot.operationalScope } : null;
       return { ...signal, currentEligibility: this.#currentEligibility(signal, controls),
+        memoryCandidate,
         bookTitle: String(this.db.prepare('SELECT title FROM books WHERE book_id = ?').get(signal.source.bookId)?.title ?? '') };
     });
-    const itemRows = this.db.prepare('SELECT item_id FROM global_editorial_memory_items ORDER BY rowid DESC LIMIT ? OFFSET ?').all(PAGE_SIZE + 1, input.itemOffset);
-    const items = itemRows.slice(0, PAGE_SIZE).map((row) => {
+    const itemRows = input.detailItemId === undefined
+      ? this.db.prepare('SELECT item_id FROM global_editorial_memory_items ORDER BY rowid DESC LIMIT ? OFFSET ?').all(PAGE_SIZE + 1, input.itemOffset)
+      : this.db.prepare('SELECT item_id FROM global_editorial_memory_items WHERE item_id = ?').all(input.detailItemId);
+    requireLearning(input.detailItemId === undefined || itemRows.length === 1);
+    const items: EditorialLearningProjection['items'][number][] = [];
+    let bytes = Buffer.byteLength(JSON.stringify(signals), 'utf8');
+    for (const row of itemRows.slice(0, PAGE_SIZE)) {
       const history = this.#versions(String(row.item_id)); const current = history.at(-1)!;
-      return { current, history, usable: current.activation === 'active' && current.signalIds.every((id) => this.#currentEligibility(this.#signal(id), controls) === 'house') };
-    });
+      const historyEnd = Math.max(0, history.length - (input.historyOffset ?? 0));
+      const historyStart = Math.max(0, historyEnd - PAGE_SIZE);
+      const sources = current.schema === 'ai7.global-editorial-memory/2' ? this.effectiveSources(current) : [];
+      const sourceOffset = input.sourceOffset ?? 0;
+      const entry = { current, history: history.slice(historyStart, historyEnd),
+        nextHistoryOffset: historyStart > 0 ? (input.historyOffset ?? 0) + PAGE_SIZE : null,
+        sources: sources.slice(sourceOffset, sourceOffset + PAGE_SIZE), nextSourceOffset: sources.length > sourceOffset + PAGE_SIZE ? sourceOffset + PAGE_SIZE : null,
+        usable: current.schema === 'ai7.global-editorial-memory/2' ? this.usable(current)
+          : current.activation === 'active' && current.signalIds.every((id) => this.#currentEligibility(this.#signal(id), controls) === 'house') };
+      const size = Buffer.byteLength(JSON.stringify(entry), 'utf8');
+      requireLearning(size <= MAX_FRAME_BYTES / 2);
+      if (bytes + size > MAX_FRAME_BYTES / 2 && items.length > 0) break;
+      items.push(entry); bytes += size;
+    }
     const exclusionOffset = input.exclusionOffset ?? 0;
     const excludedBooks = [...controls.excludedBooks].slice(exclusionOffset, exclusionOffset + PAGE_SIZE + 1);
     const materialRows = this.db.prepare(`SELECT book_id, material_key FROM learning_eligibility_decisions d WHERE choice = 'excluded'
@@ -324,17 +1794,28 @@ export class EditorialLearningLedger {
     return { basis: LOCAL_LEARNING_POLICY_BASIS.text, enabled: controls.enabled, controlEntries: controls.entries,
       excludedBooks: excludedBooks.slice(0, PAGE_SIZE).map((bookId) => ({ bookId, title: String(this.db.prepare('SELECT title FROM books WHERE book_id = ?').get(bookId)?.title ?? '') })),
       excludedMaterials, signals, items, nextSignalOffset: rows.length > PAGE_SIZE ? input.signalOffset + PAGE_SIZE : null,
-      nextItemOffset: itemRows.length > PAGE_SIZE ? input.itemOffset + PAGE_SIZE : null,
+      nextItemOffset: input.detailItemId === undefined && itemRows.length > items.length ? input.itemOffset + items.length : null,
       nextExclusionOffset: excludedBooks.length > PAGE_SIZE || materialRows.length > PAGE_SIZE ? exclusionOffset + PAGE_SIZE : null };
   }
 
   /** Validate append-only records on open, including history beyond the visible page. */
-  validate(): void {
+  validate(memoryRevision = true): void { this.#read(() => this.#validateAll(memoryRevision)); }
+
+  /** Before revision 91 a store was written by the /1 readers alone: a /2 record there is a partial upgrade, refused. */
+  #validateAll(memoryRevision: boolean): void {
     this.controls();
     for (const row of this.db.prepare('SELECT signal_id FROM learning_signals').iterate()) this.#signal(String(row.signal_id));
-    for (const row of this.db.prepare('SELECT item_id, source_signal_id FROM global_editorial_memory_items').iterate()) {
+    for (const row of this.db.prepare('SELECT * FROM global_editorial_memory_items').iterate()) {
       const signal = this.#signal(String(row.source_signal_id));
+      requireLearning(signal.kind !== 'word-tracked-edit' && signal.kind !== 'manual-edit-journal');
       for (const version of this.#versions(String(row.item_id))) {
+        if (version.schema === 'ai7.global-editorial-memory/2') {
+          requireLearning(memoryRevision);
+          if (version.ordinal === 1) requireLearning(row.client_memory_id === version.actionId && row.recorded_at === version.recordedAt);
+          const sources = this.effectiveSources(version);
+          requireLearning(sources.length > 0 && sources[0]!.signalId === signal.signalId);
+          continue;
+        }
         requireLearning(version.signalIds.length === 1 && version.signalIds[0] === signal.signalId && version.supervisionDirectiveRefs.length === 0 &&
           canonicalJson([...version.positiveExamples, ...version.negativeExamples]) === canonicalJson([signal.source]));
       }

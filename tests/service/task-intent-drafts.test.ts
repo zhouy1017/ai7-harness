@@ -1,4 +1,7 @@
+import { FACTUAL_TASK_INTENTS_SQL } from '../../src/service/task-authorization.js';
+import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
+import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
@@ -376,7 +379,7 @@ describe('Task Intent Drafts over the real store on exact sample1', () => {
   }, 300_000);
 
   it('promotes a 审阅 draft on its one paragraph as one category\'s Run, linking the Run and its Task', async () => {
-    const reviewFixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-authored');
+    const reviewFixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-cross-chapter-authored');
     fixture = reviewFixture;
     const store = await open();
     try {
@@ -480,7 +483,7 @@ describe('schema revision 80', () => {
   it('rebuilds a revision-79 store\'s Task Intents with every row byte for byte and adds the draft relations empty', async () => {
     expect(TASK_INTENT_DRAFT_SCHEMA_VERSION).toBe(80);
     // Revision 84 follows the imported Skill revisions and adds independent model selections and translation attempt metadata.
-    expect(LATEST_SCHEMA_VERSION).toBe(TASK_INTENT_DRAFT_SCHEMA_VERSION + 8);
+    expect(LATEST_SCHEMA_VERSION).toBe(TASK_INTENT_DRAFT_SCHEMA_VERSION + 18);
     const store = await open();
     let bookId: string;
     try {
@@ -494,11 +497,12 @@ describe('schema revision 80', () => {
     }
     const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
     const plant = new DatabaseSync(path);
+    constructPre94PolicyEncoding(plant);
     const intents = plant.prepare('SELECT rowid, * FROM analysis_task_intents ORDER BY rowid').all();
     const plans = plant.prepare('SELECT rowid, * FROM analysis_plan_records ORDER BY rowid').all();
     expect(intents).toHaveLength(1);
     restoreTaskIntentDraftPredecessor(plant);
-    plant.exec('PRAGMA user_version = 79');
+    execPre74Fixture(plant, 'PRAGMA user_version = 79');
     expect((plant.prepare("SELECT sql FROM sqlite_schema WHERE name = 'analysis_task_intents'").get() as { sql: string }).sql).toBe(ANALYSIS_LEDGER_REVISION_79_SQL.analysis_task_intents);
     plant.close();
     const reopened = await open();
@@ -510,8 +514,8 @@ describe('schema revision 80', () => {
     }
     const migrated = new DatabaseSync(path);
     try {
-      expect(migrated.prepare('PRAGMA user_version').get()).toEqual({ user_version: 88 });
-      expect((migrated.prepare("SELECT sql FROM sqlite_schema WHERE name = 'analysis_task_intents'").get() as { sql: string }).sql).toBe(ANALYSIS_LEDGER_SCHEMA_SQL.analysis_task_intents);
+      expect(migrated.prepare('PRAGMA user_version').get()).toEqual({ user_version: 98 });
+      expect((migrated.prepare("SELECT sql FROM sqlite_schema WHERE name = 'analysis_task_intents'").get() as { sql: string }).sql).toBe(FACTUAL_TASK_INTENTS_SQL);
       expect(migrated.prepare('SELECT rowid, * FROM analysis_task_intents ORDER BY rowid').all()).toEqual(intents);
       expect(migrated.prepare('SELECT rowid, * FROM analysis_plan_records ORDER BY rowid').all()).toEqual(plans);
       for (const table of Object.keys(TASK_INTENT_DRAFT_SCHEMA_SQL)) expect(migrated.prepare(`SELECT count(*) AS n FROM ${table}`).get()).toEqual({ n: 0 });

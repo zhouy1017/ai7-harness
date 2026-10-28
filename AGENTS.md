@@ -23,8 +23,8 @@ Never read, print, copy or commit secret values. The untracked development crede
 
 ## Development
 
-- [Orca dispatch](docs/agents/orca-dispatch.md) is the sole owner of repository roles, model pairings, wave dispatch, writer handoff, slice review/merge and final dev integration under [ADR 0089](docs/adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md). Its bootstrap clause covers this documentation transition.
-- Follow [incremental development](docs/agents/incremental-development.md): one bounded outcome and existing owners before new ones; return an insufficient brief to the Commander.
+- [Orca dispatch](docs/agents/orca-dispatch.md) owns repository dispatch (including Owner manual per-Issue dispatch and wave dispatch), slice merge and final dev integration under [ADR 0089](docs/adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md). Mandatory cross-provider review is retired: repair is required only when E2E or CI tests fail.
+- Follow [incremental development](docs/agents/incremental-development.md): one bounded outcome, existing owners before new ones, no defensive ceremony or test bloat.
 - Verification follows [CI and test boundaries](docs/agents/ci-test-boundaries.md). Every agent-run Electron Journey and its attested ladder runs on a background test guest through the host runner ([ADR 0083](docs/adr/0083-run-every-agent-s-electron-journeys-on-the-background-test-guests.md)). Keep the existing provider-free Gate; create no additional hosted gate. Do not query or consider Actions usage ([ADR 0058](docs/adr/0058-remove-actions-usage-observation-from-development-gating.md)).
 - Git: [conventions](docs/agents/git-conventions.md). Issues: [tracker rules](docs/agents/issue-tracker.md) and [Change Brief](docs/agents/change-brief.md). Documents: [lifecycle](docs/agents/document-lifecycle.md).
 - Domain work starts at [CONTEXT-MAP](CONTEXT-MAP.md); GLOSSARY is a bilingual index, not a definition owner ([domain rules](docs/agents/domain.md)).

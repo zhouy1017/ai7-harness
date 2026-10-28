@@ -69,6 +69,8 @@ export type ReviewCategoryScopePlan =
 
 /** The facts of one category's ledger a scope reads: whether it has reviewed, and whether that is stale. */
 export interface ReviewCategoryLedgerFacts {
+  readonly factualUpdates?: boolean;
+  readonly factualSupplement?: boolean;
   readonly hasRevision: boolean;
   /**
    * A Run of the whole manuscript, chosen chapters or changed chapters put this category on the manuscript (Issue #423 review,
@@ -113,12 +115,18 @@ export function reviewCategoryScopePlan(
 ): ReviewCategoryScopePlan {
   if (executor === 'unavailable' || executor === 'series-knowledge') return { kind: 'refused', reason: unavailableReason ?? '这一类暂不可用。' };
   if (scope.kind === 'selection' && scope.selectedRange === null) return { kind: 'refused', reason: SELECTION_UNAVAILABLE_REASON };
+  if (executor === 'local-text-check') return scope.kind === 'changed' ? { kind: 'refused', reason: '本地文字检查请选择全书、选章或当前选区。' }
+    : scope.kind !== 'whole' && scope.selectedRange === null ? { kind: 'refused', reason: NO_CHAPTERS_REASON } : { kind: 'leads', selectedRange: scope.selectedRange };
   if (executor === 'baseline-leads') {
     if (!facts.baselineRevision) return { kind: 'refused', reason: LEADS_ABSENT_REASON };
     if (scope.kind === 'changed') return { kind: 'refused', reason: LEADS_CHANGED_REASON };
     return { kind: 'leads', selectedRange: scope.kind === 'chapters' || scope.kind === 'selection' ? scope.selectedRange : null };
   }
   if (executor === 'factual-review-kind') {
+    if (facts.factualUpdates === true) {
+      if (scope.kind === 'whole') return { kind: 'task', mode: facts.hasRevision ? 'review-again' : 'whole-manuscript', selectedRange: null };
+      if (facts.factualSupplement === true && facts.hasRevision && (scope.kind === 'chapters' || scope.kind === 'selection') && scope.selectedRange !== null) return { kind: 'task', mode: 'review-range', selectedRange: scope.selectedRange };
+    }
     if (scope.kind === 'chapters') return { kind: 'refused', reason: FACTUAL_CHAPTERS_REASON };
     if (scope.kind === 'selection') return { kind: 'refused', reason: FACTUAL_SELECTION_REASON };
     if (scope.kind === 'changed') return { kind: 'refused', reason: FACTUAL_CHANGED_REASON };

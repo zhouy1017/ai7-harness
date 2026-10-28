@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -21,6 +22,12 @@ import {
 } from '../../src/shared/protocol.js';
 import { SAMPLE1_UNITS, importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for 改计划重做 (Issue #422, plan slice S76c; V2-UX-AUTH-010, CONT-013): the real store on
 // a temporary Agent Data Root, exact `sample1` imported through the supported path, J-04's deterministic route, and no
@@ -63,6 +70,7 @@ function openWithRoute(): Promise<EditorialStore> {
 
 function owner(store: EditorialStore): BaselineAnalysisExecutionOwner {
   return new BaselineAnalysisExecutionOwner({
+    requestGovernor,
     ledger: store.baselineAnalysisLedger,
     launchPolicy,
     fixture,
@@ -242,6 +250,7 @@ describe('改计划重做 over the real store', () => {
       // blocks it before it begins — its plan moved.
       const live = () => store.baselineAnalysisLedger.bindLaunch({
         operationalScope: 'developer-live',
+        localFixtureRuntime: () => store.localFixtureRuntime(),
         live: {
           route: 'opencode-go',
           model: 'deepseek-v4.1-flash',
@@ -251,7 +260,8 @@ describe('改计划重做 over the real store', () => {
           runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 240_000 },
         },
       });
-      const offline = () => store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'development-ci', live: null });
+      const offline = () => store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'development-ci', live: null,
+        policy: launchPolicy, localFixtureRuntime: () => store.localFixtureRuntime() });
       const moved = async (taskIntentId: string, digest: string) => {
         store.startBaselineAnalysisWhenOnline(bookId, taskIntentId, digest);
         live();
@@ -364,6 +374,7 @@ describe('改计划重做 over the real store', () => {
       await first.dispose();
       // The next launch executes another fixture, so the binding the Run persisted no longer reads the same.
       second = new BaselineAnalysisExecutionOwner({
+        requestGovernor,
         ledger: store.baselineAnalysisLedger,
         launchPolicy,
         fixture: await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-transient-retry'),

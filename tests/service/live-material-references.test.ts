@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { reviewFixtureContractVersion } from '../../src/service/provider/model-fixture.js';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
@@ -19,6 +20,12 @@ import { WRITING_MATERIAL_LIVE_UNAVAILABLE, type LaunchPolicyProjection } from '
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { withRuleFor } from '../support/policy-rules.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Real material import, pins, ledgers, per-step re-check, adapter and egress; the transport is socket-free.
 type Kind = 'review' | 'writing' | 'initial-evaluation' | 'readers-report';
@@ -63,8 +70,9 @@ beforeEach(async () => {
   for (const kind of kinds) {
     const id = kindId(kind);
     const rule = policy.providerProcessing.admittedRules.find((candidate) => candidate.taskKinds.includes(id))!;
-    policy = withRuleFor(policy, id, { materialReferencesAllowed: true,
-      outboundDataCategories: [...new Set([...rule.outboundDataCategories, 'frozen-material-reference-excerpt' as const])] });
+    // Current-policy positives use the resolver's actual terms, with no successor admission injected.
+    expect(rule.materialReferencesAllowed).toBe(true);
+    expect(rule.outboundDataCategories).toContain('frozen-material-reference-excerpt');
   }
   control = { baselineAnalysisRoute: null,
     induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
@@ -134,7 +142,7 @@ beforeEach(async () => {
       choices: [{ message: { content: text, reasoning_content: '合成推理。' }, finish_reason: 'stop' }],
       usage: { prompt_tokens: usage.inputTokens, completion_tokens: usage.outputTokens } }), { status: 200 });
   };
-  owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
+  owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
     secretResolver: { resolve: async () => 'placeholder-development-key' }, materialGuard: (id, ledger) => store.materialGuard(id, ledger),
     unitHold: async (settled) => { atUnit?.(settled); }, developerLive: { launch: { runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 500_000 },
       providerCacheRoot: join(roots.inputRoot, 'cache'), validation: { family: 'live-material-references', case: 'synthetic-boundary', delta: null } }, nativeFetch } });

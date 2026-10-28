@@ -1,7 +1,15 @@
-import { procedureIdForKind } from '../procedures/preinstalled.js';
-import { recordProcedurePlanPin, readProcedurePlanPin } from '../procedures/definition-store.js';
+import { currentPreinstalledVersion, selectedProcedureForBook, resolveProcedurePin, procedureStopped, validateProcedureEdit } from '../procedures/editable.js';
+import { withProcedureDefinition, procedureInstruction } from '../procedures/execution.js';
+import { MODEL_REQUEST_ADMISSION_SCHEMA_VERSION } from '../task-authorization.js';
+import { procedureIdForKind, FACTUAL_CLAIM_PROCEDURE_ID } from '../procedures/preinstalled.js';
+import { recordProcedurePlanPin, readProcedurePlanPin, readProcedurePlanDocument, resolveProcedureDefinition } from '../procedures/definition-store.js';
+import { withReviewLocalTools, pinnedReviewDefinition, reviewCategoryKindDefinition } from '../review/review-category-kind.js';
+import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryEntry, reviewCategoryContractInput } from '../review/category-configuration.js';
+import type { CompositionOptions } from '../harness/primary-agent-harness.js';
+import type { PinnedLocalToolSources } from '../retrieval/index.js';
 import { kindResearchDeclaration } from './live-kind-admission.js';
 import { factualReviewDefinitionsByDigest, factualReviewKindDefinition, factualReviewLevelDefinition, withFactualResearch } from './kind-definition.js';
+import { factualClaimKindDefinition } from './factual-claim-contract.js';
 import { FACTUAL_REVIEW_KIND, type EvidenceAssuranceLevel, type ProcedureDefinitionPin } from '../../shared/protocol.js';
 import { FACTUAL_VERIFICATION_POLICY_VERSION } from './factual-review-contract.js';
 import { factualReviewUnitResultOfRecordV2 } from './factual-review-contract-v2.js';
@@ -9,6 +17,9 @@ import { platformToolsFromProjection } from '../provider/search-service.js';
 import { searchBackend, searchBackendConfigurationDigest } from '../provider/search-backends/index.js';
 import { CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES } from '../../shared/provider-configuration.generated.js';
 import type { FrozenWebToolsBackend } from '../../shared/protocol.js';
+import { isResultSetPolicyPin, selectedPolicyIdentityOf, type LocalFixtureProfile, type SelectedPolicyIdentity } from '../../shared/protocol.js';
+import { STOCK_TYPOS_LEAF_FIXTURE, STOCK_TYPOS_LEAF_FIXTURE_SHA256, STOCK_TYPOS_LEAF_LOCAL_TOOLS, localFixtureRegisteredProfile, type LocalFixtureRuntimeContext } from '../provider/model-fixture.js';
+import { providerPlanPolicyMetadata } from './plan-boundary.js';
 import { randomUUID } from 'node:crypto';
 import { liveKindAdmission, liveKindRule } from './live-kind-admission.js';
 import { withModelClarification } from '../provider/clarification-contract.js';
@@ -19,6 +30,7 @@ import {
   INITIAL_EVALUATION_KIND,
   READERS_REPORT_KIND,
   WRITING_KIND,
+  type AnalysisAssuranceSampleDispositionProjection,
   type AnalysisGoal,
   type AnalysisKindId,
   type AnalysisProjection,
@@ -68,6 +80,7 @@ import {
   type ReviewScopePlanCounts,
   type ReviewScopePlanProjection,
   type RunAttemptState,
+  type AnalysisInFlightUnitProjection,
   type RunBudgetCeilingState,
   type SafeRetryRepetition,
 } from '../../shared/protocol.js';
@@ -153,10 +166,10 @@ import {
   runReportReflectionNotRun,
   type RunReportRecord,
 } from './run-report.js';
-import { assuranceSampleNotRun } from './reducers.js';
+import { assuranceSampleNotRun, type CrossUnitOutcome } from './reducers.js';
 import { baselineAnalysisKindDefinition } from './kind-definition.js';
-import { ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST } from './assurance-sampling-contract.js';
-import { describeComposition } from '../harness/primary-agent-harness.js';
+import { ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, assuranceSamplingTurns, buildAssuranceSamplingMessage, type AssuranceSampleDraw } from './assurance-sampling-contract.js';
+import { describeComposition, STOCK_TYPOS_LEAF } from '../harness/primary-agent-harness.js';
 import { kindLocalTools } from './live-kind-admission.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from '../provider/egress-gate.js';
 import type { AnalysisOutcomeAttentionReading, AnalysisTaskAttentionReading } from '../global-attention.js';
@@ -187,6 +200,10 @@ function activeRunWords(kind: string): { readonly task: string; readonly next: s
 }
 /** A queued Run's own words (Issue #49, S14; CONC-007): what it waits for, and that nothing has begun. */
 export const RUN_QUEUED_LABEL = '等待运行名额' as const;
+/** A start the editor deferred to idle time (Issue #1089; ADR 0095 §3): authorized, holding no place until quiet. */
+export const RUN_WAITING_IDLE_LABEL = '等待空闲' as const;
+/** A background Run AI7 paused at a unit boundary for the editor's waiting Run (Issue #1089); it goes on at the next quiet. */
+export const RUN_IDLE_YIELD_LABEL = '让位给你的任务' as const;
 /** The waiting state's own words (Issue #502, OFF-005): recorded, and nothing has been sent or begun. */
 const CONNECTIVITY_WAIT_DETAIL = '已记录授权；联网并通过重新联网预检后开始。此前不调用模型、不产生用量。' as const;
 
@@ -250,11 +267,13 @@ export const RUN_CANCELLED_AFTER_START_LABEL = '已取消' as const;
 export const RUN_CANCELLING_DETAIL = '编辑取消了这项任务；正在进行的这一步会被中止，此后不再发送任何内容。' as const;
 
 /** What `pausing` records (CTRL-001): the editor's word, and where the Run stops to wait. */
-export const RUN_PAUSING_DETAIL = '编辑暂停了这项任务；正在进行的阅读范围读完后停下，已完成的部分都会保存。' as const;
+export const RUN_PAUSING_DETAIL = '编辑暂停了这项任务；正在进行的这一步完成后停下，不再开始下一步，已完成的结果与用量都会保存。' as const;
 
 /** What reconciliation records for a Run AI7 stopped under (CONT-014): nothing of it runs, and nothing is sent until 续行. */
 export const RECONCILED_RESUMABLE_DETAIL = 'AI7 上次关闭时这项任务正在运行；已读完的阅读范围都已保存。点「续行」从下一个阅读范围接着读；在此之前不会发送任何内容。' as const;
 export const RECONCILED_PAUSED_DETAIL = 'AI7 上次关闭时这项任务正在暂停；已读完的阅读范围都已保存，任务已暂停。' as const;
+/** A Run left yielded at a restart (Issue #1089; ADR 0034): it no longer goes on by itself at the next quiet. */
+export const RECONCILED_YIELDED_DETAIL = 'AI7 上次关闭时这项任务正让位给你的任务；已读完的阅读范围都已保存，任务已暂停，点「续行」接着处理。' as const;
 /**
  * A start AI7 closed on while it waited for a place (Issue #49 review; ADR 0034): it never began, and a restart starts
  * nothing by itself, so it is blocked before dispatch with why, and the editor starts it again when they choose.
@@ -455,6 +474,8 @@ interface PreparationWork {
 
 /** A Task Intent as `prepare` decided it, before it is written. */
 interface PendingIntent {
+  readonly procedure?: ProcedureDefinitionPin;
+  readonly factualDecision?: import('../factual-verification.js').FactualRecheckSelection;
   readonly taskIntentId: string;
   readonly bookId: string;
   readonly goal: string;
@@ -581,6 +602,7 @@ export type BaselineAnalysisPrepareInput =
    */
   | {
     phase: 'start';
+    factualDecision?: import('../factual-verification.js').FactualRecheckSelection;
     bookId: string;
     goal: AnalysisGoal;
     update: BaselineAnalysisUpdateRequest | AnalysisModeRequest | null;
@@ -624,6 +646,7 @@ export interface RunProgress {
   readonly currentUnitOrdinal: number | null;
   readonly currentUnitStartedAt: string | null;
   readonly attemptState: RunAttemptState | null;
+  readonly inFlightUnits?: ReadonlyArray<AnalysisInFlightUnitProjection>;
   readonly completedAttempts: number;
   readonly longestSettledUnitMs: number | null;
   /** Which declared step of the Run is in flight: the unit loop, the cross-unit reduction, or the sample. */
@@ -681,6 +704,12 @@ export interface PlanAdaptationInput {
 
 /** Everything the execution owner needs from the frozen plan before the first model call. */
 export interface ExecutionPlanFacts {
+  readonly factualDecision?: import('../factual-verification.js').FactualRecheckSelection;
+  readonly retainedPolicyPin?: ResultSetPolicyPin;
+  readonly retainedPolicy?: LaunchPolicyProjection;
+  readonly selectedPolicyIdentity?: SelectedPolicyIdentity;
+  readonly localFixtureProfile?: LocalFixtureProfile;
+  readonly localFixtureRuntime?: LocalFixtureRuntimeContext;
   readonly webToolsBackend?: FrozenWebToolsBackend;
   readonly searchCredentialReference?: string;
   readonly bookId: string;
@@ -693,6 +722,7 @@ export interface ExecutionPlanFacts {
    * Who started the Run, as its Run Authorization records it (Issue #864): a Run a 后台分析登记 started is admitted live only
    * under the selected policy's enrolled-background rule.
    */
+  readonly startWhen?: 'now' | 'idle';
   readonly origin: 'standard-direct' | 'default-execution-rule' | 'background-analysis-enrollment';
   readonly checkpoint: ManuscriptCheckpointBinding;
   readonly manifest: CoverageManifestProjection;
@@ -714,6 +744,7 @@ export interface ExecutionPlanFacts {
   readonly artifactPin: { nativeCarrierSha256: string; sidecarRevision: 2; sidecarSha256: string };
   readonly promptContractDigest: string;
   readonly behaviorCompositionDigest: string;
+  readonly compositionOptions?: CompositionOptions;
   /** The assurance sampling contract the plan froze ({@link frozenAssurancePromptContractDigest}). */
   readonly assurancePromptContractDigest: string;
   /** The ceiling the frozen Provider Resolution Plan carries, already resolved against the frozen unit count. */
@@ -733,6 +764,7 @@ export interface ProductionPlanBinding {
 }
 
 export interface ExecutionBindingRecord {
+  readonly compositionVersion?: 2 | 3;
   readonly attemptId: string;
   readonly taskIntentId: string;
   readonly runRecordId: string;
@@ -909,6 +941,8 @@ export function activeRunReason(state: BaselineAnalysisRunState | null, kind: st
  * authorization, not chosen at dispatch.
  */
 export interface LaunchBinding {
+  readonly retainedPolicyFor?: (pin: ResultSetPolicyPin, binding: import('../launch-policy.js').ConfiguredProviderBinding) => LaunchPolicyProjection | null;
+  readonly localFixtureRuntime?: () => LocalFixtureRuntimeContext | null;
   /** Verified runtime policy for review admission; never persisted as a new record or IPC member. */
   readonly policy?: LaunchPolicyProjection;
   readonly operationalScope: 'development-ci' | 'developer-live' | 'ordinary-production';
@@ -1042,11 +1076,81 @@ export function providerConsequence(live: LiveReading, unitCount: number | null 
 }
 
 /**
- * The stages a stop keeps its usage for (Issue #541): a reduction or a sample 续行 forms again was spent all the same. A unit
+ * The stages a stop keeps its usage for (Issue #541): settled or refused stage work was spent all the same. A unit
  * a stop kept carries its own usage in its checkpoint.
  */
 export const CARRIED_STAGES = ['cross-unit-reduction', 'assurance-sampling'] as const;
 export type CarriedStages = Record<(typeof CARRIED_STAGES)[number], { requests: number; inputTokens: number; outputTokens: number }>;
+
+/** Private continuation evidence, nested in existing Run states; never a public protocol or a new binding. */
+export interface StageContinuation {
+  readonly runRecordId: string;
+  readonly attemptId: string;
+  readonly bindingDigest: string;
+  readonly manifestDigest: string;
+  readonly promptContractDigest: string;
+  reduction?: { inputDigest: string; contractDigest: string; requestDigest: string | null; outcome: CrossUnitOutcome };
+  sampling?: {
+    inputDigest: string; contractDigest: string; draw: AssuranceSampleDraw;
+    nextTurn: number; ended: boolean;
+    turns: Array<{ requestDigest: string; unitOrdinal: number; usage: { inputTokens: number; outputTokens: number } | null; state: 'closed' | 'gap' | 'outcome-unknown' }>;
+    dispositions: AnalysisAssuranceSampleDispositionProjection[]; gapReasons: string[];
+    sampled: { inputTokens: number; outputTokens: number; turnsWithUsage: number };
+  };
+}
+
+/** Payload-free identities for physical model admissions; tool dispatch tokens never cross this boundary. */
+export interface AnalysisRequestIdentity {
+  readonly requestId: string;
+  readonly producerId: string;
+  readonly requestOrdinal: number;
+  readonly sessionId: string;
+  readonly unitOrdinal: number | null;
+  readonly stage: RunProgressStage | 'web-verification';
+  readonly attemptIndex: number;
+  readonly adaptationId: string | null;
+  readonly payloadDigest: string;
+  readonly messageDigest: string;
+  readonly requestDigest: string;
+  readonly inputDigest: string;
+  readonly contractDigest: string;
+}
+
+interface RequestAdmissionPins {
+  readonly runRecordId: string;
+  readonly attemptId: string;
+  readonly bindingDigest: string;
+  readonly planEnvelopeDigest: string;
+  readonly manifestDigest: string;
+  readonly compositionDigest: string;
+  readonly promptContractDigest: string;
+  readonly policyVersion: string;
+  readonly policyRuleId: string;
+}
+
+type RequestAdmissionEvent =
+  | { readonly kind: 'execution'; readonly width: 1 | 3; readonly limits: { readonly requests: 4; readonly units: 3; readonly backgroundRequests: 1 } }
+  | { readonly kind: 'admit'; readonly request: AnalysisRequestIdentity }
+  | { readonly kind: 'resolve'; readonly requests: readonly string[]; readonly evidence: {
+      readonly kind: 'no-send' | 'unit-checkpoint' | 'clarification-checkpoint' | 'stage-checkpoint' | 'reflection-outcome' | 'refused-turn' | 'unavailable' | 'factual-checkpoint';
+      readonly digest: string;
+    } };
+
+interface RequestAdmissionData extends RequestAdmissionPins {
+  readonly sequence: number;
+  readonly predecessorDigest: string | null;
+  readonly event: RequestAdmissionEvent;
+}
+
+export interface RequestAdmissionReading {
+  readonly pins: RequestAdmissionPins;
+  readonly width: 1 | 3;
+  readonly sequence: number;
+  readonly digest: string;
+  readonly open: ReadonlyMap<string, AnalysisRequestIdentity>;
+  readonly unavailable: ReadonlyArray<AnalysisRequestIdentity>;
+  readonly notSent: ReadonlyArray<AnalysisRequestIdentity>;
+}
 
 /**
  * The append-only ledger of one analysis kind of one Book database. The kind it serves is the
@@ -1067,10 +1171,327 @@ export function levelBelowPolicyMinimum(level: EvidenceAssuranceLevel, minimum: 
   return minimum !== null && LEVEL_ORDER[level] < LEVEL_ORDER[minimum];
 }
 
+/** Immutable references only: no route, launch policy, source selection, provider or writes. */
+function admissionRow(row: SqlRow | undefined): Record<string, unknown> {
+  requireAnalysis(row !== undefined, 'ANALYSIS_RECORD_INVALID', '请求准入引用缺失。');
+  const record = parseCanonicalJson(asString(row.canonical_json));
+  requireAnalysis(isRecord(record) && canonicalRecord(record).digest === row.sha256, 'ANALYSIS_RECORD_INVALID', '请求准入引用摘要不一致。');
+  return record;
+}
+
+function readAdmissionBinding(db: DatabaseSync, runRecordId: string): { attemptId: string; binding: ExecutionBindingRecord; bindingDigest: string } | null {
+  const runRow = db.prepare('SELECT * FROM analysis_run_records WHERE run_record_id = ?').get(runRecordId) as SqlRow | undefined;
+  const run = admissionRow(runRow);
+  const attemptRow = db.prepare('SELECT * FROM analysis_execution_attempts WHERE run_record_id = ?').get(runRecordId) as SqlRow | undefined;
+  if (attemptRow === undefined) return null;
+  const attempt = admissionRow(attemptRow);
+  const bindingRow = db.prepare('SELECT * FROM analysis_execution_bindings WHERE attempt_id = ?').get(attemptRow.attempt_id!) as SqlRow | undefined;
+  const binding = admissionRow(bindingRow) as unknown as ExecutionBindingRecord;
+  const authorization = admissionRow(db.prepare('SELECT * FROM analysis_run_authorizations WHERE authorization_id = ?').get(runRow!.authorization_id!) as SqlRow | undefined);
+  const intent = admissionRow(db.prepare('SELECT * FROM analysis_task_intents WHERE task_intent_id = ?').get(runRow!.task_intent_id!) as SqlRow | undefined);
+  requireAnalysis(run.runRecordId === runRecordId && run.taskIntentId === runRow!.task_intent_id && run.authorizationId === runRow!.authorization_id &&
+    attempt.attemptId === attemptRow.attempt_id && attempt.runRecordId === runRecordId &&
+    binding.attemptId === attempt.attemptId && binding.runRecordId === runRecordId && binding.taskIntentId === run.taskIntentId &&
+    intent.taskIntentId === run.taskIntentId && intent.bookId === binding.bookId && authorization.authorizationId === run.authorizationId &&
+    authorization.taskIntentId === run.taskIntentId && authorization.planEnvelopeDigest === binding.planEnvelopeDigest && authorization.planVersionOrdinal === binding.planVersion,
+    'ANALYSIS_RECORD_INVALID', '请求准入的运行、尝试与授权引用不一致。');
+  return { attemptId: asString(attemptRow.attempt_id), binding, bindingDigest: asString(bindingRow!.sha256) };
+}
+
+function readAdmissionManifest(db: DatabaseSync, stored: NonNullable<ReturnType<typeof readAdmissionBinding>>): CoverageManifestProjection {
+  const rows = db.prepare('SELECT * FROM analysis_plan_records WHERE task_intent_id = ? AND plan_version = ?').all(stored.binding.taskIntentId, stored.binding.planVersion) as SqlRow[];
+  const components = new Map(rows.map((row) => [asString(row.component), { record: admissionRow(row), digest: asString(row.sha256) }]));
+  for (const [component, digest] of [
+    ['plan-envelope', stored.binding.planEnvelopeDigest],
+    ['provider-resolution-plan', stored.binding.providerResolutionPlanDigest], ['run-source-scope', stored.binding.runSourceScopeDigest],
+  ]) requireAnalysis(components.get(component!)?.digest === digest, 'ANALYSIS_RECORD_INVALID', '请求准入的固定计划引用不一致。');
+  const manifest = components.get('coverage-manifest')!.record as unknown as CoverageManifestProjection;
+  requireAnalysis(manifestDigestIsExact(manifest) && manifest.digest === stored.binding.coverageManifestDigest &&
+    manifest.manuscript.revisionId === stored.binding.manuscriptPin.revisionId && manifest.manuscript.revisionDigest === stored.binding.manuscriptPin.revisionDigest,
+    'ANALYSIS_RECORD_INVALID', '请求准入的固定覆盖清单无法核对。');
+  return manifest;
+}
+
+function readAdmissionAdaptations(db: DatabaseSync, attemptId: string): Array<{ adaptationId: unknown; unitOrdinal: unknown }> {
+  return (db.prepare('SELECT * FROM analysis_plan_adaptations WHERE attempt_id = ? ORDER BY ordinal').all(attemptId) as SqlRow[]).map((row) => {
+    const record = admissionRow(row);
+    requireAnalysis(record.adaptationId === row.adaptation_id && record.attemptId === attemptId && record.unitOrdinal === row.unit_ordinal,
+      'ANALYSIS_RECORD_INVALID', '请求准入的调整引用不一致。');
+    return { adaptationId: record.adaptationId, unitOrdinal: record.unitOrdinal };
+  });
+}
+
+function readRequestAdmissions(db: DatabaseSync, runRecordId: string): RequestAdmissionReading | null {
+  const rows = db.prepare(`SELECT sequence, recorded_at, canonical_json, sha256 FROM analysis_run_states WHERE run_record_id = ?
+      AND json_type(canonical_json, '$.requestAdmission') IS NOT NULL ORDER BY sequence`).all(runRecordId) as SqlRow[];
+  if (rows.length === 0 && db.prepare(`SELECT 1 FROM analysis_run_states WHERE run_record_id = ? AND
+      json_type(canonical_json, '$.modelClarificationAnswerClaim') IS NOT NULL LIMIT 1`).get(runRecordId) === undefined) return null;
+  const exact = (value: unknown, keys: readonly string[]): value is Record<string, unknown> => isRecord(value) &&
+    Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
+  const invalid = (): never => { throw new AnalysisError('ANALYSIS_RECORD_INVALID', '模型请求准入记录无法核对；不能续行。'); };
+  const state: { reading: RequestAdmissionReading | null } = { reading: null };
+  const open = new Map<string, AnalysisRequestIdentity>();
+  const unavailable: AnalysisRequestIdentity[] = [];
+  const notSent: AnalysisRequestIdentity[] = [];
+  const seen = new Set<string>();
+  const admitted = new Map<string, { request: AnalysisRequestIdentity; recordedAt: string }>();
+  const resolutions = new Map<string, { kind: string; digest: string }>();
+  const refusalProofs = new Map<string, number>();
+  const ordinals = new Map<string, number>();
+  const stored = readAdmissionBinding(db, runRecordId);
+  let requestManifest: CoverageManifestProjection | undefined;
+  let adaptations: ReturnType<typeof readAdmissionAdaptations> | undefined;
+  for (const row of rows) {
+    const record = parseCanonicalJson(asString(row.canonical_json)) as Record<string, unknown>;
+    const receipt = record.requestAdmission;
+    if (record.runRecordId !== runRecordId || record.sequence !== row.sequence || record.recordedAt !== row.recorded_at) return invalid();
+    if (receipt === undefined) continue;
+    if (canonicalRecord(record).digest !== row.sha256 || !exact(receipt, ['schema', 'data', 'digest']) ||
+      receipt.schema !== 'ai7.analysis.request-admission/1' || !isRecord(receipt.data) || canonicalRecord(receipt.data).digest !== receipt.digest) return invalid();
+    const data = receipt.data as unknown as RequestAdmissionData;
+    if (!exact(data, ['runRecordId', 'attemptId', 'bindingDigest', 'planEnvelopeDigest', 'manifestDigest', 'compositionDigest',
+      'promptContractDigest', 'policyVersion', 'policyRuleId', 'sequence', 'predecessorDigest', 'event']) ||
+      data.sequence !== (state.reading?.sequence ?? 0) + 1 || data.predecessorDigest !== (state.reading?.digest ?? null)) return invalid();
+    const { sequence, predecessorDigest, event, ...pins } = data;
+    if (stored === null || pins.runRecordId !== runRecordId || pins.attemptId !== stored.attemptId || pins.bindingDigest !== stored.bindingDigest ||
+      pins.planEnvelopeDigest !== stored.binding.planEnvelopeDigest || pins.manifestDigest !== stored.binding.coverageManifestDigest ||
+      pins.compositionDigest !== stored.binding.behaviorCompositionDigest || pins.promptContractDigest !== stored.binding.promptContractDigest ||
+      pins.policyVersion !== stored.binding.policyPin.providerProcessingVersion || typeof pins.policyRuleId !== 'string' || !/^[a-z][a-z0-9-]{0,159}$/u.test(pins.policyRuleId) ||
+      state.reading !== null && canonicalJson(pins) !== canonicalJson(state.reading.pins)) return invalid();
+    let width: 1 | 3 = state.reading?.width ?? 1;
+    if (state.reading === null) {
+      if (!exact(event, ['kind', 'width', 'limits']) || event.kind !== 'execution' || (event.width !== 1 && event.width !== 3) ||
+        !exact(event.limits, ['requests', 'units', 'backgroundRequests']) || event.limits.requests !== 4 || event.limits.units !== 3 || event.limits.backgroundRequests !== 1 ||
+        event.width === 3 && (stored!.binding.compositionVersion !== 2 || stored!.binding.policyPin.operationalScope !== 'ordinary-production' || stored!.binding.runBudgetCeiling !== 'unset')) return invalid();
+      width = event.width;
+    } else if (event.kind === 'admit') {
+      if (!exact(event, ['kind', 'request'])) return invalid();
+      const request = event.request;
+      if (!exact(request, ['requestId', 'producerId', 'requestOrdinal', 'sessionId', 'unitOrdinal', 'stage', 'attemptIndex', 'adaptationId',
+        'payloadDigest', 'messageDigest', 'requestDigest', 'inputDigest', 'contractDigest']) ||
+        ![request.requestId, request.producerId, request.sessionId].every((id) => typeof id === 'string' && UUID_PATTERN.test(id)) ||
+        seen.has(request.requestId) || !Number.isSafeInteger(request.requestOrdinal) || request.requestOrdinal !== (ordinals.get(request.producerId) ?? 0) + 1 ||
+        !Number.isSafeInteger(request.attemptIndex) || request.attemptIndex < 1 || request.attemptIndex > 4 ||
+        request.adaptationId !== null && !UUID_PATTERN.test(request.adaptationId) ||
+        ![request.payloadDigest, request.messageDigest, request.requestDigest, request.inputDigest, request.contractDigest].every((digest) => typeof digest === 'string' && DIGEST_PATTERN.test(digest)) ||
+        !['units', 'cross-unit-reduction', 'assurance-sampling', 'run-report-reflection', 'web-verification'].includes(request.stage) ||
+        request.stage === 'units' && (!Number.isSafeInteger(request.unitOrdinal) || request.unitOrdinal! < 1) ||
+        request.stage !== 'units' && request.unitOrdinal !== null) return invalid();
+      const manifest = requestManifest ??= readAdmissionManifest(db, stored);
+      if (request.unitOrdinal !== null && (manifest.units[request.unitOrdinal - 1]?.ordinal !== request.unitOrdinal ||
+        manifest.units[request.unitOrdinal - 1]!.digest !== request.inputDigest || request.contractDigest !== stored.binding.promptContractDigest)) return invalid();
+      if (request.stage === 'web-verification') {
+        const session = db.prepare("SELECT canonical_json FROM factual_claim_sessions WHERE session_id = ? AND run_record_id = ? AND stage = 'web-verification'").get(request.sessionId, runRecordId);
+        const pins = session === undefined ? null : JSON.parse(String(session.canonical_json)) as import('../factual-verification.js').FactualClaimSession;
+        if (pins === null || pins.sourceMessageDigest !== request.messageDigest || pins.promptContractDigest !== request.contractDigest || pins.ledgerDigest !== request.inputDigest) return invalid();
+      }
+      if (request.adaptationId !== null && !(adaptations ??= readAdmissionAdaptations(db, stored!.attemptId)).some((adaptation) => adaptation.adaptationId === request.adaptationId && adaptation.unitOrdinal === request.unitOrdinal)) return invalid();
+      admitted.set(request.requestId, { request, recordedAt: asString(row.recorded_at) });
+      seen.add(request.requestId); ordinals.set(request.producerId, request.requestOrdinal); open.set(request.requestId, request);
+    } else if (event.kind === 'resolve') {
+      if (!exact(event, ['kind', 'requests', 'evidence']) || !Array.isArray(event.requests) || new Set(event.requests).size !== event.requests.length ||
+        !event.requests.every((id) => typeof id === 'string' && open.has(id)) || !exact(event.evidence, ['kind', 'digest']) || !DIGEST_PATTERN.test(event.evidence.digest)) return invalid();
+      const requests = event.requests.map((id) => open.get(id)!);
+      const evidence = event.evidence;
+      if (event.requests.length === 0 && evidence.kind !== 'stage-checkpoint') return invalid();
+      if (evidence.kind === 'no-send') {
+        if (requests.length !== 1 || canonicalRecord(requests[0]).digest !== evidence.digest) return invalid();
+        notSent.push(requests[0]!);
+      } else if (evidence.kind === 'unit-checkpoint') {
+        const unit = requests[0]?.unitOrdinal;
+        const checkpoint = db.prepare('SELECT canonical_json, sha256 FROM analysis_unit_checkpoints WHERE run_record_id = ? AND unit_ordinal = ?').get(runRecordId, unit ?? -1) as SqlRow | undefined;
+        if (checkpoint === undefined || checkpoint.sha256 !== evidence.digest || requests.some((request) => request.stage !== 'units' || request.unitOrdinal !== unit)) return invalid();
+        const kept = parseCanonicalJson(asString(checkpoint!.canonical_json)) as { requests?: unknown };
+        if (canonicalRecord(kept).digest !== evidence.digest || !Array.isArray(kept.requests) || kept.requests.length !== event.requests.length || !event.requests.every((id) => (kept.requests as unknown[]).includes(id))) return invalid();
+      } else if (evidence.kind === 'clarification-checkpoint') {
+        const unit = requests[0]?.unitOrdinal;
+        const checkpoint = db.prepare('SELECT canonical_json, sha256 FROM analysis_clarification_requests WHERE run_record_id = ? AND unit_ordinal = ?').get(runRecordId, unit ?? -1) as SqlRow | undefined;
+        if (checkpoint === undefined || checkpoint.sha256 !== evidence.digest || sha256Hex(asString(checkpoint.canonical_json)) !== evidence.digest ||
+          requests.some((request) => request.stage !== 'units' || request.unitOrdinal !== unit)) return invalid();
+        const kept = parseCanonicalJson(asString(checkpoint!.canonical_json)) as { requests?: unknown };
+        if (!Array.isArray(kept.requests) || kept.requests.length !== event.requests.length || !event.requests.every((id) => (kept.requests as unknown[]).includes(id))) return invalid();
+      } else if (evidence.kind === 'stage-checkpoint') {
+        const stage = record.stageContinuation;
+        if (!exact(stage, ['schema', 'data', 'digest']) || stage.schema !== 'ai7.analysis.stage-continuation/1' ||
+          !isRecord(stage.data) || canonicalRecord(stage.data).digest !== stage.digest ||
+          !exact(record.carriedUsage, ['inputTokens', 'outputTokens', 'stages']) ||
+          ![record.carriedUsage.inputTokens, record.carriedUsage.outputTokens].every((value) => Number.isSafeInteger(value) && (value as number) >= 0) ||
+          !exact(record.carriedUsage.stages, CARRIED_STAGES) ||
+          !Object.values(record.carriedUsage.stages).every((value) => exact(value, ['requests', 'inputTokens', 'outputTokens']) &&
+            Object.values(value).every((count) => Number.isSafeInteger(count) && (count as number) >= 0))) return invalid();
+        if (record.stageContinuation === undefined || record.carriedUsage === undefined ||
+          canonicalRecord({ stageContinuation: record.stageContinuation, carriedUsage: record.carriedUsage }).digest !== evidence.digest ||
+          requests.some((request) => request.stage === 'units' || request.stage === 'run-report-reflection')) return invalid();
+        const stages = (record.stageContinuation as { data?: StageContinuation }).data;
+        if (stages === undefined || stages.runRecordId !== runRecordId || stages.attemptId !== stored!.attemptId ||
+          stages.bindingDigest !== stored!.bindingDigest || stages.manifestDigest !== stored!.binding.coverageManifestDigest ||
+          stages.promptContractDigest !== stored!.binding.promptContractDigest || requests.some((request) => request.stage === 'cross-unit-reduction'
+            ? stages.reduction?.inputDigest !== request.inputDigest || stages.reduction.requestDigest !== request.requestDigest || stages.reduction.contractDigest !== request.contractDigest
+            : stages.sampling?.inputDigest !== request.inputDigest || stages.sampling.contractDigest !== request.contractDigest || !stages.sampling.turns.some((turn) => turn.requestDigest === request.requestDigest))) return invalid();
+      } else if (evidence.kind === 'reflection-outcome') {
+        const outcome = db.prepare('SELECT canonical_json, sha256 FROM analysis_task_outcomes WHERE run_record_id = ?').get(runRecordId) as SqlRow | undefined;
+        if (outcome === undefined || outcome.sha256 !== evidence.digest || sha256Hex(asString(outcome.canonical_json)) !== evidence.digest ||
+          requests.some((request) => request.stage !== 'run-report-reflection')) return invalid();
+      } else if (evidence.kind === 'refused-turn') {
+        const refused = record.requestRefusal;
+        if (!exact(refused, ['state', 'stage', 'unitOrdinal', 'observation']) || refused.state !== 'provider-account-limit' ||
+          canonicalRecord(refused).digest !== evidence.digest || requests.some((request) => request.stage !== refused.stage || request.unitOrdinal !== refused.unitOrdinal)) return invalid();
+        const observed = refused.observation;
+        if (!exact(observed, ['attempts', 'usage']) || !Number.isSafeInteger(observed.attempts) || (observed.attempts as number) < 1 ||
+          observed.usage !== null && (!exact(observed.usage, ['inputTokens', 'outputTokens']) ||
+            ![observed.usage.inputTokens, observed.usage.outputTokens].every((count) => Number.isSafeInteger(count) && (count as number) >= 0))) return invalid();
+        refusalProofs.set(evidence.digest, Number(row.sequence));
+      } else if (evidence.kind === 'factual-checkpoint') {
+        if (requests.some((request) => request.stage !== 'web-verification' || request.sessionId !== requests[0]?.sessionId) ||
+          !db.prepare("SELECT 1 FROM factual_claim_events WHERE session_id = ? AND kind = 'verification-result' AND sha256 = ?").get(requests[0]?.sessionId ?? '', evidence.digest)) return invalid();
+      } else if (evidence.kind === 'unavailable') {
+        if (canonicalRecord({ requests, reason: 'possible-send-without-durable-result' }).digest !== evidence.digest) return invalid();
+        unavailable.push(...requests);
+      } else return invalid();
+      for (const id of event.requests) { resolutions.set(id, { kind: evidence.kind, digest: evidence.digest }); open.delete(id); }
+    } else return invalid();
+    state.reading = { pins, width, sequence, digest: receipt.digest as string, open, unavailable, notSent };
+  }
+  // Check arrays independently of discharge events, including the crash window before discharge.
+  for (const table of ['analysis_unit_checkpoints', 'analysis_clarification_requests'] as const) {
+    for (const checkpoint of db.prepare(`SELECT * FROM ${table} WHERE run_record_id = ?`).all(runRecordId) as SqlRow[]) {
+      const kept = admissionRow(checkpoint);
+      if (!Object.hasOwn(kept, 'requests')) continue;
+      if (!Array.isArray(kept.requests) || new Set(kept.requests).size !== kept.requests.length ||
+        kept.runRecordId !== runRecordId || kept.attemptId !== stored!.attemptId ||
+        table === 'analysis_clarification_requests' && kept.taskIntentId !== stored!.binding.taskIntentId ||
+        kept.unitOrdinal !== undefined && kept.unitOrdinal !== checkpoint.unit_ordinal) return invalid();
+      const manifest = requestManifest ??= readAdmissionManifest(db, stored!);
+      if (manifest.units[Number(checkpoint.unit_ordinal) - 1]?.ordinal !== checkpoint.unit_ordinal) return invalid();
+      const ids = kept.requests as unknown[];
+      const checkpointTime = asString(table === 'analysis_unit_checkpoints' ? checkpoint.recorded_at : checkpoint.raised_at);
+      if (!ids.every((id) => typeof id === 'string' && admitted.has(id) &&
+        admitted.get(id)!.request.stage === 'units' && admitted.get(id)!.request.unitOrdinal === checkpoint.unit_ordinal &&
+        admitted.get(id)!.recordedAt <= checkpointTime)) return invalid();
+      if (table === 'analysis_unit_checkpoints') {
+        const unit = kept.unit as { unitOrdinal?: unknown; requestDigest?: unknown } | undefined;
+        if (unit?.unitOrdinal !== checkpoint.unit_ordinal || !ids.every((id) => admitted.get(id as string)!.request.requestDigest === unit!.requestDigest)) return invalid();
+        for (const [id, value] of admitted) if (value.request.stage === 'units' && value.request.unitOrdinal === checkpoint.unit_ordinal &&
+          (resolutions.get(id) === undefined || resolutions.get(id)!.kind === 'unit-checkpoint' && resolutions.get(id)!.digest === checkpoint.sha256) && !ids.includes(id)) return invalid();
+      }
+    }
+  }
+  for (const row of db.prepare("SELECT sequence, canonical_json, sha256 FROM analysis_run_states WHERE run_record_id = ? AND json_type(canonical_json, '$.requestRefusal') IS NOT NULL").all(runRecordId) as SqlRow[]) {
+    const record = admissionRow(row);
+    const refusal = record.requestRefusal;
+    if (!exact(refusal, ['state', 'stage', 'unitOrdinal', 'observation']) || !refusalProofs.has(canonicalRecord(refusal).digest) ||
+      refusalProofs.get(canonicalRecord(refusal).digest)! > Number(row.sequence)) return invalid();
+  }
+  const claims = new Set<string>();
+  const firstReceiptRowSequence = rows.length === 0 ? null : asNumber(rows[0]!.sequence);
+  const sameEvidence = (left: unknown, right: unknown): boolean => left === undefined || right === undefined
+    ? left === right : canonicalRecord(left).digest === canonicalRecord(right).digest;
+  let predecessor: Record<string, unknown> | null = null;
+  for (const row of db.prepare('SELECT sequence, recorded_at, canonical_json, sha256 FROM analysis_run_states WHERE run_record_id = ? ORDER BY sequence').all(runRecordId) as SqlRow[]) {
+    const record = admissionRow(row);
+    // A governed row inherits its predecessor's stage evidence; only its own stage checkpoint carries new evidence.
+    if (Object.hasOwn(record, 'requestAdmission')) {
+      const event = (record.requestAdmission as { data: { event: { kind: string; evidence?: { kind: string } } } }).data.event;
+      if (!(event.kind === 'resolve' && event.evidence?.kind === 'stage-checkpoint') &&
+        (!sameEvidence(record.stageContinuation, predecessor?.stageContinuation) || !sameEvidence(record.carriedUsage, predecessor?.carriedUsage))) return invalid();
+    }
+    predecessor = record;
+    if (rows.length > 0 && Object.hasOwn(record, 'stageContinuation')) {
+      const stage = record.stageContinuation;
+      if (!exact(stage, ['schema', 'data', 'digest']) || stage.schema !== 'ai7.analysis.stage-continuation/1' ||
+        !isRecord(stage.data) || canonicalRecord(stage.data).digest !== stage.digest ||
+        stage.data.runRecordId !== runRecordId || stage.data.attemptId !== stored!.attemptId ||
+        stage.data.bindingDigest !== stored!.bindingDigest || stage.data.manifestDigest !== stored!.binding.coverageManifestDigest ||
+        stage.data.promptContractDigest !== stored!.binding.promptContractDigest) return invalid();
+    }
+    if (!Object.hasOwn(record, 'modelClarificationAnswerClaim')) continue;
+    if (record.runRecordId !== runRecordId || record.sequence !== row.sequence || record.recordedAt !== row.recorded_at) return invalid();
+    const claim = record.modelClarificationAnswerClaim;
+    if (typeof claim !== 'string' || !UUID_PATTERN.test(claim)) return invalid();
+    if (!claims.has(claim)) {
+      if (stored === null) return invalid();
+      const clarification = db.prepare('SELECT * FROM analysis_clarification_requests WHERE request_id = ?').get(claim) as SqlRow | undefined;
+      const question = admissionRow(clarification);
+      const model = clarification?.model_question_json == null ? null : parseModelClarification(asString(clarification.model_question_json));
+      const answerRow = db.prepare('SELECT * FROM analysis_clarification_answers WHERE request_id = ?').get(claim) as SqlRow | undefined;
+      const answer = admissionRow(answerRow);
+      const manifest = requestManifest ??= readAdmissionManifest(db, stored!);
+      const selected = typeof answer.optionId === 'string' ? /^model-option-([0-3])$/u.exec(answer.optionId)?.[1] : undefined;
+      if (question.schema !== CLARIFICATION_REQUEST_SCHEMA || question.requestId !== claim || clarification!.request_id !== claim ||
+        clarification!.run_record_id !== runRecordId || question.runRecordId !== runRecordId || question.origin !== 'model' || question.kind !== 'model-question' ||
+        question.attemptId !== stored!.attemptId || question.taskIntentId !== stored!.binding.taskIntentId ||
+        question.planVersion !== stored!.binding.planVersion || question.planEnvelopeDigest !== stored!.binding.planEnvelopeDigest ||
+        question.unitOrdinal !== clarification!.unit_ordinal || !Number.isSafeInteger(question.unitOrdinal) || (question.unitOrdinal as number) < 1 ||
+        manifest.units[(question.unitOrdinal as number) - 1]?.ordinal !== question.unitOrdinal ||
+        typeof question.requestDigest !== 'string' || !DIGEST_PATTERN.test(question.requestDigest) ||
+        typeof question.firstUnitMessageDigest !== 'string' || !DIGEST_PATTERN.test(question.firstUnitMessageDigest) ||
+        model === null || canonicalJson(question.modelQuestion) !== clarification!.model_question_json ||
+        answer.schema !== CLARIFICATION_ANSWER_SCHEMA || answer.answerId !== answerRow!.answer_id ||
+        typeof answer.answerId !== 'string' || !UUID_PATTERN.test(answer.answerId) || answer.requestId !== claim || answerRow!.request_id !== claim ||
+        answer.runRecordId !== runRecordId || answer.requestSha256 !== clarification!.sha256 || answerRow!.option_id !== 'retry' ||
+        answer.answeredAt !== answerRow!.answered_at || (answer.actor !== 'editor' && answer.actor !== 'service-timeout') ||
+        (answer.note !== null && (typeof answer.note !== 'string' || !answer.note.isWellFormed() || clarificationGraphemes(answer.note) > CLARIFICATION_NOTE_MAX)) ||
+        !(answer.optionId === 'no-answer' ? answer.note === null || answer.note === '' : answer.optionId === 'free-text'
+          ? model.freeTextAllowed && typeof answer.note === 'string' && answer.note !== ''
+          : selected !== undefined && model.options?.[Number(selected)] !== undefined && (answer.note === null || answer.note === '')) ||
+        answer.actor === 'service-timeout' && answer.optionId !== 'no-answer') return invalid();
+      const receipt = record.requestAdmission as { data?: { event?: RequestAdmissionEvent } } | undefined;
+      const event = receipt?.data?.event;
+      if (firstReceiptRowSequence !== null && asNumber(row.sequence) >= firstReceiptRowSequence &&
+        (event?.kind !== 'admit' || event.request.stage !== 'units' || event.request.unitOrdinal !== clarification!.unit_ordinal)) return invalid();
+      claims.add(claim);
+    }
+  }
+  return state.reading;
+}
+
+/** Validate every persisted request variant without selecting a policy, mutating, or reconciling. */
+export function validateRequestAdmissionRecords(db: DatabaseSync, allowGoverned: boolean): void {
+  const fields = [
+    ['analysis_run_states', 'requestAdmission'], ['analysis_run_states', 'requestRefusal'],
+    ['analysis_unit_checkpoints', 'requests'], ['analysis_clarification_requests', 'requests'],
+  ] as const;
+  const runs = new Set<string>();
+  for (const [table, field] of fields) {
+    if (db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) === undefined) continue;
+    const rows = db.prepare(`SELECT run_record_id FROM ${table} WHERE json_type(canonical_json, '$.${field}') IS NOT NULL`).all() as SqlRow[];
+    requireAnalysis(allowGoverned || rows.length === 0, 'ANALYSIS_RECORD_INVALID', '请求准入记录与数据库读者修订不一致。');
+    for (const row of rows) runs.add(asString(row.run_record_id));
+  }
+  const governedRuns = new Set(runs);
+  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'analysis_run_states'").get() !== undefined) {
+    for (const row of db.prepare("SELECT DISTINCT run_record_id FROM analysis_run_states WHERE json_type(canonical_json, '$.modelClarificationAnswerClaim') IS NOT NULL").all() as SqlRow[]) runs.add(asString(row.run_record_id));
+  }
+  const requestOwners = new Map<string, string>();
+  for (const runRecordId of runs) {
+    const reading = readRequestAdmissions(db, runRecordId);
+    requireAnalysis(!governedRuns.has(runRecordId) || reading !== null, 'ANALYSIS_RECORD_INVALID', '请求准入证据缺少执行收据。');
+    if (reading === null) continue;
+    for (const row of db.prepare("SELECT canonical_json FROM analysis_run_states WHERE run_record_id = ? AND json_extract(canonical_json, '$.requestAdmission.data.event.kind') = 'admit'").all(runRecordId) as SqlRow[]) {
+      const record = parseCanonicalJson(asString(row.canonical_json)) as { requestAdmission: { data: { event: { request: AnalysisRequestIdentity } } } };
+      const requestId = record.requestAdmission.data.event.request.requestId;
+      requireAnalysis(!requestOwners.has(requestId), 'ANALYSIS_RECORD_INVALID', '物理请求标识不能跨运行复用。');
+      requestOwners.set(requestId, runRecordId);
+    }
+  }
+}
+
 export class BaselineAnalysisStore {
+  #factualVerification: import('../factual-verification.js').FactualVerificationLedger | null = null;
+
+  bindFactualVerification(owner: import('../factual-verification.js').FactualVerificationLedger): void {
+    requireAnalysis(this.kind === FACTUAL_REVIEW_KIND, 'FACTUAL_CLAIM_KIND_INVALID', '只有事实核查任务可以绑定断言账本。');
+    this.#factualVerification = owner;
+  }
+
+  get factualVerification(): import('../factual-verification.js').FactualVerificationLedger {
+    requireAnalysis(this.#factualVerification !== null, 'FACTUAL_CLAIM_OWNER_MISSING', '事实核查账本未绑定。');
+    return this.#factualVerification;
+  }
   readonly #db: DatabaseSync;
   readonly #checkpointOwner: CheckpointOwner;
   readonly #route: BaselineAnalysisRouteFacts | null;
+  readonly #originalDefinition: AnalysisKindDefinition;
   #definition: AnalysisKindDefinition;
   readonly #work = new Map<string, PreparationWork>();
   /**
@@ -1094,6 +1515,7 @@ export class BaselineAnalysisStore {
     this.#db = db;
     this.#checkpointOwner = checkpointOwner;
     this.#route = route;
+    this.#originalDefinition = definition;
     this.#definition = route?.fixtureIdentity.startsWith('sample1-model-clarification') === true ? withModelClarification(definition) : definition;
   }
 
@@ -1101,7 +1523,182 @@ export class BaselineAnalysisStore {
     return this.#route;
   }
 
+  /** Reservations belong to actual Runs, including a send whose result is unknown after restart. */
+  curationBudgetUse(controlEntryId: string): { passesUsed: number; reservedTokens: number } {
+    const rows = this.#db.prepare(`SELECT a.canonical_json, o.canonical_json outcome FROM analysis_run_authorizations a
+      LEFT JOIN analysis_task_outcomes o ON o.task_intent_id = a.task_intent_id
+      WHERE a.origin = 'enabled-learning' AND json_extract(a.canonical_json, '$.controlEntryId') = ?`).all(controlEntryId);
+    return { passesUsed: rows.length, reservedTokens: rows.reduce((total, row) => {
+      const reserved = Number((parseCanonicalJson(String(row.canonical_json)) as { reservedTokens: number }).reservedTokens);
+      const outcome = row.outcome === null ? null : parseCanonicalJson(String(row.outcome)) as { usage: Record<string, number> | null };
+      const actual = Object.values(outcome?.usage ?? {}).reduce((sum, count) => sum + count, 0);
+      return total + Math.max(reserved, actual);
+    }, 0) };
+  }
+
+  curationRuns(): Array<{ runRecordId: string; state: string; summary: string }> {
+    return this.#db.prepare(`SELECT r.run_record_id, s.state, s.canonical_json FROM analysis_run_records r
+      JOIN analysis_task_intents t ON t.task_intent_id = r.task_intent_id
+      JOIN analysis_run_states s ON s.run_record_id = r.run_record_id
+      WHERE t.kind = 'learning-curation' AND s.sequence = (SELECT max(sequence) FROM analysis_run_states WHERE run_record_id = r.run_record_id)
+      ORDER BY r.rowid DESC LIMIT 10`).all().map((row) => ({ runRecordId: String(row.run_record_id), state: String(row.state),
+      summary: String((parseCanonicalJson(String(row.canonical_json)) as { detail: string }).detail) }));
+  }
+
+  /** Called by the existing startup reconciliation; possible sends never become retries or fresh budget. */
+  reconcileCuration(): void {
+    for (const row of this.#db.prepare(`SELECT r.*, p.canonical_json plan, p.sha256 plan_digest, scope.canonical_json sources
+      FROM analysis_run_records r JOIN analysis_task_intents t ON t.task_intent_id = r.task_intent_id
+      JOIN analysis_plan_records p ON p.task_intent_id = t.task_intent_id AND p.component = 'plan-envelope'
+      JOIN analysis_plan_records scope ON scope.task_intent_id = t.task_intent_id AND scope.component = 'run-source-scope'
+      WHERE t.kind = 'learning-curation' AND NOT EXISTS (SELECT 1 FROM analysis_task_outcomes o WHERE o.run_record_id = r.run_record_id)`).all()) {
+      const plan = parseCanonicalJson(String(row.plan)) as { controlEntryId: string; envelope: import('../../shared/protocol/learning.js').EnabledLearningEnvelope; compositionDigest: string };
+      const bundle = parseCanonicalJson(String(row.sources)) as import('../../shared/protocol/learning.js').LearningCurationBundle;
+      const run = { taskIntentId: String(row.task_intent_id), runRecordId: String(row.run_record_id), authorizationId: String(row.authorization_id),
+        controlEntryId: plan.controlEntryId, envelope: plan.envelope, compositionDigest: plan.compositionDigest, bundle, planDigest: String(row.plan_digest) };
+      const possibleSend = this.#db.prepare("SELECT 1 FROM analysis_run_states WHERE run_record_id = ? AND state = 'executing'").get(run.runRecordId) !== undefined;
+      this.settleCuration(run, 'interrupted', { usage: null, proposals: 0, transmitted: possibleSend,
+        reason: possibleSend ? '服务中断，学习整理发送结果不确定；保留预算与来源，不自动重发。' : '服务中断，本次学习整理未完成；保留来源记录，不自动重发。' });
+    }
+  }
+
+  startCuration(bundle: import('../../shared/protocol/learning.js').LearningCurationBundle,
+    control: { entryId: string; envelope: import('../../shared/protocol/learning.js').EnabledLearningEnvelope }): import('../learning/curation.js').CurationRun {
+    requireAnalysis(this.#db.isTransaction && bundle.state === 'ready', 'ANALYSIS_PLAN_INVALID', '学习整理必须冻结完整来源。');
+    const taskIntentId = randomUUID(), runRecordId = randomUUID(), authorizationId = randomUUID(), planVersionId = randomUUID();
+    const instant = new Date().toISOString();
+    const envelope = control.envelope;
+    const compositionDigest = describeComposition(envelope.binding.route, envelope.binding.model, envelope.contractDigest,
+      { version: 2, learningCuration: { bundleDigest: bundle.digest, contractDigest: envelope.contractDigest } }).digest;
+    const intent = canonicalRecord({ taskIntentId, bookId: bundle.bookId, kind: 'learning-curation', contractVersion: bundle.schema,
+      goal: '从完整编辑样例整理待接受的偏好与记忆', expectedOutcome: 'reviewable-learning-proposals', mode: 'learning-curation', createdAt: instant });
+    this.#db.prepare(`INSERT INTO analysis_task_intents(task_intent_id,book_id,kind,contract_version,goal,created_at,canonical_json,sha256,mode)
+      VALUES (?,?,'learning-curation',?,?,?,?,?,'learning-curation')`).run(taskIntentId, bundle.bookId, bundle.schema,
+        '从完整编辑样例整理待接受的偏好与记忆', instant, intent.json, intent.digest);
+    const plan = canonicalRecord({ schema: 'ai7.learning-curation-plan/1', taskIntentId, controlEntryId: control.entryId,
+      envelope, sourceManifestDigest: bundle.digest, compositionDigest, operations: ['model-processing'], startWhen: 'idle', tools: [], retries: 0 });
+    for (const [component, value] of [['run-source-scope', bundle], ['provider-resolution-plan', envelope.binding], ['plan-envelope', parseCanonicalJson(plan.json)]] as const) {
+      const record = canonicalRecord(value);
+      this.#db.prepare('INSERT INTO analysis_plan_records VALUES (?,1,?,?,?,?)').run(taskIntentId, component, record.json, record.digest, instant);
+    }
+    const version = canonicalRecord({ planVersionId, taskIntentId, ordinal: 1, planEnvelopeDigest: plan.digest, createdAt: instant });
+    this.#db.prepare('INSERT INTO analysis_plan_versions VALUES (?,?,1,NULL,?,?,?,?)')
+      .run(planVersionId, taskIntentId, plan.digest, instant, version.json, version.digest);
+    const authorization = canonicalRecord({ authorizationId, taskIntentId, origin: 'enabled-learning', authority: 'standard-direct-dispatch',
+      startWhen: 'idle', planEnvelopeDigest: plan.digest, controlEntryId: control.entryId, reservedTokens: envelope.budget.perPassTokens, authorizedAt: instant });
+    this.#db.prepare(`INSERT INTO analysis_run_authorizations VALUES (?,?,?,'enabled-learning','standard-direct-dispatch',?,?,?,'idle')`)
+      .run(authorizationId, taskIntentId, plan.digest, instant, authorization.json, authorization.digest);
+    const run = canonicalRecord({ runRecordId, taskIntentId, authorizationId, recordedAt: instant });
+    this.#db.prepare('INSERT INTO analysis_run_records VALUES (?,?,?,?,?,?)').run(runRecordId, taskIntentId, authorizationId, instant, run.json, run.digest);
+    this.#insertRunState(runRecordId, 1, 'authorized', { detail: '已启用的学习范围授权一次完整样例整理；预算已保留。' }, instant);
+    return { taskIntentId, runRecordId, authorizationId, controlEntryId: control.entryId, envelope, bundle, planDigest: plan.digest, compositionDigest };
+  }
+
+  bindCuration(run: import('../learning/curation.js').CurationRun, sessionId: string): { attemptId: string; bindingDigest: string } {
+    const attemptId = randomUUID(), at = new Date().toISOString();
+    const attempt = canonicalRecord({ attemptId, runRecordId: run.runRecordId, ordinal: 1, startedAt: at });
+    const binding = canonicalRecord({ schema: 'ai7.learning-curation-binding/1', attemptId, harnessSessionId: sessionId,
+      planEnvelopeDigest: run.planDigest, sourceManifestDigest: run.bundle.digest, compositionDigest: run.compositionDigest,
+      envelope: run.envelope, boundAt: at });
+    transact(this.#db, () => {
+      this.#db.prepare('INSERT INTO analysis_execution_attempts VALUES (?,?,1,?,?,?)').run(attemptId, run.runRecordId, at, attempt.json, attempt.digest);
+      this.#db.prepare('INSERT INTO analysis_execution_bindings VALUES (?,?,?,?,?)').run(attemptId, sessionId, at, binding.json, binding.digest);
+      this.recordRunState(run.runRecordId, 'admitted', { detail: '学习整理执行绑定已固定。', attemptId, bindingDigest: binding.digest });
+    });
+    return { attemptId, bindingDigest: binding.digest };
+  }
+
+  settleCuration(run: import('../learning/curation.js').CurationRun, state: 'completed' | 'failed' | 'interrupted',
+    evidence: { usage: import('../provider/classification.js').UsageFacts | null; proposals: number; transmitted: boolean; reason: string }): void {
+    transact(this.#db, () => {
+      this.recordRunState(run.runRecordId, state, { detail: evidence.reason, curation: evidence });
+      const outcomeId = randomUUID(), recordedAt = new Date().toISOString();
+      const outcome = canonicalRecord({ schema: 'ai7.learning-curation-outcome/1', outcomeId, taskIntentId: run.taskIntentId,
+        runRecordId: run.runRecordId, classification: state, resultSetRevisionId: null, sourceManifestDigest: run.bundle.digest,
+        summary: evidence.reason, safeNextAction: '查看候选记忆；本批来源不会自动重发。', ...evidence, recordedAt });
+      this.#db.prepare('INSERT INTO analysis_task_outcomes VALUES (?,?,?,?,NULL,?,?,?)')
+        .run(outcomeId, run.taskIntentId, run.runRecordId, state, recordedAt, outcome.json, outcome.digest);
+    });
+  }
+
   /** The analysis kind this ledger serves; the execution owner reads its contract through this. */
+  factualRecheckUsed(onceKey: string): boolean {
+    return this.#db.prepare("SELECT 1 FROM analysis_run_authorizations WHERE origin = 'background-analysis-enrollment' AND json_extract(canonical_json, '$.factualRecheckOnceKey') = ? LIMIT 1").get(onceKey) !== undefined;
+  }
+
+  startFactualRecheck(candidate: import('./factual-recheck.js').FactualRecheckCandidate): import('./factual-recheck.js').FactualRecheckRun {
+    requireAnalysis(this.#db.isTransaction && !this.factualRecheckUsed(candidate.onceKey), 'FACTUAL_RECHECK_ALREADY_SUBMITTED', '这条断言已按这个登记和决定提交过，不会自动重发。');
+    const taskIntentId = randomUUID(), runRecordId = randomUUID(), authorizationId = randomUUID(), planVersionId = randomUUID();
+    const instant = new Date().toISOString();
+    const { ledger, limits, ...frozen } = candidate;
+    const session = { sessionId: randomUUID(), runRecordId, stage: 'web-verification' as const, scopeId: candidate.selection.claimId,
+      ledgerDigest: ledger.digest, sourceMessageDigest: sha256Hex(candidate.message), promptContractDigest: candidate.promptDigest, limits };
+    const compositionDigest = describeComposition(candidate.binding.route, candidate.binding.model, candidate.promptDigest, {
+      version: 2, procedure: candidate.procedure, platformTools: true, localTools: false,
+      researchDeclaration: { webSearch: true, searchEngine: 'user-selected-backend' } }).digest;
+    const intent = canonicalRecord({ taskIntentId, bookId: candidate.selection.bookId, kind: 'factual-recheck',
+      contractVersion: 'ai7.factual-claim-verification/1', mode: 'factual-recheck', goal: '核查编辑要求补充证据的一条冻结断言',
+      factualDecision: candidate.selection, expectedOutcome: 'versioned-factual-verification', createdAt: instant });
+    this.#db.prepare(`INSERT INTO analysis_task_intents(task_intent_id,book_id,kind,contract_version,goal,created_at,canonical_json,sha256,mode)
+      VALUES (?,?,'factual-recheck','ai7.factual-claim-verification/1',?,?,?,?, 'factual-recheck')`)
+      .run(taskIntentId, candidate.selection.bookId, '核查编辑要求补充证据的一条冻结断言', instant, intent.json, intent.digest);
+    const plan = canonicalRecord({ schema: 'ai7.factual-recheck-plan/1', ...frozen, taskIntentId, runRecordId, authorizationId,
+      session, compositionDigest, policyVersion: 'v31', stages: ['web-verification'], startWhen: 'idle', recordedAt: instant });
+    for (const [component, value] of [['run-source-scope', { selection: candidate.selection, messageDigest: session.sourceMessageDigest,
+      messageByteCount: Buffer.byteLength(candidate.message, 'utf8') }], ['provider-resolution-plan', { binding: candidate.binding, search: candidate.search }], ['plan-envelope', JSON.parse(plan.json)]] as const) {
+      const record = canonicalRecord(value);
+      this.#db.prepare('INSERT INTO analysis_plan_records VALUES (?,1,?,?,?,?)').run(taskIntentId, component, record.json, record.digest, instant);
+    }
+    const version = canonicalRecord({ planVersionId, taskIntentId, ordinal: 1, planEnvelopeDigest: plan.digest, createdAt: instant });
+    this.#db.prepare('INSERT INTO analysis_plan_versions VALUES (?,?,1,NULL,?,?,?,?)').run(planVersionId, taskIntentId, plan.digest, instant, version.json, version.digest);
+    const authorization = canonicalRecord({ authorizationId, taskIntentId, origin: 'background-analysis-enrollment', authority: 'standard-direct-dispatch',
+      startWhen: 'idle',
+      enrollmentId: candidate.enrollmentId, enrollmentVersionId: candidate.enrollmentVersionId, factualRecheckOnceKey: candidate.onceKey,
+      planEnvelopeDigest: plan.digest, runBudgetCeiling: { kind: 'tokens', maxTotalTokens: candidate.maximumTokens }, authorizedAt: instant });
+    this.#db.prepare(`INSERT INTO analysis_run_authorizations VALUES (?,?,?,'background-analysis-enrollment','standard-direct-dispatch',?,?,?,'idle')`)
+      .run(authorizationId, taskIntentId, plan.digest, instant, authorization.json, authorization.digest);
+    const run = canonicalRecord({ runRecordId, taskIntentId, authorizationId, recordedAt: instant });
+    this.#db.prepare('INSERT INTO analysis_run_records VALUES (?,?,?,?,?,?)').run(runRecordId, taskIntentId, authorizationId, instant, run.json, run.digest);
+    this.#insertRunState(runRecordId, 1, 'authorized', { detail: '独立事实复核登记与最新编辑决定已固定；一次性提交身份已保留。' }, instant);
+    this.factualVerification.freezeClaims(runRecordId, ledger);
+    this.factualVerification.admitClaimSession(session);
+    return { ...frozen, taskIntentId, runRecordId, authorizationId, session, compositionDigest, planDigest: plan.digest };
+  }
+
+  bindFactualRecheck(run: import('./factual-recheck.js').FactualRecheckRun): { attemptId: string; bindingDigest: string } {
+    const attemptId = randomUUID(), at = new Date().toISOString();
+    const attempt = canonicalRecord({ attemptId, runRecordId: run.runRecordId, ordinal: 1, startedAt: at });
+    const binding = canonicalRecord({ schema: 'ai7.factual-recheck-binding/1', attemptId, harnessSessionId: run.session.sessionId,
+      planEnvelopeDigest: run.planDigest, selection: run.selection, binding: run.binding, compositionDigest: run.compositionDigest, boundAt: at });
+    transact(this.#db, () => {
+      this.#db.prepare('INSERT INTO analysis_execution_attempts VALUES (?,?,1,?,?,?)').run(attemptId, run.runRecordId, at, attempt.json, attempt.digest);
+      this.#db.prepare('INSERT INTO analysis_execution_bindings VALUES (?,?,?,?,?)').run(attemptId, run.session.sessionId, at, binding.json, binding.digest);
+      this.recordRunState(run.runRecordId, 'admitted', { detail: '单条事实复核执行绑定已固定。', attemptId, bindingDigest: binding.digest });
+    });
+    return { attemptId, bindingDigest: binding.digest };
+  }
+
+  settleFactualRecheck(run: import('./factual-recheck.js').FactualRecheckRun, state: 'completed' | 'failed' | 'interrupted', usage: import('../provider/classification.js').UsageFacts | null): void {
+    transact(this.#db, () => {
+      const reason = state === 'completed' ? '单条事实复核结果已保留。' : '单条事实复核未完成；提交额度保留，不自动重发。';
+      this.recordRunState(run.runRecordId, state, { detail: reason });
+      const outcomeId = randomUUID(), recordedAt = new Date().toISOString();
+      const outcome = canonicalRecord({ schema: 'ai7.factual-recheck-outcome/1', outcomeId, taskIntentId: run.taskIntentId,
+        runRecordId: run.runRecordId, classification: state, resultSetRevisionId: null, selection: run.selection, usage,
+        summary: reason, safeNextAction: '查看核查历史；需要进一步核查时记录新的明确决定。', recordedAt });
+      this.#db.prepare('INSERT INTO analysis_task_outcomes VALUES (?,?,?,?,NULL,?,?,?)').run(outcomeId, run.taskIntentId, run.runRecordId, state, recordedAt, outcome.json, outcome.digest);
+    });
+  }
+
+  reconcileFactualRechecks(): void {
+    for (const row of this.#db.prepare(`SELECT p.canonical_json, p.sha256 FROM analysis_plan_records p JOIN analysis_task_intents t ON t.task_intent_id = p.task_intent_id
+      WHERE t.kind = 'factual-recheck' AND p.component = 'plan-envelope' AND NOT EXISTS
+      (SELECT 1 FROM analysis_task_outcomes o WHERE o.task_intent_id = t.task_intent_id)`).all()) {
+      const plan = JSON.parse(String(row.canonical_json)) as import('./factual-recheck.js').FactualRecheckRun;
+      this.settleFactualRecheck({ ...plan, planDigest: String(row.sha256) }, 'interrupted', null);
+    }
+  }
+
   get definition(): AnalysisKindDefinition {
     this.#refreshClarificationDefinition();
     return this.#definition;
@@ -1121,6 +1718,7 @@ export class BaselineAnalysisStore {
 
   #factualUnwrapped(level: EvidenceAssuranceLevel, rule: ReturnType<typeof liveKindRule>): AnalysisKindDefinition {
     if (level === 'quick') return factualReviewLevelDefinition('quick');
+    if (rule?.claimScopedFactualStages?.evidenceAssuranceLevels.includes(level)) return factualClaimKindDefinition(level);
     if (this.#factualLevelsActive(rule)) return factualReviewLevelDefinition(level);
     const v1 = factualReviewKindDefinition();
     return platformToolsFromProjection(rule) === null ? v1 : withFactualResearch(v1);
@@ -1130,13 +1728,19 @@ export class BaselineAnalysisStore {
   #factualDefinitionFor(level: EvidenceAssuranceLevel): AnalysisKindDefinition {
     const rule = liveKindRule(this.#launch.policy, FACTUAL_REVIEW_KIND);
     const unwrapped = this.#factualUnwrapped(level, rule);
-    return this.#route?.fixtureIdentity.startsWith('sample1-model-clarification') === true || rule?.clarificationQuestionAllowed === true
+    return unwrapped.factualClaims === undefined && (this.#route?.fixtureIdentity.startsWith('sample1-model-clarification') === true || rule?.clarificationQuestionAllowed === true)
       ? withModelClarification(unwrapped) : unwrapped;
   }
 
   /** The definition one plan version executes: its level's for the factual kind (Issue #901), the ledger's own for every other. */
-  #planDefinition(edits: PlanEdits): AnalysisKindDefinition {
-    return this.definition.kind === FACTUAL_REVIEW_KIND ? this.#factualDefinitionFor(planEditAssuranceLevel(edits)) : this.#definition;
+  #planDefinition(edits: PlanEdits, mode?: string): AnalysisKindDefinition {
+    if (this.definition.kind !== FACTUAL_REVIEW_KIND) return this.#definition;
+    if (mode !== undefined && mode !== 'whole-manuscript' && this.#definition.factualClaims !== undefined) {
+      const successor = this.#factualDefinitionFor(planEditAssuranceLevel(edits));
+      return { ...factualReviewLevelDefinition(planEditAssuranceLevel(edits)), outOfScope: successor.outOfScope,
+        modes: successor.modes, updateModes: successor.updateModes, mode: successor.mode };
+    }
+    return this.#factualDefinitionFor(planEditAssuranceLevel(edits));
   }
 
   /**
@@ -1146,9 +1750,35 @@ export class BaselineAnalysisStore {
    * the contract it froze.
    */
   definitionForDigest(promptContractDigest: string): AnalysisKindDefinition {
+    const row = this.#db.prepare(`SELECT p.canonical_json, p.sha256 FROM analysis_plan_records p JOIN analysis_task_intents t ON t.task_intent_id = p.task_intent_id
+      WHERE p.component = 'plan-envelope' AND t.kind = ? AND json_extract(p.canonical_json, '$.promptContractDigest') = ?
+      AND json_extract(p.canonical_json, '$.basePromptContractDigest') IS NOT NULL LIMIT 1`).get(this.#definition.kind, promptContractDigest);
+    if (row !== undefined) {
+      const plan = parseCanonicalJson(asString(row.canonical_json)) as { basePromptContractDigest: string; compositionOptions: { procedure: ProcedureDefinitionPin } };
+      const pin = plan.compositionOptions.procedure;
+      return withProcedureDefinition(this.#baseDefinitionForDigest(plan.basePromptContractDigest), readProcedurePlanDocument(this.#db, String(row.sha256))!, pin);
+    }
+    return this.#baseDefinitionForDigest(promptContractDigest);
+  }
+
+  #baseDefinitionForDigest(promptContractDigest: string): AnalysisKindDefinition {
+    if (this.#originalDefinition.kind.startsWith('editorial-review/')) {
+      const original = pinnedReviewDefinition(this.#originalDefinition, promptContractDigest);
+      if (original.promptContractDigest === promptContractDigest) return original;
+    }
     const current = this.definition;
-    if (current.kind.startsWith('editorial-review/')) return current.legacyReviewContract?.promptContractDigest === promptContractDigest ? current.legacyReviewContract : current;
+    if (current.kind === BASELINE_ANALYSIS_KIND) {
+      const base = current.clarificationBase ?? current;
+      for (const candidate of [current, base, withModelClarification(base)]) {
+        if (candidate.promptContractDigest === promptContractDigest) return candidate;
+      }
+    }
+    if (current.kind.startsWith('editorial-review/')) return pinnedReviewDefinition(current, promptContractDigest);
     if (current.kind !== FACTUAL_REVIEW_KIND) return current;
+    for (const level of ['standard', 'strict'] as const) {
+      const candidate = factualClaimKindDefinition(level);
+      if (candidate.promptContractDigest === promptContractDigest) return candidate;
+    }
     for (const level of ['standard', 'strict', 'quick'] as const) {
       const candidate = this.#factualDefinitionFor(level);
       if (candidate.promptContractDigest === promptContractDigest) return candidate;
@@ -1166,7 +1796,15 @@ export class BaselineAnalysisStore {
     const planned = this.definitionForDigest(promptContractDigest);
     if (planned.kind !== FACTUAL_REVIEW_KIND) return planned;
     const assurance = this.factualRunAssurance(runRecordId);
-    return assurance?.effectiveLevel === 'quick' ? this.#factualDefinitionFor('quick') : planned;
+    if (assurance?.effectiveLevel !== 'quick') return planned;
+    const quick = this.#factualDefinitionFor('quick');
+    return planned.procedureBinding === undefined ? quick : withProcedureDefinition(quick, planned.procedureBinding.document, planned.procedureBinding.pin);
+  }
+
+  procedureForRun(runRecordId: string): import('../../shared/protocol/procedures.js').ProcedureDefinitionDocument | null {
+    const digest = this.#db.prepare(`SELECT a.plan_envelope_sha256 FROM analysis_run_records r
+      JOIN analysis_run_authorizations a ON a.authorization_id = r.authorization_id WHERE r.run_record_id = ?`).get(runRecordId);
+    return digest === undefined ? null : readProcedurePlanDocument(this.#db, String(digest.plan_envelope_sha256));
   }
 
   factualRunAssurance(runRecordId: string): import('../../shared/protocol.js').FactualRunAssuranceProjection | null {
@@ -1190,6 +1828,72 @@ export class BaselineAnalysisStore {
 
   get kind(): AnalysisKindId {
     return this.#definition.kind;
+  }
+
+  /** Resolve an immutable baseline revision by the authorized id/digest, never by latest at tool time. */
+  pinnedToolSourcesForRun(runRecordId: string): PinnedLocalToolSources | null {
+    const facts = this.loadExecutionPlan(runRecordId);
+    const sources = facts.compositionOptions?.sources;
+    if (sources === undefined) return null;
+    const pin = sources.baseline;
+    if (pin === null) return sources;
+    const row = this.#db.prepare(`SELECT r.* FROM analysis_result_set_revisions r JOIN analysis_result_sets s ON s.result_set_id = r.result_set_id
+      WHERE r.revision_id = ? AND s.book_id = ? AND s.kind = 'baseline-manuscript-analysis'`).get(pin.revisionId, facts.bookId);
+    requireAnalysis(row !== undefined && row.sha256 === pin.digest && sha256Hex(asString(row.canonical_json)) === pin.digest,
+      'ANALYSIS_RECORD_INVALID', '固定基线来源不可用。');
+    const body = parseCanonicalJson(asString(row.canonical_json)) as { synthesis?: { entities?: unknown[]; events?: unknown[]; settingClaims?: unknown[] } };
+    const baseline = { ...pin, entities: body.synthesis?.entities ?? [], events: body.synthesis?.events ?? [], settingClaims: body.synthesis?.settingClaims ?? [] };
+    return { ...sources, baseline, terms: baseline.entities.filter((entity) => isRecord(entity) && ['person', 'place', 'term'].includes(String(entity.kind))) };
+  }
+
+  #newCompositionOptions(bookId: string, leafMode = false, definition = this.#definition, selected?: ProcedureDefinitionPin): CompositionOptions {
+    const id = definition.factualClaims === undefined ? procedureIdForKind(this.#definition.kind) : FACTUAL_CLAIM_PROCEDURE_ID;
+    const resolved = selected === undefined ? id === null ? null : resolveProcedureDefinition(this.#db, id, this.#definition.contractVersion === 'ai7.editorial-review/1' ? 1 : currentPreinstalledVersion(id))
+      : { document: resolveProcedurePin(this.#db, selected), pin: selected };
+    const procedureOptions = resolved === null ? {} : { procedure: resolved.pin, stages: resolved.document.stages.map((stage, index) =>
+      ({ ordinal: index + 1, stageType: stage.stageType, digest: sha256Hex(canonicalJson(stage)) })) };
+    const stock = reviewCategoryEntry('typos-and-usage')!;
+    const expected = withModelClarification(reviewCategoryKindDefinition(reviewCategoryContractInput(stock), 2, STOCK_TYPOS_LEAF_LOCAL_TOOLS));
+    const localLeaf = this.#route?.fixtureIdentity === STOCK_TYPOS_LEAF_FIXTURE;
+    const productionLeaf = leafMode && this.#launch.operationalScope === 'ordinary-production' &&
+      this.#launch.policy?.providerProcessing.subAgents !== undefined && this.#definition.promptContractDigest === expected.promptContractDigest;
+    if (localLeaf || productionLeaf) {
+      requireAnalysis(leafMode && this.#definition.promptContractDigest === expected.promptContractDigest &&
+        resolved?.pin.procedureId === 'ai7-procedure/review-typos-and-usage' && resolved.pin.version === 2,
+      'ANALYSIS_CHILD_PROFILE_REFUSED', '单元子代理只适用于固定的标准错字用词审阅。');
+      return { version: 3, subagents: STOCK_TYPOS_LEAF, ...procedureOptions, localTools: STOCK_TYPOS_LEAF_LOCAL_TOOLS,
+        sources: { baseline: null, guidelines: stock.guidelineDocuments.map(({ documentId, version, clauses }) => ({ documentId, version, clauses })), terms: [] } };
+    }
+    const local = kindLocalTools(this.#launch.policy, this.#definition.kind);
+    if (local?.declarations === undefined) return { version: 2, ...procedureOptions };
+    const row = this.#db.prepare(`SELECT r.* FROM analysis_result_set_revisions r JOIN analysis_result_sets s ON s.result_set_id = r.result_set_id
+      WHERE s.book_id = ? AND s.kind = 'baseline-manuscript-analysis' ORDER BY r.ordinal DESC LIMIT 1`).get(bookId);
+    let baseline: PinnedLocalToolSources['baseline'] = null;
+    if (row !== undefined) {
+      const json = asString(row.canonical_json);
+      requireAnalysis(sha256Hex(json) === row.sha256, 'ANALYSIS_RECORD_INVALID', '基线记录摘要无效。');
+      baseline = { revisionId: asString(row.revision_id), digest: asString(row.sha256), entities: [], events: [], settingClaims: [] };
+    }
+    const documents = liveKindRule(this.#launch.policy, this.#definition.kind)?.outboundDataCategories.includes('house-review-guideline-clause') === true
+      ? BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.flatMap((category) => category.guidelineDocuments) : [];
+    let remaining = 40;
+    const guidelines = [...new Map(documents.map((document) => [document.documentId, document])).values()].flatMap((document) => {
+      if (remaining === 0) return [];
+      const latest = this.#db.prepare('SELECT * FROM review_guideline_versions WHERE document_id = ? ORDER BY ordinal DESC LIMIT 1').get(document.documentId);
+      let clauses = document.clauses;
+      let version = document.version;
+      if (latest !== undefined) {
+        const json = asString(latest.canonical_json);
+        requireAnalysis(sha256Hex(json) === latest.sha256, 'ANALYSIS_RECORD_INVALID', '规范文件版本摘要无效。');
+        const body = parseCanonicalJson(json) as { clauses: typeof clauses };
+        clauses = body.clauses;
+        version = asString(latest.version_id);
+      }
+      const admitted = clauses.filter((clause) => [...new Intl.Segmenter('zh', { granularity: 'grapheme' }).segment(clause.text)].length <= 300).slice(0, remaining);
+      remaining -= admitted.length;
+      return [{ documentId: document.documentId, version, clauses: admitted }];
+    });
+    return { version: 2, ...procedureOptions, sources: { baseline, guidelines, terms: [] } };
   }
 
   get launch(): LaunchBinding {
@@ -1227,18 +1931,33 @@ export class BaselineAnalysisStore {
         : Number.isSafeInteger(ceiling.tokensPerFrozenUnit) && ceiling.tokensPerFrozenUnit > 0)) &&
         UUID_PATTERN.test(live.credentialReference)),
     'ANALYSIS_LAUNCH_BINDING_INVALID', '开发者实时绑定缺少必需的运行预算上限或凭据引用。');
-    this.#launch = launch;
+    // Preserve own fields for callers that spread/rebind the launch. Its policy/live accessors must still read the
+    // caller's current connection with their original receiver; the retained reader alone falls back to the Store's.
+    const retainedPolicyFor = launch.retainedPolicyFor ?? this.#launch.retainedPolicyFor;
+    if (launch.retainedPolicyFor !== undefined || retainedPolicyFor === undefined) this.#launch = launch;
+    else {
+      const descriptors: PropertyDescriptorMap = Object.getOwnPropertyDescriptors(launch);
+      for (const key of Reflect.ownKeys(descriptors)) {
+        const descriptor = descriptors[key]!;
+        if (descriptor.get !== undefined) descriptor.get = descriptor.get.bind(launch);
+        if (descriptor.set !== undefined) descriptor.set = descriptor.set.bind(launch);
+      }
+      this.#launch = Object.defineProperties({}, { ...descriptors,
+        retainedPolicyFor: { value: retainedPolicyFor, enumerable: true } }) as LaunchBinding;
+    }
     this.#refreshClarificationDefinition();
   }
 
   #refreshClarificationDefinition(): void {
     const launch = this.#launch;
     const rule = liveKindRule(launch.policy, this.#definition.kind);
+    const leaf = this.#route?.fixtureIdentity === STOCK_TYPOS_LEAF_FIXTURE;
+    this.#definition = withReviewLocalTools(this.#definition, leaf ? STOCK_TYPOS_LEAF_LOCAL_TOOLS : kindLocalTools(launch.policy, this.#definition.kind));
     const base = this.#definition.clarificationBase ?? this.#definition;
     // The factual kind's own definition is its default level's (Issue #901): 标准核查 where the levels apply, else v1 as before.
     if (base.kind === FACTUAL_REVIEW_KIND) this.#definition = this.#factualUnwrapped('standard', rule);
     // The one origin-qualified admitted rule owns eligibility; missing terms deny.
-    if (this.#route?.fixtureIdentity.startsWith('sample1-model-clarification') === true ||
+    if (leaf || this.#route?.fixtureIdentity.startsWith('sample1-model-clarification') === true ||
         rule?.clarificationQuestionAllowed === true) {
       this.#definition = withModelClarification(this.#definition);
     // An unconfigured production route has no current rule, but a stopped Run still owns its frozen binding.
@@ -1402,12 +2121,12 @@ export class BaselineAnalysisStore {
       // and one stopping at the editor's word 正在取消 (Issue #422).
       stateLabel: state === 'prepared' ? '计划已冻结 · 待授权'
         : state === 'authorized-blocked' ? (run?.blockedBy === 'plan-moved' ? PLAN_MOVED_LABEL : '已授权 · 派发前阻止')
-          : state === 'queued' ? RUN_QUEUED_LABEL
+          : state === 'queued' ? (authorization?.start_when === 'idle' ? RUN_WAITING_IDLE_LABEL : RUN_QUEUED_LABEL)
           : state === 'waiting' ? RUN_STATE_LABELS['awaiting-connectivity']
             : state === 'cancelled' ? (run !== null && runBegan(run.transitions) ? RUN_CANCELLED_AFTER_START_LABEL : RUN_STATE_LABELS.cancelled)
               : state === 'cancelling' ? RUN_STATE_LABELS.cancelling
                 : state === 'pausing' ? RUN_STATE_LABELS.pausing
-                  : state === 'paused' ? RUN_STATE_LABELS.paused
+                  : state === 'paused' ? (run?.stateLabel ?? RUN_STATE_LABELS.paused)
                     : state === 'resumable' ? (run !== null && this.accountLimitOf(run.runRecordId) !== null ? ACCOUNT_LIMIT_RUN_LABEL
                       : run !== null && this.outcomeUnknownOf(run.runRecordId) !== null ? OUTCOME_UNKNOWN_RUN_LABEL : RUN_STATE_LABELS.resumable)
                       : state === 'awaiting-clarification' ? RUN_STATE_LABELS['awaiting-clarification']
@@ -1442,6 +2161,7 @@ export class BaselineAnalysisStore {
         summary: asString(envelope.summary),
         promptContractDigest: asString(envelope.promptContractDigest),
         behaviorCompositionDigest: asString(envelope.behaviorCompositionDigest),
+        ...(envelope.compositionVersion === 2 || envelope.compositionVersion === 3 ? { compositionVersion: envelope.compositionVersion } : {}),
         planVersion: typeof envelope.planVersion === 'number' ? envelope.planVersion : null,
         boundary: isRecord(envelope.boundary) ? envelope.boundary as unknown as PlanBoundarySplitProjection : null,
       },
@@ -1454,6 +2174,7 @@ export class BaselineAnalysisStore {
         planEnvelopeDigest: asString(authorization.plan_envelope_sha256),
         planVersionOrdinal: boundVersion?.ordinal ?? null,
         ...authorizationOrigin(authorization),
+        startWhen: authorization.start_when === 'idle' ? 'idle' : 'now',
         authority: asString(authorization.authority) as 'standard-direct-dispatch' | 'record-only-no-dispatch',
         authorizedAt: asString(authorization.authorized_at),
       },
@@ -1639,6 +2360,8 @@ export class BaselineAnalysisStore {
           run: {
             runRecordId,
             state,
+            waitingIdle: state === 'authorized' && this.loadExecutionPlan(runRecordId).startWhen === 'idle',
+            idleYield: (state === 'paused' || state === 'pausing') && this.#idleYielded(runRecordId),
             stateAt: asString(row.last_state_at),
             recordedAt: asString(row.run_recorded_at),
             progress: state === 'admitted' || state === 'executing' || state === 'cancelling' || state === 'pausing' ? progress(runRecordId) : null,
@@ -1929,6 +2652,7 @@ export class BaselineAnalysisStore {
     requireAnalysis(pin !== undefined, 'ANALYSIS_ARTIFACT_PIN_UNAVAILABLE', '当前图书尚未固定编辑工作区方案。');
     const latest = this.#isInitial(mode) ? undefined : this.#revisionRows(bookId).at(-1);
     return {
+      ...this.#selectedPlanMetadata(),
       providerBinding: frozenProductionBinding ?? (live === null
         ? {
             providerId: asString(connection!.provider_id),
@@ -1959,6 +2683,25 @@ export class BaselineAnalysisStore {
       outboundDataCategory: this.#launch.operationalScope === 'ordinary-production' ? 'unpublished-excerpts' : 'public-or-synthetic',
       expectedOutcome: this.#definition.expectedOutcome,
     };
+  }
+
+  #selectedPlanMetadata(policy = this.#launch.policy): Pick<MaterialPlanInputsProjection, 'selectedPolicyIdentity' | 'localFixtureProfile'> {
+    if (policy?.selectedPolicyIdentity === undefined) {
+      requireAnalysis(!['v21', 'v22'].includes(policy?.activePolicySetVersion ?? '') && !['v29', 'v30', 'v31'].includes(policy?.providerProcessing.version ?? ''),
+        'ANALYSIS_POLICY_UNAVAILABLE', '当前计划缺少已选处理策略身份。');
+      return {};
+    }
+    const selected = selectedPolicyIdentityOf(policy.selectedPolicyIdentity);
+    requireAnalysis(policy.integrityState === 'verified' && selected !== null && selected.providerProcessingVersion === policy.providerProcessing.version,
+      'ANALYSIS_POLICY_UNAVAILABLE', '已选处理策略身份无效。');
+    if (selected.providerProcessingVersion !== 'v29' || this.#route === null) return { selectedPolicyIdentity: selected };
+    const runtime = this.#launch.localFixtureRuntime?.();
+    requireAnalysis(runtime !== undefined && runtime !== null && canonicalJson(runtime.selectedPolicyIdentity) === canonicalJson(selected),
+      'ANALYSIS_POLICY_UNAVAILABLE', '本地夹具策略目录缺失或不一致。');
+    // Plan inputs are also re-derived to detect drift; a launch whose fixture cannot serve this kind must read as drift, not
+    // fail the read. Execution still refuses an unserved fixture before any replay (LocalFixturePolicyCatalog.entriesFor).
+    return { selectedPolicyIdentity: selected,
+      localFixtureProfile: runtime.catalog.legacyProfile(selected, localFixtureRegisteredProfile(this.#definition.kind, null)) };
   }
 
   /**
@@ -2322,6 +3065,8 @@ export class BaselineAnalysisStore {
       'ANALYSIS_PLAN_EDIT_INVALID', '只有事实核查任务有证据保证级别。');
     const next = canonicalPlanEdits({ ...input, evidenceAssuranceLevel: input.evidenceAssuranceLevel ?? existing.planVersion?.edits.evidenceAssuranceLevel });
     requireAnalysis(next !== null, 'ANALYSIS_PLAN_EDIT_INVALID', '这项修改不在这份计划可以改的范围内。');
+    if (isRecord(intent.record.factualDecision)) requireAnalysis(planEditAssuranceLevel(next) === intent.record.factualDecision.level || planEditAssuranceLevel(next) === 'strict',
+      'ANALYSIS_PLAN_EDIT_INVALID', '补充核查不能降低编辑决定要求的核查级别。');
     requireAnalysis(!levelBelowPolicyMinimum(planEditAssuranceLevel(next)), 'ANALYSIS_PLAN_EDIT_INVALID', FACTUAL_POLICY_MINIMUM_REASON);
     requireAnalysis(this.#definition.assurance !== null || next.removedSteps.length === 0,
       'ANALYSIS_PLAN_EDIT_INVALID', '这项任务没有核对与抽检步骤，不能修改该步骤。');
@@ -2416,15 +3161,26 @@ export class BaselineAnalysisStore {
    * leaves out-of-scope units unreviewed gets the scope plan, and the baseline kind gets the reuse plan
    * it has always had, from the same untouched function and therefore with the same bytes.
    */
+  #selectedDefinition(base: AnalysisKindDefinition, bookId: string): AnalysisKindDefinition {
+    const pin = selectedProcedureForBook(this.#db, bookId, base.kind);
+    return pin === null ? base : withProcedureDefinition(base, resolveProcedurePin(this.#db, pin), pin);
+  }
+
   #derivePlan(
     mode: AnalysisTaskMode,
     selectedRange: BaselineAnalysisSelectedRange | null,
     manifest: CoverageManifestProjection,
     predecessor: ReusePlanPredecessor | ScopePlanPredecessor | null,
+    definition = this.#selectedDefinition(this.#definition, manifest.manuscript.bookId),
   ): AnalysisPlanRecord {
+    const prior = predecessor === null ? null : this.#revisionBody(this.#revisionRowById(predecessor.revisionId));
+    const priorDefinition = prior === null ? null : this.definitionForDigest(String((prior.bindingPin as Record<string, unknown>).promptContractDigest));
+    const procedureCompatible = definition.procedureBinding === undefined && priorDefinition?.procedureBinding === undefined ||
+      prior?.schemaDigest === definition.schemaDigest;
     if (this.#definition.outOfScope === 'leave-unreviewed') {
       requireAnalysis(predecessor === null || 'schemaDigest' in predecessor, 'ANALYSIS_RECORD_INVALID', '前一修订版缺少审阅范围计划所需的事实。');
       return deriveScopePlan({
+        procedureCompatible,
         kind: this.#definition.kind,
         contractVersion: this.#definition.contractVersion,
         schemaDigest: this.#definition.schemaDigest,
@@ -2437,7 +3193,7 @@ export class BaselineAnalysisStore {
       });
     }
     requireAnalysis(predecessor !== null, 'ANALYSIS_RECORD_INVALID', '更新任务缺少前一修订版。');
-    return deriveReusePlan({ mode: mode as BaselineAnalysisUpdateMode, selectedRange, manifest, predecessor });
+    return deriveReusePlan({ procedureCompatible, mode: mode as BaselineAnalysisUpdateMode, selectedRange, manifest, predecessor });
   }
 
   /** The counts a whole first Task's revision states: every unit read, none reused. */
@@ -2497,6 +3253,8 @@ export class BaselineAnalysisStore {
    * the edits of the redone Task's last plan version; nothing for any other Task.
    */
   #redoPlanEdits(intent: IntentFacts): PlanEdits {
+    if (isRecord(intent.record.factualDecision)) return intent.record.factualDecision.level === 'strict'
+      ? { ...NO_PLAN_EDITS, evidenceAssuranceLevel: 'strict' } : NO_PLAN_EDITS;
     if (intent.redoOfRunRecordId === null) return NO_PLAN_EDITS;
     const prior = this.#redoneTaskIntentId(intent.redoOfRunRecordId);
     const last = this.#planVersionFacts(prior).at(-1);
@@ -2513,7 +3271,28 @@ export class BaselineAnalysisStore {
     for (const component of required) {
       requireAnalysis(records[component] !== undefined, 'ANALYSIS_RECORD_INVALID', '任务计划记录图不完整。');
     }
+    requireAnalysis(isRecord(records['provider-resolution-plan']), 'ANALYSIS_RECORD_INVALID', '处理策略计划记录无效。');
+    providerPlanPolicyMetadata(records['provider-resolution-plan']);
     const envelope = records['plan-envelope'] as Record<string, unknown>;
+    const route = (records['provider-resolution-plan'] as { executionRoute?: { kind: string; model: string; fixtureIdentity?: string; fixtureSha256?: string } }).executionRoute;
+    if (route?.fixtureIdentity === STOCK_TYPOS_LEAF_FIXTURE || envelope.compositionVersion === 3) {
+      const stock = reviewCategoryEntry('typos-and-usage')!;
+      const definition = withModelClarification(reviewCategoryKindDefinition(reviewCategoryContractInput(stock), 2, STOCK_TYPOS_LEAF_LOCAL_TOOLS));
+      const options = envelope.compositionOptions as CompositionOptions | undefined;
+      const procedure = resolveProcedureDefinition(this.#db, 'ai7-procedure/review-typos-and-usage', 2);
+      requireAnalysis(envelope.compositionVersion === 3 && route !== undefined && options?.version === 3 &&
+        (mode === 'any' || mode === 'review-first') && envelope.promptContractDigest === definition.promptContractDigest &&
+        canonicalJson(options.subagents) === canonicalJson(STOCK_TYPOS_LEAF) &&
+        canonicalJson(options.localTools) === canonicalJson(STOCK_TYPOS_LEAF_LOCAL_TOOLS) &&
+        canonicalJson(options.sources) === canonicalJson({ baseline: null, guidelines: stock.guidelineDocuments.map(({ documentId, version, clauses }) => ({ documentId, version, clauses })), terms: [] }) &&
+        procedure !== null && canonicalJson(options.procedure) === canonicalJson(procedure.pin) &&
+        canonicalJson(options.stages) === canonicalJson(procedure.document.stages.map((stage, index) => ({ ordinal: index + 1, stageType: stage.stageType, digest: sha256Hex(canonicalJson(stage)) }))) &&
+        (route.kind !== LOCAL_DETERMINISTIC_ROUTE || route.fixtureIdentity === STOCK_TYPOS_LEAF_FIXTURE &&
+          route.fixtureSha256 === sha256Hex(`${STOCK_TYPOS_LEAF_FIXTURE}:${STOCK_TYPOS_LEAF_FIXTURE_SHA256}`)),
+      'ANALYSIS_CHILD_PROFILE_REFUSED', '冻结的单元子代理配置不属于固定标准审阅。');
+      requireAnalysis(describeComposition(route.kind as ExecutionRouteId, route.model, definition.promptContractDigest, options).digest === envelope.behaviorCompositionDigest,
+        'ANALYSIS_CHILD_PROFILE_REFUSED', '冻结的单元子代理组合摘要不一致。');
+    }
     if (envelope.webToolsBackendDigest !== undefined) {
       const backend = records['web-tools-backend'];
       const provider = records['provider-resolution-plan'] as Record<string, unknown>;
@@ -2586,6 +3365,8 @@ export class BaselineAnalysisStore {
           unitMessageDigest: typeof record.unitMessageDigest === 'string' ? record.unitMessageDigest : null,
         };
       });
+      if (this.requestAdmissionOf(runRecordId)?.width === 3) spans.sort((left, right) =>
+        (left.unitOrdinal ?? Number.MAX_SAFE_INTEGER) - (right.unitOrdinal ?? Number.MAX_SAFE_INTEGER) || left.ordinal - right.ordinal);
       attempt = {
         attemptId,
         ordinal: 1,
@@ -2609,7 +3390,7 @@ export class BaselineAnalysisStore {
       runRecordId,
       procedure: (parseCanonicalJson(asString(runRecord.canonical_json)) as { procedure?: ProcedureDefinitionPin }).procedure ?? null,
       state: current.state,
-      stateLabel: current.state === 'cancelled' && runBegan(transitions) ? RUN_CANCELLED_AFTER_START_LABEL
+      stateLabel: currentRecord.idleYield === true ? RUN_IDLE_YIELD_LABEL : current.state === 'cancelled' && runBegan(transitions) ? RUN_CANCELLED_AFTER_START_LABEL
         : current.state === 'interrupted' && this.#runStop(runRecordId) !== null ? BUDGET_REACHED_RUN_LABEL
           : current.state === 'resumable' && this.accountLimitOf(runRecordId) !== null ? ACCOUNT_LIMIT_RUN_LABEL
             : current.state === 'resumable' && this.outcomeUnknownOf(runRecordId) !== null ? OUTCOME_UNKNOWN_RUN_LABEL
@@ -2631,6 +3412,7 @@ export class BaselineAnalysisStore {
       bindingDigest: asString(row.sha256),
       harnessSessionId: binding.harnessSessionId,
       behaviorCompositionDigest: binding.behaviorCompositionDigest,
+      ...(binding.compositionVersion === 2 || binding.compositionVersion === 3 ? { compositionVersion: binding.compositionVersion } : {}),
       promptContractDigest: binding.promptContractDigest,
       planEnvelopeDigest: binding.planEnvelopeDigest,
       runSourceScopeDigest: binding.runSourceScopeDigest,
@@ -3517,14 +4299,16 @@ export class BaselineAnalysisStore {
     // imported anew since (Issue #427 review): its plan could never execute under this contract, so the preparation is a
     // new Task Intent under the contract that applies now.
     // So is one whose plan froze another assurance sampling contract (Issue #826): the composition does not pin it.
-    const contractCurrent = existing.planEnvelope === null || (existing.planEnvelope.promptContractDigest === this.#planDefinition(existing.planVersion?.edits ?? NO_PLAN_EDITS).promptContractDigest &&
+    const contractCurrent = existing.planEnvelope === null || (existing.planEnvelope.promptContractDigest === this.#selectedDefinition(this.#planDefinition(existing.planVersion?.edits ?? NO_PLAN_EDITS, existing.taskIntent?.mode), input.bookId).promptContractDigest &&
       (existing.executionPlan === null ||
         !assuranceContractMoved(this.#definition, frozenAssurancePromptContractDigest(existing.executionPlan as unknown as Record<string, unknown>))));
     // Nor is a Task whose frozen scope plan the chain no longer derives (#711 review P3-4): 重新准备 makes it anew.
     const planDerives = existing.coverageManifest === null || existing.authorization !== null || this.#frozenPlanDerives(existing.update, existing.coverageManifest);
     // A Task the 后台分析登记 dispatcher prepared is never the editor's to revise or resume, and the dispatcher never takes up any
     // Task Intent but the one it creates now (#713 review, P1-2): each side's preparation is a Task of its own.
-    const sameTask = background === null && input.newTask !== true && intentDraft === null && latestIntent !== null && latestIntent.preparedByEnrollmentVersionId === null &&
+    const selectedProcedure = background === null ? selectedProcedureForBook(this.#db, input.bookId, this.#definition.kind) : null;
+    const sameProcedure = canonicalJson(latestIntent?.record.procedure ?? null) === canonicalJson(selectedProcedure);
+    const sameTask = sameProcedure && background === null && input.newTask !== true && intentDraft === null && latestIntent !== null && latestIntent.preparedByEnrollmentVersionId === null &&
       existing.run === null && latestIntent.mode === mode &&
       latestIntent.predecessorRevisionId === (latest?.revisionId ?? null) && (input.reconfirm || checkpointCurrent) && contractCurrent && planDerives;
     if (sameTask && existing.checkpoint !== null) {
@@ -3537,6 +4321,8 @@ export class BaselineAnalysisStore {
     // Background preparations and draft promotions write their intent only when the plan freezes. A stopped preparation leaves
     // no orphan intent, and a failed draft promotion leaves its draft editable. Ordinary preparation retains its existing path.
     const pendingIntent: PendingIntent | null = reusable ? null : {
+      ...(selectedProcedure === null ? {} : { procedure: selectedProcedure }),
+      ...(input.factualDecision === undefined ? {} : { factualDecision: input.factualDecision }),
       taskIntentId, bookId: input.bookId, goal: input.goal, mode, redoOf,
       preparedByEnrollmentVersionId: background?.enrollmentVersionId ?? null,
       backgroundRunBudgetCeiling: background === null ? null : { kind: 'tokens', maxTotalTokens: background.runBudgetCeiling.maxTotalTokens },
@@ -3574,6 +4360,8 @@ export class BaselineAnalysisStore {
   #insertIntent(intent: PendingIntent): void {
     const createdAt = new Date().toISOString();
     const base = {
+      ...(intent.procedure === undefined ? {} : { procedure: intent.procedure }),
+      ...(intent.factualDecision === undefined ? {} : { factualDecision: intent.factualDecision }),
       bookId: intent.bookId,
       contractVersion: this.#definition.contractVersion,
       createdAt,
@@ -3654,7 +4442,8 @@ export class BaselineAnalysisStore {
     ).run(taskIntentId, checkpoint.manuscriptId, checkpoint.branchId, checkpoint.revisionId, checkpoint.revisionLabel,
       checkpoint.revisionDigest, checkpoint.journalSequence, purpose, checkpoint.createdForDirtyJournal ? 1 : 0,
       checkpointRecord.json, checkpointRecord.digest, instant);
-    this.#writePlanVersion({ intent, checkpoint, checkpointDigest: checkpointRecord.digest, ordinal: 1, selectedRange: intent.selectedRange, planRevisionId: null, instant, edits: this.#redoPlanEdits(intent) });
+    this.#writePlanVersion({ intent, checkpoint, checkpointDigest: checkpointRecord.digest, ordinal: 1, selectedRange: intent.selectedRange,
+      planRevisionId: null, instant, edits: this.#redoPlanEdits(intent), policy: launchPolicy });
   }
 
   /**
@@ -3665,6 +4454,7 @@ export class BaselineAnalysisStore {
    * Version 1 is written with the checkpoint; a later version resolves a Plan Revision.
    */
   #writePlanVersion(input: {
+    policy?: LaunchPolicyProjection;
     intent: IntentFacts;
     checkpoint: ManuscriptCheckpointBinding;
     checkpointDigest: string;
@@ -3681,6 +4471,9 @@ export class BaselineAnalysisStore {
     credentialReadiness?: ModelCredentialOperationState;
   }): { planVersionId: string; planEnvelopeDigest: string } {
     const { intent, checkpoint, ordinal, instant } = input;
+    if (this.#route?.fixtureIdentity === STOCK_TYPOS_LEAF_FIXTURE) requireAnalysis(intent.mode === 'review-first' &&
+      intent.selectedRange === null && intent.preparedByEnrollmentVersionId === null,
+    'ANALYSIS_CHILD_PROFILE_REFUSED', '单元子代理只适用于标准前台全文首次审阅。');
     const taskIntentId = intent.taskIntentId;
     // A later version never re-validates the checkpoint against the working head: manuscript edits are non-material.
     const facts = this.#binding(checkpoint.bookId, checkpoint, ordinal === 1);
@@ -3694,6 +4487,26 @@ export class BaselineAnalysisStore {
       revisionDigest: checkpoint.revisionDigest,
       blocks,
     });
+    const live = this.#launch.live;
+    const production = live !== null && live.scope === 'ordinary-production' ? live : null;
+    // The editor's ceiling is the plan's own outside developer-live (Issue #51, S16a); under it the launch sets the
+    // ceiling, so a redo that copies a ceiling the editor once set keeps the rest of the edit and not the ceiling.
+    const edits = !launchSetsCeilingOf(live) ? input.edits : withoutCeiling(input.edits);
+    // The factual Task's level decides its contract and its research declaration (Issue #901); every other kind's is its own.
+    const baseDefinition = this.#planDefinition(edits, intent.mode);
+    const selected = intent.record.procedure as ProcedureDefinitionPin | undefined;
+    const document = selected === undefined ? null : resolveProcedurePin(this.#db, selected);
+    if (selected !== undefined && document !== null) {
+      const currentId = baseDefinition.factualClaims === undefined ? procedureIdForKind(baseDefinition.kind) : FACTUAL_CLAIM_PROCEDURE_ID;
+      if (currentId !== null) validateProcedureEdit(resolveProcedureDefinition(this.#db, currentId, currentPreinstalledVersion(currentId)).document,
+        { procedureId: null, basedOn: selected, title: document.title, editorInstruction: document.editorInstruction, stages: document.stages });
+    }
+    const definition = selected === undefined || document === null ? baseDefinition : withProcedureDefinition(baseDefinition, document, selected);
+    if (selected !== undefined) requireAnalysis(!procedureStopped(this.#db, selected), 'PROCEDURE_STOPPED', '所选工序版本已停用，请选择另一个版本。');
+    if (selected !== undefined && document !== null && procedureInstruction(document, selected) !== '' && live !== null) {
+      requireAnalysis(liveKindRule(this.#launch.policy, definition.kind, ['editor-task-instruction'])?.editorTaskInstruction !== undefined,
+        'PROCEDURE_INSTRUCTION_NOT_ADMITTED', '当前模型处理策略尚未允许编辑任务说明。');
+    }
     let reusePlan: AnalysisPlanRecord | null = null;
     if (this.#carriesPlan(intent.mode)) {
       const latestRow = this.#revisionRows(checkpoint.bookId).at(-1);
@@ -3712,6 +4525,7 @@ export class BaselineAnalysisStore {
         this.#definition.mode(intent.mode).rangeBound ? requireSelectedRange(input.selectedRange, manifest.totalBlocks) : null,
         manifest,
         latestRow === undefined ? null : this.#planPredecessor(latestRow),
+        definition,
       );
     }
     const manuscriptPin = {
@@ -3768,13 +4582,6 @@ export class BaselineAnalysisStore {
     // The plan freezes whichever binding the launch bound: the denied production binding on the
     // deterministic route, or the selected developer-live binding. Both are frozen before authorization, never chosen
     // at dispatch, so an authorized Run can never transmit somewhere its plan did not name.
-    const live = this.#launch.live;
-    const production = live !== null && live.scope === 'ordinary-production' ? live : null;
-    // The editor's ceiling is the plan's own outside developer-live (Issue #51, S16a); under it the launch sets the
-    // ceiling, so a redo that copies a ceiling the editor once set keeps the rest of the edit and not the ceiling.
-    const edits = !launchSetsCeilingOf(live) ? input.edits : withoutCeiling(input.edits);
-    // The factual Task's level decides its contract and its research declaration (Issue #901); every other kind's is its own.
-    const definition = this.#planDefinition(edits);
     const promptContractDigest = definition.promptContractDigest;
     const admittedToolRule = this.#definition.kind === BASELINE_ANALYSIS_KIND || intent.preparedByEnrollmentVersionId !== null ? null
       : liveKindRule(this.#launch.policy, this.#definition.kind);
@@ -3794,11 +4601,15 @@ export class BaselineAnalysisStore {
       webToolsBackend = { backendId: adapter.declaration.id, host: adapter.declaration.host!, configurationDigest: searchBackendConfigurationDigest(adapter.declaration.id), selectedAt: asString(row.selected_at) };
       searchCredentialReference = production === null ? CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES[adapter.declaration.credentialSlot] : asString(row.credential_reference);
     }
+    const leafMode = intent.mode === 'review-first' && intent.selectedRange === null && intent.preparedByEnrollmentVersionId === null;
     const composition = live === null
-      ? describeComposition(LOCAL_DETERMINISTIC_ROUTE, LOCAL_DETERMINISTIC_MODEL, promptContractDigest)
-      : describeComposition(live.route, live.model, promptContractDigest, { platformTools: webToolsBackend !== undefined, researchDeclaration,
-        localTools: intent.preparedByEnrollmentVersionId === null && definition.evidenceAssuranceLevel !== 'quick' && kindLocalTools(this.#launch.policy, this.#definition.kind) !== null });
+      ? describeComposition(LOCAL_DETERMINISTIC_ROUTE, LOCAL_DETERMINISTIC_MODEL, promptContractDigest, this.#newCompositionOptions(checkpoint.bookId, leafMode, definition, selected))
+      : describeComposition(live.route, live.model, promptContractDigest, { platformTools: webToolsBackend !== undefined && definition.factualClaims === undefined,
+        researchDeclaration: definition.factualClaims === undefined ? researchDeclaration : { webSearch: false, searchEngine: null },
+        ...this.#newCompositionOptions(checkpoint.bookId, leafMode, definition, selected),
+        localTools: intent.preparedByEnrollmentVersionId === null && definition.evidenceAssuranceLevel !== 'quick' && definition.factualClaims === undefined ? kindLocalTools(this.#launch.policy, this.#definition.kind) ?? false : false });
     const providerPlan = {
+      ...this.#selectedPlanMetadata(input.policy),
       ...(webToolsBackend === undefined ? {} : { webToolsBackend, searchCredentialReference }),
       role: 'Main Editorial Role',
       capabilities: [],
@@ -3812,7 +4623,8 @@ export class BaselineAnalysisStore {
             credentialSlot: 'deepseek-api-key',
             credentialReference: facts.credentialReference,
             credentialReadiness: input.credentialReadiness ?? facts.credentialOperationState,
-            providerProcessing: { operationalScope: 'development-ci', version: 'v1', decision: 'deny', authorizedLiveTransmissionCount: 0 },
+            providerProcessing: { operationalScope: 'development-ci', version: this.#selectedPlanMetadata(input.policy).selectedPolicyIdentity?.providerProcessingVersion ?? 'v1',
+              decision: 'deny', authorizedLiveTransmissionCount: 0 },
           }
         : {
             providerId: live.route,
@@ -3875,7 +4687,7 @@ export class BaselineAnalysisStore {
     const records: Record<string, { json: string; digest: string }> = {
       'manuscript-pin': canonicalRecord(manuscriptPin),
       'artifact-pin': canonicalRecord(artifactPin),
-      'run-source-scope': canonicalRecord(sourceScope),
+      'run-source-scope': canonicalRecord(composition.sources === undefined ? sourceScope : { ...sourceScope, localToolSources: composition.sources }),
       'coverage-manifest': canonicalRecord(manifest),
       'provider-resolution-plan': canonicalRecord(providerPlan),
       'execution-plan': canonicalRecord(this.#definition.materialReferences === undefined ? { ...executionPlan, ...samplingPin, ...clarificationPin } : {
@@ -3889,6 +4701,7 @@ export class BaselineAnalysisStore {
     if (webToolsBackend !== undefined) records['web-tools-backend'] = canonicalRecord(webToolsBackend);
     if (reusePlan !== null) records['reuse-plan'] = reusePlanRecord(reusePlan);
     const envelopeBase = {
+      ...(intent.record.factualDecision === undefined ? {} : { factualDecision: intent.record.factualDecision }),
       providerStatus: production !== null
         ? 'remote-eligible-ordinary-production'
         : live !== null
@@ -3912,11 +4725,18 @@ export class BaselineAnalysisStore {
       providerResolutionPlanDigest: records['provider-resolution-plan']!.digest,
       executionPlanDigest: records['execution-plan']!.digest,
       promptContractDigest,
+      ...(definition.procedureBinding === undefined ? {} : { basePromptContractDigest: baseDefinition.promptContractDigest }),
       ...(definition.contractIdentity === undefined ? {} : { contractIdentity: { ...definition.contractIdentity, digest: promptContractDigest } }),
       behaviorCompositionDigest: composition.digest,
+      compositionVersion: composition.version,
+      compositionOptions: { version: composition.version, ...(composition.subagents === false ? {} : { subagents: STOCK_TYPOS_LEAF, localTools: STOCK_TYPOS_LEAF_LOCAL_TOOLS }),
+        ...(composition.procedure === undefined ? {} : { procedure: composition.procedure }),
+        ...(composition.stages === undefined ? {} : { stages: composition.stages }),
+        ...(composition.sources === undefined ? {} : { sources: composition.sources }) },
       // The plan version and the Plan Boundary Split are part of the canonical envelope (Issue #48).
       planVersion: ordinal,
-      boundary: planBoundarySplit(edits.disallowedAdaptations, edits.askFirstAdaptations ?? [], definition.contractIdentity?.version === 2),
+      boundary: planBoundarySplit(edits.disallowedAdaptations, edits.askFirstAdaptations ?? [], definition.contractIdentity?.version === 2,
+        providerPlan.selectedPolicyIdentity !== undefined),
     };
     const envelope = canonicalRecord(reusePlan === null ? envelopeBase : {
       ...envelopeBase,
@@ -3937,8 +4757,7 @@ export class BaselineAnalysisStore {
       `INSERT INTO analysis_plan_versions(plan_version_id, task_intent_id, ordinal, plan_revision_id, plan_envelope_sha256, created_at, canonical_json, sha256)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(planVersionId, taskIntentId, ordinal, input.planRevisionId, envelope.digest, instant, version.json, version.digest);
-    const procedureId = procedureIdForKind(this.#definition.kind);
-    if (procedureId !== null) recordProcedurePlanPin(this.#db, taskIntentId, envelope.digest, procedureId, definition.contractVersion === 'ai7.editorial-review/1' ? 1 : undefined);
+    if (composition.procedure !== undefined) recordProcedurePlanPin(this.#db, taskIntentId, envelope.digest, composition.procedure.procedureId, composition.procedure.version);
     return { planVersionId, planEnvelopeDigest: envelope.digest };
   }
 
@@ -3962,9 +4781,11 @@ export class BaselineAnalysisStore {
     bookId: string,
     taskIntentId: string,
     planEnvelopeDigest: string,
-    start: 'now' | 'when-online' = 'now',
+    start: 'now' | 'when-online' | 'idle' = 'now',
     origin: AnalysisAuthorizationOrigin = STANDARD_DIRECT,
   ): { projection: AnalysisProjection; dispatchRunRecordId: string | null } {
+    if (this.#route?.fixtureIdentity === STOCK_TYPOS_LEAF_FIXTURE) requireAnalysis(start === 'now' && origin.kind === 'standard-direct',
+      'ANALYSIS_CHILD_PROFILE_REFUSED', '单元子代理只适用于直接授权的前台审阅。');
     // The baseline rule of the selected Provider Processing admits one kind and one origin, each refused under its own code, as preparation refuses them.
     requireAnalysis(this.#liveReading() !== MODEL_SERVICE_SETUP_REQUIRED, 'ANALYSIS_MODEL_SERVICE_SETUP_REQUIRED', MODEL_SERVICE_SETUP_REQUIRED_REASON);
     if (this.#launch.live !== null) {
@@ -3988,6 +4809,8 @@ export class BaselineAnalysisStore {
     const prepared = this.inspect(bookId);
     requireAnalysis(prepared.taskIntent?.taskIntentId === taskIntentId && prepared.planEnvelope !== null && prepared.planVersion !== null,
       'ANALYSIS_AUTHORIZATION_STALE', '任务计划已经变化；无法记录该授权。');
+    if (prepared.planEnvelope.compositionVersion === 3) requireAnalysis(start === 'now' && origin.kind === 'standard-direct',
+      'ANALYSIS_CHILD_PROFILE_REFUSED', '单元子代理只适用于直接授权的前台审阅。');
     if (prepared.authorization !== null) {
       requireAnalysis(prepared.planEnvelope.digest === planEnvelopeDigest, 'ANALYSIS_AUTHORIZATION_STALE', '任务计划已经变化；无法记录该授权。');
       return { projection: prepared, dispatchRunRecordId: null };
@@ -4012,6 +4835,7 @@ export class BaselineAnalysisStore {
     const authorization = canonicalRecord({
       authorizationId,
       origin: origin.kind,
+      startWhen: start === 'idle' ? 'idle' : 'now',
       planEnvelopeDigest,
       planVersionId: prepared.planVersion.planVersionId,
       planVersionOrdinal: prepared.planVersion.ordinal,
@@ -4021,13 +4845,14 @@ export class BaselineAnalysisStore {
       ...(origin.kind === 'background-analysis-enrollment' ? { enrollmentVersionId: origin.enrollmentVersionId } : {}),
     });
     const procedure = readProcedurePlanPin(this.#db, planEnvelopeDigest);
+    requireAnalysis(procedure === null || !procedureStopped(this.#db, procedure), 'PROCEDURE_STOPPED', '计划固定的工序版本已停用，请选择另一个版本重新准备。');
     const run = canonicalRecord({ runRecordId, authorizationId, taskIntentId, recordedAt: instant,
       ...(procedure === null ? {} : { procedure }) });
     transact(this.#db, () => {
       this.#db.prepare(
-        `INSERT INTO analysis_run_authorizations(authorization_id, task_intent_id, plan_envelope_sha256, origin, authority, authorized_at, canonical_json, sha256)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(authorizationId, taskIntentId, planEnvelopeDigest, origin.kind, authority, instant, authorization.json, authorization.digest);
+        `INSERT INTO analysis_run_authorizations(authorization_id, task_intent_id, plan_envelope_sha256, origin, authority, authorized_at, canonical_json, sha256, start_when)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(authorizationId, taskIntentId, planEnvelopeDigest, origin.kind, authority, instant, authorization.json, authorization.digest, start === 'idle' ? 'idle' : 'now');
       this.#db.prepare(
         'INSERT INTO analysis_run_records(run_record_id, task_intent_id, authorization_id, recorded_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?)',
       ).run(runRecordId, taskIntentId, authorizationId, instant, run.json, run.digest);
@@ -4043,7 +4868,7 @@ export class BaselineAnalysisStore {
         this.#insertRunState(runRecordId, 2, 'awaiting-connectivity', { detail: CONNECTIVITY_WAIT_DETAIL }, instant);
       }
     });
-    return { projection: this.inspect(bookId), dispatchRunRecordId: dispatchAllowed && start === 'now' ? runRecordId : null };
+    return { projection: this.inspect(bookId), dispatchRunRecordId: dispatchAllowed && start !== 'when-online' ? runRecordId : null };
   }
 
   // ---- Connectivity Wait (Issue #502, plan slice S74b) -------------------------------------------------
@@ -4154,10 +4979,64 @@ export class BaselineAnalysisStore {
     const reasons = drift.length === 0 ? [] : [`计划的关键内容已经变化：${drift.join('、')}。这次运行不能照原计划续行；请改计划重做。`];
     try {
       this.unitCheckpoints(runRecordId);
+      this.stageContinuationOf(runRecordId);
     } catch {
       reasons.push('已保存的阅读进度无法核对，这次运行不能续行；请取消它，再重新开始。');
     }
     return reasons;
+  }
+
+  /** Read the latest optional stage evidence, refusing corrupt or incompatible evidence before admission. */
+  stageContinuationOf(runRecordId: string): StageContinuation | null {
+    const rows = this.#db.prepare('SELECT canonical_json, sha256 FROM analysis_run_states WHERE run_record_id = ? ORDER BY sequence DESC').all(runRecordId) as SqlRow[];
+    for (const row of rows) {
+      const record = parseCanonicalJson(asString(row.canonical_json)) as { stageContinuation?: { schema?: unknown; data?: StageContinuation; digest?: unknown }; carriedUsage?: unknown };
+      const kept = record.stageContinuation;
+      if (kept === undefined) continue;
+      const invalid = (): never => { throw new AnalysisError('ANALYSIS_RECORD_INVALID', '已保存的阶段进度无法核对；不能续行。'); };
+      if (canonicalRecord(record).digest !== row.sha256 || kept === null || kept.schema !== 'ai7.analysis.stage-continuation/1' ||
+          kept.data === undefined || canonicalRecord(kept.data).digest !== kept.digest || JSON.stringify(kept).length > 16_777_216) invalid();
+      const data = kept.data!;
+      const stored = this.executionBindingOf(runRecordId);
+      if (stored === null || data.runRecordId !== runRecordId || data.attemptId !== stored.attemptId || data.bindingDigest !== stored.bindingDigest ||
+          data.manifestDigest !== stored.binding.coverageManifestDigest || data.promptContractDigest !== stored.binding.promptContractDigest || record.carriedUsage === undefined || data.reduction === undefined) invalid();
+      const definition = this.definitionForRun(runRecordId, data.promptContractDigest);
+      const count = (value: number): boolean => Number.isSafeInteger(value) && value >= 0;
+      if (data.reduction !== undefined) {
+        const reduction = data.reduction;
+        if (!DIGEST_PATTERN.test(reduction.inputDigest) || reduction.contractDigest !== (definition.crossUnit?.promptContractDigest ?? data.promptContractDigest) ||
+            !['closed', 'gap', 'not-run'].includes(reduction.outcome?.state) ||
+            (reduction.requestDigest === null) !== (reduction.outcome.state === 'not-run') ||
+            reduction.requestDigest !== null && (!DIGEST_PATTERN.test(reduction.requestDigest) || reduction.outcome.state === 'not-run' || reduction.outcome.requestDigest !== reduction.requestDigest) ||
+            reduction.outcome.state === 'closed' && (!Array.isArray(reduction.outcome.findings) || reduction.outcome.usage !== null &&
+              (!count(reduction.outcome.usage.inputTokens) || !count(reduction.outcome.usage.outputTokens)))) invalid();
+      }
+      if (data.sampling !== undefined) {
+        const sample = data.sampling;
+        if (data.reduction === undefined || !DIGEST_PATTERN.test(sample.inputDigest) || sample.contractDigest !== definition.assurance?.promptContractDigest ||
+            !count(sample.nextTurn) || sample.nextTurn < 1 || !Array.isArray(sample.turns) || sample.turns.length !== sample.nextTurn - 1 ||
+            !sample.turns.every((turn) => DIGEST_PATTERN.test(turn.requestDigest) && count(turn.unitOrdinal) && turn.unitOrdinal > 0 &&
+              ['closed', 'gap', 'outcome-unknown'].includes(turn.state) && (turn.usage === null || count(turn.usage.inputTokens) && count(turn.usage.outputTokens))) ||
+            typeof sample.ended !== 'boolean' || sample.turns.some((turn) => turn.state === 'outcome-unknown') && !sample.ended ||
+            !Array.isArray(sample.dispositions) || !Array.isArray(sample.gapReasons) || !sample.gapReasons.every((reason) => typeof reason === 'string') ||
+            !Array.isArray(sample.draw?.sampled) || !count(sample.sampled?.inputTokens) || !count(sample.sampled?.outputTokens) || !count(sample.sampled?.turnsWithUsage)) invalid();
+      }
+      // A newer snapshot may only follow all submitted units; no corrupt stage pin can send unfinished units first.
+      const governed = this.requestAdmissionOf(runRecordId) !== null;
+      const plan = governed ? this.#planRecords(stored!.binding.taskIntentId, 'any', stored!.binding.planVersion) : null;
+      const reuse = plan?.['reuse-plan'] as { units: Array<{ disposition: string }> } | undefined;
+      const facts = governed ? null : this.loadExecutionPlan(runRecordId);
+      const expected = governed ? reuse === undefined ? this.#requestManifest(stored!).units.length : reuse.units.filter((unit) => unit.disposition === 'recomputed').length
+        : facts!.update === null ? facts!.manifest.units.length : facts!.update.reusePlan.units.filter((unit) => unit.disposition === 'recomputed').length;
+      if (this.unitCheckpoints(runRecordId).length !== expected) invalid();
+      const usage = this.carriedUsageOf(runRecordId)?.stages;
+      if (usage == null || data.reduction?.outcome.state === 'closed' && usage['cross-unit-reduction'].requests < 1) invalid();
+      if (data.sampling !== undefined && (usage!['assurance-sampling'].requests < data.sampling.nextTurn - 1 ||
+          data.sampling.sampled.turnsWithUsage > data.sampling.nextTurn - 1 ||
+          usage!['assurance-sampling'].inputTokens < data.sampling.sampled.inputTokens || usage!['assurance-sampling'].outputTokens < data.sampling.sampled.outputTokens)) invalid();
+      return data;
+    }
+    return null;
   }
 
   /** One settled unit of a Run, kept the moment it settles: the continuation point 续行 goes on from (CONT-015). */
@@ -4166,7 +5045,9 @@ export class BaselineAnalysisStore {
     attemptId: string;
     unit: UnitResultRecord;
     observation: UnitCheckpoint['observation'];
+    requests?: readonly string[];
   }): void {
+    if (input.requests !== undefined) requireAnalysis(Number(this.#db.prepare('PRAGMA user_version').get()?.user_version) >= MODEL_REQUEST_ADMISSION_SCHEMA_VERSION, 'ANALYSIS_RECORD_INVALID', '请求检查点写入需要已验证的读者修订。');
     const recordedAt = new Date().toISOString();
     const record = canonicalRecord({
       schema: UNIT_CHECKPOINT_SCHEMA,
@@ -4174,6 +5055,7 @@ export class BaselineAnalysisStore {
       attemptId: input.attemptId,
       unit: input.unit,
       observation: input.observation,
+      ...(input.requests === undefined ? {} : { requests: input.requests }),
       recordedAt,
     });
     this.#db.prepare(
@@ -4182,18 +5064,26 @@ export class BaselineAnalysisStore {
   }
 
   /**
-   * What a stopped Run spent beyond its units before it stopped — a reduction or a sample 续行 forms again — as its latest
+   * What a stopped Run spent beyond its units before it stopped — settled or refused stage work — as its latest
    * stop kept it (Issue #51, S16a): the ceiling counts it after 续行 as it did before. `null` when no stop kept any.
    */
-  carriedUsageOf(runRecordId: string): { inputTokens: number; outputTokens: number; stages: CarriedStages | null } | null {
+  carriedUsageOf(runRecordId: string): { inputTokens: number; outputTokens: number; stages: CarriedStages | null; webVerification?: { inputTokens: number; outputTokens: number } } | null {
     const rows = this.#db.prepare(
-      "SELECT canonical_json FROM analysis_run_states WHERE run_record_id = ? AND state IN ('paused', 'resumable', 'awaiting-clarification') ORDER BY sequence DESC",
+      `SELECT canonical_json, sha256 FROM analysis_run_states WHERE run_record_id = ? AND
+       (state IN ('paused', 'resumable', 'awaiting-clarification') OR
+        json_extract(canonical_json, '$.requestAdmission.schema') = 'ai7.analysis.request-admission/1' AND json_type(canonical_json, '$.carriedUsage') IS NOT NULL)
+       ORDER BY sequence DESC`,
     ).all(runRecordId) as SqlRow[];
     const count = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
     for (const row of rows) {
-      const carried = (parseCanonicalJson(asString(row.canonical_json)) as { carriedUsage?: unknown }).carriedUsage;
+      const record = parseCanonicalJson(asString(row.canonical_json)) as { carriedUsage?: unknown; requestAdmission?: unknown };
+      if (record.requestAdmission !== undefined) {
+        requireAnalysis(canonicalRecord(record).digest === row.sha256, 'ANALYSIS_RECORD_INVALID', '阶段用量记录无法核对。');
+        this.requestAdmissionOf(runRecordId);
+      }
+      const carried = record.carriedUsage;
       if (carried === undefined) continue;
-      const usage = carried as { inputTokens?: unknown; outputTokens?: unknown; stages?: unknown };
+      const usage = carried as { inputTokens?: unknown; outputTokens?: unknown; stages?: unknown; webVerification?: { inputTokens?: unknown; outputTokens?: unknown } };
       requireAnalysis(carried !== null && typeof carried === 'object' && count(usage.inputTokens) && count(usage.outputTokens),
         'ANALYSIS_RECORD_INVALID', '运行记录的已用量无效。');
       // The stages a stop kept its usage by (Issue #541); a stop recorded before they were kept names none.
@@ -4212,7 +5102,12 @@ export class BaselineAnalysisStore {
         requireAnalysis(summed.inputTokens <= (usage.inputTokens as number) && summed.outputTokens <= (usage.outputTokens as number),
           'ANALYSIS_RECORD_INVALID', '运行记录的已用量无效。');
       }
-      return { inputTokens: usage.inputTokens as number, outputTokens: usage.outputTokens as number, stages };
+      const web = usage.webVerification;
+      requireAnalysis(web === undefined || web !== null && count(web.inputTokens) && count(web.outputTokens) &&
+        web.inputTokens <= (usage.inputTokens as number) && web.outputTokens <= (usage.outputTokens as number),
+      'ANALYSIS_RECORD_INVALID', '联网取证阶段的已用量无效。');
+      return { inputTokens: usage.inputTokens as number, outputTokens: usage.outputTokens as number, stages,
+        ...(web === undefined ? {} : { webVerification: { inputTokens: web.inputTokens as number, outputTokens: web.outputTokens as number } }) };
     }
     return null;
   }
@@ -4273,7 +5168,10 @@ export class BaselineAnalysisStore {
     const requestId = randomUUID();
     const raisedAt = input.raisedAt ?? new Date().toISOString();
     const modelJson = input.modelQuestion === undefined ? null : canonicalJson(input.modelQuestion);
+    const requests = this.requestAdmissionOf(input.runRecordId);
+    const covered = requests === null ? undefined : [...requests.open.values()].filter((request) => request.stage === 'units' && request.unitOrdinal === input.unitOrdinal).map((request) => request.requestId);
     requireAnalysis(modelJson === null || parseModelClarification(modelJson) !== null, 'ANALYSIS_RECORD_INVALID', '模型澄清问题无效。');
+    if (covered !== undefined) requireAnalysis(Number(this.#db.prepare('PRAGMA user_version').get()?.user_version) >= MODEL_REQUEST_ADMISSION_SCHEMA_VERSION, 'ANALYSIS_RECORD_INVALID', '请求澄清写入需要已验证的读者修订。');
     const record = canonicalRecord({
       schema: CLARIFICATION_REQUEST_SCHEMA,
       ...(modelJson === null ? {} : { origin: 'model', modelQuestion: input.modelQuestion, firstAttempts: input.firstAttempts ?? 1 }),
@@ -4294,10 +5192,12 @@ export class BaselineAnalysisStore {
       firstUsage: input.firstUsage,
       firstWallMs: Math.max(0, Math.round(input.firstWallMs)),
       raisedAt,
+      ...(covered === undefined ? {} : { requests: covered }),
     });
     this.#db.prepare(
       'INSERT INTO analysis_clarification_requests(request_id, run_record_id, unit_ordinal, kind, raised_at, canonical_json, sha256, model_question_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
     ).run(requestId, input.runRecordId, input.unitOrdinal, 'ask-first-adaptation', raisedAt, record.json, record.digest, modelJson);
+    this.checkpointClarificationRequests(input.runRecordId, input.unitOrdinal);
     return requestId;
   }
 
@@ -4429,10 +5329,16 @@ export class BaselineAnalysisStore {
     return expired;
   }
 
-  claimModelClarificationAnswer(runRecordId: string, requestId: string): boolean {
+  modelClarificationAnswerClaimed(runRecordId: string, requestId: string): boolean {
     const rows = this.#db.prepare('SELECT canonical_json FROM analysis_run_states WHERE run_record_id = ?').all(runRecordId);
-    if (rows.some((row) => (parseCanonicalJson(asString(row.canonical_json)) as Record<string, unknown>).modelClarificationAnswerClaim === requestId)) return false;
-    this.recordRunState(runRecordId, 'executing', { detail: '按澄清回答接着处理这个阅读范围。', modelClarificationAnswerClaim: requestId });
+    return rows.some((row) => (parseCanonicalJson(asString(row.canonical_json)) as Record<string, unknown>).modelClarificationAnswerClaim === requestId);
+  }
+
+  claimModelClarificationAnswer(runRecordId: string, requestId: string, preserveState = false): boolean {
+    if (this.modelClarificationAnswerClaimed(runRecordId, requestId)) return false;
+    const detail = { detail: '按澄清回答接着处理这个阅读范围。', modelClarificationAnswerClaim: requestId };
+    if (preserveState) this.#appendExecutionEvidence(runRecordId, { modelClarificationAnswerClaim: requestId });
+    else this.recordRunState(runRecordId, 'executing', detail);
     return true;
   }
 
@@ -4560,7 +5466,8 @@ export class BaselineAnalysisStore {
     const row = this.#db.prepare('SELECT * FROM analysis_execution_bindings WHERE attempt_id = ?').get(attemptId) as SqlRow | undefined;
     requireAnalysis(row !== undefined, 'ANALYSIS_RECORD_INVALID', '执行尝试缺少执行绑定。');
     const binding = parseCanonicalJson(asString(row.canonical_json)) as ExecutionBindingRecord;
-    requireAnalysis(canonicalRecord(binding).digest === asString(row.sha256) && binding.attemptId === attemptId, 'ANALYSIS_RECORD_INVALID', '执行绑定与其摘要不一致。');
+    requireAnalysis(canonicalRecord(binding).digest === asString(row.sha256) && binding.attemptId === attemptId && isResultSetPolicyPin(binding.policyPin),
+      'ANALYSIS_RECORD_INVALID', '执行绑定与其摘要或策略 pin 不一致。');
     const spans = this.#db.prepare('SELECT count(*) total, max(ordinal) last FROM analysis_harness_spans WHERE attempt_id = ?').get(attemptId) as SqlRow;
     return { attemptId, binding, bindingDigest: asString(row.sha256), spanCount: spans.last === null ? 0 : asNumber(spans.last) };
   }
@@ -4591,9 +5498,14 @@ export class BaselineAnalysisStore {
     const cancelling: string[] = [];
     for (const row of rows) {
       const runRecordId = asString(row.run_record_id);
+      this.reconcileRequestAdmissions(runRecordId);
       const state = row.last_state === null ? null : asString(row.last_state);
       if (state === 'pausing') {
         this.recordRunState(runRecordId, 'paused', { detail: RECONCILED_PAUSED_DETAIL, reconciled: true });
+        settled += 1;
+      } else if (state === 'paused' && this.#idleYielded(runRecordId)) {
+        // Yielding lasts only while this lifetime runs (Issue #1089): afterwards the Run waits for 续行 like any paused Run.
+        this.recordRunState(runRecordId, 'paused', { detail: RECONCILED_YIELDED_DETAIL, reconciled: true });
         settled += 1;
       } else if (state === 'admitted' || state === 'executing') {
         this.recordRunState(runRecordId, 'resumable', { detail: RECONCILED_RESUMABLE_DETAIL, reconciled: true });
@@ -4728,12 +5640,254 @@ export class BaselineAnalysisStore {
 
   // ---- execution persistence -------------------------------------------------------------------
 
+  /** Immutable request pins remain readable after this Run publishes its successor revision. */
+  #requestManifest(stored: NonNullable<ReturnType<BaselineAnalysisStore['executionBindingOf']>>): CoverageManifestProjection {
+    const manifest = this.#planRecords(stored.binding.taskIntentId, 'any', stored.binding.planVersion)['coverage-manifest'] as CoverageManifestProjection;
+    requireAnalysis(manifestDigestIsExact(manifest) && manifest.digest === stored.binding.coverageManifestDigest &&
+      manifest.manuscript.revisionId === stored.binding.manuscriptPin.revisionId && manifest.manuscript.revisionDigest === stored.binding.manuscriptPin.revisionDigest,
+    'ANALYSIS_RECORD_INVALID', '请求准入的固定覆盖清单无法核对。');
+    return manifest;
+  }
+
+  /** An absent receipt is historical evidence, never an inferred admission. */
+  requestAdmissionOf(runRecordId: string): RequestAdmissionReading | null {
+    return readRequestAdmissions(this.#db, runRecordId);
+  }
+
+  /** Preserve the latest stop, detail and idle-yield marker when appending private execution evidence. */
+  #appendExecutionEvidence(runRecordId: string, detail: Record<string, unknown>): void {
+    const row = this.#db.prepare('SELECT canonical_json, sha256 FROM analysis_run_states WHERE run_record_id = ? ORDER BY sequence DESC LIMIT 1').get(runRecordId) as SqlRow | undefined;
+    requireAnalysis(row !== undefined && sha256Hex(asString(row.canonical_json)) === row.sha256, 'ANALYSIS_RECORD_INVALID', '运行状态无法核对。');
+    const { runRecordId: _run, sequence: _sequence, state, recordedAt: _at, requestAdmission: _receipt, ...kept } = parseCanonicalJson(asString(row.canonical_json)) as Record<string, unknown>;
+    this.recordRunState(runRecordId, state as BaselineAnalysisRunState, { ...kept, ...detail });
+  }
+
+  #appendRequestAdmission(runRecordId: string, pins: RequestAdmissionPins, event: RequestAdmissionEvent, detail: Record<string, unknown> = {}): void {
+    requireAnalysis(Number(this.#db.prepare('PRAGMA user_version').get()?.user_version) >= MODEL_REQUEST_ADMISSION_SCHEMA_VERSION,
+      'ANALYSIS_RECORD_INVALID', '请求准入写入需要已验证的读者修订。');
+    transact(this.#db, () => {
+      const prior = this.requestAdmissionOf(runRecordId);
+      const data: RequestAdmissionData = { ...pins, sequence: (prior?.sequence ?? 0) + 1, predecessorDigest: prior?.digest ?? null, event };
+      this.#appendExecutionEvidence(runRecordId, { ...detail, requestAdmission: { schema: 'ai7.analysis.request-admission/1', data, digest: canonicalRecord(data).digest } });
+      this.requestAdmissionOf(runRecordId);
+    });
+  }
+
+  beginRequestAdmissions(runRecordId: string, width: 1 | 3, policyRuleId: string): 1 | 3 {
+    requireAnalysis(typeof policyRuleId === 'string' && /^[a-z][a-z0-9-]{0,159}$/u.test(policyRuleId),
+      'ANALYSIS_RECORD_INVALID', '请求准入需要实际规则标识。');
+    const prior = this.requestAdmissionOf(runRecordId);
+    if (prior !== null) {
+      requireAnalysis(prior.pins.policyRuleId === policyRuleId, 'ANALYSIS_RECORD_INVALID', '请求准入的固定规则与实际规则不一致。');
+      return prior.width;
+    }
+    const stored = this.executionBindingOf(runRecordId);
+    requireAnalysis(stored !== null, 'ANALYSIS_RECORD_INVALID', '请求准入前必须保存执行绑定。');
+    const binding = stored.binding;
+    this.#appendRequestAdmission(runRecordId, { runRecordId, attemptId: stored.attemptId, bindingDigest: stored.bindingDigest,
+      planEnvelopeDigest: binding.planEnvelopeDigest, manifestDigest: binding.coverageManifestDigest, compositionDigest: binding.behaviorCompositionDigest,
+      promptContractDigest: binding.promptContractDigest, policyVersion: binding.policyPin.providerProcessingVersion, policyRuleId },
+    { kind: 'execution', width, limits: { requests: 4, units: 3, backgroundRequests: 1 } });
+    return this.requestAdmissionOf(runRecordId)!.width;
+  }
+
+  admitModelRequest(runRecordId: string, request: AnalysisRequestIdentity, clarificationRequestId: string | null = null): void {
+    transact(this.#db, () => {
+      const reading = this.requestAdmissionOf(runRecordId);
+      requireAnalysis(reading !== null, 'ANALYSIS_RECORD_INVALID', '请求准入缺少执行收据。');
+      if (clarificationRequestId !== null) requireAnalysis(!this.modelClarificationAnswerClaimed(runRecordId, clarificationRequestId),
+        'ANALYSIS_CLARIFICATION_ALREADY_CLAIMED', '澄清回答回合已经提交；没有再次发送。');
+      this.#appendRequestAdmission(runRecordId, reading.pins, { kind: 'admit', request },
+        clarificationRequestId === null ? {} : { modelClarificationAnswerClaim: clarificationRequestId });
+    });
+  }
+
+  recordModelRequestNotSent(runRecordId: string, requestId: string): void {
+    const reading = this.requestAdmissionOf(runRecordId);
+    const request = reading?.open.get(requestId);
+    requireAnalysis(reading !== null && request !== undefined, 'ANALYSIS_RECORD_INVALID', '未发送证明缺少精确的请求标识。');
+    this.#appendRequestAdmission(runRecordId, reading.pins, { kind: 'resolve', requests: [requestId], evidence: { kind: 'no-send', digest: canonicalRecord(request).digest } });
+  }
+
+  checkpointFactualRequests(runRecordId: string, round: import('../factual-verification.js').FactualClaimRound): void {
+    const reading = this.requestAdmissionOf(runRecordId);
+    if (reading === null) return;
+    const requests = [...reading.open.values()].filter((request) => request.stage === 'web-verification' && request.sessionId === round.sessionId).map((request) => request.requestId);
+    if (requests.length > 0) this.#appendRequestAdmission(runRecordId, reading.pins, { kind: 'resolve', requests,
+      evidence: { kind: 'factual-checkpoint', digest: canonicalRecord(round).digest } });
+  }
+
+  checkpointModelRequests(runRecordId: string, unitOrdinal: number): void {
+    const reading = this.requestAdmissionOf(runRecordId);
+    if (reading === null) return;
+    const requests = [...reading.open.values()].filter((request) => request.stage === 'units' && request.unitOrdinal === unitOrdinal).map((request) => request.requestId);
+    if (requests.length === 0) return;
+    const checkpoint = this.#db.prepare('SELECT sha256 FROM analysis_unit_checkpoints WHERE run_record_id = ? AND unit_ordinal = ?').get(runRecordId, unitOrdinal) as SqlRow | undefined;
+    requireAnalysis(checkpoint !== undefined, 'ANALYSIS_RECORD_INVALID', '请求结算前必须保存对应的单元结果。');
+    this.#appendRequestAdmission(runRecordId, reading.pins, { kind: 'resolve', requests, evidence: { kind: 'unit-checkpoint', digest: asString(checkpoint.sha256) } });
+    this.requestAdmissionOf(runRecordId);
+  }
+
+  checkpointClarificationRequests(runRecordId: string, unitOrdinal: number): void {
+    const reading = this.requestAdmissionOf(runRecordId);
+    if (reading === null) return;
+    const row = this.#db.prepare('SELECT canonical_json, sha256 FROM analysis_clarification_requests WHERE run_record_id = ? AND unit_ordinal = ?').get(runRecordId, unitOrdinal) as SqlRow | undefined;
+    if (row === undefined) return;
+    const checkpoint = parseCanonicalJson(asString(row.canonical_json)) as { requests?: string[] };
+    const requests = [...reading.open.values()].filter((request) => request.stage === 'units' && request.unitOrdinal === unitOrdinal && checkpoint.requests?.includes(request.requestId)).map((request) => request.requestId);
+    if (requests.length === 0) return;
+    this.#appendRequestAdmission(runRecordId, reading.pins, { kind: 'resolve', requests,
+      evidence: { kind: 'clarification-checkpoint', digest: asString(row.sha256) } });
+  }
+
+  modelClarificationAnswerNotSent(runRecordId: string, clarificationRequestId: string, unitOrdinal: number): boolean {
+    const reading = this.requestAdmissionOf(runRecordId);
+    if (reading === null) return false;
+    const claims = this.#db.prepare(`SELECT sequence, canonical_json FROM analysis_run_states WHERE run_record_id = ? AND
+      json_extract(canonical_json, '$.modelClarificationAnswerClaim') = ? ORDER BY sequence LIMIT 1`).get(runRecordId, clarificationRequestId) as SqlRow | undefined;
+    if (claims === undefined) return false;
+    const firstReceipt = this.#db.prepare(`SELECT sequence FROM analysis_run_states WHERE run_record_id = ? AND
+      json_type(canonical_json, '$.requestAdmission') IS NOT NULL ORDER BY sequence LIMIT 1`).get(runRecordId) as SqlRow;
+    const origin = parseCanonicalJson(asString(claims.canonical_json)) as { requestAdmission?: { data: { event: RequestAdmissionEvent } } };
+    const admitted = origin.requestAdmission?.data.event;
+    if (asNumber(claims.sequence) < asNumber(firstReceipt.sequence) || admitted?.kind !== 'admit' ||
+        admitted.request.stage !== 'units' || admitted.request.unitOrdinal !== unitOrdinal) return false;
+    const rows = this.#db.prepare(`SELECT canonical_json FROM analysis_run_states WHERE run_record_id = ? AND sequence >= ? AND
+      json_extract(canonical_json, '$.requestAdmission.data.event.kind') = 'admit' AND
+      json_extract(canonical_json, '$.requestAdmission.data.event.request.unitOrdinal') = ?`).all(runRecordId, claims.sequence!, unitOrdinal) as SqlRow[];
+    const ids = rows.map((row) => (parseCanonicalJson(asString(row.canonical_json)) as { requestAdmission: { data: { event: { request: AnalysisRequestIdentity } } } }).requestAdmission.data.event.request.requestId);
+    return ids.length > 0 && ids.every((id) => reading.notSent.some((request) => request.requestId === id));
+  }
+
+  checkpointStageRequests(runRecordId: string, stage: 'cross-unit-reduction' | 'assurance-sampling', stages: StageContinuation, carriedUsage: { inputTokens: number; outputTokens: number; stages: CarriedStages }): void {
+    const reading = this.requestAdmissionOf(runRecordId);
+    if (reading === null) return;
+    const detail = { stageContinuation: { schema: 'ai7.analysis.stage-continuation/1', data: stages, digest: canonicalRecord(stages).digest }, carriedUsage };
+    this.#appendRequestAdmission(runRecordId, reading.pins, { kind: 'resolve',
+      requests: [...reading.open.values()].filter((request) => request.stage === stage && (stage === 'cross-unit-reduction'
+        ? stages.reduction?.requestDigest === request.requestDigest && stages.reduction.inputDigest === request.inputDigest
+        : stages.sampling?.inputDigest === request.inputDigest && stages.sampling.turns.some((turn) => turn.requestDigest === request.requestDigest))).map((request) => request.requestId),
+      evidence: { kind: 'stage-checkpoint', digest: canonicalRecord(detail).digest } }, detail);
+  }
+
+  checkpointReflectionRequests(runRecordId: string): void {
+    const reading = this.requestAdmissionOf(runRecordId);
+    if (reading === null) return;
+    const requests = [...reading.open.values()].filter((request) => request.stage === 'run-report-reflection').map((request) => request.requestId);
+    if (requests.length === 0) return;
+    const outcome = this.#db.prepare('SELECT sha256 FROM analysis_task_outcomes WHERE run_record_id = ?').get(runRecordId) as SqlRow | undefined;
+    requireAnalysis(outcome !== undefined, 'ANALYSIS_RECORD_INVALID', '反思请求结算前必须保存运行结果。');
+    this.#appendRequestAdmission(runRecordId, reading.pins, { kind: 'resolve', requests, evidence: { kind: 'reflection-outcome', digest: asString(outcome.sha256) } });
+  }
+
+  hasCommittedOutcome(runRecordId: string): boolean {
+    return this.#db.prepare('SELECT 1 FROM analysis_task_outcomes WHERE run_record_id = ?').get(runRecordId) !== undefined;
+  }
+
+  checkpointRefusedRequests(runRecordId: string, stage: RunProgressStage, unitOrdinal: number | null,
+    observation: { attempts: number; usage: { inputTokens: number; outputTokens: number } | null }): void {
+    const reading = this.requestAdmissionOf(runRecordId);
+    if (reading === null) return;
+    const requests = [...reading.open.values()].filter((request) => request.stage === stage && request.unitOrdinal === unitOrdinal).map((request) => request.requestId);
+    if (requests.length === 0) return;
+    const requestRefusal = { state: 'provider-account-limit', stage, unitOrdinal, observation };
+    this.#appendRequestAdmission(runRecordId, reading.pins, { kind: 'resolve', requests,
+      evidence: { kind: 'refused-turn', digest: canonicalRecord(requestRefusal).digest } }, { requestRefusal });
+  }
+
+  /** Startup only: a possible send without an exact committed result is never re-executed. */
+  reconcileRequestAdmissions(runRecordId: string): void {
+    let reading = this.requestAdmissionOf(runRecordId);
+    if (reading === null || reading.open.size === 0) return;
+    const stored = this.executionBindingOf(runRecordId);
+    requireAnalysis(stored !== null, 'ANALYSIS_RECORD_INVALID', '准入记录缺少执行绑定。');
+    const manifest = this.#requestManifest(stored);
+    // The Run's frozen contract, never the launch's current one: a reopened Run whose current
+    // rule is missing or differs still names its admitted requests by the digests it froze.
+    const frozen = this.definitionForRun(runRecordId, reading.pins.promptContractDigest);
+    const ordinals = [...new Set([...reading.open.values()].filter((request) => request.stage === 'units').map((request) => request.unitOrdinal!))].sort((left, right) => left - right);
+    for (const ordinal of ordinals) {
+      this.checkpointClarificationRequests(runRecordId, ordinal);
+      reading = this.requestAdmissionOf(runRecordId)!;
+      const requests = [...reading.open.values()].filter((request) => request.stage === 'units' && request.unitOrdinal === ordinal);
+      if (requests.length === 0) continue;
+      const pins = reading.pins;
+      // The unknown checkpoint and its discharge commit together: a refused discharge leaves no row behind.
+      transact(this.#db, () => {
+        const existing = this.unitCheckpoints(runRecordId).find((checkpoint) => checkpoint.unit.unitOrdinal === ordinal);
+        if (existing === undefined) {
+          const unit = manifest.units[ordinal - 1]!;
+          const reason = '本次请求已准入，AI7 关闭前没有保存可核对的单元结果；结果未知，这次运行不会再次发送。';
+          const question = this.clarificationsOf(runRecordId).find((entry) => entry.unitOrdinal === ordinal);
+          this.recordUnitCheckpoint({ runRecordId, attemptId: pins.attemptId, requests: requests.map((request) => request.requestId),
+            unit: { unitOrdinal: ordinal, requestDigest: frozen.requestDigest(ordinal, unit.digest), lineage: { kind: 'recomputed' },
+              closed: { state: 'gap', gap: { unitOrdinal: ordinal, code: 'outcome-unknown', reason, startPosition: unit.startPosition, endPosition: unit.endPosition, blockIds: [...unit.blockIds] } } },
+            observation: { unitOrdinal: ordinal, attempts: (question?.firstAttempts ?? (question === undefined ? 0 : 1)) + new Set(requests.map((request) => `${request.sessionId}:${request.attemptIndex}:${request.adaptationId ?? ''}`)).size,
+              usage: question?.firstUsage ?? null, wallMs: question?.firstWallMs ?? 0 } });
+        }
+        this.checkpointModelRequests(runRecordId, ordinal);
+      });
+      reading = this.requestAdmissionOf(runRecordId)!;
+    }
+    const stageRequests = [...reading.open.values()].filter((request) => request.stage === 'cross-unit-reduction' || request.stage === 'assurance-sampling');
+    if (stageRequests.length > 0) {
+      const kept = this.stageContinuationOf(runRecordId);
+      const stages: StageContinuation = kept ?? { runRecordId, attemptId: reading.pins.attemptId, bindingDigest: reading.pins.bindingDigest,
+        manifestDigest: reading.pins.manifestDigest, promptContractDigest: reading.pins.promptContractDigest };
+      const usage = this.carriedUsageOf(runRecordId);
+      const carried: CarriedStages = structuredClone(usage?.stages ?? {
+        'cross-unit-reduction': { requests: 0, inputTokens: 0, outputTokens: 0 }, 'assurance-sampling': { requests: 0, inputTokens: 0, outputTokens: 0 },
+      });
+      const reduction = stageRequests.find((request) => request.stage === 'cross-unit-reduction');
+      if (reduction !== undefined && stages.reduction === undefined) {
+        stages.reduction = { inputDigest: reduction.inputDigest, contractDigest: reduction.contractDigest, requestDigest: reduction.requestDigest,
+          outcome: { state: 'gap', code: 'outcome-unknown', requestDigest: reduction.requestDigest,
+            reason: '归纳请求可能已经发出，关闭前没有保存可核对的结果；本次运行不会再次发送。' } };
+        carried['cross-unit-reduction'].requests += 1;
+      }
+      const sampling = stageRequests.find((request) => request.stage === 'assurance-sampling');
+      if (sampling !== undefined) {
+        const sample = stages.sampling;
+        requireAnalysis(sample !== undefined && sample.inputDigest === sampling.inputDigest && sample.contractDigest === sampling.contractDigest,
+          'ANALYSIS_RECORD_INVALID', '抽样准入缺少可核对的抽取记录；不能续行。');
+        if (!sample.turns.some((turn) => turn.requestDigest === sampling.requestDigest)) {
+          const turn = assuranceSamplingTurns(sample.draw.sampled)[sample.nextTurn - 1];
+          const definition = this.definitionForRun(runRecordId, reading.pins.promptContractDigest);
+          const blocks = new Map(this.readRevisionBlocks(manifest.manuscript.manuscriptId, manifest.manuscript.revisionId).map((block) => [block.blockId, block] as const));
+          requireAnalysis(turn !== undefined && definition.assurance !== null && canonicalRecord(buildAssuranceSamplingMessage(manifest.units[turn.unitOrdinal - 1]!,
+            manifest.units.length, blocks, turn.findings, definition.assurance.prompt)).digest === sampling.requestDigest,
+          'ANALYSIS_RECORD_INVALID', '抽样请求与抽取记录不一致；不能续行。');
+          sample.turns.push({ requestDigest: sampling.requestDigest, unitOrdinal: turn.unitOrdinal, usage: null, state: 'outcome-unknown' });
+          sample.nextTurn += 1; sample.ended = true;
+          sample.gapReasons.push(`第 ${turn.unitOrdinal} 个阅读范围的抽样请求可能已经发出，关闭前没有保存结果；本次运行不会再次发送。`);
+          carried['assurance-sampling'].requests += 1;
+        }
+      }
+      const totals = { inputTokens: usage?.inputTokens ?? 0, outputTokens: usage?.outputTokens ?? 0, stages: carried };
+      if (reduction !== undefined) this.checkpointStageRequests(runRecordId, 'cross-unit-reduction', stages, totals);
+      if (sampling !== undefined) this.checkpointStageRequests(runRecordId, 'assurance-sampling', stages, totals);
+      reading = this.requestAdmissionOf(runRecordId)!;
+    }
+    const reflection = [...reading.open.values()].filter((request) => request.stage === 'run-report-reflection');
+    if (reflection.length > 0) {
+      if (this.hasCommittedOutcome(runRecordId)) this.checkpointReflectionRequests(runRecordId);
+      else this.#appendRequestAdmission(runRecordId, reading.pins, { kind: 'resolve', requests: reflection.map((request) => request.requestId),
+        evidence: { kind: 'unavailable', digest: canonicalRecord({ requests: reflection, reason: 'possible-send-without-durable-result' }).digest } });
+    }
+  }
+
   recordRunState(runRecordId: string, state: BaselineAnalysisRunState, detail: Record<string, unknown>): void {
     requireAnalysis(UUID_PATTERN.test(runRecordId), 'ANALYSIS_RUN_INVALID', '运行记录标识无效。');
     const row = this.#db.prepare('SELECT max(sequence) last FROM analysis_run_states WHERE run_record_id = ?').get(runRecordId) as SqlRow;
     const last = row.last === null ? 0 : asNumber(row.last);
     requireAnalysis(last >= 1, 'ANALYSIS_RUN_INVALID', '运行记录不存在。');
     this.#insertRunState(runRecordId, last + 1, state, detail, new Date().toISOString());
+  }
+
+  /** Whether the Run's latest state is AI7's yield to the editor's waiting Run (Issue #1089), not the editor's own 暂停. */
+  #idleYielded(runRecordId: string): boolean {
+    const row = this.#db.prepare('SELECT canonical_json FROM analysis_run_states WHERE run_record_id = ? ORDER BY sequence DESC LIMIT 1').get(runRecordId) as SqlRow | undefined;
+    return row !== undefined && (parseCanonicalJson(asString(row.canonical_json)) as { idleYield?: unknown }).idleYield === true;
   }
 
   currentRunState(runRecordId: string): BaselineAnalysisRunState {
@@ -4772,6 +5926,17 @@ export class BaselineAnalysisStore {
     const manifest = plan['coverage-manifest'] as CoverageManifestProjection;
     requireAnalysis(manifestDigestIsExact(manifest), 'ANALYSIS_RECORD_INVALID', '覆盖清单记录无效。');
     const providerPlan = plan['provider-resolution-plan'] as NonNullable<BaselineAnalysisProjection['providerResolutionPlan']>;
+    const selectedMetadata = providerPlanPolicyMetadata(providerPlan);
+    const retainedBinding = this.executionBindingOf(runRecordId);
+    if (retainedBinding !== null) requireAnalysis(
+      retainedBinding.binding.policyPin.operationalScope === providerPlan.remoteBinding.providerProcessing.operationalScope &&
+      retainedBinding.binding.policyPin.providerProcessingVersion === providerPlan.remoteBinding.providerProcessing.version &&
+      (selectedMetadata.selectedPolicyIdentity === undefined || retainedBinding.binding.policyPin.activePolicySetVersion === selectedMetadata.selectedPolicyIdentity.activePolicySetVersion),
+    'ANALYSIS_RECORD_INVALID', '执行绑定的策略 pin 与冻结计划不一致。');
+    const localFixtureRuntime = selectedMetadata.localFixtureProfile === undefined ? null : this.#launch.localFixtureRuntime?.();
+    requireAnalysis(selectedMetadata.localFixtureProfile === undefined || localFixtureRuntime !== undefined && localFixtureRuntime !== null &&
+      canonicalJson(localFixtureRuntime.selectedPolicyIdentity) === canonicalJson(selectedMetadata.selectedPolicyIdentity),
+    'ANALYSIS_RECORD_INVALID', '冻结计划的本地夹具策略目录缺失或不一致。');
     const runBudgetCeiling = runBudgetCeilingStateOf(providerPlan.runBudgetCeiling);
     // The route the plan froze must still be the route this launch binds. A developer-live plan
     // cannot execute under a provider-free launch, and a deterministic plan cannot execute live.
@@ -4798,6 +5963,12 @@ export class BaselineAnalysisStore {
       requireAnalysis(providerPlan.executionRoute.kind === LOCAL_DETERMINISTIC_ROUTE, 'ANALYSIS_ROUTE_ABSENT', '计划没有可执行的本地路由。');
       requireAnalysis(this.#route !== null && this.#route.fixtureIdentity === providerPlan.executionRoute.fixtureIdentity &&
         this.#route.fixtureSha256 === providerPlan.executionRoute.fixtureSha256, 'ANALYSIS_ROUTE_STALE', '当前启动的本地路由与冻结计划不一致。');
+    }
+    let retainedPolicy: LaunchPolicyProjection | null = null;
+    if (retainedBinding !== null && selectedMetadata.selectedPolicyIdentity === undefined && productionBinding !== null) {
+      retainedPolicy = this.#launch.retainedPolicyFor?.(retainedBinding.binding.policyPin,
+        { ...productionBinding, credentialReference: providerPlan.remoteBinding.credentialReference }) ?? null;
+      requireAnalysis(retainedPolicy !== null, 'ANALYSIS_RECORD_INVALID', '历史执行绑定缺少准确的已核实策略阅读。');
     }
     const envelope = plan['plan-envelope'] as Record<string, unknown>;
     const artifactPin = plan['artifact-pin'] as { nativeCarrierSha256: string; sidecarSha256: string };
@@ -4839,7 +6010,7 @@ export class BaselineAnalysisStore {
         predecessor = this.#planPredecessor(predecessorRow);
       }
       const stored = plan['reuse-plan'] as AnalysisPlanRecord;
-      const rederived = this.#derivePlan(intent.mode, stored.selectedRange, manifest, predecessor);
+      const rederived = this.#derivePlan(intent.mode, stored.selectedRange, manifest, predecessor, this.definitionForDigest(asString(envelope.promptContractDigest)));
       const record = reusePlanRecord(rederived);
       requireAnalysis(record.digest === digests['reuse-plan'] && canonicalJson(stored) === record.json && envelope.reusePlanDigest === record.digest,
         'ANALYSIS_REUSE_PLAN_DRIFT', REUSE_PLAN_DRIFT_REASON);
@@ -4861,9 +6032,11 @@ export class BaselineAnalysisStore {
       bookId: intent.bookId,
       taskIntentId: intent.taskIntentId,
       runRecordId,
+      ...(intent.record.factualDecision === undefined ? {} : { factualDecision: intent.record.factualDecision as import('../factual-verification.js').FactualRecheckSelection }),
       planVersionId: version.planVersionId,
       planVersionOrdinal: version.ordinal,
       origin: origin.origin,
+      startWhen: (parseCanonicalJson(asString(run.canonical_json)) as { startWhen?: 'now' | 'idle' }).startWhen ?? 'now',
       checkpoint: {
         bookId: intent.bookId,
         manuscriptId: asString(checkpointRow.manuscript_id),
@@ -4884,10 +6057,15 @@ export class BaselineAnalysisStore {
       sourceDigest: (plan['manuscript-pin'] as { sourceDigest: string }).sourceDigest,
       // The deterministic fixture facts; `null` on the live route, which replays no fixture.
       route: this.#route,
+      ...selectedMetadata,
+      ...(retainedBinding === null ? {} : { retainedPolicyPin: retainedBinding.binding.policyPin }),
+      ...(retainedPolicy === null ? {} : { retainedPolicy }),
+      ...(localFixtureRuntime == null ? {} : { localFixtureRuntime }),
       productionBinding,
       artifactPin: { nativeCarrierSha256: artifactPin.nativeCarrierSha256, sidecarRevision: 2, sidecarSha256: artifactPin.sidecarSha256 },
       promptContractDigest: asString(envelope.promptContractDigest),
       behaviorCompositionDigest: asString(envelope.behaviorCompositionDigest),
+      ...(envelope.compositionVersion === 2 || envelope.compositionVersion === 3 ? { compositionOptions: envelope.compositionOptions as CompositionOptions } : {}),
       assurancePromptContractDigest: frozenAssurancePromptContractDigest(plan['execution-plan'] as Record<string, unknown>),
       runBudgetCeiling,
       update,
@@ -5140,11 +6318,12 @@ export class BaselineAnalysisStore {
           behaviorCompositionDigest: facts.behaviorCompositionDigest,
           promptContractDigest: facts.promptContractDigest,
         },
-        policyPin: produced !== null
+        policyPin: this.executionBindingOf(facts.runRecordId)?.binding.policyPin ?? (produced !== null
           ? { operationalScope: 'ordinary-production', providerProcessingVersion: ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION, activePolicySetVersion: ACTIVE_SET_VERSION, liveTransmissions: 'bounded-by-run' }
           : live === null
-          ? { operationalScope: 'development-ci', providerProcessingVersion: 'v1', activePolicySetVersion: ACTIVE_SET_VERSION, liveTransmissions: 0 }
-          : { operationalScope: 'developer-live', providerProcessingVersion: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, activePolicySetVersion: ACTIVE_SET_VERSION, liveTransmissions: 'bounded-by-run' },
+          ? { operationalScope: 'development-ci', providerProcessingVersion: facts.selectedPolicyIdentity?.providerProcessingVersion === 'v29' ? 'v29' : 'v1',
+            activePolicySetVersion: facts.selectedPolicyIdentity?.activePolicySetVersion ?? ACTIVE_SET_VERSION, liveTransmissions: 0 }
+          : { operationalScope: 'developer-live', providerProcessingVersion: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, activePolicySetVersion: ACTIVE_SET_VERSION, liveTransmissions: 'bounded-by-run' }),
         provenance: {
           taskIntentId: facts.taskIntentId,
           runRecordId: facts.runRecordId,
@@ -5325,9 +6504,9 @@ export class BaselineAnalysisStore {
       'ANALYSIS_POLICY_UNAVAILABLE', `无法建立可信的 developer-live Provider Processing ${DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION} 记录。`);
       return;
     }
-    requireAnalysis(policy.providerProcessing.version === 'v1' && policy.providerProcessing.decision === 'deny' &&
+    requireAnalysis(['v1', 'v29'].includes(policy.providerProcessing.version ?? '') && policy.providerProcessing.decision === 'deny' &&
       policy.providerProcessing.authorizedLiveTransmissionCount === 0 && policy.providerProcessing.liveTransmissionAllowed === false,
-    'ANALYSIS_POLICY_UNAVAILABLE', '无法建立可信的 development-ci Provider Processing v1 拒绝记录。');
+    'ANALYSIS_POLICY_UNAVAILABLE', '无法建立可信的 development-ci Provider Processing 拒绝记录。');
   }
 }
 

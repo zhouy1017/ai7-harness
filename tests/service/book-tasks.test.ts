@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { createHash } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -28,6 +29,12 @@ import {
   recordMissingCredentialConnection,
   requireExactSample1,
 } from '../support/sample1-baseline.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for the 任务 panel (Issue #423, plan slice S77a; editor-surfaces §1 任务面, V2-UX-TASK-044):
 // the real store over exact `sample1`, the one execution owner and the Review Run drive loop, with the AI7 local
@@ -67,7 +74,7 @@ function open(route: ResolvedModelFixture): Promise<EditorialStore> {
 }
 
 function ownerOf(store: EditorialStore, fixture: ResolvedModelFixture): BaselineAnalysisExecutionOwner {
-  return new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+  return new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
 }
 
 async function importBook(store: EditorialStore, title: string, first: boolean): Promise<{ bookId: string }> {
@@ -182,7 +189,7 @@ describe('the 任务 panel over the real store on exact sample1', () => {
   }, 300_000);
 
   it('lists a 审阅 prepared and not started in 等你处理, and once on the manuscript in 最近完成 with its Run as the result', async () => {
-    const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-authored');
+    const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-review-cross-chapter-authored');
     const store = await open(fixture);
     const owner = ownerOf(store, fixture);
     const read = (bookId: string): BookTasksProjection => store.inspectBookTasks(bookId, (runRecordId) => owner.progressFor(runRecordId));

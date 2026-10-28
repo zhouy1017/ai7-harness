@@ -1,3 +1,4 @@
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
@@ -28,6 +29,12 @@ import type {
 import { ADMITTED_BASELINE_DOCX, composeManuscriptDocx, type ComposedManuscriptRequest } from '../support/composed-fixture.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for 质量与学习 › 学习准入 (Issue #61, plan slice S26b; V2-UX-LEARN-001 to LEARN-012, ATTN-009,
 // FDBK-013) over the real store. The manuscript is composed from the one admitted SampleBook and no assertion prints its
@@ -172,9 +179,14 @@ describe('学习准入 over the real store', () => {
       expect(rejected.kind).toBe('rejected');
       store.recordProposalDecisionFeedback({ ...binding, markId: rejectedMark, decisionId: rejection.decisionId, expectedFeedback: 0,
         action: 'revise', reason: '学习理由修订示例', reasonSource: 'free-text' });
-      expect(inspect().signals[0]!.source.reasonRevision).toBe(1);
+      const revisedSignal = inspect().signals[0]!;
+      if (revisedSignal.kind === 'word-tracked-edit' || revisedSignal.kind === 'manual-edit-journal') throw new Error('expected a decision signal');
+      expect(revisedSignal.source.reasonRevision).toBe(1);
       // The revised reason supersedes the earlier signal: unusable, and never reported as the editor's 明确排除.
-      expect(inspect().signals.slice(0, 2).map((signal) => [signal.source.reasonRevision, signal.currentEligibility])).toEqual([[1, 'house'], [0, 'superseded']]);
+      expect(inspect().signals.slice(0, 2).map((signal) => {
+        if (signal.kind === 'word-tracked-edit' || signal.kind === 'manual-edit-journal') throw new Error('expected a decision signal');
+        return [signal.source.reasonRevision, signal.currentEligibility];
+      })).toEqual([[1, 'house'], [0, 'superseded']]);
       const create = { clientMemoryId: randomUUID(), signalId: rewritten.signalId, title: '保持用语一致', editorialDimension: '语言', confidence: 0.5 };
       store.createEditorialMemory(create); store.createEditorialMemory(create);
       const memory = inspect().items[0]!;
@@ -542,7 +554,7 @@ describe('学习准入 over the real store', () => {
   it('decides a 审阅 finding the editor ignored with a reason, by its own rvf_ identity, through the frame as through the store', async () => {
     await requireExactSample1(roots.codeRoot);
     const launchPolicy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot);
-    const fixture = await loadModelFixture(resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url))), 'sample1-review-authored');
+    const fixture = await loadModelFixture(resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url))), 'sample1-review-cross-chapter-authored');
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
       induceUnprovableReconciliation: false,
       persistLegacyReviewedDraft: false,
@@ -551,7 +563,7 @@ describe('学习准入 over the real store', () => {
       interruptAfterAbandonObjectRemoval: false,
       baselineAnalysisRoute: { fixtureIdentity: fixture.identity, fixtureSha256: fixture.sha256, fixtureLineage: fixture.lineage },
     });
-    const owner = new BaselineAnalysisExecutionOwner({ ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
+    const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
     const driver = new ReviewRunDriver(store.reviewRunDriveSteps, owner);
     try {
       const { bookId, manuscriptId, branchId } = await importSample1Book(store, roots.codeRoot, 'L2 审阅学习');
@@ -568,6 +580,7 @@ describe('学习准入 over the real store', () => {
       store.recordReviewFindingDisposition(bookId, run.reviewRunId, finding.findingId, '本书体例允许这种写法');
       const captured = store.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }).signals[0]!;
       expect(captured.kind).toBe('review-finding-ignored');
+      if (captured.kind === 'word-tracked-edit' || captured.kind === 'manual-edit-journal') throw new Error('expected a review finding signal');
       expect(captured.source).toMatchObject({ bookId, reviewRunId: run.reviewRunId, findingId: finding.findingId });
       expect(captured.source.resultSetRevisionId).not.toBeNull();
       const material = store.inspectLearningMaterials(bookId).books[0]!.materials.find((entry) => entry.kind === 'review-disposition')!;

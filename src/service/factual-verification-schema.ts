@@ -7,6 +7,54 @@
 const LEVELS = "('quick', 'standard', 'strict')";
 const OUTCOMES = "('待核查', '证据支持', '疑似错误', '证据不足', '证据冲突', '无法核实')";
 
+/** Revision 97: frozen membership, exact sessions and append-only reservations/results in the factual owner. */
+export const FACTUAL_CLAIM_SCHEMA_SQL: Readonly<Record<string, string>> = {
+  factual_claim_ledgers: `CREATE TABLE factual_claim_ledgers (
+  run_record_id TEXT PRIMARY KEY REFERENCES analysis_run_records(run_record_id),
+  ledger_digest TEXT NOT NULL CHECK(length(ledger_digest) = 64),
+  canonical_json TEXT NOT NULL,
+  recorded_at TEXT NOT NULL
+) STRICT`,
+  factual_claim_sessions: `CREATE TABLE factual_claim_sessions (
+  session_id TEXT PRIMARY KEY,
+  run_record_id TEXT NOT NULL REFERENCES analysis_run_records(run_record_id),
+  stage TEXT NOT NULL CHECK(stage IN ('claim-extraction', 'web-verification')),
+  scope_id TEXT NOT NULL,
+  ledger_digest TEXT CHECK(ledger_digest IS NULL OR length(ledger_digest) = 64),
+  model_limit INTEGER NOT NULL CHECK(model_limit BETWEEN 1 AND 129),
+  tool_limit INTEGER NOT NULL CHECK(tool_limit BETWEEN 0 AND 128),
+  search_limit INTEGER NOT NULL CHECK(search_limit BETWEEN 0 AND 3),
+  canonical_json TEXT NOT NULL,
+  sha256 TEXT NOT NULL CHECK(length(sha256) = 64),
+  UNIQUE(run_record_id, stage, scope_id),
+  CHECK((stage = 'claim-extraction' AND ledger_digest IS NULL AND model_limit = 1 AND tool_limit = 0 AND search_limit = 0)
+    OR (stage = 'web-verification' AND ledger_digest IS NOT NULL))
+) STRICT`,
+  factual_claim_events: `CREATE TABLE factual_claim_events (
+  session_id TEXT NOT NULL REFERENCES factual_claim_sessions(session_id),
+  sequence INTEGER NOT NULL CHECK(sequence >= 1),
+  kind TEXT NOT NULL CHECK(kind IN ('model', 'tool', 'search', 'search-result', 'verification-result', 'source-exclusion')),
+  identity TEXT NOT NULL,
+  canonical_json TEXT NOT NULL,
+  sha256 TEXT NOT NULL CHECK(length(sha256) = 64),
+  recorded_at TEXT NOT NULL,
+  PRIMARY KEY(session_id, sequence),
+  UNIQUE(session_id, kind, identity)
+) STRICT`,
+};
+
+export const FACTUAL_CLAIM_TRIGGER_SQL: Readonly<Record<string, string>> = Object.fromEntries(
+  Object.keys(FACTUAL_CLAIM_SCHEMA_SQL).flatMap((table) => ['update', 'delete'].map((action) =>
+    [`${table}_no_${action}`, `CREATE TRIGGER ${table}_no_${action} BEFORE ${action.toUpperCase()} ON ${table}
+    BEGIN SELECT RAISE(ABORT, 'FACTUAL_VERIFICATION_LEDGER_IMMUTABLE'); END`])),
+);
+
+export const FACTUAL_CLAIM_FOREIGN_KEYS: Readonly<Record<string, readonly string[]>> = {
+  factual_claim_ledgers: ['run_record_id>analysis_run_records.run_record_id:NO ACTION/NO ACTION/NONE'],
+  factual_claim_sessions: ['run_record_id>analysis_run_records.run_record_id:NO ACTION/NO ACTION/NONE'],
+  factual_claim_events: ['session_id>factual_claim_sessions.session_id:NO ACTION/NO ACTION/NONE'],
+};
+
 export const FACTUAL_VERIFICATION_SCHEMA_SQL = {
   factual_run_assurance: `CREATE TABLE factual_run_assurance (
   run_record_id TEXT PRIMARY KEY REFERENCES analysis_run_records(run_record_id),

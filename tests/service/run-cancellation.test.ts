@@ -1,3 +1,5 @@
+import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
+import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { IMPORTED_SKILL_RELATIONS, CUSTOM_ANALYSIS_RELATIONS, HOUSE_REVIEW_PREFERENCE_RELATIONS, TASK_INTENT_DRAFT_RELATIONS } from '../support/pre74-schema.js';
 import { execPre74Fixture, FACTUAL_VERIFICATION_RELATIONS, MATERIAL_INDEX_LAYER_RELATIONS, PROPOSAL_REVIEW_RELATIONS, RESEARCH_EVIDENCE_RELATIONS } from '../support/pre74-schema.js';
 import { createHash } from 'node:crypto';
@@ -35,6 +37,12 @@ import { RUN_CHECKPOINT_RELATIONS_DROP_ORDER } from '../support/run-continuation
 import { SAMPLE1_UNITS, importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
+
+// One explicit model-request capability per test application.
+// Registered first: the stack-ordered final hook runs after existing consumer teardown.
+let requestGovernor: ModelRequestGovernor;
+beforeEach(() => { requestGovernor = new ModelRequestGovernor(); });
+afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(); });
 
 // Service-integration suite (L2) for 取消任务 (Issue #422, plan slice S76a): the real store on a temporary Agent
 // Data Root, exact `sample1` imported through the supported path, J-04's deterministic route, and no Provider,
@@ -76,6 +84,7 @@ function openWithRoute(): Promise<EditorialStore> {
 /** The owner as the service builds it for J-10: the deterministic route, and the unit hold read from `holdPath`. */
 function owner(store: EditorialStore, holdPath: string | null): BaselineAnalysisExecutionOwner {
   return new BaselineAnalysisExecutionOwner({
+    requestGovernor,
     ledger: store.baselineAnalysisLedger,
     launchPolicy,
     fixture,
@@ -159,6 +168,7 @@ describe('schema revision 32 over the real store', () => {
       first.close();
     }
     const before = withDatabase(false, (database) => {
+      constructPre94PolicyEncoding(database);
       plantRevision31Relations(database);
       execPre74Fixture(database, `PRAGMA user_version = 31`);
       downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_58_SQL);
@@ -192,7 +202,7 @@ describe('schema revision 32 over the real store', () => {
       for (const relation of RUN_CHECKPOINT_RELATIONS_DROP_ORDER) expect(after.get(relation)?.content).toMatch(/^0:/);
       // Revision 59 rebuilds the three kind-coupled analysis relations for the evaluation kind (Issue #429), every row kept.
       expect([...before.truth].filter(([name, was]) => after.get(name)!.sql !== was.sql).map(([name]) => name))
-        .toEqual(['analysis_plan_records', 'analysis_result_set_revisions', 'analysis_result_sets', 'analysis_run_states', 'analysis_task_intents', 'analysis_task_outcomes', 'proposal_item_decisions']);
+        .toEqual(['analysis_plan_records', 'analysis_result_set_revisions', 'analysis_result_sets', 'analysis_run_authorizations', 'analysis_run_states', 'analysis_task_intents', 'analysis_task_outcomes', 'proposal_item_decisions']);
       expect([...before.truth].filter(([name, was]) => after.get(name)!.content !== was.content).map(([name]) => name)).toEqual(['service_lifetimes']);
       for (const table of ['analysis_run_states', 'analysis_task_outcomes']) {
         expect(database.prepare("SELECT name FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = ? ORDER BY name").all(table))
@@ -263,6 +273,7 @@ describe('取消任务 over the real store', () => {
     let releaseHold!: () => void;
     const holding = new Promise<void>((resolve) => { releaseHold = resolve; });
     const execution = new BaselineAnalysisExecutionOwner({
+      requestGovernor,
       ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null },
       unitHold: async (settled) => { if (settled === 5) { held = true; await holding; } },
     });
@@ -431,6 +442,7 @@ describe('取消任务 over the real store', () => {
     let heldAt: string | null = null;
     const store = await openWithRoute();
     const execution = new BaselineAnalysisExecutionOwner({
+      requestGovernor,
       ledger: store.baselineAnalysisLedger,
       launchPolicy,
       fixture,

@@ -26,6 +26,35 @@ function block(): { targetedRetrieval: Record<string, unknown>; breaker: Record<
 }
 
 describe('readLocalToolsRule (Provider Processing v18 and v19, Issue #891)', () => {
+  it('retains verified v26 declarations while preserving the predecessor retrieval bounds', () => {
+    const prior = rulesOf('v25');
+    for (const rule of rulesOf('v26')) {
+      const reading = readLocalToolsRule(rule);
+      expect(reading).not.toBeNull();
+      const previous = readLocalToolsRule(prior.find((entry) => entry.ruleId === rule.ruleId));
+      expect(reading?.targetedRetrieval).toEqual(previous?.targetedRetrieval);
+      expect(reading?.breaker).toEqual(previous?.breaker);
+      expect(reading?.declarations).toEqual((rule.localTools as { declarations?: unknown }).declarations);
+    }
+  });
+
+  it('fails closed on unknown or malformed v26 metadata', () => {
+    const mutations: Array<(value: Record<string, unknown>) => void> = [
+      (value) => { value['unknown'] = true; },
+      (value) => { delete value['parallelCallsAllowed']; },
+      (value) => { delete value['declarations']; },
+      (value) => { value['parallelCallsAllowed'] = 5; },
+      (value) => { value['declarations'] = [{ name: 'shell', readOnly: true, concurrencySafe: true }]; },
+      (value) => { (value['declarations'] as Array<Record<string, unknown>>)[0]!['readOnly'] = false; },
+      (value) => { (value['declarations'] as Array<Record<string, unknown>>)[0]!['unknown'] = true; },
+      (value) => { (value['targetedRetrieval'] as Record<string, unknown>)['allowed'] = false; },
+    ];
+    for (const mutate of mutations) {
+      const value = structuredClone(rulesOf('v26')[2]!.localTools) as Record<string, unknown>;
+      mutate(value);
+      expect(() => readLocalToolsRule({ localTools: value })).toThrow(LocalToolsRuleError);
+    }
+  });
   it('declares the bounds the policies state', () => {
     expect([LOCAL_TOOL_CALLS_PER_UNIT, LOCAL_TOOL_CANDIDATES_PER_CALL, LOCAL_TOOL_ROUND_TRIP_BREAKER, LOCAL_TOOL_BREAKER_END]).toEqual([5, 8, 128, '检索未完成']);
   });

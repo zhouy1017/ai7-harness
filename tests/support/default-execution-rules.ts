@@ -1,6 +1,7 @@
+import { CURATION_SCHEMA_SQL } from '../../src/service/task-authorization.js';
 import type { DatabaseSync } from 'node:sqlite';
 import { DEFAULT_EXECUTION_RULE_SCHEMA_SQL } from '../../src/service/default-execution-rules.js';
-import { ANALYSIS_LEDGER_REVISION_30_SQL, ANALYSIS_LEDGER_REVISION_65_SQL, ANALYSIS_LEDGER_SCHEMA_SQL } from '../../src/service/task-authorization.js';
+import { IDLE_RUN_AUTHORIZATIONS_SQL, ANALYSIS_LEDGER_REVISION_30_SQL, ANALYSIS_LEDGER_REVISION_65_SQL, ANALYSIS_LEDGER_SCHEMA_SQL } from '../../src/service/task-authorization.js';
 import { CLARIFICATION_RELATIONS_DROP_ORDER } from './clarifications.js';
 import { REIMPORT_GROUP_RELATIONS_DROP_ORDER } from './reimport-groups.js';
 import { PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER } from './production-documents.js';
@@ -35,6 +36,7 @@ export function downgradeAnalysisRunAuthorizationsToRevision65(database: Databas
 function downgradeAnalysisRunAuthorizations(database: DatabaseSync, sql: string): void {
   const columns = (database.prepare("SELECT name FROM pragma_table_info('analysis_run_authorizations') ORDER BY cid").all() as { name: string }[])
     .map((column) => column.name)
+    .filter((name) => name !== 'start_when')
     .join(', ');
   const attached = (database.prepare(
     "SELECT sql FROM sqlite_schema WHERE tbl_name = 'analysis_run_authorizations' AND type IN ('index', 'trigger') AND sql IS NOT NULL ORDER BY type, name",
@@ -88,5 +90,5 @@ export function analysisRunAuthorizationsShape(database: DatabaseSync): 'revisio
   if (row === undefined) return 'other';
   if (normalized(row.sql) === normalized(ANALYSIS_LEDGER_REVISION_30_SQL.analysis_run_authorizations)) return 'revision-30';
   if (normalized(row.sql) === normalized(ANALYSIS_LEDGER_REVISION_65_SQL.analysis_run_authorizations)) return 'revision-65';
-  return normalized(row.sql) === normalized(ANALYSIS_LEDGER_SCHEMA_SQL.analysis_run_authorizations) ? 'current' : 'other';
+  return normalized(row.sql) === normalized(CURATION_SCHEMA_SQL.analysis_run_authorizations!) ? 'current' : 'other';
 }
