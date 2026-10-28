@@ -11,8 +11,8 @@ import { graphemeCount } from './analysis/factual-review-contract.js';
 import { executionBackgroundShare } from './analysis/execution.js';
 import { initializeProcedureDefinitionSchema } from './procedures/definition-store.js';
 import { EditorialLearningLedger, LearningReads, initializeEditorialLearningSchema, type WordLearningProofs } from './learning/ledger.js';
-import { CURATION_CONTRACT_DIGEST, validCurationBudget, parseCurationResult, type CurationRun } from './learning/curation.js';
-import type { EnabledLearningEnvelope, LearningCurationBudget, LearningCurationBundle } from '../shared/protocol/learning.js';
+import { type CurationRun } from './learning/curation.js';
+import type { LearningCurationBundle } from '../shared/protocol/learning.js';
 import type { WordTrackedEditLearningSource } from '../shared/protocol/learning.js';
 import type { ChangeEditorialLearningInput, CreateEditorialMemoryInput, DeactivateEditorialMemoryInput, InspectEditorialLearningInput, EditorialLearningProjection, LearningReasonAskInput, LearningReasonAskProjection } from '../shared/protocol/learning.js';
 import { buildDialogueMessage, dialogueQuestionDigest } from './dialogue/contract.js';
@@ -34,7 +34,6 @@ import { customAnalysisPlan } from './analysis/custom-analysis-kind.js';
 import { isCustomAnalysisKindId } from '../shared/protocol.js';
 import type { CustomAnalysisDimensionsProjection, PrepareCustomAnalysisInput, SaveCustomAnalysisDimensionInput } from '../shared/protocol.js';
 import { HouseReviewPreferenceLedger, houseReviewPreferenceKindDefinition, initializeHouseReviewPreferenceSchema, preferenceNames, withdrawalOf, withoutNames } from './house-review-preference.js';
-import { inspectEditQualitySignals as readEditQualitySignals } from './edit-quality-signals.js';
 import type { HouseReviewPreferenceProjection, HouseReviewPreferenceUse, EditQualitySignalsProjection } from '../shared/protocol.js';
 import type { ApplyReceiptProjection, BatchProposalDecisionDraftInput, InspectApplyReceiptInput, PrepareReverseApplyInput, ProposalDraftBatchProjection, ProposalWorkspaceInput, ProposalWorkspaceProjection, RecordProposalDecisionInput, ReverseApplyPreparationProjection, SaveProposalDecisionDraftInput } from '../shared/protocol.js';
 import { initializeProposalReviewSchema } from './editorial-marks.js';
@@ -11867,114 +11866,51 @@ export class EditorialStore {
     });
   }
 
-  /** One Learning Material as its Review Card reads it: what a decision answers with, and what a refusal reads again. */
-  inspectLearningMaterial(bookId: string, materialKey: string): LearningMaterialProjection {
-    return this.#learningCall(() => {
-      requireStore(UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
-      const candidate = learningSupervision.learningCandidateOf(this.#learningSupervisionHost, bookId, materialKey, true);
-      requireStore(candidate !== null, 'LEARNING_MATERIAL_NOT_FOUND', '这条材料已经不在学习准入之列。');
-      return { ...this.#learningEligibility.project(bookId, [candidate])[0]!, ...this.#learningMaterialSource(bookId, candidate) };
-    });
+  /** What the 学习素材 and 学习整理 operations in house-review-preference.ts reach of the store (Issue #1172), read live. */
+  readonly #editorialLearningHost: learningSupervision.EditorialLearningStoreHost = this.#editorialLearningHostOf();
+
+  #editorialLearningHostOf(): learningSupervision.EditorialLearningStoreHost {
+    const store = this;
+    return {
+      get authority() { return store.#authority; },
+      get baselineAnalysis() { return store.#baselineAnalysis; },
+      get bookPeople() { return store.#bookPeople; },
+      learningCall: this.#learningCall.bind(this),
+      get learningEligibility() { return store.#learningEligibility; },
+      learningLedger: this.#learningLedger.bind(this),
+      learningMaterialSource: this.#learningMaterialSource.bind(this),
+      get learningSupervisionHost() { return store.#learningSupervisionHost; },
+      replacementFrozen: this.replacementFrozen.bind(this),
+      transaction: this.#transaction.bind(this),
+    };
   }
 
-  /** 记录学习准入决定 for the exact version the editor read, attributed to the Book's people as they stand (FDBK-013). */
+  inspectLearningMaterial(bookId: string, materialKey: string): LearningMaterialProjection {
+    return learningSupervision.inspectLearningMaterial(this.#editorialLearningHost, bookId, materialKey);
+  }
+
   decideLearningMaterial(input: DecideLearningMaterialInput): LearningMaterialProjection {
-    this.#learningCall(() => {
-      requireStore(UUID_PATTERN.test(input.bookId), 'BOOK_INVALID', '图书标识无效。');
-      this.#transaction(this.#authority, () => {
-        const candidate = learningSupervision.learningCandidateOf(this.#learningSupervisionHost, input.bookId, input.materialKey, false);
-        requireStore(candidate !== null, 'LEARNING_MATERIAL_NOT_FOUND', '这条材料已经不在学习准入之列。');
-        requireStore(learningMaterialDigest(candidate) === input.materialDigest, 'LEARNING_MATERIAL_CHANGED', '这条材料在你打开后改过；请看过现在的内容再定。');
-        const people = this.#bookPeople.current(input.bookId);
-        this.#learningEligibility.decide({
-          bookId: input.bookId,
-          candidate,
-          expectedDecisions: input.expectedDecisions,
-          choice: input.choice,
-          note: input.note,
-          attribution: { peopleVersion: people.version, authors: people.authors, editors: people.editors },
-        });
-        learningSupervision.rebuildStoredHouseReviewPreference(this.#learningSupervisionHost);
-      });
-    });
-    // The one material it decided: the page it sits on is never re-sent whole.
-    return this.inspectLearningMaterial(input.bookId, input.materialKey);
+    return learningSupervision.decideLearningMaterial(this.#editorialLearningHost, input);
   }
 
   inspectEditQualitySignals(bookId: string | null, after: import('../shared/protocol/learning.js').PreferenceAdoptionCursor | null = null): EditQualitySignalsProjection {
-    return this.#learningCall(() => {
-      requireStore(bookId === null || UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
-      if (bookId !== null) requireStore(this.#authority.prepare('SELECT 1 FROM books WHERE book_id = ?').get(bookId) !== undefined, 'BOOK_NOT_FOUND', '图书不存在。');
-      return { ...readEditQualitySignals(this.#authority, bookId), ...this.#learningLedger().adoption(bookId, after) };
-    });
+    return learningSupervision.inspectEditQualitySignals(this.#editorialLearningHost, bookId, after);
   }
 
   inspectEditorialLearning(input: InspectEditorialLearningInput): EditorialLearningProjection {
-    return this.#learningCall(() => {
-      const learning = this.#learningLedger();
-      const current = learning.curationEnvelope();
-      const offered = this.#curationEnvelope({ maxPasses: 1, totalTokens: 20_000, perPassTokens: 20_000 });
-      return { ...learning.inspect(input, this.#baselineAnalysis.launch.operationalScope), curation: {
-        available: offered !== null, disclosure: offered?.disclosure ?? '模型整理尚不可用；当前仅在本机保留学习记录。',
-        envelope: current?.envelope ?? null, ...this.#baselineAnalysis.curationBudgetUse(current?.entryId ?? ''),
-        recentRuns: this.#baselineAnalysis.curationRuns() } };
-    });
-  }
-
-  #curationEnvelope(budget: LearningCurationBudget): EnabledLearningEnvelope | null {
-    const launch = this.#baselineAnalysis.launch;
-    const policy = launch.policy;
-    const identity = selectedPolicyIdentityOf(policy?.selectedPolicyIdentity);
-    const live = launch.live;
-    const rule = policy?.providerProcessing.admittedRules?.find((entry) => entry.ruleId === 'ordinary-production-learning-curation');
-    if (launch.operationalScope !== 'ordinary-production' || live?.scope !== 'ordinary-production' ||
-      policy?.integrityState !== 'verified' || identity?.providerProcessingVersion !== 'v31' || rule?.enabledLearningEnvelope === undefined ||
-      rule.route !== live.route || rule.model !== live.model || rule.endpoint !== live.endpoint || rule.credentialSlot !== live.credentialSlot) return null;
-    return { schema: 'ai7.enabled-learning-envelope/1', budget, contractDigest: CURATION_CONTRACT_DIGEST, policy: identity,
-      binding: { route: live.route, endpoint: live.endpoint, model: live.model, credentialSlot: live.credentialSlot, credentialReference: live.credentialReference },
-      sourceKinds: ['proposal-decision', 'manual-edit-journal', 'word-tracked-edit'], scope: 'eligible-local-books',
-      supervisionDigest: this.#learningLedger().supervisionDigest(), disableStopsLaterDispatchAndUse: true,
-      disclosure: `空闲时将符合范围的直接修改、Word 修订及原生审阅决定的完整修改前后文字和实际原因发送给 ${live.route} · ${live.model} 整理。遵循当前学习监督与排除范围；只生成待接受的本社偏好和记忆，不会自动启用。关闭学习或排除来源会停止后续发送与使用。策略 ${identity.providerProcessingVersion}。` };
+    return learningSupervision.inspectEditorialLearning(this.#editorialLearningHost, input);
   }
 
   prepareLearningCuration(bookId: string, signalIds: readonly string[]): LearningCurationBundle {
-    return this.#learningCall(() => this.#learningLedger().prepareCuration(bookId, signalIds));
+    return learningSupervision.prepareLearningCuration(this.#editorialLearningHost, bookId, signalIds);
   }
 
-  nextLearningCuration(): CurationRun | null {
-    return this.#learningCall(() => this.#transaction(this.#authority, () => {
-      const learning = this.#learningLedger();
-      const current = learning.curationEnvelope();
-      if (current === null || canonicalJson(this.#curationEnvelope(current.envelope.budget)) !== canonicalJson(current.envelope) || this.replacementFrozen()) return null;
-      const use = this.#baselineAnalysis.curationBudgetUse(current.entryId);
-      if (use.passesUsed >= current.envelope.budget.maxPasses || use.reservedTokens + current.envelope.budget.perPassTokens > current.envelope.budget.totalTokens) return null;
-      for (const bookId of learning.curationBooks()) {
-        const bundle = learning.nextCuration(bookId);
-        if (bundle?.state === 'ready') return this.#baselineAnalysis.startCuration(bundle, current);
-      }
-      return null;
-    }));
-  }
+  nextLearningCuration(): CurationRun | null { return learningSupervision.nextLearningCuration(this.#editorialLearningHost); }
 
-  learningCurationCurrent(run: CurationRun): boolean {
-    try {
-      const current = this.#learningLedger().curationEnvelope();
-      return !this.replacementFrozen() && current?.entryId === run.controlEntryId &&
-        canonicalJson(this.#curationEnvelope(run.envelope.budget)) === canonicalJson(run.envelope) &&
-        this.prepareLearningCuration(run.bundle.bookId, run.bundle.signalIds).digest === run.bundle.digest;
-    } catch { return false; }
-  }
+  learningCurationCurrent(run: CurationRun): boolean { return learningSupervision.learningCurationCurrent(this.#editorialLearningHost, run); }
 
   publishLearningCuration(run: CurationRun, text: string, evidence: { usage: import('./provider/classification.js').UsageFacts | null; transmitted: boolean }): number {
-    return this.#learningCall(() => this.#transaction(this.#authority, () => {
-      requireStore(this.learningCurationCurrent(run), 'LEARNING_SOURCE_CHANGED', '学习整理来源或范围已经变化；结果未发布。');
-      const proposals = parseCurationResult(text, run.bundle.examples);
-      requireStore(proposals !== null, 'LEARNING_RESULT_INVALID', '学习整理结果未满足约定；没有发布候选。');
-      this.#learningLedger().proposeCuration(run.bundle, proposals, run);
-      this.#baselineAnalysis.settleCuration(run, 'completed', { ...evidence, proposals: proposals.length,
-        reason: proposals.length === 0 ? '整理完成；证据不足以提出新偏好。' : `已形成 ${proposals.length} 条待接受的偏好与记忆。` });
-      return proposals.length;
-    }));
+    return learningSupervision.publishLearningCuration(this.#editorialLearningHost, run, text, evidence);
   }
 
   /** Explicit-Book source detail; historical inspection remains available while current learning is excluded. */
@@ -12041,25 +11977,15 @@ export class EditorialStore {
   }
 
   recordLearningReasonAsk(input: LearningReasonAskInput, frequency: import('../shared/protocol/learning.js').LearningReasonAskFrequency): LearningReasonAskProjection | null {
-    return this.#learningCall(() => this.#transaction(this.#authority, () => this.#learningLedger().reasonAsk(input, frequency)));
+    return learningSupervision.recordLearningReasonAsk(this.#editorialLearningHost, input, frequency);
   }
 
   changeEditorialLearning(input: ChangeEditorialLearningInput): EditorialLearningProjection {
-    return this.#learningCall(() => this.#transaction(this.#authority, () => {
-      const budget = input.kind === 'switch' ? input.curation : undefined;
-      const envelope = budget === undefined ? undefined : this.#curationEnvelope(budget);
-      requireStore(budget === undefined || validCurationBudget(budget) && envelope !== null, 'LEARNING_ENVELOPE_UNAVAILABLE', '学习整理缺少有效的模型、策略或预算范围。');
-      this.#learningLedger().change(input, envelope ?? undefined);
-      learningSupervision.rebuildStoredHouseReviewPreference(this.#learningSupervisionHost);
-      return this.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
-    }));
+    return learningSupervision.changeEditorialLearning(this.#editorialLearningHost, input);
   }
 
   createEditorialMemory(input: CreateEditorialMemoryInput): EditorialLearningProjection {
-    return this.#learningCall(() => this.#transaction(this.#authority, () => {
-      this.#learningLedger().create(input, this.#baselineAnalysis.launch.operationalScope);
-      return this.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
-    }));
+    return learningSupervision.createEditorialMemory(this.#editorialLearningHost, input);
   }
 
   acceptEditorialMemory(input: import('../shared/protocol/learning.js').AcceptEditorialMemoryInput): EditorialLearningProjection {

@@ -2,18 +2,18 @@ import { SupervisionDirectives, governedMemoryItems, preferenceItems, type Edito
 import { selectPreferenceLines, type PreferenceLineCandidate } from './learning/retrieval.js';
 import { EditorialLearningLedger, LearningReads, validateEditorialMemorySourceShape } from './learning/ledger.js';
 import { REVIEW_CATEGORY_SELECTED_PREFERENCE_PROMPT_SCHEMA } from './review/review-category-contract.js';
-import type { ReferencedRuleVersion } from '../shared/protocol/learning.js';
+import type { ReferencedRuleVersion, InspectEditorialLearningInput, EditorialLearningProjection, LearningCurationBudget, EnabledLearningEnvelope, LearningCurationBundle, LearningReasonAskInput, LearningReasonAskProjection, ChangeEditorialLearningInput, CreateEditorialMemoryInput } from '../shared/protocol/learning.js';
 import { liveMaterialContract, materialContractDefinition } from './task-material-references.js';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import type { AnalysisKindDefinition } from './analysis/kind-definition.js';
 import { DIGEST_PATTERN, UUID_PATTERN, canonicalJson, canonicalRecord, sha256Hex, isRecord } from './analysis/canonical.js';
 import { graphemesOf } from '../shared/mark-anchor.js';
-import type { HouseReviewPreferenceVersion, HouseReviewPreferenceUse, HouseReviewPreferenceSource, LearningEligibilityChoice, LearningMaterialState, TrustedOperationalScope } from '../shared/protocol.js';
+import type { HouseReviewPreferenceVersion, HouseReviewPreferenceUse, HouseReviewPreferenceSource, LearningEligibilityChoice, LearningMaterialState, TrustedOperationalScope, DecideLearningMaterialInput, EditQualitySignalsProjection } from '../shared/protocol.js';
 import { EDITORIAL_REVIEW_KIND_PREFIX, MAX_FRAME_BYTES } from '../shared/protocol.js';
-import { LearningEligibilityError, LearningEligibilityLedger, type LearningAttribution, type LearningMaterialCandidate, LOCAL_LEARNING_POLICY_BASIS, learningAuditChoices, learningAuditStanding, learningMaterialOrder, type LearningRemediationReach, LEARNING_REMEDIATION_NAMED, learningRemediationPreview, DISPOSITION_LABELS, feedbackReasonExcerpt, analysisReasonLabel, DIMENSION_LABELS, JUDGMENT_LABELS, feedbackHistoryPage } from './learning-eligibility.js';
-import { NO_EDIT_QUALITY, editQualityOfDecisions, type DecisionEditQuality } from './edit-quality-signals.js';
-import { HOUSE_REVIEW_PREFERENCE_MAX_GRAPHEMES, HOUSE_REVIEW_PREFERENCE_MAX_LINES } from './launch-policy.js';
+import { LearningEligibilityError, LearningEligibilityLedger, type LearningAttribution, type LearningMaterialCandidate, LOCAL_LEARNING_POLICY_BASIS, learningAuditChoices, learningAuditStanding, learningMaterialOrder, type LearningRemediationReach, LEARNING_REMEDIATION_NAMED, learningRemediationPreview, DISPOSITION_LABELS, feedbackReasonExcerpt, analysisReasonLabel, DIMENSION_LABELS, JUDGMENT_LABELS, feedbackHistoryPage, learningMaterialDigest } from './learning-eligibility.js';
+import { NO_EDIT_QUALITY, editQualityOfDecisions, type DecisionEditQuality, inspectEditQualitySignals as readEditQualitySignals } from './edit-quality-signals.js';
+import { HOUSE_REVIEW_PREFERENCE_MAX_GRAPHEMES, HOUSE_REVIEW_PREFERENCE_MAX_LINES, selectedPolicyIdentityOf } from './launch-policy.js';
 import {
   type RecordLearningSupervisionInput,
   type GlobalAgentProjection,
@@ -39,7 +39,7 @@ import {
   type LearningMaterialsBookProjection,
   type BaselineAnalysisProjection,
 } from '../shared/protocol.js';
-import { requireStore, type SqlRow, asString, UUID_PATTERN as StoreUUID_PATTERN } from './store-records.js';
+import { requireStore, type SqlRow, asString, UUID_PATTERN as StoreUUID_PATTERN, canonicalJson as storeCanonicalJson } from './store-records.js';
 import { reviewCategoryEntry } from './review/category-configuration.js';
 import { SeriesError, type SeriesLedger } from './series.js';
 import type { ReviewRunStore } from './review/review-runs.js';
@@ -49,6 +49,7 @@ import { analysisFeedbackItems, type AnalysisFeedbackLedger } from './analysis-f
 import type { BaselineAnalysisStore, ProgressReader } from './analysis/baseline-analysis-store.js';
 import type { BookPeople } from './book-people.js';
 import type { LiveAnswer } from './dialogue/dialogue-history.js';
+import { CURATION_CONTRACT_DIGEST, type CurationRun, parseCurationResult, validCurationBudget } from './learning/curation.js';
 
 /** The house owns versions; Book-owned Runs carry their selected version by value during database merges. */
 export const HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL = {
@@ -1495,4 +1496,152 @@ export function feedbackRevision(host: LearningSupervisionStoreHost, bookId: str
     bound: { revisionId: revision.revisionId, digest: revision.digest, ordinal: revision.ordinal },
     items: analysisFeedbackItems(revision),
   };
+}
+
+// ---- 学习素材, 编辑学习 and 学习整理 as operations of the store (Issue #61 S26b, F-05; moved from store.ts by Issue #1172) ----------------
+
+/** The store state and calls the editorial learning operations use, lent by EditorialStore: its fields read live through getters, its own methods bound. */
+export interface EditorialLearningStoreHost {
+  readonly authority: DatabaseSync;
+  readonly baselineAnalysis: BaselineAnalysisStore;
+  readonly bookPeople: BookPeople;
+  learningCall<T>(operation: () => T): T;
+  readonly learningEligibility: LearningEligibilityLedger;
+  learningLedger(): EditorialLearningLedger;
+  learningMaterialSource(bookId: string, candidate: LearningMaterialCandidate): Pick<LearningMaterialProjection, 'target' | 'sourceTask' | 'wordCurrentEligibility'>;
+  readonly learningSupervisionHost: LearningSupervisionStoreHost;
+  replacementFrozen(): boolean;
+  transaction<T>(db: DatabaseSync, operation: () => T): T;
+}
+
+/** One Learning Material as its Review Card reads it: what a decision answers with, and what a refusal reads again. */
+export function inspectLearningMaterial(host: EditorialLearningStoreHost, bookId: string, materialKey: string): LearningMaterialProjection {
+  return host.learningCall(() => {
+    requireStore(StoreUUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
+    const candidate = learningCandidateOf(host.learningSupervisionHost, bookId, materialKey, true);
+    requireStore(candidate !== null, 'LEARNING_MATERIAL_NOT_FOUND', '这条材料已经不在学习准入之列。');
+    return { ...host.learningEligibility.project(bookId, [candidate])[0]!, ...host.learningMaterialSource(bookId, candidate) };
+  });
+}
+
+/** 记录学习准入决定 for the exact version the editor read, attributed to the Book's people as they stand (FDBK-013). */
+export function decideLearningMaterial(host: EditorialLearningStoreHost, input: DecideLearningMaterialInput): LearningMaterialProjection {
+  host.learningCall(() => {
+    requireStore(StoreUUID_PATTERN.test(input.bookId), 'BOOK_INVALID', '图书标识无效。');
+    host.transaction(host.authority, () => {
+      const candidate = learningCandidateOf(host.learningSupervisionHost, input.bookId, input.materialKey, false);
+      requireStore(candidate !== null, 'LEARNING_MATERIAL_NOT_FOUND', '这条材料已经不在学习准入之列。');
+      requireStore(learningMaterialDigest(candidate) === input.materialDigest, 'LEARNING_MATERIAL_CHANGED', '这条材料在你打开后改过；请看过现在的内容再定。');
+      const people = host.bookPeople.current(input.bookId);
+      host.learningEligibility.decide({
+        bookId: input.bookId,
+        candidate,
+        expectedDecisions: input.expectedDecisions,
+        choice: input.choice,
+        note: input.note,
+        attribution: { peopleVersion: people.version, authors: people.authors, editors: people.editors },
+      });
+      rebuildStoredHouseReviewPreference(host.learningSupervisionHost);
+    });
+  });
+  // The one material it decided: the page it sits on is never re-sent whole.
+  return inspectLearningMaterial(host, input.bookId, input.materialKey);
+}
+
+export function inspectEditQualitySignals(host: EditorialLearningStoreHost, bookId: string | null, after: import('../shared/protocol/learning.js').PreferenceAdoptionCursor | null = null): EditQualitySignalsProjection {
+  return host.learningCall(() => {
+    requireStore(bookId === null || StoreUUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
+    if (bookId !== null) requireStore(host.authority.prepare('SELECT 1 FROM books WHERE book_id = ?').get(bookId) !== undefined, 'BOOK_NOT_FOUND', '图书不存在。');
+    return { ...readEditQualitySignals(host.authority, bookId), ...host.learningLedger().adoption(bookId, after) };
+  });
+}
+
+export function inspectEditorialLearning(host: EditorialLearningStoreHost, input: InspectEditorialLearningInput): EditorialLearningProjection {
+  return host.learningCall(() => {
+    const learning = host.learningLedger();
+    const current = learning.curationEnvelope();
+    const offered = curationEnvelope(host, { maxPasses: 1, totalTokens: 20_000, perPassTokens: 20_000 });
+    return { ...learning.inspect(input, host.baselineAnalysis.launch.operationalScope), curation: {
+      available: offered !== null, disclosure: offered?.disclosure ?? '模型整理尚不可用；当前仅在本机保留学习记录。',
+      envelope: current?.envelope ?? null, ...host.baselineAnalysis.curationBudgetUse(current?.entryId ?? ''),
+      recentRuns: host.baselineAnalysis.curationRuns() } };
+  });
+}
+
+export function curationEnvelope(host: EditorialLearningStoreHost, budget: LearningCurationBudget): EnabledLearningEnvelope | null {
+  const launch = host.baselineAnalysis.launch;
+  const policy = launch.policy;
+  const identity = selectedPolicyIdentityOf(policy?.selectedPolicyIdentity);
+  const live = launch.live;
+  const rule = policy?.providerProcessing.admittedRules?.find((entry) => entry.ruleId === 'ordinary-production-learning-curation');
+  if (launch.operationalScope !== 'ordinary-production' || live?.scope !== 'ordinary-production' ||
+    policy?.integrityState !== 'verified' || identity?.providerProcessingVersion !== 'v31' || rule?.enabledLearningEnvelope === undefined ||
+    rule.route !== live.route || rule.model !== live.model || rule.endpoint !== live.endpoint || rule.credentialSlot !== live.credentialSlot) return null;
+  return { schema: 'ai7.enabled-learning-envelope/1', budget, contractDigest: CURATION_CONTRACT_DIGEST, policy: identity,
+    binding: { route: live.route, endpoint: live.endpoint, model: live.model, credentialSlot: live.credentialSlot, credentialReference: live.credentialReference },
+    sourceKinds: ['proposal-decision', 'manual-edit-journal', 'word-tracked-edit'], scope: 'eligible-local-books',
+    supervisionDigest: host.learningLedger().supervisionDigest(), disableStopsLaterDispatchAndUse: true,
+    disclosure: `空闲时将符合范围的直接修改、Word 修订及原生审阅决定的完整修改前后文字和实际原因发送给 ${live.route} · ${live.model} 整理。遵循当前学习监督与排除范围；只生成待接受的本社偏好和记忆，不会自动启用。关闭学习或排除来源会停止后续发送与使用。策略 ${identity.providerProcessingVersion}。` };
+}
+
+export function prepareLearningCuration(host: EditorialLearningStoreHost, bookId: string, signalIds: readonly string[]): LearningCurationBundle {
+  return host.learningCall(() => host.learningLedger().prepareCuration(bookId, signalIds));
+}
+
+export function nextLearningCuration(host: EditorialLearningStoreHost): CurationRun | null {
+  return host.learningCall(() => host.transaction(host.authority, () => {
+    const learning = host.learningLedger();
+    const current = learning.curationEnvelope();
+    if (current === null || storeCanonicalJson(curationEnvelope(host, current.envelope.budget)) !== storeCanonicalJson(current.envelope) || host.replacementFrozen()) return null;
+    const use = host.baselineAnalysis.curationBudgetUse(current.entryId);
+    if (use.passesUsed >= current.envelope.budget.maxPasses || use.reservedTokens + current.envelope.budget.perPassTokens > current.envelope.budget.totalTokens) return null;
+    for (const bookId of learning.curationBooks()) {
+      const bundle = learning.nextCuration(bookId);
+      if (bundle?.state === 'ready') return host.baselineAnalysis.startCuration(bundle, current);
+    }
+    return null;
+  }));
+}
+
+export function learningCurationCurrent(host: EditorialLearningStoreHost, run: CurationRun): boolean {
+  try {
+    const current = host.learningLedger().curationEnvelope();
+    return !host.replacementFrozen() && current?.entryId === run.controlEntryId &&
+      storeCanonicalJson(curationEnvelope(host, run.envelope.budget)) === storeCanonicalJson(run.envelope) &&
+      prepareLearningCuration(host, run.bundle.bookId, run.bundle.signalIds).digest === run.bundle.digest;
+  } catch { return false; }
+}
+
+export function publishLearningCuration(host: EditorialLearningStoreHost, run: CurationRun, text: string, evidence: { usage: import('./provider/classification.js').UsageFacts | null; transmitted: boolean }): number {
+  return host.learningCall(() => host.transaction(host.authority, () => {
+    requireStore(learningCurationCurrent(host, run), 'LEARNING_SOURCE_CHANGED', '学习整理来源或范围已经变化；结果未发布。');
+    const proposals = parseCurationResult(text, run.bundle.examples);
+    requireStore(proposals !== null, 'LEARNING_RESULT_INVALID', '学习整理结果未满足约定；没有发布候选。');
+    host.learningLedger().proposeCuration(run.bundle, proposals, run);
+    host.baselineAnalysis.settleCuration(run, 'completed', { ...evidence, proposals: proposals.length,
+      reason: proposals.length === 0 ? '整理完成；证据不足以提出新偏好。' : `已形成 ${proposals.length} 条待接受的偏好与记忆。` });
+    return proposals.length;
+  }));
+}
+
+export function recordLearningReasonAsk(host: EditorialLearningStoreHost, input: LearningReasonAskInput, frequency: import('../shared/protocol/learning.js').LearningReasonAskFrequency): LearningReasonAskProjection | null {
+  return host.learningCall(() => host.transaction(host.authority, () => host.learningLedger().reasonAsk(input, frequency)));
+}
+
+export function changeEditorialLearning(host: EditorialLearningStoreHost, input: ChangeEditorialLearningInput): EditorialLearningProjection {
+  return host.learningCall(() => host.transaction(host.authority, () => {
+    const budget = input.kind === 'switch' ? input.curation : undefined;
+    const envelope = budget === undefined ? undefined : curationEnvelope(host, budget);
+    requireStore(budget === undefined || validCurationBudget(budget) && envelope !== null, 'LEARNING_ENVELOPE_UNAVAILABLE', '学习整理缺少有效的模型、策略或预算范围。');
+    host.learningLedger().change(input, envelope ?? undefined);
+    rebuildStoredHouseReviewPreference(host.learningSupervisionHost);
+    return inspectEditorialLearning(host, { signalOffset: 0, itemOffset: 0 });
+  }));
+}
+
+export function createEditorialMemory(host: EditorialLearningStoreHost, input: CreateEditorialMemoryInput): EditorialLearningProjection {
+  return host.learningCall(() => host.transaction(host.authority, () => {
+    host.learningLedger().create(input, host.baselineAnalysis.launch.operationalScope);
+    return inspectEditorialLearning(host, { signalOffset: 0, itemOffset: 0 });
+  }));
 }
