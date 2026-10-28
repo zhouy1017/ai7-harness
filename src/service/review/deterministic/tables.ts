@@ -19,4 +19,3 @@ export const VARIANT_WORDS = data.variantWords;
 export const APPENDIX_WORDS = data.appendixWords;
 export const TABLE_RULE_IDS = ['C01', 'C02', 'V01', 'T01'] as const;
 export type TableRuleId = typeof TABLE_RULE_IDS[number];
-
