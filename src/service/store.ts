@@ -35,7 +35,7 @@ import { customAnalysisKindDefinition, customAnalysisPlan } from './analysis/cus
 import { withModelClarification } from './provider/clarification-contract.js';
 import { CUSTOM_ANALYSIS_DIMENSION_STATE_LABELS, CUSTOM_ANALYSIS_UNIT_PLACEHOLDER, MAX_CUSTOM_ANALYSIS_ROWS_SHOWN, customAnalysisKindId, MAX_CUSTOM_ANALYSIS_VERSIONS_SHOWN, customAnalysisDimensionIdOfKind, customAnalysisModeGoal, isCustomAnalysisDimensionId, isCustomAnalysisKindId } from '../shared/protocol.js';
 import type { CustomAnalysisDimensionProjection, CustomAnalysisDimensionsProjection, CustomAnalysisRevisionSummaryProjection, CustomAnalysisRowProjection, PrepareCustomAnalysisInput, SaveCustomAnalysisDimensionInput } from '../shared/protocol.js';
-import { HousePreferenceInfluence, HouseReviewPreferenceLedger, houseReviewPreferenceKindDefinition, housePreferenceSources, initializeHouseReviewPreferenceSchema, preferenceNames, preferenceSourceIdentity, preferenceSourceWithdrawal, withdrawalOf, withoutNames, type HousePreferenceSource, type StandingReviewMaterial } from './house-review-preference.js';
+import { HouseReviewPreferenceLedger, houseReviewPreferenceKindDefinition, initializeHouseReviewPreferenceSchema, preferenceNames, withdrawalOf, withoutNames } from './house-review-preference.js';
 import { inspectEditQualitySignals as readEditQualitySignals } from './edit-quality-signals.js';
 import type { HouseReviewPreferenceProjection, HouseReviewPreferenceUse, EditQualitySignalsProjection } from '../shared/protocol.js';
 import type { ApplyReceiptProjection, BatchProposalDecisionDraftInput, InspectApplyReceiptInput, PrepareReverseApplyInput, ProposalDraftBatchProjection, ProposalWorkspaceInput, ProposalWorkspaceProjection, RecordProposalDecisionInput, ReverseApplyPreparationProjection, SaveProposalDecisionDraftInput } from '../shared/protocol.js';
@@ -73,7 +73,7 @@ import {
 } from './store-records.js';
 // The store's error types are still read from here by every caller that catches them.
 export { StoreError, StoreFatalError };
-import { acceptedSourceImportRetainedBoundaryLabels, sourceImportRetainedBoundaryLabel, BASELINE_ANALYSIS_MODE_GOALS, BASELINE_ANALYSIS_MODE_LABELS, J03_TASK_GOAL, MAX_DIALOGUE_SELECTION_GRAPHEMES, MAX_EVALUATION_CALIBRATION_BOOKS, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_LEARNING_AUDIT_BOOK_CHOICES, MAX_LEARNING_AUDIT_PAGE, MAX_LEARNING_AUDIT_SERIES_CHOICES, MAX_LEARNING_LINEAGE_DECISIONS, MAX_LEARNING_LINEAGE_TASKS, MAX_LEARNING_REMEDIATION_ITEMS, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
+import { acceptedSourceImportRetainedBoundaryLabels, sourceImportRetainedBoundaryLabel, BASELINE_ANALYSIS_MODE_GOALS, BASELINE_ANALYSIS_MODE_LABELS, J03_TASK_GOAL, MAX_DIALOGUE_SELECTION_GRAPHEMES, MAX_EVALUATION_CALIBRATION_BOOKS, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_LEARNING_AUDIT_PAGE, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
 import type {
   ControlTaskRunInput,
   EditTaskPlanInput,
@@ -214,7 +214,6 @@ import type {
   RecordChangeSuggestionDecisionInput,
   RecordProposalDecisionFeedbackInput,
   DecideLearningMaterialInput,
-  FeedbackHistoryEntryProjection,
   InspectEvaluationCalibrationInput,
   EvaluationCalibrationBookProjection,
   BookSeriesProjection,
@@ -272,7 +271,6 @@ import type {
   LearningAuditBookProjection,
   LearningAuditInput,
   LearningAuditMaterialProjection,
-  LearningAuditChoicesProjection,
   LearningAuditProjection,
   LearningLineageProjection,
   LearningRemediationOutcomeProjection,
@@ -548,7 +546,6 @@ import {
   readApplyOutcomeAttention,
   readRecoveryAttention,
   recentWindowStart,
-  type LearningMaterialsAttentionReading,
   type UnconfirmedAttentionReading,
 } from './global-attention.js';
 import { ALWAYS_ONLINE, type TaskPlanConnectivity } from './connectivity.js';
@@ -835,32 +832,20 @@ import {
   type FinalizedEvaluation,
   type InitialEvaluationFacts,
 } from './evaluation-records.js';
-import { AnalysisFeedbackError, AnalysisFeedbackLedger, analysisFeedbackItems, initializeAnalysisFeedbackSchema } from './analysis-feedback.js';
+import { AnalysisFeedbackError, AnalysisFeedbackLedger, initializeAnalysisFeedbackSchema } from './analysis-feedback.js';
 import { OutcomeResolutionLedger, initializeOutcomeResolutionSchema } from './analysis/outcome-resolutions.js';
 import { DecisionFeedbackError, DecisionFeedbackLedger, initializeDecisionFeedbackSchema } from './decision-feedback.js';
 import {
-  DIMENSION_LABELS,
-  DISPOSITION_LABELS,
-  JUDGMENT_LABELS,
   LOCAL_LEARNING_POLICY_BASIS,
   LearningEligibilityError,
-  analysisReasonLabel,
   LearningEligibilityLedger,
   analysisFeedbackCandidate,
-  feedbackHistoryPage,
-  feedbackReasonExcerpt,
   initializeLearningEligibilitySchema,
-  learningAuditChoices,
-  learningAuditStanding,
   learningMaterialDigest,
   wordTrackedEditCandidate,
-  learningMaterialOrder,
-  LEARNING_REMEDIATION_NAMED,
-  learningRemediationPreview,
   proposalDecisionCandidate,
   reviewDispositionCandidate,
   type LearningMaterialCandidate,
-  type LearningRemediationReach,
 } from './learning-eligibility.js';
 import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, HISTORICAL_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryEntry } from './review/category-configuration.js';
 import { EvaluationCalibrationError, EvaluationCalibrationLedger, initializeEvaluationCalibrationSchema } from './evaluation-calibration.js';
@@ -878,7 +863,6 @@ import {
   predictionAvailable,
 } from '../shared/evaluation-calibration.js';
 import {
-  MAX_FEEDBACK_HISTORY_ENTRIES,
   MAX_SERIES_MEMBERS_PAGE,
   PUBLICATION_ACTUALS_RECORDED_STATE,
 } from '../shared/protocol.js';
@@ -1139,6 +1123,7 @@ import {
 import * as seriesOperations from './series.js';
 import * as capturedProcedureOperations from './captured-procedures.js';
 import * as evaluationRewriteOperations from './evaluation-rewrites.js';
+import * as learningSupervision from './house-review-preference.js';
 
 const TOKEN_PATTERN = UUID_PATTERN;
 const CORE_SCHEMA_VERSION = 5;
@@ -4961,7 +4946,7 @@ export class EditorialStore {
       learningLedger: () => this.#learningLedger(),
       ledgerOf: (entry, materials, digest, bookId, preference, version) => this.#reviewLedgerOf(entry, materials, digest, bookId, preference, version),
       housePreference: (bookId, categoryId, kind, policy) => {
-        const use = new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).use(this.#baselineAnalysis.launch.operationalScope, bookId, categoryId, this.#housePreferencePeopleNames());
+        const use = new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).use(this.#baselineAnalysis.launch.operationalScope, bookId, categoryId, learningSupervision.housePreferencePeopleNames(this.#learningSupervisionHost));
         if (use === null) return null;
         // The kind's one foreground rule must name the category; the live admission asks the same again before any dispatch.
         const rules = policy.providerProcessing.admittedRules.filter((rule) => rule.backgroundOrigin !== true && rule.taskKinds.includes(kind));
@@ -12619,7 +12604,7 @@ export class EditorialStore {
    */
   inspectAnalysisFeedback(bookId: string, revisionId: string): AnalysisFeedbackProjection {
     return this.#feedbackCall(() => {
-      const revision = this.#feedbackRevision(bookId, revisionId);
+      const revision = learningSupervision.feedbackRevision(this.#learningSupervisionHost, bookId, revisionId);
       return this.#analysisFeedback.projection(bookId, revision.bound, revision.items);
     });
   }
@@ -12627,7 +12612,7 @@ export class EditorialStore {
   /** 记录反馈: one explicit judgment appended as a Quality Signal, and the revision's feedback as it now reads. */
   recordAnalysisFeedback(input: RecordAnalysisFeedbackInput & { bookId: string }): AnalysisFeedbackProjection {
     return this.#feedbackCall(() => {
-      const revision = this.#feedbackRevision(input.bookId, input.revisionId);
+      const revision = learningSupervision.feedbackRevision(this.#learningSupervisionHost, input.bookId, input.revisionId);
       this.#transaction(this.#authority, () => this.#analysisFeedback.record(input.bookId, revision.bound, revision.items, input));
       return this.#analysisFeedback.projection(input.bookId, revision.bound, revision.items);
     });
@@ -12658,7 +12643,7 @@ export class EditorialStore {
         const id = asString(row.book_id);
         const title = asString(row.title);
         if (bookId !== null) namedTitle = title;
-        const materials = this.#learningMaterialsPage(id, id === after?.bookId ? after : null,
+        const materials = learningSupervision.learningMaterialsPage(this.#learningSupervisionHost, id, id === after?.bookId ? after : null,
           MAX_LEARNING_MATERIALS_PAGE + 1 - collected.length);
         for (const { material, orderedAt } of materials) {
           collected.push({ bookId: id, title, material, orderedAt });
@@ -12672,7 +12657,7 @@ export class EditorialStore {
       let more = collected.length > MAX_LEARNING_MATERIALS_PAGE;
       for (const entry of collected.slice(0, MAX_LEARNING_MATERIALS_PAGE)) {
         const book = books.at(-1);
-        const heading = book?.bookId === entry.bookId ? null : this.#learningBookOf(entry.bookId, entry.title);
+        const heading = book?.bookId === entry.bookId ? null : learningSupervision.learningBookOf(this.#learningSupervisionHost, entry.bookId, entry.title);
         const weight = Buffer.byteLength(JSON.stringify(entry.material), 'utf8') + 1 +
           (heading === null ? 0 : Buffer.byteLength(JSON.stringify({ ...heading, materials: [] }), 'utf8') + 1);
         if (shown.length > 0 && bytes + weight > MAX_FRAME_BYTES / 2) {
@@ -12685,7 +12670,7 @@ export class EditorialStore {
         bytes += weight;
       }
       // A Book named by itself is shown even while it has no material.
-      if (bookId !== null && after === null && books.length === 0 && namedTitle !== null) books.push({ ...this.#learningBookOf(bookId, namedTitle), materials: [] });
+      if (bookId !== null && after === null && books.length === 0 && namedTitle !== null) books.push({ ...learningSupervision.learningBookOf(this.#learningSupervisionHost, bookId, namedTitle), materials: [] });
       const last = shown.at(-1);
       return {
         basis: LOCAL_LEARNING_POLICY_BASIS.text,
@@ -12701,7 +12686,7 @@ export class EditorialStore {
   inspectLearningMaterial(bookId: string, materialKey: string): LearningMaterialProjection {
     return this.#learningCall(() => {
       requireStore(UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
-      const candidate = this.#learningCandidateOf(bookId, materialKey, true);
+      const candidate = learningSupervision.learningCandidateOf(this.#learningSupervisionHost, bookId, materialKey, true);
       requireStore(candidate !== null, 'LEARNING_MATERIAL_NOT_FOUND', '这条材料已经不在学习准入之列。');
       return { ...this.#learningEligibility.project(bookId, [candidate])[0]!, ...this.#learningMaterialSource(bookId, candidate) };
     });
@@ -12712,7 +12697,7 @@ export class EditorialStore {
     this.#learningCall(() => {
       requireStore(UUID_PATTERN.test(input.bookId), 'BOOK_INVALID', '图书标识无效。');
       this.#transaction(this.#authority, () => {
-        const candidate = this.#learningCandidateOf(input.bookId, input.materialKey, false);
+        const candidate = learningSupervision.learningCandidateOf(this.#learningSupervisionHost, input.bookId, input.materialKey, false);
         requireStore(candidate !== null, 'LEARNING_MATERIAL_NOT_FOUND', '这条材料已经不在学习准入之列。');
         requireStore(learningMaterialDigest(candidate) === input.materialDigest, 'LEARNING_MATERIAL_CHANGED', '这条材料在你打开后改过；请看过现在的内容再定。');
         const people = this.#bookPeople.current(input.bookId);
@@ -12724,7 +12709,7 @@ export class EditorialStore {
           note: input.note,
           attribution: { peopleVersion: people.version, authors: people.authors, editors: people.editors },
         });
-        this.#rebuildHouseReviewPreference();
+        learningSupervision.rebuildStoredHouseReviewPreference(this.#learningSupervisionHost);
       });
     });
     // The one material it decided: the page it sits on is never re-sent whole.
@@ -12880,7 +12865,7 @@ export class EditorialStore {
       const envelope = budget === undefined ? undefined : this.#curationEnvelope(budget);
       requireStore(budget === undefined || validCurationBudget(budget) && envelope !== null, 'LEARNING_ENVELOPE_UNAVAILABLE', '学习整理缺少有效的模型、策略或预算范围。');
       this.#learningLedger().change(input, envelope ?? undefined);
-      this.#rebuildHouseReviewPreference();
+      learningSupervision.rebuildStoredHouseReviewPreference(this.#learningSupervisionHost);
       return this.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
     }));
   }
@@ -12895,7 +12880,7 @@ export class EditorialStore {
   acceptEditorialMemory(input: import('../shared/protocol/learning.js').AcceptEditorialMemoryInput): EditorialLearningProjection {
     return this.#learningCall(() => this.#transaction(this.#authority, () => {
       this.#learningLedger().accept(input, this.#baselineAnalysis.launch.operationalScope);
-      new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).refreshGovernance(this.#baselineAnalysis.launch.operationalScope, this.#housePreferencePeopleNames(), 'memory');
+      new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).refreshGovernance(this.#baselineAnalysis.launch.operationalScope, learningSupervision.housePreferencePeopleNames(this.#learningSupervisionHost), 'memory');
       return this.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
     }));
   }
@@ -12903,7 +12888,7 @@ export class EditorialStore {
   deactivateEditorialMemory(input: DeactivateEditorialMemoryInput): EditorialLearningProjection {
     return this.#learningCall(() => this.#transaction(this.#authority, () => {
       this.#learningLedger().deactivate(input, this.#baselineAnalysis.launch.operationalScope);
-      new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).refreshGovernance(this.#baselineAnalysis.launch.operationalScope, this.#housePreferencePeopleNames());
+      new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).refreshGovernance(this.#baselineAnalysis.launch.operationalScope, learningSupervision.housePreferencePeopleNames(this.#learningSupervisionHost));
       return this.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
     }));
   }
@@ -13100,7 +13085,7 @@ export class EditorialStore {
 
   /** One name set for listing and the final-gate recheck: the base lines' attributed people and the house's people now. */
   #globalAgentNames(preference: HouseReviewPreferenceVersion | null): string[] {
-    return preferenceNames(preference?.governance?.baseLines ?? preference?.lines ?? [], this.#housePreferencePeopleNames());
+    return preferenceNames(preference?.governance?.baseLines ?? preference?.lines ?? [], learningSupervision.housePreferencePeopleNames(this.#learningSupervisionHost));
   }
 
   /** A disclosure read creates no Task, attempt, log, credential release or transmission. */
@@ -13176,87 +13161,46 @@ export class EditorialStore {
     });
   }
 
+  /** What the 学习监督 operations in house-review-preference.ts reach of the store (Issue #1172), read live. */
+  readonly #learningSupervisionHost: learningSupervision.LearningSupervisionStoreHost = this.#learningSupervisionHostOf();
+
+  #learningSupervisionHostOf(): learningSupervision.LearningSupervisionStoreHost {
+    const store = this;
+    return {
+      get analysisFeedback() { return store.#analysisFeedback; },
+      get authority() { return store.#authority; },
+      get baselineAnalysis() { return store.#baselineAnalysis; },
+      get bookPeople() { return store.#bookPeople; },
+      editorialMemoryGovernanceHooks: this.#editorialMemoryGovernanceHooks.bind(this),
+      evaluationBookTitle: this.#evaluationBookTitle.bind(this),
+      inspectBaselineAnalysis: this.inspectBaselineAnalysis.bind(this),
+      inspectGlobalAgent: this.inspectGlobalAgent.bind(this),
+      inspectLearningMaterial: this.inspectLearningMaterial.bind(this),
+      learningCall: this.#learningCall.bind(this),
+      learningCandidates: this.#learningCandidates.bind(this),
+      get learningEligibility() { return store.#learningEligibility; },
+      learningLedger: this.#learningLedger.bind(this),
+      learningMaterialSource: this.#learningMaterialSource.bind(this),
+      get reviewRuns() { return store.#reviewRuns; },
+      get series() { return store.#series; },
+      transaction: this.#transaction.bind(this),
+    };
+  }
+
   recordLearningSupervision(input: RecordLearningSupervisionInput): GlobalAgentProjection {
-    this.#learningCall(() => this.#transaction(this.#authority, () => {
-      const current = this.inspectGlobalAgent();
-      requireStore(reviewCategoryEntry(input.categoryId) !== null, 'REVIEW_CATEGORY_INVALID', '请选择有效的审阅类别。');
-      if (input.scope.kind === 'book') requireStore(this.#authority.prepare('SELECT 1 FROM books WHERE book_id = ?').get(input.scope.bookId) !== undefined,
-        'BOOK_INVALID', '监督范围的图书不存在。');
-      const memoryTargets = input.targets.filter((pin) => this.#authority.prepare('SELECT 1 FROM global_editorial_memory_items WHERE item_id = ?').get(pin.itemId));
-      requireStore(memoryTargets.length === 0 || memoryTargets.length === input.targets.length, 'LEARNING_SUPERVISION_INVALID', '请分别治理记忆与偏好条目。');
-      const directive = new SupervisionDirectives(this.#authority).record(current.operationalScope, input, current.items);
-      if (memoryTargets.length > 0) {
-        this.#editorialMemoryGovernanceHooks().govern(directive, memoryTargets);
-      }
-      // Only an action that adds text is refused at the bound; a guide, freeze or deactivation lets derived lines yield as a rebuild does.
-      const addsText = input.operation === 'create' || input.operation === 'merge' || input.operation === 'correct' ||
-        input.operation === 'supervise' && input.effect === 'correct';
-      new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).refreshGovernance(current.operationalScope, this.#housePreferencePeopleNames(),
-        addsText && (memoryTargets.length > 0 ? 'memory' : true));
-    }));
-    return this.inspectGlobalAgent();
+    return learningSupervision.recordLearningSupervision(this.#learningSupervisionHost, input);
   }
 
   inspectHouseReviewPreference(): HouseReviewPreferenceProjection {
-    return this.#learningCall(() => {
-      const operationalScope = this.#baselineAnalysis.launch.operationalScope;
-      const history = new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).history(operationalScope);
-      // Its disclosure states the basis 学习准入 decisions now record (Issue #1082); the record, lineage and use are unchanged.
-      return { operationalScope, current: history.at(-1) ?? null,
-        history: history.map(({ versionId, ordinal, recordedAt, sourceCount }) => ({ versionId, ordinal, recordedAt, sourceCount })), basis: LOCAL_LEARNING_POLICY_BASIS.text };
-    });
+    return learningSupervision.inspectHouseReviewPreference(this.#learningSupervisionHost);
   }
 
   rebuildHouseReviewPreference(): HouseReviewPreferenceProjection {
-    this.#learningCall(() => this.#transaction(this.#authority, () => this.#rebuildHouseReviewPreference()));
-    return this.inspectHouseReviewPreference();
+    return learningSupervision.rebuildHouseReviewPreference(this.#learningSupervisionHost);
   }
 
-  /**
-   * The house record from every Book's review material as it stands (Issue #911): the sources are read, and filtered by
-   * eligibility and by the scope of the Result Set Revision each came from, in `house-review-preference.ts`; every person the
-   * house's Books name now is kept out of the lines besides each decision's own attribution.
-   */
-  #housePreferencePeopleNames(): string[] {
-    const names: string[] = [];
-    for (const book of this.#authority.prepare('SELECT book_id FROM books ORDER BY book_id').iterate()) {
-      const people = this.#bookPeople.current(String(book.book_id));
-      names.push(...people.authors, ...people.editors, ...people.related.map((person) => person.name));
-    }
-    return names;
-  }
-
-  #rebuildHouseReviewPreference(): void {
-    const scope = this.#baselineAnalysis.launch.operationalScope;
-    const sources: HousePreferenceSource[] = [];
-    const names = this.#housePreferencePeopleNames();
-    for (const book of this.#authority.prepare('SELECT book_id, title FROM books ORDER BY book_id').iterate() as IterableIterator<SqlRow>) {
-      const bookId = asString(book.book_id);
-      sources.push(...housePreferenceSources(this.#authority, scope, { bookId, title: asString(book.title) }, this.#standingMaterials(bookId),
-        (categoryId) => reviewCategoryEntry(categoryId)?.label ?? categoryId));
-    }
-    new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).rebuild(scope, sources, names);
-  }
-
-  /** Each of one Book's Learning Materials where it stands, a decided one with the newest decision of its chain. */
-  *#standingMaterials(bookId: string): IterableIterator<StandingReviewMaterial> {
-    // Word retention grants no preference-source admission, so its pairs are not even enumerated here.
-    for (const [candidate, projection] of this.#learningEligibility.projectCandidates(bookId, this.#learningCandidates(bookId, false, false))) {
-      const latest = projection.state === 'decided' ? this.#learningEligibility.history(bookId, candidate.materialKey).at(-1) ?? null : null;
-      yield { candidate, state: projection.state, materialDigest: projection.digest,
-        decision: latest === null ? null : { decisionId: latest.decisionId, choice: latest.choice, attribution: latest.attribution } };
-    }
-  }
-
-  /**
-   * 质量与学习 › 反馈历史 (Issue #61, plan slice S26c; FDBK-009, FDBK-010, FDBK-013): the editor's feedback, newest first — each
-   * 修改建议's current decision with its reason as it stands, each analysis item's latest judgment, each 审阅 finding's latest
-   * 忽略 — with where it opens and the Book's people it is attributed to: the version in force when it was given, or the first
-   * saved after it (Issue #61 review). One answer holds what `feedbackHistoryPage` admits, each reason bounded. Passive
-   * history: a read, asking nothing.
-   */
   inspectFeedbackHistory(input: FeedbackHistoryInput = {}): FeedbackHistoryProjection {
-    return this.#readFeedbackHistory(input);
+    return learningSupervision.inspectFeedbackHistory(this.#learningSupervisionHost, input);
   }
 
   /**
@@ -13300,7 +13244,7 @@ export class EditorialStore {
         const id = asString(row.book_id);
         if (members !== null && !members.has(id)) continue;
         const title = asString(row.title);
-        const { page, count } = this.#learningAuditPage(id, id === after?.bookId ? after : null, MAX_LEARNING_AUDIT_PAGE + 1 - collected.length, matches);
+        const { page, count } = learningSupervision.learningAuditPage(this.#learningSupervisionHost, id, id === after?.bookId ? after : null, MAX_LEARNING_AUDIT_PAGE + 1 - collected.length, matches);
         counts.set(id, count);
         for (const { material, orderedAt } of page) {
           collected.push({ bookId: id, title, material, orderedAt });
@@ -13336,388 +13280,21 @@ export class EditorialStore {
         nextCursor: more && last !== undefined
           ? { bookTitle: last.title, bookId: last.bookId, orderedAt: last.orderedAt, materialKey: last.material.materialKey }
           : null,
-        choices: this.#learningAuditChoices(input.bookId ?? null),
+        choices: learningSupervision.readLearningAuditChoices(this.#learningSupervisionHost, input.bookId ?? null),
       };
     });
   }
 
-  /**
-   * 学习回溯's filter choices (LAUD-002; Issue #677): the house's Books and Series by title, read one beyond each bound, and the
-   * Book the filter names. A damaged Series record leaves the Series out rather than failing the audit, which reads none.
-   */
-  #learningAuditChoices(chosenBookId: string | null): LearningAuditChoicesProjection {
-    const books = (this.#authority.prepare('SELECT book_id, title FROM books ORDER BY title, book_id LIMIT ?')
-      .all(MAX_LEARNING_AUDIT_BOOK_CHOICES + 1) as SqlRow[]).map((row) => ({ bookId: asString(row.book_id), title: asString(row.title) }));
-    let series: Array<{ seriesId: string; title: string }> | null;
-    try {
-      series = this.#series.listAfter(null, MAX_LEARNING_AUDIT_SERIES_CHOICES + 1).map((entry) => ({ seriesId: entry.seriesId, title: entry.title }));
-    } catch (error) {
-      if (!(error instanceof SeriesError)) throw error;
-      series = null;
-    }
-    const chosen = chosenBookId === null
-      ? null
-      : this.#authority.prepare('SELECT book_id, title FROM books WHERE book_id = ?').get(chosenBookId) as SqlRow | undefined;
-    return learningAuditChoices(books, series, chosen == null ? null : { bookId: asString(chosen.book_id), title: asString(chosen.title) });
-  }
-
-  /** One Book's matching materials after the cursor, the next `limit` in order, and how many match in all. */
-  #learningAuditPage(
-    bookId: string,
-    after: LearningMaterialCursor | null,
-    limit: number,
-    matches: (candidate: LearningMaterialCandidate, standing: string) => boolean,
-  ): { page: Array<{ material: LearningAuditMaterialProjection; orderedAt: string }>; count: number } {
-    const kept: Array<{ candidate: LearningMaterialCandidate; material: LearningAuditMaterialProjection }> = [];
-    let count = 0;
-    for (const [candidate, projection] of this.#learningEligibility.projectCandidates(bookId, this.#learningCandidates(bookId, true))) {
-      const standing = learningAuditStanding(projection);
-      if (!matches(candidate, standing)) continue;
-      count += 1;
-      if (after !== null && learningMaterialOrder(candidate, after) <= 0) continue;
-      const material: LearningAuditMaterialProjection = {
-        materialKey: projection.materialKey,
-        kind: projection.kind,
-        digest: projection.digest,
-        originLabel: projection.originLabel,
-        recordedAt: projection.recordedAt,
-        excerpt: projection.excerpt,
-        standing,
-        decisions: projection.decisions,
-        decidedAt: projection.decision?.decidedAt ?? null,
-        downstreamTasks: 0,
-      };
-      const index = kept.findIndex((entry) => learningMaterialOrder(candidate, entry.candidate) < 0);
-      if (index < 0) {
-        if (kept.length < limit) kept.push({ candidate, material });
-      } else {
-        kept.splice(index, 0, { candidate, material });
-        if (kept.length > limit) kept.pop();
-      }
-    }
-    // 使用过的任务 for the materials the page keeps (Issue #912; LAUD-001): read once for the page, never for every match.
-    const influence = kept.length === 0 ? null : new HousePreferenceInfluence(this.#authority, this.#baselineAnalysis.launch.operationalScope);
-    return { page: kept.map(({ candidate, material }) => ({
-      material: { ...material, downstreamTasks: this.#materialInfluence(bookId, material.materialKey, influence!).tasks.length,
-        ...(candidate.source.kind === 'word-tracked-edit' ? { wordCurrentEligibility: this.#learningLedger().wordCurrentEligibility(
-          bookId, candidate.source.sampleId, candidate.source.sampleDigest) } : {}),
-        automaticAdmission: this.#learningLedger().automaticAdmissionFor(bookId, material.materialKey, material.digest, this.#baselineAnalysis.launch.operationalScope) },
-      orderedAt: candidate.orderedAt,
-    })), count };
-  }
-
-  /**
-   * What came of one material after its decisions (Issue #912; LAUD-003, LAUD-004): the 本社审阅偏好 versions of this launch's
-   * scope with a line it supports — its 学习信号 — and every Review Run category whose pinned version carried such a line, as
-   * it is now; its 使用过的任务 are those that sent anything. Only real consumption is read.
-   */
-  #materialInfluence(bookId: string, materialKey: string, influence: HousePreferenceInfluence): {
-    signals: ReturnType<HousePreferenceInfluence['signalsOf']>;
-    uses: Array<ReturnType<ReviewRunStore['influenceUses']>[number] & { versionOrdinal: number; withdrawn: boolean }>;
-    tasks: Array<ReturnType<ReviewRunStore['influenceUses']>[number] & { versionOrdinal: number; withdrawn: boolean }>;
-  } {
-    const decisionIds = new Set([...this.#learningEligibility.history(bookId, materialKey).map((entry) => entry.decisionId),
-      ...this.#learningLedger().sourceKeys(bookId, [materialKey])]);
-    const uses = influence.usesOf(decisionIds).flatMap((pin) => {
-      const withdrawn = pin.sources.some((source) => decisionIds.has(preferenceSourceIdentity(source)) &&
-        preferenceSourceWithdrawal(this.#authority, source).withdrawnAt !== null);
-      return this.#reviewRuns.influenceUses([pin]).map((use) => ({ ...use, versionOrdinal: pin.version.ordinal, withdrawn }));
-    });
-    return { signals: influence.signalsOf(decisionIds), uses, tasks: uses.filter((use) => use.consumed) };
-  }
-
-  /**
-   * What 停止今后使用 of the included materials reaches (Issue #912; LAUD-006, LAUD-008): the lines of the current 本社审阅偏好
-   * version they support, and the Review Run category Tasks whose pinned version reads them — approved and not finished, which
-   * stop before their next read; prepared and not approved, whose approval is refused; finished, which keep their result and
-   * gain the marker.
-   */
-  #remediationReach(bookId: string, materialKeys: ReadonlyArray<string>): ReturnType<LearningRemediationReach> & { approved: Array<{ reviewRunId: string; categoryId: string }> } {
-    const influence = new HousePreferenceInfluence(this.#authority, this.#baselineAnalysis.launch.operationalScope);
-    const decisionIds = new Set([...materialKeys.flatMap((key) => this.#learningEligibility.history(bookId, key).map((entry) => entry.decisionId)),
-      ...this.#learningLedger().sourceKeys(bookId, materialKeys)]);
-    const current = influence.versions.at(-1) ?? null;
-    const uses = this.#reviewRuns.influenceUses(influence.usesOf(decisionIds));
-    const running = uses.filter((use) => use.state === 'running' || use.state === 'approved');
-    const completed = uses.filter((use) => use.state === 'completed');
-    return {
-      currentVersion: current?.ordinal ?? null,
-      linesAffected: current?.lines.filter((line) => line.sources.some((source) => decisionIds.has(preferenceSourceIdentity(source)))).length ?? 0,
-      memory: this.#learningLedger().affectedMemoryCount(bookId, materialKeys),
-      running: running.length,
-      prepared: uses.filter((use) => use.state === 'prepared').length,
-      completed: completed.length,
-      runningNamed: running.slice(0, LEARNING_REMEDIATION_NAMED).map((use) => use.label),
-      completedNamed: completed.slice(0, LEARNING_REMEDIATION_NAMED).map((use) => use.label),
-      approved: uses.filter((use) => use.state === 'approved').map(({ reviewRunId, categoryId }) => ({ reviewRunId, categoryId })),
-    };
-  }
-
-  /**
-   * A Learning Lineage Explorer (Issue #62, S27a; LAUD-003 to LAUD-005): the material, every decision of its chain — the one
-   * that stands and each it superseded, none rewritten — and what came of it after. No Learning Signal, Memory Candidate,
-   * enabled memory or Task use is made of learning material in AI7 yet, so those stages count none. A read.
-   */
   inspectLearningLineage(bookId: string, materialKey: string): LearningLineageProjection {
-    return this.#learningCall(() => {
-      const material = this.inspectLearningMaterial(bookId, materialKey);
-      const chain = this.#learningEligibility.history(bookId, materialKey);
-      const shown = chain.slice(-MAX_LEARNING_LINEAGE_DECISIONS);
-      const last = chain.at(-1);
-      return {
-        bookId,
-        bookTitle: this.#evaluationBookTitle(bookId),
-        material,
-        standing: learningAuditStanding(material),
-        automaticAdmission: this.#learningLedger().automaticAdmissionFor(bookId, materialKey, material.digest, this.#baselineAnalysis.launch.operationalScope),
-        decisions: shown.map((entry) => ({
-          decisionId: entry.decisionId,
-          ordinal: entry.ordinal,
-          choice: entry.choice,
-          note: entry.note,
-          recordedAt: entry.recordedAt,
-          superseded: entry !== last,
-          currentVersion: entry.materialDigest === material.digest,
-          via: entry.remediationPreview === null ? 'learning-eligibility' as const : 'learning-audit' as const,
-          attribution: entry.attribution,
-          audit: {
-            materialDigest: entry.materialDigest,
-            supersedes: entry.supersedes,
-            recordDigest: entry.recordDigest,
-            basis: `${entry.basis.policy}@${entry.basis.version} · ${entry.basis.mode}`,
-            remediationPreview: entry.remediationPreview,
-          },
-        })),
-        earlierDecisions: chain.length - shown.length,
-        ...(() => {
-          const { signals, tasks } = this.#materialInfluence(bookId, materialKey, new HousePreferenceInfluence(this.#authority, this.#baselineAnalysis.launch.operationalScope));
-          const current = this.#authority.prepare('SELECT version_id FROM house_review_preference_versions WHERE operational_scope = ? ORDER BY ordinal DESC LIMIT 1')
-            .get(this.#baselineAnalysis.launch.operationalScope) as SqlRow | undefined;
-          const listed = tasks.slice(-MAX_LEARNING_LINEAGE_TASKS);
-          return {
-            downstream: { signals: signals.length, memoryCandidates: this.#learningLedger().candidateMemoryCount(bookId, materialKey),
-              activeMemories: this.#learningLedger().activeMemoryCount(bookId, [materialKey]), tasks: tasks.length },
-            signals: signals.map(({ version, lines }) => ({ versionId: version.versionId, ordinal: version.ordinal, recordedAt: version.recordedAt,
-              current: current !== undefined && asString(current.version_id) === version.versionId, lines })),
-            tasks: listed.map((use) => ({ bookId: use.bookId, reviewRunId: use.reviewRunId, label: use.label, versionOrdinal: use.versionOrdinal,
-              use: use.state === 'completed' ? 'completed' as const : use.state === 'running' ? 'running' as const : 'stopped' as const,
-              marked: use.state === 'completed' && use.withdrawn })),
-            earlierTasks: tasks.length - listed.length,
-          };
-        })(),
-      };
-    });
+    return learningSupervision.inspectLearningLineage(this.#learningSupervisionHost, bookId, materialKey);
   }
 
-  /** 停止今后使用's 学习补救影响预览 (Issue #62, S27a; LAUD-006, LAUD-010, LAUD-011). A read. */
   previewLearningRemediation(input: PreviewLearningRemediationInput): LearningRemediationPreviewProjection {
-    return this.#learningCall(() => this.#learningRemediation(input).preview);
+    return learningSupervision.previewLearningRemediation(this.#learningSupervisionHost, input);
   }
 
-  /**
-   * 确认停止今后使用 (Issue #62, S27a; LAUD-007, LAUD-009, LAUD-011): against the exact preview the editor read — refused once
-   * anything it shows moved — each included material gains one `excluded` Learning Eligibility Decision superseding the one
-   * it had, naming the preview, in one transaction; the earlier decision, the material and the record it came from stay as
-   * they were. The answer names each material's own outcome, those left out with why.
-   */
   recordLearningRemediation(input: RecordLearningRemediationInput): LearningRemediationOutcomeProjection {
-    return this.#learningCall(() => this.#transaction(this.#authority, () => {
-      const { preview, found } = this.#learningRemediation(input);
-      requireStore(preview.previewDigest === input.previewDigest, 'LEARNING_REMEDIATION_PREVIEW_STALE',
-        '预览之后，这些学习材料或它们的准入决定有了变化；请重新查看影响，再决定。');
-      requireStore(preview.included.length > 0, 'LEARNING_REMEDIATION_EMPTY', '所选的学习材料都不能停止今后使用：它们现在都没有纳入学习。');
-      const people = this.#bookPeople.current(input.bookId);
-      for (const entry of preview.included) {
-        this.#learningEligibility.decide({
-          bookId: input.bookId,
-          candidate: found.get(entry.materialKey)!,
-          expectedDecisions: input.items.find((item) => item.materialKey === entry.materialKey)!.expectedDecisions,
-          choice: 'excluded',
-          note: null,
-          attribution: { peopleVersion: people.version, authors: people.authors, editors: people.editors },
-          remediationPreview: preview.previewDigest,
-        });
-      }
-      this.#rebuildHouseReviewPreference();
-      // An approved Review Run category whose pinned version reads them and has not begun stops now (Issue #912; LAUD-008);
-      // one reading now stops before its next range, at the execution owner's guard.
-      for (const run of this.#remediationReach(input.bookId, preview.included.map((entry) => entry.materialKey)).approved) {
-        this.#reviewRuns.stopForWithdrawnInfluence(run.reviewRunId, run.categoryId);
-      }
-      return { bookId: input.bookId, recorded: preview.included, leftOut: preview.leftOut };
-    }));
-  }
-
-  #learningRemediation(input: PreviewLearningRemediationInput): { preview: LearningRemediationPreviewProjection; found: Map<string, LearningMaterialCandidate> } {
-    requireStore(UUID_PATTERN.test(input.bookId), 'BOOK_INVALID', '图书标识无效。');
-    requireStore(input.items.length >= 1 && input.items.length <= MAX_LEARNING_REMEDIATION_ITEMS, 'LEARNING_REMEDIATION_INVALID',
-      `停止今后使用要选 1 到 ${MAX_LEARNING_REMEDIATION_ITEMS} 条学习材料。`);
-    const title = this.#evaluationBookTitle(input.bookId);
-    const wanted = new Set(input.items.map((item) => item.materialKey));
-    const found = new Map<string, LearningMaterialCandidate>();
-    const standings = new Map<string, { candidate: LearningMaterialCandidate; projection: Omit<LearningMaterialProjection, 'target' | 'sourceTask'>; automaticEligibility?: 'house' }>();
-    for (const [candidate, projection] of this.#learningEligibility.projectCandidates(input.bookId, this.#learningCandidates(input.bookId, false))) {
-      if (!wanted.has(candidate.materialKey)) continue;
-      found.set(candidate.materialKey, candidate);
-      const automatic = projection.state === 'pending' && projection.decisions === 0 && projection.decision === null
-        ? this.#learningLedger().automaticAdmissionFor(input.bookId, candidate.materialKey, projection.digest, this.#baselineAnalysis.launch.operationalScope) : null;
-      standings.set(candidate.materialKey, { candidate, projection, ...(automatic === null ? {} : { automaticEligibility: automatic.choice }) });
-    }
-    return { preview: learningRemediationPreview({ bookId: input.bookId, title }, input.items, (key) => standings.get(key) ?? null, (keys) => {
-      const { approved: _approved, ...reach } = this.#remediationReach(input.bookId, keys);
-      return reach;
-    }), found };
-  }
-
-  #readFeedbackHistory(input: FeedbackHistoryInput, exactEntryId: string | null = null): FeedbackHistoryProjection {
-    return this.#learningCall(() => {
-      type Entry = Omit<FeedbackHistoryEntryProjection, 'peopleVersion'>;
-      // Keep only the newest response-sized candidates plus one lookahead, regardless of ledger depth or Book count.
-      const entries: Entry[] = [];
-      const newest = (a: Pick<Entry, 'recordedAt' | 'entryId'>, b: Pick<Entry, 'recordedAt' | 'entryId'>): number => a.recordedAt > b.recordedAt ? -1 : a.recordedAt < b.recordedAt ? 1 : a.entryId < b.entryId ? -1 : a.entryId > b.entryId ? 1 : 0;
-      const consider = (entry: Entry): void => {
-        if (exactEntryId !== null && entry.entryId !== exactEntryId) return;
-        if ((input.bookId != null && entry.bookId !== input.bookId) || (input.origin != null && entry.origin !== input.origin) ||
-            (input.recordedFrom != null && entry.recordedAt < input.recordedFrom) ||
-            (input.recordedBefore != null && entry.recordedAt >= input.recordedBefore) ||
-            (Object.hasOwn(input, 'dimension') && entry.dimension !== input.dimension) ||
-            (input.signal != null && entry.signal !== input.signal) ||
-            (input.after != null && newest(entry, input.after) <= 0)) return;
-        if (input.author != null || input.editor != null) {
-          const people = this.#bookPeople.at(entry.bookId, entry.recordedAt);
-          if ((input.author != null && !people?.authors.includes(input.author)) ||
-              (input.editor != null && !people?.editors.includes(input.editor))) return;
-        }
-        const at = entries.findIndex((held) => newest(entry, held) < 0);
-        entries.splice(at < 0 ? entries.length : at, 0, entry);
-        if (entries.length > MAX_FEEDBACK_HISTORY_ENTRIES + 1) entries.pop();
-      };
-      const reasons = new DecisionFeedbackLedger(this.#authority);
-      const decisions = this.#authority.prepare(
-        `SELECT m.book_id, m.mark_id, m.manuscript_id, m.branch_id, m.block_id, m.anchor_state, m.source_origin, m.source_label,
-                d.decision_id, d.disposition, d.recorded_at, r.reason, r.reason_source, r.recorded_at AS reason_recorded_at,
-                (SELECT f.recorded_at FROM proposal_decision_feedback f WHERE f.decision_id = d.decision_id
-                 ORDER BY f.ordinal DESC LIMIT 1) AS feedback_recorded_at
-         FROM editorial_marks m
-         JOIN proposal_change_items i ON i.mark_id = m.mark_id
-         JOIN proposal_item_decisions d ON d.item_id = i.item_id
-         LEFT JOIN proposal_decision_reasons r ON r.decision_id = d.decision_id
-         WHERE m.status IN ('open', 'resolved', 'applied') AND d.disposition <> 'withdrawn'
-           AND d.ordinal = (SELECT max(latest.ordinal) FROM proposal_item_decisions latest WHERE latest.item_id = i.item_id)`,
-      ).iterate() as IterableIterator<SqlRow>;
-      for (const row of decisions) {
-        const decisionId = asString(row.decision_id);
-        const first = row.reason === null || row.reason === undefined
-          ? null
-          : { reason: asString(row.reason), source: asString(row.reason_source) as 'reason-field' | 'suggested' | 'free-text' };
-        const standing = reasons.standing(decisionId, first);
-        const bookId = asString(row.book_id);
-        consider({
-          entryId: `proposal-decision:${decisionId}`,
-          origin: 'proposal-decision',
-          bookId,
-          // A 修改建议 a 审阅 category made is about that category (Issue #61 review); one the editor or a Task made names none.
-          dimension: row.source_origin === 'review-category' ? asString(row.source_label) : null,
-          signal: DISPOSITION_LABELS[asString(row.disposition)] ?? asString(row.disposition),
-          reason: feedbackReasonExcerpt(standing.reason),
-          reasonState: standing.reasonState,
-          // Attribute the displayed current feedback to when it was given, not the older business decision.
-          recordedAt: standing.reasonRevisedAt ?? (row.reason_recorded_at == null
-            ? row.feedback_recorded_at == null ? asString(row.recorded_at) : asString(row.feedback_recorded_at)
-            : asString(row.reason_recorded_at)),
-          target: {
-            kind: 'mark', bookId, manuscriptId: asString(row.manuscript_id), branchId: asString(row.branch_id), blockId: asString(row.block_id),
-            markId: asString(row.mark_id), detached: row.anchor_state === 'detached',
-          },
-        });
-      }
-      for (const book of this.#authority.prepare('SELECT book_id FROM books').iterate() as IterableIterator<SqlRow>) {
-        const bookId = asString(book.book_id);
-        for (const signal of this.#analysisFeedback.latestEntries(bookId)) {
-          const reason = [analysisReasonLabel(signal), signal.correction === null ? null : `修正：${signal.correction}`].filter((part) => part !== null).join(' · ');
-          consider({
-            entryId: `analysis-feedback:${signal.revisionId}/${signal.itemKey}`,
-            origin: 'analysis-feedback',
-            bookId,
-            dimension: DIMENSION_LABELS[signal.dimension],
-            signal: JUDGMENT_LABELS[signal.judgment],
-            reason: feedbackReasonExcerpt(reason.length === 0 ? null : reason),
-            reasonState: reason.length === 0 ? 'none' : 'given',
-            recordedAt: signal.recordedAt,
-            target: { kind: 'analysis', bookId, revisionId: signal.revisionId, itemKey: signal.itemKey, dimension: signal.dimension },
-          });
-        }
-      }
-      const ignored = this.#authority.prepare(
-        `SELECT book_id, review_run_id, finding_id, category_id, reason, recorded_at FROM quality_signals q
-         WHERE kind = 'review-finding-ignored'
-           AND recorded_at = (SELECT max(latest.recorded_at) FROM quality_signals latest
-                              WHERE latest.review_run_id = q.review_run_id AND latest.finding_id = q.finding_id)`,
-      ).iterate() as IterableIterator<SqlRow>;
-      for (const row of ignored) {
-        const bookId = asString(row.book_id);
-        const categoryId = asString(row.category_id);
-        consider({
-          entryId: `review-disposition:${asString(row.review_run_id)}/${asString(row.finding_id)}`,
-          origin: 'review-disposition',
-          bookId,
-          dimension: reviewCategoryEntry(categoryId)?.label ?? categoryId,
-          signal: '忽略',
-          reason: feedbackReasonExcerpt(asString(row.reason)),
-          reasonState: 'given',
-          recordedAt: asString(row.recorded_at),
-          target: { kind: 'review', bookId, reviewRunId: asString(row.review_run_id), findingId: asString(row.finding_id) },
-        });
-      }
-      // Each entry is attributed to the Book's people as they stood when it was given, or as first saved after it.
-      const attributed: FeedbackHistoryEntryProjection[] = entries.map((entry) => ({
-        ...entry, peopleVersion: this.#bookPeople.at(entry.bookId, entry.recordedAt)?.version ?? 0,
-      }));
-      return feedbackHistoryPage(
-        attributed,
-        (bookId) => {
-          const people = this.#bookPeople.current(bookId);
-          return { bookId, title: this.#evaluationBookTitle(bookId), authors: people.authors, editors: people.editors };
-        },
-        (bookId, version) => this.#bookPeople.version(bookId, version),
-      );
-    });
-  }
-
-  /** A Book's heading on the page: its title, its people, and how many materials it has in all. */
-  #learningBookOf(bookId: string, title: string): Omit<LearningMaterialsBookProjection, 'materials'> {
-    const people = this.#bookPeople.current(bookId);
-    let materialCount = 0;
-    for (const _candidate of this.#learningCandidates(bookId, false)) materialCount += 1;
-    return { bookId, title, authors: people.authors, editors: people.editors, materialCount };
-  }
-
-  /** Scan every candidate, retaining only the next bounded page in its stable display order. */
-  #learningMaterialsPage(bookId: string, after: LearningMaterialCursor | null, limit: number): Array<{ material: LearningMaterialProjection; orderedAt: string }> {
-    const candidates: LearningMaterialCandidate[] = [];
-    for (const candidate of this.#learningCandidates(bookId, true)) {
-      if (after !== null && learningMaterialOrder(candidate, after) <= 0) continue;
-      const index = candidates.findIndex((entry) => learningMaterialOrder(candidate, entry) < 0);
-      if (index < 0) {
-        if (candidates.length < limit) candidates.push(candidate);
-      } else {
-        candidates.splice(index, 0, candidate);
-        if (candidates.length > limit) candidates.pop();
-      }
-    }
-    return this.#learningEligibility.project(bookId, candidates).map((material, index) => ({
-      material: { ...material, ...this.#learningMaterialSource(bookId, candidates[index]!) },
-      orderedAt: candidates[index]!.orderedAt,
-    }));
-  }
-
-  /** Exact lookup still exhausts source-chain validation; it never keeps the other candidates. */
-  #learningCandidateOf(bookId: string, materialKey: string, withExcerpt: boolean): LearningMaterialCandidate | null {
-    let found: LearningMaterialCandidate | null = null;
-    for (const candidate of this.#learningCandidates(bookId, withExcerpt)) {
-      if (candidate.materialKey === materialKey) found = candidate;
-    }
-    return found;
+    return learningSupervision.recordLearningRemediation(this.#learningSupervisionHost, input);
   }
 
   /** Resolve the exact source and its originating Task; neither display fact changes the material digest or eligibility. */
@@ -13843,28 +13420,6 @@ export class EditorialStore {
     if (includeWord) yield* this.#learningLedger().wordCandidates(bookId);
   }
 
-  /** Each Book whose Learning Material waits: how many wait for a decision or changed since one, and how many were deferred. */
-  #learningAttention(limit: number): LearningMaterialsAttentionReading[] {
-    const readings: LearningMaterialsAttentionReading[] = [];
-    for (const row of this.#authority.prepare('SELECT book_id, title FROM books ORDER BY title, book_id').iterate() as IterableIterator<SqlRow>) {
-      const bookId = asString(row.book_id);
-      let pending = 0;
-      let deferred = 0;
-      let at = '';
-      // Word retention waits for a future consumer, not a required human inclusion, so it is not enumerated here.
-      for (const material of this.#learningEligibility.projectEntries(bookId, this.#learningCandidates(bookId, false, false))) {
-        if (material.state === 'pending' || material.state === 'changed') pending += 1;
-        else if (material.state === 'deferred') deferred += 1;
-        else continue;
-        if (material.recordedAt > at) at = material.recordedAt;
-      }
-      if (pending === 0 && deferred === 0) continue;
-      readings.push({ bookId, bookTitle: asString(row.title), pending, deferred, at });
-      if (readings.length >= limit) break;
-    }
-    return readings;
-  }
-
   #learningCall<T>(operation: () => T): T {
     this.#assertAvailable();
     this.#learningCallDepth += 1;
@@ -13978,18 +13533,6 @@ export class EditorialStore {
     } finally { if (descriptor !== null) closeSync(descriptor); }
   }
 
-  /** The revision feedback binds: one of this Book's baseline Result Set Revisions, as ②A shows it, and its items. */
-  #feedbackRevision(bookId: string, revisionId: string) {
-    requireStore(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(revisionId), 'ANALYSIS_FEEDBACK_REVISION_NOT_FOUND', '没有这个分析结果修订版。');
-    const projection = this.inspectBaselineAnalysis(bookId, undefined, revisionId);
-    const revision = projection.inspectedRevision?.revision ?? projection.resultSetRevision;
-    requireStore(revision !== null && revision.revisionId === revisionId, 'ANALYSIS_FEEDBACK_REVISION_NOT_FOUND', '没有这个分析结果修订版。');
-    return {
-      bound: { revisionId: revision.revisionId, digest: revision.digest, ordinal: revision.ordinal },
-      items: analysisFeedbackItems(revision),
-    };
-  }
-
   #feedbackCall<T>(operation: () => T): T {
     this.#assertAvailable();
     try {
@@ -14056,7 +13599,7 @@ export class EditorialStore {
       // An editor's words reach a record by a directive or, from /2 on, by an accepted memory: either is refiltered by the house's names now.
       const preferences = new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger());
       if (new SupervisionDirectives(this.#authority).history(scope).length > 0 || preferences.history(scope).at(-1)?.schema === 'ai7.house-review-preference/2')
-        preferences.refreshGovernance(scope, this.#housePreferencePeopleNames());
+        preferences.refreshGovernance(scope, learningSupervision.housePreferencePeopleNames(this.#learningSupervisionHost));
       return result;
     }));
   }
@@ -18236,7 +17779,7 @@ export class EditorialStore {
       const resolved = this.#bounded.resolveBookWorkbenchRoute(route);
       if (route.kind !== 'book') return resolved;
       if (route.feedbackEntryId !== undefined) {
-        const entry = this.#readFeedbackHistory({ bookId: route.bookId }, route.feedbackEntryId).entries[0];
+        const entry = learningSupervision.readFeedbackHistory(this.#learningSupervisionHost, { bookId: route.bookId }, route.feedbackEntryId).entries[0];
         requireStore(resolved.kind === 'book' && entry !== undefined, 'FEEDBACK_SOURCE_NOT_FOUND', '这条反馈的来源记录不存在。');
         requireStore(entry.target.kind !== 'mark' || !entry.target.detached,
           'FEEDBACK_SOURCE_DETACHED', '这条修改建议所在的段落已不在稿件中。');
@@ -18937,7 +18480,7 @@ export class EditorialStore {
     const run = this.#authority.prepare('SELECT task_intent_id FROM analysis_run_records WHERE run_record_id = ?').get(runRecordId) as SqlRow | undefined;
     if (run === undefined) return null;
     try {
-      return new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).governanceChanged(asString(run.task_intent_id), () => this.#housePreferencePeopleNames())
+      return new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).governanceChanged(asString(run.task_intent_id), () => learningSupervision.housePreferencePeopleNames(this.#learningSupervisionHost))
         ? '本社审阅偏好的学习监督已变化' : null;
     } catch (error) {
       if (!(error instanceof LearningEligibilityError)) throw error;
@@ -20022,7 +19565,7 @@ export class EditorialStore {
           reviewCompletions: review.completed,
           maintenance: this.#maintenanceCases.attentionReadings(limit),
           libraryMaterials: this.#libraryMaterials.attentionReadings(limit),
-          learningMaterials: this.#learningAttention(limit),
+          learningMaterials: learningSupervision.learningAttention(this.#learningSupervisionHost, limit),
           materialIndexes: this.#materialIndexAttention(since, limit),
           unconfirmed: this.#unconfirmedAttention(limit),
           // Every Book's unfinished Task Intent Drafts (Issue #423, slice 7a): in 待我处理 only as their own card.
