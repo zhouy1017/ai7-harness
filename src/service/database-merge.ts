@@ -117,6 +117,7 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   word_import_mark_sources: 'owned',
   manuscript_command_groups: 'owned',
   manuscript_command_edits: 'owned',
+  manuscript_block_lineage: 'owned',
   manuscript_entry_positions: 'owned',
   manuscript_outline: 'owned',
   branch_working_state: 'owned',

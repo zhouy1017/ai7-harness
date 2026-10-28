@@ -1331,7 +1331,7 @@ it('migrates revision 88 authorizations and enrollment rows without changing his
     reopened.markCleanShutdown();
   } finally { reopened.close(); }
   withDatabase(true, (db) => {
-    expect(db.prepare('PRAGMA user_version').get()?.user_version).toBe(99);
+    expect(db.prepare('PRAGMA user_version').get()?.user_version).toBe(100);
     expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
     for (const [table, rows] of before) expect(db.prepare(`SELECT rowid, canonical_json, sha256 FROM ${table} ORDER BY rowid`).all()).toEqual(rows);
     for (const table of Object.keys(BACKGROUND_PROCESSING_ENROLLMENT_SCHEMA_SQL)) expect(db.prepare(`SELECT kind FROM ${table}`).all().every((row) => row.kind === 'baseline-analysis')).toBe(true);
@@ -1384,7 +1384,7 @@ it('recovers only the exact pre-stamp authorization shape and refuses an unexpec
   try { expect(recovered.inspectBaselineAnalysis(bookId).authorization?.startWhen).toBe('now'); recovered.markCleanShutdown(); }
   finally { recovered.close(); }
   withDatabase(false, (db) => {
-    expect(db.prepare('PRAGMA user_version').get()?.user_version).toBe(99);
+    expect(db.prepare('PRAGMA user_version').get()?.user_version).toBe(100);
     expect(db.prepare('SELECT rowid, * FROM analysis_run_authorizations ORDER BY rowid').all()).toEqual(snapshot.rows);
     expect(db.prepare("SELECT sql FROM sqlite_schema WHERE name = 'analysis_run_authorizations'").get()?.sql).toBe(CURATION_SCHEMA_SQL.analysis_run_authorizations);
     execPre74Fixture(db, 'PRAGMA user_version = 88; ALTER TABLE analysis_run_authorizations ADD COLUMN unexpected INTEGER');

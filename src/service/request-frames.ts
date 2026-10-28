@@ -2436,7 +2436,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     case 'flushJournalEdit': {
-      const input = requireInput(
+      const input = requireInputWithOptional(
         value.input,
         [
           'clientEditId',
@@ -2451,8 +2451,19 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
           'toGrapheme',
           'insertText',
         ],
+        ['structure'],
         tentativeId,
       );
+      // Protocol 181 (Issue #1175): Enter's split names the new paragraph; Backspace's merge names the paragraph it takes in.
+      const structure = input.structure;
+      if (structure !== undefined && !(isRecord(structure) && (
+        (structure.kind === 'split' && hasExactKeys(structure, ['kind', 'newBlockId']) && isBoundedString(structure.newBlockId, 28) &&
+          /^blk_[0-9a-f]{24}$/.test(structure.newBlockId)) ||
+        (structure.kind === 'merge' && hasExactKeys(structure, ['kind', 'mergedBlockId', 'mergedBlockDigest']) &&
+          isBoundedString(structure.mergedBlockId, 28) && /^blk_[0-9a-f]{24}$/.test(structure.mergedBlockId) &&
+          isBoundedString(structure.mergedBlockDigest, 64) && HEX_DIGEST_PATTERN.test(structure.mergedBlockDigest))))) {
+        throw new ProtocolError(tentativeId);
+      }
       if (
         !isBoundedString(input.clientEditId, 36) ||
         !UUID_PATTERN.test(input.clientEditId) ||
