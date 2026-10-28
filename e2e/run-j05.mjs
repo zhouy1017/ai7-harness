@@ -908,7 +908,8 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="editor"]') && document.querySelector('[data-testid="manuscript-editor"] .editorial-mark')`, 'proposal-restart-editor');
     await assertRenderer(renderer, PAGE_HELPERS, 'proposal-page-helpers');
     await openMarkCard(renderer, 'change-suggestion', proposalBlock, 'proposal-offer-card');
-    await waitFor(renderer, `window.__j05.card()?.querySelector('[data-mark-action="proposal-workspace"]')`, 'proposal-explicit-offer');
+    // One decision system on the card (ADR 0096 §3, #1177): the card opens the proposal workspace and carries no draft.
+    await waitFor(renderer, `window.__j05.card()?.querySelector('[data-mark-action="proposal-workspace"]') && window.__j05.card().querySelector('[data-mark-action^="draft-"]') === null`, 'proposal-explicit-offer');
     await assertRenderer(renderer, `document.querySelector('[data-screen="editor"]') && window.__j05.act('proposal-workspace')`, 'proposal-stays-contextual-until-chosen');
     await waitFor(renderer, `document.querySelector('[data-screen="proposal-workspace"] [data-proposal-active]')`, 'proposal-workspace-active');
     await assertRenderer(renderer, `(async () => { const work = (await window.ai7.listPriorWork()).find((entry) => entry.bookTitle === ${JSON.stringify(EXCERPT.title)}); const workspace = await window.ai7.inspectProposalWorkspace({ manuscriptId: work.manuscriptId, branchId: work.branchId, resultId: null }); window.__j05WorkspaceMarkId = workspace.items.find((item) => item.blockId === ${JSON.stringify(proposalBlock)}).markId; const row = document.getElementById('windowed-' + window.__j05WorkspaceMarkId); if (!row) return false; row.click(); return true; })()`, 'proposal-activate-synthetic-change');

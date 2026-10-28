@@ -139,7 +139,7 @@ interface MountOptions {
     RendererApi,
     'createEditorialMark' | 'getEditorialMarkCard' | 'updateEditorialMark' | 'recordChangeSuggestionDecision' |
     'recordProposalDecisionReason' | 'recordProposalDecisionFeedback' | 'recordLearningReasonAsk' | 'runEditorClipboardCommand' | 'applyChangeSuggestion' | 'reverseAppliedChangeSuggestion' |
-    'inspectProposalWorkspace' | 'saveProposalDecisionDraft' | 'inspectApplyReceipt' | 'prepareReverseApply' | 'getManuscriptApplyOutcome' | 'inspectReviewFindingOfMark' |
+    'inspectProposalWorkspace' | 'inspectApplyReceipt' | 'prepareReverseApply' | 'getManuscriptApplyOutcome' | 'inspectReviewFindingOfMark' |
     // A factual finding's sources on its card (Issue #1174), read as its review card reads them.
     'inspectFactualVerification' | 'inspectEvidenceWorkspace' | 'inspectResearchEvidence'
   >;
@@ -1098,27 +1098,18 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         const state = el('p', 'editorial-mark-recorded', pendingReceipt.state === 'confirming' ? '正在确认应用结果' : pendingReceipt.state === 'unresolved' ? '结果待确认' : pendingReceipt.state === 'applied' ? '已应用' : '未应用');
         state.dataset['applyReceiptState'] = pendingReceipt.state; yours.append(state, el('p', 'muted', pendingReceipt.reason));
       }
+      // One decision system on the card (ADR 0096 §3): the draft dispositions live only in the proposal workspace, which the
+      // card opens; an atomic group is decided there as a whole.
       if (applied === null && pendingReceipt?.state !== 'unresolved' && pendingReceipt?.state !== 'confirming') {
-        const drafts = el('div', 'button-row'); yours.append(drafts);
+        const workspaceRow = el('div', 'button-row'); yours.append(workspaceRow);
         void readProposalWorkspace(api, { manuscriptId: binding().manuscriptId, branchId: binding().branchId, resultId: null }).then((workspace) => {
-          if (!drafts.isConnected) return;
+          if (!workspaceRow.isConnected) return;
           const item = workspace.items.find((entry) => entry.markId === card.markId); if (!item) return;
-          const members = item.atomicGroupId === null ? [item] : workspace.items.filter((entry) => entry.atomicGroupId === item.atomicGroupId);
-          if ((workspace.offerWorkspace || item.atomicGroupId !== null) && options.openProposalWorkspace) drafts.append(actionButton('proposal-workspace', '在专用工作区审阅', 'secondary', () => options.openProposalWorkspace?.()));
-          const reading = el('p', 'muted', item.draft === null ? '尚无处理草稿。' : item.draft === 'accepted' ? '拟采纳 · 草稿已保存' : item.draft === 'rejected' ? '拟拒绝 · 草稿已保存' : '暂不决定 · 草稿已保存'); drafts.append(reading);
+          if ((workspace.offerWorkspace || item.atomicGroupId !== null) && options.openProposalWorkspace) workspaceRow.append(actionButton('proposal-workspace', '在专用工作区审阅', 'secondary', () => options.openProposalWorkspace?.()));
           if (item.atomicGroupId !== null) {
-            drafts.append(el('p', 'muted', `原子组：${item.atomicReason ?? '依赖说明缺失'}；部分采纳会造成上述不一致。拆分需要新的提案版本。`));
-            for (const member of members) drafts.append(el('p', 'muted', `${member.chapter} · 第 ${member.position} 段 ${member.fromGrapheme}–${member.toGrapheme}`));
+            workspaceRow.append(el('p', 'muted', `原子组：${item.atomicReason ?? '依赖说明缺失'}；部分采纳会造成上述不一致。拆分需要新的提案版本。`));
+            for (const member of workspace.items.filter((entry) => entry.atomicGroupId === item.atomicGroupId)) workspaceRow.append(el('p', 'muted', `${member.chapter} · 第 ${member.position} 段 ${member.fromGrapheme}–${member.toGrapheme}`));
           }
-          const save = async (disposition: 'accepted' | 'rejected' | 'deferred' | null): Promise<void> => {
-            const next = await api.saveProposalDecisionDraft({ manuscriptId: binding().manuscriptId, branchId: binding().branchId, resultId: null, markIds: members.map((member) => member.markId), disposition, atomicGroupId: item.atomicGroupId, expectedScopeDigest: workspace.scopeDigest });
-            workspace = next; reading.textContent = disposition === null ? '已撤销草稿处理。' : disposition === 'accepted' ? '拟采纳 · 草稿已保存，尚未记录决定。' : disposition === 'rejected' ? '拟拒绝 · 草稿已保存，尚未记录决定。' : '暂不决定 · 草稿已保存，尚未记录决定。';
-          };
-          for (const [disposition, label] of [['accepted', '拟采纳'], ['rejected', '拟拒绝'], ['deferred', '暂不决定']] as const) {
-            const control = actionButton(`draft-${disposition}`, label, 'secondary', () => void save(disposition).catch((error) => options.setStatus(options.errorMessage(error, '草稿未能保存。'), 'error')));
-            control.disabled = disposition === 'accepted' && members.some((member) => member.conflict); drafts.append(control);
-          }
-          drafts.append(actionButton('draft-undo', '撤销草稿处理', 'quiet', () => void save(item.draft).catch(() => {})));
         }).catch(() => {});
       }
 

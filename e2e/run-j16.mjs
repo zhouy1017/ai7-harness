@@ -44,7 +44,7 @@ import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState
 // opens it; on the Journey's Book it opens the workspace, which records nothing on entering and goes back with 返回. Words of
 // one paragraph and a 修改要求 make one proposal round — one dialogue turn on the J-04 adapter — listed as proposals anchored
 // inside the range, the item outside it dropped; 提交为修改建议 makes them one atomic group of 修改建议, which no member leaves
-// alone: the Mark Card's 拟采纳, the proposal workspace's decision and one batch Apply with its receipt change the manuscript.
+// alone: the proposal workspace's 拟采纳 and decision and one batch Apply with its receipt change the manuscript.
 // A second round, discarded, records nothing beyond its dialogue turn.
 //
 // The runner writes J-16's unit-hold file, and reads the service's projections through `window.ai7` only to cross-check
@@ -1974,7 +1974,7 @@ async function main() {
 
     at('workspace-mark-decision');
     // A member of the group is never applied alone — the existing refusal. The group is decided as a whole through the existing
-    // owners: the Mark Card's 拟采纳 drafts every member, the proposal workspace records the decision and applies both in one
+    // owners: the proposal workspace's 拟采纳 drafts every member, records the decision and applies both in one
     // batch with the receipt as today. Only that Apply changes the manuscript.
     const firstMark = promotedCards.find((card) => card.suggestion.currentText === WORKSPACE_FIRST_ANCHOR).markId;
     const alone = await renderer.evaluate(`window.ai7.applyChangeSuggestion({ manuscriptId: ${JSON.stringify(workspaceBinding.manuscriptId)}, branchId: ${JSON.stringify(workspaceBinding.branchId)}, windowStartBlockId: ${JSON.stringify(workspaceBlock)}, markId: ${JSON.stringify(firstMark)}, clientEffectId: crypto.randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null }).then(() => 'applied', (error) => ({ code: error?.code ?? null, message: error?.message ?? null }))`);
@@ -1982,11 +1982,13 @@ async function main() {
     requireJourney((await workspaceState()).digest === proposeBefore.digest, 'workspace-member-alone-nothing-moved');
     await clickSelector(renderer, '[data-screen="agent-workspace"] [data-agent-workspace-action="open-marks"]', 'workspace-open-marks');
     await waitFor(renderer, `document.querySelector('[data-screen="editor"] .editor-shell[data-book-id=${JSON.stringify(bookId)}]') !== null && document.querySelector('.editorial-mark-layer [data-mark-card]')?.dataset.markCard === ${JSON.stringify(firstMark)}`, 'workspace-mark-card', 60_000);
-    await waitFor(renderer, `(() => { const card = document.querySelector('.editorial-mark-layer [data-mark-card]'); return (card?.textContent ?? '').includes('本组只能记录一个整体处理；在专用提案工作区记录决定和准备应用。') && card.querySelector('[data-mark-action="draft-accepted"]') instanceof HTMLButtonElement; })()`, 'workspace-mark-card-group', 30_000);
-    await clickSelector(renderer, '.editorial-mark-layer [data-mark-card] [data-mark-action="draft-accepted"]', 'workspace-mark-draft-accept');
-    await waitFor(renderer, `(document.querySelector('.editorial-mark-layer [data-mark-card]')?.textContent ?? '').includes('拟采纳 · 草稿已保存，尚未记录决定。')`, 'workspace-mark-drafted', 30_000);
+    // One decision system on the card (ADR 0096 §3, #1177): the group card offers the proposal workspace and no draft; the
+    // group's 拟采纳 is drafted there, for every member at once.
+    await waitFor(renderer, `(() => { const card = document.querySelector('.editorial-mark-layer [data-mark-card]'); return (card?.textContent ?? '').includes('本组只能记录一个整体处理；在专用提案工作区记录决定和准备应用。') && card.querySelector('[data-mark-action="proposal-workspace"]') instanceof HTMLButtonElement && card.querySelector('[data-mark-action^="draft-"]') === null; })()`, 'workspace-mark-card-group', 30_000);
     await clickSelector(renderer, '.editorial-mark-layer [data-mark-card] [data-mark-action="proposal-workspace"]', 'workspace-mark-proposal-workspace');
     await waitFor(renderer, `document.querySelector('[data-screen="proposal-workspace"] [data-proposal-active]') !== null && document.querySelector('.proposal-workspace')?.getAttribute('aria-busy') === 'false'`, 'workspace-proposal-workspace', 60_000);
+    await clickSelector(renderer, '[data-screen="proposal-workspace"] [data-proposal-action="draft-accepted"]', 'workspace-mark-draft-accept');
+    await waitFor(renderer, `document.querySelector('.proposal-navigator')?.textContent.includes('拟采纳') && document.querySelector('[data-screen="proposal-workspace"]').textContent.includes('拟采纳 · 草稿已保存，尚未记录决定') && document.querySelector('.proposal-workspace')?.getAttribute('aria-busy') === 'false'`, 'workspace-mark-drafted', 30_000);
     // Agent entry temporarily presents another surface; 返回 must restore this exact proposal work, including its saved draft.
     const proposalReturnMark = await renderer.evaluate(`document.querySelector('[data-proposal-active]')?.dataset.proposalActive ?? null`);
     await assertRenderer(renderer, AGENT_ROW_CLICK, 'workspace-proposal-return-entry');
