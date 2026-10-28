@@ -39,6 +39,9 @@ const APPLIED_TEXT = '〔一键应用〕';
 const LOST_ACK_TEXT = '〔确认未达〕';
 const TYPED_BEFORE = '新增';
 const TYPED_INSIDE = '改';
+// Issue #1175: where Enter splits the structure paragraph, and the words an Apply between the split and its 撤销 writes.
+const STRUCTURE_SPLIT_AT = 12;
+const STRUCTURE_APPLIED_TEXT = '〔分段后应用〕';
 // Four ranges inside one paragraph and one inside another, in graphemes of the durable text. The
 // paragraphs are chosen at run time so that in their first 80 code units a grapheme is a code unit.
 const RANGES = Object.freeze({ highlight: [2, 8], annotation: [10, 16], note: [18, 24], suggestion: [26, 32], second: [3, 9], applied: [20, 26] });
@@ -934,6 +937,46 @@ async function main() {
     await click(renderer, '返回稿件', 'proposal-return');
     await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, 'proposal-back-to-manuscript');
     await settled(renderer, 'proposal-settled');
+
+    // Issue #1175 (ADR 0096 §1): Enter at the caret splits a paragraph and Backspace at a paragraph's start merges it back, each
+    // one journal entry shown at once; an Apply between them is one more entry that 撤销 steps over, never takes back.
+    at('structure-split');
+    const structural = await renderer.evaluate(`(() => { const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }); const clean = Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > p[data-block-id]')).filter((node) => ![${JSON.stringify(first)}, ${JSON.stringify(second)}].includes(node.dataset.blockId) && node.querySelectorAll('.editorial-mark').length === 0 && Array.from(segmenter.segment((node.textContent ?? '').slice(0, 24))).length === 24); return clean.length >= 2 ? [clean[0].dataset.blockId, clean[1].dataset.blockId] : null; })()`);
+    requireJourney(Array.isArray(structural) && structural.every((id) => /^blk_[0-9a-f]{24}$/.test(id)), 'structure-paragraphs');
+    const [splitBlock, appliedBlock] = structural;
+    await assertRenderer(renderer, `(async () => { window.__j05Structure = { split: window.__j05.text(${JSON.stringify(splitBlock)}), applied: window.__j05.text(${JSON.stringify(appliedBlock)}) }; const work = (await window.ai7.listPriorWork()).find((entry) => entry.bookTitle === ${JSON.stringify(EXCERPT.title)}); window.__j05Journal = (await window.ai7.getManuscriptWindowAt({ manuscriptId: work.manuscriptId, branchId: work.branchId, target: { kind: 'start' } })).journalSequence; return typeof window.__j05Structure.split === 'string'; })()`, 'structure-original-kept');
+    await assertRenderer(renderer, `window.__j05.place(${JSON.stringify(splitBlock)}, ${STRUCTURE_SPLIT_AT}, ${STRUCTURE_SPLIT_AT})`, 'structure-caret');
+    await new Promise((resolveWait) => setTimeout(resolveWait, 120));
+    await pressEnter(renderer);
+    await waitFor(renderer, `(() => { const next = window.__j05.block(${JSON.stringify(splitBlock)})?.nextElementSibling; window.__j05Split = next?.dataset.blockId; return next?.tagName === 'P' && window.__j05Split !== ${JSON.stringify(splitBlock)} && window.__j05.text(${JSON.stringify(splitBlock)}) === window.__j05Structure.split.slice(0, ${STRUCTURE_SPLIT_AT}) && window.__j05.text(window.__j05Split) === window.__j05Structure.split.slice(${STRUCTURE_SPLIT_AT}); })()`, 'split-shown-at-once', 10_000);
+    await settled(renderer, 'split-settled');
+    await assertRenderer(renderer, `(async () => { const work = (await window.ai7.listPriorWork()).find((entry) => entry.bookTitle === ${JSON.stringify(EXCERPT.title)}); const page = await window.ai7.getManuscriptWindowAt({ manuscriptId: work.manuscriptId, branchId: work.branchId, target: { kind: 'block', blockId: ${JSON.stringify(splitBlock)} } }); const at = page.blocks.findIndex((block) => block.blockId === ${JSON.stringify(splitBlock)}); const wrote = page.journalSequence === window.__j05Journal + 1 && page.blocks[at + 1]?.blockId === window.__j05Split && page.blocks[at + 1].kind === 'paragraph'; window.__j05Journal = page.journalSequence; return wrote; })()`, 'split-is-one-journal-entry');
+
+    at('structure-undo-across-apply');
+    await openSelectionMenu(renderer, appliedBlock, 2, 6, 'structure-apply-menu');
+    await chooseMenuItem(renderer, 'add-change-suggestion', 'structure-apply-suggestion');
+    await waitFor(renderer, `window.__j05.composer()?.dataset.markComposer === 'create-change-suggestion'`, 'structure-apply-composer');
+    await assertRenderer(renderer, `window.__j05.write('proposedText', ${JSON.stringify(STRUCTURE_APPLIED_TEXT)}) && window.__j05.act('submit')`, 'structure-apply-submit');
+    await waitFor(renderer, `window.__j05.mark('change-suggestion', ${JSON.stringify(appliedBlock)}).length > 0 && window.__j05.composer() === null`, 'structure-apply-drawn');
+    await openMarkCard(renderer, 'change-suggestion', appliedBlock, 'structure-apply-card');
+    await assertRenderer(renderer, `window.__j05.act('accept-and-apply')`, 'structure-accept-and-apply');
+    await waitFor(renderer, `window.__j05.card()?.querySelector('[data-mark-application]') && window.__j05.text(${JSON.stringify(appliedBlock)}) === window.__j05Structure.applied.slice(0, 2) + ${JSON.stringify(STRUCTURE_APPLIED_TEXT)} + window.__j05Structure.applied.slice(6)`, 'structure-applied');
+    await press(renderer, 'Escape');
+    // 撤销 steps over the Apply to the split before it; the applied words stay, and 重做 splits again.
+    await click(renderer, '撤销', 'undo-over-apply');
+    await waitFor(renderer, `window.__j05.block(window.__j05Split) === null && window.__j05.text(${JSON.stringify(splitBlock)}) === window.__j05Structure.split && window.__j05.text(${JSON.stringify(appliedBlock)}).includes(${JSON.stringify(STRUCTURE_APPLIED_TEXT)})`, 'undo-steps-over-apply', 15_000);
+    await click(renderer, '重做', 'redo-split');
+    await waitFor(renderer, `window.__j05.block(window.__j05Split)?.previousElementSibling?.dataset.blockId === ${JSON.stringify(splitBlock)} && window.__j05.text(window.__j05Split) === window.__j05Structure.split.slice(${STRUCTURE_SPLIT_AT})`, 'redo-splits-again', 15_000);
+
+    at('structure-merge');
+    await assertRenderer(renderer, `window.__j05.place(window.__j05Split, 0, 0)`, 'merge-caret');
+    await new Promise((resolveWait) => setTimeout(resolveWait, 120));
+    await press(renderer, 'Backspace');
+    await waitFor(renderer, `window.__j05.block(window.__j05Split) === null && window.__j05.text(${JSON.stringify(splitBlock)}) === window.__j05Structure.split`, 'merge-shown-at-once', 10_000);
+    await settled(renderer, 'merge-settled');
+    await click(renderer, '撤销', 'undo-merge');
+    await waitFor(renderer, `window.__j05.text(window.__j05Split) === window.__j05Structure.split.slice(${STRUCTURE_SPLIT_AT}) && window.__j05.text(${JSON.stringify(splitBlock)}) === window.__j05Structure.split.slice(0, ${STRUCTURE_SPLIT_AT})`, 'undo-merge-is-one-step', 15_000);
+    await settled(renderer, 'structure-settled');
 
     // #1119 / F-20a: a distinct local procedure on exact admitted sample1 and tester-authored edits.
     // No fixture/model binding is added to launch; the existing network-denied product path is unchanged.

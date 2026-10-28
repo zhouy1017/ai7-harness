@@ -1702,6 +1702,60 @@ async function runProtectionJourney(renderer) {
   await protectionChecks(renderer, `({ cleared: !p.shown && p.document === null, exactEntries: p.journal === ${durable + 3 + entries}, writable: p.writable, closeRisk: p.closeRisk === 'false' })`, 'protection-read-only-recovered', 90_000);
 }
 
+/** The manuscript's last block and its block count, read through the public window at its end. */
+const MANUSCRIPT_TAIL_PROBE = `(async () => { const work = (await window.ai7.listPriorWork())[0]; const page = await window.ai7.getManuscriptWindowAt({ manuscriptId: work.manuscriptId, branchId: work.branchId, target: { kind: 'proportion', proportion: 1 } }); const last = page.blocks.at(-1); return { blockId: last.blockId, position: last.position, totalBlocks: page.position.totalBlocks }; })()`;
+
+/** What the window shows of the structure paragraph: its text and the paragraph after it, the window size, and the journal. */
+const STRUCTURE_PROBE = `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const s = window.__j02Structure; const block = editor?.querySelector('[data-block-id="' + s.blockId + '"]'); const next = block?.nextElementSibling; return { text: block?.textContent ?? null, nextId: next?.dataset.blockId ?? null, nextText: next?.textContent ?? null, blocks: editor?.children.length ?? 0, journal: ${JOURNAL_SEQUENCE_PROBE}, closeRisk: document.documentElement.dataset.ai7CloseRisk }; })()`;
+
+async function pressStructureKey(renderer, key) {
+  const descriptor = key === 'Enter'
+    ? { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 }
+    : { key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 8 };
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', ...descriptor, ...(key === 'Enter' ? { text: '\r', unmodifiedText: '\r' } : {}) });
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', ...descriptor });
+}
+
+/** A collapsed caret `offset` code units into a block of the window, placed the way a click places it. */
+async function placeStructureCaret(renderer, blockId, offset, location) {
+  await assertRenderer(renderer, `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const block = editor?.querySelector('[data-block-id=' + JSON.stringify(${JSON.stringify(blockId)}) + ']'); const text = block?.firstChild; if (!editor || !block) return false; editor.focus({ preventScroll: true }); const range = document.createRange(); if (text) range.setStart(text, ${offset}); else range.setStart(block, 0); range.collapse(true); const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range); return true; })()`, location);
+  await new Promise((resolveWait) => setTimeout(resolveWait, 150));
+}
+
+/**
+ * Issue #1175 (ADR 0096 §1): Enter at the caret splits a paragraph of the 50,000-block manuscript and Backspace at the new
+ * paragraph's start merges it back, each shown at once in the bounded window and written as one journal entry, while every
+ * later block's position moves; 撤销 and 重做 take each back and forth as one step, and the window never holds more than 32 blocks.
+ */
+async function runStructureJourney(renderer) {
+  at('structure-split');
+  const chosen = await renderer.evaluate(`(() => { const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }); const blocks = Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > p[data-block-id]')); const found = blocks.slice(1, -2).find((node) => node.childNodes.length === 1 && Array.from(segmenter.segment((node.textContent ?? '').slice(0, 24))).length === 24); if (!found) return false; window.__j02Structure = { blockId: found.dataset.blockId, text: found.textContent, journal: ${JOURNAL_SEQUENCE_PROBE} }; return true; })()`);
+  requireJourney(chosen === true, 'structure-paragraph');
+  const tail = await renderer.evaluate(MANUSCRIPT_TAIL_PROBE);
+  requireJourney(tail.position === tail.totalBlocks && tail.totalBlocks >= BLOCK_COUNT, 'structure-tail-before');
+  const blockId = await renderer.evaluate('window.__j02Structure.blockId');
+  await placeStructureCaret(renderer, blockId, 12, 'structure-split-caret');
+  await pressStructureKey(renderer, 'Enter');
+  await waitForChecks(renderer, `(() => { const p = ${STRUCTURE_PROBE}; const s = window.__j02Structure; window.__j02Split = p.nextId; return { head: p.text === s.text.slice(0, 12), tail: p.nextText === s.text.slice(12), newIdentity: p.nextId !== null && p.nextId !== s.blockId, bounded: p.blocks <= ${MAX_RENDERER_BLOCKS} }; })()`, 'structure-split-shown', 10_000);
+  await waitForChecks(renderer, `(() => { const p = ${STRUCTURE_PROBE}; return { oneEntry: p.journal === window.__j02Structure.journal + 1, settled: p.closeRisk === 'false' }; })()`, 'structure-split-written', 30_000);
+  const shifted = await renderer.evaluate(MANUSCRIPT_TAIL_PROBE);
+  requireJourney(shifted.blockId === tail.blockId && shifted.position === tail.position + 1 && shifted.totalBlocks === tail.totalBlocks + 1, 'structure-tail-shifted');
+
+  at('structure-undo-redo');
+  await clickButton(renderer, '撤销', 'structure-undo-split');
+  await waitForChecks(renderer, `(() => { const p = ${STRUCTURE_PROBE}; const s = window.__j02Structure; return { whole: p.text === s.text, gone: p.nextId !== window.__j02Split, oneStep: p.journal === s.journal + 2, bounded: p.blocks <= ${MAX_RENDERER_BLOCKS} }; })()`, 'structure-undo-is-one-step', 30_000);
+  await clickButton(renderer, '重做', 'structure-redo-split');
+  await waitForChecks(renderer, `(() => { const p = ${STRUCTURE_PROBE}; const s = window.__j02Structure; return { head: p.text === s.text.slice(0, 12), again: p.nextId === window.__j02Split, oneStep: p.journal === s.journal + 3 }; })()`, 'structure-redo-is-one-step', 30_000);
+
+  at('structure-merge');
+  await placeStructureCaret(renderer, await renderer.evaluate('window.__j02Split'), 0, 'structure-merge-caret');
+  await pressStructureKey(renderer, 'Backspace');
+  await waitForChecks(renderer, `(() => { const p = ${STRUCTURE_PROBE}; const s = window.__j02Structure; return { whole: p.text === s.text, merged: p.nextId !== window.__j02Split, bounded: p.blocks <= ${MAX_RENDERER_BLOCKS} }; })()`, 'structure-merge-shown', 10_000);
+  await waitForChecks(renderer, `(() => { const p = ${STRUCTURE_PROBE}; return { oneEntry: p.journal === window.__j02Structure.journal + 4, settled: p.closeRisk === 'false' }; })()`, 'structure-merge-written', 30_000);
+  const merged = await renderer.evaluate(MANUSCRIPT_TAIL_PROBE);
+  requireJourney(merged.blockId === tail.blockId && merged.position === tail.position && merged.totalBlocks === tail.totalBlocks, 'structure-tail-restored');
+}
+
 async function main() {
   parseJourney();
   const networkDenialEntry = resolve(ROOT, 'dist', 'shared', 'network-denial.mjs');
@@ -1779,6 +1833,8 @@ async function main() {
     // Issue #951: 专注模式, the reading typography and Editing Protection Mode, after every pinned stage above.
     await runEditorModesJourney(renderer);
     await runProtectionJourney(renderer);
+    // Issue #1175: Enter splits and Backspace merges inside the bounded window, after every pinned stage above.
+    await runStructureJourney(renderer);
     // The close and what follows it are their own stages: left under the last j14 step, a failure to
     // shut the product down or to clear the run root would read as an accessibility failure (#474).
     at('completion-browser-close');

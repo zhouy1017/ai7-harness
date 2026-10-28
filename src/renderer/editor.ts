@@ -5,6 +5,7 @@ import { EditorState, Plugin, TextSelection, type Transaction } from 'prosemirro
 import { Decoration, DecorationSet, EditorView } from 'prosemirror-view';
 import { deriveSpanEdit, followSpanEdit } from '../shared/mark-anchor.js';
 import { markPointKind, markPointLabel } from './editorial-mark-labels.js';
+import { newParagraphIdentity, structuralInput, structuralKey, type PendingStructure } from './editor-structure.js';
 import {
   bufferAdmits,
   bufferReachedLimit,
@@ -127,6 +128,8 @@ interface BaselineBlock {
 
 const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' });
 const CARET_NAVIGATION_KEYS = new Set(['arrowleft', 'arrowright', 'arrowup', 'arrowdown', 'home', 'end']);
+/** The transaction meta of the editor's own Enter split or Backspace merge, the one structural change it admits. */
+const STRUCTURE_META = 'ai7-structure';
 
 function graphemes(text: string): string[] {
   return Array.from(segmenter.segment(text), ({ segment }) => segment);
@@ -331,6 +334,8 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
   let saving = false;
   let retryRequired = false;
   let retryPrepared: { input: JournalEditInput } | undefined;
+  // The Enter split or Backspace merge shown and not yet acknowledged (Issue #1175): one at a time.
+  let structure: PendingStructure | undefined;
   let flushPromise: Promise<void> | undefined;
   let autoFlushTimer: number | undefined;
   let compositionWaiters: Array<() => void> = [];
@@ -399,15 +404,32 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       const blockId = String(node.attrs['blockId']);
       if (node.textContent !== baselines.get(blockId)?.text) changed.push(blockId);
     });
+    // A split or merge not yet acknowledged is unacknowledged work even where no text differs: an empty paragraph merged away.
+    if (structure !== undefined && !changed.includes(structure.blockId)) changed.unshift(structure.blockId);
     return changed;
+  };
+
+  /** While a split or merge is pending, the window keeps the structure it shows: text changes, blocks do not come or go. */
+  const pendingStructureAdmits = (transaction: Transaction): boolean => {
+    const before = transaction.before;
+    const candidate = transaction.doc;
+    if (candidate.childCount !== before.childCount) return false;
+    let valid = true;
+    candidate.forEach((node, _offset, index) => {
+      const previous = before.child(index);
+      if (node.attrs['blockId'] !== previous.attrs['blockId'] || node.type !== previous.type || node.attrs['level'] !== previous.attrs['level'] ||
+        node.textContent.length > MAX_BLOCK_CODE_UNITS || graphemes(node.textContent).length > MAX_BLOCK_GRAPHEMES) valid = false;
+    });
+    return valid;
   };
 
   const candidateIsBounded = (transaction: Transaction): boolean => {
     if (!transaction.docChanged) return true;
+    if (transaction.getMeta(STRUCTURE_META) === true) return isEditable();
     const candidate = transaction.doc;
-    if (candidate.childCount !== baselines.size) return false;
+    if (structure !== undefined ? !pendingStructureAdmits(transaction) : candidate.childCount !== baselines.size) return false;
     let valid = true;
-    candidate.forEach((node, _offset, index) => {
+    if (structure === undefined) candidate.forEach((node, _offset, index) => {
       const blockId = String(node.attrs['blockId']);
       const baseline = baselines.get(blockId);
       const expected = windowProjection.blocks[index];
@@ -778,6 +800,116 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     announceState();
   };
 
+  const textInput = (baseline: BaselineBlock, text: string): { input: JournalEditInput } => ({
+    input: {
+      clientEditId: crypto.randomUUID(),
+      manuscriptId: windowProjection.manuscriptId,
+      branchId: windowProjection.branchId,
+      baseRevisionId: windowProjection.revisionId,
+      blockId: baseline.blockId,
+      windowStartBlockId: windowProjection.blocks[0]!.blockId,
+      baseBlockDigest: baseline.digest,
+      expectedJournalSequence: windowProjection.journalSequence,
+      ...deriveEdit(baseline.text, text),
+    },
+  });
+
+  /** The next write: a pending split or merge first — its paragraphs' texts as the key found them, then its own command. */
+  const nextPrepared = (blockId: string): { input: JournalEditInput } => {
+    if (structure !== undefined) {
+      const pending = structure;
+      const owed: Array<[string, string | undefined]> = [[pending.blockId, pending.preText]];
+      if (pending.kind === 'merge') owed.push([pending.mergedBlockId, pending.mergedPreText]);
+      if (pending.held !== null) owed.push([pending.held.blockId, pending.held.text]);
+      for (const [id, text] of owed) {
+        const baseline = baselines.get(id);
+        requireEditor(baseline && text !== undefined, '待保存内容块不存在。');
+        if (baseline.text !== text) return textInput(baseline, text);
+      }
+      return {
+        input: structuralInput(pending, {
+          manuscriptId: windowProjection.manuscriptId, branchId: windowProjection.branchId, baseRevisionId: windowProjection.revisionId,
+          expectedJournalSequence: windowProjection.journalSequence,
+        }, {
+          block: baselines.get(pending.blockId)!.digest,
+          ...(pending.kind === 'merge' ? { merged: baselines.get(pending.mergedBlockId)!.digest } : {}),
+        }, (text) => graphemes(text).length),
+      };
+    }
+    const baseline = baselines.get(blockId);
+    const current = findBlock(view.state.doc, blockId);
+    requireEditor(baseline && current, '待保存内容块不存在。');
+    return textInput(baseline, current.textContent);
+  };
+
+  /**
+   * Enter at the caret in a paragraph splits it; Backspace at a paragraph's start merges it into the paragraph before it
+   * (Issue #1175). The document changes at once and the command is written behind it. Whether the key was this editor's.
+   */
+  const beginStructure = (key: 'Enter' | 'Backspace'): boolean => {
+    const state = view.state;
+    if (!state.selection.empty || !isEditable()) return false;
+    const point = pointAtPosition(state.doc, state.selection.head);
+    const found = findBlockPosition(state.doc, point.blockId);
+    if (!found) return false;
+    let index = 0;
+    state.doc.forEach((node, _offset, at) => { if (node.attrs['blockId'] === point.blockId) index = at; });
+    const previous = index > 0 ? state.doc.child(index - 1) : undefined;
+    if (key === 'Backspace' && (point.grapheme !== 0 || previous?.type.name !== 'paragraph' || found.node.type.name !== 'paragraph')) return false;
+    if (found.node.type.name !== 'paragraph') {
+      options.onAnnouncement('标题不能在这里分段；分段与合并只用于正文段落。', 'error');
+      return true;
+    }
+    if (structure !== undefined) {
+      options.onAnnouncement('上一处分段或合并正在写入修订日志，请稍候。', 'busy');
+      return true;
+    }
+    const position = positionAtPoint(state.doc, point);
+    requireEditor(position !== undefined, '稿件选择位置无法解析。');
+    const blockAt = (at: number): string => String(state.doc.child(at).attrs['blockId']);
+    const full = state.doc.childCount >= MAX_WINDOW_BLOCKS;
+    if (key === 'Enter') {
+      const last = index === state.doc.childCount - 1;
+      const newBlockId = newParagraphIdentity();
+      // In a full window the split pushes a block past an edge — the last, or the first when the split is in the last paragraph,
+      // whose acknowledgement then comes with the window one block on so the new paragraph is in it.
+      const heldIndex = full ? (last ? 0 : state.doc.childCount - 1) : -1;
+      const held = heldIndex < 0 ? null : { blockId: blockAt(heldIndex), text: state.doc.child(heldIndex).textContent };
+      const transaction = state.tr.split(position, 1, [{
+        type: ai7Schema.nodes['paragraph']!,
+        attrs: { blockId: newBlockId, position: Number(found.node.attrs['position']), digest: '', level: null },
+      }]);
+      if (held !== null) {
+        const leaving = findBlockPosition(transaction.doc, held.blockId)!;
+        transaction.delete(leaving.position, leaving.position + leaving.node.nodeSize);
+      }
+      transaction.setSelection(TextSelection.create(transaction.doc, findBlockPosition(transaction.doc, newBlockId)!.position + 1))
+        .setMeta(STRUCTURE_META, true).scrollIntoView();
+      view.dispatch(transaction);
+      structure = {
+        kind: 'split', blockId: point.blockId, newBlockId, at: point.grapheme, preText: found.node.textContent,
+        windowStartBlockId: blockAt(full && last ? 1 : 0), held,
+      };
+    } else {
+      try {
+        validateText(previous!.textContent + found.node.textContent);
+      } catch {
+        options.onAnnouncement('合并后的段落超出单段安全范围，没有合并。', 'error');
+        return true;
+      }
+      const transaction = state.tr.join(found.position);
+      transaction.setSelection(TextSelection.create(transaction.doc, found.position - 1)).setMeta(STRUCTURE_META, true).scrollIntoView();
+      view.dispatch(transaction);
+      structure = {
+        kind: 'merge', blockId: String(previous!.attrs['blockId']), mergedBlockId: point.blockId, preText: previous!.textContent,
+        mergedPreText: found.node.textContent, windowStartBlockId: blockAt(0), held: null,
+      };
+    }
+    announceState();
+    void flush();
+    return true;
+  };
+
   const flush = (): Promise<void> => {
     if (destroyed || interrupted || protection?.cause === 'drift') return Promise.resolve();
     if (autoFlushTimer !== undefined) {
@@ -791,26 +923,9 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
         if (composing || view.composing) break;
         const changed = changedBlocks(view.state.doc);
         if (changed.length === 0 && retryPrepared === undefined) break;
-        const blockId = retryPrepared?.input.blockId ?? changed[0]!;
-        const baseline = baselines.get(blockId);
-        const current = findBlock(view.state.doc, blockId);
-        requireEditor(baseline && current, '待保存内容块不存在。');
-        const prepared = retryPrepared ?? (() => {
-          const edit = deriveEdit(baseline.text, current.textContent);
-          return {
-            input: {
-              clientEditId: crypto.randomUUID(),
-              manuscriptId: windowProjection.manuscriptId,
-              branchId: windowProjection.branchId,
-              baseRevisionId: windowProjection.revisionId,
-              blockId: baseline.blockId,
-              windowStartBlockId: windowProjection.blocks[0]!.blockId,
-              baseBlockDigest: baseline.digest,
-              expectedJournalSequence: windowProjection.journalSequence,
-              ...edit,
-            },
-          };
-        })();
+        const prepared = retryPrepared ?? nextPrepared(changed[0]!);
+        const baseline = baselines.get(prepared.input.blockId);
+        requireEditor(baseline, '待保存内容块不存在。');
         // Keep the exact command from dispatch through acknowledgement, including while the visible text changes again.
         retryPrepared = prepared;
         saving = true;
@@ -832,14 +947,20 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
               ack.window.revisionId === prepared.input.baseRevisionId &&
               ack.window.blocks[0]?.blockId === prepared.input.windowStartBlockId,
           );
+          if (prepared.input.structure !== undefined) structure = undefined;
           await waitForComposition();
           const continuity = captureRenderedContinuity();
           const localText = new Map<string, string>();
           view.state.doc.forEach((node) => localText.set(String(node.attrs['blockId']), node.textContent));
           windowProjection = ack.window;
           baselines = baselineMap(windowProjection);
-          const visibleBlocks = windowProjection.blocks.map((block) => ({ ...block, text: localText.get(block.blockId) ?? block.text }));
-          restoreContinuity(makeState(visibleBlocks), continuity, null, null, false);
+          // A paragraph written to its text ahead of a pending split or merge: the document keeps showing that structure.
+          if (structure === undefined) {
+            const visibleBlocks = windowProjection.blocks.map((block) => ({ ...block, text: localText.get(block.blockId) ?? block.text }));
+            const anchored = windowProjection.blocks.some((block) => block.blockId === continuity.scrollAnchor.blockId)
+              ? continuity : { ...continuity, scrollAnchor: { blockId: continuity.head.blockId, offset: 0 } };
+            restoreContinuity(makeState(visibleBlocks), anchored, null, null, false);
+          }
           retryPrepared = undefined;
           retryRequired = false;
           lastDurable = { sequence: ack.sequence, durableAt: ack.durableAt };
@@ -918,6 +1039,11 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
           event.preventDefault();
           options.onAnnouncement('输入法组合尚未结束，命令已暂缓。', 'busy');
           announceState();
+          return true;
+        }
+        const structural = structuralKey(event, composing || currentView.composing);
+        if (structural !== null && beginStructure(structural)) {
+          event.preventDefault();
           return true;
         }
         if (modifier && !event.altKey && key === 's' && !event.shiftKey) {
