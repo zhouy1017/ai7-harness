@@ -1,8 +1,8 @@
 import type { GlobalAgentOperations, GlobalAgentRendererApi } from './protocol/global-agent.js';
 import type { HouseWordListOperations, HouseWordListApi } from './protocol/house-word-list.js';
 export * from './protocol/global-agent.js';
-export type { ReviewContractIdentity, ReviewExcludedFindingProjection, ReviewContractRejectionReason } from './protocol/review.js';
-import type { ReviewExcludedFindingProjection, ReviewContractRejectionReason } from './protocol/review.js';
+export type { ReviewContractIdentity, ReviewExcludedFindingProjection, ReviewContractRejectionReason, ReviewEvidenceSource, ReviewReportSchema, ReviewReportDerivedSections, ReviewReportFindingEntry } from './protocol/review.js';
+import type { ReviewExcludedFindingProjection, ReviewContractRejectionReason, ReviewReportSchema, ReviewReportDerivedSections } from './protocol/review.js';
 import type {
   QuickStartBaselineAnalysisResult,
   HISTORICALLY_AFFECTED_RESULT_MARKER,
@@ -7302,8 +7302,8 @@ export interface EditQualitySignalsProjection {
   categories: ReadonlyArray<{ categoryId: string; applied: number; surviving: number; editVolume: number; lineageDigest: string }>;
 }
 
-export interface ReviewReportRecord {
-  schema: 'ai7.review.report/1';
+export interface ReviewReportRecord extends ReviewReportDerivedSections {
+  schema: ReviewReportSchema;
   reviewRunId: string;
   version: number;
   generatedAt: string;
@@ -11340,7 +11340,7 @@ export type ExportFidelityKey =
   // The four parts of a 审阅报告 (V2-UX-REV-009; Issue #500, S64b part 2).
   | 'report-overview'
   | 'report-must-items'
-  | 'report-summaries'
+  | 'report-summaries' | 'report-statistics' | 'report-findings'
   | 'report-appendix';
 
 /** `excluded`: a mark kind the editor left out of this export — a choice, not a loss. */

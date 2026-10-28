@@ -454,7 +454,7 @@ const PACKAGE_MEMBER_LINES: Readonly<Record<PackageMemberKind, { restoration: st
 };
 /** The writer of a package export's 评估记录 member (Issue #429): its owner's Markdown of the 定稿 version, written as it stands. */
 const PACKAGE_RECORD_WRITER_IDENTITY = 'ai7-package-evaluation-record/1';
-const REVIEW_REPORT_SCHEMA = 'ai7.review.report/1' as const;
+const REVIEW_REPORT_SCHEMAS: ReadonlyArray<unknown> = ['ai7.review.report/1', 'ai7.review.report/2'];
 const POLICY = { id: 'external-export-policy', version: 'v2' } as const;
 const INVALID_FILE_NAME_CHARACTERS = /[\\/:*?"<>|\u0000-\u001F]/gu;
 
@@ -1555,7 +1555,7 @@ export class ManuscriptExportStore {
     const record = parseCanonicalJson(json) as ReviewReportRecord;
     const version = integer(row.version);
     requireExport(
-      isRecord(record) && record.schema === REVIEW_REPORT_SCHEMA && record.version === version && record.reviewRunId === text(row.review_run_id),
+      isRecord(record) && REVIEW_REPORT_SCHEMAS.includes(record.schema) && record.version === version && record.reviewRunId === text(row.review_run_id),
       'EXPORT_RECORD_INVALID',
       '审阅报告记录无效。',
     );

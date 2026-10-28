@@ -5,7 +5,7 @@ import { HouseWordListError, type InspectHouseWordListInput, type SaveHouseWordL
 import { validateRequestAdmissionRecords } from './analysis/baseline-analysis-store.js';
 import { MODEL_REQUEST_ADMISSION_SCHEMA_VERSION, WORD_TRACKED_IMPORT_SCHEMA_VERSION, POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION, LEARNING_CURATION_SCHEMA_VERSION } from './task-authorization.js';
 import { IDLE_BACKGROUND_SCHEMA_VERSION, LOCAL_REVIEW_SCHEMA_VERSION, EDITORIAL_MEMORY_SCHEMA_VERSION } from './task-authorization.js';
-import { initializeLocalStageSchema } from './review/review-runs.js';
+import { initializeLocalStageSchema, reviewRunEvidence } from './review/review-runs.js';
 import { sha256Hex } from './analysis/canonical.js';
 import { graphemeCount } from './analysis/factual-review-contract.js';
 import { executionBackgroundShare } from './analysis/execution.js';
@@ -6022,7 +6022,7 @@ export class EditorialStore {
   /** The next version of the Run's 审阅报告 (REV-009). */
   generateReviewReport(bookId: string, reviewRunId: string, progress?: ProgressReader): ReviewWorkspaceProjection {
     return this.#reviewCall(() => {
-      this.#reviewRuns.generateReport(bookId, reviewRunId);
+      this.#reviewRuns.generateReport(bookId, reviewRunId, () => reviewRunEvidence(this, bookId, reviewRunId));
       return this.#reviewRuns.workspace(bookId, reviewRunId, progress);
     });
   }
