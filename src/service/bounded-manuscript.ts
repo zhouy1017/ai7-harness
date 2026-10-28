@@ -13,6 +13,12 @@ import { HOUSE_REVIEW_PREFERENCE_FOREIGN_KEYS, HOUSE_REVIEW_PREFERENCE_SCHEMA_SQ
 import { TASK_INTENT_DRAFT_FOREIGN_KEYS, TASK_INTENT_DRAFT_SCHEMA_SQL, TASK_INTENT_DRAFT_TRIGGER_SQL } from './task-intent-drafts.js';
 import { CUSTOM_ANALYSIS_DIMENSION_FOREIGN_KEYS, CUSTOM_ANALYSIS_DIMENSION_SCHEMA_SQL, CUSTOM_ANALYSIS_DIMENSION_TRIGGER_SQL } from './custom-analysis-dimensions.js';
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { BoundedStoreError, BoundedStoreFatalError, requireBounded, one, asString, asNumber, canonicalJson, sha256, graphemes, fenwickSpan, appendOffsetSegment,
+  lastWorkingPosition, workingOffsetPrefix, updateWorkingOffsetNodes, transact, stagedBlockLength, UUID_PATTERN, DIGEST_PATTERN, BLOCK_PATTERN,
+  HISTORY_BATCH, MIGRATION_BATCH, type OffsetSegment } from './manuscript/bounded-kernel.js';
+import { blockDigest, CommandEvidenceReader, recoveryCommandEvidenceDigest, recoveryWorkingDigest, validateCommandHistoryGroup, type CommandEvidenceHeader, type CommandEvidenceMember } from './manuscript/command-history.js';
+export { BoundedStoreError, BoundedStoreFatalError } from './manuscript/bounded-kernel.js';
+export type { CommandEvidenceHeader, CommandEvidenceMember } from './manuscript/command-history.js';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import {
   acceptedSourceImportRetainedBoundaryLabels,
@@ -379,9 +385,6 @@ const PRE_17_ANALYSIS_LEDGER_TRIGGER_SQL: Readonly<Record<string, string>> = Obj
     !ANALYSIS_LEDGER_REVISION_17_TABLES.some((table) => name === `${table}_no_update` || name === `${table}_no_delete`)),
 );
 
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
-const BLOCK_PATTERN = /^blk_[0-9a-f]{24}$/;
 const CONTINUITY_SCHEMA_VERSION = 5;
 const EDITOR_SCHEMA_VERSION = 6;
 const RECOVERY_SCHEMA_VERSION = 7;
@@ -391,9 +394,7 @@ const MANUSCRIPT_REIMPORT_SCHEMA_VERSION = 10;
 const MODEL_SERVICE_SCHEMA_VERSION = 11;
 const NATIVE_ARTIFACT_SCHEMA_VERSION = 12;
 const AUTHORITY_SIDECAR_SCHEMA_VERSION = 13;
-const MIGRATION_BATCH = 256;
 const SEARCH_BATCH = 128;
-const HISTORY_BATCH = 128;
 const WINDOW_STRIDE = Math.floor(MAX_WINDOW_BLOCKS / 2);
 const MAX_RETAINED_TRANSIENT_SEARCHES = 32;
 const MAX_RETAINED_REPLACEMENT_PREVIEWS = 8;
@@ -2324,20 +2325,6 @@ const SCHEMA_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   ],
 };
 
-export class BoundedStoreError extends Error {
-  constructor(readonly code: string, message: string) {
-    super(message);
-    this.name = 'BoundedStoreError';
-  }
-}
-
-export class BoundedStoreFatalError extends Error {
-  constructor(cause: unknown) {
-    super('Bounded SQLite transaction rollback failed.', { cause });
-    this.name = 'BoundedStoreFatalError';
-  }
-}
-
 /**
  * The Edit Journal write-failure injection (Issue #951, wave 12 slice 12a; T0-1): process-local, so a restart starts it
  * `off`. Unarmed — every launch but J-02's armed one — it refuses to change and never fires. Armed, `fail-next` refuses the
@@ -2372,25 +2359,6 @@ export class EditJournalFaultInjection {
 export function journalWriteUnderFault<T>(fault: EditJournalFaultInjection, write: () => T): T {
   fault.beforeJournalWrite();
   return write();
-}
-
-function requireBounded(condition: unknown, code: string, message: string): asserts condition {
-  if (!condition) throw new BoundedStoreError(code, message);
-}
-
-function one(rows: SqlRow[], code: string, message: string): SqlRow {
-  requireBounded(rows.length === 1, code, message);
-  return rows[0]!;
-}
-
-function asString(value: SQLOutputValue | undefined): string {
-  requireBounded(typeof value === 'string' && value.isWellFormed(), 'STORE_CORRUPT', '持久化记录类型无效。');
-  return value;
-}
-
-function asNumber(value: SQLOutputValue | undefined): number {
-  requireBounded(typeof value === 'number' && Number.isSafeInteger(value), 'STORE_CORRUPT', '持久化数字无效。');
-  return value;
 }
 
 function canonicalSchemaSql(sql: string): string {
@@ -3140,18 +3108,6 @@ function requireV6TargetSchema(db: DatabaseSync): void {
   requireExactSchema(db, FULL_V6_TARGET_SCHEMA_SQL, V6_TARGET_INDEX_SQL, true);
 }
 
-function canonicalJson(value: unknown): string {
-  if (typeof value === 'string') requireBounded(value.isWellFormed(), 'CANONICAL_VALUE_INVALID', '无法形成规范摘要。');
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
-  if (value !== null && typeof value === 'object') {
-    return `{${Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b))
-      .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(',')}}`;
-  }
-  const encoded = JSON.stringify(value);
-  requireBounded(encoded !== undefined, 'CANONICAL_VALUE_INVALID', '无法形成规范摘要。');
-  return encoded;
-}
-
 function validateWorkflowSemanticTruth(db: DatabaseSync, profile: BuiltInWorkflowProfile): void {
   const projectionJson = canonicalJson({
     schema: profile.projection.schema,
@@ -3500,69 +3456,6 @@ function validateSourceImportRecordTruth(db: DatabaseSync): void {
   requireBounded(invalidAttempts.length === 0, 'SCHEMA_INVALID', '导入提交尝试类型与草稿或提交不一致。');
 }
 
-function sha256(value: string): string {
-  return createHash('sha256').update(value).digest('hex');
-}
-
-const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' });
-
-function graphemes(text: string): string[] {
-  return Array.from(segmenter.segment(text), ({ segment }) => segment);
-}
-
-interface OffsetSegment {
-  size: number;
-  total: number;
-}
-
-function fenwickSpan(position: number): number {
-  requireBounded(Number.isSafeInteger(position) && position > 0, 'OFFSET_INDEX_INVALID', '稿件偏移索引位置无效。');
-  let remainder = position;
-  let span = 1;
-  while (remainder % 2 === 0) {
-    remainder /= 2;
-    span *= 2;
-  }
-  return span;
-}
-
-function appendOffsetSegment(stack: OffsetSegment[], position: number, length: number): number {
-  requireBounded(Number.isSafeInteger(length) && length >= 0, 'OFFSET_INDEX_INVALID', '稿件偏移索引长度无效。');
-  let segment: OffsetSegment = { size: 1, total: length };
-  while (stack.at(-1)?.size === segment.size) {
-    const previous = stack.pop()!;
-    const total = previous.total + segment.total;
-    requireBounded(Number.isSafeInteger(total), 'OFFSET_INDEX_INVALID', '稿件偏移索引总量无效。');
-    segment = { size: segment.size * 2, total };
-  }
-  requireBounded(segment.size === fenwickSpan(position), 'OFFSET_INDEX_INVALID', '稿件偏移索引范围无效。');
-  stack.push(segment);
-  return segment.total;
-}
-
-function lastWorkingPosition(db: DatabaseSync, branchId: string): number {
-  const row = db.prepare(
-    'SELECT position FROM working_blocks WHERE branch_id = ? ORDER BY position DESC LIMIT 1',
-  ).get(branchId) as SqlRow | undefined;
-  requireBounded(row !== undefined, 'WINDOW_NOT_FOUND', '稿件窗口为空。');
-  return asNumber(row.position);
-}
-
-function workingOffsetPrefix(db: DatabaseSync, branchId: string, throughPosition: number): number {
-  requireBounded(Number.isSafeInteger(throughPosition) && throughPosition >= 0, 'OFFSET_INDEX_INVALID', '稿件偏移查询位置无效。');
-  let position = throughPosition;
-  let total = 0;
-  const read = db.prepare('SELECT span_graphemes FROM working_offset_nodes WHERE branch_id = ? AND position = ?');
-  while (position > 0) {
-    const row = read.get(branchId, position) as SqlRow | undefined;
-    requireBounded(row !== undefined, 'OFFSET_INDEX_INVALID', '稿件偏移索引节点缺失。');
-    total += asNumber(row.span_graphemes);
-    requireBounded(Number.isSafeInteger(total), 'OFFSET_INDEX_INVALID', '稿件偏移查询总量无效。');
-    position -= fenwickSpan(position);
-  }
-  return total;
-}
-
 function workingOffsetBefore(db: DatabaseSync, branchId: string, position: number): number {
   requireBounded(Number.isSafeInteger(position) && position > 0, 'OFFSET_INDEX_INVALID', '稿件偏移查询位置无效。');
   return workingOffsetPrefix(db, branchId, position - 1);
@@ -3602,33 +3495,6 @@ function resolveWorkingCharacter(
   }
   requireBounded(position < totalBlocks, 'OFFSET_INDEX_INVALID', '全稿字符位置无法解析。');
   return { position: position + 1, startCharacter: prefix };
-}
-
-function updateWorkingOffsetNodes(db: DatabaseSync, branchId: string, position: number, delta: number): number {
-  requireBounded(Number.isSafeInteger(delta), 'OFFSET_INDEX_INVALID', '稿件偏移变化无效。');
-  if (delta === 0) return 0;
-  const totalBlocks = lastWorkingPosition(db, branchId);
-  requireBounded(position <= totalBlocks, 'OFFSET_INDEX_INVALID', '稿件偏移更新位置无效。');
-  const update = db.prepare(
-    'UPDATE working_offset_nodes SET span_graphemes = span_graphemes + ? WHERE branch_id = ? AND position = ?',
-  );
-  let nodePosition = position;
-  let changes = 0;
-  while (nodePosition <= totalBlocks) {
-    requireBounded(
-      update.run(delta, branchId, nodePosition).changes === 1,
-      'OFFSET_INDEX_INVALID',
-      '稿件偏移索引节点无法更新。',
-    );
-    changes += 1;
-    nodePosition += fenwickSpan(nodePosition);
-  }
-  requireBounded(
-    changes <= Math.ceil(Math.log2(totalBlocks)) + 1,
-    'OFFSET_INDEX_INVALID',
-    '稿件偏移索引更新超出对数边界。',
-  );
-  return changes;
 }
 
 function encodedJsonStringBytes(text: string): number {
@@ -3711,115 +3577,6 @@ function boundedSearchContext(text: ReadonlyArray<string>, from: number, to: num
   return context;
 }
 
-function blockDigest(kind: ManuscriptBlockProjection['kind'], level: number | null, text: string): string {
-  return sha256(canonicalJson({ kind, level, text }));
-}
-
-/** The canonical header `ai7.recovery-command-evidence/1` hashes before a command group's members. */
-export interface CommandEvidenceHeader {
-  readonly schema: 'ai7.recovery-command-evidence/1';
-  readonly groupId: string;
-  readonly branchId: string;
-  readonly ordinal: number;
-  readonly kind: 'edit' | 'replacement';
-  readonly sourceGroupId: string | null;
-}
-
-/** One member of a command group exactly as its evidence hashes it: the block's whole text before and after. */
-export interface CommandEvidenceMember {
-  readonly position: number;
-  readonly blockId: string;
-  readonly beforeText: string;
-  readonly beforeDigest: string;
-  readonly afterText: string;
-  readonly afterDigest: string;
-}
-
-/**
- * The one reading of a command group's immutable evidence (Issue #1140). The group is validated whole first; then its
- * canonical header and every member, in position order and in storage batches, pass through the
- * `ai7.recovery-command-evidence/1` digest as they are read. The working-state chain keeps only that digest; the manual
- * source reader also keeps the members of the page it is packing, so the page and the digest that proves it come from
- * one pass over the group.
- */
-class CommandEvidenceReader {
-  readonly header: CommandEvidenceHeader;
-  readonly #db: DatabaseSync;
-  readonly #digest = createHash('sha256');
-  #position = 0;
-  #count = 0;
-  #exhausted = false;
-
-  constructor(db: DatabaseSync, groupId: string) {
-    validateCommandHistoryGroup(db, groupId);
-    const group = one(db.prepare(
-      `SELECT branch_id, ordinal, kind, source_group_id
-       FROM manuscript_command_groups WHERE command_group_id = ?`,
-    ).all(groupId) as SqlRow[], 'HISTORY_CORRUPT', '恢复命令证据缺失。');
-    this.#db = db;
-    this.header = {
-      schema: 'ai7.recovery-command-evidence/1',
-      groupId,
-      branchId: asString(group.branch_id),
-      ordinal: asNumber(group.ordinal),
-      kind: asString(group.kind) as CommandEvidenceHeader['kind'],
-      sourceGroupId: group.source_group_id === null ? null : asString(group.source_group_id),
-    };
-    this.#digest.update(canonicalJson(this.header));
-  }
-
-  /** The next storage batch of members, each already hashed; empty once the last member has been read. */
-  nextBatch(): CommandEvidenceMember[] {
-    if (this.#exhausted) return [];
-    const edits = this.#db.prepare(
-      `SELECT position, block_id, before_text, before_digest, after_text, after_digest
-       FROM manuscript_command_edits
-       WHERE command_group_id = ? AND position > ? ORDER BY position LIMIT ?`,
-    ).all(this.header.groupId, this.#position, HISTORY_BATCH) as SqlRow[];
-    if (edits.length === 0) {
-      this.#exhausted = true;
-      return [];
-    }
-    return edits.map((edit) => {
-      this.#position = asNumber(edit.position);
-      const member: CommandEvidenceMember = {
-        position: this.#position,
-        blockId: asString(edit.block_id),
-        beforeText: asString(edit.before_text),
-        beforeDigest: asString(edit.before_digest),
-        afterText: asString(edit.after_text),
-        afterDigest: asString(edit.after_digest),
-      };
-      this.#digest.update(canonicalJson(member));
-      this.#count += 1;
-      return member;
-    });
-  }
-
-  /** Reads whatever members remain, then the whole group's digest and member count. */
-  finish(): { memberCount: number; digest: string } {
-    while (this.nextBatch().length > 0) { /* hashed as read */ }
-    requireBounded(this.#position > 0, 'HISTORY_CORRUPT', '恢复命令证据为空。');
-    return { memberCount: this.#count, digest: this.#digest.digest('hex') };
-  }
-}
-
-function recoveryCommandEvidenceDigest(db: DatabaseSync, groupId: string): string {
-  return new CommandEvidenceReader(db, groupId).finish().digest;
-}
-
-function recoveryWorkingDigest(
-  previous: string,
-  sequence: number,
-  action: 'edit' | 'replacement' | 'undo' | 'redo',
-  groupId: string,
-  evidenceDigest: string,
-): string {
-  return sha256(canonicalJson({
-    schema: 'ai7.recovery-working-digest/1', previous, sequence, action, groupId, evidenceDigest,
-  }));
-}
-
 function stagedBlockId(draftId: string, position: number, digest: string): string {
   return `blk_${sha256(`${draftId}\u0000${position}\u0000${digest}`).slice(0, 24)}`;
 }
@@ -3870,22 +3627,6 @@ function validateShortText(value: string, maximum: number, code: string, message
   const normalized = value.normalize('NFC').trim();
   requireBounded((allowEmpty || normalized.length > 0) && normalized.length <= maximum, code, message);
   return normalized;
-}
-
-function transact<T>(db: DatabaseSync, operation: () => T): T {
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    const result = operation();
-    db.exec('COMMIT');
-    return result;
-  } catch (error) {
-    try {
-      db.exec('ROLLBACK');
-    } catch (rollbackError) {
-      throw new BoundedStoreFatalError(new AggregateError([error, rollbackError], 'SQLite rollback failed.'));
-    }
-    throw error;
-  }
 }
 
 function recreateImportDraftTable(db: DatabaseSync): void {
@@ -3939,21 +3680,6 @@ function recreateRevisionTable(db: DatabaseSync): void {
     ALTER TABLE manuscript_revisions_v3 RENAME TO manuscript_revisions;
     PRAGMA legacy_alter_table = OFF;
   `);
-}
-
-function stagedBlockLength(
-  text: string,
-  code = 'SCHEMA_MIGRATION_FAILED',
-  message = '暂存稿件包含无法按内容块有界校验的文字。',
-): number {
-  requireBounded(
-    text.isWellFormed() && text.length <= MAX_BLOCK_CODE_UNITS,
-    code,
-    message,
-  );
-  const length = graphemes(text).length;
-  requireBounded(length <= MAX_BLOCK_GRAPHEMES, code, message);
-  return length;
 }
 
 function requirePersistedBlockTextBounds(
@@ -4720,80 +4446,6 @@ function repairLegacyHistoryRoots(db: DatabaseSync): void {
 
 function validateLegacyHistoryRoots(db: DatabaseSync): void {
   forEachSchemaId(db, 'branch_working_state', 'branch_id', (branchId) => validateLegacyHistoryRoot(db, branchId));
-}
-
-function validateCommandHistoryGroup(db: DatabaseSync, groupId: string): void {
-  requireBounded(UUID_PATTERN.test(groupId), 'HISTORY_CORRUPT', '历史命令组标识无效。');
-  const group = one(
-    db.prepare(
-      'SELECT branch_id, status, before_working_digest, after_working_digest FROM manuscript_command_groups WHERE command_group_id = ?',
-    ).all(groupId) as SqlRow[],
-    'HISTORY_CORRUPT',
-    '历史命令组缺失。',
-  );
-  requireBounded(
-    UUID_PATTERN.test(asString(group.branch_id)) && DIGEST_PATTERN.test(asString(group.before_working_digest)) &&
-      DIGEST_PATTERN.test(asString(group.after_working_digest)),
-    'HISTORY_CORRUPT',
-    '历史命令组绑定摘要无效。',
-  );
-  const oversized = db.prepare(
-    `SELECT position FROM manuscript_command_edits
-     WHERE command_group_id = ? AND (
-       typeof(before_text) <> 'text' OR typeof(after_text) <> 'text' OR
-       length(CAST(before_text AS BLOB)) > ? OR length(CAST(after_text AS BLOB)) > ?
-     ) ORDER BY position LIMIT 1`,
-  ).get(groupId, MAX_BLOCK_CODE_UNITS * 3, MAX_BLOCK_CODE_UNITS * 3) as SqlRow | undefined;
-  requireBounded(oversized === undefined, 'HISTORY_CORRUPT', '历史命令文字超出有界校验范围。');
-  let position = 0;
-  let expectedPosition = 1;
-  while (true) {
-    const rows = db.prepare(
-      `SELECT ce.position, ce.block_id, ce.before_text, ce.before_digest, ce.after_text, ce.after_digest,
-              wb.kind, wb.level, wb.block_id working_block_id
-       FROM manuscript_command_edits ce
-       JOIN manuscript_command_groups cg ON cg.command_group_id = ce.command_group_id
-       LEFT JOIN working_blocks wb ON wb.branch_id = cg.branch_id AND wb.block_id = ce.block_id
-       WHERE ce.command_group_id = ? AND ce.position > ? ORDER BY ce.position LIMIT ?`,
-    ).all(groupId, position, HISTORY_BATCH) as SqlRow[];
-    if (rows.length === 0) break;
-    for (const row of rows) {
-      position = asNumber(row.position);
-      requireBounded(position === expectedPosition, 'HISTORY_CORRUPT', '历史命令内容块顺序或绑定无效。');
-      let kind: ManuscriptBlockProjection['kind'];
-      let level: number | null;
-      if (typeof row.working_block_id === 'string' && typeof row.kind === 'string') {
-        kind = asString(row.kind) as ManuscriptBlockProjection['kind'];
-        level = row.level === null ? null : asNumber(row.level);
-      } else {
-        requireBounded(asString(group.status) === 'superseded', 'HISTORY_CORRUPT', '历史命令内容块顺序或绑定无效。');
-        const shapes = db.prepare(
-          `SELECT kind, level FROM manuscript_block_versions WHERE block_id = ?
-           GROUP BY kind, level ORDER BY kind, level LIMIT 2`,
-        ).all(asString(row.block_id)) as SqlRow[];
-        requireBounded(shapes.length === 1, 'HISTORY_CORRUPT', '已归档历史命令的内容块结构证据无效。');
-        kind = asString(shapes[0]!.kind) as ManuscriptBlockProjection['kind'];
-        level = shapes[0]!.level === null ? null : asNumber(shapes[0]!.level);
-      }
-      const shapeValid =
-        (kind === 'title' && level === 1) ||
-        (kind === 'heading' && level !== null && Number.isSafeInteger(level) && level >= 1 && level <= 6) ||
-        (kind === 'paragraph' && level === null);
-      const beforeText = asString(row.before_text);
-      const afterText = asString(row.after_text);
-      const beforeLength = stagedBlockLength(beforeText, 'HISTORY_CORRUPT', '历史命令文字超出内容块边界。');
-      const afterLength = stagedBlockLength(afterText, 'HISTORY_CORRUPT', '历史命令文字超出内容块边界。');
-      requireBounded(
-        shapeValid && beforeLength <= MAX_BLOCK_GRAPHEMES && afterLength <= MAX_BLOCK_GRAPHEMES &&
-          blockDigest(kind, level, beforeText) === asString(row.before_digest) &&
-          blockDigest(kind, level, afterText) === asString(row.after_digest),
-        'HISTORY_CORRUPT',
-        '历史命令的前后文字与摘要不一致。',
-      );
-      expectedPosition += 1;
-    }
-  }
-  requireBounded(expectedPosition > 1, 'HISTORY_CORRUPT', '历史命令组没有可重放内容。');
 }
 
 function validateAllCommandHistory(db: DatabaseSync): void {
