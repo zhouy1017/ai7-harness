@@ -164,6 +164,16 @@ describe('single-writer exact-candidate merge release', () => {
     expect(release.mergeAuthorization({ ...final, isDraft: true }, [finalAssignment, cumulative, finalRelease]).allowed).toBe(false);
     expect(release.mergeAuthorization(final, [finalAssignment, cumulative, finalRelease]).allowed).toBe(true);
     expect(release.mergeAuthorization(final, [finalAssignment, { ...cumulative, slices: [] }, finalRelease]).allowed).toBe(false);
+    // An Owner direct-merged slice is closed by its merge record alone; mixing the forms is refused.
+    const closes = (slices: Record<string, unknown>[]) =>
+      release.mergeAuthorization(final, [finalAssignment, { ...cumulative, slices }, finalRelease]).allowed;
+    const direct = { pr: 817, merge: CORRECTED, directMerge: true };
+    expect(closes([direct])).toBe(true);
+    expect(closes([...cumulative.slices, direct])).toBe(true);
+    expect(closes([{ pr: 817, merge: CORRECTED }])).toBe(false);
+    expect(closes([{ ...direct, completion: 20, release: 21 }])).toBe(false);
+    expect(closes([{ ...direct, directMerge: 'true' }])).toBe(false);
+    expect(closes([{ ...cumulative.slices[0], directMerge: false }])).toBe(false);
   });
 });
 

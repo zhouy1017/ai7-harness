@@ -115,6 +115,19 @@ function localTests(tests, candidate) {
     tests.layers.length === LADDER.length;
 }
 
+/**
+ * An integration completion closes a slice by its receipts `{pr, completion, release, merge}` or,
+ * under the Owner's direct-merge authorization, by its merge record `{pr, merge, directMerge: true}`.
+ * Both forms or neither are refused.
+ */
+export function sliceClosure(slice) {
+  if (!Number.isSafeInteger(slice.pr) || slice.pr <= 0 || !SHA.test(slice.merge ?? '')) return null;
+  if (slice.directMerge === undefined) {
+    return Number.isSafeInteger(slice.completion) && Number.isSafeInteger(slice.release) ? 'receipted' : null;
+  }
+  return slice.directMerge === true && slice.completion === undefined && slice.release === undefined ? 'direct' : null;
+}
+
 /** A release refers to the latest completion and current assignment; no older green fallback. */
 export function mergeAuthorization(candidate, receipts) {
   const deny = (reason) => ({ allowed: false, reason });
@@ -147,8 +160,7 @@ export function mergeAuthorization(candidate, receipts) {
   } else if (complete.coordinator !== assignment.commander.terminal || complete.writer !== assignment.commander.terminal ||
       !Array.isArray(complete.slices) || complete.slices.length === 0 ||
       new Set(complete.slices.map((slice) => slice.pr)).size !== complete.slices.length ||
-      complete.slices.some((slice) => !Number.isSafeInteger(slice.pr) || slice.pr <= 0 ||
-        !Number.isSafeInteger(slice.completion) || !Number.isSafeInteger(slice.release) || !SHA.test(slice.merge ?? ''))) return deny('missing-slice-closures');
+      complete.slices.some((slice) => sliceClosure(slice) === null)) return deny('missing-slice-closures');
   if (!release || release.id <= complete.id || release.completion !== complete.id ||
       release.coordinator !== assignment.commander.terminal || release.runId !== assignment.commander.runId || release.writerReleased !== true ||
       !matches(release, candidate)) return deny('missing-current-release');
