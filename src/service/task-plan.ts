@@ -2455,6 +2455,10 @@ export function reviewRunPlan(input: {
 }): TaskPlanProjection {
   const { facts, bookTitle, blocks } = input;
   const local = facts.localPlan;
+  // A composite (Issue #1173) is one Task: 确定性检查 is its first category, the others run under the composite's shares.
+  const composite = facts.composite;
+  const localOnly = local !== undefined && composite === undefined;
+  const isLocal = (category: ReviewRunPlanFacts['categories'][number]): boolean => local !== undefined && category.categoryId === 'local-text-check';
   const scope = facts.scope;
   const reading = scope.kind === 'whole' ? readRange(blocks, null)
     : scope.selectedRange !== null ? readRange(blocks, scope.selectedRange) : null;
@@ -2475,6 +2479,7 @@ export function reviewRunPlan(input: {
   const production = tasks.some((category) => (category.task!.components['provider-resolution-plan'] as { remoteBinding?: { providerProcessing?: { operationalScope?: unknown } } }).remoteBinding?.providerProcessing?.operationalScope === 'ordinary-production');
   const allSet = ceilings.length > 0 && ceilings.every((ceiling) => ceiling !== 'unset');
   const ceilingTotal = ceilings.reduce((total, ceiling) => total + (ceiling === 'unset' ? 0 : ceiling.maxTotalTokens), 0);
+  const sharedCeiling = ceilings.reduce((most, ceiling) => Math.max(most, ceiling === 'unset' ? 0 : ceiling.maxTotalTokens), 0);
   const unitsRead = tasks.reduce((total, category) => total + category.task!.plan.recomputed, 0);
   const refused = categories.filter((category) => category.state === 'refused');
   const reasons = facts.state === 'prepared'
@@ -2507,8 +2512,8 @@ export function reviewRunPlan(input: {
           readiness: routes.includes('none') ? 'no-route' : 'ready',
           needsModelConnection,
           planEnvelopeDigest: null,
-          categoryDigests: local === undefined ? tasks.map((category) => ({ categoryId: category.categoryId, planEnvelopeDigest: category.task!.planEnvelopeDigest }))
-            : [{ categoryId: 'local-text-check', planEnvelopeDigest: local.digest }],
+          categoryDigests: [...(local === undefined ? [] : [{ categoryId: 'local-text-check', planEnvelopeDigest: local.digest }]),
+            ...tasks.map((category) => ({ categoryId: category.categoryId, planEnvelopeDigest: category.task!.planEnvelopeDigest }))],
           reconfirm: null,
         };
   return {
@@ -2518,20 +2523,21 @@ export function reviewRunPlan(input: {
     state: reviewState(facts),
     planVersion: null,
     goal: {
-      sentence: `按 ${categories.length} 类审阅${scopeWords}：${categories.map((category) => category.label).join('、')}`,
+      sentence: composite === undefined ? `按 ${categories.length} 类审阅${scopeWords}：${categories.map((category) => category.label).join('、')}`
+        : `按工序《${composite.title}》第 ${composite.procedure.version} 版依次审阅${scopeWords}：${categories.map((category) => category.label).join(' → ')}`,
       chips: {
         book: bookTitle,
         position,
         selectedGraphemes: reading?.graphemes ?? null,
         taskInputRevision: facts.inputRevision.revisionLabel,
-        procedure: procedures.length <= 1 ? firstProcedure : `${firstProcedure} 等 ${procedures.length} 个工序`,
+        procedure: composite !== undefined ? `${composite.title} 第 ${composite.procedure.version} 版` : procedures.length <= 1 ? firstProcedure : `${firstProcedure} 等 ${procedures.length} 个工序`,
       },
       savedForEdits: facts.inputRevision.createdForDirtyJournal,
     },
     scope: {
       process: `《${bookTitle}》${position}${reading === null ? '' : ` · ${groupedCount(reading.graphemes)} 字`} · ${categories.length} 个类别` +
         (spans === null ? (selection ? '；只在所选段落上标出发现' : '') : selection ? `；读取 ${spans} 作为上下文，只在所选段落上标出发现` : `；读取 ${spans}`),
-      reference: [...categories.map((category) => local !== undefined ? category.basisStatement : category.modelFree
+      reference: [...categories.map((category) => isLocal(category) ? category.basisStatement : category.modelFree
         ? `${category.label}：基线分析的前后不一致线索与未决事项`
         : category.guidelineDocuments.length === 0
           ? `${category.label}：${category.procedure.title}（第 ${category.procedure.version} 版）`
@@ -2543,7 +2549,7 @@ export function reviewRunPlan(input: {
     steps: [
       ...categories.map((category): TaskPlanStepProjection => ({
         id: `category:${category.categoryId}`,
-        label: local !== undefined ? `本机确定性检查：${category.label}` : category.modelFree ? `读取基线分析的线索：${category.label}` : `逐章审读：${category.label}`,
+        label: isLocal(category) ? `本机确定性检查：${category.label}` : category.modelFree ? `读取基线分析的线索：${category.label}` : `逐章审读：${category.label}`,
         result: `${category.label}的发现（稿件上的标记）`,
         removable: false,
         removed: false,
@@ -2557,19 +2563,20 @@ export function reviewRunPlan(input: {
     service: {
       role: roleLabel('Main Editorial Role'),
       provider: (route === null ? '不调用模型' : live ? `${route.kind} · ${route.model}` : 'AI7 本地确定性模型适配器') + (webSearchLabels.length === 0 ? '' : ` · 联网检索 · ${webSearchLabels.join('、')}`),
-      decision: (local !== undefined ? local.options.tables === undefined ? '本机执行五项有限识别规则，数字默认关闭；只生成可能问题批注，不表示整部标准合规' : '在本机按所选字形、词形、本社词表及本书术语表检查；机械修正由你采纳后应用，其余生成批注，数字默认关闭' : route === null
+      decision: (localOnly ? local.options.tables === undefined ? '本机执行五项有限识别规则，数字默认关闭；只生成可能问题批注，不表示整部标准合规' : '在本机按所选字形、词形、本社词表及本书术语表检查；机械修正由你采纳后应用，其余生成批注，数字默认关闭' : route === null
         ? '只读基线分析的线索，不调用模型'
         : live ? `${production ? '本地正式生产' : '开发者实时'}：实时传输受运行边界约束`
           : route.kind === 'none'
             ? '远程模型服务被拒绝，且没有可执行的本地路由；授权后会在派发前阻止'
             : '远程模型服务被拒绝（0 次实时传输）；由 AI7 本地确定性模型适配器执行') + ' · ' + (tasks.length === 0 ? '未联网核查' : tasks.map((category) =>
         researchDecisionLine(category.label, category.task!.researchReport, category.task!.components['web-tools-backend'] as import('../shared/protocol.js').FrozenWebToolsBackend | undefined)).join('；')),
-      send: local !== undefined ? '本机读取冻结的所选正文，不发送任何内容' : route === null ? '只读基线分析的线索，不发送任何内容' : live ? `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款${preferenceSent}，发往为审阅配置的模型服务` : NOTHING_SENT,
+      send: localOnly ? '本机读取冻结的所选正文，不发送任何内容' : route === null ? '只读基线分析的线索，不发送任何内容' : live ? `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款${preferenceSent}，发往为审阅配置的模型服务` : NOTHING_SENT,
       sendCategory: outboundLabel('public-or-synthetic'),
-      usage: local !== undefined ? '本地计算，不产生模型用量' : live && allSet ? `至多 ${groupedCount(ceilingTotal)} tokens（${tasks.length} 类合计）` : live && production ? PRODUCTION_UNSET_USAGE : NO_USAGE,
+      usage: localOnly ? '本地计算，不产生模型用量' : live && allSet && composite !== undefined ? `至多 ${groupedCount(sharedCeiling)} tokens（各成员按工序份额分用）` : live && allSet ? `至多 ${groupedCount(ceilingTotal)} tokens（${tasks.length} 类合计）` : live && production ? PRODUCTION_UNSET_USAGE : NO_USAGE,
       usageIsCeiling: live && allSet,
       duration: DURATION_UNKNOWN,
-      budgetCeiling: allSet ? `任务运行预算上限：${groupedCount(ceilingTotal)} tokens（${tasks.length} 类合计）` : BUDGET_NOT_SET,
+      budgetCeiling: !allSet ? BUDGET_NOT_SET : composite === undefined ? `任务运行预算上限：${groupedCount(ceilingTotal)} tokens（${tasks.length} 类合计）`
+        : `任务运行预算上限：${groupedCount(sharedCeiling)} tokens；各成员的模型阶段按工序份额分用`,
       accountLimit: ACCOUNT_LIMIT_UNKNOWN,
     },
     outcomes: [
@@ -2606,6 +2613,7 @@ export function reviewRunPlan(input: {
         : preferences.map(({ categoryLabel, preference }, index) => ({ key: `house-review-preference:${index}`, label: '本社审阅偏好',
           value: `${categoryLabel} · ${housePreferenceLabel(preference)} · ${preference.versionId} · ${preference.materialSetDigest}` }))),
       ...(materials.length === 0 ? [] : [{ key: 'material-references', label: '资料库参考版本', value: materials.map(({ source }) => `《${source.title}》 · ${source.materialId} · 索引版本 ${source.indexDigest}`).join('；') }]),
+      ...(composite === undefined ? [] : [{ key: 'procedure', label: '组合工序', value: `${composite.procedure.procedureId} · 第 ${composite.procedure.version} 版 · ${composite.procedure.digest}` }]),
       { key: 'review-run', label: '审阅记录', value: `${facts.label} · ${facts.reviewRunId} · ${facts.createdAt}` },
       { key: 'manuscript', label: '稿件 pin', value: `${facts.manuscript.revisionLabel} · ${facts.manuscript.revisionId} · 修订日志序号 ${facts.manuscript.journalSequence} · ${facts.manuscript.workingDigest}` },
       { key: 'task-input-revision', label: '任务输入修订版', value: `${facts.inputRevision.revisionLabel} · ${facts.inputRevision.revisionId}` },
@@ -2614,7 +2622,7 @@ export function reviewRunPlan(input: {
       ...categories.map((category) => ({
         key: `category:${category.categoryId}`,
         label: category.label,
-        value: local !== undefined ? `${category.procedure.title}（第 ${category.procedure.version} 版）· 本地确定性检查 → 派生报告 · ${local.digest}` : category.task === null
+        value: isLocal(category) ? `${category.procedure.title}（第 ${category.procedure.version} 版）· 本地确定性检查 → 派生报告 · ${local!.digest}` : category.task === null
           ? `${category.procedure.title}（第 ${category.procedure.version} 版）· 直接读取基线分析的线索，没有任务`
           : `${category.procedure.title}（第 ${category.procedure.version} 版）· 任务 ${category.task.taskIntentId} · ${category.task.modeLabel} · 计划版本 ${category.task.planVersion} · 计划权限边界 ${category.task.planEnvelopeDigest} · ${category.task.plan.routeLabel} · ${category.task.plan.providerStatusLabel} · ${category.task.plan.budgetCeilingLabel}`,
       })),

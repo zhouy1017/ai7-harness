@@ -1,3 +1,5 @@
+import type { ProcedureRecommendationInput, ProcedureRecommendationProjection } from '../protocol.js';
+
 /** ADR 0095 §1: product-built stage identities; declaring a stage grants no execution authority. */
 export const PROCEDURE_DEFINITION_SCHEMA = 'ai7.procedure-definition/2' as const;
 export const PROCEDURE_STAGE_TYPES = [
@@ -58,6 +60,17 @@ export interface ProcedureDefinitionDocument {
   readonly editorInstruction: string;
   readonly stages: readonly ProcedureStageDefinition[];
   readonly outputKinds: readonly ('change-suggestion' | 'annotation' | 'record' | 'document')[];
+  /** A composite version's member executions, in run order; absent on a version that binds one executor. */
+  readonly members?: readonly ProcedureMemberDefinition[];
+}
+
+/**
+ * One member of a composite version (Issue #1173): an existing pre-installed version run as its own category Run of one Review
+ * Run. Its `stageCount` stages follow the previous member's in the composite; the composite's last stage is the Run's report.
+ */
+export interface ProcedureMemberDefinition extends ProcedureDefinitionPin {
+  readonly categoryId: string;
+  readonly stageCount: number;
 }
 
 export interface ProcedureDefinitionPin {
@@ -100,13 +113,24 @@ export interface ProcedureLibraryProjection {
   readonly procedures: readonly EditableProcedureProjection[];
   readonly completedRuns: readonly { readonly runId: string; readonly bookId: string; readonly bookTitle: string;
     readonly title: string; readonly procedure: ProcedureDefinitionPin; readonly document: ProcedureDefinitionDocument; readonly executorKind: string }[];
+  /** 工序推荐 over the library's definitions and the house's Captured Procedures, present only on a `recommend` answer. */
+  readonly recommendation?: ProcedureRecommendationProjection;
 }
 
 export type ProcedureLibraryCommand =
   | { readonly action: 'inspect' }
   | { readonly action: 'save'; readonly input: SaveProcedureDefinitionInput }
   | { readonly action: 'stop'; readonly procedure: ProcedureDefinitionPin }
-  | { readonly action: 'select'; readonly bookId: string; readonly procedure: ProcedureDefinitionPin };
+  | { readonly action: 'select'; readonly bookId: string; readonly procedure: ProcedureDefinitionPin }
+  | { readonly action: 'recommend'; readonly input: ProcedureRecommendationInput };
+
+/** 运行此工序… of a composite (Issue #1173): the exact version a 审阅 runs; its categories are the version's members, in order. */
+export interface CompositeReviewRunRequest {
+  procedureDefinition?: ProcedureDefinitionPin | null;
+}
+
+/** A composite version runs as one 审阅 of a Book; it names no single kind executor. */
+export const COMPOSITE_PROCEDURE_EXECUTOR = 'review-run' as const;
 
 export const PROCEDURE_STAGE_LABELS: Readonly<Record<ProcedureStageType, string>> = {
   'read-through-ledger': '通读记账',

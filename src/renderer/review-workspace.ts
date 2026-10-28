@@ -245,7 +245,7 @@ type ReviewApi = Partial<Pick<RendererApi, 'inspectBookSeries' | 'inspectHouseWo
   'updateEditorialMark' | 'getEditorialMarkCard' |
   'reviewManuscriptExport' | 'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport' |
   // 可复用工序 (Issue #65, S30; ADR 0087): capture from a finished Run, and 按已保存的工序 on 新建审阅.
-  'inspectProcedureCapture' | 'saveCapturedProcedure' | 'saveDeveloperProposal' | 'inspectCapturedProcedureApplicability' | 'inspectCapturedProcedureRun' | 'recommendProcedures' |
+  'inspectProcedureCapture' | 'saveCapturedProcedure' | 'saveDeveloperProposal' | 'inspectCapturedProcedureApplicability' | 'inspectCapturedProcedureRun' | 'recommendProcedures' | 'procedureLibrary' |
   // 事实核查's retained sources on its finding cards (Issue #425, S70).
   'inspectProposalWorkspace' | 'inspectResearchEvidence' |
   // The Fact-check Lens and the Evidence Workspace (Issue #901).
@@ -349,7 +349,12 @@ interface SheetState {
   procedure: CapturedProcedureRunProjection | null;
   /** Its choices in flight (Issue #66, S31 review P2-1): only the newest answer fills the sheet, and 先看计划 waits for it. */
   readonly requests: ProcedureChoiceRequests;
+  /** A composite Procedure Definition version opened by 运行此工序… (Issue #1173): its members are the categories, in its order. */
+  definition: { readonly pin: import('../shared/protocol/procedures.js').ProcedureDefinitionPin; readonly title: string; readonly categoryIds: readonly string[] } | null;
 }
+
+/** 运行此工序… names a Procedure Definition version as `id@version`; a Captured Procedure is named by its UUID alone. */
+const PROCEDURE_DEFINITION_KEY = /^ai7-procedure\/[^@]+@[1-9][0-9]*$/u;
 
 const NO_FILTERS: Filters = { categoryId: null, severity: null, status: null, chapterBlockId: null };
 const FILTER_KEYS: Readonly<Record<FilterName, keyof Filters>> = {
@@ -2145,9 +2150,14 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       procedures,
       procedure: null,
       requests: new ProcedureChoiceRequests(),
+      definition: null,
     };
     renderSheet(projection, sheetState);
     sheet.showModal();
+    if (procedureId !== null && PROCEDURE_DEFINITION_KEY.test(procedureId)) {
+      await chooseDefinition(sheetState, procedureId);
+      return;
+    }
     if (procedureId !== null) {
       await chooseProcedure(sheetState, procedureId);
       return;
@@ -2189,6 +2199,26 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     renderSheet(projection, state);
     // Back on the selector the editor used, while the sheet still shows it.
     sheet.querySelector<HTMLElement>(`[data-review-field="${settled.focus}"]`)?.focus();
+  }
+
+  /** Fill the sheet from a composite version (Issue #1173): every member ticked, 确定性检查 first; the plan is still read before 开始. */
+  async function chooseDefinition(state: SheetState, key: string): Promise<void> {
+    const at = key.lastIndexOf('@');
+    try {
+      const entry = (await api.procedureLibrary({ action: 'inspect' })).procedures.find((procedure) => procedure.procedureId === key.slice(0, at));
+      const pin = entry?.versions.find((version) => version.version === Number(key.slice(at + 1)));
+      const document = entry?.documents.find((candidate) => candidate.version === pin?.version);
+      if (pin === undefined || document?.members === undefined) throw new Error('PROCEDURE_DEFINITION_UNAVAILABLE');
+      if (projection === null || sheetState !== state || destroyed) return;
+      state.definition = { pin, title: document.title, categoryIds: document.members.map((member) => member.categoryId) };
+      state.categories.clear();
+      for (const categoryId of state.definition.categoryIds) state.categories.add(categoryId);
+      state.scope ??= 'whole';
+    } catch (error) {
+      if (projection === null || sheetState !== state || destroyed) return;
+      state.problem = options.errorMessage(error, '无法读取所选工序版本；请在「知识库 › 工序与规则」重新运行此工序。');
+    }
+    renderSheet(projection, state);
   }
 
   function renderSheet(workspace: ReviewWorkspaceProjection, state: SheetState): void {
@@ -2258,6 +2288,12 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
 
     const categories = el('fieldset', 'review-category-options');
     const localSheet = state.categories.has('local-text-check');
+    if (state.definition !== null) {
+      const labels = state.definition.categoryIds.map((categoryId) => workspace.categories.find((entry) => entry.categoryId === categoryId)?.label ?? categoryId);
+      const line = el('p', 'field-note review-sheet-definition', `按工序《${state.definition.title}》第 ${state.definition.pin.version} 版依次审阅：${labels.join(' → ')}；成员不能单独增减。`);
+      line.dataset['procedureDefinition'] = `${state.definition.pin.procedureId}@${state.definition.pin.version}`;
+      categories.append(line);
+    }
     procedureField.hidden = localSheet;
     recommendationSlot.hidden = localSheet;
     categories.append(el('legend', undefined, REVIEW_CATEGORY_LEGEND));
@@ -2594,7 +2630,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       sheetUpdate();
       return;
     }
-    const categoryIds = state.categories.has('local-text-check') ? ['local-text-check'] : projection.categories.filter((entry) => state.categories.has(entry.categoryId)).map((entry) => entry.categoryId);
+    const categoryIds = state.definition !== null ? [...state.definition.categoryIds] : state.categories.has('local-text-check') ? ['local-text-check']
+      : projection.categories.filter((entry) => state.categories.has(entry.categoryId)).map((entry) => entry.categoryId);
     const { from, to } = chaptersOf(state);
     const asked = reviewSheetScope({
       scope: state.scope,
@@ -2619,6 +2656,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         scope,
         ...(state.materialIds.size === 0 ? {} : { materialIds: taskMaterialSelection(projection.materials?.items ?? [], state.materialIds) }),
         ...(choice.pin === null ? {} : { capturedProcedure: choice.pin }),
+        ...(state.definition === null ? {} : { procedureDefinition: state.definition.pin }),
       });
       state.job = initial;
       sheetUpdate();

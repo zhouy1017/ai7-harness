@@ -136,6 +136,11 @@ export function isSafeInteger(value: unknown, minimum = 0): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= minimum;
 }
 
+function procedureDefinitionPin(candidate: unknown): boolean {
+  return isRecord(candidate) && hasExactKeys(candidate, ['procedureId', 'version', 'digest']) &&
+    isBoundedString(candidate.procedureId, 160) && isSafeInteger(candidate.version, 1) && typeof candidate.digest === 'string' && /^[a-f0-9]{64}$/u.test(candidate.digest);
+}
+
 function isBoundedString(value: unknown, maximum: number, allowEmpty = false): value is string {
   return typeof value === 'string' && value.isWellFormed() && value.length <= maximum && (allowEmpty || value.length > 0);
 }
@@ -1723,9 +1728,12 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     case 'prepareReviewRun': {
       // A sheet pre-filled from a Captured Procedure (Issue #65, S30) names the exact version and digest it was filled from.
-      const input = requireInputWithOptional(value.input, ['bookId', 'categoryIds', 'scope'], ['capturedProcedure', 'materialIds', 'seriesId', 'localCheck', 'decisionId'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'categoryIds', 'scope'], ['capturedProcedure', 'procedureDefinition', 'materialIds', 'seriesId', 'localCheck', 'decisionId'], tentativeId);
       if (input.decisionId !== undefined && (!validUuid(input.decisionId) || !Array.isArray(input.categoryIds) || input.categoryIds.length !== 1 || input.categoryIds[0] !== 'factual-review')) throw new ProtocolError(tentativeId);
-      if (input.localCheck !== undefined && (!validLocalOptions(input.localCheck) || !Array.isArray(input.categoryIds) || input.categoryIds.length !== 1 || input.categoryIds[0] !== 'local-text-check')) throw new ProtocolError(tentativeId);
+      // A composite version (Issue #1173) names the exact Procedure Definition; its members, 确定性检查 first, are the categories.
+      const composite = input.procedureDefinition != null;
+      if (!optionalOrNull(input, 'procedureDefinition', procedureDefinitionPin) || (composite && (input.capturedProcedure != null || input.decisionId !== undefined))) throw new ProtocolError(tentativeId);
+      if (input.localCheck !== undefined && (!validLocalOptions(input.localCheck) || !Array.isArray(input.categoryIds) || input.categoryIds[0] !== 'local-text-check' || (!composite && input.categoryIds.length !== 1))) throw new ProtocolError(tentativeId);
       if (Array.isArray(input.categoryIds) && input.categoryIds.includes('local-text-check') &&
         (!validLocalOptions(input.localCheck) || input.capturedProcedure != null || input.seriesId != null || (Array.isArray(input.materialIds) && input.materialIds.length > 0))) throw new ProtocolError(tentativeId);
       if (!optionalOrNull(input, 'seriesId', validUuid)) throw new ProtocolError(tentativeId);
@@ -1747,10 +1755,14 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     case 'procedureLibrary': {
       const input = value.input;
-      const pin = (candidate: unknown): boolean => isRecord(candidate) && hasExactKeys(candidate, ['procedureId', 'version', 'digest']) &&
-        isBoundedString(candidate.procedureId, 160) && isSafeInteger(candidate.version, 1) && typeof candidate.digest === 'string' && /^[a-f0-9]{64}$/u.test(candidate.digest);
+      const pin = procedureDefinitionPin;
       if (!isRecord(input)) throw new ProtocolError(tentativeId);
       if (input.action === 'inspect' && hasExactKeys(input, ['action'])) break;
+      // 工序推荐 in the library (Issue #1173): the same bounded intent the review sheet sends, read for one chosen Book.
+      if (input.action === 'recommend' && hasExactKeys(input, ['action', 'input']) && isRecord(input.input) &&
+        hasExactKeys(input.input, ['bookId', 'goal', 'taskKind', 'scope', 'categoryIds']) && validUuid(input.input.bookId) && isBoundedString(input.input.goal, 2000, true) &&
+        ['review-run', 'baseline-analysis', 'writing', 'unclassified'].includes(String(input.input.taskKind)) && ['whole', 'chapters', 'selection'].includes(String(input.input.scope)) &&
+        Array.isArray(input.input.categoryIds) && validReviewCategoryIds(input.input.categoryIds, 0)) break;
       if (input.action === 'stop' && hasExactKeys(input, ['action', 'procedure']) && pin(input.procedure)) break;
       if (input.action === 'select' && hasExactKeys(input, ['action', 'bookId', 'procedure']) && validUuid(input.bookId) && pin(input.procedure)) break;
       const edit = input.input;

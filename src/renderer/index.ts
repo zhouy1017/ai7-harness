@@ -4555,11 +4555,11 @@ function renderKnowledgeBaseProjection(projection: DefaultExecutionRulesProjecti
     const section = element('section', 'knowledge-procedures');
     section.dataset['procedureCount'] = String(procedures.preinstalled.length);
     const list = renderProcedureLibrary(procedures.preinstalled);
-    void mountEditableProcedureLibrary(list, window.ai7, async (book, kind) => {
+    void mountEditableProcedureLibrary(list, window.ai7, async (book, kind, procedure) => {
       await requestBookWorkbenchRoute({ kind: 'book', bookId: book.bookId }, async (route) => {
         if (kind === 'writing') renderBookDeliverables(route.bookId, route.bookTitle);
         else if (['evaluation', 'readers-report', 'evaluation-rewrite'].includes(kind)) renderBookEvaluation(route.bookId, route.bookTitle);
-        else renderBookReview(route.bookId, route.bookTitle);
+        else renderBookReview(route.bookId, route.bookTitle, null, kind === 'review-run' ? `${procedure.procedureId}@${procedure.version}` : null);
       });
     }, rendererErrorMessage).catch((error: unknown) => setStatus(rendererErrorMessage(error, '无法读取工序版本。'), 'error'));
     const artifacts = element('ul', 'knowledge-artifact-list');

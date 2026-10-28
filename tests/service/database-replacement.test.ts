@@ -1,5 +1,6 @@
 import { PROCEDURE_DEFINITION_SCHEMA_SQL, PROCEDURE_DEFINITION_TRIGGER_SQL } from '../../src/service/procedures/definition-store.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
+import { asRevision98 } from '../support/procedure-revisions.js';
 import { existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { copyFile, readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -105,7 +106,7 @@ async function handmade(name: string, dataVersion: number, schemaRevision: numbe
   mkdirSync(join(other, 'objects'), { recursive: true });
   if (schemaRevision >= 55) {
     const store = await EditorialStore.open(other, roots.codeRoot);
-    if (schemaRevision === 97) createBook(store, '版本97合成图书');
+    if (schemaRevision === 97 || schemaRevision === 98) createBook(store, `版本${schemaRevision}合成图书`);
     store.close();
   }
   const database = new DatabaseSync(schemaRevision >= 55 ? join(other, 'store', 'ai7.sqlite') : ':memory:');
@@ -116,7 +117,8 @@ async function handmade(name: string, dataVersion: number, schemaRevision: numbe
       database.exec(PROCEDURE_DEFINITION_SCHEMA_SQL.procedure_plan_pins);
       for (const action of ['update', 'delete']) database.exec(PROCEDURE_DEFINITION_TRIGGER_SQL[`procedure_plan_pins_no_${action}`]!);
     }
-    execPre74Fixture(database, `PRAGMA user_version = ${schemaRevision};`);
+    if (schemaRevision === 98) asRevision98(database);
+    else execPre74Fixture(database, `PRAGMA user_version = ${schemaRevision};`);
     const path = join(roots.inputRoot, name);
     await writeDatabasePackage(database, other, path, () => ({
       dataVersion, softwareVersion: '0.1.0', schemaRevision, createdAt: T.toISOString(), origin: 'database-export', contents,
@@ -144,7 +146,24 @@ describe('导入数据库 over the real store', () => {
         basedOn: { procedureId: original.procedureId, version: original.version, digest: original.digest },
         title: '迁移后的写作', editorInstruction: '简明', stages: original.document.stages } });
       expect(created.procedures.find((entry) => entry.procedureId === original.procedureId)!.documents).toContainEqual(original.document);
-      expect(await store.inspectDatabaseImport(await exported(store, 'revision98.ai7db'))).toMatchObject({ schemaRevision: 98 });
+      expect(await store.inspectDatabaseImport(await exported(store, 'revision99.ai7db'))).toMatchObject({ schemaRevision: 99 });
+      store.markCleanShutdown();
+    } finally { store.close(); }
+  });
+
+  it('migrates a genuine revision-98 package through replacement and installs 全文审校 v1 last (#1173)', async () => {
+    const path = await handmade('revision98.ai7db', 1, 98);
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const preview = await store.inspectDatabaseImport(path);
+      expect(preview).toMatchObject({ schemaRevision: 98, compatibility: 'compatible' });
+      await store.prepareDatabaseReplacement(preview.previewId, T);
+      store.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      expect(titles(store)).toEqual(['版本98合成图书']);
+      const procedures = store.procedureLibrary({ action: 'inspect' }).procedures;
+      expect([procedures.length, procedures.at(-1)!.procedureId, procedures.at(-1)!.version, procedures.at(-1)!.executorKind])
+        .toEqual([17, 'ai7-procedure/full-review', 1, 'review-run']);
+      expect(await store.inspectDatabaseImport(await exported(store, 'revision98-migrated.ai7db'))).toMatchObject({ schemaRevision: 99 });
       store.markCleanShutdown();
     } finally { store.close(); }
   });
@@ -181,7 +200,7 @@ describe('导入数据库 over the real store', () => {
       expect(store.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }))
         .toMatchObject({ enabled: false, signals: [], items: [], controlEntries: 1 });
       const preview = await store.inspectDatabaseImport(await exported(store, 'migrated-v96.ai7db'));
-      expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 98, dataVersion: 1 });
+      expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 99, dataVersion: 1 });
       store.markCleanShutdown();
     } finally { store.close(); }
   });
@@ -203,7 +222,7 @@ describe('导入数据库 over the real store', () => {
       expect(original.localFixtureProfile).toBeUndefined();
       const packagePath = await exported(store, 'selected-v1.ai7db');
       const preview = await store.inspectDatabaseImport(packagePath);
-      expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 98, dataVersion: 1 });
+      expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 99, dataVersion: 1 });
       await store.prepareDatabaseReplacement(preview.previewId, T); await store.close();
       store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, control);
       expect(store.inspectFactualReview(book.bookId).providerResolutionPlan).toEqual(original);

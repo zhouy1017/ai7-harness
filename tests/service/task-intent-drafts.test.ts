@@ -483,7 +483,7 @@ describe('schema revision 80', () => {
   it('rebuilds a revision-79 store\'s Task Intents with every row byte for byte and adds the draft relations empty', async () => {
     expect(TASK_INTENT_DRAFT_SCHEMA_VERSION).toBe(80);
     // Revision 84 follows the imported Skill revisions and adds independent model selections and translation attempt metadata.
-    expect(LATEST_SCHEMA_VERSION).toBe(TASK_INTENT_DRAFT_SCHEMA_VERSION + 18);
+    expect(LATEST_SCHEMA_VERSION).toBe(TASK_INTENT_DRAFT_SCHEMA_VERSION + 19);
     const store = await open();
     let bookId: string;
     try {
@@ -514,7 +514,7 @@ describe('schema revision 80', () => {
     }
     const migrated = new DatabaseSync(path);
     try {
-      expect(migrated.prepare('PRAGMA user_version').get()).toEqual({ user_version: 98 });
+      expect(migrated.prepare('PRAGMA user_version').get()).toEqual({ user_version: 99 });
       expect((migrated.prepare("SELECT sql FROM sqlite_schema WHERE name = 'analysis_task_intents'").get() as { sql: string }).sql).toBe(FACTUAL_TASK_INTENTS_SQL);
       expect(migrated.prepare('SELECT rowid, * FROM analysis_task_intents ORDER BY rowid').all()).toEqual(intents);
       expect(migrated.prepare('SELECT rowid, * FROM analysis_plan_records ORDER BY rowid').all()).toEqual(plans);

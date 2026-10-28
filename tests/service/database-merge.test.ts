@@ -2,6 +2,7 @@ import { PROCEDURE_DEFINITION_SCHEMA_SQL, PROCEDURE_DEFINITION_TRIGGER_SQL } fro
 import { BASELINE_ANALYSIS_TASK_GOAL } from '../../src/shared/protocol.js';
 import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
+import { asRevision98 } from '../support/procedure-revisions.js';
 import { randomUUID } from 'node:crypto';
 import { copyFileSync, cpSync, existsSync, mkdirSync } from 'node:fs';
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
@@ -894,7 +895,7 @@ describe('只导入其中的图书 over the store', () => {
       categoryId: 'typos-and-usage', text: '目标本社保留的合成偏好。', effect: 'guide' });
     const targetHouse = target.inspectGlobalAgent();
     const preview = await target.inspectDatabaseImport(packagePath);
-    expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 98, dataVersion: 1 });
+    expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 99, dataVersion: 1 });
     await target.prepareDatabaseMerge(preview.previewId, T);
     target.close();
     target = await EditorialStore.open(otherRoot, roots.codeRoot, control);
@@ -1276,7 +1277,31 @@ describe('what a merge refuses, puts back and brings forward', () => {
       await target.prepareDatabaseMerge(preview.previewId, T);
       target.close(); target = await EditorialStore.open(otherRoot, roots.codeRoot);
       expect(titles(target)).toEqual(['版本97待合并图书']);
-      expect(target.procedureLibrary({ action: 'inspect' }).procedures).toHaveLength(16);
+      expect(target.procedureLibrary({ action: 'inspect' }).procedures).toHaveLength(17);
+      target.markCleanShutdown();
+    } finally { target.close(); }
+  });
+
+  it('migrates a genuine revision-98 package on selected-Book merge without its missing 全文审校 row (#1173)', async () => {
+    const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const creation = source.prepareBookCreation('版本98待合并图书', null);
+    source.commitBookCreation({ ...creation.proposed, reviewDigest: creation.reviewDigest }); source.close();
+    const db = new DatabaseSync(storeOf(roots.dataRoot));
+    const path = join(roots.inputRoot, 'revision98.ai7db');
+    try {
+      asRevision98(db);
+      expect(db.prepare("SELECT count(*) total FROM procedure_definitions WHERE procedure_id = 'ai7-procedure/full-review'").get()).toEqual({ total: 0 });
+      await writeDatabasePackage(db, roots.dataRoot, path, () => ({ dataVersion: 1, softwareVersion: '0.1.0', schemaRevision: 98,
+        createdAt: T.toISOString(), origin: 'database-export', contents: { books: 1, sourceVersions: 0, libraryMaterials: 0, series: 0 } }));
+    } finally { db.close(); }
+    let target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    try {
+      const preview = await target.inspectDatabaseImport(path);
+      expect(preview).toMatchObject({ schemaRevision: 98, compatibility: 'compatible' });
+      await target.prepareDatabaseMerge(preview.previewId, T);
+      target.close(); target = await EditorialStore.open(otherRoot, roots.codeRoot);
+      expect(titles(target)).toEqual(['版本98待合并图书']);
+      expect(target.procedureLibrary({ action: 'inspect' }).procedures.map((entry) => entry.procedureId).at(-1)).toBe('ai7-procedure/full-review');
       target.markCleanShutdown();
     } finally { target.close(); }
   });

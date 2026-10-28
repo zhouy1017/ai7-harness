@@ -161,8 +161,8 @@ describe('the protection words (ED-055, DUR-003, DUR-004, DUR-005, DUR-009)', ()
 });
 
 describe('the Edit Journal write-failure injection launch rule (T0-1)', () => {
-  it('is protocol 178 for scoped Global Agent turns, editable procedure commands and selected policy/profile projections while retaining explicit Word import readings', () => {
-    expect(SERVICE_PROTOCOL_VERSION).toBe(178);
+  it('is protocol 179 for composite procedure runs, scoped Global Agent turns, editable procedure commands and selected policy/profile projections while retaining explicit Word import readings', () => {
+    expect(SERVICE_PROTOCOL_VERSION).toBe(179);
   });
 
   it('arms only J-02\'s `armed` launch in the development-ci scope and refuses every other present control', () => {

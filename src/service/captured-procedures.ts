@@ -70,6 +70,7 @@ import {
   readProcedureLibrary,
 } from './procedures/editable.js';
 import { readKnowledgeProcedures } from './knowledge-procedures.js';
+import { definitionRecommendationReadings } from './procedures/library.js';
 import type { BookDeliveryPackages } from './book-delivery-packages.js';
 import type { EditorialWorkspaceProfileStore } from './editorial-workspace-profile.js';
 import type { ReviewGuidelineLedger } from './review-guidelines.js';
@@ -1333,7 +1334,8 @@ export function enableImportedSkill(host: CapturedProcedureStoreHost, revisionId
 }
 
 /** ADR 0090: recommendations consume existing eligibility; neither this read nor selection writes authority. */
-export function recommendProcedures(host: CapturedProcedureStoreHost, input: ProcedureRecommendationInput): ProcedureRecommendationProjection {
+/** The review sheet reads Captured Procedures; the library's 工序推荐 also reads its Procedure Definitions (Issue #1173). */
+export function recommendProcedures(host: CapturedProcedureStoreHost, input: ProcedureRecommendationInput, definitions = false): ProcedureRecommendationProjection {
   host.assertAvailable();
   return procedureCall(host, () => {
     requireStore(typeof input.goal === 'string' && input.goal.length <= 2000 && input.goal.isWellFormed() &&
@@ -1348,7 +1350,7 @@ export function recommendProcedures(host: CapturedProcedureStoreHost, input: Pro
       readings.push({ applicability: entry, document: stored.document, documentSha256: stored.documentSha256,
         labels: capturedStepProjections(stored.document, capturedStepWords(host)).map((step) => step.label) });
     }
-    return rankProcedureRecommendations(input, readings);
+    return rankProcedureRecommendations(input, readings, definitions ? definitionRecommendationReadings(host.authority) : []);
   });
 }
 
@@ -1869,7 +1871,8 @@ export function procedureLibrary(host: CapturedProcedureStoreHost, command: impo
         selectProcedureForBook(host.authority, command.bookId, command.procedure);
       }
     });
-    return readProcedureLibrary(host.authority);
+    const library = readProcedureLibrary(host.authority);
+    return command.action === 'recommend' ? { ...library, recommendation: recommendProcedures(host, command.input, true) } : library;
   });
 }
 

@@ -1,8 +1,8 @@
 import type { DatabaseSync } from 'node:sqlite';
 import type { ProcedureDefinitionDocument, ProcedureDefinitionPin } from '../../shared/protocol/procedures.js';
 import { canonicalJson, canonicalRecord, parseCanonicalJson, requireAnalysis, sha256Hex } from '../analysis/canonical.js';
-import { preinstalledProcedureDefinitions, allPreinstalledProcedureDefinitions } from './preinstalled.js';
-import { FACTUAL_CLAIM_SCHEMA_VERSION, EDITABLE_PROCEDURE_SCHEMA_VERSION, REVIEW_CONTRACT_SCHEMA_VERSION } from '../task-authorization.js';
+import { preinstalledProcedureDefinitions, allPreinstalledProcedureDefinitions, FULL_REVIEW_PROCEDURE_ID } from './preinstalled.js';
+import { FACTUAL_CLAIM_SCHEMA_VERSION, EDITABLE_PROCEDURE_SCHEMA_VERSION, COMPOSITE_PROCEDURE_SCHEMA_VERSION, REVIEW_CONTRACT_SCHEMA_VERSION } from '../task-authorization.js';
 import { HOUSE_WORD_LIST_SCHEMA_VERSION } from '../review/house-word-list.js';
 
 export const PROCEDURE_DEFINITION_SCHEMA_SQL = {
@@ -90,7 +90,7 @@ function insertProcedureVersions(db: DatabaseSync, documents: readonly Procedure
 export function initializeProcedureDefinitionSchema(db: DatabaseSync): void {
   const existing = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'procedure_definitions'").get() !== undefined;
   if (existing) {
-    if (Number(db.prepare('PRAGMA user_version').get()?.user_version) >= EDITABLE_PROCEDURE_SCHEMA_VERSION) {
+    if (Number(db.prepare('PRAGMA user_version').get()?.user_version) >= COMPOSITE_PROCEDURE_SCHEMA_VERSION) {
       validateProcedureDefinitions(db);
       return;
     }
@@ -121,6 +121,7 @@ export function validateProcedureDefinitions(db: DatabaseSync, allowLegacy = fal
   for (const document of expected) {
     if (schemaVersion < EDITABLE_PROCEDURE_SCHEMA_VERSION && ['evaluation', 'readers-report', 'evaluation-rewrite', 'writing'].some((kind) => document.id === `ai7-procedure/${kind}`)) continue;
     if (schemaVersion < FACTUAL_CLAIM_SCHEMA_VERSION && document.id === 'ai7-procedure/factual-claim-check') continue;
+    if (schemaVersion < COMPOSITE_PROCEDURE_SCHEMA_VERSION && document.id === FULL_REVIEW_PROCEDURE_ID) continue;
     if (allowLegacy && schemaVersion < HOUSE_WORD_LIST_SCHEMA_VERSION && document.id === 'ai7-procedure/local-text-check') continue;
     if (allowPreCrossChapter && ((document.id === 'ai7-procedure/review-style-and-format' && document.version === 3) ||
       (document.id === 'ai7-procedure/review-plot-consistency' && document.version === 2))) continue;

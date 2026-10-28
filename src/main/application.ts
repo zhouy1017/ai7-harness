@@ -5086,8 +5086,8 @@ function registerRendererHandlers(
             scope: input.scope,
             ...(input.materialIds === undefined ? {} : { materialIds: input.materialIds }),
             bookId: route.bookId,
-            // A sheet pre-filled from a Captured Procedure (Issue #65, S30) names the version it was filled from.
-            ...(input.capturedProcedure === undefined || input.capturedProcedure === null ? {} : { capturedProcedure: input.capturedProcedure }),
+            // A sheet pre-filled from a Captured Procedure (Issue #65, S30), or opened for a composite version (Issue #1173), names it.
+            ...(input.capturedProcedure == null ? {} : { capturedProcedure: input.capturedProcedure }), ...(input.procedureDefinition == null ? {} : { procedureDefinition: input.procedureDefinition }),
             // 本地文字检查 (Issue #1119) carries the editor's explicit options, which the service's request frame validates.
             ...(input.localCheck === undefined ? {} : { localCheck: input.localCheck }),
           });
@@ -6589,7 +6589,7 @@ export async function runApplication(): Promise<void> {
     await requireSameCanonicalDataDirectory(shellRoot, app.getPath('userData'));
     // The Data Version (数据版本) and the store's schema revision (数据库修订) apart (Issue #967): the unit suite holds each to its owner.
     const crashFacts = () => ({
-      appVersion: softwareVersion, buildIdentity, dataVersion: buildIdentity.dataVersion, schemaRevision: 98, protocol: SERVICE_PROTOCOL_VERSION,
+      appVersion: softwareVersion, buildIdentity, dataVersion: buildIdentity.dataVersion, schemaRevision: 99, protocol: SERVICE_PROTOCOL_VERSION,
       platform: process.platform, arch: process.arch, electron: process.versions.electron ?? 'unknown',
       uptimeSeconds: process.uptime(),
     });

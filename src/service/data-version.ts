@@ -73,6 +73,7 @@ export const SCHEMA_REVISION_CLASSES: ReadonlyArray<ClassifiedSchemaRevision> = 
   { revision: 96, class: 'additive' }, // #1165: typed curation Task and enabled-learning origin CHECKs.
   { revision: 97, class: 'additive' }, // #1168: factual claim membership, reservations and recheck task modes.
   { revision: 98, class: 'additive' }, // #1170: editable version lineage, stops, choices and portable Plan snapshots.
+  { revision: 99, class: 'additive' }, // #1173: the pre-installed composite 全文审校 v1 row.
 ];
 
 /**
