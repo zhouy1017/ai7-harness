@@ -1,4 +1,5 @@
 import { validLocalOptions } from './review/deterministic/plan.js';
+import { validStructureChoice } from '../shared/protocol/import-structure.js';
 import { validateInspectHouseWordListInput, validateSaveHouseWordListInput } from '../shared/protocol/house-word-list.js';
 import { validSupervisionInput } from './learning/supervision-directives.js';
 import { validCurationBudget } from './learning/curation.js';
@@ -1999,7 +2000,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       const input = requireInputWithOptional(
         value.input,
         ['draftId', 'expectedDraftVersion', 'target', 'acceptDegradation', 'textBoxDisposition'],
-        ['trackedChanges'],
+        ['trackedChanges', 'structure'],
         tentativeId,
       );
       const target = input.target;
@@ -2022,7 +2023,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
           hasExactKeys(input.trackedChanges, ['mode', 'learnFromEdits', 'acceptedBaselineConfirmed']) &&
           typeof input.trackedChanges.learnFromEdits === 'boolean' &&
           (input.trackedChanges.mode === 'suggestions' && input.trackedChanges.acceptedBaselineConfirmed === false ||
-            input.trackedChanges.mode === 'accepted-baseline' && input.trackedChanges.acceptedBaselineConfirmed === true)))
+            input.trackedChanges.mode === 'accepted-baseline' && input.trackedChanges.acceptedBaselineConfirmed === true))) ||
+        (input.structure !== undefined && !validStructureChoice(input.structure))
       ) {
         throw new ProtocolError(tentativeId);
       }

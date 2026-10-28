@@ -86,6 +86,13 @@ export interface ComposedManuscriptRequest {
   /** `dc:title` of the composed package. Test-authored: no title is ever taken from the source. */
   readonly title: string;
   readonly retention?: ComposedRetentionContent;
+  /** Write every excerpt block as an unstyled paragraph: a manuscript without heading styles (Issue #1205). */
+  readonly withoutHeadingStyles?: true;
+  /**
+   * The excerpt's blocks `[block, block + blocks)` (1-based) written as one paragraph — over the block bound when long enough —
+   * their texts joined directly, or with a soft line break between them.
+   */
+  readonly joined?: { readonly block: number; readonly blocks: number; readonly softBreaks: boolean };
 }
 
 function paragraphOf(block: ParsedDocxBlock): SyntheticDocxParagraph {
@@ -405,8 +412,14 @@ export async function composeManuscriptDocx(
     );
   }
   const excerpt = available.slice(request.startBlock - 1, lastBlock);
+  const paragraphs = excerpt.map((block) => request.withoutHeadingStyles === true ? { text: block.text } : paragraphOf(block));
+  const joined = request.joined;
+  if (joined !== undefined) {
+    const texts = paragraphs.splice(joined.block - 1, joined.blocks).map((paragraph) => paragraph.text);
+    paragraphs.splice(joined.block - 1, 0, joined.softBreaks ? { text: texts.join('\n'), softBreaks: true as const } : { text: texts.join('') });
+  }
   const archive = buildSyntheticDocx({
-    paragraphs: excerpt.map(paragraphOf),
+    paragraphs,
     coreTitle: request.title,
     ...(request.retention === undefined ? {} : { extraEntries: retentionParts(excerpt, available, request.retention) }),
   });

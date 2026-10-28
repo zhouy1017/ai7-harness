@@ -11,6 +11,7 @@ import {
   type ImportCommitProjection,
 } from '../shared/protocol.js';
 import { renderFidelityReview } from './import-fidelity.js';
+import { STRUCTURE_CHOICE_REQUIRED, renderStructureReview } from './import-structure.js';
 import {
   wordIntakeRefusalLabel,
   wordImportModeOption,
@@ -312,9 +313,12 @@ export function createImportReview(options: ImportReviewOptions) {
       title.value = staged.titleSuggestion.value;
       const note = element('span', 'field-note', `建议来源：${staged.titleSuggestion.sourceLabel}。这是可编辑建议，不会自动创建图书。`);
       const fidelityView = renderFidelityReview(staged.fidelity, staged.source.conversion, { kind: 'offer' });
+      const structureView = renderStructureReview(staged.structure);
       const wordControls = relationshipSelection === 'first-manuscript' ? renderWordIntakeControls(staged) : null;
       const confirm = button('确认书名并复核', 'primary', async () => {
         if (wordControls !== null && !wordControls.allowed()) { setStatus('请选择可用的 Word 阅读；选择「直接并入正文（作为定稿基线）」时须单独确认。', 'error'); return; }
+        if (relationshipSelection === 'first-manuscript' && !structureView.allowed()) { setStatus(STRUCTURE_CHOICE_REQUIRED, 'error'); return; }
+        const structure = relationshipSelection === 'first-manuscript' ? structureView.choice() : undefined;
         const trackedChanges = wordControls?.choice();
         const confirmedTitle = title.value.normalize('NFC').replace(/\s+/g, ' ').trim();
         if (!confirmedTitle || confirmedTitle.length > 180) {
@@ -347,6 +351,7 @@ export function createImportReview(options: ImportReviewOptions) {
               acceptDegradation: false,
               textBoxDisposition: fidelityView.textBoxDisposition(),
               ...(trackedChanges === undefined ? {} : { trackedChanges }),
+              ...(structure === undefined ? {} : { structure }),
             });
             renderReview(review, recoveryNotice, recoveryReturn);
           }
@@ -361,7 +366,7 @@ export function createImportReview(options: ImportReviewOptions) {
       form.append(label, title, note);
       if (relationshipSelection === 'first-manuscript') {
         if (wordControls !== null) { form.append(...wordControls.elements); wordControls.bind(confirm); }
-        form.append(...fidelityView.elements);
+        form.append(...fidelityView.elements, ...structureView.elements);
       }
       form.append(actions);
       content.append(form);
@@ -369,11 +374,14 @@ export function createImportReview(options: ImportReviewOptions) {
     } else if (selectedChoice?.kind === 'existing-book' && relationshipSelection === 'first-manuscript') {
       if (selectedChoice.manuscriptState !== 'empty') throw new Error('AI7_IMPORT_RELATIONSHIP_INVALID');
       const fidelityView = renderFidelityReview(staged.fidelity, staged.source.conversion, { kind: 'offer' });
+      const structureView = renderStructureReview(staged.structure);
       const wordControls = renderWordIntakeControls(staged);
-      content.append(...wordControls.elements, ...fidelityView.elements);
+      content.append(...wordControls.elements, ...fidelityView.elements, ...structureView.elements);
       const actions = element('div', 'button-row');
       const confirm = button('复核导入到所选图书', 'primary', async () => {
         if (!wordControls.allowed()) { setStatus('请选择可用的 Word 阅读；选择「直接并入正文（作为定稿基线）」时须单独确认。', 'error'); return; }
+        if (!structureView.allowed()) { setStatus(STRUCTURE_CHOICE_REQUIRED, 'error'); return; }
+        const structure = structureView.choice();
         const trackedChanges = wordControls.choice();
         confirm.disabled = true;
         wordControls.setBusy(true);
@@ -386,6 +394,7 @@ export function createImportReview(options: ImportReviewOptions) {
             acceptDegradation: false,
             textBoxDisposition: fidelityView.textBoxDisposition(),
             ...(trackedChanges === undefined ? {} : { trackedChanges }),
+            ...(structure === undefined ? {} : { structure }),
           });
           renderReview(review, recoveryNotice, recoveryReturn);
           setStatus('导入前复核已准备', 'success');
@@ -1273,6 +1282,7 @@ export function createImportReview(options: ImportReviewOptions) {
         kind: 'stated',
         disposition: review.textBoxDisposition,
       }).elements,
+      ...renderStructureReview(review.structure?.projection, review.structure?.choice).elements,
     );
     content.append(fidelity);
 
@@ -1319,6 +1329,7 @@ export function createImportReview(options: ImportReviewOptions) {
               acceptDegradation: true,
               textBoxDisposition: review.textBoxDisposition ?? 'retain',
               ...(review.trackedChanges === undefined ? {} : { trackedChanges: review.trackedChanges }),
+              ...(review.structure === undefined ? {} : { structure: review.structure.choice }),
             });
             setStatus('已接受本次导入的完整降级集合', 'success');
             renderReview(acceptedReview, recoveryNotice, recoveryReturn);

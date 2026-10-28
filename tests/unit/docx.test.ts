@@ -190,7 +190,7 @@ describe('explicit tracked Word successor compiler (#1132)', () => {
   });
 
   it('does not impose legacy raw-paragraph accumulation on a supported normalized Word preview', async () => {
-    const spaces = `<w:r><w:t xml:space="preserve">${' '.repeat(4000)}</w:t></w:r>`.repeat(16);
+    const spaces = `<w:r><w:t xml:space="preserve">${' '.repeat(4000)}</w:t></w:r>`.repeat(80);
     const { path } = await compileTrackedBody(`<w:p><w:r><w:t>base</w:t></w:r>${spaces}` +
       '<w:ins w:id="1"><w:r><w:t>X</w:t></w:r></w:ins></w:p>');
     const preview: string[] = [];
@@ -772,15 +772,21 @@ describe('parseDocx: hostile-input bounds', () => {
     ).rejects.toThrow('DOCX_REJECTED:document XML markup token exceeds its bound');
   });
 
-  it('rejects a document XML text token past its block bound', async () => {
+  it('rejects a document XML text token past its source paragraph bound', async () => {
     await expect(
-      parseFixture({ paragraphs: [{ text: 'x'.repeat(4_200) }] }),
+      parseFixture({ paragraphs: [{ text: 'x'.repeat(270_000) }] }),
     ).rejects.toThrow('DOCX_REJECTED:document XML text token exceeds its block bound');
   });
 
-  it('rejects a paragraph past its bounded block size', async () => {
+  it('splits a paragraph past the block bound into bounded blocks under revision 5 (Issue #1205)', async () => {
+    const { parsed, blocks } = await parseFixture({ paragraphs: [{ text: '字'.repeat(2_100) }] });
+    expect(parsed.parserIdentity).toBe('ai7-docx-fflate-saxes/5');
+    expect(blocks.map((block) => [block.graphemeLength, block.piece?.ordinal, block.piece?.joint])).toEqual([[2_048, 1, null], [52, 2, 'bound']]);
+  });
+
+  it('still refuses a styled heading past the block bound', async () => {
     await expect(
-      parseFixture({ paragraphs: [{ text: '字'.repeat(2_100) }] }),
+      parseFixture({ paragraphs: [{ text: '字'.repeat(2_100), style: 'Heading1' }] }),
     ).rejects.toThrow('DOCX_REJECTED:paragraph exceeds the bounded block size');
   });
 

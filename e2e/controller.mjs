@@ -173,6 +173,8 @@ const J01_COMPLETION_PHASES_BY_SCENARIO = Object.freeze({
   'retention-degraded': J01_COMMON_COMPLETION_PHASES,
   'retention-text-box-retain': J01_COMMON_COMPLETION_PHASES,
   'retention-text-box-merge': J01_COMMON_COMPLETION_PHASES,
+  // Issue #1205: candidate headings and the long-paragraph choice of a heading-less Public SampleBook variant.
+  'candidate-structure': J01_COMMON_COMPLETION_PHASES,
   // Issue #411: a DOCX's comments and tracked changes enter as 批注 and 修改建议 whose source is its author.
   'imported-marks': J01_COMMON_COMPLETION_PHASES,
   'before-paint': Object.freeze([
@@ -229,6 +231,7 @@ const J01_LAUNCH_SCENARIOS = Object.freeze([
   'retention-degraded',
   'retention-text-box-retain',
   'retention-text-box-merge',
+  'candidate-structure',
   'imported-marks',
   'source-only-pdf',
   'text-manuscript',
@@ -461,6 +464,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'continuity-review',
     'legacy-review',
     'retention-review',
+    'structure-review',
     'imported-marks-review',
     'imported-marks-record',
     'imported-marks-editor',

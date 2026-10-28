@@ -55,6 +55,7 @@ export function asRevision99(db: DatabaseSync): void {
  * and triggers as they were, and without the two note-source relations revision 101 adds.
  */
 export function asRevision100(db: DatabaseSync): void {
+  asRevision101(db);
   for (const table of NOTE_BLOCK_KIND_TABLES) {
     const kinds = table === 'manuscript_reimport_mappings' ? "'note' IN (current_kind, lineage_kind, staged_kind)" : "kind = 'note'";
     if (db.prepare(`SELECT 1 FROM ${table} WHERE ${kinds} LIMIT 1`).get() !== undefined) throw new Error('a revision-100 store holds no note block');
@@ -72,4 +73,14 @@ export function asRevision100(db: DatabaseSync): void {
     for (const dependent of dependents) db.exec(dependent);
   }
   db.exec('PRAGMA user_version = 100');
+}
+
+/**
+ * A genuine revision-101 store from a current one that holds no split paragraph and no import lineage (#1205): the three relations
+ * revision 102 adds dropped, with the lineage triggers that go with them.
+ */
+export function asRevision101(db: DatabaseSync): void {
+  if (db.prepare('SELECT 1 FROM manuscript_import_lineage LIMIT 1').get() !== undefined) throw new Error('a revision-101 store holds no import lineage');
+  db.exec('DROP TABLE manuscript_import_lineage; DROP TABLE staged_import_structure_choices; DROP TABLE staged_import_paragraph_pieces');
+  db.exec('PRAGMA user_version = 101');
 }
