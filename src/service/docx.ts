@@ -12,6 +12,8 @@ import {
   type TextBoxDisposition,
 } from '../shared/protocol.js';
 import type { ConversionLoss } from './text-manuscript.js';
+import { buildFidelityReportV1, type DocumentSignalsV1 } from './docx-fidelity-v1.js';
+import { NOTE_REFERENCE_PARTS, NotePartCollector, noteBlocks, normalizeBlockText, type NotePart, type NoteReference, type ParsedNoteSource } from './docx-notes.js';
 import {
   ImportedMarkCollector,
   MAX_COMMENT_PART_BYTES,
@@ -72,6 +74,12 @@ const HYPERLINK_FIELD = 'HYPERLINK';
  */
 export const DOCX_PARSER_IDENTITY = 'ai7-docx-fflate-saxes/3';
 /**
+ * The identity of a reading that made note blocks (Issue #1204): revision 3's reading, and every footnote and endnote the body
+ * refers to as a note block after the last body paragraph, with 脚注与尾注 reported as 完整保留（随文件保留）. A reading that
+ * makes no note block is exactly revision 3's and keeps its identity, so a Source Version read before keeps taking its file.
+ */
+export const DOCX_NOTE_PARSER_IDENTITY = 'ai7-docx-fflate-saxes/4';
+/**
  * The identity of every review written between ADR 0086 and Issue #411: ten classes, comments and revisions
  * 不支持导入, rebuilt by the frozen builder (`buildFidelityReportV2`).
  */
@@ -104,7 +112,7 @@ export interface ImportFidelityPlan {
 export interface ParsedDocxBlock {
   blockId: string;
   position: number;
-  kind: 'title' | 'heading' | 'paragraph';
+  kind: 'title' | 'heading' | 'paragraph' | 'note';
   level: number | null;
   text: string;
   digest: string;
@@ -112,9 +120,11 @@ export interface ParsedDocxBlock {
   /**
    * Which `w:p` of `word/document.xml` the block came from: the 0-based index of that element among
    * every `w:p` start tag of the part, in document order (ADR 0086 §3). Nothing else in the block
-   * depends on it, so block identities and digests stay what revision 1 made them.
+   * depends on it, so block identities and digests stay what revision 1 made them. A note block, read from a note part, has
+   * no body paragraph: -1, and `note` names its source.
    */
   sourceParagraphIndex: number;
+  note?: ParsedNoteSource;
 }
 
 /** One non-empty paragraph of a text box, in the form it would take as a Manuscript block. */
@@ -143,7 +153,7 @@ export interface ParsedTextBox {
 }
 
 export interface ParsedDocx {
-  parserIdentity: typeof DOCX_PARSER_IDENTITY;
+  parserIdentity: typeof DOCX_PARSER_IDENTITY | typeof DOCX_NOTE_PARSER_IDENTITY;
   sourceDigest: string;
   contentDigest: string;
   structureDigest: string;
@@ -186,8 +196,6 @@ export interface DocumentSignals {
 
 /** The eight body signals a revision-2 report counted; kept only to rebuild such a report exactly. */
 type DocumentSignalsV2 = Omit<DocumentSignals, 'commentsRevisionsPresent'>;
-/** The six body signals a revision-1 report counted; kept only to rebuild such a report exactly. */
-type DocumentSignalsV1 = Omit<DocumentSignalsV2, 'textBoxes' | 'fields'>;
 
 /**
  * A conversion whose loss the report counts and names (ADR 0072 §3). The labels stay the class's:
@@ -199,13 +207,6 @@ export interface FidelityConversion {
   identity: string;
   sourceFormat: ManuscriptConversionProjection['sourceFormat'];
   loss: ConversionLoss;
-}
-
-/** A revision-1 conversion: the seven counted classes that report carried. */
-interface FidelityConversionV1 {
-  identity: string;
-  sourceFormat: ManuscriptConversionProjection['sourceFormat'];
-  loss: Omit<ConversionLoss, 'textBoxes' | 'fields'>;
 }
 
 /**
@@ -237,6 +238,8 @@ interface DocumentParseResult {
   signals: DocumentSignals;
   textBoxes: ParsedTextBox[];
   importedMarks: ParsedImportedMark[];
+  /** How many note blocks the parse made (Issue #1204); a reference to no note with text makes none. */
+  noteBlocks: number;
 }
 
 /**
@@ -392,7 +395,7 @@ interface OpenParagraph {
 }
 
 /** What a paragraph style makes of a block: a title, a heading of level 1 to 6, or a body paragraph. */
-function blockShape(style: string | undefined): { kind: ParsedDocxBlock['kind']; level: number | null } {
+function blockShape(style: string | undefined): { kind: 'title' | 'heading' | 'paragraph'; level: number | null } {
   const normalized = style?.toLocaleLowerCase('en-US') ?? '';
   const headingMatch = /(?:heading|标题)\s*([1-6])/.exec(normalized);
   const kind = normalized === 'title' || normalized === '标题' ? 'title' : headingMatch ? 'heading' : 'paragraph';
@@ -401,8 +404,7 @@ function blockShape(style: string | undefined): { kind: ParsedDocxBlock['kind'];
 
 /** A paragraph's collected text as a block carries it, or the empty string for one that holds none. */
 function paragraphBlockText(open: OpenParagraph): string {
-  requireDocx(open.text.isWellFormed(), 'paragraph contains invalid text');
-  return open.text.normalize('NFC').replace(/[ \t]+/g, ' ').replace(/ *\n */g, '\n').trim();
+  return normalizeBlockText(open.text);
 }
 
 /**
@@ -420,9 +422,10 @@ function paragraphBlockText(open: OpenParagraph): string {
 function createDocumentParser(
   onBlock: (block: ParsedDocxBlock) => void,
   wordPreview?: { reading: WordCompiledReading; textBoxes: ParsedTextBox[] },
+  readNotes = true,
 ): {
   write(chunk: Uint8Array, final: boolean): void;
-  finish(comments: { comments?: string; commentsExtended?: string }): DocumentParseResult;
+  finish(comments: DocumentSideParts): DocumentParseResult;
 } {
   const signals: DocumentSignals = {
     inlineStyles: 0,
@@ -462,6 +465,10 @@ function createDocumentParser(
   // index names exactly one element of `word/document.xml` (ADR 0086 §3).
   let nextParagraphIndex = 0;
   let paragraph: OpenParagraph | undefined;
+  // The notes the body refers to (Issue #1204): those of the open paragraph wait for it to close to learn their block.
+  const noteReferences: NoteReference[] = [];
+  const openReferences: Array<{ part: NotePart; noteId: string }> = [];
+  let lastEmittedPosition: number | null = null;
   let textBox: { record: ParsedTextBox; depth: number } | undefined;
   let boxParagraph: OpenParagraph | undefined;
   let boxParagraphCount = 0;
@@ -699,9 +706,12 @@ function createDocumentParser(
         break;
       }
       case 'footnoteReference':
-      case 'endnoteReference':
+      case 'endnoteReference': {
         signals.notes += 1;
+        const noteId = attributeValue(tag, 'id');
+        if (noteId !== undefined && paragraph !== undefined) openReferences.push({ part: NOTE_REFERENCE_PARTS[tag.local]!, noteId });
         break;
+      }
       case 'tbl':
         signals.tables += 1;
         break;
@@ -830,35 +840,31 @@ function createDocumentParser(
     const text = paragraphBlockText(paragraph);
     const closing = paragraph;
     let emitted: { position: number; text: string } | null = null;
-    if (text.length > 0) {
-      const blockGraphemes = graphemeCount(text);
-      requireDocx(text.length <= MAX_BLOCK_CODE_UNITS && blockGraphemes <= MAX_BLOCK_GRAPHEMES, 'paragraph exceeds the bounded block size');
-      requireDocx(blockCount + boxParagraphCount < MAX_BLOCK_COUNT, 'too many manuscript blocks');
-      const { kind, level } = blockShape(paragraph.style);
-      const position = blockCount + 1;
-      const digest = sha256(canonicalJson({ kind, level, text }));
-      const block = {
-        blockId: `blk_${sha256(`${position}\u0000${digest}`).slice(0, 24)}`,
-        position,
-        kind,
-        level,
-        text,
-        digest,
-        graphemeLength: blockGraphemes,
-        sourceParagraphIndex: paragraph.sourceParagraphIndex,
-      } satisfies ParsedDocxBlock;
-      if (blockCount > 0) contentHash.update('\u001e');
-      contentHash.update(text);
-      if (blockCount > 0) structureHash.update(',');
-      structureHash.update(canonicalJson({ blockId: block.blockId, position, kind, level, digest }));
-      blockCount += 1;
-      characterCount += blockGraphemes;
-      onBlock(block);
-      emitted = { position, text };
-    }
+    if (text.length > 0) emitted = { position: emitBlock({ ...blockShape(paragraph.style), text, sourceParagraphIndex: paragraph.sourceParagraphIndex }), text };
+    if (emitted !== null) lastEmittedPosition = emitted.position;
+    for (const reference of openReferences.splice(0)) noteReferences.push({ ...reference, referencePosition: lastEmittedPosition });
     paragraph = undefined;
     marks?.closeParagraph(closing.revisions!, closing.text, emitted);
   });
+
+  /** One block in document order: its identity and digests, the content and structure hashes, and the bound. */
+  function emitBlock(shape: Pick<ParsedDocxBlock, 'kind' | 'level' | 'text' | 'sourceParagraphIndex' | 'note'>): number {
+    const { kind, level, text } = shape;
+    const blockGraphemes = graphemeCount(text);
+    requireDocx(text.length <= MAX_BLOCK_CODE_UNITS && blockGraphemes <= MAX_BLOCK_GRAPHEMES, 'paragraph exceeds the bounded block size');
+    requireDocx(blockCount + boxParagraphCount < MAX_BLOCK_COUNT, 'too many manuscript blocks');
+    const position = blockCount + 1;
+    const digest = sha256(canonicalJson({ kind, level, text }));
+    const block: ParsedDocxBlock = { blockId: `blk_${sha256(`${position}\u0000${digest}`).slice(0, 24)}`, position, ...shape, digest, graphemeLength: blockGraphemes };
+    if (blockCount > 0) contentHash.update('\u001e');
+    contentHash.update(text);
+    if (blockCount > 0) structureHash.update(',');
+    structureHash.update(canonicalJson({ blockId: block.blockId, position, kind, level, digest }));
+    blockCount += 1;
+    characterCount += blockGraphemes;
+    onBlock(block);
+    return position;
+  }
 
   return {
     write(chunk, final) {
@@ -892,6 +898,8 @@ function createDocumentParser(
       );
       if (wordPreview === undefined) requireDocx(blockCount > 0, 'DOCX contains no editable text blocks');
       else requireDocx(wordPreview.reading.usable && wordPreview.reading.blocks.length > 0, 'Word preview has no usable editable blocks');
+      const notes = wordPreview === undefined && readNotes ? noteBlocks(noteReferences, comments.notes ?? new Map()) : [];
+      for (const note of notes) emitBlock({ kind: 'note', level: null, text: note.text, sourceParagraphIndex: -1, note: note.source });
       // A field left open at the end of the part is still one field.
       settleField();
       const importedMarks = marks === null ? wordPreview!.reading.marks.map((entry) => entry.mark)
@@ -906,6 +914,7 @@ function createDocumentParser(
         signals,
         textBoxes: wordPreview === undefined ? textBoxes : wordPreview.textBoxes,
         importedMarks,
+        noteBlocks: notes.length,
       };
     },
   };
@@ -914,14 +923,21 @@ function createDocumentParser(
 async function readStreamingArchive(
   path: string,
   onBlock: (block: ParsedDocxBlock) => void,
-  options: { signal?: AbortSignal; onArchiveProgress?: (bytes: number) => void } = {},
+  options: { signal?: AbortSignal; onArchiveProgress?: (bytes: number) => void; noteBlocks?: false } = {},
 ) {
-  return readDocxArchive(path, createDocumentParser(onBlock), options);
+  return readDocxArchive(path, createDocumentParser(onBlock, undefined, options.noteBlocks ?? true), options);
+}
+
+/** The parts read whole beside the body: the comments (Issue #411) and the note parts (Issue #1204). */
+interface DocumentSideParts {
+  comments?: string;
+  commentsExtended?: string;
+  notes?: ReadonlyMap<NotePart, string>;
 }
 
 interface StreamingDocxParser<T> {
   write(chunk: Uint8Array, final: boolean): void;
-  finish(comments: { comments?: string; commentsExtended?: string }): T;
+  finish(comments: DocumentSideParts): T;
 }
 
 async function readDocxArchive<T>(
@@ -965,6 +981,7 @@ function createDocxArchiveReader<T>(documentParser: StreamingDocxParser<T>,
   let expandedBytes = 0;
   let documentSeen = false;
   let sideMarkup = false;
+  const notes = new NotePartCollector();
   let callbackFailure: Error | undefined;
 
   const unzip = new Unzip((file) => {
@@ -1008,6 +1025,7 @@ function createDocxArchiveReader<T>(documentParser: StreamingDocxParser<T>,
             observePart?.(name, chunk, final);
             expandedBytes += chunk.byteLength;
             requireDocx(expandedBytes <= MAX_EXPANDED_BYTES, 'expanded DOCX is too large');
+            notes.accept(name, chunk, final);
             if (side !== undefined && !sideMarkup) {
               const window = side.tail + side.decoder.decode(chunk, { stream: !final });
               if (SIDE_MARKUP.test(window)) sideMarkup = true;
@@ -1080,6 +1098,7 @@ function createDocxArchiveReader<T>(documentParser: StreamingDocxParser<T>,
       document: documentParser.finish({
         ...(commentsPart === undefined ? {} : { comments: decodeMetadataXml(commentsPart) }),
         ...(commentsExtendedPart === undefined ? {} : { commentsExtended: decodeMetadataXml(commentsExtendedPart) }),
+        notes: notes.parts(),
       }),
       sideMarkup,
     };
@@ -1087,8 +1106,20 @@ function createDocxArchiveReader<T>(documentParser: StreamingDocxParser<T>,
   return { write, finish };
 }
 
-function fidelityReport(signals: DocumentSignals, entryNames: string[]): FidelityCategoryProjection[] {
-  return buildFidelityReport(signals, entryNames.filter((name) => /^word\/(header|footer)\d*\.xml$/i.test(name)).length);
+function fidelityReport(signals: DocumentSignals, entryNames: string[], noteBlocks = 0): FidelityCategoryProjection[] {
+  const report = buildFidelityReport(signals, entryNames.filter((name) => /^word\/(header|footer)\d*\.xml$/i.test(name)).length);
+  return noteBlocks > 0 ? withNoteBlocksRow(report) : report;
+}
+
+/**
+ * The 脚注与尾注 row revision 4 states for a natively read file whose notes became note blocks: the notes' form kept with the
+ * file. A file whose references name no note with text keeps revision 3's 降级导入.
+ */
+const NOTE_BLOCKS_DETAIL = '脚注与尾注作为注释块显示在稿件正文之后，按引用顺序排列，可以像段落一样编辑；正文不显示引用标记，注释块标明引自哪一段。注文格式随来源版本保留，未改过的注释导出时从原文件恢复，改过的注释在导出保真审阅里逐条说明。';
+
+function withNoteBlocksRow(report: FidelityCategoryProjection[]): FidelityCategoryProjection[] {
+  return report.map((category) => category.key === 'notes' && category.count > 0 && category.status === 'degraded'
+    ? { ...category, ...RETAINED, detail: NOTE_BLOCKS_DETAIL } : category);
 }
 
 /** The status a class present in the file carries when its content stays with the Source Version. */
@@ -1299,82 +1330,6 @@ function buildFidelityReportV2(
   ];
 }
 
-/**
- * The eight classes exactly as parser identity `ai7-docx-fflate-saxes/1` reported them. Frozen: it
- * builds nothing new and exists so that a review recorded under revision 1 — staged, committed, or
- * reimported — still rebuilds byte for byte from its counts. Nothing may change a character of it.
- */
-function buildFidelityReportV1(
-  signals: DocumentSignalsV1,
-  headersFooters: number,
-  conversion?: FidelityConversionV1,
-): FidelityCategoryProjection[] {
-  const loss = conversion?.loss;
-  const count = {
-    inlineStyles: signals.inlineStyles + (loss?.inlineStyles ?? 0),
-    commentsRevisions: signals.commentsRevisions + (loss?.commentsRevisions ?? 0),
-    notes: signals.notes + (loss?.notes ?? 0),
-    tables: signals.tables + (loss?.tables ?? 0),
-    imagesCaptions: signals.imagesCaptions + (loss?.imagesCaptions ?? 0),
-    sections: signals.sections + (loss?.sections ?? 0),
-    headersFooters: headersFooters + (loss?.headersFooters ?? 0),
-  };
-  const phrase = conversion === undefined ? undefined : CONVERSION_LOSS_PHRASES[conversion.identity];
-  requireDocx(conversion === undefined || phrase !== undefined, 'unknown converter identity');
-  const detail = (key: keyof typeof count, text: string): string =>
-    conversion && loss![key] > 0
-      ? `由 ${conversion.identity} 从 ${conversion.sourceFormat} ${phrase}：${text}`
-      : text;
-  return [
-    {
-      key: 'inline-styles', label: '行内样式', count: count.inlineStyles,
-      status: count.inlineStyles === 0 ? 'preserved' : 'degraded',
-      statusLabel: count.inlineStyles === 0 ? '完整保留' : '降级导入',
-      detail: detail('inlineStyles', count.inlineStyles === 0 ? '未检测到行内样式。' : '检测到字体与字号（rFonts、sz、szCs）等行内样式；可编辑内容块仅保留文字顺序，后续导出无法恢复这些样式。'),
-    },
-    {
-      key: 'comments-revisions', label: '批注与修订', count: count.commentsRevisions,
-      status: count.commentsRevisions === 0 ? 'preserved' : 'unsupported',
-      statusLabel: count.commentsRevisions === 0 ? '完整保留' : '不支持导入',
-      detail: detail('commentsRevisions', count.commentsRevisions === 0 ? '未检测到批注或修订标记。' : '本次受限导入不导入批注或修订标记。'),
-    },
-    {
-      key: 'notes', label: '脚注与尾注', count: count.notes,
-      status: count.notes === 0 ? 'preserved' : 'unsupported',
-      statusLabel: count.notes === 0 ? '完整保留' : '不支持导入',
-      detail: detail('notes', count.notes === 0 ? '未检测到脚注或尾注。' : '本次受限导入不导入脚注或尾注。'),
-    },
-    {
-      key: 'tables', label: '表格', count: count.tables,
-      status: count.tables === 0 ? 'preserved' : 'degraded',
-      statusLabel: count.tables === 0 ? '完整保留' : '降级导入',
-      detail: detail('tables', count.tables === 0 ? '未检测到表格。' : '表格会退化为连续文本；本次受限导入不提交该分支。'),
-    },
-    {
-      key: 'images-captions', label: '图片与图注', count: count.imagesCaptions,
-      status: count.imagesCaptions === 0 ? 'preserved' : 'degraded',
-      statusLabel: count.imagesCaptions === 0 ? '完整保留' : '降级导入',
-      detail: detail('imagesCaptions', count.imagesCaptions === 0 ? '未检测到图片或图注。' : '图片不会进入可编辑稿件；本次受限导入不提交该分支。'),
-    },
-    {
-      key: 'sections', label: '分节', count: count.sections,
-      status: count.sections === 0 ? 'preserved' : 'degraded',
-      statusLabel: count.sections === 0 ? '完整保留' : '降级导入',
-      detail: detail('sections', count.sections === 0 ? '未检测到额外分节；单节正文顺序完整保留，且不据此建立版式往返保证。' : '检测到页尺寸、页边距、分栏与文档网格等分节设置；正文按单一连续稿件顺序导入，后续导出无法恢复原分节版式。'),
-    },
-    {
-      key: 'headers-footers', label: '页眉与页脚', count: count.headersFooters,
-      status: count.headersFooters === 0 ? 'preserved' : 'degraded',
-      statusLabel: count.headersFooters === 0 ? '完整保留' : '降级导入',
-      detail: detail('headersFooters', count.headersFooters === 0 ? '未检测到页眉或页脚。' : '页眉页脚不进入稿件正文；本次受限导入不提交该分支。'),
-    },
-    {
-      key: 'round-trip-export', label: 'DOCX 往返与导出预期', count: 0, status: 'unsupported', statusLabel: '不支持导入',
-      detail: '本导入功能不提供 DOCX 导出，因此无法建立往返行为、版式复原或导出结果保证。',
-    },
-  ];
-}
-
 const NO_SIGNALS: DocumentSignals = {
   inlineStyles: 0, commentsRevisions: 0, notes: 0, tables: 0, imagesCaptions: 0, sections: 0, textBoxes: 0, fields: 0,
 };
@@ -1437,22 +1392,27 @@ function reportsForCandidateCounts(
       tables: counts[3]!, imagesCaptions: counts[4]!, sections: counts[5]!,
     };
     const report = conversion === undefined
-      ? buildFidelityReportV1(signals, counts[6]!)
+      ? buildFidelityReportV1(signals, counts[6]!, CONVERSION_LOSS_PHRASES)
       : buildFidelityReportV1(
         { inlineStyles: 0, commentsRevisions: 0, notes: 0, tables: 0, imagesCaptions: 0, sections: 0 },
         0,
+        CONVERSION_LOSS_PHRASES,
         { ...conversion, loss: { ...signals, headersFooters: counts[6]! } },
       );
     return [{ report, textBoxDisposition: null, commentsRevisions: 'absent' }];
   }
-  if (parserIdentity !== DOCX_PARSER_IDENTITY && parserIdentity !== DOCX_PARSER_IDENTITY_V2 && parserIdentity !== WORD_DOCX_PARSER_IDENTITY) return [];
+  if (parserIdentity !== DOCX_PARSER_IDENTITY && parserIdentity !== DOCX_NOTE_PARSER_IDENTITY && parserIdentity !== DOCX_PARSER_IDENTITY_V2 &&
+    parserIdentity !== WORD_DOCX_PARSER_IDENTITY) return [];
   const counts = candidateCounts(value, 10);
-  if (counts === undefined) return [];
+  // A reading that made a note block counted the reference that named its note.
+  if (counts === undefined || (parserIdentity === DOCX_NOTE_PARSER_IDENTITY && counts[2] === 0)) return [];
   const signals: DocumentSignalsV2 = {
     inlineStyles: counts[0]!, commentsRevisions: counts[1]!, notes: counts[2]!, tables: counts[3]!,
     imagesCaptions: counts[4]!, sections: counts[5]!, textBoxes: counts[7]!, fields: counts[8]!,
   };
-  const current = parserIdentity === DOCX_PARSER_IDENTITY;
+  const current = parserIdentity === DOCX_PARSER_IDENTITY || parserIdentity === DOCX_NOTE_PARSER_IDENTITY;
+  // Revision 4 is revision 3 with its 脚注与尾注 row stating note blocks: it names only readings that made one.
+  const notes = parserIdentity === DOCX_NOTE_PARSER_IDENTITY ? withNoteBlocksRow : (report: FidelityCategoryProjection[]) => report;
   if (conversion !== undefined) {
     const { textBoxes, fields, ...rest } = signals;
     const withLoss = { ...conversion, loss: { ...rest, headersFooters: counts[6]!, textBoxes, fields } };
@@ -1476,7 +1436,7 @@ function reportsForCandidateCounts(
   return dispositions.flatMap((disposition) => {
     const base = buildFidelityReportV2(signals, counts[6]!, undefined, disposition ?? 'retain');
     return variants.map((variant) => ({
-      report: current ? withCommentsRevisionsVariant(base, variant, undefined) : base,
+      report: current ? notes(withCommentsRevisionsVariant(base, variant, undefined)) : base,
       textBoxDisposition: disposition,
       commentsRevisions: variant,
     }));
@@ -1573,7 +1533,7 @@ export async function parseDocx(
   displayNameInput: string,
   onBlock: (block: ParsedDocxBlock) => void,
   expectedSource?: { digest: string; bytes: number },
-  options: { signal?: AbortSignal; onArchiveProgress?: (bytes: number) => void; formatIdentified?: boolean } = {},
+  options: { signal?: AbortSignal; onArchiveProgress?: (bytes: number) => void; formatIdentified?: boolean; noteBlocks?: false } = {},
 ): Promise<ParsedDocx> {
   const displayName = safeDisplayName(displayNameInput, options.formatIdentified !== true);
   const archive = await readStreamingArchive(path, onBlock, options);
@@ -1598,10 +1558,12 @@ function finishParsedDocx(archive: ReadDocxArchive<DocumentParseResult>, display
   // A note, header or footer holding a comment or a tracked change: nothing of it becomes a mark, and the row says it
   // stays with the file rather than that none was found.
   const signals = archive.sideMarkup ? { ...archive.document.signals, commentsRevisionsPresent: true } : archive.document.signals;
-  const fidelity = fidelityReport(signals, archive.entryNames);
-  requireDocx(deriveImportFidelityPlan(fidelity, archive.sourceDigest, archive.archiveBytes) !== undefined, 'document fidelity report is malformed');
+  const fidelity = fidelityReport(signals, archive.entryNames, archive.document.noteBlocks);
+  const parserIdentity = archive.document.noteBlocks > 0 ? DOCX_NOTE_PARSER_IDENTITY : DOCX_PARSER_IDENTITY;
+  requireDocx(deriveImportFidelityPlan(fidelity, archive.sourceDigest, archive.archiveBytes, undefined, parserIdentity) !== undefined,
+    'document fidelity report is malformed');
   return {
-    parserIdentity: DOCX_PARSER_IDENTITY,
+    parserIdentity,
     sourceDigest: archive.sourceDigest,
     contentDigest: archive.document.contentDigest,
     structureDigest: archive.document.structureDigest,

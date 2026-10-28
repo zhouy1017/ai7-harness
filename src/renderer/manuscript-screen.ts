@@ -624,6 +624,11 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   const editorWindow = element('section', 'editor-window');
   const editorHost = element('div');
   editorWindow.append(editorHost);
+  // A note block's 「引自第 X 段」 goes to the paragraph that refers to it (Issue #1204).
+  editorHost.addEventListener('click', (event) => {
+    const reference = (event.target as Element | null)?.closest<HTMLElement>('[data-note-reference]')?.dataset['noteReference'];
+    if (reference !== undefined) void navigate({ kind: 'block', blockId: reference });
+  });
   const positionRailLabel = element('label', 'position-rail-label', '全稿位置');
   positionRailLabel.htmlFor = 'manuscript-position';
   const positionRail = element('input', 'position-rail');
@@ -1311,7 +1316,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     let heading: string | null = null;
     for (let at = index; at >= 0; at -= 1) {
       const candidate = blocks[at]!;
-      if (candidate.kind !== 'paragraph') {
+      if (candidate.kind === 'title' || candidate.kind === 'heading') {
         heading = candidate.text;
         break;
       }

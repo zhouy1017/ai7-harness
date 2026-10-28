@@ -291,7 +291,7 @@ export class RecoveryObjectStore {
       if (footerSeen || value.type !== 'block') throw new Error('RECOVERY_OBJECT_INVALID');
       const block = value as unknown as RecoverySnapshotBlock & { type: 'block' };
       if (block.position !== position + 1 || typeof block.blockId !== 'string' ||
-          !['title', 'heading', 'paragraph'].includes(block.kind) ||
+          !['title', 'heading', 'paragraph', 'note'].includes(block.kind) ||
           !(block.level === null || (Number.isSafeInteger(block.level) && block.level! >= 1 && block.level! <= 6)) ||
           typeof block.text !== 'string' || !block.text.isWellFormed() || block.text.length > MAX_BLOCK_CODE_UNITS ||
           !Number.isSafeInteger(block.graphemeLength) || block.graphemeLength < 0 || block.graphemeLength > MAX_BLOCK_GRAPHEMES ||

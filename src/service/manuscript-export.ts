@@ -49,6 +49,7 @@ import {
   type WordMappedDocxSource,
 } from './docx-export.js';
 import { WORD_DOCX_PARSER_IDENTITY, compileWordTrackedDocxBytes, type WordTrackedCompilation } from './docx.js';
+import { revisionNoteSources } from './manuscript/note-blocks.js';
 import { readWordImportChoiceRecord, readWordParentSourcePin, requireWordRevisionSource,
   requireWordManuscriptSourceSegments, WORD_EXTRACTOR_IDENTITY } from './import-retention.js';
 import { REPORT_EXPORT_WRITER_IDENTITIES, renderReportExport, type ReportExportInput } from './report-export.js';
@@ -1737,6 +1738,7 @@ export class ManuscriptExportStore {
     let exportSource: DocxExportSource;
     let wordPins: Omit<WordExportSourcePins, 'revisionId' | 'revisionDigest'> | null = null;
     let mapping: DocxExportSourceRow[] = [];
+    let notes: ReturnType<typeof revisionNoteSources> = [];
     if (target.document !== null && (readersReportDocumentType(target.document.typeId) !== undefined || this.#drafted(target.document.documentId))) {
       // A 审稿意见 draft (Issue #429, S81c) was written from a finalized Evaluation Record, and a writing draft (Issue #432, S84a)
       // from the Book and its reference set, not from a file: each revision names the manuscript file only because every revision
@@ -1754,10 +1756,10 @@ export class ManuscriptExportStore {
         exportSource = word.source;
         wordPins = word.pins;
       } else {
-        mapping = this.#mapping(target.revisionId, sourceVersionId);
+        ({ rows: mapping, notes } = this.#mapping(target.revisionId, sourceVersionId));
         exportSource = mapping.length === 0
           ? { kind: 'fresh', reason: 'no-mapping', scan: original, converter: null }
-          : { kind: 'mapped', original, rows: mapping, textBoxes: this.#textBoxChoice(sourceVersionId, mapping) };
+          : { kind: 'mapped', original, rows: mapping, textBoxes: this.#textBoxChoice(sourceVersionId, mapping), ...(notes.length > 0 ? { notes } : {}) };
       }
     }
     const marks = this.#marks(target.branchId, blocks);
@@ -1773,6 +1775,7 @@ export class ManuscriptExportStore {
       revisionDigest: target.revisionDigest,
       source: exportSource.kind === 'mapped' ? { kind: 'mapped', objectDigest, textBoxes: exportSource.textBoxes } : { kind: 'fresh', reason: exportSource.reason, objectDigest },
       mapping: sha256Hex(canonicalJson(mapping)),
+      ...(notes.length > 0 ? { notes: sha256Hex(canonicalJson(notes)) } : {}),
       marks: sha256Hex(canonicalJson(marks)),
       options,
       title: target.bookTitle,
@@ -1816,9 +1819,10 @@ export class ManuscriptExportStore {
 
   /**
    * The source-paragraph mapping of the import or reimport that made the version's lineage (ADR 0086 §3): the
-   * nearest revision, the version itself or an ancestor with the same Source Version, that recorded one.
+   * nearest revision, the version itself or an ancestor with the same Source Version, that recorded one, with the note sources
+   * that revision recorded beside it (Issue #1204).
    */
-  #mapping(revisionId: string, sourceVersionId: string): DocxExportSourceRow[] {
+  #mapping(revisionId: string, sourceVersionId: string): { rows: DocxExportSourceRow[]; notes: ReturnType<typeof revisionNoteSources> } {
     const revision = this.#db.prepare('SELECT source_version_id, parent_revision_id FROM manuscript_revisions WHERE revision_id = ?');
     const rows = this.#db.prepare(
       `SELECT block_id, source_part, source_paragraph_index, source_paragraph_digest FROM manuscript_block_sources
@@ -1827,19 +1831,19 @@ export class ManuscriptExportStore {
     let current: string | null = revisionId;
     for (let step = 0; current !== null && step < 100_000; step += 1) {
       const row = revision.get(current) as SqlRow | undefined;
-      if (row === undefined || text(row.source_version_id) !== sourceVersionId) return [];
+      if (row === undefined || text(row.source_version_id) !== sourceVersionId) return { rows: [], notes: [] };
       const found = rows.all(current, sourceVersionId) as SqlRow[];
       if (found.length > 0) {
-        return found.map((entry) => ({
+        return { notes: revisionNoteSources(this.#db, current, sourceVersionId), rows: found.map((entry) => ({
           blockId: text(entry.block_id),
           sourcePart: text(entry.source_part) === 'text-box' ? 'text-box' : 'body',
           sourceParagraphIndex: integer(entry.source_paragraph_index),
           sourceParagraphDigest: text(entry.source_paragraph_digest),
-        }));
+        })) };
       }
       current = nullableText(row.parent_revision_id);
     }
-    return [];
+    return { rows: [], notes: [] };
   }
 
   /** The text-box choice the import recorded, or what its mapping shows when it recorded none (a reimport). */

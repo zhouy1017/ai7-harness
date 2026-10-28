@@ -1,4 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
+import { NOTE_BLOCK_KIND_TABLES } from '../../src/service/manuscript/note-schema.js';
 
 /** Revision 99's text of the two command relations revision 100 rebuilds (Issue #1175). */
 const REVISION_99_COMMAND_SQL = {
@@ -32,6 +33,7 @@ const REVISION_99_COMMAND_SQL = {
  * relations rebuilt with revision 99's text and the same rows in the same order, without the lineage relation revision 100 adds.
  */
 export function asRevision99(db: DatabaseSync): void {
+  asRevision100(db);
   const structural = db.prepare("SELECT count(*) total FROM manuscript_command_groups WHERE kind NOT IN ('edit', 'replacement')").get();
   if (Number(structural?.total) !== 0) throw new Error('a revision-99 store holds no structural or Apply command');
   db.exec('PRAGMA foreign_keys = OFF');
@@ -45,4 +47,29 @@ export function asRevision99(db: DatabaseSync): void {
   }
   db.exec('CREATE INDEX command_history_state ON manuscript_command_groups(branch_id, status, ordinal)');
   db.exec('PRAGMA user_version = 99');
+}
+
+/**
+ * A genuine revision-100 store from a current one that holds no note block (#1204): every relation revision 101 widened rebuilt
+ * with its revision-100 text — the block-kind CHECK without the note kind — and the same rows in the same order, its indexes
+ * and triggers as they were, and without the two note-source relations revision 101 adds.
+ */
+export function asRevision100(db: DatabaseSync): void {
+  for (const table of NOTE_BLOCK_KIND_TABLES) {
+    const kinds = table === 'manuscript_reimport_mappings' ? "'note' IN (current_kind, lineage_kind, staged_kind)" : "kind = 'note'";
+    if (db.prepare(`SELECT 1 FROM ${table} WHERE ${kinds} LIMIT 1`).get() !== undefined) throw new Error('a revision-100 store holds no note block');
+  }
+  db.exec('PRAGMA foreign_keys = OFF');
+  db.exec('DROP TABLE manuscript_note_sources; DROP TABLE staged_import_note_sources');
+  for (const table of NOTE_BLOCK_KIND_TABLES) {
+    const sql = String(db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table)!.sql);
+    const dependents = db.prepare("SELECT sql FROM sqlite_schema WHERE type IN ('index', 'trigger') AND tbl_name = ? AND sql IS NOT NULL")
+      .all(table).map((row) => String(row.sql));
+    const columns = db.prepare(`PRAGMA table_info(${table})`).all().map((row) => String(row.name)).join(', ');
+    db.exec(`CREATE TEMP TABLE kept_${table} AS SELECT rowid AS prior_rowid, ${columns} FROM ${table} ORDER BY rowid; DROP TABLE ${table}`);
+    db.exec(sql.replaceAll("IN ('title', 'heading', 'paragraph', 'note')", "IN ('title', 'heading', 'paragraph')"));
+    db.exec(`INSERT INTO ${table}(rowid, ${columns}) SELECT prior_rowid, ${columns} FROM kept_${table} ORDER BY prior_rowid; DROP TABLE kept_${table}`);
+    for (const dependent of dependents) db.exec(dependent);
+  }
+  db.exec('PRAGMA user_version = 100');
 }

@@ -2615,14 +2615,15 @@ async function main() {
       fidelityRows: CLEAN_FIDELITY_ROWS.map(([key]) =>
         key === 'inline-styles' ? [key, 266, 'status-retained'] : key === 'sections' ? [key, 1, 'status-retained'] : [key, 0, 'status-preserved']),
     };
-    // A field and a footnote are the two classes that cannot be retained: 降级导入, decided explicitly.
+    // A field cannot be retained: 降级导入, decided explicitly. The footnote becomes a note block (Issue #1204) and stays
+    // with the file as 完整保留（随文件保留）.
     const composedDegradedExpectation = {
       sourceSha256: composedDegradedSha256,
       sourceBytes: composedDegradedInfo.size,
       degraded: true,
       fidelityRows: CLEAN_FIDELITY_ROWS.map(([key]) =>
-        key === 'notes' || key === 'fields' ? [key, 1, 'status-degraded'] : [key, 0, 'status-preserved']),
-      degradationItems: [['notes', '1'], ['fields', '1']],
+        key === 'fields' ? [key, 1, 'status-degraded'] : key === 'notes' ? [key, 1, 'status-retained'] : [key, 0, 'status-preserved']),
+      degradationItems: [['fields', '1']],
     };
     const composedTextBoxExpectation = {
       sourceSha256: composedTextBoxSha256,
@@ -2963,7 +2964,7 @@ async function main() {
     await clickExactButton(renderer, '稿件导入记录', 'retention-degraded-record-open');
     await assertRenderer(
       renderer,
-      `(() => { const record = document.querySelector('.record-detail[data-record-kind="import-record"]'); const items = Array.from(record?.querySelectorAll('[data-degradation-category]') ?? []); return record?.textContent.includes('含已接受的降级 · 原文件随来源版本保留') && record.textContent.includes('查看受影响类别、示例与导出后果') && items.length === 2 && items[0].dataset.degradationCategory === 'notes' && items[0].dataset.degradationCount === '1' && items[1].dataset.degradationCategory === 'fields' && items[1].dataset.degradationCount === '1'; })()`,
+      `(() => { const record = document.querySelector('.record-detail[data-record-kind="import-record"]'); const items = Array.from(record?.querySelectorAll('[data-degradation-category]') ?? []); return record?.textContent.includes('含已接受的降级 · 原文件随来源版本保留') && record.textContent.includes('查看受影响类别、示例与导出后果') && items.length === 1 && items[0].dataset.degradationCategory === 'fields' && items[0].dataset.degradationCount === '1'; })()`,
       'retention-degraded-record',
     );
     await closeProduct();

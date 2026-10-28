@@ -2,10 +2,11 @@ import { createHash } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import type { ManuscriptBlockProjection, TextBoxDisposition } from '../shared/protocol.js';
 import { MAX_FRAME_BYTES } from '../shared/protocol.js';
-import { DOCX_PARSER_IDENTITY, DOCX_PARSER_IDENTITY_V1, DOCX_PARSER_IDENTITY_V2,
+import { DOCX_NOTE_PARSER_IDENTITY, DOCX_PARSER_IDENTITY, DOCX_PARSER_IDENTITY_V1, DOCX_PARSER_IDENTITY_V2,
   WORD_DOCX_PARSER_IDENTITY, type ParsedTextBox, type ParsedDocx, type ParsedDocxBlock,
   type NativeDocxIntakeParse, type WordTrackedCompilation } from './docx.js';
 import type { ParsedImportedMark } from './docx-marks.js';
+import { stageNoteSources, stagedNoteSourcesMatch, type StagedNoteSource } from './manuscript/note-blocks.js';
 import { LOCAL_LEARNING_POLICY_BASIS } from './learning-eligibility.js';
 import { canonicalJson as wordCanonicalJson, sha256Hex, DIGEST_PATTERN, UUID_PATTERN, hasExactKeys, isRecord } from './analysis/canonical.js';
 
@@ -569,7 +570,7 @@ export function wordParentSourcePinRecord(pin: WordParentSourcePin): { json: str
     pin.schema === 'ai7.word-parent-source-pin/1' && UUID_PATTERN.test(pin.sourceVersionId) && UUID_PATTERN.test(pin.bookId) &&
     [pin.objectDigest, pin.sourceDigest, pin.contentDigest, pin.structureDigest].every((digest) => DIGEST_PATTERN.test(digest)) &&
     pin.objectDigest === pin.sourceDigest && pin.format === 'DOCX' && Number.isSafeInteger(pin.sourceBytes) && pin.sourceBytes > 0 &&
-    [DOCX_PARSER_IDENTITY_V1, DOCX_PARSER_IDENTITY_V2, DOCX_PARSER_IDENTITY, WORD_DOCX_PARSER_IDENTITY].some((identity) => identity === pin.parserIdentity) &&
+    [DOCX_PARSER_IDENTITY_V1, DOCX_PARSER_IDENTITY_V2, DOCX_PARSER_IDENTITY, DOCX_NOTE_PARSER_IDENTITY, WORD_DOCX_PARSER_IDENTITY].some((identity) => identity === pin.parserIdentity) &&
     pin.workingObjectDigest === null && pin.converterIdentity === null && pin.displayName.length > 0 && pin.displayName.isWellFormed() &&
     Number.isFinite(Date.parse(pin.createdAt)), 'WORD_SOURCE_INVALID', 'Word 原始来源固定记录无效。');
   const json = wordCanonicalJson(pin);
@@ -1655,10 +1656,14 @@ export interface StagedTextBoxParagraph {
   graphemeLength: number;
 }
 
-/** The staged sources of one parse: the source paragraph of every block, in block order, and every box. */
+/**
+ * The staged sources of one parse: the source paragraph of every body block, in block order, every box, and the note each
+ * note block reads (Issue #1204), whose blocks follow every body block.
+ */
 export interface StagedImportSources {
   blockSourceIndexes: ReadonlyArray<number>;
   textBoxes: ReadonlyArray<ParsedTextBox>;
+  notes: ReadonlyArray<StagedNoteSource>;
 }
 
 function flattenTextBoxes(textBoxes: ReadonlyArray<ParsedTextBox>): StagedTextBoxParagraph[] {
@@ -1698,6 +1703,7 @@ export function stageImportSources(db: DatabaseSync, draftId: string, sources: S
       paragraph.graphemeLength,
     );
   }
+  stageNoteSources(db, draftId, sources.notes);
 }
 
 /** The source paragraph of every staged block of a draft, in position order. */
@@ -1762,7 +1768,7 @@ export function stagedImportSourcesMatch(db: DatabaseSync, draftId: string, sour
   }
   const expected = flattenTextBoxes(sources.textBoxes).sort((left, right) => left.sourceParagraphIndex - right.sourceParagraphIndex);
   const actual = stagedTextBoxParagraphs(db, draftId);
-  return actual.length === expected.length && actual.every((paragraph, index) => {
+  return stagedNoteSourcesMatch(db, draftId, sources.notes) && actual.length === expected.length && actual.every((paragraph, index) => {
     const other = expected[index]!;
     return paragraph.boxOrdinal === other.boxOrdinal && paragraph.boxParagraphOrdinal === other.boxParagraphOrdinal &&
       paragraph.anchorParagraphIndex === other.anchorParagraphIndex &&

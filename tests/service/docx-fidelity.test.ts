@@ -112,7 +112,8 @@ describe('edited DOCX fidelity corpus (#814)', () => {
           const book = await store.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: importing.draftVersion, reviewDigest: importing.reviewDigest!, commitId });
           await store.acknowledgeImportCompletion(commitId);
           const view = (): ManuscriptWindowProjection => store!.getManuscriptWindow(book.manuscriptId, book.branchId, null);
-          expect(view().blocks.length).toBe(4);
+          // Four body paragraphs, then the footnote and the endnote as note blocks (Issue #1204).
+          expect(view().blocks.map((block) => block.kind)).toEqual(['paragraph', 'paragraph', 'paragraph', 'paragraph', 'note', 'note']);
           if (variant === 'edited') {
             for (let index = 0; index < 3; index += 1) {
               const current = view();

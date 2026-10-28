@@ -2,6 +2,8 @@ import type { GlobalAgentOperations, GlobalAgentRendererApi } from './protocol/g
 import type { HouseWordListOperations, HouseWordListApi } from './protocol/house-word-list.js';
 import type { JournalEditInput } from './protocol/manuscript-structure.js';
 export type { JournalEditInput, JournalStructuralEdit } from './protocol/manuscript-structure.js';
+import type { ManuscriptBlockProjection } from './protocol/manuscript-notes.js';
+export type { ManuscriptBlockKind, ManuscriptBlockProjection, ManuscriptNoteProjection } from './protocol/manuscript-notes.js';
 export * from './protocol/global-agent.js';
 export type { ReviewContractIdentity, ReviewExcludedFindingProjection, ReviewContractRejectionReason, ReviewEvidenceSource, ReviewReportSchema, ReviewReportDerivedSections, ReviewReportFindingEntry } from './protocol/review.js';
 import type { ReviewExcludedFindingProjection, ReviewContractRejectionReason, ReviewReportSchema, ReviewReportDerivedSections } from './protocol/review.js';
@@ -131,7 +133,7 @@ import type { PublicSampleBookSourceDigest } from './public-samplebooks.js';
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 181 as const;
+export const SERVICE_PROTOCOL_VERSION = 182 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 export interface BookFindingProjection {
@@ -1573,15 +1575,6 @@ export interface ReimportLineageSourceVersionPageProjection {
   items: ReadonlyArray<string>;
   previousCursor: string | null;
   nextCursor: string | null;
-}
-
-export interface ManuscriptBlockProjection {
-  blockId: string;
-  position: number;
-  kind: 'title' | 'heading' | 'paragraph';
-  level: number | null;
-  text: string;
-  digest: string;
 }
 
 export interface ManuscriptWindowProjection {

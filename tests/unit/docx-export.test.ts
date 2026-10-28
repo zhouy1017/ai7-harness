@@ -18,6 +18,7 @@ import {
   type DocxExportBlock,
   type DocxExportInput,
   type DocxExportMark,
+  type DocxExportNoteRow,
   type DocxExportSourceRow,
 } from '../../src/service/docx-export.js';
 import { renderMarkdownExport, renderPdfHtmlExport } from '../../src/service/text-export.js';
@@ -442,7 +443,14 @@ function exportBlocks(blocks: ReadonlyArray<ParsedDocxBlock>): DocxExportBlock[]
 }
 
 function bodyRows(blocks: ReadonlyArray<ParsedDocxBlock>): DocxExportSourceRow[] {
-  return blocks.map((block) => ({ blockId: block.blockId, sourcePart: 'body', sourceParagraphIndex: block.sourceParagraphIndex, sourceParagraphDigest: block.digest }));
+  return blocks.filter((block) => block.note === undefined)
+    .map((block) => ({ blockId: block.blockId, sourcePart: 'body', sourceParagraphIndex: block.sourceParagraphIndex, sourceParagraphDigest: block.digest }));
+}
+
+/** The note sources an import records beside the body's (Issue #1204). */
+function noteRows(blocks: ReadonlyArray<ParsedDocxBlock>): DocxExportNoteRow[] {
+  return blocks.flatMap((block) => block.note === undefined ? []
+    : [{ blockId: block.blockId, part: block.note.part, noteId: block.note.noteId, sourceNoteDigest: block.digest }]);
 }
 
 function edited(block: DocxExportBlock, text: string): DocxExportBlock {
@@ -503,7 +511,7 @@ async function richInput(options: Partial<DocxExportInput> = {}): Promise<{ inpu
       blocks: exportBlocks(blocks),
       marks: [],
       options: { ...DEFAULT_MANUSCRIPT_EXPORT_OPTIONS },
-      source: { kind: 'mapped', original, rows: bodyRows(blocks), textBoxes: 'retain' },
+      source: { kind: 'mapped', original, rows: bodyRows(blocks), notes: noteRows(blocks), textBoxes: 'retain' },
       ...options,
     },
   };
@@ -519,7 +527,7 @@ describe('a regenerated paragraph keeps its bookmarks', () => {
       blocks: exportBlocks(blocks).map((block, index) => index === 0 ? edited(block, `${block.text}（改）`) : block),
       marks: [],
       options: { ...DEFAULT_MANUSCRIPT_EXPORT_OPTIONS },
-      source: { kind: 'mapped', original, rows: bodyRows(blocks), textBoxes: 'retain' },
+      source: { kind: 'mapped', original, rows: bodyRows(blocks), notes: noteRows(blocks), textBoxes: 'retain' },
     };
     const result = renderDocxExport(input, { emit: true });
     expect([result.restoredBlocks, result.regeneratedBlocks]).toEqual([1, 1]);
@@ -554,7 +562,7 @@ describe('a regenerated paragraph keeps its bookmarks', () => {
         blocks: exportBlocks(blocks).map((block, index) => index === editedIndex ? edited(block, `${block.text}（改）`) : block),
         marks: [],
         options: { ...DEFAULT_MANUSCRIPT_EXPORT_OPTIONS },
-        source: { kind: 'mapped', original, rows: bodyRows(blocks), textBoxes: 'retain' },
+        source: { kind: 'mapped', original, rows: bodyRows(blocks), notes: noteRows(blocks), textBoxes: 'retain' },
       }, { emit: true });
       expect([name, result.restoredBlocks, result.regeneratedBlocks]).toEqual([name, 1, 1]);
       expect([name, ...halves(partOf(result.bytes!, 'word/document.xml')!)]).toEqual([name, false, false]);
@@ -575,7 +583,7 @@ describe('a regenerated paragraph keeps its bookmarks', () => {
         blocks: exportBlocks(blocks).map((block, index) => index === 0 ? edited(block, `${block.text}（改）`) : block),
         marks: [],
         options: { ...DEFAULT_MANUSCRIPT_EXPORT_OPTIONS },
-        source: { kind: 'mapped', original, rows: bodyRows(blocks), textBoxes: 'retain' },
+        source: { kind: 'mapped', original, rows: bodyRows(blocks), notes: noteRows(blocks), textBoxes: 'retain' },
       }, { emit: true });
       expect([container, result.restoredBlocks, result.regeneratedBlocks]).toEqual([container, 1, 1]);
       // The regenerated paragraph writes its start; the restored one keeps its end: the pair stays whole.
@@ -590,7 +598,8 @@ describe('DOCX export restores the original', () => {
     const { input, blocks, original } = await richInput();
     const result = renderDocxExport(input, { emit: true });
     expect(result.restoration).toBe('from-original');
-    expect([result.restoredBlocks, result.regeneratedBlocks]).toEqual([blocks.length, 0]);
+    // The note block (Issue #1204) is restored with its note, not counted with the body's paragraphs.
+    expect([result.restoredBlocks, result.regeneratedBlocks]).toEqual([bodyRows(blocks).length, 0]);
     expect(result.degraded).toBe(false);
     expect(result.fidelity.map((entry) => entry.key)).toEqual([
       'inline-styles', 'annotations', 'change-suggestions', 'editor-notes', 'notes', 'tables', 'images-captions', 'sections',
@@ -643,7 +652,7 @@ describe('DOCX export restores the original', () => {
       return block;
     });
     const result = renderDocxExport({ ...input, blocks: changed }, { emit: true });
-    expect([result.restoredBlocks, result.regeneratedBlocks]).toEqual([blocks.length - 5, 5]);
+    expect([result.restoredBlocks, result.regeneratedBlocks]).toEqual([bodyRows(blocks).length - 5, 5]);
     expect(result.degraded).toBe(true);
     expect(fidelityOf(result.fidelity)).toEqual([
       ['inline-styles', 'degraded', 2, [2]],
@@ -679,7 +688,7 @@ describe('DOCX export restores the original', () => {
     const input: DocxExportInput = {
       title: '锚点', marks: [], options: { ...DEFAULT_MANUSCRIPT_EXPORT_OPTIONS },
       blocks: exportBlocks(blocks).map((block, index) => index === 1 ? edited(block, `${block.text}（改）`) : block),
-      source: { kind: 'mapped', original, rows: bodyRows(blocks), textBoxes: 'retain' },
+      source: { kind: 'mapped', original, rows: bodyRows(blocks), notes: noteRows(blocks), textBoxes: 'retain' },
     };
     const result = renderDocxExport(input, { emit: true });
     expect(fidelityOf(result.fidelity).filter(([key]) => ['notes', 'images-captions', 'text-boxes'].includes(key))).toEqual([
@@ -719,7 +728,7 @@ describe('DOCX export restores the original', () => {
     const { blocks } = await parse(path);
     const result = renderDocxExport({
       title: '页眉', marks: [], options: { ...DEFAULT_MANUSCRIPT_EXPORT_OPTIONS }, blocks: exportBlocks(blocks),
-      source: { kind: 'mapped', original, rows: bodyRows(blocks), textBoxes: 'retain' },
+      source: { kind: 'mapped', original, rows: bodyRows(blocks), notes: noteRows(blocks), textBoxes: 'retain' },
     }, { emit: true });
     expect(digest(unzipSync(result.bytes!)['word/header1.xml']!)).toBe(digest(composed['word/header1.xml']!));
     expect(exportRetentionDisclosure(result.fidelity).retention?.preserved).toContain('页眉页脚（1 个，与原文件逐字节相同）');
@@ -746,7 +755,7 @@ describe('DOCX export restores the original', () => {
       blocks: exportBlocks(blocks),
       marks: [],
       options: { ...DEFAULT_MANUSCRIPT_EXPORT_OPTIONS },
-      source: { kind: 'mapped', original, rows: bodyRows(blocks), textBoxes: 'retain' },
+      source: { kind: 'mapped', original, rows: bodyRows(blocks), notes: noteRows(blocks), textBoxes: 'retain' },
     }, { emit: true });
     expect(result.restoredBlocks).toBe(blocks.length);
     const reread = await parseBytes(result.bytes!);
@@ -797,7 +806,7 @@ describe('DOCX export of a table\'s own revisions (Issue #411)', () => {
       blocks: exportBlocks(blocks),
       marks: [],
       options: { ...DEFAULT_MANUSCRIPT_EXPORT_OPTIONS },
-      source: { kind: 'mapped', original, rows: bodyRows(blocks), textBoxes: 'retain' },
+      source: { kind: 'mapped', original, rows: bodyRows(blocks), notes: noteRows(blocks), textBoxes: 'retain' },
     }, { emit: true });
     expect(result.restoredBlocks).toBe(blocks.length);
     // The written file reads back as the manuscript: the same blocks, and no revision or mark left in it.
@@ -902,7 +911,7 @@ describe('DOCX export writes AI7\'s marks', () => {
     });
     const without = renderDocxExport({ ...input, marks: [note] }, { emit: true });
     expect(without.written.editorNotes).toBe(0);
-    expect(without.restoredBlocks).toBe(input.blocks.length);
+    expect(without.restoredBlocks).toBe(input.blocks.filter((block) => block.kind !== 'note').length);
     const withNotes = renderDocxExport({ ...input, marks: [note], options: { ...DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, includeEditorNotes: true } }, { emit: true });
     expect(withNotes.written.editorNotes).toBe(1);
     expect(fidelityOf(withNotes.fidelity).find(([key]) => key === 'editor-notes')).toEqual(['editor-notes', 'preserved', 1, []]);
@@ -920,7 +929,7 @@ describe('DOCX export writes AI7\'s marks', () => {
       }),
     ];
     const result = renderDocxExport({ ...input, marks, options: { includeAnnotations: false, includeSuggestions: false, includeEditorNotes: false } }, { emit: true });
-    expect(result.restoredBlocks).toBe(input.blocks.length);
+    expect(result.restoredBlocks).toBe(input.blocks.filter((block) => block.kind !== 'note').length);
     expect(result.degraded).toBe(false);
     expect(fidelityOf(result.fidelity).filter(([key]) => ['annotations', 'change-suggestions'].includes(key))).toEqual([
       ['annotations', 'excluded', 1, []],
@@ -999,7 +1008,9 @@ describe('DOCX export of text boxes and fresh builds', () => {
       ['fields', 'unavailable'],
     ]);
     const reread = await parseBytes(result.bytes!);
-    expect(reread.blocks.map((block) => block.digest)).toEqual(input.blocks.map((block) => block.digest));
+    // A fresh build writes the note block as a paragraph after the body (Issue #1204): the same words, read back as a paragraph.
+    expect(reread.blocks.map((block) => block.kind === 'paragraph' && input.blocks[block.position - 1]?.kind === 'note' ? block.text : block.digest))
+      .toEqual(input.blocks.map((block) => block.kind === 'note' ? block.text : block.digest));
     expect(reread.parsed.importedMarks.map((entry) => [entry.blockPosition, entry.fromGrapheme, entry.toGrapheme, entry.kind])).toEqual([[4, 1, 3, 'annotation']]);
     const names = Object.keys(unzipSync(result.bytes!));
     expect(names).toEqual([
@@ -1137,7 +1148,7 @@ describe('PDF and the Markdown 备用格式 lay the version out from its words',
     expect(text.endsWith('\n') && !text.endsWith('\n\n')).toBe(true);
     const parts = text.slice(0, -1).split('\n\n');
     const [body, notes] = [parts.slice(0, input.blocks.length), parts.slice(input.blocks.length)];
-    expect(body.map((part) => /^#+ /u.exec(part)?.[0] ?? '')).toEqual(['# ', '## ', '###### ', '', '', '', '', '', '', '']);
+    expect(body.map((part) => /^#+ /u.exec(part)?.[0] ?? '')).toEqual(['# ', '## ', '###### ', '', '', '', '', '', '', '', '']);
     // The title's 批注 follows its words; its block is the manuscript's words, escaped, and nothing more.
     const first = graphemes(input.blocks[0]!.text);
     expect(digest(body[0]!)).toBe(digest(`# ${md(first.slice(0, 6).join(''))}[^1]${md(first.slice(6).join(''))}`));
@@ -1169,9 +1180,10 @@ describe('PDF and the Markdown 备用格式 lay the version out from its words',
     expect(page).toContain('@page{size:A4;');
     expect(page).not.toMatch(/<script|<img|<link|<iframe|url\(|https?:/iu);
     expect([page.match(/<h1 class="book-title">/gu)?.length, page.match(/<h2>/gu)?.length, page.match(/<h6>/gu)?.length, page.match(/<p>/gu)?.length])
-      .toEqual([1, 2, 1, 7]);
+      .toEqual([1, 2, 1, 8]);
+    // The last paragraph is the note block (Issue #1204), laid out after the body like a paragraph.
     const paragraphs = [...page.matchAll(/<p>(.*?)<\/p>/gu)].map((match) => match[1]!);
-    expect(digest(paragraphs.at(-1)!)).toBe(digest(
+    expect(digest(paragraphs.at(-2)!)).toBe(digest(
       `<del>${html(tenth.slice(0, 2).join(''))}</del><ins>${html(proposal)}</ins><sup class="note-ref">3</sup>${html(tenth.slice(2, 6).join(''))}` +
       `<ins>${html(insertion)}</ins><sup class="note-ref">4</sup>${html(tenth.slice(6, 9).join(''))}<del>${html(tenth.slice(9, 11).join(''))}</del>` +
       `<sup class="note-ref">5</sup><sup class="note-ref">6</sup>${html(tenth.slice(11).join(''))}`,

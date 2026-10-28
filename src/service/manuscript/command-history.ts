@@ -188,7 +188,7 @@ export function validateCommandHistoryGroup(db: DatabaseSync, groupId: string): 
       const shapeValid =
         (kind === 'title' && level === 1) ||
         (kind === 'heading' && level !== null && Number.isSafeInteger(level) && level >= 1 && level <= 6) ||
-        (kind === 'paragraph' && level === null);
+        ((kind === 'paragraph' || kind === 'note') && level === null);
       const beforeText = asString(row.before_text);
       const afterText = asString(row.after_text);
       const beforeLength = stagedBlockLength(beforeText, 'HISTORY_CORRUPT', '历史命令文字超出内容块边界。');

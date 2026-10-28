@@ -8,6 +8,7 @@ import { compileWordTrackedDocxBytes, type WordTrackedCompilation } from './docx
 import { bindWordReadingBlocks, type WordBlockBinding, type WordImportMode, type WordReadingKind,
   type WordRevisionGraph, type WordSourceSegment } from './import-retention.js';
 import {
+  type ManuscriptBlockKind,
   EXPORT_FIDELITY_STATUS_LABELS,
   MAX_EXPORT_FIDELITY_POSITIONS,
   type ExportFidelityKey,
@@ -146,7 +147,7 @@ function requireExport(condition: unknown, code: string, message: string): asser
 export interface DocxExportBlock {
   blockId: string;
   position: number;
-  kind: 'title' | 'heading' | 'paragraph';
+  kind: ManuscriptBlockKind;
   level: number | null;
   text: string;
   digest: string;
@@ -184,11 +185,21 @@ export interface DocxExportMark {
   suggestion: { currentText: string; proposedText: string } | null;
 }
 
+/** One note block of the exported Revision and the note of the original it reads (Issue #1204). */
+export interface DocxExportNoteRow {
+  blockId: string;
+  part: 'footnote' | 'endnote';
+  noteId: string;
+  sourceNoteDigest: string;
+}
+
 export interface LegacyMappedDocxSource {
   kind: 'mapped';
   /** The original file of the Source Version, exactly as retained. */
   original: Uint8Array;
   rows: ReadonlyArray<DocxExportSourceRow>;
+  /** The note blocks' notes; absent or empty when the Revision has none. */
+  notes?: ReadonlyArray<DocxExportNoteRow>;
   /** The text-box choice the import recorded (ADR 0086 §2). */
   textBoxes: 'retain' | 'merge';
   mapping?: { kind: 'paragraph-rows' };
@@ -1261,7 +1272,9 @@ interface ReviewFacts {
   marks: MarkPlan;
   options: ManuscriptExportOptions;
   /** A mapped build's retained parts beside the body, by the name the disclosure gives them: copied byte for byte, or rewritten. */
-  parts?: { preserved: Array<[string, number]>; rewritten: Array<[string, number]> };
+  parts?: { preserved: Array<[string, number]>; rewritten: Array<[string, number]>; edited?: Array<[string, number]> };
+  /** The positions of the note blocks written back into their notes because they were edited (Issue #1204). */
+  editedNotes?: number[];
 }
 
 function emptyTally(): ClassTally {
@@ -1335,6 +1348,17 @@ function markRow(
   return fidelityRow(key, label, considered, 'unavailable', `${words.written(written)}${words.unwritable(unwritable.length)}`, unwritable);
 }
 
+/** The edited notes' sentence, said of the note blocks that carry it (Issue #1204): an unedited note is restored as it was. */
+const EDITED_NOTES_LINE = '注文按稿件文字写出，原注文中的行内样式未能恢复';
+
+function withEditedNotes(facts: ReviewFacts, row: ExportFidelityRowProjection): ExportFidelityRowProjection {
+  const edited = facts.editedNotes ?? [];
+  if (edited.length === 0) return row;
+  const lead = facts.tallies.notes.lost > 0 ? `${row.detail.replace(/；注文和其余引用从原文件恢复。$/u, '')}；` : '';
+  return fidelityRow('notes', row.label, row.count, 'degraded',
+    `${lead}${edited.length} 条改过的注释：${EDITED_NOTES_LINE}；其余从原文件恢复。`, [...row.positions, ...edited]);
+}
+
 function fidelityRows(facts: ReviewFacts): ExportFidelityRowProjection[] {
   const boxes = facts.tallies['text-boxes'];
   const revisions = facts.tallies['file-revisions'];
@@ -1359,8 +1383,8 @@ function fidelityRows(facts: ReviewFacts): ExportFidelityRowProjection[] {
       written: (count) => `${count} 条备注作为 Word 批注写出，作者为「${EDITOR_NOTE_AUTHOR_LABEL}」。`,
       unwritable: (count) => `${count} 条所在的文字已变化，无法导出。`,
     }),
-    contentRow(facts, 'notes', '脚注与尾注', '未检测到脚注或尾注。', '脚注与尾注从原文件恢复。',
-      (count) => `改过或带标记的段落中有 ${count} 处脚注、尾注引用照常写出，但从原来的位置移到了该段末尾；注文和其余引用从原文件恢复。`),
+    withEditedNotes(facts, contentRow(facts, 'notes', '脚注与尾注', '未检测到脚注或尾注。', '脚注与尾注从原文件恢复。',
+      (count) => `改过或带标记的段落中有 ${count} 处脚注、尾注引用照常写出，但从原来的位置移到了该段末尾；注文和其余引用从原文件恢复。`)),
     structureRow(facts, 'tables', '表格', '未检测到表格。', '表格结构从原文件恢复；改过的单元格文字按稿件写出。'),
     contentRow(facts, 'images-captions', '图片与图注', '未检测到图片。', '图片从原文件恢复；图注按稿件文字写出。',
       (count) => `改过或带标记的段落中有 ${count} 张图片照常写出，但从原来的位置移到了该段末尾；其余从原文件恢复，图注按稿件文字写出。`),
@@ -1418,6 +1442,7 @@ function exclusionReason(row: ExportFidelityRowProjection, facts: ReviewFacts): 
   if (facts.restoration === 'regenerated') return `没有可对应的原文件段落，无法恢复（${row.count} 项）`;
   const lost = facts.tallies[row.key as keyof ReviewFacts['tallies']].lost;
   if (row.key === 'inline-styles') return `改过或带标记的段落中 ${lost} 处未能恢复，超链接只保留文字`;
+  if (row.key === 'notes') return `${facts.editedNotes?.length ?? 0} 条改过的注释：${EDITED_NOTES_LINE}`;
   if (row.key === 'fields') return `改过或带标记的段落中 ${lost} 个只写出当前显示的文字，不再更新`;
   return `${row.count} 处未转为稿件标记，修订记号不写出`;
 }
@@ -1444,14 +1469,16 @@ function recordRetention(rows: ExportFidelityRowProjection[], facts: ReviewFacts
     }
     const kind = MARK_ROW_KINDS[row.key];
     const written = row.count - (kind === undefined ? 0 : facts.marks.unwritable[kind].length);
-    const anchor = facts.restoration === 'from-original' && row.status === 'degraded' ? MOVED_ANCHOR_NAMES[row.key] : undefined;
+    const editedNotes = row.key === 'notes' ? facts.editedNotes?.length ?? 0 : 0;
+    const anchor = facts.restoration === 'from-original' && row.status === 'degraded' && (editedNotes === 0 || facts.tallies.notes.lost > 0)
+      ? MOVED_ANCHOR_NAMES[row.key] : undefined;
     // The header and footer parts are named with the parts below; the file's own revisions are never written.
     if (row.key !== 'headers-footers' && row.key !== 'file-revisions' && written > 0 && (row.status !== 'unavailable' || kind !== undefined)) {
       retention.rebuilt.push(anchor === undefined ? `${row.label}（${written} 项）`
         : `${row.label}：${row.count} 项，其中 ${facts.tallies[row.key as keyof ReviewFacts['tallies']].lost} 项随重建段落移到该段末尾`);
     }
     if (anchor !== undefined) moved.push(anchor);
-    else if (row.status !== 'preserved') {
+    if (anchor === undefined ? row.status !== 'preserved' : editedNotes > 0) {
       retention.excluded.push(`${row.label}：${exclusionReason(row, facts)}`);
       limited.push(name(row));
     }
@@ -1466,13 +1493,15 @@ function recordRetention(rows: ExportFidelityRowProjection[], facts: ReviewFacts
     `本次 DOCX：${parts.preserved.length > 0 ? `${labels(parts.preserved)}与原文件逐字节相同` : '没有与原文件逐字节相同的部分'}`,
     `正文 ${body}${moved.length > 0 ? `，重建段落中的${moved.join('、')}移到该段末尾` : ''}`,
     ...(parts.rewritten.length > 0 ? [`${labels(parts.rewritten)}去掉原文件的批注标记后重新写出`] : []),
+    ...((parts.edited ?? []).length > 0 ? [`${labels(parts.edited!)}按改过的注释重新写出`] : []),
     ...(limited.length > 0 ? [`未能原样写出：${limited.join('、')}`] : []),
     ...(optional.length > 0 ? [`本次未包含：${optional.join('、')}`] : []),
   ].join('；');
   const first = rows[0]!.retention!;
   rows[0]!.retention = {
     preserved: parts.preserved.map(([label, count]) => `${label}（${count} 个，与原文件逐字节相同）`),
-    rebuilt: [`正文：${body}`, ...parts.rewritten.map(([label, count]) => `${label}（${count} 个，去掉原批注标记后重新写出）`), ...first.rebuilt],
+    rebuilt: [`正文：${body}`, ...parts.rewritten.map(([label, count]) => `${label}（${count} 个，去掉原批注标记后重新写出）`),
+      ...(parts.edited ?? []).map(([label, count]) => `${label}（${count} 个，按改过的注释重新写出）`), ...first.rebuilt],
     excluded: first.excluded,
     summary: `${summary}。数量、原因与段落位置见导出保真审阅。`,
   };
@@ -1524,7 +1553,7 @@ function sourceProperties(paragraph: XmlElement, selectedWord = false): { paragr
 
 /** The style a regenerated block without a source paragraph takes: the parser reads it back as the same kind. */
 function freshParagraphProperties(block: DocxExportBlock, writer: MarkupWriter): string {
-  if (block.kind === 'paragraph') return '';
+  if (block.kind === 'paragraph' || block.kind === 'note') return '';
   const style = block.kind === 'title' ? 'Title' : `Heading${block.level ?? 1}`;
   return `<${writer.w('pPr')}><${writer.w('pStyle')} ${writer.w('val')}="${style}"/></${writer.w('pPr')}>`;
 }
@@ -1563,7 +1592,8 @@ function rewriteDocument(
     rows.set(sourceRow.sourceParagraphIndex, sourceRow);
   }
   const mapped = new Set(source.rows.filter((sourceRow) => blocksById.has(sourceRow.blockId)).map((sourceRow) => sourceRow.blockId));
-  const pending = input.blocks.filter((block) => !mapped.has(block.blockId));
+  // A note block is written into its note, never into the body (Issue #1204).
+  const pending = input.blocks.filter((block) => !mapped.has(block.blockId) && block.kind !== 'note');
   const emitted = new Set<string>();
   let writer: MarkupWriter | undefined;
   let mainUri = WORD_MAIN;
@@ -1759,7 +1789,7 @@ function rewriteDocument(
   parser.write(documentXml).close();
   requireExport(rootSeen && bodyClosed && depth === 0, 'DOCX_EXPORT_SOURCE_INVALID', '正文部件不完整。');
   requireExport(pending.length === 0, 'DOCX_EXPORT_MAPPING_INVALID', '有稿件内容块未能写出。');
-  const missing = input.blocks.filter((block) => !emitted.has(block.blockId));
+  const missing = input.blocks.filter((block) => !emitted.has(block.blockId) && block.kind !== 'note');
   requireExport(missing.length === 0, 'DOCX_EXPORT_MAPPING_INVALID', '有稿件内容块未能写出。');
   return { documentXml: withoutHalfBookmarks(`${XML_DECLARATION}${out.join('')}`), restoredBlocks, regeneratedBlocks, writer: writer!, mainUri };
 }
@@ -1940,6 +1970,49 @@ const RETAINED_PART_LABELS: ReadonlyArray<readonly [RegExp, string]> = [
   [/^word\/media\//, '图片等媒体文件'],
 ];
 
+const NOTE_PARTS: Readonly<Record<DocxExportNoteRow['part'], string>> = { footnote: 'word/footnotes.xml', endnote: 'word/endnotes.xml' };
+
+/**
+ * The notes whose note block was edited (Issue #1204), by part and note: each is written back with the block's words, and its
+ * block's position is disclosed. A note block whose words are its note's is restored with the part as it was.
+ */
+function editedNotes(input: DocxExportInput, source: LegacyMappedDocxSource, facts: ReviewFacts): Map<string, Map<string, string>> {
+  const blocks = new Map(input.blocks.map((block) => [block.blockId, block]));
+  const edits = new Map<string, Map<string, string>>();
+  for (const row of source.notes ?? []) {
+    const block = blocks.get(row.blockId);
+    if (block === undefined || block.digest === row.sourceNoteDigest) continue;
+    const part = NOTE_PARTS[row.part];
+    edits.set(part, (edits.get(part) ?? new Map()).set(row.noteId, block.text));
+    (facts.editedNotes ??= []).push(block.position);
+  }
+  return edits;
+}
+
+/**
+ * A note part with each edited note's paragraphs replaced by the block's lines: the note's first paragraph's properties and its
+ * number mark stay, and every line is one run in that paragraph's first run's properties.
+ */
+function rewriteNotes(bytes: Uint8Array, part: string, edits: ReadonlyMap<string, string>): Uint8Array {
+  const root = parseXmlPart(decode(bytes, part), part);
+  const prefix = root.name.slice(0, root.name.length - root.local.length);
+  let written = 0;
+  for (const note of root.children) {
+    if (!isElement(note) || (note.local !== 'footnote' && note.local !== 'endnote')) continue;
+    const text = edits.get(attributeOf(note, 'id') ?? '');
+    if (text === undefined) continue;
+    const first = note.children.find((child): child is XmlElement => isElement(child) && child.local === 'p');
+    const properties = first === undefined ? { paragraph: '', run: '' } : sourceProperties(first);
+    const mark = first?.children.find((child): child is XmlElement => isElement(child) && child.local === 'r' &&
+      child.children.some((inner) => isElement(inner) && (inner.local === 'footnoteRef' || inner.local === 'endnoteRef')));
+    note.children = [{ raw: text.split('\n').map((line, index) => `<${prefix}p>${properties.paragraph}${index === 0 && mark !== undefined ? serialize([mark]) : ''}` +
+      `<${prefix}r>${properties.run}<${prefix}t xml:space="preserve">${escapeText(line)}</${prefix}t></${prefix}r></${prefix}p>`).join('') }];
+    written += 1;
+  }
+  requireExport(written === edits.size, 'DOCX_EXPORT_MAPPING_INVALID', '有改过的注释在原文件中找不到。');
+  return strToU8(`${XML_DECLARATION}${serialize([root])}`);
+}
+
 /** A part beside the body that anchors comments: its comment markup goes, since the comments are replaced. */
 function withoutCommentMarkup(bytes: Uint8Array, part: string): Uint8Array {
   const xml = decode(bytes, part);
@@ -1975,6 +2048,7 @@ function mappedPackage(input: DocxExportInput, source: Extract<DocxExportSource,
   facts.tallies['headers-footers'].total = original.names.filter((name) => /^word\/(header|footer)\d*\.xml$/i.test(name)).length;
   if (isWordMappedDocxSource(source)) facts.wordMode = source.mapping.mode;
   const makeWriter = (prefix: string): MarkupWriter => new MarkupWriter(prefix, identities.nextId, identities.paraIds);
+  const notes = isWordMappedDocxSource(source) ? new Map<string, Map<string, string>>() : editedNotes(input, source, facts);
   const walk = isWordMappedDocxSource(source)
     ? { kind: 'word' as const, ...rewriteWordDocument(documentXml, input, source, plan, facts, makeWriter) }
     : { kind: 'legacy' as const, ...rewriteDocument(documentXml, input, source, plan, facts, makeWriter) };
@@ -2025,7 +2099,9 @@ function mappedPackage(input: DocxExportInput, source: Extract<DocxExportSource,
       replaced.delete(name);
     } else if (/^word\/(header|footer)\d*\.xml$|^word\/(footnotes|endnotes)\.xml$/i.test(name) ||
       (walk.kind === 'word' && walk.sideStoryParts.includes(name))) {
-      entries.push([name, withoutCommentMarkup(original.entries.get(name)!, name)]);
+      const kept = withoutCommentMarkup(original.entries.get(name)!, name);
+      const edits = notes.get(name);
+      entries.push([name, edits === undefined ? kept : rewriteNotes(kept, name, edits)]);
     } else {
       entries.push([name, original.entries.get(name)!]);
     }
@@ -2041,21 +2117,22 @@ function mappedPackage(input: DocxExportInput, source: Extract<DocxExportSource,
   }
   entries.push(...added);
   // The retained parts the disclosure names, each compared with the original byte for byte (Issue #814).
-  const partCounts = new Map<string, { preserved: number; rewritten: number }>();
+  const partCounts = new Map<string, { preserved: number; rewritten: number; edited: number }>();
   for (const [name, bytes] of entries) {
     const label = RETAINED_PART_LABELS.find(([pattern]) => pattern.test(name))?.[1];
     if (label === undefined) continue;
     const before = original.entries.get(name);
     const identical = before !== undefined && before.length === bytes.length && before.every((byte, index) => byte === bytes[index]);
-    const counts = partCounts.get(label) ?? { preserved: 0, rewritten: 0 };
-    counts[identical ? 'preserved' : 'rewritten'] += 1;
+    const counts = partCounts.get(label) ?? { preserved: 0, rewritten: 0, edited: 0 };
+    counts[identical ? 'preserved' : notes.has(name) ? 'edited' : 'rewritten'] += 1;
     partCounts.set(label, counts);
   }
-  facts.parts = { preserved: [], rewritten: [] };
+  facts.parts = { preserved: [], rewritten: [], ...(notes.size > 0 ? { edited: [] } : {}) };
   for (const [, label] of RETAINED_PART_LABELS) {
     const counts = partCounts.get(label);
     if (counts !== undefined && counts.preserved > 0) facts.parts.preserved.push([label, counts.preserved]);
     if (counts !== undefined && counts.rewritten > 0) facts.parts.rewritten.push([label, counts.rewritten]);
+    if (counts !== undefined && counts.edited > 0) facts.parts.edited!.push([label, counts.edited]);
   }
   return { bytes: emit ? zipPackage(entries) : null, facts, walk, written: writer.written };
 }
