@@ -1702,6 +1702,9 @@ async function runProtectionJourney(renderer) {
   await protectionChecks(renderer, `({ cleared: !p.shown && p.document === null, exactEntries: p.journal === ${durable + 3 + entries}, writable: p.writable, closeRisk: p.closeRisk === 'false' })`, 'protection-read-only-recovered', 90_000);
 }
 
+/** The bounded window's block ceiling, owned by MAX_WINDOW_BLOCKS in src/shared/protocol.ts. */
+const MAX_RENDERER_BLOCKS = 32;
+
 /** The manuscript's last block and its block count, read through the public window at its end. */
 const MANUSCRIPT_TAIL_PROBE = `(async () => { const work = (await window.ai7.listPriorWork())[0]; const page = await window.ai7.getManuscriptWindowAt({ manuscriptId: work.manuscriptId, branchId: work.branchId, target: { kind: 'proportion', proportion: 1 } }); const last = page.blocks.at(-1); return { blockId: last.blockId, position: last.position, totalBlocks: page.position.totalBlocks }; })()`;
 
