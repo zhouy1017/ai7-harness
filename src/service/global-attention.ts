@@ -8,6 +8,7 @@ import {
   GLOBAL_ATTENTION_GROUP_LIMIT,
   GLOBAL_ATTENTION_RECENT_DAYS,
   GLOBAL_ATTENTION_RECENT_LIMIT,
+  MODEL_SERVICE_ROUTES,
   type BaselineAnalysisRunState,
   type BaselineAnalysisTaskMode,
   type BookTaskGroupKey,
@@ -24,6 +25,7 @@ import {
   type LibraryMaterialKind,
   type MaintenanceClassification,
   type MaintenanceNextStep,
+  type ProcessingIndicatorProjection,
   type ProposalConflictKind,
   type ReviewRunCategoryState,
   type ReviewRunState,
@@ -370,8 +372,24 @@ export async function readGlobalAttention(
   progress: ProgressReader,
   busy: boolean,
   read: () => Promise<WaitingFor>,
+  sending: ReadonlyArray<string> = [],
 ): Promise<GlobalAttentionProjection> {
-  return store.inspectGlobalAttention(progress, busy, await attentionWaitingFor(store.waitingTaskRuns(null).length > 0, read));
+  const projection = store.inspectGlobalAttention(progress, busy, await attentionWaitingFor(store.waitingTaskRuns(null).length > 0, read));
+  // The execution owner's requests in the transport (ADR 0096 §3) join the answering dialogues the composition read.
+  const channels = sendingChannels([...sending, ...(projection.processing.state === 'sending' ? projection.processing.channels : [])]);
+  return channels.length === 0 ? projection : { ...projection, processing: { state: 'sending', channels } };
+}
+
+/** The routes named as channels, once each in 设置 › 模型服务's order; a route that is no model service is never named. */
+function sendingChannels(routes: ReadonlyArray<string>): ReadonlyArray<(typeof MODEL_SERVICE_ROUTES)[number]> {
+  return MODEL_SERVICE_ROUTES.filter((route) => routes.includes(route));
+}
+
+/** The processing indicator as the records read it (ADR 0096 §3): an answering dialogue sends; a Connectivity Wait waits. */
+function processingOf(dialogues: ReadonlyArray<GlobalAgentDialogueProjection>, items: ReadonlyArray<GlobalAttentionItemProjection>): ProcessingIndicatorProjection {
+  const channels = sendingChannels(dialogues.flatMap((dialogue) => dialogue.attempts.at(-1)?.state === 'answering' && dialogue.provider ? [dialogue.provider.route] : []));
+  if (channels.length > 0) return { state: 'sending', channels };
+  return items.some((entry) => entry.state === 'analysis-waiting-network') ? { state: 'waiting-network' } : { state: 'local' };
 }
 
 function item(
@@ -971,6 +989,7 @@ export function composeGlobalAttention(readings: GlobalAttentionReadings, now: D
     running: readings.busy || (readings.globalDialogues ?? []).some((dialogue) => dialogue.attempts.at(-1)?.state === 'answering') || readings.reviewRuns.some((reading) => reading.state === 'running' || reading.state === 'waiting') ||
       readings.analysisTasks.some((reading) => reading.run !== null && followedRun(reading.run)) ||
       (readings.waitingTasks ?? []).some((reading) => reading.state === 'awaiting-connectivity'),
+    processing: processingOf(readings.globalDialogues ?? [], unique),
   };
 }
 

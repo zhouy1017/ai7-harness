@@ -1549,7 +1549,7 @@ async function dispatch(
     case 'inspectGlobalAttention':
       return {
         id: request.id, ok: true, op: request.op,
-        result: await readGlobalAttention(store, analysisProgress, analysisExecution.busy, () => connectivity.waitingFor()),
+        result: await readGlobalAttention(store, analysisProgress, analysisExecution.busy, () => connectivity.waitingFor(), analysisExecution.sendingRoutes),
       };
     // 就这段提问… (Issue #52, plan slice S17a; UI ADR 0014): no plan and no 开始任务 (the Owner, 2026-10-07) — asking records the
     // dialogue Task and starts its answer at once, and the answer streams into the owner's memory whether anyone watches or

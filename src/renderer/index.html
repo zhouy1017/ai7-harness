@@ -20,7 +20,8 @@
         <p class="context-position" id="context-position">全局</p>
         <h1 class="context-title" id="context-title">AI7 编辑工作台</h1>
       </div>
-      <p class="locality context-status" aria-label="处理方式：本地处理，未联网"><span aria-hidden="true">●</span> 本地处理 · 未联网</p>
+      <!-- The live processing indicator (ADR 0096 §3): painted from the execution state, empty until it can say. -->
+      <p class="locality context-status" id="processing-indicator" hidden></p>
       <!-- 专注, 视图 and the editing protection surface of the manuscript on screen (Issue #951); a screen's own actions follow. -->
       <div class="context-view" id="context-view"></div>
       <div class="context-actions" id="context-actions"></div>

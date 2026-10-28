@@ -275,6 +275,8 @@ interface ActiveRun {
   transmissions: (() => number) | null;
   /** What that counter read when the attempt in flight was dispatched. */
   transmissionsAtDispatch: number;
+  /** The live route this Run sends to, which the processing indicator names; `null` on the deterministic route. */
+  channel: ExecutionRouteId | null;
   harness: PrimaryAgentHarnessHandle | null;
   readonly requestAbort: AbortController;
   interrupted: boolean;
@@ -897,6 +899,15 @@ export class BaselineAnalysisExecutionOwner {
       occupying.filter((run) => !this.#backgroundActive.has(run.runRecordId)).length >= LIVE_FOREGROUND_PLACES);
   }
 
+  /**
+   * The routes whose request is in the transport now (ADR 0096 §3): an attempt awaiting its answer, never one dispatched,
+   * queued or between requests. The context header's processing indicator names them, and nothing else.
+   */
+  get sendingRoutes(): ReadonlyArray<ExecutionRouteId> {
+    return [...new Set([...this.#active.values()].filter((run) => run.channel !== null && (attemptStateOf(run) === 'awaiting-response' ||
+      [...run.unitActivities.values()].some((unit) => unit.attemptState === 'awaiting-response'))).map((run) => run.channel!))];
+  }
+
   /** Whether every place is taken (Issue #864): a Run a 后台分析登记 starts needs a free place, within its share. */
   get full(): boolean {
     return this.#occupiedPlaces().length + (this.#curation === null ? 0 : 1) >= this.#capacity;
@@ -1213,6 +1224,7 @@ export class BaselineAnalysisExecutionOwner {
       },
       transmissions: null,
       transmissionsAtDispatch: 0,
+      channel: null,
       harness: null,
       requestAbort: new AbortController(),
       interrupted: false,
@@ -2094,6 +2106,7 @@ export class BaselineAnalysisExecutionOwner {
     const context = stageContext;
     const { harness, liveAdapter, admittedUserMessages, acceptedOutputDigests, pendingLoopUsage, ceilingState, retrieval } = context;
     active.transmissions = () => liveAdapter.instance?.transmissions ?? 0;
+    active.channel = live === null ? null : route;
     active.harness = harness;
     // Which of the two developer-live interruptions settled this Run, when one did; the closed CHECK
     // sets record both as `interrupted`, so the distinction lives in the detail, summary, and action.

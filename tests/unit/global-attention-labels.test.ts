@@ -93,7 +93,7 @@ function item(state: GlobalAttentionStateKey, overrides: Partial<GlobalAttention
 
 function projection(groups: Partial<Record<GlobalAttentionGroupKey, ReadonlyArray<GlobalAttentionItemProjection>>>, totals: Partial<Record<GlobalAttentionGroupKey, number>> = {}): GlobalAttentionProjection {
   const built = GLOBAL_ATTENTION_GROUP_KEYS.map((key) => ({ key, items: groups[key] ?? [], total: totals[key] ?? (groups[key] ?? []).length }));
-  return { groups: built, actionableCount: built[0]!.total + built[1]!.total, running: false };
+  return { groups: built, actionableCount: built[0]!.total + built[1]!.total, running: false, processing: { state: 'local' } };
 }
 
 describe('the entry and the screen', () => {

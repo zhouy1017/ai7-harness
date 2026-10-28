@@ -224,12 +224,8 @@ import {
   publicationStateOf,
 } from './deliverables-labels.js';
 import { ViewPreferences, mountRegionSeparator, renderViewSettings } from './layout.js';
-import {
-  createGlobalAttentionReader,
-  mountGlobalAttention,
-  mountGlobalAttentionEntry,
-  type GlobalAttentionSurface,
-} from './global-attention.js';
+import { createGlobalAttentionReader, mountGlobalAttention, mountGlobalAttentionEntry, type GlobalAttentionSurface } from './global-attention.js';
+import { mountProcessingIndicator } from './processing-indicator.js';
 import { GLOBAL_ATTENTION_ACTIONS, GLOBAL_ATTENTION_STATUS_LINES } from './global-attention-labels.js';
 import { analysisRefusalView } from './overview-refusal-labels.js';
 import {
@@ -815,6 +811,7 @@ const globalAttentionEntry = ((): HTMLButtonElement => {
   return node;
 })();
 mountGlobalAttentionEntry({ button: globalAttentionEntry, reader: globalAttentionReader, open: () => void openGlobalAttention() });
+mountProcessingIndicator(requiredElement('#processing-indicator'), globalAttentionReader);
 const showQuietNotice = mountQuietNotice((item) => void leaveThen(() => openGlobalAttentionItem(item)));
 const observeNotifications = createNotificationObserver({
   api: window.ai7,

@@ -1,12 +1,12 @@
 import type { GlobalAgentOperations, GlobalAgentRendererApi } from './protocol/global-agent.js';
 import type { HouseWordListOperations, HouseWordListApi } from './protocol/house-word-list.js';
-import type { JournalEditInput } from './protocol/manuscript-structure.js'; import type { SelectionSpanBlockPin, SelectionSpanField } from './protocol/selection-span.js';
+import type { JournalEditInput } from './protocol/manuscript-structure.js'; import type { SelectionSpanBlockPin, SelectionSpanField } from './protocol/selection-span.js'; import type { GlobalAttentionProjection } from './protocol/global-attention.js';
 export type { JournalEditInput, JournalStructuralEdit } from './protocol/manuscript-structure.js';
 import type { ManuscriptBlockProjection } from './protocol/manuscript-notes.js';
 export type { ManuscriptBlockKind, ManuscriptBlockProjection, ManuscriptNoteProjection } from './protocol/manuscript-notes.js';
 import type { ImportStructureChoice, ImportStructureProjection } from './protocol/import-structure.js';
 import type { EditableImportProjection, ImportIdentityFindingProjection, ManuscriptConversionProjection } from './protocol/import-intake.js';
-export type * from './protocol/import-intake.js'; export type * from './protocol/import-structure.js'; export type * from './protocol/selection-span.js'; export { validStructureChoice } from './protocol/import-structure.js';
+export type * from './protocol/import-intake.js'; export type * from './protocol/import-structure.js'; export type * from './protocol/selection-span.js'; export type * from './protocol/global-attention.js'; export { validStructureChoice } from './protocol/import-structure.js';
 export * from './protocol/global-agent.js';
 export type { ReviewContractIdentity, ReviewExcludedFindingProjection, ReviewContractRejectionReason, ReviewEvidenceSource, ReviewReportSchema, ReviewReportDerivedSections, ReviewReportFindingEntry } from './protocol/review.js';
 import type { ReviewExcludedFindingProjection, ReviewContractRejectionReason, ReviewReportSchema, ReviewReportDerivedSections } from './protocol/review.js';
@@ -136,7 +136,7 @@ import type { PublicSampleBookSourceDigest } from './public-samplebooks.js';
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 184 as const;
+export const SERVICE_PROTOCOL_VERSION = 185 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 export interface BookFindingProjection {
@@ -10821,20 +10821,6 @@ export interface GlobalAttentionGroupProjection {
   items: ReadonlyArray<GlobalAttentionItemProjection>;
   /** How many items the group holds; more than `items` when the group is longer than one answer lists. */
   total: number;
-}
-
-/**
- * 待我处理 across every Book (editor-surfaces §8.1, V2-UX-ATTN-001 to 009, IA-007). A read: composing it
- * terminalizes, claims and writes nothing (V2-UX-ATTN-008). An item resolves by itself when the record
- * moves on — a newer Task of the same kind for its Book, a decision made, a completion aging out.
- */
-export interface GlobalAttentionProjection {
-  /** Always the four groups, in the fixed order. */
-  groups: ReadonlyArray<GlobalAttentionGroupProjection>;
-  /** The Actionable Attention Count: the items of the first two groups, and no others (V2-UX-ATTN-006). */
-  actionableCount: number;
-  /** A Run is in flight now, or a Review Run is being driven: a reader follows it slowly until it ends. */
-  running: boolean;
 }
 
 // ---- ① 任务面 (Issue #423, plan slice S77a; editor-surfaces §1 任务面, V2-UX-TASK-044, TASK-045) --------------------
