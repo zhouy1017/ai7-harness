@@ -1542,7 +1542,7 @@ async function main() {
     // it stands at, how much is selected and where (TASK-002), the Tasks that read a range now, and what is handed over.
     await waitFor(renderer, `window.__j16.composer()?.dataset.markComposer === 'task-on-selection'`, 'selection-task-composer-open', 30_000);
     const composer = await renderer.evaluate(`(() => { const composer = window.__j16.composer(); const select = composer?.querySelector('select[data-mark-field="procedure"]'); return composer === null || !(select instanceof HTMLSelectElement) ? null : { label: composer.getAttribute('aria-label'), quote: composer.querySelector('.editorial-mark-quote')?.textContent ?? null, field: select.closest('label')?.firstElementChild?.textContent ?? null, hint: select.closest('label')?.querySelector('small')?.textContent ?? null, options: Array.from(select.options).map((option) => [option.value, option.textContent]), chosen: select.value, note: composer.querySelector('[data-mark-form-note]')?.textContent ?? null, submit: composer.querySelector('[data-mark-action="submit"]')?.textContent ?? null }; })()`);
-    const context = /^《(.+)》 · 修订版 (r\d+) · 修订日志序号 (\d+) · 已选 (\d+) 字 · 第 (\d+) 个内容块$/u.exec(composer?.hint ?? '');
+    const context = /^《(.+)》 · 修订版 (r\d+) · 修订日志序号 (\d+) · 已选 (\d+) 字 · 第 (\d+) 段$/u.exec(composer?.hint ?? '');
     const position = context?.[5] ?? null;
     const offered = new Map(composer?.options ?? []);
     requireJourney(composer?.label === '就这段发起任务' && composer.quote === taskWords && composer.field === '工序' && context !== null && context[1] === BOOK.title && Number(context[4]) === wordsTo &&

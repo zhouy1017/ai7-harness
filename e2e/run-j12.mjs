@@ -1382,6 +1382,15 @@ async function main() {
     await click(primary, '保护并保存', 'model-credential-save');
     await waitFor(primary, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='available' && document.querySelector('[data-credential-state="ready"]')`, 'model-credential-ready');
     await assertRenderer(primary, `(() => { const input=document.querySelector('#main-editorial-credential'); return input instanceof HTMLInputElement && input.type==='password' && input.autocomplete==='off' && input.value==='' && !document.body.textContent.includes(${JSON.stringify(secretOne)}); })()`, 'model-secret-not-redisplayed');
+    // The Main Editorial Role's connection test (ADR 0096 §3, #1177): the Fast role's explicit test, for the route in use and the
+    // Main role's model. Offered, not clicked: this launch admits no live test.
+    requireJourney(await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>{
+      const route=settings.routeChoice.routes.find((item)=>item.inUse&&item.connection?.credentialOperationState==='ready');
+      const card=document.querySelector('[data-model-role="main-editorial"]');
+      const test=card?.querySelector('[data-action="test-main-role-connection"]');
+      return route!==undefined && test instanceof HTMLButtonElement && !test.disabled && test.textContent==='测试主编辑模型连接' && test.dataset.modelRoute===route.route &&
+        card.querySelector('.model-main-role-test')?.textContent.includes('尚未测试');
+    })`) === true, 'main-role-connection-test-surface');
     at('model-service-search-backends');
     const searchSettings = await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.searchBackends)`);
     requireJourney(searchSettings.selectedBackendId === 'search-tinyfish' && JSON.stringify(searchSettings.backends.map((entry)=>entry.backendId)) === JSON.stringify(['search-tinyfish','search-deepseek','search-brave','search-parallel','search-bochaai']), 'search-backend-ranking-default');
