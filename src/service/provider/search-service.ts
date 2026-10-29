@@ -1,11 +1,14 @@
-import { searchBackend } from './search-backends/index.js';
+import { searchBackend, searchBackendCandidateConfigurationDigest } from './search-backends/index.js';
+import { DEVELOPMENT_CREDENTIAL_REFERENCES } from '../../shared/protected-secret-identity.js';
 import type { CredentialBroker } from './credential-broker.js';
 import type { TicketHostAdmission } from './public-source-fetch.js';
 import { isRecord } from '../analysis/canonical.js';
-import { EgressTicketBook, evaluateSearchServiceCall, redeemEgressTicket, type SearchServiceTicket } from './egress-gate.js';
+import { EgressTicketBook, evaluateSearchCandidateProbe, evaluateSearchServiceCall, redeemEgressTicket, redeemSearchCandidateProbe, releaseSearchCandidateProbe, type SearchCandidateProbeTicket, type SearchServiceTicket } from './egress-gate.js';
+import { deepseekDirectSearchRequest, readDeepseekDirectSearch } from './search-backends/deepseek.js';
 import { toolArgumentsDigest, type PlatformToolArguments, type PlatformToolsRule } from './platform-tools.js';
 import { PlatformToolHttpError, deadlineSignal, readBoundedBody, type PlatformToolFetch } from './platform-tool-http.js';
-import { anonymousSearchInterface } from './search-backends.js';
+import { anonymousSearchInterface, searchBackendCandidate } from './search-backends.js';
+import type { SearchBackendProbeProjection, SearchCandidateId, SearchCandidateProbeOutcome, SearchConnectionTestPolicy } from '../../shared/protocol.js';
 
 /**
  * The `websearch` forwarder (ADR 0080 §7.1, §7.2; Issue #473 S87-f3a). The model emits the call; AI7 composes no query of
@@ -218,6 +221,24 @@ export async function sendSearchCall(authorized: AuthorizedSearchCall, fetch: Pl
   }
 }
 
+/**
+ * Why one search submission failed, as a closed class (Issue #1181): a missing key, an authentication or account-balance
+ * rejection, a rate limit, a server error, any other rejection, an answer AI7 cannot read, a refusal before sending, or a
+ * transport that did not complete. Classes come from the HTTP status or AI7's own error code — never from a provider's body.
+ */
+export type SearchFailureClass = 'credential-missing' | 'auth' | 'quota' | 'rate' | 'server' | 'rejected' | 'malformed' | 'refused' | 'transport';
+
+export function searchFailureClass(failure: { readonly status: number } | { readonly code: string }): SearchFailureClass {
+  if ('status' in failure) {
+    const { status } = failure;
+    return status === 200 ? 'malformed' : status === 401 || status === 403 ? 'auth' : status === 402 ? 'quota' : status === 429 ? 'rate'
+      : status >= 500 && status <= 599 ? 'server' : 'rejected';
+  }
+  if (failure.code === 'SEARCH_SERVICE_CREDENTIAL_REQUIRED' || failure.code === 'CREDENTIAL_MISSING' || failure.code === 'SEARCH_CREDENTIAL_MISSING') return 'credential-missing';
+  if (failure.code === 'PLATFORM_TOOL_BODY_TOO_LARGE') return 'malformed';
+  return failure.code === 'PLATFORM_TOOL_TIMEOUT' || failure.code === 'PLATFORM_TOOL_FAILED' || failure.code.startsWith('TRANSPORT_') ? 'transport' : 'refused';
+}
+
 /** The settings path's only query; it contains no Book or manuscript input. */
 export const SEARCH_BACKEND_PROBE_QUERY = 'UNESCO World Book and Copyright Day April 23';
 
@@ -265,4 +286,105 @@ export function platformToolsFromProjection(rule: unknown): import('./egress-gat
   if (search['backends'].length !== 5 || new Set(search['backends'].map((entry: { id: string }) => entry.id)).size !== 5) return null;
   return { websearch: { selection: 'user-configured', backends: search['backends'] as Array<{ id: string; host: string; credentialSlot: string }> },
     webfetch: { maxBytes: 5_242_880, timeoutSeconds: 30, boundedByCitations: true } };
+}
+
+/** Titles keep printable text on one line, cut at the policy's code-point bound before they are exposed. */
+function boundedProbeTitle(title: string, max: number): string {
+  return capCharacters(title.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/gu, ' ').trim(), max);
+}
+
+/**
+ * Send one candidate connection test (Issue #1055) under a redeemed `call-search-candidate-probe` ticket: the broker releases
+ * the frozen reference only to this one request, built from the ticket alone — never a caller's query, URL, body or key —
+ * with the search service's deadline, body bound and manual redirects, no retry and no fallback. Every exit withdraws the
+ * ticket and releases the host. The outcome is sanitized; at most three bounded titles and public URLs are returned and
+ * nothing is stored.
+ */
+export async function probeSearchCandidate(input: {
+  readonly ticket: SearchCandidateProbeTicket;
+  readonly policy: SearchConnectionTestPolicy;
+  readonly broker: CredentialBroker;
+  readonly fetch: PlatformToolFetch;
+  readonly admitHost: TicketHostAdmission;
+  readonly isCurrent: () => boolean;
+}): Promise<SearchBackendProbeProjection> {
+  const { ticket, policy } = input;
+  const started = Date.now();
+  const qualified = (outcome: SearchCandidateProbeOutcome, httpStatus: number | null,
+    results: ReadonlyArray<{ title: string; url: string }> = [], resultCount = 0): SearchBackendProbeProjection => ({
+    backendId: ticket.backendId, reachable: outcome === 'succeeded' || outcome === 'succeeded-empty', latencyMs: Date.now() - started, resultCount, results,
+    failure: outcome === 'succeeded' || outcome === 'succeeded-empty' ? null : httpStatus === null ? outcome : `HTTP ${httpStatus}`,
+    candidate: { candidateId: ticket.candidateId as SearchCandidateId, endpoint: ticket.endpoint, protocol: ticket.protocol,
+      configurationDigest: ticket.configurationDigest, outcome, httpStatus },
+  });
+  try {
+    if (!redeemSearchCandidateProbe(ticket)) throw new SearchServiceError('PLATFORM_TOOL_TICKET_REFUSED', '没有本次连接测试的决定；未发送任何内容。');
+    const candidate = searchBackendCandidate(ticket.backendId, ticket.candidateId);
+    return await input.broker.releaseTo({ bindingDigest: ticket.bindingDigest, modelRole: 'Main Editorial Role', slot: ticket.credentialSlot,
+      credentialReference: ticket.credentialReference, isCurrent: input.isCurrent }, ticket, async (credential) => {
+      const request = deepseekDirectSearchRequest(candidate, ticket.arguments, credential);
+      if (request.url !== ticket.endpoint || new URL(request.url).hostname !== ticket.host) throw new SearchServiceError('PLATFORM_TOOL_TICKET_REFUSED', '连接测试的请求不是票据所冻结的请求；未发送。');
+      const deadline = deadlineSignal(policy.timeoutMilliseconds);
+      let release: (() => void) | undefined;
+      let status: number | null = null;
+      try {
+        release = input.admitHost({ host: ticket.host, port: 443, ticketId: ticket.ticketId });
+        const response = await input.fetch(request.url, { method: 'POST', headers: { ...request.headers }, body: request.body!, signal: deadline.signal, redirect: 'manual' });
+        status = response.status;
+        const bytes = await readBoundedBody(response, policy.responseMaxBytes);
+        if (status !== 200) return qualified('http-rejected', status);
+        const hits = readDeepseekDirectSearch(new TextDecoder().decode(bytes));
+        if (hits === null) return qualified('malformed-response', status);
+        const results = hits.slice(0, policy.resultsMaximum).map((hit) => ({ title: boundedProbeTitle(hit.title, policy.titleMaximumCharacters), url: hit.url }))
+          .filter((hit) => hit.url.length <= policy.urlMaximumCharacters && /^https?:\/\//u.test(hit.url));
+        return qualified(hits.length === 0 ? 'succeeded-empty' : 'succeeded', status, results, hits.length);
+      } catch (error) {
+        if (error instanceof SearchServiceError) throw error;
+        // An answer past the body bound is not the documented shape; a deadline is an interruption; anything else is unknown.
+        if (error instanceof PlatformToolHttpError && error.code === 'PLATFORM_TOOL_BODY_TOO_LARGE') return qualified('malformed-response', status);
+        return qualified(deadline.signal.aborted ? 'transport-interrupted' : 'transport-unknown', status);
+      } finally { deadline.dispose(); release?.(); }
+    });
+  } finally { releaseSearchCandidateProbe(ticket); }
+}
+
+export class SearchCandidateProbeRefusal extends Error {
+  constructor(readonly code: string, message: string) {
+    super(message);
+    this.name = 'SearchCandidateProbeRefusal';
+  }
+}
+
+/**
+ * The candidate connection test as the service composes it (Issue #1055): the closed candidate or a refusal, then the gate's
+ * decision — scope first, so development-ci, fixture-recording and developer-live read no connection, resolve no secret and
+ * send nothing — then the one ticketed request. A refusal or a failure before the send is a `SearchCandidateProbeRefusal`.
+ */
+export async function composeSearchCandidateProbe(input: {
+  readonly backendId: string;
+  readonly candidateId: string;
+  readonly operationalScope: string | null;
+  readonly launchPolicy: import('../../shared/protocol.js').LaunchPolicyProjection;
+  readonly connection: (backendId: string) => { readonly credentialReference: string | null; readonly credentialOperationState: string } | undefined;
+  readonly broker: CredentialBroker;
+  readonly fetch: PlatformToolFetch;
+  readonly admitHost: TicketHostAdmission;
+}): Promise<SearchBackendProbeProjection> {
+  let candidate: import('./search-backends.js').SearchBackendCandidate;
+  try { candidate = searchBackendCandidate(input.backendId, input.candidateId); } catch { throw new SearchCandidateProbeRefusal('SEARCH_CANDIDATE_UNKNOWN', '没有这一联网检索候选接口；未发送任何内容。'); }
+  const policy = input.launchPolicy.providerProcessing.searchConnectionTest;
+  const decision = evaluateSearchCandidateProbe({ operationalScope: input.operationalScope, providerProcessingVersion: input.launchPolicy.providerProcessing.version, policy,
+    configurationDigest: searchBackendCandidateConfigurationDigest(candidate.backendId, candidate.candidateId), connection: () => input.connection(candidate.backendId),
+    candidate: { ...candidate.search, backendId: candidate.backendId, candidateId: candidate.candidateId, credentialSlot: candidate.credentialSlot, arguments: candidate.search.probeArguments },
+    developmentReference: (reference) => DEVELOPMENT_CREDENTIAL_REFERENCES.has(reference.toLowerCase()) });
+  if (decision.decision === 'refuse') throw new SearchCandidateProbeRefusal(decision.code, decision.detail);
+  const { ticket } = decision;
+  try {
+    return await probeSearchCandidate({ ticket, policy: policy!, broker: input.broker, fetch: input.fetch, admitHost: input.admitHost,
+      // Removing or replacing the key between the click and the read retargets nothing: the frozen reference must still be the ready one.
+      isCurrent: () => { const now = input.connection(candidate.backendId); return now?.credentialOperationState === 'ready' && now.credentialReference === ticket.credentialReference; } });
+  } catch (error) {
+    const code = error !== null && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : 'SEARCH_CANDIDATE_PROBE_FAILED';
+    throw new SearchCandidateProbeRefusal(code === 'CREDENTIAL_MISSING' ? 'SEARCH_CREDENTIAL_MISSING' : code, '连接测试未完成：凭据未释放或请求未发送；请检查本页保存的密钥后重试。');
+  }
 }

@@ -1,7 +1,7 @@
 import { SEARCH_BACKENDS } from './search-backends.js';
 import { LOCAL_TOOL_RESULT_MAX_BYTES, type LocalToolsRule } from './local-tools.js';
 import { randomUUID } from 'node:crypto';
-import type { AdmittedProviderRule, OrdinaryProductionProviderProcessingVersion } from '../../shared/protocol.js';
+import type { AdmittedProviderRule, OrdinaryProductionProviderProcessingVersion, SearchConnectionTestPolicy } from '../../shared/protocol.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from '../../shared/provider-configuration.generated.js';
 import { CONFIGURED_RUNTIME_MODEL_TABLE } from '../../shared/provider-configuration.generated.js';
 import type { OutboundDataCategoryId } from '../../shared/protocol.js';
@@ -276,6 +276,95 @@ export interface PlatformToolRefusal {
   readonly reason: EgressRefusalReason;
   readonly detail: string;
 }
+/**
+ * The one `call-search-candidate-probe` decision (Issue #1055; the selected policy's `searchConnectionTest`): every pin the
+ * policy freezes before secret access — the candidate, its endpoint, method, protocol and configuration digest, the fixed
+ * arguments and request digest, the opaque credential reference, the selected policy and the explicit action — in one
+ * single-use ticket. It opens no ticket book, names no research rule and is never a `call-search-service` ticket.
+ */
+export interface SearchCandidateProbeTicket {
+  readonly decision: 'call-search-candidate-probe';
+  readonly ticketId: string;
+  readonly bindingDigest: string;
+  readonly actionId: string;
+  readonly backendId: string;
+  readonly candidateId: string;
+  readonly endpoint: string;
+  readonly host: string;
+  readonly method: 'POST';
+  readonly protocol: 'deepseek-direct-search';
+  readonly configurationDigest: string;
+  readonly arguments: SearchConnectionTestPolicy['arguments'];
+  readonly argumentsDigest: string;
+  readonly credentialSlot: CredentialSlot;
+  readonly credentialReference: string;
+  readonly policy: { readonly operationalScope: 'ordinary-production'; readonly providerProcessingVersion: string };
+}
+export type SearchCandidateProbeDecision = { readonly decision: 'call-search-candidate-probe'; readonly ticket: SearchCandidateProbeTicket } |
+  { readonly decision: 'refuse'; readonly code: string; readonly detail: string };
+
+const outstandingCandidateProbes = new Set<SearchCandidateProbeTicket>();
+const candidateProbeReleases = new WeakSet<SearchCandidateProbeTicket>();
+
+/**
+ * Decide one explicit candidate connection test. Scope comes first: development-ci, fixture-recording and developer-live are
+ * refused here, before a ticket, a credential or a transport exists. Then the selected policy's block must name exactly this
+ * candidate's configured interface and arguments, and the connection must be the backend's own ready production reference.
+ */
+export function evaluateSearchCandidateProbe(input: {
+  readonly operationalScope: string | null;
+  readonly providerProcessingVersion: string | null;
+  readonly policy: SearchConnectionTestPolicy | undefined;
+  readonly candidate: { readonly backendId: string; readonly candidateId: string; readonly endpoint: string; readonly host: string; readonly method: 'POST';
+    readonly protocol: 'deepseek-direct-search'; readonly headerForm: 'authorization-bearer'; readonly credentialSlot: string; readonly arguments: SearchConnectionTestPolicy['arguments'] };
+  readonly configurationDigest: string;
+  /** Read only after the scope and policy checks pass. */
+  readonly connection: () => { readonly credentialReference: string | null; readonly credentialOperationState: string } | undefined;
+  readonly developmentReference: (reference: string) => boolean;
+}): SearchCandidateProbeDecision {
+  const refuse = (code: string, detail: string): SearchCandidateProbeDecision => ({ decision: 'refuse', code, detail });
+  const { policy, candidate } = input;
+  if (input.operationalScope !== 'ordinary-production' || policy === undefined || policy.rejectedOperationalScopes.some((scope) => scope === input.operationalScope)) {
+    return refuse('SEARCH_CANDIDATE_PROBE_SCOPE_REFUSED', `连接测试只在本机正式使用下发送；当前环境（${input.operationalScope ?? '未知'}）不读取凭据，也不发送任何内容。`);
+  }
+  if (policy.backendId !== candidate.backendId || policy.candidateId !== candidate.candidateId || policy.endpoint !== candidate.endpoint ||
+      policy.method !== candidate.method || policy.protocol !== candidate.protocol || policy.headerForm !== candidate.headerForm ||
+      policy.credentialSlot !== candidate.credentialSlot || canonicalJson(policy.arguments) !== canonicalJson(candidate.arguments) ||
+      sha256Hex(canonicalJson(candidate.arguments)) !== policy.argumentsCanonicalSha256 || new URL(candidate.endpoint).hostname !== candidate.host) {
+    return refuse('SEARCH_CANDIDATE_PROBE_POLICY_MISMATCH', '所选策略未准许这一候选接口或其固定查询；未读取凭据，也未发送任何内容。');
+  }
+  const connection = input.connection();
+  const reference = connection?.credentialOperationState === 'ready' ? connection.credentialReference : null;
+  if (reference === null || !DIGEST_PATTERN.test(input.configurationDigest) || input.developmentReference(reference)) {
+    return refuse('SEARCH_CREDENTIAL_MISSING', '连接测试需要已保存的 DeepSeek 服务端搜索（官方）密钥；请先在本页保存。');
+  }
+  const pins = { actionId: randomUUID(), backendId: candidate.backendId, candidateId: candidate.candidateId, endpoint: candidate.endpoint, host: candidate.host,
+    method: candidate.method, protocol: candidate.protocol, configurationDigest: input.configurationDigest, arguments: candidate.arguments,
+    argumentsDigest: policy.argumentsCanonicalSha256, credentialSlot: candidate.credentialSlot as CredentialSlot, credentialReference: reference,
+    policy: { operationalScope: 'ordinary-production' as const, providerProcessingVersion: input.providerProcessingVersion ?? '' } };
+  const ticket: SearchCandidateProbeTicket = Object.freeze({ decision: 'call-search-candidate-probe' as const, ticketId: randomUUID(), bindingDigest: sha256Hex(canonicalJson(pins)), ...pins });
+  outstandingCandidateProbes.add(ticket);
+  return { decision: 'call-search-candidate-probe', ticket };
+}
+
+/** Redeem a candidate probe ticket exactly once; the redemption is the one broker release it authorizes. */
+export function redeemSearchCandidateProbe(ticket: SearchCandidateProbeTicket): boolean {
+  if (!outstandingCandidateProbes.delete(ticket)) return false;
+  candidateProbeReleases.add(ticket);
+  return true;
+}
+
+/** Withdraw an unredeemed or unreleased candidate probe ticket: every exit releases what the decision held. */
+export function releaseSearchCandidateProbe(ticket: SearchCandidateProbeTicket): void {
+  outstandingCandidateProbes.delete(ticket);
+  candidateProbeReleases.delete(ticket);
+}
+
+/** A redeemed candidate probe ticket authorizes one broker release of its own slot and reference, never another. */
+export function consumeSearchCandidateProbeRelease(ticket: SearchCandidateProbeTicket): boolean {
+  return candidateProbeReleases.delete(ticket);
+}
+
 export type SearchServiceDecision = { readonly decision: 'call-search-service'; readonly ticket: SearchServiceTicket } | PlatformToolRefusal;
 export type PublicSourceDecision = { readonly decision: 'fetch-public-source'; readonly ticket: PublicSourceTicket } | PlatformToolRefusal;
 export type PlatformToolEgressDecision = SearchServiceDecision | PublicSourceDecision;

@@ -1,6 +1,7 @@
 import { validLocalOptions } from './review/deterministic/plan.js';
 import { validStructureChoice } from '../shared/protocol/import-structure.js';
 import { CUSTOM_ANALYSIS_PREPARATION_PURPOSES, type CustomAnalysisPreparationPurpose } from '../shared/protocol/custom-analysis-redo.js';
+import { SEARCH_CANDIDATE_IDS } from '../shared/protocol/search-backends.js';
 import { MAX_SELECTION_SPAN_BLOCKS } from '../shared/selection-span.js';
 import { validateInspectHouseWordListInput, validateSaveHouseWordListInput } from '../shared/protocol/house-word-list.js';
 import { validSupervisionInput } from './learning/supervision-directives.js';
@@ -496,10 +497,16 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     case 'selectSearchBackend':
-    case 'probeSearchBackend':
     case 'removeSearchBackendCredential': {
       const input = requireInput(value.input, ['backendId'], tentativeId);
       if (!isBoundedString(input.backendId, 80) || !/^search-[a-z][a-z0-9-]*$/u.test(input.backendId)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'probeSearchBackend': {
+      // The candidate is a closed identifier (Issue #1055); a query, URL, body or credential field is never the caller's.
+      const input = requireInputWithOptional(value.input, ['backendId'], ['candidateId'], tentativeId);
+      if (!isBoundedString(input.backendId, 80) || !/^search-[a-z][a-z0-9-]*$/u.test(input.backendId) ||
+          (input.candidateId !== undefined && !(SEARCH_CANDIDATE_IDS as readonly unknown[]).includes(input.candidateId))) throw new ProtocolError(tentativeId);
       break;
     }
     case 'saveSearchBackendCredential': {

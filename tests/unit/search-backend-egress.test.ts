@@ -106,6 +106,28 @@ describe('frozen backend egress and per-Run tool accounting', () => {
     expect(session.usage.refusedSearchCalls).toBe(1);
   });
 
+  it('records each failed submission by its class — rate, quota, auth, server, missing key, transport — and sends once (Issue #1181)', async () => {
+    const cases: Array<[string, () => Promise<Response>, string | null]> = [
+      ['rate', async () => new Response('{"error":{"message":"provider words"}}', { status: 429 }), 'synthetic-key'],
+      ['quota', async () => new Response('{}', { status: 402 }), 'synthetic-key'],
+      ['auth', async () => new Response('{}', { status: 401 }), 'synthetic-key'],
+      ['server', async () => new Response('{}', { status: 503 }), 'synthetic-key'],
+      ['credential-missing', async () => new Response('{"results":[]}'), null],
+      ['transport', async () => { throw new TypeError('fetch failed'); }, 'synthetic-key'],
+    ];
+    for (const [failure, answer, key] of cases) {
+      let sends = 0;
+      const session = new PlatformToolSession({ binding, scope, broker: new CredentialBroker({ resolve: async () => key }), purpose: `provider-free-${failure}`,
+        admitHost: admitTicketHost, fetch: async () => { sends += 1; return answer(); } });
+      const call = { tool: 'websearch' as const, signal: new AbortController().signal };
+      const result = await session.execute({ ...call, callId: failure, arguments: { query: `public fact ${failure}` }, dispatch: { token: Symbol(), active: () => !call.signal.aborted } });
+      expect(result.sourceUrl).toBeNull();
+      expect(result.text).not.toContain('provider words');
+      expect(session.usage.searchFailures).toEqual({ [failure]: 1 });
+      expect(sends).toBe(key === null ? 0 : 1);
+    }
+  });
+
   it('still counts cached query round trips toward the unit breaker', async () => {
     let sends = 0;
     const session = new PlatformToolSession({ binding, scope, broker: new CredentialBroker({ resolve: async () => 'synthetic-key' }),

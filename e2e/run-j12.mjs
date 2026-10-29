@@ -1315,7 +1315,7 @@ async function main() {
     const diagnosticsSummary = JSON.parse(await readFile(resolve(diagnosticsBundle, 'summary.json'), 'utf8'));
     const builtPolicySet = JSON.parse(await readFile(resolve(ROOT, 'dist/docs/policies/active-policy-set.v22.json'), 'utf8'));
     // 数据版本 and 数据库修订 named apart (Issue #967): the Data Version is 1, the schema revision the store's own.
-    requireJourney(diagnosticsSummary.appVersion === packageVersion && diagnosticsSummary.dataVersion === 1 && diagnosticsSummary.schemaRevision === CREDENTIAL_CLEANUP_SCHEMA_VERSION && diagnosticsSummary.protocol === 188 &&
+    requireJourney(diagnosticsSummary.appVersion === packageVersion && diagnosticsSummary.dataVersion === 1 && diagnosticsSummary.schemaRevision === CREDENTIAL_CLEANUP_SCHEMA_VERSION && diagnosticsSummary.protocol === 189 &&
       diagnosticsSummary.policySetVersion === builtPolicySet.version && diagnosticsSummary.logs === '无日志文件', 'diagnostics-summary');
     requireJourney((await readFile(resolve(diagnosticsBundle, 'README.txt'), 'utf8')).includes('不含数据库、书稿'), 'diagnostics-exclusions');
     await click(primary, '查看诊断位置', 'diagnostics-reveal');
@@ -1439,6 +1439,32 @@ async function main() {
     requireJourney(await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.searchBackends.selectedBackendId==='search-brave')`), 'search-backend-selection-saved');
     const unknownSearchBackend = await primary.evaluate(`window.ai7.selectSearchBackend({backendId:'search-kimi'}).then(()=>false,(error)=>error.code==='SEARCH_BACKEND_NOT_SHIPPED')`);
     requireJourney(unknownSearchBackend, 'unshipped-search-backend-refused');
+    // The DeepSeek direct-search candidate (Issue #1055 into W22-S10a #1181): disclosed as 未实测 beside the ranked backends, not
+    // selectable, its one explicit 测试连接 refused under development-ci before any credential or transport; closed identifiers only.
+    const candidateSettings = await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.searchBackends.candidates)`);
+    requireJourney(candidateSettings.length === 1 && candidateSettings[0].candidateId === 'deepseek-direct-search-v1' && candidateSettings[0].backendId === 'search-deepseek' &&
+      candidateSettings[0].measurement === 'not-measured' && candidateSettings[0].selectable === false && candidateSettings[0].endpoint === 'https://api.deepseek.com/v1/tools/search', 'search-candidate-declared');
+    await assertRenderer(primary, `(() => { const card=document.querySelector('[data-search-candidate="deepseek-direct-search-v1"]');
+      const labels=Array.from(card?.querySelectorAll('button')??[]).map((node)=>node.textContent);
+      return card?.dataset.measurement==='not-measured' && card.textContent.includes('未实测') && card.textContent.includes('不能用于任务') && card.textContent.includes('USD 0.75') &&
+        card.textContent.includes('不承诺直连调用免费') && JSON.stringify(labels)==='["测试连接"]' && card.querySelector('[data-search-candidate-probe]').textContent==='';
+    })()`, 'search-candidate-disclosed-unselectable');
+    await primary.evaluate(`document.querySelector('[data-search-candidate="deepseek-direct-search-v1"] [data-action="probe-search-candidate"]').click()`);
+    await waitFor(primary, `document.querySelector('[data-search-candidate-probe="deepseek-direct-search-v1"]')?.textContent.includes('development-ci')`, 'search-candidate-probe-refused-under-ci');
+    await assertRenderer(primary, `document.querySelector('[data-search-candidate-probe="deepseek-direct-search-v1"]').textContent.includes('不读取凭据') && document.querySelectorAll('[data-search-candidate-probe] a').length===0`, 'search-candidate-refusal-sends-nothing');
+    const candidateRefusals = await primary.evaluate(`Promise.all([
+      window.ai7.probeSearchBackend({backendId:'search-deepseek',candidateId:'deepseek-direct-search-v1'}).then(()=>null,(error)=>error.code),
+      window.ai7.probeSearchBackend({backendId:'search-brave',candidateId:'deepseek-direct-search-v1'}).then(()=>null,(error)=>error.code),
+      window.ai7.probeSearchBackend({backendId:'search-deepseek',candidateId:'deepseek-direct-search-v2'}).then(()=>null,(error)=>error.code),
+      window.ai7.probeSearchBackend({backendId:'search-deepseek',candidateId:'deepseek-direct-search-v1',query:'manuscript'}).then(()=>null,(error)=>error.code),
+      window.ai7.selectSearchBackend({backendId:'deepseek-direct-search-v1'}).then(()=>null,(error)=>error.code),
+    ])`);
+    requireJourney(candidateRefusals[0] === 'SEARCH_CANDIDATE_PROBE_SCOPE_REFUSED' && candidateRefusals[1] === 'SEARCH_CANDIDATE_UNKNOWN' &&
+      candidateRefusals.slice(2).every((code) => typeof code === 'string' && code.length > 0), 'search-candidate-closed-identifiers');
+    // Leaving the screen and coming back clears the result: it lives only in that painted section.
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'search-candidate-leave');
+    await waitFor(primary, `(() => { const node=Array.from(document.querySelectorAll('#screen[data-screen="settings"] button')).find((item)=>item.textContent==='模型服务'); if(!(node instanceof HTMLButtonElement)||node.disabled)return false; node.click(); return true; })()`, 'search-candidate-return');
+    await waitFor(primary, `document.querySelector('[data-search-candidate-probe="deepseek-direct-search-v1"]')?.textContent===''`, 'search-candidate-result-cleared-on-navigation');
     at('model-service-first-save');
     const firstConnection = await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>({
       roles:settings.roles.length,
