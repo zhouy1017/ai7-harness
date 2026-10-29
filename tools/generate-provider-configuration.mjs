@@ -74,7 +74,7 @@ export const CAPABILITY_VALUES = Object.freeze({
   usageAttribution: ['includes-reasoning', 'separate', 'unknown'],
   toolCalling: ['none', 'function'],
   webSearchTool: ['none', 'provider-tool'],
-  streaming: ['none', 'chat-completions-sse'],
+  streaming: ['none', 'chat-completions-sse', 'responses-sse', 'messages-sse', 'generate-content-sse'],
 });
 const CAPABILITIES = Object.keys(CAPABILITY_VALUES);
 const ABSENT = Object.freeze({
@@ -100,6 +100,7 @@ const SHAPE_RULES = Object.freeze({
     structuredOutput: ['none', 'json-object'],
     reasoningControl: ['none', 'deepseek-thinking'],
     toolCalling: ['none', 'function'],
+    streaming: 'chat-completions-sse',
     requiresOutputCap: false,
     headerForms: ['authorization-bearer'],
   },
@@ -108,7 +109,8 @@ const SHAPE_RULES = Object.freeze({
     reasoningChannel: 'content-thinking-blocks',
     structuredOutput: ['none'],
     reasoningControl: ['none'],
-    toolCalling: ['none'],
+    toolCalling: ['none', 'function'],
+    streaming: 'messages-sse',
     requiresOutputCap: true,
     headerForms: ['authorization-bearer', 'x-api-key'],
   },
@@ -117,7 +119,8 @@ const SHAPE_RULES = Object.freeze({
     reasoningChannel: 'output-reasoning-items',
     structuredOutput: ['none'],
     reasoningControl: ['none'],
-    toolCalling: ['none'],
+    toolCalling: ['none', 'function'],
+    streaming: 'responses-sse',
     requiresOutputCap: false,
     headerForms: ['authorization-bearer'],
   },
@@ -126,11 +129,36 @@ const SHAPE_RULES = Object.freeze({
     reasoningChannel: 'candidate-thought-parts',
     structuredOutput: ['none'],
     reasoningControl: ['none'],
-    toolCalling: ['none'],
+    toolCalling: ['none', 'function'],
+    streaming: 'generate-content-sse',
     requiresOutputCap: false,
     headerForms: ['x-goog-api-key'],
   },
 });
+
+/**
+ * What the adapter implements for each protocol family (Issue #1180, ADR 0094 §1), proven by the provider-free family
+ * fixtures under `tests/fixtures/model/provider-families/`. A family states `supported` or `unsupported`; a declared model is
+ * `supported` for `text`, `stream` or `functionTools` only where its own capability is declared on evidence, and
+ * `untested` otherwise (`src/service/provider/family-dispositions.ts` refuses every demand that is not `supported`).
+ * Structured output and reasoning control are the chat-completions spellings alone; reasoning continuation is the
+ * chat-completions `reasoning_content` round trip, because the other families' reasoning is opaque and the payload cannot
+ * carry it back; no family exposes a provider's own server tools.
+ */
+const FAMILY_ASPECTS = Object.freeze(['text', 'stream', 'functionTools', 'usage', 'cancellation', 'accountLimit', 'rateLimit',
+  'structuredOutput', 'reasoningControl', 'reasoningContinuation', 'providerTools']);
+const MODEL_ASPECTS = Object.freeze(['text', 'stream', 'functionTools']);
+const CHAT_ONLY_ASPECTS = new Set(['structuredOutput', 'reasoningControl', 'reasoningContinuation']);
+export const FAMILY_DISPOSITIONS = Object.freeze(Object.fromEntries(Object.keys(SHAPE_RULES).map((shape) => [shape,
+  Object.freeze(Object.fromEntries(FAMILY_ASPECTS.map((aspect) => [aspect,
+    aspect === 'providerTools' || (CHAT_ONLY_ASPECTS.has(aspect) && shape !== 'openai-chat-completions') ? 'unsupported' : 'supported'])))])));
+
+/** Whether one resolved model declares a per-model aspect: the same rule `family-dispositions.ts` applies at runtime. */
+function declaresAspect(model, shape, aspect) {
+  if (aspect === 'text') return model.capabilities.answerChannel !== 'none';
+  if (aspect === 'stream') return model.capabilities.streaming === SHAPE_RULES[shape].streaming;
+  return model.capabilities.toolCalling === 'function';
+}
 
 /** Route ids the product owns itself and no document may take. */
 const RESERVED_ROUTE_IDS = new Set(['ai7-local-deterministic']);
@@ -498,8 +526,8 @@ export function resolveProviderConfiguration({ schema, documents, recordedEviden
         }
         refuse(capabilities.reasoningControl !== 'deepseek-thinking' || DEEPSEEK_ONLY_PROVIDERS.has(data.providerId),
           `PROVIDER_CONFIGURATION/deepseek-thinking: ${modelWhere} (DeepSeek's thinking parameters are sent to DeepSeek official alone)`);
-        refuse(capabilities.streaming !== 'chat-completions-sse' || route.requestShape === 'openai-chat-completions',
-          `PROVIDER_CONFIGURATION/shape-capability: ${modelWhere} (streaming needs chat completions)`);
+        refuse(capabilities.streaming === undefined || capabilities.streaming === 'none' || capabilities.streaming === shape.streaming,
+          `PROVIDER_CONFIGURATION/shape-capability: ${modelWhere} (${route.requestShape} streams as ${shape.streaming})`);
         refuse(capabilities.answerChannel === 'none' || capabilities.answerChannel === shape.answerChannel,
           `PROVIDER_CONFIGURATION/answer-channel: ${modelWhere} (${route.requestShape} answers on ${shape.answerChannel})`);
         refuse(capabilities.reasoningChannel === 'none' || capabilities.reasoningChannel === shape.reasoningChannel,
@@ -538,6 +566,11 @@ export function resolveProviderConfiguration({ schema, documents, recordedEviden
         },
         requestShape: route.requestShape,
         routeEvidence: { limitPolicy: limitEvidence, dshAttribution: attributionEvidence, sessionHeader: sessionEvidence },
+        dispositions: {
+          family: route.requestShape,
+          supported: Object.fromEntries(MODEL_ASPECTS.map((aspect) => [aspect, FAMILY_DISPOSITIONS[route.requestShape][aspect] === 'supported'
+            ? models.filter((model) => declaresAspect(model, route.requestShape, aspect)).map((model) => model.model) : []])),
+        },
         note: route.note ?? null,
         models,
       });
@@ -756,7 +789,8 @@ function renderProfiles({ providers }) {
     '',
     "import type { ConfiguredRouteId } from '../../shared/provider-configuration.generated.js';",
     "import type { ProviderRouteProfile } from './deepseek-adapter.js';",
-    "import type { CapabilityEvidence, ProviderModelProfile } from './model-profile.js';",
+    "import type { FamilyDispositions, RouteDispositions } from './family-dispositions.js';",
+    "import type { CapabilityEvidence, ProviderModelProfile, RequestShape } from './model-profile.js';",
     '',
     '/* Every evidence record the documents cite, written once. */',
     ...[...named].map(([text, name]) => `const ${name}: CapabilityEvidence = ${renderValue(JSON.parse(text), 0)};`),
@@ -770,6 +804,14 @@ function renderProfiles({ providers }) {
     'export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [',
     ...models.map((model) => `  ${renderValue(model, 1, named)},`),
     '];',
+    '',
+    '/** What the adapter implements for each protocol family (Issue #1180): `supported` or `unsupported`, per aspect. */',
+    `export const GENERATED_FAMILY_DISPOSITIONS: Readonly<Record<RequestShape, FamilyDispositions>> = ${renderValue(FAMILY_DISPOSITIONS, 0)};`,
+    '',
+    '/** Per route: its family, and the models each per-model aspect is `supported` for; every other declared model is `untested`. */',
+    'export const GENERATED_ROUTE_DISPOSITIONS: Readonly<Record<ConfiguredRouteId, RouteDispositions>> = {',
+    ...routes.map((route) => `  ${literal(route.profile.route)}: ${renderValue(route.dispositions, 1)},`),
+    '};',
     '',
   ].join('\n');
 }
@@ -869,6 +911,30 @@ function renderSearchBackendSupport(searchBackends) {
   return lines;
 }
 
+/** The support page's family table (Issue #1180): what each family is implemented for, and the policy limit beside it. */
+function renderFamilyDispositions() {
+  const shapes = Object.keys(FAMILY_DISPOSITIONS);
+  return [
+    '## Protocol family dispositions',
+    '',
+    'What the adapter implements for each protocol family (Issue #1180, ADR 0094 §1), proven provider-free by the family fixtures under [`tests/fixtures/model/provider-families/`](../../tests/fixtures/model/provider-families/). A declared model is `supported` for text, stream or function tools only where its own capability is declared on evidence and `untested` otherwise; the adapter refuses every demand that is not `supported` by name before any ticket, credential or transport is touched (`src/service/provider/family-dispositions.ts`). A family the selected policy does not admit for a role is refused by name as `family-not-admitted-by-selected-policy`: the selected policy baseline (`policyBaseline` in the runtime model table, which the launch verifier matches against the policy bytes) admits chat completions for the Main role and chat completions and Responses for the Fast role, so Messages and generateContent, and Responses for Main, wait for a policy successor (ADR 0095 §6).',
+    '',
+    `| Aspect | ${shapes.map((shape) => `\`${shape}\``).join(' | ')} |`,
+    `| --- | ${shapes.map(() => '---').join(' | ')} |`,
+    ...FAMILY_ASPECTS.map((aspect) => `| ${aspect} | ${shapes.map((shape) => FAMILY_DISPOSITIONS[shape][aspect]).join(' | ')} |`),
+    '',
+  ];
+}
+
+/** One route's per-model disposition for one aspect, as the support page states it. */
+function dispositionText(route, aspect) {
+  if (FAMILY_DISPOSITIONS[route.requestShape][aspect] === 'unsupported') return 'unsupported';
+  const supported = route.dispositions.supported[aspect];
+  if (supported.length === 0) return 'untested for every model';
+  const rest = route.models.length - supported.length;
+  return `supported for ${supported.map((model) => `\`${model}\``).join(', ')}${rest === 0 ? '' : `, untested for the other ${rest}`}`;
+}
+
 function renderSupport({ providers, recordedEvidence, searchBackends = [] }) {
   const lines = [
     '# Provider support',
@@ -889,6 +955,7 @@ function renderSupport({ providers, recordedEvidence, searchBackends = [] }) {
     '',
     'A capability a document does not declare is absent with `unverified` evidence. A context size is the one the vendor page states, in tokens (an input limit where the page states one separately; a page\'s "1M" is read as 1,000,000), and `none` where no page read states one.',
     '',
+    ...renderFamilyDispositions(),
   ];
   for (const provider of providers) {
     lines.push(`## ${provider.displayName}`, '');
@@ -937,6 +1004,7 @@ function renderSupport({ providers, recordedEvidence, searchBackends = [] }) {
       }
       const every = route.models.length;
       const inert = route.models.filter((model) => model.capabilities.answerChannel === 'none').length;
+      lines.push(`Dispositions (\`${route.requestShape}\`): ${MODEL_ASPECTS.map((aspect) => `${aspect} ${dispositionText(route, aspect)}`).join('; ')}.`, '');
       lines.push(`Inert: ${inert} of ${every} (no declared answer channel). Established:`, '');
       for (const [text, subjects] of facts) {
         const who = subjects.length === every && every > 1 ? 'every model' : subjects.map((subject) => `\`${subject}\``).join(', ');

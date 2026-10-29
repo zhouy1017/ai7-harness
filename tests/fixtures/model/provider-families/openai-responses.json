@@ -1,0 +1,858 @@
+{
+  "family": "openai-responses",
+  "route": "openai-platform",
+  "model": "gpt-5.6-luna",
+  "declared": {
+    "streaming": "responses-sse",
+    "toolCalling": "function"
+  },
+  "cases": [
+    {
+      "name": "text",
+      "turn": "unit",
+      "stream": false,
+      "request": {
+        "url": "https://api.openai.com/v1/responses",
+        "headers": {
+          "content-type": "application/json",
+          "accept": "application/json"
+        },
+        "credentialHeader": "authorization",
+        "body": {
+          "input": [
+            {
+              "content": "合成段落：春风吹过合成的小镇。",
+              "role": "user"
+            }
+          ],
+          "instructions": "合成系统提示。",
+          "max_output_tokens": 8192,
+          "model": "gpt-5.6-luna",
+          "store": false
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "resp_synthetic_1",
+          "object": "response",
+          "status": "completed",
+          "model": "gpt-5.6-luna",
+          "output": [
+            {
+              "type": "reasoning",
+              "id": "rs_synthetic_1",
+              "summary": []
+            },
+            {
+              "type": "message",
+              "id": "msg_synthetic_1",
+              "status": "completed",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "output_text",
+                  "text": "合成回答。",
+                  "annotations": []
+                }
+              ]
+            }
+          ],
+          "usage": {
+            "input_tokens": 20,
+            "output_tokens": 8,
+            "output_tokens_details": {
+              "reasoning_tokens": 2
+            }
+          }
+        }
+      },
+      "chunks": [
+        {
+          "type": "block-start",
+          "index": 0,
+          "blockType": "text"
+        },
+        {
+          "type": "text-delta",
+          "index": 0,
+          "text": "合成回答。"
+        },
+        {
+          "type": "block-end",
+          "index": 0,
+          "block": {
+            "type": "text",
+            "text": "合成回答。"
+          }
+        },
+        {
+          "type": "usage",
+          "usage": {
+            "inputTokens": 20,
+            "outputTokens": 8,
+            "reasoningTokens": 2
+          }
+        },
+        {
+          "type": "finish",
+          "reason": {
+            "kind": "stop"
+          }
+        }
+      ],
+      "result": {
+        "kind": "answer",
+        "text": "合成回答。",
+        "reasoningText": null,
+        "usage": {
+          "inputTokens": 20,
+          "outputTokens": 8,
+          "reasoningTokens": 2
+        }
+      },
+      "usage": {
+        "inputTokens": 20,
+        "outputTokens": 8,
+        "reasoningTokens": 2
+      }
+    },
+    {
+      "name": "text-stream",
+      "turn": "dialogue",
+      "stream": true,
+      "request": {
+        "url": "https://api.openai.com/v1/responses",
+        "headers": {
+          "content-type": "application/json",
+          "accept": "text/event-stream"
+        },
+        "credentialHeader": "authorization",
+        "body": {
+          "input": [
+            {
+              "content": "AI7 编辑对话 · 提问 · 问题摘要 74721387eb50670055951037676f437a85999a99e25d999ba02872fd2710a266\n【所选文字】\n合成选区。\n【问题】\n合成问题？",
+              "role": "user"
+            }
+          ],
+          "instructions": "你是出版社编辑的写作顾问。编辑在稿件中选了一段文字，并就这段文字提了一个问题。\n只依据所选文字和问题作答，用简洁、完整的中文句子回答；不要复述整段原文，不要编造所选文字之外的情节、人物或事实。\n你的回答只供编辑阅读：它不修改稿件，不构成事实结论，也不自动成为修改建议。需要时可以说明可以怎样改，由编辑自己决定。\n不调用任何工具。",
+          "max_output_tokens": 8192,
+          "model": "gpt-5.6-luna",
+          "store": false,
+          "stream": true
+        }
+      },
+      "response": {
+        "status": 200,
+        "frames": [
+          "event: response.created\ndata: {\"type\":\"response.created\",\"sequence_number\":0,\"response\":{\"id\":\"resp_synthetic_1\",\"object\":\"response\",\"status\":\"in_progress\",\"model\":\"gpt-5.6-luna\",\"output\":[]}}\n\n",
+          "event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"sequence_number\":1,\"output_index\":0,\"item\":{\"type\":\"message\",\"id\":\"msg_synthetic_1\",\"status\":\"in_progress\",\"role\":\"assistant\",\"content\":[]}}\n\n",
+          "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"sequence_number\":2,\"item_id\":\"msg_synthetic_1\",\"output_index\":0,\"content_index\":0,\"delta\":\"合成\"}\n\n",
+          "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"sequence_number\":3,\"item_id\":\"msg_synthetic_1\",\"output_index\":0,\"content_index\":0,\"delta\":\"回答。\"}\n\n",
+          "event: response.output_text.done\ndata: {\"type\":\"response.output_text.done\",\"sequence_number\":4,\"item_id\":\"msg_synthetic_1\",\"output_index\":0,\"content_index\":0,\"text\":\"合成回答。\"}\n\n",
+          "event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"sequence_number\":5,\"output_index\":0,\"item\":{\"type\":\"message\",\"id\":\"msg_synthetic_1\",\"status\":\"completed\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"合成回答。\",\"annotations\":[]}]}}\n\n",
+          "event: response.completed\ndata: {\"type\":\"response.completed\",\"sequence_number\":6,\"response\":{\"id\":\"resp_synthetic_1\",\"object\":\"response\",\"status\":\"completed\",\"model\":\"gpt-5.6-luna\",\"output\":[{\"type\":\"message\",\"id\":\"msg_synthetic_1\",\"status\":\"completed\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"合成回答。\",\"annotations\":[]}]}],\"usage\":{\"input_tokens\":30,\"output_tokens\":4}}}\n\n"
+        ]
+      },
+      "chunks": [
+        {
+          "type": "block-start",
+          "index": 0,
+          "blockType": "text"
+        },
+        {
+          "type": "text-delta",
+          "index": 0,
+          "text": "合成"
+        },
+        {
+          "type": "text-delta",
+          "index": 0,
+          "text": "回答。"
+        },
+        {
+          "type": "block-end",
+          "index": 0,
+          "block": {
+            "type": "text",
+            "text": "合成回答。"
+          }
+        },
+        {
+          "type": "usage",
+          "usage": {
+            "inputTokens": 30,
+            "outputTokens": 4
+          }
+        },
+        {
+          "type": "finish",
+          "reason": {
+            "kind": "stop"
+          }
+        }
+      ],
+      "result": {
+        "kind": "answer",
+        "text": "合成回答。",
+        "reasoningText": null,
+        "usage": {
+          "inputTokens": 30,
+          "outputTokens": 4
+        }
+      },
+      "usage": {
+        "inputTokens": 30,
+        "outputTokens": 4
+      }
+    },
+    {
+      "name": "tool-calls",
+      "turn": "tool",
+      "stream": false,
+      "request": {
+        "url": "https://api.openai.com/v1/responses",
+        "headers": {
+          "content-type": "application/json",
+          "accept": "application/json"
+        },
+        "credentialHeader": "authorization",
+        "body": {
+          "input": [
+            {
+              "content": "合成段落：春风吹过合成的小镇。",
+              "role": "user"
+            }
+          ],
+          "instructions": "合成系统提示。",
+          "max_output_tokens": 8192,
+          "model": "gpt-5.6-luna",
+          "store": false,
+          "tools": [
+            {
+              "description": "合成查询工具。",
+              "name": "synthetic_lookup",
+              "parameters": {
+                "properties": {
+                  "query": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "query"
+                ],
+                "type": "object"
+              },
+              "strict": false,
+              "type": "function"
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "resp_synthetic_1",
+          "object": "response",
+          "status": "completed",
+          "model": "gpt-5.6-luna",
+          "output": [
+            {
+              "type": "message",
+              "id": "msg_synthetic_1",
+              "status": "completed",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "output_text",
+                  "text": "先查一下。",
+                  "annotations": []
+                }
+              ]
+            },
+            {
+              "type": "function_call",
+              "id": "fc_call_a",
+              "call_id": "call_a",
+              "name": "synthetic_lookup",
+              "arguments": "{\"query\":\"合成\"}",
+              "status": "completed"
+            }
+          ],
+          "usage": {
+            "input_tokens": 40,
+            "output_tokens": 12
+          }
+        }
+      },
+      "chunks": [
+        {
+          "type": "block-start",
+          "index": 0,
+          "blockType": "text"
+        },
+        {
+          "type": "text-delta",
+          "index": 0,
+          "text": "先查一下。"
+        },
+        {
+          "type": "block-end",
+          "index": 0,
+          "block": {
+            "type": "text",
+            "text": "先查一下。"
+          }
+        },
+        {
+          "type": "block-start",
+          "index": 1,
+          "blockType": "tool-call"
+        },
+        {
+          "type": "tool-call-delta",
+          "index": 1,
+          "id": "call_a",
+          "name": "synthetic_lookup",
+          "argumentsDelta": "{\"query\":\"合成\"}"
+        },
+        {
+          "type": "block-end",
+          "index": 1,
+          "block": {
+            "type": "tool-call",
+            "id": "call_a",
+            "name": "synthetic_lookup",
+            "arguments": "{\"query\":\"合成\"}"
+          }
+        },
+        {
+          "type": "usage",
+          "usage": {
+            "inputTokens": 40,
+            "outputTokens": 12
+          }
+        },
+        {
+          "type": "finish",
+          "reason": {
+            "kind": "tool-calls"
+          }
+        }
+      ],
+      "result": {
+        "kind": "tool-calls",
+        "text": "先查一下。",
+        "calls": [
+          {
+            "id": "call_a",
+            "name": "synthetic_lookup",
+            "arguments": "{\"query\":\"合成\"}"
+          }
+        ],
+        "reasoningText": null,
+        "usage": {
+          "inputTokens": 40,
+          "outputTokens": 12
+        }
+      },
+      "usage": {
+        "inputTokens": 40,
+        "outputTokens": 12
+      }
+    },
+    {
+      "name": "tool-history",
+      "turn": "tool-history",
+      "stream": false,
+      "request": {
+        "url": "https://api.openai.com/v1/responses",
+        "headers": {
+          "content-type": "application/json",
+          "accept": "application/json"
+        },
+        "credentialHeader": "authorization",
+        "body": {
+          "input": [
+            {
+              "content": "合成段落：春风吹过合成的小镇。",
+              "role": "user"
+            },
+            {
+              "content": "先查一下。",
+              "role": "assistant"
+            },
+            {
+              "arguments": "{\"query\":\"合成\"}",
+              "call_id": "call_synthetic_1",
+              "name": "synthetic_lookup",
+              "type": "function_call"
+            },
+            {
+              "call_id": "call_synthetic_1",
+              "output": "合成结果。",
+              "type": "function_call_output"
+            }
+          ],
+          "instructions": "合成系统提示。",
+          "max_output_tokens": 8192,
+          "model": "gpt-5.6-luna",
+          "store": false,
+          "tools": [
+            {
+              "description": "合成查询工具。",
+              "name": "synthetic_lookup",
+              "parameters": {
+                "properties": {
+                  "query": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "query"
+                ],
+                "type": "object"
+              },
+              "strict": false,
+              "type": "function"
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "resp_synthetic_1",
+          "object": "response",
+          "status": "completed",
+          "model": "gpt-5.6-luna",
+          "output": [
+            {
+              "type": "message",
+              "id": "msg_synthetic_1",
+              "status": "completed",
+              "role": "assistant",
+              "content": [
+                {
+                  "type": "output_text",
+                  "text": "查到了合成结果。",
+                  "annotations": []
+                }
+              ]
+            }
+          ],
+          "usage": {
+            "input_tokens": 60,
+            "output_tokens": 6
+          }
+        }
+      },
+      "chunks": [
+        {
+          "type": "block-start",
+          "index": 0,
+          "blockType": "text"
+        },
+        {
+          "type": "text-delta",
+          "index": 0,
+          "text": "查到了合成结果。"
+        },
+        {
+          "type": "block-end",
+          "index": 0,
+          "block": {
+            "type": "text",
+            "text": "查到了合成结果。"
+          }
+        },
+        {
+          "type": "usage",
+          "usage": {
+            "inputTokens": 60,
+            "outputTokens": 6
+          }
+        },
+        {
+          "type": "finish",
+          "reason": {
+            "kind": "stop"
+          }
+        }
+      ],
+      "result": {
+        "kind": "answer",
+        "text": "查到了合成结果。",
+        "reasoningText": null,
+        "usage": {
+          "inputTokens": 60,
+          "outputTokens": 6
+        }
+      },
+      "usage": {
+        "inputTokens": 60,
+        "outputTokens": 6
+      }
+    },
+    {
+      "name": "tool-stream",
+      "turn": "retrieval",
+      "stream": true,
+      "request": {
+        "url": "https://api.openai.com/v1/responses",
+        "headers": {
+          "content-type": "application/json",
+          "accept": "text/event-stream"
+        },
+        "credentialHeader": "authorization",
+        "body": {
+          "input": [
+            {
+              "content": "AI7 编辑对话 · 提问 · 问题摘要 74721387eb50670055951037676f437a85999a99e25d999ba02872fd2710a266\n【所选文字】\n合成选区。\n【问题】\n合成问题？",
+              "role": "user"
+            }
+          ],
+          "instructions": "你是出版社编辑的写作顾问。编辑在稿件中选了一段文字，并提出一个问题。\n根据所选文字、问题与本次已授权固定来源作答；找到书中哪里的问题先 retrieve，再 exact_fetch。检索预览不是原文。\n引用检索到的文字前必须精确取文；只引用 exact_fetch 返回的原文，并附上 [retrieval:候选 candidateId] 锚点。未经精确取文的引用不被接受。\n用简洁的一行中文回答，不编造情节或事实；回答只供编辑参考，不修改稿件，也不自动成为修改建议。",
+          "max_output_tokens": 8192,
+          "model": "gpt-5.6-luna",
+          "store": false,
+          "stream": true,
+          "tools": [
+            {
+              "description": "精确取回检索候选在已固定来源版本中的原文。引用前必须调用。",
+              "name": "exact_fetch",
+              "parameters": {
+                "additionalProperties": false,
+                "properties": {
+                  "candidateId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "candidateId"
+                ],
+                "type": "object"
+              },
+              "strict": false,
+              "type": "function"
+            },
+            {
+              "description": "在这次任务已授权并固定的本机来源中检索候选；候选预览不是引文，引用前必须精确取文。",
+              "name": "retrieve",
+              "parameters": {
+                "additionalProperties": false,
+                "properties": {
+                  "k": {
+                    "maximum": 8,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "query": {
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "sourceKinds": {
+                    "items": {
+                      "enum": [
+                        "manuscript",
+                        "material",
+                        "retained-source"
+                      ],
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "type": "array",
+                    "uniqueItems": true
+                  }
+                },
+                "required": [
+                  "query"
+                ],
+                "type": "object"
+              },
+              "strict": false,
+              "type": "function"
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "frames": [
+          "event: response.created\ndata: {\"type\":\"response.created\",\"sequence_number\":0,\"response\":{\"id\":\"resp_synthetic_2\",\"object\":\"response\",\"status\":\"in_progress\",\"model\":\"gpt-5.6-luna\",\"output\":[]}}\n\n",
+          "event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"sequence_number\":1,\"output_index\":0,\"item\":{\"type\":\"function_call\",\"id\":\"fc_call_r1\",\"call_id\":\"call_r1\",\"name\":\"retrieve\",\"arguments\":\"\",\"status\":\"in_progress\"}}\n\n",
+          "event: response.function_call_arguments.delta\ndata: {\"type\":\"response.function_call_arguments.delta\",\"sequence_number\":2,\"item_id\":\"fc_call_r1\",\"output_index\":0,\"delta\":\"{\\\"query\\\":\\\"合成\\\"}\"}\n\n",
+          "event: response.function_call_arguments.done\ndata: {\"type\":\"response.function_call_arguments.done\",\"sequence_number\":3,\"item_id\":\"fc_call_r1\",\"output_index\":0,\"arguments\":\"{\\\"query\\\":\\\"合成\\\"}\"}\n\n",
+          "event: response.completed\ndata: {\"type\":\"response.completed\",\"sequence_number\":4,\"response\":{\"id\":\"resp_synthetic_2\",\"object\":\"response\",\"status\":\"completed\",\"model\":\"gpt-5.6-luna\",\"output\":[{\"type\":\"function_call\",\"id\":\"fc_call_r1\",\"call_id\":\"call_r1\",\"name\":\"retrieve\",\"arguments\":\"{\\\"query\\\":\\\"合成\\\"}\",\"status\":\"completed\"}],\"usage\":{\"input_tokens\":50,\"output_tokens\":9}}}\n\n"
+        ]
+      },
+      "chunks": [
+        {
+          "type": "block-start",
+          "index": 0,
+          "blockType": "tool-call"
+        },
+        {
+          "type": "tool-call-delta",
+          "index": 0,
+          "id": "call_r1",
+          "name": "retrieve",
+          "argumentsDelta": "{\"query\":\"合成\"}"
+        },
+        {
+          "type": "block-end",
+          "index": 0,
+          "block": {
+            "type": "tool-call",
+            "id": "call_r1",
+            "name": "retrieve",
+            "arguments": "{\"query\":\"合成\"}"
+          }
+        },
+        {
+          "type": "usage",
+          "usage": {
+            "inputTokens": 50,
+            "outputTokens": 9
+          }
+        },
+        {
+          "type": "finish",
+          "reason": {
+            "kind": "tool-calls"
+          }
+        }
+      ],
+      "result": {
+        "kind": "tool-calls",
+        "text": "",
+        "calls": [
+          {
+            "id": "call_r1",
+            "name": "retrieve",
+            "arguments": "{\"query\":\"合成\"}"
+          }
+        ],
+        "reasoningText": null,
+        "usage": {
+          "inputTokens": 50,
+          "outputTokens": 9
+        }
+      },
+      "usage": {
+        "inputTokens": 50,
+        "outputTokens": 9
+      }
+    },
+    {
+      "name": "account-limit",
+      "turn": "unit",
+      "stream": false,
+      "request": {
+        "url": "https://api.openai.com/v1/responses",
+        "headers": {
+          "content-type": "application/json",
+          "accept": "application/json"
+        },
+        "credentialHeader": "authorization",
+        "body": {
+          "input": [
+            {
+              "content": "合成段落：春风吹过合成的小镇。",
+              "role": "user"
+            }
+          ],
+          "instructions": "合成系统提示。",
+          "max_output_tokens": 8192,
+          "model": "gpt-5.6-luna",
+          "store": false
+        }
+      },
+      "response": {
+        "status": 429,
+        "body": {
+          "error": {
+            "message": "Synthetic: you exceeded your current quota.",
+            "type": "insufficient_quota",
+            "code": "insufficient_quota"
+          }
+        }
+      },
+      "chunks": [
+        {
+          "type": "finish",
+          "reason": {
+            "kind": "error",
+            "failure": {
+              "code": "QUOTA",
+              "message": "模型服务账户限额或余额不足。",
+              "status": 429
+            }
+          }
+        }
+      ],
+      "result": null,
+      "usage": null
+    },
+    {
+      "name": "rate-limit",
+      "turn": "unit",
+      "stream": false,
+      "request": {
+        "url": "https://api.openai.com/v1/responses",
+        "headers": {
+          "content-type": "application/json",
+          "accept": "application/json"
+        },
+        "credentialHeader": "authorization",
+        "body": {
+          "input": [
+            {
+              "content": "合成段落：春风吹过合成的小镇。",
+              "role": "user"
+            }
+          ],
+          "instructions": "合成系统提示。",
+          "max_output_tokens": 8192,
+          "model": "gpt-5.6-luna",
+          "store": false
+        }
+      },
+      "response": {
+        "status": 429,
+        "headers": {
+          "retry-after": "2"
+        },
+        "body": {
+          "error": {
+            "message": "Synthetic: rate limit reached for requests.",
+            "type": "requests",
+            "code": "rate_limit_exceeded"
+          }
+        }
+      },
+      "chunks": [
+        {
+          "type": "finish",
+          "reason": {
+            "kind": "error",
+            "failure": {
+              "code": "RATE_LIMIT",
+              "message": "模型服务速率限制。",
+              "status": 429
+            }
+          }
+        }
+      ],
+      "result": null,
+      "usage": null
+    },
+    {
+      "name": "stream-failed",
+      "turn": "dialogue",
+      "stream": true,
+      "request": {
+        "url": "https://api.openai.com/v1/responses",
+        "headers": {
+          "content-type": "application/json",
+          "accept": "text/event-stream"
+        },
+        "credentialHeader": "authorization",
+        "body": {
+          "input": [
+            {
+              "content": "AI7 编辑对话 · 提问 · 问题摘要 74721387eb50670055951037676f437a85999a99e25d999ba02872fd2710a266\n【所选文字】\n合成选区。\n【问题】\n合成问题？",
+              "role": "user"
+            }
+          ],
+          "instructions": "你是出版社编辑的写作顾问。编辑在稿件中选了一段文字，并就这段文字提了一个问题。\n只依据所选文字和问题作答，用简洁、完整的中文句子回答；不要复述整段原文，不要编造所选文字之外的情节、人物或事实。\n你的回答只供编辑阅读：它不修改稿件，不构成事实结论，也不自动成为修改建议。需要时可以说明可以怎样改，由编辑自己决定。\n不调用任何工具。",
+          "max_output_tokens": 8192,
+          "model": "gpt-5.6-luna",
+          "store": false,
+          "stream": true
+        }
+      },
+      "response": {
+        "status": 200,
+        "frames": [
+          "event: response.created\ndata: {\"type\":\"response.created\",\"sequence_number\":0,\"response\":{\"id\":\"resp_synthetic_3\",\"object\":\"response\",\"status\":\"in_progress\",\"model\":\"gpt-5.6-luna\",\"output\":[]}}\n\n",
+          "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"sequence_number\":1,\"item_id\":\"msg_synthetic_1\",\"output_index\":0,\"content_index\":0,\"delta\":\"合成\"}\n\n",
+          "event: response.failed\ndata: {\"type\":\"response.failed\",\"sequence_number\":2,\"response\":{\"id\":\"resp_synthetic_3\",\"object\":\"response\",\"status\":\"failed\",\"error\":{\"code\":\"server_error\",\"message\":\"Synthetic server error.\"},\"output\":[]}}\n\n"
+        ]
+      },
+      "chunks": [
+        {
+          "type": "block-start",
+          "index": 0,
+          "blockType": "text"
+        },
+        {
+          "type": "text-delta",
+          "index": 0,
+          "text": "合成"
+        },
+        {
+          "type": "finish",
+          "reason": {
+            "kind": "error",
+            "failure": {
+              "code": "AI7_OUTCOME_UNKNOWN",
+              "message": "模型服务已接受请求，但回答没有完整传回。",
+              "status": 200
+            }
+          }
+        }
+      ],
+      "result": null,
+      "usage": null
+    },
+    {
+      "name": "stream-account-limit",
+      "turn": "dialogue",
+      "stream": true,
+      "request": {
+        "url": "https://api.openai.com/v1/responses",
+        "headers": {
+          "content-type": "application/json",
+          "accept": "text/event-stream"
+        },
+        "credentialHeader": "authorization",
+        "body": {
+          "input": [
+            {
+              "content": "AI7 编辑对话 · 提问 · 问题摘要 74721387eb50670055951037676f437a85999a99e25d999ba02872fd2710a266\n【所选文字】\n合成选区。\n【问题】\n合成问题？",
+              "role": "user"
+            }
+          ],
+          "instructions": "你是出版社编辑的写作顾问。编辑在稿件中选了一段文字，并就这段文字提了一个问题。\n只依据所选文字和问题作答，用简洁、完整的中文句子回答；不要复述整段原文，不要编造所选文字之外的情节、人物或事实。\n你的回答只供编辑阅读：它不修改稿件，不构成事实结论，也不自动成为修改建议。需要时可以说明可以怎样改，由编辑自己决定。\n不调用任何工具。",
+          "max_output_tokens": 8192,
+          "model": "gpt-5.6-luna",
+          "store": false,
+          "stream": true
+        }
+      },
+      "response": {
+        "status": 200,
+        "frames": [
+          "event: error\ndata: {\"type\":\"error\",\"sequence_number\":0,\"code\":\"insufficient_quota\",\"message\":\"Synthetic: you exceeded your current quota.\"}\n\n"
+        ]
+      },
+      "chunks": [
+        {
+          "type": "finish",
+          "reason": {
+            "kind": "error",
+            "failure": {
+              "code": "QUOTA",
+              "message": "模型服务账户限额或余额不足。",
+              "status": 429
+            }
+          }
+        }
+      ],
+      "result": null,
+      "usage": null
+    }
+  ]
+}

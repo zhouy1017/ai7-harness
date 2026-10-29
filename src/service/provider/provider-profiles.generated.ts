@@ -4,7 +4,8 @@
 
 import type { ConfiguredRouteId } from '../../shared/provider-configuration.generated.js';
 import type { ProviderRouteProfile } from './deepseek-adapter.js';
-import type { CapabilityEvidence, ProviderModelProfile } from './model-profile.js';
+import type { FamilyDispositions, RouteDispositions } from './family-dispositions.js';
+import type { CapabilityEvidence, ProviderModelProfile, RequestShape } from './model-profile.js';
 
 /* Every evidence record the documents cite, written once. */
 const EVIDENCE_1: CapabilityEvidence = {
@@ -3589,3 +3590,135 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
     context: { tokens: 200000, evidence: EVIDENCE_13 },
   },
 ];
+
+/** What the adapter implements for each protocol family (Issue #1180): `supported` or `unsupported`, per aspect. */
+export const GENERATED_FAMILY_DISPOSITIONS: Readonly<Record<RequestShape, FamilyDispositions>> = {
+  'openai-chat-completions': {
+    text: 'supported',
+    stream: 'supported',
+    functionTools: 'supported',
+    usage: 'supported',
+    cancellation: 'supported',
+    accountLimit: 'supported',
+    rateLimit: 'supported',
+    structuredOutput: 'supported',
+    reasoningControl: 'supported',
+    reasoningContinuation: 'supported',
+    providerTools: 'unsupported',
+  },
+  'anthropic-messages': {
+    text: 'supported',
+    stream: 'supported',
+    functionTools: 'supported',
+    usage: 'supported',
+    cancellation: 'supported',
+    accountLimit: 'supported',
+    rateLimit: 'supported',
+    structuredOutput: 'unsupported',
+    reasoningControl: 'unsupported',
+    reasoningContinuation: 'unsupported',
+    providerTools: 'unsupported',
+  },
+  'openai-responses': {
+    text: 'supported',
+    stream: 'supported',
+    functionTools: 'supported',
+    usage: 'supported',
+    cancellation: 'supported',
+    accountLimit: 'supported',
+    rateLimit: 'supported',
+    structuredOutput: 'unsupported',
+    reasoningControl: 'unsupported',
+    reasoningContinuation: 'unsupported',
+    providerTools: 'unsupported',
+  },
+  'google-generate-content': {
+    text: 'supported',
+    stream: 'supported',
+    functionTools: 'supported',
+    usage: 'supported',
+    cancellation: 'supported',
+    accountLimit: 'supported',
+    rateLimit: 'supported',
+    structuredOutput: 'unsupported',
+    reasoningControl: 'unsupported',
+    reasoningContinuation: 'unsupported',
+    providerTools: 'unsupported',
+  },
+};
+
+/** Per route: its family, and the models each per-model aspect is `supported` for; every other declared model is `untested`. */
+export const GENERATED_ROUTE_DISPOSITIONS: Readonly<Record<ConfiguredRouteId, RouteDispositions>> = {
+  'alibaba-model-studio': {
+    family: 'openai-chat-completions',
+    supported: { text: [], stream: [], functionTools: [] },
+  },
+  'anthropic-claude': {
+    family: 'anthropic-messages',
+    supported: { text: [], stream: [], functionTools: [] },
+  },
+  'baidu-qianfan': {
+    family: 'openai-chat-completions',
+    supported: { text: [], stream: [], functionTools: [] },
+  },
+  'deepseek-open-platform': {
+    family: 'openai-chat-completions',
+    supported: { text: ['deepseek-v4-pro', 'deepseek-flash'], stream: [], functionTools: ['deepseek-v4-pro'] },
+  },
+  'google-gemini': {
+    family: 'google-generate-content',
+    supported: { text: [], stream: [], functionTools: [] },
+  },
+  'minimax': {
+    family: 'openai-chat-completions',
+    supported: { text: [], stream: [], functionTools: [] },
+  },
+  'moonshot-kimi': {
+    family: 'openai-chat-completions',
+    supported: { text: [], stream: [], functionTools: [] },
+  },
+  'openai-platform': {
+    family: 'openai-responses',
+    supported: { text: ['gpt-5.6-sol', 'gpt-5.6-luna'], stream: [], functionTools: [] },
+  },
+  'opencode-go': {
+    family: 'openai-chat-completions',
+    supported: {
+      text: ['deepseek-v4-flash', 'deepseek-v4.1-flash'],
+      stream: ['deepseek-v4.1-flash'],
+      functionTools: ['deepseek-v4.1-flash'],
+    },
+  },
+  'opencode-go-messages': {
+    family: 'anthropic-messages',
+    supported: { text: [], stream: [], functionTools: [] },
+  },
+  'opencode-go-responses': {
+    family: 'openai-responses',
+    supported: { text: [], stream: [], functionTools: [] },
+  },
+  'opencode-zen': {
+    family: 'openai-chat-completions',
+    supported: { text: [], stream: [], functionTools: [] },
+  },
+  'opencode-zen-messages': {
+    family: 'anthropic-messages',
+    supported: { text: [], stream: [], functionTools: [] },
+  },
+  'opencode-zen-responses': {
+    family: 'openai-responses',
+    supported: { text: [], stream: [], functionTools: [] },
+  },
+  'tencent-hunyuan': {
+    family: 'openai-chat-completions',
+    supported: { text: [], stream: [], functionTools: [] },
+  },
+  'xiaomi-mimo': {
+    family: 'openai-chat-completions',
+    supported: { text: [], stream: [], functionTools: ['mimo-v2.5-pro', 'mimo-v2.5'] },
+  },
+  'zhipu-glm': {
+    family: 'openai-chat-completions',
+    supported: { text: [], stream: [], functionTools: [] },
+  },
+};

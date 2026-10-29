@@ -308,7 +308,8 @@ async function send(
       try {
         for await (const event of response.stream?.() ?? dialogueSseEvents(response, model)) {
           if (event.kind === 'text') chunks.push(event.text);
-          else { aggregate = event.response; complete = true; }
+          // The capture keeps the chat-completions aggregate alone; an in-stream refusal is never a whole answer here.
+          else if (event.kind === 'complete') { aggregate = event.response; complete = true; }
           if (event.kind === 'text') yield event;
         }
         if (!complete) throw new Error('AI7_OUTCOME_UNKNOWN');

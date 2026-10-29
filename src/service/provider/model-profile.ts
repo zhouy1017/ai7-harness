@@ -123,8 +123,12 @@ export interface ModelCapabilities {
   readonly usageAttribution: UsageAttribution;
   readonly toolCalling: ToolCalling;
   readonly webSearchTool: WebSearchTool;
-  /** Absent unless this exact route/model has observed chat-completions SSE support. */
-  readonly streaming?: 'none' | 'chat-completions-sse';
+  /**
+   * Absent unless this exact route/model has observed its family's stream: `chat-completions-sse` (Issue #833), or the
+   * Responses, Messages and generateContent streams their family readers implement (Issue #1180). A value is one family's
+   * and only that family's; the generator refuses any other pairing.
+   */
+  readonly streaming?: 'none' | 'chat-completions-sse' | 'responses-sse' | 'messages-sse' | 'generate-content-sse';
 }
 
 /**

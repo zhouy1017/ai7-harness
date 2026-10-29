@@ -16,6 +16,24 @@ Task research declarations (Issue #744, ADR 0080 rows 15/17) resolve to `webSear
 
 A capability a document does not declare is absent with `unverified` evidence. A context size is the one the vendor page states, in tokens (an input limit where the page states one separately; a page's "1M" is read as 1,000,000), and `none` where no page read states one.
 
+## Protocol family dispositions
+
+What the adapter implements for each protocol family (Issue #1180, ADR 0094 §1), proven provider-free by the family fixtures under [`tests/fixtures/model/provider-families/`](../../tests/fixtures/model/provider-families/). A declared model is `supported` for text, stream or function tools only where its own capability is declared on evidence and `untested` otherwise; the adapter refuses every demand that is not `supported` by name before any ticket, credential or transport is touched (`src/service/provider/family-dispositions.ts`). A family the selected policy does not admit for a role is refused by name as `family-not-admitted-by-selected-policy`: the selected policy baseline (`policyBaseline` in the runtime model table, which the launch verifier matches against the policy bytes) admits chat completions for the Main role and chat completions and Responses for the Fast role, so Messages and generateContent, and Responses for Main, wait for a policy successor (ADR 0095 §6).
+
+| Aspect | `openai-chat-completions` | `anthropic-messages` | `openai-responses` | `google-generate-content` |
+| --- | --- | --- | --- | --- |
+| text | supported | supported | supported | supported |
+| stream | supported | supported | supported | supported |
+| functionTools | supported | supported | supported | supported |
+| usage | supported | supported | supported | supported |
+| cancellation | supported | supported | supported | supported |
+| accountLimit | supported | supported | supported | supported |
+| rateLimit | supported | supported | supported | supported |
+| structuredOutput | supported | unsupported | unsupported | unsupported |
+| reasoningControl | supported | unsupported | unsupported | unsupported |
+| reasoningContinuation | supported | unsupported | unsupported | unsupported |
+| providerTools | unsupported | unsupported | unsupported | unsupported |
+
 ## 阿里云百炼 Qwen
 
 | | |
@@ -41,6 +59,8 @@ A capability a document does not declare is absent with `unverified` evidence. A
 | `qwen3.8-max` | Qwen3.8 Max | none | `none` | `none` |
 | `qwen3.7-plus` | Qwen3.7 Plus | none | `none` | `none` |
 | `qwen3.8-flash` | Qwen3.8 Flash | none | `none` | `none` |
+
+Dispositions (`openai-chat-completions`): text untested for every model; stream untested for every model; functionTools untested for every model.
 
 Inert: 3 of 3 (no declared answer channel). Established:
 
@@ -87,6 +107,8 @@ The shape requires a per-turn output cap; the route declares the same 32,768 as 
 | `claude-sonnet-5` | Claude Sonnet 5 | 1,000,000 | `none` | `provider-tool` |
 | `claude-haiku-4-5` | Claude Haiku 4.5 | 200,000 | `none` | `provider-tool` |
 
+Dispositions (`anthropic-messages`): text untested for every model; stream untested for every model; functionTools untested for every model.
+
 Inert: 4 of 4 (no declared answer channel). Established:
 
 - every model · `requestShape: anthropic-messages` — `vendor-documentation`, Claude Platform documentation, platform.claude.com (docs.claude.com redirects there) — Messages API, models overview, read 2026-09-10
@@ -132,6 +154,8 @@ The model ids are written as the reading printed them; the resold `DeepSeek-V4-P
 | `ERNIE-5.0` | ERNIE 5.0 | 128,000 | `none` | `provider-tool` |
 | `ERNIE-4.5-Turbo-128K` | ERNIE 4.5 Turbo 128K | 128,000 | `none` | `provider-tool` |
 
+Dispositions (`openai-chat-completions`): text untested for every model; stream untested for every model; functionTools untested for every model.
+
 Inert: 3 of 3 (no declared answer channel). Established:
 
 - every model · `requestShape: openai-chat-completions` — `vendor-documentation`, Baidu AI Cloud Qianfan documentation, cloud.baidu.com/doc/qianfan-*, read 2026-09-10
@@ -175,6 +199,8 @@ The production connection's route, unchanged: the one route that sends the DSH a
 | --- | --- | --- | --- | --- |
 | `deepseek-v4-pro` | DeepSeek V4 Pro High | 1,000,000 | `function` | `none` |
 | `deepseek-flash` | DeepSeek V4.1 Flash | 1,000,000 | `none` | `none` |
+
+Dispositions (`openai-chat-completions`): text supported for `deepseek-v4-pro`, `deepseek-flash`; stream untested for every model; functionTools supported for `deepseek-v4-pro`, untested for the other 1.
 
 Inert: 0 of 2 (no declared answer channel). Established:
 
@@ -230,6 +256,8 @@ The endpoint is the models collection: the shape addresses the model in the path
 | `gemini-3.1-pro-preview` | Gemini 3.1 Pro Preview | 1,048,576 | `none` | `none` |
 | `gemini-2.5-pro` | Gemini 2.5 Pro | 1,048,576 | `none` | `none` |
 
+Dispositions (`google-generate-content`): text untested for every model; stream untested for every model; functionTools untested for every model.
+
 Inert: 3 of 3 (no declared answer channel). Established:
 
 - every model · `requestShape: google-generate-content` — `vendor-documentation`, Gemini API documentation, models, ai.google.dev/gemini-api/docs, read 2026-09-10
@@ -272,6 +300,8 @@ Open:
 | `MiniMax-M3` | MiniMax M3 | 1,000,000 | `none` | `none` |
 | `MiniMax-M2.7` | MiniMax M2.7 | none | `none` | `none` |
 | `MiniMax-M2.5` | MiniMax M2.5 | none | `none` | `none` |
+
+Dispositions (`openai-chat-completions`): text untested for every model; stream untested for every model; functionTools untested for every model.
 
 Inert: 3 of 3 (no declared answer channel). Established:
 
@@ -318,6 +348,8 @@ The search tool is declared per model, for exactly the two the reading names: re
 | `kimi-k2.7-code` | Kimi K2.7 Code | 256,000 | `none` | `none` |
 | `kimi-k2.6` | Kimi K2.6 | 256,000 | `none` | `provider-tool` |
 
+Dispositions (`openai-chat-completions`): text untested for every model; stream untested for every model; functionTools untested for every model.
+
 Inert: 3 of 3 (no declared answer channel). Established:
 
 - every model · `requestShape: openai-chat-completions` — `vendor-documentation`, Kimi platform documentation, platform.kimi.com/docs (platform.moonshot.cn redirects there), read 2026-09-10
@@ -363,6 +395,8 @@ Buffered text only with max_output_tokens 8192. The explicit synthetic connectio
 | `gpt-5.6-sol` | GPT-5.6 Sol | 1,050,000 | `none` | `provider-tool` |
 | `gpt-5.6-terra` | GPT-5.6 Terra | 1,050,000 | `none` | `provider-tool` |
 | `gpt-5.6-luna` | GPT-5.6 Luna | 1,050,000 | `none` | `provider-tool` |
+
+Dispositions (`openai-responses`): text supported for `gpt-5.6-sol`, `gpt-5.6-luna`, untested for the other 2; stream untested for every model; functionTools untested for every model.
 
 Inert: 2 of 4 (no declared answer channel). Established:
 
@@ -419,6 +453,8 @@ The developer-live route of Provider Processing v18 (ADR 0065, ADR 0067), select
 | `kimi-k2.6` | Kimi K2.6（OpenCode Go） | none | `none` | `none` |
 | `deepseek-v4-flash-vision-exp` | DeepSeek V4 Flash Vision Exp（OpenCode Go） | none | `none` | `none` |
 
+Dispositions (`openai-chat-completions`): text supported for `deepseek-v4-flash`, `deepseek-v4.1-flash`, untested for the other 9; stream supported for `deepseek-v4.1-flash`, untested for the other 10; functionTools supported for `deepseek-v4.1-flash`, untested for the other 10.
+
 Inert: 9 of 11 (no declared answer channel). Established:
 
 - `deepseek-v4-flash`, `deepseek-v4-pro` · `requestShape: openai-chat-completions` — `vendor-documentation`, ADR 0067 · OpenCode Go documentation, read 2026-09-06
@@ -459,6 +495,8 @@ The same plan, account and credential slot over the Anthropic-compatible path. T
 | `minimax-m2.7` | MiniMax M2.7（OpenCode Go） | none | `none` | `none` |
 | `minimax-m2.5` | MiniMax M2.5（OpenCode Go） | none | `none` | `none` |
 
+Dispositions (`anthropic-messages`): text untested for every model; stream untested for every model; functionTools untested for every model.
+
 Inert: 5 of 5 (no declared answer channel). Established:
 
 - every model · `requestShape: anthropic-messages` — `vendor-documentation`, OpenCode Go https://opencode.ai/docs/go/ · Zen model table https://opencode.ai/docs/zen/, read 2026-09-08
@@ -482,6 +520,8 @@ The same plan over the OpenAI-compatible Responses path. `max_output_tokens` is 
 | --- | --- | --- | --- | --- |
 | `grok-4.6` | Grok 4.6（OpenCode Go） | none | `none` | `none` |
 | `gpt-5.6-luna` | GPT 5.6 Luna（OpenCode Go） | none | `none` | `none` |
+
+Dispositions (`openai-responses`): text untested for every model; stream untested for every model; functionTools untested for every model.
 
 Inert: 2 of 2 (no declared answer channel). Established:
 
@@ -548,6 +588,8 @@ The Zen page's `chat/completions` rows. A spend limit on this gateway ends the R
 | `kimi-k3` | Kimi K3（OpenCode Zen） | none | `none` | `none` |
 | `mistral-large-4` | Mistral Large 4（OpenCode Zen） | none | `none` | `none` |
 
+Dispositions (`openai-chat-completions`): text untested for every model; stream untested for every model; functionTools untested for every model.
+
 Inert: 18 of 18 (no declared answer channel). Established:
 
 - every model · `requestShape: openai-chat-completions` — `vendor-documentation`, OpenCode Zen https://opencode.ai/docs/zen/ (read as https://opencode.ai/docs/zen.md), Endpoints table and API examples, read 2026-10-09
@@ -588,6 +630,8 @@ The Zen page's `/messages` rows. The shape requires a per-turn output cap; the r
 | `qwen3.7-plus` | Qwen3.7 Plus（OpenCode Zen） | none | `none` | `none` |
 | `qwen3.6-plus` | Qwen3.6 Plus（OpenCode Zen） | none | `none` | `none` |
 | `qwen3.5-plus` | Qwen3.5 Plus（OpenCode Zen） | none | `none` | `none` |
+
+Dispositions (`anthropic-messages`): text untested for every model; stream untested for every model; functionTools untested for every model.
 
 Inert: 19 of 19 (no declared answer channel). Established:
 
@@ -641,6 +685,8 @@ The Zen page's `/responses` rows. `max_output_tokens` is optional on this shape,
 | `muse-spark-1.3` | Muse Spark 1.3（OpenCode Zen） | none | `none` | `none` |
 | `muse-spark-1.2` | Muse Spark 1.2（OpenCode Zen） | none | `none` | `none` |
 
+Dispositions (`openai-responses`): text untested for every model; stream untested for every model; functionTools untested for every model.
+
 Inert: 30 of 30 (no declared answer channel). Established:
 
 - every model · `requestShape: openai-responses` — `vendor-documentation`, OpenCode Zen https://opencode.ai/docs/zen/ (read as https://opencode.ai/docs/zen.md), Endpoints table and API examples, read 2026-10-09
@@ -682,6 +728,8 @@ Context is the input limit the page states separately from the window.
 | --- | --- | --- | --- | --- |
 | `hy4-preview` | HY4 Preview | 960,000 | `none` | `provider-tool` |
 | `hy3` | HY3 | 192,000 | `none` | `provider-tool` |
+
+Dispositions (`openai-chat-completions`): text untested for every model; stream untested for every model; functionTools untested for every model.
 
 Inert: 2 of 2 (no declared answer channel). Established:
 
@@ -728,6 +776,8 @@ The adapter sends the Bearer form, which the page lists beside `api-key:`.
 | `mimo-v2.5-pro` | MiMo-V2.5-Pro | 1,000,000 | `function` | `provider-tool` |
 | `mimo-v2.5` | MiMo-V2.5 | 1,000,000 | `function` | `provider-tool` |
 
+Dispositions (`openai-chat-completions`): text untested for every model; stream untested for every model; functionTools supported for `mimo-v2.5-pro`, `mimo-v2.5`.
+
 Inert: 2 of 2 (no declared answer channel). Established:
 
 - every model · `requestShape: openai-chat-completions` — `vendor-documentation`, Xiaomi MiMo API documentation, mimo.mi.com — OpenAI-compatible chat completions, models, read 2026-09-11
@@ -772,6 +822,8 @@ Open:
 | `glm-5.3-flash` | GLM-5.3-Flash | 1,000,000 | `none` | `provider-tool` |
 | `glm-5.2` | GLM-5.2 | 1,000,000 | `none` | `provider-tool` |
 | `glm-4.6` | GLM-4.6 | 200,000 | `none` | `provider-tool` |
+
+Dispositions (`openai-chat-completions`): text untested for every model; stream untested for every model; functionTools untested for every model.
 
 Inert: 4 of 4 (no declared answer channel). Established:
 

@@ -11,7 +11,9 @@ import {
 import {
   LOCAL_TOOL_BREAKER_END, LOCAL_TOOL_CALLS_PER_UNIT, LOCAL_TOOL_CANDIDATES_PER_CALL, LOCAL_TOOL_DECLARATION_NAMES, LOCAL_TOOL_ROUND_TRIP_BREAKER, readLocalToolsRule,
 } from './provider/local-tools.js';
-import { modelProfileFor } from './provider/model-profile.js';
+import { familyAdmissionRefusal, providerPreflight, type ProviderPreflightRefusal } from './provider/family-dispositions.js';
+import { modelProfileFor, type ProviderModelProfile } from './provider/model-profile.js';
+import { GENERATED_ROUTE_DISPOSITIONS } from './provider/provider-profiles.generated.js';
 import type { RemoteExecutionRoute } from './provider/egress-gate.js';
 import { SEARCH_BACKENDS } from './provider/search-backends.js';
 import { CURRENT_PRODUCTION_POLICY_SHA256, CURRENT_ACTIVE_SET_SHA256, DEVELOPMENT_CI_POLICY_SHA256, ORIGINAL_FIELDS_ACTIVE_SET_SHA256, ORIGINAL_FIELDS_POLICY_SHA256, LOCAL_FIXTURE_POLICY_SHA256, LOCAL_FIXTURE_MANIFEST_SHA256,
@@ -120,6 +122,16 @@ export function allowedProductionBindingOf(binding: ConfiguredProviderBinding | 
   const allowedBindings = role === 'fast-interaction' ? ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS : ORDINARY_PRODUCTION_ALLOWED_BINDINGS;
   return allowedBindings.find((allowed) => allowed.route === binding.route && allowed.endpoint === binding.endpoint &&
     allowed.model === binding.model && allowed.credentialSlot === binding.credentialSlot) ?? null;
+}
+
+/**
+ * One declared model's named refusal for an ordinary-production role (Issue #1180), or `null`: its protocol family must be
+ * one the policy baseline admits for the role — a new family needs a policy successor (ADR 0095 §6) — and its text answer
+ * `supported` on evidence. Every model-table row passes by construction; anything else is refused by name, never tried.
+ */
+export function productionBindingRefusal(model: ProviderModelProfile, role: 'main' | 'fast'): ProviderPreflightRefusal | null {
+  const families = new Set(CONFIGURED_RUNTIME_MODEL_TABLE.policyBaseline[role].map((binding) => GENERATED_ROUTE_DISPOSITIONS[binding.route].family));
+  return familyAdmissionRefusal(model, families) ?? providerPreflight(model, { stream: false, functionTools: false });
 }
 
 /**
@@ -2013,7 +2025,7 @@ export function bindOrdinaryProductionRules(reading: OrdinaryProductionPolicyRea
     if (allowed === null) return null;
     if (!allowedRoutes.includes(allowed.route)) continue;
     const profile = modelProfileFor(allowed.route as RemoteExecutionRoute, allowed.model);
-    if (profile === null || profile.capabilities.answerChannel === 'none') continue;
+    if (profile === null || productionBindingRefusal(profile, kind.modelRole === 'Fast Interaction Role' ? 'fast' : 'main') !== null) continue;
     // This admission proves buffered, tool-free 来源译文 only. Other contracts keep their existing capability requirements.
     if (allowed.route === 'openai-platform' && (kind.modelRole !== 'Fast Interaction Role' || !kind.taskKinds.includes(MATERIAL_TRANSLATION_KIND))) continue;
     admitted.push({
@@ -2044,7 +2056,7 @@ export function bindOrdinaryProductionRules(reading: OrdinaryProductionPolicyRea
   }
   if (fastBinding !== null && reading.connectionTestAllowed === true) {
     const profile = modelProfileFor(fastBinding.route as RemoteExecutionRoute, fastBinding.model);
-    if (profile !== null && profile.capabilities.answerChannel !== 'none') admitted.push({
+    if (profile !== null && productionBindingRefusal(profile, 'fast') === null) admitted.push({
       ruleId: CONNECTION_TEST_POLICY.ruleId, taskKinds: [CONNECTION_TEST_KIND], modelRole: 'Fast Interaction Role',
       route: fastBinding.route, endpoint: fastBinding.endpoint, model: fastBinding.model, credentialSlot: fastBinding.credentialSlot,
       outboundDataCategories: ['public-or-synthetic'], crossUnitSynthesisAllowed: false, materialReferencesAllowed: false,
