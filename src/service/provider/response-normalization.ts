@@ -1,4 +1,5 @@
 import { isRecord } from '../analysis/canonical.js';
+import { GEMINI_SYNTHETIC_CALL_PREFIX } from './family-gemini.js';
 import type { ProviderModelProfile } from './model-profile.js';
 
 /**
@@ -308,7 +309,7 @@ function normalizeOutputItems(profile: ProviderModelProfile, body: unknown, opti
  * shape should confirm. A candidate with no `content`, no parts, or no non-thought text is the empty
  * answer this module exists to distinguish, since all three hand the contract layer the same `''`.
  */
-function normalizeCandidateParts(profile: ProviderModelProfile, body: unknown): CanonicalModelResult {
+function normalizeCandidateParts(profile: ProviderModelProfile, body: unknown, options: NormalizeOptions): CanonicalModelResult {
   if (!isRecord(body)) return { kind: 'malformed', reason: 'response-not-a-record' };
   if (!Array.isArray(body.candidates) || body.candidates.length === 0) return { kind: 'malformed', reason: 'candidate-absent' };
   const candidate: unknown = body.candidates[0];
@@ -318,6 +319,11 @@ function normalizeCandidateParts(profile: ProviderModelProfile, body: unknown): 
   const parts: ReadonlyArray<unknown> = isRecord(candidate.content) && Array.isArray(candidate.content.parts)
     ? candidate.content.parts
     : [];
+  const functionsOffered = options.toolCallsOffered === true && profile.capabilities.toolCalling === 'function';
+  if (functionsOffered || parts.some((part) => isRecord(part) && part.functionCall !== undefined)) {
+    if (!functionsOffered) return { kind: 'malformed', reason: 'tool-calls-malformed' };
+    return candidateFunctionCallsOf(body, candidate, parts, options);
+  }
   const text = parts
     .filter((part): part is Record<string, unknown> => isRecord(part) && part.thought !== true && typeof part.text === 'string')
     .map((part) => part.text as string)
@@ -327,6 +333,39 @@ function normalizeCandidateParts(profile: ProviderModelProfile, body: unknown): 
     parts.some((part) => isRecord(part) && part.thought === true);
   if (text.length === 0) return { kind: 'empty-answer', reasoningPresent, usage };
   return { kind: 'answer', text, reasoningText: null, usage };
+}
+
+/**
+ * The generateContent function-call reading (Issue #1180), for a request that offered functions to a function-calling
+ * model: only leading plain text parts, then `functionCall` parts naming an offered function with object `args`, under a
+ * `STOP` finish. A thought part, a thought signature, or any other part is opaque reasoning or a server tool this payload
+ * cannot carry back, so the whole turn is `tool-calls-malformed`. A call without the optional provider id takes the
+ * deterministic `gemini-call-<seed>-<n>` id, and a turn that needs one without a seed refuses rather than inventing it.
+ */
+function candidateFunctionCallsOf(body: Record<string, unknown>, candidate: Record<string, unknown>, parts: ReadonlyArray<unknown>,
+  options: NormalizeOptions): CanonicalModelResult {
+  if (candidate.finishReason !== 'STOP') return { kind: 'malformed', reason: 'tool-calls-malformed' };
+  const calls: CanonicalToolCall[] = [];
+  let text = '';
+  for (const part of parts) {
+    if (isRecord(part) && Object.keys(part).join(',') === 'text' && typeof part.text === 'string' && calls.length === 0) {
+      text += part.text;
+      continue;
+    }
+    const call = isRecord(part) && Object.keys(part).join(',') === 'functionCall' && isRecord(part.functionCall) ? part.functionCall : null;
+    if (call === null || Object.keys(call).some((key) => !['name', 'args', 'id'].includes(key)) || typeof call.name !== 'string' ||
+        !(options.offeredToolNames ?? []).includes(call.name) || (call.args !== undefined && !isRecord(call.args)) ||
+        (call.id !== undefined && (typeof call.id !== 'string' || call.id.length === 0))) {
+      return { kind: 'malformed', reason: 'tool-calls-malformed' };
+    }
+    if (call.id === undefined && options.callIdSeed === undefined) return { kind: 'malformed', reason: 'tool-calls-malformed' };
+    const id = typeof call.id === 'string' ? call.id : `${GEMINI_SYNTHETIC_CALL_PREFIX}${options.callIdSeed}-${calls.length + 1}`;
+    if (calls.some((existing) => existing.id === id)) return { kind: 'malformed', reason: 'tool-calls-malformed' };
+    calls.push({ id, name: call.name, arguments: JSON.stringify(call.args ?? {}) });
+  }
+  const usage = candidateUsageOf(body);
+  if (calls.length > 0) return { kind: 'tool-calls', text, calls, reasoningText: null, usage };
+  return text.length === 0 ? { kind: 'empty-answer', reasoningPresent: false, usage } : { kind: 'answer', text, reasoningText: null, usage };
 }
 
 /**
@@ -341,13 +380,15 @@ export function normalizeModelResponse(profile: ProviderModelProfile, body: unkn
   if (profile.capabilities.answerChannel === 'none') return { kind: 'malformed', reason: 'answer-channel-not-declared' };
   if (profile.capabilities.answerChannel === 'content-text-blocks') return normalizeContentBlocks(profile, body, options);
   if (profile.capabilities.answerChannel === 'output-message-text') return normalizeOutputItems(profile, body, options);
-  if (profile.capabilities.answerChannel === 'candidate-parts-text') return normalizeCandidateParts(profile, body);
+  if (profile.capabilities.answerChannel === 'candidate-parts-text') return normalizeCandidateParts(profile, body, options);
   return normalizeMessageContentString(profile, body, options);
 }
 
 /** What the request a response answers offered: tools, or not (Issue #473). Absent, as for every replay, it offered none. */
 export interface NormalizeOptions {
   readonly toolCallsOffered?: boolean;
-  /** Messages client calls must name a function actually declared by this request. Other shapes retain their existing reading. */
+  /** Messages and Gemini client calls must name a function actually declared by this request. Other shapes retain their existing reading. */
   readonly offeredToolNames?: ReadonlyArray<string>;
+  /** The request-digest prefix a Gemini call without a provider id is named from; absent, such a call refuses. */
+  readonly callIdSeed?: string;
 }

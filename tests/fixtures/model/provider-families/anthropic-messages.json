@@ -1,0 +1,839 @@
+{
+  "family": "anthropic-messages",
+  "route": "anthropic-claude",
+  "model": "claude-opus-5",
+  "declared": {
+    "answerChannel": "content-text-blocks",
+    "streaming": "messages-sse",
+    "toolCalling": "function"
+  },
+  "cases": [
+    {
+      "name": "text",
+      "turn": "unit",
+      "stream": false,
+      "request": {
+        "url": "https://api.anthropic.com/v1/messages",
+        "headers": {
+          "content-type": "application/json",
+          "accept": "application/json",
+          "anthropic-version": "2023-06-01"
+        },
+        "credentialHeader": "x-api-key",
+        "body": {
+          "max_tokens": 32768,
+          "messages": [
+            {
+              "content": "合成段落：春风吹过合成的小镇。",
+              "role": "user"
+            }
+          ],
+          "model": "claude-opus-5",
+          "system": "合成系统提示。"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "msg_synthetic_1",
+          "type": "message",
+          "role": "assistant",
+          "model": "claude-opus-5",
+          "content": [
+            {
+              "type": "text",
+              "text": "合成回答。"
+            }
+          ],
+          "stop_reason": "end_turn",
+          "stop_sequence": null,
+          "usage": {
+            "input_tokens": 20,
+            "output_tokens": 8
+          }
+        }
+      },
+      "chunks": [
+        {
+          "type": "block-start",
+          "index": 0,
+          "blockType": "text"
+        },
+        {
+          "type": "text-delta",
+          "index": 0,
+          "text": "合成回答。"
+        },
+        {
+          "type": "block-end",
+          "index": 0,
+          "block": {
+            "type": "text",
+            "text": "合成回答。"
+          }
+        },
+        {
+          "type": "usage",
+          "usage": {
+            "inputTokens": 20,
+            "outputTokens": 8
+          }
+        },
+        {
+          "type": "finish",
+          "reason": {
+            "kind": "stop"
+          }
+        }
+      ],
+      "result": {
+        "kind": "answer",
+        "text": "合成回答。",
+        "reasoningText": null,
+        "usage": {
+          "inputTokens": 20,
+          "outputTokens": 8
+        }
+      },
+      "usage": {
+        "inputTokens": 20,
+        "outputTokens": 8
+      }
+    },
+    {
+      "name": "text-stream",
+      "turn": "dialogue",
+      "stream": true,
+      "request": {
+        "url": "https://api.anthropic.com/v1/messages",
+        "headers": {
+          "content-type": "application/json",
+          "accept": "text/event-stream",
+          "anthropic-version": "2023-06-01"
+        },
+        "credentialHeader": "x-api-key",
+        "body": {
+          "max_tokens": 32768,
+          "messages": [
+            {
+              "content": "AI7 编辑对话 · 提问 · 问题摘要 74721387eb50670055951037676f437a85999a99e25d999ba02872fd2710a266\n【所选文字】\n合成选区。\n【问题】\n合成问题？",
+              "role": "user"
+            }
+          ],
+          "model": "claude-opus-5",
+          "stream": true,
+          "system": "你是出版社编辑的写作顾问。编辑在稿件中选了一段文字，并就这段文字提了一个问题。\n只依据所选文字和问题作答，用简洁、完整的中文句子回答；不要复述整段原文，不要编造所选文字之外的情节、人物或事实。\n你的回答只供编辑阅读：它不修改稿件，不构成事实结论，也不自动成为修改建议。需要时可以说明可以怎样改，由编辑自己决定。\n不调用任何工具。"
+        }
+      },
+      "response": {
+        "status": 200,
+        "frames": [
+          "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_synthetic_1\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-opus-5\",\"content\":[],\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":30,\"output_tokens\":1}}}\n\n",
+          "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+          "event: ping\ndata: {\"type\":\"ping\"}\n\n",
+          "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"合成\"}}\n\n",
+          "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"回答。\"}}\n\n",
+          "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+          "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":4}}\n\n",
+          "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+        ]
+      },
+      "chunks": [
+        {
+          "type": "block-start",
+          "index": 0,
+          "blockType": "text"
+        },
+        {
+          "type": "text-delta",
+          "index": 0,
+          "text": "合成"
+        },
+        {
+          "type": "text-delta",
+          "index": 0,
+          "text": "回答。"
+        },
+        {
+          "type": "block-end",
+          "index": 0,
+          "block": {
+            "type": "text",
+            "text": "合成回答。"
+          }
+        },
+        {
+          "type": "usage",
+          "usage": {
+            "inputTokens": 30,
+            "outputTokens": 4
+          }
+        },
+        {
+          "type": "finish",
+          "reason": {
+            "kind": "stop"
+          }
+        }
+      ],
+      "result": {
+        "kind": "answer",
+        "text": "合成回答。",
+        "reasoningText": null,
+        "usage": {
+          "inputTokens": 30,
+          "outputTokens": 4
+        }
+      },
+      "usage": {
+        "inputTokens": 30,
+        "outputTokens": 4
+      }
+    },
+    {
+      "name": "tool-calls",
+      "turn": "tool",
+      "stream": false,
+      "request": {
+        "url": "https://api.anthropic.com/v1/messages",
+        "headers": {
+          "content-type": "application/json",
+          "accept": "application/json",
+          "anthropic-version": "2023-06-01"
+        },
+        "credentialHeader": "x-api-key",
+        "body": {
+          "max_tokens": 32768,
+          "messages": [
+            {
+              "content": "合成段落：春风吹过合成的小镇。",
+              "role": "user"
+            }
+          ],
+          "model": "claude-opus-5",
+          "system": "合成系统提示。",
+          "tools": [
+            {
+              "description": "合成查询工具。",
+              "input_schema": {
+                "properties": {
+                  "query": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "query"
+                ],
+                "type": "object"
+              },
+              "name": "synthetic_lookup"
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "msg_synthetic_1",
+          "type": "message",
+          "role": "assistant",
+          "model": "claude-opus-5",
+          "content": [
+            {
+              "type": "text",
+              "text": "先查一下。"
+            },
+            {
+              "type": "tool_use",
+              "id": "toolu_synthetic_a",
+              "name": "synthetic_lookup",
+              "input": {
+                "query": "合成"
+              }
+            }
+          ],
+          "stop_reason": "tool_use",
+          "stop_sequence": null,
+          "usage": {
+            "input_tokens": 40,
+            "output_tokens": 12
+          }
+        }
+      },
+      "chunks": [
+        {
+          "type": "block-start",
+          "index": 0,
+          "blockType": "text"
+        },
+        {
+          "type": "text-delta",
+          "index": 0,
+          "text": "先查一下。"
+        },
+        {
+          "type": "block-end",
+          "index": 0,
+          "block": {
+            "type": "text",
+            "text": "先查一下。"
+          }
+        },
+        {
+          "type": "block-start",
+          "index": 1,
+          "blockType": "tool-call"
+        },
+        {
+          "type": "tool-call-delta",
+          "index": 1,
+          "id": "toolu_synthetic_a",
+          "name": "synthetic_lookup",
+          "argumentsDelta": "{\"query\":\"合成\"}"
+        },
+        {
+          "type": "block-end",
+          "index": 1,
+          "block": {
+            "type": "tool-call",
+            "id": "toolu_synthetic_a",
+            "name": "synthetic_lookup",
+            "arguments": "{\"query\":\"合成\"}"
+          }
+        },
+        {
+          "type": "usage",
+          "usage": {
+            "inputTokens": 40,
+            "outputTokens": 12
+          }
+        },
+        {
+          "type": "finish",
+          "reason": {
+            "kind": "tool-calls"
+          }
+        }
+      ],
+      "result": {
+        "kind": "tool-calls",
+        "text": "先查一下。",
+        "calls": [
+          {
+            "id": "toolu_synthetic_a",
+            "name": "synthetic_lookup",
+            "arguments": "{\"query\":\"合成\"}"
+          }
+        ],
+        "reasoningText": null,
+        "usage": {
+          "inputTokens": 40,
+          "outputTokens": 12
+        }
+      },
+      "usage": {
+        "inputTokens": 40,
+        "outputTokens": 12
+      }
+    },
+    {
+      "name": "tool-history",
+      "turn": "tool-history",
+      "stream": false,
+      "request": {
+        "url": "https://api.anthropic.com/v1/messages",
+        "headers": {
+          "content-type": "application/json",
+          "accept": "application/json",
+          "anthropic-version": "2023-06-01"
+        },
+        "credentialHeader": "x-api-key",
+        "body": {
+          "max_tokens": 32768,
+          "messages": [
+            {
+              "content": "合成段落：春风吹过合成的小镇。",
+              "role": "user"
+            },
+            {
+              "content": [
+                {
+                  "text": "先查一下。",
+                  "type": "text"
+                },
+                {
+                  "id": "call_synthetic_1",
+                  "input": {
+                    "query": "合成"
+                  },
+                  "name": "synthetic_lookup",
+                  "type": "tool_use"
+                }
+              ],
+              "role": "assistant"
+            },
+            {
+              "content": [
+                {
+                  "content": "合成结果。",
+                  "is_error": false,
+                  "tool_use_id": "call_synthetic_1",
+                  "type": "tool_result"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "model": "claude-opus-5",
+          "system": "合成系统提示。",
+          "tools": [
+            {
+              "description": "合成查询工具。",
+              "input_schema": {
+                "properties": {
+                  "query": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "query"
+                ],
+                "type": "object"
+              },
+              "name": "synthetic_lookup"
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "id": "msg_synthetic_1",
+          "type": "message",
+          "role": "assistant",
+          "model": "claude-opus-5",
+          "content": [
+            {
+              "type": "text",
+              "text": "查到了合成结果。"
+            }
+          ],
+          "stop_reason": "end_turn",
+          "stop_sequence": null,
+          "usage": {
+            "input_tokens": 60,
+            "output_tokens": 6
+          }
+        }
+      },
+      "chunks": [
+        {
+          "type": "block-start",
+          "index": 0,
+          "blockType": "text"
+        },
+        {
+          "type": "text-delta",
+          "index": 0,
+          "text": "查到了合成结果。"
+        },
+        {
+          "type": "block-end",
+          "index": 0,
+          "block": {
+            "type": "text",
+            "text": "查到了合成结果。"
+          }
+        },
+        {
+          "type": "usage",
+          "usage": {
+            "inputTokens": 60,
+            "outputTokens": 6
+          }
+        },
+        {
+          "type": "finish",
+          "reason": {
+            "kind": "stop"
+          }
+        }
+      ],
+      "result": {
+        "kind": "answer",
+        "text": "查到了合成结果。",
+        "reasoningText": null,
+        "usage": {
+          "inputTokens": 60,
+          "outputTokens": 6
+        }
+      },
+      "usage": {
+        "inputTokens": 60,
+        "outputTokens": 6
+      }
+    },
+    {
+      "name": "tool-stream",
+      "turn": "retrieval",
+      "stream": true,
+      "request": {
+        "url": "https://api.anthropic.com/v1/messages",
+        "headers": {
+          "content-type": "application/json",
+          "accept": "text/event-stream",
+          "anthropic-version": "2023-06-01"
+        },
+        "credentialHeader": "x-api-key",
+        "body": {
+          "max_tokens": 32768,
+          "messages": [
+            {
+              "content": "AI7 编辑对话 · 提问 · 问题摘要 74721387eb50670055951037676f437a85999a99e25d999ba02872fd2710a266\n【所选文字】\n合成选区。\n【问题】\n合成问题？",
+              "role": "user"
+            }
+          ],
+          "model": "claude-opus-5",
+          "stream": true,
+          "system": "你是出版社编辑的写作顾问。编辑在稿件中选了一段文字，并提出一个问题。\n根据所选文字、问题与本次已授权固定来源作答；找到书中哪里的问题先 retrieve，再 exact_fetch。检索预览不是原文。\n引用检索到的文字前必须精确取文；只引用 exact_fetch 返回的原文，并附上 [retrieval:候选 candidateId] 锚点。未经精确取文的引用不被接受。\n用简洁的一行中文回答，不编造情节或事实；回答只供编辑参考，不修改稿件，也不自动成为修改建议。",
+          "tools": [
+            {
+              "description": "精确取回检索候选在已固定来源版本中的原文。引用前必须调用。",
+              "input_schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "candidateId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "candidateId"
+                ],
+                "type": "object"
+              },
+              "name": "exact_fetch"
+            },
+            {
+              "description": "在这次任务已授权并固定的本机来源中检索候选；候选预览不是引文，引用前必须精确取文。",
+              "input_schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "k": {
+                    "maximum": 8,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "query": {
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "sourceKinds": {
+                    "items": {
+                      "enum": [
+                        "manuscript",
+                        "material",
+                        "retained-source"
+                      ],
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "type": "array",
+                    "uniqueItems": true
+                  }
+                },
+                "required": [
+                  "query"
+                ],
+                "type": "object"
+              },
+              "name": "retrieve"
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "frames": [
+          "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_synthetic_1\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-opus-5\",\"content\":[],\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":50,\"output_tokens\":1}}}\n\n",
+          "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_synthetic_r1\",\"name\":\"retrieve\",\"input\":{}}}\n\n",
+          "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"query\\\":\"}}\n\n",
+          "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"\\\"合成\\\"}\"}}\n\n",
+          "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+          "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":9}}\n\n",
+          "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+        ]
+      },
+      "chunks": [
+        {
+          "type": "block-start",
+          "index": 0,
+          "blockType": "tool-call"
+        },
+        {
+          "type": "tool-call-delta",
+          "index": 0,
+          "id": "toolu_synthetic_r1",
+          "name": "retrieve",
+          "argumentsDelta": "{\"query\":\"合成\"}"
+        },
+        {
+          "type": "block-end",
+          "index": 0,
+          "block": {
+            "type": "tool-call",
+            "id": "toolu_synthetic_r1",
+            "name": "retrieve",
+            "arguments": "{\"query\":\"合成\"}"
+          }
+        },
+        {
+          "type": "usage",
+          "usage": {
+            "inputTokens": 50,
+            "outputTokens": 9
+          }
+        },
+        {
+          "type": "finish",
+          "reason": {
+            "kind": "tool-calls"
+          }
+        }
+      ],
+      "result": {
+        "kind": "tool-calls",
+        "text": "",
+        "calls": [
+          {
+            "id": "toolu_synthetic_r1",
+            "name": "retrieve",
+            "arguments": "{\"query\":\"合成\"}"
+          }
+        ],
+        "reasoningText": null,
+        "usage": {
+          "inputTokens": 50,
+          "outputTokens": 9
+        }
+      },
+      "usage": {
+        "inputTokens": 50,
+        "outputTokens": 9
+      }
+    },
+    {
+      "name": "account-limit",
+      "turn": "unit",
+      "stream": false,
+      "request": {
+        "url": "https://api.anthropic.com/v1/messages",
+        "headers": {
+          "content-type": "application/json",
+          "accept": "application/json",
+          "anthropic-version": "2023-06-01"
+        },
+        "credentialHeader": "x-api-key",
+        "body": {
+          "max_tokens": 32768,
+          "messages": [
+            {
+              "content": "合成段落：春风吹过合成的小镇。",
+              "role": "user"
+            }
+          ],
+          "model": "claude-opus-5",
+          "system": "合成系统提示。"
+        }
+      },
+      "response": {
+        "status": 400,
+        "body": {
+          "type": "error",
+          "error": {
+            "type": "invalid_request_error",
+            "message": "Synthetic: your credit balance is too low."
+          }
+        }
+      },
+      "chunks": [
+        {
+          "type": "finish",
+          "reason": {
+            "kind": "error",
+            "failure": {
+              "code": "QUOTA",
+              "message": "模型服务账户限额或余额不足。",
+              "status": 400
+            }
+          }
+        }
+      ],
+      "result": null,
+      "usage": null
+    },
+    {
+      "name": "rate-limit",
+      "turn": "unit",
+      "stream": false,
+      "request": {
+        "url": "https://api.anthropic.com/v1/messages",
+        "headers": {
+          "content-type": "application/json",
+          "accept": "application/json",
+          "anthropic-version": "2023-06-01"
+        },
+        "credentialHeader": "x-api-key",
+        "body": {
+          "max_tokens": 32768,
+          "messages": [
+            {
+              "content": "合成段落：春风吹过合成的小镇。",
+              "role": "user"
+            }
+          ],
+          "model": "claude-opus-5",
+          "system": "合成系统提示。"
+        }
+      },
+      "response": {
+        "status": 429,
+        "headers": {
+          "retry-after": "3"
+        },
+        "body": {
+          "type": "error",
+          "error": {
+            "type": "rate_limit_error",
+            "message": "Synthetic: request rate exceeded."
+          }
+        }
+      },
+      "chunks": [
+        {
+          "type": "finish",
+          "reason": {
+            "kind": "error",
+            "failure": {
+              "code": "RATE_LIMIT",
+              "message": "模型服务速率限制。",
+              "status": 429
+            }
+          }
+        }
+      ],
+      "result": null,
+      "usage": null
+    },
+    {
+      "name": "overloaded",
+      "turn": "unit",
+      "stream": false,
+      "request": {
+        "url": "https://api.anthropic.com/v1/messages",
+        "headers": {
+          "content-type": "application/json",
+          "accept": "application/json",
+          "anthropic-version": "2023-06-01"
+        },
+        "credentialHeader": "x-api-key",
+        "body": {
+          "max_tokens": 32768,
+          "messages": [
+            {
+              "content": "合成段落：春风吹过合成的小镇。",
+              "role": "user"
+            }
+          ],
+          "model": "claude-opus-5",
+          "system": "合成系统提示。"
+        }
+      },
+      "response": {
+        "status": 529,
+        "body": {
+          "type": "error",
+          "error": {
+            "type": "overloaded_error",
+            "message": "Synthetic: overloaded."
+          }
+        }
+      },
+      "chunks": [
+        {
+          "type": "finish",
+          "reason": {
+            "kind": "error",
+            "failure": {
+              "code": "PROVIDER_ERROR",
+              "message": "模型服务返回服务端错误。",
+              "status": 529
+            }
+          }
+        }
+      ],
+      "result": null,
+      "usage": null
+    },
+    {
+      "name": "stream-overloaded",
+      "turn": "dialogue",
+      "stream": true,
+      "request": {
+        "url": "https://api.anthropic.com/v1/messages",
+        "headers": {
+          "content-type": "application/json",
+          "accept": "text/event-stream",
+          "anthropic-version": "2023-06-01"
+        },
+        "credentialHeader": "x-api-key",
+        "body": {
+          "max_tokens": 32768,
+          "messages": [
+            {
+              "content": "AI7 编辑对话 · 提问 · 问题摘要 74721387eb50670055951037676f437a85999a99e25d999ba02872fd2710a266\n【所选文字】\n合成选区。\n【问题】\n合成问题？",
+              "role": "user"
+            }
+          ],
+          "model": "claude-opus-5",
+          "stream": true,
+          "system": "你是出版社编辑的写作顾问。编辑在稿件中选了一段文字，并就这段文字提了一个问题。\n只依据所选文字和问题作答，用简洁、完整的中文句子回答；不要复述整段原文，不要编造所选文字之外的情节、人物或事实。\n你的回答只供编辑阅读：它不修改稿件，不构成事实结论，也不自动成为修改建议。需要时可以说明可以怎样改，由编辑自己决定。\n不调用任何工具。"
+        }
+      },
+      "response": {
+        "status": 200,
+        "frames": [
+          "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_synthetic_1\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-opus-5\",\"content\":[],\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":30,\"output_tokens\":1}}}\n\n",
+          "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+          "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"合成\"}}\n\n",
+          "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Synthetic: overloaded.\"}}\n\n"
+        ]
+      },
+      "chunks": [
+        {
+          "type": "block-start",
+          "index": 0,
+          "blockType": "text"
+        },
+        {
+          "type": "text-delta",
+          "index": 0,
+          "text": "合成"
+        },
+        {
+          "type": "finish",
+          "reason": {
+            "kind": "error",
+            "failure": {
+              "code": "AI7_OUTCOME_UNKNOWN",
+              "message": "模型服务已接受请求，但回答没有完整传回。",
+              "status": 200
+            }
+          }
+        }
+      ],
+      "result": null,
+      "usage": null
+    }
+  ]
+}

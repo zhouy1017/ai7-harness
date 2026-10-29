@@ -17,7 +17,7 @@ import {
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../shared/protected-secret-identity.js';
 import { CredentialBroker, type CredentialSlotBinding, type SecretResolver } from '../provider/credential-broker.js';
 import { AI7_FAILURE_CODES } from '../provider/classification.js';
-import { DeepSeekOpenAiCompatibleAdapter, modelRequestNotSent, type DeepSeekTransport } from '../provider/deepseek-adapter.js';
+import { DeepSeekOpenAiCompatibleAdapter, modelRequestNotSent, streamingDeclared, type DeepSeekTransport } from '../provider/deepseek-adapter.js';
 import { Ai7LocalDeterministicAdapter, dialogueRetrievalFixtureRule, type AnswerHold } from '../provider/local-deterministic-adapter.js';
 import {
   LOCAL_DETERMINISTIC_MODEL,
@@ -494,7 +494,7 @@ export class DialogueExecutionOwner {
           // The SSE request shape is the dialogue's own and admitted for its contracts alone; an Agent 工作区 turn, read only once
           // it has settled, keeps the whole-answer request (Issue #90, slice 13a).
           // A scoped Global turn keeps the whole-answer request tool rounds use elsewhere: the SSE shape admits no Global tools.
-          const streamShape = !workspace && scoped === null && route.modelProfile.capabilities.streaming === 'chat-completions-sse' ? 'editorial-dialogue-sse' as const : null;
+          const streamShape = !workspace && scoped === null && streamingDeclared(route.modelProfile) ? 'editorial-dialogue-sse' as const : null;
           const adapter = new DeepSeekOpenAiCompatibleAdapter({
             broker: live.broker,
             slotBinding,
