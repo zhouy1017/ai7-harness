@@ -2347,3 +2347,19 @@ body { transition: padding-left .2s cubic-bezier(.22, 1, .36, 1), padding-right 
     outline-offset: -2px;
   }
 }
+/* 设置 › 模型服务's one flow and the header's compact channel / model selector (Issue #1215): each wraps to one column at 200%. */
+.model-service-flow fieldset { display: flex; flex-wrap: wrap; gap: .4rem .9rem; min-width: 0; margin: .6rem 0 0; padding: .55rem .7rem; border: 1px solid var(--boundary); border-radius: 8px; }
+.model-service-flow-choice { min-width: 0; overflow-wrap: anywhere; }
+.model-service-flow-step { min-width: 0; margin-top: 1rem; }
+.model-service-flow-step h4 { margin: 0 0 .4rem; }
+.model-service-flow-ineligible { margin-top: .8rem; }
+.model-service-flow-ineligible summary { cursor: pointer; }
+.model-service-flow-ineligible li { overflow-wrap: anywhere; }
+.compact-model-selector { position: relative; min-width: 0; max-width: min(30rem, 100%); }
+.compact-model-selector > summary { cursor: pointer; overflow-wrap: anywhere; }
+.compact-model-selector-body { position: absolute; right: 0; top: 100%; z-index: 40; display: grid; gap: .6rem; width: min(26rem, 85vw); max-height: 75vh; overflow-y: auto; padding: 1rem; border: 1px solid var(--boundary); border-radius: 10px; background: var(--surface); box-shadow: 0 12px 28px var(--shadow); }
+.compact-model-selector-body fieldset { display: grid; gap: .35rem; min-width: 0; margin: 0; padding: 0; border: 0; }
+.compact-model-selector-body label { overflow-wrap: anywhere; }
+@media (forced-colors: active) {
+  .model-service-flow fieldset, .compact-model-selector-body { border-color: CanvasText; box-shadow: none; }
+}

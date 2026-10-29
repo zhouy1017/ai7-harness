@@ -2,18 +2,18 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
-import { LAUNCH_SELECTABLE_SCOPES, isTrustedOperationalScope, type AdmittedLocalTools, type AdmittedPlatformTools, type AdmittedProviderRule, type DeveloperLiveCeiling, type OutboundDataCategoryId, type DevelopmentValidationIntent, type LaunchPolicyProjection, type TrustedLaunchForm, type TrustedOperationalScope } from '../shared/protocol.js';
+import { LAUNCH_SELECTABLE_SCOPES, MODEL_SERVICE_CHANNELS, MODEL_SERVICE_ROUTES, MODEL_SERVICE_ROUTE_BINDINGS, isTrustedOperationalScope, type ModelServiceChannelProjection, type ModelServiceModelDisposition, type ModelServiceRouteId, type AdmittedLocalTools, type AdmittedPlatformTools, type AdmittedProviderRule, type DeveloperLiveCeiling, type OutboundDataCategoryId, type DevelopmentValidationIntent, type LaunchPolicyProjection, type TrustedLaunchForm, type TrustedOperationalScope } from '../shared/protocol.js';
 import { CREDENTIAL_REFERENCE_PATTERN, DEVELOPMENT_CREDENTIAL_REFERENCES } from '../shared/protected-secret-identity.js';
-import { CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES, CONFIGURED_RUNTIME_MODEL_TABLE } from '../shared/provider-configuration.generated.js';
+import { CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES, CONFIGURED_PROVIDER_LABELS, CONFIGURED_RUNTIME_MODEL_TABLE } from '../shared/provider-configuration.generated.js';
 import {
   PLATFORM_TOOL_BREAKER_END, PLATFORM_TOOL_ROUND_TRIP_BREAKER, WEBFETCH_MAX_BYTES, WEBFETCH_TIMEOUT_SECONDS, isConfiguredPlatformTools, readPlatformToolsRule,
 } from './provider/platform-tools.js';
 import {
   LOCAL_TOOL_BREAKER_END, LOCAL_TOOL_CALLS_PER_UNIT, LOCAL_TOOL_CANDIDATES_PER_CALL, LOCAL_TOOL_DECLARATION_NAMES, LOCAL_TOOL_ROUND_TRIP_BREAKER, readLocalToolsRule,
 } from './provider/local-tools.js';
-import { familyAdmissionRefusal, providerPreflight, type ProviderPreflightRefusal } from './provider/family-dispositions.js';
+import { familyAdmissionRefusal, modelDisposition, providerPreflight, type ProviderPreflightRefusal } from './provider/family-dispositions.js';
 import { modelProfileFor, type ProviderModelProfile } from './provider/model-profile.js';
-import { GENERATED_ROUTE_DISPOSITIONS } from './provider/provider-profiles.generated.js';
+import { GENERATED_MODEL_PROFILES, GENERATED_ROUTE_DISPOSITIONS } from './provider/provider-profiles.generated.js';
 import type { RemoteExecutionRoute } from './provider/egress-gate.js';
 import { SEARCH_BACKENDS } from './provider/search-backends.js';
 import { CURRENT_PRODUCTION_POLICY_SHA256, CURRENT_ACTIVE_SET_SHA256, DEVELOPMENT_CI_POLICY_SHA256, ORIGINAL_FIELDS_ACTIVE_SET_SHA256, ORIGINAL_FIELDS_POLICY_SHA256, LOCAL_FIXTURE_POLICY_SHA256, LOCAL_FIXTURE_MANIFEST_SHA256,
@@ -132,6 +132,38 @@ export function allowedProductionBindingOf(binding: ConfiguredProviderBinding | 
 export function productionBindingRefusal(model: ProviderModelProfile, role: 'main' | 'fast'): ProviderPreflightRefusal | null {
   const families = new Set(CONFIGURED_RUNTIME_MODEL_TABLE.policyBaseline[role].map((binding) => GENERATED_ROUTE_DISPOSITIONS[binding.route].family));
   return familyAdmissionRefusal(model, families) ?? providerPreflight(model, { stream: false, functionTools: false });
+}
+
+/**
+ * The one Settings flow's channels (ADR 0094 §1; Issue #1215): every model each channel's routes declare, with its named
+ * disposition for the Main and the Fast role. A model is `eligible` only where the selected policy admits its family, its text
+ * answer is supported on evidence, and the runtime model table holds its reviewed record for the role; a gateway catalogue
+ * alone establishes none of these. Derived from the generated declarations and the model table alone, so it changes no
+ * selection, grants no authority and reads no credential.
+ */
+export function modelServiceChannels(): ModelServiceChannelProjection[] {
+  const disposition = (model: ProviderModelProfile, role: 'main' | 'fast'): ModelServiceModelDisposition => {
+    const refused = productionBindingRefusal(model, role);
+    if (refused !== null) return refused.reason as Exclude<ModelServiceModelDisposition, 'eligible' | 'not-in-runtime-model-table'>;
+    return CONFIGURED_RUNTIME_MODEL_TABLE.ordinaryProduction[role].some((binding) => binding.route === model.route && binding.model === model.model)
+      ? 'eligible' : 'not-in-runtime-model-table';
+  };
+  return MODEL_SERVICE_CHANNELS.map((channelId) => {
+    const route = MODEL_SERVICE_ROUTES.includes(channelId as ModelServiceRouteId) ? channelId as ModelServiceRouteId : null;
+    return {
+      channelId,
+      channelLabel: route === null ? CONFIGURED_PROVIDER_LABELS[channelId] : MODEL_SERVICE_ROUTE_BINDINGS[route].providerLabel,
+      route,
+      models: GENERATED_MODEL_PROFILES.filter((model) => model.route === channelId || model.route.startsWith(`${channelId}-`)).map((model) => ({
+        modelId: model.model,
+        modelLabel: model.displayName,
+        family: model.capabilities.requestShape,
+        capabilities: { text: modelDisposition(model, 'text'), stream: modelDisposition(model, 'stream'), functionTools: modelDisposition(model, 'functionTools') },
+        main: disposition(model, 'main'),
+        fast: disposition(model, 'fast'),
+      })),
+    };
+  });
 }
 
 /**

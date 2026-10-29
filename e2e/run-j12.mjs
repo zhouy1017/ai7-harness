@@ -304,18 +304,20 @@ async function configuredUnboundProviderNames() {
   const directory = resolve(ROOT, 'config', 'providers');
   const names = new Set();
   const listed = new Set();
+  const routes = new Set();
   for (const file of (await readdir(directory)).filter((name) => name.endsWith('.json') && !name.endsWith('.schema.json')).sort()) {
     const document = JSON.parse(await readFile(join(directory, file), 'utf8'));
     if (document.providerId === 'deepseek-open-platform' || document.providerId === 'opencode-go' || document.providerId === 'openai-platform') continue;
     names.add(document.displayName);
     listed.add(document.displayName);
     for (const route of document.routes) {
-      names.add(route.displayName);
-      names.add(route.routeId);
-      names.add(new URL(route.endpoint).hostname);
+      for (const name of [route.displayName, route.routeId, new URL(route.endpoint).hostname]) {
+        names.add(name);
+        routes.add(name);
+      }
     }
   }
-  return { names: [...names], listed: [...listed] };
+  return { names: [...names], listed: [...listed], routes: [...routes] };
 }
 
 async function assertRenderer(renderer, expression, name) {
@@ -672,7 +674,7 @@ async function main() {
     await mkdir(resolve(shellRoot, 'crashes'));
     await writeFile(resolve(shellRoot, 'crashes', '2026-10-17T00-00-00.000Z-render-process-gone.json'), JSON.stringify({
       instant: '2026-10-17T00:00:00.000Z', kind: 'render-process-gone', reason: 'crashed', exitCode: 1,
-      appVersion: '0.1.0', schemaRevision: 94, protocol: 187, platform: process.platform, arch: process.arch,
+      appVersion: '0.1.0', schemaRevision: 94, protocol: 188, platform: process.platform, arch: process.arch,
       electron: '43.4.1', uptimeSeconds: 1, stack: '    at <redacted-path>:12:3',
     }), { flag: 'wx' });
     const executable = electronExecutable();
@@ -1313,7 +1315,7 @@ async function main() {
     const diagnosticsSummary = JSON.parse(await readFile(resolve(diagnosticsBundle, 'summary.json'), 'utf8'));
     const builtPolicySet = JSON.parse(await readFile(resolve(ROOT, 'dist/docs/policies/active-policy-set.v22.json'), 'utf8'));
     // 数据版本 and 数据库修订 named apart (Issue #967): the Data Version is 1, the schema revision the store's own.
-    requireJourney(diagnosticsSummary.appVersion === packageVersion && diagnosticsSummary.dataVersion === 1 && diagnosticsSummary.schemaRevision === CREDENTIAL_CLEANUP_SCHEMA_VERSION && diagnosticsSummary.protocol === 187 &&
+    requireJourney(diagnosticsSummary.appVersion === packageVersion && diagnosticsSummary.dataVersion === 1 && diagnosticsSummary.schemaRevision === CREDENTIAL_CLEANUP_SCHEMA_VERSION && diagnosticsSummary.protocol === 188 &&
       diagnosticsSummary.policySetVersion === builtPolicySet.version && diagnosticsSummary.logs === '无日志文件', 'diagnostics-summary');
     requireJourney((await readFile(resolve(diagnosticsBundle, 'README.txt'), 'utf8')).includes('不含数据库、书稿'), 'diagnostics-exclusions');
     await click(primary, '查看诊断位置', 'diagnostics-reveal');
@@ -1357,22 +1359,40 @@ async function main() {
     })()`, 'four-role-first-policy-semantics');
     // ADR 0073 §3 and V2-UX-MSET-007 (Issue #435): a configured provider appears as a connection only when a Model Role
     // can bind to it. Since Issue #811 the two production routes are bindable; every other configured provider is named once,
-    // in the 尚未支持 list, offers nothing to choose or fill in, and its routes and hosts are named nowhere.
+    // in the 尚未支持 list, offers nothing to choose or fill in, and its routes and hosts are named nowhere. Since Issue #1215
+    // the one flow (`[data-model-service-flow]`) also names the six channels of ADR 0094 §1 — never a route, route id or host —
+    // and a channel without a credential slot shows each declared model with its disposition by name and nothing to choose.
     const unbound = await configuredUnboundProviderNames();
     requireJourney(unbound.names.length > 0 && unbound.listed.length > 0, 'model-service-configured-providers-read');
     await assertRenderer(primary, `(() => {
       const screen=document.querySelector('[data-screen="model-service"]');
       const list=screen?.querySelector('[data-unsupported-providers]');
-      if(!(screen instanceof HTMLElement)||!(list instanceof HTMLElement)||!screen.textContent?.includes('DeepSeek 开放平台（官方）'))return false;
+      const flow=screen?.querySelector('[data-model-service-flow]');
+      if(!(screen instanceof HTMLElement)||!(list instanceof HTMLElement)||!(flow instanceof HTMLElement)||!screen.textContent?.includes('DeepSeek 开放平台（官方）'))return false;
       const outside=screen.cloneNode(true);
       outside.querySelector('[data-unsupported-providers]')?.remove();
+      outside.querySelector('[data-model-service-flow]')?.remove();
       const listed=list.textContent??'';
       return ${JSON.stringify(unbound.names)}.every((name)=>!outside.textContent.includes(name)) &&
+        ${JSON.stringify(unbound.routes)}.every((name)=>!flow.textContent.includes(name)) &&
         ${JSON.stringify(unbound.listed)}.every((name)=>listed.includes(name)) &&
         list.querySelectorAll('input,button,select,textarea,a').length===0 &&
         Array.from(list.querySelectorAll('li')).every((item)=>item.textContent.endsWith('尚未支持'));
     })()`, 'model-service-unbound-provider-absent');
-    await tabUntil(primary, `document.activeElement?.id==='main-editorial-connection-name' && document.activeElement.matches(':focus-visible')`, 'model-settings-keyboard-connection');
+    await assertRenderer(primary, `(() => {
+      const flow=document.querySelector('[data-model-service-flow]');
+      const channels=Array.from(flow?.querySelectorAll('[data-model-channel]')??[]).map((node)=>node.dataset.modelChannel);
+      const zen=flow?.querySelector('[data-model-channel="opencode-zen"] input');
+      if(JSON.stringify(channels)!==JSON.stringify(['opencode-zen','opencode-go','anthropic-claude','google-gemini','openai-platform','deepseek-open-platform'])||!(zen instanceof HTMLInputElement))return false;
+      zen.click();
+      const items=Array.from(flow.querySelectorAll('.model-service-flow-ineligible li'));
+      const shown=flow.dataset.flowChannel==='opencode-zen' && flow.querySelectorAll('[data-model-choice]').length===0 && flow.querySelector('[data-action="enter-channel-credential"]')===null &&
+        items.length>0 && items.every((item)=>/（(family-not-admitted-by-selected-policy|untested:text|unsupported:text|not-in-runtime-model-table)）/.test(item.textContent) && item.querySelectorAll('input,button').length===0) &&
+        ${JSON.stringify(unbound.routes)}.every((name)=>!flow.textContent.includes(name));
+      flow.querySelector('[data-model-channel="opencode-go"] input').click();
+      return shown && flow.dataset.flowChannel==='opencode-go' && flow.querySelector('[data-model-choice="deepseek-v4.1-flash"]')?.disabled===true;
+    })()`, 'model-service-flow-dispositions');
+    await tabUntil(primary, `document.activeElement?.id==='main-editorial-connection-name' && document.activeElement.matches(':focus-visible')`, 'model-settings-keyboard-connection', 16);
     await dispatchTab(primary);
     await assertRenderer(primary, `document.activeElement?.id==='main-editorial-credential' && document.activeElement.matches(':focus-visible')`, 'model-settings-keyboard-credential');
     await dispatchTab(primary);
@@ -1385,6 +1405,18 @@ async function main() {
     await click(primary, '保护并保存', 'model-credential-save');
     await waitFor(primary, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='available' && document.querySelector('[data-credential-state="ready"]')`, 'model-credential-ready');
     await assertRenderer(primary, `(() => { const input=document.querySelector('#main-editorial-credential'); return input instanceof HTMLInputElement && input.type==='password' && input.autocomplete==='off' && input.value==='' && !document.body.textContent.includes(${JSON.stringify(secretOne)}); })()`, 'model-secret-not-redisplayed');
+    // The one flow (Issue #1215) offers the saved channel's model to both roles, already the choice both hold: nothing to apply.
+    await assertRenderer(primary, `(() => {
+      const flow=document.querySelector('[data-model-service-flow]');
+      const official=flow?.querySelector('[data-model-channel="deepseek-open-platform"]');
+      if(!(official instanceof HTMLElement)||official.dataset.channelCredential!=='ready')return false;
+      official.querySelector('input').click();
+      const model=flow.querySelector('[data-model-choice="deepseek-flash"]');
+      const use=flow.querySelector('[data-action="use-model-for-both-roles"]');
+      const test=flow.querySelector('[data-action="test-flow-connection"]');
+      return flow.dataset.flowChannel==='deepseek-open-platform' && model instanceof HTMLInputElement && model.checked && !model.disabled &&
+        model.closest('label')?.textContent.includes('当前使用中') && use instanceof HTMLButtonElement && use.disabled && test instanceof HTMLButtonElement && !test.disabled;
+    })()`, 'model-service-flow-current-choice');
     // The Main Editorial Role's connection test (ADR 0096 §3, #1177): the Fast role's explicit test, for the route in use and the
     // Main role's model. Offered, not clicked: this launch admits no live test.
     requireJourney(await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>{

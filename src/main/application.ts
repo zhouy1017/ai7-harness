@@ -7040,7 +7040,7 @@ export async function runApplication(): Promise<void> {
           label: process.platform === 'win32' ? 'Windows 凭据管理器' : 'macOS 钥匙串',
           availability: protectedSecretStore === undefined ? 'unavailable' : 'available',
         },
-        launchPolicy: state.launchPolicy,
+        launchPolicy: state.launchPolicy, channels: state.channels,
         authorityStatement: '凭据就绪不授予模型处理、对外导出、运行、受控动作或公开发布权限。',
       };
     };
