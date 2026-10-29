@@ -288,6 +288,19 @@ describe('Word graph mapped export (#1132)', () => {
     expect(output.fidelity.find((row) => row.key === 'inline-styles')!.status).toBe('degraded');
   });
 
+  it.each(['suggestions', 'accepted-baseline'] as const)('keeps an edited paragraph’s run style and link in the selected reading and revives no rejected text (%s, Issue #874)', async (mode) => {
+    const input = makeInput('<w:p><w:r><w:rPr><w:b/></w:rPr><w:t xml:space="preserve">bold </w:t></w:r><w:hyperlink w:anchor="a"><w:r><w:t xml:space="preserve">link </w:t></w:r></w:hyperlink>' +
+      '<w:del w:id="1"><w:r><w:delText>old</w:delText></w:r></w:del><w:ins w:id="2"><w:r><w:t>new</w:t></w:r></w:ins></w:p>', mode);
+    const blocks = input.blocks.map((block) => edited(block, `${block.text} edited`));
+    const output = renderDocxExport({ ...input, blocks }, { emit: true });
+    expect(output.fidelity.find((row) => row.key === 'inline-styles')).toMatchObject({ count: 2, status: 'preserved' });
+    expect([output.regeneratedBlocks, output.unmappedBlocks]).toEqual([1, 0]);
+    const xml = strFromU8(unzipSync(output.bytes!)['word/document.xml']!);
+    expect([xml.split('<w:b/>').length - 1, xml.split('<w:hyperlink ').length - 1, xml.includes(mode === 'suggestions' ? '>new<' : '>old<'), xml.includes('<w:ins ')])
+      .toEqual([1, 1, false, false]);
+    expect((await parseBytes(output.bytes!)).blocks.map((block) => block.text)).toEqual([`bold link ${mode === 'suggestions' ? 'old' : 'new'} edited`]);
+  });
+
   it('measures retained note movement against the selected accepted reading', async () => {
     const parts = unzipSync(await buildCorpusSource('synthetic'));
     const originalXml = strFromU8(parts['word/document.xml']!);
@@ -643,7 +656,7 @@ describe('DOCX export restores the original', () => {
     expect(review.fidelity).toEqual(first.fidelity);
   });
 
-  it('regenerates an edited paragraph from its properties and first run, and names what it could not keep', async () => {
+  it('regenerates an edited paragraph over its run mapping, and names the field whose words changed (Issue #874)', async () => {
     const { input, blocks } = await richInput();
     const replacement = await sourceSpanText(SOURCE, { block: 30 });
     const changed = input.blocks.map((block) => {
@@ -655,7 +668,7 @@ describe('DOCX export restores the original', () => {
     expect([result.restoredBlocks, result.regeneratedBlocks]).toEqual([bodyRows(blocks).length - 5, 5]);
     expect(result.degraded).toBe(true);
     expect(fidelityOf(result.fidelity)).toEqual([
-      ['inline-styles', 'degraded', 2, [2]],
+      ['inline-styles', 'preserved', 2, []],
       ['editor-notes', 'excluded', 0, []],
       ['notes', 'preserved', 1, []],
       ['tables', 'preserved', 1, []],
@@ -667,8 +680,12 @@ describe('DOCX export restores the original', () => {
     ]);
     const reread = await parseBytes(result.bytes!);
     expect(reread.blocks.map((block) => block.digest)).toEqual(changed.map((block) => block.digest));
-    // The regenerated second paragraph kept its first run's properties — none — so no bold remains.
-    expect(partOf(result.bytes!, 'word/document.xml')!.includes('<w:b/>')).toBe(false);
+    // The second paragraph's bold run still holds its words and the words appended after them; the fourth paragraph's
+    // field, its words all replaced, is written as its words alone.
+    const document = partOf(result.bytes!, 'word/document.xml')!;
+    const bold = graphemes(changed[1]!.text).slice(4).join('');
+    expect([document.match(/<w:b\/>/g)?.length, document.includes(`<w:r><w:rPr><w:b/></w:rPr><w:t xml:space="preserve">${escapeXml(bold)}</w:t></w:r>`)]).toEqual([1, true]);
+    expect(document.includes('fldSimple')).toBe(false);
     expect(reread.parsed.textBoxes.length).toBe(1);
   });
 
@@ -703,7 +720,7 @@ describe('DOCX export restores the original', () => {
     expect([document.split('<w:drawing>').length, document.split('<w:txbxContent>').length]).toEqual([2, 2]);
     expect(lastWords >= 0 && lastWords < document.indexOf('<w:drawing>') && document.indexOf('<w:drawing>') < document.indexOf('<w:txbxContent>')).toBe(true);
     const { retentionSummary } = exportRetentionDisclosure(result.fidelity);
-    expect(retentionSummary).toContain('正文 1 段从原文件恢复，1 段按稿件文字重新写出，重建段落中的图片、文本框移到该段末尾；');
+    expect(retentionSummary).toContain('正文 1 段从原文件恢复，1 段按稿件文字重新写出，重建段落中的图片、文本框移到该段末尾。');
     const reread = await parseBytes(result.bytes!);
     expect(reread.blocks.map((block) => block.digest)).toEqual(input.blocks.map((block) => block.digest));
     expect(reread.parsed.textBoxes.length).toBe(1);
@@ -767,6 +784,111 @@ describe('DOCX export restores the original', () => {
     }
     expect(unzipSync(result.bytes!)['word/comments.xml']).toBeUndefined();
     expect(fidelityOf(result.fidelity).find(([key]) => key === 'file-revisions')).toEqual(['file-revisions', 'degraded', 2, []]);
+  });
+});
+
+describe('an edited paragraph keeps the formatting its words still carry (Issue #874)', () => {
+  // One paragraph of exact sample1 spans: a plain run, a bold run, a link around an italic run, a complex field
+  // displaying a fourth span and a simple field around a fifth; then a plain paragraph. Graphemes: [0,6) plain,
+  // [6,12) bold, [12,18) link, [18,22) complex field, [22,27) simple field.
+  const SPANS: SourceSpan[] = [{ block: 8, from: 0, to: 6 }, { block: 8, from: 6, to: 12 }, { block: 10, from: 0, to: 6 },
+    { block: 13, from: 0, to: 4 }, { block: 14, from: 0, to: 5 }];
+  const EDIT = '〔改〕';
+  const mixed = async (): Promise<{ input: DocxExportInput; text: string[] }> => {
+    const words = await Promise.all(SPANS.map(async (span) => escapeXml(await sourceSpanText(SOURCE, span))));
+    const run = (index: number, properties = ''): string => `<w:r>${properties}<w:t xml:space="preserve">${words[index]}</w:t></w:r>`;
+    const after = run(1, '<w:rPr><w:b/></w:rPr>') + `<w:hyperlink w:anchor="mark">${run(2, '<w:rPr><w:i/></w:rPr>')}</w:hyperlink>` +
+      '<w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> PAGE </w:instrText></w:r>' +
+      `<w:r><w:fldChar w:fldCharType="separate"/></w:r>${run(3)}<w:r><w:fldChar w:fldCharType="end"/></w:r>` +
+      `<w:fldSimple w:instr=" DATE ">${run(4)}</w:fldSimple>`;
+    const path = join(sandbox, 'mixed.docx');
+    const original = await composeSource(path, { body: [{ runs: [{ span: SPANS[0]! }], after }, { runs: [{ span: { block: 3 } }] }] });
+    const { blocks } = await parse(path);
+    const input: DocxExportInput = { title: '行内样式', marks: [], options: { ...DEFAULT_MANUSCRIPT_EXPORT_OPTIONS }, blocks: exportBlocks(blocks),
+      source: { kind: 'mapped', original, rows: bodyRows(blocks), notes: [], textBoxes: 'retain' } };
+    return { input, text: graphemes(blocks[0]!.text) };
+  };
+  const replace = (text: string[], ...edits: Array<[number, number]>): string =>
+    edits.reduceRight((parts, [from, to]) => [...parts.slice(0, from), EDIT, ...parts.slice(to)], text).join('');
+  const shape = (bytes: Uint8Array): number[] => ['<w:b/>', '<w:i/>', '<w:hyperlink ', '<w:fldChar ', '<w:instrText ', '<w:fldSimple ']
+    .map((tag) => partOf(bytes, 'word/document.xml')!.split(tag).length - 1);
+
+  it('writes words written over a bold run in bold, and keeps the link and both fields of the words it kept', async () => {
+    const { input, text } = await mixed();
+    const blocks = input.blocks.map((block, index) => index === 0 ? edited(block, replace(text, [7, 9])) : block);
+    const result = renderDocxExport({ ...input, blocks }, { emit: true });
+    expect([result.regeneratedBlocks, result.unmappedBlocks, result.degraded]).toEqual([1, 0, false]);
+    expect(fidelityOf(result.fidelity).filter(([key]) => key === 'inline-styles' || key === 'fields')).toEqual([
+      ['inline-styles', 'preserved', 3, []],
+      ['fields', 'preserved', 2, []],
+    ]);
+    expect(shape(result.bytes!)).toEqual([1, 1, 1, 3, 1, 1]);
+    const bold = `${text[6]}${EDIT}${text.slice(9, 12).join('')}`;
+    expect(partOf(result.bytes!, 'word/document.xml')!.includes(`<w:r><w:rPr><w:b/></w:rPr><w:t xml:space="preserve">${escapeXml(bold)}</w:t></w:r>`)).toBe(true);
+    expect((await parseBytes(result.bytes!)).blocks.map((block) => block.digest)).toEqual(blocks.map((block) => block.digest));
+  });
+
+  it('names a link an edit crosses and a field whose words changed, at the paragraph, and writes their words', async () => {
+    const { input, text } = await mixed();
+    const blocks = input.blocks.map((block, index) => index === 0 ? edited(block, replace(text, [10, 14], [19, 20])) : block);
+    const result = renderDocxExport({ ...input, blocks }, { emit: true });
+    expect([result.unmappedBlocks, result.degraded]).toEqual([1, true]);
+    // The italic run and the link the replacement crossed; the complex field whose words it changed.
+    expect(fidelityOf(result.fidelity).filter(([key]) => key === 'inline-styles' || key === 'fields')).toEqual([
+      ['inline-styles', 'degraded', 3, [1]],
+      ['fields', 'degraded', 2, [1]],
+    ]);
+    expect(result.fidelity.find((row) => row.key === 'inline-styles')!.detail).toMatch(/^改过或带标记的段落中有 2 处行内样式未能对应原文件/u);
+    expect(result.fidelity.find((row) => row.key === 'fields')!.detail).toMatch(/^改过或带标记的段落中有 1 个域.*只写出当前文字，不再更新/u);
+    // The link holds its four untouched words; the new words, bold, stand before it; the simple field is whole.
+    expect(shape(result.bytes!)).toEqual([1, 1, 1, 0, 0, 1]);
+    const document = partOf(result.bytes!, 'word/document.xml')!;
+    expect(document.includes(`${escapeXml(EDIT)}</w:t></w:r><w:hyperlink w:anchor="mark"><w:r><w:rPr><w:i/></w:rPr><w:t xml:space="preserve">${escapeXml(text.slice(14, 18).join(''))}</w:t></w:r></w:hyperlink>`)).toBe(true);
+    expect((await parseBytes(result.bytes!)).blocks.map((block) => block.digest)).toEqual(blocks.map((block) => block.digest));
+    expect(exportRetentionDisclosure(result.fidelity).retentionSummary).toContain('未能原样写出：行内样式、域');
+  });
+
+  it('keeps a table-of-contents entry’s link and page field when its title words are edited', async () => {
+    const title = escapeXml(await sourceSpanText(SOURCE, { block: 8, from: 0, to: 8 }));
+    const page = '<w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> PAGEREF _Toc1 \\h </w:instrText></w:r>' +
+      '<w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>5</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r>';
+    const path = join(sandbox, 'toc.docx');
+    const original = await composeSource(path, { body: [
+      { runs: [], after: `<w:hyperlink w:anchor="_Toc1"><w:r><w:t xml:space="preserve">${title}</w:t></w:r><w:r><w:tab/></w:r>${page}</w:hyperlink>` },
+      { runs: [{ span: { block: 3 } }] },
+    ] });
+    const { blocks } = await parse(path);
+    const words = graphemes(blocks[0]!.text);
+    const changed = exportBlocks(blocks).map((block, index) => index === 0 ? edited(block, `${words.slice(0, 2).join('')}${EDIT}${words.slice(4).join('')}`) : block);
+    const result = renderDocxExport({ title: '目录', marks: [], options: { ...DEFAULT_MANUSCRIPT_EXPORT_OPTIONS }, blocks: changed,
+      source: { kind: 'mapped', original, rows: bodyRows(blocks), notes: [], textBoxes: 'retain' } }, { emit: true });
+    expect([result.unmappedBlocks, result.degraded]).toEqual([0, false]);
+    expect(fidelityOf(result.fidelity).filter(([key]) => key === 'inline-styles' || key === 'fields')).toEqual([
+      ['inline-styles', 'preserved', 1, []],
+      ['fields', 'preserved', 1, []],
+    ]);
+    expect(shape(result.bytes!)).toEqual([0, 0, 1, 3, 1, 0]);
+    expect(partOf(result.bytes!, 'word/document.xml')!.match(/<w:hyperlink w:anchor="_Toc1">.*?<\/w:hyperlink>/su)?.[0].includes('PAGEREF')).toBe(true);
+    expect((await parseBytes(result.bytes!)).blocks.map((block) => block.digest)).toEqual(changed.map((block) => block.digest));
+  });
+
+  it('keeps a field whole beside a comment, and writes one a comment cuts as its words', async () => {
+    const { input } = await mixed();
+    const block = input.blocks[0]!;
+    const comment = (markId: string, fromGrapheme: number, toGrapheme: number): DocxExportMark =>
+      mark({ markId, blockId: block.blockId, kind: 'annotation', standing: { state: 'exact', fromGrapheme, toGrapheme }, authorLabel: AUTHOR, body: '核对格式。' });
+    const result = renderDocxExport({ ...input, marks: [comment('a', 0, 3), comment('b', 23, 25)] }, { emit: true });
+    expect([result.regeneratedBlocks, result.unmappedBlocks, result.written.annotations]).toEqual([1, 1, 2]);
+    expect(fidelityOf(result.fidelity).filter(([key]) => key === 'inline-styles' || key === 'fields')).toEqual([
+      ['inline-styles', 'preserved', 3, []],
+      ['fields', 'degraded', 2, [1]],
+    ]);
+    expect(shape(result.bytes!)).toEqual([1, 1, 1, 3, 1, 0]);
+    const reread = await parseBytes(result.bytes!);
+    expect(reread.blocks.map((entry) => entry.digest)).toEqual(input.blocks.map((entry) => entry.digest));
+    expect(reread.parsed.importedMarks.map((entry) => [entry.kind, entry.authorLabel, entry.fromGrapheme, entry.toGrapheme])).toEqual([
+      ['annotation', AUTHOR, 0, 3], ['annotation', AUTHOR, 23, 25],
+    ]);
   });
 });
 
@@ -875,9 +997,10 @@ describe('DOCX export writes AI7\'s marks', () => {
       ['change-suggestions', 'unavailable', 4, [10]],
       ['editor-notes', 'excluded', 1, []],
     ]);
-    // The marked paragraphs 1, 9 and 10 are regenerated; the hyperlink of paragraph 9 is what it lost.
+    // The marked paragraphs 1, 9 and 10 are regenerated; paragraph 9 keeps its hyperlink around the words it held (Issue #874).
     expect(result.regeneratedBlocks).toBe(3);
-    expect(fidelityOf(result.fidelity).find(([key]) => key === 'inline-styles')).toEqual(['inline-styles', 'degraded', 2, [9]]);
+    expect(fidelityOf(result.fidelity).find(([key]) => key === 'inline-styles')).toEqual(['inline-styles', 'preserved', 2, []]);
+    expect(partOf(result.bytes!, 'word/document.xml')!.match(/<w:hyperlink w:anchor="mark">/g)).toHaveLength(1);
 
     const reread = await parseBytes(result.bytes!);
     // The rejected reading of the written file is the manuscript's own text.

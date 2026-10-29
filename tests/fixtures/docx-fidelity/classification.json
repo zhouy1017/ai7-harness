@@ -4,12 +4,58 @@
     "evidence": "phase-a-compiler-graph-mapping-export",
     "writer": "ai7-docx-word-export/1",
     "recipes": {
-      "replacement": { "samples": 1, "rejected": ["base old"], "accepted": ["base new"] },
-      "paragraph-join": { "samples": 1, "rejected": ["A", "B"], "accepted": ["AB"] },
-      "named-move": { "samples": 1, "rejected": ["Astay"], "accepted": ["stay", "A"] },
-      "all-inserted": { "samples": 1, "rejected": [], "accepted": ["new"] },
-      "all-deleted": { "samples": 1, "rejected": ["old"], "accepted": [] },
-      "normalization": { "samples": 1, "rejected": ["é B"], "accepted": ["é B C"] }
+      "replacement": {
+        "samples": 1,
+        "rejected": [
+          "base old"
+        ],
+        "accepted": [
+          "base new"
+        ]
+      },
+      "paragraph-join": {
+        "samples": 1,
+        "rejected": [
+          "A",
+          "B"
+        ],
+        "accepted": [
+          "AB"
+        ]
+      },
+      "named-move": {
+        "samples": 1,
+        "rejected": [
+          "Astay"
+        ],
+        "accepted": [
+          "stay",
+          "A"
+        ]
+      },
+      "all-inserted": {
+        "samples": 1,
+        "rejected": [],
+        "accepted": [
+          "new"
+        ]
+      },
+      "all-deleted": {
+        "samples": 1,
+        "rejected": [
+          "old"
+        ],
+        "accepted": []
+      },
+      "normalization": {
+        "samples": 1,
+        "rejected": [
+          "é B"
+        ],
+        "accepted": [
+          "é B C"
+        ]
+      }
     },
     "ordinaryCounterfactual": "historical-reader-unchanged",
     "formatting": "retained-original-or-disclosed-paragraph-regeneration",
@@ -36,18 +82,18 @@
       "unrepresented-revisions": "intentionally-excluded"
     },
     "edited": {
-      "run-properties": "intentionally-excluded",
+      "run-properties": "rebuilt",
       "drawings": "rebuilt",
       "text-boxes": "rebuilt",
       "footnotes-endnotes": "preserved",
-      "fields": "intentionally-excluded",
+      "fields": "rebuilt",
       "comments-tracked-changes": "rebuilt",
       "tables": "rebuilt",
       "numbering": "preserved",
       "sections": "rebuilt",
       "headers-footers": "preserved",
       "styles": "preserved",
-      "hyperlinks": "intentionally-excluded",
+      "hyperlinks": "rebuilt",
       "unrepresented-revisions": "intentionally-excluded"
     },
     "mark-exported": {
@@ -62,15 +108,13 @@
       "sections": "rebuilt",
       "headers-footers": "preserved",
       "styles": "preserved",
-      "hyperlinks": "intentionally-excluded",
+      "hyperlinks": "rebuilt",
       "unrepresented-revisions": "intentionally-excluded"
     }
   },
   "exclusions": {
-    "run-properties": "Edited paragraphs, and mark-only rebuilds whose runs no longer map exactly to the normalized text, retain paragraph and first-run properties; other run formatting and rebuilt hyperlinks have no text-only mapping. Follow-up #874.",
-    "fields": "Rebuilt computed fields become their displayed text under ADR 0086/S64, with no update instruction. Follow-up #874.",
-    "hyperlinks": "Rebuilt paragraphs retain hyperlink text but lose clickable wrappers. Follow-up #874.",
-    "unrepresented-revisions": "Original formatting revisions and other revisions AI7 did not import as marks are not written: their revision markup is dropped, the run keeps its current formatting and the text keeps the rejected reading the import took (ADR 0086/S64). Follow-up #874."
+    "fields": "A field is written whole while its displayed words are untouched and no mark stands inside them; a field whose words a mark cuts (the mark-exported pairs' simple field) becomes its displayed text with no update instruction, and the export names it under 域 (#874).",
+    "unrepresented-revisions": "Original formatting revisions and other revisions AI7 did not import as marks are not written: their revision markup is dropped, the run keeps its current formatting and the text keeps the rejected reading the import took (ADR 0086/S64)."
   },
   "disclosures": {
     "unchanged": {
@@ -117,7 +161,7 @@
       ]
     },
     "edited": {
-      "summary": "本次 DOCX：样式表、编号格式、脚注注文、尾注注文、页眉页脚、图片等媒体文件与原文件逐字节相同；正文 4 段都按稿件文字重新写出，重建段落中的图片移到该段末尾；未能原样写出：行内样式、域、原文件中的修订。数量、原因与段落位置见导出保真审阅。",
+      "summary": "本次 DOCX：样式表、编号格式、脚注注文、尾注注文、页眉页脚、图片等媒体文件与原文件逐字节相同；正文 4 段都按稿件文字重新写出，重建段落中的图片移到该段末尾；未能原样写出：原文件中的修订。数量、原因与段落位置见导出保真审阅。",
       "preserved": [
         "样式表（1 个，与原文件逐字节相同）",
         "编号格式（1 个，与原文件逐字节相同）",
@@ -139,8 +183,6 @@
         "域（目录等）（2 项）"
       ],
       "excluded": [
-        "行内样式：改过或带标记的段落中 3 处未能恢复，超链接只保留文字",
-        "域（目录等）：改过或带标记的段落中 2 个只写出当前显示的文字，不再更新",
         "原文件中的修订：1 处未转为稿件标记，修订记号不写出"
       ],
       "anchors": [
@@ -164,7 +206,7 @@
       ]
     },
     "mark-exported": {
-      "summary": "本次 DOCX：样式表、编号格式、脚注注文、尾注注文、页眉页脚、图片等媒体文件与原文件逐字节相同；正文 4 段都按稿件文字重新写出，重建段落中的图片移到该段末尾；未能原样写出：行内样式、域、原文件中的修订。数量、原因与段落位置见导出保真审阅。",
+      "summary": "本次 DOCX：样式表、编号格式、脚注注文、尾注注文、页眉页脚、图片等媒体文件与原文件逐字节相同；正文 4 段都按稿件文字重新写出，重建段落中的图片移到该段末尾；未能原样写出：域、原文件中的修订。数量、原因与段落位置见导出保真审阅。",
       "preserved": [
         "样式表（1 个，与原文件逐字节相同）",
         "编号格式（1 个，与原文件逐字节相同）",
@@ -186,8 +228,7 @@
         "域（目录等）（2 项）"
       ],
       "excluded": [
-        "行内样式：改过或带标记的段落中 1 处未能恢复，超链接只保留文字",
-        "域（目录等）：改过或带标记的段落中 2 个只写出当前显示的文字，不再更新",
+        "域（目录等）：改过或带标记的段落中 1 个只写出当前文字，不再更新",
         "原文件中的修订：1 处未转为稿件标记，修订记号不写出"
       ],
       "anchors": [

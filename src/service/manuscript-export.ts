@@ -1985,6 +1985,8 @@ export class ManuscriptExportStore {
     // A 审阅报告 says how its own file is written; a PDF or a Markdown file is written from the manuscript's text (Issue
     // #500, S64b); only a DOCX restores from the original, or says why it cannot.
     const report = target.report;
+    // Issue #874: a regenerated paragraph whose run mapping left some formatting behind is counted, never claimed whole.
+    const unmapped = (rendered.unmappedBlocks ?? 0) > 0 ? `；其中 ${rendered.unmappedBlocks} 段有未能对应的行内样式、超链接或域，见保真审阅` : '';
     const restorationLine = target.manifest !== null
       ? PACKAGE_MEMBER_LINES[target.manifest.member].restoration
       : report !== null
@@ -1992,9 +1994,9 @@ export class ManuscriptExportStore {
       : format !== 'docx'
         ? EXPORT_TEXT_RESTORATION_LINES[format]
         : plan.kind === 'manuscript' && plan.wordBinding !== null
-          ? `按「${plan.wordBinding.mode === 'suggestions' ? '转为 AI7 修订建议' : '直接并入正文（作为定稿基线）'}」及之后的稿件文字导出；${rendered.restoredBlocks} 段恢复可保留的原文件格式，${rendered.regeneratedBlocks} 段重新生成，具体损失见保真审阅。`
+          ? `按「${plan.wordBinding.mode === 'suggestions' ? '转为 AI7 修订建议' : '直接并入正文（作为定稿基线）'}」及之后的稿件文字导出；${rendered.restoredBlocks} 段恢复可保留的原文件格式，${rendered.regeneratedBlocks} 段重新生成，具体损失见保真审阅${unmapped}。`
         : rendered.restoration === 'from-original'
-          ? `未改过、也没有带出标记的 ${rendered.restoredBlocks} 段从原文件恢复；其余 ${rendered.regeneratedBlocks} 段按稿件文字重新写出。`
+          ? `未改过、也没有带出标记的 ${rendered.restoredBlocks} 段从原文件恢复；其余 ${rendered.regeneratedBlocks} 段按稿件文字重新写出${unmapped}。`
           : plan.kind === 'manuscript' && (plan.input.source.kind === 'mapped' || (plan.input.source.kind === 'fresh' && plan.input.source.reason === 'unprefixed'))
             ? EXPORT_UNPREFIXED_RESTORATION_LINE
             : '这份稿件没有可以对应的原文件段落，导出按稿件文字重新生成 DOCX。';
