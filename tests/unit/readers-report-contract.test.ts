@@ -15,7 +15,7 @@ import {
 import { readersReportKindDefinition } from '../../src/service/evaluation/readers-report-kind.js';
 import { parseInitialEvaluationUnitMessageHeader } from '../../src/service/evaluation/initial-evaluation-contract.js';
 import { parseUnitMessageHeader } from '../../src/service/analysis/contract.js';
-import { readersReportDraftBlocks } from '../../src/service/readers-reports.js';
+import { readersReportDraftBlocks, readersReportTaskOf, type ReadersReportStoreHost } from '../../src/service/readers-reports.js';
 import { READERS_REPORT_NO_EXEMPLAR } from '../../src/shared/protocol.js';
 
 // Reader's Report Contract v1 (Issue #429, plan slice S81c; V2-UX-EVAL-013): what the contract freezes, what it says when the
@@ -133,5 +133,16 @@ describe('Reader\'s Report Contract v1', () => {
       ['heading', 1, '修改建议'], ['paragraph', null, '1. 逐句校读。'],
       ['heading', 1, '结论'], ['paragraph', null, '修改后再议。'],
     ]);
+  });
+});
+
+describe('the 审稿意见 Task lookup (Issue #795 item 6)', () => {
+  it('reads a Task with neither a frozen plan nor a recorded row as no Task', () => {
+    const host = {
+      evaluationMaterialPlan: () => null,
+      readersReportCall: <T>(operation: () => T): T => operation(),
+      readersReports: { planContract: () => null, task: () => null },
+    } as unknown as ReadersReportStoreHost;
+    expect(readersReportTaskOf(host, '00000000-0000-4000-8000-000000000000')).toBeNull();
   });
 });

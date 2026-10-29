@@ -558,7 +558,11 @@ export function readersReportLedgerPreparing(host: ReadersReportStoreHost, workI
   return undefined;
 }
 
-/** One Task's 定稿 version and template — the one its frozen plan names when it froze one. */
+/**
+ * One Task's 定稿 version and template — the one its frozen plan names when it froze one. `null` only for a Task with neither a
+ * plan nor a recorded row. A plan whose contract names no recorded row is refused as `READERS_REPORT_RECORD_INVALID`, never read
+ * as "no Task": the plan and its record disagree, and 评估 says so rather than drafting from a guess (Issue #795 item 6).
+ */
 export function readersReportTaskOf(host: ReadersReportStoreHost, taskIntentId: string): { task: StoredReadersReportTask; ledger: BaselineAnalysisStore } | null {
   const frozen = host.evaluationMaterialPlan(taskIntentId);
   const planContract = frozen?.baseDigest ?? host.readersReportCall(() => host.readersReports.planContract(taskIntentId));

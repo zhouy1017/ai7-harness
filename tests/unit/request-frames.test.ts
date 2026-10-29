@@ -66,7 +66,7 @@ describe('whole package archive frames (#953)', () => {
     const options = { includeAnnotations: true, includeSuggestions: false };
     for (const body of [
       { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId, options, route: 'archive', offset: 40 } },
-      { op: 'prepareBookDeliveryPackageArchiveExport', input: { bookId, packageVersionId, options, reviewDigest: 'a'.repeat(64), memberKeys: [], destination: resolve('package.zip') } },
+      { op: 'prepareBookDeliveryPackageArchiveExport', input: { bookId, packageVersionId, options, reviewDigest: 'a'.repeat(64), destination: resolve('package.zip') } },
       { op: 'approveBookDeliveryPackageArchiveExport', input: { bookId, exportId: randomUUID() } },
       { op: 'cancelBookDeliveryPackageArchiveExport', input: { jobId: randomUUID() } },
     ]) {
@@ -79,7 +79,9 @@ describe('whole package archive frames (#953)', () => {
     const base = { bookId: randomUUID(), packageVersionId: randomUUID(), options: { includeAnnotations: true, includeSuggestions: true } };
     for (const body of [
       { op: 'reviewBookDeliveryPackageExport', input: { ...base, route: 'network' } },
-      { op: 'prepareBookDeliveryPackageArchiveExport', input: { ...base, memberKeys: [], reviewDigest: 'a'.repeat(64), destination: 'package.zip' } },
+      { op: 'prepareBookDeliveryPackageArchiveExport', input: { ...base, reviewDigest: 'a'.repeat(64), destination: 'package.zip' } },
+      // The archive names no members (Issue #959): an ignored list is refused, not carried.
+      { op: 'prepareBookDeliveryPackageArchiveExport', input: { ...base, memberKeys: [], reviewDigest: 'a'.repeat(64), destination: resolve('package.zip') } },
       { op: 'approveBookDeliveryPackageArchiveExport', input: { bookId: base.bookId, exportId: 'not-an-id' } },
     ]) expect(() => decodeRequest(encoder.encode(JSON.stringify({ id: randomUUID(), ...body })))).toThrow(ProtocolError);
   });

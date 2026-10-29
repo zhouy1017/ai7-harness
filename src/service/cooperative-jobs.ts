@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { ControlTaskRunInput, LaunchPolicyProjection, PromoteTaskIntentDraftInput, ServiceJobProjection } from '../shared/protocol.js';
 import { StoreError, StoreFatalError, type DraftPromotion, type EditorialStore } from './store.js';
+import { packageExportWrongRoute } from './book-delivery-package-exports.js';
 
 const MAX_ACTIVE_JOBS = 4;
 const MAX_RETAINED_JOBS = 32;
@@ -12,6 +13,8 @@ interface JobRecord {
   cancelRequested: boolean;
   scheduled: boolean;
   writeStarted?: boolean;
+  /** The route a package export was approved by (Issue #959): only that route's cancellation reaches it. */
+  route?: 'folder' | 'archive';
   /** The Book a preparation is for, when its completed result is read for that Book (AI7 初评, Issue #429). */
   bookId?: string;
 }
@@ -470,11 +473,11 @@ export class CooperativeJobOwner {
   }
 
   /** Export runs off the frame loop, so a cancellation frame can reach its pre-write boundary. */
-  startPackageExport(input: Parameters<EditorialStore['approveBookDeliveryPackageExport']>[0], available: boolean): ServiceJobProjection {
+  startPackageExport(input: Parameters<EditorialStore['approveBookDeliveryPackageExport']>[0], available: boolean, route?: 'folder' | 'archive'): ServiceJobProjection {
     this.#requireCapacity();
     if (this.#exportWork.size > 0) throw new StoreError('SERVICE_BUSY', '另一次交付包导出尚未结束。');
     const job: JobRecord = {
-      subjectId: input.exportId, cancelRequested: false, scheduled: false, writeStarted: false,
+      subjectId: input.exportId, cancelRequested: false, scheduled: false, writeStarted: false, ...(route === undefined ? {} : { route }),
       projection: { jobId: randomUUID(), kind: 'package-export', state: 'running',
         progress: { completed: 0, total: 1, label: '正在检查导出文件…' }, result: null, failure: null },
     };
@@ -482,7 +485,7 @@ export class CooperativeJobOwner {
     const work = this.#store.approveBookDeliveryPackageExport(input, available, (phase = 'commit') => {
       if (job.cancelRequested) throw new StoreError('EXPORT_CANCELLED', '已取消导出，没有写入任何文件。');
       if (phase === 'commit') job.writeStarted = true;
-    }).then((result) => {
+    }, route).then((result) => {
       job.projection = { ...job.projection, state: 'completed', result,
         progress: { completed: 1, total: 1, label: result.export.summary } };
     }, (error: unknown) => {
@@ -496,8 +499,12 @@ export class CooperativeJobOwner {
     return structuredClone(job.projection);
   }
 
-  cancelPackageExport(jobId: string): boolean {
+  cancelPackageExport(jobId: string, route?: 'folder' | 'archive'): boolean {
     const job = this.#requireJob(jobId);
+    if (job.projection.kind === 'package-export' && route !== undefined && job.route !== undefined && route !== job.route) {
+      const wrong = packageExportWrongRoute(job.route);
+      throw new StoreError(wrong.code, wrong.message);
+    }
     if (job.projection.kind !== 'package-export' || job.writeStarted ||
         (job.projection.state !== 'queued' && job.projection.state !== 'running')) return false;
     job.cancelRequested = true;

@@ -109,6 +109,15 @@ function requirePackageExport(condition: unknown, code: string, message: string)
   if (!condition) throw new BookDeliveryPackageExportError(code, message);
 }
 
+/** The two ways a package export writes (Issue #959): its own approve and cancel operations act on it, never the other's. */
+export type BookDeliveryPackageExportRoute = 'folder' | 'archive';
+
+/** A route's operation called on the other route's export: refused by name, nothing approved, cancelled or written. */
+export function packageExportWrongRoute(actual: BookDeliveryPackageExportRoute): BookDeliveryPackageExportError {
+  const label = actual === 'archive' ? '导出为压缩包' : '导出为文件夹';
+  return new BookDeliveryPackageExportError('BOOK_DELIVERY_PACKAGE_EXPORT_WRONG_ROUTE', `这次导出是「${label}」；请在「${label}」里继续。`);
+}
+
 /** Revision 41's relations, created once: a store that predates them gains two empty relations and nothing existing moves. */
 export function initializeBookDeliveryPackageExportSchema(db: DatabaseSync): void {
   if (db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'book_delivery_package_exports'").get() !== undefined) return;
@@ -257,7 +266,8 @@ export class BookDeliveryPackageExports {
    * The folder the system dialog returned (EXP-010): the review must still be exactly the one the editor read, and the
    * folder must hold none of the file names. Every file's preparation is recorded, then the export that links them.
    */
-  async prepare(input: PrepareBookDeliveryPackageExportInput, available: boolean, archiveDestination?: string): Promise<BookDeliveryPackageExportProjection> {
+  async prepare(input: Omit<PrepareBookDeliveryPackageExportInput, 'memberKeys'> & Partial<Pick<PrepareBookDeliveryPackageExportInput, 'memberKeys'>>,
+    available: boolean, archiveDestination?: string): Promise<BookDeliveryPackageExportProjection> {
     requirePackageExport(isRecord(input) && typeof input.bookId === 'string' && UUID_PATTERN.test(input.bookId) &&
       typeof input.packageVersionId === 'string' && UUID_PATTERN.test(input.packageVersionId) &&
       typeof input.reviewDigest === 'string' && DIGEST_PATTERN.test(input.reviewDigest),
@@ -269,13 +279,14 @@ export class BookDeliveryPackageExports {
       input.memberKeys.every((key) => typeof key === 'string' && key.length > 0 && key.length <= 80) &&
       new Set(input.memberKeys).size === input.memberKeys.length),
     'BOOK_DELIVERY_PACKAGE_EXPORT_INVALID', '请明确选择本次要导出的文件。');
+    const memberKeys = input.memberKeys ?? [];
     const plan = archiveDestination === undefined
       ? await this.#plan(input.bookId, input.packageVersionId, options, available, requireOffset(input.offset))
       : await this.#archivePlan(input.bookId, input.packageVersionId, options, available);
     requirePackageExport(plan.reviewDigest === input.reviewDigest, 'BOOK_DELIVERY_PACKAGE_EXPORT_CHANGED',
       '要导出的文件在查看后有了变化，请重新查看导出。');
-    const selected = archiveDestination === undefined ? plan.files.filter((file) => input.memberKeys.includes(file.key)) : plan.files;
-    requirePackageExport(archiveDestination !== undefined || selected.length === input.memberKeys.length, 'BOOK_DELIVERY_PACKAGE_EXPORT_CHANGED',
+    const selected = archiveDestination === undefined ? plan.files.filter((file) => memberKeys.includes(file.key)) : plan.files;
+    requirePackageExport(archiveDestination !== undefined || selected.length === memberKeys.length, 'BOOK_DELIVERY_PACKAGE_EXPORT_CHANGED',
       '只能导出本页已查看并明确选择的文件，请重新查看导出。');
     for (const file of archiveDestination === undefined ? selected : []) {
       requirePackageExport(!(await exists(join(folder, file.fileName))), 'BOOK_DELIVERY_PACKAGE_EXPORT_FOLDER_TAKEN',
@@ -343,11 +354,13 @@ export class BookDeliveryPackageExports {
    * file that fails or cannot be confirmed stops the rest (EXP-021): they stay unwritten, and nothing retries by itself. An
    * export already approved answers with what it came to — never a second write.
    */
-  async approve(input: ApproveBookDeliveryPackageExportInput, available: boolean, beforeWrite?: (phase?: 'check' | 'commit') => void): Promise<BookDeliveryPackageExportProjection> {
+  async approve(input: ApproveBookDeliveryPackageExportInput, available: boolean, beforeWrite?: (phase?: 'check' | 'commit') => void,
+    route?: BookDeliveryPackageExportRoute): Promise<BookDeliveryPackageExportProjection> {
     requirePackageExport(isRecord(input) && typeof input.bookId === 'string' && UUID_PATTERN.test(input.bookId) &&
       typeof input.exportId === 'string' && UUID_PATTERN.test(input.exportId),
     'BOOK_DELIVERY_PACKAGE_EXPORT_INVALID', '图书交付包导出请求无效。');
     const archive = this.#archivePreparation(input.bookId, input.exportId);
+    if (route !== undefined && route !== (archive === null ? 'folder' : 'archive')) throw packageExportWrongRoute(archive === null ? 'folder' : 'archive');
     if (archive !== null) return this.#approveArchive(input, available, archive, beforeWrite);
     const files = this.#files(input.bookId, input.exportId);
     requirePackageExport(files.length <= MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED,

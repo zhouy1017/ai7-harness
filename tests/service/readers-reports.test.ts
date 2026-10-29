@@ -461,7 +461,7 @@ describe('审稿意见 over the real store on exact sample1', () => {
         options: ALL, route: 'archive' }, true);
       const archivePath = join(roots.inputRoot, '审稿意见交付包.zip');
       const archivePreparation = await book.store.prepareBookDeliveryPackageArchiveExport({ bookId, packageVersionId: version.packageVersionId,
-        options: ALL, memberKeys: [], reviewDigest: archiveReview.reviewDigest, destination: archivePath }, true);
+        options: ALL, reviewDigest: archiveReview.reviewDigest, destination: archivePath }, true);
       const archiveExport = await book.store.approveBookDeliveryPackageExport({ bookId, exportId: archivePreparation.exportId }, true);
       const archive = unzipSync(await readFile(archivePath));
       expect(archiveExport.export.files.map((file) => [file.key, file.outcome])).toEqual([
