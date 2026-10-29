@@ -1,12 +1,12 @@
 import type { GlobalAgentOperations, GlobalAgentRendererApi } from './protocol/global-agent.js';
 import type { HouseWordListOperations, HouseWordListApi } from './protocol/house-word-list.js'; import type { CustomAnalysisPreparationFrom, TaskPlanCustomDimension } from './protocol/custom-analysis-redo.js';
-import type { JournalEditInput } from './protocol/manuscript-structure.js'; import type { SelectionSpanBlockPin, SelectionSpanField } from './protocol/selection-span.js'; import type { GlobalAttentionProjection } from './protocol/global-attention.js'; import type { ModelServiceChannelProjection } from './protocol/model-service.js';
+import type { JournalEditInput } from './protocol/manuscript-structure.js'; import type { SelectionSpanBlockPin, SelectionSpanField } from './protocol/selection-span.js'; import type { GlobalAttentionProjection } from './protocol/global-attention.js'; import type { ModelServiceChannelProjection } from './protocol/model-service.js'; import type { SearchBackendConnectionProjection, SearchBackendProbeProjection, SearchBackendSettingsProjection, SearchCandidateId, SearchConnectionTestPolicy } from './protocol/search-backends.js';
 export type { JournalEditInput, JournalStructuralEdit } from './protocol/manuscript-structure.js';
 import type { ManuscriptBlockProjection } from './protocol/manuscript-notes.js';
 export type { ManuscriptBlockKind, ManuscriptBlockProjection, ManuscriptNoteProjection } from './protocol/manuscript-notes.js';
 import type { ImportStructureChoice, ImportStructureProjection } from './protocol/import-structure.js';
 import type { EditableImportProjection, ImportIdentityFindingProjection, ManuscriptConversionProjection } from './protocol/import-intake.js';
-export type * from './protocol/import-intake.js'; export type * from './protocol/import-structure.js'; export * from './protocol/custom-analysis-redo.js'; export type * from './protocol/selection-span.js'; export type * from './protocol/global-attention.js'; export * from './protocol/model-service.js'; export { validStructureChoice } from './protocol/import-structure.js';
+export type * from './protocol/import-intake.js'; export type * from './protocol/import-structure.js'; export * from './protocol/custom-analysis-redo.js'; export type * from './protocol/selection-span.js'; export type * from './protocol/global-attention.js'; export * from './protocol/model-service.js'; export * from './protocol/search-backends.js'; export { validStructureChoice } from './protocol/import-structure.js';
 export * from './protocol/global-agent.js';
 export type { ReviewContractIdentity, ReviewExcludedFindingProjection, ReviewContractRejectionReason, ReviewEvidenceSource, ReviewReportSchema, ReviewReportDerivedSections, ReviewReportFindingEntry } from './protocol/review.js';
 import type { ReviewExcludedFindingProjection, ReviewContractRejectionReason, ReviewReportSchema, ReviewReportDerivedSections } from './protocol/review.js';
@@ -136,7 +136,7 @@ import type { PublicSampleBookSourceDigest } from './public-samplebooks.js';
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 188 as const;
+export const SERVICE_PROTOCOL_VERSION = 189 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 export interface BookFindingProjection {
@@ -3103,7 +3103,7 @@ export interface LaunchPolicyProjection {
       readonly requestDeadlineSeconds: number;
       readonly rateLimitRetry: { readonly honourRetryAfter: boolean; readonly maxRetries: number };
     };
-    readonly research?: { readonly searchesPerClaim: number };
+    readonly research?: { readonly searchesPerClaim: number }; readonly searchConnectionTest?: SearchConnectionTestPolicy;
     version: ProviderProcessingVersion | null;
     decision: 'deny' | 'eligible-only';
     /** `0` under development-ci; the verbatim token `bounded-by-run` under developer-live. */
@@ -3259,41 +3259,6 @@ export interface ModelServiceSettingsProjection {
   };
   launchPolicy: LaunchPolicyProjection; channels: ModelServiceStoredStateProjection['channels'];
   authorityStatement: '凭据就绪不授予模型处理、对外导出、运行、受控动作或公开发布权限。';
-}
-
-export interface SearchBackendConnectionProjection {
-  backendId: string;
-  credentialReference: string | null;
-  credentialOperationState: ModelCredentialOperationState;
-  selected: boolean;
-  selectedAt: string;
-}
-
-export interface SearchBackendSettingsProjection {
-  selectedBackendId: string;
-  backends: ReadonlyArray<{
-    backendId: string;
-    name: string;
-    rank: number;
-    host: string;
-    reachable: boolean;
-    p50Ms: number | null;
-    price: string;
-    keyRequired: boolean;
-    chineseHitRate: number;
-    internationalHitRate: number;
-    note: string | null;
-    connection: SearchBackendConnectionProjection;
-  }>;
-}
-
-export interface SearchBackendProbeProjection {
-  backendId: string;
-  reachable: boolean;
-  latencyMs: number;
-  resultCount: number;
-  results: ReadonlyArray<{ title: string; url: string }>;
-  failure: string | null;
 }
 
 /** A Run's exact web backend, part of its Plan Envelope digest. */
@@ -11818,7 +11783,7 @@ export type UsageCsvExportResult = { outcome: 'cancelled' } | { outcome: 'writte
 export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordListOperations {
   getSearchBackendSettings: { input: Record<string, never>; output: SearchBackendSettingsProjection };
   selectSearchBackend: { input: { backendId: string }; output: SearchBackendSettingsProjection };
-  probeSearchBackend: { input: { backendId: string }; output: SearchBackendProbeProjection };
+  probeSearchBackend: { input: { backendId: string; candidateId?: SearchCandidateId }; output: SearchBackendProbeProjection };
   saveSearchBackendCredential: {
     input: { backendId: string; credentialReference: string | null; credentialOperationState: ModelCredentialOperationState };
     output: SearchBackendConnectionProjection;
@@ -12908,7 +12873,7 @@ export type PickerReselectResult =
 
 export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   selectSearchBackend(input: { backendId: string }): Promise<ModelServiceSettingsProjection>;
-  probeSearchBackend(input: { backendId: string }): Promise<SearchBackendProbeProjection>;
+  probeSearchBackend(input: { backendId: string; candidateId?: SearchCandidateId }): Promise<SearchBackendProbeProjection>;
   saveSearchBackendCredential(input: { backendId: string; secret: string }): Promise<ModelServiceSettingsProjection>;
   removeSearchBackendCredential(input: { backendId: string }): Promise<ModelServiceSettingsProjection>;
   readonly platform: 'win32' | 'darwin';

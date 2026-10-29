@@ -1348,6 +1348,14 @@ function readPolicySync(path: string): Record<string, unknown> {
   return JSON.parse(readFileSync(join(REPO_ROOT, ...path.split('/')), 'utf8')) as Record<string, unknown>;
 }
 
+/** The selected v31 `searchConnectionTest` as the launch projects it (Issue #1055): its typed terms, every switch omitted. */
+function searchConnectionTestReading(): Record<string, unknown> {
+  const block = readPolicySync('docs/policies/provider-processing-policy.v31.json')['searchConnectionTest'] as Record<string, unknown>;
+  return Object.fromEntries(['ruleId', 'purpose', 'backendId', 'candidateId', 'endpoint', 'method', 'protocol', 'credentialSlot', 'headerForm', 'arguments',
+    'argumentsCanonicalSha256', 'maximumRequests', 'timeoutMilliseconds', 'responseMaxBytes', 'resultsMaximum', 'titleMaximumCharacters', 'urlMaximumCharacters',
+    'rejectedOperationalScopes'].map((key) => [key, block[key]]));
+}
+
 type Mutation = { readonly path: readonly (string | number)[]; readonly kind: string; readonly apply: (policy: Record<string, unknown>) => void };
 
 /** Every single-term tampering of the sections the v19 reading owns: a primitive changed, a key dropped or added, a list shortened. */
@@ -1562,6 +1570,7 @@ describe('Provider Processing v23 (ordinary-production, inherited from v19 and v
         execution: readPolicySync('docs/policies/provider-processing-policy.v27.json').execution,
         transport: readPolicySync('docs/policies/provider-processing-policy.v27.json').transport,
         research: readPolicySync('docs/policies/provider-processing-policy.v27.json').research,
+        searchConnectionTest: searchConnectionTestReading(),
         subAgents: readPolicySync('docs/policies/provider-processing-policy.v27.json').subAgents,
         backgroundProcessingEnrollment: rulesOf(readPolicySync('docs/policies/provider-processing-policy.v27.json')).at(-1)!.backgroundProcessingEnrollment,
         decision: 'eligible-only',
@@ -1592,6 +1601,7 @@ describe('Provider Processing v23 (ordinary-production, inherited from v19 and v
       execution: readPolicySync('docs/policies/provider-processing-policy.v27.json').execution,
       transport: readPolicySync('docs/policies/provider-processing-policy.v27.json').transport,
       research: readPolicySync('docs/policies/provider-processing-policy.v27.json').research,
+      searchConnectionTest: searchConnectionTestReading(),
         subAgents: readPolicySync('docs/policies/provider-processing-policy.v27.json').subAgents,
         backgroundProcessingEnrollment: rulesOf(readPolicySync('docs/policies/provider-processing-policy.v27.json')).at(-1)!.backgroundProcessingEnrollment,
       decision: 'eligible-only',

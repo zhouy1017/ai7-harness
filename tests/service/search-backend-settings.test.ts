@@ -39,6 +39,27 @@ describe('the persisted search settings and schema 74', () => {
     } finally { store?.close(); await roots.dispose(); }
   });
 
+  it('discloses the DeepSeek direct-search candidate as unmeasured and unselectable beside the unchanged ranked backends (Issue #1055)', async () => {
+    const roots = await createServiceTestRoots();
+    let store: EditorialStore | undefined;
+    try {
+      store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      const settings = store.getSearchBackendSettings();
+      expect(settings.backends.map((entry) => entry.backendId)).toEqual(['search-tinyfish', 'search-deepseek', 'search-brave', 'search-parallel', 'search-bochaai']);
+      expect(settings.candidates).toHaveLength(1);
+      const [candidate] = settings.candidates;
+      expect(candidate).toMatchObject({ backendId: 'search-deepseek', candidateId: 'deepseek-direct-search-v1', revision: 1, measurement: 'not-measured', selectable: false,
+        endpoint: 'https://api.deepseek.com/v1/tools/search', protocol: 'deepseek-direct-search', capabilities: { search: true, fetch: true }, price: 'USD 0.75 / 1000 次' });
+      const disclosure = candidate!.disclosure.join(' ');
+      for (const fact of ['未实测', '不能用于任务', '/v1/tools/fetch', 'UNESCO World Book and Copyright Day April 23', '2026-10-29', '空结果、失败与超时不计费', '不承诺直连调用免费', '不保存']) {
+        expect(disclosure).toContain(fact);
+      }
+      expect(() => store!.selectSearchBackend('deepseek-direct-search-v1')).toThrow(/未提供/u);
+      expect(() => store!.saveSearchBackendCredential('deepseek-direct-search-v1', null, 'ready')).toThrow(/未提供/u);
+      expect(store.getSearchBackendSettings().selectedBackendId).toBe('search-tinyfish');
+    } finally { store?.close(); await roots.dispose(); }
+  });
+
   it('migrates exact revision 73 once and refuses a malformed terminal CHECK', async () => {
     const roots = await createServiceTestRoots();
     let store: EditorialStore | undefined;

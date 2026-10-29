@@ -161,8 +161,8 @@ describe('the protection words (ED-055, DUR-003, DUR-004, DUR-005, DUR-009)', ()
 });
 
 describe('the Edit Journal write-failure injection launch rule (T0-1)', () => {
-  it('is protocol 188 for the model-service channel catalogue, a 图书交付包 archive preparation that names no members, custom-dimension 同类型重做 / 重新准备 / 重新确认 on the frozen version, the live processing indicator on 待我处理, exact cross-paragraph selection spans, candidate structure and long paragraphs in the import fidelity review, note blocks on the manuscript window, Enter/Backspace structural journal edits, composite stages marked 空闲时处理, composite procedure runs, scoped Global Agent turns, editable procedure commands and selected policy/profile projections while retaining explicit Word import readings', () => {
-    expect(SERVICE_PROTOCOL_VERSION).toBe(188);
+  it('is protocol 189 for the DeepSeek direct-search candidate connection test and its settings disclosure, the model-service channel catalogue, a 图书交付包 archive preparation that names no members, custom-dimension 同类型重做 / 重新准备 / 重新确认 on the frozen version, the live processing indicator on 待我处理, exact cross-paragraph selection spans, candidate structure and long paragraphs in the import fidelity review, note blocks on the manuscript window, Enter/Backspace structural journal edits, composite stages marked 空闲时处理, composite procedure runs, scoped Global Agent turns, editable procedure commands and selected policy/profile projections while retaining explicit Word import readings', () => {
+    expect(SERVICE_PROTOCOL_VERSION).toBe(189);
   });
 
   it('arms only J-02\'s `armed` launch in the development-ci scope and refuses every other present control', () => {

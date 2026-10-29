@@ -56,5 +56,51 @@
   "notes": [
     "DeepSeek server-side web_search reading (Issue #883): listed — the Anthropic-compatible endpoint documents the server-tool result blocks as Supported and its Claude Code guide says web search runs through DeepSeek's API, but no page names the tool type or states the feature for a generic Anthropic client.",
     "Searching here costs model tokens on the same DeepSeek key the production route uses, and the query reaches a model before any search; the evaluation sends only the public query."
-  ]
+  ],
+  "candidate": {
+    "candidateId": "deepseek-direct-search-v1",
+    "revision": 1,
+    "displayName": "DeepSeek 搜索 API（直连）",
+    "measurement": "not-measured",
+    "search": {
+      "endpoint": "https://api.deepseek.com/v1/tools/search",
+      "method": "POST",
+      "protocol": "deepseek-direct-search",
+      "headerForm": "authorization-bearer",
+      "probeArguments": {
+        "query": "UNESCO World Book and Copyright Day April 23",
+        "count": 10,
+        "need_content": false
+      },
+      "evidence": "deepseek-search-api"
+    },
+    "fetch": {
+      "endpoint": "https://api.deepseek.com/v1/tools/fetch",
+      "method": "POST",
+      "protocol": "deepseek-direct-fetch",
+      "headerForm": "authorization-bearer",
+      "evidence": "deepseek-search-fetch-guide"
+    },
+    "price": {
+      "amount": 0.75,
+      "currency": "USD",
+      "per": 1000,
+      "basis": "USD 0.75 per 1,000 successful search requests and the same for fetch; only an HTTP 200 that produces a result is billed (empty results, failures and timeouts are not), and count does not change the price. The guide's free period covers only server-side tool calls made through DeepSeek Harness, Claude Code or Codex, until 2026-11-01 00:00 Beijing time; it states no free entitlement for a direct API call.",
+      "evidence": "deepseek-search-fetch-guide"
+    },
+    "evidence": {
+      "deepseek-search-api": {
+        "kind": "vendor-documentation",
+        "source": "DeepSeek official Search API reference, https://api-docs.deepseek.com/api/search/",
+        "readOn": "2026-10-29",
+        "note": "POST /v1/tools/search with application/json. Body: query (string, required, 1 to 128 characters, not all whitespace, query operators supported), count (integer 1 to 50, default 10), ori_question (optional), localization (optional IP, default empty) and need_content (boolean, default false; when false content is always empty). 200 returns results[]: rerank_score, title, url, snippet, summary, content, site_name, site_icon, date and authority; an empty array means no match."
+      },
+      "deepseek-search-fetch-guide": {
+        "kind": "vendor-documentation",
+        "source": "DeepSeek official Search & Fetch guide, https://api-docs.deepseek.com/guides/search/",
+        "readOn": "2026-10-29",
+        "note": "Base URL https://api.deepseek.com; Search POST /v1/tools/search and Fetch POST /v1/tools/fetch ({url} up to 8,192 characters, http or https with a host and no userinfo; returns title and Markdown content); Authorization: Bearer <DeepSeek API Key>; unknown body fields are ignored. Errors use an OpenAI-compatible envelope: 400 invalid request, 401 missing or invalid key, 402 insufficient balance, 403 fetch refused by security policy, 404 fetch found no usable content, 408, 413, 429 QPS limit (search 100, fetch 25 plus a per-domain limit, per account), 500 and 504. Billing USD 0.75 per 1,000 successful search or fetch requests from 2026-11-01 00:00 Beijing time; server-side calls through DeepSeek Harness, Claude Code or Codex are free until then. The page proves no account, entitlement or live reachability."
+      }
+    }
+  }
 }

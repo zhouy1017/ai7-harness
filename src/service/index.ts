@@ -162,7 +162,7 @@ async function dispatch(
    * results: under ordinary-production the route new Tasks use; under every other scope the launch's own, unchanged.
    */
   modelServiceChanged: () => Promise<LaunchPolicyProjection> = async () => launchPolicy,
-  probeBackend: (id: string) => Promise<import('../shared/protocol.js').SearchBackendProbeProjection> = async () => { throw new Error('SEARCH_PROBE_UNAVAILABLE'); },
+  probeBackend: (input: Extract<ServiceRequest, { op: 'probeSearchBackend' }>['input']) => Promise<import('../shared/protocol.js').SearchBackendProbeProjection> = async () => { throw new Error('SEARCH_PROBE_UNAVAILABLE'); },
 ): Promise<ServiceSuccessResponse> {
   const analysisProgress = (runRecordId: string) => analysisExecution.progressFor(runRecordId);
   // 替换本机全部数据 waits for AI7's next start (Issue #434 review): until then nothing is written, so no change made meanwhile
@@ -199,7 +199,7 @@ async function dispatch(
     case 'removeSearchBackendCredential':
       return { id: request.id, ok: true, op: request.op, result: store.saveSearchBackendCredential(request.input.backendId, null, 'missing') };
     case 'probeSearchBackend':
-      return { id: request.id, ok: true, op: request.op, result: await probeBackend(request.input.backendId) };
+      return { id: request.id, ok: true, op: request.op, result: await probeBackend(request.input) };
     case 'selectFastRoleModel':
       store.selectFastRoleModel(request.input.route, request.input.modelId);
       await modelServiceChanged();
@@ -2121,11 +2121,18 @@ async function run(): Promise<void> {
     store.initialEvaluationLedger.bindLaunch(launch);
     harness = await mountDormantHarness();
     jobs = new CooperativeJobOwner(store);
-    const [{ searchBackend }, { probeSearchBackend, SEARCH_BACKEND_PROBE_QUERY, platformToolsFromProjection }, { CredentialBroker }, { readPlatformToolsRule }, { canonicalJson, sha256Hex }, { CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES }] = await Promise.all([
+    const [{ searchBackend }, { probeSearchBackend, composeSearchCandidateProbe, SearchCandidateProbeRefusal, SEARCH_BACKEND_PROBE_QUERY, platformToolsFromProjection }, { CredentialBroker }, { readPlatformToolsRule }, { canonicalJson, sha256Hex }, { CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES }] = await Promise.all([
       import('./provider/search-backends/index.js'), import('./provider/search-service.js'), import('./provider/credential-broker.js'), import('./provider/platform-tools.js'), import('./analysis/canonical.js'), import('../shared/provider-configuration.generated.js'),
     ]);
     const probeBroker = new CredentialBroker(createKeyringSecretResolver(), { developmentReferences: production === null ? 'admitted' : 'refused' });
-    const probeBackend = async (id: string): Promise<import('../shared/protocol.js').SearchBackendProbeProjection> => {
+    const probeBackend = async (input: { backendId: string; candidateId?: string }): Promise<import('../shared/protocol.js').SearchBackendProbeProjection> => {
+      // The candidate connection test (Issue #1055): the selected policy's own purpose, refused by scope before anything is read.
+      if (input.candidateId !== undefined) {
+        return composeSearchCandidateProbe({ backendId: input.backendId, candidateId: input.candidateId, operationalScope: launchForm.trustedOperationalScope, launchPolicy,
+          connection: (backendId) => store!.getSearchBackendConnections().find((entry) => entry.backendId === backendId), broker: probeBroker, fetch: modelServiceFetch, admitHost: admitTicketHost,
+        }).catch((error: unknown) => { throw error instanceof SearchCandidateProbeRefusal ? new StoreError(error.code, error.message) : error; });
+      }
+      const id = input.backendId;
       const adapter = searchBackend(id);
       if (launchForm.trustedOperationalScope === 'development-ci') {
         // Provider-free settings probe: the same adapter reads a synthetic public title and URL; no credential, host or native fetch.

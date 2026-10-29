@@ -42,7 +42,7 @@ import { HouseReviewPreferenceLedger, houseReviewPreferenceKindDefinition, initi
 import type { HouseReviewPreferenceProjection, HouseReviewPreferenceUse, EditQualitySignalsProjection } from '../shared/protocol.js';
 import type { ApplyReceiptProjection, BatchProposalDecisionDraftInput, InspectApplyReceiptInput, PrepareReverseApplyInput, ProposalDraftBatchProjection, ProposalWorkspaceInput, ProposalWorkspaceProjection, RecordProposalDecisionInput, ReverseApplyPreparationProjection, SaveProposalDecisionDraftInput } from '../shared/protocol.js';
 import { initializeProposalReviewSchema } from './editorial-marks.js';
-import { SEARCH_BACKENDS, defaultSearchBackend } from './provider/search-backends.js';
+import { SEARCH_BACKENDS, defaultSearchBackend } from './provider/search-backends.js'; import { searchBackendSettingsProjection } from './provider/search-backend-settings.js';
 import { RetrievalIndex, RetrievalError, type RetrievalMaterialVectorQuery, type RetrievalSource } from './retrieval/index.js';
 import { materialRetrievalSources } from './retrieval/source-readers.js';
 import { TASK_MATERIALS_NONE, TASK_MATERIALS_STATEMENT, TASK_MATERIAL_LIVE_UNAVAILABLE, REVIEW_MATERIAL_CATEGORY_REQUIRED, taskMaterialReferenceLine, taskMaterialKindDefinition, taskMaterialSources, taskMaterialWords, taskMaterialRefusal, taskMaterialSettled, TASK_MATERIAL_OFFER_DAMAGED, type MaterialGuardRefusal, type TaskMaterialBoundary, type TaskMaterialReading, type TaskMaterialSource } from './task-material-references.js';
@@ -16771,25 +16771,7 @@ export class EditorialStore {
   }
 
   getSearchBackendSettings(): import('../shared/protocol.js').SearchBackendSettingsProjection {
-    const connections = this.getSearchBackendConnections();
-    return { selectedBackendId: connections.find((row) => row.selected)!.backendId,
-      backends: SEARCH_BACKENDS.filter((entry) => entry.shipped).map((entry) => ({
-        backendId: entry.id, name: entry.displayName, rank: entry.rank!, host: entry.host!,
-        reachable: entry.profile?.verdict === 'measured', p50Ms: entry.profile?.latencyMs.p50 ?? null,
-        // A plain price line: a token-billed backend shows its measured cost per call, never the vendor's English basis.
-        price: entry.price.amount === null
-          ? entry.profile?.costPerCallUsd === null || entry.profile?.costPerCallUsd === undefined ? '按 token 计费' : `按 token 计费，实测约 USD ${entry.profile.costPerCallUsd.toFixed(4)} / 次`
-          : entry.price.amount === 0 ? '免费' : `${entry.price.currency} ${entry.price.amount} / ${entry.price.per === 1 ? '' : `${entry.price.per} `}次`,
-        keyRequired: entry.keyRequired,
-        chineseHitRate: entry.profile === null || entry.profile.totals.chinese === 0 ? 0 : entry.profile.hits.chinese / entry.profile.totals.chinese,
-        internationalHitRate: entry.profile === null || entry.profile.totals.international === 0 ? 0 : entry.profile.hits.international / entry.profile.totals.international,
-        note: [entry.id === 'search-tinyfish' ? '提供方限速：30 次/分钟、500 次/小时；另一页面标示每日 12,000 次。' : entry.id === 'search-brave' ? '测量时出现间歇性连接失败。' : entry.profile?.note ?? null,
-          // #884: a price whose vendor source was not retained is shown only with that caveat.
-          entry.priceSource.verified ? null : '单价来源未经核实：这是评估时记录的历史标价，以服务商当前价格页为准。',
-        ].filter((line): line is string => line !== null).join(' ') || null,
-        connection: connections.find((row) => row.backendId === entry.id)!,
-      })),
-    };
+    return searchBackendSettingsProjection(this.getSearchBackendConnections());
   }
 
   getSearchBackendConnections(): import('../shared/protocol.js').SearchBackendConnectionProjection[] {
