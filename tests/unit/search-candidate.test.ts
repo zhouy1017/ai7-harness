@@ -7,6 +7,7 @@ import {
   SEARCH_BACKEND_DECLARATIONS, SEARCH_BACKEND_EVALUATION, SEARCH_BACKENDS, defaultSearchBackend, searchBackendCandidate, searchBackendCandidateOf,
   searchBackendDeclarationOf, searchBackendOutcome,
 } from '../../src/service/provider/search-backends.js';
+import { searchFailureClass } from '../../src/service/provider/search-service.js';
 import { candidateConfigurationDigestOf, legacyConfigurationDigestOf, searchBackendConfigurationDigest } from '../../src/service/provider/search-backends/index.js';
 import { deepseekBackend, deepseekDirectFetchRequest, deepseekDirectSearchRequest, readDeepseekDirectFetch, readDeepseekDirectSearch } from '../../src/service/provider/search-backends/deepseek.js';
 import type { SearchConnectionTestPolicy } from '../../src/shared/protocol.js';
@@ -130,5 +131,14 @@ describe('the candidate probe decision and its single credential release', () =>
     await expect(broker.releaseTo(binding, ticket, async (value) => value)).resolves.toBe('placeholder');
     await expect(broker.releaseTo(binding, ticket, async () => 'again')).rejects.toMatchObject({ code: 'CREDENTIAL_RELEASE_REFUSED' });
     expect(reads).toBe(1);
+  });
+});
+
+describe('the closed search failure classes', () => {
+  it('reads a class from the HTTP status or an AI7 error code, never from a body', () => {
+    expect([200, 400, 401, 402, 403, 404, 429, 500, 504].map((status) => searchFailureClass({ status })))
+      .toEqual(['malformed', 'rejected', 'auth', 'quota', 'auth', 'rejected', 'rate', 'server', 'server']);
+    expect(['SEARCH_SERVICE_CREDENTIAL_REQUIRED', 'CREDENTIAL_MISSING', 'PLATFORM_TOOL_TIMEOUT', 'PLATFORM_TOOL_FAILED', 'PLATFORM_TOOL_BODY_TOO_LARGE', 'PLATFORM_TOOL_TICKET_REFUSED']
+      .map((code) => searchFailureClass({ code }))).toEqual(['credential-missing', 'credential-missing', 'transport', 'transport', 'malformed', 'refused']);
   });
 });

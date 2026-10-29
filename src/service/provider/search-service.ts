@@ -221,6 +221,24 @@ export async function sendSearchCall(authorized: AuthorizedSearchCall, fetch: Pl
   }
 }
 
+/**
+ * Why one search submission failed, as a closed class (Issue #1181): a missing key, an authentication or account-balance
+ * rejection, a rate limit, a server error, any other rejection, an answer AI7 cannot read, a refusal before sending, or a
+ * transport that did not complete. Classes come from the HTTP status or AI7's own error code — never from a provider's body.
+ */
+export type SearchFailureClass = 'credential-missing' | 'auth' | 'quota' | 'rate' | 'server' | 'rejected' | 'malformed' | 'refused' | 'transport';
+
+export function searchFailureClass(failure: { readonly status: number } | { readonly code: string }): SearchFailureClass {
+  if ('status' in failure) {
+    const { status } = failure;
+    return status === 200 ? 'malformed' : status === 401 || status === 403 ? 'auth' : status === 402 ? 'quota' : status === 429 ? 'rate'
+      : status >= 500 && status <= 599 ? 'server' : 'rejected';
+  }
+  if (failure.code === 'SEARCH_SERVICE_CREDENTIAL_REQUIRED' || failure.code === 'CREDENTIAL_MISSING' || failure.code === 'SEARCH_CREDENTIAL_MISSING') return 'credential-missing';
+  if (failure.code === 'PLATFORM_TOOL_BODY_TOO_LARGE') return 'malformed';
+  return failure.code === 'PLATFORM_TOOL_TIMEOUT' || failure.code === 'PLATFORM_TOOL_FAILED' || failure.code.startsWith('TRANSPORT_') ? 'transport' : 'refused';
+}
+
 /** The settings path's only query; it contains no Book or manuscript input. */
 export const SEARCH_BACKEND_PROBE_QUERY = 'UNESCO World Book and Copyright Day April 23';
 

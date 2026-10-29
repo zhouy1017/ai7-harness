@@ -3647,7 +3647,7 @@ export interface RunReportUsageProjection {
   exactFetchCalls?: number;
   refusedRetrievalCalls?: number;
   searchCalls?: Readonly<Record<string, number>>;
-  refusedSearchCalls?: number;
+  refusedSearchCalls?: number; searchFailures?: Readonly<Record<string, number>>;
   fetchCount?: number;
   fetchBytes?: number;
   requests: number;
