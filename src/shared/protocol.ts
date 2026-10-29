@@ -1,8 +1,15 @@
 import type { GlobalAgentOperations, GlobalAgentRendererApi } from './protocol/global-agent.js';
-import type { HouseWordListOperations, HouseWordListApi } from './protocol/house-word-list.js';
+import type { HouseWordListOperations, HouseWordListApi } from './protocol/house-word-list.js'; import type { CustomAnalysisPreparationFrom, TaskPlanCustomDimension } from './protocol/custom-analysis-redo.js';
+import type { JournalEditInput } from './protocol/manuscript-structure.js'; import type { SelectionSpanBlockPin, SelectionSpanField } from './protocol/selection-span.js'; import type { GlobalAttentionProjection } from './protocol/global-attention.js'; import type { ModelServiceChannelProjection } from './protocol/model-service.js'; import type { SearchBackendConnectionProjection, SearchBackendProbeProjection, SearchBackendSettingsProjection, SearchCandidateId, SearchConnectionTestPolicy } from './protocol/search-backends.js';
+export type { JournalEditInput, JournalStructuralEdit } from './protocol/manuscript-structure.js';
+import type { ManuscriptBlockProjection } from './protocol/manuscript-notes.js';
+export type { ManuscriptBlockKind, ManuscriptBlockProjection, ManuscriptNoteProjection } from './protocol/manuscript-notes.js';
+import type { ImportStructureChoice, ImportStructureProjection } from './protocol/import-structure.js';
+import type { EditableImportProjection, ImportIdentityFindingProjection, ManuscriptConversionProjection } from './protocol/import-intake.js';
+export type * from './protocol/import-intake.js'; export type * from './protocol/import-structure.js'; export * from './protocol/custom-analysis-redo.js'; export type * from './protocol/selection-span.js'; export type * from './protocol/global-attention.js'; export * from './protocol/model-service.js'; export * from './protocol/search-backends.js'; export { validStructureChoice } from './protocol/import-structure.js';
 export * from './protocol/global-agent.js';
-export type { ReviewContractIdentity, ReviewExcludedFindingProjection, ReviewContractRejectionReason } from './protocol/review.js';
-import type { ReviewExcludedFindingProjection, ReviewContractRejectionReason } from './protocol/review.js';
+export type { ReviewContractIdentity, ReviewExcludedFindingProjection, ReviewContractRejectionReason, ReviewEvidenceSource, ReviewReportSchema, ReviewReportDerivedSections, ReviewReportFindingEntry } from './protocol/review.js';
+import type { ReviewExcludedFindingProjection, ReviewContractRejectionReason, ReviewReportSchema, ReviewReportDerivedSections } from './protocol/review.js';
 import type {
   QuickStartBaselineAnalysisResult,
   HISTORICALLY_AFFECTED_RESULT_MARKER,
@@ -113,7 +120,7 @@ import type {
   DatabaseImportPreviewProjection,
   DatabaseReplacementsProjection,
 } from './protocol/data-storage.js';
-import type { ProcedureDefinitionPin, PreinstalledProcedureProjection } from './protocol/procedures.js';
+import type { CompositeReviewRunRequest, ProcedureDefinitionPin, PreinstalledProcedureProjection } from './protocol/procedures.js';
 import type {
   ChangeEditorialLearningInput,
   CreateEditorialMemoryInput,
@@ -129,7 +136,7 @@ import type { PublicSampleBookSourceDigest } from './public-samplebooks.js';
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 178 as const;
+export const SERVICE_PROTOCOL_VERSION = 189 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 export interface BookFindingProjection {
@@ -1182,37 +1189,6 @@ export function acceptedSourceImportRetainedBoundaryLabels(
     : [current];
 }
 
-/**
- * The converter a format is read through, and the format it was read from. A format with no
- * conversion is read natively; nothing else in the product may present a conversion as a native
- * read (ADR 0072 §2, §3).
- */
-export interface ManuscriptConversionProjection {
-  converterIdentity: string;
-  sourceFormat: 'TXT' | 'MD' | 'DOC';
-}
-
-/**
- * Whether the staged file can become an editable Manuscript, why not when it cannot, and through
- * which converter when it can only be read through one.
- */
-export type EditableImportProjection =
-  | { available: true; conversion?: ManuscriptConversionProjection }
-  | { available: false; code: 'FORMAT_UNSUPPORTED_FOR_EDITABLE_IMPORT'; reason: string };
-
-export interface ImportIdentityFindingProjection {
-  bookId: string;
-  bookTitle: string;
-  sourceVersionId: string;
-  importRecordId: string;
-  recordKind: 'manuscript-import' | 'source-import' | 'manuscript-reimport';
-  recordLabel: '稿件导入记录' | '来源导入记录' | '稿件重新导入记录';
-  identityClass: {
-    kind: 'immutable-original' | 'parsed-content-structure' | 'filename-collision';
-    label: '精确原始文件身份' | '发现相同内容' | '名称相同，内容不同';
-  };
-}
-
 /** An explicit choice for supported native tracked Word intake; accepted mode requires its own confirmation. */
 export interface WordTrackedChangesChoice {
   mode: 'suggestions' | 'accepted-baseline';
@@ -1326,6 +1302,8 @@ export interface StagedImportProjection {
   fidelity: ReadonlyArray<FidelityCategoryProjection>;
   detectedBlockCount: number;
   wordTrackedChanges?: WordTrackedChangesIntakeProjection;
+  /** Candidate headings and split paragraphs (Issue #1205); absent when the reading offers neither. */
+  structure?: ImportStructureProjection;
 }
 
 export interface ReviewBeforeImportProjection {
@@ -1359,6 +1337,8 @@ export interface ReviewBeforeImportProjection {
    * `retain` (保留为文本框, the default) or `merge` (并入正文); null when the file has none it can choose for.
    */
   textBoxDisposition: TextBoxDisposition | null;
+  /** The staged structure and the choice the review was formed with (Issue #1205), when the staged draft offered one. */
+  structure?: { projection: ImportStructureProjection; choice: ImportStructureChoice };
   trackedChanges?: WordTrackedChangesChoice;
   wordLearning?: { globalEnabled: boolean; bookExcluded: boolean; sourceTemplateCount: number; eligibleSampleCount: number };
   recordsToCreate: ReadonlyArray<string>;
@@ -1571,15 +1551,6 @@ export interface ReimportLineageSourceVersionPageProjection {
   items: ReadonlyArray<string>;
   previousCursor: string | null;
   nextCursor: string | null;
-}
-
-export interface ManuscriptBlockProjection {
-  blockId: string;
-  position: number;
-  kind: 'title' | 'heading' | 'paragraph';
-  level: number | null;
-  text: string;
-  digest: string;
 }
 
 export interface ManuscriptWindowProjection {
@@ -2254,7 +2225,7 @@ export interface FastInteractionRoutesProjection {
   readonly conflictRegenerate: FastInteractionRouteProjection;
 }
 
-/** 润色这段: the exact words the editor selected in one block of the Book's manuscript. */
+/** 润色这段: the exact words the editor selected in one block of the Book's manuscript, or across contiguous paragraphs (#1176). */
 export interface PolishSelectionInput {
   readonly selection: DialogueSelectionInput;
 }
@@ -2592,13 +2563,13 @@ export type RunBudgetCeilingState = 'unset' | { kind: 'tokens'; maxTotalTokens: 
 
 /** ADR 0095 / #1160: a technical leaf inside the parent attempt, never another Task or Run. */
 export interface ParentAttemptSubagentDeclaration {
-  readonly profileId: 'ai7-stock-typos-leaf/1';
+  readonly profileId: 'ai7-stock-typos-leaf/1' | 'ai7-stock-typos-fanout/1';
   readonly provider: 'spawn';
   readonly transport: 'same-process';
   readonly lifetime: 'one-shot';
   readonly stage: 'units';
   readonly maxDepth: 1;
-  readonly maxActiveChildren: 1;
+  readonly maxActiveChildren: 1 | 3;
   readonly unitWidth: 1;
   readonly awaitDisposal: true;
 }
@@ -3132,7 +3103,7 @@ export interface LaunchPolicyProjection {
       readonly requestDeadlineSeconds: number;
       readonly rateLimitRetry: { readonly honourRetryAfter: boolean; readonly maxRetries: number };
     };
-    readonly research?: { readonly searchesPerClaim: number };
+    readonly research?: { readonly searchesPerClaim: number }; readonly searchConnectionTest?: SearchConnectionTestPolicy;
     version: ProviderProcessingVersion | null;
     decision: 'deny' | 'eligible-only';
     /** `0` under development-ci; the verbatim token `bounded-by-run` under developer-live. */
@@ -3197,7 +3168,7 @@ export interface ModelServiceStoredStateProjection {
   connection: ModelServiceConnectionProjection | null;
   /** Every route's connection (Issue #811), Go first; at most one is `selected`. */
   connections: readonly ModelServiceConnectionProjection[];
-  launchPolicy: LaunchPolicyProjection;
+  launchPolicy: LaunchPolicyProjection; channels: readonly ModelServiceChannelProjection[];
 }
 
 /** One route the Main Editorial Role may be configured to, as 设置 › 模型服务 offers it (Issue #811). */
@@ -3286,43 +3257,8 @@ export interface ModelServiceSettingsProjection {
     label: 'Windows 凭据管理器' | 'macOS 钥匙串';
     availability: 'available' | 'unavailable';
   };
-  launchPolicy: LaunchPolicyProjection;
+  launchPolicy: LaunchPolicyProjection; channels: ModelServiceStoredStateProjection['channels'];
   authorityStatement: '凭据就绪不授予模型处理、对外导出、运行、受控动作或公开发布权限。';
-}
-
-export interface SearchBackendConnectionProjection {
-  backendId: string;
-  credentialReference: string | null;
-  credentialOperationState: ModelCredentialOperationState;
-  selected: boolean;
-  selectedAt: string;
-}
-
-export interface SearchBackendSettingsProjection {
-  selectedBackendId: string;
-  backends: ReadonlyArray<{
-    backendId: string;
-    name: string;
-    rank: number;
-    host: string;
-    reachable: boolean;
-    p50Ms: number | null;
-    price: string;
-    keyRequired: boolean;
-    chineseHitRate: number;
-    internationalHitRate: number;
-    note: string | null;
-    connection: SearchBackendConnectionProjection;
-  }>;
-}
-
-export interface SearchBackendProbeProjection {
-  backendId: string;
-  reachable: boolean;
-  latencyMs: number;
-  resultCount: number;
-  results: ReadonlyArray<{ title: string; url: string }>;
-  failure: string | null;
 }
 
 /** A Run's exact web backend, part of its Plan Envelope digest. */
@@ -3711,7 +3647,7 @@ export interface RunReportUsageProjection {
   exactFetchCalls?: number;
   refusedRetrievalCalls?: number;
   searchCalls?: Readonly<Record<string, number>>;
-  refusedSearchCalls?: number;
+  refusedSearchCalls?: number; searchFailures?: Readonly<Record<string, number>>;
   fetchCount?: number;
   fetchBytes?: number;
   requests: number;
@@ -4511,7 +4447,7 @@ export interface SaveCustomAnalysisDimensionInput {
 export interface PrepareCustomAnalysisInput {
   bookId: string;
   dimensionId: string;
-  update: BaselineAnalysisUpdateRequest | null;
+  update: BaselineAnalysisUpdateRequest | null; /** 同类型重做 / 重新准备 / 重新确认 (Issue #931): on the version that Task froze. */ from?: CustomAnalysisPreparationFrom | null;
 }
 
 /** Every analysis kind a Book may hold, and every Task mode any of them declares. */
@@ -4838,7 +4774,7 @@ export interface BaselineAnalysisPlanAdaptationProjection {
 export type SafeRetryRepetition = 'byte-identical' | 'differs' | 'unrecorded';
 
 export interface BaselineAnalysisExecutionBindingProjection {
-  compositionVersion?: 2 | 3;
+  compositionVersion?: 2 | 3 | 4;
   attemptId: string;
   bindingDigest: string;
   harnessSessionId: string;
@@ -5123,7 +5059,7 @@ export interface BaselineAnalysisProjection {
     stopCondition: string;
   };
   planEnvelope: null | {
-    compositionVersion?: 2 | 3;
+    compositionVersion?: 2 | 3 | 4;
     digest: string;
     dispatchAllowed: boolean;
     providerStatus: 'remote-denied-local-deterministic' | 'remote-denied-no-route' | 'remote-eligible-developer-live' | 'remote-eligible-ordinary-production';
@@ -7302,8 +7238,8 @@ export interface EditQualitySignalsProjection {
   categories: ReadonlyArray<{ categoryId: string; applied: number; surviving: number; editVolume: number; lineageDigest: string }>;
 }
 
-export interface ReviewReportRecord {
-  schema: 'ai7.review.report/1';
+export interface ReviewReportRecord extends ReviewReportDerivedSections {
+  schema: ReviewReportSchema;
   reviewRunId: string;
   version: number;
   generatedAt: string;
@@ -7525,7 +7461,7 @@ export interface FrozenSeriesScope {
   readonly exclusions: ReadonlyArray<{ readonly exclusionId: string; readonly revisionId: string; readonly version: number }>;
 }
 
-export interface PrepareReviewRunInput {
+export interface PrepareReviewRunInput extends CompositeReviewRunRequest {
   decisionId?: string;
   localCheck?: import('./protocol/procedures.js').LocalCheckOptions;
   seriesId?: string | null;
@@ -7918,7 +7854,7 @@ export interface TaskPlanProjection {
   /** Transport-only pages; derivation and authority records remain complete. String cursors count Unicode code points. */
   listPages?: Readonly<Record<string, { shown: number; total: number; nextOrdinal: number | null; digest: string }>>;
   readonly seriesScopes?: ReadonlyArray<FrozenSeriesScope>;
-  bookId: string;
+  bookId: string; /** A 自定义分析维度 Task's dimension (Issue #931): its redo, 重新准备 and 重新确认 prepare on it, never the baseline. */ custom?: TaskPlanCustomDimension;
   kind: TaskPlanKind;
   /** The Task Intent or the Review Run this plan belongs to. */
   ref: string;
@@ -8721,7 +8657,7 @@ export interface ProcedureRecommendationCandidate {
   readonly version: number;
   readonly documentSha256: string;
   readonly purpose: string;
-  readonly kind: '可复用工序';
+  readonly kind: '可复用工序' | '预装工序' | '本社工序';
   readonly fit: 'all' | 'partial';
   readonly rationale: readonly string[];
   readonly requiredInputs: readonly string[];
@@ -10852,20 +10788,6 @@ export interface GlobalAttentionGroupProjection {
   total: number;
 }
 
-/**
- * 待我处理 across every Book (editor-surfaces §8.1, V2-UX-ATTN-001 to 009, IA-007). A read: composing it
- * terminalizes, claims and writes nothing (V2-UX-ATTN-008). An item resolves by itself when the record
- * moves on — a newer Task of the same kind for its Book, a decision made, a completion aging out.
- */
-export interface GlobalAttentionProjection {
-  /** Always the four groups, in the fixed order. */
-  groups: ReadonlyArray<GlobalAttentionGroupProjection>;
-  /** The Actionable Attention Count: the items of the first two groups, and no others (V2-UX-ATTN-006). */
-  actionableCount: number;
-  /** A Run is in flight now, or a Review Run is being driven: a reader follows it slowly until it ends. */
-  running: boolean;
-}
-
 // ---- ① 任务面 (Issue #423, plan slice S77a; editor-surfaces §1 任务面, V2-UX-TASK-044, TASK-045) --------------------
 
 /**
@@ -10926,8 +10848,8 @@ export const MAX_DIALOGUE_PROPOSAL_CHARACTERS = 4_000;
 /** The longest selection a dialogue may be asked about, in graphemes. */
 export const MAX_DIALOGUE_SELECTION_GRAPHEMES = 2_000;
 
-/** The exact words of that Book's manuscript the question is about, as the editor selected them (one block). */
-export type DialogueSelectionInput = SeriesKnowledgeSpanInput;
+/** The exact words of that Book's manuscript the question is about, as the editor selected them: in one block, or a span (#1176). */
+export type DialogueSelectionInput = SeriesKnowledgeSpanInput & SelectionSpanField;
 
 export interface AskAboutSelectionInput {
   readonly selection: DialogueSelectionInput;
@@ -11007,7 +10929,7 @@ export interface DialogueProjection {
   /** `null` when the Harness Session Ledger holds no turn of this dialogue here. */
   readonly question: string | null;
   readonly selection: string | null;
-  readonly range: { readonly blockId: string; readonly fromGrapheme: number; readonly toGrapheme: number };
+  readonly range: { readonly blockId: string; readonly fromGrapheme: number; readonly toGrapheme: number; readonly span?: ReadonlyArray<SelectionSpanBlockPin> };
   readonly askedAt: string;
   readonly attempts: ReadonlyArray<DialogueAttemptProjection>;
   readonly actions: { readonly stop: boolean; readonly continue: boolean; readonly regenerate: boolean; readonly convert: boolean };
@@ -11172,7 +11094,7 @@ export interface InspectTaskIntentDraftsInput {
  * a newer revision; checked exactly when the Task's own revision is saved), or `任务范围需要重新选择` (the words are no longer
  * there).
  */
-export interface TaskIntentDraftRangeProjection {
+export interface TaskIntentDraftRangeProjection extends SelectionSpanField {
   readonly rangeId: string;
   readonly manuscriptId: string;
   readonly blockId: string;
@@ -11340,7 +11262,7 @@ export type ExportFidelityKey =
   // The four parts of a 审阅报告 (V2-UX-REV-009; Issue #500, S64b part 2).
   | 'report-overview'
   | 'report-must-items'
-  | 'report-summaries'
+  | 'report-summaries' | 'report-statistics' | 'report-findings'
   | 'report-appendix';
 
 /** `excluded`: a mark kind the editor left out of this export — a choice, not a loss. */
@@ -11726,20 +11648,6 @@ export type ContinueImportProjection =
   | { state: 'outcome-uncertain'; recovery: ImportDraftRecoveryProjection }
   | { state: 'committed-recovered'; result: ImportCommitProjection };
 
-export interface JournalEditInput {
-  clientEditId: string;
-  manuscriptId: string;
-  branchId: string;
-  baseRevisionId: string;
-  blockId: string;
-  windowStartBlockId: string;
-  baseBlockDigest: string;
-  expectedJournalSequence: number;
-  fromGrapheme: number;
-  toGrapheme: number;
-  insertText: string;
-}
-
 export interface JournalAcknowledgement {
   clientEditId: string;
   branchId: string;
@@ -11875,7 +11783,7 @@ export type UsageCsvExportResult = { outcome: 'cancelled' } | { outcome: 'writte
 export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordListOperations {
   getSearchBackendSettings: { input: Record<string, never>; output: SearchBackendSettingsProjection };
   selectSearchBackend: { input: { backendId: string }; output: SearchBackendSettingsProjection };
-  probeSearchBackend: { input: { backendId: string }; output: SearchBackendProbeProjection };
+  probeSearchBackend: { input: { backendId: string; candidateId?: SearchCandidateId }; output: SearchBackendProbeProjection };
   saveSearchBackendCredential: {
     input: { backendId: string; credentialReference: string | null; credentialOperationState: ModelCredentialOperationState };
     output: SearchBackendConnectionProjection;
@@ -12540,6 +12448,8 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
        */
       textBoxDisposition: TextBoxDisposition;
       trackedChanges?: WordTrackedChangesChoice;
+      /** Required when the staged draft lists long paragraphs; otherwise optional (Issue #1205). */
+      structure?: ImportStructureChoice;
     };
     output: ReviewBeforeImportProjection;
   };
@@ -12963,7 +12873,7 @@ export type PickerReselectResult =
 
 export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   selectSearchBackend(input: { backendId: string }): Promise<ModelServiceSettingsProjection>;
-  probeSearchBackend(input: { backendId: string }): Promise<SearchBackendProbeProjection>;
+  probeSearchBackend(input: { backendId: string; candidateId?: SearchCandidateId }): Promise<SearchBackendProbeProjection>;
   saveSearchBackendCredential(input: { backendId: string; secret: string }): Promise<ModelServiceSettingsProjection>;
   removeSearchBackendCredential(input: { backendId: string }): Promise<ModelServiceSettingsProjection>;
   readonly platform: 'win32' | 'darwin';

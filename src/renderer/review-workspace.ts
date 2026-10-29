@@ -26,10 +26,12 @@ import {
   type ReviewWorkspaceProjection,
   type RendererApi,
   type ResearchEvidenceBookProjection,
+  type ReviewEvidenceSource,
   type ServiceWireJobProjection as ServiceJobProjection,
   type WritingTaskMaterialProjection,
 } from '../shared/protocol.js';
-import { findingResearchLines, readFindingResearch } from './research-evidence-labels.js';
+import { findingResearchLines, readFindingResearch, readFindingSources } from './research-evidence-labels.js';
+import { findingEvidenceList } from './research-evidence.js';
 import { mountEvidenceWorkspace, type EvidenceWorkspaceSurface } from './evidence-workspace.js';
 import {
   FACT_CLOSE_WORKSPACE,
@@ -61,6 +63,7 @@ import {
 } from '../shared/protocol.js';
 import { reportExportLabel } from '../shared/report-wording.js';
 import { applyOnce } from './manuscript-apply.js';
+import { oneActionStart } from './one-action-start.js';
 import { mountHouseWordList } from './house-word-list.js';
 import { parseBookTerms } from '../shared/protocol/deterministic.js';
 import { openProcedureCapture } from './procedure-capture.js';
@@ -151,6 +154,8 @@ import {
   REVIEW_REPORT_NOTE,
   REVIEW_REPORT_NO_MUST_ITEMS,
   REVIEW_REPORT_OVERVIEW_COLUMNS,
+  REVIEW_REPORT_STATISTICS_CHAPTER,
+  REVIEW_REPORT_TOTAL,
   REVIEW_REPORT_WAIT_RUNNING,
   REVIEW_RESULTS_HEADING,
   REVIEW_RISK_POINT,
@@ -196,8 +201,12 @@ import {
   reviewReportAppendixLine,
   reviewReportConfigurationLine,
   reviewReportExcludedLine,
+  reviewReportFindingHeading,
+  reviewReportFindingLines,
   reviewReportGeneratedLine,
   reviewReportMustItemLine,
+  reviewReportOmittedLine,
+  reviewReportTotalsLine,
   reviewReportVersionLine,
   reviewResultsCountsLine,
   reviewRunHeading,
@@ -240,12 +249,12 @@ export interface ReviewWorkspaceSurface {
 type ReviewApi = Partial<Pick<RendererApi, 'inspectBookSeries' | 'inspectHouseWordList' | 'saveHouseWordList'>> & Pick<
   RendererApi,
   'inspectReviewWorkspace' | 'prepareReviewRun' | 'continueReviewRun' | 'cancelReviewRun' | 'recordReviewFindingDisposition' | 'recordLearningReasonAsk' |
-  'inspectTaskPlan' | 'getTaskPlanPage' | 'quickStartReviewRun' | 'searchReferableMaterials' |
+  'inspectTaskPlan' | 'getTaskPlanPage' | 'quickStartReviewRun' | 'authorizeReviewRun' | 'searchReferableMaterials' |
   'generateReviewReport' | 'cancelServiceJob' | 'applyChangeSuggestion' | 'applyChangeSuggestionBatch' | 'getManuscriptApplyOutcome' | 'inspectApplyReceipt' |
   'updateEditorialMark' | 'getEditorialMarkCard' |
   'reviewManuscriptExport' | 'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport' |
   // 可复用工序 (Issue #65, S30; ADR 0087): capture from a finished Run, and 按已保存的工序 on 新建审阅.
-  'inspectProcedureCapture' | 'saveCapturedProcedure' | 'saveDeveloperProposal' | 'inspectCapturedProcedureApplicability' | 'inspectCapturedProcedureRun' | 'recommendProcedures' |
+  'inspectProcedureCapture' | 'saveCapturedProcedure' | 'saveDeveloperProposal' | 'inspectCapturedProcedureApplicability' | 'inspectCapturedProcedureRun' | 'recommendProcedures' | 'procedureLibrary' |
   // 事实核查's retained sources on its finding cards (Issue #425, S70).
   'inspectProposalWorkspace' | 'inspectResearchEvidence' |
   // The Fact-check Lens and the Evidence Workspace (Issue #901).
@@ -275,6 +284,8 @@ export interface MountReviewWorkspaceOptions {
   openPlan(reviewRunId: string): void;
   /** The Run on show changed state: the drawer reads its plan again if it shows it. */
   planChanged(): void;
+  /** 开始审阅 recorded this Run's authorization from the sheet, as the drawer's 开始任务 would (ADR 0096 §3). */
+  recorded?(reviewRunId: string): void;
   /** 在来源与证据中查看 (Issue #901): the Book's 来源与证据 view, brought to one retained source. */
   openSource?(evidenceId: string): void;
   /** 查看学习来源链 (Issue #912; LAUD-004): 学习回溯 opened at one material's Learning Lineage Explorer. */
@@ -349,7 +360,12 @@ interface SheetState {
   procedure: CapturedProcedureRunProjection | null;
   /** Its choices in flight (Issue #66, S31 review P2-1): only the newest answer fills the sheet, and 先看计划 waits for it. */
   readonly requests: ProcedureChoiceRequests;
+  /** A composite Procedure Definition version opened by 运行此工序… (Issue #1173): its members are the categories, in its order. */
+  definition: { readonly pin: import('../shared/protocol/procedures.js').ProcedureDefinitionPin; readonly title: string; readonly categoryIds: readonly string[] } | null;
 }
+
+/** 运行此工序… names a Procedure Definition version as `id@version`; a Captured Procedure is named by its UUID alone. */
+const PROCEDURE_DEFINITION_KEY = /^ai7-procedure\/[^@]+@[1-9][0-9]*$/u;
 
 const NO_FILTERS: Filters = { categoryId: null, severity: null, status: null, chapterBlockId: null };
 const FILTER_KEYS: Readonly<Record<FilterName, keyof Filters>> = {
@@ -494,6 +510,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
    * lists the sources retained for it, or why there is none. A read that fails leaves the cards as they were.
    */
   let research = new Map<string, ResearchEvidenceBookProjection>();
+  // Each factual finding's sources as its card lists them (Issue #1174): the result's, less the excluded, joined to 来源与证据.
+  let evidence = new Map<string, ReviewEvidenceSource[]>();
   const reasonAsks = new Map<string, HTMLElement>();
   const offerReasonAsk = (findingId: string, decisionId: string | null | undefined): void => {
     if (!decisionId) return;
@@ -570,6 +588,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       }
     }
     research = next;
+    evidence = run === null || task == null ? new Map() : await readFindingSources(api, bookId, run.reviewRunId, next);
   };
 
   /** The workspace with as many pages of findings as the editor has asked to see, read one after another. */
@@ -1474,7 +1493,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       .filter((line, index, all): line is string => line !== null && all.indexOf(line) === index);
     for (const line of lines) article.append(el('p', 'review-finding-state', line));
     const retained = research.get(finding.findingId);
-    const sources = category.categoryId === 'factual-review' && retained !== undefined ? findingResearchLines(retained, finding, localInstantLabel) : null;
+    const attached = category.categoryId === 'factual-review' ? evidence.get(finding.findingId) ?? [] : [];
+    const sources = attached.length > 0 || category.categoryId !== 'factual-review' || retained === undefined ? null : findingResearchLines(retained, finding, localInstantLabel);
+    if (attached.length > 0) article.append(findingEvidenceList(attached, options.openSource === undefined ? undefined : (evidenceId) => options.openSource?.(evidenceId)));
     for (const line of sources ?? []) article.append(el('p', 'review-finding-source', line));
     if (finding.status !== 'pending') article.append(el('p', 'review-finding-status-detail', finding.statusDetail));
     if (finding.ignoreReason !== null) article.append(el('p', 'review-finding-ignore-reason', reviewIgnoreReasonLine(finding.ignoreReason)));
@@ -1801,12 +1822,48 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       );
       summaries.append(block);
     }
+    // Version /2's derived parts (Issue #1174): the totals, the chapter × category table and the 发现详单; a /1 record has none.
+    const derived: HTMLElement[] = [];
+    if (record.statistics !== undefined) {
+      const stats = el('table', 'review-report-table review-report-statistics');
+      const header = el('tr');
+      for (const column of [REVIEW_REPORT_STATISTICS_CHAPTER, ...record.statistics.categories.map((category) => category.label), REVIEW_REPORT_TOTAL]) {
+        const cell = el('th', undefined, column);
+        cell.scope = 'col';
+        header.append(cell);
+      }
+      const statsHead = el('thead');
+      statsHead.append(header);
+      const statsBody = el('tbody');
+      for (const row of [...record.statistics.rows, { label: REVIEW_REPORT_TOTAL, counts: record.statistics.totals, total: record.statistics.total }]) {
+        const tr = el('tr');
+        const name = el('th', undefined, row.label);
+        name.scope = 'row';
+        tr.append(name, ...row.counts.map((count) => el('td', undefined, String(count))), el('td', undefined, String(row.total)));
+        statsBody.append(tr);
+      }
+      stats.append(statsHead, statsBody);
+      derived.push(part('statistics', record.statistics.title, stats));
+    }
+    if (record.findings !== undefined) {
+      const list = el('ol', 'review-report-list review-report-findings');
+      for (const [index, entry] of record.findings.entries.entries()) {
+        const item = el('li');
+        item.dataset['findingIds'] = entry.findingIds.join(' ');
+        item.append(el('p', 'review-report-summary-title', reviewReportFindingHeading(index + 1, entry)), ...reviewReportFindingLines(entry).map((line) => el('p', undefined, line)));
+        if (entry.sources.length > 0) item.append(findingEvidenceList(entry.sources, options.openSource === undefined ? undefined : (evidenceId) => options.openSource?.(evidenceId)));
+        list.append(item);
+      }
+      const omitted = reviewReportOmittedLine(record.findings.omitted);
+      derived.push(part('findings', record.findings.title, list, ...(omitted === null ? [] : [el('p', 'field-note', omitted)])));
+    }
     const appendix = el('ul', 'review-report-list');
     appendix.append(el('li', undefined, reviewReportConfigurationLine(record.appendix.configuration.version)));
     for (const category of record.appendix.categories) appendix.append(el('li', undefined, reviewReportAppendixLine(category)));
     body.append(
-      part('overview', record.overview.title, table),
+      part('overview', record.overview.title, table, ...(record.totals === undefined ? [] : [el('p', 'field-note review-report-totals', reviewReportTotalsLine(record.totals))])),
       part('must-items', record.mustItems.title, must),
+      ...derived,
       part('category-summaries', record.categorySummaries.title, summaries),
       part('appendix', record.appendix.title, appendix, options.technicalDetails(
         'review-facts',
@@ -2145,9 +2202,14 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       procedures,
       procedure: null,
       requests: new ProcedureChoiceRequests(),
+      definition: null,
     };
     renderSheet(projection, sheetState);
     sheet.showModal();
+    if (procedureId !== null && PROCEDURE_DEFINITION_KEY.test(procedureId)) {
+      await chooseDefinition(sheetState, procedureId);
+      return;
+    }
     if (procedureId !== null) {
       await chooseProcedure(sheetState, procedureId);
       return;
@@ -2189,6 +2251,26 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     renderSheet(projection, state);
     // Back on the selector the editor used, while the sheet still shows it.
     sheet.querySelector<HTMLElement>(`[data-review-field="${settled.focus}"]`)?.focus();
+  }
+
+  /** Fill the sheet from a composite version (Issue #1173): every member ticked, 确定性检查 first; the plan is still read before 开始. */
+  async function chooseDefinition(state: SheetState, key: string): Promise<void> {
+    const at = key.lastIndexOf('@');
+    try {
+      const entry = (await api.procedureLibrary({ action: 'inspect' })).procedures.find((procedure) => procedure.procedureId === key.slice(0, at));
+      const pin = entry?.versions.find((version) => version.version === Number(key.slice(at + 1)));
+      const document = entry?.documents.find((candidate) => candidate.version === pin?.version);
+      if (pin === undefined || document?.members === undefined) throw new Error('PROCEDURE_DEFINITION_UNAVAILABLE');
+      if (projection === null || sheetState !== state || destroyed) return;
+      state.definition = { pin, title: document.title, categoryIds: document.members.map((member) => member.categoryId) };
+      state.categories.clear();
+      for (const categoryId of state.definition.categoryIds) state.categories.add(categoryId);
+      state.scope ??= 'whole';
+    } catch (error) {
+      if (projection === null || sheetState !== state || destroyed) return;
+      state.problem = options.errorMessage(error, '无法读取所选工序版本；请在「知识库 › 工序与规则」重新运行此工序。');
+    }
+    renderSheet(projection, state);
   }
 
   function renderSheet(workspace: ReviewWorkspaceProjection, state: SheetState): void {
@@ -2258,6 +2340,12 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
 
     const categories = el('fieldset', 'review-category-options');
     const localSheet = state.categories.has('local-text-check');
+    if (state.definition !== null) {
+      const labels = state.definition.categoryIds.map((categoryId) => workspace.categories.find((entry) => entry.categoryId === categoryId)?.label ?? categoryId);
+      const line = el('p', 'field-note review-sheet-definition', `按工序《${state.definition.title}》第 ${state.definition.pin.version} 版依次审阅：${labels.join(' → ')}；成员不能单独增减。`);
+      line.dataset['procedureDefinition'] = `${state.definition.pin.procedureId}@${state.definition.pin.version}`;
+      categories.append(line);
+    }
     procedureField.hidden = localSheet;
     recommendationSlot.hidden = localSheet;
     categories.append(el('legend', undefined, REVIEW_CATEGORY_LEGEND));
@@ -2485,13 +2573,14 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     progress.setAttribute('aria-live', 'polite');
     const quickReason = el('p', 'field-note review-quick-start-reason', REVIEW_QUICK_START_REASON);
     quickReason.id = uid('quick-start-reason');
-    const prepare = actionButton('prepare', 'primary', () => void prepareRun(state));
-    const quick = actionButton('quick-start', 'secondary', () => void prepareRun(state, true));
+    const start = actionButton('start', 'primary', () => void prepareRun(state, 'start'));
+    const prepare = actionButton('prepare', 'secondary', () => void prepareRun(state));
+    const quick = actionButton('quick-start', 'secondary', () => void prepareRun(state, 'quick'));
     quick.setAttribute('aria-describedby', quickReason.id);
     const cancelPreparation = actionButton('cancel-preparation', 'quiet', () => void cancelJob(state, cancelPreparation));
     const close = actionButton('close-sheet', 'quiet', () => sheet.close());
     const actions = el('div', 'button-row review-sheet-actions');
-    actions.append(prepare, quick, cancelPreparation, close);
+    actions.append(start, prepare, quick, cancelPreparation, close);
     form.append(categories, scopes, materialField, consequences, problem, progress, actions, quickReason);
     form.addEventListener('submit', (event) => event.preventDefault());
 
@@ -2557,6 +2646,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       prepare.disabled = preparing || loading || (state.materialIds.size > 0 && !acceptsMaterials);
       if (local && (invalidTerms || (state.localOptions.punctuation === 'off' && state.localOptions.numerals === 'off' && !state.localOptions.tables?.characters && !state.localOptions.tables?.variantWords && state.localOptions.tables?.bookTerms.length === 0 && state.localOptions.tables?.houseWordList === null) || (state.localOptions.numerals !== 'off' && !state.localOptions.numeralsConfirmed))) prepare.disabled = true;
       quick.disabled = prepare.disabled || state.categories.size === 0 || state.scope === null;
+      start.disabled = quick.disabled;
       close.disabled = preparing;
       cancelPreparation.hidden = !preparing;
       cancelPreparation.disabled = !preparing;
@@ -2583,7 +2673,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     };
   }
 
-  async function prepareRun(state: SheetState, quick = false): Promise<void> {
+  async function prepareRun(state: SheetState, mode: 'preview' | 'quick' | 'start' = 'preview'): Promise<void> {
     if (destroyed || state.job !== null || projection === null) return;
     // The version on show is the version pinned, and never while a choice is still loading (S31 review P2-1; REUSE-054).
     const resolved = state.procedure?.resolved ?? null;
@@ -2594,7 +2684,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       sheetUpdate();
       return;
     }
-    const categoryIds = state.categories.has('local-text-check') ? ['local-text-check'] : projection.categories.filter((entry) => state.categories.has(entry.categoryId)).map((entry) => entry.categoryId);
+    const categoryIds = state.definition !== null ? [...state.definition.categoryIds] : state.categories.has('local-text-check') ? ['local-text-check']
+      : projection.categories.filter((entry) => state.categories.has(entry.categoryId)).map((entry) => entry.categoryId);
     const { from, to } = chaptersOf(state);
     const asked = reviewSheetScope({
       scope: state.scope,
@@ -2619,6 +2710,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         scope,
         ...(state.materialIds.size === 0 ? {} : { materialIds: taskMaterialSelection(projection.materials?.items ?? [], state.materialIds) }),
         ...(choice.pin === null ? {} : { capturedProcedure: choice.pin }),
+        ...(state.definition === null ? {} : { procedureDefinition: state.definition.pin }),
       });
       state.job = initial;
       sheetUpdate();
@@ -2639,7 +2731,22 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         throw new Error(REVIEW_STATUS_LINES.preparationFailed);
       }
       let quickNote: string | null = null;
-      if (quick) {
+      if (mode === 'start') {
+        // 开始审阅 (ADR 0096 §3): the one explicit action records the Run Authorization for the plan exactly as its bar shows
+        // it; a plan that is editable, moved or needs a decision opens first, and a refused start says why there.
+        const decision = oneActionStart(await api.inspectTaskPlan({ kind: 'review-run', ref: result.run.reviewRunId }));
+        if (decision.kind === 'authorize') {
+          try {
+            result = await api.authorizeReviewRun({ reviewRunId: result.run.reviewRunId, planDigests: decision.planDigests });
+            quickNote = REVIEW_STATUS_LINES.started;
+            if (result.run !== null) options.recorded?.(result.run.reviewRunId);
+          } catch (error) {
+            quickNote = options.errorMessage(error, REVIEW_STATUS_LINES.startFailed);
+          }
+        } else {
+          quickNote = REVIEW_STATUS_LINES.startNeedsPlan;
+        }
+      } else if (mode === 'quick') {
         const plan = await api.inspectTaskPlan({ kind: 'review-run', ref: result.run.reviewRunId });
         const rule = plan.defaultRule.current;
         const digest = plan.edit.planEnvelopeDigest;
@@ -2667,7 +2774,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       if (host.isConnected) show(result);
       options.setStatus(quickNote ?? REVIEW_STATUS_LINES.prepared, 'success');
       // S72 D4: 先看计划 opens the plan the preparation froze in the Task Drawer, which takes focus; closing
-      // it brings focus back to this Run's 查看计划.
+      // it brings focus back to this Run's 查看计划. After 开始审阅 the drawer shows the started Run, its plan one step away.
       options.openPlan(result.run.reviewRunId);
     } catch (error) {
       if (destroyed) return;

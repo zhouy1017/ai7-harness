@@ -218,7 +218,7 @@ export async function readGuidelineFile(path: string): Promise<{ source: ReviewG
   if (format === 'DOCX') {
     const paragraphs: string[] = [];
     try {
-      await parseDocx(path, displayName, (block) => { paragraphs.push(block.text); }, { digest: sha256, bytes: bytes.length }, { formatIdentified: true });
+      await parseDocx(path, displayName, (block) => { paragraphs.push(block.text); }, { digest: sha256, bytes: bytes.length }, { formatIdentified: true, noteBlocks: false });
     } catch {
       throw new ReviewGuidelineError('REVIEW_GUIDELINE_FILE_UNREADABLE', '这个 Word 文件无法读取；请另存为 .docx 后再选。');
     }

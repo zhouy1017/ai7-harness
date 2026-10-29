@@ -140,14 +140,15 @@ describe('the runners\' composed-docx helper', () => {
     expect(Object.keys(read.parts).sort()).toEqual(['[Content_Types].xml', 'docProps/core.xml', 'word/_rels/document.xml.rels', 'word/comments.xml', 'word/document.xml', 'word/header1.xml']);
   });
 
-  it('writes a field and a footnote that the parser reads as the two classes that need the decision', async () => {
+  it('writes a field that needs the decision and a footnote the parser reads as a note block', async () => {
     const { parsed, blocks } = await composedParse('degraded.docx', {
       source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 8, title: '降级组稿',
       retention: { field: { block: 1 }, footnote: { block: 3, noteSourceBlock: 9 } },
     });
-    expect(blocks).toHaveLength(8);
-    expect(deriveImportFidelityPlan(parsed.fidelity, parsed.sourceDigest, parsed.archiveBytes)?.degradations).toEqual([
-      { categoryKey: 'notes', label: '脚注与尾注', count: 1 },
+    // Issue #1204: the footnote is a ninth block, a note block after the eight paragraphs, and stays with the file.
+    expect(blocks.map((block) => block.kind)).toEqual([...Array(8).fill('paragraph'), 'note']);
+    expect(parsed.parserIdentity).toBe('ai7-docx-fflate-saxes/4');
+    expect(deriveImportFidelityPlan(parsed.fidelity, parsed.sourceDigest, parsed.archiveBytes, undefined, parsed.parserIdentity)?.degradations).toEqual([
       { categoryKey: 'fields', label: '域（目录等）', count: 1 },
     ]);
   });

@@ -223,7 +223,7 @@ export function dialogueProjection(
     branchId: task.branchId,
     question: resolved.first?.question ?? null,
     selection: resolved.first?.selection ?? null,
-    range: { blockId: task.blockId, fromGrapheme: task.fromGrapheme, toGrapheme: task.toGrapheme },
+    range: { blockId: task.blockId, fromGrapheme: task.fromGrapheme, toGrapheme: task.toGrapheme, ...(task.span === undefined ? {} : { span: task.span }) },
     askedAt: task.askedAt,
     attempts,
     anchors: citations.anchors.filter((candidate) => candidate.sourceKind === 'manuscript' && candidate.sourceId === task.manuscriptId && candidate.anchor.blockId !== undefined),
@@ -233,8 +233,9 @@ export function dialogueProjection(
       // 继续回答 goes on from complete fragments the answer kept; 重新回答 asks again (DIALOG-014). Both need the question.
       continue: known && latest !== undefined && (latestState === 'stopped' || latestState === 'interrupted') && latest.fragments.length > 0,
       regenerate: known && latestState !== null && latestState !== 'answering',
-      // An Incomplete Dialogue Answer is no completed answer and is never converted (DIALOG-013).
-      convert: latestState === 'completed' && latest !== undefined && latest.fragments.length > 0 && !citations.unverified,
+      // An Incomplete Dialogue Answer is no completed answer and is never converted (DIALOG-013); a 修改建议 stands in one
+      // paragraph, so a question across paragraphs (Issue #1176) is converted to a Task Intent Draft instead.
+      convert: latestState === 'completed' && latest !== undefined && latest.fragments.length > 0 && !citations.unverified && task.span === undefined,
     },
   };
 }

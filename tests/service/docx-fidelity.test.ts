@@ -69,16 +69,15 @@ function actualClasses(before: Record<string, Uint8Array>, after: Record<string,
   const written = firstParagraph(xml);
   const drawingPlace = variant === 'unchanged' ? firstParagraph(source).drawingAt : written.styles.length;
   return {
-    'run-properties': variant === 'edited'
-      ? classify(count(xml, 'b') > 0 && count(xml, 'i') === 0 && count(xml, 'color') === 0, 'intentionally-excluded')
-      : classify(allRunProperties),
+    'run-properties': classify(allRunProperties),
     drawings: classify(count(xml, 'drawing') === 1 && drawing(xml) === drawing(source) && written.drawingAt === drawingPlace &&
       unchanged(['word/media/pixel.png'])),
     'text-boxes': classify(count(xml, 'txbxContent') === 1 && count(xml, 'pict') === 1),
     'footnotes-endnotes': classify(count(xml, 'footnoteReference') === 1 && count(xml, 'endnoteReference') === 1 && unchanged(['word/footnotes.xml', 'word/endnotes.xml']), 'preserved'),
-    fields: variant === 'unchanged'
+    // Issue #874: an untouched field is written whole; the simple field a comment cuts is written as its words.
+    fields: variant !== 'mark-exported'
       ? classify(count(xml, 'fldSimple') === 1 && count(xml, 'instrText') === 1 && count(xml, 'fldChar') === 3)
-      : classify(count(xml, 'fldSimple') === 0 && count(xml, 'instrText') === 0 && count(xml, 'fldChar') === 0, 'intentionally-excluded'),
+      : classify(count(xml, 'fldSimple') === 0 && count(xml, 'instrText') === 1 && count(xml, 'fldChar') === 3, 'intentionally-excluded'),
     'comments-tracked-changes': classify(after['word/comments.xml'] !== undefined && count(xml, 'commentRangeStart') >= 1 && count(xml, 'del') === 1 && count(xml, 'ins') === 1),
     tables: classify(['tbl', 'tblPr', 'tblGrid', 'tr', 'tc', 'tcPr'].every((tag) => count(xml, tag) === 1) &&
       xml.includes('<w:tblW w:w="4000" w:type="dxa"/>') && xml.includes('<w:tcW w:w="4000" w:type="dxa"/>')),
@@ -86,8 +85,7 @@ function actualClasses(before: Record<string, Uint8Array>, after: Record<string,
     sections: classify(count(xml, 'sectPr') === 1 && xml.includes('<w:pgSz w:w="11906" w:h="16838"/>') && count(xml, 'pgMar') === 1),
     'headers-footers': classify(unchanged(['word/header1.xml', 'word/footer1.xml']) && count(xml, 'headerReference') === 1 && count(xml, 'footerReference') === 1, 'preserved'),
     styles: classify(unchanged(['word/styles.xml']) && xml.includes('<w:pStyle w:val="Normal"/>'), 'preserved'),
-    hyperlinks: variant === 'unchanged' ? classify(count(xml, 'hyperlink') === 1 && xml.includes('<w:hyperlink r:id="rLink">'))
-      : classify(count(xml, 'hyperlink') === 0, 'intentionally-excluded'),
+    hyperlinks: classify(count(xml, 'hyperlink') === 1 && xml.includes('<w:hyperlink r:id="rLink">')),
     'unrepresented-revisions': classify(count(xml, 'rPrChange') === 0, 'intentionally-excluded'),
   };
 }
@@ -112,7 +110,8 @@ describe('edited DOCX fidelity corpus (#814)', () => {
           const book = await store.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: importing.draftVersion, reviewDigest: importing.reviewDigest!, commitId });
           await store.acknowledgeImportCompletion(commitId);
           const view = (): ManuscriptWindowProjection => store!.getManuscriptWindow(book.manuscriptId, book.branchId, null);
-          expect(view().blocks.length).toBe(4);
+          // Four body paragraphs, then the footnote and the endnote as note blocks (Issue #1204).
+          expect(view().blocks.map((block) => block.kind)).toEqual(['paragraph', 'paragraph', 'paragraph', 'paragraph', 'note', 'note']);
           if (variant === 'edited') {
             for (let index = 0; index < 3; index += 1) {
               const current = view();
@@ -140,6 +139,8 @@ describe('edited DOCX fidelity corpus (#814)', () => {
           expect(reviewed.retentionSummary).toBe(disclosure.summary);
           expect(reviewed.retention).toEqual({ preserved: disclosure.preserved, rebuilt: disclosure.rebuilt, excluded: disclosure.excluded });
           expect(JSON.stringify([reviewed.retentionSummary, reviewed.retention, reviewed.fidelity.map((row) => row.detail)])).not.toMatch(/#\d|完整保真|完全保留/);
+          // The restoration line counts the rebuilt paragraph whose field a comment cuts (Issue #874); it claims nothing whole.
+          expect(reviewed.restorationLine.endsWith(variant === 'mark-exported' ? '；其中 1 段有未能对应的行内样式、超链接或域，见保真审阅。' : '段按稿件文字重新写出。')).toBe(true);
           // An anchor written at its rebuilt paragraph's end, after text it stood before, is named with its paragraph.
           expect(reviewed.fidelity.filter((row) => ['notes', 'images-captions', 'text-boxes'].includes(row.key))
             .map((row) => [row.key, row.status, [...row.positions]])).toEqual(disclosure.anchors);
@@ -159,8 +160,9 @@ describe('edited DOCX fidelity corpus (#814)', () => {
           expect(actualClasses(before, after, variant)).toEqual(classification.pairs[variant]);
           const originalStyles = firstParagraph(strFromU8(before['word/document.xml']!)).styles;
           const writtenStyles = firstParagraph(strFromU8(after['word/document.xml']!)).styles;
-          if (variant === 'edited') expect([...new Set(writtenStyles.map(([, properties]) => properties))]).toEqual([originalStyles[0]![1]]);
-          else expect(writtenStyles).toEqual(originalStyles);
+          // The words inserted before the first run extend it (Issue #874); every other word keeps its own run's properties.
+          const inserted = variant === 'edited' ? graphemesOf('〔编辑〕').map((grapheme) => [digest(grapheme), originalStyles[0]![1]] as [string, string]) : [];
+          expect(writtenStyles).toEqual([...inserted, ...originalStyles]);
           // Retained box text and properties stay with that exact box; no duplicate body block appears.
           const box = (xml: string): string => xml.match(/<w:txbxContent>.*?<\/w:txbxContent>/s)?.[0] ?? '';
           expect(digest(box(strFromU8(after['word/document.xml']!)))).toBe(digest(box(strFromU8(before['word/document.xml']!))));

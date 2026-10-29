@@ -5,9 +5,11 @@ import { fixedArchiveTime } from '../shared/archive-time.js';
 import { graphemesOf } from '../shared/mark-anchor.js';
 import { canonicalJson, sha256Hex } from './analysis/canonical.js';
 import { compileWordTrackedDocxBytes, type WordTrackedCompilation } from './docx.js';
+import { mapInline, type InlineContainer, type MappedInline, type MarkBounds, type SourceInline } from './docx-run-mapping.js';
 import { bindWordReadingBlocks, type WordBlockBinding, type WordImportMode, type WordReadingKind,
   type WordRevisionGraph, type WordSourceSegment } from './import-retention.js';
 import {
+  type ManuscriptBlockKind,
   EXPORT_FIDELITY_STATUS_LABELS,
   MAX_EXPORT_FIDELITY_POSITIONS,
   type ExportFidelityKey,
@@ -32,12 +34,14 @@ import {
  *   that carries no exported mark is restored from the original, stripped to the view the parser read: every
  *   revision rejected (`w:ins` and `w:moveTo` content dropped, `w:del` and `w:moveFrom` unwrapped with their
  *   deleted text written as text), and every comment anchor, formatting revision and revision marker dropped.
- * - An edited block, or one carrying an exported mark, is regenerated: the source paragraph's properties and
- *   its first run's properties over edited text, or each source run's properties when only marks triggered the
- *   rebuild. Bookmarks surround the new text; drawings, retained boxes and note references stay on their source
- *   paragraph at its end, and one that had text after it is counted moved (降级导出, the block named). Fields and
- *   hyperlinks have no editable mapping: their displayed words remain, their instructions and links do not. The
- *   review and receipt name these exclusions and the moved anchors.
+ * - An edited block, or one carrying an exported mark, is regenerated over the source paragraph's properties by its
+ *   run mapping (Issue #874, `docx-run-mapping.ts`): the words the edit kept keep their runs' properties, their
+ *   hyperlinks and other inline containers, and their fields, written whole when their displayed words are untouched;
+ *   edited words take the properties of the words they replace. Bookmarks surround the new text; drawings, retained
+ *   boxes and note references stay on their source paragraph at its end, and one that had text after it is counted
+ *   moved (降级导出, the block named). What the mapping could not keep — a replacement across differently formatted
+ *   runs, new words across a link's edge, a field whose displayed words changed (written as its words) — is counted
+ *   with its block, and the review and receipt name it with the moved anchors.
  * - A source paragraph mapped to nothing (an empty one, a text box's own paragraph, a section carrier) is
  *   restored stripped. A text box merged into the body at import is not written as a box: its paragraphs are
  *   written as body paragraphs right after the paragraph that anchored it.
@@ -146,7 +150,7 @@ function requireExport(condition: unknown, code: string, message: string): asser
 export interface DocxExportBlock {
   blockId: string;
   position: number;
-  kind: 'title' | 'heading' | 'paragraph';
+  kind: ManuscriptBlockKind;
   level: number | null;
   text: string;
   digest: string;
@@ -184,11 +188,21 @@ export interface DocxExportMark {
   suggestion: { currentText: string; proposedText: string } | null;
 }
 
+/** One note block of the exported Revision and the note of the original it reads (Issue #1204). */
+export interface DocxExportNoteRow {
+  blockId: string;
+  part: 'footnote' | 'endnote';
+  noteId: string;
+  sourceNoteDigest: string;
+}
+
 export interface LegacyMappedDocxSource {
   kind: 'mapped';
   /** The original file of the Source Version, exactly as retained. */
   original: Uint8Array;
   rows: ReadonlyArray<DocxExportSourceRow>;
+  /** The note blocks' notes; absent or empty when the Revision has none. */
+  notes?: ReadonlyArray<DocxExportNoteRow>;
   /** The text-box choice the import recorded (ADR 0086 §2). */
   textBoxes: 'retain' | 'merge';
   mapping?: { kind: 'paragraph-rows' };
@@ -251,6 +265,8 @@ export interface DocxExportResult {
   restoration: 'from-original' | 'regenerated';
   restoredBlocks: number;
   regeneratedBlocks: number;
+  /** Regenerated blocks some of whose inline styles, links or fields could not be mapped (Issue #874); a DOCX's only. */
+  unmappedBlocks?: number;
   written: { annotations: number; suggestions: number; editorNotes: number; replies: number };
 }
 
@@ -272,21 +288,62 @@ interface ParagraphRetention {
   anchors: string;
   text: string;
   moved: MovedAnchors;
+  /** The reading the run mapping of a regenerated paragraph starts from (Issue #874). */
+  inline: SourceInline;
 }
 
-const NO_RETENTION: ParagraphRetention = { runs: [], anchors: '', text: '', moved: { images: 0, textBoxes: 0, notes: 0 } };
+const NO_RETENTION: ParagraphRetention = { runs: [], anchors: '', text: '', moved: { images: 0, textBoxes: 0, notes: 0 },
+  inline: { graphemes: [], runs: [], containers: [], fields: [], unsupported: 0, droppedFields: 0 } };
+
+/** The inline containers the run mapping writes again around the words they held; `sdt` around its `sdtContent`. */
+const INLINE_CONTAINERS: ReadonlySet<string> = new Set(['hyperlink', 'smartTag', 'customXml', 'dir', 'bdo', 'sdt']);
+/** What field markup may hold to be written again whole: anything else (a picture, a note reference, a symbol) blocks it. */
+const FIELD_MARKUP: ReadonlySet<string> = new Set(['r', 'rPr', 't', 'tab', 'br', 'cr', 'fldChar', 'instrText', 'fldSimple', 'hyperlink',
+  'lastRenderedPageBreak', 'proofErr', 'bookmarkStart', 'bookmarkEnd', 'fldData', 'ffData']);
+
+/** Field markup as it is written again: its bookmarks are the paragraph's, written at its edges. */
+function fieldMarkup(nodes: ReadonlyArray<XmlNode>): { markup: string; blocked: boolean } {
+  let blocked = false;
+  const visit = (node: XmlNode): XmlNode[] => {
+    if (!isElement(node)) return [node];
+    if (node.local === 'bookmarkStart' || node.local === 'bookmarkEnd') return [];
+    if (node.local === 'rPr' || node.local === 'ffData' || node.local === 'fldData') return [node];
+    if (!FIELD_MARKUP.has(node.local)) blocked = true;
+    return [{ ...node, children: node.children.flatMap(visit) }];
+  };
+  return { markup: serialize(nodes.flatMap(visit)), blocked };
+}
+
+function fieldInstruction(nodes: ReadonlyArray<XmlNode>): string {
+  let instruction = '';
+  for (const { element } of readableElements(nodes)) {
+    if (element.local === 'instrText') instruction += element.children.filter((child): child is string => typeof child === 'string').join('');
+    if (element.local === 'fldChar' && attributeOf(element, 'fldCharType') === 'separate') break;
+  }
+  return instruction;
+}
 
 /** Non-text content stays attached to its source paragraph even when that paragraph's text changes. */
 function paragraphRetention(paragraph: XmlElement, selectedWord = false): ParagraphRetention {
   const runs: RetainedRun[] = [];
+  const graphemes: string[] = [];
+  const inline: SourceInline = { graphemes, runs, containers: [], fields: [], unsupported: 0, droppedFields: 0 };
   let offset = 0;
   let anchors = '';
   let text = '';
   // Each anchor's class counts, as the review counts them, and the reading offset it stood at.
   const placed: Array<{ at: number; counts: ClassCounts }> = [];
   const prefix = paragraph.name.slice(0, -1);
-  const walk = (nodes: ReadonlyArray<XmlNode>, properties: string, attributes: ReadonlyArray<[string, string]>): void => {
-    for (const node of nodes) {
+  /**
+   * `level` counts the containers around `nodes`; a complex field is whole when it begins and ends among the same
+   * siblings, and a marker of one that does not is kept where it stood only at the paragraph's own level.
+   */
+  const walk = (nodes: ReadonlyArray<XmlNode>, properties: string, attributes: ReadonlyArray<[string, string]>, level: number, flattened: boolean): void => {
+    const begun: Array<{ index: number; from: number }> = [];
+    const balanced: Array<[number, number]> = [];
+    const markers: Array<{ index: number; at: number; markup: string; begins: boolean }> = [];
+    for (let index = 0; index < nodes.length; index += 1) {
+      const node = nodes[index]!;
       if (!isElement(node) || node.local === 'pPr' || node.local === 'rPr') continue;
       if (['drawing', 'pict', 'object'].includes(node.local) ||
           (node.local === 'AlternateContent' && ['drawing', 'pict', 'object'].some((local) => contains(node, local))) ||
@@ -297,20 +354,64 @@ function paragraphRetention(paragraph: XmlElement, selectedWord = false): Paragr
       }
       if (node.local === 'r') {
         const rPr = node.children.find((child): child is XmlElement => isElement(child) && child.local === 'rPr');
-        walk(node.children, rPr === undefined ? '' : serialize([rPr]), node.attributes);
+        const inner = node.children.filter((child): child is XmlElement => isElement(child) && child.local !== 'rPr');
+        if (inner.length > 0 && inner.every((child) => ['fldChar', 'instrText', 'lastRenderedPageBreak'].includes(child.local)) &&
+            inner.some((child) => child.local === 'fldChar' || child.local === 'instrText')) {
+          let begins = false;
+          for (const child of inner.filter((part) => part.local === 'fldChar')) {
+            const type = attributeOf(child, 'fldCharType');
+            if (type === 'begin') {
+              begun.push({ index, from: offset });
+              begins = true;
+            } else if (type === 'end') {
+              const begin = begun.pop();
+              if (begin === undefined) continue;
+              const slice = nodes.slice(begin.index, index + 1);
+              balanced.push([begin.index, index]);
+              inline.fields.push({ from: begin.from, to: offset, ...fieldMarkup(slice), hyperlink: /^\s*HYPERLINK\b/i.test(fieldInstruction(slice)), depth: level });
+            }
+          }
+          markers.push({ index, at: offset, markup: serialize([node]), begins });
+        }
+        walk(node.children, rPr === undefined ? '' : serialize([rPr]), node.attributes, level, flattened);
         continue;
       }
       const words = node.local === 't' ? node.children.filter((child): child is string => typeof child === 'string').join('')
         : node.local === 'tab' ? '\t' : node.local === 'br' || node.local === 'cr' ? '\n' : null;
       if (words !== null) {
         text += words;
-        const length = graphemesOf(words).length;
-        if (length > 0) runs.push({ from: offset, to: offset + length, properties });
-        offset += length;
-      } else walk(selectedWord ? node.children : readableChildren(node), properties, attributes);
+        const parts = graphemesOf(words);
+        graphemes.push(...parts);
+        if (parts.length > 0) runs.push({ from: offset, to: offset + parts.length, properties });
+        offset += parts.length;
+        continue;
+      }
+      const from = offset;
+      const word = !selectedWord || isWordElement(node);
+      if (word && node.local === 'fldSimple') {
+        walk(node.children, properties, attributes, level + 1, flattened);
+        inline.fields.push({ from, to: offset, ...fieldMarkup([node]), hyperlink: /^\s*HYPERLINK\b/i.test(attributeOf(node, 'instr') ?? ''), depth: level });
+      } else if (word && INLINE_CONTAINERS.has(node.local)) {
+        const content = node.local === 'sdt'
+          ? node.children.find((child): child is XmlElement => isElement(child) && child.local === 'sdtContent') : node;
+        const own = node.children.filter((child): child is XmlElement => isElement(child) && child !== content && child.local.endsWith('Pr'));
+        walk(content?.children ?? [], properties, attributes, level + 1, flattened);
+        inline.containers.push({ from, to: offset, counted: node.local === 'hyperlink', depth: level,
+          open: `${openTag(node.name, node.attributes, false)}${serialize(own)}${content !== undefined && content !== node ? openTag(content.name, content.attributes, false) : ''}`,
+          close: `${content !== undefined && content !== node ? `</${content.name}>` : ''}</${node.name}>` });
+      } else {
+        walk(selectedWord ? node.children : readableChildren(node), properties, attributes, level, true);
+        // Anything else that held words is written as its words alone: outside the supported set.
+        if (!flattened && offset > from) inline.unsupported += 1;
+      }
+    }
+    for (const marker of markers) {
+      if (balanced.some(([from, to]) => from <= marker.index && marker.index <= to)) continue;
+      if (level === 0) inline.fields.push({ from: marker.at, to: marker.at, markup: marker.markup, hyperlink: false, blocked: false, depth: 0 });
+      else if (marker.begins) inline.droppedFields += 1;
     }
   };
-  walk(selectedWord ? paragraph.children : stripped(paragraph).children, '', []);
+  walk(selectedWord ? paragraph.children : stripped(paragraph).children, '', [], 0, false);
   // An anchor written at the paragraph's end has moved only when some of the paragraph's text stood after it.
   const moved: MovedAnchors = { images: 0, textBoxes: 0, notes: 0 };
   for (const { at, counts } of placed) {
@@ -319,12 +420,7 @@ function paragraphRetention(paragraph: XmlElement, selectedWord = false): Paragr
     moved.textBoxes += counts.textBoxes;
     moved.notes += counts.notes;
   }
-  return { runs, anchors, text, moved };
-}
-
-function hasExactRunMapping(retained: ParagraphRetention, block: DocxExportBlock): boolean {
-  // Import normalizes whitespace and NFC. A run boundary that normalization moved cannot be guessed.
-  return retained.text === block.text && retained.runs.at(-1)?.to === graphemesOf(block.text).length;
+  return { runs, anchors, text, moved, inline };
 }
 
 // ---- XML trees ------------------------------------------------------------------------------------
@@ -845,50 +941,6 @@ function paragraphBookmarks(paragraph: XmlElement): { starts: string; ends: stri
   return { starts, ends };
 }
 
-/**
- * How much of a paragraph's formatting a regeneration cannot keep: every text run formatted otherwise than the
- * first — whose properties the regenerated runs take — every link, and every HYPERLINK field. The paragraph
- * mark's own properties stay with the paragraph's.
- */
-function inlineStylesLost(paragraph: XmlElement, keepRunProperties = false): number {
-  let first: string | undefined;
-  let lost = 0;
-  let instruction: string | undefined;
-  const walk = (nodes: ReadonlyArray<XmlNode>, deleted: boolean): void => {
-    for (const node of nodes) {
-      if (!isElement(node)) continue;
-      if (node.local === 'ins' || node.local === 'moveTo' || node.local === 'txbxContent' || node.local === 'pPr' ||
-          FORMATTING_REVISIONS.has(node.local)) continue;
-      if (node.local === 'hyperlink') lost += 1;
-      if (node.local === 'fldSimple' && /^\s*HYPERLINK\b/i.test(attributeOf(node, 'instr') ?? '')) lost += 1;
-      if (node.local === 'fldChar') {
-        const type = attributeOf(node, 'fldCharType');
-        if (type === 'begin') instruction = '';
-        else if (instruction !== undefined) {
-          if (/^\s*HYPERLINK\b/i.test(instruction)) lost += 1;
-          instruction = undefined;
-        }
-      }
-      if (node.local === 'instrText' && instruction !== undefined) {
-        instruction += node.children.filter((child): child is string => typeof child === 'string').join('');
-      }
-      if (node.local === 'r') {
-        const text = node.children.some((child) => isElement(child) && ((child.local === 't' &&
-          child.children.some((part) => typeof part === 'string' && part.length > 0)) || (deleted && child.local === 'delText')));
-        if (text) {
-          const properties = node.children.find((child): child is XmlElement => isElement(child) && child.local === 'rPr');
-          const key = properties === undefined ? '' : serialize([stripped(properties)]);
-          if (first === undefined) first = key;
-          else if (key !== first && !keepRunProperties) lost += 1;
-        }
-      }
-      walk(readableChildren(node), deleted || node.local === 'del' || node.local === 'moveFrom');
-    }
-  };
-  walk(paragraph.children, false);
-  return lost;
-}
-
 function hasContent(paragraph: XmlElement): boolean {
   for (const { element } of readableElements(paragraph.children)) {
     if (CONTENT_ELEMENTS.has(element.local)) return true;
@@ -1122,13 +1174,18 @@ class MarkupWriter {
   /**
    * The runs of one block with its marks: comments as ranges with their references after them — a reply
    * sharing its thread's range — and each pending suggestion as a deletion of its current words followed by
-   * an insertion of its proposal. Comment boundaries inside a suggestion's range split its deletion.
+   * an insertion of its proposal. Comment boundaries inside a suggestion's range split its deletion. A run mapping
+   * (Issue #874) gives the words their source runs' properties, writes its containers around the words they hold, and
+   * writes a field kept whole as its own markup in place of its words.
    */
-  blockRuns(block: DocxExportBlock, properties: string, comments: ReadonlyArray<PlannedComment>, suggestions: ReadonlyArray<PlannedSuggestion>, retained: ReadonlyArray<RetainedRun> = []): string {
+  blockRuns(block: DocxExportBlock, properties: string, comments: ReadonlyArray<PlannedComment>, suggestions: ReadonlyArray<PlannedSuggestion>, mapping: MappedInline | null = null): string {
     const parts = graphemesOf(block.text);
     const threads = comments.map((comment) => ({ comment, ids: [this.#id(), ...comment.mark.replies.map(() => this.#id())] }));
+    const retained = mapping?.runs ?? [];
+    const containers = mapping?.containers ?? [];
+    const fields = mapping?.fields ?? [];
     const boundaries = new Set<number>([0, parts.length]);
-    for (const run of retained) {
+    for (const run of [...retained, ...containers, ...fields]) {
       boundaries.add(run.from);
       boundaries.add(run.to);
     }
@@ -1177,17 +1234,31 @@ class MarkupWriter {
         for (const id of ids) out += `<${this.w('commentRangeStart')} ${this.w('id')}="${id}"/>`;
       }
     };
+    const open: InlineContainer[] = [];
+    let opened = 0;
     for (let index = 0; index < points.length; index += 1) {
       const point = points[index]!;
+      while (open.length > 0 && open.at(-1)!.to <= point) out += open.pop()!.close;
       at(point);
+      for (const field of fields) if (field.from === point && field.to === point) out += field.markup;
       const next = points[index + 1];
       if (next === undefined || next <= point) continue;
+      while (opened < containers.length && containers[opened]!.from === point) {
+        open.push(containers[opened]!);
+        out += containers[opened++]!.open;
+      }
+      const whole = fields.find((field) => field.from <= point && next <= field.to && field.from < field.to);
+      if (whole !== undefined) {
+        if (whole.from === point) out += whole.markup;
+        continue;
+      }
       const text = parts.slice(point, next).join('');
       const within = suggestions.find((suggestion) => suggestion.fromGrapheme <= point && next <= suggestion.toGrapheme && suggestion.toGrapheme > suggestion.fromGrapheme);
       out += within === undefined
         ? this.run(text, propertiesAt(point), false)
         : this.#revision('del', within.mark.authorLabel, fileDate(within.mark.createdAt), this.run(text, propertiesAt(point), true));
     }
+    while (open.length > 0) out += open.pop()!.close;
     for (const suggestion of suggestions) {
       if (suggestion.mark.kind === 'change-suggestion') this.written.suggestions += 1;
     }
@@ -1261,7 +1332,9 @@ interface ReviewFacts {
   marks: MarkPlan;
   options: ManuscriptExportOptions;
   /** A mapped build's retained parts beside the body, by the name the disclosure gives them: copied byte for byte, or rewritten. */
-  parts?: { preserved: Array<[string, number]>; rewritten: Array<[string, number]> };
+  parts?: { preserved: Array<[string, number]>; rewritten: Array<[string, number]>; edited?: Array<[string, number]> };
+  /** The positions of the note blocks written back into their notes because they were edited (Issue #1204). */
+  editedNotes?: number[];
 }
 
 function emptyTally(): ClassTally {
@@ -1335,12 +1408,23 @@ function markRow(
   return fidelityRow(key, label, considered, 'unavailable', `${words.written(written)}${words.unwritable(unwritable.length)}`, unwritable);
 }
 
+/** The edited notes' sentence, said of the note blocks that carry it (Issue #1204): an unedited note is restored as it was. */
+const EDITED_NOTES_LINE = '注文按稿件文字写出，原注文中的行内样式未能恢复';
+
+function withEditedNotes(facts: ReviewFacts, row: ExportFidelityRowProjection): ExportFidelityRowProjection {
+  const edited = facts.editedNotes ?? [];
+  if (edited.length === 0) return row;
+  const lead = facts.tallies.notes.lost > 0 ? `${row.detail.replace(/；注文和其余引用从原文件恢复。$/u, '')}；` : '';
+  return fidelityRow('notes', row.label, row.count, 'degraded',
+    `${lead}${edited.length} 条改过的注释：${EDITED_NOTES_LINE}；其余从原文件恢复。`, [...row.positions, ...edited]);
+}
+
 function fidelityRows(facts: ReviewFacts): ExportFidelityRowProjection[] {
   const boxes = facts.tallies['text-boxes'];
   const revisions = facts.tallies['file-revisions'];
   return [
     contentRow(facts, 'inline-styles', '行内样式', '未检测到行内样式。', '字体、粗体、颜色等行内样式与超链接从原文件恢复。',
-      (count) => `改过或带标记的段落中有 ${count} 处行内样式未能恢复：文字改过或无法逐字对应原文的段落按段首文字的格式写出，超链接只保留文字、不能再点击；其余从原文件恢复。`),
+      (count) => `改过或带标记的段落中有 ${count} 处行内样式未能对应原文件（跨越不同格式或超链接边界的改写、合并的段落、无法写回的其他行内结构）：这些文字按所替换文字开头的格式写出，不在超链接内；其余文字的样式与超链接按原文件写出。`),
     markRow(facts, 'annotation', 'annotations', '批注', {
       excluded: (live) => `本次不含批注；稿件上的 ${live} 条批注不变。`,
       none: '稿件上没有批注。',
@@ -1359,8 +1443,8 @@ function fidelityRows(facts: ReviewFacts): ExportFidelityRowProjection[] {
       written: (count) => `${count} 条备注作为 Word 批注写出，作者为「${EDITOR_NOTE_AUTHOR_LABEL}」。`,
       unwritable: (count) => `${count} 条所在的文字已变化，无法导出。`,
     }),
-    contentRow(facts, 'notes', '脚注与尾注', '未检测到脚注或尾注。', '脚注与尾注从原文件恢复。',
-      (count) => `改过或带标记的段落中有 ${count} 处脚注、尾注引用照常写出，但从原来的位置移到了该段末尾；注文和其余引用从原文件恢复。`),
+    withEditedNotes(facts, contentRow(facts, 'notes', '脚注与尾注', '未检测到脚注或尾注。', '脚注与尾注从原文件恢复。',
+      (count) => `改过或带标记的段落中有 ${count} 处脚注、尾注引用照常写出，但从原来的位置移到了该段末尾；注文和其余引用从原文件恢复。`)),
     structureRow(facts, 'tables', '表格', '未检测到表格。', '表格结构从原文件恢复；改过的单元格文字按稿件写出。'),
     contentRow(facts, 'images-captions', '图片与图注', '未检测到图片。', '图片从原文件恢复；图注按稿件文字写出。',
       (count) => `改过或带标记的段落中有 ${count} 张图片照常写出，但从原来的位置移到了该段末尾；其余从原文件恢复，图注按稿件文字写出。`),
@@ -1376,7 +1460,7 @@ function fidelityRows(facts: ReviewFacts): ExportFidelityRowProjection[] {
             ? fidelityRow('text-boxes', '文本框', boxes.total, 'preserved', '文本框从原文件恢复。')
             : fidelityRow('text-boxes', '文本框', boxes.total, 'degraded', `锚定在改过或带标记的段落中的 ${boxes.lost} 个文本框连同内容照常写出，但锚点从原来的位置移到了该段末尾；其余从原文件恢复。`, boxes.positions),
     contentRow(facts, 'fields', '域（目录等）', '未检测到域。', '目录、页码等域从原文件恢复，打开后可以更新。',
-      (count) => `改过或带标记的段落中的域只写出当前显示的文字，不再更新（${count} 个）；其余从原文件恢复。`),
+      (count) => `改过或带标记的段落中有 ${count} 个域的显示文字改过、带有标记或无法对应：只写出当前文字，不再更新；其余域连同显示文字按原文件写出，打开后可以更新。`),
     facts.wordMode !== undefined
       ? fidelityRow('file-revisions', '原文件中的修订', revisions.total, revisions.total === 0 ? 'preserved' : 'degraded',
         `正文来源的 ${revisions.total} 处原始修订记号不直接恢复；文字按导入时确认的${facts.wordMode === 'suggestions' ? '拒绝修订' : '接受修订'}阅读对应，之后的编辑按当前稿件写出。待处理修改建议按本次导出选项处理。`)
@@ -1417,8 +1501,9 @@ function exclusionReason(row: ExportFidelityRowProjection, facts: ReviewFacts): 
   }
   if (facts.restoration === 'regenerated') return `没有可对应的原文件段落，无法恢复（${row.count} 项）`;
   const lost = facts.tallies[row.key as keyof ReviewFacts['tallies']].lost;
-  if (row.key === 'inline-styles') return `改过或带标记的段落中 ${lost} 处未能恢复，超链接只保留文字`;
-  if (row.key === 'fields') return `改过或带标记的段落中 ${lost} 个只写出当前显示的文字，不再更新`;
+  if (row.key === 'inline-styles') return `改过或带标记的段落中 ${lost} 处未能对应原文件，按所替换文字开头的格式写出`;
+  if (row.key === 'notes') return `${facts.editedNotes?.length ?? 0} 条改过的注释：${EDITED_NOTES_LINE}`;
+  if (row.key === 'fields') return `改过或带标记的段落中 ${lost} 个只写出当前文字，不再更新`;
   return `${row.count} 处未转为稿件标记，修订记号不写出`;
 }
 
@@ -1444,14 +1529,16 @@ function recordRetention(rows: ExportFidelityRowProjection[], facts: ReviewFacts
     }
     const kind = MARK_ROW_KINDS[row.key];
     const written = row.count - (kind === undefined ? 0 : facts.marks.unwritable[kind].length);
-    const anchor = facts.restoration === 'from-original' && row.status === 'degraded' ? MOVED_ANCHOR_NAMES[row.key] : undefined;
+    const editedNotes = row.key === 'notes' ? facts.editedNotes?.length ?? 0 : 0;
+    const anchor = facts.restoration === 'from-original' && row.status === 'degraded' && (editedNotes === 0 || facts.tallies.notes.lost > 0)
+      ? MOVED_ANCHOR_NAMES[row.key] : undefined;
     // The header and footer parts are named with the parts below; the file's own revisions are never written.
     if (row.key !== 'headers-footers' && row.key !== 'file-revisions' && written > 0 && (row.status !== 'unavailable' || kind !== undefined)) {
       retention.rebuilt.push(anchor === undefined ? `${row.label}（${written} 项）`
         : `${row.label}：${row.count} 项，其中 ${facts.tallies[row.key as keyof ReviewFacts['tallies']].lost} 项随重建段落移到该段末尾`);
     }
     if (anchor !== undefined) moved.push(anchor);
-    else if (row.status !== 'preserved') {
+    if (anchor === undefined ? row.status !== 'preserved' : editedNotes > 0) {
       retention.excluded.push(`${row.label}：${exclusionReason(row, facts)}`);
       limited.push(name(row));
     }
@@ -1466,13 +1553,15 @@ function recordRetention(rows: ExportFidelityRowProjection[], facts: ReviewFacts
     `本次 DOCX：${parts.preserved.length > 0 ? `${labels(parts.preserved)}与原文件逐字节相同` : '没有与原文件逐字节相同的部分'}`,
     `正文 ${body}${moved.length > 0 ? `，重建段落中的${moved.join('、')}移到该段末尾` : ''}`,
     ...(parts.rewritten.length > 0 ? [`${labels(parts.rewritten)}去掉原文件的批注标记后重新写出`] : []),
+    ...((parts.edited ?? []).length > 0 ? [`${labels(parts.edited!)}按改过的注释重新写出`] : []),
     ...(limited.length > 0 ? [`未能原样写出：${limited.join('、')}`] : []),
     ...(optional.length > 0 ? [`本次未包含：${optional.join('、')}`] : []),
   ].join('；');
   const first = rows[0]!.retention!;
   rows[0]!.retention = {
     preserved: parts.preserved.map(([label, count]) => `${label}（${count} 个，与原文件逐字节相同）`),
-    rebuilt: [`正文：${body}`, ...parts.rewritten.map(([label, count]) => `${label}（${count} 个，去掉原批注标记后重新写出）`), ...first.rebuilt],
+    rebuilt: [`正文：${body}`, ...parts.rewritten.map(([label, count]) => `${label}（${count} 个，去掉原批注标记后重新写出）`),
+      ...(parts.edited ?? []).map(([label, count]) => `${label}（${count} 个，按改过的注释重新写出）`), ...first.rebuilt],
     excluded: first.excluded,
     summary: `${summary}。数量、原因与段落位置见导出保真审阅。`,
   };
@@ -1524,7 +1613,7 @@ function sourceProperties(paragraph: XmlElement, selectedWord = false): { paragr
 
 /** The style a regenerated block without a source paragraph takes: the parser reads it back as the same kind. */
 function freshParagraphProperties(block: DocxExportBlock, writer: MarkupWriter): string {
-  if (block.kind === 'paragraph') return '';
+  if (block.kind === 'paragraph' || block.kind === 'note') return '';
   const style = block.kind === 'title' ? 'Title' : `Heading${block.level ?? 1}`;
   return `<${writer.w('pPr')}><${writer.w('pStyle')} ${writer.w('val')}="${style}"/></${writer.w('pPr')}>`;
 }
@@ -1533,10 +1622,18 @@ interface MappedWalk {
   documentXml: string;
   restoredBlocks: number;
   regeneratedBlocks: number;
+  /** Regenerated blocks whose run mapping could not write some of their formatting as it was (Issue #874). */
+  unmappedBlocks: number;
 }
 
 function blockComments(plan: MarkPlan, block: DocxExportBlock): PlannedComment[] {
   return plan.commentsByBlock.get(block.blockId) ?? [];
+}
+
+/** Where a block's written marks stand, for its run mapping: a comment's ends, a suggestion's whole range. */
+function markBounds(plan: MarkPlan, block: DocxExportBlock): MarkBounds {
+  return { cuts: blockComments(plan, block).flatMap((comment) => [comment.fromGrapheme, comment.toGrapheme]),
+    spans: blockSuggestions(plan, block).map((suggestion) => [suggestion.fromGrapheme, suggestion.toGrapheme] as const) };
 }
 
 function blockSuggestions(plan: MarkPlan, block: DocxExportBlock): PlannedSuggestion[] {
@@ -1563,12 +1660,14 @@ function rewriteDocument(
     rows.set(sourceRow.sourceParagraphIndex, sourceRow);
   }
   const mapped = new Set(source.rows.filter((sourceRow) => blocksById.has(sourceRow.blockId)).map((sourceRow) => sourceRow.blockId));
-  const pending = input.blocks.filter((block) => !mapped.has(block.blockId));
+  // A note block is written into its note, never into the body (Issue #1204).
+  const pending = input.blocks.filter((block) => !mapped.has(block.blockId) && block.kind !== 'note');
   const emitted = new Set<string>();
   let writer: MarkupWriter | undefined;
   let mainUri = WORD_MAIN;
   let restoredBlocks = 0;
   let regeneratedBlocks = 0;
+  const unmapped = new Set<string>();
   const out: string[] = [];
 
   const note = (key: keyof ReviewFacts['tallies'], total: number, lost: number, position: number | null): void => {
@@ -1578,20 +1677,26 @@ function rewriteDocument(
     if (lost > 0 && position !== null) tally.positions.push(position);
   };
 
-  /** A regenerated paragraph (`lostAt` its position) counts what it could not write as it was, the anchors it moved among them. */
-  const noteCounts = (counts: ClassCounts, lostAt: number | null, inlineLost: number, moved: MovedAnchors = NO_RETENTION.moved): void => {
-    const lost = lostAt !== null;
-    note('inline-styles', counts.inlineStyles, lost ? inlineLost : 0, lostAt);
+  /**
+   * A regenerated paragraph (`lostAt` its position) counts what its run mapping could not write as it was — a construct
+   * outside the supported set counted only then — and the anchors it moved.
+   */
+  const noteCounts = (counts: ClassCounts, lostAt: number | null, mapping: MappedInline | null, moved: MovedAnchors = NO_RETENTION.moved): boolean => {
+    const lost = lostAt !== null && mapping !== null;
+    const styles = lost ? Math.min(counts.inlineStyles, mapping.lost.styles) + mapping.lost.unsupported : 0;
+    const fields = lost ? Math.min(counts.fields, mapping.lost.fields) : 0;
+    note('inline-styles', counts.inlineStyles + (lost ? mapping.lost.unsupported : 0), styles, lostAt);
     note('notes', counts.notes, lost ? moved.notes : 0, lostAt);
     note('tables', counts.tables, 0, null);
     note('images-captions', counts.images, lost ? moved.images : 0, lostAt);
     note('sections', counts.sections, 0, null);
-    note('fields', counts.fields, lost ? counts.fields : 0, lostAt);
+    note('fields', counts.fields, fields, lostAt);
     note('file-revisions', counts.fileRevisions, 0, null);
     note('text-boxes', counts.textBoxes, lost ? moved.textBoxes : 0, lostAt);
+    return styles > 0 || fields > 0;
   };
 
-  const regenerate = (block: DocxExportBlock, paragraph: XmlElement | null, retained = paragraph === null ? NO_RETENTION : paragraphRetention(paragraph)): string => {
+  const regenerate = (block: DocxExportBlock, paragraph: XmlElement | null, retained = NO_RETENTION, mapping: MappedInline | null = null): string => {
     const w = writer!;
     const properties = paragraph === null ? { paragraph: freshParagraphProperties(block, w), run: '' } : sourceProperties(paragraph);
     const attributes = paragraph === null ? [] : paragraph.attributes;
@@ -1599,8 +1704,7 @@ function rewriteDocument(
     emitted.add(block.blockId);
     regeneratedBlocks += 1;
     const bookmarks = paragraph === null ? { starts: '', ends: '' } : paragraphBookmarks(paragraph);
-    const unchanged = paragraph !== null && rows.get(paragraph.paragraphIndex)?.sourceParagraphDigest === block.digest && hasExactRunMapping(retained, block);
-    return `${openTag(name, attributes, false)}${properties.paragraph}${bookmarks.starts}${w.blockRuns(block, properties.run, blockComments(plan, block), blockSuggestions(plan, block), unchanged ? retained.runs : [])}${retained.anchors}${bookmarks.ends}</${name}>`;
+    return `${openTag(name, attributes, false)}${properties.paragraph}${bookmarks.starts}${w.blockRuns(block, properties.run, blockComments(plan, block), blockSuggestions(plan, block), mapping)}${retained.anchors}${bookmarks.ends}</${name}>`;
   };
 
   /** The blocks no source paragraph holds, written fresh before the block that follows them. */
@@ -1620,7 +1724,7 @@ function rewriteDocument(
     const block = sourceRow === undefined ? undefined : blocksById.get(sourceRow.blockId);
     const counts = countClasses(counted.children);
     if (block === undefined || emitted.has(block.blockId)) {
-      noteCounts(counts, null, 0);
+      noteCounts(counts, null, null);
       if (paragraphMarkInserted(paragraph)) {
         const restored = stripped(paragraph);
         return hasContent(restored) ? [restored] : [];
@@ -1631,16 +1735,16 @@ function rewriteDocument(
     const flushed = flushPending(block.position);
     if (flushed.length > 0) lead.push({ raw: flushed });
     if (block.digest === sourceRow!.sourceParagraphDigest && !carriesMarks(block)) {
-      noteCounts(counts, null, 0);
+      noteCounts(counts, null, null);
       emitted.add(block.blockId);
       restoredBlocks += 1;
       return [...lead, stripped(paragraph)];
     }
-    // Marks alone keep each source run's properties. Hyperlinks still have no editable representation.
+    // The words keep the formatting their run mapping still finds in the source paragraph (Issue #874).
     const retained = paragraphRetention(paragraph);
-    const inlineLost = inlineStylesLost(paragraph, block.digest === sourceRow!.sourceParagraphDigest && hasExactRunMapping(retained, block));
-    noteCounts(counts, block.position, inlineLost, retained.moved);
-    return [...lead, { raw: regenerate(block, paragraph, retained) }];
+    const mapping = mapInline(retained.inline, graphemesOf(block.text), markBounds(plan, block));
+    if (noteCounts(counts, block.position, mapping, retained.moved)) unmapped.add(block.blockId);
+    return [...lead, { raw: regenerate(block, paragraph, retained, mapping) }];
   };
 
   /** A body paragraph, with the paragraphs of the text boxes merged into the body written right after it. */
@@ -1759,9 +1863,9 @@ function rewriteDocument(
   parser.write(documentXml).close();
   requireExport(rootSeen && bodyClosed && depth === 0, 'DOCX_EXPORT_SOURCE_INVALID', '正文部件不完整。');
   requireExport(pending.length === 0, 'DOCX_EXPORT_MAPPING_INVALID', '有稿件内容块未能写出。');
-  const missing = input.blocks.filter((block) => !emitted.has(block.blockId));
+  const missing = input.blocks.filter((block) => !emitted.has(block.blockId) && block.kind !== 'note');
   requireExport(missing.length === 0, 'DOCX_EXPORT_MAPPING_INVALID', '有稿件内容块未能写出。');
-  return { documentXml: withoutHalfBookmarks(`${XML_DECLARATION}${out.join('')}`), restoredBlocks, regeneratedBlocks, writer: writer!, mainUri };
+  return { documentXml: withoutHalfBookmarks(`${XML_DECLARATION}${out.join('')}`), restoredBlocks, regeneratedBlocks, unmappedBlocks: unmapped.size, writer: writer!, mainUri };
 }
 
 /**
@@ -1841,27 +1945,34 @@ function rewriteWordDocument(documentXml: string, input: DocxExportInput, source
   const emitted = new Set<string>();
   let restoredBlocks = 0;
   let regeneratedBlocks = 0;
+  const unmapped = new Set<string>();
   const note = (key: keyof ReviewFacts['tallies'], total: number, lost: number, position: number | null): void => {
     const tally = facts.tallies[key]; tally.total += total; tally.lost += lost;
     if (lost > 0 && position !== null) tally.positions.push(position);
   };
-  const countParagraph = (paragraph: XmlElement, regenerated: boolean, position: number | null, retained: ParagraphRetention, original: XmlElement): void => {
+  /** A regenerated paragraph without a run mapping (a join's) loses every inline style and field; one with a mapping, what it names. */
+  const countParagraph = (paragraph: XmlElement, regenerated: boolean, position: number | null, retained: ParagraphRetention, original: XmlElement,
+    mapping: MappedInline | null = null): boolean => {
     const counts = countClasses(paragraph.children, true);
-    note('inline-styles', counts.inlineStyles, regenerated ? counts.inlineStyles : 0, position);
+    const unsupported = regenerated && mapping !== null ? mapping.lost.unsupported : 0;
+    const styles = !regenerated ? 0 : mapping === null ? counts.inlineStyles : Math.min(counts.inlineStyles, mapping.lost.styles) + unsupported;
+    const fields = !regenerated ? 0 : mapping === null ? counts.fields : Math.min(counts.fields, mapping.lost.fields);
+    note('inline-styles', counts.inlineStyles + unsupported, styles, position);
     note('notes', counts.notes, regenerated ? retained.moved.notes : 0, position);
     note('images-captions', counts.images, regenerated ? retained.moved.images : 0, position);
     note('sections', counts.sections, 0, null);
-    note('fields', counts.fields, regenerated ? counts.fields : 0, position);
+    note('fields', counts.fields, fields, position);
     note('text-boxes', counts.textBoxes, regenerated ? retained.moved.textBoxes : 0, position);
     note('file-revisions', countClasses(original.children, true).fileRevisions, 0, null);
+    return styles > 0 || fields > 0;
   };
-  const regenerate = (block: DocxExportBlock, paragraph: XmlElement | null, retain: ParagraphRetention): RawXml => {
+  const regenerate = (block: DocxExportBlock, paragraph: XmlElement | null, retain: ParagraphRetention, mapping: MappedInline | null = null): RawXml => {
     const properties = paragraph === null ? { paragraph: freshParagraphProperties(block, writer), run: '' } : sourceProperties(paragraph, true);
     const name = paragraph?.name ?? writer.w('p');
     emitted.add(block.blockId); regeneratedBlocks += 1;
     const bookmarks = paragraph === null ? { starts: '', ends: '' } : paragraphBookmarks(paragraph);
     return { raw: `${openTag(name, paragraph?.attributes ?? [], false)}${properties.paragraph}${bookmarks.starts}` +
-      writer.blockRuns(block, properties.run, blockComments(plan, block), blockSuggestions(plan, block)) +
+      writer.blockRuns(block, properties.run, blockComments(plan, block), blockSuggestions(plan, block), mapping) +
       `${retain.anchors}${bookmarks.ends}</${name}>` };
   };
   const flushPending = (before: number): XmlNode[] => {
@@ -1878,7 +1989,7 @@ function rewriteWordDocument(documentXml: string, input: DocxExportInput, source
     const retained = paragraphRetention(projected, true);
     if (owner === undefined || block === undefined || owner.sourceParagraphIndices[0] !== element.paragraphIndex) {
       const joined = owner !== undefined && block !== undefined;
-      countParagraph(projected, joined, joined ? block.position : null, retained, element);
+      if (countParagraph(projected, joined, joined ? block.position : null, retained, element)) unmapped.add(block!.blockId);
       // Preserve non-text anchors and section properties, while dropping every unmatched original word.
       const properties = projected.children.filter((child): child is XmlElement => isElement(child) && child.local === 'pPr' && isWordElement(child));
       const keep = retained.anchors.length > 0 || properties.some((property) => contains(property, 'sectPr'));
@@ -1890,10 +2001,15 @@ function rewriteWordDocument(documentXml: string, input: DocxExportInput, source
       (['ins', 'del', 'moveFrom', 'moveTo', 'AlternateContent'].includes(element.local) || COMMENT_MARKERS.has(element.local) || FORMATTING_REVISIONS.has(element.local)));
     const unchanged = single && block.digest === owner.digest && !revisedParagraphs.has(element.paragraphIndex) && !foreignLookalike &&
       blockComments(plan, block).length === 0 && blockSuggestions(plan, block).length === 0;
-    countParagraph(projected, !unchanged, block.position, retained, element);
-    if (unchanged) { emitted.add(block.blockId); restoredBlocks += 1; return [...lead, projected]; }
-    // A join uses the projected block's properties, rather than choosing one source paragraph's style.
-    return [...lead, regenerate(block, single ? projected : null, single ? retained : NO_RETENTION)];
+    if (unchanged) {
+      countParagraph(projected, false, block.position, retained, element);
+      emitted.add(block.blockId); restoredBlocks += 1; return [...lead, projected];
+    }
+    // A join uses the projected block's properties, rather than choosing one source paragraph's style; a single
+    // paragraph keeps what its run mapping finds (Issue #874).
+    const mapping = single ? mapInline(retained.inline, graphemesOf(block.text), markBounds(plan, block)) : null;
+    if (countParagraph(projected, true, block.position, retained, element, mapping)) unmapped.add(block.blockId);
+    return [...lead, regenerate(block, single ? projected : null, single ? retained : NO_RETENTION, mapping)];
   };
   const transform = (element: XmlElement): XmlNode[] => {
     if (element.uri === mainUri && element.local === 'p' && graphParagraphs.has(element.paragraphIndex)) {
@@ -1926,7 +2042,7 @@ function rewriteWordDocument(documentXml: string, input: DocxExportInput, source
   body.children = body.children.flatMap((child) => isElement(child) ? transform(child) : [child]);
   body.children.push(...flushPending(Number.POSITIVE_INFINITY));
   requireExport(input.blocks.every((block) => emitted.has(block.blockId)), 'DOCX_EXPORT_MAPPING_INVALID', '有所选读法的稿件块未能写出。');
-  return { documentXml: withoutHalfBookmarks(`${XML_DECLARATION}${serialize([root])}`), restoredBlocks, regeneratedBlocks, writer, mainUri,
+  return { documentXml: withoutHalfBookmarks(`${XML_DECLARATION}${serialize([root])}`), restoredBlocks, regeneratedBlocks, unmappedBlocks: unmapped.size, writer, mainUri,
     sideStoryParts: compiled.inventory.storyParts.filter((part) => part !== 'word/document.xml') };
 }
 
@@ -1939,6 +2055,49 @@ const RETAINED_PART_LABELS: ReadonlyArray<readonly [RegExp, string]> = [
   [/^word\/(header|footer)\d*\.xml$/i, '页眉页脚'],
   [/^word\/media\//, '图片等媒体文件'],
 ];
+
+const NOTE_PARTS: Readonly<Record<DocxExportNoteRow['part'], string>> = { footnote: 'word/footnotes.xml', endnote: 'word/endnotes.xml' };
+
+/**
+ * The notes whose note block was edited (Issue #1204), by part and note: each is written back with the block's words, and its
+ * block's position is disclosed. A note block whose words are its note's is restored with the part as it was.
+ */
+function editedNotes(input: DocxExportInput, source: LegacyMappedDocxSource, facts: ReviewFacts): Map<string, Map<string, string>> {
+  const blocks = new Map(input.blocks.map((block) => [block.blockId, block]));
+  const edits = new Map<string, Map<string, string>>();
+  for (const row of source.notes ?? []) {
+    const block = blocks.get(row.blockId);
+    if (block === undefined || block.digest === row.sourceNoteDigest) continue;
+    const part = NOTE_PARTS[row.part];
+    edits.set(part, (edits.get(part) ?? new Map()).set(row.noteId, block.text));
+    (facts.editedNotes ??= []).push(block.position);
+  }
+  return edits;
+}
+
+/**
+ * A note part with each edited note's paragraphs replaced by the block's lines: the note's first paragraph's properties and its
+ * number mark stay, and every line is one run in that paragraph's first run's properties.
+ */
+function rewriteNotes(bytes: Uint8Array, part: string, edits: ReadonlyMap<string, string>): Uint8Array {
+  const root = parseXmlPart(decode(bytes, part), part);
+  const prefix = root.name.slice(0, root.name.length - root.local.length);
+  let written = 0;
+  for (const note of root.children) {
+    if (!isElement(note) || (note.local !== 'footnote' && note.local !== 'endnote')) continue;
+    const text = edits.get(attributeOf(note, 'id') ?? '');
+    if (text === undefined) continue;
+    const first = note.children.find((child): child is XmlElement => isElement(child) && child.local === 'p');
+    const properties = first === undefined ? { paragraph: '', run: '' } : sourceProperties(first);
+    const mark = first?.children.find((child): child is XmlElement => isElement(child) && child.local === 'r' &&
+      child.children.some((inner) => isElement(inner) && (inner.local === 'footnoteRef' || inner.local === 'endnoteRef')));
+    note.children = [{ raw: text.split('\n').map((line, index) => `<${prefix}p>${properties.paragraph}${index === 0 && mark !== undefined ? serialize([mark]) : ''}` +
+      `<${prefix}r>${properties.run}<${prefix}t xml:space="preserve">${escapeText(line)}</${prefix}t></${prefix}r></${prefix}p>`).join('') }];
+    written += 1;
+  }
+  requireExport(written === edits.size, 'DOCX_EXPORT_MAPPING_INVALID', '有改过的注释在原文件中找不到。');
+  return strToU8(`${XML_DECLARATION}${serialize([root])}`);
+}
 
 /** A part beside the body that anchors comments: its comment markup goes, since the comments are replaced. */
 function withoutCommentMarkup(bytes: Uint8Array, part: string): Uint8Array {
@@ -1975,6 +2134,7 @@ function mappedPackage(input: DocxExportInput, source: Extract<DocxExportSource,
   facts.tallies['headers-footers'].total = original.names.filter((name) => /^word\/(header|footer)\d*\.xml$/i.test(name)).length;
   if (isWordMappedDocxSource(source)) facts.wordMode = source.mapping.mode;
   const makeWriter = (prefix: string): MarkupWriter => new MarkupWriter(prefix, identities.nextId, identities.paraIds);
+  const notes = isWordMappedDocxSource(source) ? new Map<string, Map<string, string>>() : editedNotes(input, source, facts);
   const walk = isWordMappedDocxSource(source)
     ? { kind: 'word' as const, ...rewriteWordDocument(documentXml, input, source, plan, facts, makeWriter) }
     : { kind: 'legacy' as const, ...rewriteDocument(documentXml, input, source, plan, facts, makeWriter) };
@@ -2025,7 +2185,9 @@ function mappedPackage(input: DocxExportInput, source: Extract<DocxExportSource,
       replaced.delete(name);
     } else if (/^word\/(header|footer)\d*\.xml$|^word\/(footnotes|endnotes)\.xml$/i.test(name) ||
       (walk.kind === 'word' && walk.sideStoryParts.includes(name))) {
-      entries.push([name, withoutCommentMarkup(original.entries.get(name)!, name)]);
+      const kept = withoutCommentMarkup(original.entries.get(name)!, name);
+      const edits = notes.get(name);
+      entries.push([name, edits === undefined ? kept : rewriteNotes(kept, name, edits)]);
     } else {
       entries.push([name, original.entries.get(name)!]);
     }
@@ -2041,21 +2203,22 @@ function mappedPackage(input: DocxExportInput, source: Extract<DocxExportSource,
   }
   entries.push(...added);
   // The retained parts the disclosure names, each compared with the original byte for byte (Issue #814).
-  const partCounts = new Map<string, { preserved: number; rewritten: number }>();
+  const partCounts = new Map<string, { preserved: number; rewritten: number; edited: number }>();
   for (const [name, bytes] of entries) {
     const label = RETAINED_PART_LABELS.find(([pattern]) => pattern.test(name))?.[1];
     if (label === undefined) continue;
     const before = original.entries.get(name);
     const identical = before !== undefined && before.length === bytes.length && before.every((byte, index) => byte === bytes[index]);
-    const counts = partCounts.get(label) ?? { preserved: 0, rewritten: 0 };
-    counts[identical ? 'preserved' : 'rewritten'] += 1;
+    const counts = partCounts.get(label) ?? { preserved: 0, rewritten: 0, edited: 0 };
+    counts[identical ? 'preserved' : notes.has(name) ? 'edited' : 'rewritten'] += 1;
     partCounts.set(label, counts);
   }
-  facts.parts = { preserved: [], rewritten: [] };
+  facts.parts = { preserved: [], rewritten: [], ...(notes.size > 0 ? { edited: [] } : {}) };
   for (const [, label] of RETAINED_PART_LABELS) {
     const counts = partCounts.get(label);
     if (counts !== undefined && counts.preserved > 0) facts.parts.preserved.push([label, counts.preserved]);
     if (counts !== undefined && counts.rewritten > 0) facts.parts.rewritten.push([label, counts.rewritten]);
+    if (counts !== undefined && counts.edited > 0) facts.parts.edited!.push([label, counts.edited]);
   }
   return { bytes: emit ? zipPackage(entries) : null, facts, walk, written: writer.written };
 }
@@ -2148,7 +2311,7 @@ function freshPackage(input: DocxExportInput, source: Extract<DocxExportSource, 
   const writer = new MarkupWriter('w:', 0, new Set());
   const paragraphs = input.blocks.map((block) =>
     `<w:p>${freshParagraphProperties(block, writer)}${writer.blockRuns(block, '', blockComments(plan, block), blockSuggestions(plan, block))}</w:p>`);
-  const walk: MappedWalk = { documentXml: '', restoredBlocks: 0, regeneratedBlocks: input.blocks.length };
+  const walk: MappedWalk = { documentXml: '', restoredBlocks: 0, regeneratedBlocks: input.blocks.length, unmappedBlocks: 0 };
   if (!emit) return { bytes: null, facts, walk, written: writer.written };
   const added: FreshParts = { relationships: [], overrides: [], parts: [] };
   if (writer.comments.length > 0) {
@@ -2231,6 +2394,7 @@ export function renderDocxExport(input: DocxExportInput, options: { emit: boolea
     restoration: built.facts.restoration,
     restoredBlocks: built.walk.restoredBlocks,
     regeneratedBlocks: built.walk.regeneratedBlocks,
+    unmappedBlocks: built.walk.unmappedBlocks,
     written: { ...built.written },
   };
 }

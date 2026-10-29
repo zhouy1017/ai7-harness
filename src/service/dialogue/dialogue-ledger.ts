@@ -8,6 +8,8 @@ import { POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION } from '../task-authorizat
 import { GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST, GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT_DIGEST, GLOBAL_AGENT_SCOPED_RULE_ID } from './global-agent-session.js';
 import { AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST, DIALOGUE_PROMPT_CONTRACT_DIGEST, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST } from './contract.js';
 import type { DialogueMessageInput } from './contract.js';
+import type { SelectionSpanBlockPin } from '../../shared/protocol/selection-span.js';
+import { isSpanOf } from '../manuscript/selection-span.js';
 
 /**
  * The AI7 side of Interactive Editorial Dialogue (Issue #52, plan slice S17a; UI ADR 0014, ADR 0011): a dialogue Task bound
@@ -406,6 +408,11 @@ export interface StoredDialogueTask {
   readonly fromGrapheme: number;
   readonly toGrapheme: number;
   readonly blockDigest: string;
+  /**
+   * A question about a cross-paragraph selection (Issue #1176): every block of the span, the range above naming its first.
+   * It lives in the Task's canonical record only, so a Task on one block records exactly what it always did.
+   */
+  readonly span?: ReadonlyArray<SelectionSpanBlockPin>;
   readonly selectionSha256: string;
   readonly questionSha256: string;
   readonly askedAt: string;
@@ -495,6 +502,16 @@ function bindingRecord(attemptId: string, binding: StoredDialogueBinding): Recor
 }
 
 /** A row read back: its record must be exactly the canonical form of what its columns say, under its digest. */
+/** The span a Task's canonical record carries, if any; the record is then verified whole against it. */
+function spanOfRecord(row: SqlRow): { span?: ReadonlyArray<SelectionSpanBlockPin> } {
+  const record = parseStoredJson(text(row.canonical_json), () => new DialogueError('DIALOGUE_RECORD_INVALID', INVALID));
+  const span = isRecord(record) ? record.span : undefined;
+  if (span === undefined) return {};
+  const range = { blockId: text(row.block_id), blockDigest: text(row.block_digest), fromGrapheme: integer(row.from_grapheme), toGrapheme: integer(row.to_grapheme) };
+  requireDialogue(isSpanOf(span, range), 'DIALOGUE_RECORD_INVALID', INVALID);
+  return { span };
+}
+
 function verified(row: SqlRow, record: Record<string, unknown>): void {
   const json = text(row.canonical_json);
   requireDialogue(sha256Hex(json) === text(row.sha256) && json === canonicalJson(record), 'DIALOGUE_RECORD_INVALID', INVALID);
@@ -513,7 +530,8 @@ export class DialogueLedger {
       UUID_PATTERN.test(input.revisionId) && Number.isSafeInteger(input.journalSequence) && input.journalSequence >= 0 &&
       /^blk_[0-9a-f]{24}$/u.test(input.blockId) && Number.isSafeInteger(input.fromGrapheme) && input.fromGrapheme >= 0 &&
       Number.isSafeInteger(input.toGrapheme) && input.toGrapheme > input.fromGrapheme && DIGEST_PATTERN.test(input.blockDigest) &&
-      DIGEST_PATTERN.test(input.selectionSha256) && DIGEST_PATTERN.test(input.questionSha256),
+      DIGEST_PATTERN.test(input.selectionSha256) && DIGEST_PATTERN.test(input.questionSha256) &&
+      (input.span === undefined || isSpanOf(input.span, input)),
     'DIALOGUE_INVALID', '对话的所选文字或问题无效。');
     const task: StoredDialogueTask = {
       dialogueId: randomUUID(),
@@ -526,6 +544,7 @@ export class DialogueLedger {
       fromGrapheme: input.fromGrapheme,
       toGrapheme: input.toGrapheme,
       blockDigest: input.blockDigest,
+      ...(input.span === undefined ? {} : { span: input.span }),
       selectionSha256: input.selectionSha256,
       questionSha256: input.questionSha256,
       askedAt: input.now.toISOString(),
@@ -598,6 +617,7 @@ export class DialogueLedger {
       fromGrapheme: integer(row.from_grapheme),
       toGrapheme: integer(row.to_grapheme),
       blockDigest: text(row.block_digest),
+      ...spanOfRecord(row),
       selectionSha256: text(row.selection_sha256),
       questionSha256: text(row.question_sha256),
       askedAt: text(row.asked_at),

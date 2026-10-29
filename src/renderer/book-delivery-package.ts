@@ -746,14 +746,17 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     draw('keep');
     options.setStatus(current.route === 'archive' ? PACKAGE_ARCHIVE_STATUS_LINES.choosing : PACKAGE_EXPORT_STATUS_LINES.choosing, 'busy');
     try {
-      const choose = current.route === 'archive' ? api.chooseBookDeliveryPackageArchiveDestination : api.chooseBookDeliveryPackageExportFolder;
-      const chosen = await choose({
-        packageVersionId: current.packageVersionId,
-        options: reviewed.options,
-        reviewDigest: reviewed.reviewDigest,
-        offset: reviewed.offset,
-        memberKeys: [...current.selected],
-      });
+      const chosen = await (current.route === 'archive'
+        // The archive binds every content member of the version, so it names none (Issue #959).
+        ? api.chooseBookDeliveryPackageArchiveDestination({ packageVersionId: current.packageVersionId, options: reviewed.options,
+          reviewDigest: reviewed.reviewDigest, offset: reviewed.offset })
+        : api.chooseBookDeliveryPackageExportFolder({
+          packageVersionId: current.packageVersionId,
+          options: reviewed.options,
+          reviewDigest: reviewed.reviewDigest,
+          offset: reviewed.offset,
+          memberKeys: [...current.selected],
+        }));
       if (destroyed || exporting !== current || request !== exportTicket) return;
       if (chosen.outcome === 'cancelled') {
         current.phase = current.prepared === null ? 'ready' : 'prepared';

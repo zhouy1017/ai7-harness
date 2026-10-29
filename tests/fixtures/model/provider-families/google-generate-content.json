@@ -1,0 +1,1208 @@
+{
+  "family": "google-generate-content",
+  "route": "google-gemini",
+  "model": "gemini-3.8-flash",
+  "declared": {
+    "answerChannel": "candidate-parts-text",
+    "streaming": "generate-content-sse",
+    "toolCalling": "function"
+  },
+  "cases": [
+    {
+      "name": "text",
+      "turn": "unit",
+      "stream": false,
+      "request": {
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent",
+        "headers": {
+          "content-type": "application/json",
+          "accept": "application/json"
+        },
+        "credentialHeader": "x-goog-api-key",
+        "body": {
+          "contents": [
+            {
+              "parts": [
+                {
+                  "text": "合成段落：春风吹过合成的小镇。"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "systemInstruction": {
+            "parts": [
+              {
+                "text": "合成系统提示。"
+              }
+            ]
+          }
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "candidates": [
+            {
+              "content": {
+                "role": "model",
+                "parts": [
+                  {
+                    "text": "合成回答。"
+                  }
+                ]
+              },
+              "finishReason": "STOP",
+              "index": 0
+            }
+          ],
+          "usageMetadata": {
+            "promptTokenCount": 20,
+            "candidatesTokenCount": 8,
+            "thoughtsTokenCount": 2,
+            "totalTokenCount": 30
+          },
+          "modelVersion": "gemini-3.8-flash"
+        }
+      },
+      "chunks": [
+        {
+          "type": "block-start",
+          "index": 0,
+          "blockType": "text"
+        },
+        {
+          "type": "text-delta",
+          "index": 0,
+          "text": "合成回答。"
+        },
+        {
+          "type": "block-end",
+          "index": 0,
+          "block": {
+            "type": "text",
+            "text": "合成回答。"
+          }
+        },
+        {
+          "type": "usage",
+          "usage": {
+            "inputTokens": 20,
+            "outputTokens": 8,
+            "reasoningTokens": 2
+          }
+        },
+        {
+          "type": "finish",
+          "reason": {
+            "kind": "stop"
+          }
+        }
+      ],
+      "result": {
+        "kind": "answer",
+        "text": "合成回答。",
+        "reasoningText": null,
+        "usage": {
+          "inputTokens": 20,
+          "outputTokens": 8,
+          "reasoningTokens": 2
+        }
+      },
+      "usage": {
+        "inputTokens": 20,
+        "outputTokens": 8,
+        "reasoningTokens": 2
+      }
+    },
+    {
+      "name": "text-stream",
+      "turn": "dialogue",
+      "stream": true,
+      "request": {
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:streamGenerateContent?alt=sse",
+        "headers": {
+          "content-type": "application/json",
+          "accept": "text/event-stream"
+        },
+        "credentialHeader": "x-goog-api-key",
+        "body": {
+          "contents": [
+            {
+              "parts": [
+                {
+                  "text": "AI7 编辑对话 · 提问 · 问题摘要 74721387eb50670055951037676f437a85999a99e25d999ba02872fd2710a266\n【所选文字】\n合成选区。\n【问题】\n合成问题？"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "systemInstruction": {
+            "parts": [
+              {
+                "text": "你是出版社编辑的写作顾问。编辑在稿件中选了一段文字，并就这段文字提了一个问题。\n只依据所选文字和问题作答，用简洁、完整的中文句子回答；不要复述整段原文，不要编造所选文字之外的情节、人物或事实。\n你的回答只供编辑阅读：它不修改稿件，不构成事实结论，也不自动成为修改建议。需要时可以说明可以怎样改，由编辑自己决定。\n不调用任何工具。"
+              }
+            ]
+          }
+        }
+      },
+      "response": {
+        "status": 200,
+        "frames": [
+          "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"合成\"}]},\"index\":0}],\"usageMetadata\":{\"promptTokenCount\":30,\"candidatesTokenCount\":1,\"totalTokenCount\":31},\"modelVersion\":\"gemini-3.8-flash\"}\r\n\r\n",
+          "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"回答。\"}]},\"finishReason\":\"STOP\",\"index\":0}],\"usageMetadata\":{\"promptTokenCount\":30,\"candidatesTokenCount\":4,\"totalTokenCount\":34},\"modelVersion\":\"gemini-3.8-flash\"}\r\n\r\n"
+        ]
+      },
+      "chunks": [
+        {
+          "type": "block-start",
+          "index": 0,
+          "blockType": "text"
+        },
+        {
+          "type": "text-delta",
+          "index": 0,
+          "text": "合成"
+        },
+        {
+          "type": "text-delta",
+          "index": 0,
+          "text": "回答。"
+        },
+        {
+          "type": "block-end",
+          "index": 0,
+          "block": {
+            "type": "text",
+            "text": "合成回答。"
+          }
+        },
+        {
+          "type": "usage",
+          "usage": {
+            "inputTokens": 30,
+            "outputTokens": 4
+          }
+        },
+        {
+          "type": "finish",
+          "reason": {
+            "kind": "stop"
+          }
+        }
+      ],
+      "result": {
+        "kind": "answer",
+        "text": "合成回答。",
+        "reasoningText": null,
+        "usage": {
+          "inputTokens": 30,
+          "outputTokens": 4
+        }
+      },
+      "usage": {
+        "inputTokens": 30,
+        "outputTokens": 4
+      }
+    },
+    {
+      "name": "tool-calls",
+      "turn": "tool",
+      "stream": false,
+      "request": {
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent",
+        "headers": {
+          "content-type": "application/json",
+          "accept": "application/json"
+        },
+        "credentialHeader": "x-goog-api-key",
+        "body": {
+          "contents": [
+            {
+              "parts": [
+                {
+                  "text": "合成段落：春风吹过合成的小镇。"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "systemInstruction": {
+            "parts": [
+              {
+                "text": "合成系统提示。"
+              }
+            ]
+          },
+          "tools": [
+            {
+              "functionDeclarations": [
+                {
+                  "description": "合成查询工具。",
+                  "name": "synthetic_lookup",
+                  "parametersJsonSchema": {
+                    "properties": {
+                      "query": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "query"
+                    ],
+                    "type": "object"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "candidates": [
+            {
+              "content": {
+                "role": "model",
+                "parts": [
+                  {
+                    "text": "先查一下。"
+                  },
+                  {
+                    "functionCall": {
+                      "name": "synthetic_lookup",
+                      "args": {
+                        "query": "合成"
+                      }
+                    }
+                  }
+                ]
+              },
+              "finishReason": "STOP",
+              "index": 0
+            }
+          ],
+          "usageMetadata": {
+            "promptTokenCount": 40,
+            "candidatesTokenCount": 12,
+            "totalTokenCount": 52
+          },
+          "modelVersion": "gemini-3.8-flash"
+        }
+      },
+      "chunks": [
+        {
+          "type": "block-start",
+          "index": 0,
+          "blockType": "text"
+        },
+        {
+          "type": "text-delta",
+          "index": 0,
+          "text": "先查一下。"
+        },
+        {
+          "type": "block-end",
+          "index": 0,
+          "block": {
+            "type": "text",
+            "text": "先查一下。"
+          }
+        },
+        {
+          "type": "block-start",
+          "index": 1,
+          "blockType": "tool-call"
+        },
+        {
+          "type": "tool-call-delta",
+          "index": 1,
+          "id": "gemini-call-8a7f13993e051a98-1",
+          "name": "synthetic_lookup",
+          "argumentsDelta": "{\"query\":\"合成\"}"
+        },
+        {
+          "type": "block-end",
+          "index": 1,
+          "block": {
+            "type": "tool-call",
+            "id": "gemini-call-8a7f13993e051a98-1",
+            "name": "synthetic_lookup",
+            "arguments": "{\"query\":\"合成\"}"
+          }
+        },
+        {
+          "type": "usage",
+          "usage": {
+            "inputTokens": 40,
+            "outputTokens": 12
+          }
+        },
+        {
+          "type": "finish",
+          "reason": {
+            "kind": "tool-calls"
+          }
+        }
+      ],
+      "result": {
+        "kind": "tool-calls",
+        "text": "先查一下。",
+        "calls": [
+          {
+            "id": "gemini-call-8a7f13993e051a98-1",
+            "name": "synthetic_lookup",
+            "arguments": "{\"query\":\"合成\"}"
+          }
+        ],
+        "reasoningText": null,
+        "usage": {
+          "inputTokens": 40,
+          "outputTokens": 12
+        }
+      },
+      "usage": {
+        "inputTokens": 40,
+        "outputTokens": 12
+      }
+    },
+    {
+      "name": "tool-calls-provider-id",
+      "turn": "tool",
+      "stream": false,
+      "request": {
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent",
+        "headers": {
+          "content-type": "application/json",
+          "accept": "application/json"
+        },
+        "credentialHeader": "x-goog-api-key",
+        "body": {
+          "contents": [
+            {
+              "parts": [
+                {
+                  "text": "合成段落：春风吹过合成的小镇。"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "systemInstruction": {
+            "parts": [
+              {
+                "text": "合成系统提示。"
+              }
+            ]
+          },
+          "tools": [
+            {
+              "functionDeclarations": [
+                {
+                  "description": "合成查询工具。",
+                  "name": "synthetic_lookup",
+                  "parametersJsonSchema": {
+                    "properties": {
+                      "query": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "query"
+                    ],
+                    "type": "object"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "candidates": [
+            {
+              "content": {
+                "role": "model",
+                "parts": [
+                  {
+                    "functionCall": {
+                      "id": "gemini-provider-call-1",
+                      "name": "synthetic_lookup",
+                      "args": {
+                        "query": "合成"
+                      }
+                    }
+                  }
+                ]
+              },
+              "finishReason": "STOP",
+              "index": 0
+            }
+          ],
+          "usageMetadata": {
+            "promptTokenCount": 40,
+            "candidatesTokenCount": 10,
+            "totalTokenCount": 50
+          },
+          "modelVersion": "gemini-3.8-flash"
+        }
+      },
+      "chunks": [
+        {
+          "type": "block-start",
+          "index": 0,
+          "blockType": "tool-call"
+        },
+        {
+          "type": "tool-call-delta",
+          "index": 0,
+          "id": "gemini-provider-call-1",
+          "name": "synthetic_lookup",
+          "argumentsDelta": "{\"query\":\"合成\"}"
+        },
+        {
+          "type": "block-end",
+          "index": 0,
+          "block": {
+            "type": "tool-call",
+            "id": "gemini-provider-call-1",
+            "name": "synthetic_lookup",
+            "arguments": "{\"query\":\"合成\"}"
+          }
+        },
+        {
+          "type": "usage",
+          "usage": {
+            "inputTokens": 40,
+            "outputTokens": 10
+          }
+        },
+        {
+          "type": "finish",
+          "reason": {
+            "kind": "tool-calls"
+          }
+        }
+      ],
+      "result": {
+        "kind": "tool-calls",
+        "text": "",
+        "calls": [
+          {
+            "id": "gemini-provider-call-1",
+            "name": "synthetic_lookup",
+            "arguments": "{\"query\":\"合成\"}"
+          }
+        ],
+        "reasoningText": null,
+        "usage": {
+          "inputTokens": 40,
+          "outputTokens": 10
+        }
+      },
+      "usage": {
+        "inputTokens": 40,
+        "outputTokens": 10
+      }
+    },
+    {
+      "name": "tool-history",
+      "turn": "tool-history",
+      "stream": false,
+      "request": {
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent",
+        "headers": {
+          "content-type": "application/json",
+          "accept": "application/json"
+        },
+        "credentialHeader": "x-goog-api-key",
+        "body": {
+          "contents": [
+            {
+              "parts": [
+                {
+                  "text": "合成段落：春风吹过合成的小镇。"
+                }
+              ],
+              "role": "user"
+            },
+            {
+              "parts": [
+                {
+                  "text": "先查一下。"
+                },
+                {
+                  "functionCall": {
+                    "args": {
+                      "query": "合成"
+                    },
+                    "id": "call_synthetic_1",
+                    "name": "synthetic_lookup"
+                  }
+                }
+              ],
+              "role": "model"
+            },
+            {
+              "parts": [
+                {
+                  "functionResponse": {
+                    "id": "call_synthetic_1",
+                    "name": "synthetic_lookup",
+                    "response": {
+                      "output": "合成结果。"
+                    }
+                  }
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "systemInstruction": {
+            "parts": [
+              {
+                "text": "合成系统提示。"
+              }
+            ]
+          },
+          "tools": [
+            {
+              "functionDeclarations": [
+                {
+                  "description": "合成查询工具。",
+                  "name": "synthetic_lookup",
+                  "parametersJsonSchema": {
+                    "properties": {
+                      "query": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "query"
+                    ],
+                    "type": "object"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "candidates": [
+            {
+              "content": {
+                "role": "model",
+                "parts": [
+                  {
+                    "text": "查到了合成结果。"
+                  }
+                ]
+              },
+              "finishReason": "STOP",
+              "index": 0
+            }
+          ],
+          "usageMetadata": {
+            "promptTokenCount": 60,
+            "candidatesTokenCount": 6,
+            "totalTokenCount": 66
+          },
+          "modelVersion": "gemini-3.8-flash"
+        }
+      },
+      "chunks": [
+        {
+          "type": "block-start",
+          "index": 0,
+          "blockType": "text"
+        },
+        {
+          "type": "text-delta",
+          "index": 0,
+          "text": "查到了合成结果。"
+        },
+        {
+          "type": "block-end",
+          "index": 0,
+          "block": {
+            "type": "text",
+            "text": "查到了合成结果。"
+          }
+        },
+        {
+          "type": "usage",
+          "usage": {
+            "inputTokens": 60,
+            "outputTokens": 6
+          }
+        },
+        {
+          "type": "finish",
+          "reason": {
+            "kind": "stop"
+          }
+        }
+      ],
+      "result": {
+        "kind": "answer",
+        "text": "查到了合成结果。",
+        "reasoningText": null,
+        "usage": {
+          "inputTokens": 60,
+          "outputTokens": 6
+        }
+      },
+      "usage": {
+        "inputTokens": 60,
+        "outputTokens": 6
+      }
+    },
+    {
+      "name": "tool-history-synthetic-id",
+      "turn": "tool-history",
+      "callId": "gemini-call-0123456789abcdef-1",
+      "stream": false,
+      "request": {
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent",
+        "headers": {
+          "content-type": "application/json",
+          "accept": "application/json"
+        },
+        "credentialHeader": "x-goog-api-key",
+        "body": {
+          "contents": [
+            {
+              "parts": [
+                {
+                  "text": "合成段落：春风吹过合成的小镇。"
+                }
+              ],
+              "role": "user"
+            },
+            {
+              "parts": [
+                {
+                  "text": "先查一下。"
+                },
+                {
+                  "functionCall": {
+                    "args": {
+                      "query": "合成"
+                    },
+                    "name": "synthetic_lookup"
+                  }
+                }
+              ],
+              "role": "model"
+            },
+            {
+              "parts": [
+                {
+                  "functionResponse": {
+                    "name": "synthetic_lookup",
+                    "response": {
+                      "output": "合成结果。"
+                    }
+                  }
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "systemInstruction": {
+            "parts": [
+              {
+                "text": "合成系统提示。"
+              }
+            ]
+          },
+          "tools": [
+            {
+              "functionDeclarations": [
+                {
+                  "description": "合成查询工具。",
+                  "name": "synthetic_lookup",
+                  "parametersJsonSchema": {
+                    "properties": {
+                      "query": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "query"
+                    ],
+                    "type": "object"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "candidates": [
+            {
+              "content": {
+                "role": "model",
+                "parts": [
+                  {
+                    "text": "查到了合成结果。"
+                  }
+                ]
+              },
+              "finishReason": "STOP",
+              "index": 0
+            }
+          ],
+          "usageMetadata": {
+            "promptTokenCount": 60,
+            "candidatesTokenCount": 6,
+            "totalTokenCount": 66
+          },
+          "modelVersion": "gemini-3.8-flash"
+        }
+      },
+      "chunks": [
+        {
+          "type": "block-start",
+          "index": 0,
+          "blockType": "text"
+        },
+        {
+          "type": "text-delta",
+          "index": 0,
+          "text": "查到了合成结果。"
+        },
+        {
+          "type": "block-end",
+          "index": 0,
+          "block": {
+            "type": "text",
+            "text": "查到了合成结果。"
+          }
+        },
+        {
+          "type": "usage",
+          "usage": {
+            "inputTokens": 60,
+            "outputTokens": 6
+          }
+        },
+        {
+          "type": "finish",
+          "reason": {
+            "kind": "stop"
+          }
+        }
+      ],
+      "result": {
+        "kind": "answer",
+        "text": "查到了合成结果。",
+        "reasoningText": null,
+        "usage": {
+          "inputTokens": 60,
+          "outputTokens": 6
+        }
+      },
+      "usage": {
+        "inputTokens": 60,
+        "outputTokens": 6
+      }
+    },
+    {
+      "name": "tool-stream",
+      "turn": "retrieval",
+      "stream": true,
+      "request": {
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:streamGenerateContent?alt=sse",
+        "headers": {
+          "content-type": "application/json",
+          "accept": "text/event-stream"
+        },
+        "credentialHeader": "x-goog-api-key",
+        "body": {
+          "contents": [
+            {
+              "parts": [
+                {
+                  "text": "AI7 编辑对话 · 提问 · 问题摘要 74721387eb50670055951037676f437a85999a99e25d999ba02872fd2710a266\n【所选文字】\n合成选区。\n【问题】\n合成问题？"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "systemInstruction": {
+            "parts": [
+              {
+                "text": "你是出版社编辑的写作顾问。编辑在稿件中选了一段文字，并提出一个问题。\n根据所选文字、问题与本次已授权固定来源作答；找到书中哪里的问题先 retrieve，再 exact_fetch。检索预览不是原文。\n引用检索到的文字前必须精确取文；只引用 exact_fetch 返回的原文，并附上 [retrieval:候选 candidateId] 锚点。未经精确取文的引用不被接受。\n用简洁的一行中文回答，不编造情节或事实；回答只供编辑参考，不修改稿件，也不自动成为修改建议。"
+              }
+            ]
+          },
+          "tools": [
+            {
+              "functionDeclarations": [
+                {
+                  "description": "精确取回检索候选在已固定来源版本中的原文。引用前必须调用。",
+                  "name": "exact_fetch",
+                  "parametersJsonSchema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "candidateId": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "candidateId"
+                    ],
+                    "type": "object"
+                  }
+                },
+                {
+                  "description": "在这次任务已授权并固定的本机来源中检索候选；候选预览不是引文，引用前必须精确取文。",
+                  "name": "retrieve",
+                  "parametersJsonSchema": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "k": {
+                        "maximum": 8,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "query": {
+                        "maxLength": 1000,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "sourceKinds": {
+                        "items": {
+                          "enum": [
+                            "manuscript",
+                            "material",
+                            "retained-source"
+                          ],
+                          "type": "string"
+                        },
+                        "minItems": 1,
+                        "type": "array",
+                        "uniqueItems": true
+                      }
+                    },
+                    "required": [
+                      "query"
+                    ],
+                    "type": "object"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "frames": [
+          "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"functionCall\":{\"name\":\"retrieve\",\"args\":{\"query\":\"合成\"}}}]},\"finishReason\":\"STOP\",\"index\":0}],\"usageMetadata\":{\"promptTokenCount\":50,\"candidatesTokenCount\":9,\"totalTokenCount\":59},\"modelVersion\":\"gemini-3.8-flash\"}\r\n\r\n"
+        ]
+      },
+      "chunks": [
+        {
+          "type": "block-start",
+          "index": 0,
+          "blockType": "tool-call"
+        },
+        {
+          "type": "tool-call-delta",
+          "index": 0,
+          "id": "gemini-call-8ed45e07e27f4d52-1",
+          "name": "retrieve",
+          "argumentsDelta": "{\"query\":\"合成\"}"
+        },
+        {
+          "type": "block-end",
+          "index": 0,
+          "block": {
+            "type": "tool-call",
+            "id": "gemini-call-8ed45e07e27f4d52-1",
+            "name": "retrieve",
+            "arguments": "{\"query\":\"合成\"}"
+          }
+        },
+        {
+          "type": "usage",
+          "usage": {
+            "inputTokens": 50,
+            "outputTokens": 9
+          }
+        },
+        {
+          "type": "finish",
+          "reason": {
+            "kind": "tool-calls"
+          }
+        }
+      ],
+      "result": {
+        "kind": "tool-calls",
+        "text": "",
+        "calls": [
+          {
+            "id": "gemini-call-8ed45e07e27f4d52-1",
+            "name": "retrieve",
+            "arguments": "{\"query\":\"合成\"}"
+          }
+        ],
+        "reasoningText": null,
+        "usage": {
+          "inputTokens": 50,
+          "outputTokens": 9
+        }
+      },
+      "usage": {
+        "inputTokens": 50,
+        "outputTokens": 9
+      }
+    },
+    {
+      "name": "account-limit",
+      "turn": "unit",
+      "stream": false,
+      "request": {
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent",
+        "headers": {
+          "content-type": "application/json",
+          "accept": "application/json"
+        },
+        "credentialHeader": "x-goog-api-key",
+        "body": {
+          "contents": [
+            {
+              "parts": [
+                {
+                  "text": "合成段落：春风吹过合成的小镇。"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "systemInstruction": {
+            "parts": [
+              {
+                "text": "合成系统提示。"
+              }
+            ]
+          }
+        }
+      },
+      "response": {
+        "status": 429,
+        "body": {
+          "error": {
+            "code": 429,
+            "message": "Synthetic: you exceeded your current quota.",
+            "status": "RESOURCE_EXHAUSTED"
+          }
+        }
+      },
+      "chunks": [
+        {
+          "type": "finish",
+          "reason": {
+            "kind": "error",
+            "failure": {
+              "code": "QUOTA",
+              "message": "模型服务账户限额或余额不足。",
+              "status": 429
+            }
+          }
+        }
+      ],
+      "result": null,
+      "usage": null
+    },
+    {
+      "name": "rate-limit",
+      "turn": "unit",
+      "stream": false,
+      "request": {
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent",
+        "headers": {
+          "content-type": "application/json",
+          "accept": "application/json"
+        },
+        "credentialHeader": "x-goog-api-key",
+        "body": {
+          "contents": [
+            {
+              "parts": [
+                {
+                  "text": "合成段落：春风吹过合成的小镇。"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "systemInstruction": {
+            "parts": [
+              {
+                "text": "合成系统提示。"
+              }
+            ]
+          }
+        }
+      },
+      "response": {
+        "status": 429,
+        "body": {
+          "error": {
+            "code": 429,
+            "message": "Synthetic: too many requests.",
+            "status": "RESOURCE_EXHAUSTED"
+          }
+        }
+      },
+      "chunks": [
+        {
+          "type": "finish",
+          "reason": {
+            "kind": "error",
+            "failure": {
+              "code": "RATE_LIMIT",
+              "message": "模型服务速率限制。",
+              "status": 429
+            }
+          }
+        }
+      ],
+      "result": null,
+      "usage": null
+    },
+    {
+      "name": "unavailable",
+      "turn": "unit",
+      "stream": false,
+      "request": {
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent",
+        "headers": {
+          "content-type": "application/json",
+          "accept": "application/json"
+        },
+        "credentialHeader": "x-goog-api-key",
+        "body": {
+          "contents": [
+            {
+              "parts": [
+                {
+                  "text": "合成段落：春风吹过合成的小镇。"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "systemInstruction": {
+            "parts": [
+              {
+                "text": "合成系统提示。"
+              }
+            ]
+          }
+        }
+      },
+      "response": {
+        "status": 503,
+        "body": {
+          "error": {
+            "code": 503,
+            "message": "Synthetic: the model is overloaded.",
+            "status": "UNAVAILABLE"
+          }
+        }
+      },
+      "chunks": [
+        {
+          "type": "finish",
+          "reason": {
+            "kind": "error",
+            "failure": {
+              "code": "PROVIDER_ERROR",
+              "message": "模型服务返回服务端错误。",
+              "status": 503
+            }
+          }
+        }
+      ],
+      "result": null,
+      "usage": null
+    },
+    {
+      "name": "stream-unavailable",
+      "turn": "dialogue",
+      "stream": true,
+      "request": {
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:streamGenerateContent?alt=sse",
+        "headers": {
+          "content-type": "application/json",
+          "accept": "text/event-stream"
+        },
+        "credentialHeader": "x-goog-api-key",
+        "body": {
+          "contents": [
+            {
+              "parts": [
+                {
+                  "text": "AI7 编辑对话 · 提问 · 问题摘要 74721387eb50670055951037676f437a85999a99e25d999ba02872fd2710a266\n【所选文字】\n合成选区。\n【问题】\n合成问题？"
+                }
+              ],
+              "role": "user"
+            }
+          ],
+          "systemInstruction": {
+            "parts": [
+              {
+                "text": "你是出版社编辑的写作顾问。编辑在稿件中选了一段文字，并就这段文字提了一个问题。\n只依据所选文字和问题作答，用简洁、完整的中文句子回答；不要复述整段原文，不要编造所选文字之外的情节、人物或事实。\n你的回答只供编辑阅读：它不修改稿件，不构成事实结论，也不自动成为修改建议。需要时可以说明可以怎样改，由编辑自己决定。\n不调用任何工具。"
+              }
+            ]
+          }
+        }
+      },
+      "response": {
+        "status": 200,
+        "frames": [
+          "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"合成\"}]},\"index\":0}],\"modelVersion\":\"gemini-3.8-flash\"}\r\n\r\n",
+          "data: {\"error\":{\"code\":503,\"message\":\"Synthetic: the model is overloaded.\",\"status\":\"UNAVAILABLE\"}}\r\n\r\n"
+        ]
+      },
+      "chunks": [
+        {
+          "type": "block-start",
+          "index": 0,
+          "blockType": "text"
+        },
+        {
+          "type": "text-delta",
+          "index": 0,
+          "text": "合成"
+        },
+        {
+          "type": "finish",
+          "reason": {
+            "kind": "error",
+            "failure": {
+              "code": "AI7_OUTCOME_UNKNOWN",
+              "message": "模型服务已接受请求，但回答没有完整传回。",
+              "status": 200
+            }
+          }
+        }
+      ],
+      "result": null,
+      "usage": null
+    }
+  ]
+}

@@ -49,6 +49,7 @@ import {
   type WordMappedDocxSource,
 } from './docx-export.js';
 import { WORD_DOCX_PARSER_IDENTITY, compileWordTrackedDocxBytes, type WordTrackedCompilation } from './docx.js';
+import { revisionNoteSources } from './manuscript/note-blocks.js';
 import { readWordImportChoiceRecord, readWordParentSourcePin, requireWordRevisionSource,
   requireWordManuscriptSourceSegments, WORD_EXTRACTOR_IDENTITY } from './import-retention.js';
 import { REPORT_EXPORT_WRITER_IDENTITIES, renderReportExport, type ReportExportInput } from './report-export.js';
@@ -454,7 +455,7 @@ const PACKAGE_MEMBER_LINES: Readonly<Record<PackageMemberKind, { restoration: st
 };
 /** The writer of a package export's 评估记录 member (Issue #429): its owner's Markdown of the 定稿 version, written as it stands. */
 const PACKAGE_RECORD_WRITER_IDENTITY = 'ai7-package-evaluation-record/1';
-const REVIEW_REPORT_SCHEMA = 'ai7.review.report/1' as const;
+const REVIEW_REPORT_SCHEMAS: ReadonlyArray<unknown> = ['ai7.review.report/1', 'ai7.review.report/2'];
 const POLICY = { id: 'external-export-policy', version: 'v2' } as const;
 const INVALID_FILE_NAME_CHARACTERS = /[\\/:*?"<>|\u0000-\u001F]/gu;
 
@@ -1555,7 +1556,7 @@ export class ManuscriptExportStore {
     const record = parseCanonicalJson(json) as ReviewReportRecord;
     const version = integer(row.version);
     requireExport(
-      isRecord(record) && record.schema === REVIEW_REPORT_SCHEMA && record.version === version && record.reviewRunId === text(row.review_run_id),
+      isRecord(record) && REVIEW_REPORT_SCHEMAS.includes(record.schema) && record.version === version && record.reviewRunId === text(row.review_run_id),
       'EXPORT_RECORD_INVALID',
       '审阅报告记录无效。',
     );
@@ -1737,6 +1738,7 @@ export class ManuscriptExportStore {
     let exportSource: DocxExportSource;
     let wordPins: Omit<WordExportSourcePins, 'revisionId' | 'revisionDigest'> | null = null;
     let mapping: DocxExportSourceRow[] = [];
+    let notes: ReturnType<typeof revisionNoteSources> = [];
     if (target.document !== null && (readersReportDocumentType(target.document.typeId) !== undefined || this.#drafted(target.document.documentId))) {
       // A 审稿意见 draft (Issue #429, S81c) was written from a finalized Evaluation Record, and a writing draft (Issue #432, S84a)
       // from the Book and its reference set, not from a file: each revision names the manuscript file only because every revision
@@ -1754,10 +1756,10 @@ export class ManuscriptExportStore {
         exportSource = word.source;
         wordPins = word.pins;
       } else {
-        mapping = this.#mapping(target.revisionId, sourceVersionId);
+        ({ rows: mapping, notes } = this.#mapping(target.revisionId, sourceVersionId));
         exportSource = mapping.length === 0
           ? { kind: 'fresh', reason: 'no-mapping', scan: original, converter: null }
-          : { kind: 'mapped', original, rows: mapping, textBoxes: this.#textBoxChoice(sourceVersionId, mapping) };
+          : { kind: 'mapped', original, rows: mapping, textBoxes: this.#textBoxChoice(sourceVersionId, mapping), ...(notes.length > 0 ? { notes } : {}) };
       }
     }
     const marks = this.#marks(target.branchId, blocks);
@@ -1773,6 +1775,7 @@ export class ManuscriptExportStore {
       revisionDigest: target.revisionDigest,
       source: exportSource.kind === 'mapped' ? { kind: 'mapped', objectDigest, textBoxes: exportSource.textBoxes } : { kind: 'fresh', reason: exportSource.reason, objectDigest },
       mapping: sha256Hex(canonicalJson(mapping)),
+      ...(notes.length > 0 ? { notes: sha256Hex(canonicalJson(notes)) } : {}),
       marks: sha256Hex(canonicalJson(marks)),
       options,
       title: target.bookTitle,
@@ -1816,9 +1819,10 @@ export class ManuscriptExportStore {
 
   /**
    * The source-paragraph mapping of the import or reimport that made the version's lineage (ADR 0086 §3): the
-   * nearest revision, the version itself or an ancestor with the same Source Version, that recorded one.
+   * nearest revision, the version itself or an ancestor with the same Source Version, that recorded one, with the note sources
+   * that revision recorded beside it (Issue #1204).
    */
-  #mapping(revisionId: string, sourceVersionId: string): DocxExportSourceRow[] {
+  #mapping(revisionId: string, sourceVersionId: string): { rows: DocxExportSourceRow[]; notes: ReturnType<typeof revisionNoteSources> } {
     const revision = this.#db.prepare('SELECT source_version_id, parent_revision_id FROM manuscript_revisions WHERE revision_id = ?');
     const rows = this.#db.prepare(
       `SELECT block_id, source_part, source_paragraph_index, source_paragraph_digest FROM manuscript_block_sources
@@ -1827,19 +1831,19 @@ export class ManuscriptExportStore {
     let current: string | null = revisionId;
     for (let step = 0; current !== null && step < 100_000; step += 1) {
       const row = revision.get(current) as SqlRow | undefined;
-      if (row === undefined || text(row.source_version_id) !== sourceVersionId) return [];
+      if (row === undefined || text(row.source_version_id) !== sourceVersionId) return { rows: [], notes: [] };
       const found = rows.all(current, sourceVersionId) as SqlRow[];
       if (found.length > 0) {
-        return found.map((entry) => ({
+        return { notes: revisionNoteSources(this.#db, current, sourceVersionId), rows: found.map((entry) => ({
           blockId: text(entry.block_id),
           sourcePart: text(entry.source_part) === 'text-box' ? 'text-box' : 'body',
           sourceParagraphIndex: integer(entry.source_paragraph_index),
           sourceParagraphDigest: text(entry.source_paragraph_digest),
-        }));
+        })) };
       }
       current = nullableText(row.parent_revision_id);
     }
-    return [];
+    return { rows: [], notes: [] };
   }
 
   /** The text-box choice the import recorded, or what its mapping shows when it recorded none (a reimport). */
@@ -1981,6 +1985,8 @@ export class ManuscriptExportStore {
     // A 审阅报告 says how its own file is written; a PDF or a Markdown file is written from the manuscript's text (Issue
     // #500, S64b); only a DOCX restores from the original, or says why it cannot.
     const report = target.report;
+    // Issue #874: a regenerated paragraph whose run mapping left some formatting behind is counted, never claimed whole.
+    const unmapped = (rendered.unmappedBlocks ?? 0) > 0 ? `；其中 ${rendered.unmappedBlocks} 段有未能对应的行内样式、超链接或域，见保真审阅` : '';
     const restorationLine = target.manifest !== null
       ? PACKAGE_MEMBER_LINES[target.manifest.member].restoration
       : report !== null
@@ -1988,9 +1994,9 @@ export class ManuscriptExportStore {
       : format !== 'docx'
         ? EXPORT_TEXT_RESTORATION_LINES[format]
         : plan.kind === 'manuscript' && plan.wordBinding !== null
-          ? `按「${plan.wordBinding.mode === 'suggestions' ? '转为 AI7 修订建议' : '直接并入正文（作为定稿基线）'}」及之后的稿件文字导出；${rendered.restoredBlocks} 段恢复可保留的原文件格式，${rendered.regeneratedBlocks} 段重新生成，具体损失见保真审阅。`
+          ? `按「${plan.wordBinding.mode === 'suggestions' ? '转为 AI7 修订建议' : '直接并入正文（作为定稿基线）'}」及之后的稿件文字导出；${rendered.restoredBlocks} 段恢复可保留的原文件格式，${rendered.regeneratedBlocks} 段重新生成，具体损失见保真审阅${unmapped}。`
         : rendered.restoration === 'from-original'
-          ? `未改过、也没有带出标记的 ${rendered.restoredBlocks} 段从原文件恢复；其余 ${rendered.regeneratedBlocks} 段按稿件文字重新写出。`
+          ? `未改过、也没有带出标记的 ${rendered.restoredBlocks} 段从原文件恢复；其余 ${rendered.regeneratedBlocks} 段按稿件文字重新写出${unmapped}。`
           : plan.kind === 'manuscript' && (plan.input.source.kind === 'mapped' || (plan.input.source.kind === 'fresh' && plan.input.source.reason === 'unprefixed'))
             ? EXPORT_UNPREFIXED_RESTORATION_LINE
             : '这份稿件没有可以对应的原文件段落，导出按稿件文字重新生成 DOCX。';

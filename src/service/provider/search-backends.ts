@@ -82,6 +82,36 @@ export interface SearchBackendEntry extends SearchBackendDeclaration {
   readonly tier: number | null;
 }
 
+/**
+ * A backend document's one closed candidate namespace (Issue #1055): a direct interface of the same vendor, declared and
+ * disclosed as unmeasured. It is never the backend's request, profile, rank, default or legacy digest, and nothing ordinary —
+ * a Task, a selection, the default — may name it; only the selected policy's fixed connection test reaches its search.
+ */
+export interface SearchBackendCandidate {
+  readonly backendId: SearchBackendId;
+  readonly candidateId: string;
+  readonly revision: number;
+  readonly displayName: string;
+  readonly measurement: 'not-measured';
+  readonly search: {
+    readonly endpoint: string; readonly host: string; readonly method: 'POST'; readonly protocol: 'deepseek-direct-search'; readonly headerForm: 'authorization-bearer';
+    readonly probeArguments: { readonly query: string; readonly count: number; readonly need_content: false };
+  };
+  readonly fetch: { readonly endpoint: string; readonly host: string; readonly method: 'POST'; readonly protocol: 'deepseek-direct-fetch'; readonly headerForm: 'authorization-bearer' };
+  readonly credentialSlot: SearchBackendId;
+  readonly price: SearchBackendDeclaration['price'];
+  readonly priceSource: SearchBackendDeclaration['priceSource'];
+}
+
+/**
+ * The historical subject a measured profile was recorded against (#883): a profile qualifies a backend only while its actual
+ * request is still that subject, so an altered legacy request cannot inherit the old measurement and no candidate inherits it.
+ */
+export const MEASURED_SEARCH_SUBJECTS: Readonly<Partial<Record<SearchBackendId, { readonly endpoint: string; readonly method: 'POST'; readonly protocol: SearchBackendProtocol; readonly model: string; readonly tool: { readonly type: string; readonly name: string } }>>> = Object.freeze({
+  'search-deepseek': Object.freeze({ endpoint: 'https://api.deepseek.com/anthropic/v1/messages', method: 'POST', protocol: 'anthropic-messages-web-search',
+    model: 'deepseek-flash', tool: Object.freeze({ type: 'web_search_20250305', name: 'web_search' }) }),
+});
+
 /** One search result as AI7 keeps it from any backend: a title and a URL, never the snippet or the page. */
 export interface SearchBackendHit {
   readonly title: string;
@@ -190,10 +220,56 @@ export function searchBackendDeclarationOf(document: unknown): SearchBackendDecl
   });
 }
 
+/** A document's candidate namespace, read whole after the generator validated it; `null` when the document declares none. */
+export function searchBackendCandidateOf(document: unknown): SearchBackendCandidate | null {
+  if (!isRecord(document) || document['candidate'] === undefined) return null;
+  const declaration = searchBackendDeclarationOf(document);
+  const candidate = document['candidate'];
+  requireConfiguration(isRecord(candidate) && typeof candidate['candidateId'] === 'string' && Number.isInteger(candidate['revision']) &&
+    candidate['measurement'] === 'not-measured' && isRecord(candidate['search']) && isRecord(candidate['fetch']) && isRecord(candidate['price']) && isRecord(candidate['evidence']), `${declaration.id} candidate`);
+  const search = candidate['search'] as Record<string, unknown>;
+  const fetch = candidate['fetch'] as Record<string, unknown>;
+  const args = search['probeArguments'];
+  requireConfiguration(typeof search['endpoint'] === 'string' && search['method'] === 'POST' && search['protocol'] === 'deepseek-direct-search' &&
+    search['headerForm'] === 'authorization-bearer' && isRecord(args) && typeof args['query'] === 'string' && Number.isInteger(args['count']) && args['need_content'] === false &&
+    typeof fetch['endpoint'] === 'string' && fetch['method'] === 'POST' && fetch['protocol'] === 'deepseek-direct-fetch' && fetch['headerForm'] === 'authorization-bearer', `${declaration.id} candidate interfaces`);
+  const host = new URL(search['endpoint']).hostname;
+  requireConfiguration(host === declaration.host && new URL(fetch['endpoint']).hostname === host && search['endpoint'] !== declaration.endpoint, `${declaration.id} candidate host`);
+  const priced = searchBackendDeclarationOf({ ...document, price: candidate['price'], evidence: candidate['evidence'] });
+  return Object.freeze({
+    backendId: declaration.id, candidateId: candidate['candidateId'], revision: candidate['revision'] as number, displayName: String(candidate['displayName']),
+    measurement: 'not-measured' as const,
+    search: Object.freeze({ endpoint: search['endpoint'], host, method: 'POST' as const, protocol: 'deepseek-direct-search' as const, headerForm: 'authorization-bearer' as const,
+      probeArguments: Object.freeze({ query: args['query'] as string, count: args['count'] as number, need_content: false as const }) }),
+    fetch: Object.freeze({ endpoint: fetch['endpoint'], host, method: 'POST' as const, protocol: 'deepseek-direct-fetch' as const, headerForm: 'authorization-bearer' as const }),
+    credentialSlot: declaration.credentialSlot, price: priced.price, priceSource: priced.priceSource,
+  });
+}
+
 /** Every declared backend, in document file-name order. */
 export const SEARCH_BACKEND_DECLARATIONS: ReadonlyArray<SearchBackendDeclaration> = Object.freeze(
   [bochaai, brave, deepseek, parallel, tinyfish].map((document: unknown) => searchBackendDeclarationOf(document)),
 );
+
+/** Every declared candidate, in document file-name order. */
+export const SEARCH_BACKEND_CANDIDATES: ReadonlyArray<SearchBackendCandidate> = Object.freeze(
+  [bochaai, brave, deepseek, parallel, tinyfish].map((document: unknown) => searchBackendCandidateOf(document)).filter((entry): entry is SearchBackendCandidate => entry !== null),
+);
+
+/** The exact closed candidate a backend declares; an unknown or mismatched backend/candidate pair is refused. */
+export function searchBackendCandidate(backendId: string, candidateId: string): SearchBackendCandidate {
+  const candidate = SEARCH_BACKEND_CANDIDATES.find((entry) => entry.backendId === backendId && entry.candidateId === candidateId);
+  if (candidate === undefined) throw new Error('SEARCH_CANDIDATE_UNKNOWN');
+  return candidate;
+}
+
+/** The measured profile that still qualifies this declaration: its own, and only while its request is the measured subject. */
+export function qualifiedSearchProfile(declaration: SearchBackendDeclaration, profiles: ReadonlyArray<MeasuredSearchProfile>): MeasuredSearchProfile | null {
+  const profile = profiles.find((entry) => entry.backendId === declaration.id) ?? null;
+  const subject = MEASURED_SEARCH_SUBJECTS[declaration.id];
+  if (profile === null || subject === undefined) return profile;
+  return declaration.endpoint === subject.endpoint && declaration.method === subject.method && declaration.protocol === subject.protocol ? profile : null;
+}
 
 /** A backend's overall hit rate, or 0 where nothing was asked. */
 export function overallHitRate(profile: MeasuredSearchProfile): number {
@@ -275,7 +351,7 @@ export function searchBackendOutcome(
   const excluded: Array<{ backendId: string; reason: SearchBackendExclusion }> = [];
   const candidates: RankingCandidate[] = [];
   for (const declaration of declarations) {
-    const profile = profiles.find((entry) => entry.backendId === declaration.id) ?? null;
+    const profile = qualifiedSearchProfile(declaration, profiles);
     const exclusion = searchBackendExclusion(declaration, profile);
     if (exclusion !== null || profile === null) {
       excluded.push({ backendId: declaration.id, reason: exclusion ?? 'not-measured' });
@@ -303,7 +379,7 @@ export const SEARCH_BACKENDS: ReadonlyArray<SearchBackendEntry> = Object.freeze(
     const rankIndex = OUTCOME.ranking.findIndex((entry) => entry.backendId === backendId);
     return Object.freeze({
       ...declaration,
-      profile: SEARCH_BACKEND_EVALUATION.profiles.find((entry) => entry.backendId === backendId) ?? null,
+      profile: qualifiedSearchProfile(declaration, SEARCH_BACKEND_EVALUATION.profiles),
       shipped: rankIndex >= 0,
       exclusion: OUTCOME.excluded.find((entry) => entry.backendId === backendId)?.reason ?? null,
       rank: rankIndex >= 0 ? rankIndex + 1 : null,

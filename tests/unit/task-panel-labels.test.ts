@@ -181,17 +181,25 @@ describe('查看结果 and 回到<位置>', () => {
     expect(labels.reviewResultFindingLine({ quote: '原文', note: '' })).toBe('「原文」');
     expect(labels.reviewResultFindingLine({ quote: '原文', note: '说明'.repeat(40) })).toBe(`${'说明'.repeat(30)}…`);
     expect(labels.reviewResultPlaceLine({ chapterTitle: '第一章', blockPosition: 3 })).toBe('第一章');
-    expect(labels.reviewResultPlaceLine({ chapterTitle: null, blockPosition: 3 })).toBe('第 3 个内容块');
+    expect(labels.reviewResultPlaceLine({ chapterTitle: null, blockPosition: 3 })).toBe('第 3 段');
     expect(labels.reviewResultPlaceLine({ chapterTitle: null, blockPosition: null })).toBe('已不在当前稿件中');
     expect(labels.reviewResultMoreLine(20, 20)).toBeNull();
     expect(labels.reviewResultMoreLine(20, 34)).toBe('共 34 条发现，这里列出前 20 条；全部在审阅中。');
     expect(labels.REVIEW_RESULT_NONE).toBe('这次审阅没有发现。');
     expect(labels.returnChipPlace('第七章', 40)).toBe('第七章');
-    expect(labels.returnChipPlace(null, 40)).toBe('第 40 个内容块');
-    expect(labels.returnChipPlace('  ', 40)).toBe('第 40 个内容块');
+    expect(labels.returnChipPlace(null, 40)).toBe('第 40 段');
+    expect(labels.returnChipPlace('  ', 40)).toBe('第 40 段');
     expect(labels.returnChipPlace('一个非常非常非常非常非常长的章节标题在这里', 1)).toBe('一个非常非常非常非常非常长的章节…');
     expect(labels.returnChipLabel('第七章')).toBe('回到第七章');
     expect(labels.RETURN_CHIP_TITLE).toBe('回到跳转前的位置');
     expect(labels.returnChipArrived('第七章')).toBe('已回到第七章。');
+  });
+});
+
+describe('the composer range line (Issue #1176)', () => {
+  it('names a span by its first and last block and paragraph count, counting the words without the breaks between them', () => {
+    expect(labels.taskComposerRangeLine(5, 12, 'r1')).toBe('第 5 段 · 12 字 · 修订版 r1');
+    expect(labels.taskComposerRangeLine(5, 20, 'r1', 3)).toBe('第 5–7 段 · 18 字 · 修订版 r1');
+    expect(labels.taskComposerRangeLine(null, 20, 'r1', 3)).toBe('段落已不在当前稿件中 · 18 字 · 修订版 r1');
   });
 });

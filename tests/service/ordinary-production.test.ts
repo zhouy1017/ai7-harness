@@ -948,7 +948,7 @@ it.each(['queued', 'body', 'current-projection'] as const)('orders real-store se
         await production.rebind(store); return { id: request.id, ok: true, op: request.op, result: value };
       }
       if (request.op === 'getModelServiceStoredState') return { id: request.id, ok: true, op: request.op,
-        result: { connection: store.getModelServiceConnection(), connections: store.getModelServiceConnections(), launchPolicy: production.policy, proxy: await store.getModelServiceProxy() } };
+        result: { connection: store.getModelServiceConnection(), connections: store.getModelServiceConnections(), launchPolicy: production.policy, proxy: await store.getModelServiceProxy(), channels: [] } };
       if (request.op === 'selectFastRoleModel') {
         store.selectFastRoleModel(request.input.route, request.input.modelId); await production.rebind(store);
         return { id: request.id, ok: true, op: request.op, result: undefined };
@@ -1672,7 +1672,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
         const prepared = await restarted.prepareDatabaseExport(destination, true);
         expect((await restarted.approveDatabaseExport(prepared.preparationId, true)).outcome).toBe('created');
         const preview = await restarted.inspectDatabaseImport(destination);
-        expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 98, dataVersion: 1 });
+        expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 102, dataVersion: 1 });
         await restarted.prepareDatabaseReplacement(preview.previewId);
         restarted.close();
         const replaced = await EditorialStore.open(roots.dataRoot, roots.codeRoot); opened.push(replaced);

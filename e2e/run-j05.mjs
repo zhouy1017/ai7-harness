@@ -39,6 +39,9 @@ const APPLIED_TEXT = '〔一键应用〕';
 const LOST_ACK_TEXT = '〔确认未达〕';
 const TYPED_BEFORE = '新增';
 const TYPED_INSIDE = '改';
+// Issue #1175: where Enter splits the structure paragraph, and the words an Apply between the split and its 撤销 writes.
+const STRUCTURE_SPLIT_AT = 12;
+const STRUCTURE_APPLIED_TEXT = '〔分段后应用〕';
 // Four ranges inside one paragraph and one inside another, in graphemes of the durable text. The
 // paragraphs are chosen at run time so that in their first 80 code units a grapheme is a code unit.
 const RANGES = Object.freeze({ highlight: [2, 8], annotation: [10, 16], note: [18, 24], suggestion: [26, 32], second: [3, 9], applied: [20, 26] });
@@ -517,13 +520,14 @@ async function main() {
     await waitFor(renderer, `window.__j05.menu() === null && document.activeElement === document.querySelector('[data-testid="manuscript-editor"]')`, 'escape-returns-focus', 15_000);
 
     at('selection-menu-cross-paragraph');
-    // A selection across two paragraphs is refused by name: a mark lives inside one paragraph.
+    // A selection across paragraphs is one exact span (Issue #1176): a mark lives inside one paragraph, so the mark entries are
+    // refused by name, while 就这段提问… and 就这段发起任务… take the span and 润色这段 says why this launch cannot run it.
     await rightClickUntil(
       renderer,
       `(() => { const a = window.__j05.block(${JSON.stringify(first)}); const b = window.__j05.block(${JSON.stringify(second)}); const range = document.createRange(); range.setStart(a.firstChild, 2); range.setEnd(b.firstChild, 2); document.querySelector('[data-testid="manuscript-editor"]').focus(); const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range); return !selection.isCollapsed; })()`,
       `window.__j05.block(${JSON.stringify(first)})`,
-      `window.__j05.menu()?.textContent.includes('同一段落') && window.__j05.item('add-annotation')?.disabled === true && window.__j05.item('copy')?.disabled === false`,
-      'cross-paragraph-refused',
+      `(() => { const menu = window.__j05.menu(); const enabled = (action) => window.__j05.item(action)?.disabled === false; const polish = window.__j05.item('preset-polish'); return menu?.textContent.includes('同一段落') && /已选 [0-9]+ 字 · [0-9]+ 段/u.test(menu.textContent) && window.__j05.item('add-annotation')?.disabled === true && window.__j05.item('add-change-suggestion')?.disabled === true && enabled('copy') && enabled('ask-on-selection') && enabled('task-on-selection') && polish instanceof HTMLButtonElement && polish.disabled && polish.title === '当前运行范围未允许润色这段：这次启动没有可用的模型。'; })()`,
+      'cross-paragraph-span',
     );
     await press(renderer, 'Escape');
 
@@ -904,7 +908,8 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="editor"]') && document.querySelector('[data-testid="manuscript-editor"] .editorial-mark')`, 'proposal-restart-editor');
     await assertRenderer(renderer, PAGE_HELPERS, 'proposal-page-helpers');
     await openMarkCard(renderer, 'change-suggestion', proposalBlock, 'proposal-offer-card');
-    await waitFor(renderer, `window.__j05.card()?.querySelector('[data-mark-action="proposal-workspace"]')`, 'proposal-explicit-offer');
+    // One decision system on the card (ADR 0096 §3, #1177): the card opens the proposal workspace and carries no draft.
+    await waitFor(renderer, `window.__j05.card()?.querySelector('[data-mark-action="proposal-workspace"]') && window.__j05.card().querySelector('[data-mark-action^="draft-"]') === null`, 'proposal-explicit-offer');
     await assertRenderer(renderer, `document.querySelector('[data-screen="editor"]') && window.__j05.act('proposal-workspace')`, 'proposal-stays-contextual-until-chosen');
     await waitFor(renderer, `document.querySelector('[data-screen="proposal-workspace"] [data-proposal-active]')`, 'proposal-workspace-active');
     await assertRenderer(renderer, `(async () => { const work = (await window.ai7.listPriorWork()).find((entry) => entry.bookTitle === ${JSON.stringify(EXCERPT.title)}); const workspace = await window.ai7.inspectProposalWorkspace({ manuscriptId: work.manuscriptId, branchId: work.branchId, resultId: null }); window.__j05WorkspaceMarkId = workspace.items.find((item) => item.blockId === ${JSON.stringify(proposalBlock)}).markId; const row = document.getElementById('windowed-' + window.__j05WorkspaceMarkId); if (!row) return false; row.click(); return true; })()`, 'proposal-activate-synthetic-change');
@@ -934,6 +939,81 @@ async function main() {
     await click(renderer, '返回稿件', 'proposal-return');
     await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, 'proposal-back-to-manuscript');
     await settled(renderer, 'proposal-settled');
+
+    // Issue #1175 (ADR 0096 §1): Enter at the caret splits a paragraph and Backspace at a paragraph's start merges it back, each
+    // one journal entry shown at once; an Apply between them is one more entry that 撤销 steps over, never takes back.
+    at('structure-split');
+    const structural = await renderer.evaluate(`(() => { const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }); const clean = Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > p[data-block-id]')).filter((node) => ![${JSON.stringify(first)}, ${JSON.stringify(second)}].includes(node.dataset.blockId) && node.querySelectorAll('.editorial-mark').length === 0 && Array.from(segmenter.segment((node.textContent ?? '').slice(0, 24))).length === 24); return clean.length >= 2 ? [clean[0].dataset.blockId, clean[1].dataset.blockId] : null; })()`);
+    requireJourney(Array.isArray(structural) && structural.every((id) => /^blk_[0-9a-f]{24}$/.test(id)), 'structure-paragraphs');
+    const [splitBlock, appliedBlock] = structural;
+    await assertRenderer(renderer, `(async () => { window.__j05Structure = { split: window.__j05.text(${JSON.stringify(splitBlock)}), applied: window.__j05.text(${JSON.stringify(appliedBlock)}) }; const work = (await window.ai7.listPriorWork()).find((entry) => entry.bookTitle === ${JSON.stringify(EXCERPT.title)}); window.__j05Journal = (await window.ai7.getManuscriptWindowAt({ manuscriptId: work.manuscriptId, branchId: work.branchId, target: { kind: 'start' } })).journalSequence; return typeof window.__j05Structure.split === 'string'; })()`, 'structure-original-kept');
+    await assertRenderer(renderer, `window.__j05.place(${JSON.stringify(splitBlock)}, ${STRUCTURE_SPLIT_AT}, ${STRUCTURE_SPLIT_AT})`, 'structure-caret');
+    await new Promise((resolveWait) => setTimeout(resolveWait, 120));
+    await pressEnter(renderer);
+    await waitFor(renderer, `(() => { const next = window.__j05.block(${JSON.stringify(splitBlock)})?.nextElementSibling; window.__j05Split = next?.dataset.blockId; return next?.tagName === 'P' && window.__j05Split !== ${JSON.stringify(splitBlock)} && window.__j05.text(${JSON.stringify(splitBlock)}) === window.__j05Structure.split.slice(0, ${STRUCTURE_SPLIT_AT}) && window.__j05.text(window.__j05Split) === window.__j05Structure.split.slice(${STRUCTURE_SPLIT_AT}); })()`, 'split-shown-at-once', 10_000);
+    await settled(renderer, 'split-settled');
+    await assertRenderer(renderer, `(async () => { const work = (await window.ai7.listPriorWork()).find((entry) => entry.bookTitle === ${JSON.stringify(EXCERPT.title)}); const page = await window.ai7.getManuscriptWindowAt({ manuscriptId: work.manuscriptId, branchId: work.branchId, target: { kind: 'block', blockId: ${JSON.stringify(splitBlock)} } }); const at = page.blocks.findIndex((block) => block.blockId === ${JSON.stringify(splitBlock)}); const wrote = page.journalSequence === window.__j05Journal + 1 && page.blocks[at + 1]?.blockId === window.__j05Split && page.blocks[at + 1].kind === 'paragraph'; window.__j05Journal = page.journalSequence; return wrote; })()`, 'split-is-one-journal-entry');
+
+    at('structure-undo-across-apply');
+    await openSelectionMenu(renderer, appliedBlock, 2, 6, 'structure-apply-menu');
+    await chooseMenuItem(renderer, 'add-change-suggestion', 'structure-apply-suggestion');
+    await waitFor(renderer, `window.__j05.composer()?.dataset.markComposer === 'create-change-suggestion'`, 'structure-apply-composer');
+    await assertRenderer(renderer, `window.__j05.write('proposedText', ${JSON.stringify(STRUCTURE_APPLIED_TEXT)}) && window.__j05.act('submit')`, 'structure-apply-submit');
+    await waitFor(renderer, `window.__j05.mark('change-suggestion', ${JSON.stringify(appliedBlock)}).length > 0 && window.__j05.composer() === null`, 'structure-apply-drawn');
+    await openMarkCard(renderer, 'change-suggestion', appliedBlock, 'structure-apply-card');
+    await assertRenderer(renderer, `window.__j05.act('accept-and-apply')`, 'structure-accept-and-apply');
+    await waitFor(renderer, `window.__j05.card()?.querySelector('[data-mark-application]') && window.__j05.text(${JSON.stringify(appliedBlock)}) === window.__j05Structure.applied.slice(0, 2) + ${JSON.stringify(STRUCTURE_APPLIED_TEXT)} + window.__j05Structure.applied.slice(6)`, 'structure-applied');
+    await press(renderer, 'Escape');
+    // 撤销 steps over the Apply to the split before it; the applied words stay, and 重做 splits again.
+    await click(renderer, '撤销', 'undo-over-apply');
+    await waitFor(renderer, `window.__j05.block(window.__j05Split) === null && window.__j05.text(${JSON.stringify(splitBlock)}) === window.__j05Structure.split && window.__j05.text(${JSON.stringify(appliedBlock)}).includes(${JSON.stringify(STRUCTURE_APPLIED_TEXT)}) && Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '重做' && !button.disabled)`, 'undo-steps-over-apply', 15_000);
+    await click(renderer, '重做', 'redo-split');
+    await waitFor(renderer, `window.__j05.block(window.__j05Split)?.previousElementSibling?.dataset.blockId === ${JSON.stringify(splitBlock)} && window.__j05.text(window.__j05Split) === window.__j05Structure.split.slice(${STRUCTURE_SPLIT_AT}) && document.querySelector('[data-testid="manuscript-editor"]')?.parentElement?.dataset.authoritativeMutation === 'false'`, 'redo-splits-again', 15_000);
+
+    at('structure-merge');
+    await assertRenderer(renderer, `window.__j05.place(window.__j05Split, 0, 0)`, 'merge-caret');
+    await new Promise((resolveWait) => setTimeout(resolveWait, 120));
+    await press(renderer, 'Backspace');
+    await waitFor(renderer, `window.__j05.block(window.__j05Split) === null && window.__j05.text(${JSON.stringify(splitBlock)}) === window.__j05Structure.split`, 'merge-shown-at-once', 10_000);
+    await settled(renderer, 'merge-settled');
+    await click(renderer, '撤销', 'undo-merge');
+    await waitFor(renderer, `window.__j05.text(window.__j05Split) === window.__j05Structure.split.slice(${STRUCTURE_SPLIT_AT}) && window.__j05.text(${JSON.stringify(splitBlock)}) === window.__j05Structure.split.slice(0, ${STRUCTURE_SPLIT_AT})`, 'undo-merge-is-one-step', 15_000);
+    await settled(renderer, 'structure-settled');
+
+    // Issue #1176 (W22-S5): words from inside one paragraph to inside the second after it reach 就这段发起任务… as one exact span.
+    // The composer quotes the span; 准备任务 saves a draft — no Task, plan or Run — pinning every paragraph with its digest. Nothing
+    // is written.
+    at('selection-span-draft');
+    const spanBlocks = await renderer.evaluate(`(() => { const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }); const clean = (node) => node instanceof HTMLParagraphElement && /^blk_[0-9a-f]{24}$/.test(node.dataset.blockId ?? '') && node.querySelectorAll('.editorial-mark').length === 0 && (node.textContent ?? '').length >= 8 && Array.from(segmenter.segment(node.textContent ?? '')).length === (node.textContent ?? '').length; const start = Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > p[data-block-id]')).find((node) => clean(node) && clean(node.nextElementSibling) && clean(node.nextElementSibling?.nextElementSibling)); return start === undefined ? null : [start, start.nextElementSibling, start.nextElementSibling.nextElementSibling].map((node) => node.dataset.blockId); })()`);
+    requireJourney(Array.isArray(spanBlocks) && spanBlocks.length === 3, 'span-paragraphs');
+    const [spanA, spanB, spanC] = spanBlocks;
+    await assertRenderer(renderer, `(() => { window.__j05Span = { a: window.__j05.text(${JSON.stringify(spanA)}), b: window.__j05.text(${JSON.stringify(spanB)}), c: window.__j05.text(${JSON.stringify(spanC)}) }; window.__j05Span.words = [window.__j05Span.a.slice(2), window.__j05Span.b, window.__j05Span.c.slice(0, 3)].join('\\n'); return window.__j05Span.words.split('\\n').length === 3; })()`, 'span-words-kept');
+    await rightClickUntil(
+      renderer,
+      `(() => { const a = window.__j05.block(${JSON.stringify(spanA)}); const c = window.__j05.block(${JSON.stringify(spanC)}); const range = document.createRange(); range.setStart(a.firstChild, 2); range.setEnd(c.firstChild, 3); document.querySelector('[data-testid="manuscript-editor"]').focus(); const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range); return !selection.isCollapsed; })()`,
+      `window.__j05.block(${JSON.stringify(spanA)})`,
+      `window.__j05.menu()?.textContent.includes('· 3 段') && window.__j05.item('task-on-selection')?.disabled === false`,
+      'span-menu',
+    );
+    await chooseMenuItem(renderer, 'task-on-selection', 'span-task-choose');
+    const composerOf = `document.querySelector('#task-drawer:not([hidden]) .task-composer')`;
+    await waitFor(renderer, `(() => { const composer = ${composerOf}; const quotes = Array.from(composer?.querySelectorAll('li.task-composer-range blockquote') ?? [], (node) => node.textContent); return composer?.dataset.taskComposer === 'new' && quotes.length === 1 && quotes[0] === window.__j05Span.words; })()`, 'span-composer-quotes-span', 30_000);
+    await assertRenderer(renderer, `(() => { const composer = ${composerOf}; const goal = composer.querySelector('[data-task-composer-field="goal"]'); const outcome = composer.querySelector('[data-task-composer-field="outcome-review"]'); if (!(goal instanceof HTMLTextAreaElement) || !(outcome instanceof HTMLInputElement)) return false; goal.focus(); goal.value = '核对这三段的称谓是否前后一致'; goal.dispatchEvent(new Event('input', { bubbles: true })); outcome.click(); return outcome.checked; })()`, 'span-goal-and-outcome');
+    await waitFor(renderer, `${composerOf}?.querySelector('[data-task-composer-action="prepare"]')?.disabled === false`, 'span-prepare-ready', 10_000);
+    await assertRenderer(renderer, `(() => { ${composerOf}.querySelector('[data-task-composer-action="prepare"]').click(); return true; })()`, 'span-prepare');
+    await waitFor(renderer, `${composerOf}?.dataset.taskComposer === 'draft' && ${composerOf}.querySelector('[data-task-composer-resolution]') !== null`, 'span-draft-saved', 30_000);
+    // The draft pins the span exactly — its first paragraph's range, then every paragraph with its digest — and is no Task yet.
+    await assertRenderer(renderer, `(async () => { const read = await window.ai7.inspectTaskIntentDrafts({ draftId: null }); const draft = read.drafts.find((entry) => entry.promotion === null && entry.version.goal === '核对这三段的称谓是否前后一致'); const range = draft?.version.ranges[0]; window.__j05SpanDraft = draft; const review = await window.ai7.inspectReviewWorkspace({ reviewRunId: null }); return draft?.version.ranges.length === 1 && range.blockId === ${JSON.stringify(spanA)} && range.fromGrapheme === 2 && range.text === window.__j05Span.words && JSON.stringify(range.span.map((pin) => [pin.blockId, pin.fromGrapheme, pin.toGrapheme])) === JSON.stringify([[${JSON.stringify(spanA)}, 2, window.__j05Span.a.length], [${JSON.stringify(spanB)}, 0, window.__j05Span.b.length], [${JSON.stringify(spanC)}, 0, 3]]) && range.span.every((pin) => /^[0-9a-f]{64}$/.test(pin.blockDigest)) && review.run === null; })()`, 'span-draft-pins');
+
+    // In this model-free launch no 审阅 category can read a selection, so the span draft is
+    // offered no choice, as a one-paragraph draft is here, and 准备计划 stays disabled with that reason. The card names the span.
+    // Promotion over exactly the span, its plan statement and `draft-span` pins are proven by tests/service/task-intent-drafts.test.ts.
+    at('selection-span-no-review-choice');
+    await waitFor(renderer, `(async () => { const composer = ${composerOf}; const range = window.__j05SpanDraft.version.ranges[0]; const reason = '没有能审阅这个范围的审阅类别。'; const read = (await window.ai7.inspectTaskIntentDrafts({ draftId: window.__j05SpanDraft.draftId })).drafts[0]; return composer?.querySelector('[data-task-composer-resolution]')?.dataset.taskComposerResolution === 'unsupported' && composer.querySelector('.task-composer-unsupported')?.textContent === reason && composer.querySelector('[data-task-composer-field^="choice-"]') === null && composer.querySelector('[data-task-composer-action="promote"]')?.disabled === true && read.resolution?.state === 'unsupported' && read.resolution.reason === reason && read.promotion === null && composer.querySelector('li.task-composer-range small.field-note')?.textContent === '第 ' + range.position + '–' + (range.position + 2) + ' 段 · ' + ([...range.text].length - 2) + ' 字 · 修订版 ' + range.revisionLabel; })()`, 'span-promote-withheld-by-reason', 10_000);
+    await assertRenderer(renderer, `(async () => (await window.ai7.inspectReviewWorkspace({ reviewRunId: null })).run === null && window.__j05.text(${JSON.stringify(spanA)}) === window.__j05Span.a && window.__j05.text(${JSON.stringify(spanB)}) === window.__j05Span.b && window.__j05.text(${JSON.stringify(spanC)}) === window.__j05Span.c)()`, 'span-nothing-prepared-or-written');
+    await assertRenderer(renderer, `(() => { const close = document.querySelector('#task-drawer [data-task-drawer-control="close"]'); if (!(close instanceof HTMLButtonElement)) return false; close.click(); return true; })()`, 'span-drawer-close');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden === true`, 'span-drawer-closed', 15_000);
+    await settled(renderer, 'span-settled');
 
     // #1119 / F-20a: a distinct local procedure on exact admitted sample1 and tester-authored edits.
     // No fixture/model binding is added to launch; the existing network-denied product path is unchanged.

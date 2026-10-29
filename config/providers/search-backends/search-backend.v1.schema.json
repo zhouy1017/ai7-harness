@@ -30,6 +30,10 @@
       "$ref": "#/definitions/anonymousRequest"
     },
     "credential": { "$ref": "#/definitions/credential" },
+    "candidate": {
+      "description": "One optional closed candidate namespace (Issue #1055): a direct interface of the same vendor that is declared, disclosed as unmeasured and reachable only by the selected policy's fixed connection test. It is never part of the legacy backend's request, profile, ranking, default or configuration digest, and it inherits none of them.",
+      "$ref": "#/definitions/candidate"
+    },
     "price": { "$ref": "#/definitions/price" },
     "reachability": {
       "description": "What the vendor states about where its service is reachable; the measured reachability is the evaluation's (config/providers/recorded-evidence/search-backend-profiles.json).",
@@ -140,6 +144,56 @@
         },
         "keyRequired": { "type": "boolean" },
         "evidence": { "$ref": "#/definitions/evidenceKey" }
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidateId", "revision", "displayName", "measurement", "search", "fetch", "price", "evidence"],
+      "properties": {
+        "candidateId": { "$ref": "#/definitions/identifier" },
+        "revision": { "type": "integer", "minimum": 1 },
+        "displayName": { "$ref": "#/definitions/label" },
+        "measurement": { "description": "A candidate is never measured by its declaration; a measured profile belongs to the evaluation.", "enum": ["not-measured"] },
+        "search": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["endpoint", "method", "protocol", "headerForm", "probeArguments", "evidence"],
+          "properties": {
+            "endpoint": { "$ref": "#/definitions/endpoint" },
+            "method": { "enum": ["POST"] },
+            "protocol": { "enum": ["deepseek-direct-search"] },
+            "headerForm": { "enum": ["authorization-bearer"] },
+            "probeArguments": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["query", "count", "need_content"],
+              "properties": {
+                "query": { "$ref": "#/definitions/label" },
+                "count": { "type": "integer", "minimum": 1, "maximum": 50 },
+                "need_content": { "const": false }
+              }
+            },
+            "evidence": { "$ref": "#/definitions/evidenceKey" }
+          }
+        },
+        "fetch": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["endpoint", "method", "protocol", "headerForm", "evidence"],
+          "properties": {
+            "endpoint": { "$ref": "#/definitions/endpoint" },
+            "method": { "enum": ["POST"] },
+            "protocol": { "enum": ["deepseek-direct-fetch"] },
+            "headerForm": { "enum": ["authorization-bearer"] },
+            "evidence": { "$ref": "#/definitions/evidenceKey" }
+          }
+        },
+        "price": { "$ref": "#/definitions/price" },
+        "evidence": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/definitions/evidenceRecord" }
+        }
       }
     },
     "price": {

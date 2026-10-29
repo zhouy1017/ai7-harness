@@ -181,7 +181,9 @@ body { padding-left: var(--sidebar-width); }
 .context-actions:empty { display: none; }
 .preferences-notice { flex: 1 1 100%; margin: 0; }
 .locality { margin: 0; color: var(--text-subdued); font-size: .9rem; white-space: nowrap; }
-.locality span { color: var(--status-good); }
+.locality::before { content: '● '; color: var(--status-good); }
+.locality[data-processing-state="sending"]::before { color: var(--status-progress); }
+.locality[data-processing-state="waiting-network"]::before { color: var(--status-attention); }
 
 /* 设置 (editor-surfaces §8.6): the three groups, one row per page; a row not yet available says 即将提供. */
 .settings-group { margin-top: 1.3rem; }
@@ -594,6 +596,9 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .task-drawer-mode[aria-pressed="true"] { background: var(--status-progress-surface); color: var(--text); font-weight: 800; box-shadow: inset 0 -3px 0 var(--selection-boundary); }
 .task-drawer-mode:focus-visible { outline: 3px solid var(--focus); outline-offset: -3px; }
 .task-drawer-hidden-reason { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+/* Held beside 全域智能体 (Issue #1178): one line under the header says whose Tasks these are and when they go on. */
+.task-drawer-held { flex: none; margin: 0; padding: .45rem 1rem; border-bottom: 1px solid var(--boundary); color: var(--text-subdued); font-weight: 700; }
+.task-drawer-held[hidden] { display: none; }
 .task-drawer-body { display: grid; flex: 1 1 auto; align-content: start; gap: .9rem; min-height: 0; padding: .9rem 1rem 1.2rem; overflow-x: hidden; overflow-y: auto; }
 /* The footer region and its authorization bar (Issue #420, S74a; §6 常驻授权条, V2-UX-LAYER-005): never scrolled
    away with the plan. Should the bar's words ever outgrow half the drawer — 200% zoom on a short window — they
@@ -1502,6 +1507,11 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
 .ProseMirror h1 { font-size: 2rem; line-height: 1.35; }
 .ProseMirror h2, .ProseMirror h3, .ProseMirror h4, .ProseMirror h5, .ProseMirror h6 { margin-top: 1.8em; line-height: 1.5; }
 .ProseMirror p { margin: 1em 0; }
+/* A note block (Issue #1204): its label above, its words edited like a paragraph's. */
+.ProseMirror .manuscript-note { margin: 1em 0; font-size: .92em; }
+.ProseMirror .manuscript-note > p { margin: .2em 0 0; }
+.ProseMirror .manuscript-note-label { display: block; font-size: .82em; opacity: .75; user-select: none; }
+.ProseMirror .manuscript-note-label[data-note-reference] { cursor: pointer; text-decoration: underline dotted; }
 .ProseMirror [data-block-id] { border-left: 2px solid transparent; padding-left: .65rem; }
 .ProseMirror [data-block-id]:focus-within { border-left-color: var(--boundary); }
 /* A paragraph carrying an open mark shows a 3 px margin line in that mark's color; the text does not shift. */
@@ -2336,4 +2346,20 @@ body { transition: padding-left .2s cubic-bezier(.22, 1, .36, 1), padding-right 
     outline: 2px solid Highlight;
     outline-offset: -2px;
   }
+}
+/* 设置 › 模型服务's one flow and the header's compact channel / model selector (Issue #1215): each wraps to one column at 200%. */
+.model-service-flow fieldset { display: flex; flex-wrap: wrap; gap: .4rem .9rem; min-width: 0; margin: .6rem 0 0; padding: .55rem .7rem; border: 1px solid var(--boundary); border-radius: 8px; }
+.model-service-flow-choice { min-width: 0; overflow-wrap: anywhere; }
+.model-service-flow-step { min-width: 0; margin-top: 1rem; }
+.model-service-flow-step h4 { margin: 0 0 .4rem; }
+.model-service-flow-ineligible { margin-top: .8rem; }
+.model-service-flow-ineligible summary { cursor: pointer; }
+.model-service-flow-ineligible li { overflow-wrap: anywhere; }
+.compact-model-selector { position: relative; min-width: 0; max-width: min(30rem, 100%); }
+.compact-model-selector > summary { cursor: pointer; overflow-wrap: anywhere; }
+.compact-model-selector-body { position: absolute; right: 0; top: 100%; z-index: 40; display: grid; gap: .6rem; width: min(26rem, 85vw); max-height: 75vh; overflow-y: auto; padding: 1rem; border: 1px solid var(--boundary); border-radius: 10px; background: var(--surface); box-shadow: 0 12px 28px var(--shadow); }
+.compact-model-selector-body fieldset { display: grid; gap: .35rem; min-width: 0; margin: 0; padding: 0; border: 0; }
+.compact-model-selector-body label { overflow-wrap: anywhere; }
+@media (forced-colors: active) {
+  .model-service-flow fieldset, .compact-model-selector-body { border-color: CanvasText; box-shadow: none; }
 }

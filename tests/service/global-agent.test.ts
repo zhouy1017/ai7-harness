@@ -195,7 +195,7 @@ describe('revision 87 (Issue #1083)', () => {
     const migrated = new DatabaseSync(path, { enableForeignKeyConstraints: false });
     try {
       // Synchronized with #1084: revision 88 follows, adding only its own relations, which this predecessor already carries.
-      expect(migrated.prepare('PRAGMA user_version').get()).toEqual({ user_version: 98 });
+      expect(migrated.prepare('PRAGMA user_version').get()).toEqual({ user_version: 102 });
       expect((migrated.prepare("SELECT sql FROM sqlite_schema WHERE name = 'learning_supervision_directives'").get() as { sql: string }).sql)
         .toBe(SUPERVISION_SCHEMA_SQL.learning_supervision_directives);
       expect((migrated.prepare("SELECT sql FROM sqlite_schema WHERE name = 'dialogue_tasks'").get() as { sql: string }).sql).toBe(DIALOGUE_SCHEMA_SQL.dialogue_tasks);

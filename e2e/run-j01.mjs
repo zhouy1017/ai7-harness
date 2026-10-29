@@ -1495,6 +1495,7 @@ async function runJourney(
     degradationItems = [],
     textBoxDisposition = null,
     importedMarks = 0,
+    structure = null,
   } = expectation;
   const {
     start = 'landing',
@@ -1623,6 +1624,22 @@ async function runJourney(
       'text-box-choice-offered',
     );
   }
+  if (structure !== null) {
+    // Issue #1205 (ADR 0096 §2): a heading-less file lists its candidate headings unchecked and the paragraph cut at the block
+    // bound waits for its one choice; 确认书名并复核 refuses until it is made. The first candidate is confirmed, 按句子分段 chosen.
+    await assertRenderer(
+      renderer,
+      `(() => { const offered = document.querySelector('[data-import-structure="offered"]'); const boxes = Array.from(offered?.querySelectorAll('[data-structure-candidate]') ?? []); const radios = Array.from(offered?.querySelectorAll('[data-long-paragraph-choice]') ?? []); return boxes.length === ${structure.candidates} && boxes.every((box) => !box.checked && !box.disabled) && radios.length === 2 && radios.every((radio) => !radio.checked) && offered.querySelectorAll('.structure-lineage').length === 1; })()`,
+      'structure-offered-unchecked',
+    );
+    await clickExactButton(renderer, '确认书名并复核', 'structure-choice-required');
+    await waitFor(renderer, `document.querySelector('#persistence-status')?.dataset.tone === 'error' && document.querySelector('#persistence-status').textContent.includes('按句子分段') && document.querySelector('[data-screen="title"]') !== null`, 'structure-choice-required-refused');
+    await assertRenderer(
+      renderer,
+      `(() => { const offered = document.querySelector('[data-import-structure="offered"]'); offered.querySelector('[data-structure-candidate]').click(); offered.querySelector('[data-long-paragraph-choice="sentences"]').click(); return offered.querySelector('[data-structure-candidate]').checked && offered.querySelector('[data-long-paragraph-choice="sentences"]').checked; })()`,
+      'structure-chosen',
+    );
+  }
   await clickExactButton(renderer, '确认书名并复核', 'review-click');
   await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, 'review-screen');
   at(diagnosticReviewLocation);
@@ -1644,6 +1661,13 @@ async function runJourney(
       renderer,
       `(() => { const stated = document.querySelector('[data-screen="review"] [data-text-box-choice="stated"]'); const checked = stated?.querySelector('input:checked'); const row = document.querySelector('[data-screen="review"] .fidelity-row[data-fidelity-category="text-boxes"]'); return checked?.value === ${JSON.stringify(textBoxDisposition)} && Array.from(stated.querySelectorAll('input')).every((input) => input.disabled) && row?.querySelector('.fidelity-detail')?.textContent.startsWith(${JSON.stringify(textBoxDisposition === 'merge' ? '并入正文：' : '保留为文本框：')}) && (document.querySelector('[data-screen="review"] [data-fidelity-summary="no-decision"]')?.textContent ?? '').includes(${JSON.stringify(textBoxDisposition === 'merge' ? '文本框 · 1 项并入正文' : '文本框 · 1 项随文件保留')}); })()`,
       'review-text-box-choice-stated',
+    );
+  }
+  if (structure !== null) {
+    await assertRenderer(
+      renderer,
+      `(() => { const stated = document.querySelector('[data-screen="review"] [data-import-structure="stated"]'); const boxes = Array.from(stated?.querySelectorAll('[data-structure-candidate]') ?? []); const lineage = stated?.querySelector('.structure-lineage')?.textContent ?? ''; return boxes.length === ${structure.candidates} && boxes.every((box) => box.disabled) && boxes.filter((box) => box.checked).length === 1 && boxes[0].checked && stated.querySelector('[data-long-paragraph-choice="sentences"]')?.checked === true && /^第3段 来自原文第3段（共[0-9]+段）$/.test(lineage); })()`,
+      'review-structure-stated',
     );
   }
   if (degraded) {
@@ -2114,7 +2138,7 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
   await waitFor(renderer, `document.querySelector('[data-screen="relationship"]')`, 'existing-book-target-selected');
   await assertRenderer(
     renderer,
-    `(() => { const selectedTarget = document.querySelector('input[name="import-target"]:checked'); const relationship = document.querySelector('input[aria-label="作为首份稿件导入"]'); const newBook = document.querySelector('input[aria-label="新建图书"]'); const label = selectedTarget?.getAttribute('aria-label') ?? ''; return selectedTarget?.value === ${JSON.stringify(`existing-book:${bookId}`)} && label.includes(${JSON.stringify(title)}) && label.includes(${JSON.stringify(internalNumber)}) && label.includes(${JSON.stringify(bookId)}) && relationship && !relationship.checked && document.activeElement === relationship && newBook && !newBook.checked && !Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '复核导入到所选图书'); })()`,
+    `(() => { const selectedTarget = document.querySelector('input[name="import-target"]:checked'); const relationship = document.querySelector('input[aria-label="作为首份稿件导入"]'); const newBook = document.querySelector('input[aria-label="新建图书"]'); const label = selectedTarget?.getAttribute('aria-label') ?? ''; const identity = selectedTarget?.closest('label.choice')?.nextElementSibling; const identityTerms = Array.from(identity?.querySelectorAll('dt') ?? [], (term) => term.textContent); const identityValues = Array.from(identity?.querySelectorAll('dd.technical-identity') ?? [], (value) => value.textContent); return selectedTarget?.value === ${JSON.stringify(`existing-book:${bookId}`)} && label.includes(${JSON.stringify(title)}) && label.includes(${JSON.stringify(internalNumber)}) && !label.includes(${JSON.stringify(bookId)}) && identity instanceof HTMLDetailsElement && identity.classList.contains('technical-details') && !identity.open && JSON.stringify(identityTerms) === ${JSON.stringify(JSON.stringify(['图书 ID']))} && JSON.stringify(identityValues) === ${JSON.stringify(JSON.stringify([bookId]))} && relationship && !relationship.checked && document.activeElement === relationship && newBook && !newBook.checked && !Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '复核导入到所选图书'); })()`,
     'existing-target-and-relationship-independent',
   );
   await assertRenderer(
@@ -2129,7 +2153,7 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
   );
   await assertRenderer(
     renderer,
-    `(() => { const review = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '复核导入到所选图书'); return document.activeElement === review && document.querySelector('#persistence-status')?.textContent.includes(${JSON.stringify(bookId)}); })()`,
+    `(() => { const review = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '复核导入到所选图书'); const status = document.querySelector('#persistence-status')?.textContent ?? ''; return document.activeElement === review && status.includes(${JSON.stringify(title)}) && status.includes(${JSON.stringify(internalNumber)}) && !status.includes(${JSON.stringify(bookId)}); })()`,
     'existing-book-relationship-review-focus',
   );
   await clickExactButton(renderer, '复核导入到所选图书', 'existing-book-review-click');
@@ -2615,14 +2639,15 @@ async function main() {
       fidelityRows: CLEAN_FIDELITY_ROWS.map(([key]) =>
         key === 'inline-styles' ? [key, 266, 'status-retained'] : key === 'sections' ? [key, 1, 'status-retained'] : [key, 0, 'status-preserved']),
     };
-    // A field and a footnote are the two classes that cannot be retained: 降级导入, decided explicitly.
+    // A field cannot be retained: 降级导入, decided explicitly. The footnote becomes a note block (Issue #1204) and stays
+    // with the file as 完整保留（随文件保留）.
     const composedDegradedExpectation = {
       sourceSha256: composedDegradedSha256,
       sourceBytes: composedDegradedInfo.size,
       degraded: true,
       fidelityRows: CLEAN_FIDELITY_ROWS.map(([key]) =>
-        key === 'notes' || key === 'fields' ? [key, 1, 'status-degraded'] : [key, 0, 'status-preserved']),
-      degradationItems: [['notes', '1'], ['fields', '1']],
+        key === 'fields' ? [key, 1, 'status-degraded'] : key === 'notes' ? [key, 1, 'status-retained'] : [key, 0, 'status-preserved']),
+      degradationItems: [['fields', '1']],
     };
     const composedTextBoxExpectation = {
       sourceSha256: composedTextBoxSha256,
@@ -2963,7 +2988,7 @@ async function main() {
     await clickExactButton(renderer, '稿件导入记录', 'retention-degraded-record-open');
     await assertRenderer(
       renderer,
-      `(() => { const record = document.querySelector('.record-detail[data-record-kind="import-record"]'); const items = Array.from(record?.querySelectorAll('[data-degradation-category]') ?? []); return record?.textContent.includes('含已接受的降级 · 原文件随来源版本保留') && record.textContent.includes('查看受影响类别、示例与导出后果') && items.length === 2 && items[0].dataset.degradationCategory === 'notes' && items[0].dataset.degradationCount === '1' && items[1].dataset.degradationCategory === 'fields' && items[1].dataset.degradationCount === '1'; })()`,
+      `(() => { const record = document.querySelector('.record-detail[data-record-kind="import-record"]'); const items = Array.from(record?.querySelectorAll('[data-degradation-category]') ?? []); return record?.textContent.includes('含已接受的降级 · 原文件随来源版本保留') && record.textContent.includes('查看受影响类别、示例与导出后果') && items.length === 1 && items[0].dataset.degradationCategory === 'fields' && items[0].dataset.degradationCount === '1'; })()`,
       'retention-degraded-record',
     );
     await closeProduct();
@@ -2993,6 +3018,28 @@ async function main() {
       );
       await closeProduct();
     }
+
+    // Issue #1205: a manuscript without heading styles — 儒林外史's first thirty blocks written unstyled, its third to fourteenth
+    // paragraphs joined into one over the block bound — offers its two 第X回 lines as candidates and the long paragraph's choice.
+    // Confirmed, the first candidate is the one heading of r1; spoken of by digest and count alone.
+    const structurePath = resolve(syntheticRoot, 'candidate-structure.docx');
+    const structureTexts = await admittedParagraphs({ source: 'wujingzi-rulin-waishi.docx', startBlock: 1, blocks: 30 });
+    structureTexts.splice(2, 12, structureTexts.slice(2, 14).join(''));
+    await writeFile(structurePath, zipSync({
+      '[Content_Types].xml': strToU8('<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>'),
+      'word/document.xml': strToU8(`<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${structureTexts.map((text) => `<w:p><w:r><w:t>${text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</w:t></w:r></w:p>`).join('')}</w:body></w:document>`),
+    }, { level: 6, mtime: fixedArchiveTime() }), { flag: 'wx' });
+    const structureRoot = await createCanonicalExternalDataRoot(resolve(runRoot, 'candidate-structure-data'), checkoutRoot);
+    renderer = await launchProduct({ dataRoot: structureRoot, pickerPath: structurePath, launchScenario: 'candidate-structure' });
+    await runJourney(renderer, { sourceSha256: await digestFile(structurePath), sourceBytes: (await lstat(structurePath)).size, degraded: false,
+      structure: { candidates: 2 } }, { diagnosticReviewLocation: 'structure-review', diagnosticScenario: 'candidate-structure' });
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'candidate-structure-editor-open');
+    await waitFor(
+      renderer,
+      `(() => { const blocks = Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')); return blocks.length > 19 && blocks.filter((block) => block.tagName === 'H2').length === 1 && blocks[1].tagName === 'H2'; })()`,
+      'candidate-structure-heading',
+    );
+    await closeProduct();
 
     // Issue #411: a DOCX's comments and tracked changes enter as 批注 and 修改建议 whose source is the file's
     // author (V2-UX-MARK-009). The manuscript reads as the file reads with every revision rejected, nothing

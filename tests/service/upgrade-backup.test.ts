@@ -341,13 +341,13 @@ describe('升级前备份 over the real store', () => {
     const software = await packageVersion();
     await storeBeforeUpgrade();
     expect(code(await refusal(open(BREAKING, 'after-record')))).toBe('E2E_CONTROL_INTERRUPTED');
-    // The note was never cleared, and 0.3.0 opened the data since: its record, not the upgrade's, is the latest.
+    // The note was never cleared, and 0.4.0 opened the data since: its record, not the upgrade's, is the latest.
     const plant = new DatabaseSync(storePath());
     try {
       const latest = parseCanonicalJson((plant.prepare('SELECT canonical_json FROM store_versions ORDER BY ordinal DESC LIMIT 1').get() as
         { canonical_json: string }).canonical_json) as Record<string, unknown>;
       const record: Record<string, unknown> = {
-        ...latest, recordId: randomUUID(), ordinal: (latest.ordinal as number) + 1, softwareVersion: '0.3.0', supersedes: latest.recordId,
+        ...latest, recordId: randomUUID(), ordinal: (latest.ordinal as number) + 1, softwareVersion: '0.4.0', supersedes: latest.recordId,
         recordedAt: new Date(Date.now() + 60_000).toISOString(),
       };
       delete record.upgrade;
@@ -355,7 +355,7 @@ describe('升级前备份 over the real store', () => {
       plant.prepare(
         `INSERT INTO store_versions(record_id, ordinal, software_version, data_version, schema_revision, supersedes_record_id, recorded_at, canonical_json, sha256)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(record.recordId as string, record.ordinal as number, '0.3.0', record.dataVersion as number, record.schemaRevision as number,
+      ).run(record.recordId as string, record.ordinal as number, '0.4.0', record.dataVersion as number, record.schemaRevision as number,
         record.supersedes as string, record.recordedAt as string, stored.json, stored.digest);
     } finally {
       plant.close();
@@ -363,9 +363,9 @@ describe('升级前备份 over the real store', () => {
     expect(existsSync(note())).toBe(true);
     const store = await open(BREAKING);
     try {
-      // The upgrade stays recorded once, and this open is recorded after 0.3.0's.
+      // The upgrade stays recorded once, and this open is recorded after 0.4.0's.
       expect(upgradesOf(store)).toEqual([[software, 1, 2, [CHANGE]]]);
-      expect(historyOf(store).map(([version, dataVersion]) => [version, dataVersion])).toEqual([[software, 2], ['0.3.0', 2], [software, 2], [software, 1]]);
+      expect(historyOf(store).map(([version, dataVersion]) => [version, dataVersion])).toEqual([[software, 2], ['0.4.0', 2], [software, 2], [software, 1]]);
       store.markCleanShutdown();
     } finally {
       store.close();

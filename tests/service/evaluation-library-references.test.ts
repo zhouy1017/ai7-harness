@@ -119,13 +119,13 @@ function finalize(): void {
     risks: record.content.risks.map((risk) => ({ ...risk, level: 'low', statement: '合成风险说明' })), conclusion: 'revise',
   } });
 }
-function prepare(kind: Kind, ids: ReadonlyArray<string> = []): InitialEvaluationProjection | ReadersReportProjection {
+function prepare(kind: Kind, ids: ReadonlyArray<string> = [], template: 'author' | 'editorial' = 'author'): InitialEvaluationProjection | ReadersReportProjection {
   if (kind === 'initial-evaluation') {
     let work = store.createInitialEvaluationPreparationWork(bookId, launchPolicy, ids);
     while (!work.done) work = store.advanceInitialEvaluationPreparationWork(work.workId!);
     return work.projection!;
   }
-  let work = store.createReadersReportPreparationWork(bookId, 'author', launchPolicy, ids);
+  let work = store.createReadersReportPreparationWork(bookId, template, launchPolicy, ids);
   while (!work.done) work = store.advanceReadersReportPreparationWork(work.workId!);
   return work.projection!;
 }
@@ -171,6 +171,21 @@ function answer(kind: Kind, prepared: InitialEvaluationProjection | ReadersRepor
   entries.set(fixtureEntryKey(0, requestDigest), { unitOrdinal: 0, requestDigest, attempt: null, contentDigest: null,
     response: { kind: 'unit-result', text: JSON.stringify(response), usage: { inputTokens: 10, outputTokens: 10 } } });
 }
+
+describe('审稿意见 references per template (Issue #795 item 4)', () => {
+  beforeEach(() => finalize());
+  it('pins only each template’s own selection into its own plan', async () => {
+    const id = await material();
+    const author = prepare('readers-report', [id]).taskIntent!.taskIntentId;
+    const editorial = prepare('readers-report', [], 'editorial').taskIntent!.taskIntentId;
+    expect(editorial).not.toBe(author);
+    expect(pins(author).map((pin) => pin.materialId)).toEqual([id]);
+    expect(pins(editorial)).toEqual([]);
+    expect(plan('readers-report', editorial).scope.reference.some((line) => line.includes('合成背景资料'))).toBe(false);
+    // 评估 shows the latest Task's frozen rows: the editorial template's, which carry none.
+    expect(frozenRows('readers-report')).toEqual({ lines: [], blocked: false });
+  });
+});
 
 describe.each(['initial-evaluation', 'readers-report'] as const)('评估 reference boundaries (%s)', (kind) => {
   beforeEach(() => { if (kind === 'readers-report') finalize(); });

@@ -11,8 +11,11 @@ import {
   type TaskIntentDraftProcedurePin,
   type TaskIntentDraftResolution,
   type TaskIntentOutcomeClass,
+  type TaskPlanProjection,
 } from '../shared/protocol.js';
+import type { SelectionSpanBlockPin } from '../shared/protocol/selection-span.js';
 import { BLOCK_ID_PATTERN, DIGEST_PATTERN, UUID_PATTERN, canonicalRecord, isRecord, parseCanonicalJson } from './analysis/canonical.js';
+import { isSpanOf } from './manuscript/selection-span.js';
 
 /**
  * Task Intent Drafts (Issue #423, wave 10 slice 7a; #52 S17b; V2-UX-TASK-001 to 009, DIALOG-016): what the editor asked AI7 to
@@ -137,6 +140,8 @@ export interface StoredDraftRange {
   /** Whether the words were pinned on edits newer than the revision named: `待保存修订版` until a revision holds them. */
   readonly pendingSave: boolean;
   readonly text: string;
+  /** A range across contiguous paragraphs (Issue #1176): every block's pin, the fields above naming the first block's. */
+  readonly span?: ReadonlyArray<SelectionSpanBlockPin>;
 }
 
 /** What one version holds: the editor's words and choices, and the context it came from. */
@@ -197,7 +202,8 @@ function isStoredRange(value: unknown): value is StoredDraftRange {
     Number.isSafeInteger(value.fromGrapheme) && Number.isSafeInteger(value.toGrapheme) && (value.fromGrapheme as number) >= 0 &&
     (value.toGrapheme as number) > (value.fromGrapheme as number) && typeof value.revisionId === 'string' && UUID_PATTERN.test(value.revisionId) &&
     typeof value.revisionLabel === 'string' && Number.isSafeInteger(value.journalSequence) && (value.journalSequence as number) >= 0 &&
-    typeof value.pendingSave === 'boolean' && typeof value.text === 'string' && value.text.length > 0;
+    typeof value.pendingSave === 'boolean' && typeof value.text === 'string' && value.text.length > 0 &&
+    (value.span === undefined || isSpanOf(value.span, value as unknown as StoredDraftRange));
 }
 
 export function isProcedurePin(value: unknown): value is TaskIntentDraftProcedurePin {
@@ -445,7 +451,10 @@ function settle(options: ReadonlyArray<TaskIntentDraftOption>, none: string): Ta
 export function resolveDraft(draft: Pick<DraftContent, 'target' | 'outcomeClass' | 'ranges' | 'goal'>, facts: DraftResolutionFacts): TaskIntentDraftResolution {
   if (draft.outcomeClass === null) return { state: 'unsupported', reason: DRAFT_RESOLUTION_REASONS.noOutcome };
   const onRanges = draft.target === 'ranges';
-  if (onRanges && new Set(draft.ranges.map((range) => range.blockId)).size !== 1) return { state: 'unsupported', reason: DRAFT_RESOLUTION_REASONS.rangesApart };
+  // A range across paragraphs (Issue #1176) is the one place a Task reads; another range beside it is a second place.
+  if (onRanges && (new Set(draft.ranges.map((range) => range.blockId)).size !== 1 || (draft.ranges.length > 1 && draft.ranges.some((range) => range.span !== undefined)))) {
+    return { state: 'unsupported', reason: DRAFT_RESOLUTION_REASONS.rangesApart };
+  }
   switch (draft.outcomeClass) {
     case 'analysis': {
       const analysis = facts.analysis;
@@ -531,4 +540,30 @@ export function goalFromText(value: string): string {
     kept += character;
   }
   return `${kept}…`;
+}
+
+/** How many whole paragraphs a draft's ranges lie in: the Task reads exactly those. */
+export function draftParagraphs(ranges: ReadonlyArray<StoredDraftRange>): number {
+  return new Set(ranges.flatMap((range) => range.span?.map((pin) => pin.blockId) ?? [range.blockId])).size;
+}
+
+/** The first and last block a resolved draft's ranges lie in — one paragraph, or a span's (Issue #1176) — or `null` for the Book. */
+export function draftBlockBounds(ranges: ReadonlyArray<StoredDraftRange>): { readonly fromBlockId: string; readonly toBlockId: string } | null {
+  const first = ranges[0];
+  return first === undefined ? null : { fromBlockId: first.blockId, toBlockId: first.span?.at(-1)?.blockId ?? first.blockId };
+}
+
+/**
+ * A plan prepared from a draft on ranges (Issue #423, slice 7a) says the selected words were widened to their whole paragraphs;
+ * a span's plan (Issue #1176) also names its exact pins among the technical details, from its first block's grapheme to its
+ * last's, with every block's digest.
+ */
+export function draftRangesPlan(plan: TaskPlanProjection, ranges: ReadonlyArray<StoredDraftRange>): TaskPlanProjection {
+  const process = `${plan.scope.process}；所选文字已扩展为所在的 ${draftParagraphs(ranges)} 个完整段落；任务按包含这些段落的阅读范围处理。`;
+  const span = ranges.length === 1 ? ranges[0]!.span : undefined;
+  const first = span?.[0];
+  const last = span?.at(-1);
+  return { ...plan, scope: { ...plan.scope, process },
+    technical: first === undefined || last === undefined ? plan.technical : [...plan.technical, { key: 'draft-span', label: '所选文字（跨段）',
+      value: `${first.blockId} 第 ${first.fromGrapheme} 字 → ${last.blockId} 第 ${last.toGrapheme} 字 · ${span!.length} 段 · ${span!.map((pin) => pin.blockDigest).join(' / ')}` }] };
 }

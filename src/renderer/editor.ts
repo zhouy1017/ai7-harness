@@ -2,9 +2,11 @@ import { baseKeymap } from 'prosemirror-commands';
 import { keymap } from 'prosemirror-keymap';
 import { Schema, type DOMOutputSpec, type Node as ProseMirrorNode } from 'prosemirror-model';
 import { EditorState, Plugin, TextSelection, type Transaction } from 'prosemirror-state';
-import { Decoration, DecorationSet, EditorView } from 'prosemirror-view';
-import { deriveSpanEdit, followSpanEdit } from '../shared/mark-anchor.js';
-import { markPointKind, markPointLabel } from './editorial-mark-labels.js';
+import { EditorView } from 'prosemirror-view';
+import { readSelectionSpan, type SpanSourceBlock } from '../shared/selection-span.js';
+import type { SelectionSpanBlockPin } from '../shared/protocol/selection-span.js';
+import { MARK_DECORATIONS_META, markDecorationPlugin } from './mark-decorations.js';
+import { newParagraphIdentity, structuralInput, structuralKey, type PendingStructure } from './editor-structure.js';
 import {
   bufferAdmits,
   bufferReachedLimit,
@@ -22,7 +24,6 @@ import {
   MAX_EDIT_GRAPHEMES,
   MAX_WINDOW_BLOCKS,
   type EditorialMarkAnchorProjection,
-  type EditorialMarkKind,
   type JournalAcknowledgement,
   type JournalEditInput,
   type ManuscriptBlockProjection,
@@ -70,7 +71,9 @@ export interface BoundedEditor {
   setActiveMark(active: { markId: string; previewText: string | null } | null): void;
   /**
    * What the editor has selected, in the window's own vocabulary: one block and a grapheme range of
-   * its durable text. `unsettled` while that block holds text the journal has not acknowledged.
+   * its durable text, or — across paragraphs (Issue #1176) — the exact span over the contiguous blocks
+   * it covers, named by its first block's range. `unsettled` while any of those blocks holds text the
+   * journal has not acknowledged; `across-note` when a note block lies inside it.
    */
   selectedRange(): EditorSelectedRange;
   setOperationLocked(locked: boolean): void;
@@ -86,9 +89,10 @@ export interface BoundedEditor {
 
 export type EditorSelectedRange =
   | { kind: 'none' }
-  | { kind: 'multiple-blocks' }
+  | { kind: 'across-note' }
   | { kind: 'unsettled' }
-  | { kind: 'range'; blockId: string; blockDigest: string; fromGrapheme: number; toGrapheme: number; text: string };
+  | { kind: 'range'; blockId: string; blockDigest: string; fromGrapheme: number; toGrapheme: number; text: string }
+  | { kind: 'span'; blockId: string; blockDigest: string; fromGrapheme: number; toGrapheme: number; text: string; span: ReadonlyArray<SelectionSpanBlockPin> };
 
 export interface EditorPoint {
   blockId: string;
@@ -127,6 +131,8 @@ interface BaselineBlock {
 
 const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' });
 const CARET_NAVIGATION_KEYS = new Set(['arrowleft', 'arrowright', 'arrowup', 'arrowdown', 'home', 'end']);
+/** The transaction meta of the editor's own Enter split or Backspace merge, the one structural change it admits. */
+const STRUCTURE_META = 'ai7-structure';
 
 function graphemes(text: string): string[] {
   return Array.from(segmenter.segment(text), ({ segment }) => segment);
@@ -142,6 +148,25 @@ const blockAttrs = {
   digest: { validate: 'string' },
   level: { default: null, validate: 'number|null' },
 };
+
+/** What a note block's label says (Issue #1204): 「脚注 n · 引自第 X 段」, or 「注释」 where the window carries no note record. */
+export function noteLabel(note: ManuscriptBlockProjection['note']): string {
+  if (note === undefined) return '注释';
+  const name = `${note.part === 'endnote' ? '尾注' : '脚注'} ${note.ordinal}`;
+  return note.referencePosition === null ? name : `${name} · 引自第 ${note.referencePosition} 段`;
+}
+
+/**
+ * A note block reads like a paragraph under its label; the label is not text of the block, and when the note names the paragraph
+ * that refers to it, the label goes there (`data-note-reference`).
+ */
+function noteDom(node: ProseMirrorNode): DOMOutputSpec {
+  const reference = node.attrs['noteReference'] as string | null;
+  return ['div', { class: 'manuscript-note', 'data-block-kind': 'note' },
+    ['span', { class: 'manuscript-note-label', contenteditable: 'false', ...(reference === null ? {} : { 'data-note-reference': reference, role: 'link', tabindex: '-1' }) },
+      String(node.attrs['noteLabel'])],
+    ['p', { 'data-block-id': String(node.attrs['blockId']) }, 0]];
+}
 
 const ai7Schema = new Schema({
   nodes: {
@@ -169,12 +194,18 @@ const ai7Schema = new Schema({
       attrs: blockAttrs,
       toDOM: (node) => blockDom('p', node),
     },
+    note: {
+      group: 'block',
+      content: 'text*',
+      marks: '',
+      attrs: { ...blockAttrs, noteLabel: { default: '注释', validate: 'string' }, noteReference: { default: null, validate: 'string|null' } },
+      defining: true,
+      toDOM: noteDom,
+    },
     text: { group: 'inline' },
   },
   marks: {},
 });
-
-const MARK_LINE_PRIORITY: ReadonlyArray<EditorialMarkKind> = ['change-suggestion', 'annotation', 'editor-note', 'personal-highlight'];
 
 function requireEditor(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -188,7 +219,7 @@ function requireAcknowledgement(condition: boolean): asserts condition {
 function validateText(text: string): void {
   requireEditor(
     text.length <= MAX_BLOCK_CODE_UNITS && graphemes(text).length <= MAX_BLOCK_GRAPHEMES,
-    '稿件内容块超出当前安全编辑范围。',
+    '稿件段落超出当前安全编辑范围。',
   );
 }
 
@@ -238,8 +269,8 @@ function baselineMap(windowProjection: ManuscriptWindowProjection): Map<string, 
       /^blk_[0-9a-f]{24}$/.test(block.blockId) &&
         !map.has(block.blockId) &&
         block.position > previousPosition &&
-        (block.kind === 'title' || block.kind === 'heading' || block.kind === 'paragraph'),
-      '稿件窗口内容块绑定无效。',
+        (block.kind === 'title' || block.kind === 'heading' || block.kind === 'paragraph' || block.kind === 'note'),
+      '稿件窗口段落绑定无效。',
     );
     validateText(block.text);
     previousPosition = block.position;
@@ -260,6 +291,7 @@ function createDocument(blocks: ReadonlyArray<ManuscriptBlockProjection>): Prose
           position: block.position,
           digest: block.digest,
           level: block.level,
+          ...(block.kind === 'note' ? { noteLabel: noteLabel(block.note), noteReference: block.note?.referenceBlockId ?? null } : {}),
         },
         block.text.length > 0 ? ai7Schema.text(block.text) : undefined,
       ),
@@ -285,6 +317,38 @@ function findBlockPosition(document: ProseMirrorNode, blockId: string): { node: 
     return found === undefined;
   });
   return found;
+}
+
+/**
+ * The selection from `anchor` to `head` across paragraphs (Issue #1176): the exact span over every block between them, read
+ * from their acknowledged text — `unsettled` while any holds input the journal has not acknowledged.
+ */
+function spanBetween(
+  document: ProseMirrorNode,
+  baselines: ReadonlyMap<string, { readonly text: string; readonly digest: string }>,
+  anchor: EditorPoint,
+  head: EditorPoint,
+  settled: boolean,
+): EditorSelectedRange {
+  const blocks: SpanSourceBlock[] = [];
+  let inside = false;
+  let unsettled = !settled;
+  document.forEach((node) => {
+    const blockId = String(node.attrs['blockId']);
+    if (blockId === anchor.blockId) inside = true;
+    if (!inside) return;
+    const baseline = baselines.get(blockId);
+    if (baseline === undefined || node.textContent !== baseline.text) unsettled = true;
+    blocks.push({ blockId, digest: baseline?.digest ?? '', kind: node.type.name, text: node.textContent });
+    if (blockId === head.blockId) inside = false;
+  });
+  if (unsettled) return { kind: 'unsettled' };
+  const reading = readSelectionSpan(blocks, anchor.grapheme, head.grapheme);
+  if (reading.kind === 'none') return { kind: 'none' };
+  if (reading.kind === 'note') return { kind: 'across-note' };
+  const first = reading.kind === 'range' ? reading.pin : reading.pins[0]!;
+  const range = { blockId: first.blockId, blockDigest: first.blockDigest, fromGrapheme: first.fromGrapheme, toGrapheme: first.toGrapheme, text: reading.text };
+  return reading.kind === 'range' ? { kind: 'range', ...range } : { kind: 'span', ...range, span: reading.pins };
 }
 
 function pointAtPosition(document: ProseMirrorNode, position: number): EditorPoint {
@@ -331,6 +395,8 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
   let saving = false;
   let retryRequired = false;
   let retryPrepared: { input: JournalEditInput } | undefined;
+  // The Enter split or Backspace merge shown and not yet acknowledged (Issue #1175): one at a time.
+  let structure: PendingStructure | undefined;
   let flushPromise: Promise<void> | undefined;
   let autoFlushTimer: number | undefined;
   let compositionWaiters: Array<() => void> = [];
@@ -399,15 +465,32 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       const blockId = String(node.attrs['blockId']);
       if (node.textContent !== baselines.get(blockId)?.text) changed.push(blockId);
     });
+    // A split or merge not yet acknowledged is unacknowledged work even where no text differs: an empty paragraph merged away.
+    if (structure !== undefined && !changed.includes(structure.blockId)) changed.unshift(structure.blockId);
     return changed;
+  };
+
+  /** While a split or merge is pending, the window keeps the structure it shows: text changes, blocks do not come or go. */
+  const pendingStructureAdmits = (transaction: Transaction): boolean => {
+    const before = transaction.before;
+    const candidate = transaction.doc;
+    if (candidate.childCount !== before.childCount) return false;
+    let valid = true;
+    candidate.forEach((node, _offset, index) => {
+      const previous = before.child(index);
+      if (node.attrs['blockId'] !== previous.attrs['blockId'] || node.type !== previous.type || node.attrs['level'] !== previous.attrs['level'] ||
+        node.textContent.length > MAX_BLOCK_CODE_UNITS || graphemes(node.textContent).length > MAX_BLOCK_GRAPHEMES) valid = false;
+    });
+    return valid;
   };
 
   const candidateIsBounded = (transaction: Transaction): boolean => {
     if (!transaction.docChanged) return true;
+    if (transaction.getMeta(STRUCTURE_META) === true) return isEditable();
     const candidate = transaction.doc;
-    if (candidate.childCount !== baselines.size) return false;
+    if (structure !== undefined ? !pendingStructureAdmits(transaction) : candidate.childCount !== baselines.size) return false;
     let valid = true;
-    candidate.forEach((node, _offset, index) => {
+    if (structure === undefined) candidate.forEach((node, _offset, index) => {
       const blockId = String(node.attrs['blockId']);
       const baseline = baselines.get(blockId);
       const expected = windowProjection.blocks[index];
@@ -441,116 +524,13 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
 
   const transactionFilter = new Plugin({ filterTransaction: candidateIsBounded });
 
-  /**
-   * Marks are drawn over the document, never written into it. Their ranges are grapheme ranges of
-   * the durable text, so text typed and not yet acknowledged is followed here with the arithmetic the
-   * service applies when the edit lands: a mark in front of the caret does not slide onto the wrong
-   * characters while someone types, and one whose own text is being changed shows as drifted at once.
-   */
-  const markDecorations = (document: ProseMirrorNode): DecorationSet => {
-    if (windowProjection.marks.length === 0) return DecorationSet.empty;
-    const byBlock = new Map<string, EditorialMarkAnchorProjection[]>();
-    for (const mark of windowProjection.marks) {
-      const list = byBlock.get(mark.blockId);
-      if (list) list.push(mark);
-      else byBlock.set(mark.blockId, [mark]);
-    }
-    const decorations: Decoration[] = [];
-    document.forEach((node, offset) => {
-      const blockMarks = byBlock.get(String(node.attrs['blockId']));
-      if (!blockMarks) return;
-      const parts = graphemes(node.textContent);
-      const baseline = baselines.get(String(node.attrs['blockId']));
-      const local = baseline && baseline.text !== node.textContent ? deriveSpanEdit(graphemes(baseline.text), parts) : null;
-      const position = (grapheme: number): number =>
-        offset + 1 + parts.slice(0, Math.min(Math.max(0, grapheme), parts.length)).join('').length;
-      let line: EditorialMarkKind | undefined;
-      for (const mark of blockMarks) {
-        const followed = local ? followSpanEdit(mark, local) : { ...mark, touched: false };
-        const drifted = mark.anchorState === 'drifted' || followed.touched;
-        if (mark.status === 'open' && (line === undefined || MARK_LINE_PRIORITY.indexOf(mark.kind) < MARK_LINE_PRIORITY.indexOf(line))) {
-          line = mark.kind;
-        }
-        const from = position(followed.fromGrapheme);
-        const to = position(followed.toGrapheme);
-        const previewing = activeMark?.markId === mark.markId && activeMark.previewText !== null && !drifted;
-        const preview = (at: number): void => {
-          const previewText = activeMark!.previewText!;
-          decorations.push(Decoration.widget(at, () => {
-            const element = window.document.createElement('ins');
-            element.className = 'editorial-mark-preview';
-            element.contentEditable = 'false';
-            element.dataset['markPreview'] = mark.markId;
-            const proposed = window.document.createElement('span');
-            proposed.className = 'editorial-mark-preview-text';
-            proposed.textContent = previewText.length === 0 ? '（删去）' : previewText;
-            const label = window.document.createElement('span');
-            label.className = 'editorial-mark-preview-label';
-            label.textContent = '预览 · 未应用';
-            element.append(proposed, label);
-            return element;
-          }, { side: 1, key: `preview:${mark.markId}:${previewText}`, ignoreSelection: true }));
-        };
-        if (to <= from) {
-          // No text is left under the mark — the point an applied deletion left, the point a pending
-          // insertion would write at (Issue #411), or a mark whose own words an edit took away — so a point
-          // is drawn there: no part of the document, no room in the line, text typed at it landing in front
-          // of it, and a click on it opening the mark's card as a click on a mark does, without moving the
-          // caret. A pending insertion whose card is open previews its words beside it.
-          const label = markPointLabel(mark, drifted);
-          const pointKind = markPointKind(mark);
-          const active = activeMark?.markId === mark.markId;
-          const anchor = drifted ? 'drifted' : 'exact';
-          decorations.push(Decoration.widget(from, () => {
-            const point = window.document.createElement('span');
-            point.className = ['editorial-mark-point', `editorial-mark-point-${mark.kind}`, ...(active ? ['editorial-mark-active'] : [])].join(' ');
-            point.contentEditable = 'false';
-            point.setAttribute('role', 'img');
-            point.setAttribute('aria-label', label);
-            point.title = label;
-            point.dataset['markId'] = mark.markId;
-            point.dataset['markKind'] = mark.kind;
-            point.dataset['markSource'] = mark.sourceKind;
-            point.dataset['markStatus'] = mark.status;
-            point.dataset['markAnchor'] = anchor;
-            point.dataset['markPoint'] = pointKind;
-            if (mark.disposition !== null) point.dataset['markDisposition'] = mark.disposition;
-            point.addEventListener('mousedown', (event) => {
-              if (event.button === 0) event.preventDefault();
-            });
-            return point;
-          }, {
-            side: 1,
-            ignoreSelection: true,
-            key: `point:${mark.markId}:${mark.status}:${mark.disposition ?? ''}:${anchor}:${active ? 'active' : ''}:${label}`,
-          }));
-          if (previewing && pointKind === 'insertion') preview(from);
-          continue;
-        }
-        decorations.push(Decoration.inline(from, to, {
-          class: [
-            'editorial-mark',
-            `editorial-mark-${mark.kind}`,
-            ...(activeMark?.markId === mark.markId ? ['editorial-mark-active'] : []),
-            ...(previewing ? ['editorial-mark-previewed'] : []),
-          ].join(' '),
-          'data-mark-id': mark.markId,
-          'data-mark-kind': mark.kind,
-          'data-mark-source': mark.sourceKind,
-          'data-mark-status': mark.status,
-          'data-mark-anchor': drifted ? 'drifted' : 'exact',
-          ...(mark.highlightColor === null ? {} : { 'data-mark-color': String(mark.highlightColor) }),
-          ...(mark.disposition === null ? {} : { 'data-mark-disposition': mark.disposition }),
-        }));
-        if (previewing) preview(to);
-      }
-      if (line !== undefined) {
-        decorations.push(Decoration.node(offset, offset + node.nodeSize, { class: 'has-editorial-mark', 'data-mark-line': line }));
-      }
-    });
-    return DecorationSet.create(document, decorations);
-  };
-  const markPlugin = new Plugin({ props: { decorations: (state) => markDecorations(state.doc) } });
+  // The window's marks, drawn where they changed only (Issue #1178): `mark-decorations.ts`.
+  const markPlugin = markDecorationPlugin({
+    marks: () => windowProjection.marks,
+    baselineText: (blockId) => baselines.get(blockId)?.text,
+    active: () => activeMark,
+    generation: () => baselines,
+  });
   const makeState = (blocks: ReadonlyArray<ManuscriptBlockProjection> = windowProjection.blocks): EditorState =>
     EditorState.create({
       schema: ai7Schema,
@@ -778,6 +758,116 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     announceState();
   };
 
+  const textInput = (baseline: BaselineBlock, text: string): { input: JournalEditInput } => ({
+    input: {
+      clientEditId: crypto.randomUUID(),
+      manuscriptId: windowProjection.manuscriptId,
+      branchId: windowProjection.branchId,
+      baseRevisionId: windowProjection.revisionId,
+      blockId: baseline.blockId,
+      windowStartBlockId: windowProjection.blocks[0]!.blockId,
+      baseBlockDigest: baseline.digest,
+      expectedJournalSequence: windowProjection.journalSequence,
+      ...deriveEdit(baseline.text, text),
+    },
+  });
+
+  /** The next write: a pending split or merge first — its paragraphs' texts as the key found them, then its own command. */
+  const nextPrepared = (blockId: string): { input: JournalEditInput } => {
+    if (structure !== undefined) {
+      const pending = structure;
+      const owed: Array<[string, string | undefined]> = [[pending.blockId, pending.preText]];
+      if (pending.kind === 'merge') owed.push([pending.mergedBlockId, pending.mergedPreText]);
+      if (pending.held !== null) owed.push([pending.held.blockId, pending.held.text]);
+      for (const [id, text] of owed) {
+        const baseline = baselines.get(id);
+        requireEditor(baseline && text !== undefined, '待保存段落不存在。');
+        if (baseline.text !== text) return textInput(baseline, text);
+      }
+      return {
+        input: structuralInput(pending, {
+          manuscriptId: windowProjection.manuscriptId, branchId: windowProjection.branchId, baseRevisionId: windowProjection.revisionId,
+          expectedJournalSequence: windowProjection.journalSequence,
+        }, {
+          block: baselines.get(pending.blockId)!.digest,
+          ...(pending.kind === 'merge' ? { merged: baselines.get(pending.mergedBlockId)!.digest } : {}),
+        }, (text) => graphemes(text).length),
+      };
+    }
+    const baseline = baselines.get(blockId);
+    const current = findBlock(view.state.doc, blockId);
+    requireEditor(baseline && current, '待保存段落不存在。');
+    return textInput(baseline, current.textContent);
+  };
+
+  /**
+   * Enter at the caret in a paragraph splits it; Backspace at a paragraph's start merges it into the paragraph before it
+   * (Issue #1175). The document changes at once and the command is written behind it. Whether the key was this editor's.
+   */
+  const beginStructure = (key: 'Enter' | 'Backspace'): boolean => {
+    const state = view.state;
+    if (!state.selection.empty || !isEditable()) return false;
+    const point = pointAtPosition(state.doc, state.selection.head);
+    const found = findBlockPosition(state.doc, point.blockId);
+    if (!found) return false;
+    let index = 0;
+    state.doc.forEach((node, _offset, at) => { if (node.attrs['blockId'] === point.blockId) index = at; });
+    const previous = index > 0 ? state.doc.child(index - 1) : undefined;
+    if (key === 'Backspace' && (point.grapheme !== 0 || previous?.type.name !== 'paragraph' || found.node.type.name !== 'paragraph')) return false;
+    if (found.node.type.name !== 'paragraph') {
+      options.onAnnouncement(found.node.type.name === 'note' ? '注释不能分段；分段与合并只用于正文段落。' : '标题不能在这里分段；分段与合并只用于正文段落。', 'error');
+      return true;
+    }
+    if (structure !== undefined) {
+      options.onAnnouncement('上一处分段或合并正在写入修订日志，请稍候。', 'busy');
+      return true;
+    }
+    const position = positionAtPoint(state.doc, point);
+    requireEditor(position !== undefined, '稿件选择位置无法解析。');
+    const blockAt = (at: number): string => String(state.doc.child(at).attrs['blockId']);
+    const full = state.doc.childCount >= MAX_WINDOW_BLOCKS;
+    if (key === 'Enter') {
+      const last = index === state.doc.childCount - 1;
+      const newBlockId = newParagraphIdentity();
+      // In a full window the split pushes a block past an edge — the last, or the first when the split is in the last paragraph,
+      // whose acknowledgement then comes with the window one block on so the new paragraph is in it.
+      const heldIndex = full ? (last ? 0 : state.doc.childCount - 1) : -1;
+      const held = heldIndex < 0 ? null : { blockId: blockAt(heldIndex), text: state.doc.child(heldIndex).textContent };
+      const transaction = state.tr.split(position, 1, [{
+        type: ai7Schema.nodes['paragraph']!,
+        attrs: { blockId: newBlockId, position: Number(found.node.attrs['position']), digest: '', level: null },
+      }]);
+      if (held !== null) {
+        const leaving = findBlockPosition(transaction.doc, held.blockId)!;
+        transaction.delete(leaving.position, leaving.position + leaving.node.nodeSize);
+      }
+      transaction.setSelection(TextSelection.create(transaction.doc, findBlockPosition(transaction.doc, newBlockId)!.position + 1))
+        .setMeta(STRUCTURE_META, true).scrollIntoView();
+      view.dispatch(transaction);
+      structure = {
+        kind: 'split', blockId: point.blockId, newBlockId, at: point.grapheme, preText: found.node.textContent,
+        windowStartBlockId: blockAt(full && last ? 1 : 0), held,
+      };
+    } else {
+      try {
+        validateText(previous!.textContent + found.node.textContent);
+      } catch {
+        options.onAnnouncement('合并后的段落超出单段安全范围，没有合并。', 'error');
+        return true;
+      }
+      const transaction = state.tr.join(found.position);
+      transaction.setSelection(TextSelection.create(transaction.doc, found.position - 1)).setMeta(STRUCTURE_META, true).scrollIntoView();
+      view.dispatch(transaction);
+      structure = {
+        kind: 'merge', blockId: String(previous!.attrs['blockId']), mergedBlockId: point.blockId, preText: previous!.textContent,
+        mergedPreText: found.node.textContent, windowStartBlockId: blockAt(0), held: null,
+      };
+    }
+    announceState();
+    void flush();
+    return true;
+  };
+
   const flush = (): Promise<void> => {
     if (destroyed || interrupted || protection?.cause === 'drift') return Promise.resolve();
     if (autoFlushTimer !== undefined) {
@@ -791,26 +881,9 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
         if (composing || view.composing) break;
         const changed = changedBlocks(view.state.doc);
         if (changed.length === 0 && retryPrepared === undefined) break;
-        const blockId = retryPrepared?.input.blockId ?? changed[0]!;
-        const baseline = baselines.get(blockId);
-        const current = findBlock(view.state.doc, blockId);
-        requireEditor(baseline && current, '待保存内容块不存在。');
-        const prepared = retryPrepared ?? (() => {
-          const edit = deriveEdit(baseline.text, current.textContent);
-          return {
-            input: {
-              clientEditId: crypto.randomUUID(),
-              manuscriptId: windowProjection.manuscriptId,
-              branchId: windowProjection.branchId,
-              baseRevisionId: windowProjection.revisionId,
-              blockId: baseline.blockId,
-              windowStartBlockId: windowProjection.blocks[0]!.blockId,
-              baseBlockDigest: baseline.digest,
-              expectedJournalSequence: windowProjection.journalSequence,
-              ...edit,
-            },
-          };
-        })();
+        const prepared = retryPrepared ?? nextPrepared(changed[0]!);
+        const baseline = baselines.get(prepared.input.blockId);
+        requireEditor(baseline, '待保存段落不存在。');
         // Keep the exact command from dispatch through acknowledgement, including while the visible text changes again.
         retryPrepared = prepared;
         saving = true;
@@ -832,14 +905,20 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
               ack.window.revisionId === prepared.input.baseRevisionId &&
               ack.window.blocks[0]?.blockId === prepared.input.windowStartBlockId,
           );
+          if (prepared.input.structure !== undefined) structure = undefined;
           await waitForComposition();
           const continuity = captureRenderedContinuity();
           const localText = new Map<string, string>();
           view.state.doc.forEach((node) => localText.set(String(node.attrs['blockId']), node.textContent));
           windowProjection = ack.window;
           baselines = baselineMap(windowProjection);
-          const visibleBlocks = windowProjection.blocks.map((block) => ({ ...block, text: localText.get(block.blockId) ?? block.text }));
-          restoreContinuity(makeState(visibleBlocks), continuity, null, null, false);
+          // A paragraph written to its text ahead of a pending split or merge: the document keeps showing that structure.
+          if (structure === undefined) {
+            const visibleBlocks = windowProjection.blocks.map((block) => ({ ...block, text: localText.get(block.blockId) ?? block.text }));
+            const anchored = windowProjection.blocks.some((block) => block.blockId === continuity.scrollAnchor.blockId)
+              ? continuity : { ...continuity, scrollAnchor: { blockId: continuity.head.blockId, offset: 0 } };
+            restoreContinuity(makeState(visibleBlocks), anchored, null, null, false);
+          }
           retryPrepared = undefined;
           retryRequired = false;
           lastDurable = { sequence: ack.sequence, durableAt: ack.durableAt };
@@ -918,6 +997,11 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
           event.preventDefault();
           options.onAnnouncement('输入法组合尚未结束，命令已暂缓。', 'busy');
           announceState();
+          return true;
+        }
+        const structural = structuralKey(event, composing || currentView.composing);
+        if (structural !== null && beginStructure(structural)) {
+          event.preventDefault();
           return true;
         }
         if (modifier && !event.altKey && key === 's' && !event.shiftKey) {
@@ -1086,19 +1170,19 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     setMarks: (marks, truncated) => {
       if (destroyed) return;
       windowProjection = { ...windowProjection, marks, marksTruncated: truncated };
-      view.dispatch(view.state.tr.setMeta('ai7-editorial-marks', true));
+      view.dispatch(view.state.tr.setMeta(MARK_DECORATIONS_META, true));
     },
     setActiveMark: (active) => {
       if (destroyed) return;
       activeMark = active ?? undefined;
-      view.dispatch(view.state.tr.setMeta('ai7-editorial-marks', true));
+      view.dispatch(view.state.tr.setMeta(MARK_DECORATIONS_META, true));
     },
-    selectedRange: () => {
+    selectedRange: (): EditorSelectedRange => {
       const selection = view.state.selection;
       if (selection.empty) return { kind: 'none' };
       const anchor = pointAtPosition(view.state.doc, selection.from);
       const head = pointAtPosition(view.state.doc, selection.to);
-      if (anchor.blockId !== head.blockId) return { kind: 'multiple-blocks' };
+      if (anchor.blockId !== head.blockId) return spanBetween(view.state.doc, baselines, anchor, head, !saving && !retryRequired);
       const baseline = baselines.get(anchor.blockId);
       const block = findBlock(view.state.doc, anchor.blockId);
       if (!baseline || !block || saving || retryRequired || block.textContent !== baseline.text) return { kind: 'unsettled' };

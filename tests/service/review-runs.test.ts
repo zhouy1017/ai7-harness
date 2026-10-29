@@ -46,6 +46,7 @@ import {
   SELECTION_UNAVAILABLE_REASON,
 } from '../../src/service/review/review-scope.js';
 import { selectionExcludedLine, selectionOutsideLine, UNREAD_WALK_CUT_NOTE } from '../../src/service/review/review-runs.js';
+import { oneActionStart } from '../../src/renderer/one-action-start.js';
 import { CARRIED_GAP_REASON } from '../../src/service/analysis/reuse-plan.js';
 import { ANALYSIS_LEDGER_TRIGGER_SQL } from '../../src/service/task-authorization.js';
 import {
@@ -494,7 +495,7 @@ describe('a Review Run over the real store on exact sample1', () => {
     try {
       const after = database();
       try {
-        expect(after.prepare('PRAGMA user_version').get()!.user_version).toBe(98);
+        expect(after.prepare('PRAGMA user_version').get()!.user_version).toBe(102);
         for (const snapshot of before) expect(after.prepare(`SELECT canonical_json, sha256 FROM ${snapshot.table} ORDER BY rowid`).all()).toEqual(snapshot.rows);
         expect(after.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
       } finally { after.close(); }
@@ -686,6 +687,26 @@ describe('a Review Run over the real store on exact sample1', () => {
     });
   });
 
+  it('starts a ready Review Run plan in one action, and previews a plan whose boundary moved before dispatch (ADR 0096 §3)', async () => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
+      const run = prepare(session, book, [TYPOS], WHOLE);
+      const plan = session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: run.reviewRunId });
+      const decision = oneActionStart(plan);
+      expect(decision).toEqual({ kind: 'authorize', planDigests: approvals(run) });
+      session.store.authorizeReviewRun(book.bookId, run.reviewRunId, decision.kind === 'authorize' ? decision.planDigests : []);
+      expect(workspace(session, book, run.reviewRunId).run!.authorization).not.toBeNull();
+      // The plan stays one disclosure away: the drawer reads the started Run's plan, which offers no second start.
+      expect(oneActionStart(session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: run.reviewRunId }))).toEqual({ kind: 'preview' });
+
+      const moved = prepare(session, book, [STYLE], WHOLE);
+      reenrollCredential();
+      const movedPlan = session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: moved.reviewRunId });
+      expect(movedPlan.start.readiness).toBe('changed');
+      expect(oneActionStart(movedPlan)).toEqual({ kind: 'preview' });
+      expect(workspace(session, book, moved.reviewRunId).run!.authorization).toBeNull();
+    });
+  });
+
   it('reviews several categories and the baseline leads one after another and puts every finding on the manuscript as one record with its mark', async () => {
     await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
       const before = workspace(session, book);
@@ -861,6 +882,12 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(report.record.mustItems.items.map((item) => item.findingId).sort()).toEqual(must.map((finding) => finding.findingId).sort());
       expect(report.record.mustItems.items.every((item) => graphemeCount(item.quote) <= 80 && item.locationLabel.startsWith('内容块 '))).toBe(true);
       expect(report.record.overview.rows.find((row) => row.categoryId === TYPOS)!.counts).toMatchObject({ handled: 1, ignored: 1 });
+      // Version /2 (Issue #1174): the chapter table counts each finding once, by position, and the 发现详单 lists each place once.
+      expect(report.record.schema).toBe('ai7.review.report/2');
+      expect(report.record.statistics!.total).toBe(report.record.overview.rows.reduce((total, row) => total + row.counts.must + row.counts.should + row.counts.note, 0));
+      expect(report.record.statistics!.rows.every((row) => /^(章节 \d+（内容块 \d+(–\d+)?）|章节之外|内容块已不在当前稿件中)$/u.test(row.label))).toBe(true);
+      expect(report.record.findings!.omitted).toBe(0);
+      expect(new Set(report.record.findings!.entries.flatMap((entry) => entry.findingIds)).size).toBe(report.record.statistics!.total);
       expect(report.record.appendix.categories.map((category) => [category.categoryId, category.procedure.version, category.guidelineDocuments[0]!.version]))
         .toEqual([[TYPOS, '1', '1'], [STYLE, '2', '1']]);
       expect(report.record.appendix.categories[0]!.adapterPin).toMatchObject({ route: 'ai7-local-deterministic', fixtureIdentity: 'sample1-review-cross-chapter-authored' });
@@ -2060,7 +2087,8 @@ describe('the 审阅报告 exported in the manuscript\'s formats (Issue #500, S6
       expect(docx.formats).toEqual(REPORT_EXPORT_FORMATS);
       const must = report.record.mustItems.items.length;
       expect(docx.fidelity.map((row) => `${row.key}:${row.status}:${row.count}`)).toEqual([
-        'report-overview:preserved:2', `report-must-items:preserved:${must}`, 'report-summaries:preserved:2', 'report-appendix:preserved:3',
+        'report-overview:preserved:2', `report-must-items:preserved:${must}`, `report-statistics:preserved:${report.record.statistics!.rows.length + 1}`,
+        `report-findings:preserved:${report.record.findings!.entries.length}`, 'report-summaries:preserved:2', 'report-appendix:preserved:3',
       ]);
       expect((await review('markdown')).fidelity[0]).toMatchObject({ key: 'report-overview', status: 'degraded' });
 
@@ -2085,8 +2113,10 @@ describe('the 审阅报告 exported in the manuscript\'s formats (Issue #500, S6
       };
       const written = await exported('docx', '审阅报告.docx');
       const documentXml = strFromU8(unzipSync(written)['word/document.xml']!);
-      expect(documentXml.match(/<w:tbl>/gu)?.length).toBe(1);
+      // A /2 record writes 概览表 and 章节与类别统计 as Word tables (Issue #1174).
+      expect(documentXml.match(/<w:tbl>/gu)?.length).toBe(2);
       expect(documentXml).toContain('>概览表<');
+      expect(documentXml).toContain('>章节与类别统计<');
       const markdown = (await exported('markdown', '审阅报告.md')).toString('utf8');
       expect(markdown.startsWith('# L2 sample1 审阅记录 · 审阅报告\n\n第 1 次审阅 · ')).toBe(true);
       expect(markdown).toContain('\n\n## 概览表\n\n| 类别 | 状态 | 发现 |\n| --- | --- | --- |\n');
@@ -2118,7 +2148,7 @@ describe('the 审阅报告 exported in the manuscript\'s formats (Issue #500, S6
         options: { includeAnnotations: true, includeSuggestions: true }, route: 'archive' }, true);
       const archivePath = join(outbox, '含审阅报告.zip');
       const preparedArchive = await session.store.prepareBookDeliveryPackageArchiveExport({ bookId: book.bookId, packageVersionId: version.packageVersionId,
-        options: archiveReview.options, memberKeys: [], reviewDigest: archiveReview.reviewDigest, destination: archivePath }, true);
+        options: archiveReview.options, reviewDigest: archiveReview.reviewDigest, destination: archivePath }, true);
       const exportedArchive = await session.store.approveBookDeliveryPackageExport({ bookId: book.bookId, exportId: preparedArchive.exportId }, true);
       const reportMember = exportedArchive.export.files.find((file) => file.key === `report:${report.reportId}`)!;
       expect(reportMember.outcome).toBe('created');

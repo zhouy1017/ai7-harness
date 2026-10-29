@@ -5,6 +5,7 @@ import { mountWindowedList } from './windowed-list.js';
 import { applyOnce } from './manuscript-apply.js';
 import { mountPositionRail } from './position-rail.js';
 import { DECISION_REASON_CHIPS } from './editorial-mark-labels.js';
+import { proposalIdentityRows, proposalPreparationLine } from './technical-layer-labels.js';
 
 const dispositions = { accepted: '拟采纳', rejected: '拟拒绝', deferred: '暂不决定' } as const;
 const exclusionLabels = { conflict: '未解决冲突', 'unclassified-stale': '旧基准尚未分类', unloaded: '未加载', 'other-version': '其他版本', 'atomic-group': '原子组需单独处理', applied: '已经应用' } as const;
@@ -13,6 +14,12 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string, classN
 }
 function button(label: string, action: string, run: () => void): HTMLButtonElement {
   const node = el('button', label, 'secondary'); node.type = 'button'; node.dataset['proposalAction'] = action; node.addEventListener('click', run); return node;
+}
+/** Identities one disclosure away (ADR 0096 §3, ADR 0071 §1): 查看技术详情, closed by default. */
+function technical(rows: ReadonlyArray<readonly [string, string]>): HTMLElement {
+  const details = el('details', undefined, 'technical-details'); const list = el('dl');
+  for (const [term, value] of rows) list.append(el('dt', term), el('dd', value, 'technical-identity'));
+  details.append(el('summary', '查看技术详情'), list); return details;
 }
 function region(title: string, ...nodes: HTMLElement[]): HTMLElement { const section = el('section', undefined, 'proposal-region'); section.append(el('h4', title), ...nodes); return section; }
 
@@ -135,7 +142,7 @@ export function mountProposalWorkspace(options: {
       })); control.disabled = disposition === 'accepted' && group.some((member) => member.conflict || !member.loaded); yours.append(control);
     }
     if (item.conflict) yours.append(button('解决冲突…', 'conflict', () => options.openConflict(item.markId)));
-    yours.append(el('p', item.appliedRevisionId !== null ? `已应用 · 稿件修订 ${item.appliedRevisionId}` : item.disposition === 'accepted' || item.disposition === 'accepted-with-edit' ? '已采纳 · 尚未应用' : item.draft !== null ? `${dispositions[item.draft]} · 草稿已保存，尚未记录决定` : '尚未选择处理。'));
+    yours.append(el('p', item.appliedRevisionId !== null ? '已应用 · 已写入稿件' : item.disposition === 'accepted' || item.disposition === 'accepted-with-edit' ? '已采纳 · 尚未应用' : item.draft !== null ? `${dispositions[item.draft]} · 草稿已保存，尚未记录决定` : '尚未选择处理。'));
     const decision = suggestion.decision;
     if (decision !== null) {
       if (decision.reason !== null) yours.append(el('p', `你的原因：${decision.reason}`));
@@ -151,7 +158,7 @@ export function mountProposalWorkspace(options: {
       const save = button('保存你的原因', 'reason-own', () => saveReason(field.value.trim(), 'free-text')); save.disabled = true;
       field.addEventListener('input', () => { save.disabled = field.value.trim().length === 0; }); reasons.append(label, save); yours.append(reasons);
     }
-    comparison.replaceChildren(el('p', `基准修订 ${item.baseRevisionId} · 当前修订 ${window.revisionId}${item.stale ? ' · 旧基准，按精确范围核对' : ''}`),
+    comparison.replaceChildren(...(item.stale ? [el('p', '旧基准，按精确范围核对')] : []), technical(proposalIdentityRows({ 基准修订: item.baseRevisionId, 当前修订: window.revisionId, 应用后的稿件修订: item.appliedRevisionId })),
       button(position.comparison === 'inline' ? '并排对比' : '行内对比', 'comparison', () => { position.comparison = position.comparison === 'inline' ? 'side-by-side' : 'inline'; void persist().catch(() => options.setStatus('审阅位置未能保存。', 'error')); paintComparison(item, card, window); }),
       region('修改内容', content, (() => { const detail = el('details'); detail.open = position.expanded; detail.append(el('summary', '周围语境'), el('p', context)); detail.addEventListener('toggle', () => { position.expanded = detail.open; void persist().catch(() => options.setStatus('审阅位置未能保存。', 'error')); }); return detail; })()), region('修改理由', el('p', suggestion.rationale || '没有填写修改理由。')),
       region('依据与核查', el('p', '支持资料与核查状态见原修改建议卡。'), button('在稿件中查看', 'source-card', () => void options.returnToManuscript(item.blockId, item.markId))), yours);
@@ -162,7 +169,7 @@ export function mountProposalWorkspace(options: {
     const labels = { applied: '已应用', 'not-applied': '未应用', confirming: '正在确认应用结果', unresolved: '结果待确认' } as const;
     node.append(el('h4', labels[receipt.state]), el('p', receipt.reason), button('在稿件中查看', 'receipt-manuscript', () => void options.returnToManuscript(position.blockId, position.activeMarkId)),
       button('返回提案', 'receipt-proposal', () => { controls.replaceChildren(); renderControls(); }));
-    node.append(el('p', `${options.bookTitle} · 分支 ${receipt.branchId} · 你 · ${receipt.approvedAt ?? '尚无批准记录'} · ${receipt.application?.changeCount ?? 0} 处写入`));
+    node.append(el('p', `${options.bookTitle} · 你 · ${receipt.approvedAt ?? '尚无批准记录'} · ${receipt.application?.changeCount ?? 0} 处写入`), technical(proposalIdentityRows({ 分支: receipt.branchId })));
     if (receipt.safeRetry && receipt.state === 'not-applied') node.append(button('重新准备应用（需重新批准）', 'safe-reprepare', renderControls));
     // EREC-005: no retry while 结果待确认; the editor's re-check reads the authoritative records and dispatches nothing.
     if (receipt.state === 'unresolved') node.append(button('重新核对应用结果', 'receipt-recheck', () => void act(async () => {
@@ -204,7 +211,8 @@ export function mountProposalWorkspace(options: {
   }
   function renderPreparation(): void {
     if (!workspace || prepared === null) return;
-    controls.replaceChildren(el('h3', '准备应用'), el('p', `${options.bookTitle} · 分支 ${workspace.branchId} · 当前修订 ${workspace.revisionId} · 决定 ${preparedDecision ?? '尚未记录'} · 纳入 ${prepared.length} 项 · 预计修订日志序号 ${workspace.journalSequence + 1}，写入一次新的受控稿件变更`), el('p', '尚未批准应用，稿件未发生变化'));
+    controls.replaceChildren(el('h3', '准备应用'), el('p', proposalPreparationLine(options.bookTitle, preparedDecision !== null, prepared.length, workspace.journalSequence + 1)), el('p', '尚未批准应用，稿件未发生变化'),
+      technical(proposalIdentityRows({ 分支: workspace.branchId, 当前修订: workspace.revisionId, 提案决定: preparedDecision })));
     const rows = el('ul'); for (const markId of prepared) { const item = workspace.items.find((entry) => entry.markId === markId)!; const row = el('li', `${item.chapter} · 第 ${item.position} 段 ${item.fromGrapheme}–${item.toGrapheme}`);
       row.append(button('从本次应用移除', 'remove', () => { const group = item.atomicGroupId; prepared = prepared!.filter((id) => group === null ? id !== markId : workspace!.items.find((entry) => entry.markId === id)?.atomicGroupId !== group); renderPreparation(); })); rows.append(row); }
     const excluded = el('ul'); for (const item of workspace.items.filter((entry) => !prepared!.includes(entry.markId))) excluded.append(el('li', `排除：${item.chapter} · 第 ${item.position} 段 ${item.fromGrapheme}–${item.toGrapheme} · ${item.appliedRevisionId !== null ? '已应用' : item.conflict ? '冲突待解决' : item.disposition === 'accepted' ? '本次移除或决定已更新（已采纳 · 尚未应用）' : '未被当前决定采纳'}`));

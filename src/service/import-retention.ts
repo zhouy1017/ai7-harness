@@ -2,10 +2,12 @@ import { createHash } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import type { ManuscriptBlockProjection, TextBoxDisposition } from '../shared/protocol.js';
 import { MAX_FRAME_BYTES } from '../shared/protocol.js';
-import { DOCX_PARSER_IDENTITY, DOCX_PARSER_IDENTITY_V1, DOCX_PARSER_IDENTITY_V2,
+import { DOCX_NOTE_PARSER_IDENTITY, DOCX_PARSER_IDENTITY, DOCX_SPLIT_PARSER_IDENTITY, DOCX_PARSER_IDENTITY_V1, DOCX_PARSER_IDENTITY_V2,
   WORD_DOCX_PARSER_IDENTITY, type ParsedTextBox, type ParsedDocx, type ParsedDocxBlock,
   type NativeDocxIntakeParse, type WordTrackedCompilation } from './docx.js';
 import type { ParsedImportedMark } from './docx-marks.js';
+import { stageNoteSources, stagedNoteSourcesMatch, type StagedNoteSource } from './manuscript/note-blocks.js';
+import { stageParagraphPieces, stagedParagraphPiecesMatch, type StagedParagraphPiece } from './manuscript/import-structure.js';
 import { LOCAL_LEARNING_POLICY_BASIS } from './learning-eligibility.js';
 import { canonicalJson as wordCanonicalJson, sha256Hex, DIGEST_PATTERN, UUID_PATTERN, hasExactKeys, isRecord } from './analysis/canonical.js';
 
@@ -569,7 +571,7 @@ export function wordParentSourcePinRecord(pin: WordParentSourcePin): { json: str
     pin.schema === 'ai7.word-parent-source-pin/1' && UUID_PATTERN.test(pin.sourceVersionId) && UUID_PATTERN.test(pin.bookId) &&
     [pin.objectDigest, pin.sourceDigest, pin.contentDigest, pin.structureDigest].every((digest) => DIGEST_PATTERN.test(digest)) &&
     pin.objectDigest === pin.sourceDigest && pin.format === 'DOCX' && Number.isSafeInteger(pin.sourceBytes) && pin.sourceBytes > 0 &&
-    [DOCX_PARSER_IDENTITY_V1, DOCX_PARSER_IDENTITY_V2, DOCX_PARSER_IDENTITY, WORD_DOCX_PARSER_IDENTITY].some((identity) => identity === pin.parserIdentity) &&
+    [DOCX_PARSER_IDENTITY_V1, DOCX_PARSER_IDENTITY_V2, DOCX_PARSER_IDENTITY, DOCX_NOTE_PARSER_IDENTITY, DOCX_SPLIT_PARSER_IDENTITY, WORD_DOCX_PARSER_IDENTITY].some((identity) => identity === pin.parserIdentity) &&
     pin.workingObjectDigest === null && pin.converterIdentity === null && pin.displayName.length > 0 && pin.displayName.isWellFormed() &&
     Number.isFinite(Date.parse(pin.createdAt)), 'WORD_SOURCE_INVALID', 'Word 原始来源固定记录无效。');
   const json = wordCanonicalJson(pin);
@@ -1655,10 +1657,16 @@ export interface StagedTextBoxParagraph {
   graphemeLength: number;
 }
 
-/** The staged sources of one parse: the source paragraph of every block, in block order, and every box. */
+/**
+ * The staged sources of one parse: the source paragraph of every body block, in block order, every box, and the note each
+ * note block reads (Issue #1204), whose blocks follow every body block.
+ */
 export interface StagedImportSources {
   blockSourceIndexes: ReadonlyArray<number>;
   textBoxes: ReadonlyArray<ParsedTextBox>;
+  notes: ReadonlyArray<StagedNoteSource>;
+  /** The pieces of each paragraph split at the block bound (Issue #1205); a later piece stages no block source. */
+  pieces?: ReadonlyArray<StagedParagraphPiece>;
 }
 
 function flattenTextBoxes(textBoxes: ReadonlyArray<ParsedTextBox>): StagedTextBoxParagraph[] {
@@ -1684,7 +1692,9 @@ export function stageImportSources(db: DatabaseSync, draftId: string, sources: S
   const insertBlock = db.prepare(
     'INSERT INTO staged_import_block_sources(draft_id, position, source_paragraph_index) VALUES (?, ?, ?)',
   );
-  sources.blockSourceIndexes.forEach((index, offset) => insertBlock.run(draftId, offset + 1, index));
+  const continued = new Set(sources.pieces?.filter((piece) => piece.pieceOrdinal > 1).map((piece) => piece.position));
+  sources.blockSourceIndexes.forEach((index, offset) => { if (!continued.has(offset + 1)) insertBlock.run(draftId, offset + 1, index); });
+  stageParagraphPieces(db, draftId, sources.pieces ?? []);
   const insertParagraph = db.prepare(
     `INSERT INTO staged_import_text_box_paragraphs(
        draft_id, box_ordinal, box_paragraph_ordinal, anchor_paragraph_index, source_paragraph_index,
@@ -1698,17 +1708,18 @@ export function stageImportSources(db: DatabaseSync, draftId: string, sources: S
       paragraph.graphemeLength,
     );
   }
+  stageNoteSources(db, draftId, sources.notes);
 }
 
-/** The source paragraph of every staged block of a draft, in position order. */
-export function stagedBlockSourceIndexes(db: DatabaseSync, draftId: string): number[] {
+/**
+ * The source paragraph of every staged block of a draft that stages one, as `position:index` in position order. A later piece of a
+ * split paragraph (Issue #1205) stages none.
+ */
+function stagedBlockSourceIndexes(db: DatabaseSync, draftId: string): string[] {
   const rows = db.prepare(
     'SELECT position, source_paragraph_index FROM staged_import_block_sources WHERE draft_id = ? ORDER BY position',
   ).all(draftId) as SqlRow[];
-  return rows.map((row, index) => {
-    requireRetention(integer(row.position) === index + 1, 'SNAPSHOT_INCOMPLETE', '暂存内容块来源段落不连续。');
-    return integer(row.source_paragraph_index);
-  });
+  return rows.map((row) => `${integer(row.position)}:${integer(row.source_paragraph_index)}`);
 }
 
 /**
@@ -1757,12 +1768,13 @@ export function stagedTextBoxParagraphs(db: DatabaseSync, draftId: string): Stag
  */
 export function stagedImportSourcesMatch(db: DatabaseSync, draftId: string, sources: StagedImportSources): boolean {
   const staged = stagedBlockSourceIndexes(db, draftId);
-  if (staged.length !== sources.blockSourceIndexes.length || staged.some((index, offset) => index !== sources.blockSourceIndexes[offset])) {
-    return false;
-  }
+  const continued = new Set(sources.pieces?.filter((piece) => piece.pieceOrdinal > 1).map((piece) => piece.position));
+  const expectedSources = sources.blockSourceIndexes.flatMap((index, offset) => continued.has(offset + 1) ? [] : [`${offset + 1}:${index}`]);
+  if (staged.length !== expectedSources.length || staged.some((entry, offset) => entry !== expectedSources[offset])) return false;
   const expected = flattenTextBoxes(sources.textBoxes).sort((left, right) => left.sourceParagraphIndex - right.sourceParagraphIndex);
   const actual = stagedTextBoxParagraphs(db, draftId);
-  return actual.length === expected.length && actual.every((paragraph, index) => {
+  return stagedNoteSourcesMatch(db, draftId, sources.notes) && stagedParagraphPiecesMatch(db, draftId, sources.pieces ?? []) &&
+    actual.length === expected.length && actual.every((paragraph, index) => {
     const other = expected[index]!;
     return paragraph.boxOrdinal === other.boxOrdinal && paragraph.boxParagraphOrdinal === other.boxParagraphOrdinal &&
       paragraph.anchorParagraphIndex === other.anchorParagraphIndex &&

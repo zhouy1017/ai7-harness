@@ -1,5 +1,5 @@
 import type { CallId, GenerateOptions, LlmAdapter, LlmProviderInfo, LlmResolvedModelInfo, StreamChunk } from '@deepseek-ai/dsh-llm';
-import { canonicalJson, isRecord, sha256Hex } from '../analysis/canonical.js';
+import { isRecord, sha256Hex } from '../analysis/canonical.js';
 import { DIALOGUE_PROMPT_CONTRACT, DIALOGUE_PROMPT_CONTRACT_DIGEST, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST, parseDialogueMessage } from '../dialogue/contract.js';
 import { GLOBAL_AGENT_PROMPT_CONTRACT, GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST } from '../dialogue/global-agent-session.js';
 import { AI7_FAILURE_CODES, retryBackoffMs, type DshFailureCodes } from './classification.js';
@@ -11,6 +11,11 @@ import {
   type RemoteExecutionRoute,
   type TransmitTicket,
 } from './egress-gate.js';
+import { anthropicMessagesBody, anthropicMessagesStreamBody, messagesSseEvents } from './family-anthropic-messages.js';
+import { chatCompletionsBody, chatCompletionsStreamBody, dialogueSseEvents } from './family-chat-completions.js';
+import { providerPreflight, streamingDeclared } from './family-dispositions.js';
+import { generateContentSseEvents, googleGenerateContentBody, googleGenerateContentUrl } from './family-gemini.js';
+import { openaiResponsesBody, openaiResponsesStreamBody, responsesSseEvents } from './family-openai-responses.js';
 import {
   DEEPSEEK_V4_PRO_PROFILE,
   type CapabilityEvidence,
@@ -21,10 +26,13 @@ import { GENERATED_ROUTE_PROFILES } from './provider-profiles.generated.js';
 import { LOCAL_TOOL_NAMES, LEGACY_LOCAL_TOOL_SCHEMAS, toolSetEqualsPlatformSchemas } from './platform-tools.js';
 import { normalizeModelResponse, type CanonicalModelResult, type ModelUsage, type NormalizeOptions } from './response-normalization.js';
 
+export { DEEPSEEK_REASONING_EFFORT, dialogueSseEvents } from './family-chat-completions.js';
+export { streamingDeclared } from './family-dispositions.js';
+
 /**
  * The AI7-owned Provider adapter, revision 1. One adapter serves every remote route and all four
- * implemented request shapes, composed from two profiles: a **route profile** — endpoint, credential
- * slot, header policy, limit reading, output cap — says how to reach a model, and a **model profile**
+ * protocol families, composed from two profiles: a **route profile** — endpoint, credential slot,
+ * header policy, limit reading, output cap — says how to reach a model, and a **model profile**
  * (`./model-profile.ts`) says how to speak to one. They are separate because one route serves many
  * models, so a model's capabilities cannot hang off the route that carries it.
  * Every route profile is generated from the provider documents under `config/providers/` (ADR 0073
@@ -33,10 +41,14 @@ import { normalizeModelResponse, type CanonicalModelResult, type ModelUsage, typ
  * unchanged production route (model `deepseek-v4-pro`, thinking enabled at high reasoning effort).
  * `opencode-go` is the developer-live route of Provider Processing v9 (bare model id
  * `deepseek-v4.1-flash`, a standard chat-completions body with no DeepSeek-specific parameters, and the
- * technical Session id in `x-opencode-session` for the gateway's prompt cache). Every other
- * configured route — the Go plan's `/messages` and `/responses` paths and every provider document's
- * route — is declared and inert: no Provider Resolution Plan may bind it (`ExecutionRoute` in
- * `./egress-gate.ts`) until a Provider Processing revision names its exact binding.
+ * technical Session id in `x-opencode-session` for the gateway's prompt cache).
+ *
+ * Each family's request, stream and tool spelling lives in its own module beside this one (Issue #1180):
+ * `family-chat-completions.ts`, `family-openai-responses.ts`, `family-anthropic-messages.ts` and
+ * `family-gemini.ts`; `family-dispositions.ts` states what each family and each declared model is
+ * supported for, and the adapter refuses every other demand by name before any ticket, credential or
+ * transport is touched. This module keeps the one loop: preflight, assembly, the ticket, the broker's
+ * release, the transport, classification and the canonical result, the same for every family.
  *
  * No route exposes provider-native tools. The adapter assembles a deterministic request from the
  * frozen prompt contract, records the request digest, and transmits only after a `transmit-remote`
@@ -46,17 +58,12 @@ import { normalizeModelResponse, type CanonicalModelResult, type ModelUsage, typ
  */
 export const DEEPSEEK_ADAPTER_REVISION = 1 as const;
 export const DEEPSEEK_CONFIGURATION_REVISION = 1 as const;
-export const DEEPSEEK_REASONING_EFFORT = 'high' as const;
 /** Pre-v26 launch fallback. */
 export const MODEL_REQUEST_DEADLINE_MS = 180_000;
 /** The opaque per-request Session header the gateway uses for prompt caching; it carries the Session id and nothing else. */
 export const OPENCODE_GO_SESSION_HEADER = 'x-opencode-session' as const;
 /** The specific User-Agent the developer-live route sends: the product and the trusted scope, no host or user detail. */
 export const OPENCODE_GO_USER_AGENT = 'AI7-Harness/1.0 (developer-live)' as const;
-/** The method the generateContent shape appends to the model id it addresses in the path. */
-const GOOGLE_GENERATE_CONTENT_METHOD = ':generateContent' as const;
-/** A model id that stands in a URL path segment as it is written; the shape that addresses one refuses anything else. */
-const URL_ADDRESSABLE_MODEL_ID = /^[A-Za-z0-9._-]+$/u;
 
 /**
  * How one remote route is reached: everything that is true of the route whichever model it carries.
@@ -142,352 +149,27 @@ export interface ProviderRequestContext {
   readonly requestShape?: 'editorial-dialogue-sse';
 }
 
-/** The turn's user and assistant messages as both shapes carry them; where the system prompt goes is each shape's own business. */
-function conversationMessages(payload: AssembledModelPayload): Array<{ role: string; content: string }> {
-  const messages: Array<{ role: string; content: string }> = [];
-  for (const message of payload.messages) {
-    const text = messageText(message);
-    if (text === null) throw new Error('DEEPSEEK_REQUEST_NON_TEXT_CONTENT');
-    if (message.role !== 'user' && message.role !== 'assistant') throw new Error('DEEPSEEK_REQUEST_ROLE_INVALID');
-    messages.push({ role: message.role, content: text });
-  }
-  return messages;
-}
-
-/** The system prompt of one payload, or `null` when the payload carries none. */
-function systemPromptOf(payload: AssembledModelPayload): string | null {
-  return payload.system !== undefined && payload.system.length > 0 ? payload.system : null;
-}
-
-/**
- * The chat-completions body, exactly as adapter revision 1 has always assembled it: the system prompt
- * is the first message, and both frozen request digests are over these bytes.
- *
- * Of the structured-output constraints only `json-object` is implemented, as exactly one body field —
- * `response_format: {"type":"json_object"}`, the chat-completions spelling — and `json-schema` and
- * `tool-call` still refuse, because naming a constraint is not implementing it. Implementing one is
- * still not sending it: the field travels only for a model whose profile declares `json-object`, and
- * that declaration needs the live evidence the profile table demands (Issue #306).
- */
-function chatCompletionsBody(model: ProviderModelProfile, payload: AssembledModelPayload): string {
-  const structuredOutput = model.capabilities.structuredOutput;
-  if (structuredOutput !== 'none' && structuredOutput !== 'json-object') throw new Error('PROVIDER_STRUCTURED_OUTPUT_UNSUPPORTED');
-  const tools = payload.tools ?? [];
-  // Function tools travel only for a model whose profile declares `toolCalling: 'function'` with evidence (ADR 0080 §2);
-  // every other model refuses to assemble a payload that carries them, so nothing is sent (Issue #473).
-  const toolCalling = model.capabilities.toolCalling === 'function';
-  if (tools.length > 0 && !toolCalling) throw new Error('PROVIDER_TOOL_CALLING_UNSUPPORTED');
-  const system = systemPromptOf(payload);
-  const conversation = toolCalling ? chatCompletionsConversation(payload) : conversationMessages(payload);
-  const messages = system === null ? conversation : [{ role: 'system', content: system }, ...conversation];
-  return canonicalJson({
-    model: model.model,
-    messages,
-    stream: false,
-    ...(model.capabilities.reasoningControl === 'deepseek-thinking'
-      ? { thinking: { type: 'enabled' }, reasoning_effort: DEEPSEEK_REASONING_EFFORT }
-      : {}),
-    // One field, and nothing else moves: a profile that declares `json-object` sends the body it
-    // would have sent anyway plus this key, so the constraint can be added to or withdrawn from a
-    // model without any other byte of the request changing.
-    ...(structuredOutput === 'json-object' ? { response_format: { type: 'json_object' } } : {}),
-    // The same rule for tools: a payload without tools sends no `tools` key, so no request that carries none moves a byte.
-    ...(tools.length > 0 ? { tools: tools.map(chatCompletionsTool) } : {}),
-  });
-}
-
-/** One function tool in the chat-completions spelling: `{ type: 'function', function: { name, description, parameters } }`. */
-function chatCompletionsTool(tool: unknown): { type: 'function'; function: { name: string; description: string; parameters: unknown } } {
-  if (!isRecord(tool) || typeof tool.name !== 'string' || typeof tool.description !== 'string' || !isRecord(tool.parameters)) {
-    throw new Error('PROVIDER_TOOL_SCHEMA_INVALID');
-  }
-  return { type: 'function', function: { name: tool.name, description: tool.description, parameters: tool.parameters } };
-}
-
-/**
- * The chat-completions conversation of a tool-calling model (Issue #473): every text message exactly as
- * `conversationMessages` writes it, an assistant tool-call message as `{ role: 'assistant', content, tool_calls }`, and a
- * tool result as `{ role: 'tool', tool_call_id, content }`. Anything else refuses, as it does for every other model.
- */
-function chatCompletionsConversation(payload: AssembledModelPayload): Array<Record<string, unknown>> {
-  const messages: Array<Record<string, unknown>> = [];
-  for (const message of payload.messages) {
-    const calls = assistantToolCalls(message);
-    if (calls !== null) {
-      messages.push({
-        role: 'assistant',
-        content: calls.text.length > 0 ? calls.text : null,
-        ...(calls.reasoning.length > 0 ? { reasoning_content: calls.reasoning } : {}),
-        tool_calls: calls.calls.map((call) => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.arguments } })),
-      });
-      continue;
-    }
-    const result = toolResultOf(message);
-    if (result !== null) {
-      messages.push({ role: 'tool', tool_call_id: result.callId, content: result.text });
-      continue;
-    }
-    const text = messageText(message);
-    if (text === null) throw new Error('DEEPSEEK_REQUEST_NON_TEXT_CONTENT');
-    if (message.role !== 'user' && message.role !== 'assistant') throw new Error('DEEPSEEK_REQUEST_ROLE_INVALID');
-    messages.push({ role: message.role, content: text });
-  }
-  return messages;
-}
-
-/**
- * The Anthropic-compatible body, from the Anthropic Messages API reference read on 2026-09-08
- * (`https://platform.claude.com/docs/en/api/messages`): `{ model, max_tokens, system?, messages }`.
- *
- * Two facts of this shape are worth stating where they are implemented. The system prompt is a
- * top-level field and never a message, so the same `AssembledModelPayload` that puts it first in a
- * chat-completions array puts it beside the array here, and nothing above the adapter learns the
- * difference. And `max_tokens` is mandatory, so it is taken from the route's declaration or the
- * request refuses: a cap the assembler invented would be a bound nobody authorized.
- *
- * The reasoning and structured-output spellings this adapter implements are the chat-completions
- * ones, so a profile that declares either on this shape refuses rather than sending a field the
- * endpoint never documented.
- */
-function anthropicMessagesBody(
-  profile: ProviderRouteProfile,
-  model: ProviderModelProfile,
-  payload: AssembledModelPayload,
-): string {
-  if (model.capabilities.structuredOutput !== 'none') throw new Error('PROVIDER_STRUCTURED_OUTPUT_UNSUPPORTED');
-  if (model.capabilities.reasoningControl !== 'none') throw new Error('PROVIDER_REASONING_CONTROL_UNSUPPORTED');
-  if (profile.maxOutputTokens === null) throw new Error('PROVIDER_MAX_OUTPUT_TOKENS_ABSENT');
-  const toolCalling = model.capabilities.toolCalling === 'function';
-  if ((payload.tools ?? []).length > 0 && !toolCalling) throw new Error('PROVIDER_TOOL_CALLING_UNSUPPORTED');
-  const tools = (payload.tools ?? []).map((tool) => {
-    const { name, description, parameters } = chatCompletionsTool(tool).function;
-    // Only canonical client functions: native/server declarations and toolsets cannot be silently converted.
-    if (!/^[a-zA-Z0-9_-]{1,128}$/u.test(name) || !isRecord(tool) ||
-        Object.keys(tool).some((key) => !['name', 'description', 'parameters'].includes(key))) {
-      throw new Error('PROVIDER_TOOL_SCHEMA_INVALID');
-    }
-    return { name, description, input_schema: parameters };
-  });
-  const names = tools.map((tool) => tool.name);
-  if (new Set(names).size !== names.length) throw new Error('PROVIDER_TOOL_SCHEMA_INVALID');
-  const system = systemPromptOf(payload);
-  return canonicalJson({
-    model: model.model,
-    max_tokens: profile.maxOutputTokens,
-    ...(system === null ? {} : { system }),
-    messages: anthropicMessagesConversation(payload, names),
-    ...(tools.length > 0 ? { tools } : {}),
-  });
-}
-
-/**
- * Buffered client functions only (Issue #1056). Keep text before calls, then consume exactly one
- * consecutive result per call into the next user message, retaining the canonical result order.
- * No unresolved batch, opaque reasoning, or intervening message can be repaired by serialization.
- */
-function anthropicMessagesConversation(payload: AssembledModelPayload, offeredNames: ReadonlyArray<string>): Array<Record<string, unknown>> {
-  const messages: Array<Record<string, unknown>> = [];
-  const seenIds = new Set<string>();
-  for (let index = 0; index < payload.messages.length; index += 1) {
-    const message = payload.messages[index]!;
-    // Shared history readers intentionally project a wider canonical shape for Chat/Responses.
-    // Messages cannot replay opaque fields, including those on otherwise ordinary text blocks.
-    // Results are checked where they are consumed; every other block type keeps its existing refusal below.
-    for (const block of message.content) {
-      const fields = block.type === 'text' ? ['type', 'text'] : block.type === 'tool-call' ? ['type', 'id', 'name', 'arguments'] : null;
-      if (fields !== null && Object.keys(block).some((key) => !fields.includes(key))) throw new Error('PROVIDER_TOOL_CALLS_INVALID');
-    }
-    const calls = assistantToolCalls(message);
-    if (calls !== null) {
-      if (offeredNames.length === 0) throw new Error('PROVIDER_TOOL_CALLING_UNSUPPORTED');
-      const content: Array<Record<string, unknown>> = [];
-      const pending = new Set<string>();
-      for (const block of message.content) {
-        if (block.type === 'text' && typeof block.text === 'string' && pending.size === 0) {
-          // A Messages text block must be non-empty; an empty one carries nothing, as Chat/Responses already omit it.
-          if (block.text.length > 0) content.push({ type: 'text', text: block.text });
-          continue;
-        }
-        if (block.type !== 'tool-call' || typeof block.id !== 'string' || block.id.length === 0 ||
-            typeof block.name !== 'string' || !offeredNames.includes(block.name) || typeof block.arguments !== 'string' || seenIds.has(block.id)) {
-          throw new Error('PROVIDER_TOOL_CALLS_INVALID');
-        }
-        let input: unknown;
-        try { input = JSON.parse(block.arguments) as unknown; } catch { throw new Error('PROVIDER_TOOL_CALLS_INVALID'); }
-        if (!isRecord(input)) throw new Error('PROVIDER_TOOL_CALLS_INVALID');
-        seenIds.add(block.id);
-        pending.add(block.id);
-        content.push({ type: 'tool_use', id: block.id, name: block.name, input });
-      }
-      messages.push({ role: 'assistant', content });
-      const results: Array<Record<string, unknown>> = [];
-      while (pending.size > 0) {
-        index += 1;
-        const next = payload.messages[index];
-        const result = next === undefined ? null : toolResultOf(next);
-        if (result === null || !pending.delete(result.callId)) throw new Error('PROVIDER_TOOL_CORRELATION_INVALID');
-        const resultBlock = next!.content[0]!;
-        if (Object.keys(resultBlock).some((key) => !['type', 'toolCallId', 'content', 'isError'].includes(key)) ||
-            resultBlock.content!.some((block) => Object.keys(block).some((key) => key !== 'type' && key !== 'text'))) {
-          throw new Error('PROVIDER_TOOL_CORRELATION_INVALID');
-        }
-        const isError = resultBlock.isError;
-        if (isError !== undefined && typeof isError !== 'boolean') throw new Error('PROVIDER_TOOL_CORRELATION_INVALID');
-        results.push({ type: 'tool_result', tool_use_id: result.callId, content: result.text, is_error: result.isError });
-      }
-      messages.push({ role: 'user', content: results });
-      continue;
-    }
-    // Results outside the immediately following batch are orphans, even if their id appeared before.
-    if (message.source.kind === 'tool' || message.content.some((block) => block.type === 'tool-result')) {
-      throw new Error('PROVIDER_TOOL_CORRELATION_INVALID');
-    }
-    const text = messageText(message);
-    if (text === null) throw new Error('DEEPSEEK_REQUEST_NON_TEXT_CONTENT');
-    if (message.role !== 'user' && message.role !== 'assistant') throw new Error('DEEPSEEK_REQUEST_ROLE_INVALID');
-    messages.push({ role: message.role, content: text });
-  }
-  return messages;
-}
-
-/**
- * The OpenAI Responses text/function body, rechecked against the official function-calling guide and
- * Create Response reference on 2026-10-22 (Issue #1038):
- * https://developers.openai.com/api/docs/guides/function-calling
- * https://developers.openai.com/api/reference/resources/responses/methods/create
- * Flat functions explicitly retain non-strict schemas; call_id correlates calls and outputs.
- *
- * Two facts of this shape are worth stating where they are implemented. The system prompt is the
- * top-level `instructions` and never an input item — the third spelling of the one thing the
- * `AssembledModelPayload` carries, and the third time nothing above the adapter learns which. And
- * `max_output_tokens` is *optional* here, unlike the mandatory `max_tokens` of the shape before it,
- * so the route's declaration decides: a number sends the field, `null` sends nothing, and no cap is
- * invented for a route that declares none.
- *
- * This shape has mechanisms of its own for the two capabilities that refuse here —
- * `text.format: { type: 'json_object' }` for a required JSON answer and `reasoning.effort` for
- * reasoning control. They are named as the documented spellings for the live item that first needs
- * one, and neither is assembled: the spellings this adapter implements are the chat-completions
- * ones, so a profile declaring either on this shape refuses rather than sending a field on a guess.
- */
-function openaiResponsesBody(
-  profile: ProviderRouteProfile,
-  model: ProviderModelProfile,
-  payload: AssembledModelPayload,
-): string {
-  if (model.capabilities.structuredOutput !== 'none') throw new Error('PROVIDER_STRUCTURED_OUTPUT_UNSUPPORTED');
-  if (model.capabilities.reasoningControl !== 'none') throw new Error('PROVIDER_REASONING_CONTROL_UNSUPPORTED');
-  const tools = payload.tools ?? [];
-  const toolCalling = model.capabilities.toolCalling === 'function';
-  if (tools.length > 0 && !toolCalling) throw new Error('PROVIDER_TOOL_CALLING_UNSUPPORTED');
-  const instructions = systemPromptOf(payload);
-  return canonicalJson({
-    model: model.model,
-    ...(profile.route === 'openai-platform' ? { store: false } : {}),
-    ...(instructions === null ? {} : { instructions }),
-    input: toolCalling ? openaiResponsesConversation(payload) : conversationMessages(payload),
-    ...(profile.maxOutputTokens === null ? {} : { max_output_tokens: profile.maxOutputTokens }),
-    // Responses defaults can tighten the existing schemas; retain their non-strict semantics explicitly.
-    ...(tools.length > 0 ? { tools: tools.map((tool) => ({ type: 'function', ...chatCompletionsTool(tool).function, strict: false })) } : {}),
-  });
-}
-
-/** Text and function items only; opaque Responses reasoning cannot round-trip through this payload. */
-function openaiResponsesConversation(payload: AssembledModelPayload): Array<Record<string, unknown>> {
-  const items: Array<Record<string, unknown>> = [];
-  for (const message of payload.messages) {
-    const calls = assistantToolCalls(message);
-    if (calls !== null) {
-      if (message.content.some((block) => block.type === 'reasoning')) throw new Error('PROVIDER_REASONING_CONTINUATION_UNSUPPORTED');
-      if (calls.text.length > 0) items.push({ role: 'assistant', content: calls.text });
-      for (const call of calls.calls) {
-        items.push({ type: 'function_call', call_id: call.id, name: call.name, arguments: call.arguments });
-      }
-      continue;
-    }
-    const result = toolResultOf(message);
-    if (result !== null) {
-      items.push({ type: 'function_call_output', call_id: result.callId, output: result.text });
-      continue;
-    }
-    const text = messageText(message);
-    if (text === null) throw new Error('DEEPSEEK_REQUEST_NON_TEXT_CONTENT');
-    if (message.role !== 'user' && message.role !== 'assistant') throw new Error('DEEPSEEK_REQUEST_ROLE_INVALID');
-    items.push({ role: message.role, content: text });
-  }
-  return items;
-}
-
-/**
- * The generateContent body, from Google's published SDK contract read on 2026-09-08 — the source of
- * record is `googleapis/js-genai` `src/types.ts` at commit
- * `3e1d923ef914812c1d209aa2e5461a717d03a081` (2026-08-31), with the method and path from
- * `https://ai.google.dev/api/generate-content`. The body is
- * `{ systemInstruction?, contents, generationConfig? }`.
- *
- * Three facts of this shape are worth stating where they are implemented. The system prompt is the
- * top-level `systemInstruction` with one text part and never a `contents` entry — the fourth spelling
- * of the one thing the `AssembledModelPayload` carries. The roles are this shape's own: `assistant`
- * is `model` here, mapped in this arm alone so that `conversationMessages` keeps saying what every
- * other shape means by a turn. And `generationConfig` travels only when the route declares something
- * to put in it, exactly as the optional cap of the shape before it does, so a route declaring `null`
- * sends no such key at all.
- *
- * The model id is not in the body: this shape addresses it in the URL, which `providerRequestUrl`
- * derives. The credential is not here either, and unlike the three shapes before it this endpoint
- * takes it in `x-goog-api-key` rather than `authorization: Bearer`
- * (`https://ai.google.dev/gemini-api/docs/api-key`, read the same day). The `google-gemini` provider
- * document declares that form, and `credentialHeaders` sends it; the route is inert and binds nothing
- * until the shape review its document records.
- *
- * Structured output and reasoning control refuse, as they do on the two shapes before it. This shape
- * spells them `generationConfig.responseMimeType: 'application/json'` with `responseSchema`, and
- * `generationConfig.thinkingConfig`; they are named as the documented spellings for the live item
- * that first needs one, and neither is assembled. Nothing else travels either — no `safetySettings`,
- * no `tools`, no `temperature`.
- */
-function googleGenerateContentBody(
-  profile: ProviderRouteProfile,
-  model: ProviderModelProfile,
-  payload: AssembledModelPayload,
-): string {
-  if (model.capabilities.structuredOutput !== 'none') throw new Error('PROVIDER_STRUCTURED_OUTPUT_UNSUPPORTED');
-  if (model.capabilities.reasoningControl !== 'none') throw new Error('PROVIDER_REASONING_CONTROL_UNSUPPORTED');
-  const systemInstruction = systemPromptOf(payload);
-  return canonicalJson({
-    contents: conversationMessages(payload).map((message) => ({
-      role: message.role === 'assistant' ? 'model' : message.role,
-      parts: [{ text: message.content }],
-    })),
-    ...(systemInstruction === null ? {} : { systemInstruction: { parts: [{ text: systemInstruction }] } }),
-    ...(profile.maxOutputTokens === null ? {} : { generationConfig: { maxOutputTokens: profile.maxOutputTokens } }),
-  });
-}
-
 /**
  * The body of one request, chosen by the declared request shape and by nothing else — no route,
  * model id, or endpoint is consulted, which is what makes a model behind a second or third vendor's
- * endpoint a row in the profile table rather than a branch above the provider layer.
- *
- * All three shapes ADR 0067 documents behind the Go gateway's paths are implemented as of this
- * revision, and the fourth beside them, and the `default` still stands: a profile is data, so the
- * union cannot rule out at runtime a shape that no profile in the table declares.
+ * endpoint a row in the profile table rather than a branch above the provider layer. Each family
+ * refuses what it does not implement; the `default` still stands, because a profile is data.
  */
-function providerRequestBody(
-  profile: ProviderRouteProfile,
-  model: ProviderModelProfile,
-  payload: AssembledModelPayload,
-): string {
-  // Function tools are spelled only for chat completions and the bounded Responses/Messages subsets; other shapes refuse them
-  // rather than dropping them silently.
-  if ((payload.tools ?? []).length > 0 && model.capabilities.requestShape !== 'openai-chat-completions' &&
-      model.capabilities.requestShape !== 'openai-responses' && model.capabilities.requestShape !== 'anthropic-messages') {
-    throw new Error('PROVIDER_TOOL_CALLING_UNSUPPORTED');
-  }
+function providerRequestBody(profile: ProviderRouteProfile, model: ProviderModelProfile, payload: AssembledModelPayload, stream: boolean): string {
   switch (model.capabilities.requestShape) {
-    case 'openai-chat-completions': return chatCompletionsBody(model, payload);
-    case 'anthropic-messages': return anthropicMessagesBody(profile, model, payload);
-    case 'openai-responses': return openaiResponsesBody(profile, model, payload);
+    case 'openai-chat-completions': {
+      const body = chatCompletionsBody(model, payload);
+      return stream ? chatCompletionsStreamBody(body) : body;
+    }
+    case 'anthropic-messages': {
+      const body = anthropicMessagesBody(profile, model, payload);
+      return stream ? anthropicMessagesStreamBody(body) : body;
+    }
+    case 'openai-responses': {
+      const body = openaiResponsesBody(profile, model, payload);
+      return stream ? openaiResponsesStreamBody(body) : body;
+    }
+    // This family streams by method, not by a body field.
     case 'google-generate-content': return googleGenerateContentBody(profile, model, payload);
     default: throw new Error('PROVIDER_REQUEST_SHAPE_UNSUPPORTED');
   }
@@ -495,22 +177,22 @@ function providerRequestBody(
 
 /**
  * The URL of one request: the route's endpoint, except on the one shape that addresses the model in
- * the path instead of naming it in the body. There the route's `endpoint` is the models collection
- * — `https://generativelanguage.googleapis.com/v1beta/models` for the official service — and the
- * method is appended to the id, which is the whole of what the shape's REST contract asks for
- * (`POST .../{model=models/*}:generateContent`). No route-profile field is added for it: a route
- * already says where it is reached, and this shape reads that one field differently.
- *
- * A model id that cannot stand in a path segment refuses rather than being escaped into one. Percent
- * encoding an id would send a request for a model nobody declared, and a declared id that needs
- * encoding is a row this table should not have; the check is scoped to this shape because on the
- * three where the id is a body field it is a string like any other, and refusing there would move
- * requests that are pinned byte for byte.
+ * the path instead of naming it in the body (`family-gemini.ts`). No route-profile field is added for
+ * it: a route already says where it is reached, and that shape reads that one field differently.
  */
-function providerRequestUrl(profile: ProviderRouteProfile, model: ProviderModelProfile): string {
+function providerRequestUrl(profile: ProviderRouteProfile, model: ProviderModelProfile, stream: boolean): string {
   if (model.capabilities.requestShape !== 'google-generate-content') return profile.endpoint;
-  if (!URL_ADDRESSABLE_MODEL_ID.test(model.model)) throw new Error('PROVIDER_MODEL_ID_UNADDRESSABLE');
-  return `${profile.endpoint}/${model.model}${GOOGLE_GENERATE_CONTENT_METHOD}`;
+  return googleGenerateContentUrl(profile, model, stream);
+}
+
+/** The stream reader of one model's family, aggregating to that family's buffered body. */
+function familyStreamEvents(response: DeepSeekTransportResponse, model: ProviderModelProfile): AsyncIterable<DialogueStreamEvent> {
+  switch (model.capabilities.requestShape) {
+    case 'openai-responses': return responsesSseEvents(response);
+    case 'anthropic-messages': return messagesSseEvents(response);
+    case 'google-generate-content': return generateContentSseEvents(response);
+    default: return dialogueSseEvents(response, model.model);
+  }
 }
 
 /** A /2 dialogue carries its one admitted question followed only by complete local function-call rounds. */
@@ -538,10 +220,24 @@ function isRetrievalDialogue(payload: AssembledModelPayload): boolean {
   return pending.size === 0;
 }
 
+/** Whether a stream request carries one of the frozen dialogue contracts the SSE shape is admitted for. */
+function isStreamedDialogue(payload: AssembledModelPayload, context: ProviderRequestContext): boolean {
+  const message = payload.messages[0];
+  const predecessor = context.promptContractDigest === DIALOGUE_PROMPT_CONTRACT_DIGEST &&
+    payload.system === DIALOGUE_PROMPT_CONTRACT.systemPrompt && payload.messages.length === 1 &&
+    message?.role === 'user' && parseDialogueMessage(messageText(message) ?? '') !== null && (payload.tools ?? []).length === 0;
+  const retrieval = context.promptContractDigest === DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST && isRetrievalDialogue(payload);
+  const global = context.promptContractDigest === GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST &&
+    payload.system === GLOBAL_AGENT_PROMPT_CONTRACT.systemPrompt && payload.messages.length === 1 && message?.role === 'user' &&
+    parseDialogueMessage(messageText(message) ?? '')?.globalSources !== undefined && (payload.tools ?? []).length === 0;
+  return predecessor || retrieval || global;
+}
+
 /**
  * Assemble one request. The header set comes from the route profile, the body from the model
  * profile's declared capabilities, and nothing is read from anywhere else — which is what makes a
- * new model a new row in the profile table rather than a new branch here.
+ * new model a new row in the profile table rather than a new branch here. A stream is assembled only
+ * for a frozen dialogue contract on a model that declares its own family's stream.
  */
 export function assembleProviderRequest(
   profile: ProviderRouteProfile,
@@ -550,24 +246,11 @@ export function assembleProviderRequest(
   context: ProviderRequestContext,
 ): DeepSeekRequestAssembly {
   if (model.route !== profile.route) throw new Error('PROVIDER_MODEL_ROUTE_MISMATCH');
-  // The address before the payload: a model that cannot be reached has no request to assemble.
-  const url = providerRequestUrl(profile, model);
-  let body = providerRequestBody(profile, model, payload);
   const dialogueStream = context.requestShape === 'editorial-dialogue-sse';
-  if (dialogueStream) {
-    const message = payload.messages[0];
-    const predecessor = context.promptContractDigest === DIALOGUE_PROMPT_CONTRACT_DIGEST &&
-      payload.system === DIALOGUE_PROMPT_CONTRACT.systemPrompt && payload.messages.length === 1 &&
-      message?.role === 'user' && parseDialogueMessage(messageText(message) ?? '') !== null && (payload.tools ?? []).length === 0;
-    const retrieval = context.promptContractDigest === DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST && isRetrievalDialogue(payload);
-    const global = context.promptContractDigest === GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST &&
-      payload.system === GLOBAL_AGENT_PROMPT_CONTRACT.systemPrompt && payload.messages.length === 1 && message?.role === 'user' &&
-      parseDialogueMessage(messageText(message) ?? '')?.globalSources !== undefined && (payload.tools ?? []).length === 0;
-    if (profile.route !== OPENCODE_GO_ROUTE || model.capabilities.requestShape !== 'openai-chat-completions' ||
-      model.capabilities.streaming !== 'chat-completions-sse' ||
-      (!predecessor && !retrieval && !global)) throw new Error('PROVIDER_DIALOGUE_STREAM_SHAPE_INVALID');
-    body = canonicalJson({ ...JSON.parse(body), stream: true, stream_options: { include_usage: true } });
-  }
+  // The address before the payload: a model that cannot be reached has no request to assemble.
+  const url = providerRequestUrl(profile, model, dialogueStream);
+  const body = providerRequestBody(profile, model, payload, dialogueStream);
+  if (dialogueStream && (!streamingDeclared(model) || !isStreamedDialogue(payload, context))) throw new Error('PROVIDER_DIALOGUE_STREAM_SHAPE_INVALID');
   if (profile.sessionHeader && (context.sessionId === undefined || context.sessionId.length === 0)) {
     throw new Error('PROVIDER_REQUEST_SESSION_ABSENT');
   }
@@ -630,7 +313,8 @@ function errorTextOf(body: unknown): string {
   const errorRecord = isRecord(body) && isRecord(body.error) ? body.error : null;
   return errorRecord === null
     ? ''
-    : [errorRecord.code, errorRecord.type, errorRecord.message].filter((part) => typeof part === 'string').join(' ').toLocaleLowerCase('en-US');
+    // Gemini names its class in `status` (`RESOURCE_EXHAUSTED`) where the other families name it in `code` or `type`.
+    : [errorRecord.code, errorRecord.type, errorRecord.status, errorRecord.message].filter((part) => typeof part === 'string').join(' ').toLocaleLowerCase('en-US');
 }
 
 /**
@@ -733,109 +417,14 @@ export interface DeepSeekTransportResponse {
 
 export type DialogueStreamEvent =
   | { readonly kind: 'text'; readonly text: string }
-  | { readonly kind: 'complete'; readonly response: unknown };
+  | { readonly kind: 'complete'; readonly response: unknown }
+  /**
+   * The service's refusal after it accepted the request (Issue #1180): the status the family's error names and the error
+   * body in that family's buffered form. The request may have been processed and billed, so only an account limit reads
+   * as itself; every other in-stream refusal is outcome-unknown and never resent on its own.
+   */
+  | { readonly kind: 'error'; readonly status: number; readonly body: unknown };
 
-/**
- * Read the chat-completions SSE wire without exposing reasoning. UTF-8 and event boundaries may fall
- * anywhere in a network chunk. Only [DONE] after a finish marker proves a whole response; EOF,
- * malformed data and an aborted reader remain outcome-unknown (Issue #833).
- */
-export async function* dialogueSseEvents(response: DeepSeekTransportResponse, model: string): AsyncIterable<DialogueStreamEvent> {
-  if (response.body == null || !response.headers?.get('content-type')?.toLowerCase().startsWith('text/event-stream')) {
-    throw new Error('AI7_OUTCOME_UNKNOWN');
-  }
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder('utf-8', { fatal: true });
-  let pending = '';
-  let content = '';
-  let finish: string | null = null;
-  let usage: unknown = null;
-  let done = false;
-  const calls = new Map<number, { id: string; type: string; name: string; arguments: string }>();
-  let callBytes = 0;
-  const readEvent = (event: string): DialogueStreamEvent | null => {
-    const data = event.split(/\r?\n/u).filter((line) => line.startsWith('data:'))
-      .map((line) => line.slice(5).replace(/^ /u, '')).join('\n');
-    if (data.length === 0) return null;
-    if (data === '[DONE]') {
-      if (finish === null) throw new Error('AI7_OUTCOME_UNKNOWN');
-      const toolCalls = [...calls.entries()].sort(([a], [b]) => a - b).map(([index, call], ordinal) => {
-        if (index !== ordinal || call.id.length === 0 || call.type !== 'function' || call.name.length === 0) throw new Error('AI7_OUTCOME_UNKNOWN');
-        return { id: call.id, type: call.type, function: { name: call.name, arguments: call.arguments } };
-      });
-      if ((toolCalls.length > 0) !== (finish === 'tool_calls') || new Set(toolCalls.map((call) => call.id)).size !== toolCalls.length) throw new Error('AI7_OUTCOME_UNKNOWN');
-      done = true;
-      return { kind: 'complete', response: { model, choices: [{ message: { content, ...(toolCalls.length === 0 ? {} : { tool_calls: toolCalls }) }, finish_reason: finish }], usage } };
-    }
-    const value: unknown = JSON.parse(data);
-    if (!isRecord(value) || (value.model !== undefined && value.model !== model) || !Array.isArray(value.choices)) {
-      throw new Error('AI7_OUTCOME_UNKNOWN');
-    }
-    if (value.usage !== undefined && value.usage !== null) usage = value.usage;
-    if (value.choices.length === 0) return null;
-    if (value.choices.length !== 1 || !isRecord(value.choices[0])) throw new Error('AI7_OUTCOME_UNKNOWN');
-    const choice = value.choices[0];
-    if (choice.index !== undefined && choice.index !== 0) throw new Error('AI7_OUTCOME_UNKNOWN');
-    const alreadyFinished = finish !== null;
-    if (choice.finish_reason !== undefined && choice.finish_reason !== null) {
-      if (typeof choice.finish_reason !== 'string') throw new Error('AI7_OUTCOME_UNKNOWN');
-      finish = choice.finish_reason;
-    }
-    if (!isRecord(choice.delta)) throw new Error('AI7_OUTCOME_UNKNOWN');
-    if (choice.delta.tool_calls !== undefined) {
-      if (alreadyFinished || !Array.isArray(choice.delta.tool_calls)) throw new Error('AI7_OUTCOME_UNKNOWN');
-      for (const delta of choice.delta.tool_calls) {
-        if (!isRecord(delta) || typeof delta.index !== 'number' || !Number.isSafeInteger(delta.index) || delta.index < 0 || delta.index >= 128) throw new Error('AI7_OUTCOME_UNKNOWN');
-        const index = delta.index;
-        const call = calls.get(index) ?? { id: '', type: '', name: '', arguments: '' };
-        for (const key of ['id', 'type'] as const) {
-          if (delta[key] === undefined) continue;
-          if (typeof delta[key] !== 'string' || call[key].length > 0) throw new Error('AI7_OUTCOME_UNKNOWN');
-          call[key] = delta[key];
-          callBytes += delta[key].length;
-        }
-        if (delta.function !== undefined) {
-          if (!isRecord(delta.function)) throw new Error('AI7_OUTCOME_UNKNOWN');
-          for (const key of ['name', 'arguments'] as const) {
-            const fragment = delta.function[key];
-            if (fragment === undefined) continue;
-            if (typeof fragment !== 'string') throw new Error('AI7_OUTCOME_UNKNOWN');
-            call[key] += fragment;
-            callBytes += fragment.length;
-          }
-        }
-        if (callBytes > 1024 * 1024) throw new Error('AI7_OUTCOME_UNKNOWN');
-        calls.set(index, call);
-      }
-    }
-    const text = choice.delta.content;
-    if (text === undefined || text === null || text === '') return null;
-    if (typeof text !== 'string' || alreadyFinished) throw new Error('AI7_OUTCOME_UNKNOWN');
-    content += text;
-    return { kind: 'text', text };
-  };
-  try {
-    while (!done) {
-      const chunk = await reader.read();
-      pending += chunk.done ? decoder.decode() : decoder.decode(chunk.value, { stream: true });
-      if (pending.length > 1024 * 1024) throw new Error('AI7_OUTCOME_UNKNOWN');
-      let boundary: RegExpExecArray | null;
-      while ((boundary = /\r?\n\r?\n/u.exec(pending)) !== null) {
-        const event = readEvent(pending.slice(0, boundary.index));
-        pending = pending.slice(boundary.index + boundary[0].length);
-        if (event !== null) yield event;
-        if (done) break;
-      }
-      if (chunk.done && !done) throw new Error('AI7_OUTCOME_UNKNOWN');
-    }
-  } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') throw error;
-    throw new Error('AI7_OUTCOME_UNKNOWN');
-  } finally {
-    await reader.cancel().catch(() => undefined);
-    reader.releaseLock();
-  }
-}
 
 export type DeepSeekTransport = (
   url: string,
@@ -967,6 +556,13 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
       yield fail(AI7_FAILURE_CODES.INVALID_RESPONSE, '适配器只服务其绑定路由与模型。');
       return;
     }
+    // Preflight: a demand this family or this model is not `supported` for is refused by name and never attempted.
+    const refusal = providerPreflight(this.#modelProfile, { stream: this.#deps.requestShape === 'editorial-dialogue-sse', functionTools: (options.tools ?? []).length > 0 });
+    if (refusal !== null) {
+      this.#deps.onRequestNotSent?.();
+      yield fail(AI7_FAILURE_CODES.INVALID_RESPONSE, refusal.message);
+      return;
+    }
     let assembly: DeepSeekRequestAssembly;
     try {
       assembly = assembleProviderRequest(this.#profile, this.#modelProfile, options, {
@@ -1021,17 +617,25 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
       });
       responseStatus = response.status;
       let body: unknown = null;
+      // An in-stream account limit is read under the status its error names; every other response under its own.
+      let bodyStatus = response.status;
       const dialogueStream = this.#deps.requestShape === 'editorial-dialogue-sse';
       if (dialogueStream && response.status === 200 && response.replayed !== true) {
         let completed = false;
         // Nothing is yielded before the stream reads: a stop that ends this turn at any chunk then ends a stream already
         // reading, so the transmission still records its possibly billed request as unknown.
-        for await (const event of response.stream?.() ?? dialogueSseEvents(response, this.#modelProfile.model)) {
+        for await (const event of response.stream?.() ?? familyStreamEvents(response, this.#modelProfile)) {
           if (event.kind === 'text') {
             if (!blockStarted) yield { type: 'block-start', index: 0, blockType: 'text' };
             blockStarted = true;
             streamed += event.text;
             yield { type: 'text-delta', index: 0, text: event.text };
+          } else if (event.kind === 'error') {
+            const refused = parseProviderResponse(event.status, event.body, this.#deps.codes, this.#profile, this.#modelProfile);
+            if (refused.kind !== 'failure' || refused.code !== this.#deps.codes.QUOTA_EXCEEDED_CODE) throw new Error('AI7_OUTCOME_UNKNOWN');
+            bodyStatus = event.status;
+            body = event.body;
+            completed = true;
           } else { body = event.response; completed = true; }
         }
         if (!completed) throw new Error('AI7_OUTCOME_UNKNOWN');
@@ -1049,10 +653,12 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
         }
       }
       // Tool calls are read only for a request that offered tools (Issue #473); to any other the response reads as before.
-      const parsed = parseProviderResponse(response.status, body, this.#deps.codes, this.#profile, this.#modelProfile,
+      const shape = this.#modelProfile.capabilities.requestShape;
+      const parsed = parseProviderResponse(bodyStatus, body, this.#deps.codes, this.#profile, this.#modelProfile,
         { toolCallsOffered: (options.tools ?? []).length > 0,
-          ...(this.#modelProfile.capabilities.requestShape === 'anthropic-messages'
+          ...(shape === 'anthropic-messages' || shape === 'google-generate-content'
             ? { offeredToolNames: (options.tools ?? []).map((tool) => tool.name) } : {}),
+          ...(shape === 'google-generate-content' ? { callIdSeed: assembly.requestDigest.slice(0, 16) } : {}),
         });
       outcome = response.replayed === true ? withoutIncurredUsage(parsed) : parsed;
       if (outcome.kind === 'failure' && this.#profile.limitPolicy === 'rate-limit-retryable' &&

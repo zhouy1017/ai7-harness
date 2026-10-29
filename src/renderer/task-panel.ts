@@ -124,6 +124,8 @@ export interface TaskPanelSurface {
   refresh(): void;
   /** The panel left the drawer: nothing is read until it is shown again. */
   stop(): void;
+  /** Held beside a screen with no Book (Issue #1178): what was read stays shown, and nothing is read until `refresh`. */
+  pause(): void;
 }
 
 /** How often the panel reads again while a Task of the Book runs, so its card follows the Run to its end. */
@@ -206,6 +208,7 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
   let ticket = 0;
   let timer: number | undefined;
   let working = false;
+  let paused = false;
   let selected: ComposeMode | null = null;
 
   function clearTimer(): void {
@@ -216,7 +219,7 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
   /** Read the Tasks and — when `withAnalysis`, or when a Run just ended — what 发起全书任务 can start. */
   function read(withAnalysis: boolean): void {
     const book = bookId;
-    if (book === null) return;
+    if (book === null || paused) return;
     clearTimer();
     const mine = ++ticket;
     const wasRunning = tasks?.running === true;
@@ -509,6 +512,7 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
     element,
     show(next) {
       bookId = next;
+      paused = false;
       tasks = null;
       analysis = null;
       analysisRead = false;
@@ -522,12 +526,19 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
     },
     refresh() {
       if (bookId === null) return;
+      paused = false;
       read(true);
     },
     stop() {
       ticket += 1;
       clearTimer();
       bookId = null;
+      paused = false;
+    },
+    pause() {
+      ticket += 1;
+      clearTimer();
+      paused = true;
     },
   };
 }
@@ -546,6 +557,8 @@ export interface ComposerRange {
   readonly journalSequence: number;
   readonly state: TaskIntentDraftRangeProjection['state'];
   readonly stateLabel: string | null;
+  /** How many contiguous paragraphs a kept range spans (Issue #1176); a new range reads it from `span`. */
+  readonly paragraphs?: number;
 }
 
 /** What a new composer opens on (TASK-001, 002): its Book, the manuscript as it stands, and the selection, if any. */
@@ -629,6 +642,7 @@ function keptRanges(draft: TaskIntentDraftProjection): ComposerRange[] {
   return draft.version.ranges.map((range) => ({
     key: range.rangeId, rangeId: range.rangeId, span: null, blockId: range.blockId, text: range.text, position: range.position,
     revisionLabel: range.revisionLabel, journalSequence: range.journalSequence, state: range.state, stateLabel: range.stateLabel,
+    paragraphs: range.span?.length ?? 1,
   }));
 }
 
@@ -763,7 +777,7 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
       item.dataset['taskComposerRange'] = range.key;
       item.dataset['rangeState'] = range.state;
       const words = el('blockquote', 'editorial-mark-quote task-composer-range-text', range.text);
-      const where = el('small', 'field-note', taskComposerRangeLine(range.position, [...range.text].length, range.revisionLabel));
+      const where = el('small', 'field-note', taskComposerRangeLine(range.position, [...range.text].length, range.revisionLabel, range.span?.span?.length ?? range.paragraphs ?? 1));
       item.append(words, where);
       if (range.stateLabel !== null) {
         const label = el('span', `status-pill review-pill task-composer-range-state task-composer-range-${range.state}`, range.stateLabel);

@@ -8,6 +8,14 @@ import {
   type EvaluationConclusion,
   type ReadersReportSectionsProjection,
   type ReadersReportTemplate,
+  type ReadersReportProjection,
+  READERS_REPORT_LIVE_UNAVAILABLE,
+  type LaunchPolicyProjection,
+  READERS_REPORT_MODE_GOALS,
+  type EvaluationReadersReportProjection,
+  type EvaluationWorkspaceProjection,
+  INITIAL_EVALUATION_KIND,
+  EVALUATION_REWRITE_KIND,
 } from '../shared/protocol.js';
 import { UUID_PATTERN, canonicalJson, canonicalRecord, isRecord, sha256Hex } from './analysis/canonical.js';
 import { graphemeCount } from './analysis/factual-review-contract.js';
@@ -16,8 +24,45 @@ import {
   readersReportContractDigest,
   type ReadersReportContractInput,
   type ReadersReportExemplarInput,
+  readersReportExemplarLine,
 } from './evaluation/readers-report-contract.js';
-import type { FinalizedEvaluation } from './evaluation-records.js';
+import type { FinalizedEvaluation, EvaluationRecords } from './evaluation-records.js';
+import {
+  type TaskMaterialBoundary,
+  taskMaterialKindDefinition,
+  type TaskMaterialSource,
+  type TaskMaterialReading,
+} from './task-material-references.js';
+import {
+  BaselineAnalysisStore,
+  type ProgressReader,
+  type AnalysisPreparationResult,
+  runIsActive,
+  activeRunReason,
+} from './analysis/baseline-analysis-store.js';
+import { readersReportKindDefinition } from './evaluation/readers-report-kind.js';
+import {
+  requireStore,
+  StoreError,
+  UUID_PATTERN as StoreUUID_PATTERN,
+  canonicalJson as storeCanonicalJson,
+  type SqlRow as StoreSqlRow,
+  asString,
+  sha256,
+} from './store-records.js';
+import {
+  readersReportDocumentTypeId,
+  readersReportDocumentType,
+  READERS_REPORT_DOCUMENT_TYPES,
+  READERS_REPORT_DOCUMENT_TYPES_DIGEST,
+} from './production-document-types.js';
+import { readersReportTaskStateLabel } from './task-plan.js';
+import { randomUUID } from 'node:crypto';
+import type { BoundedManuscriptStore } from './bounded-manuscript.js';
+import type { ProductionDocumentWorkflow } from './production-document-workflow.js';
+import type { ProductionDocuments } from './production-documents.js';
+import { RecentCache } from './recent-cache.js';
+import type { StoreControl, LedgerTaskKind } from './store.js';
 
 /**
  * 审稿意见 (Issue #429, plan slice S81c; V2-UX-EVAL-013; editor-surfaces §5 ②C): the reader's report drafted by AI7 from a
@@ -454,4 +499,381 @@ export class ReadersReports {
 /** The conclusion label a profile gives one conclusion, for the words of a draft's plan. */
 export function conclusionLabelOf(profile: FinalizedEvaluation['profile'], conclusion: EvaluationConclusion | null): string | null {
   return profile.conclusions.find((entry) => entry.conclusion === conclusion)?.label ?? null;
+}
+
+// ---- 审稿意见 operations of the store (Issue #429 S81c; moved from store.ts by Issue #1172) ---------------------------------------
+
+/** The store state and calls the 审稿意见 operations use, lent by EditorialStore: its fields read live through getters, its own methods bound. */
+export interface ReadersReportStoreHost {
+  analysisCall<T>(operation: () => T): T;
+  assertAvailable(): void;
+  readonly authority: DatabaseSync;
+  readonly baselineAnalysis: BaselineAnalysisStore;
+  readonly boundedAuthority: BoundedManuscriptStore;
+  boundedCall<T>(operation: () => T): T;
+  readonly control: StoreControl;
+  documentCall<T>(operation: () => T): T;
+  readonly documentWorkflow: ProductionDocumentWorkflow;
+  evaluationCall<T>(operation: () => T): T;
+  evaluationLiveRefused(kind: typeof INITIAL_EVALUATION_KIND | typeof READERS_REPORT_KIND | typeof EVALUATION_REWRITE_KIND): boolean;
+  evaluationMaterialPlan(taskIntentId: string): { boundary: TaskMaterialBoundary; baseDigest: string; promptDigest: string } | null;
+  evaluationRecordOrdinal(recordId: string): number;
+  readonly evaluations: EvaluationRecords;
+  inspectEvaluation(bookId: string, recordId: string | null, recordsBefore?: number | null): EvaluationWorkspaceProjection;
+  ledgerTaskOf(kind: LedgerTaskKind, bookId: string, taskIntentId: string): BaselineAnalysisStore;
+  prepareTaskMaterials(bookId: string, materialIds: ReadonlyArray<string>): ReadonlyArray<TaskMaterialSource>;
+  readonly productionDocuments: ProductionDocuments;
+  readersReportCall<T>(operation: () => T): T;
+  readersReportExemplars(bookId: string): { exemplars: ReadersReportExemplarInput[]; damaged: string[]; ledgerDamaged: string[] };
+  readonly readersReportLedgers: RecentCache<BaselineAnalysisStore>;
+  readonly readersReports: ReadersReports;
+  requireEvaluationMaterialScope(hasReferences: boolean, kind: string): void;
+  requireLedgerKindScope(kind: LedgerTaskKind, bookId: string, taskIntentId: string): void;
+  taskMaterialReadings(boundary: TaskMaterialBoundary, surface?: '审阅' | '评估'): ReadonlyArray<TaskMaterialReading>;
+  transaction<T>(db: DatabaseSync, operation: () => T): T;
+}
+
+/**
+ * The reader's report ledger of one frozen contract — a template and one 定稿 version's words — made when first asked for. As
+ * a review category's, only the `REVIEW_CATEGORY_CACHE_CAPACITY` most recently used are kept besides those with a preparation
+ * in flight, which only that instance holds (Issue #672); any other is made afresh from the Book database and reads exactly
+ * what the one let go would have. It takes the launch the baseline ledger was bound to.
+ */
+export function readersReportLedger(host: ReadersReportStoreHost, input: ReadersReportContractInput, materials?: TaskMaterialBoundary, frozenPromptDigest?: string): BaselineAnalysisStore {
+  host.assertAvailable();
+  const base = host.analysisCall(() => readersReportKindDefinition(input));
+  const readings = materials === undefined || materials.references.length === 0 ? [] : host.taskMaterialReadings(materials, '评估');
+  const definition = materials === undefined ? base : host.analysisCall(() => taskMaterialKindDefinition(base, materials, readings, frozenPromptDigest));
+  const make = (): BaselineAnalysisStore => {
+    const ledger = new BaselineAnalysisStore(host.authority, host.boundedAuthority, host.control.baselineAnalysisRoute, definition);
+    ledger.bindLaunch(host.baselineAnalysis.launch);
+    return ledger;
+  };
+  return readings.some((reading) => reading.refusal !== null) ? make() : host.readersReportLedgers.obtain(definition.promptContractDigest, make);
+}
+
+/** The kept reader's report ledger that holds the preparation `workId`, if one does: a ledger preparing is never let go. */
+export function readersReportLedgerPreparing(host: ReadersReportStoreHost, workId: string): BaselineAnalysisStore | undefined {
+  for (const ledger of host.readersReportLedgers.values()) if (ledger.holdsPreparation(workId)) return ledger;
+  return undefined;
+}
+
+/**
+ * One Task's 定稿 version and template — the one its frozen plan names when it froze one. `null` only for a Task with neither a
+ * plan nor a recorded row. A plan whose contract names no recorded row is refused as `READERS_REPORT_RECORD_INVALID`, never read
+ * as "no Task": the plan and its record disagree, and 评估 says so rather than drafting from a guess (Issue #795 item 6).
+ */
+export function readersReportTaskOf(host: ReadersReportStoreHost, taskIntentId: string): { task: StoredReadersReportTask; ledger: BaselineAnalysisStore } | null {
+  const frozen = host.evaluationMaterialPlan(taskIntentId);
+  const planContract = frozen?.baseDigest ?? host.readersReportCall(() => host.readersReports.planContract(taskIntentId));
+  const task = host.readersReportCall(() => host.readersReports.task(taskIntentId, planContract));
+  if (task === null) {
+    requireStore(planContract === null, 'READERS_REPORT_RECORD_INVALID', '审稿意见任务的计划与它的记录不一致。');
+    return null;
+  }
+  return { task, ledger: readersReportLedger(host, task.input, frozen?.boundary, frozen?.promptDigest) };
+}
+
+/** The Book's latest 审稿意见 Task with its ledger and projection; `null` before the first, or for one no record names. */
+export function latestReadersReport(host: ReadersReportStoreHost, bookId: string, progress?: ProgressReader): { task: StoredReadersReportTask; ledger: BaselineAnalysisStore; projection: ReadersReportProjection } | null {
+  const intentId = host.readersReportCall(() => host.readersReports.latestTaskIntentId(bookId));
+  if (intentId === null) return null;
+  const found = readersReportTaskOf(host, intentId);
+  if (found === null) return null;
+  const projection = host.analysisCall(() => found.ledger.inspect(bookId, progress)) as ReadersReportProjection;
+  return { ...found, projection };
+}
+
+/** The Book's latest 审稿意见 Task as its ledger reads it, or `null`; `progress` is the execution owner's reader. */
+export function inspectReadersReport(host: ReadersReportStoreHost, bookId: string, progress?: ProgressReader): ReadersReportProjection | null {
+  host.assertAvailable();
+  return latestReadersReport(host, bookId, progress)?.projection ?? null;
+}
+
+/**
+ * 审稿意见 runs only where it may be sent (EVAL-013, as 初评): under a live scope only a rule naming the kind with the editor's
+ * record and the house exemplars admits it; otherwise nothing is prepared or started there, and 评估 says why. The
+ * provider-free scope is unaffected.
+ */
+export function requireReadersReportScope(host: ReadersReportStoreHost): void {
+  host.assertAvailable();
+  if (host.evaluationLiveRefused(READERS_REPORT_KIND)) throw new StoreError('READERS_REPORT_UNAVAILABLE', READERS_REPORT_LIVE_UNAVAILABLE);
+}
+
+/**
+ * What 评估 says of the house's 审稿意见 exemplars (Issue #778, #792): the ones that read, then what cannot be read — a
+ * damaged record, or one whose decision ledger alone will not read, each under its own plain reason and named as it would
+ * be listed, so one damaged record leaves only itself out. When nothing readable precedes the damage, 「另有」 is not used.
+ */
+export function readersReportExemplarStatement(host: ReadersReportStoreHost, readings: { exemplars: ReadonlyArray<ReadersReportExemplarInput>; damaged: ReadonlyArray<string>; ledgerDamaged: ReadonlyArray<string> }): string {
+  const clauses: string[] = [];
+  const clause = (count: number, subject: string, titles: ReadonlyArray<string>): void => {
+    if (count === 0) return;
+    const names = titles.map((title) => `《${title}》`).join('、');
+    clauses.push(clauses.length === 0 && readings.exemplars.length === 0
+      ? `本社有 ${count} 份审稿意见范例${subject}已损坏，无法读取，本次不参考范例：${names}`
+      : `另有 ${count} 份范例${subject}已损坏，无法读取，本次不参考：${names}`);
+  };
+  clause(readings.damaged.length, '记录', readings.damaged);
+  clause(readings.ledgerDamaged.length, '的学习准入记录', readings.ledgerDamaged);
+  if (clauses.length === 0) return readersReportExemplarLine(readings.exemplars);
+  return readings.exemplars.length === 0
+    ? clauses.join('；')
+    : `${readersReportExemplarLine(readings.exemplars)}；${clauses.join('；')}`;
+}
+
+/**
+ * 起草审稿意见 (EVAL-013): the reader's report kind's Task, drafted from the Book's latest 定稿 version under one template, in
+ * the mode that applies — the first draft, or another once one settled. Refused under a live scope, while no version is
+ * 定稿, or once the template has its draft document. Its plan opens in the Task Drawer.
+ */
+export function createReadersReportPreparationWork(host: ReadersReportStoreHost, bookId: string, template: ReadersReportTemplate, launchPolicy: LaunchPolicyProjection, materialIds: ReadonlyArray<string> = [], redoOf: string | null = null): AnalysisPreparationResult<ReadersReportProjection> {
+  host.requireEvaluationMaterialScope(materialIds.length > 0, READERS_REPORT_KIND);
+  requireReadersReportScope(host);
+  requireStore(StoreUUID_PATTERN.test(bookId) && READERS_REPORT_TEMPLATES.includes(template), 'READERS_REPORT_INVALID', '审稿意见参数无效。');
+  const basis = host.evaluationCall(() => host.evaluations.latestFinalized(bookId));
+  requireStore(basis !== null, 'READERS_REPORT_NEEDS_FINALIZED', READERS_REPORT_NEEDS_FINALIZED);
+  requireStore(host.documentCall(() => host.productionDocuments.documentOfType(bookId, readersReportDocumentTypeId(template))) === undefined,
+    'READERS_REPORT_DRAFT_EXISTS', `这本书已经有「${READERS_REPORT_TEMPLATE_LABELS[template]}」的草稿；请打开它继续修改。`);
+  const readings = host.readersReportExemplars(bookId);
+  const input = host.readersReportCall(() => readersReportContractInput(template, basis, readings.exemplars));
+  const ledger = readersReportLedger(host, input, { bookId, references: host.prepareTaskMaterials(bookId, materialIds) });
+  const latest = latestReadersReport(host, bookId);
+  const mode = latest === null || latest.projection.resultSetRevision === null ? 'readers-report-first' : 'readers-report-again';
+  // What this preparation skipped for damage, and the contract it is recorded under (Issue #792).
+  const skippedExemplars = [
+    ...readings.damaged.map((title) => ({ title, reason: 'record' as const })),
+    ...readings.ledgerDamaged.map((title) => ({ title, reason: 'ledger' as const })),
+  ];
+  const promptContractSha256 = ledger.definition.materialReferences?.basePromptContractDigest ?? ledger.definition.promptContractDigest;
+  // A row is written once per contract, so re-preparing under a digest already recorded would keep its first note. When only
+  // the damage set changed — a damaged exemplar repaired or replaced — prepare a new Task, whose fresh row names the current
+  // set, as the frozen plan's exemplar line must (Issue #803).
+  // An interrupted preparation can record several contracts before any plan freezes. Compare the requested contract's
+  // row, even when another template's contract was recorded more recently on that same Task.
+  const recorded = latest === null ? null : host.readersReportCall(() =>
+    host.readersReports.task(latest.task.taskIntentId, promptContractSha256));
+  const noteChanged = recorded !== null && storeCanonicalJson(recorded.skippedExemplars) !== storeCanonicalJson(skippedExemplars);
+  const result = host.analysisCall(() => ledger.prepare({
+    phase: 'start',
+    bookId,
+    goal: READERS_REPORT_MODE_GOALS[mode],
+    redoOf,
+    update: mode === 'readers-report-first' ? null : { mode, selectedRange: null },
+    reconfirm: false,
+    launchPolicy,
+    ...(noteChanged || storeCanonicalJson(latest?.ledger.definition.materialReferences?.sources ?? []) !== storeCanonicalJson(ledger.definition.materialReferences?.sources ?? []) ? { newTask: true } : {}),
+  }));
+  // Which 定稿 version and template the Task drafts from, recorded once for it and this contract, and what that preparation
+  // left out for damage: a plan is frozen, so its exemplar line names what was skipped when it was drafted (Issue #792).
+  const taskIntentId = host.readersReportCall(() => host.readersReports.latestTaskIntentId(bookId));
+  requireStore(taskIntentId !== null, 'READERS_REPORT_RECORD_INVALID', '审稿意见任务没有准备出来。');
+  host.readersReportCall(() => host.transaction(host.authority, () => host.readersReports.recordTask({
+    taskIntentId,
+    bookId,
+    recordId: basis.recordId,
+    finalizedEntrySha256: basis.entrySha256,
+    contract: input,
+    skippedExemplars,
+    promptContractSha256,
+  })));
+  return { ...result, projection: result.projection as ReadersReportProjection | null };
+}
+
+export function advanceReadersReportPreparationWork(host: ReadersReportStoreHost, workId: string): AnalysisPreparationResult<ReadersReportProjection> {
+  host.assertAvailable();
+  const ledger = readersReportLedgerPreparing(host, workId);
+  requireStore(ledger !== undefined, 'ANALYSIS_PREPARATION_NOT_FOUND', '审稿意见的计划准备已不存在。');
+  const result = host.analysisCall(() => ledger.prepare({ phase: 'advance', workId }));
+  return { ...result, projection: result.projection as ReadersReportProjection | null };
+}
+
+export function cancelReadersReportPreparationWork(host: ReadersReportStoreHost, workId: string): boolean {
+  host.assertAvailable();
+  const ledger = readersReportLedgerPreparing(host, workId);
+  if (ledger === undefined) return false;
+  host.analysisCall(() => ledger.prepare({ phase: 'cancel', workId }));
+  return true;
+}
+
+/** 开始任务 in the drawer's bar: the Run Authorization and the Run on the ledger of the plan's contract, for the owner. */
+export function authorizeReadersReport(
+    host: ReadersReportStoreHost,
+  bookId: string,
+  taskIntentId: string,
+  planEnvelopeDigest: string,
+  start: 'now' | 'when-online' | 'idle' = 'now',
+): { dispatchRunRecordId: string | null; ledger: BaselineAnalysisStore } {
+  host.requireLedgerKindScope('readers-report', bookId, taskIntentId);
+  const ledger = host.ledgerTaskOf('readers-report', bookId, taskIntentId);
+  const authorized = host.analysisCall(() => ledger.authorize(bookId, taskIntentId, planEnvelopeDigest, start));
+  return { dispatchRunRecordId: authorized.dispatchRunRecordId, ledger };
+}
+
+/** Reconcile stranded Runs to their kept continuation points; queued starts still require an explicit new start. */
+export function reconcileStoppedReadersReportRuns(host: ReadersReportStoreHost): { settled: number } {
+  host.assertAvailable();
+  const any = host.readersReportCall(() => host.readersReports.anyTask());
+  if (any === null) return { settled: 0 };
+  return { settled: host.analysisCall(() => readersReportLedger(host, any.input).reconcileStoppedRuns()).settled };
+}
+
+/**
+ * 审稿意见 on ②C (EVAL-013): the 定稿 version a new one drafts from, the Book's latest Task, and per template whether it can be
+ * drafted, its newest result not yet opened, and its draft document.
+ */
+export function readersReportWorkspace(host: ReadersReportStoreHost, bookId: string, basis: FinalizedEvaluation | null, unreadable: string | null): EvaluationReadersReportProjection {
+  const readings = host.readersReportExemplars(bookId);
+  let latest: { task: StoredReadersReportTask; ledger: BaselineAnalysisStore; projection: ReadersReportProjection } | null = null;
+  let unavailable: string | null = unreadable;
+  try {
+    latest = latestReadersReport(host, bookId);
+  } catch (error) {
+    if (!(error instanceof StoreError)) throw error;
+    unavailable = `审稿意见暂不可用：${error.message}`;
+  }
+  const runState = latest?.projection.run?.state ?? null;
+  const drafts = host.readersReportCall(() => host.readersReports.drafts(bookId));
+  const revisions = host.readersReportCall(() => host.readersReports.revisions(bookId));
+  const templates = READERS_REPORT_TEMPLATES.map((template) => {
+    const label = READERS_REPORT_TEMPLATE_LABELS[template];
+    const typeId = readersReportDocumentTypeId(template);
+    const stored = drafts.find((draft) => draft.template === template);
+    const row = stored === undefined ? undefined : host.documentCall(() => host.productionDocuments.documentById(bookId, stored.documentId));
+    const draft = stored === undefined || row === undefined ? null : {
+      typeId,
+      typeLabel: readersReportDocumentType(typeId)!.label,
+      recordOrdinal: host.evaluationRecordOrdinal(stored.recordId),
+      document: host.documentCall(() => host.productionDocuments.document(row)),
+    };
+    // The newest result of this template whose synthesis wrote the draft, while the template has no draft document yet.
+    let drafted: { revisionId: string; recordOrdinal: number; createdAt: string } | null = null;
+    if (draft === null && unavailable === null) {
+      for (const revision of revisions) {
+        const found = readersReportTaskOf(host, revision.taskIntentId);
+        if (found === null || found.task.template !== template) continue;
+        const inspected = host.analysisCall(() => found.ledger.inspect(bookId, undefined, revision.revisionId)) as ReadersReportProjection;
+        if (inspected.inspectedRevision?.revision.readersReport.sections !== null) {
+          drafted = { revisionId: revision.revisionId, recordOrdinal: host.evaluationRecordOrdinal(found.task.recordId), createdAt: revision.createdAt };
+        }
+        break;
+      }
+    }
+    const prepare: EvaluationReadersReportProjection['templates'][number]['prepare'] =
+      host.evaluationLiveRefused(READERS_REPORT_KIND) ? { allowed: false, reason: READERS_REPORT_LIVE_UNAVAILABLE }
+      : unavailable !== null ? { allowed: false, reason: unavailable }
+      : basis === null ? { allowed: false, reason: READERS_REPORT_NEEDS_FINALIZED }
+      : draft !== null ? { allowed: false, reason: `这本书已经有「${label}」的草稿；请打开它继续修改。` }
+      : runIsActive(runState) ? { allowed: false, reason: activeRunReason(runState, READERS_REPORT_KIND) }
+      : { allowed: true, mode: latest === null || latest.projection.resultSetRevision === null ? 'readers-report-first' : 'readers-report-again' };
+    return { template, label, prepare, drafted, draft };
+  });
+  const task = latest?.projection.taskIntent ?? null;
+  return {
+    basis: basis === null ? null : { recordId: basis.recordId, ordinal: basis.ordinal, revisionLabel: basis.revisionLabel, finalizedAt: basis.finalizedAt },
+    exemplars: { count: readings.exemplars.length, statement: readersReportExemplarStatement(host, readings) },
+    task: latest === null || task === null ? null : {
+      taskIntentId: task.taskIntentId,
+      template: latest.task.template,
+      state: latest.projection.state,
+      label: readersReportTaskStateLabel(latest.projection),
+    },
+    templates,
+  };
+}
+
+/**
+ * 打开草稿 (EVAL-013): one drafted result made its template's draft document — an Editorial Artifact in the same block store
+ * as a Production Document, edited on the manuscript surface with the same marks, saved as `版本 N` and exported as DOCX —
+ * in one transaction with the record of which result and which 定稿 version it was made from. Once per template of a Book:
+ * the draft is then edited in place. It is a draft: nothing is delivered or sent, and the Evaluation Record is unchanged.
+ */
+export function createReadersReportDraft(host: ReadersReportStoreHost, bookId: string, revisionId: string): EvaluationWorkspaceProjection {
+  host.assertAvailable();
+  requireStore(StoreUUID_PATTERN.test(bookId) && StoreUUID_PATTERN.test(revisionId), 'READERS_REPORT_INVALID', '审稿意见参数无效。');
+  const revision = host.readersReportCall(() => host.readersReports.revisions(bookId)).find((entry) => entry.revisionId === revisionId);
+  requireStore(revision !== undefined, 'READERS_REPORT_NOT_FOUND', '这本书没有这一次起草的审稿意见。');
+  const found = readersReportTaskOf(host, revision.taskIntentId);
+  requireStore(found !== null, 'READERS_REPORT_RECORD_INVALID', '这一次起草没有记下它依据的评估版本。');
+  const inspected = host.analysisCall(() => found.ledger.inspect(bookId, undefined, revisionId)) as ReadersReportProjection;
+  const sections = inspected.inspectedRevision?.revision.readersReport.sections ?? null;
+  requireStore(sections !== null, 'READERS_REPORT_NOT_DRAFTED', '这一次起草没有写出审稿意见，不能打开草稿。');
+  const template = found.task.template;
+  const typeId = readersReportDocumentTypeId(template);
+  const type = readersReportDocumentType(typeId)!;
+  const book = host.authority.prepare('SELECT title FROM books WHERE book_id = ?').get(bookId) as StoreSqlRow | undefined;
+  requireStore(book !== undefined, 'BOOK_NOT_FOUND', '图书不存在。');
+  // Every revision names a Source Version; a draft's names the manuscript file its 定稿 version evaluated (the export writes
+  // the draft fresh from its own words, never from that file).
+  const source = host.authority.prepare(
+    `SELECT mr.source_version_id FROM evaluation_records er JOIN manuscript_revisions mr ON mr.revision_id = er.revision_id
+       WHERE er.record_id = ? AND er.book_id = ?`,
+  ).get(found.task.recordId, bookId) as StoreSqlRow | undefined;
+  requireStore(source !== undefined, 'READERS_REPORT_RECORD_INVALID', '审稿意见所依据的评估版本缺失。');
+  const sourceVersionId = asString(source.source_version_id);
+  const blocks = readersReportDraftBlocks(asString(book.title), template, sections).map((block) => ({
+    ...block,
+    digest: sha256(storeCanonicalJson({ kind: block.kind, level: block.level, text: block.text })),
+    graphemeLength: readersReportBlockLength(block.text),
+  }));
+  const now = new Date().toISOString();
+  const documentId = randomUUID();
+  const branchId = randomUUID();
+  const draftRevisionId = randomUUID();
+  const characterCount = blocks.reduce((total, block) => total + block.graphemeLength, 0);
+  const revisionDigest = ReadersReports.draftRevisionDigest(documentId, revisionId, blocks.map(({ kind, level, text }) => ({ kind, level, text })));
+  host.documentCall(() => host.readersReportCall(() => host.transaction(host.authority, () => {
+    // The checks again, inside the transaction that writes: a second 打开草稿 of the template refuses this one.
+    requireStore(host.productionDocuments.documentOfType(bookId, typeId) === undefined, 'READERS_REPORT_DRAFT_EXISTS',
+      `这本书已经有「${READERS_REPORT_TEMPLATE_LABELS[template]}」的草稿；请打开它继续修改。`);
+    host.authority.prepare("INSERT INTO manuscripts(manuscript_id, book_id, role, created_at) VALUES (?, ?, 'production-document', ?)")
+      .run(documentId, bookId, now);
+    host.authority.prepare('INSERT INTO manuscript_branches(branch_id, manuscript_id, name, created_at) VALUES (?, ?, ?, ?)')
+      .run(branchId, documentId, type.label, now);
+    host.authority.prepare(
+      `INSERT INTO manuscript_revisions(
+           revision_id, manuscript_id, branch_id, ordinal, revision_label, parent_revision_id,
+           source_version_id, revision_digest, created_at
+         ) VALUES (?, ?, ?, 1, 'r1', NULL, ?, ?, ?)`,
+    ).run(draftRevisionId, documentId, branchId, sourceVersionId, revisionDigest, now);
+    host.authority.prepare('UPDATE manuscript_branches SET base_revision_id = ? WHERE branch_id = ?').run(draftRevisionId, branchId);
+    const insertBlock = host.authority.prepare('INSERT INTO manuscript_blocks(block_id, manuscript_id, created_revision_id) VALUES (?, ?, ?)');
+    const insertVersion = host.authority.prepare(
+      `INSERT INTO manuscript_block_versions(
+           revision_id, block_id, position, kind, level, text, digest, start_offset, grapheme_length
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    const insertWorking = host.authority.prepare(
+      `INSERT INTO working_blocks(branch_id, block_id, position, kind, level, text, digest, grapheme_length)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    let offset = 0;
+    blocks.forEach((block, index) => {
+      const position = index + 1;
+      const blockId = `blk_${sha256(`${draftRevisionId}\u0000${position}\u0000${block.digest}`).slice(0, 24)}`;
+      insertBlock.run(blockId, documentId, draftRevisionId);
+      insertVersion.run(draftRevisionId, blockId, position, block.kind, block.level, block.text, block.digest, offset, block.graphemeLength);
+      insertWorking.run(branchId, blockId, position, block.kind, block.level, block.text, block.digest, block.graphemeLength);
+      offset += block.graphemeLength;
+    });
+    host.authority.prepare(
+      `INSERT INTO branch_working_state(
+           branch_id, manuscript_id, base_revision_id, journal_sequence, working_digest,
+           total_graphemes, history_sequence, last_checkpoint_sequence
+         ) VALUES (?, ?, ?, 0, ?, ?, 0, 0)`,
+    ).run(branchId, documentId, draftRevisionId, revisionDigest, characterCount);
+    requireStore(
+      host.boundedCall(() => host.boundedAuthority.initializeImportedBranch(branchId)) === characterCount,
+      'READERS_REPORT_INVALID', '审稿意见草稿的索引无法由它的文字精确建立。',
+    );
+    host.productionDocuments.record({
+      documentId, bookId, typeId, originSourceVersionId: sourceVersionId, parserIdentity: 'ai7.readers-report-draft/1', createdAt: now,
+    }, { types: READERS_REPORT_DOCUMENT_TYPES, digest: READERS_REPORT_DOCUMENT_TYPES_DIGEST });
+    host.documentWorkflow.recordInstance(documentId, now);
+    host.productionDocuments.recordVersion(documentId, draftRevisionId, revisionDigest, 'created');
+    host.readersReports.recordDraft({
+      documentId, bookId, template, analysisRevisionId: revisionId, taskIntentId: revision.taskIntentId, recordId: found.task.recordId, recordedAt: now,
+    });
+  })));
+  return host.inspectEvaluation(bookId, null);
 }

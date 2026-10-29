@@ -33,7 +33,7 @@ import type { PlatformToolFetch } from './platform-tool-http.js';
 import type { ProviderResultCache } from './provider-result-cache.js';
 import { authorizePublicFetch, sendPublicFetch, type TicketHostAdmission } from './public-source-fetch.js';
 import type { ResearchSnapshotCache } from './research-snapshot-cache.js';
-import { authorizeSearchCall, sendSearchCall } from './search-service.js';
+import { authorizeSearchCall, searchFailureClass, sendSearchCall, type SearchFailureClass } from './search-service.js';
 
 interface DispatchAccounting {
   readonly unit: object;
@@ -99,7 +99,9 @@ export class PlatformToolSession implements PlatformToolOwner {
   readonly #evidenceOnly: boolean;
   evidenceNeedsCommander = false;
   readonly usage: { requests: number; inputTokens: number; outputTokens: number; searchCalls: Record<string, number>; refusedSearchCalls: number;
-    fetchCount: number; fetchBytes: number; retrievalCalls?: number; exactFetchCalls?: number; refusedRetrievalCalls?: number; localToolCalls?: Record<string, number> } = {
+    fetchCount: number; fetchBytes: number; retrievalCalls?: number; exactFetchCalls?: number; refusedRetrievalCalls?: number; localToolCalls?: Record<string, number>;
+    /** Each failed search submission by its class (Issue #1181), present once one fails; the model's refusal text is unchanged. */
+    searchFailures?: Partial<Record<SearchFailureClass, number>> } = {
     requests: 0, inputTokens: 0, outputTokens: 0, searchCalls: {}, refusedSearchCalls: 0, fetchCount: 0, fetchBytes: 0,
   };
   readonly provenance: Array<{ sourceKind: 'tool'; backendId: string | null; host: string; capturedAt: string; argumentsDigest: string; responseDigest: string }> = [];
@@ -404,6 +406,11 @@ export class PlatformToolSession implements PlatformToolOwner {
    * keeps asking — a different query after the unit's one, a malformed or repeated call — ends at 128 with 联网核查未完成
    * instead of looping; the refusal itself never trips the breaker earlier.
    */
+  #countSearchFailure(failure: SearchFailureClass): void {
+    const failures = this.usage.searchFailures ??= {};
+    failures[failure] = (failures[failure] ?? 0) + 1;
+  }
+
   #refuseCounted(call: PlatformToolExecution, text: string): { readonly text: string; readonly sourceUrl: null } {
     this.#refusedRoundTrips += 1;
     return this.#observeWeb(this.#dispatchState(call, call.dispatch), `refused:${this.#refusedRoundTrips}`) === 'tripped' ? refusal('联网核查未完成：本单元的工具往返已达到熔断上限。') : refusal(text);
@@ -511,7 +518,10 @@ export class PlatformToolSession implements PlatformToolOwner {
             send: (authorized) => sendSearchCall(authorized, this.#fetch, call.signal, this.#broker === undefined ? undefined : { broker: this.#broker, admitHost: this.#admitHost, modelRole: 'Main Editorial Role' }),
           });
         if (settled.replayed) this.#book.revoke(decision.ticket);
-        if (settled.snapshot === null) return refusal(`搜索服务没有返回可用结果（状态 ${settled.status}）。`);
+        if (settled.snapshot === null) {
+          this.#countSearchFailure(searchFailureClass({ status: settled.status }));
+          return refusal(`搜索服务没有返回可用结果（状态 ${settled.status}）。`);
+        }
         for (const url of urlsIn(settled.snapshot.text)) this.cite(url);
         const result = { text: settled.snapshot.text, sourceUrl: settled.snapshot.url };
         this.#claimAccounting?.recordSearchResult(digest, result);
@@ -539,6 +549,7 @@ export class PlatformToolSession implements PlatformToolOwner {
       return result;
     } catch (error) {
       const code = error !== null && typeof error === 'object' && typeof (error as { code?: unknown }).code === 'string' ? (error as { code: string }).code : 'PLATFORM_TOOL_FAILED';
+      if (args.tool === 'websearch') this.#countSearchFailure(searchFailureClass({ code }));
       return refusal(`工具调用失败（${code}）；不重试。`);
     }
   }

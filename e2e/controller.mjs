@@ -173,6 +173,8 @@ const J01_COMPLETION_PHASES_BY_SCENARIO = Object.freeze({
   'retention-degraded': J01_COMMON_COMPLETION_PHASES,
   'retention-text-box-retain': J01_COMMON_COMPLETION_PHASES,
   'retention-text-box-merge': J01_COMMON_COMPLETION_PHASES,
+  // Issue #1205: candidate headings and the long-paragraph choice of a heading-less Public SampleBook variant.
+  'candidate-structure': J01_COMMON_COMPLETION_PHASES,
   // Issue #411: a DOCX's comments and tracked changes enter as 批注 and 修改建议 whose source is its author.
   'imported-marks': J01_COMMON_COMPLETION_PHASES,
   'before-paint': Object.freeze([
@@ -229,6 +231,7 @@ const J01_LAUNCH_SCENARIOS = Object.freeze([
   'retention-degraded',
   'retention-text-box-retain',
   'retention-text-box-merge',
+  'candidate-structure',
   'imported-marks',
   'source-only-pdf',
   'text-manuscript',
@@ -461,6 +464,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'continuity-review',
     'legacy-review',
     'retention-review',
+    'structure-review',
     'imported-marks-review',
     'imported-marks-record',
     'imported-marks-editor',
@@ -637,6 +641,9 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'protection-ime-reserve',
     'protection-read-only',
     'protection-read-only-recovery',
+    'structure-split',
+    'structure-undo-redo',
+    'structure-merge',
     'completion-browser-close',
     'completion-fixture-survived',
     'completion-cleanup',
@@ -940,6 +947,8 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     // Correction Proposal that keeps 证据核查未完成.
     'factual-level-plan',
     'factual-evidence-workspace',
+    // Issue #1174: the factual finding's review card and mark card list the result's sources.
+    'factual-card-evidence',
     'factual-review-decision',
     'factual-correction-proposal',
     // Issue #922 (slice 7f): a 自定义分析维度 written in 知识库 › 工序与规则, run from ②A's 自定义 tab, its answers read there.
@@ -1007,6 +1016,11 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'proposal-workspace-offer',
     'proposal-decision-draft-batch',
     'proposal-decision-record',
+    'structure-split',
+    'structure-undo-across-apply',
+    'structure-merge',
+    'selection-span-draft',
+    'selection-span-no-review-choice',
     'local-check-exact-sample1',
     'completion-browser-close',
     'completion-cleanup',

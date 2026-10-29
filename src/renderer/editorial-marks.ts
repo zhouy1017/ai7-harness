@@ -1,5 +1,7 @@
 import { readProposalWorkspace } from './proposal-workspace.js';
-import type { ApplyReceiptProjection } from '../shared/protocol.js';
+import { readFindingSources } from './research-evidence-labels.js';
+import { findingEvidenceList } from './research-evidence.js';
+import type { ApplyReceiptProjection, ProposalWorkspaceProjection } from '../shared/protocol.js';
 import { MAX_DIALOGUE_QUESTION_CHARACTERS, SERIES_KNOWLEDGE_CLASSES, SERIES_KNOWLEDGE_CLASS_LABELS } from '../shared/protocol.js';
 import type { AskAboutSelectionInput, DialogueProjection, DialogueSelectionInput, EditorialPolishProjection, FastInteractionRoutesProjection, PolishSelectionInput } from '../shared/protocol.js';
 import {
@@ -61,6 +63,7 @@ import {
   selectionMenuReason,
 } from './editorial-mark-labels.js';
 import { applyOnce } from './manuscript-apply.js';
+import { spanGraphemes } from '../shared/selection-span.js';
 import { REVIEW_VIEW_TASK_ABSENT, REVIEW_VIEW_TASK_RESOLVING } from './review-labels.js';
 import { sheetChosenApartLine } from './captured-procedure-labels.js';
 import {
@@ -71,6 +74,7 @@ import {
   SELECTION_TASK_CHOSEN_APART_LEGEND,
   SELECTION_TASK_DOCUMENT_REASON,
   SELECTION_TASK_FIELD,
+  SELECTION_SPAN_PROCEDURE_REASON,
   SELECTION_TASK_MENU_LABEL,
   SELECTION_TASK_NOTE,
   SELECTION_TASK_PICK_RANGE,
@@ -135,7 +139,9 @@ interface MountOptions {
     RendererApi,
     'createEditorialMark' | 'getEditorialMarkCard' | 'updateEditorialMark' | 'recordChangeSuggestionDecision' |
     'recordProposalDecisionReason' | 'recordProposalDecisionFeedback' | 'recordLearningReasonAsk' | 'runEditorClipboardCommand' | 'applyChangeSuggestion' | 'reverseAppliedChangeSuggestion' |
-    'inspectProposalWorkspace' | 'saveProposalDecisionDraft' | 'inspectApplyReceipt' | 'prepareReverseApply' | 'getManuscriptApplyOutcome' | 'inspectReviewFindingOfMark'
+    'inspectProposalWorkspace' | 'inspectApplyReceipt' | 'prepareReverseApply' | 'getManuscriptApplyOutcome' | 'inspectReviewFindingOfMark' |
+    // A factual finding's sources on its card (Issue #1174), read as its review card reads them.
+    'inspectFactualVerification' | 'inspectEvidenceWorkspace' | 'inspectResearchEvidence'
   >;
   /**
    * 查看任务 on a mark a Review Run produced (V2-UX-MARK-008): leave for 审阅 with that Run open and the
@@ -294,6 +300,8 @@ export function menuPlacement(
 }
 
 type SeriesChoice = { readonly seriesId: string; readonly title: string };
+/** Words the AI7 actions take: one block's range, or the exact span across paragraphs (Issue #1176). */
+type SelectedWords = Extract<ReturnType<BoundedEditor['selectedRange']>, { kind: 'range' | 'span' }>;
 
 /**
  * The selection menu's 书系 group (Issue #63, S28b): one entry per Series the Book is in, then the chooser. A Book in no
@@ -413,6 +421,21 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   const inSeries = seriesOf === undefined ? null : seriesMembership(() => seriesOf(null), () => !destroyed);
   void inSeries?.refresh();
   let closedAt: { top: number } | undefined;
+
+  /**
+   * The proposal workspace a 修改建议 card reads for its 在专用工作区审阅 and atomic group (Issue #1178): read once for the marks the
+   * window holds, not again for every card opened over them; a decision or a new window — new marks — reads it again.
+   */
+  let workspaceRead: { readonly marks: unknown; readonly read: Promise<ProposalWorkspaceProjection> } | null = null;
+  const proposalWorkspace = (): Promise<ProposalWorkspaceProjection> => {
+    const current = editor.currentWindow();
+    if (workspaceRead?.marks !== current.marks) {
+      const read = readProposalWorkspace(api, { manuscriptId: current.manuscriptId, branchId: current.branchId, resultId: null });
+      workspaceRead = { marks: current.marks, read };
+      read.catch(() => { if (workspaceRead?.read === read) workspaceRead = null; });
+    }
+    return workspaceRead.read;
+  };
 
   const binding = (): { manuscriptId: string; branchId: string; windowStartBlockId: string } => {
     const current = editor.currentWindow();
@@ -644,7 +667,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     options.setStatus(done, 'success');
   }, '标记未能添加。');
 
-  const settledRange = async (): Promise<Extract<ReturnType<BoundedEditor['selectedRange']>, { kind: 'range' }> | null> => {
+  /** The words selected now, settled first — one block's range, or a span across paragraphs (Issue #1176); `null` once the reason was said. */
+  const settledWords = async (): Promise<SelectedWords | null> => {
     composersPending += 1;
     try {
       await editor.flush();
@@ -652,9 +676,31 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       composersPending -= 1;
     }
     const range = editor.selectedRange();
-    if (range.kind === 'range') return range;
+    if (range.kind === 'range' || range.kind === 'span') return range;
     options.setStatus(selectionMenuReason(range.kind), 'error');
     return null;
+  };
+  /** The words selected now inside one paragraph, as a mark names them; a span is refused with the marks' reason. */
+  const settledRange = async (): Promise<Extract<SelectedWords, { kind: 'range' }> | null> => {
+    const words = await settledWords();
+    if (words === null || words.kind === 'range') return words;
+    options.setStatus(selectionMenuReason('span'), 'error');
+    return null;
+  };
+  /** Those words as the service reads them, bound to the window as it stands: a span carries every block's pin. */
+  const selectionInputOf = (range: SelectedWords): DialogueSelectionInput => {
+    const current = editor.currentWindow();
+    return {
+      ...binding(),
+      baseRevisionId: current.revisionId,
+      expectedJournalSequence: current.journalSequence,
+      blockId: range.blockId,
+      baseBlockDigest: range.blockDigest,
+      fromGrapheme: range.fromGrapheme,
+      toGrapheme: range.toGrapheme,
+      selectedText: range.text,
+      ...(range.kind === 'span' ? { span: range.span } : {}),
+    };
   };
 
   /**
@@ -928,6 +974,21 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   };
 
   /**
+   * A review mark's factual sources (ADR 0095 §5; Issue #1174): once its Run and finding are found, the sources its review card
+   * lists — the result's, less the excluded, with their retained 来源译文. Nothing for a mark with no factual result.
+   */
+  const findingEvidence = (card: EditorialMarkCardProjection): HTMLElement[] => {
+    if (card.source.origin !== 'review-category') return [];
+    const slot = el('div', 'editorial-mark-evidence');
+    void reviewFindingOf(card.markId).then(async (found) => {
+      if (found === null) return;
+      const sources = (await readFindingSources(api, found.bookId, found.reviewRunId, undefined, found.findingId)).get(found.findingId) ?? [];
+      if (sources.length > 0 && !destroyed && openCardId === card.markId && slot.isConnected) slot.replaceChildren(findingEvidenceList(sources));
+    });
+    return [slot];
+  };
+
+  /**
    * A Correction Proposal's factual lineage (Issue #901; CORR-012, EASSURE-012): the result version it came from with its three
    * states apart, the level, the sources checked and only candidates, the policy version — and 证据核查未完成 with what is
    * missing, kept on the card through decision, Apply and reversal. Nothing for any other mark.
@@ -1044,7 +1105,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
               : '正文里显示的是替换后的样子（预览 · 未应用）；稿件本身仍是原文。'
             : '稿件本身仍是原文。')),
         region('rationale', '修改理由', el('p', undefined, suggestion.rationale.length > 0 ? suggestion.rationale : '没有填写修改理由。')),
-        region('basis', '依据与核查', basisList(card), ...factualLineage(card)),
+        region('basis', '依据与核查', basisList(card), ...factualLineage(card), ...findingEvidence(card)),
       );
       const yours = region('disposition', '你的处理');
       const pendingReceipt = recoveryCards.get(card.markId);
@@ -1052,27 +1113,18 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         const state = el('p', 'editorial-mark-recorded', pendingReceipt.state === 'confirming' ? '正在确认应用结果' : pendingReceipt.state === 'unresolved' ? '结果待确认' : pendingReceipt.state === 'applied' ? '已应用' : '未应用');
         state.dataset['applyReceiptState'] = pendingReceipt.state; yours.append(state, el('p', 'muted', pendingReceipt.reason));
       }
+      // One decision system on the card (ADR 0096 §3): the draft dispositions live only in the proposal workspace, which the
+      // card opens; an atomic group is decided there as a whole.
       if (applied === null && pendingReceipt?.state !== 'unresolved' && pendingReceipt?.state !== 'confirming') {
-        const drafts = el('div', 'button-row'); yours.append(drafts);
-        void readProposalWorkspace(api, { manuscriptId: binding().manuscriptId, branchId: binding().branchId, resultId: null }).then((workspace) => {
-          if (!drafts.isConnected) return;
+        const workspaceRow = el('div', 'button-row'); yours.append(workspaceRow);
+        void proposalWorkspace().then((workspace) => {
+          if (!workspaceRow.isConnected) return;
           const item = workspace.items.find((entry) => entry.markId === card.markId); if (!item) return;
-          const members = item.atomicGroupId === null ? [item] : workspace.items.filter((entry) => entry.atomicGroupId === item.atomicGroupId);
-          if ((workspace.offerWorkspace || item.atomicGroupId !== null) && options.openProposalWorkspace) drafts.append(actionButton('proposal-workspace', '在专用工作区审阅', 'secondary', () => options.openProposalWorkspace?.()));
-          const reading = el('p', 'muted', item.draft === null ? '尚无处理草稿。' : item.draft === 'accepted' ? '拟采纳 · 草稿已保存' : item.draft === 'rejected' ? '拟拒绝 · 草稿已保存' : '暂不决定 · 草稿已保存'); drafts.append(reading);
+          if ((workspace.offerWorkspace || item.atomicGroupId !== null) && options.openProposalWorkspace) workspaceRow.append(actionButton('proposal-workspace', '在专用工作区审阅', 'secondary', () => options.openProposalWorkspace?.()));
           if (item.atomicGroupId !== null) {
-            drafts.append(el('p', 'muted', `原子组：${item.atomicReason ?? '依赖说明缺失'}；部分采纳会造成上述不一致。拆分需要新的提案版本。`));
-            for (const member of members) drafts.append(el('p', 'muted', `${member.chapter} · 第 ${member.position} 段 ${member.fromGrapheme}–${member.toGrapheme}`));
+            workspaceRow.append(el('p', 'muted', `原子组：${item.atomicReason ?? '依赖说明缺失'}；部分采纳会造成上述不一致。拆分需要新的提案版本。`));
+            for (const member of workspace.items.filter((entry) => entry.atomicGroupId === item.atomicGroupId)) workspaceRow.append(el('p', 'muted', `${member.chapter} · 第 ${member.position} 段 ${member.fromGrapheme}–${member.toGrapheme}`));
           }
-          const save = async (disposition: 'accepted' | 'rejected' | 'deferred' | null): Promise<void> => {
-            const next = await api.saveProposalDecisionDraft({ manuscriptId: binding().manuscriptId, branchId: binding().branchId, resultId: null, markIds: members.map((member) => member.markId), disposition, atomicGroupId: item.atomicGroupId, expectedScopeDigest: workspace.scopeDigest });
-            workspace = next; reading.textContent = disposition === null ? '已撤销草稿处理。' : disposition === 'accepted' ? '拟采纳 · 草稿已保存，尚未记录决定。' : disposition === 'rejected' ? '拟拒绝 · 草稿已保存，尚未记录决定。' : '暂不决定 · 草稿已保存，尚未记录决定。';
-          };
-          for (const [disposition, label] of [['accepted', '拟采纳'], ['rejected', '拟拒绝'], ['deferred', '暂不决定']] as const) {
-            const control = actionButton(`draft-${disposition}`, label, 'secondary', () => void save(disposition).catch((error) => options.setStatus(options.errorMessage(error, '草稿未能保存。'), 'error')));
-            control.disabled = disposition === 'accepted' && members.some((member) => member.conflict); drafts.append(control);
-          }
-          drafts.append(actionButton('draft-undo', '撤销草稿处理', 'quiet', () => void save(item.draft).catch(() => {})));
         }).catch(() => {});
       }
 
@@ -1208,7 +1260,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         }
         panel.append(region('replies', '回复', replies));
       }
-      if (card.kind === 'annotation' && (card.basis.length > 0 || card.source.kind === 'ai7')) panel.append(region('basis', '依据', basisList(card)));
+      if (card.kind === 'annotation' && (card.basis.length > 0 || card.source.kind === 'ai7')) panel.append(region('basis', '依据', basisList(card), ...findingEvidence(card)));
       const yours = region('disposition', '你的处理');
       if (card.kind === 'annotation') {
         disposition.append(
@@ -1574,7 +1626,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   const startOnSelection = options.startTaskOnSelection;
   const houseProcedures = startOnSelection === undefined ? null : latestAnswer(() => startOnSelection.procedures(), () => !destroyed);
   void houseProcedures?.refresh();
-  const aiTaskGroup = (selectionReason: string | undefined, procedures: ReadonlyArray<SelectionProcedureEntry> | null): MenuGroup => ({
+  const aiTaskGroup = (selectionReason: string | undefined, procedures: ReadonlyArray<SelectionProcedureEntry> | null, spanned = false): MenuGroup => ({
     label: 'AI7 任务',
     note: selectionTaskGroupNote(options.startTaskOnSelection === undefined ? null : procedures),
     items: [
@@ -1589,7 +1641,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         action: entry.value,
         label: entry.label,
         ...(entry.hint === null ? {} : { hint: entry.hint }),
-        ...(selectionReason !== undefined ? { disabledReason: selectionReason }
+        ...(selectionReason !== undefined ? { disabledReason: selectionReason } : spanned ? { disabledReason: SELECTION_SPAN_PROCEDURE_REASON }
           : entry.disabledReason !== null ? { disabledReason: entry.disabledReason } : { run: () => void composeTask(entry.value) }),
       })),
       polishItem(selectionReason),
@@ -1603,25 +1655,13 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
    */
   const polishSelection = async (): Promise<void> => {
     if (refuseWhileBusy() || polishOptions === undefined) return;
-    const range = await settledRange();
+    const range = await settledWords();
     if (range === null || destroyed) return;
     closeMenu();
-    const current = editor.currentWindow();
     options.setStatus(SELECTION_POLISH_STATUS.requesting, 'busy');
     let settled: EditorialPolishProjection;
     try {
-      settled = await polishOptions.polish({
-        selection: {
-          ...binding(),
-          baseRevisionId: current.revisionId,
-          expectedJournalSequence: current.journalSequence,
-          blockId: range.blockId,
-          baseBlockDigest: range.blockDigest,
-          fromGrapheme: range.fromGrapheme,
-          toGrapheme: range.toGrapheme,
-          selectedText: range.text,
-        },
-      });
+      settled = await polishOptions.polish({ selection: selectionInputOf(range) });
     } catch (error) {
       options.setStatus(options.errorMessage(error, SELECTION_POLISH_STATUS.failed), 'error');
       return;
@@ -1669,20 +1709,11 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   };
   /** The words selected now as the exact span a mark names, settled first; `null` once the reason was said. */
   const spanNow = async (): Promise<SelectionSpanReading | null> => {
-    const range = await settledRange();
+    const range = await settledWords();
     if (range === null || destroyed) return null;
     const current = editor.currentWindow();
     return {
-      span: {
-        ...binding(),
-        baseRevisionId: current.revisionId,
-        expectedJournalSequence: current.journalSequence,
-        blockId: range.blockId,
-        baseBlockDigest: range.blockDigest,
-        fromGrapheme: range.fromGrapheme,
-        toGrapheme: range.toGrapheme,
-        selectedText: range.text,
-      },
+      span: selectionInputOf(range),
       position: current.blocks.find((block) => block.blockId === range.blockId)?.position ?? null,
       revisionLabel: current.revisionLabel,
       journalSequence: current.journalSequence,
@@ -1784,7 +1815,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   const composeQuestion = async (): Promise<void> => {
     if (refuseWhileBusy() || options.askAboutSelection === undefined) return;
     const ask = options.askAboutSelection;
-    const range = await settledRange();
+    const range = await settledWords();
     if (range === null) return;
     openComposer(range.blockId, {
       id: 'ask-about-selection',
@@ -1801,21 +1832,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         }
         try {
           await editor.flush();
-          const current = editor.currentWindow();
           options.setStatus(DIALOGUE_STATUS.asking, 'busy');
-          const dialogue = await ask({
-            selection: {
-              ...binding(),
-              baseRevisionId: current.revisionId,
-              expectedJournalSequence: current.journalSequence,
-              blockId: range.blockId,
-              baseBlockDigest: range.blockDigest,
-              fromGrapheme: range.fromGrapheme,
-              toGrapheme: range.toGrapheme,
-              selectedText: range.text,
-            },
-            question: values.question,
-          });
+          const dialogue = await ask({ selection: selectionInputOf(range), question: values.question });
           options.setStatus(DIALOGUE_STATUS.asked, 'success');
           closeFloating();
           options.onAsked?.(dialogue);
@@ -1911,7 +1929,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     const range = editor.selectedRange();
     const markable = range.kind === 'range' || range.kind === 'unsettled';
     const why = markable ? undefined : selectionMenuReason(range.kind);
-    const selected = range.kind === 'range' ? `已选 ${range.toGrapheme - range.fromGrapheme} 字` : range.kind === 'none' ? '未选中文字' : '已选中文字';
+    const selected = range.kind === 'range' ? `已选 ${range.toGrapheme - range.fromGrapheme} 字`
+      : range.kind === 'span' ? `已选 ${spanGraphemes(range)} 字 · ${range.span.length} 段` : range.kind === 'none' ? '未选中文字' : '已选中文字';
     const needsSelection = range.kind === 'none' ? '先选中文字' : undefined;
     const shown = inSeries?.current() ?? null;
     const shownProcedures = houseProcedures?.current() ?? null;
@@ -1950,7 +1969,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           })),
         ],
       },
-      aiTaskGroup(range.kind === 'range' ? undefined : why ?? selectionMenuReason(range.kind), shownProcedures),
+      // Across paragraphs (Issue #1176) the AI7 actions take the exact span; marks and 书系 knowledge stay in one paragraph.
+      aiTaskGroup(range.kind === 'range' || range.kind === 'span' ? undefined : why ?? selectionMenuReason(range.kind), shownProcedures, range.kind === 'span'),
       ...(knowledge === null ? [] : [knowledge]),
     ], at);
     if (!reread || (inSeries === null && houseProcedures === null && polishRoute === null)) return;
@@ -2177,7 +2197,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     },
     holdsFloating: () => menu !== undefined || floating !== undefined || composersPending > 0,
     selectionSpan: async () => {
-      if (editor.selectedRange().kind !== 'range') return SELECTION_TASK_PICK_RANGE;
+      if (!['range', 'span'].includes(editor.selectedRange().kind)) return SELECTION_TASK_PICK_RANGE;
       return (await spanNow()) ?? SELECTION_TASK_PICK_RANGE;
     },
     composeProcedures: (range) => {

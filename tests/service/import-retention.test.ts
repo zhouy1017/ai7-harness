@@ -815,7 +815,7 @@ describe('import retention over the real store (ADR 0086)', () => {
     }
   }, 120_000);
 
-  it('asks for the degradation decision for a field and a note, and records it with the review', async () => {
+  it('asks for the degradation decision for a field, not for a note that became a note block, and records it with the review', async () => {
     const { path } = await composed({
       source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 5, title: '降级组稿',
       retention: { field: { block: 1 }, footnote: { block: 3, noteSourceBlock: 9 } },
@@ -828,10 +828,7 @@ describe('import retention over the real store (ADR 0086)', () => {
       expect(pending.reviewDigest).toBeNull();
       expect(pending.degradationDecision).toEqual({
         state: 'required-unselected',
-        items: [
-          { categoryKey: 'notes', label: '脚注与尾注', count: 1 },
-          { categoryKey: 'fields', label: '域（目录等）', count: 1 },
-        ],
+        items: [{ categoryKey: 'fields', label: '域（目录等）', count: 1 }],
       });
       const review = store.prepareNewBookReview(staged.draftId, staged.draftVersion, target, true);
       expect(review.degradationDecision.state).toBe('accepted-complete-set');
@@ -841,7 +838,7 @@ describe('import retention over the real store (ADR 0086)', () => {
       });
       const record = store.getBookOverview(commit.bookId).records.find((item) => item.kind === 'import-record');
       expect(record?.kind === 'import-record' && record.degradationDecision?.acceptedItems.map((item) => item.categoryKey))
-        .toEqual(['notes', 'fields']);
+        .toEqual(['fields']);
       store.markCleanShutdown();
     } finally {
       store.close();

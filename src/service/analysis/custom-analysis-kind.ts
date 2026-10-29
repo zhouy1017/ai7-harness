@@ -283,7 +283,7 @@ export function customAnalysisKindDefinition(version: CustomAnalysisVersionInput
  */
 export function customAnalysisPlan(
   plan: TaskPlanProjection,
-  version: { readonly title: string; readonly versionId: string; readonly version: number; readonly documentDigest: string; readonly questionTemplate: string },
+  version: { readonly dimensionId: string; readonly title: string; readonly versionId: string; readonly version: number; readonly documentDigest: string; readonly questionTemplate: string },
   live: boolean,
 ): TaskPlanProjection {
   const named = `自定义分析「${version.title}」第 ${version.version} 版`;
@@ -291,11 +291,9 @@ export function customAnalysisPlan(
   const [units] = plan.steps;
   return {
     ...plan,
-    // These preparation controls encode the built-in goal in the shared drawer. A custom Task is prepared only by its tab.
-    start: { ...plan.start, reconfirm: null },
-    redo: null,
-    reprepare: null,
-    budgetStop: null,
+    // 同类型重做 / 重新准备 / 重新确认 (Issue #931) stay as the shared builder offers them; the drawer prepares each again on this
+    // dimension (`custom`), on the version the plan froze, never through the baseline's preparation.
+    custom: { dimensionId: version.dimensionId },
     goal: { ...plan.goal, sentence: `逐单元回答${named}的提问，定位每条回答所依据的原文，形成结果集修订版。`,
       // The chip reads 工序「…」, so the procedure is named without brackets of its own.
       chips: { ...plan.goal.chips, procedure: `自定义分析 · ${version.title} · 第 ${version.version} 版` } },

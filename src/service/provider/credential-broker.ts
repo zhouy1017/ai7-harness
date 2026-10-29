@@ -1,7 +1,7 @@
 import { CREDENTIAL_REFERENCE_PATTERN, DEVELOPMENT_CREDENTIAL_REFERENCES } from '../../shared/protected-secret-identity.js';
 import { CONFIGURED_CREDENTIAL_SLOTS, CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES } from '../../shared/provider-configuration.generated.js';
 import { DIGEST_PATTERN } from '../analysis/canonical.js';
-import { consumeSearchCredentialRelease, type CredentialSlot, type TransmitTicket, type SearchServiceTicket } from './egress-gate.js';
+import { consumeSearchCandidateProbeRelease, consumeSearchCredentialRelease, type CredentialSlot, type TransmitTicket, type SearchCandidateProbeTicket, type SearchServiceTicket } from './egress-gate.js';
 
 /**
  * The Credential Broker maps (Execution Binding, Model Role, logical slot) to the opaque Credential
@@ -107,9 +107,18 @@ export class CredentialBroker {
    * must be the gate's `transmit-remote` decision for this exact binding; anything else refuses
    * before the store is touched.
    */
-  async releaseTo<T>(binding: CredentialSlotBinding, ticket: TransmitTicket | SearchServiceTicket | null, consume: (value: string) => Promise<T>): Promise<T> {
+  async releaseTo<T>(binding: CredentialSlotBinding, ticket: TransmitTicket | SearchServiceTicket | SearchCandidateProbeTicket | null, consume: (value: string) => Promise<T>): Promise<T> {
     requireBinding(binding);
     this.#requireAdmittedReference(binding.credentialReference);
+    // A candidate connection test (Issue #1055) releases only its own frozen production slot and reference, once, and never a
+    // development reference: the policy inherits no development credential, model binding or other slot.
+    if (ticket?.decision === 'call-search-candidate-probe') {
+      if (ticket.bindingDigest !== binding.bindingDigest || ticket.credentialSlot !== binding.slot || ticket.credentialReference !== binding.credentialReference ||
+          DEVELOPMENT_CREDENTIAL_REFERENCES.has(binding.credentialReference.toLowerCase()) || !consumeSearchCandidateProbeRelease(ticket)) {
+        throw new CredentialBrokerError('CREDENTIAL_RELEASE_REFUSED', '没有本次连接测试的单次决定；凭据未释放。');
+      }
+      return this.#release(binding, consume);
+    }
     // A search ticket releases only its frozen backend's own slot: a development reference must be that slot's own, so no
     // search host is ever handed the model's key or another backend's.
     const developmentReference = DEVELOPMENT_CREDENTIAL_REFERENCES.has(binding.credentialReference.toLowerCase());
@@ -121,6 +130,10 @@ export class CredentialBroker {
         (ticket.decision === 'transmit-remote' && binding.slot.startsWith('search-'))) {
       throw new CredentialBrokerError('CREDENTIAL_RELEASE_REFUSED', '没有本次绑定的 transmit-remote 决定；凭据未释放。');
     }
+    return this.#release(binding, consume);
+  }
+
+  async #release<T>(binding: CredentialSlotBinding, consume: (value: string) => Promise<T>): Promise<T> {
     requireCurrentBinding(binding);
     const value = await this.#resolver.resolve(binding.credentialReference);
     requireCurrentBinding(binding);

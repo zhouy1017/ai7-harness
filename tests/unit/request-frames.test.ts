@@ -66,7 +66,7 @@ describe('whole package archive frames (#953)', () => {
     const options = { includeAnnotations: true, includeSuggestions: false };
     for (const body of [
       { op: 'reviewBookDeliveryPackageExport', input: { bookId, packageVersionId, options, route: 'archive', offset: 40 } },
-      { op: 'prepareBookDeliveryPackageArchiveExport', input: { bookId, packageVersionId, options, reviewDigest: 'a'.repeat(64), memberKeys: [], destination: resolve('package.zip') } },
+      { op: 'prepareBookDeliveryPackageArchiveExport', input: { bookId, packageVersionId, options, reviewDigest: 'a'.repeat(64), destination: resolve('package.zip') } },
       { op: 'approveBookDeliveryPackageArchiveExport', input: { bookId, exportId: randomUUID() } },
       { op: 'cancelBookDeliveryPackageArchiveExport', input: { jobId: randomUUID() } },
     ]) {
@@ -79,7 +79,9 @@ describe('whole package archive frames (#953)', () => {
     const base = { bookId: randomUUID(), packageVersionId: randomUUID(), options: { includeAnnotations: true, includeSuggestions: true } };
     for (const body of [
       { op: 'reviewBookDeliveryPackageExport', input: { ...base, route: 'network' } },
-      { op: 'prepareBookDeliveryPackageArchiveExport', input: { ...base, memberKeys: [], reviewDigest: 'a'.repeat(64), destination: 'package.zip' } },
+      { op: 'prepareBookDeliveryPackageArchiveExport', input: { ...base, reviewDigest: 'a'.repeat(64), destination: 'package.zip' } },
+      // The archive names no members (Issue #959): an ignored list is refused, not carried.
+      { op: 'prepareBookDeliveryPackageArchiveExport', input: { ...base, memberKeys: [], reviewDigest: 'a'.repeat(64), destination: resolve('package.zip') } },
       { op: 'approveBookDeliveryPackageArchiveExport', input: { bookId: base.bookId, exportId: 'not-an-id' } },
     ]) expect(() => decodeRequest(encoder.encode(JSON.stringify({ id: randomUUID(), ...body })))).toThrow(ProtocolError);
   });
@@ -2383,6 +2385,7 @@ describe('search backend settings frames', () => {
       { id: randomUUID(), op: 'getSearchBackendSettings', input: {} },
       { id: randomUUID(), op: 'selectSearchBackend', input: { backendId: 'search-tinyfish' } },
       { id: randomUUID(), op: 'probeSearchBackend', input: { backendId: 'search-brave' } },
+      { id: randomUUID(), op: 'probeSearchBackend', input: { backendId: 'search-deepseek', candidateId: 'deepseek-direct-search-v1' } },
       { id: randomUUID(), op: 'removeSearchBackendCredential', input: { backendId: 'search-brave' } },
       { id: randomUUID(), op: 'saveSearchBackendCredential', input: { backendId: 'search-brave', credentialReference: null, credentialOperationState: 'needs-attention' } },
       { id: randomUUID(), op: 'saveSearchBackendCredential', input: { backendId: 'search-brave', credentialReference: randomUUID(), credentialOperationState: 'ready' } },
@@ -2395,6 +2398,10 @@ describe('search backend settings frames', () => {
       { op: 'getSearchBackendSettings', input: { backendId: 'search-tinyfish' } },
       { op: 'selectSearchBackend', input: { backendId: '' } },
       { op: 'probeSearchBackend', input: { backendId: 'search-tinyfish', query: 'untrusted query' } },
+      // The candidate is a closed identifier (Issue #1055): no other id, and no caller query, URL, body or credential beside it.
+      ...[{ candidateId: 'deepseek-direct-search-v2' }, { candidateId: null }, { candidateId: 'deepseek-direct-search-v1', query: 'untrusted query' },
+        { candidateId: 'deepseek-direct-search-v1', url: 'https://example.invalid/' }, { candidateId: 'deepseek-direct-search-v1', body: '{}' },
+        { candidateId: 'deepseek-direct-search-v1', credentialReference: randomUUID() }].map((extra) => ({ op: 'probeSearchBackend', input: { backendId: 'search-deepseek', ...extra } })),
       { op: 'saveSearchBackendCredential', input: { backendId: 'search-tinyfish', credentialReference: 'not-a-reference', credentialOperationState: 'ready' } },
       { op: 'saveSearchBackendCredential', input: { backendId: 'search-tinyfish', credentialReference: null, credentialOperationState: 'other' } },
       { op: 'saveSearchBackendCredential', input: { backendId: 'search-tinyfish', credentialReference: null, credentialOperationState: 'ready', secret: 'synthetic-placeholder' } },

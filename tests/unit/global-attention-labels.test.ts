@@ -52,6 +52,8 @@ import { TASK_PLAN_STATE_PILLS } from '../../src/renderer/task-drawer-labels.js'
 const RENDERER = readFileSync(fileURLToPath(new URL('../../src/renderer/index.ts', import.meta.url)), 'utf8');
 // The Manuscript screen owns its toolbar, so the recovery return's button is read there (Issue #1127).
 const MANUSCRIPT_SCREEN = readFileSync(fileURLToPath(new URL('../../src/renderer/manuscript-screen.ts', import.meta.url)), 'utf8');
+// ②A's baseline-analysis card owns its Task outcome's next step (Issue #1172).
+const BASELINE_ANALYSIS_CARD = readFileSync(fileURLToPath(new URL('../../src/renderer/baseline-analysis-card.ts', import.meta.url)), 'utf8');
 const AT = '2026-09-23T04:05:06.000Z';
 
 const STATES: ReadonlyArray<GlobalAttentionStateKey> = [
@@ -91,7 +93,7 @@ function item(state: GlobalAttentionStateKey, overrides: Partial<GlobalAttention
 
 function projection(groups: Partial<Record<GlobalAttentionGroupKey, ReadonlyArray<GlobalAttentionItemProjection>>>, totals: Partial<Record<GlobalAttentionGroupKey, number>> = {}): GlobalAttentionProjection {
   const built = GLOBAL_ATTENTION_GROUP_KEYS.map((key) => ({ key, items: groups[key] ?? [], total: totals[key] ?? (groups[key] ?? []).length }));
-  return { groups: built, actionableCount: built[0]!.total + built[1]!.total, running: false };
+  return { groups: built, actionableCount: built[0]!.total + built[1]!.total, running: false, processing: { state: 'local' } };
 }
 
 describe('the entry and the screen', () => {
@@ -299,7 +301,7 @@ describe('each item', () => {
     expect(MANUSCRIPT_SCREEN).toContain(`button('${GLOBAL_ATTENTION_NEXT_STEP_LABELS['return-to-recovery']}'`);
     expect(RENDERER).toContain(`button('${GLOBAL_ATTENTION_NEXT_STEP_LABELS['retry-abandon-cleanup']}'`);
     expect(RENDERER).toContain(`${GLOBAL_ATTENTION_NEXT_STEP_LABELS['await-local-check']}；不要重复导入`);
-    expect(RENDERER).toContain(`\`${GLOBAL_ATTENTION_NEXT_STEP_PREFIX}\${`);
+    expect(BASELINE_ANALYSIS_CARD).toContain(`\`${GLOBAL_ATTENTION_NEXT_STEP_PREFIX}\${`);
     expect(globalAttentionNextStepLine('reconfirm-plan')).toBe('安全的下一步：重新确认计划');
     // No step grants anything, and none says 授权.
     for (const label of Object.values(GLOBAL_ATTENTION_NEXT_STEP_LABELS)) expect(label).not.toMatch(/授权|批准|待审批/u);

@@ -151,6 +151,18 @@ describe('provider documents and the generator (ADR 0073 §2)', () => {
     expect(JSON.stringify(documentOf(freshInput(), 'google-gemini').openQuestions)).toContain('Interactions-style API');
   });
 
+  it('keeps every model-table choice inside the families and readable rows the policy baseline admits (ADR 0095 §6)', () => {
+    type Bindings = { data: { ordinaryProduction: Record<'main' | 'fast', Array<{ route: string; model: string }>> } };
+    const add = (role: 'main' | 'fast', route: string, model: string) => (input: ReturnType<typeof freshInput>) => {
+      (input as unknown as { runtimeBindings: Bindings }).runtimeBindings.data.ordinaryProduction[role].push({ route, model });
+    };
+    // Responses is admitted for the Fast role alone; a readable Responses row for Main is a new family there.
+    expect(refusalAfter(add('main', 'openai-platform', 'gpt-5.6-luna'))).toContain('PROVIDER_CONFIGURATION/runtime-binding-protocol');
+    // Messages and Gemini rows read no text answer on evidence yet, so no role can choose one (Issue #1180).
+    expect(refusalAfter(add('fast', 'anthropic-claude', 'claude-opus-5'))).toContain('PROVIDER_CONFIGURATION/runtime-binding-unreadable');
+    expect(refusalAfter(add('fast', 'google-gemini', 'gemini-3.8-flash'))).toContain('PROVIDER_CONFIGURATION/runtime-binding-unreadable');
+  });
+
   it('refuses a document that breaks a rule, naming the rule and the place', () => {
     const cases: Array<[string, (input: ReturnType<typeof freshInput>) => void]> = [
       ['schema', (input) => { route(documentOf(input, 'minimax')).endpoint = 'http://api.minimax.cn/v1/chat/completions'; }],
@@ -180,7 +192,8 @@ describe('provider documents and the generator (ADR 0073 §2)', () => {
       ['answer-channel', (input) => { route(documentOf(input, 'minimax')).models[0].capabilities = { answerChannel: { value: 'content-text-blocks', evidence: 'minimax-platform-docs' } }; }],
       ['reasoning-channel', (input) => { route(documentOf(input, 'minimax')).models[0].capabilities = { reasoningChannel: { value: 'output-reasoning-items', evidence: 'minimax-platform-docs' } }; }],
       ['shape-capability', (input) => { route(documentOf(input, 'anthropic-claude')).models[0].capabilities = { structuredOutput: { value: 'json-object', evidence: 'claude-platform-docs' } }; }],
-      ['shape-capability', (input) => { route(documentOf(input, 'openai-platform')).models[0].capabilities = { toolCalling: { value: 'function', evidence: 'openai-api-docs' } }; }],
+      // Every family implements function tools since Issue #1180; a stream is still one family's alone.
+      ['shape-capability', (input) => { route(documentOf(input, 'openai-platform')).models[0].capabilities = { streaming: { value: 'messages-sse', evidence: 'openai-api-docs' } }; }],
       ['context-evidence', (input) => { route(documentOf(input, 'minimax')).models[1].context = { tokens: 200000, evidence: 'unverified' }; }],
       // The evidence records themselves are schema-checked (the object form of `additionalProperties`).
       ['schema', (input) => { (documentOf(input, 'minimax').evidence as any)['minimax-platform-docs'].readOn = 'yesterday'; }],
@@ -583,6 +596,10 @@ describe('the generated configuration (ADR 0073 §3, §4)', () => {
 });
 
 describe('credential header forms (ADR 0073 §2)', () => {
+  const READABLE_CHANNEL = {
+    'openai-chat-completions': 'message-content-string', 'openai-responses': 'output-message-text',
+    'anthropic-messages': 'content-text-blocks', 'google-generate-content': 'candidate-parts-text',
+  } as const;
   const codes = { QUOTA_EXCEEDED_CODE, INVALID_CREDENTIAL_CODE, CONTEXT_WINDOW_EXCEEDED_CODE };
   const SECRET = 'placeholder-not-a-credential';
 
@@ -597,7 +614,10 @@ describe('credential header forms (ADR 0073 §2)', () => {
 
   async function transmitOnce(routeId: RemoteExecutionRoute, modelId: string): Promise<{ url: string; headers: Record<string, string>; body: string }> {
     const profile: ProviderRouteProfile = PROVIDER_ROUTE_PROFILES[routeId];
-    const model = modelProfileFor(routeId, modelId)!;
+    // Most of these rows are untested for a text answer and preflight refuses them before transport (Issue #1180); the
+    // header form is the route's, so it is read through the same row declared readable.
+    const declared = modelProfileFor(routeId, modelId)!;
+    const model: ProviderModelProfile = { ...declared, capabilities: { ...declared.capabilities, answerChannel: READABLE_CHANNEL[declared.capabilities.requestShape] } };
     const slotBinding: CredentialSlotBinding = { bindingDigest: 'a'.repeat(64), modelRole: 'Main Editorial Role', slot: profile.credentialSlot, credentialReference: randomUUID() };
     let ticket: { decision: 'transmit-remote'; bindingDigest: string; payloadDigest: string } | null = { decision: 'transmit-remote', bindingDigest: 'a'.repeat(64), payloadDigest: 'b'.repeat(64) };
     const calls: Array<{ url: string; headers: Record<string, string>; body: string }> = [];
@@ -715,6 +735,25 @@ describe('search backend documents (Issue #883; ADR 0073 §4)', () => {
     expect(withoutSearch['docs/development/provider-support.md']).not.toContain('## Search backends');
     // The search documents live in their own subdirectory, so nothing that reads `config/providers/*.json` (J-12) meets one.
     expect(readdirSync(join(ROOT, 'config', 'providers')).filter((name) => name.startsWith('search-') && name.endsWith('.json'))).toEqual([]);
+  });
+
+  it('validates the one closed candidate namespace without moving a generated byte (Issue #1055)', () => {
+    const input = searchInput();
+    const without = searchInput();
+    delete backend(without, 'search-deepseek').candidate;
+    expect(generator.renderProviderConfiguration(generator.resolveProviderConfiguration(input)))
+      .toEqual(generator.renderProviderConfiguration(generator.resolveProviderConfiguration(without)));
+    const candidate = (input: SearchInput): any => backend(input, 'search-deepseek').candidate;
+    expect(searchRefusalAfter((input) => { candidate(input).extra = true; })).toContain('PROVIDER_CONFIGURATION/search-backend-schema');
+    expect(searchRefusalAfter((input) => { candidate(input).measurement = 'measured'; })).toContain('PROVIDER_CONFIGURATION/search-backend-schema');
+    expect(searchRefusalAfter((input) => { candidate(input).search.probeArguments.need_content = true; })).toContain('PROVIDER_CONFIGURATION/search-backend-schema');
+    expect(searchRefusalAfter((input) => { candidate(input).search.endpoint = 'https://api.example.com/v1/tools/search'; })).toContain('PROVIDER_CONFIGURATION/search-candidate-endpoint');
+    expect(searchRefusalAfter((input) => { candidate(input).fetch.endpoint = candidate(input).search.endpoint; })).toContain('PROVIDER_CONFIGURATION/search-candidate-endpoint');
+    expect(searchRefusalAfter((input) => { candidate(input).search.endpoint = backend(input, 'search-deepseek').request.endpoint; })).toContain('PROVIDER_CONFIGURATION/search-candidate-endpoint');
+    expect(searchRefusalAfter((input) => { candidate(input).evidence.spare = { kind: 'unverified' }; })).toContain('PROVIDER_CONFIGURATION/evidence-uncited');
+    expect(searchRefusalAfter((input) => { candidate(input).evidence['deepseek-search-api'] = { kind: 'unverified' }; })).toContain('PROVIDER_CONFIGURATION/search-backend-unverified');
+    expect(searchRefusalAfter((input) => { candidate(input).price.evidence = 'deepseek-pricing'; })).toContain('PROVIDER_CONFIGURATION/evidence-unknown');
+    expect(searchRefusalAfter((input) => { backend(input, 'search-brave').candidate = structuredClone(candidate(input)); })).toContain('PROVIDER_CONFIGURATION/search-candidate-endpoint');
   });
 
   it('refuses a search backend document that breaks a rule, naming the rule and the place', () => {

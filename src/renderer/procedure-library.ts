@@ -2,6 +2,7 @@ import { PROCEDURE_STAGE_LABELS, procedureStageUsesModel } from '../shared/proto
 import type { PreinstalledProcedureProjection, EditableProcedureProjection, ProcedureDefinitionPin, SaveProcedureDefinitionInput } from '../shared/protocol/procedures.js';
 import type { RendererApi, BookSummaryProjection, BookSummaryCursor } from '../shared/protocol.js';
 import { PROCEDURE_PREDECESSOR_NOTE, PROCEDURE_STATE_LABELS, procedureLine, procedureStagesLine } from './knowledge-base-labels.js';
+import { mountProcedureRecommendation, ProcedureRecommendationSelection } from './procedure-choice.js';
 
 /** The pre-installed library is read-only in F-26a; Book-dependent availability stays on the ordinary task sheet. */
 export function renderProcedureLibrary(procedures: readonly PreinstalledProcedureProjection[]): HTMLElement {
@@ -53,7 +54,7 @@ export function renderProcedureLibrary(procedures: readonly PreinstalledProcedur
 
 /** The form owns only its unsaved values; the service owns versions and selections. */
 export async function mountEditableProcedureLibrary(root: HTMLElement, api: RendererApi,
-  openRun: (book: BookSummaryProjection, kind: string) => Promise<void>, errorMessage: (error: unknown, fallback: string) => string): Promise<void> {
+  openRun: (book: BookSummaryProjection, kind: string, procedure: ProcedureDefinitionPin) => Promise<void>, errorMessage: (error: unknown, fallback: string) => string): Promise<void> {
   const node = <K extends keyof HTMLElementTagNameMap>(tag: K, text?: string): HTMLElementTagNameMap[K] => {
     const result = document.createElement(tag); if (text !== undefined) result.textContent = text; return result;
   };
@@ -80,7 +81,8 @@ export async function mountEditableProcedureLibrary(root: HTMLElement, api: Rend
     form.append(node('h4', captureRunId === undefined ? create ? '新建工序' : '改写为新版本' : '从本次运行捕获'),
       label('名称', title), label('编辑任务说明', instruction),
       node('p', '工序沿用所选任务的执行器。阶段按输入依赖顺序运行；不兼容的顺序不能保存。说明和豁免规则合计最多 1200 字，不能覆盖任务契约。'),
-      node('p', '模型阶段的预算份额在运行设置了总预算时生效；0 表示沿用总预算约束。固定本地归并和报告阶段不解释文字豁免，模型预算为零。'));
+      node('p', '模型阶段的预算份额在运行设置了总预算时生效；0 表示沿用总预算约束。固定本地归并和报告阶段不解释文字豁免，模型预算为零。'),
+      ...(entry.document.members === undefined ? [] : [node('p', '成员的模型阶段全部勾选「空闲时处理」时，这个成员在其他成员之后、AI7 空闲时才开始，仍属于同一次审阅的授权。')]));
     let stages = structuredClone(entry.document.stages);
     const stageList = node('ol');
     const renderStages = (): void => {
@@ -97,6 +99,16 @@ export async function mountEditableProcedureLibrary(root: HTMLElement, api: Rend
         };
         row.append(node('strong', PROCEDURE_STAGE_LABELS[stage.stageType]), label('豁免规则（每行一条）', rules), label('预算份额 %', share),
           action('上移', () => move(-1)), action('下移', () => move(1)));
+        // 空闲时处理 (Issue #1200): a composite's model-member stage only; a member runs idle once all its model stages are marked.
+        if (entry.document.members !== undefined && !rules.disabled) {
+          const idle = node('input'); idle.type = 'checkbox'; idle.checked = stage.deferred === true; idle.dataset['procedureField'] = 'deferred';
+          idle.addEventListener('change', () => { stages = stages.map((item, i) => {
+            if (i !== index) return item;
+            const { deferred: _deferred, ...rest } = item;
+            return idle.checked ? { ...rest, deferred: true as const } : rest;
+          }); });
+          row.append(label('空闲时处理', idle));
+        }
         stageList.append(row);
       });
     };
@@ -112,20 +124,48 @@ export async function mountEditableProcedureLibrary(root: HTMLElement, api: Rend
     });
     formSlot.replaceChildren(form); title.focus();
   };
-  const chooseBook = async (entry: EditableProcedureProjection, pin: ProcedureDefinitionPin): Promise<void> => {
-    const chooser = node('div'), select = node('select'); select.dataset['procedureField'] = 'book';
+  const readBooks = async (): Promise<BookSummaryProjection[]> => {
     const books: BookSummaryProjection[] = [];
     let after: BookSummaryCursor | null = null;
     do { const page = await api.listBooks({ after }); books.push(...page.items); after = page.nextCursor; } while (after !== null);
-    for (const book of books.filter((book) => book.manuscriptState === 'populated')) select.append(new Option(book.title, book.bookId));
-    chooser.append(label('选择图书', select), node('p', '为此书的这类任务选择精确工序版本；打开任务后仍需准备和开始。'), action('打开任务', async () => {
+    return books.filter((book) => book.manuscriptState === 'populated');
+  };
+  const chooseBook = async (entry: EditableProcedureProjection, pin: ProcedureDefinitionPin, bookId?: string): Promise<void> => {
+    const chooser = node('div'), select = node('select'); select.dataset['procedureField'] = 'book';
+    const books = await readBooks();
+    for (const book of books) select.append(new Option(book.title, book.bookId));
+    if (bookId !== undefined) select.value = bookId;
+    // A composite (Issue #1173) is chosen for each of its members' kinds and runs as one 审阅 of the chosen Book.
+    chooser.append(label('选择图书', select), node('p', entry.document.members === undefined ? '为此书的这类任务选择精确工序版本；打开任务后仍需准备和开始。'
+      : '为此书选择这个组合工序版本：打开审阅后按它的成员依次准备；确定性检查选项仍由你明确选择，查看计划后再开始。'), action('打开任务', async () => {
       const book = books.find((item) => item.bookId === select.value); if (book === undefined) return;
-      await api.procedureLibrary({ action: 'select', bookId: book.bookId, procedure: pin }); await openRun(book, entry.executorKind);
+      await api.procedureLibrary({ action: 'select', bookId: book.bookId, procedure: pin }); await openRun(book, entry.executorKind, pin);
     }));
     formSlot.replaceChildren(chooser);
   };
+  // 工序推荐 (ADR 0090 §1; Issue #1173): for one chosen Book, over this library's definitions and the house's Captured Procedures.
+  const recommendationBook = node('select'); recommendationBook.dataset['procedureField'] = 'recommendation-book';
+  const recommendationState = new ProcedureRecommendationSelection();
+  let current: EditableProcedureProjection[] = [];
+  const recommendationSlot = node('section'); recommendationSlot.dataset['procedureLibraryRecommendation'] = '';
+  const recommendation = mountProcedureRecommendation({
+    root: recommendationSlot, state: recommendationState,
+    api: { recommendProcedures: async (intent) => (await api.procedureLibrary({ action: 'recommend', input: { ...intent, bookId: recommendationBook.value } })).recommendation! },
+    input: () => ({ goal: '在所选图书运行一项审阅工序', taskKind: 'review-run', scope: 'whole', categoryIds: [] }),
+    choose: async (candidate) => {
+      const entry = current.find((item) => item.procedureId === candidate.procedureId);
+      const pin = entry?.versions.find((version) => version.version === candidate.version);
+      // A Captured Procedure is run from its own card in 可复用工序; here only the library's versions open 运行此工序….
+      if (entry === undefined || pin === undefined) throw new Error('PROCEDURE_RECOMMENDATION_NOT_IN_LIBRARY');
+      await chooseBook(entry, pin, recommendationBook.value);
+    },
+    edit: () => recommendationBook.focus(),
+    browse: () => body.querySelector<HTMLElement>('.knowledge-procedure-list button')?.focus(),
+  });
+  recommendationBook.addEventListener('change', () => recommendation.refreshIntent());
   const load = async (): Promise<void> => {
     const projection = await api.procedureLibrary({ action: 'inspect' });
+    current = [...projection.procedures];
     body.replaceChildren();
     const template = node('select'); template.dataset['procedureField'] = 'template';
     for (const entry of projection.procedures) template.append(new Option(entry.document.title, entry.procedureId));
@@ -158,6 +198,13 @@ export async function mountEditableProcedureLibrary(root: HTMLElement, api: Rend
       list.append(card);
     }
     const predecessor = node('p', PROCEDURE_PREDECESSOR_NOTE); predecessor.className = 'field-note procedure-predecessor'; body.append(predecessor);
+    const books = await readBooks();
+    if (books.length > 0) {
+      const chosen = recommendationBook.value;
+      recommendationBook.replaceChildren(...books.map((book) => new Option(book.title, book.bookId)));
+      if (books.some((book) => book.bookId === chosen)) recommendationBook.value = chosen;
+      body.append(label('工序推荐的图书', recommendationBook), recommendationSlot);
+    }
     if (projection.completedRuns.length > 0) {
       const runs = node('select'); runs.dataset['procedureField'] = 'capture-run';
       for (const run of projection.completedRuns) runs.append(new Option(`${run.bookTitle} · ${run.title}`, run.runId));

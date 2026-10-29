@@ -70,10 +70,11 @@ describe('pre-installed procedures v1', () => {
     const configuration = canonicalJson(BUILTIN_REVIEW_CATEGORY_CONFIGURATION);
     const digest = reviewCategoryConfigurationDigest();
     const definitions = preinstalledProcedureDefinitions();
-    expect(definitions).toHaveLength(16);
-    expect(new Set(definitions.map((definition) => `${definition.id}@${definition.version}`)).size).toBe(16);
+    expect(definitions).toHaveLength(17);
+    expect(new Set(definitions.map((definition) => `${definition.id}@${definition.version}`)).size).toBe(17);
     expect(preinstalledProcedureDefinitions()).toEqual(definitions);
-    expect(definitions.every((definition) => definition.editorInstruction === '' && definition.stages.length > 0)).toBe(true);
+    // Only the composite 全文审校 (#1173) carries AI7's own instruction and exemption template; each kind's version carries none.
+    expect(definitions.filter((definition) => definition.members === undefined).every((definition) => definition.editorInstruction === '' && definition.stages.length > 0)).toBe(true);
     expect(baselineProcedureDefinition(baselineAnalysisKindDefinition('retained-v1'))).toEqual(baselineProcedureDefinition());
     expect(canonicalJson(BUILTIN_REVIEW_CATEGORY_CONFIGURATION)).toBe(configuration);
     expect(reviewCategoryConfigurationDigest()).toBe(digest);
@@ -96,14 +97,14 @@ describe('pre-installed procedures v1', () => {
     });
   });
 
-  it('lists sixteen enabled versions with their stages and uses and labels the review-only predecessor', () => {
+  it('lists seventeen enabled versions with their stages and uses and labels the review-only predecessor', () => {
     const restore = installMiniDom();
     try {
       const library = renderProcedureLibrary(preinstalledProcedureDefinitions().map((definition) => ({
         procedureId: definition.id, version: definition.version, digest: 'a'.repeat(64), title: definition.title,
         state: 'enabled', uses: 2, stages: definition.stages.map((stage) => ({ stageType: stage.stageType, label: PROCEDURE_STAGE_LABELS[stage.stageType] })),
       })));
-      expect(library.querySelectorAll('li')).toHaveLength(16);
+      expect(library.querySelectorAll('li')).toHaveLength(17);
       expect(library.textContent).toContain('已使用 2 次');
       expect(library.textContent).toContain('跨单元归并与跨章一致性');
       expect(library.textContent).toContain('审阅专用前身');

@@ -21,7 +21,7 @@ export const UNIT_OVERLAP_BLOCKS = 1;
 export interface ManifestBlockInput {
   readonly blockId: string;
   readonly position: number;
-  readonly kind: 'title' | 'heading' | 'paragraph';
+  readonly kind: 'title' | 'heading' | 'paragraph' | 'note';
   readonly level: number | null;
   readonly text: string;
   readonly digest: string;
@@ -50,7 +50,7 @@ function requireBlocks(blocks: ReadonlyArray<ManifestBlockInput>): void {
     requireAnalysis(
       block.position === index + 1 && BLOCK_ID_PATTERN.test(block.blockId) && DIGEST_PATTERN.test(block.digest) &&
         Number.isSafeInteger(block.graphemes) && block.graphemes >= 0 && block.text.isWellFormed() &&
-        (block.kind === 'title' || block.kind === 'heading' || block.kind === 'paragraph') &&
+        (block.kind === 'title' || block.kind === 'heading' || block.kind === 'paragraph' || block.kind === 'note') &&
         (block.level === null || (Number.isSafeInteger(block.level) && block.level >= 1 && block.level <= 6)),
       'COVERAGE_MANIFEST_INVALID',
       '任务输入修订版内容块序列无效。',
@@ -64,7 +64,8 @@ function sectionsOf(blocks: ReadonlyArray<ManifestBlockInput>): Section[] {
   const sections: Section[] = [];
   let current: Section | null = null;
   for (const block of blocks) {
-    if (block.kind === 'title' || block.kind === 'heading' || current === null) {
+    // The notes (Issue #1204), which follow every body block, are a section of their own: no chapter reads them as its own.
+    if (block.kind === 'title' || block.kind === 'heading' || current === null || (block.kind === 'note' && current.blocks.at(-1)!.kind !== 'note')) {
       const structural = block.kind === 'title' || block.kind === 'heading';
       current = { ordinal: sections.length + 1, heading: structural ? block : null, blocks: [block] };
       sections.push(current);

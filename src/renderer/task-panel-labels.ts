@@ -245,7 +245,7 @@ export function reviewResultFindingLine(finding: Pick<ReviewFindingProjection, '
 /** Where a finding stands: its chapter, or the manuscript when it falls in none. */
 export function reviewResultPlaceLine(finding: Pick<ReviewFindingProjection, 'chapterTitle' | 'blockPosition'>): string {
   if (finding.chapterTitle !== null) return finding.chapterTitle;
-  return finding.blockPosition === null ? '已不在当前稿件中' : `第 ${finding.blockPosition} 个内容块`;
+  return finding.blockPosition === null ? '已不在当前稿件中' : `第 ${finding.blockPosition} 段`;
 }
 
 export function reviewResultMoreLine(shown: number, total: number): string | null {
@@ -259,7 +259,7 @@ export const REVIEW_RESULT_NONE = '这次审阅没有发现。';
 export const RETURN_CHIP_PLACE_CHARACTERS = 16;
 /** The place the chip names: the heading the editor was reading under, or the paragraph's number when there is none. */
 export function returnChipPlace(heading: string | null, position: number): string {
-  if (heading === null || heading.trim().length === 0) return `第 ${position} 个内容块`;
+  if (heading === null || heading.trim().length === 0) return `第 ${position} 段`;
   const words = [...heading.trim()];
   return words.length > RETURN_CHIP_PLACE_CHARACTERS ? `${words.slice(0, RETURN_CHIP_PLACE_CHARACTERS).join('')}…` : words.join('');
 }
@@ -315,8 +315,10 @@ export function taskComposerRevisionLine(revisionLabel: string, journalSequence:
 export const TASK_COMPOSER_NO_RANGES = '没有带所选文字。';
 /** Words pinned while the journal holds edits no revision holds yet (TASK-002, 031). */
 export const TASK_COMPOSER_PENDING_LABEL = '待保存修订版';
-export function taskComposerRangeLine(position: number | null, graphemes: number, revisionLabel: string): string {
-  return `${position === null ? '段落已不在当前稿件中' : `第 ${position} 个内容块`} · ${graphemes} 字 · 修订版 ${revisionLabel}`;
+/** Where a range lies: one block, or a span's contiguous blocks (Issue #1176), counted without the breaks between them. */
+export function taskComposerRangeLine(position: number | null, graphemes: number, revisionLabel: string, paragraphs = 1): string {
+  const place = position === null ? '段落已不在当前稿件中' : paragraphs > 1 ? `第 ${position}–${position + paragraphs - 1} 段` : `第 ${position} 段`;
+  return `${place} · ${graphemes - (paragraphs - 1)} 字 · 修订版 ${revisionLabel}`;
 }
 export const TASK_COMPOSER_RANGE_REMOVE = '移除';
 /** 再选一段加入 lives here, never in the selection menu (TASK-046). */

@@ -34,7 +34,7 @@ export function selectionTaskContextLine(context: {
   readonly graphemes: number;
   readonly position: number;
 }): string {
-  return `《${context.bookTitle}》 · 修订版 ${context.revisionLabel} · 修订日志序号 ${context.journalSequence} · 已选 ${context.graphemes} 字 · 第 ${context.position} 个内容块`;
+  return `《${context.bookTitle}》 · 修订版 ${context.revisionLabel} · 修订日志序号 ${context.journalSequence} · 已选 ${context.graphemes} 字 · 第 ${context.position} 段`;
 }
 
 export const SELECTION_TASK_REANALYZE = '重新分析这段';
@@ -200,6 +200,9 @@ export function selectionTaskChoices(
   }
   return { choices, refusal: choices.length > 0 ? null : selectionTaskNoneLine(reasons) };
 }
+
+/** A house 工序 entry on words across paragraphs (Issue #1176): it prepares on one paragraph, so the span goes to the composer. */
+export const SELECTION_SPAN_PROCEDURE_REASON = '按工序准备一次只就一个段落；跨段的文字请用「就这段发起任务…」。';
 
 /** 再选一段加入 in the Context-bound Task Composer (Issue #423, slice 7a; TASK-046): it takes the words selected now, or says so. */
 export const SELECTION_TASK_PICK_RANGE = '先在稿件里选中要加入的文字，再按「再选一段加入」。';

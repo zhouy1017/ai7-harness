@@ -3146,10 +3146,11 @@ async function main() {
     await waitFor(renderer, `document.querySelector('section.review-run')`, 'book-findings-review-ready');
 
     at('review-report');
-    // The versioned 审阅报告 with its four parts, and 导出… of the version on show (V2-UX-REV-009; Issue #500).
+    // The versioned 审阅报告 with its parts, and 导出… of the version on show (V2-UX-REV-009; Issue #500). Synchronized delta with
+    // Issue #1174 (ADR 0095 §5): a /2 record adds 章节与类别统计 and 发现详单 between 必须处理的事项 and 各类别摘要.
     await reviewAction(renderer, '[data-review-action="generate-report"]', 'review-report-generate');
     await waitFor(renderer, `document.querySelector('section.review-report')?.dataset.reportVersion==='1'`, 'review-report-version');
-    await assertRenderer(renderer, `(() => { const report=document.querySelector('section.review-report'); const parts=Array.from(report.querySelectorAll('section.review-report-part[data-report-part] > h6')).map((heading)=>heading.textContent); const exporter=report.querySelector('[data-review-action="export"]'); return JSON.stringify(parts)===JSON.stringify(['概览表','必须处理的事项','各类别摘要','附录']) && exporter instanceof HTMLButtonElement && !exporter.disabled && exporter.textContent==='导出…' && exporter.dataset.reportVersion==='1'; })()`, 'review-report-parts');
+    await assertRenderer(renderer, `(() => { const report=document.querySelector('section.review-report'); const parts=Array.from(report.querySelectorAll('section.review-report-part[data-report-part] > h6')).map((heading)=>heading.textContent); const exporter=report.querySelector('[data-review-action="export"]'); return JSON.stringify(parts)===JSON.stringify(['概览表','必须处理的事项','章节与类别统计','发现详单','各类别摘要','附录']) && report.querySelector('table.review-report-statistics tbody tr:last-child th')?.textContent==='合计' && exporter instanceof HTMLButtonElement && !exporter.disabled && exporter.textContent==='导出…' && exporter.dataset.reportVersion==='1'; })()`, 'review-report-parts');
 
     at('review-report-export');
     // Issue #500 (S64b part 2; ADR 0079 §3.4): 导出… opens ④ 导出's own card in the report — the report's own review of
@@ -3169,7 +3170,7 @@ async function main() {
       const rows=Array.from(card.querySelectorAll('ol.export-fidelity-list > li.export-fidelity-row')).map((row)=>row.dataset.exportFidelity+':'+row.dataset.exportStatus);
       const fidelity=card.querySelector('section.export-fidelity');
       return card.querySelector('h4')?.textContent===${JSON.stringify(`导出 · ${reportLabel}`)} && card.querySelector('fieldset.export-options')===null &&
-        ['report-overview:preserved','report-summaries:preserved','report-appendix:preserved'].every((row)=>rows.includes(row)) && rows.every((row)=>row.endsWith(':preserved')) &&
+        ['report-overview:preserved','report-statistics:preserved','report-findings:preserved','report-summaries:preserved','report-appendix:preserved'].every((row)=>rows.includes(row)) && rows.every((row)=>row.endsWith(':preserved')) &&
         fidelity?.dataset.exportDegraded==='false' && (fidelity.querySelector('.export-restoration-line')?.textContent ?? '').startsWith('审阅报告按第 1 版的记录写出') &&
         JSON.stringify(Array.from(card.querySelectorAll('input[name="export-format"]')).map((radio)=>radio.value+':'+radio.disabled))==='["docx:false","pdf:false","markdown:false"]';
     })()`, 'report-export-review-is-the-reports');
@@ -3183,13 +3184,19 @@ async function main() {
     await waitFor(renderer, `${reportCard}?.dataset.exportPhase==='done' && ${reportCard}.querySelector('.export-receipt')?.dataset.exportOutcome==='created' && ${reportCard}.querySelector('.export-outcome-detail')?.textContent===${JSON.stringify(`已新建「${REPORT_EXPORT_FILE}」。`)}`, 'report-export-written', 60_000);
     const reportMarkdown = await readFile(reportExportPath, 'utf8');
     const reportBlocks = reportMarkdown.slice(0, -1).split('\n\n');
-    const overviewRows = await renderer.evaluate(`document.querySelectorAll('section.review-report table.review-report-table tbody tr').length`);
+    const overviewRows = await renderer.evaluate(`document.querySelectorAll('section.review-report table.review-report-table:not(.review-report-statistics) tbody tr').length`);
+    const statisticsRows = await renderer.evaluate(`document.querySelectorAll('section.review-report table.review-report-statistics tbody tr').length`);
+    const listedFindings = await renderer.evaluate(`document.querySelectorAll('section.review-report ol.review-report-findings > li').length`);
     const table = reportBlocks[reportBlocks.indexOf('## 概览表') + 1] ?? '';
+    const statistics = reportBlocks[reportBlocks.indexOf('## 章节与类别统计') + 1] ?? '';
+    const findingHeadings = reportBlocks.slice(reportBlocks.indexOf('## 发现详单') + 1, reportBlocks.indexOf('## 各类别摘要')).filter((block) => block.startsWith('### '));
     requireJourney(reportMarkdown.endsWith('\n') && reportBlocks[0] === `# ${J04_BOOK_TITLE} · 审阅报告` && (reportBlocks[1] ?? '').startsWith(`${runHeading} · `) &&
       (reportBlocks[1] ?? '').includes(' · 报告第 1 版 · 生成于 ') &&
-      JSON.stringify(reportBlocks.filter((block) => block.startsWith('## '))) === JSON.stringify(['## 概览表', '## 必须处理的事项', '## 各类别摘要', '## 附录']) &&
-      table.startsWith('| 类别 | 状态 | 发现 |\n| --- | --- | --- |\n') && table.split('\n').length === 2 + overviewRows && overviewRows > 0,
-    'report-export-file-reads-as-the-report', { blocks: reportBlocks.length, headings: reportBlocks.filter((block) => block.startsWith('#')).length, rows: overviewRows });
+      JSON.stringify(reportBlocks.filter((block) => block.startsWith('## '))) === JSON.stringify(['## 概览表', '## 必须处理的事项', '## 章节与类别统计', '## 发现详单', '## 各类别摘要', '## 附录']) &&
+      table.startsWith('| 类别 | 状态 | 发现 |\n| --- | --- | --- |\n') && table.split('\n').length === 2 + overviewRows && overviewRows > 0 &&
+      statistics.startsWith('| 章节 | ') && statistics.split('\n').length === 2 + statisticsRows && statistics.split('\n').at(-1).startsWith('| 合计 | ') &&
+      findingHeadings.length === listedFindings && listedFindings > 0 && findingHeadings.every((block, index) => block.startsWith(`### 第 ${index + 1} 条 · `)),
+    'report-export-file-reads-as-the-report', { blocks: reportBlocks.length, headings: reportBlocks.filter((block) => block.startsWith('#')).length, rows: overviewRows, statisticsRows, listedFindings });
     requireJourney(JSON.stringify(await readdir(exportsRoot)) === JSON.stringify([REPORT_EXPORT_FILE]), 'report-export-folder-holds-one-file');
     await reviewAction(renderer, 'section.review-report .review-report-export-slot [data-export-action="close"]', 'report-export-close');
     await waitFor(renderer, `${reportCard}===null && document.activeElement===document.querySelector('section.review-report [data-review-action="export"]')`, 'report-export-closed-focus-returns', 10_000);
@@ -3281,11 +3288,13 @@ async function main() {
     await openReviewDestination(renderer, 'overlap-review-destination');
     await reviewAction(renderer, '[data-review-action="new-review"]', 'overlap-new-review');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'overlap-sheet');
-    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); sheet.querySelector('input[name="review-category"][value="typos-and-usage"]').click(); sheet.querySelector('input[name="review-scope"][value="whole"]').click(); sheet.querySelector('[data-review-action="prepare"]').click(); return true; })()`, 'overlap-prepare');
-    await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared'`, 'overlap-prepared', 120_000);
+    // 开始审阅 (ADR 0096 §3, #1177): one action prepares the plan and, while it is ready, records its Run Authorization; the drawer
+    // shows the started Run with its plan one disclosure away, and nothing waits on the drawer's 开始任务.
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); sheet.querySelector('input[name="review-category"][value="typos-and-usage"]').click(); sheet.querySelector('input[name="review-scope"][value="whole"]').click(); const start=sheet.querySelector('[data-review-action="start"]'); if(!(start instanceof HTMLButtonElement)||start.disabled||start.textContent!=='开始审阅'||!start.classList.contains('primary'))return false; start.click(); return true; })()`, 'overlap-prepare');
+    await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open!==true && ['running','settled'].includes(document.querySelector('.review-workspace-card')?.dataset.reviewState)`, 'overlap-prepared', 120_000);
     const overlapPrepared = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`)).run;
-    await drawerShowing(renderer, overlapPrepared.reviewRunId, 'ready', 'overlap-drawer');
-    await reviewAction(renderer, '#task-drawer [data-task-drawer-control="start"]', 'overlap-start');
+    requireJourney(overlapPrepared.authorization !== null, 'overlap-one-action-authorized', overlapPrepared.authorization);
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(overlapPrepared.reviewRunId)}`, 'overlap-drawer');
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, 'overlap-settled', 180_000);
     const overlapReviewed = await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`);
     const overlapFinding = overlapReviewed.run.findings[0];
@@ -3381,6 +3390,22 @@ async function main() {
       sourced?.states.factualVerification === '证据不足' && sourced.sourceCounts.checked === 0 && lens.run?.plannedLevel === 'standard' && lens.run.disclosure === null,
     'factual-lens-results', { total: lens?.total, counts: lens?.counts });
     await assertRenderer(renderer, `(() => { const row=document.querySelector('.fact-lens-row[data-fact-result-id=${JSON.stringify(sourced.resultId)}]'); return row?.dataset.outcome==='证据不足' && JSON.stringify(Array.from(row.querySelectorAll('[data-state-term]')).map((cell)=>cell.dataset.stateTerm))===JSON.stringify(['引文完整性','断言支持','事实核查']); })()`, 'factual-lens-columns');
+    at('factual-card-evidence');
+    // Synchronized delta with Issue #1174 (ADR 0095 §5): the finding's card lists the sources the Evidence Workspace holds for its
+    // result, none excluded here — each with its note and, for a web source, its address; a candidate is never quoted. Its mark
+    // card on the manuscript lists the same rows.
+    const attached = await renderer.evaluate(`window.ai7.inspectEvidenceWorkspace({ bookId: ${JSON.stringify(factualBook.bookId)}, resultId: ${JSON.stringify(sourced.resultId)}, sourcesAfter: null })`);
+    const expectedEvidence = JSON.stringify((attached?.sources ?? []).filter((source) => source.excluded !== true)
+      .map((source) => [`${source.checkLabel} · ${source.relation}`, source.sourceKind === 'web' ? source.sourceRef : null, false]));
+    requireJourney(attached?.sources?.length === 3 && UUID_PATTERN.test(sourced.markId ?? ''), 'factual-card-evidence-sources', attached?.sources);
+    const evidenceRows = (root) => `(() => { const list=${root}?.querySelector('.finding-evidence'); return list ? JSON.stringify(Array.from(list.querySelectorAll('li.finding-evidence-source')).map((item)=>[item.querySelector('.finding-evidence-note')?.textContent ?? '', item.querySelector('.finding-evidence-url')?.textContent ?? null, item.querySelector('.finding-evidence-snippet')!==null])) : null; })()`;
+    const factualCard = `document.querySelector('article.review-finding[data-finding-id="${sourced.reviewFindingId}"]')`;
+    await waitFor(renderer, `${evidenceRows(factualCard)}===${JSON.stringify(expectedEvidence)}`, 'factual-card-evidence', 30_000);
+    await reviewAction(renderer, `article.review-finding[data-finding-id="${sourced.reviewFindingId}"] [data-review-action="go-to-text"]`, 'factual-card-go-to-text');
+    await waitFor(renderer, `${evidenceRows(`document.querySelector('[data-mark-card="${sourced.markId}"]')`)}===${JSON.stringify(expectedEvidence)}`, 'factual-mark-card-evidence', 30_000);
+    await openReviewDestination(renderer, 'factual-card-evidence-back');
+    await waitFor(renderer, `document.querySelectorAll('section.review-group[data-review-category="factual-review"] .fact-lens .fact-lens-row').length > 0`, 'factual-card-evidence-lens', 60_000);
+    at('factual-evidence-workspace');
     await reviewAction(renderer, `.fact-lens-row[data-fact-result-id=${JSON.stringify(sourced.resultId)}] [data-fact-action="fact-workspace"]`, 'factual-workspace-open');
     const workspaceSelector = `.evidence-workspace[data-result-id=${JSON.stringify(sourced.resultId)}]`;
     await waitFor(renderer, `document.querySelectorAll('${workspaceSelector} .evidence-card').length===3`, 'factual-workspace-cards');

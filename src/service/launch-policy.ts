@@ -2,18 +2,20 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
-import { LAUNCH_SELECTABLE_SCOPES, isTrustedOperationalScope, type AdmittedLocalTools, type AdmittedPlatformTools, type AdmittedProviderRule, type DeveloperLiveCeiling, type OutboundDataCategoryId, type DevelopmentValidationIntent, type LaunchPolicyProjection, type TrustedLaunchForm, type TrustedOperationalScope } from '../shared/protocol.js';
+import { LAUNCH_SELECTABLE_SCOPES, MODEL_SERVICE_CHANNELS, MODEL_SERVICE_ROUTES, MODEL_SERVICE_ROUTE_BINDINGS, isTrustedOperationalScope, type ModelServiceChannelProjection, type ModelServiceModelDisposition, type ModelServiceRouteId, type AdmittedLocalTools, type AdmittedPlatformTools, type AdmittedProviderRule, type DeveloperLiveCeiling, type OutboundDataCategoryId, type DevelopmentValidationIntent, type LaunchPolicyProjection, type TrustedLaunchForm, type TrustedOperationalScope, type SearchConnectionTestPolicy } from '../shared/protocol.js';
 import { CREDENTIAL_REFERENCE_PATTERN, DEVELOPMENT_CREDENTIAL_REFERENCES } from '../shared/protected-secret-identity.js';
-import { CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES, CONFIGURED_RUNTIME_MODEL_TABLE } from '../shared/provider-configuration.generated.js';
+import { CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES, CONFIGURED_PROVIDER_LABELS, CONFIGURED_RUNTIME_MODEL_TABLE } from '../shared/provider-configuration.generated.js';
 import {
   PLATFORM_TOOL_BREAKER_END, PLATFORM_TOOL_ROUND_TRIP_BREAKER, WEBFETCH_MAX_BYTES, WEBFETCH_TIMEOUT_SECONDS, isConfiguredPlatformTools, readPlatformToolsRule,
 } from './provider/platform-tools.js';
 import {
   LOCAL_TOOL_BREAKER_END, LOCAL_TOOL_CALLS_PER_UNIT, LOCAL_TOOL_CANDIDATES_PER_CALL, LOCAL_TOOL_DECLARATION_NAMES, LOCAL_TOOL_ROUND_TRIP_BREAKER, readLocalToolsRule,
 } from './provider/local-tools.js';
-import { modelProfileFor } from './provider/model-profile.js';
+import { familyAdmissionRefusal, modelDisposition, providerPreflight, type ProviderPreflightRefusal } from './provider/family-dispositions.js';
+import { modelProfileFor, type ProviderModelProfile } from './provider/model-profile.js';
+import { GENERATED_MODEL_PROFILES, GENERATED_ROUTE_DISPOSITIONS } from './provider/provider-profiles.generated.js';
 import type { RemoteExecutionRoute } from './provider/egress-gate.js';
-import { SEARCH_BACKENDS } from './provider/search-backends.js';
+import { SEARCH_BACKENDS } from './provider/search-backends.js'; import { SEARCH_RESPONSE_MAX_BYTES, SEARCH_SERVICE_TIMEOUT_MS } from './provider/search-service.js';
 import { CURRENT_PRODUCTION_POLICY_SHA256, CURRENT_ACTIVE_SET_SHA256, DEVELOPMENT_CI_POLICY_SHA256, ORIGINAL_FIELDS_ACTIVE_SET_SHA256, ORIGINAL_FIELDS_POLICY_SHA256, LOCAL_FIXTURE_POLICY_SHA256, LOCAL_FIXTURE_MANIFEST_SHA256,
   selectedPolicyIdentityOf, localFixtureProfileOf } from '../shared/protocol.js';
 export { ORIGINAL_FIELDS_ACTIVE_SET_SHA256, ORIGINAL_FIELDS_POLICY_SHA256, LOCAL_FIXTURE_POLICY_SHA256, LOCAL_FIXTURE_MANIFEST_SHA256,
@@ -120,6 +122,48 @@ export function allowedProductionBindingOf(binding: ConfiguredProviderBinding | 
   const allowedBindings = role === 'fast-interaction' ? ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS : ORDINARY_PRODUCTION_ALLOWED_BINDINGS;
   return allowedBindings.find((allowed) => allowed.route === binding.route && allowed.endpoint === binding.endpoint &&
     allowed.model === binding.model && allowed.credentialSlot === binding.credentialSlot) ?? null;
+}
+
+/**
+ * One declared model's named refusal for an ordinary-production role (Issue #1180), or `null`: its protocol family must be
+ * one the policy baseline admits for the role — a new family needs a policy successor (ADR 0095 §6) — and its text answer
+ * `supported` on evidence. Every model-table row passes by construction; anything else is refused by name, never tried.
+ */
+export function productionBindingRefusal(model: ProviderModelProfile, role: 'main' | 'fast'): ProviderPreflightRefusal | null {
+  const families = new Set(CONFIGURED_RUNTIME_MODEL_TABLE.policyBaseline[role].map((binding) => GENERATED_ROUTE_DISPOSITIONS[binding.route].family));
+  return familyAdmissionRefusal(model, families) ?? providerPreflight(model, { stream: false, functionTools: false });
+}
+
+/**
+ * The one Settings flow's channels (ADR 0094 §1; Issue #1215): every model each channel's routes declare, with its named
+ * disposition for the Main and the Fast role. A model is `eligible` only where the selected policy admits its family, its text
+ * answer is supported on evidence, and the runtime model table holds its reviewed record for the role; a gateway catalogue
+ * alone establishes none of these. Derived from the generated declarations and the model table alone, so it changes no
+ * selection, grants no authority and reads no credential.
+ */
+export function modelServiceChannels(): ModelServiceChannelProjection[] {
+  const disposition = (model: ProviderModelProfile, role: 'main' | 'fast'): ModelServiceModelDisposition => {
+    const refused = productionBindingRefusal(model, role);
+    if (refused !== null) return refused.reason as Exclude<ModelServiceModelDisposition, 'eligible' | 'not-in-runtime-model-table'>;
+    return CONFIGURED_RUNTIME_MODEL_TABLE.ordinaryProduction[role].some((binding) => binding.route === model.route && binding.model === model.model)
+      ? 'eligible' : 'not-in-runtime-model-table';
+  };
+  return MODEL_SERVICE_CHANNELS.map((channelId) => {
+    const route = MODEL_SERVICE_ROUTES.includes(channelId as ModelServiceRouteId) ? channelId as ModelServiceRouteId : null;
+    return {
+      channelId,
+      channelLabel: route === null ? CONFIGURED_PROVIDER_LABELS[channelId] : MODEL_SERVICE_ROUTE_BINDINGS[route].providerLabel,
+      route,
+      models: GENERATED_MODEL_PROFILES.filter((model) => model.route === channelId || model.route.startsWith(`${channelId}-`)).map((model) => ({
+        modelId: model.model,
+        modelLabel: model.displayName,
+        family: model.capabilities.requestShape,
+        capabilities: { text: modelDisposition(model, 'text'), stream: modelDisposition(model, 'stream'), functionTools: modelDisposition(model, 'functionTools') },
+        main: disposition(model, 'main'),
+        fast: disposition(model, 'fast'),
+      })),
+    };
+  });
 }
 
 /**
@@ -1516,6 +1560,7 @@ export interface OrdinaryProductionPolicyReading {
   readonly execution?: LaunchPolicyProjection['providerProcessing']['execution'];
   readonly transport?: LaunchPolicyProjection['providerProcessing']['transport'];
   readonly research?: LaunchPolicyProjection['providerProcessing']['research'];
+  readonly searchConnectionTest?: SearchConnectionTestPolicy;
   readonly crossUnitReductionAllowed: boolean;
   readonly assuranceSamplingAllowed: boolean;
   readonly runReportReflectionAllowed: boolean;
@@ -1746,6 +1791,52 @@ function readWave21Eligibility(policy: Record<string, unknown>): Record<string, 
   return legacy;
 }
 
+/** Every term of the selected `searchConnectionTest` block (v28, unchanged through v31), in document order. */
+const SEARCH_CONNECTION_TEST_TERMS = ['ruleId', 'purpose', 'operationalScope', 'backendId', 'candidateId', 'endpoint', 'method', 'protocol', 'credentialSlot',
+  'headerForm', 'modelBindingRequired', 'explicitEditorActionRequired', 'source', 'allowedOutboundDataCategories', 'bookMaterialAllowed', 'arguments',
+  'argumentsCanonicalSha256', 'maximumRequests', 'timeoutMilliseconds', 'responseMaxBytes', 'redirectMode', 'automaticRetryAllowed', 'fallbackAllowed',
+  'taskOrDefaultSelectionAllowed', 'measuredStatusPromotionAllowed', 'durableResultStorageAllowed', 'responseBodiesRetained', 'resultsMaximum',
+  'titleMaximumCharacters', 'urlMaximumCharacters', 'argumentsCanonicalization', 'argumentKeysExact', 'argumentOverrideOrAdditionalFieldsAllowed',
+  'requestScope', 'timeoutAndResponseBoundsSource', 'credentialSource', 'frozenPinsBeforeSecretAccess', 'singleUseFinalGateTicketRequired',
+  'developmentCredentialMainModelBindingOtherSlotFallbackOrAmbientDefaultInherited', 'missingChangedStoppedOrStalePinsResult', 'resultLengthUnit',
+  'presentationBoundsEnforcedBeforeExposure', 'resultUrlSchemes', 'resultUrlUserinfoControlsOrPrivateTargetAllowed', 'linkOrRedirectFollowingAllowed',
+  'bodySnippetSummaryOrContentRetentionAllowed', 'providerBodyLoggingAllowed', 'bookOrSourceAcquisitionAllowed', 'resultProvesOnlyThisExactProbeResponse',
+  'addsDirectApiToOrdinaryResearchTool', 'qualifiesFetch', 'rejectedOperationalScopes', 'rejectionPrecedesTicketCredentialOrTransport', 'unsafeUrlResult'] as const;
+
+/**
+ * The standalone fixed-public Search connection test (#1055; v28 row 4.5), read whole: every term present and nothing else,
+ * every authority switch closed, the argument digest recomputed from the arguments, and the bounds this build's search
+ * constants. Its typed reading is the only thing the candidate probe consumer reads; a tampered block is a policy the launch
+ * cannot read.
+ */
+function readSearchConnectionTest(block: unknown): SearchConnectionTestPolicy {
+  requirePolicy(isRecord(block) && exactKeys(block, [...SEARCH_CONNECTION_TEST_TERMS]));
+  const args = block['arguments'];
+  requirePolicy(isRecord(args) && exactKeys(args, ['query', 'count', 'need_content']) && typeof args['query'] === 'string' && Number.isInteger(args['count']) && args['need_content'] === false &&
+    block['argumentsCanonicalSha256'] === digest(Buffer.from(canonicalJson(args))) && sameValue(block['argumentKeysExact'], ['count', 'need_content', 'query']));
+  requirePolicy(block['ruleId'] === 'ordinary-production-direct-search-connection-test' && block['purpose'] === 'fixed-public-search-connection-test' &&
+    block['operationalScope'] === 'ordinary-production' && block['method'] === 'POST' && block['protocol'] === 'deepseek-direct-search' &&
+    block['headerForm'] === 'authorization-bearer' && block['credentialSlot'] === block['backendId'] && block['maximumRequests'] === 1 &&
+    block['timeoutMilliseconds'] === SEARCH_SERVICE_TIMEOUT_MS && block['responseMaxBytes'] === SEARCH_RESPONSE_MAX_BYTES && block['redirectMode'] === 'manual' &&
+    sameValue(block['allowedOutboundDataCategories'], ['public-or-synthetic']) && sameValue(block['resultUrlSchemes'], ['http', 'https']) &&
+    sameValue(block['rejectedOperationalScopes'], ['development-ci', 'fixture-recording', 'developer-live']) &&
+    block['resultsMaximum'] === 3 && block['titleMaximumCharacters'] === 120 && block['urlMaximumCharacters'] === 2048);
+  for (const key of ['explicitEditorActionRequired', 'singleUseFinalGateTicketRequired', 'presentationBoundsEnforcedBeforeExposure', 'resultProvesOnlyThisExactProbeResponse',
+    'rejectionPrecedesTicketCredentialOrTransport'] as const) requirePolicy(block[key] === true);
+  for (const key of ['modelBindingRequired', 'bookMaterialAllowed', 'automaticRetryAllowed', 'fallbackAllowed', 'taskOrDefaultSelectionAllowed', 'measuredStatusPromotionAllowed',
+    'durableResultStorageAllowed', 'responseBodiesRetained', 'argumentOverrideOrAdditionalFieldsAllowed', 'developmentCredentialMainModelBindingOtherSlotFallbackOrAmbientDefaultInherited',
+    'resultUrlUserinfoControlsOrPrivateTargetAllowed', 'linkOrRedirectFollowingAllowed', 'bodySnippetSummaryOrContentRetentionAllowed', 'providerBodyLoggingAllowed',
+    'bookOrSourceAcquisitionAllowed', 'addsDirectApiToOrdinaryResearchTool', 'qualifiesFetch'] as const) requirePolicy(block[key] === false);
+  for (const key of ['backendId', 'candidateId', 'endpoint'] as const) requirePolicy(typeof block[key] === 'string' && (block[key] as string).length > 0);
+  return Object.freeze({ ruleId: 'ordinary-production-direct-search-connection-test', purpose: 'fixed-public-search-connection-test',
+    backendId: block['backendId'] as string, candidateId: block['candidateId'] as string, endpoint: block['endpoint'] as string, method: 'POST', protocol: 'deepseek-direct-search',
+    credentialSlot: block['credentialSlot'] as string, headerForm: 'authorization-bearer',
+    arguments: Object.freeze({ query: args['query'] as string, count: args['count'] as number, need_content: false as const }),
+    argumentsCanonicalSha256: block['argumentsCanonicalSha256'] as string, maximumRequests: 1, timeoutMilliseconds: SEARCH_SERVICE_TIMEOUT_MS,
+    responseMaxBytes: SEARCH_RESPONSE_MAX_BYTES, resultsMaximum: 3, titleMaximumCharacters: 120, urlMaximumCharacters: 2048,
+    rejectedOperationalScopes: Object.freeze(['development-ci', 'fixture-recording', 'developer-live'] as const) } satisfies SearchConnectionTestPolicy);
+}
+
 /** Read the pinned successor directly; no predecessor document is synthesized or restamped. */
 function projectOriginalFieldPolicy(policy: Record<string, unknown>): OrdinaryProductionPolicyReading {
   requirePolicy(digest(Buffer.from(canonicalJson(policy))) === (policy['version'] === 'v30'
@@ -1802,7 +1893,7 @@ function projectOriginalFieldPolicy(policy: Record<string, unknown>): OrdinaryPr
     allowedBindings: ORDINARY_PRODUCTION_ALLOWED_BINDINGS, fastAllowedBindings: ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS, connectionTestAllowed: true,
     execution: policy['execution'] as NonNullable<OrdinaryProductionPolicyReading['execution']>,
     transport: policy['transport'] as NonNullable<OrdinaryProductionPolicyReading['transport']>,
-    research: policy['research'] as NonNullable<OrdinaryProductionPolicyReading['research']>,
+    research: policy['research'] as NonNullable<OrdinaryProductionPolicyReading['research']>, searchConnectionTest: readSearchConnectionTest(policy['searchConnectionTest']),
     subAgents: policy['subAgents'] as NonNullable<OrdinaryProductionPolicyReading['subAgents']>,
     backgroundProcessingEnrollment: declared.find((rule) => rule['ruleId'] === BACKGROUND_PROCESSING_RULE_ID)!['backgroundProcessingEnrollment'] as NonNullable<OrdinaryProductionPolicyReading['backgroundProcessingEnrollment']>, rules };
 }
@@ -2013,7 +2104,7 @@ export function bindOrdinaryProductionRules(reading: OrdinaryProductionPolicyRea
     if (allowed === null) return null;
     if (!allowedRoutes.includes(allowed.route)) continue;
     const profile = modelProfileFor(allowed.route as RemoteExecutionRoute, allowed.model);
-    if (profile === null || profile.capabilities.answerChannel === 'none') continue;
+    if (profile === null || productionBindingRefusal(profile, kind.modelRole === 'Fast Interaction Role' ? 'fast' : 'main') !== null) continue;
     // This admission proves buffered, tool-free 来源译文 only. Other contracts keep their existing capability requirements.
     if (allowed.route === 'openai-platform' && (kind.modelRole !== 'Fast Interaction Role' || !kind.taskKinds.includes(MATERIAL_TRANSLATION_KIND))) continue;
     admitted.push({
@@ -2044,7 +2135,7 @@ export function bindOrdinaryProductionRules(reading: OrdinaryProductionPolicyRea
   }
   if (fastBinding !== null && reading.connectionTestAllowed === true) {
     const profile = modelProfileFor(fastBinding.route as RemoteExecutionRoute, fastBinding.model);
-    if (profile !== null && profile.capabilities.answerChannel !== 'none') admitted.push({
+    if (profile !== null && productionBindingRefusal(profile, 'fast') === null) admitted.push({
       ruleId: CONNECTION_TEST_POLICY.ruleId, taskKinds: [CONNECTION_TEST_KIND], modelRole: 'Fast Interaction Role',
       route: fastBinding.route, endpoint: fastBinding.endpoint, model: fastBinding.model, credentialSlot: fastBinding.credentialSlot,
       outboundDataCategories: ['public-or-synthetic'], crossUnitSynthesisAllowed: false, materialReferencesAllowed: false,
@@ -2300,6 +2391,7 @@ function* verifyLaunchPolicyInputs(
           ...(reading.execution === undefined ? {} : { execution: reading.execution }),
           ...(reading.transport === undefined ? {} : { transport: reading.transport }),
           ...(reading.research === undefined ? {} : { research: reading.research }),
+          ...(reading.searchConnectionTest === undefined ? {} : { searchConnectionTest: reading.searchConnectionTest }),
           ...(reading.backgroundProcessingEnrollment === undefined ? {} : { backgroundProcessingEnrollment: reading.backgroundProcessingEnrollment }),
           ...(reading.subAgents === undefined ? {} : { subAgents: reading.subAgents }),
           decision: 'eligible-only',

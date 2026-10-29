@@ -3806,7 +3806,7 @@ function registerRendererHandlers(
       return serializeEffect(async () => {
         requireAuthority();
         const route = requireCurrentBookRoute(owned);
-        const result = await service.call('prepareCustomAnalysis', { bookId: route.bookId, dimensionId: input.dimensionId, update: input.update });
+        const result = await service.call('prepareCustomAnalysis', { bookId: route.bookId, dimensionId: input.dimensionId, update: input.update, from: input.from ?? null });
         if (result.dimensions.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '自定义分析任务不属于当前图书工作台。');
         return result;
       });
@@ -5086,8 +5086,8 @@ function registerRendererHandlers(
             scope: input.scope,
             ...(input.materialIds === undefined ? {} : { materialIds: input.materialIds }),
             bookId: route.bookId,
-            // A sheet pre-filled from a Captured Procedure (Issue #65, S30) names the version it was filled from.
-            ...(input.capturedProcedure === undefined || input.capturedProcedure === null ? {} : { capturedProcedure: input.capturedProcedure }),
+            // A sheet pre-filled from a Captured Procedure (Issue #65, S30), or opened for a composite version (Issue #1173), names it.
+            ...(input.capturedProcedure == null ? {} : { capturedProcedure: input.capturedProcedure }), ...(input.procedureDefinition == null ? {} : { procedureDefinition: input.procedureDefinition }),
             // 本地文字检查 (Issue #1119) carries the editor's explicit options, which the service's request frame validates.
             ...(input.localCheck === undefined ? {} : { localCheck: input.localCheck }),
           });
@@ -5742,7 +5742,7 @@ function registerRendererHandlers(
         const prepared = await service.call('prepareBookDeliveryPackageArchiveExport', {
           bookId: route.bookId, packageVersionId: input.packageVersionId, options: input.options,
           ...(input.offset === undefined ? {} : { offset: input.offset }),
-          reviewDigest: input.reviewDigest, memberKeys: input.memberKeys, destination,
+          reviewDigest: input.reviewDigest, destination,
         });
         requireCurrentRouteGeneration(owned, routeGeneration);
         return { outcome: 'prepared', export: prepared };
@@ -6589,7 +6589,7 @@ export async function runApplication(): Promise<void> {
     await requireSameCanonicalDataDirectory(shellRoot, app.getPath('userData'));
     // The Data Version (数据版本) and the store's schema revision (数据库修订) apart (Issue #967): the unit suite holds each to its owner.
     const crashFacts = () => ({
-      appVersion: softwareVersion, buildIdentity, dataVersion: buildIdentity.dataVersion, schemaRevision: 98, protocol: SERVICE_PROTOCOL_VERSION,
+      appVersion: softwareVersion, buildIdentity, dataVersion: buildIdentity.dataVersion, schemaRevision: 102, protocol: SERVICE_PROTOCOL_VERSION,
       platform: process.platform, arch: process.arch, electron: process.versions.electron ?? 'unknown',
       uptimeSeconds: process.uptime(),
     });
@@ -7040,7 +7040,7 @@ export async function runApplication(): Promise<void> {
           label: process.platform === 'win32' ? 'Windows 凭据管理器' : 'macOS 钥匙串',
           availability: protectedSecretStore === undefined ? 'unavailable' : 'available',
         },
-        launchPolicy: state.launchPolicy,
+        launchPolicy: state.launchPolicy, channels: state.channels,
         authorityStatement: '凭据就绪不授予模型处理、对外导出、运行、受控动作或公开发布权限。',
       };
     };

@@ -5,7 +5,10 @@ import {
   type ResearchEvidenceFindingProjection,
   type ResearchEvidenceProjection,
   type RendererApi,
+  type EvidenceSourceCardProjection,
+  type ReviewEvidenceSource,
 } from '../shared/protocol.js';
+import { findingEvidenceSources } from '../shared/report-wording.js';
 
 /**
  * The words of 来源与证据 and of a 事实核查 finding's sources (Issue #425, plan slice S70; V2-UX-SRC-013, EGR-003, FACT-007,
@@ -32,6 +35,8 @@ export const SOURCE_SAVE_NOTE = '只在本机资料库里保存一份副本；�
 export const SOURCE_ORIGINAL_LABEL = '原文';
 export const SOURCE_TRANSLATION_MACHINE = '机器翻译，仅供理解；以原文为准。';
 export const SOURCE_UNITS_HEADING = '各阅读范围的联网核查';
+/** A factual card's way to the row 来源与证据 archives (Issue #1174). */
+export const FINDING_EVIDENCE_OPEN = '在来源与证据中查看';
 
 type InstantLabel = (iso: string) => string;
 
@@ -110,4 +115,42 @@ export async function readFindingResearch(api: Pick<RendererApi, 'inspectResearc
     records.push(...answer.records);
   }
   return { ...answer, records };
+}
+
+/**
+ * The sources each factual finding of one Review Run lists on its card (ADR 0095 §5; Issue #1174): the finding's latest result
+ * in the Run, that result's source cards less the excluded ones, joined to the retained 来源与证据 rows — the reads the
+ * 审阅报告 records. `research` is the retained reading already in hand per finding; `only` reads one finding. A failed read
+ * grants no source.
+ */
+export async function readFindingSources(
+  api: Pick<RendererApi, 'inspectFactualVerification' | 'inspectEvidenceWorkspace' | 'inspectResearchEvidence'>,
+  bookId: string, reviewRunId: string, research?: ReadonlyMap<string, ResearchEvidenceBookProjection>, only?: string,
+): Promise<Map<string, ReviewEvidenceSource[]>> {
+  const latest = new Map<string, { resultId: string; taskIntentId: string }>();
+  const sources = new Map<string, ReviewEvidenceSource[]>();
+  try {
+    let after: number | null = null;
+    do {
+      const page = await api.inspectFactualVerification({ bookId, reviewRunId, after, chapterBlockId: null, outcome: null, severity: null, sourceCondition: null, actionNeed: null });
+      for (const result of page.results) if (only === undefined || result.reviewFindingId === only) latest.set(result.reviewFindingId, result);
+      after = page.nextCursor;
+    } while (after !== null);
+  } catch {
+    return sources;
+  }
+  for (const [findingId, { resultId, taskIntentId }] of latest) {
+    try {
+      const cards: EvidenceSourceCardProjection[] = [];
+      let sourcesAfter: number | null = null;
+      do {
+        const workspace = await api.inspectEvidenceWorkspace({ bookId, resultId, sourcesAfter });
+        cards.push(...workspace.sources);
+        sourcesAfter = workspace.nextSourceCursor;
+      } while (sourcesAfter !== null);
+      const retained = research?.get(findingId) ?? await readFindingResearch(api, bookId, taskIntentId, findingId);
+      sources.set(findingId, findingEvidenceSources(cards, retained.records));
+    } catch { /* The read failure grants no source. */ }
+  }
+  return sources;
 }
