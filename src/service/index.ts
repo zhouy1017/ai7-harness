@@ -39,6 +39,7 @@ import {
   ORDINARY_PRODUCTION_ALLOWED_BINDINGS,
   ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS,
   allowedProductionBindingOf,
+  modelServiceChannels,
   resolveDeveloperLiveLaunch,
   type ConfiguredProviderBinding,
   type DeveloperLiveRuntime,
@@ -208,7 +209,7 @@ async function dispatch(
         id: request.id,
         ok: true,
         op: request.op,
-        result: { connection: store.getModelServiceConnection(), connections: store.getModelServiceConnections(), launchPolicy, proxy: await store.getModelServiceProxy() },
+        result: { connection: store.getModelServiceConnection(), connections: store.getModelServiceConnections(), launchPolicy, proxy: await store.getModelServiceProxy(), channels: modelServiceChannels() },
       };
     case 'saveModelServiceProxy':
       return { id: request.id, ok: true, op: request.op, result: await store.saveModelServiceProxy(request.input) };
@@ -230,7 +231,7 @@ async function dispatch(
         id: request.id,
         ok: true,
         op: request.op,
-        result: { connection: store.getModelServiceConnection(), connections: store.getModelServiceConnections(), launchPolicy: policy, proxy: await store.getModelServiceProxy() },
+        result: { connection: store.getModelServiceConnection(), connections: store.getModelServiceConnections(), launchPolicy: policy, proxy: await store.getModelServiceProxy(), channels: modelServiceChannels() },
       };
     }
     case 'setModelServiceCredentialState': {

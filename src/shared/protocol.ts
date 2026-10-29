@@ -1,12 +1,12 @@
 import type { GlobalAgentOperations, GlobalAgentRendererApi } from './protocol/global-agent.js';
 import type { HouseWordListOperations, HouseWordListApi } from './protocol/house-word-list.js'; import type { CustomAnalysisPreparationFrom, TaskPlanCustomDimension } from './protocol/custom-analysis-redo.js';
-import type { JournalEditInput } from './protocol/manuscript-structure.js'; import type { SelectionSpanBlockPin, SelectionSpanField } from './protocol/selection-span.js'; import type { GlobalAttentionProjection } from './protocol/global-attention.js';
+import type { JournalEditInput } from './protocol/manuscript-structure.js'; import type { SelectionSpanBlockPin, SelectionSpanField } from './protocol/selection-span.js'; import type { GlobalAttentionProjection } from './protocol/global-attention.js'; import type { ModelServiceChannelProjection } from './protocol/model-service.js';
 export type { JournalEditInput, JournalStructuralEdit } from './protocol/manuscript-structure.js';
 import type { ManuscriptBlockProjection } from './protocol/manuscript-notes.js';
 export type { ManuscriptBlockKind, ManuscriptBlockProjection, ManuscriptNoteProjection } from './protocol/manuscript-notes.js';
 import type { ImportStructureChoice, ImportStructureProjection } from './protocol/import-structure.js';
 import type { EditableImportProjection, ImportIdentityFindingProjection, ManuscriptConversionProjection } from './protocol/import-intake.js';
-export type * from './protocol/import-intake.js'; export type * from './protocol/import-structure.js'; export * from './protocol/custom-analysis-redo.js'; export type * from './protocol/selection-span.js'; export type * from './protocol/global-attention.js'; export { validStructureChoice } from './protocol/import-structure.js';
+export type * from './protocol/import-intake.js'; export type * from './protocol/import-structure.js'; export * from './protocol/custom-analysis-redo.js'; export type * from './protocol/selection-span.js'; export type * from './protocol/global-attention.js'; export * from './protocol/model-service.js'; export { validStructureChoice } from './protocol/import-structure.js';
 export * from './protocol/global-agent.js';
 export type { ReviewContractIdentity, ReviewExcludedFindingProjection, ReviewContractRejectionReason, ReviewEvidenceSource, ReviewReportSchema, ReviewReportDerivedSections, ReviewReportFindingEntry } from './protocol/review.js';
 import type { ReviewExcludedFindingProjection, ReviewContractRejectionReason, ReviewReportSchema, ReviewReportDerivedSections } from './protocol/review.js';
@@ -136,7 +136,7 @@ import type { PublicSampleBookSourceDigest } from './public-samplebooks.js';
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 187 as const;
+export const SERVICE_PROTOCOL_VERSION = 188 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 export interface BookFindingProjection {
@@ -3168,7 +3168,7 @@ export interface ModelServiceStoredStateProjection {
   connection: ModelServiceConnectionProjection | null;
   /** Every route's connection (Issue #811), Go first; at most one is `selected`. */
   connections: readonly ModelServiceConnectionProjection[];
-  launchPolicy: LaunchPolicyProjection;
+  launchPolicy: LaunchPolicyProjection; channels: readonly ModelServiceChannelProjection[];
 }
 
 /** One route the Main Editorial Role may be configured to, as 设置 › 模型服务 offers it (Issue #811). */
@@ -3257,7 +3257,7 @@ export interface ModelServiceSettingsProjection {
     label: 'Windows 凭据管理器' | 'macOS 钥匙串';
     availability: 'available' | 'unavailable';
   };
-  launchPolicy: LaunchPolicyProjection;
+  launchPolicy: LaunchPolicyProjection; channels: ModelServiceStoredStateProjection['channels'];
   authorityStatement: '凭据就绪不授予模型处理、对外导出、运行、受控动作或公开发布权限。';
 }
 

@@ -948,7 +948,7 @@ it.each(['queued', 'body', 'current-projection'] as const)('orders real-store se
         await production.rebind(store); return { id: request.id, ok: true, op: request.op, result: value };
       }
       if (request.op === 'getModelServiceStoredState') return { id: request.id, ok: true, op: request.op,
-        result: { connection: store.getModelServiceConnection(), connections: store.getModelServiceConnections(), launchPolicy: production.policy, proxy: await store.getModelServiceProxy() } };
+        result: { connection: store.getModelServiceConnection(), connections: store.getModelServiceConnections(), launchPolicy: production.policy, proxy: await store.getModelServiceProxy(), channels: [] } };
       if (request.op === 'selectFastRoleModel') {
         store.selectFastRoleModel(request.input.route, request.input.modelId); await production.rebind(store);
         return { id: request.id, ok: true, op: request.op, result: undefined };

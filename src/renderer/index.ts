@@ -63,6 +63,7 @@ import type {
   ManuscriptWindowProjection,
   ModelServiceRouteOptionProjection,
   ModelServiceSettingsProjection,
+  ModelServiceChannelId,
   PriorWorkItemProjection,
   RecoveryComparisonProjection,
   RecoveryRestorationProjection,
@@ -227,7 +228,7 @@ import { ViewPreferences, mountRegionSeparator, renderViewSettings } from './lay
 import { createGlobalAttentionReader, mountGlobalAttention, mountGlobalAttentionEntry, type GlobalAttentionSurface } from './global-attention.js';
 import { mountProcessingIndicator } from './processing-indicator.js';
 import { bookIdentityRows } from './technical-layer-labels.js';
-import { MODEL_CONNECTION_TEST_NOTE, mainRoleConnectionTest, modelConnectionTestDisclosure, modelConnectionTestLabel } from './model-service-roles.js';
+import { MODEL_CONNECTION_TEST_NOTE, mainRoleConnectionTest, modelConnectionTestDisclosure, modelConnectionTestLabel } from './model-service-roles.js'; import { modelServiceFlow } from './model-service-flow.js';
 import { GLOBAL_ATTENTION_ACTIONS, GLOBAL_ATTENTION_STATUS_LINES } from './global-attention-labels.js';
 import { analysisRefusalView } from './overview-refusal-labels.js';
 import {
@@ -878,6 +879,7 @@ const shell = mountShell({
   listBooks: (input) => window.ai7.listBooks(input),
   setStatus,
   errorMessage: rendererErrorMessage,
+  modelSelector: { api: window.ai7, openModelService: () => void leaveThen(() => renderModelServiceSettings()) },
   openDestination: (destination) => {
     if (authorityInterrupted) return;
     if (destination === 'library') void leaveThen(() => returnToLibrary());
@@ -1094,19 +1096,6 @@ function replaceScreen(state: string, content: HTMLElement, place: ShellPlace | 
   taskSurfaceRefresh = {};
   screen.dataset['screen'] = state;
   screen.replaceChildren(content);
-  if (place !== null) {
-    const selected = button(lastModelSelection === null ? '快速交互模型 · 查看设置' : `快速交互 · ${lastModelSelection.providerLabel} / ${lastModelSelection.modelLabel}`,
-      'quiet', () => void renderModelServiceSettings());
-    selected.dataset['compactModelSelection'] = 'fast-interaction';
-    content.prepend(selected);
-    void window.ai7.getModelServiceSettings().then((settings) => {
-      if (!selected.isConnected) return;
-      const role = settings.roles.find((candidate) => candidate.roleId === 'fast-interaction');
-      lastModelSelection = role?.binding ?? null;
-      selected.textContent = lastModelSelection === null ? '快速交互模型 · 需设置'
-        : `快速交互 · ${lastModelSelection.providerLabel} / ${lastModelSelection.modelLabel} · ${role?.statusLabel ?? '需设置'}`;
-    }).catch(() => { selected.textContent = '快速交互模型 · 需处理'; });
-  }
   if (authorityInterrupted) {
     for (const control of screen.querySelectorAll<HTMLButtonElement | HTMLInputElement>('button, input')) {
       control.disabled = true;
@@ -4749,8 +4738,6 @@ function renderModelServiceProxyBlock(projection: ModelServiceSettingsProjection
  * One route of 设置 › 模型服务 (Issue #811): its binding, whether new Tasks use it, and its own connection name and credential.
  * The DeepSeek 开放平台（官方） form keeps the field identities and action words S55a gave it; the Go form names its route.
  */
-let lastModelSelection: ModelServiceRouteOptionProjection['binding'] | null = null;
-
 function renderModelRouteOption(option: ModelServiceRouteOptionProjection): HTMLElement {
   const official = option.route === 'deepseek-open-platform';
   const section = element('article', 'model-route-option');
@@ -4940,8 +4927,8 @@ function renderSearchBackendSettings(projection: ModelServiceSettingsProjection)
   return section;
 }
 
+let modelServiceChannel: ModelServiceChannelId | null = null;
 function renderModelServiceSettingsProjection(projection: ModelServiceSettingsProjection): void {
-  lastModelSelection = projection.roles.find((role) => role.roleId === 'fast-interaction')?.binding ?? null;
   const content = panel();
   content.classList.add('model-service-settings');
   content.dataset['policyIntegrity'] = projection.launchPolicy.integrityState;
@@ -4951,8 +4938,12 @@ function renderModelServiceSettingsProjection(projection: ModelServiceSettingsPr
   content.append(
     element('p', 'section-label', '设置 · 模型服务'),
     element('h2', undefined, '模型服务'),
-    element('p', 'lede', '先按编辑工作所需角色查看状态；提供方、模型与凭据绑定属于下一层配置。'),
+    element('p', 'lede', '先选择渠道、凭据与模型；各模型角色的状态、提供方绑定与单独指定在下方高级设置。'),
   );
+  // The one flow for both roles (Issue #1215) leads; the per-role cards below are its advanced settings.
+  content.append(modelServiceFlow(projection, { api: window.ai7, render: renderModelServiceSettingsProjection, setStatus, errorMessage: rendererErrorMessage,
+    channel: modelServiceChannel, chooseChannel: (channel) => { modelServiceChannel = channel; } }),
+    element('h3', undefined, '高级设置 · 分别指定模型角色'));
   const roles = element('section', 'model-role-grid');
   roles.setAttribute('aria-label', '模型角色连接状态');
   for (const role of projection.roles) {
@@ -5461,6 +5452,7 @@ async function focusEditorialProfileCard(bookId: string): Promise<void> {
 
 async function renderModelServiceSettings(): Promise<void> {
   setStatus('正在读取模型服务状态…', 'busy');
+  modelServiceChannel = null;
   try {
     renderModelServiceSettingsProjection(await window.ai7.getModelServiceSettings());
     setStatus('模型服务设置已打开');
