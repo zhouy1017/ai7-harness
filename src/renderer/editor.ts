@@ -2,11 +2,10 @@ import { baseKeymap } from 'prosemirror-commands';
 import { keymap } from 'prosemirror-keymap';
 import { Schema, type DOMOutputSpec, type Node as ProseMirrorNode } from 'prosemirror-model';
 import { EditorState, Plugin, TextSelection, type Transaction } from 'prosemirror-state';
-import { Decoration, DecorationSet, EditorView } from 'prosemirror-view';
-import { deriveSpanEdit, followSpanEdit } from '../shared/mark-anchor.js';
+import { EditorView } from 'prosemirror-view';
 import { readSelectionSpan, type SpanSourceBlock } from '../shared/selection-span.js';
 import type { SelectionSpanBlockPin } from '../shared/protocol/selection-span.js';
-import { markPointKind, markPointLabel } from './editorial-mark-labels.js';
+import { MARK_DECORATIONS_META, markDecorationPlugin } from './mark-decorations.js';
 import { newParagraphIdentity, structuralInput, structuralKey, type PendingStructure } from './editor-structure.js';
 import {
   bufferAdmits,
@@ -25,7 +24,6 @@ import {
   MAX_EDIT_GRAPHEMES,
   MAX_WINDOW_BLOCKS,
   type EditorialMarkAnchorProjection,
-  type EditorialMarkKind,
   type JournalAcknowledgement,
   type JournalEditInput,
   type ManuscriptBlockProjection,
@@ -208,8 +206,6 @@ const ai7Schema = new Schema({
   },
   marks: {},
 });
-
-const MARK_LINE_PRIORITY: ReadonlyArray<EditorialMarkKind> = ['change-suggestion', 'annotation', 'editor-note', 'personal-highlight'];
 
 function requireEditor(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -528,116 +524,13 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
 
   const transactionFilter = new Plugin({ filterTransaction: candidateIsBounded });
 
-  /**
-   * Marks are drawn over the document, never written into it. Their ranges are grapheme ranges of
-   * the durable text, so text typed and not yet acknowledged is followed here with the arithmetic the
-   * service applies when the edit lands: a mark in front of the caret does not slide onto the wrong
-   * characters while someone types, and one whose own text is being changed shows as drifted at once.
-   */
-  const markDecorations = (document: ProseMirrorNode): DecorationSet => {
-    if (windowProjection.marks.length === 0) return DecorationSet.empty;
-    const byBlock = new Map<string, EditorialMarkAnchorProjection[]>();
-    for (const mark of windowProjection.marks) {
-      const list = byBlock.get(mark.blockId);
-      if (list) list.push(mark);
-      else byBlock.set(mark.blockId, [mark]);
-    }
-    const decorations: Decoration[] = [];
-    document.forEach((node, offset) => {
-      const blockMarks = byBlock.get(String(node.attrs['blockId']));
-      if (!blockMarks) return;
-      const parts = graphemes(node.textContent);
-      const baseline = baselines.get(String(node.attrs['blockId']));
-      const local = baseline && baseline.text !== node.textContent ? deriveSpanEdit(graphemes(baseline.text), parts) : null;
-      const position = (grapheme: number): number =>
-        offset + 1 + parts.slice(0, Math.min(Math.max(0, grapheme), parts.length)).join('').length;
-      let line: EditorialMarkKind | undefined;
-      for (const mark of blockMarks) {
-        const followed = local ? followSpanEdit(mark, local) : { ...mark, touched: false };
-        const drifted = mark.anchorState === 'drifted' || followed.touched;
-        if (mark.status === 'open' && (line === undefined || MARK_LINE_PRIORITY.indexOf(mark.kind) < MARK_LINE_PRIORITY.indexOf(line))) {
-          line = mark.kind;
-        }
-        const from = position(followed.fromGrapheme);
-        const to = position(followed.toGrapheme);
-        const previewing = activeMark?.markId === mark.markId && activeMark.previewText !== null && !drifted;
-        const preview = (at: number): void => {
-          const previewText = activeMark!.previewText!;
-          decorations.push(Decoration.widget(at, () => {
-            const element = window.document.createElement('ins');
-            element.className = 'editorial-mark-preview';
-            element.contentEditable = 'false';
-            element.dataset['markPreview'] = mark.markId;
-            const proposed = window.document.createElement('span');
-            proposed.className = 'editorial-mark-preview-text';
-            proposed.textContent = previewText.length === 0 ? '（删去）' : previewText;
-            const label = window.document.createElement('span');
-            label.className = 'editorial-mark-preview-label';
-            label.textContent = '预览 · 未应用';
-            element.append(proposed, label);
-            return element;
-          }, { side: 1, key: `preview:${mark.markId}:${previewText}`, ignoreSelection: true }));
-        };
-        if (to <= from) {
-          // No text is left under the mark — the point an applied deletion left, the point a pending
-          // insertion would write at (Issue #411), or a mark whose own words an edit took away — so a point
-          // is drawn there: no part of the document, no room in the line, text typed at it landing in front
-          // of it, and a click on it opening the mark's card as a click on a mark does, without moving the
-          // caret. A pending insertion whose card is open previews its words beside it.
-          const label = markPointLabel(mark, drifted);
-          const pointKind = markPointKind(mark);
-          const active = activeMark?.markId === mark.markId;
-          const anchor = drifted ? 'drifted' : 'exact';
-          decorations.push(Decoration.widget(from, () => {
-            const point = window.document.createElement('span');
-            point.className = ['editorial-mark-point', `editorial-mark-point-${mark.kind}`, ...(active ? ['editorial-mark-active'] : [])].join(' ');
-            point.contentEditable = 'false';
-            point.setAttribute('role', 'img');
-            point.setAttribute('aria-label', label);
-            point.title = label;
-            point.dataset['markId'] = mark.markId;
-            point.dataset['markKind'] = mark.kind;
-            point.dataset['markSource'] = mark.sourceKind;
-            point.dataset['markStatus'] = mark.status;
-            point.dataset['markAnchor'] = anchor;
-            point.dataset['markPoint'] = pointKind;
-            if (mark.disposition !== null) point.dataset['markDisposition'] = mark.disposition;
-            point.addEventListener('mousedown', (event) => {
-              if (event.button === 0) event.preventDefault();
-            });
-            return point;
-          }, {
-            side: 1,
-            ignoreSelection: true,
-            key: `point:${mark.markId}:${mark.status}:${mark.disposition ?? ''}:${anchor}:${active ? 'active' : ''}:${label}`,
-          }));
-          if (previewing && pointKind === 'insertion') preview(from);
-          continue;
-        }
-        decorations.push(Decoration.inline(from, to, {
-          class: [
-            'editorial-mark',
-            `editorial-mark-${mark.kind}`,
-            ...(activeMark?.markId === mark.markId ? ['editorial-mark-active'] : []),
-            ...(previewing ? ['editorial-mark-previewed'] : []),
-          ].join(' '),
-          'data-mark-id': mark.markId,
-          'data-mark-kind': mark.kind,
-          'data-mark-source': mark.sourceKind,
-          'data-mark-status': mark.status,
-          'data-mark-anchor': drifted ? 'drifted' : 'exact',
-          ...(mark.highlightColor === null ? {} : { 'data-mark-color': String(mark.highlightColor) }),
-          ...(mark.disposition === null ? {} : { 'data-mark-disposition': mark.disposition }),
-        }));
-        if (previewing) preview(to);
-      }
-      if (line !== undefined) {
-        decorations.push(Decoration.node(offset, offset + node.nodeSize, { class: 'has-editorial-mark', 'data-mark-line': line }));
-      }
-    });
-    return DecorationSet.create(document, decorations);
-  };
-  const markPlugin = new Plugin({ props: { decorations: (state) => markDecorations(state.doc) } });
+  // The window's marks, drawn where they changed only (Issue #1178): `mark-decorations.ts`.
+  const markPlugin = markDecorationPlugin({
+    marks: () => windowProjection.marks,
+    baselineText: (blockId) => baselines.get(blockId)?.text,
+    active: () => activeMark,
+    generation: () => baselines,
+  });
   const makeState = (blocks: ReadonlyArray<ManuscriptBlockProjection> = windowProjection.blocks): EditorState =>
     EditorState.create({
       schema: ai7Schema,
@@ -1277,12 +1170,12 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     setMarks: (marks, truncated) => {
       if (destroyed) return;
       windowProjection = { ...windowProjection, marks, marksTruncated: truncated };
-      view.dispatch(view.state.tr.setMeta('ai7-editorial-marks', true));
+      view.dispatch(view.state.tr.setMeta(MARK_DECORATIONS_META, true));
     },
     setActiveMark: (active) => {
       if (destroyed) return;
       activeMark = active ?? undefined;
-      view.dispatch(view.state.tr.setMeta('ai7-editorial-marks', true));
+      view.dispatch(view.state.tr.setMeta(MARK_DECORATIONS_META, true));
     },
     selectedRange: (): EditorSelectedRange => {
       const selection = view.state.selection;

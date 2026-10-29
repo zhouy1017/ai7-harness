@@ -45,6 +45,34 @@ function percent(proportion: number): string {
   return `${(Math.min(1, Math.max(0, proportion)) * 100).toFixed(3)}%`;
 }
 
+/**
+ * Draw `items` into `host` keeping the node each key had (Issue #1178): a refresh after one decision changes the few markers whose
+ * slot it moved, instead of drawing the column again. Only a key new to the rail creates a node and only a key gone removes one; the
+ * others are updated in place and stay in the order drawn.
+ */
+function keyed<T>(host: HTMLElement, nodes: Map<string, HTMLElement>, items: ReadonlyArray<T>, key: (item: T, index: number) => string,
+  create: (item: T) => HTMLElement, update: (node: HTMLElement, item: T) => void): void {
+  const ordered = items.map((item, index) => {
+    const id = key(item, index);
+    let node = nodes.get(id);
+    if (node === undefined) {
+      node = create(item);
+      nodes.set(id, node);
+    }
+    update(node, item);
+    return [id, node] as const;
+  });
+  const kept = new Set(ordered.map(([id]) => id));
+  for (const [id, node] of nodes) {
+    if (kept.has(id)) continue;
+    node.remove();
+    nodes.delete(id);
+  }
+  ordered.forEach(([, node], index) => {
+    if (host.children[index] !== node) host.insertBefore(node, host.children[index] ?? null);
+  });
+}
+
 export function mountPositionRail(options: MountOptions): PositionRail {
   const ticks = el('div', 'rail-ticks');
   const gaps = el('div', 'rail-gaps');
@@ -58,26 +86,31 @@ export function mountPositionRail(options: MountOptions): PositionRail {
   let destroyed = false;
   let generation = 0;
 
+  const tickNodes = new Map<string, HTMLElement>();
+  const gapNodes = new Map<string, HTMLElement>();
+  const markerNodes = new Map<string, HTMLElement>();
+  /** The paragraph each marker jumps to, as last drawn. */
+  const targets = new WeakMap<HTMLElement, string>();
+
   const draw = (rail: ManuscriptRailProjection): void => {
-    ticks.replaceChildren(...rail.chapters.map((chapter) => {
-      const tick = el('div', 'rail-tick');
+    keyed(ticks, tickNodes, rail.chapters, (_chapter, index) => String(index), () => el('div', 'rail-tick'), (tick, chapter) => {
       tick.style.top = percent(chapter.proportion);
       tick.dataset['railLevel'] = String(chapter.level);
       const marked = chapter.suggestions + chapter.annotations + chapter.notes;
       tick.title = marked === 0
         ? chapter.title
         : `${chapter.title} · 修改建议 ${chapter.suggestions} · 批注 ${chapter.annotations} · 备注 ${chapter.notes}`;
-      return tick;
-    }));
-    gaps.replaceChildren(...(rail.uncovered ?? []).map((range) => {
+    });
+    keyed(gaps, gapNodes, rail.uncovered ?? [], (_range, index) => String(index), () => {
       const gap = el('div', 'rail-gap');
+      gap.dataset['railGap'] = 'uncovered';
+      return gap;
+    }, (gap, range) => {
       gap.style.top = percent(range.fromProportion);
       gap.style.height = percent(Math.max(0.004, range.toProportion - range.fromProportion));
       gap.title = `分析未覆盖：${range.reason}`;
-      gap.dataset['railGap'] = 'uncovered';
-      return gap;
-    }));
-    const markers: HTMLElement[] = [];
+    });
+    const markers: Array<{ kind: (typeof LANE_KINDS)[number]; lane: number; slot: number; count: number; blockId: string }> = [];
     LANE_KINDS.forEach((kind, lane) => {
       const slots = new Map<number, { count: number; blockId: string }>();
       for (const mark of rail.marks) {
@@ -87,21 +120,24 @@ export function mountPositionRail(options: MountOptions): PositionRail {
         if (held) held.count += 1;
         else slots.set(slot, { count: 1, blockId: mark.blockId });
       }
-      for (const [slot, held] of slots) {
-        const marker = el('button', 'rail-marker') as HTMLButtonElement;
-        marker.type = 'button';
-        marker.dataset['railKind'] = kind;
-        marker.dataset['railLane'] = String(lane + 1);
-        marker.dataset['railCount'] = String(held.count);
-        marker.style.top = percent((slot + 0.5) / LANE_SLOTS);
-        marker.setAttribute('aria-label', `${LANE_LABELS[kind]} ${held.count} 处，跳到这里`);
-        marker.title = `${LANE_LABELS[kind]} ${held.count} 处`;
-        marker.tabIndex = -1;
-        marker.addEventListener('click', () => options.jumpToBlock(held.blockId));
-        markers.push(marker);
-      }
+      for (const [slot, held] of slots) markers.push({ kind, lane, slot, ...held });
     });
-    lanes.replaceChildren(...markers);
+    keyed(lanes, markerNodes, markers, (marker) => `${marker.kind}:${marker.slot}`, (held) => {
+      const marker = el('button', 'rail-marker') as HTMLButtonElement;
+      marker.type = 'button';
+      marker.dataset['railKind'] = held.kind;
+      marker.dataset['railLane'] = String(held.lane + 1);
+      marker.style.top = percent((held.slot + 0.5) / LANE_SLOTS);
+      marker.tabIndex = -1;
+      marker.addEventListener('click', () => options.jumpToBlock(targets.get(marker)!));
+      return marker;
+    }, (marker, held) => {
+      targets.set(marker, held.blockId);
+      if (marker.dataset['railCount'] === String(held.count)) return;
+      marker.dataset['railCount'] = String(held.count);
+      marker.setAttribute('aria-label', `${LANE_LABELS[held.kind]} ${held.count} 处，跳到这里`);
+      marker.title = `${LANE_LABELS[held.kind]} ${held.count} 处`;
+    });
     options.track.dataset['railChapters'] = String(rail.chapters.length);
     options.track.dataset['railMarks'] = String(rail.marks.length);
     options.track.dataset['railSparse'] = rail.chaptersTruncated || rail.marksTruncated ? 'true' : 'false';
