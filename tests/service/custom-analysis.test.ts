@@ -371,6 +371,8 @@ describe('同类型重做 / 重新准备 / 重新确认 of a custom Task (Issue 
       expect(task.update?.selectedRange).toEqual(range(5).selectedRange);
       expect(task.authorization).toBeNull();
       expect(book.store.inspectTaskPlan({ bookId: book.bookId, kind: 'baseline-analysis', ref: prepared.taskIntentId }).start.readiness).toBe('ready');
+      // The settled Run's Result Set Revision stays the dimension's latest until a reconfirmed plan is started and settles.
+      expect(custom(book.store.inspectCustomAnalysisDimensions(book.bookId), dimensionId).book!.latest!.revisionId).toBe(settled.resultSetRevision!.revisionId);
       // Drift again, then 停用: the version the Task froze is final, and 重新确认 names it instead of moving to another.
       book.store.prepareCustomAnalysis({ bookId: book.bookId, dimensionId, update: range(2) }, launchPolicy);
       book.store.stopCustomAnalysisDimension(versionId);
