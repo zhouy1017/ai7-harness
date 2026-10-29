@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 // @ts-expect-error Plain build tooling intentionally has no TypeScript declarations.
 import { builderConfiguration, copyRuntimeClosure, packagerArtifacts, plannedOutputs, selfCheckEnvironment } from '../../tools/package.mjs';
 
-const identity = { schema: 1, softwareVersion: '0.2.0', dataVersion: 1, buildNumber: 1234, sourceCommit: 'a'.repeat(40), dirty: false };
+const identity = { schema: 1, softwareVersion: '0.3.0', dataVersion: 1, buildNumber: 1234, sourceCommit: 'a'.repeat(40), dirty: false };
 
 describe('host-native offline package inputs', () => {
   it('passes only OS prerequisites to the installed-product self-check', () => {
@@ -40,12 +40,12 @@ describe('host-native offline package inputs', () => {
     expect(config.win.signAndEditExecutable).toBe(true); // Pinned resedit JS, no secondary tool acquisition.
     expect(config.win.signExecutable).toBe(false);
     expect(config.buildNumber).toBe('1234');
-    expect(config.buildVersion).toBe('0.2.0.1234');
+    expect(config.buildVersion).toBe('0.3.0.1234');
     expect(config.mac.bundleVersion).toBe('1.12.34');
-    expect(config.mac.bundleShortVersion).toBe('0.2.0');
+    expect(config.mac.bundleShortVersion).toBe('0.3.0');
     expect(config.mac.extendInfo.AI7SourceCommit).toBe(identity.sourceCommit);
     expect(() => builderConfiguration(manifest, resolve('stage'), { ...identity, dirty: true })).toThrow();
-    expect(() => builderConfiguration(manifest, resolve('stage'), { ...identity, softwareVersion: '0.3.0' })).toThrow();
+    expect(() => builderConfiguration(manifest, resolve('stage'), { ...identity, softwareVersion: '0.4.0' })).toThrow();
     expect(config.mac.identity).toBeNull();
     expect(config.mac.notarize).toBe(false);
     expect(config.dmg.sign).toBe(false);
@@ -90,12 +90,12 @@ describe('host-native offline package inputs', () => {
       expect(sign).not.toHaveBeenCalled();
       const resources = NtExecutableResource.from(NtExecutable.from(await readFile(file)));
       const info = Resource.VersionInfo.fromEntries(resources.entries)[0];
-      expect(info.fixedInfo.fileVersionMS).toBe(2); // 0.2
+      expect(info.fixedInfo.fileVersionMS).toBe(3); // 0.3
       expect(info.fixedInfo.fileVersionLS).toBe(1234); // 0.1234
-      expect(info.fixedInfo.productVersionMS).toBe(2);
+      expect(info.fixedInfo.productVersionMS).toBe(3);
       expect(info.fixedInfo.productVersionLS).toBe(1234);
       const strings = info.getStringValues(info.getAllLanguagesForStringValues()[0]);
-      expect(strings).toMatchObject({ FileVersion: '0.2.0.1234', ProductVersion: '0.2.0.1234', ProductName: 'AI7' });
+      expect(strings).toMatchObject({ FileVersion: '0.3.0.1234', ProductVersion: '0.3.0.1234', ProductName: 'AI7' });
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 
