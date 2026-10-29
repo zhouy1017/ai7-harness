@@ -4,6 +4,7 @@ import type {
   BaselineAnalysisUpdateRequest,
   BookTaskItemProjection,
   ClarificationOptionId,
+  CustomAnalysisPreparationPurpose,
   DefaultExecutionRuleReference,
   DialogueProjection,
   GlobalAttentionTarget,
@@ -228,6 +229,7 @@ type DrawerApi = Pick<
   | 'authorizeEvaluationRewrite'
   | 'authorizeWritingTask'
   | 'prepareBaselineAnalysis'
+  | 'prepareCustomAnalysis'
   | 'startBaselineAnalysisWhenOnline'
   | 'cancelWaitingBaselineAnalysis'
   | 'startTaskWhenOnline'
@@ -2052,18 +2054,22 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     options.setStatus('正在准备改计划重做的新任务…', 'busy');
     let prepared: string | null = null;
     try {
-      const initial = 'kind' in redo.prepare
-        ? await api.redoTaskPlan({ kind: redo.prepare.kind, ref: redo.prepare.ref })
-        : await api.prepareBaselineAnalysis({ goal: redo.prepare.goal, update: redo.prepare.update, reconfirm: false, redoOf: redo.prepare.redoOf });
-      const completed = await options.awaitServiceJob(initial, (job) => options.setStatus(job.progress.label, job.state === 'failed' ? 'error' : 'busy'));
-      if (completed.state === 'cancelled') {
-        options.setStatus('改计划重做的准备已取消；这次运行保持已取消。', 'success');
-        return;
+      if (current.custom !== undefined && !('kind' in redo.prepare)) {
+        prepared = await prepareCustom(current, 'redo', redo.prepare.update);
+      } else {
+        const initial = 'kind' in redo.prepare
+          ? await api.redoTaskPlan({ kind: redo.prepare.kind, ref: redo.prepare.ref })
+          : await api.prepareBaselineAnalysis({ goal: redo.prepare.goal, update: redo.prepare.update, reconfirm: false, redoOf: redo.prepare.redoOf });
+        const completed = await options.awaitServiceJob(initial, (job) => options.setStatus(job.progress.label, job.state === 'failed' ? 'error' : 'busy'));
+        if (completed.state === 'cancelled') {
+          options.setStatus('改计划重做的准备已取消；这次运行保持已取消。', 'success');
+          return;
+        }
+        if (completed.result === null) throw new Error(TASK_BAR_REDO_FAILED);
+        if ('taskIntent' in completed.result) prepared = completed.result.taskIntent?.taskIntentId ?? null;
+        else if ('run' in completed.result && completed.result.run !== null && 'reviewRunId' in completed.result.run) prepared = completed.result.run.reviewRunId;
+        else if ('kind' in redo.prepare) prepared = (await api.inspectTaskPlan({ kind: redo.prepare.kind, ref: null })).ref;
       }
-      if (completed.result === null) throw new Error(TASK_BAR_REDO_FAILED);
-      if ('taskIntent' in completed.result) prepared = completed.result.taskIntent?.taskIntentId ?? null;
-      else if ('run' in completed.result && completed.result.run !== null && 'reviewRunId' in completed.result.run) prepared = completed.result.run.reviewRunId;
-      else if ('kind' in redo.prepare) prepared = (await api.inspectTaskPlan({ kind: redo.prepare.kind, ref: null })).ref;
       if (prepared === null) throw new Error(TASK_BAR_REDO_FAILED);
       options.setStatus('新任务已准备：可以先改计划，再开始。', 'success');
       options.onRecorded(current.kind, current.bookId, current.ref);
@@ -2092,16 +2098,20 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     options.setStatus('正在重新准备这项任务…', 'busy');
     let prepared: string | null = null;
     try {
-      const initial = await api.prepareBaselineAnalysis({ goal: again.prepare.goal, update: again.prepare.update, reconfirm: false, redoOf: null });
-      const completed = await options.awaitServiceJob(initial, (job) => options.setStatus(job.progress.label, job.state === 'failed' ? 'error' : 'busy'));
-      if (completed.state === 'cancelled') {
-        options.setStatus('重新准备已取消；这项任务保持原样。', 'success');
-        return;
+      if (current.custom !== undefined) {
+        prepared = await prepareCustom(current, 'reprepare', again.prepare.update);
+      } else {
+        const initial = await api.prepareBaselineAnalysis({ goal: again.prepare.goal, update: again.prepare.update, reconfirm: false, redoOf: null });
+        const completed = await options.awaitServiceJob(initial, (job) => options.setStatus(job.progress.label, job.state === 'failed' ? 'error' : 'busy'));
+        if (completed.state === 'cancelled') {
+          options.setStatus('重新准备已取消；这项任务保持原样。', 'success');
+          return;
+        }
+        if (completed.kind !== 'baseline-analysis-preparation' || completed.result === null || !('coverageManifest' in completed.result)) {
+          throw new Error(TASK_BAR_REPREPARE_FAILED);
+        }
+        prepared = completed.result.taskIntent?.taskIntentId ?? null;
       }
-      if (completed.kind !== 'baseline-analysis-preparation' || completed.result === null || !('coverageManifest' in completed.result)) {
-        throw new Error(TASK_BAR_REPREPARE_FAILED);
-      }
-      prepared = completed.result.taskIntent?.taskIntentId ?? null;
       options.setStatus('新计划已准备：看过之后再开始任务。', 'success');
       options.onRecorded(current.kind, current.bookId, current.ref);
     } catch (error) {
@@ -2306,6 +2316,15 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   }
 
   /**
+   * 同类型重做 / 重新准备 / 重新确认 of a 自定义分析维度 Task (Issue #931): prepared again on its own dimension, on the version its plan
+   * froze — never through the baseline's preparation — answering the Task whose plan the drawer shows next, which only 开始任务 starts.
+   */
+  async function prepareCustom(current: TaskPlanProjection, purpose: CustomAnalysisPreparationPurpose, update: BaselineAnalysisUpdateRequest | null): Promise<string> {
+    const prepared = await api.prepareCustomAnalysis({ dimensionId: current.custom!.dimensionId, update, from: { taskIntentId: current.ref, purpose } });
+    return prepared.taskIntentId;
+  }
+
+  /**
    * 重新确认计划 (V2-UX-PLAN-009, AUTH-006): prepares the next plan version of the same Task Intent from the
    * change the pending Plan Revision proposes, exactly as ②A did before the action moved into the bar. The
    * drawer then reads the next version, whose bar offers 开始任务 again.
@@ -2317,16 +2336,21 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     if (current === null || input === null || !beginWork()) return;
     options.setStatus('正在按变化后的关键内容重新确认计划…', 'busy');
     try {
-      const initial = await api.prepareBaselineAnalysis({ goal: input.goal, update: input.update, reconfirm: true });
-      const completed = await options.awaitServiceJob(initial, (job) => options.setStatus(job.progress.label, job.state === 'failed' ? 'error' : 'busy'));
-      if (completed.state === 'cancelled') {
-        options.setStatus('重新确认计划已取消；原计划保持不变。', 'success');
-        return;
+      if (current.custom !== undefined) {
+        await prepareCustom(current, 'reconfirm', input.update);
+        options.setStatus('计划已重新确认：看过之后再开始任务。', 'success');
+      } else {
+        const initial = await api.prepareBaselineAnalysis({ goal: input.goal, update: input.update, reconfirm: true });
+        const completed = await options.awaitServiceJob(initial, (job) => options.setStatus(job.progress.label, job.state === 'failed' ? 'error' : 'busy'));
+        if (completed.state === 'cancelled') {
+          options.setStatus('重新确认计划已取消；原计划保持不变。', 'success');
+          return;
+        }
+        if (completed.kind !== 'baseline-analysis-preparation' || completed.result === null || !('coverageManifest' in completed.result)) {
+          throw new Error('重新确认计划未返回计划。');
+        }
+        options.setStatus(`计划已重新确认为版本 ${completed.result.planVersion?.ordinal ?? '?'}。`, 'success');
       }
-      if (completed.kind !== 'baseline-analysis-preparation' || completed.result === null || !('coverageManifest' in completed.result)) {
-        throw new Error('重新确认计划未返回计划。');
-      }
-      options.setStatus(`计划已重新确认为版本 ${completed.result.planVersion?.ordinal ?? '?'}。`, 'success');
       focusBar = true;
       options.onRecorded(current.kind, current.bookId, current.ref);
     } catch (error) {

@@ -3806,7 +3806,7 @@ function registerRendererHandlers(
       return serializeEffect(async () => {
         requireAuthority();
         const route = requireCurrentBookRoute(owned);
-        const result = await service.call('prepareCustomAnalysis', { bookId: route.bookId, dimensionId: input.dimensionId, update: input.update });
+        const result = await service.call('prepareCustomAnalysis', { bookId: route.bookId, dimensionId: input.dimensionId, update: input.update, from: input.from ?? null });
         if (result.dimensions.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '自定义分析任务不属于当前图书工作台。');
         return result;
       });
