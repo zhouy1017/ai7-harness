@@ -1490,12 +1490,14 @@ async function dispatch(
       };
     case 'cancelBookDeliveryPackageArchiveExport':
     case 'cancelBookDeliveryPackageExport':
-      return { id: request.id, ok: true, op: request.op, result: jobs.cancelPackageExport(request.input.jobId) };
+      return { id: request.id, ok: true, op: request.op,
+        result: jobs.cancelPackageExport(request.input.jobId, request.op === 'cancelBookDeliveryPackageArchiveExport' ? 'archive' : 'folder') };
     case 'approveBookDeliveryPackageArchiveExport':
     case 'approveBookDeliveryPackageExport':
       return {
         id: request.id, ok: true, op: request.op,
-        result: jobs.startPackageExport(request.input, launchPolicy.externalExport.currentExportEffectAvailable),
+        result: jobs.startPackageExport(request.input, launchPolicy.externalExport.currentExportEffectAvailable,
+          request.op === 'approveBookDeliveryPackageArchiveExport' ? 'archive' : 'folder'),
       };
     case 'inspectMaintenanceCase':
       return { id: request.id, ok: true, op: request.op, result: store.inspectMaintenanceCase(request.input) };

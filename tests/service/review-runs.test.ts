@@ -2148,7 +2148,7 @@ describe('the 审阅报告 exported in the manuscript\'s formats (Issue #500, S6
         options: { includeAnnotations: true, includeSuggestions: true }, route: 'archive' }, true);
       const archivePath = join(outbox, '含审阅报告.zip');
       const preparedArchive = await session.store.prepareBookDeliveryPackageArchiveExport({ bookId: book.bookId, packageVersionId: version.packageVersionId,
-        options: archiveReview.options, memberKeys: [], reviewDigest: archiveReview.reviewDigest, destination: archivePath }, true);
+        options: archiveReview.options, reviewDigest: archiveReview.reviewDigest, destination: archivePath }, true);
       const exportedArchive = await session.store.approveBookDeliveryPackageExport({ bookId: book.bookId, exportId: preparedArchive.exportId }, true);
       const reportMember = exportedArchive.export.files.find((file) => file.key === `report:${report.reportId}`)!;
       expect(reportMember.outcome).toBe('created');

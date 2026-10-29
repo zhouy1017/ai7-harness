@@ -5742,7 +5742,7 @@ function registerRendererHandlers(
         const prepared = await service.call('prepareBookDeliveryPackageArchiveExport', {
           bookId: route.bookId, packageVersionId: input.packageVersionId, options: input.options,
           ...(input.offset === undefined ? {} : { offset: input.offset }),
-          reviewDigest: input.reviewDigest, memberKeys: input.memberKeys, destination,
+          reviewDigest: input.reviewDigest, destination,
         });
         requireCurrentRouteGeneration(owned, routeGeneration);
         return { outcome: 'prepared', export: prepared };

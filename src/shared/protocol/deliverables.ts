@@ -878,7 +878,8 @@ export interface PrepareBookDeliveryPackageExportInput {
   folder: string;
 }
 
-export type PrepareBookDeliveryPackageArchiveInput = Omit<PrepareBookDeliveryPackageExportInput, 'folder'> & { destination: string };
+/** The archive binds every content member of the version (Issue #959), so it names no members. */
+export type PrepareBookDeliveryPackageArchiveInput = Omit<PrepareBookDeliveryPackageExportInput, 'folder' | 'memberKeys'> & { destination: string };
 
 export interface BookDeliveryPackageArchiveReceiptProjection {
   receiptId: string;

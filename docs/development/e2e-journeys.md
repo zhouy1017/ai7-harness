@@ -40,6 +40,8 @@ Issue #1161 updates new-work expectations to selected set21 / ordinary v30 / loc
 
 ## J-12 Book workbench, data location, and Model Service setup
 
+Issue #1213 (Wave 22 · W22-S8b; #959) is a synchronized delta with no new stage: the crash-summary and diagnostics literals read protocol 187, the revision whose `prepareBookDeliveryPackageArchiveExport` input drops the ignored `memberKeys`. No selector changes.
+
 Issue #1178 (Wave 22 · W22-S7; #931) is a synchronized delta with no new stage: the crash-summary and diagnostics literals read protocol 186, the revision that adds `prepareCustomAnalysis`'s optional `from` and a custom plan's `custom` dimension. No selector changes.
 
 Issue #1177 (Wave 22 · W22-S6; ADR 0096 §3) is a synchronized delta with no new stage. `offline-empty-and-import` reads the live processing indicator (`#processing-indicator`, `data-processing-state="local"`, `本地处理`, aria-label `处理方式：本地处理`) in place of the static 「本地处理 · 未联网」, which is gone from the context header. After `model-credential-ready` the Main Editorial Role card offers `测试主编辑模型连接` (`data-action="test-main-role-connection"`) for the route in use, untested, without clicking it — this launch admits no live test. After `restart-library` every 书库 card prints no Book identity inline and keeps 图书 ID and 稳定标识 in a closed `查看技术详情`. The crash-summary and diagnostics literals read protocol 185.
