@@ -220,10 +220,11 @@ export function evaluationMaterialsField(
   available: boolean,
   busy: boolean,
   repaint: (materialId: string) => void,
+  templateLabel?: string,
 ): HTMLElement {
   const fieldset = el('fieldset', 'evaluation-materials');
   fieldset.dataset['evaluationMaterials'] = kind;
-  fieldset.append(el('legend', undefined, '允许参考 · 资料库'));
+  fieldset.append(el('legend', undefined, templateLabel === undefined ? '允许参考 · 资料库' : `允许参考 · 资料库 · 「${templateLabel}」`));
   fieldset.append(el('p', 'field-note', page.materials?.statement ?? '暂无可参考的资料库资料。'));
   // 初评 carries no 定稿 of its own, so its row says what references never override there (Issue #795 item 3); 审稿意见, which
   // drafts from a 定稿 record, keeps the 定稿 wording.
@@ -265,12 +266,39 @@ export function evaluationMaterialsField(
   return fieldset;
 }
 
+/**
+ * 审稿意见's 允许参考 (Issue #795 item 4): one fieldset per template, each with its own selection, so 起草 of a template sends only
+ * what was ticked for it. The template whose Task is prepared keeps its choices locked beside its plan's frozen rows; the other
+ * stays editable while it may be prepared. Exported so the real rows run under a DOM stub in tests.
+ */
+export function readersReportMaterialsFields(
+  page: Pick<EvaluationWorkspaceProjection, 'materials' | 'materialReferences' | 'readersReport'>,
+  selections: Map<ReadersReportTemplate, Set<string>>,
+  busy: boolean,
+  repaint: (template: ReadersReportTemplate, materialId: string) => void,
+): Array<{ template: ReadersReportTemplate; available: boolean; selected: Set<string>; field: HTMLElement }> {
+  const task = page.readersReport.task;
+  const blocked = page.materialReferences?.blocked.readersReport === true;
+  return page.readersReport.templates.map((entry) => {
+    const own = task !== null && task.template === entry.template;
+    const available = entry.prepare.allowed && !(own && task.state === 'prepared' && !blocked);
+    const selected = selections.get(entry.template) ?? new Set<string>();
+    selections.set(entry.template, selected);
+    // The latest Task's frozen rows are its own template's; the other template's fieldset shows none.
+    const references = page.materialReferences === undefined || own ? page.materialReferences : { ...page.materialReferences, readersReport: [] };
+    const field = evaluationMaterialsField({ ...(page.materials === undefined ? {} : { materials: page.materials }), ...(references === undefined ? {} : { materialReferences: references }) },
+      'readersReport', selected, available, busy, (materialId) => repaint(entry.template, materialId), entry.label);
+    field.dataset['template'] = entry.template;
+    return { template: entry.template, available, selected, field };
+  });
+}
+
 export function mountEvaluation(options: MountEvaluationOptions): { load(): Promise<void>; refresh(): void } {
   const { root, api, setStatus, errorMessage, technicalDetails } = options;
   root.classList.add('evaluation');
   const initialMaterialIds = new Set<string>();
   let seriesId: string | null = null;
-  const reportMaterialIds = new Set<string>();
+  const reportMaterialIds = new Map<ReadersReportTemplate, Set<string>>();
   let busy = false;
   let workspace: EvaluationWorkspaceProjection | null = null;
   let refusal: string | null = null;
@@ -319,7 +347,13 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     if (task !== null) section.append(el('p', 'readers-report-task', readersReportTaskLine(task, READERS_REPORT_TEMPLATE_LABELS[task.template])));
     // A prepared plan whose frozen reference went away can never start: 评估 offers its preparation again, as the plan says.
     const reportBlocked = page.materialReferences?.blocked.readersReport === true;
-    section.append(materialsNode(page, 'readersReport', reportMaterialIds, report.templates.some((entry) => entry.prepare.allowed) && (report.task?.state !== 'prepared' || reportBlocked)));
+    for (const { template, available, selected, field } of readersReportMaterialsFields(page, reportMaterialIds, busy, (template, materialId) =>
+      paint(`[data-evaluation-materials="readersReport"][data-template="${template}"] [data-evaluation-material="${materialId}"]`, true))) {
+      if (available && !busy) field.append(similarMaterialsField(api, page.bookId, page.materials?.items ?? [], selected, (id) => {
+        selected.add(id); paint(`[data-evaluation-materials="readersReport"][data-template="${template}"]`, true);
+      }));
+      section.append(field);
+    }
     const list = el('ul', 'readers-report-templates');
     for (const entry of report.templates) {
       const item = el('li');
@@ -389,7 +423,9 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     setStatus(READERS_REPORT_STATUS.preparing, 'busy');
     paint(null, true);
     try {
-      const job = await api.prepareReadersReport({ template, ...(reportMaterialIds.size === 0 ? {} : { materialIds: taskMaterialSelection(workspace.materials?.items ?? [], reportMaterialIds) }) });
+      // Only this template's own selection is sent (Issue #795 item 4).
+      const selected = reportMaterialIds.get(template) ?? new Set<string>();
+      const job = await api.prepareReadersReport({ template, ...(selected.size === 0 ? {} : { materialIds: taskMaterialSelection(workspace.materials?.items ?? [], selected) }) });
       const completed = await options.awaitServiceJob(job, (next) => setStatus(next.progress.label, 'busy'));
       busy = false;
       if (completed.state === 'cancelled') {
