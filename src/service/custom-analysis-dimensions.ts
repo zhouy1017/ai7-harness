@@ -21,6 +21,9 @@ import {
   type PrepareCustomAnalysisInput,
   type LaunchPolicyProjection,
   customAnalysisModeGoal,
+  type BaselineAnalysisUpdateRequest,
+  CUSTOM_ANALYSIS_PREPARATION_PURPOSES,
+  type CustomAnalysisPreparationFrom,
 } from '../shared/protocol.js';
 import { canonicalRecord, isRecord, parseCanonicalJson } from './analysis/canonical.js';
 import {
@@ -597,27 +600,87 @@ export function stopCustomAnalysisDimension(host: CustomAnalysisStoreHost, versi
 }
 
 /**
+ * The version a Task of the dimension on the Book froze (Issue #931): what 同类型重做, 重新准备 and 重新确认 prepare on again — never the
+ * newest version — and only while it is still 已启用; a stopped one is refused by name, and the editor runs the enabled one from ②A.
+ */
+function frozenVersionOf(host: CustomAnalysisStoreHost, input: PrepareCustomAnalysisInput, taskIntentId: string): CustomAnalysisDimensionVersionRecord {
+  const task = host.authority.prepare('SELECT 1 FROM analysis_task_intents WHERE task_intent_id = ? AND book_id = ? AND kind = ?')
+    .get(taskIntentId, input.bookId, customAnalysisKindId(input.dimensionId));
+  requireStore(task !== undefined, 'TASK_PLAN_NOT_CURRENT', '这项任务不是这个维度在本书的任务；请从「分析 › 自定义」重新打开它的计划。');
+  const version = customAnalysisVersionOfTask(host, taskIntentId);
+  requireStore(version !== null, 'CUSTOM_ANALYSIS_DIMENSION_NOT_FOUND', '这项任务依据的维度版本不存在。');
+  requireStore(version.state === 'enabled', 'CUSTOM_ANALYSIS_DIMENSION_NOT_ENABLED',
+    `这项任务依据的「${version.document.title}」第 ${version.version} 版${version.state === 'stopped' ? '已停用' : '尚未启用'}，不能再准备；请在「分析 › 自定义」用已启用的版本运行，再在计划中开始任务。`);
+  return version;
+}
+
+function sameUpdate(left: BaselineAnalysisUpdateRequest | null, right: BaselineAnalysisUpdateRequest | null): boolean {
+  if (left === null || right === null) return left === right;
+  return left.mode === right.mode && left.selectedRange?.startPosition === right.selectedRange?.startPosition &&
+    left.selectedRange?.endPosition === right.selectedRange?.endPosition;
+}
+
+/**
+ * What a preparation from a Task prepares, read on that Task's own ledger (Issue #931) exactly as the drawer's plan names it: a redo
+ * names the Run it redoes and carries what that Run kept as 同步到当前稿件; 重新准备 asks again for the Task a moved plan blocked;
+ * 重新确认 resolves the Task's pending Plan Revision, its range the one the revision proposes.
+ */
+function preparationFrom(projection: BaselineAnalysisProjection, from: CustomAnalysisPreparationFrom): { update: BaselineAnalysisUpdateRequest | null; redoOf: string | null; reconfirm: boolean } {
+  const intent = projection.taskIntent;
+  requireStore(intent !== null && intent.taskIntentId === from.taskIntentId, 'TASK_PLAN_NOT_CURRENT', '这项任务已不是这个维度在本书最近的任务；请从「分析 › 自定义」重新打开它的计划。');
+  const asItWas = projection.update === null ? null : { mode: projection.update.mode, selectedRange: projection.update.selectedRange } as BaselineAnalysisUpdateRequest;
+  const run = projection.run;
+  if (from.purpose === 'redo') {
+    requireStore(run !== null, 'ANALYSIS_REDO_STALE', '这项任务没有可以改计划重做的运行。');
+    const carried = projection.resultSetRevision?.provenance.runRecordId === run.runRecordId;
+    return { update: carried ? { mode: 'sync-current', selectedRange: null } : asItWas, redoOf: run.runRecordId, reconfirm: false };
+  }
+  if (from.purpose === 'reprepare') {
+    requireStore(run !== null && run.state === 'blocked-before-dispatch' && run.blockedBy === 'plan-moved', 'ANALYSIS_REPREPARE_STALE', '只有因计划变化而没能开始的运行需要重新准备。');
+    return { update: asItWas, redoOf: null, reconfirm: false };
+  }
+  const revision = projection.planRevision;
+  requireStore(revision !== null && projection.actions.canReconfirmPlan, 'ANALYSIS_PLAN_REVISION_ABSENT', '这项任务没有待重新确认的计划修订。');
+  return {
+    update: intent.mode === 'first-baseline' ? null
+      : { mode: intent.mode, selectedRange: intent.mode === 'reanalyze-range' ? revision.proposed.selectedRange : null } as BaselineAnalysisUpdateRequest,
+    redoOf: null,
+    reconfirm: true,
+  };
+}
+
+/**
  * ②A 自定义 › 运行 (Issue #922): the dimension's newest enabled version prepared on the Book through the ordinary ②A path — Task
  * Intent, input checkpoint, Coverage Manifest, Plan Envelope — its plan then opened in the Task Drawer, where 开始任务 records the
  * standard Run Authorization. Under a live scope the selected policy must admit the family (`custom-analysis/*`, v22/v23); the
  * local deterministic route needs no policy. The preparation is a few local steps and runs to its end in this one call.
+ *
+ * With `from` (Issue #931, F-10 #1029): 同类型重做, 重新准备 or 重新确认 of that Task, on the same ledger of the version it froze, so its
+ * Run and Result Set Revision stay pinned; `update` must be the one its plan names. Each ends in a prepared plan the editor starts
+ * with 开始任务 — nothing is started, scheduled or enrolled here, and the baseline's preparation is never called.
  */
 export function prepareCustomAnalysis(host: CustomAnalysisStoreHost, input: PrepareCustomAnalysisInput, launchPolicy: LaunchPolicyProjection): { taskIntentId: string; dimensions: CustomAnalysisDimensionsProjection } {
   host.assertAvailable();
   requireStore(typeof input === 'object' && input !== null && typeof input.bookId === 'string' && UUID_PATTERN.test(input.bookId) &&
-    isCustomAnalysisDimensionId(input.dimensionId), 'CUSTOM_ANALYSIS_REQUEST_INVALID', '自定义分析请求无效。');
+    isCustomAnalysisDimensionId(input.dimensionId) && (input.from == null || (typeof input.from === 'object' && UUID_PATTERN.test(input.from.taskIntentId) &&
+      CUSTOM_ANALYSIS_PREPARATION_PURPOSES.includes(input.from.purpose))), 'CUSTOM_ANALYSIS_REQUEST_INVALID', '自定义分析请求无效。');
   const dimension = host.customAnalysisCall(() => host.customAnalysisDimensions.dimension(input.dimensionId));
   requireStore(dimension !== null, 'CUSTOM_ANALYSIS_DIMENSION_NOT_FOUND', '这个自定义分析维度不存在。');
-  const version = dimension.versions.find((entry) => entry.state === 'enabled') ?? null;
+  const from = input.from ?? null;
+  const version = from === null ? dimension.versions.find((entry) => entry.state === 'enabled') ?? null : frozenVersionOf(host, input, from.taskIntentId);
   requireStore(version !== null, 'CUSTOM_ANALYSIS_DIMENSION_NOT_ENABLED', '这个维度没有已启用的版本；已停用的版本不能再运行。');
   requireStore(!templateEchoesManuscript(host, version.document.questionTemplate, input.bookId), 'CUSTOM_ANALYSIS_TEMPLATE_MANUSCRIPT_TEXT', CUSTOM_ANALYSIS_TEMPLATE_ECHO_REASON);
   const definition = customAnalysisDefinition(host, version);
   const live = host.baselineAnalysis.launch.live;
   requireStore(live === null || liveKindAdmission(launchPolicy, definition, live) !== null, 'CUSTOM_ANALYSIS_NOT_ADMITTED', CUSTOM_ANALYSIS_NOT_ADMITTED_REASON);
   const ledger = customAnalysisLedger(host, definition);
-  const mode = input.update?.mode ?? 'first-baseline';
+  const again = from === null ? null : preparationFrom(host.analysisCall(() => ledger.inspect(input.bookId)) as unknown as BaselineAnalysisProjection, from);
+  requireStore(again === null || sameUpdate(again.update, input.update ?? null), 'CUSTOM_ANALYSIS_REQUEST_INVALID',
+    '准备的范围与这项任务的计划不一致；请重新打开它的计划。');
+  const update = again?.update ?? input.update ?? null;
   let progress = host.analysisCall(() => ledger.prepare({
-    phase: 'start', bookId: input.bookId, goal: customAnalysisModeGoal(mode), update: input.update ?? null, reconfirm: false, launchPolicy,
+    phase: 'start', bookId: input.bookId, goal: customAnalysisModeGoal(update?.mode ?? 'first-baseline'), update,
+    reconfirm: again?.reconfirm ?? false, redoOf: again?.redoOf ?? null, launchPolicy,
   }));
   while (!progress.done) {
     const workId = progress.workId;

@@ -1,5 +1,6 @@
 import { validLocalOptions } from './review/deterministic/plan.js';
 import { validStructureChoice } from '../shared/protocol/import-structure.js';
+import { CUSTOM_ANALYSIS_PREPARATION_PURPOSES, type CustomAnalysisPreparationPurpose } from '../shared/protocol/custom-analysis-redo.js';
 import { MAX_SELECTION_SPAN_BLOCKS } from '../shared/selection-span.js';
 import { validateInspectHouseWordListInput, validateSaveHouseWordListInput } from '../shared/protocol/house-word-list.js';
 import { validSupervisionInput } from './learning/supervision-directives.js';
@@ -1944,8 +1945,11 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'prepareCustomAnalysis': {
       // `update` is null for the dimension's first Run on the Book, and otherwise one of the baseline's three update modes, with a
       // block range exactly for 重新分析所选范围 — the same shape `prepareBaselineAnalysis` carries, with no goal: the store derives it.
-      const input = requireInput(value.input, ['bookId', 'dimensionId', 'update'], tentativeId);
-      if (!validUuid(input.bookId) || !validUuid(input.dimensionId)) throw new ProtocolError(tentativeId);
+      // `from` (Issue #931): the Task a 同类型重做, 重新准备 or 重新确认 prepares again, and which of the three.
+      const input = requireInputWithOptional(value.input, ['bookId', 'dimensionId', 'update'], ['from'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.dimensionId) || !optionalOrNull(input, 'from', (from) => isRecord(from) &&
+          hasExactKeys(from, ['taskIntentId', 'purpose']) && validUuid(from.taskIntentId) &&
+          CUSTOM_ANALYSIS_PREPARATION_PURPOSES.includes(from.purpose as CustomAnalysisPreparationPurpose))) throw new ProtocolError(tentativeId);
       const update = input.update;
       if (update === null) break;
       if (!isRecord(update) || !hasExactKeys(update, ['mode', 'selectedRange']) ||

@@ -596,6 +596,9 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .task-drawer-mode[aria-pressed="true"] { background: var(--status-progress-surface); color: var(--text); font-weight: 800; box-shadow: inset 0 -3px 0 var(--selection-boundary); }
 .task-drawer-mode:focus-visible { outline: 3px solid var(--focus); outline-offset: -3px; }
 .task-drawer-hidden-reason { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+/* Held beside 全域智能体 (Issue #1178): one line under the header says whose Tasks these are and when they go on. */
+.task-drawer-held { flex: none; margin: 0; padding: .45rem 1rem; border-bottom: 1px solid var(--boundary); color: var(--text-subdued); font-weight: 700; }
+.task-drawer-held[hidden] { display: none; }
 .task-drawer-body { display: grid; flex: 1 1 auto; align-content: start; gap: .9rem; min-height: 0; padding: .9rem 1rem 1.2rem; overflow-x: hidden; overflow-y: auto; }
 /* The footer region and its authorization bar (Issue #420, S74a; §6 常驻授权条, V2-UX-LAYER-005): never scrolled
    away with the plan. Should the bar's words ever outgrow half the drawer — 200% zoom on a short window — they

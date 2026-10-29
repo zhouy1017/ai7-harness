@@ -1,7 +1,7 @@
 import { readProposalWorkspace } from './proposal-workspace.js';
 import { readFindingSources } from './research-evidence-labels.js';
 import { findingEvidenceList } from './research-evidence.js';
-import type { ApplyReceiptProjection } from '../shared/protocol.js';
+import type { ApplyReceiptProjection, ProposalWorkspaceProjection } from '../shared/protocol.js';
 import { MAX_DIALOGUE_QUESTION_CHARACTERS, SERIES_KNOWLEDGE_CLASSES, SERIES_KNOWLEDGE_CLASS_LABELS } from '../shared/protocol.js';
 import type { AskAboutSelectionInput, DialogueProjection, DialogueSelectionInput, EditorialPolishProjection, FastInteractionRoutesProjection, PolishSelectionInput } from '../shared/protocol.js';
 import {
@@ -421,6 +421,21 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   const inSeries = seriesOf === undefined ? null : seriesMembership(() => seriesOf(null), () => !destroyed);
   void inSeries?.refresh();
   let closedAt: { top: number } | undefined;
+
+  /**
+   * The proposal workspace a 修改建议 card reads for its 在专用工作区审阅 and atomic group (Issue #1178): read once for the marks the
+   * window holds, not again for every card opened over them; a decision or a new window — new marks — reads it again.
+   */
+  let workspaceRead: { readonly marks: unknown; readonly read: Promise<ProposalWorkspaceProjection> } | null = null;
+  const proposalWorkspace = (): Promise<ProposalWorkspaceProjection> => {
+    const current = editor.currentWindow();
+    if (workspaceRead?.marks !== current.marks) {
+      const read = readProposalWorkspace(api, { manuscriptId: current.manuscriptId, branchId: current.branchId, resultId: null });
+      workspaceRead = { marks: current.marks, read };
+      read.catch(() => { if (workspaceRead?.read === read) workspaceRead = null; });
+    }
+    return workspaceRead.read;
+  };
 
   const binding = (): { manuscriptId: string; branchId: string; windowStartBlockId: string } => {
     const current = editor.currentWindow();
@@ -1102,7 +1117,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       // card opens; an atomic group is decided there as a whole.
       if (applied === null && pendingReceipt?.state !== 'unresolved' && pendingReceipt?.state !== 'confirming') {
         const workspaceRow = el('div', 'button-row'); yours.append(workspaceRow);
-        void readProposalWorkspace(api, { manuscriptId: binding().manuscriptId, branchId: binding().branchId, resultId: null }).then((workspace) => {
+        void proposalWorkspace().then((workspace) => {
           if (!workspaceRow.isConnected) return;
           const item = workspace.items.find((entry) => entry.markId === card.markId); if (!item) return;
           if ((workspace.offerWorkspace || item.atomicGroupId !== null) && options.openProposalWorkspace) workspaceRow.append(actionButton('proposal-workspace', '在专用工作区审阅', 'secondary', () => options.openProposalWorkspace?.()));

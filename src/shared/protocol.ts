@@ -1,12 +1,12 @@
 import type { GlobalAgentOperations, GlobalAgentRendererApi } from './protocol/global-agent.js';
-import type { HouseWordListOperations, HouseWordListApi } from './protocol/house-word-list.js';
+import type { HouseWordListOperations, HouseWordListApi } from './protocol/house-word-list.js'; import type { CustomAnalysisPreparationFrom, TaskPlanCustomDimension } from './protocol/custom-analysis-redo.js';
 import type { JournalEditInput } from './protocol/manuscript-structure.js'; import type { SelectionSpanBlockPin, SelectionSpanField } from './protocol/selection-span.js'; import type { GlobalAttentionProjection } from './protocol/global-attention.js';
 export type { JournalEditInput, JournalStructuralEdit } from './protocol/manuscript-structure.js';
 import type { ManuscriptBlockProjection } from './protocol/manuscript-notes.js';
 export type { ManuscriptBlockKind, ManuscriptBlockProjection, ManuscriptNoteProjection } from './protocol/manuscript-notes.js';
 import type { ImportStructureChoice, ImportStructureProjection } from './protocol/import-structure.js';
 import type { EditableImportProjection, ImportIdentityFindingProjection, ManuscriptConversionProjection } from './protocol/import-intake.js';
-export type * from './protocol/import-intake.js'; export type * from './protocol/import-structure.js'; export type * from './protocol/selection-span.js'; export type * from './protocol/global-attention.js'; export { validStructureChoice } from './protocol/import-structure.js';
+export type * from './protocol/import-intake.js'; export type * from './protocol/import-structure.js'; export * from './protocol/custom-analysis-redo.js'; export type * from './protocol/selection-span.js'; export type * from './protocol/global-attention.js'; export { validStructureChoice } from './protocol/import-structure.js';
 export * from './protocol/global-agent.js';
 export type { ReviewContractIdentity, ReviewExcludedFindingProjection, ReviewContractRejectionReason, ReviewEvidenceSource, ReviewReportSchema, ReviewReportDerivedSections, ReviewReportFindingEntry } from './protocol/review.js';
 import type { ReviewExcludedFindingProjection, ReviewContractRejectionReason, ReviewReportSchema, ReviewReportDerivedSections } from './protocol/review.js';
@@ -136,7 +136,7 @@ import type { PublicSampleBookSourceDigest } from './public-samplebooks.js';
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 185 as const;
+export const SERVICE_PROTOCOL_VERSION = 186 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 export interface BookFindingProjection {
@@ -4482,7 +4482,7 @@ export interface SaveCustomAnalysisDimensionInput {
 export interface PrepareCustomAnalysisInput {
   bookId: string;
   dimensionId: string;
-  update: BaselineAnalysisUpdateRequest | null;
+  update: BaselineAnalysisUpdateRequest | null; /** 同类型重做 / 重新准备 / 重新确认 (Issue #931): on the version that Task froze. */ from?: CustomAnalysisPreparationFrom | null;
 }
 
 /** Every analysis kind a Book may hold, and every Task mode any of them declares. */
@@ -7889,7 +7889,7 @@ export interface TaskPlanProjection {
   /** Transport-only pages; derivation and authority records remain complete. String cursors count Unicode code points. */
   listPages?: Readonly<Record<string, { shown: number; total: number; nextOrdinal: number | null; digest: string }>>;
   readonly seriesScopes?: ReadonlyArray<FrozenSeriesScope>;
-  bookId: string;
+  bookId: string; /** A 自定义分析维度 Task's dimension (Issue #931): its redo, 重新准备 and 重新确认 prepare on it, never the baseline. */ custom?: TaskPlanCustomDimension;
   kind: TaskPlanKind;
   /** The Task Intent or the Review Run this plan belongs to. */
   ref: string;

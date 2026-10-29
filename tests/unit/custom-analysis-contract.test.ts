@@ -189,47 +189,65 @@ describe('the custom analysis kind family (custom-analysis/<dimension-id>)', () 
     ]);
   });
 
-  it('names the version and template, and refuses every baseline-only drawer preparation entry', async () => {
-    const plan = {
-      goal: { sentence: '对当前书稿执行基线稿件分析。', chips: { procedure: '基线分析' } },
-      scope: { send: '不发送任何内容' },
-      service: { send: '不发送任何内容' },
-      steps: [{ id: 'units', label: '逐章读取', result: '各章摘要', removable: false, removed: false }, { id: 'reduction', label: '汇总全书', result: '梗概', removable: false, removed: false }],
-      outcomes: ['基线分析结果'],
-      start: { reconfirm: { goal: 'baseline-only' } }, redo: { prepare: { goal: 'baseline-only' } }, reprepare: { prepare: { goal: 'baseline-only' } }, budgetStop: {},
-      technical: [],
-    } as unknown as TaskPlanProjection;
-    const local = customAnalysisPlan(plan, { ...version }, false);
+  const shared = {
+    bookId: 'book', kind: 'baseline-analysis', ref: 'task', state: { key: 'cancelled-after-start', label: '已取消' },
+    goal: { sentence: '对当前书稿执行基线稿件分析。', chips: { procedure: '基线分析' } },
+    scope: { send: '不发送任何内容' },
+    service: { send: '不发送任何内容' },
+    steps: [{ id: 'units', label: '逐章读取', result: '各章摘要', removable: false, removed: false }, { id: 'reduction', label: '汇总全书', result: '梗概', removable: false, removed: false }],
+    outcomes: ['基线分析结果'],
+    start: { reconfirm: { goal: 'shared-builder', update: null } }, redo: { summary: [], prepare: { goal: 'shared-builder', update: null, redoOf: 'run' } },
+    reprepare: { reason: '计划已变化', prepare: { goal: 'shared-builder', update: null } }, budgetStop: null,
+    technical: [],
+  } as unknown as TaskPlanProjection;
+
+  it('names the version and template, and keeps the shared builder\'s redo, 重新准备 and 重新确认 on its own dimension (#931)', () => {
+    const local = customAnalysisPlan(shared, { ...version }, false);
     expect(local.goal.chips.procedure).toBe(`自定义分析 · ${CUSTOM_DIMENSION_TITLE} · 第 1 版`);
     expect(local.scope.send).toBe(`不发送任何内容；实时运行时会一并发送该维度第 1 版的提问模板「${CUSTOM_DIMENSION_TEMPLATE}」`);
     expect(local.service.send).toBe('不发送任何内容');
-    // None of the shared drawer's baseline-only preparation controls may turn this custom Task into prepareBaselineAnalysis.
-    expect([local.start.reconfirm, local.redo, local.reprepare, local.budgetStop]).toEqual([null, null, null, null]);
-    // Exercise the real drawer handlers as in task-drawer-completion.test.ts; even a stale click must not prepare a baseline.
+    expect(local.custom).toEqual({ dimensionId: DIMENSION_ID });
+    expect([local.start.reconfirm, local.redo, local.reprepare]).toEqual([shared.start.reconfirm, shared.redo, shared.reprepare]);
+    expect(local.steps.map((step) => step.id)).toEqual(['units', 'reduction']);
+    expect(local.technical.at(-1)).toEqual({ key: 'custom-analysis-dimension', label: '自定义分析维度版本', value: `${VERSION_ID} · ${documentDigest}` });
+    const live = customAnalysisPlan({ ...shared, scope: { ...shared.scope, send: '所读阅读范围的稿件正文（8 个）' } }, { ...version }, true);
+    expect(live.scope.send).toBe(`所读阅读范围的稿件正文（8 个），以及该维度第 1 版的提问模板「${CUSTOM_DIMENSION_TEMPLATE}」`);
+    // The title is the editor's label: never on the 会发送 line.
+    expect(live.scope.send.includes(`「${CUSTOM_DIMENSION_TITLE}」`)).toBe(false);
+  });
+
+  it('prepares the drawer\'s three controls on a custom plan through prepareCustomAnalysis from the Task, never prepareBaselineAnalysis', async () => {
+    const local = customAnalysisPlan(shared, { ...version }, false);
+    // Exercise the real drawer handlers as in task-drawer-completion.test.ts.
     const source = await readFile(new URL('../../src/renderer/task-drawer.ts', import.meta.url), 'utf8');
     const parsed = createSourceFile('task-drawer.ts', source, ScriptTarget.ES2022, true);
     const handlers = new Map<string, string>();
     function visit(node: Node): void {
-      if (isFunctionDeclaration(node) && node.name !== undefined && ['redoNow', 'reprepareNow', 'reconfirm'].includes(node.name.text)) {
-        handlers.set(node.name.text, node.getText(parsed));
+      if (isFunctionDeclaration(node) && node.name !== undefined && ['redoNow', 'reprepareNow', 'reconfirm', 'prepareCustom'].includes(node.name.text)) {
+        handlers.set(node.name.text, transpileModule(node.getText(parsed), { compilerOptions: { target: ScriptTarget.ES2022, module: ModuleKind.None } }).outputText);
       }
       forEachChild(node, visit);
     }
     visit(parsed);
-    expect(handlers.size).toBe(3);
+    expect(handlers.size).toBe(4);
     const prepareBaselineAnalysis = vi.fn();
-    for (const [name, handler] of handlers) {
-      const state = createContext({ plan: local, request: null, api: { prepareBaselineAnalysis }, beginWork: () => true });
-      runInContext(transpileModule(handler, { compilerOptions: { target: ScriptTarget.ES2022, module: ModuleKind.None } }).outputText, state);
-      await expect(runInContext(`${name}()`, state)).resolves.toBeUndefined();
+    const prepareCustomAnalysis = vi.fn(async (_input: unknown) => ({ taskIntentId: 'next', dimensions: {} }));
+    const opened: unknown[] = [];
+    for (const name of ['redoNow', 'reprepareNow', 'reconfirm']) {
+      const state = createContext({
+        plan: local, request: null, redoPending: null, editOnOpen: null, focusBar: false, refusal: null, returnFocus: () => null, root: { hidden: false },
+        api: { prepareBaselineAnalysis, prepareCustomAnalysis }, beginWork: () => true, endWork: () => undefined,
+        options: { setStatus: () => undefined, onRecorded: () => undefined, errorMessage: (_error: unknown, fallback: string) => fallback },
+        surface: { open: (request: unknown) => opened.push(request) },
+      });
+      runInContext(handlers.get('prepareCustom')! + handlers.get(name)!, state);
+      await runInContext(`${name}()`, state);
     }
     expect(prepareBaselineAnalysis).not.toHaveBeenCalled();
-    expect(local.steps.map((step) => step.id)).toEqual(['units', 'reduction']);
-    expect(local.technical.at(-1)).toEqual({ key: 'custom-analysis-dimension', label: '自定义分析维度版本', value: `${VERSION_ID} · ${documentDigest}` });
-    const live = customAnalysisPlan({ ...plan, scope: { ...plan.scope, send: '所读阅读范围的稿件正文（8 个）' } }, { ...version }, true);
-    expect(live.scope.send).toBe(`所读阅读范围的稿件正文（8 个），以及该维度第 1 版的提问模板「${CUSTOM_DIMENSION_TEMPLATE}」`);
-    // The title is the editor's label: never on the 会发送 line.
-    expect(live.scope.send.includes(`「${CUSTOM_DIMENSION_TITLE}」`)).toBe(false);
+    expect(prepareCustomAnalysis.mock.calls.map(([input]) => input)).toEqual((['redo', 'reprepare', 'reconfirm'] as const)
+      .map((purpose) => ({ dimensionId: DIMENSION_ID, update: null, from: { taskIntentId: 'task', purpose } })));
+    // A redo and a 重新准备 open the prepared Task's plan, which only 开始任务 starts; a 重新确认 reads its own plan again.
+    expect(opened).toEqual([{ bookId: 'book', kind: 'baseline-analysis', ref: 'next' }, { bookId: 'book', kind: 'baseline-analysis', ref: 'next' }]);
   });
 });
 

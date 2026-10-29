@@ -3,7 +3,7 @@ import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
@@ -302,6 +302,88 @@ describe('a custom analysis Run over the real store on exact sample1', () => {
       // The second dimension still lists, its prepared Task never started and its first revision kept.
       expect(custom(listed, second.dimensionId).book!.taskState?.state).toBe('prepared');
       expect(custom(listed, second.dimensionId).book!.latest!.ordinal).toBe(1);
+    });
+  }, 180_000);
+});
+
+describe('同类型重做 / 重新准备 / 重新确认 of a custom Task (Issue #931)', () => {
+  it('redoes a cancelled custom Run on the version its plan froze, never the newest, never the baseline, and starts nothing', async () => {
+    await withBook(async (book) => {
+      const first = defineDimension(book);
+      const prepared = book.store.prepareCustomAnalysis({ bookId: book.bookId, dimensionId: first.dimensionId, update: null }, launchPolicy);
+      const taskIntentId = prepared.taskIntentId;
+      const authorized = book.store.authorizeBaselineAnalysis(book.bookId, taskIntentId, book.store.inspectAnalysisTask(book.bookId, taskIntentId).planEnvelope!.digest);
+      const runRecordId = authorized.dispatchRunRecordId!;
+      // A Run that began reading and was cancelled before it kept anything.
+      authorized.ledger.recordRunState(runRecordId, 'admitted', { detail: '已进入 AI7 调度器（单槽位）。' });
+      authorized.ledger.recordRunState(runRecordId, 'executing', { detail: '执行绑定已持久化并核对；开始逐单元执行。' });
+      authorized.ledger.requestCancel(book.bookId, taskIntentId);
+      expect(book.owner.cancelRun(runRecordId, authorized.ledger)).toBe('settled');
+      const plan = book.store.inspectTaskPlan({ bookId: book.bookId, kind: 'baseline-analysis', ref: taskIntentId });
+      expect(plan.custom).toEqual({ dimensionId: first.dimensionId });
+      expect(plan.redo?.prepare).toMatchObject({ update: null, redoOf: runRecordId });
+      // A successor enabled meanwhile is what ②A would run now; the redo keeps the version the Task froze.
+      const successor = custom(book.store.saveCustomAnalysisDimension({ dimensionId: first.dimensionId, title: '单元开篇（修订）', questionTemplate: CUSTOM_DIMENSION_TEMPLATE }), first.dimensionId).versions[0]!;
+      book.store.enableCustomAnalysisDimension(successor.versionId);
+      const from = { taskIntentId, purpose: 'redo' as const };
+      const frozen = book.store.inspectAnalysisTask(book.bookId, taskIntentId).planEnvelope!.promptContractDigest;
+      const baseline = vi.spyOn(book.store, 'createBaselineAnalysisPreparationWork');
+      expect(refusal(() => book.store.prepareCustomAnalysis({ bookId: book.bookId, dimensionId: first.dimensionId, update: { mode: 'reanalyze-book', selectedRange: null }, from }, launchPolicy)))
+        .toBe('CUSTOM_ANALYSIS_REQUEST_INVALID');
+      expect(refusal(() => book.store.prepareCustomAnalysis({ bookId: book.bookId, dimensionId: first.dimensionId, update: null, from: { taskIntentId, purpose: 'reprepare' } }, launchPolicy)))
+        .toBe('ANALYSIS_REPREPARE_STALE');
+      const redone = book.store.prepareCustomAnalysis({ bookId: book.bookId, dimensionId: first.dimensionId, update: null, from }, launchPolicy);
+      expect(baseline).not.toHaveBeenCalled();
+      const task = book.store.inspectAnalysisTask(book.bookId, redone.taskIntentId);
+      expect(redone.taskIntentId).not.toBe(taskIntentId);
+      expect(task.kind).toBe(`custom-analysis/${first.dimensionId}`);
+      expect(task.taskIntent?.mode).toBe('first-baseline');
+      // The redo is the Run's own: once made, that Run is no longer the dimension's latest to redo.
+      expect(refusal(() => book.store.prepareCustomAnalysis({ bookId: book.bookId, dimensionId: first.dimensionId, update: null, from }, launchPolicy))).toBe('TASK_PLAN_NOT_CURRENT');
+      expect(task.planEnvelope!.promptContractDigest).toBe(frozen);
+      // Prepared, not started: only 开始任务 records its Run Authorization.
+      expect(task.state).toBe('prepared');
+      expect(task.authorization).toBeNull();
+      expect(book.store.waitingTaskRuns(book.bookId)).toEqual([]);
+      const next = book.store.inspectTaskPlan({ bookId: book.bookId, kind: 'baseline-analysis', ref: redone.taskIntentId });
+      expect(next.goal.chips.procedure).toBe(`自定义分析 · ${CUSTOM_DIMENSION_TITLE} · 第 1 版`);
+      expect(next.start.readiness).toBe('ready');
+    });
+  }, 180_000);
+
+  it('reconfirms a drifted custom plan into its next version on the same Task, and refuses by name once its version is stopped', async () => {
+    await withBook(async (book) => {
+      const { dimensionId, versionId } = defineDimension(book);
+      const settled = book.store.inspectAnalysisTask(book.bookId, await run(book, dimensionId));
+      const options = settled.updateControls!.actions['reanalyze-range'].options;
+      const range = (index: number) => ({ mode: 'reanalyze-range' as const, selectedRange: { startPosition: options[index]!.startPosition, endPosition: options[index]!.endPosition } });
+      const prepared = book.store.prepareCustomAnalysis({ bookId: book.bookId, dimensionId, update: range(2) }, launchPolicy);
+      // Another range asked for on the prepared Task is drift: one pending Plan Revision, and no 开始任务 until it is reconfirmed.
+      expect(book.store.prepareCustomAnalysis({ bookId: book.bookId, dimensionId, update: range(5) }, launchPolicy).taskIntentId).toBe(prepared.taskIntentId);
+      const drifted = book.store.inspectTaskPlan({ bookId: book.bookId, kind: 'baseline-analysis', ref: prepared.taskIntentId });
+      expect(drifted.start.readiness).toBe('changed');
+      expect(drifted.start.reconfirm?.update).toEqual(range(5));
+      const from = { taskIntentId: prepared.taskIntentId, purpose: 'reconfirm' as const };
+      const reconfirmed = book.store.prepareCustomAnalysis({ bookId: book.bookId, dimensionId, update: range(5), from }, launchPolicy);
+      expect(reconfirmed.taskIntentId).toBe(prepared.taskIntentId);
+      const task = book.store.inspectAnalysisTask(book.bookId, prepared.taskIntentId);
+      expect(task.planVersion?.ordinal).toBe(2);
+      expect(task.update?.selectedRange).toEqual(range(5).selectedRange);
+      expect(task.authorization).toBeNull();
+      expect(book.store.inspectTaskPlan({ bookId: book.bookId, kind: 'baseline-analysis', ref: prepared.taskIntentId }).start.readiness).toBe('ready');
+      // The settled Run's Result Set Revision stays the dimension's latest until a reconfirmed plan is started and settles.
+      expect(custom(book.store.inspectCustomAnalysisDimensions(book.bookId), dimensionId).book!.latest!.revisionId).toBe(settled.resultSetRevision!.revisionId);
+      // Drift again, then 停用: the version the Task froze is final, and 重新确认 names it instead of moving to another.
+      book.store.prepareCustomAnalysis({ bookId: book.bookId, dimensionId, update: range(2) }, launchPolicy);
+      book.store.stopCustomAnalysisDimension(versionId);
+      let reason = '';
+      try {
+        book.store.prepareCustomAnalysis({ bookId: book.bookId, dimensionId, update: range(2), from }, launchPolicy);
+      } catch (error) {
+        reason = error instanceof StoreError ? `${error.code} ${error.message}` : String(error);
+      }
+      expect(reason).toContain('CUSTOM_ANALYSIS_DIMENSION_NOT_ENABLED');
+      expect(reason).toContain(`「${CUSTOM_DIMENSION_TITLE}」第 1 版已停用`);
     });
   }, 180_000);
 });
