@@ -21,7 +21,7 @@ function item(overrides: Partial<GlobalAttentionItemProjection> = {}): GlobalAtt
 function projection(items: GlobalAttentionItemProjection[]): GlobalAttentionProjection {
   return { groups: ['exceptions', 'decisions', 'active', 'recent'].map((key) => ({
     key: key as GlobalAttentionItemProjection['group'], items: items.filter((entry) => entry.group === key), total: items.filter((entry) => entry.group === key).length,
-  })), actionableCount: items.filter((entry) => ['exceptions', 'decisions'].includes(entry.group)).length, running: false };
+  })), actionableCount: items.filter((entry) => ['exceptions', 'decisions'].includes(entry.group)).length, running: false, processing: { state: 'local' } };
 }
 function setup() {
   let prefs = { ...preferenceDefaults(), 'notifications.enabled': true };

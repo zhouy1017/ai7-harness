@@ -1259,7 +1259,9 @@ async function runWorkspaceJourney(renderer, dataRoot) {
     'dirty-milestone-authoritative-ipc-order',
   );
   at('milestone-search-state-stale');
-  await waitFor(renderer, `document.querySelector('.search-results')?.childElementCount === 0 && document.querySelector('.replacement-review')?.hidden && document.querySelector('.search-results')?.dataset.inclusionLocked === 'false' && Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '返回查找前位置')?.hidden && document.querySelector('.search-section .field-note')?.textContent.includes('稿件修订版已变化')`, 'milestone-revision-stales-all-search-state');
+  // Synchronized delta with Issue #1177 (ADR 0096 §3): the result set is marked stale, not discarded — its rows stay, read as
+  // past, with every jump and inclusion control disabled until 查找全稿 runs again; the preview and the way back are gone.
+  await waitFor(renderer, `(() => { const results = document.querySelector('.search-results'); const rows = Array.from(results?.querySelectorAll('.search-result') ?? []); return rows.length > 0 && results.dataset.searchStale === 'true' && results.dataset.inclusionLocked === 'true' && rows.every((row) => Array.from(row.querySelectorAll('button, input')).every((control) => control.disabled)) && document.querySelector('.replacement-review')?.hidden && Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '返回查找前位置')?.hidden && Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '预览替换')?.disabled && document.querySelector('.search-section .field-note')?.textContent.startsWith('稿件已变化；以下结果已过时，请重新查找。') && document.querySelector('.search-section .field-note')?.textContent.includes('稿件修订版已变化'); })()`, 'milestone-revision-stales-all-search-state');
   at('milestone-authoritative-ready');
   await waitForChecks(
     renderer,

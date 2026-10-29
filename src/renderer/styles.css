@@ -181,7 +181,9 @@ body { padding-left: var(--sidebar-width); }
 .context-actions:empty { display: none; }
 .preferences-notice { flex: 1 1 100%; margin: 0; }
 .locality { margin: 0; color: var(--text-subdued); font-size: .9rem; white-space: nowrap; }
-.locality span { color: var(--status-good); }
+.locality::before { content: '● '; color: var(--status-good); }
+.locality[data-processing-state="sending"]::before { color: var(--status-progress); }
+.locality[data-processing-state="waiting-network"]::before { color: var(--status-attention); }
 
 /* 设置 (editor-surfaces §8.6): the three groups, one row per page; a row not yet available says 即将提供. */
 .settings-group { margin-top: 1.3rem; }

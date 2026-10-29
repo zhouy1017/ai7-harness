@@ -224,12 +224,10 @@ import {
   publicationStateOf,
 } from './deliverables-labels.js';
 import { ViewPreferences, mountRegionSeparator, renderViewSettings } from './layout.js';
-import {
-  createGlobalAttentionReader,
-  mountGlobalAttention,
-  mountGlobalAttentionEntry,
-  type GlobalAttentionSurface,
-} from './global-attention.js';
+import { createGlobalAttentionReader, mountGlobalAttention, mountGlobalAttentionEntry, type GlobalAttentionSurface } from './global-attention.js';
+import { mountProcessingIndicator } from './processing-indicator.js';
+import { bookIdentityRows } from './technical-layer-labels.js';
+import { MODEL_CONNECTION_TEST_NOTE, mainRoleConnectionTest, modelConnectionTestDisclosure, modelConnectionTestLabel } from './model-service-roles.js';
 import { GLOBAL_ATTENTION_ACTIONS, GLOBAL_ATTENTION_STATUS_LINES } from './global-attention-labels.js';
 import { analysisRefusalView } from './overview-refusal-labels.js';
 import {
@@ -815,6 +813,7 @@ const globalAttentionEntry = ((): HTMLButtonElement => {
   return node;
 })();
 mountGlobalAttentionEntry({ button: globalAttentionEntry, reader: globalAttentionReader, open: () => void openGlobalAttention() });
+mountProcessingIndicator(requiredElement('#processing-indicator'), globalAttentionReader);
 const showQuietNotice = mountQuietNotice((item) => void leaveThen(() => openGlobalAttentionItem(item)));
 const observeNotifications = createNotificationObserver({
   api: window.ai7,
@@ -1007,6 +1006,10 @@ function technicalDetails(gridClass: string | undefined, ...rows: ReadonlyArray<
   values.append(...rows);
   disclosure.append(element('summary', undefined, '查看技术详情'), values);
   return disclosure;
+}
+/** A 书库 card's identities, one disclosure away (ADR 0096 §3). */
+function bookIdentityDisclosure(book: { bookId: string; stableIdentity: string }): HTMLElement {
+  return technicalDetails(undefined, ...bookIdentityRows(book).flatMap(([term, value]) => [element('dt', undefined, term), element('dd', 'technical-identity', value)]));
 }
 
 /**
@@ -1415,7 +1418,7 @@ function appendRecoveryReturnAction(content: HTMLElement, context: RecoveryRetur
 function manuscriptEntryNotice(anchor: BookManuscriptAnchorProjection): string {
   if (anchor.entry === null) return '从稿件开头打开；这本图书还没有记录上次位置。';
   if (anchor.entry.state === 'nearest-anchor') {
-    return `上次位置所在的内容块已不在当前修订版，已回到最近的位置 · ${anchor.entry.label}`;
+    return `上次位置所在的段落已不在当前修订版，已回到最近的位置 · ${anchor.entry.label}`;
   }
   return `回到上次位置 · ${anchor.entry.label}`;
 }
@@ -2575,10 +2578,7 @@ async function renderBookWorkbenchChooser(
       });
       open.dataset['bookId'] = summary.bookId;
       const row = element('article', 'book-summary-item');
-      row.append(
-        open,
-        element('p', 'field-note', `图书 ID ${summary.bookId} · 稳定标识 ${summary.stableIdentity}`),
-      );
+      row.append(open, bookIdentityDisclosure(summary));
       list.append(row);
     }
     if (list.childElementCount === 0) {
@@ -2775,6 +2775,7 @@ function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus 
     openProposalWorkspace: (input) => renderProposalWorkspace(input, bookId, bookTitle),
     openPlan: (reviewRunId) => openTaskPlan(bookId, 'review-run', reviewRunId),
     planChanged: () => taskDrawer.refresh('review-run'),
+    recorded: (reviewRunId) => { globalAttentionReader.refresh(); manuscriptOnScreen?.followReviewMarks(bookId, reviewRunId); },
     // 在来源与证据中查看 (Issue #901): the Evidence Workspace's deep link into the Book's retained sources.
     openSource: (evidenceId) => renderBookSources(bookId, bookTitle, evidenceId),
     // 查看学习来源链 (Issue #912): 质量与学习 › 学习回溯 at the material a result's preference came from.
@@ -3163,7 +3164,7 @@ function renderBookOverview(
       element('dd', undefined, anchor.entry === null
         ? '尚未记录；打开稿件时从稿件开头开始'
         : anchor.entry.state === 'nearest-anchor'
-          ? `${anchor.entry.label}（上次位置所在的内容块已不在当前修订版，落到最近的位置）`
+          ? `${anchor.entry.label}（上次位置所在的段落已不在当前修订版，落到最近的位置）`
           : anchor.entry.label),
       element('dt', undefined, '保存状态'), element('dd', undefined, anchor.journalLabel),
     );
@@ -4838,10 +4839,8 @@ function renderModelRouteOption(option: ModelServiceRouteOptionProjection): HTML
       models.append(item);
     }
     const testState = option.connection.connectionTest;
-    const testLabel = testState == null ? '尚未测试；保存凭据不等于连接成功'
-      : testState.outcome === 'passed' ? `文本连接测试通过 · ${testState.modelId}`
-        : `文本连接测试${testState.outcome === 'outcome-unknown' ? '结果待确认；不会自动重试' : testState.outcome === 'cancelled' ? '已取消' : '未通过'} · ${testState.code ?? ''}`;
-    section.append(element('p', 'field-note', testLabel), element('p', 'field-note', '测试只发送固定公开合成消息，不含图书文字；仅核验缓冲文本，不核验工具或流式。'));
+    const testedModel = (option.models ?? [option.binding]).find((model) => model.modelId === testState?.modelId)?.modelLabel;
+    section.append(element('p', 'field-note', modelConnectionTestLabel(testState, testedModel)), ...modelConnectionTestDisclosure(testState), element('p', 'field-note', MODEL_CONNECTION_TEST_NOTE));
     const test = button('测试文本连接', 'secondary', async () => {
       test.disabled = true;
       try { renderModelServiceSettingsProjection(await window.ai7.testModelServiceConnection({ route: option.route, modelId: models.value })); }
@@ -4987,7 +4986,8 @@ function renderModelServiceSettingsProjection(projection: ModelServiceSettingsPr
       routes.setAttribute('aria-label', '模型服务路线');
       routes.append(element('h4', undefined, '模型服务路线'), element('p', 'field-note', projection.routeChoice.effectLabel));
       for (const option of projection.routeChoice.routes) routes.append(renderModelRouteOption(option));
-      card.append(routes);
+      const mainTest = mainRoleConnectionTest(projection, { api: window.ai7, render: renderModelServiceSettingsProjection, setStatus, errorMessage: rendererErrorMessage });
+      card.append(...(mainTest === null ? [] : [mainTest]), routes);
     }
     roles.append(card);
   }
@@ -5736,13 +5736,8 @@ function renderLanding(
       if (peopleLine !== null) row.append(element('p', 'book-people-line', peopleLine));
       const relatedLine = bookCardRelatedLine(summary.people);
       if (relatedLine !== null) row.append(element('p', 'field-note book-related-line', relatedLine));
-      row.append(
-        element(
-          'p',
-          'field-note',
-          `${summary.internalNumber === null ? '' : `内部编号 ${summary.internalNumber} · `}图书 ID ${summary.bookId} · 稳定标识 ${summary.stableIdentity}`,
-        ),
-      );
+      if (summary.internalNumber !== null) row.append(element('p', 'field-note', `内部编号 ${summary.internalNumber}`));
+      row.append(bookIdentityDisclosure(summary));
       list.append(row);
     }
     library.append(list);

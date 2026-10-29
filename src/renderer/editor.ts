@@ -223,7 +223,7 @@ function requireAcknowledgement(condition: boolean): asserts condition {
 function validateText(text: string): void {
   requireEditor(
     text.length <= MAX_BLOCK_CODE_UNITS && graphemes(text).length <= MAX_BLOCK_GRAPHEMES,
-    '稿件内容块超出当前安全编辑范围。',
+    '稿件段落超出当前安全编辑范围。',
   );
 }
 
@@ -274,7 +274,7 @@ function baselineMap(windowProjection: ManuscriptWindowProjection): Map<string, 
         !map.has(block.blockId) &&
         block.position > previousPosition &&
         (block.kind === 'title' || block.kind === 'heading' || block.kind === 'paragraph' || block.kind === 'note'),
-      '稿件窗口内容块绑定无效。',
+      '稿件窗口段落绑定无效。',
     );
     validateText(block.text);
     previousPosition = block.position;
@@ -888,7 +888,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       if (pending.held !== null) owed.push([pending.held.blockId, pending.held.text]);
       for (const [id, text] of owed) {
         const baseline = baselines.get(id);
-        requireEditor(baseline && text !== undefined, '待保存内容块不存在。');
+        requireEditor(baseline && text !== undefined, '待保存段落不存在。');
         if (baseline.text !== text) return textInput(baseline, text);
       }
       return {
@@ -903,7 +903,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     }
     const baseline = baselines.get(blockId);
     const current = findBlock(view.state.doc, blockId);
-    requireEditor(baseline && current, '待保存内容块不存在。');
+    requireEditor(baseline && current, '待保存段落不存在。');
     return textInput(baseline, current.textContent);
   };
 
@@ -990,7 +990,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
         if (changed.length === 0 && retryPrepared === undefined) break;
         const prepared = retryPrepared ?? nextPrepared(changed[0]!);
         const baseline = baselines.get(prepared.input.blockId);
-        requireEditor(baseline, '待保存内容块不存在。');
+        requireEditor(baseline, '待保存段落不存在。');
         // Keep the exact command from dispatch through acknowledgement, including while the visible text changes again.
         retryPrepared = prepared;
         saving = true;

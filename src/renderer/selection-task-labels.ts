@@ -34,7 +34,7 @@ export function selectionTaskContextLine(context: {
   readonly graphemes: number;
   readonly position: number;
 }): string {
-  return `《${context.bookTitle}》 · 修订版 ${context.revisionLabel} · 修订日志序号 ${context.journalSequence} · 已选 ${context.graphemes} 字 · 第 ${context.position} 个内容块`;
+  return `《${context.bookTitle}》 · 修订版 ${context.revisionLabel} · 修订日志序号 ${context.journalSequence} · 已选 ${context.graphemes} 字 · 第 ${context.position} 段`;
 }
 
 export const SELECTION_TASK_REANALYZE = '重新分析这段';
