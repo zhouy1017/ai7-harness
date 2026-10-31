@@ -26,6 +26,10 @@ Generated `node_modules/`, `.pnpm-store/`, `.cache/`, `.runtime/`, `dist/`, `rel
 
 [store-records.ts](../../src/service/store-records.ts) holds the authority store's record primitives (its errors, assertion, canonical JSON, SHA-256, patterns and typed row reads). [store.ts](../../src/service/store.ts) keeps transactions, schema, authoritative state, error boundaries and one-line public delegates; its operation groups live with their feature owners as functions over a typed store host: 书系 in [series.ts](../../src/service/series.ts), 可复用工序 in [captured-procedures.ts](../../src/service/captured-procedures.ts), 按我的评分重写评语 in [evaluation-rewrites.ts](../../src/service/evaluation-rewrites.ts), 学习监督 and 学习素材/学习整理 in [house-review-preference.ts](../../src/service/house-review-preference.ts), 自定义分析维度 in [custom-analysis-dimensions.ts](../../src/service/custom-analysis-dimensions.ts), 后台分析登记 in [background-analysis-enrollments.ts](../../src/service/background-analysis-enrollments.ts) and 审稿意见 in [readers-reports.ts](../../src/service/readers-reports.ts).
 
+[bounded-schema-sql.ts](../../src/service/manuscript/bounded-schema-sql.ts) holds the bounded manuscript store's existing schema SQL, expected historical shapes and foreign-key signatures; [bounded-manuscript.ts](../../src/service/bounded-manuscript.ts) re-exports its public SQL constants.
+
+[bounded-schema-check.ts](../../src/service/manuscript/bounded-schema-check.ts) holds the same store's exact table, index, trigger and search-schema checks, including its existing column-signature cache; initialization, migrations and the store class remain in the hub.
+
 ## Tooling ownership
 
 The existing commands `node tools/nightly-queue.mjs …` and imports from `tools/orca-release.mjs` remain compatible. Their implementations live in [queue.mjs](../../tools/ci/queue.mjs) and [release-authority.mjs](../../tools/ci/release-authority.mjs). The latter authorizes repository merges; it is distinct from creating a product release. Keeping the entry paths stable also preserves trusted control checkouts used by existing workflow runs.
