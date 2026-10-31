@@ -28,9 +28,10 @@ describe('the model-service channel catalogue', () => {
   it('names why every other declared model cannot be chosen, and carries no endpoint or credential slot', () => {
     const channels = modelServiceChannels();
     const byId = (channelId: string) => channels.find((channel) => channel.channelId === channelId)!;
-    // v32 admits every family (Issue #1221); these models now wait on their own text evidence.
-    expect(byId('anthropic-claude').models.every((model) => model.main === 'untested:text' && model.fast === 'untested:text')).toBe(true);
-    expect(byId('google-gemini').models.every((model) => model.family === 'google-generate-content' && model.main === 'untested:text')).toBe(true);
+    // v32 admits every family (Issue #1221); the official Claude and Gemini models read text on documentation (#1225), the Zen ones do not.
+    expect(byId('anthropic-claude').models.every((model) => model.main === 'eligible' && model.fast === 'eligible')).toBe(true);
+    expect(byId('google-gemini').models.every((model) => model.family === 'google-generate-content' && model.main === 'eligible')).toBe(true);
+    expect(byId('opencode-zen').models.every((model) => model.main === 'untested:text' && model.fast === 'untested:text')).toBe(true);
     const luna = byId('openai-platform').models.find((model) => model.modelId === 'gpt-5.6-luna')!;
     // OpenAI Responses for Main has its runtime record (Issue #1225), so it reads eligible for both roles.
     expect([luna.main, luna.fast]).toEqual(['eligible', 'eligible']);

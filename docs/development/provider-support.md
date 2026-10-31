@@ -107,11 +107,12 @@ The shape requires a per-turn output cap; the route declares the same 32,768 as 
 | `claude-sonnet-5` | Claude Sonnet 5 | 1,000,000 | `none` | `provider-tool` |
 | `claude-haiku-4-5` | Claude Haiku 4.5 | 200,000 | `none` | `provider-tool` |
 
-Dispositions (`anthropic-messages`): text untested for every model; stream untested for every model; functionTools untested for every model.
+Dispositions (`anthropic-messages`): text supported for `claude-opus-5`, `claude-fable-5-1`, `claude-sonnet-5`, `claude-haiku-4-5`; stream untested for every model; functionTools untested for every model.
 
-Inert: 4 of 4 (no declared answer channel). Established:
+Inert: 0 of 4 (no declared answer channel). Established:
 
 - every model · `requestShape: anthropic-messages` — `vendor-documentation`, Claude Platform documentation, platform.claude.com (docs.claude.com redirects there) — Messages API, models overview, read 2026-09-10
+- every model · `answerChannel: content-text-blocks` — `vendor-documentation`, https://platform.claude.com/docs/en/about-claude/models/overview ; https://platform.claude.com/docs/en/models/opus-5/overview ; https://platform.claude.com/docs/en/models/sonnet-5/overview ; https://platform.claude.com/docs/en/models/haiku-4-5/overview ; https://platform.claude.com/docs/en/build-with-claude/working-with-messages, read 2026-10-31
 - every model · `webSearchTool: provider-tool` — `vendor-documentation`, Claude Platform documentation, web search tool, platform.claude.com, read 2026-09-10
 - `claude-opus-5`, `claude-fable-5-1`, `claude-sonnet-5` · context 1,000,000 — `vendor-documentation`, Claude Platform documentation, platform.claude.com (docs.claude.com redirects there) — Messages API, models overview, read 2026-09-10
 - `claude-haiku-4-5` · context 200,000 — `vendor-documentation`, Claude Platform documentation, platform.claude.com (docs.claude.com redirects there) — Messages API, models overview, read 2026-09-10
@@ -120,6 +121,7 @@ Readings:
 
 - `claude-platform-docs` — `vendor-documentation`, Claude Platform documentation, platform.claude.com (docs.claude.com redirects there) — Messages API, models overview, read 2026-09-10. Endpoint `https://api.anthropic.com/v1/messages`, `x-api-key` with `anthropic-version: 2023-06-01`; models `claude-opus-5`, `claude-fable-5-1`, `claude-sonnet-5` (1M context / 128K output) and `claude-haiku-4-5` (200K / 64K) (ADR 0080 §3).
 - `claude-web-search-tool` — `vendor-documentation`, Claude Platform documentation, web search tool, platform.claude.com, read 2026-09-10. A server-side tool executed on Anthropic's infrastructure: `web_search_20250305`, `web_search_20260209`, `web_search_20260318`, $10 per 1,000 searches; the page names no per-model support list and no model restriction, so the tool is read as route-wide, every model on the route (ADR 0080 §3).
+- `claude-text-answer-docs` — `vendor-documentation`, https://platform.claude.com/docs/en/about-claude/models/overview ; https://platform.claude.com/docs/en/models/opus-5/overview ; https://platform.claude.com/docs/en/models/sonnet-5/overview ; https://platform.claude.com/docs/en/models/haiku-4-5/overview ; https://platform.claude.com/docs/en/build-with-claude/working-with-messages, read 2026-10-31. The overview says all current models (Claude Fable 5.1 among them, `claude-fable-5-1`) support text output; the Claude Opus 5 (`claude-opus-5`), Claude Sonnet 5 (`claude-sonnet-5`) and Claude Haiku 4.5 (alias `claude-haiku-4-5` of `claude-haiku-4-5-20251001`) pages each state Input → output `Text and images → text`. The Messages guide lists all four as supported models and shows the answer as `content: [{"type": "text", "text": ...}]` with `usage.input_tokens`/`output_tokens`. No page read says whether `output_tokens` includes thinking, so usage attribution stays undeclared. Claude Opus 5, Sonnet 5 and Haiku 4.5 are marked legacy; the Haiku 4.5 page states retirement not sooner than 2026-10-15 and status Active (legacy). Documentation is not per-account availability or live proof.
 
 Open:
 
@@ -256,11 +258,12 @@ The endpoint is the models collection: the shape addresses the model in the path
 | `gemini-3.1-pro-preview` | Gemini 3.1 Pro Preview | 1,048,576 | `none` | `none` |
 | `gemini-2.5-pro` | Gemini 2.5 Pro | 1,048,576 | `none` | `none` |
 
-Dispositions (`google-generate-content`): text untested for every model; stream untested for every model; functionTools untested for every model.
+Dispositions (`google-generate-content`): text supported for `gemini-3.8-flash`, `gemini-3.1-pro-preview`, `gemini-2.5-pro`; stream untested for every model; functionTools untested for every model.
 
-Inert: 3 of 3 (no declared answer channel). Established:
+Inert: 0 of 3 (no declared answer channel). Established:
 
 - every model · `requestShape: google-generate-content` — `vendor-documentation`, Gemini API documentation, models, ai.google.dev/gemini-api/docs, read 2026-09-10
+- every model · `answerChannel: candidate-parts-text` — `vendor-documentation`, https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash ; https://ai.google.dev/gemini-api/docs/models/gemini-3.1-pro-preview ; https://ai.google.dev/gemini-api/docs/models/gemini-2.5-pro ; https://ai.google.dev/api/generate-content, read 2026-10-31
 - every model · context 1,048,576 — `vendor-documentation`, Gemini API documentation, models, ai.google.dev/gemini-api/docs, read 2026-09-10
 
 Readings:
@@ -268,11 +271,13 @@ Readings:
 - `gemini-api-key-page` — `vendor-documentation`, Gemini API documentation, https://ai.google.dev/gemini-api/docs/api-key, read 2026-09-08. The endpoint takes the key in `x-goog-api-key`, as ADR 0073 §5 names and the S54d assembly recorded.
 - `generate-content-contract` — `vendor-documentation`, https://ai.google.dev/api/generate-content · googleapis/js-genai src/types.ts@3e1d923ef914812c1d209aa2e5461a717d03a081, read 2026-09-08. The `:generateContent` request the implemented shape assembles (S54d): `POST .../{model=models/*}:generateContent` with `{ systemInstruction?, contents, generationConfig? }`.
 - `gemini-models-page` — `vendor-documentation`, Gemini API documentation, models, ai.google.dev/gemini-api/docs, read 2026-09-10. `gemini-3.8-flash`, `gemini-3.1-pro-preview` and `gemini-2.5-pro`, each 1,048,576 context / 65,536 output (ADR 0080 §3).
+- `gemini-text-answer-docs` — `vendor-documentation`, https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash ; https://ai.google.dev/gemini-api/docs/models/gemini-3.1-pro-preview ; https://ai.google.dev/gemini-api/docs/models/gemini-2.5-pro ; https://ai.google.dev/api/generate-content, read 2026-10-31. Each model page states Supported data types Output `Text` (1,048,576 input / 65,536 output tokens). The generateContent reference states `POST https://generativelanguage.googleapis.com/v1beta/{model=models/*}:generateContent` (not marked deprecated), `Candidate.content` "Generated content returned from the model", `Content.parts` "Ordered Parts that constitute a single message" and `Part.text` "Inline text". It names `usageMetadata.thoughtsTokenCount` but not whether `candidatesTokenCount` includes it, so usage attribution stays undeclared. Documentation is not per-account availability or live proof.
 
 Open:
 
 - The limit reading is not established: no page read states the shape of this endpoint's rate-limit or account-limit response, so a 429 is read as a retryable rate limit (`rate-limit-retryable`, `unverified`) until a page or a named live item says otherwise.
 - A shape discrepancy, recorded rather than resolved (ADR 0080 §3): the pages read on 2026-09-10 describe an Interactions-style API (`https://generativelanguage.googleapis.com/v1beta/interactions`, `response_format`, typed `steps`), while the implemented `google-generate-content` shape assembles the older `:generateContent` request, which the vendor documentation no longer states. This document binds nothing until a shape review establishes which API the endpoint serves today, and no Gemini binding carries a web-search-enabled rule before it.
+- Read again on 2026-10-31 (Issue #1225): https://ai.google.dev/api/generate-content states `POST https://generativelanguage.googleapis.com/v1beta/{model=models/*}:generateContent`, not marked deprecated, and its response's `candidates[].content.parts[].text`; the text answer is declared on that reading. The Interactions-style shape question above stays recorded for tools, structured output and search.
 - Grounding with Google Search (`google_search`) is documented on the Interactions-style pages; it is declared absent here because the shape it is documented on is not the one this route speaks.
 
 ## MiniMax
@@ -701,6 +706,7 @@ Open:
 - The Zen page's Gemini rows are reached at `https://opencode.ai/zen/v1/models/<id>`; whether that path takes the `:generateContent` request the implemented shape appends is not stated, so no route is declared for them.
 - Excluded from this reading: every limited-time free model the page lists (the `-free` ids and Big Pickle), because a trial that ends is not a supported model, and the Jev rows on `/systemone`, which is not a chat shape.
 - The page names no session header for Zen, so no route sends one; whether any model accepts a request at all is settled only by a named live test item under ADR 0067.
+- Text answer untested for every model (Issue #1225): read again on 2026-10-31, https://opencode.ai/docs/zen/ (`/docs/zen.md` now 404) is titled Models under OpenCode Console, lists all twelve v32-bound ids with endpoints under `https://opencode.ai/inference/openai/v1/` and `https://opencode.ai/inference/anthropic/v1/` instead of the `https://opencode.ai/zen/v1/` endpoints this document and Provider Processing v32 bind, says every text model also works through the other APIs, and states no response format, answer field or usage field. No answer channel is declared until a page states it or a named live item records it; the endpoint change is recorded here, not resolved, because the endpoints are policy bindings.
 
 ## 腾讯混元
 

@@ -160,9 +160,9 @@ describe('the configured binding the resolver reads (#853 v13, carried by #863 v
     const policy = JSON.parse(await readFile(join(REPO_ROOT, 'docs', 'policies', 'provider-processing-policy.v27.json'), 'utf8')) as {
       roleBindings: Record<string, { defaultBinding?: string; allowedBindings: unknown[] }>;
     };
-    // v27's Fast bindings are both roles' reviewed choices since Main took the OpenAI text rows (Issue #1225).
+    // v27's Fast bindings lead both roles' reviewed choices; Issue #1225 adds Main's OpenAI rows and the Claude 官方 / Gemini 官方 rows after them.
     for (const role of ['Main Editorial Role', 'Fast Interaction Role']) {
-      expect(policy.roleBindings['Fast Interaction Role']!.allowedBindings).toEqual(role === 'Fast Interaction Role' ? ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS : ORDINARY_PRODUCTION_ALLOWED_BINDINGS);
+      expect(policy.roleBindings['Fast Interaction Role']!.allowedBindings).toEqual((role === 'Fast Interaction Role' ? ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS : ORDINARY_PRODUCTION_ALLOWED_BINDINGS).slice(0, 4));
       expect(policy.roleBindings[role]!.defaultBinding).toBe('opencode-go');
     }
     // Every reviewed binding sits on a Model Service route, the reviewed three first, and each is one of its channel's choices (#1225).
