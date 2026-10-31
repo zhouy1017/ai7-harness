@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { modelServiceChannels } from '../../src/service/launch-policy.js';
 import { MODEL_SERVICE_ROUTES, MODEL_SERVICE_ROUTE_BINDINGS, type ModelServiceRouteId, type ModelServiceSettingsProjection } from '../../src/shared/protocol.js';
-import { USE_FOR_BOTH_ROLES_LABEL, modelRolesLabel, modelServiceFlow, type ModelServiceFlowApi } from '../../src/renderer/model-service-flow.js';
+import { USE_FOR_BOTH_ROLES_LABEL, modelRolesLabel, modelServiceChoices, modelServiceFlow, type ModelServiceFlowApi } from '../../src/renderer/model-service-flow.js';
 import { compactModelSelectionLabel, compactModelSelector } from '../../src/renderer/shell.js';
 import { createModelServiceSettings } from '../../src/renderer/model-service-settings.js';
 import { installMiniDom, type MiniElement } from '../support/mini-dom.js';
@@ -128,6 +128,29 @@ describe('the one model-service flow', () => {
     await vi.waitFor(() => expect(render).toHaveBeenCalledWith(answer));
     expect(calls.saveModelServiceCredential).toHaveBeenCalledWith({ route: 'deepseek-open-platform', select: true });
     expect(calls.selectFastRoleModel).toHaveBeenCalledWith({ route: 'deepseek-open-platform', modelId: 'deepseek-flash' });
+  });
+
+  it('offers a Claude 官方 model to both roles only after its passed test, setting the Fast model before the Main route (#1225)', async () => {
+    const untested = settings(['opencode-go', 'anthropic-claude'], 'opencode-go');
+    const { node } = flow(untested);
+    pickChannel(node, 'anthropic-claude');
+    const opus = node.querySelector('[data-model-choice="claude-opus-5"]')!;
+    expect([opus.disabled, opus.closest('label')!.textContent.includes('需先测试连接'), button(node, 'use-model-for-both-roles').disabled]).toEqual([false, true, true]);
+    expect(modelServiceChoices(untested).some((choice) => choice.route === 'anthropic-claude')).toBe(false);
+    const tested = settings(['opencode-go', 'anthropic-claude'], 'opencode-go');
+    const claude = tested.routeChoice.routes.find((option) => option.route === 'anthropic-claude')!.connection!;
+    Object.assign(claude, { credentialUpdatedAt: 'T1', connectionTest: { modelId: 'claude-opus-5', outcome: 'passed', credentialUpdatedAt: 'T1' } });
+    const order: string[] = [];
+    const calls = api(tested);
+    vi.mocked(calls.selectFastRoleModel).mockImplementation(async () => { order.push('fast'); return tested; });
+    vi.mocked(calls.saveModelServiceCredential).mockImplementation(async () => { order.push('main'); return tested; });
+    const ready = flow(tested, calls).node;
+    pickChannel(ready, 'anthropic-claude');
+    expect(button(ready, 'use-model-for-both-roles').disabled).toBe(false);
+    expect(modelServiceChoices(tested).filter((choice) => choice.route === 'anthropic-claude').map((choice) => choice.modelId)).toEqual(['claude-opus-5']);
+    button(ready, 'use-model-for-both-roles').click();
+    await vi.waitFor(() => expect(order).toEqual(['fast', 'main']));
+    expect(calls.saveModelServiceCredential).toHaveBeenCalledWith({ route: 'anthropic-claude', select: true });
   });
 
   it('tests the chosen model\'s connection on the existing path and states its declared capabilities', async () => {

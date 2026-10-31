@@ -1514,6 +1514,15 @@ async function main() {
     await click(primary, '保护并保存（OpenAI 官方）', 'openai-protected-save');
     await waitFor(primary, `document.querySelector('[data-model-route="openai-platform"] [data-credential-state="ready"]')`, 'openai-protected-save-ready');
     await assertRenderer(primary, `(() => { const card=document.querySelector('[data-model-route="openai-platform"]'); return card.textContent.includes('尚未测试') && card.querySelector('input[type="password"]').value==='' && card.querySelector('[data-action="test-model-connection"]') instanceof HTMLButtonElement; })()`, 'openai-explicit-test-surface');
+    // Issue #1225: GPT-5.6 Sol and Luna are Main choices too, offered to both roles in the flow; with the credential saved and no
+    // passed test, each says 需先测试连接 and 用于主编辑与快速交互 stays off. This launch admits no live test, so the test is offered, not run.
+    await assertRenderer(primary, `(() => { const flow=document.querySelector('[data-model-service-flow]'); flow.querySelector('[data-model-channel="openai-platform"] input').click();
+      const choices=Array.from(flow.querySelectorAll('[data-model-choice]'));
+      const shown=flow.dataset.flowChannel==='openai-platform' && JSON.stringify(choices.map((node)=>node.dataset.modelChoice))==='["gpt-5.6-sol","gpt-5.6-luna"]' &&
+        choices.every((node)=>!node.disabled&&node.closest('label').textContent.includes('需先测试连接')) &&
+        flow.querySelector('[data-action="test-flow-connection"]')?.disabled===false && flow.querySelector('[data-action="use-model-for-both-roles"]')?.disabled===true;
+      flow.querySelector('[data-model-channel="deepseek-open-platform"] input').click();
+      return shown && flow.dataset.flowChannel==='deepseek-open-platform'; })()`, 'openai-main-choice-after-test');
     await primary.evaluate(`window.ai7.selectFastRoleModel({route:'deepseek-open-platform',modelId:'deepseek-flash'})`);
     requireJourney(await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>{
       const route=settings.routeChoice.routes.find((item)=>item.route==='openai-platform');
