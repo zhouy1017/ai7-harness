@@ -16,6 +16,7 @@ import {
   validateWordImportRetentionSchema,
   WORD_IMPORT_RETENTION_SCHEMA_SQL,
   readWordParentSourcePin,
+  readWordImportChoiceRecord,
   wordParentSourcePinRecord,
   requireWordParentSourcePin,
   requireWordRevisionSource,
@@ -36,7 +37,7 @@ import {
   retainWordRevisionImport,
   type WordImportChoiceRecord,
 } from '../../src/service/import-retention.js';
-import { canonicalRecord, isRecord } from '../../src/service/analysis/canonical.js';
+import { canonicalRecord } from '../../src/service/analysis/canonical.js';
 import { DATA_VERSION_TRIGGER_SQL, DataVersionLedger, dataVersionMarkerPath, readDataVersionMarkerText,
   refuseNewerDataVersion } from '../../src/service/data-version.js';
 import { EditorialLearningLedger } from '../../src/service/learning/ledger.js';
@@ -46,7 +47,7 @@ import { renderDocxExport } from '../../src/service/docx-export.js';
 import { createWordImportedMarks, validateWordImportedMarkSources } from '../../src/service/imported-marks.js';
 import { EditorialMarkStore } from '../../src/service/editorial-marks.js';
 import { DEFAULT_MANUSCRIPT_EXPORT_OPTIONS } from '../../src/shared/protocol.js';
-import { EditorialStore, SOURCE_VERSION_PARSER_CHANGED_MESSAGE, StoreError } from '../../src/service/store.js';
+import { EditorialStore, SOURCE_VERSION_PARSER_CHANGED_MESSAGE } from '../../src/service/store.js';
 import { CLARIFICATION_SCHEMA_VERSION, LATEST_SCHEMA_VERSION, MODEL_REQUEST_ADMISSION_SCHEMA_VERSION,
   PROPOSAL_CONFLICT_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
 import type { ManuscriptBlockProjection, TextBoxDisposition } from '../../src/shared/protocol.js';
@@ -108,17 +109,15 @@ function dropEmptyWordRetentionLayer(db: DatabaseSync): void {
 /** Reader 92 differs here only in the absent Word layer and the exact version metadata, never in source/retention bytes. */
 function constructReader92Predecessor(db: DatabaseSync): void {
   dropEmptyWordRetentionLayer(db);
-  const versions = db.prepare('SELECT * FROM store_versions ORDER BY ordinal').all();
-  expect(versions).toHaveLength(1);
-  const row = versions[0]!;
-  const value: unknown = JSON.parse(String(row.canonical_json));
-  if (!isRecord(value) || value.schema !== 'ai7.store-version/1' || value.schemaRevision !== LATEST_SCHEMA_VERSION || value.upgrade !== undefined) {
+  const { latest, count } = new DataVersionLedger(db).standing();
+  if (count !== 1 || latest?.schemaRevision !== LATEST_SCHEMA_VERSION || latest.upgrade !== null) {
     throw new Error('expected one unupgraded current version record');
   }
-  const old = canonicalRecord({ ...value, schemaRevision: MODEL_REQUEST_ADMISSION_SCHEMA_VERSION });
+  const { upgrade, ...value } = latest;
+  const old = canonicalRecord({ schema: 'ai7.store-version/1', ...value, supersedes: null, schemaRevision: MODEL_REQUEST_ADMISSION_SCHEMA_VERSION });
   db.exec('DROP TRIGGER store_versions_no_update');
   db.prepare('UPDATE store_versions SET schema_revision = ?, canonical_json = ?, sha256 = ? WHERE record_id = ?')
-    .run(MODEL_REQUEST_ADMISSION_SCHEMA_VERSION, old.json, old.digest, String(row.record_id));
+    .run(MODEL_REQUEST_ADMISSION_SCHEMA_VERSION, old.json, old.digest, latest.recordId);
   db.exec(DATA_VERSION_TRIGGER_SQL.store_versions_no_update!);
   execPre74Fixture(db, `PRAGMA user_version = ${MODEL_REQUEST_ADMISSION_SCHEMA_VERSION}`);
   expect(new DataVersionLedger(db).standing().latest?.schemaRevision).toBe(MODEL_REQUEST_ADMISSION_SCHEMA_VERSION);
@@ -277,184 +276,270 @@ describe('closed Word retention definitions (#1132)', () => {
     });
   }, 120_000);
 
-  it('captures only the distinct local Word signal over closed relation fixtures and keeps development memory consumers closed', async () => {
-    const { compiled, bookId, originalBytes } = await retainedWordParentFixture();
-    withDatabase(false, (db) => {
+  describe('local Word import contracts', () => {
+    let db: DatabaseSync;
+    let fixture: Awaited<ReturnType<typeof retainedWordParentFixture>> & ReturnType<typeof wordChoiceFixture> & {
+      branchId: string; markStore: EditorialMarkStore;
+    };
+    const cancelled = AbortSignal.abort(new Error('Word contract cancellation'));
+    beforeEach(async () => {
+      const parent = await retainedWordParentFixture();
+      db = new DatabaseSync(databasePath());
       initializeWordImportRetentionSchema(db);
       db.exec('BEGIN IMMEDIATE');
-      try {
-        // This seeds only the new canonical relation fixture over genuine parents. It does not exercise
-        // public Word import, selected-reading manuscript persistence, a migrated store, or a Journey.
-        const { original, originalProvenance, sourceVersionId, commitId, recordedAt, ledger, samples, materials, controls, bound, choice } =
-          wordChoiceFixture(db, bookId, compiled);
-        const record = canonicalRecord(choice);
-        const branchId = String(db.prepare('SELECT branch_id FROM branch_working_state WHERE base_revision_id = ?').get(choice.revisionId)!.branch_id);
-        const markStore = new EditorialMarkStore(db);
-        const sampleEntries = samples.map((sample, index) => ({ sample, templateKey: compiled.templates[index]!.templateKey }));
-        const derive = (currentChoice: WordImportChoiceRecord, currentControls = controls) => wordLocalImportAdmissions({
-          bookId, samples: sampleEntries, choice: currentChoice, choiceDigest: canonicalRecord(currentChoice).digest, currentControls, recordedAt });
-        expect(derive({ ...choice, learnFromEdits: false })).toEqual([]);
-        expect(() => wordLocalImportAdmissions({ bookId, samples: [], choice, choiceDigest: record.digest, currentControls: controls, recordedAt })).toThrow('清单');
-        const admissions = derive(choice);
-        expect(admissions).toHaveLength(samples.length);
-        const cancelled = AbortSignal.abort(new Error('Word contract cancellation'));
-        expect(() => wordLocalImportAdmissions({ bookId, samples: sampleEntries, choice, choiceDigest: record.digest,
-          currentControls: controls, recordedAt, signal: cancelled })).toThrow('Word contract cancellation');
-        const insertChoice = (selected: WordImportChoiceRecord) => {
-          expect(retainWordRevisionImport(db, bookId, selected, recordedAt).digest).toBe(canonicalRecord(selected).digest);
-        };
-        const noCapture = (configure: () => void, learnFromEdits = true) => {
-          db.exec('SAVEPOINT word_no_capture');
-          try {
-            configure();
-            const mutedChoice = { ...choice, learnFromEdits, effectiveControls: ledger.wordImportControls(bookId, materials) };
-            insertChoice(mutedChoice);
-            retainWordManuscriptSourceSegments(db, bookId, mutedChoice, compiled.readings.rejected);
-            expect(createWordImportedMarks(db, markStore, bookId, commitId, compiled, branchId)).toBe(compiled.readings.rejected.marks.length);
-            expect(db.prepare('SELECT count(*) total FROM word_import_mark_sources WHERE commit_id = ?').get(commitId)?.total)
-              .toBe(compiled.readings.rejected.marks.length);
-            expect(ledger.retainWordImportSamples(bookId, commitId, compiled)).toEqual({ sources: [], signalIds: [] });
-            expect(() => ledger.validateWordImportSamples(bookId, commitId, compiled)).not.toThrow();
-            for (const table of ['word_tracked_edit_samples', 'word_tracked_edit_sample_imports', 'learning_signals']) {
-              expect(db.prepare(`SELECT count(*) total FROM ${table}`).get()?.total).toBe(0);
-            }
-          } finally { db.exec('ROLLBACK TO word_no_capture; RELEASE word_no_capture'); }
-        };
-        noCapture(() => undefined, false);
-        noCapture(() => ledger.change({ kind: 'switch', enabled: false, expectedEntries: 0 }));
-        noCapture(() => ledger.change({ kind: 'book', bookId, excluded: true, expectedEntries: 0 }));
-        insertChoice(choice);
-        insertChoice(choice);
-        expect(() => retainWordRevisionImport(db, bookId, { ...choice, learnFromEdits: false }, recordedAt)).toThrow('已提交');
-        expect(() => requireWordManuscriptSourceSegments(db, bookId, choice, compiled.readings.rejected)).toThrow('不完整');
-        expect(retainWordManuscriptSourceSegments(db, bookId, choice, compiled.readings.rejected).mappingDigest).toBe(bound.mappingDigest);
-        expect(retainWordManuscriptSourceSegments(db, bookId, choice, compiled.readings.rejected).mappingDigest).toBe(bound.mappingDigest);
-        expect(() => createWordImportedMarks(db, markStore, bookId, commitId, compiled, randomUUID())).toThrow('基线');
-        const priorMarks = db.prepare('SELECT count(*) total FROM editorial_marks').get()!.total;
-        db.exec(`SAVEPOINT word_mark_rollback;
-          CREATE TRIGGER word_mark_source_failure BEFORE INSERT ON word_import_mark_sources
-          BEGIN SELECT RAISE(ABORT, 'WORD_MARK_SOURCE_FAILURE'); END`);
-        try {
-          expect(() => createWordImportedMarks(db, markStore, bookId, commitId, compiled, branchId)).toThrow('WORD_MARK_SOURCE_FAILURE');
-        } finally { db.exec('ROLLBACK TO word_mark_rollback; RELEASE word_mark_rollback'); }
-        expect(db.prepare('SELECT count(*) total FROM editorial_marks').get()!.total).toBe(priorMarks);
-        expect(db.prepare('SELECT count(*) total FROM word_import_mark_sources').get()!.total).toBe(0);
-        const wordMarkCount = createWordImportedMarks(db, markStore, bookId, commitId, compiled, branchId);
-        expect(wordMarkCount).toBe(compiled.readings.rejected.marks.length);
-        expect(createWordImportedMarks(db, markStore, bookId, commitId, compiled, branchId)).toBe(wordMarkCount);
-        expect(() => validateWordImportedMarkSources(db, bookId, commitId, compiled)).not.toThrow();
-        expect(db.prepare('SELECT count(*) total FROM editorial_marks').get()!.total).toBe(Number(priorMarks) + wordMarkCount);
-        const sourceMarkRows = db.prepare(`SELECT s.*, m.pinned_revision_id, m.book_id FROM word_import_mark_sources s
-          JOIN editorial_marks m ON m.mark_id = s.mark_id WHERE s.commit_id = ? ORDER BY s.source_ordinal`).all(commitId);
-        expect(sourceMarkRows).toHaveLength(wordMarkCount);
-        expect(sourceMarkRows.every((row) => row.book_id === bookId && row.pinned_revision_id === choice.revisionId)).toBe(true);
-        expect(JSON.parse(String(sourceMarkRows[0]!.canonical_json))).toMatchObject({ schema: 'ai7.word-import-mark-source/1',
-          sourceVersionId, sourceDigest: compiled.sourceDigest, graphDigest: compiled.graphDigest, importCommitId: commitId,
-          importChoiceDigest: record.digest, locator: { kind: 'revision', templateKey: compiled.templates[0]!.templateKey } });
-        expect(() => bindWordReadingToRevision(db, randomUUID(), choice.revisionId, sourceVersionId, compiled.readings.rejected)).toThrow();
-        expect(() => requireWordManuscriptSourceSegments(db, bookId, choice, compiled.readings.accepted)).toThrow('另一条阅读');
-        const mapped = readWordManuscriptExportSource(db, bookId, choice.revisionId, sourceVersionId, originalBytes);
-        expect(mapped.pins).toMatchObject({ importCommitId: commitId, mappingAncestorRevisionId: choice.revisionId,
-          parentSourcePinDigest: choice.parentSourcePinDigest });
-        const exportInput = { title: 'Word 对应契约', blocks: bound.blocks, marks: [], options: DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, source: mapped.source };
-        expect(renderDocxExport(exportInput, { emit: true }).bytes).not.toBeNull();
-        expect(planWordManuscriptExport(exportInput, 'docx', { ...mapped.pins, revisionId: choice.revisionId,
-          revisionDigest: String(db.prepare('SELECT revision_digest FROM manuscript_revisions WHERE revision_id = ?').get(choice.revisionId)!.revision_digest) }).binding.mode)
-          .toBe('suggestions');
-        expect(() => readWordManuscriptExportSource(db, randomUUID(), choice.revisionId, sourceVersionId, originalBytes)).toThrow();
-        expect(() => readWordManuscriptExportSource(db, bookId, choice.revisionId, sourceVersionId, originalBytes.slice(1))).toThrow('字节');
-        expect(() => ledger.retainWordImportSamples(bookId, commitId, compiled, cancelled)).toThrow('Word contract cancellation');
-        expect(() => ledger.retainWordImportSamples(bookId, commitId, { ...compiled, templates: compiled.templates.slice(1) })).toThrow();
-        expect(db.prepare('SELECT count(*) total FROM word_tracked_edit_samples').get()?.total).toBe(0);
-        expect(db.prepare('SELECT count(*) total FROM word_tracked_edit_sample_imports').get()?.total).toBe(0);
-        expect(db.prepare('SELECT count(*) total FROM learning_signals').get()?.total).toBe(0);
-        db.exec(`SAVEPOINT word_capture_rollback;
-          CREATE TRIGGER word_capture_failure BEFORE INSERT ON learning_signals
-          BEGIN SELECT RAISE(ABORT, 'WORD_CAPTURE_FAILURE'); END`);
-        try {
-          expect(() => ledger.retainWordImportSamples(bookId, commitId, compiled)).toThrow('WORD_CAPTURE_FAILURE');
-        } finally { db.exec('ROLLBACK TO word_capture_rollback; RELEASE word_capture_rollback'); }
-        for (const table of ['word_tracked_edit_samples', 'word_tracked_edit_sample_imports', 'learning_signals']) {
-          expect(db.prepare(`SELECT count(*) total FROM ${table}`).get()?.total).toBe(0);
-        }
-        const { sources, signalIds: signals } = ledger.retainWordImportSamples(bookId, commitId, compiled);
-        expect(sources.map((source) => source.sampleId)).toEqual(admissions.map(({ sample }) => sample.sampleId));
-        expect(db.prepare('SELECT count(*) total FROM word_tracked_edit_sample_imports WHERE commit_id = ?').get(commitId)?.total).toBe(admissions.length);
-        expect(signals).toHaveLength(samples.length);
-        expect(ledger.retainWordImportSamples(bookId, commitId, compiled)).toEqual({ sources, signalIds: signals });
-        expect(ledger.captureWordSamples(sources)).toEqual(signals);
-        expect(() => ledger.validateWordImportSamples(bookId, commitId, compiled)).not.toThrow();
-        db.exec('SAVEPOINT word_manifest_missing');
-        try {
-          db.exec('DROP TRIGGER word_tracked_edit_sample_imports_no_delete');
-          db.prepare('DELETE FROM word_tracked_edit_sample_imports WHERE sample_id = ? AND commit_id = ?').run(samples[0]!.sampleId, commitId);
-          expect(() => ledger.validateWordImportSamples(bookId, commitId, compiled)).toThrow();
-        } finally { db.exec('ROLLBACK TO word_manifest_missing; RELEASE word_manifest_missing'); }
-        const inspect = () => ledger.inspect({ signalOffset: 0, itemOffset: 0 }, 'development-ci');
-        const signal = inspect().signals[0]!;
-        expect(signal).toMatchObject({ kind: 'word-tracked-edit', schema: 'ai7.word-import-learning-signal/1',
-          currentEligibility: 'house', memoryCandidate: null, eligibility: { decisionId: null, basisVersion: 2 } });
-        expect(ledger.automaticAdmissionFor(bookId, signal.source.materialKey, signal.source.materialDigest, 'development-ci'))
-          .toEqual({ choice: 'house', sourceKeys: ledger.sourceKeys(bookId, [signal.source.materialKey]) });
-        expect(Object.hasOwn(signal.source, 'decisionId')).toBe(false);
-        expect(db.prepare('SELECT * FROM source_provenance WHERE provenance_id = ?').get(String(original.provenance_id))).toEqual(originalProvenance);
-        expect(readWordParentSourcePin(db, bookId, sourceVersionId).parserIdentity).toBe('ai7-docx-fflate-saxes/3');
-        const context = createWordSampleDetailContext(db, bookId, sourceVersionId, compiled);
-        const firstSource = sources[0]!;
-        const historicalImports = ledger.wordSampleImports(bookId, firstSource.sampleId, firstSource.sampleDigest);
-        expect(Object.isFrozen(historicalImports[0]!.choice.effectiveControls.materials)).toBe(true);
-        expect(() => { historicalImports[0]!.choice.mode = 'accepted-baseline'; }).toThrow();
-        const detail = resolveWordSampleDetailSource(db, context, firstSource.sampleId, firstSource.sampleDigest, historicalImports);
-        const detailDigest = wordSampleDetailStream(detail).detailDigest;
-        // Recompute ai7.word-sample-detail/1 from the stored membership rows alone: ordered choice/admission digests.
-        const memberships = db.prepare('SELECT choice_digest, sha256 FROM word_tracked_edit_sample_imports WHERE sample_id = ? ORDER BY commit_id')
-          .all(firstSource.sampleId).map((row) => ({ admissionDigest: String(row.sha256), choiceDigest: String(row.choice_digest) }));
-        expect(memberships).toHaveLength(1);
-        expect(detailDigest).toBe(createHash('sha256').update(JSON.stringify({ graphDigest: compiled.graphDigest, imports: memberships,
-          sampleDigest: firstSource.sampleDigest, schema: 'ai7.word-sample-detail/1', sourceVersionId })).digest('hex'));
-        const page = pageWordSampleDetail(detail, null);
-        expect(page.sampleDigest).toBe(firstSource.sampleDigest);
-        expect(page.items.length).toBeGreaterThan(0);
-        expect(page.items.some((item) => item.kind === 'record' && item.record.type === 'import')).toBe(true);
-        expect(wordSampleDetailContextCurrent(db, context)).toBe(true);
-        expect(() => resolveWordSampleDetailSource(db, context, firstSource.sampleId, 'f'.repeat(64), historicalImports)).toThrow();
-        expect(() => resolveWordSampleDetailSource(db, context, firstSource.sampleId, firstSource.sampleDigest, [])).toThrow();
-        expect(ledger.sourceSnapshot(signal.signalId)).toMatchObject({ sourceKind: 'word-tracked-edit', signalId: signal.signalId });
-        expect(() => ledger.create({ clientMemoryId: randomUUID(), signalId: signal.signalId, title: '拒绝 Word 记忆', editorialDimension: '语言', confidence: 0.5 })).toThrow();
-        expect(() => ledger.create({ schema: 'ai7.global-editorial-memory/2', actionId: randomUUID(), signalIds: [signal.signalId],
-          applicability: { kind: 'house' }, title: '拒绝 Word 记忆', editorialDimension: '语言', confidence: 0.5 }, 'development-ci')).toThrow();
-        expect(inspect().items).toEqual([]);
-        ledger.change({ kind: 'book', bookId, excluded: true, expectedEntries: 0 });
-        expect(() => ledger.validateWordImportSamples(bookId, commitId, compiled)).not.toThrow();
-        expect(wordSampleDetailContextCurrent(db, context)).toBe(false);
-        expect(() => resolveWordSampleDetailSource(db, context, firstSource.sampleId, firstSource.sampleDigest, historicalImports)).toThrow('缓存已变化');
-        const excludedContext = createWordSampleDetailContext(db, bookId, sourceVersionId, compiled);
-        const excludedDetail = resolveWordSampleDetailSource(db, excludedContext, firstSource.sampleId, firstSource.sampleDigest,
-          ledger.wordSampleImports(bookId, firstSource.sampleId, firstSource.sampleDigest));
-        expect(wordSampleDetailStream(excludedDetail).detailDigest).toBe(detailDigest);
-        const bookExcluded = ledger.wordImportControls(bookId, materials);
-        expect(() => derive(choice, bookExcluded)).toThrow('变化');
-        expect(derive({ ...choice, effectiveControls: bookExcluded }, bookExcluded)).toEqual([]);
-        expect(inspect().signals[0]!.currentEligibility).toBe('excluded');
-        expect(ledger.automaticAdmissionFor(bookId, signal.source.materialKey, signal.source.materialDigest, 'development-ci')).toBeNull();
-        expect(() => ledger.captureWordSamples(sources)).toThrow();
-        ledger.change({ kind: 'book', bookId, excluded: false, expectedEntries: 1 });
-        ledger.change({ kind: 'switch', enabled: false, expectedEntries: 2 });
-        const globalOff = ledger.wordImportControls(bookId, materials);
-        expect(derive({ ...choice, effectiveControls: globalOff }, globalOff)).toEqual([]);
-        ledger.change({ kind: 'switch', enabled: true, expectedEntries: 3 });
-        expect(inspect().signals).toHaveLength(samples.length);
-        ledger.change({ kind: 'material', signalId: signal.signalId });
-        const materialExcluded = ledger.wordImportControls(bookId, materials);
-        expect(derive({ ...choice, effectiveControls: materialExcluded }, materialExcluded)).toEqual([]);
-        expect(inspect().signals[0]!.currentEligibility).toBe('excluded');
-        db.exec('DROP TRIGGER word_tracked_edit_sample_imports_no_update');
-        db.prepare('UPDATE word_tracked_edit_sample_imports SET choice_digest = ?').run('f'.repeat(64));
-        expect(() => ledger.wordSampleImports(bookId, firstSource.sampleId, firstSource.sampleDigest)).toThrow();
-        expect(inspect).toThrow(); // Corruption never becomes an empty eligible page.
-      } finally { db.exec('ROLLBACK'); }
+      const choice = wordChoiceFixture(db, parent.bookId, parent.compiled);
+      const branchId = String(db.prepare('SELECT branch_id FROM branch_working_state WHERE base_revision_id = ?')
+        .get(choice.choice.revisionId)!.branch_id);
+      fixture = { ...parent, ...choice, branchId, markStore: new EditorialMarkStore(db) };
+    }, 120_000);
+    afterEach(() => { try { db.exec('ROLLBACK'); } finally { db.close(); } });
+    const inspect = () => fixture.ledger.inspect({ signalOffset: 0, itemOffset: 0 }, 'development-ci');
+    const derive = (choice: WordImportChoiceRecord, controls = fixture.controls) => wordLocalImportAdmissions({
+      bookId: fixture.bookId, samples: fixture.samples.map((sample, index) => ({ sample, templateKey: fixture.compiled.templates[index]!.templateKey })),
+      choice, choiceDigest: canonicalRecord(choice).digest, currentControls: controls, recordedAt: fixture.recordedAt });
+    function insertChoice(selected = fixture.choice): void {
+      expect(retainWordRevisionImport(db, fixture.bookId, selected, fixture.recordedAt).digest).toBe(canonicalRecord(selected).digest);
+    }
+    function retainMapping(): void {
+      insertChoice();
+      retainWordManuscriptSourceSegments(db, fixture.bookId, fixture.choice, fixture.compiled.readings.rejected);
+    }
+    function capture() {
+      retainMapping();
+      return fixture.ledger.retainWordImportSamples(fixture.bookId, fixture.commitId, fixture.compiled);
+    }
+
+    it('derives only opted-in local admissions and honors cancellation', () => {
+      const { bookId, samples, choice, controls, recordedAt, compiled } = fixture;
+      const record = canonicalRecord(choice);
+      const sampleEntries = samples.map((sample, index) => ({ sample, templateKey: compiled.templates[index]!.templateKey }));
+      expect(derive({ ...choice, learnFromEdits: false })).toEqual([]);
+      expect(() => wordLocalImportAdmissions({ bookId, samples: [], choice, choiceDigest: record.digest, currentControls: controls, recordedAt })).toThrow('清单');
+      const admissions = derive(choice);
+      expect(admissions).toHaveLength(samples.length);
+      expect(() => wordLocalImportAdmissions({ bookId, samples: sampleEntries, choice, choiceDigest: record.digest,
+        currentControls: controls, recordedAt, signal: cancelled })).toThrow('Word contract cancellation');
     });
-  }, 120_000);
+
+    it.each(['choice', 'switch', 'book'] as const)('keeps operational marks without learning capture when %s opts out', (optOut) => {
+      const { bookId, choice, ledger, materials, compiled, commitId, markStore, branchId } = fixture;
+      if (optOut === 'switch') ledger.change({ kind: 'switch', enabled: false, expectedEntries: 0 });
+      if (optOut === 'book') ledger.change({ kind: 'book', bookId, excluded: true, expectedEntries: 0 });
+      const mutedChoice = { ...choice, learnFromEdits: optOut !== 'choice', effectiveControls: ledger.wordImportControls(bookId, materials) };
+      insertChoice(mutedChoice);
+      retainWordManuscriptSourceSegments(db, bookId, mutedChoice, compiled.readings.rejected);
+      expect(createWordImportedMarks(db, markStore, bookId, commitId, compiled, branchId)).toBe(compiled.readings.rejected.marks.length);
+      expect(db.prepare('SELECT count(*) total FROM word_import_mark_sources WHERE commit_id = ?').get(commitId)?.total)
+        .toBe(compiled.readings.rejected.marks.length);
+      expect(ledger.retainWordImportSamples(bookId, commitId, compiled)).toEqual({ sources: [], signalIds: [] });
+      expect(() => ledger.validateWordImportSamples(bookId, commitId, compiled)).not.toThrow();
+      expect([...ledger.wordCandidates(bookId)]).toEqual([]);
+      expect(inspect().signals).toEqual([]);
+    });
+
+    it('retains the committed Word choice idempotently and refuses drift', () => {
+      const { choice, bookId, recordedAt } = fixture;
+      insertChoice(choice);
+      insertChoice(choice);
+      expect(() => retainWordRevisionImport(db, bookId, { ...choice, learnFromEdits: false }, recordedAt)).toThrow('已提交');
+    });
+
+    it('binds one selected reading idempotently and refuses another Book or reading', () => {
+      const { bookId, choice, compiled, bound, sourceVersionId } = fixture;
+      insertChoice();
+      expect(() => requireWordManuscriptSourceSegments(db, bookId, choice, compiled.readings.rejected)).toThrow('不完整');
+      expect(retainWordManuscriptSourceSegments(db, bookId, choice, compiled.readings.rejected).mappingDigest).toBe(bound.mappingDigest);
+      expect(retainWordManuscriptSourceSegments(db, bookId, choice, compiled.readings.rejected).mappingDigest).toBe(bound.mappingDigest);
+      expect(() => bindWordReadingToRevision(db, randomUUID(), choice.revisionId, sourceVersionId, compiled.readings.rejected)).toThrow();
+      expect(() => requireWordManuscriptSourceSegments(db, bookId, choice, compiled.readings.accepted)).toThrow('另一条阅读');
+    });
+
+    it('rolls back imported marks when their source cannot commit', () => {
+      const { bookId, commitId, compiled, markStore, branchId } = fixture;
+      retainMapping();
+      expect(() => createWordImportedMarks(db, markStore, bookId, commitId, compiled, randomUUID())).toThrow('基线');
+      const priorMarks = db.prepare('SELECT count(*) total FROM editorial_marks').get()!.total;
+      db.exec(`SAVEPOINT word_mark_rollback;
+        CREATE TRIGGER word_mark_source_failure BEFORE INSERT ON word_import_mark_sources
+        BEGIN SELECT RAISE(ABORT, 'WORD_MARK_SOURCE_FAILURE'); END`);
+      try {
+        expect(() => createWordImportedMarks(db, markStore, bookId, commitId, compiled, branchId)).toThrow('WORD_MARK_SOURCE_FAILURE');
+      } finally { db.exec('ROLLBACK TO word_mark_rollback; RELEASE word_mark_rollback'); }
+      expect(db.prepare('SELECT count(*) total FROM editorial_marks').get()!.total).toBe(priorMarks);
+      expect(db.prepare('SELECT count(*) total FROM word_import_mark_sources').get()!.total).toBe(0);
+    });
+
+    it('creates one pinned source for each imported mark on retry', () => {
+      const { bookId, commitId, compiled, markStore, branchId, choice, sourceVersionId } = fixture;
+      retainMapping();
+      const priorMarks = db.prepare('SELECT count(*) total FROM editorial_marks').get()!.total;
+      const record = canonicalRecord(choice);
+      const wordMarkCount = createWordImportedMarks(db, markStore, bookId, commitId, compiled, branchId);
+      expect(wordMarkCount).toBe(compiled.readings.rejected.marks.length);
+      expect(createWordImportedMarks(db, markStore, bookId, commitId, compiled, branchId)).toBe(wordMarkCount);
+      expect(() => validateWordImportedMarkSources(db, bookId, commitId, compiled)).not.toThrow();
+      expect(db.prepare('SELECT count(*) total FROM editorial_marks').get()!.total).toBe(Number(priorMarks) + wordMarkCount);
+      const sourceMarkRows = db.prepare(`SELECT s.*, m.pinned_revision_id, m.book_id FROM word_import_mark_sources s
+        JOIN editorial_marks m ON m.mark_id = s.mark_id WHERE s.commit_id = ? ORDER BY s.source_ordinal`).all(commitId);
+      expect(sourceMarkRows).toHaveLength(wordMarkCount);
+      expect(sourceMarkRows.every((row) => row.book_id === bookId && row.pinned_revision_id === choice.revisionId)).toBe(true);
+      expect(JSON.parse(String(sourceMarkRows[0]!.canonical_json))).toMatchObject({ schema: 'ai7.word-import-mark-source/1',
+        sourceVersionId, sourceDigest: compiled.sourceDigest, graphDigest: compiled.graphDigest, importCommitId: commitId,
+        importChoiceDigest: record.digest, locator: { kind: 'revision', templateKey: compiled.templates[0]!.templateKey } });
+    });
+
+    it('exports the selected reading only from its pinned Book and original bytes', () => {
+      const { bookId, choice, sourceVersionId, originalBytes, bound, commitId } = fixture;
+      retainMapping();
+      const mapped = readWordManuscriptExportSource(db, bookId, choice.revisionId, sourceVersionId, originalBytes);
+      expect(mapped.pins).toMatchObject({ importCommitId: commitId, mappingAncestorRevisionId: choice.revisionId,
+        parentSourcePinDigest: choice.parentSourcePinDigest });
+      const exportInput = { title: 'Word 对应契约', blocks: bound.blocks, marks: [], options: DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, source: mapped.source };
+      expect(renderDocxExport(exportInput, { emit: true }).bytes).not.toBeNull();
+      expect(planWordManuscriptExport(exportInput, 'docx', { ...mapped.pins, revisionId: choice.revisionId,
+        revisionDigest: String(db.prepare('SELECT revision_digest FROM manuscript_revisions WHERE revision_id = ?').get(choice.revisionId)!.revision_digest) }).binding.mode)
+        .toBe('suggestions');
+      expect(() => readWordManuscriptExportSource(db, randomUUID(), choice.revisionId, sourceVersionId, originalBytes)).toThrow();
+      expect(() => readWordManuscriptExportSource(db, bookId, choice.revisionId, sourceVersionId, originalBytes.slice(1))).toThrow('字节');
+    });
+
+    it('captures no partial samples when cancelled or given an incomplete manifest', () => {
+      const { bookId, commitId, compiled, ledger } = fixture;
+      retainMapping();
+      expect(() => ledger.retainWordImportSamples(bookId, commitId, compiled, cancelled)).toThrow('Word contract cancellation');
+      expect(() => ledger.retainWordImportSamples(bookId, commitId, { ...compiled, templates: compiled.templates.slice(1) })).toThrow();
+      expect(db.prepare('SELECT count(*) total FROM word_tracked_edit_samples').get()?.total).toBe(0);
+      expect(db.prepare('SELECT count(*) total FROM word_tracked_edit_sample_imports').get()?.total).toBe(0);
+      expect(db.prepare('SELECT count(*) total FROM learning_signals').get()?.total).toBe(0);
+    });
+
+    it('rolls back samples and signals when capture cannot commit', () => {
+      const { bookId, commitId, compiled, ledger } = fixture;
+      retainMapping();
+      db.exec(`SAVEPOINT word_capture_rollback;
+        CREATE TRIGGER word_capture_failure BEFORE INSERT ON learning_signals
+        BEGIN SELECT RAISE(ABORT, 'WORD_CAPTURE_FAILURE'); END`);
+      try {
+        expect(() => ledger.retainWordImportSamples(bookId, commitId, compiled)).toThrow('WORD_CAPTURE_FAILURE');
+      } finally { db.exec('ROLLBACK TO word_capture_rollback; RELEASE word_capture_rollback'); }
+      for (const table of ['word_tracked_edit_samples', 'word_tracked_edit_sample_imports', 'learning_signals']) {
+        expect(db.prepare(`SELECT count(*) total FROM ${table}`).get()?.total).toBe(0);
+      }
+    });
+
+    it('captures one distinct local signal per sample and reuses it on retry', () => {
+      const { bookId, commitId, compiled, ledger, samples, choice, original, originalProvenance, sourceVersionId } = fixture;
+      retainMapping();
+      const admissions = derive(choice);
+      const { sources, signalIds: signals } = ledger.retainWordImportSamples(bookId, commitId, compiled);
+      expect(sources.map((source) => source.sampleId)).toEqual(admissions.map(({ sample }) => sample.sampleId));
+      expect(db.prepare('SELECT count(*) total FROM word_tracked_edit_sample_imports WHERE commit_id = ?').get(commitId)?.total).toBe(admissions.length);
+      expect(signals).toHaveLength(samples.length);
+      expect(ledger.retainWordImportSamples(bookId, commitId, compiled)).toEqual({ sources, signalIds: signals });
+      expect(ledger.captureWordSamples(sources)).toEqual(signals);
+      expect(() => ledger.validateWordImportSamples(bookId, commitId, compiled)).not.toThrow();
+      const signal = inspect().signals[0]!;
+      expect(signal).toMatchObject({ kind: 'word-tracked-edit', schema: 'ai7.word-import-learning-signal/1',
+        currentEligibility: 'house', memoryCandidate: null, eligibility: { decisionId: null, basisVersion: 2 } });
+      expect(ledger.automaticAdmissionFor(bookId, signal.source.materialKey, signal.source.materialDigest, 'development-ci'))
+        .toEqual({ choice: 'house', sourceKeys: ledger.sourceKeys(bookId, [signal.source.materialKey]) });
+      expect(Object.hasOwn(signal.source, 'decisionId')).toBe(false);
+      expect(db.prepare('SELECT * FROM source_provenance WHERE provenance_id = ?').get(String(original.provenance_id))).toEqual(originalProvenance);
+      expect(readWordParentSourcePin(db, bookId, sourceVersionId).parserIdentity).toBe('ai7-docx-fflate-saxes/3');
+    });
+
+    it('refuses an incomplete captured sample manifest', () => {
+      const { bookId, commitId, compiled, ledger, samples } = fixture;
+      capture();
+      db.exec('SAVEPOINT word_manifest_missing');
+      try {
+        db.exec('DROP TRIGGER word_tracked_edit_sample_imports_no_delete');
+        db.prepare('DELETE FROM word_tracked_edit_sample_imports WHERE sample_id = ? AND commit_id = ?').run(samples[0]!.sampleId, commitId);
+        expect(() => ledger.validateWordImportSamples(bookId, commitId, compiled)).toThrow();
+      } finally { db.exec('ROLLBACK TO word_manifest_missing; RELEASE word_manifest_missing'); }
+    });
+
+    it('pages immutable historical sample detail with a membership-bound identity', () => {
+      const { bookId, sourceVersionId, compiled, ledger } = fixture;
+      const { sources } = capture();
+      const context = createWordSampleDetailContext(db, bookId, sourceVersionId, compiled);
+      const firstSource = sources[0]!;
+      const historicalImports = ledger.wordSampleImports(bookId, firstSource.sampleId, firstSource.sampleDigest);
+      expect(Object.isFrozen(historicalImports[0]!.choice.effectiveControls.materials)).toBe(true);
+      expect(() => { historicalImports[0]!.choice.mode = 'accepted-baseline'; }).toThrow();
+      const detail = resolveWordSampleDetailSource(db, context, firstSource.sampleId, firstSource.sampleDigest, historicalImports);
+      const detailDigest = wordSampleDetailStream(detail).detailDigest;
+      // Recompute ai7.word-sample-detail/1 from the public membership reading: ordered choice/admission digests.
+      const memberships = historicalImports.map(({ admissionDigest, choiceDigest }) => ({ admissionDigest, choiceDigest }));
+      expect(memberships).toHaveLength(1);
+      expect(detailDigest).toBe(createHash('sha256').update(JSON.stringify({ graphDigest: compiled.graphDigest, imports: memberships,
+        sampleDigest: firstSource.sampleDigest, schema: 'ai7.word-sample-detail/1', sourceVersionId })).digest('hex'));
+      const page = pageWordSampleDetail(detail, null);
+      expect(page.sampleDigest).toBe(firstSource.sampleDigest);
+      expect(page.items.length).toBeGreaterThan(0);
+      expect(page.items.some((item) => item.kind === 'record' && item.record.type === 'import')).toBe(true);
+      expect(wordSampleDetailContextCurrent(db, context)).toBe(true);
+      expect(() => resolveWordSampleDetailSource(db, context, firstSource.sampleId, 'f'.repeat(64), historicalImports)).toThrow();
+      expect(() => resolveWordSampleDetailSource(db, context, firstSource.sampleId, firstSource.sampleDigest, [])).toThrow();
+    });
+
+    it('keeps Word signals unavailable to development memory consumers', () => {
+      const { ledger } = fixture;
+      capture();
+      const signal = inspect().signals[0]!;
+      expect(ledger.sourceSnapshot(signal.signalId)).toMatchObject({ sourceKind: 'word-tracked-edit', signalId: signal.signalId });
+      expect(() => ledger.create({ clientMemoryId: randomUUID(), signalId: signal.signalId, title: '拒绝 Word 记忆', editorialDimension: '语言', confidence: 0.5 })).toThrow();
+      expect(() => ledger.create({ schema: 'ai7.global-editorial-memory/2', actionId: randomUUID(), signalIds: [signal.signalId],
+        applicability: { kind: 'house' }, title: '拒绝 Word 记忆', editorialDimension: '语言', confidence: 0.5 }, 'development-ci')).toThrow();
+      expect(inspect().items).toEqual([]);
+    });
+
+    it('invalidates current detail on exclusion while preserving historical detail', () => {
+      const { bookId, ledger, commitId, compiled, sourceVersionId, materials, choice, samples } = fixture;
+      const { sources } = capture();
+      const signal = inspect().signals[0]!;
+      const firstSource = sources[0]!;
+      const context = createWordSampleDetailContext(db, bookId, sourceVersionId, compiled);
+      const historicalImports = ledger.wordSampleImports(bookId, firstSource.sampleId, firstSource.sampleDigest);
+      const detailDigest = wordSampleDetailStream(resolveWordSampleDetailSource(db, context, firstSource.sampleId, firstSource.sampleDigest, historicalImports)).detailDigest;
+      ledger.change({ kind: 'book', bookId, excluded: true, expectedEntries: 0 });
+      expect(() => ledger.validateWordImportSamples(bookId, commitId, compiled)).not.toThrow();
+      expect(wordSampleDetailContextCurrent(db, context)).toBe(false);
+      expect(() => resolveWordSampleDetailSource(db, context, firstSource.sampleId, firstSource.sampleDigest, historicalImports)).toThrow('缓存已变化');
+      const excludedContext = createWordSampleDetailContext(db, bookId, sourceVersionId, compiled);
+      const excludedDetail = resolveWordSampleDetailSource(db, excludedContext, firstSource.sampleId, firstSource.sampleDigest,
+        ledger.wordSampleImports(bookId, firstSource.sampleId, firstSource.sampleDigest));
+      expect(wordSampleDetailStream(excludedDetail).detailDigest).toBe(detailDigest);
+      const bookExcluded = ledger.wordImportControls(bookId, materials);
+      expect(() => derive(choice, bookExcluded)).toThrow('变化');
+      expect(derive({ ...choice, effectiveControls: bookExcluded }, bookExcluded)).toEqual([]);
+      expect(inspect().signals[0]!.currentEligibility).toBe('excluded');
+      expect(ledger.automaticAdmissionFor(bookId, signal.source.materialKey, signal.source.materialDigest, 'development-ci')).toBeNull();
+      expect(() => ledger.captureWordSamples(sources)).toThrow();
+      ledger.change({ kind: 'book', bookId, excluded: false, expectedEntries: 1 });
+      ledger.change({ kind: 'switch', enabled: false, expectedEntries: 2 });
+      const globalOff = ledger.wordImportControls(bookId, materials);
+      expect(derive({ ...choice, effectiveControls: globalOff }, globalOff)).toEqual([]);
+      ledger.change({ kind: 'switch', enabled: true, expectedEntries: 3 });
+      expect(inspect().signals).toHaveLength(samples.length);
+    });
+
+    it('excludes material without hiding invalid historical admissions', () => {
+      const { bookId, ledger, materials, choice } = fixture;
+      const { sources } = capture();
+      const firstSource = sources[0]!;
+      const signal = inspect().signals[0]!;
+      ledger.change({ kind: 'material', signalId: signal.signalId });
+      const materialExcluded = ledger.wordImportControls(bookId, materials);
+      expect(derive({ ...choice, effectiveControls: materialExcluded }, materialExcluded)).toEqual([]);
+      expect(inspect().signals[0]!.currentEligibility).toBe('excluded');
+      db.exec('DROP TRIGGER word_tracked_edit_sample_imports_no_update');
+      db.prepare('UPDATE word_tracked_edit_sample_imports SET choice_digest = ?').run('f'.repeat(64));
+      expect(() => ledger.wordSampleImports(bookId, firstSource.sampleId, firstSource.sampleDigest)).toThrow();
+      expect(inspect).toThrow(); // Corruption never becomes an empty eligible page.
+    });
+
+  });
 
   it('retains every member of a thousands-edit manifest through the production capture owner, with no duplicate retry rows', async () => {
     const { compiled, bookId } = await retainedWordParentFixture(2_001);
@@ -470,16 +555,10 @@ describe('closed Word retention definitions (#1132)', () => {
           .sort((a, b) => a.id.localeCompare(b.id));
         const captured = ledger.retainWordImportSamples(bookId, commitId, compiled);
         expect(captured.sources.map((source) => ({ id: source.sampleId, digest: source.sampleDigest })).sort((a, b) => a.id.localeCompare(b.id))).toEqual(expected);
-        const storedSamples = db.prepare('SELECT sample_id, sha256 FROM word_tracked_edit_samples WHERE book_id = ? ORDER BY sample_id').all(bookId);
-        expect(storedSamples.map((row) => ({ id: row.sample_id, digest: row.sha256 }))).toEqual(expected);
-        const memberships = db.prepare(`SELECT sample_id, sample_digest, choice_digest, sha256, canonical_json
-          FROM word_tracked_edit_sample_imports WHERE commit_id = ? ORDER BY sample_id`).all(commitId);
-        expect(memberships.map((row) => ({ id: row.sample_id, digest: row.sample_digest }))).toEqual(expected);
-        const admissions = new Map(captured.sources.map((source) => [source.sampleId, source.admissionDigest]));
-        expect(memberships.every((row) => row.choice_digest === choiceRecord.digest && row.sha256 === admissions.get(String(row.sample_id)) &&
-          canonicalRecord(JSON.parse(String(row.canonical_json))).digest === row.sha256)).toBe(true);
-        const signals = db.prepare(`SELECT source_key FROM learning_signals WHERE book_id = ? ORDER BY source_key`).all(bookId);
-        expect(signals.map((row) => row.source_key)).toEqual(expected.map((entry) => `word-sample:${entry.id}:${entry.digest}`));
+        expect(() => ledger.validateWordImportSamples(bookId, commitId, compiled)).not.toThrow();
+        expect(readWordImportChoiceRecord(db, bookId, commitId).digest).toBe(choiceRecord.digest);
+        expect([...ledger.wordCandidates(bookId)].map((candidate) => candidate.materialKey).sort())
+          .toEqual(expected.map((entry) => `word-sample:${entry.id}`).sort());
         expect(captured.signalIds).toHaveLength(expected.length);
         expect(ledger.retainWordImportSamples(bookId, commitId, compiled)).toEqual(captured);
         expect(db.prepare('SELECT count(*) total FROM word_tracked_edit_samples').get()?.total).toBe(expected.length);
@@ -490,8 +569,7 @@ describe('closed Word retention definitions (#1132)', () => {
   }, 180_000);
 
   it('adds the complete empty layer once while preserving existing source and retention records', async () => {
-    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try { await importSample1Book(store, roots.codeRoot, 'Word 层保留校验'); store.markCleanShutdown(); } finally { store.close(); }
+    await withStore(async (store) => { await importSample1Book(store, roots.codeRoot, 'Word 层保留校验'); });
     withDatabase(false, (db) => {
       const tables = ['source_versions', 'source_provenance', 'manuscript_block_sources', 'import_fidelity_categories', 'import_fidelity_choices'];
       const prior = tables.map((table) => db.prepare(`SELECT rowid, * FROM ${table} ORDER BY rowid`).all());
@@ -509,8 +587,7 @@ describe('closed Word retention definitions (#1132)', () => {
   }, 120_000);
 
   it('refuses a partial layer without healing it or stamping a revision', async () => {
-    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try { store.markCleanShutdown(); } finally { store.close(); }
+    await withStore(async () => {});
     withDatabase(false, (db) => {
       dropEmptyWordRetentionLayer(db);
       db.exec('CREATE TABLE word_revision_sources (source_version_id TEXT PRIMARY KEY) STRICT');
@@ -523,8 +600,7 @@ describe('closed Word retention definitions (#1132)', () => {
   });
 
   it('rolls back all seven definitions when a trigger collision interrupts initialization', async () => {
-    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try { store.markCleanShutdown(); } finally { store.close(); }
+    await withStore(async () => {});
     withDatabase(false, (db) => {
       dropEmptyWordRetentionLayer(db);
       db.exec('CREATE TRIGGER word_revision_sources_no_update BEFORE UPDATE ON books BEGIN SELECT 1; END');
@@ -563,8 +639,7 @@ describe('Word empty-layer migration through EditorialStore.open', () => {
   });
 
   it.each([false, true])('migrates a reader-92 source store without backfill through two reopens (interrupted before stamp: %s)', async (interrupt) => {
-    const original = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try { await importSample1Book(original, roots.codeRoot, 'Word 迁移保留'); original.markCleanShutdown(); } finally { original.close(); }
+    await withStore(async (store) => { await importSample1Book(store, roots.codeRoot, 'Word 迁移保留'); });
     const before = withDatabase(false, (db) => {
       const rows = retainedSourceRows(db);
       constructReader92Predecessor(db);
@@ -597,10 +672,8 @@ describe('Word empty-layer migration through EditorialStore.open', () => {
         .toBe(MODEL_REQUEST_ADMISSION_SCHEMA_VERSION);
     }
     for (let reopen = 0; reopen < 2; reopen += 1) {
-      const migrated = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-      try { migrated.markCleanShutdown(); } finally { migrated.close(); }
+      await withStore(async (store) => { expect(store.inspectDataVersion().schemaRevision).toBe(LATEST_SCHEMA_VERSION); });
       withDatabase(false, (db) => {
-        expect(db.prepare('PRAGMA user_version').get()!.user_version).toBe(LATEST_SCHEMA_VERSION);
         validateWordImportRetentionSchema(db);
         expect(retainedSourceRows(db)).toEqual(before);
         expect(WORD_IMPORT_RETENTION_RELATIONS_DROP_ORDER.map((table) => db.prepare(`SELECT count(*) total FROM ${table}`).get()!.total))
@@ -647,6 +720,34 @@ function plantRevision26(): Row[] {
     expect(importFidelityCategoriesShape(database)).toBe('revision-26');
     return database.prepare('SELECT rowid, * FROM import_fidelity_categories ORDER BY rowid').all() as Row[];
   });
+}
+
+function prepareReimport(store: EditorialStore, staged: Awaited<ReturnType<EditorialStore['stageSelectedManuscript']>>,
+  bookId: string, reuseSourceVersionId: string | null = null) {
+  const started = store.createManuscriptReimportPreparationWork(staged.draftId, staged.draftVersion, {
+    kind: 'existing-book', bookId, relationship: 'reimport', lineage: { kind: 'unconfirmed' }, reuseSourceVersionId,
+  });
+  let prepared = store.advanceManuscriptReimportPreparationWork(started.workId);
+  while (!prepared.done) prepared = store.advanceManuscriptReimportPreparationWork(started.workId);
+  return prepared.review!;
+}
+
+async function commitReimport(store: EditorialStore, review: ReturnType<typeof prepareReimport>) {
+  const commit = await store.createManuscriptReimportCommitWork({
+    draftId: review.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest, commitId: randomUUID(),
+  });
+  let result = commit.result;
+  while (result === null) {
+    // Let the commit's background file I/O advance between steps.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    result = (await store.advanceManuscriptReimportCommitWork(commit.workId!)).result;
+  }
+  return result;
+}
+
+async function withStore(body: (store: EditorialStore) => Promise<void>): Promise<void> {
+  const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  try { await body(store); store.markCleanShutdown(); } finally { store.close(); }
 }
 
 function withDatabase<T>(readOnly: boolean, body: (database: DatabaseSync) => T): T {
@@ -742,9 +843,8 @@ describe('import retention over the real store (ADR 0086)', () => {
 
   it('keeps a text box with the file by default: r1 is the body alone and the review records 保留为文本框', async () => {
     const { path, blocks } = await composed(TEXT_BOX_EXCERPT);
-    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    let imported: Awaited<ReturnType<typeof importComposed>>;
-    try {
+    let imported!: Awaited<ReturnType<typeof importComposed>>;
+    await withStore(async (store) => {
       const staged = await store.stageSelectedManuscript(randomUUID(), path);
       const row = staged.fidelity.find((category) => category.key === 'text-boxes')!;
       expect([row.count, row.status]).toEqual([1, 'retained']);
@@ -754,10 +854,7 @@ describe('import retention over the real store (ADR 0086)', () => {
       expect(imported.textBoxDisposition).toBe('retain');
       expect(workingBlocks(store, imported.manuscriptId, imported.branchId).map((block) => block.digest))
         .toEqual(blocks.map((block) => block.digest));
-      store.markCleanShutdown();
-    } finally {
-      store.close();
-    }
+    });
     expect(textBoxChoices()).toEqual([{ category_key: 'text-boxes', choice: 'retain' }]);
     expect(blockSources(imported.revisionId).map((row) => row.source_part)).toEqual(Array(6).fill('body'));
   }, 120_000);
@@ -766,21 +863,17 @@ describe('import retention over the real store (ADR 0086)', () => {
     const { path, blocks, parsed } = await composed(TEXT_BOX_EXCERPT);
     const [box] = parsed.textBoxes;
     expect(box?.paragraphs).toHaveLength(2);
-    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    let imported: Awaited<ReturnType<typeof importComposed>>;
+    let imported!: Awaited<ReturnType<typeof importComposed>>;
     const expectedOrder = [blocks[0]!.digest, blocks[1]!.digest, ...box!.paragraphs.map((paragraph) => paragraph.digest),
       ...blocks.slice(2).map((block) => block.digest)];
-    try {
+    await withStore(async (store) => {
       imported = await importComposed(store, path, 'merge');
       expect(imported.textBoxDisposition).toBe('merge');
       expect(workingBlocks(store, imported.manuscriptId, imported.branchId).map((block) => block.digest)).toEqual(expectedOrder);
       const record = store.getBookOverview(imported.bookId).records.find((item) => item.kind === 'import-record');
       const row = record?.kind === 'import-record' ? record.fidelityCategories.find((category) => category.key === 'text-boxes') : undefined;
       expect(row?.detail.startsWith('并入正文：')).toBe(true);
-      store.markCleanShutdown();
-    } finally {
-      store.close();
-    }
+    });
     expect(textBoxChoices()).toEqual([{ category_key: 'text-boxes', choice: 'merge' }]);
     const sources = blockSources(imported.revisionId);
     expect(sources.map((row) => row.digest)).toEqual(expectedOrder);
@@ -791,28 +884,20 @@ describe('import retention over the real store (ADR 0086)', () => {
     expect(sources.every((row, index) => index === 0 || Number(row.source_paragraph_index) > Number(sources[index - 1]!.source_paragraph_index))).toBe(true);
 
     // Every record reads back exactly after a reopen validates the whole store.
-    const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
+    await withStore(async (reopened) => {
       expect(workingBlocks(reopened, imported.manuscriptId, imported.branchId).map((block) => block.digest)).toEqual(expectedOrder);
       expect(reopened.getBookOverview(imported.bookId).book.bookId).toBe(imported.bookId);
-      reopened.markCleanShutdown();
-    } finally {
-      reopened.close();
-    }
+    });
   }, 180_000);
 
   it('refuses to merge a file that has no text box', async () => {
     const { path } = await composed({ source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 4, title: '无文本框组稿' });
-    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
+    await withStore(async (store) => {
       const staged = await store.stageSelectedManuscript(randomUUID(), path);
       expect(() => store.prepareNewBookReview(staged.draftId, staged.draftVersion,
         { kind: 'new-book', choiceId: 'new-book', confirmedTitle: '无文本框组稿' }, false, 'merge'))
         .toThrow(expect.objectContaining({ code: 'TEXT_BOX_CHOICE_INVALID' }));
-      store.markCleanShutdown();
-    } finally {
-      store.close();
-    }
+    });
   }, 120_000);
 
   it('asks for the degradation decision for a field, not for a note that became a note block, and records it with the review', async () => {
@@ -820,8 +905,7 @@ describe('import retention over the real store (ADR 0086)', () => {
       source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 5, title: '降级组稿',
       retention: { field: { block: 1 }, footnote: { block: 3, noteSourceBlock: 9 } },
     });
-    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
+    await withStore(async (store) => {
       const staged = await store.stageSelectedManuscript(randomUUID(), path);
       const target = { kind: 'new-book', choiceId: 'new-book', confirmedTitle: '降级组稿' } as const;
       const pending = store.prepareNewBookReview(staged.draftId, staged.draftVersion, target, false);
@@ -839,10 +923,7 @@ describe('import retention over the real store (ADR 0086)', () => {
       const record = store.getBookOverview(commit.bookId).records.find((item) => item.kind === 'import-record');
       expect(record?.kind === 'import-record' && record.degradationDecision?.acceptedItems.map((item) => item.categoryKey))
         .toEqual(['fields']);
-      store.markCleanShutdown();
-    } finally {
-      store.close();
-    }
+    });
   }, 120_000);
 
   it('keeps a merge chosen on a review that must first accept its degradation', async () => {
@@ -850,8 +931,7 @@ describe('import retention over the real store (ADR 0086)', () => {
       ...TEXT_BOX_EXCERPT, title: '文本框与域组稿',
       retention: { ...TEXT_BOX_EXCERPT.retention, field: { block: 1 } },
     });
-    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
+    await withStore(async (store) => {
       const staged = await store.stageSelectedManuscript(randomUUID(), path);
       const target = { kind: 'new-book', choiceId: 'new-book', confirmedTitle: '文本框与域组稿' } as const;
       const pending = store.prepareNewBookReview(staged.draftId, staged.draftVersion, target, false, 'merge');
@@ -863,27 +943,18 @@ describe('import retention over the real store (ADR 0086)', () => {
         draftId: staged.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest!, commitId: randomUUID(),
       });
       expect(workingBlocks(store, commit.manuscriptId, commit.branchId)).toHaveLength(blocks.length + 2);
-      store.markCleanShutdown();
-    } finally {
-      store.close();
-    }
+    });
     expect(textBoxChoices()).toEqual([{ category_key: 'text-boxes', choice: 'merge' }]);
   }, 120_000);
 
   it('maps every block of a reimported revision to the paragraph of the file it came from', async () => {
     const first = await composed({ source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 6, title: '重新导入组稿' });
     const second = await composed({ ...TEXT_BOX_EXCERPT, blocks: 7, title: '重新导入组稿' });
-    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     let resultingRevisionId: string | null;
-    try {
+    await withStore(async (store) => {
       const book = await importComposed(store, first.path);
       const staged = await store.stageSelectedManuscript(randomUUID(), second.path);
-      const started = store.createManuscriptReimportPreparationWork(staged.draftId, staged.draftVersion, {
-        kind: 'existing-book', bookId: book.bookId, relationship: 'reimport', lineage: { kind: 'unconfirmed' }, reuseSourceVersionId: null,
-      });
-      let prepared = store.advanceManuscriptReimportPreparationWork(started.workId);
-      while (!prepared.done) prepared = store.advanceManuscriptReimportPreparationWork(started.workId);
-      let review = prepared.review!;
+      let review = prepareReimport(store, staged, book.bookId);
       // The one appended block is a row the editor resolves (Issue #412: 改写与新增, the one verb it admits); nothing is preselected.
       const unresolved: string[] = [];
       let cursor: number | null = null;
@@ -903,22 +974,10 @@ describe('import retention over the real store (ADR 0086)', () => {
       expect(review.commitReady).toBe(true);
       // A reimport offers no text-box choice: the new file's box stays with it.
       expect(review.fidelity.find((category) => category.key === 'text-boxes')?.detail.startsWith('保留为文本框：')).toBe(true);
-      const commit = await store.createManuscriptReimportCommitWork({
-        draftId: review.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest, commitId: randomUUID(),
-      });
-      let result = commit.result;
-      while (result === null) {
-        // The commit re-reads the file in the background: give its I/O a turn between steps.
-        await new Promise((resolve) => setTimeout(resolve, 5));
-        const progress = await store.advanceManuscriptReimportCommitWork(commit.workId!);
-        result = progress.result;
-      }
+      const result = await commitReimport(store, review);
       expect(result.resultKind).toBe('changed');
       resultingRevisionId = result.resultingRevisionId;
-      store.markCleanShutdown();
-    } finally {
-      store.close();
-    }
+    });
     const sources = blockSources(resultingRevisionId!);
     expect(sources.map((row) => row.digest)).toEqual(second.blocks.map((block) => block.digest));
     expect(sources.map((row) => Number(row.source_paragraph_index))).toEqual(second.blocks.map((block) => block.sourceParagraphIndex));
@@ -930,16 +989,10 @@ describe('the startup validation J-01 proves (Issue #584)', () => {
   it('refuses a store whose reimport proof the tamper control altered, as the validator and not as the control', async () => {
     const first = await composed({ source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 6, title: '篡改证明组稿' });
     const second = await composed({ source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 7, title: '篡改证明组稿' });
-    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
+    await withStore(async (store) => {
       const book = await importComposed(store, first.path);
       const staged = await store.stageSelectedManuscript(randomUUID(), second.path);
-      const started = store.createManuscriptReimportPreparationWork(staged.draftId, staged.draftVersion, {
-        kind: 'existing-book', bookId: book.bookId, relationship: 'reimport', lineage: { kind: 'unconfirmed' }, reuseSourceVersionId: null,
-      });
-      let prepared = store.advanceManuscriptReimportPreparationWork(started.workId);
-      while (!prepared.done) prepared = store.advanceManuscriptReimportPreparationWork(started.workId);
-      let review = prepared.review!;
+      let review = prepareReimport(store, staged, book.bookId);
       let cursor: number | null = null;
       do {
         const page = store.getReimportMappingPage(review.draftId, review.draftVersion, cursor);
@@ -951,19 +1004,9 @@ describe('the startup validation J-01 proves (Issue #584)', () => {
         }
         cursor = page.nextCursor;
       } while (cursor !== null);
-      const commit = await store.createManuscriptReimportCommitWork({
-        draftId: review.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest, commitId: randomUUID(),
-      });
-      let result = commit.result;
-      while (result === null) {
-        await new Promise((resolve) => setTimeout(resolve, 5));
-        result = (await store.advanceManuscriptReimportCommitWork(commit.workId!)).result;
-      }
+      const result = await commitReimport(store, review);
       expect(result.resultKind).toBe('changed');
-      store.markCleanShutdown();
-    } finally {
-      store.close();
-    }
+    });
     // The control alters one mapping that has staged text, and the store is then refused by what validates it — never by
     // the control's own E2E_CONTROL_INVALID, nor by a statement that could not be prepared.
     const opened = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
@@ -986,13 +1029,9 @@ describe('schema revision 27 over the real store', () => {
   it('migrates a revision-26 store holding a legacy eight-row review, with every fidelity row byte for byte', async () => {
     await requireExactSample1(roots.codeRoot);
     let bookId: string;
-    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
+    await withStore(async (store) => {
       bookId = (await importSample1Book(store, roots.codeRoot, '修订版 27 迁移')).bookId;
-      store.markCleanShutdown();
-    } finally {
-      store.close();
-    }
+    });
 
     // Plant revision 26 exactly as a build before ADR 0086 left it: the review is the eight-row one the
     // frozen builder rebuilds under parser identity /1, degraded and accepted as it had to be, and
@@ -1000,19 +1039,15 @@ describe('schema revision 27 over the real store', () => {
     const before = plantRevision26();
     expect(before).toHaveLength(8);
 
-    const migrated = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
+    await withStore(async (migrated) => {
+      expect(migrated.inspectDataVersion().schemaRevision).toBe(LATEST_SCHEMA_VERSION);
       // The legacy review reads back under the identity it was recorded with: eight rows, degraded, accepted.
       const record = migrated.getBookOverview(bookId).records.find((item) => item.kind === 'import-record');
       expect(record?.kind === 'import-record' && record.fidelityCategories).toEqual(SAMPLE1_V1_REPORT);
       expect(record?.kind === 'import-record' && record.degradationDecision?.acceptedItems.map((item) => item.categoryKey))
         .toEqual(['inline-styles', 'sections']);
-      migrated.markCleanShutdown();
-    } finally {
-      migrated.close();
-    }
+    });
     withDatabase(true, (database) => {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
       expect(importFidelityCategoriesShape(database)).toBe('current');
       expect(database.prepare('SELECT rowid, * FROM import_fidelity_categories ORDER BY rowid').all()).toEqual(before);
       for (const relation of [...IMPORT_RETENTION_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...MIGRATION_EMPTY_RELATIONS, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER]) {
@@ -1025,49 +1060,27 @@ describe('schema revision 27 over the real store', () => {
   it('names the parser change when a Book an earlier parser read takes its unchanged file again, at the choice (Issue #532)', async () => {
     await requireExactSample1(roots.codeRoot);
     let bookId: string;
-    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
+    await withStore(async (store) => {
       bookId = (await importSample1Book(store, roots.codeRoot, '旧读取方式')).bookId;
-      store.markCleanShutdown();
-    } finally {
-      store.close();
-    }
+    });
     plantRevision26();
     const sourceVersionId = withDatabase(true, (database) =>
       String((database.prepare('SELECT source_version_id FROM source_versions').get() as Row).source_version_id));
-    const migrated = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
-      const refused = (operation: () => unknown): [string, string] | null => {
-        try {
-          operation();
-        } catch (error) {
-          if (error instanceof StoreError) return [error.code, error.message];
-          throw error;
-        }
-        return null;
-      };
+    await withStore(async (migrated) => {
       // The unchanged file, staged under this build's parser: the Book holds its exact Source Version, read under /1. Taken
       // again as a reimport, the choice itself says why not, before any review is prepared.
       const again = await migrated.stageSelectedManuscript(randomUUID(), sample1Path(roots.codeRoot));
-      expect(refused(() => {
-        const started = migrated.createManuscriptReimportPreparationWork(again.draftId, again.draftVersion, {
-          kind: 'existing-book', bookId, relationship: 'reimport', lineage: { kind: 'unconfirmed' }, reuseSourceVersionId: sourceVersionId,
-        });
-        let progress = migrated.advanceManuscriptReimportPreparationWork(started.workId);
-        while (!progress.done) progress = migrated.advanceManuscriptReimportPreparationWork(started.workId);
-      })).toEqual(['SOURCE_VERSION_PARSER_CHANGED', SOURCE_VERSION_PARSER_CHANGED_MESSAGE]);
+      expect(() => prepareReimport(migrated, again, bookId, sourceVersionId))
+        .toThrow(expect.objectContaining({ code: 'SOURCE_VERSION_PARSER_CHANGED', message: SOURCE_VERSION_PARSER_CHANGED_MESSAGE }));
       // As source material for the Book, the same.
       const asSource = await migrated.stageSelectedManuscript(randomUUID(), sample1Path(roots.codeRoot));
-      expect(refused(() => migrated.prepareSourceImportReview(asSource.draftId, asSource.draftVersion, {
+      expect(() => migrated.prepareSourceImportReview(asSource.draftId, asSource.draftVersion, {
         kind: 'existing-book', bookId, relationship: 'source-only', reuseSourceVersionId: sourceVersionId,
-      }))).toEqual(['SOURCE_VERSION_PARSER_CHANGED', SOURCE_VERSION_PARSER_CHANGED_MESSAGE]);
+      })).toThrow(expect.objectContaining({ code: 'SOURCE_VERSION_PARSER_CHANGED', message: SOURCE_VERSION_PARSER_CHANGED_MESSAGE }));
       // The way on the words name: the file comes in as a new Book.
       const renewed = await importSample1Book(migrated, roots.codeRoot, '重新导入为新书');
       expect(renewed.bookId).not.toBe(bookId);
-      migrated.markCleanShutdown();
-    } finally {
-      migrated.close();
-    }
+    });
   }, 180_000);
 
   it('does not bring back ready a reimport review over a Source Version an earlier parser read, and says why when it is prepared again (Issue #580)', async () => {
@@ -1076,63 +1089,35 @@ describe('schema revision 27 over the real store', () => {
     let draftVersion: number;
     let bookId: string;
     let sourceVersionId: string;
-    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
+    await withStore(async (store) => {
       bookId = (await importSample1Book(store, roots.codeRoot, '旧读取方式')).bookId;
       sourceVersionId = withDatabase(true, (database) => String((database.prepare('SELECT source_version_id FROM source_versions').get() as Row).source_version_id));
       // The unchanged file taken again as a reimport that reuses its exact Source Version: a review ready under this parser.
       const again = await store.stageSelectedManuscript(randomUUID(), sample1Path(roots.codeRoot));
-      const started = store.createManuscriptReimportPreparationWork(again.draftId, again.draftVersion, {
-        kind: 'existing-book', bookId, relationship: 'reimport', lineage: { kind: 'unconfirmed' }, reuseSourceVersionId: sourceVersionId,
-      });
-      let prepared = store.advanceManuscriptReimportPreparationWork(started.workId);
-      while (!prepared.done) prepared = store.advanceManuscriptReimportPreparationWork(started.workId);
-      draftId = prepared.review!.draftId;
-      draftVersion = prepared.review!.draftVersion;
-      store.markCleanShutdown();
-    } finally {
-      store.close();
-    }
+      const preparedReview = prepareReimport(store, again, bookId, sourceVersionId);
+      draftId = preparedReview.draftId;
+      draftVersion = preparedReview.draftVersion;
+    });
     // The Source Version as an earlier parser left it. sample1 has no comments or revisions, so its /2 and /3 reports are one.
     withDatabase(false, (database) => {
       database.prepare("UPDATE source_versions SET parser_identity = 'ai7-docx-fflate-saxes/2' WHERE source_version_id = ?").run(sourceVersionId);
       database.prepare("UPDATE source_provenance SET parser_identity = 'ai7-docx-fflate-saxes/2' WHERE source_version_id = ?").run(sourceVersionId);
     });
-    const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
+    await withStore(async (reopened) => {
       const continued = await reopened.continueImportDraft(draftId!, draftVersion!);
       expect(continued.state === 'target-review-required' && continued.reviewInvalidated).toBe(true);
       const staged = continued.state === 'target-review-required' ? continued.staged : null;
-      const refused = ((): [string, string] | null => {
-        try {
-          const started = reopened.createManuscriptReimportPreparationWork(staged!.draftId, staged!.draftVersion, {
-            kind: 'existing-book', bookId: bookId!, relationship: 'reimport', lineage: { kind: 'unconfirmed' }, reuseSourceVersionId: sourceVersionId!,
-          });
-          let progress = reopened.advanceManuscriptReimportPreparationWork(started.workId);
-          while (!progress.done) progress = reopened.advanceManuscriptReimportPreparationWork(started.workId);
-        } catch (error) {
-          if (error instanceof StoreError) return [error.code, error.message];
-          throw error;
-        }
-        return null;
-      })();
-      expect(refused).toEqual(['SOURCE_VERSION_PARSER_CHANGED', SOURCE_VERSION_PARSER_CHANGED_MESSAGE]);
+      expect(() => prepareReimport(reopened, staged!, bookId!, sourceVersionId!))
+        .toThrow(expect.objectContaining({ code: 'SOURCE_VERSION_PARSER_CHANGED', message: SOURCE_VERSION_PARSER_CHANGED_MESSAGE }));
       expect(SOURCE_VERSION_PARSER_CHANGED_MESSAGE.endsWith('可以把它作为新建图书导入。')).toBe(true);
-      reopened.markCleanShutdown();
-    } finally {
-      reopened.close();
-    }
+    });
   }, 180_000);
 
   it('finds a Book an earlier parser read by its content when the same content comes in another file (Issue #532)', async () => {
     await requireExactSample1(roots.codeRoot);
-    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
+    await withStore(async (store) => {
       await importSample1Book(store, roots.codeRoot, '旧读取方式');
-      store.markCleanShutdown();
-    } finally {
-      store.close();
-    }
+    });
     plantRevision26();
     const [sourceVersionId, sourceDigest] = withDatabase(true, (database) => {
       const row = database.prepare('SELECT source_version_id, source_digest FROM source_versions').get() as Row;
@@ -1141,17 +1126,13 @@ describe('schema revision 27 over the real store', () => {
     // sample1's own parts in another container: other bytes, the same body, so the same content and structure.
     const twin = join(roots.inputRoot, 'sample1-另存.docx');
     writeFileSync(twin, zipSync(unzipSync(readFileSync(sample1Path(roots.codeRoot))), { mtime: fixedArchiveTime() }));
-    const migrated = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
+    await withStore(async (migrated) => {
       const staged = await migrated.stageSelectedManuscript(randomUUID(), twin);
       expect(staged.source.sourceSha256).not.toBe(sourceDigest);
       // Read under /1 and under this build's parser, the content and structure agree: the Book is found.
       expect(staged.identityFindings.map((finding) => [finding.sourceVersionId, finding.identityClass])).toEqual([
         [sourceVersionId, { kind: 'parsed-content-structure', label: '发现相同内容' }],
       ]);
-      migrated.markCleanShutdown();
-    } finally {
-      migrated.close();
-    }
+    });
   }, 180_000);
 });
