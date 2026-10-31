@@ -24,6 +24,12 @@ Generated `node_modules/`, `.pnpm-store/`, `.cache/`, `.runtime/`, `dist/`, `rel
 
 [manuscript-screen.ts](../../src/renderer/manuscript-screen.ts) owns the existing Manuscript and Production Document editor rendering, screen-local coordination and destruction. [index.ts](../../src/renderer/index.ts) retains shell composition, routing, shared authorities and one semantic handle to the Manuscript screen on display. [baseline-analysis-card.ts](../../src/renderer/baseline-analysis-card.ts) holds ②A's baseline-analysis card and [import-review.ts](../../src/renderer/import-review.ts) the review before an import; the shell lends each its routes through one factory.
 
+[data-storage.ts](../../src/renderer/data-storage.ts) holds 数据与存储; the shell supplies its existing helpers and routes through one factory.
+
+[knowledge-base.ts](../../src/renderer/knowledge-base.ts) holds 知识库 and 质量与学习; the shell supplies its existing helpers and routes through one factory.
+
+[model-service-settings.ts](../../src/renderer/model-service-settings.ts) holds 模型服务; the shell supplies its existing helpers and routes through one factory.
+
 [store-records.ts](../../src/service/store-records.ts) holds the authority store's record primitives (its errors, assertion, canonical JSON, SHA-256, patterns and typed row reads). [store.ts](../../src/service/store.ts) keeps transactions, schema, authoritative state, error boundaries and one-line public delegates; its operation groups live with their feature owners as functions over a typed store host: 书系 in [series.ts](../../src/service/series.ts), 可复用工序 in [captured-procedures.ts](../../src/service/captured-procedures.ts), 按我的评分重写评语 in [evaluation-rewrites.ts](../../src/service/evaluation-rewrites.ts), 学习监督 and 学习素材/学习整理 in [house-review-preference.ts](../../src/service/house-review-preference.ts), 自定义分析维度 in [custom-analysis-dimensions.ts](../../src/service/custom-analysis-dimensions.ts), 后台分析登记 in [background-analysis-enrollments.ts](../../src/service/background-analysis-enrollments.ts) and 审稿意见 in [readers-reports.ts](../../src/service/readers-reports.ts).
 
 [bounded-schema-sql.ts](../../src/service/manuscript/bounded-schema-sql.ts) holds the bounded manuscript store's existing schema SQL, expected historical shapes and foreign-key signatures; [bounded-manuscript.ts](../../src/service/bounded-manuscript.ts) re-exports its public SQL constants.
