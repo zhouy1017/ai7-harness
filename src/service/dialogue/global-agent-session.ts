@@ -1,4 +1,4 @@
-import type { AskGlobalAgentInput, GlobalAgentAttemptInput, GlobalAgentDialogueProjection, GlobalAgentDisclosure, GlobalAgentProcedurePin, GlobalAgentProjection, GlobalAgentScope, GlobalAgentSourceCandidate, GlobalAgentSupervisionProposal, GlobalAgentToolCall, GlobalMemoryPin, LaunchPolicyProjection, PrepareGlobalAgentTurnInput, RecordLearningSupervisionInput } from '../../shared/protocol.js';
+import type { AskGlobalAgentInput, GlobalAgentAttemptInput, GlobalAgentDialogueProjection, GlobalAgentDisclosure, GlobalAgentProcedurePin, GlobalAgentProjection, GlobalAgentScope, GlobalAgentSourceCandidate, GlobalAgentSupervisionProposal, GlobalAgentToolCall, GlobalMemoryPin, LaunchPolicyProjection, OrdinaryProductionRouteId, PrepareGlobalAgentTurnInput, RecordLearningSupervisionInput } from '../../shared/protocol.js';
 import { PROCEDURE_STAGE_LABELS, type ProcedureDefinitionDocument } from '../../shared/protocol/procedures.js';
 import { canonicalJson, sha256Hex } from '../analysis/canonical.js';
 import { GLOBAL_AGENT_SCOPED_TOOL_NAMES, LOCAL_TOOL_RESULT_MAX_BYTES } from '../provider/local-tools.js';
@@ -12,7 +12,7 @@ import type { DialogueLedger, QualifiedGlobalAttemptMetadata, StoredDialogueAtte
 import { DialogueError, type DialogueTurnStart } from './dialogue-ledger.js';
 import type { DialogueExecutionOwner } from './dialogue-execution.js';
 import { fragmentsText } from './fragments.js';
-import { selectedPolicyIdentityOf, type ConfiguredProviderBinding } from '../launch-policy.js';
+import { ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS, selectedPolicyIdentityOf, type ConfiguredProviderBinding } from '../launch-policy.js';
 
 export const GLOBAL_AGENT_PROMPT_CONTRACT = {
   schema: 'ai7.global-agent-dialogue/1',
@@ -122,7 +122,7 @@ export function admittedGlobalAgentScopedRoute(policy: LaunchPolicyProjection): 
   const declared = policy.providerProcessing.admittedRules.filter((entry) => entry.ruleId === GLOBAL_AGENT_SCOPED_RULE_ID);
   const rule = route?.globalAgentScopedDialogue;
   const local = route?.localTools;
-  if (route?.operationalScope !== 'ordinary-production' || route.ruleId !== GLOBAL_AGENT_SCOPED_RULE_ID || route.providerProcessingVersion !== 'v31' ||
+  if (route?.operationalScope !== 'ordinary-production' || route.ruleId !== GLOBAL_AGENT_SCOPED_RULE_ID || (route.providerProcessingVersion !== 'v31' && route.providerProcessingVersion !== 'v32') ||
       route.modelRole !== 'Fast Interaction Role' || declared.length !== 1 || declared[0]!.webSearchToolAllowed !== false ||
       declared[0]!.platformTools !== null || rule === undefined || local == null || local.targetedRetrieval.allowed !== true) return null;
   const { source, scopedTools: tools } = rule;
@@ -227,8 +227,8 @@ function qualifiedGlobalPreparation(store: GlobalAgentTurnStore, owner: Dialogue
   const ruleId = scope === undefined ? 'ordinary-production-global-agent-dialogue' : GLOBAL_AGENT_SCOPED_RULE_ID;
   const connection = store.globalAgentModelConnection();
   const routeId = route.profile.route;
-  if (policy.integrityState !== 'verified' || policy.operationalScope !== 'ordinary-production' || selected === null || (selected.providerProcessingVersion !== 'v30' && selected.providerProcessingVersion !== 'v31') ||
-      (scope !== undefined && selected.providerProcessingVersion !== 'v31') ||
+  if (policy.integrityState !== 'verified' || policy.operationalScope !== 'ordinary-production' || selected === null || (selected.providerProcessingVersion !== 'v30' && selected.providerProcessingVersion !== 'v31' && selected.providerProcessingVersion !== 'v32') ||
+      (scope !== undefined && selected.providerProcessingVersion === 'v30') ||
       policy.activePolicySetVersion !== selected.activePolicySetVersion || policy.providerProcessing.version !== selected.providerProcessingVersion ||
       route.providerProcessingVersion !== selected.providerProcessingVersion ||
       route.modelRole !== 'Fast Interaction Role' || route.ruleId !== ruleId ||
@@ -236,7 +236,7 @@ function qualifiedGlobalPreparation(store: GlobalAgentTurnStore, owner: Dialogue
       connection.binding.model !== route.modelProfile.model || connection.binding.credentialSlot !== route.profile.credentialSlot ||
       canonicalJson(connection.policy.providerProcessing.admittedRules.filter((rule) => rule.ruleId === route.ruleId)) !==
         canonicalJson(policy.providerProcessing.admittedRules.filter((rule) => rule.ruleId === route.ruleId)) ||
-      connection.binding.credentialReference !== owner.globalDisclosureReference() || (routeId !== 'opencode-go' && routeId !== 'deepseek-open-platform') ||
+      connection.binding.credentialReference !== owner.globalDisclosureReference() || !ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS.some((binding) => binding.route === routeId) ||
       parseDialogueMessage(buildDialogueMessage(message)) === null || message.selection !== '' || [...message.question].length > 500)
     throw new DialogueError('GLOBAL_AGENT_SCOPE_CHANGED', '处理策略或模型服务已经变化；未发送任何内容。');
   const history: GlobalAgentTurnHistory = input.kind === 'ask'
@@ -265,7 +265,7 @@ function qualifiedGlobalPreparation(store: GlobalAgentTurnStore, owner: Dialogue
     ...(scope === undefined ? {} : { scope, tools: GLOBAL_AGENT_SCOPED_TOOL_NAMES }) };
   const requestContextSha256 = sha256Hex(canonicalJson(descriptor));
   const qualification: QualifiedGlobalAttemptMetadata = { ...selected, providerProcessingVersion: selected.providerProcessingVersion, textProcessing: 'qualified-original-fields',
-    policyRuleId: ruleId, route: routeId,
+    policyRuleId: ruleId, route: routeId as OrdinaryProductionRouteId,
     model: route.modelProfile.model, modelRole: 'Fast Interaction Role', credentialSlot: route.profile.credentialSlot,
     credentialReference: connection.binding.credentialReference, credentialUpdatedAt: connection.credentialUpdatedAt,
     requestContextSha256, messageSha256, retainedAncestrySha256: history.retainedAncestrySha256 };
@@ -283,7 +283,7 @@ function qualifiedGlobalPreparation(store: GlobalAgentTurnStore, owner: Dialogue
 export function prepareGlobalAgentDisclosure(store: GlobalAgentTurnStore, owner: DialogueExecutionOwner,
   policy: LaunchPolicyProjection, input: PrepareGlobalAgentTurnInput): GlobalAgentDisclosure {
   const route = input.kind === 'ask' && input.scope !== undefined ? owner.requireGlobalScopedReady(policy) : owner.requireGlobalReady(policy);
-  if (policy.providerProcessing.version === 'v30' || policy.providerProcessing.version === 'v31')
+  if (policy.providerProcessing.version === 'v30' || policy.providerProcessing.version === 'v31' || policy.providerProcessing.version === 'v32')
     return qualifiedGlobalPreparation(store, owner, policy, input, store.prepareGlobalAgentTurn(input)).disclosure;
   return globalAgentDisclosure(store.prepareGlobalAgentTurn(input), store.inspectGlobalAgent().sourceCandidates ?? [],
     route, owner.globalDisclosureReference());
@@ -296,7 +296,7 @@ export function startGlobalAgentTurn(store: GlobalAgentTurnStore, owner: Dialogu
   if (disclosureSha256 !== disclosure.sha256) throw new DialogueError('GLOBAL_AGENT_DISCLOSURE_CHANGED', '发送内容或模型服务已经变化；请重新查看将发送的内容。未发送任何内容。');
   const initialPolicy = policy();
   const route = input.kind === 'ask' && input.scope !== undefined ? owner.requireGlobalScopedReady(initialPolicy) : owner.requireGlobalReady(initialPolicy);
-  const prepared = (initialPolicy.providerProcessing.version === 'v30' || initialPolicy.providerProcessing.version === 'v31')
+  const prepared = (initialPolicy.providerProcessing.version === 'v30' || initialPolicy.providerProcessing.version === 'v31' || initialPolicy.providerProcessing.version === 'v32')
     ? qualifiedGlobalPreparation(store, owner, initialPolicy, input, store.prepareGlobalAgentTurn(input)) : null;
   if (prepared !== null && prepared.disclosure.sha256 !== disclosure.sha256)
     throw new DialogueError('GLOBAL_AGENT_DISCLOSURE_CHANGED', '发送内容或模型服务已经变化；请重新查看将发送的内容。');

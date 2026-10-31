@@ -1575,7 +1575,7 @@ export function curationEnvelope(host: EditorialLearningStoreHost, budget: Learn
   const live = launch.live;
   const rule = policy?.providerProcessing.admittedRules?.find((entry) => entry.ruleId === 'ordinary-production-learning-curation');
   if (launch.operationalScope !== 'ordinary-production' || live?.scope !== 'ordinary-production' ||
-    policy?.integrityState !== 'verified' || identity?.providerProcessingVersion !== 'v31' || rule?.enabledLearningEnvelope === undefined ||
+    policy?.integrityState !== 'verified' || (identity?.providerProcessingVersion !== 'v31' && identity?.providerProcessingVersion !== 'v32') || rule?.enabledLearningEnvelope === undefined ||
     rule.route !== live.route || rule.model !== live.model || rule.endpoint !== live.endpoint || rule.credentialSlot !== live.credentialSlot) return null;
   return { schema: 'ai7.enabled-learning-envelope/1', budget, contractDigest: CURATION_CONTRACT_DIGEST, policy: identity,
     binding: { route: live.route, endpoint: live.endpoint, model: live.model, credentialSlot: live.credentialSlot, credentialReference: live.credentialReference },

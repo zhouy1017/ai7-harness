@@ -655,17 +655,18 @@ export function resolveProviderConfiguration({ schema, documents, recordedEviden
 /** Resolve only reviewed, readable rows; no endpoint or credential slot is independently configurable here. */
 function resolveRuntimeBindings(input, providers) {
   validatePolicyDocument(input.data, input.schema);
-  const resolveBinding = ({ route, model }) => {
+  // `policyBaseline` mirrors the selected policy's declared bindings, so its rows need a declared model only (#1221).
+  const resolveBinding = ({ route, model }, readableRequired = true) => {
     const declared = providers.flatMap((provider) => provider.routes).find((entry) => entry.profile.route === route);
     const profile = declared?.models.find((entry) => entry.model === model);
-    refuse(profile !== undefined && profile.capabilities.answerChannel !== 'none', `PROVIDER_CONFIGURATION/runtime-binding-unreadable: ${route}/${model}`);
+    refuse(profile !== undefined && (!readableRequired || profile.capabilities.answerChannel !== 'none'), `PROVIDER_CONFIGURATION/runtime-binding-unreadable: ${route}/${model}`);
     return { route, endpoint: declared.profile.endpoint, model, credentialSlot: declared.profile.credentialSlot };
   };
-  const resolveRoles = (roles) => Object.fromEntries(Object.entries(roles).map(([role, bindings]) => [role, bindings.map(resolveBinding)]));
+  const resolveRoles = (roles, readableRequired = true) => Object.fromEntries(Object.entries(roles).map(([role, bindings]) => [role, bindings.map((binding) => resolveBinding(binding, readableRequired))]));
   const result = {
     developerLive: resolveBinding(input.data.developerLive),
     legacyDeepSeek: resolveBinding(input.data.legacyDeepSeek),
-    policyBaseline: resolveRoles(input.data.policyBaseline),
+    policyBaseline: resolveRoles(input.data.policyBaseline, false),
     ordinaryProduction: resolveRoles(input.data.ordinaryProduction),
   };
   // The configuration may change bindings within the selected policy's protocol families, never add a protocol.
@@ -771,6 +772,13 @@ function renderShared({ providers, searchBackends = [], runtimeModelTable }) {
     '',
     '/** Reviewed bindings within declared protocol families (ADR 0095 §6); eligibility still requires the selected policy. */',
     `export const CONFIGURED_RUNTIME_MODEL_TABLE = ${renderValue(runtimeModelTable, 0)} as const;`,
+    '',
+    '/** The display name of each policy-baseline model, by `route/model`: the label 设置 › 模型服务 names it by (Issue #1225). */',
+    'export const CONFIGURED_RUNTIME_MODEL_LABELS: Readonly<Record<string, string>> = {',
+    ...[...new Set([...runtimeModelTable.policyBaseline.main, ...runtimeModelTable.policyBaseline.fast].map(({ route, model }) => `${route}/${model}`))]
+      .map((key) => `  ${literal(key)}: ${literal(providers.flatMap((provider) => provider.routes).find((entry) => entry.profile.route === key.slice(0, key.indexOf('/')))
+        .models.find((entry) => entry.model === key.slice(key.indexOf('/') + 1)).displayName)},`),
+    '};',
     '',
     '/** One credential slot per configured provider (ADR 0073 §4): the members of `CredentialSlotId`, and the Credential Broker\'s closed set. */',
     'export const CONFIGURED_CREDENTIAL_SLOTS = [',
@@ -949,7 +957,7 @@ function renderFamilyDispositions() {
   return [
     '## Protocol family dispositions',
     '',
-    'What the adapter implements for each protocol family (Issue #1180, ADR 0094 §1), proven provider-free by the family fixtures under [`tests/fixtures/model/provider-families/`](../../tests/fixtures/model/provider-families/). A declared model is `supported` for text, stream or function tools only where its own capability is declared on evidence and `untested` otherwise; the adapter refuses every demand that is not `supported` by name before any ticket, credential or transport is touched (`src/service/provider/family-dispositions.ts`). A family the selected policy does not admit for a role is refused by name as `family-not-admitted-by-selected-policy`: the selected policy baseline (`policyBaseline` in the runtime model table, which the launch verifier matches against the policy bytes) admits chat completions for the Main role and chat completions and Responses for the Fast role, so Messages and generateContent, and Responses for Main, wait for a policy successor (ADR 0095 §6).',
+    'What the adapter implements for each protocol family (Issue #1180, ADR 0094 §1), proven provider-free by the family fixtures under [`tests/fixtures/model/provider-families/`](../../tests/fixtures/model/provider-families/). A declared model is `supported` for text, stream or function tools only where its own capability is declared on evidence and `untested` otherwise; the adapter refuses every demand that is not `supported` by name before any ticket, credential or transport is touched (`src/service/provider/family-dispositions.ts`). A family the selected policy does not admit for a role is refused by name as `family-not-admitted-by-selected-policy`: the selected policy baseline (`policyBaseline` in the runtime model table, which the launch verifier matches against the policy bytes) admits chat completions, Responses, Messages and generateContent for both the Main and the Fast role (Provider Processing v32, ADR 0095 §6), so a model of any declared family reads its own text disposition, and it is chosen only once the runtime model table holds its reviewed `ordinaryProduction` record.',
     '',
     `| Aspect | ${shapes.map((shape) => `\`${shape}\``).join(' | ')} |`,
     `| --- | ${shapes.map(() => '---').join(' | ')} |`,
@@ -977,7 +985,7 @@ function renderSupport({ providers, recordedEvidence, searchBackends = [] }) {
     '',
     '## Three senses of "supported"',
     '',
-    'Runtime role choices are reviewed in [`config/providers/runtime-bindings/model-table.json`](../../config/providers/runtime-bindings/model-table.json). The generator resolves their endpoints and credential slots from the provider documents and refuses unreadable models or a protocol family outside the role’s declared baseline. `policyBaseline` preserves the predecessor declaration checks; `ordinaryProduction` supplies v26 Main/Fast choices, default first. Developer-live still has to match its immutable policy binding exactly. Configuration alone grants no transmission. Settings selector literals remain with F-01; this slice preserves their choices.',
+    'Runtime role choices are reviewed in [`config/providers/runtime-bindings/model-table.json`](../../config/providers/runtime-bindings/model-table.json). The generator resolves their endpoints and credential slots from the provider documents and refuses an unreadable `ordinaryProduction` model or a protocol family outside the role’s declared baseline. `policyBaseline` is exactly the selected policy’s Main/Fast allowed bindings, declared models readable or not, and holds every predecessor’s; `ordinaryProduction` supplies v26 Main/Fast choices, default first. Developer-live still has to match its immutable policy binding exactly. Configuration alone grants no transmission. Settings selector literals remain with F-01; this slice preserves their choices.',
     '',
     '- **Declared** — a document declares the route and the model. A declared model whose `answerChannel` is `none` is inert: it can read no response. A declared format is a claim about the request shape and nothing else (ADR 0073 §3).',
     '- **Live-verified** — a capability whose evidence is `live-test-item`, cited by its item ids.',

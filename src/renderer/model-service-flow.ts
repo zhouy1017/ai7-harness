@@ -8,14 +8,17 @@ import {
   type ModelServiceSettingsProjection,
   type RendererApi,
 } from '../shared/protocol.js';
+import { modelServiceTestRequired } from '../shared/protocol/model-service.js';
 import { MODEL_CONNECTION_TEST_NOTE, modelConnectionTestDisclosure, modelConnectionTestLabel } from './model-service-roles.js';
 
 /**
  * 设置 › 模型服务's one flow for the Main Editorial Role and the Fast Interaction Role together (ADR 0094 §1; Issue #1215):
  * a channel, its protected credential and connection test, then a model the channel declares. A model is offered only when
  * it is eligible for both roles and the channel's credential is ready; every other declared model is listed with its
- * disposition by name and offers nothing to choose. Choosing changes configuration only: the Main role through the existing
- * route choice, the Fast role through its existing model choice. The per-role cards below stay the advanced settings.
+ * disposition by name and offers nothing to choose. On a channel whose text rests on vendor documentation alone (OpenAI, OpenCode
+ * Zen, Claude 官方, Gemini 官方; Issue #1225) a model is chosen only after its own passed connection test on the saved credential.
+ * Choosing changes configuration only: the Fast role through its existing model choice, then the Main role through the existing
+ * route choice. The per-role cards below stay the advanced settings.
  */
 export type ModelServiceFlowApi = Pick<RendererApi, 'saveModelServiceCredential' | 'selectFastRoleModel' | 'testModelServiceConnection'>;
 
@@ -72,10 +75,18 @@ function credentialReady(projection: ModelServiceSettingsProjection, route: Mode
   return route !== null && projection.routeChoice.routes.find((option) => option.route === route)?.connection?.credentialOperationState === 'ready';
 }
 
+/** Whether a documentary channel's model still needs its own passed text test on the saved credential before it can be chosen. */
+export function modelServiceTestPending(projection: ModelServiceSettingsProjection, route: ModelServiceRouteId, modelId: string): boolean {
+  const connection = projection.routeChoice.routes.find((option) => option.route === route)?.connection ?? null;
+  const test = connection?.connectionTest ?? null;
+  return modelServiceTestRequired(route) && (test?.outcome !== 'passed' || test.modelId !== modelId || test.credentialUpdatedAt !== connection?.credentialUpdatedAt);
+}
+
 /** Every model both roles can take now, channel by channel, in the flow's order. */
 export function modelServiceChoices(projection: ModelServiceSettingsProjection): ModelServiceChoice[] {
   return projection.channels.flatMap((channel) => channel.route === null || !credentialReady(projection, channel.route) ? [] : channel.models
-    .filter(bothEligible).map((model) => ({ route: channel.route!, channelLabel: channel.channelLabel, modelId: model.modelId, modelLabel: model.modelLabel })));
+    .filter((model) => bothEligible(model) && !modelServiceTestPending(projection, channel.route!, model.modelId))
+    .map((model) => ({ route: channel.route!, channelLabel: channel.channelLabel, modelId: model.modelId, modelLabel: model.modelLabel })));
 }
 
 /** The choice both roles hold now, or `null` when they differ or either has none. */
@@ -88,10 +99,13 @@ export function currentModelServiceChoice(projection: ModelServiceSettingsProjec
   return { route: main.providerId, modelId: main.modelId };
 }
 
-/** Both roles onto one choice: the Main role's route, then the Fast role's model on it; the settings that answer the last. */
+/**
+ * Both roles onto one choice: the Fast role's model on the channel, which makes it the channel's model, then the Main role's route
+ * onto that model — so a tested model is the one the Main role's test rule reads (Issue #1225); the settings that answer the last.
+ */
 export async function useForBothRoles(api: Pick<RendererApi, 'saveModelServiceCredential' | 'selectFastRoleModel'>, choice: Pick<ModelServiceChoice, 'route' | 'modelId'>): Promise<ModelServiceSettingsProjection> {
-  await api.saveModelServiceCredential({ route: choice.route, select: true });
-  return api.selectFastRoleModel({ route: choice.route, modelId: choice.modelId });
+  await api.selectFastRoleModel({ route: choice.route, modelId: choice.modelId });
+  return api.saveModelServiceCredential({ route: choice.route, select: true });
 }
 
 /** The id of a route's 连接名称 field in its advanced card (the official route keeps the ids S55a gave it). */
@@ -153,7 +167,8 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
   use.dataset['action'] = 'use-model-for-both-roles';
   const paint = (): void => {
     test.disabled = !ready || checked === null;
-    use.disabled = !ready || checked === null || (current?.route === channel.route && current.modelId === checked.modelId);
+    use.disabled = !ready || checked === null || (current?.route === channel.route && current.modelId === checked.modelId) ||
+      (channel.route !== null && modelServiceTestPending(projection, channel.route, checked.modelId));
     const tested = projection.routeChoice.routes.find((option) => option.route === channel.route)?.connection?.connectionTest ?? null;
     const own = tested !== null && tested.modelId === checked?.modelId ? tested : null;
     feedback.replaceChildren(...(checked === null ? [] : [
@@ -172,7 +187,7 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
     const inUse = current?.route === channel.route && current.modelId === model.modelId;
     if (ready && (checked === null || inUse)) { radio.checked = true; checked = model; }
     radio.addEventListener('change', () => { checked = model; paint(); });
-    label.append(radio, ` ${model.modelLabel}${inUse ? ' · 当前使用中' : ready ? '' : ' · 需先保存凭据'}`);
+    label.append(radio, ` ${model.modelLabel}${inUse ? ' · 当前使用中' : !ready ? ' · 需先保存凭据' : modelServiceTestPending(projection, channel.route!, model.modelId) ? ' · 需先测试连接' : ''}`);
     group.append(label);
   }
   if (offered.length === 0) group.append(el('p', 'field-note', '此渠道没有两个角色都可选的模型。'));

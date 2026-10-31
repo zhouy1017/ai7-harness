@@ -244,7 +244,7 @@ describe('custom analysis kind family live admission (#920)', () => {
 
   it('selects the ordinary-production custom rule on the editor\'s configured binding', async () => {
     const production = await resolveSourceCheckoutLaunchPolicy(fileURLToPath(new URL('../../', import.meta.url)), 'ordinary-production', GO_PRODUCTION_BINDING);
-    expect(production.providerProcessing.version).toBe('v31');
+    expect(production.providerProcessing.version).toBe('v32');
     expect(liveKindRule(production, 'custom-analysis/synthetic-dimension', ['editor-authored-question-template'])?.ruleId).toBe('ordinary-production-custom-analysis');
     const productionBinding = production.providerProcessing.admittedRules.find((rule) => rule.ruleId === 'ordinary-production-custom-analysis')!;
     expect(liveKindAdmission(production, stubDefinition(), productionBinding)?.outboundDataCategories).toEqual(expect.arrayContaining(['public-or-synthetic', 'editor-authored-question-template']));

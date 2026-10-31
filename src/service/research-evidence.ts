@@ -29,6 +29,7 @@ import {
   researchEvidenceRecord,
   type RetainedUnit,
 } from './analysis/factual-review-evidence.js';
+import type { SearchFallbackAttribution } from './provider/platform-tool-session.js';
 
 /** Why 保存为来源材料 refuses: the house is read-only while a replacement is prepared or waiting. */
 export const RESEARCH_EVIDENCE_READ_ONLY = '数据现在是只读的（正在准备或等待替换本机数据）；不能保存为来源材料。' as const;
@@ -110,6 +111,8 @@ interface StoredEvidence {
   readonly anchors: ReadonlyArray<ResearchEvidenceAnchor>;
   readonly translation: ResearchEvidenceTranslation | null;
   readonly stalenessState: 'current' | 'hash-changed';
+  /** Issue #1226: the default backend a 备用来源 line replaced, and the admitted failure class that caused it. */
+  readonly fallback: { readonly fallbackFrom: string; readonly failureClass: string } | null;
 }
 
 /** What 保存为来源材料 reads of one retained source: its record and the captured text. */
@@ -126,6 +129,8 @@ export interface RetainedSourceForMaterial {
   readonly runRecordId: string;
   readonly content: string | null;
   readonly savedMaterialId: string | null;
+  readonly backendId: string | null;
+  readonly fallback: StoredEvidence['fallback'];
 }
 
 /**
@@ -153,7 +158,9 @@ export class ResearchEvidenceLedger {
    * unit's outcome. A capture whose address was retained before under another full-text hash is recorded `hash-changed`, which
    * marks every earlier capture of it 可能已过期. A unit already kept is refused, so a Run never records a unit twice.
    */
-  record(input: { readonly bookId: string; readonly runRecordId: string; readonly unitOrdinal: number; readonly backendId: string | null; readonly unit: RetainedUnit }): string[] {
+  record(input: { readonly bookId: string; readonly runRecordId: string; readonly unitOrdinal: number; readonly backendId: string | null; readonly unit: RetainedUnit;
+    /** Issue #1226: the sources a 备用来源 returned; each such line names that backend and carries `fallbackFrom` and the failure class. */
+    readonly fallbackSources?: ReadonlyMap<string, SearchFallbackAttribution> }): string[] {
     requireEvidence(UUID_PATTERN.test(input.runRecordId) && Number.isSafeInteger(input.unitOrdinal) && input.unitOrdinal >= 1,
       'RESEARCH_EVIDENCE_INVALID', '外部来源留存的运行或单元无效。');
     requireEvidence(this.#db.prepare('SELECT 1 FROM research_evidence_units WHERE run_record_id = ? AND unit_ordinal = ?').get(input.runRecordId, input.unitOrdinal) === undefined,
@@ -177,26 +184,32 @@ export class ResearchEvidenceLedger {
       const prior = evidence.captureState === 'full-text' ? priorFull.get(evidence.url, evidence.capturedAt) as SqlRow | undefined : undefined;
       const stalenessState = prior !== undefined && (prior.content_sha256 !== evidence.contentSha256 || prior.page_sha256 !== evidence.pageSha256) ? 'hash-changed' as const : 'current' as const;
       const evidenceId = randomUUID();
-      const record = canonicalRecord(researchEvidenceRecord({
+      const source = input.fallbackSources?.get(evidence.url);
+      const backendId = source?.backendId ?? input.backendId;
+      const record = canonicalRecord({ ...researchEvidenceRecord({
         evidenceId, bookId: input.bookId, runRecordId: input.runRecordId, unitOrdinal: input.unitOrdinal,
-        backendId: input.backendId, stalenessState, recordedAt, evidence,
-      }));
-      insertEvidence.run(evidenceId, input.bookId, input.runRecordId, input.unitOrdinal, evidence.findingId, input.backendId, evidence.queryClass,
+        backendId, stalenessState, recordedAt, evidence,
+      }), ...(source === undefined ? {} : { fallbackFrom: source.fallbackFrom, fallbackFailure: source.failureClass }) });
+      insertEvidence.run(evidenceId, input.bookId, input.runRecordId, input.unitOrdinal, evidence.findingId, backendId, evidence.queryClass,
         evidence.url, evidence.capturedAt, evidence.captureState, evidence.contentSha256, evidence.pageSha256, evidence.snapshotDigest,
         evidence.alignment, canonicalJson(evidence.anchors), evidence.translation === null ? null : canonicalJson(evidence.translation),
         stalenessState, recordedAt, record.json, record.digest);
       ids.push(evidenceId);
     }
     const unsupported = input.unit.findings.filter((finding) => finding.sources === 0).length;
+    // A unit whose every retained line came from the 备用来源 names that backend; any fallback line names the default it replaced.
+    const fallbackLines = input.unit.evidence.flatMap((evidence) => input.fallbackSources?.get(evidence.url) ?? []);
+    const unitBackendId = fallbackLines.length > 0 && fallbackLines.length === input.unit.evidence.length ? fallbackLines[0]!.backendId : input.backendId;
     const unitRecord = canonicalRecord({
       schema: RESEARCH_EVIDENCE_UNIT_SCHEMA, runRecordId: input.runRecordId, unitOrdinal: input.unitOrdinal, bookId: input.bookId,
-      backendId: input.backendId, state: input.unit.state, searchCalls: input.unit.searchCalls, retentionFetches: input.unit.retentionFetches,
+      ...(fallbackLines.length === 0 ? {} : { fallbackFrom: fallbackLines[0]!.fallbackFrom, fallbackFailures: [...new Set(fallbackLines.map((line) => line.failureClass))] }),
+      backendId: unitBackendId, state: input.unit.state, searchCalls: input.unit.searchCalls, retentionFetches: input.unit.retentionFetches,
       failedRetrievals: input.unit.failedRetrievals, findings: input.unit.findings, evidenceIds: ids, recordedAt,
       ...(input.unit.retentionFailure === undefined ? {} : { retentionFailure: input.unit.retentionFailure }),
     });
     this.#db.prepare(`INSERT INTO research_evidence_units(run_record_id, unit_ordinal, book_id, backend_id, search_state, search_calls,
       retention_fetches, failed_retrievals, unsupported_findings, recorded_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(input.runRecordId, input.unitOrdinal, input.bookId, input.backendId, input.unit.state, input.unit.searchCalls,
+      .run(input.runRecordId, input.unitOrdinal, input.bookId, unitBackendId, input.unit.state, input.unit.searchCalls,
         input.unit.retentionFetches, input.unit.failedRetrievals, unsupported, recordedAt, unitRecord.json, unitRecord.digest);
     return ids;
   }
@@ -224,6 +237,7 @@ export class ResearchEvidenceLedger {
       claim: record.claim as ResearchEvidenceProjection['claim'], alignment: String(row.alignment) as ResearchEvidenceAlignment,
       anchors: record.anchors as ReadonlyArray<ResearchEvidenceAnchor>, translation: record.translation as ResearchEvidenceTranslation | null,
       stalenessState: String(row.staleness_state) as 'current' | 'hash-changed',
+      fallback: typeof record.fallbackFrom === 'string' && typeof record.fallbackFailure === 'string' ? { fallbackFrom: record.fallbackFrom, failureClass: record.fallbackFailure } : null,
     };
   }
 
@@ -251,6 +265,7 @@ export class ResearchEvidenceLedger {
       evidenceId: stored.evidenceId, bookId: stored.bookId, url: stored.url, sourceTitle: stored.sourceTitle, capturedAt: stored.capturedAt,
       captureState: stored.captureState, contentSha256: stored.contentSha256, pageSha256: stored.pageSha256, snapshotDigest: stored.snapshotDigest,
       runRecordId: stored.runRecordId, content: this.#content(stored.contentSha256), savedMaterialId: this.#savedMaterial(stored.evidenceId),
+      backendId: stored.backendId, fallback: stored.fallback,
     };
   }
 

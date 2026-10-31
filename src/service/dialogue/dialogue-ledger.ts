@@ -1,4 +1,4 @@
-import type { GlobalMemoryPin, LocalFixtureProfile, SelectedPolicyIdentity } from '../../shared/protocol.js';
+import type { GlobalMemoryPin, LocalFixtureProfile, OrdinaryProductionRouteId, SelectedPolicyIdentity } from '../../shared/protocol.js';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import { DIGEST_PATTERN, UUID_PATTERN, canonicalJson, hasExactKeys, isRecord, parseStoredJson, sha256Hex } from '../analysis/canonical.js';
@@ -33,7 +33,8 @@ import { isSpanOf } from '../manuscript/selection-span.js';
  * bound to the local deterministic fixture names the fixture and neither of them, exactly as revision 60 recorded it.
  * Revision 72 (Issue #811) widens it again for ordinary production: an attempt there is bound to the editor's configured
  * route — Go or DeepSeek 开放平台（官方） — and names its policy version and rule exactly as a developer-live one does;
- * developer-live attempts stay on the Go route only.
+ * developer-live attempts stay on the Go route only. Revision 103 (Issue #1225) admits every route Provider Processing v32 binds
+ * for a production role, so a turn on an OpenAI, Claude 官方, Gemini 官方 or OpenCode Zen choice is recorded as a Go one is.
  */
 const LEGACY_DIALOGUE_SCHEMA_SQL = {
   dialogue_tasks: `CREATE TABLE dialogue_tasks (
@@ -116,9 +117,13 @@ const LEGACY_DIALOGUE_SCHEMA_SQL = {
 } as const;
 
 export const DIALOGUE_TASKS_REVISION_86_SQL = LEGACY_DIALOGUE_SCHEMA_SQL.dialogue_tasks;
-/** Revision 87 admits an all-null manuscript binding for an explicitly scoped Global Agent turn. */
+/** `dialogue_execution_bindings` as revision 72 widened it: ordinary production's Go and DeepSeek routes. Kept to recognise such a store. */
+export const DIALOGUE_EXECUTION_BINDINGS_REVISION_72_SQL = LEGACY_DIALOGUE_SCHEMA_SQL.dialogue_execution_bindings;
+/** Revision 87 admits an all-null manuscript binding for an explicitly scoped Global Agent turn; revision 103 every v32 production route. */
 export const DIALOGUE_SCHEMA_SQL = {
   ...LEGACY_DIALOGUE_SCHEMA_SQL,
+  dialogue_execution_bindings: DIALOGUE_EXECUTION_BINDINGS_REVISION_72_SQL.replace("'opencode-go', 'deepseek-open-platform')),",
+    "'opencode-go', 'deepseek-open-platform', 'openai-platform', 'anthropic-claude', 'google-gemini', 'opencode-zen', 'opencode-zen-messages', 'opencode-zen-responses')),"),
   dialogue_tasks: DIALOGUE_TASKS_REVISION_86_SQL.replace(
     /((?:book_id|manuscript_id|branch_id|revision_id|journal_sequence|block_id|from_grapheme|to_grapheme|block_digest) (?:TEXT|INTEGER)) NOT NULL/gu, '$1',
   ).replace(') STRICT', `, CHECK(
@@ -207,26 +212,28 @@ function foldedSql(value: string): string {
 }
 
 /**
- * Which of its three texts `dialogue_execution_bindings` holds: revision 60's, revision 71's that admits the developer-live
- * route, or revision 72's that admits ordinary production's two routes. No other text was ever created, so any other is refused.
+ * Which of its four texts `dialogue_execution_bindings` holds: revision 60's, revision 71's that admits the developer-live
+ * route, revision 72's that admits ordinary production's two routes, or revision 103's that admits every v32 production route.
+ * No other text was ever created, so any other is refused.
  */
-export function dialogueExecutionBindingsShape(db: DatabaseSync): 'revision-60' | 'revision-71' | 'current' {
+export function dialogueExecutionBindingsShape(db: DatabaseSync): 'revision-60' | 'revision-71' | 'revision-72' | 'current' {
   const row = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'dialogue_execution_bindings'").get() as SqlRow | undefined;
   const sql = row === undefined ? '' : foldedSql(text(row.sql));
   if (sql === foldedSql(DIALOGUE_SCHEMA_SQL.dialogue_execution_bindings)) return 'current';
+  if (sql === foldedSql(DIALOGUE_EXECUTION_BINDINGS_REVISION_72_SQL)) return 'revision-72';
   if (sql === foldedSql(DIALOGUE_EXECUTION_BINDINGS_REVISION_71_SQL)) return 'revision-71';
   requireDialogue(sql === foldedSql(DIALOGUE_EXECUTION_BINDINGS_REVISION_60_SQL), 'SCHEMA_MIGRATION_FAILED', '对话执行绑定表结构不兼容。');
   return 'revision-60';
 }
 
 /**
- * Revision 60 or 71 → 72 for `dialogue_execution_bindings` (Issue #52, S17c; Issue #811): the relation is rebuilt from its
+ * Revision 60, 71 or 72 → 103 for `dialogue_execution_bindings` (Issue #52, S17c; Issues #811, #1225): the relation is rebuilt from its
  * current text, every row copied byte for byte, rowid included, in rowid order — from revision 60 the two columns revision 71
  * added stay empty, as a local binding's always are — and its two ledger triggers re-armed from their own texts. It runs in
  * the caller's transaction with foreign keys off, so the spans that name a binding keep their rows while the relation they
  * reference is re-created.
  */
-function widenDialogueExecutionBindings(db: DatabaseSync, from: 'revision-60' | 'revision-71'): void {
+function widenDialogueExecutionBindings(db: DatabaseSync, from: 'revision-60' | 'revision-71' | 'revision-72'): void {
   requireDialogue(
     db.isTransaction && integer((db.prepare('PRAGMA foreign_keys').get() as SqlRow).foreign_keys) === 0,
     'SCHEMA_MIGRATION_FAILED',
@@ -330,10 +337,10 @@ export type DialogueAttemptKind = 'ask' | 'continue' | 'regenerate';
 
 export interface QualifiedGlobalAttemptMetadata extends SelectedPolicyIdentity {
   readonly textProcessing: 'qualified-original-fields';
-  readonly providerProcessingVersion: 'v30' | 'v31';
+  readonly providerProcessingVersion: 'v30' | 'v31' | 'v32';
   /** The no-tools rule, or v31's scoped tool rule (#1171); a record never moves between them. */
   readonly policyRuleId: 'ordinary-production-global-agent-dialogue' | typeof GLOBAL_AGENT_SCOPED_RULE_ID;
-  readonly route: 'opencode-go' | 'deepseek-open-platform';
+  readonly route: OrdinaryProductionRouteId;
   readonly model: string;
   readonly modelRole: 'Fast Interaction Role';
   readonly credentialSlot: string;
@@ -354,10 +361,10 @@ export function qualifiedGlobalAttemptMetadataOf(value: unknown): QualifiedGloba
     providerProcessingSha256: value.providerProcessingSha256, activePolicySetVersion: value.activePolicySetVersion,
     activePolicySetSha256: value.activePolicySetSha256 });
   const route = value.route;
-  if (identity === null || (identity.providerProcessingVersion !== 'v30' && identity.providerProcessingVersion !== 'v31') || value.textProcessing !== 'qualified-original-fields' ||
+  if (identity === null || (identity.providerProcessingVersion !== 'v30' && identity.providerProcessingVersion !== 'v31' && identity.providerProcessingVersion !== 'v32') || value.textProcessing !== 'qualified-original-fields' ||
       (value.policyRuleId !== 'ordinary-production-global-agent-dialogue' && (value.policyRuleId !== GLOBAL_AGENT_SCOPED_RULE_ID ||
-        identity.providerProcessingVersion !== 'v31')) || value.modelRole !== 'Fast Interaction Role' ||
-      (route !== 'opencode-go' && route !== 'deepseek-open-platform') || typeof value.model !== 'string' ||
+        identity.providerProcessingVersion === 'v30')) || value.modelRole !== 'Fast Interaction Role' ||
+      typeof route !== 'string' || typeof value.model !== 'string' ||
       typeof value.credentialSlot !== 'string' || !ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS.some((binding) =>
         binding.route === route && binding.model === value.model && binding.credentialSlot === value.credentialSlot) ||
       typeof value.credentialReference !== 'string' || !CREDENTIAL_REFERENCE_PATTERN.test(value.credentialReference) ||
@@ -368,7 +375,7 @@ export function qualifiedGlobalAttemptMetadataOf(value: unknown): QualifiedGloba
       typeof value.messageSha256 !== 'string' || !DIGEST_PATTERN.test(value.messageSha256) ||
       typeof value.retainedAncestrySha256 !== 'string' || !DIGEST_PATTERN.test(value.retainedAncestrySha256)) return null;
   return { ...identity, providerProcessingVersion: identity.providerProcessingVersion, textProcessing: 'qualified-original-fields',
-    policyRuleId: value.policyRuleId, route, model: value.model, modelRole: 'Fast Interaction Role',
+    policyRuleId: value.policyRuleId, route: route as OrdinaryProductionRouteId, model: value.model, modelRole: 'Fast Interaction Role',
     credentialSlot: value.credentialSlot, credentialReference: value.credentialReference, credentialUpdatedAt: value.credentialUpdatedAt,
     requestContextSha256: value.requestContextSha256, messageSha256: value.messageSha256, retainedAncestrySha256: value.retainedAncestrySha256 };
 }
@@ -440,7 +447,7 @@ export interface StoredLocalDialogueBinding extends DialogueBindingBase {
  * DeepSeek 开放平台（官方） route under ordinary-production, with the policy version and allow rule that admitted it.
  */
 export interface StoredLiveDialogueBinding extends DialogueBindingBase {
-  readonly route: 'opencode-go' | 'deepseek-open-platform';
+  readonly route: OrdinaryProductionRouteId;
   readonly operationalScope: 'developer-live' | 'ordinary-production';
   readonly providerProcessingVersion: string;
   readonly policyRuleId: string;
@@ -449,7 +456,7 @@ export interface StoredLiveDialogueBinding extends DialogueBindingBase {
 /** Whether a live binding's scope and route are a pair the ledger records: developer-live on Go only. */
 function livePairAdmitted(route: string, scope: string): boolean {
   return (scope === 'developer-live' && route === 'opencode-go') ||
-    (scope === 'ordinary-production' && (route === 'opencode-go' || route === 'deepseek-open-platform'));
+    (scope === 'ordinary-production' && ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS.some((binding) => binding.route === route));
 }
 
 export type StoredDialogueBinding = StoredLocalDialogueBinding | StoredLiveDialogueBinding;

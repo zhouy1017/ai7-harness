@@ -24,19 +24,19 @@ import { canonicalJson } from './analysis/canonical.js';
 
 /**
  * The source-checkout launch authority (ADR 0046, ADR 0065): the build-embedded carrier pins active
- * policy set v22, the sole active set for all four Provider Processing scopes, and names the three
+ * policy set v23, the sole active set for all four Provider Processing scopes, and names the three
  * scopes the built entry may bind from its launch form. `development-ci` is the default and binds
  * Provider Processing v1 (zero live transmissions); `developer-live` is bound only by the launch
  * argument `--trusted-operational-scope developer-live` on a developer host and binds the immutable
  * Provider Processing v24; `ordinary-production` is bound only by `--trusted-operational-scope ordinary-production`
- * and binds v31, whose rules are filled from the editor's own configured provider binding. `fixture-recording`
+ * and binds v32, whose rules are filled from the editor's own configured provider binding. `fixture-recording`
  * is pinned by the active set but is not selectable from the source checkout. No environment variable or product
  * setting selects a scope; every invalid state resolves to the zero-transmission denial.
  */
 const CARRIER_PATH = 'config/source-checkout-launch-authority.json';
 const CARRIER_VERSION = 2;
-export const ACTIVE_SET_VERSION = 'v22' as const;
-const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v22.json';
+export const ACTIVE_SET_VERSION = 'v23' as const;
+const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v23.json';
 const ACTIVE_SET_SHA256 = CURRENT_ACTIVE_SET_SHA256;
 const PROVIDER_PINS = {
   'development-ci': {
@@ -50,8 +50,8 @@ const PROVIDER_PINS = {
     sha256: 'd0e3996ce7ba091200d83178b48fb578090bf73b509406182a2d5403ab2a4ebc',
   },
   'ordinary-production': {
-    version: 'v31',
-    canonicalPath: 'docs/policies/provider-processing-policy.v31.json',
+    version: 'v32',
+    canonicalPath: 'docs/policies/provider-processing-policy.v32.json',
     sha256: CURRENT_PRODUCTION_POLICY_SHA256,
   },
   'developer-live': {
@@ -1561,6 +1561,8 @@ export interface OrdinaryProductionPolicyReading {
   readonly transport?: LaunchPolicyProjection['providerProcessing']['transport'];
   readonly research?: LaunchPolicyProjection['providerProcessing']['research'];
   readonly searchConnectionTest?: SearchConnectionTestPolicy;
+  /** v32 and later: the review rule's admitted search fallback chain and bounded resend. */
+  readonly searchFallback?: SearchFallbackTerms;
   readonly crossUnitReductionAllowed: boolean;
   readonly assuranceSamplingAllowed: boolean;
   readonly runReportReflectionAllowed: boolean;
@@ -1592,6 +1594,83 @@ function allowedBindingsOf(role: unknown): AllowedRoleBinding[] {
     bindings.push({ route: entry['route'] as string, endpoint: entry['endpoint'] as string, model: entry['model'] as string, credentialSlot: entry['credentialSlot'] as string });
   }
   return bindings;
+}
+
+/** Every binding of `bindings` appears exactly in `within` (route, endpoint, model and credential slot). */
+function bindingsWithin(bindings: readonly AllowedRoleBinding[], within: readonly AllowedRoleBinding[]): boolean {
+  return bindings.every((binding) => within.some((candidate) => sameValue(binding, { route: candidate.route, endpoint: candidate.endpoint,
+    model: candidate.model, credentialSlot: candidate.credentialSlot })));
+}
+
+/**
+ * v32's protocol-family admission (Issue #1221; ADR 0095 §6): the Main and Fast bindings are exactly the runtime model table's
+ * `policyBaseline`, whose families `productionBindingRefusal` admits, and the reviewed runtime choices and the code's connection
+ * test bindings are a subset of what the document admits. A model the document admits but the table does not choose stays unchosen.
+ */
+function readFamilyAdmission(policy: Record<string, unknown>): true {
+  const roles = policy['roleBindings'] as Record<string, unknown>;
+  const main = allowedBindingsOf(roles['Main Editorial Role']), fast = allowedBindingsOf(roles['Fast Interaction Role']);
+  const connectionTest = policy['connectionTest'];
+  requirePolicy(sameValue(main, CONFIGURED_RUNTIME_MODEL_TABLE.policyBaseline.main) && sameValue(fast, CONFIGURED_RUNTIME_MODEL_TABLE.policyBaseline.fast) &&
+    bindingsWithin(ORDINARY_PRODUCTION_ALLOWED_BINDINGS, main) && bindingsWithin(ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS, fast) &&
+    isRecord(connectionTest) && bindingsWithin(CONNECTION_TEST_POLICY.allowedBindings, allowedBindingsOf(connectionTest)));
+  return true;
+}
+
+/** v32's admitted search fallback chain and bounded failed-submission resend (Issue #1221; ADR 0094 §2), as the A3 consumer reads them. */
+export interface SearchFallbackTerms {
+  /** At most one fallback item, chosen among these measured and shipped backends, never the primary itself. */
+  readonly maximumChainItems: 1;
+  readonly eligibleBackendIds: readonly string[];
+  readonly frozenInPlan: readonly ['backendId', 'host', 'configurationDigest', 'credentialReference'];
+  readonly ledgerAttribution: 'fallback-from';
+  /** At most one resend per failed submission, only for these failure classes; an accepted (possibly billed) one never. */
+  readonly maximumResendsPerFailedSubmission: 1;
+  readonly resendableFailureClasses: readonly ['transport-failure-before-any-response-byte', 'http-5xx', 'http-429'];
+  readonly http429RetryAfterHonoured: true;
+  /** The per-claim budget of distinct canonical queries; a resend repeats the same query and is not counted again. */
+  readonly maximumDistinctCanonicalQuerySubmissions: number;
+}
+
+/** Read the review rule's v32 research block whole for the fallback and resend terms; anything else fails closed. */
+export function readSearchFallbackTerms(rule: unknown): SearchFallbackTerms {
+  const contract = isRecord(rule) ? rule['factualClaimContract'] : null;
+  const research = isRecord(contract) ? contract['research'] : null;
+  requirePolicy(isRecord(rule) && isRecord(research) && isRecord(rule['platformTools']) && isRecord(rule['platformTools']['websearch']));
+  const fallback = research['backendFallback'], resend = research['knownOrUnknownFailedSubmissionResendAllowed'];
+  const shipped = ((rule['platformTools']['websearch'] as Record<string, unknown>)['backends'] as Array<{ id: string }>).map((backend) => backend.id);
+  requirePolicy(isRecord(fallback) && Array.isArray(fallback['eligibleBackendIds']) && fallback['eligibleBackendIds'].length > 0 &&
+    fallback['eligibleBackendIds'].every((id: unknown) => typeof id === 'string' && shipped.includes(id)) && sameValue(fallback, {
+      maximumChainItems: 1, eligibleBackendIds: fallback['eligibleBackendIds'], eligibility: fallback['eligibility'],
+      primaryBackendAsFallbackAllowed: false, unmeasuredCandidateAllowed: false, deepseekDirectSearchCandidateAllowed: false,
+      frozenInPlanBesideWebToolsBackend: ['backendId', 'host', 'configurationDigest', 'credentialReference'], boundInRunSearchBinding: true,
+      ledgerAttribution: 'fallback-from', endpointOrCredentialAddition: false, modelFallbackAllowed: false,
+    }) && typeof fallback['eligibility'] === 'string');
+  requirePolicy(sameValue(resend, {
+    maximumResendsPerFailedSubmission: 1, resendableFailureClasses: ['transport-failure-before-any-response-byte', 'http-5xx', 'http-429'],
+    http429RetryAfterHonoured: true, acceptedOrPossiblyBilledSubmissionResendAllowed: false, inStreamOrPostAcceptanceUnknownOutcome: 'stays-unknown-never-resent',
+  }) && research['resendCountsAsDistinctCanonicalQuerySubmission'] === false && research['resendRepeatsSameCanonicalQuery'] === true &&
+    Number.isInteger(research['maximumDistinctCanonicalQuerySubmissions']) && (research['maximumDistinctCanonicalQuerySubmissions'] as number) > 0);
+  return Object.freeze({ maximumChainItems: 1, eligibleBackendIds: Object.freeze([...fallback['eligibleBackendIds'] as string[]]),
+    frozenInPlan: ['backendId', 'host', 'configurationDigest', 'credentialReference'] as const, ledgerAttribution: 'fallback-from',
+    maximumResendsPerFailedSubmission: 1, resendableFailureClasses: ['transport-failure-before-any-response-byte', 'http-5xx', 'http-429'] as const,
+    http429RetryAfterHonoured: true, maximumDistinctCanonicalQuerySubmissions: research['maximumDistinctCanonicalQuerySubmissions'] as number });
+}
+
+/**
+ * The verified fallback terms (#1226), service-internal and never a wire field, keyed by the exact selected document the verifier
+ * read (its version and SHA-256), so a projection carried through a preparation's clone still reads the terms of its own document.
+ */
+const searchFallbackOfDocument = new Map<string, SearchFallbackTerms>();
+function withSearchFallbackTerms(terms: SearchFallbackTerms | undefined, projection: LaunchPolicyProjection): LaunchPolicyProjection {
+  const identity = projection.selectedPolicyIdentity;
+  if (terms !== undefined && identity !== undefined) searchFallbackOfDocument.set(`${identity.providerProcessingVersion}:${identity.providerProcessingSha256}`, terms);
+  return projection;
+}
+/** The admitted search fallback and resend terms of the verified document a launch projection names, or `null` (v31 and earlier). */
+export function searchFallbackTermsOf(projection: LaunchPolicyProjection | null | undefined): SearchFallbackTerms | null {
+  const identity = projection?.operationalScope === 'ordinary-production' ? projection.selectedPolicyIdentity : undefined;
+  return identity === undefined ? null : searchFallbackOfDocument.get(`${identity.providerProcessingVersion}:${identity.providerProcessingSha256}`) ?? null;
 }
 
 /**
@@ -1791,7 +1870,7 @@ function readWave21Eligibility(policy: Record<string, unknown>): Record<string, 
   return legacy;
 }
 
-/** Every term of the selected `searchConnectionTest` block (v28, unchanged through v31), in document order. */
+/** Every term of the selected `searchConnectionTest` block (v28, unchanged through v32), in document order. */
 const SEARCH_CONNECTION_TEST_TERMS = ['ruleId', 'purpose', 'operationalScope', 'backendId', 'candidateId', 'endpoint', 'method', 'protocol', 'credentialSlot',
   'headerForm', 'modelBindingRequired', 'explicitEditorActionRequired', 'source', 'allowedOutboundDataCategories', 'bookMaterialAllowed', 'arguments',
   'argumentsCanonicalSha256', 'maximumRequests', 'timeoutMilliseconds', 'responseMaxBytes', 'redirectMode', 'automaticRetryAllowed', 'fallbackAllowed',
@@ -1839,14 +1918,14 @@ function readSearchConnectionTest(block: unknown): SearchConnectionTestPolicy {
 
 /** Read the pinned successor directly; no predecessor document is synthesized or restamped. */
 function projectOriginalFieldPolicy(policy: Record<string, unknown>): OrdinaryProductionPolicyReading {
-  requirePolicy(digest(Buffer.from(canonicalJson(policy))) === (policy['version'] === 'v30'
-    ? '146677f260a885ea5b6f1f5839b3574683d45d1224ebaa0ecd50509876fa47f3'
-    : 'ffe7a210dfe52c22810f8bcd07db8dc4335a770dde098ebc77f6755ed0c86e3d'));
+  requirePolicy(digest(Buffer.from(canonicalJson(policy))) === ({ v30: '146677f260a885ea5b6f1f5839b3574683d45d1224ebaa0ecd50509876fa47f3',
+    v31: 'ffe7a210dfe52c22810f8bcd07db8dc4335a770dde098ebc77f6755ed0c86e3d', v32: '72ecdd5f401fb4291a7ae1a4546a47f3b831a192e29e1dce445bbe4d31e7a058' } as Record<string, string>)[String(policy['version'])]);
   const declared = (policy['decision'] as { providerAllowRules: Array<Record<string, unknown>> }).providerAllowRules;
+  const admission = policy['version'] === 'v32' ? readFamilyAdmission(policy) : null;
   const rules: OrdinaryProductionPolicyReading['rules'][number][] = [];
   for (const rule of declared) {
     const ruleId = String(rule['ruleId']);
-    const curation = ruleId === 'ordinary-production-learning-curation' && policy['version'] === 'v31';
+    const curation = ruleId === 'ordinary-production-learning-curation' && policy['version'] !== 'v30';
     const factualRecheck = ruleId === 'enrolled-background-factual-recheck';
     const curationBlocks = Object.fromEntries(['authorityOrigin', 'executionMode', 'scopeLimits', 'clarification', 'source', 'transmissions',
       'authorizationPreconditions', 'providerAccountLimit'].map((key) => [key, rule[key]]));
@@ -1883,8 +1962,10 @@ function projectOriginalFieldPolicy(policy: Record<string, unknown>): OrdinaryPr
         redaction: HOUSE_PEOPLE_REDACTION, outboundCategoryRestriction: 'none', outboundDataDisclosureRequired: true,
       } } : {}),
     };
-    rules.push({ ruleId, reading, projection,
-      allowedRoutes: [...new Set((base.modelRole === 'Fast Interaction Role' ? ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS : ORDINARY_PRODUCTION_ALLOWED_BINDINGS).map((binding) => binding.route))],
+    const allowedRoutes = [...new Set((base.modelRole === 'Fast Interaction Role' ? ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS : ORDINARY_PRODUCTION_ALLOWED_BINDINGS).map((binding) => binding.route))];
+    // v32 declares every admitted route; the reviewed runtime choices are a subset of them, never the reverse.
+    if (admission !== null) requirePolicy(allowedRoutes.every((route) => ((rule['providerBinding'] as { allowedRoutes: string[] }).allowedRoutes).includes(route)));
+    rules.push({ ruleId, reading, projection, allowedRoutes,
       platformTools: verifyPlatformTools(factualRecheck ? declared.find((candidate) => candidate['ruleId'] === 'ordinary-production-review')! : rule, 'ordinary-production', base.platformTools),
       localTools: rule['localTools'] as AdmittedLocalTools });
   }
@@ -1894,6 +1975,7 @@ function projectOriginalFieldPolicy(policy: Record<string, unknown>): OrdinaryPr
     execution: policy['execution'] as NonNullable<OrdinaryProductionPolicyReading['execution']>,
     transport: policy['transport'] as NonNullable<OrdinaryProductionPolicyReading['transport']>,
     research: policy['research'] as NonNullable<OrdinaryProductionPolicyReading['research']>, searchConnectionTest: readSearchConnectionTest(policy['searchConnectionTest']),
+    ...(admission === null ? {} : { searchFallback: readSearchFallbackTerms(declared.find((rule) => rule['ruleId'] === 'ordinary-production-review')) }),
     subAgents: policy['subAgents'] as NonNullable<OrdinaryProductionPolicyReading['subAgents']>,
     backgroundProcessingEnrollment: declared.find((rule) => rule['ruleId'] === BACKGROUND_PROCESSING_RULE_ID)!['backgroundProcessingEnrollment'] as NonNullable<OrdinaryProductionPolicyReading['backgroundProcessingEnrollment']>, rules };
 }
@@ -1906,7 +1988,7 @@ function projectOriginalFieldPolicy(policy: Record<string, unknown>): OrdinaryPr
  * the document's `allowedBindings`, which the SHA-256 pin fixes, and checked for consistency across the roles and rules.
  */
 export function verifyOrdinaryProductionPolicy(policy: Record<string, unknown>): OrdinaryProductionPolicyReading {
-  if (policy['version'] === 'v30' || policy['version'] === 'v31') return projectOriginalFieldPolicy(policy);
+  if (policy['version'] === 'v30' || policy['version'] === 'v31' || policy['version'] === 'v32') return projectOriginalFieldPolicy(policy);
   const wave21 = policy['version'] === 'v27' ? policy : null;
   if (policy['version'] === 'v27') policy = readWave21Eligibility(policy);
   const wave20 = policy['version'] === 'v26' ? policy : null;
@@ -1949,15 +2031,11 @@ export function verifyOrdinaryProductionPolicy(policy: Record<string, unknown>):
   // are unbound by default and named by no rule. Only v25's Fast role gains the reviewed text bindings.
   const roles = policy['roleBindings'];
   requirePolicy(isRecord(roles) && exactKeys(roles, ['Main Editorial Role', 'Fast Interaction Role', 'Difficult Escalation Role', 'Frontier Model Role']));
-  if (selectedBindingPolicy) requirePolicy(sameValue(policy['connectionTest'], {
-    ...CONNECTION_TEST_POLICY, allowedBindings: CONFIGURED_RUNTIME_MODEL_TABLE.policyBaseline.fast,
-  }));
   const mainBindings = allowedBindingsOf(roles['Main Editorial Role']);
   const fastBindings = allowedBindingsOf(roles['Fast Interaction Role']);
-  if (selectedBindingPolicy) {
-    requirePolicy(sameValue(mainBindings, CONFIGURED_RUNTIME_MODEL_TABLE.policyBaseline.main) &&
-      sameValue(fastBindings, CONFIGURED_RUNTIME_MODEL_TABLE.policyBaseline.fast));
-  }
+  // A predecessor states its own bindings; the selected baseline (v32) holds every one of them (#1221).
+  if (selectedBindingPolicy) requirePolicy(sameValue(policy['connectionTest'], { ...CONNECTION_TEST_POLICY, allowedBindings: fastBindings }) &&
+    bindingsWithin(mainBindings, CONFIGURED_RUNTIME_MODEL_TABLE.policyBaseline.main) && bindingsWithin(fastBindings, CONFIGURED_RUNTIME_MODEL_TABLE.policyBaseline.fast));
   const routes = [...new Set(mainBindings.map((binding) => binding.route))];
   for (const roleName of ['Main Editorial Role', 'Fast Interaction Role']) {
     const role = roles[roleName];
@@ -2105,8 +2183,6 @@ export function bindOrdinaryProductionRules(reading: OrdinaryProductionPolicyRea
     if (!allowedRoutes.includes(allowed.route)) continue;
     const profile = modelProfileFor(allowed.route as RemoteExecutionRoute, allowed.model);
     if (profile === null || productionBindingRefusal(profile, kind.modelRole === 'Fast Interaction Role' ? 'fast' : 'main') !== null) continue;
-    // This admission proves buffered, tool-free 来源译文 only. Other contracts keep their existing capability requirements.
-    if (allowed.route === 'openai-platform' && (kind.modelRole !== 'Fast Interaction Role' || !kind.taskKinds.includes(MATERIAL_TRANSLATION_KIND))) continue;
     admitted.push({
       ruleId,
       taskKinds: [...kind.taskKinds],
@@ -2249,8 +2325,8 @@ function* verifyLaunchPolicyInputs(
     const activeSetBytes = yield ACTIVE_SET_PATH;
     requirePolicy(digest(activeSetBytes) === ACTIVE_SET_SHA256);
     for (const [path, sha256] of [
-      ['docs/policies/active-policy-set.v22.schema.json', 'ae6001084568789658fe4916b7c6b401810ab407b11fbc4e03cd2e152d67a520'],
-      ['docs/policies/provider-processing-policy.v31.schema.json', '03f53cd094efb913b3014896a3de386f244721d1fde6f9de990036d5f6e8a8ae'],
+      ['docs/policies/active-policy-set.v23.schema.json', '0935a0bb8193771dd132970959931d8aee033e09abca0ca06709963cdbb951dc'],
+      ['docs/policies/provider-processing-policy.v32.schema.json', 'e2acb9cb2eaf53199d53eba4de121a5e4c32e6382e982041d6b471434dadf0dd'],
     ] as const) requirePolicy(digest(yield path) === sha256);
     const activeSet = parseJson(activeSetBytes);
     requirePolicy(
@@ -2380,7 +2456,7 @@ function* verifyLaunchPolicyInputs(
       const admittedRules = bindOrdinaryProductionRules(reading, configuredBinding, configuredFastBinding);
       if (admittedRules === null) return deny('binding-not-allowed');
       const configured = admittedRules.length > 0;
-      return {
+      return withSearchFallbackTerms(reading.searchFallback, {
         integrityState: 'verified',
         denialReason: null,
         operationalScope: 'ordinary-production',
@@ -2407,7 +2483,7 @@ function* verifyLaunchPolicyInputs(
         },
         externalExport,
         publicReleasePermission,
-      };
+      });
     }
     verifyDevelopmentCiPolicy(selectedPolicy);
     return {

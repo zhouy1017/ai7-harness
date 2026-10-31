@@ -77,6 +77,8 @@ export const SCHEMA_REVISION_CLASSES: ReadonlyArray<ClassifiedSchemaRevision> = 
   { revision: 100, class: 'additive' }, // #1175: structural edit kinds, the Apply kind and block lineage.
   { revision: 101, class: 'additive' }, // #1204: the note block kind and the note sources of imports.
   { revision: 102, class: 'additive' }, // #1205: split-paragraph pieces, structure choices and import lineage.
+  { revision: 103, class: 'additive' }, // #1225: Zen, Claude 官方 and Gemini 官方 connection rows; every v32 production dialogue route.
+  { revision: 104, class: 'additive' }, // #1226: the one 备用来源 selection row (103 is W22b-A2 #1225's).
 ];
 
 /**

@@ -10,13 +10,13 @@ import type { PinnedLocalToolSources } from '../retrieval/index.js';
 import { kindResearchDeclaration } from './live-kind-admission.js';
 import { factualReviewDefinitionsByDigest, factualReviewKindDefinition, factualReviewLevelDefinition, withFactualResearch } from './kind-definition.js';
 import { factualClaimKindDefinition } from './factual-claim-contract.js';
-import { FACTUAL_REVIEW_KIND, type EvidenceAssuranceLevel, type ProcedureDefinitionPin } from '../../shared/protocol.js';
+import { FACTUAL_REVIEW_KIND, MODEL_SERVICE_CONNECTION_IDS, modelServiceChannelOf, type EvidenceAssuranceLevel, type ProcedureDefinitionPin } from '../../shared/protocol.js';
 import { FACTUAL_VERIFICATION_POLICY_VERSION } from './factual-review-contract.js';
 import { factualReviewUnitResultOfRecordV2 } from './factual-review-contract-v2.js';
 import { platformToolsFromProjection } from '../provider/search-service.js';
 import { searchBackend, searchBackendConfigurationDigest } from '../provider/search-backends/index.js';
 import { CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES } from '../../shared/provider-configuration.generated.js';
-import type { FrozenWebToolsBackend } from '../../shared/protocol.js';
+import type { FrozenWebToolsBackend, FrozenWebToolsFallback } from '../../shared/protocol.js'; import { freezeSearchFallback } from '../provider/search-backend-settings.js';
 import { isResultSetPolicyPin, selectedPolicyIdentityOf, type LocalFixtureProfile, type SelectedPolicyIdentity } from '../../shared/protocol.js';
 import { STOCK_TYPOS_LEAF_FIXTURE, STOCK_TYPOS_LEAF_FIXTURE_SHA256, STOCK_TYPOS_LEAF_LOCAL_TOOLS, localFixtureRegisteredProfile, type LocalFixtureRuntimeContext } from '../provider/model-fixture.js';
 import { providerPlanPolicyMetadata } from './plan-boundary.js';
@@ -144,7 +144,7 @@ import {
   type UnreadWalkCut,
 } from './unread-changes.js';
 import { TASK_INPUT_CHECKPOINT_PURPOSE } from './identity.js';
-import { ACTIVE_SET_VERSION, DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, ORDINARY_PRODUCTION_ALLOWED_BINDINGS, ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION } from '../launch-policy.js';
+import { ACTIVE_SET_VERSION, DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, ORDINARY_PRODUCTION_ALLOWED_BINDINGS, ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION, searchFallbackTermsOf, type OrdinaryProductionAllowedBinding } from '../launch-policy.js';
 import { DEVELOPMENT_CREDENTIAL_REFERENCES } from '../../shared/protected-secret-identity.js';
 import { MAX_TASK_INTENT_GOAL_LENGTH, MODEL_SERVICE_SETUP_REQUIRED_REASON } from '../../shared/protocol.js';
 import type { AnalysisKindDefinition, AnalysisReductionResult } from './kind-definition.js';
@@ -710,7 +710,7 @@ export interface ExecutionPlanFacts {
   readonly selectedPolicyIdentity?: SelectedPolicyIdentity;
   readonly localFixtureProfile?: LocalFixtureProfile;
   readonly localFixtureRuntime?: LocalFixtureRuntimeContext;
-  readonly webToolsBackend?: FrozenWebToolsBackend;
+  readonly webToolsBackend?: FrozenWebToolsBackend; readonly webToolsFallback?: FrozenWebToolsFallback;
   readonly searchCredentialReference?: string;
   readonly bookId: string;
   readonly taskIntentId: string;
@@ -757,10 +757,10 @@ export interface ExecutionPlanFacts {
 
 /** One frozen ordinary-production binding: one of the two allowed routes, exactly (Issue #811). */
 export interface ProductionPlanBinding {
-  readonly route: 'opencode-go' | 'deepseek-open-platform';
-  readonly model: 'deepseek-v4.1-flash' | 'deepseek-flash';
+  readonly route: OrdinaryProductionAllowedBinding['route'];
+  readonly model: OrdinaryProductionAllowedBinding['model'];
   readonly endpoint: string;
-  readonly credentialSlot: 'opencode-go' | 'deepseek-api-key';
+  readonly credentialSlot: OrdinaryProductionAllowedBinding['credentialSlot'];
 }
 
 export interface ExecutionBindingRecord {
@@ -1643,7 +1643,7 @@ export class BaselineAnalysisStore {
       VALUES (?,?,'factual-recheck','ai7.factual-claim-verification/1',?,?,?,?, 'factual-recheck')`)
       .run(taskIntentId, candidate.selection.bookId, '核查编辑要求补充证据的一条冻结断言', instant, intent.json, intent.digest);
     const plan = canonicalRecord({ schema: 'ai7.factual-recheck-plan/1', ...frozen, taskIntentId, runRecordId, authorizationId,
-      session, compositionDigest, policyVersion: 'v31', stages: ['web-verification'], startWhen: 'idle', recordedAt: instant });
+      session, compositionDigest, policyVersion: ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION, stages: ['web-verification'], startWhen: 'idle', recordedAt: instant });
     for (const [component, value] of [['run-source-scope', { selection: candidate.selection, messageDigest: session.sourceMessageDigest,
       messageByteCount: Buffer.byteLength(candidate.message, 'utf8') }], ['provider-resolution-plan', { binding: candidate.binding, search: candidate.search }], ['plan-envelope', JSON.parse(plan.json)]] as const) {
       const record = canonicalRecord(value);
@@ -2687,7 +2687,7 @@ export class BaselineAnalysisStore {
 
   #selectedPlanMetadata(policy = this.#launch.policy): Pick<MaterialPlanInputsProjection, 'selectedPolicyIdentity' | 'localFixtureProfile'> {
     if (policy?.selectedPolicyIdentity === undefined) {
-      requireAnalysis(!['v21', 'v22'].includes(policy?.activePolicySetVersion ?? '') && !['v29', 'v30', 'v31'].includes(policy?.providerProcessing.version ?? ''),
+      requireAnalysis(!['v21', 'v22', 'v23'].includes(policy?.activePolicySetVersion ?? '') && !['v29', 'v30', 'v31', 'v32'].includes(policy?.providerProcessing.version ?? ''),
         'ANALYSIS_POLICY_UNAVAILABLE', '当前计划缺少已选处理策略身份。');
       return {};
     }
@@ -3316,7 +3316,7 @@ export class BaselineAnalysisStore {
       requireAnalysis(row !== undefined, 'ANALYSIS_RECORD_INVALID', '任务计划记录图不完整。');
       const record = parseCanonicalJson(asString(row.canonical_json));
       requireAnalysis(isRecord(record), 'ANALYSIS_RECORD_INVALID', '任务计划记录图不完整。');
-      const { webToolsBackend: _backend, searchCredentialReference: _reference, ...rest } = record as Record<string, unknown>;
+      const { webToolsBackend: _backend, searchCredentialReference: _reference, webToolsFallback: _fallback, ...rest } = record as Record<string, unknown>;
       const kept = tools ? rest : record;
       return canonicalJson(ceiling ? { ...kept, runBudgetCeiling: null } : kept);
     };
@@ -4591,7 +4591,7 @@ export class BaselineAnalysisStore {
       : kindResearchDeclaration(this.#launch.policy, definition.kind, definition.researchDeclaration);
     const toolsDeclared = live !== null && researchDeclaration.webSearch;
     let webToolsBackend: FrozenWebToolsBackend | undefined;
-    let searchCredentialReference: string | undefined;
+    let searchCredentialReference: string | undefined; let webToolsFallback: FrozenWebToolsFallback | undefined;
     if (toolsDeclared) {
       const row = this.#db.prepare('SELECT * FROM search_backend_connections WHERE selected = 1').get() as SqlRow | undefined;
       requireAnalysis(row !== undefined, 'SEARCH_BACKEND_NOT_SHIPPED', '请在 设置 › 模型服务 › 联网检索 选择后端。');
@@ -4599,7 +4599,7 @@ export class BaselineAnalysisStore {
       if (production !== null) requireAnalysis(row.credential_operation_state === 'ready' && typeof row.credential_reference === 'string',
         'SEARCH_CREDENTIAL_MISSING', `${adapter.declaration.displayName} 需要密钥；请在 设置 › 模型服务 › 联网检索 保存。`);
       webToolsBackend = { backendId: adapter.declaration.id, host: adapter.declaration.host!, configurationDigest: searchBackendConfigurationDigest(adapter.declaration.id), selectedAt: asString(row.selected_at) };
-      searchCredentialReference = production === null ? CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES[adapter.declaration.credentialSlot] : asString(row.credential_reference);
+      searchCredentialReference = production === null ? CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES[adapter.declaration.credentialSlot] : asString(row.credential_reference); if (production !== null) webToolsFallback = freezeSearchFallback(this.#db, searchFallbackTermsOf(input.policy ?? this.#launch.policy), adapter.declaration.id);
     }
     const leafMode = intent.mode === 'review-first' && intent.selectedRange === null && intent.preparedByEnrollmentVersionId === null;
     const composition = live === null
@@ -4610,7 +4610,7 @@ export class BaselineAnalysisStore {
         localTools: intent.preparedByEnrollmentVersionId === null && definition.evidenceAssuranceLevel !== 'quick' && definition.factualClaims === undefined ? kindLocalTools(this.#launch.policy, this.#definition.kind) ?? false : false });
     const providerPlan = {
       ...this.#selectedPlanMetadata(input.policy),
-      ...(webToolsBackend === undefined ? {} : { webToolsBackend, searchCredentialReference }),
+      ...(webToolsBackend === undefined ? {} : { webToolsBackend, searchCredentialReference }), ...(webToolsFallback === undefined ? {} : { webToolsFallback }),
       role: 'Main Editorial Role',
       capabilities: [],
       remoteBinding: live === null
@@ -6051,7 +6051,7 @@ export class BaselineAnalysisStore {
       manifestDigest: manifest.digest,
       planEnvelopeDigest: asString(run.plan_envelope_sha256),
       runSourceScopeDigest: asString(digests['run-source-scope']),
-      ...(providerPlan.webToolsBackend === undefined ? {} : { webToolsBackend: providerPlan.webToolsBackend, searchCredentialReference: providerPlan.searchCredentialReference! }),
+      ...(providerPlan.webToolsBackend === undefined ? {} : { webToolsBackend: providerPlan.webToolsBackend, searchCredentialReference: providerPlan.searchCredentialReference! }), ...(providerPlan.webToolsFallback === undefined ? {} : { webToolsFallback: providerPlan.webToolsFallback }),
       providerResolutionPlanDigest: asString(digests['provider-resolution-plan']),
       credentialReference: providerPlan.remoteBinding.credentialReference,
       sourceDigest: (plan['manuscript-pin'] as { sourceDigest: string }).sourceDigest,
@@ -6427,9 +6427,9 @@ export class BaselineAnalysisStore {
     // ADR 0091 work, Issue #990) and the official row.
     const live = this.#launch.live;
     const production = this.#launch.operationalScope === 'ordinary-production';
-    const connectionId = live !== null && live.scope === 'ordinary-production' && live.route === 'opencode-go'
-      ? 'main-editorial-opencode-go'
-      : 'main-editorial-deepseek-v4-pro';
+    // The connection row of the live route's channel (Issue #1225): a Zen model's route names the one Zen row.
+    const channel = live !== null && live.scope === 'ordinary-production' ? modelServiceChannelOf(live.route) : null;
+    const connectionId = channel === null ? 'main-editorial-deepseek-v4-pro' : MODEL_SERVICE_CONNECTION_IDS[channel];
     const row = this.#db.prepare(
       `SELECT m.manuscript_id, mb.branch_id, bws.base_revision_id, bws.journal_sequence, bws.working_digest,
               mr.source_version_id, sv.source_digest,

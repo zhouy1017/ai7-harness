@@ -534,7 +534,16 @@ export const STRUCTURAL_EDIT_SCHEMA_VERSION = 100;
 export const NOTE_BLOCK_SCHEMA_VERSION = 101;
 /** Revision 102 (Issue #1205): split-paragraph pieces and structure choices of staged imports, and their committed lineage. */
 export const IMPORT_STRUCTURE_SCHEMA_VERSION = 102;
-export const LATEST_SCHEMA_VERSION = IMPORT_STRUCTURE_SCHEMA_VERSION;
+/** Revision 103 (Issue #1225): the Zen, Claude 官方 and Gemini 官方 connection rows and every production route a dialogue binds; CHECKs only. */
+export const ADMITTED_CHANNELS_SCHEMA_VERSION = 103;
+/** Revision 104 (Issue #1226): the one 备用来源 selection row beside the search-backend connections; 103 is W22b-A2's (#1225). */
+export const SEARCH_FALLBACK_SCHEMA_VERSION = 104;
+export const SEARCH_BACKEND_FALLBACK_SQL = `CREATE TABLE search_backend_fallback (
+  singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+  backend_id TEXT NOT NULL CHECK(backend_id IN ('search-tinyfish', 'search-deepseek', 'search-brave', 'search-parallel', 'search-bochaai')),
+  selected_at TEXT NOT NULL
+) STRICT`;
+export const LATEST_SCHEMA_VERSION = SEARCH_FALLBACK_SCHEMA_VERSION;
 /** The custom analysis kind family slice 7f brings (ADR 0090 item 4): admitted here so it needs no second rebuild. */
 const CUSTOM_ANALYSIS_KIND_GLOB = 'custom-analysis/[a-z0-9-]*' as const;
 const CUSTOM_ANALYSIS_CONTRACT_VERSION_GLOB = 'ai7.custom-analysis*/[0-9]*' as const;
@@ -1546,7 +1555,7 @@ const PROVIDER_PROCESSING_PINS: Readonly<Record<TrustedOperationalScope, Provide
 
 /** The developer-live versions earlier launches selected, whose retained records stay readable after a successor is selected. */
 const RETAINED_DEVELOPER_LIVE_VERSIONS: readonly DeveloperLiveProviderProcessingVersion[] = ['v5', 'v9', 'v10', 'v11', 'v12', 'v14', 'v16', 'v18', 'v20', 'v22'];
-const RETAINED_ORDINARY_PRODUCTION_VERSIONS: readonly OrdinaryProductionProviderProcessingVersion[] = ['v13', 'v15', 'v17', 'v19', 'v21', 'v23', 'v25', 'v26', 'v27', 'v30'];
+const RETAINED_ORDINARY_PRODUCTION_VERSIONS: readonly OrdinaryProductionProviderProcessingVersion[] = ['v13', 'v15', 'v17', 'v19', 'v21', 'v23', 'v25', 'v26', 'v27', 'v30', 'v31'];
 
 /**
  * The pin a stored value carries, or `null` when it is not exactly the pin of the scope it names.
@@ -3234,7 +3243,7 @@ function initializeCurationSchema(db: DatabaseSync): void {
 
 export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
   if (Number(db.prepare('PRAGMA user_version').get()?.user_version) === LATEST_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
-  if ([FACTUAL_CLAIM_SCHEMA_VERSION, EDITABLE_PROCEDURE_SCHEMA_VERSION, COMPOSITE_PROCEDURE_SCHEMA_VERSION, STRUCTURAL_EDIT_SCHEMA_VERSION, NOTE_BLOCK_SCHEMA_VERSION].includes(Number(db.prepare('PRAGMA user_version').get()?.user_version))) {
+  if ([FACTUAL_CLAIM_SCHEMA_VERSION, EDITABLE_PROCEDURE_SCHEMA_VERSION, COMPOSITE_PROCEDURE_SCHEMA_VERSION, STRUCTURAL_EDIT_SCHEMA_VERSION, NOTE_BLOCK_SCHEMA_VERSION, IMPORT_STRUCTURE_SCHEMA_VERSION, ADMITTED_CHANNELS_SCHEMA_VERSION].includes(Number(db.prepare('PRAGMA user_version').get()?.user_version))) {
     db.exec(`PRAGMA user_version = ${LATEST_SCHEMA_VERSION}`);
     return validateTaskAuthorizationSchema(db);
   }

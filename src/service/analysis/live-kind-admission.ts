@@ -30,7 +30,7 @@ export interface LiveKindRule {
 /** The enabled-learning origin is distinct from enrolled background processing, despite its shared kind name. */
 export function learningCurationRule(policy: LaunchPolicyProjection | undefined, binding: LiveKindBinding): AdmittedProviderRule | null {
   if (policy?.integrityState !== 'verified' || policy.operationalScope !== 'ordinary-production' ||
-    policy.providerProcessing.version !== 'v31' || policy.providerProcessing.decision !== 'eligible-only' ||
+    (policy.providerProcessing.version !== 'v31' && policy.providerProcessing.version !== 'v32') || policy.providerProcessing.decision !== 'eligible-only' ||
     policy.providerProcessing.liveTransmissionAllowed !== true) return null;
   const rules = policy.providerProcessing.admittedRules?.filter((rule) => rule.ruleId === 'ordinary-production-learning-curation') ?? [];
   const rule = rules.length === 1 ? rules[0]! : null;

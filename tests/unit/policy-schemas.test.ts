@@ -25,10 +25,10 @@ function readPair(policyFile: string, schemaFile: string) {
 describe('validateAllPolicies', () => {
   it('discovers all current, historical and unselected candidate pairs and validates every one at this base', () => {
     const pairs = discoverPolicyPairs(POLICIES_DIR);
-    expect(pairs).toHaveLength(53);
+    expect(pairs).toHaveLength(55);
 
     const results = validateAllPolicies(POLICIES_DIR);
-    expect(results).toHaveLength(53);
+    expect(results).toHaveLength(55);
     for (const result of results) {
       expect(result.ok, `${result.policyFile}: ${result.reason ?? ''}`).toBe(true);
     }
@@ -1086,6 +1086,8 @@ describe('Unselected ordinary v30 and set v21: original-field declaration (Issue
     ['provider-processing-policy.v29.schema.json', 'b7251af2cc84bacb763c8d7993e575abc80c3c5d4728326e9ee36d6235a18435'],
     ['active-policy-set.v20.json', 'c5587d32e87a6422a09d2c3cb77271d1e0773a016923b91b776c623a7b5ff168'],
     ['active-policy-set.v20.schema.json', '3136b7313a065c9dd54a1f8b9416117195a98cef685f707f73627ee905c1dd5d'],
+    ['provider-processing-policy.v31.json', '1cf19c82e46adf7a731e4f0c625cc1dd1f8e07e5b744eb06a872cbaa01849bd5'],
+    ['active-policy-set.v22.json', '68125ebd3e1266f02fc1cf02c0a548fa652c4cad3ee052bbfaebc68922758ebb'],
   ])('preserves frozen predecessor bytes: %s', (file, digest) => {
     expect(sha256(`docs/policies/${file}`)).toBe(digest);
   });

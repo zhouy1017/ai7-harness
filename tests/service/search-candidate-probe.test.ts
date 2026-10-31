@@ -56,7 +56,7 @@ function storeRows(dataRoot: string): string {
   } finally { db.close(); }
 }
 
-describe('the candidate connection test under ordinary-production (selected v31, no Main model configured)', () => {
+describe('the candidate connection test under ordinary-production (selected v32, no Main model configured)', () => {
   it('sends exactly the fixed request once and returns at most three bounded, qualified results', async () => {
     await withStore(async (store, codeRoot, dataRoot) => {
       const reference = readyKey(store);

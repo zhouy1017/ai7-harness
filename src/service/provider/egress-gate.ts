@@ -1,7 +1,7 @@
 import { SEARCH_BACKENDS } from './search-backends.js';
 import { LOCAL_TOOL_RESULT_MAX_BYTES, type LocalToolsRule } from './local-tools.js';
 import { randomUUID } from 'node:crypto';
-import type { AdmittedProviderRule, OrdinaryProductionProviderProcessingVersion, SearchConnectionTestPolicy } from '../../shared/protocol.js';
+import type { AdmittedProviderRule, OrdinaryProductionProviderProcessingVersion, OrdinaryProductionRouteId, SearchConnectionTestPolicy } from '../../shared/protocol.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from '../../shared/provider-configuration.generated.js';
 import { CONFIGURED_RUNTIME_MODEL_TABLE } from '../../shared/provider-configuration.generated.js';
 import type { OutboundDataCategoryId } from '../../shared/protocol.js';
@@ -45,14 +45,12 @@ export const OPENCODE_GO_ROUTE = CONFIGURED_RUNTIME_MODEL_TABLE.developerLive.ro
 export const OPENCODE_GO_MODEL = CONFIGURED_RUNTIME_MODEL_TABLE.developerLive.model;
 
 /**
- * Every route a Provider Resolution Plan may bind. No configured route beyond these two is here —
- * not the OpenCode Go plan's `/messages` and `/responses` paths, nor any route a provider document
- * declares: a declared format is a claim about the request shape, and a route becomes bindable only
- * when a Provider Processing revision names its exact binding (ADR 0073 §3). This gate is the place
- * that enforces it, so this union is a narrower statement than `RemoteExecutionRoute` rather than a
- * superset of it.
+ * Every route a Provider Resolution Plan may bind: the local adapter, and the routes the reviewed runtime model table records —
+ * the developer-live binding and each production role's choices (Issues #811, #1225). Not every route a provider document
+ * declares: a declared format is a claim about the request shape, and a route becomes bindable only when a Provider Processing
+ * revision names its exact binding (ADR 0073 §3, ADR 0095 §6). This union is a narrower statement than `RemoteExecutionRoute`.
  */
-export type ExecutionRoute = typeof LOCAL_DETERMINISTIC_ROUTE | typeof DEEPSEEK_ROUTE | typeof OPENCODE_GO_ROUTE;
+export type ExecutionRoute = typeof LOCAL_DETERMINISTIC_ROUTE | typeof DEEPSEEK_ROUTE | typeof OPENCODE_GO_ROUTE | OrdinaryProductionRouteId;
 /**
  * Every remote route a profile may be declared for, bindable or not; all of them are served by the same adapter. The
  * members are the routes the provider documents under `config/providers/` declare (ADR 0073 §2): a closed union,
@@ -147,6 +145,8 @@ export interface EgressBindingFacts {
     { readonly rule?: undefined; readonly scopedRule: NonNullable<AdmittedProviderRule['globalAgentScopedDialogue']> });
   readonly seriesScopeGuard?: () => string | null;
   readonly searchBackend?: SearchBackendBinding;
+  /** The Plan's frozen 备用来源 (Issue #1226), present only when one was frozen: its exact host's results are admitted too. */
+  readonly searchFallback?: SearchBackendBinding;
   readonly bindingDigest: string;
   readonly route: ExecutionRoute;
   readonly model: string;
@@ -565,7 +565,7 @@ function toolResultSourceAdmitted(admitted: AdmittedToolResult, rule: PlatformTo
   if (admitted.tool === 'websearch') {
     try {
       const url = new URL(admitted.sourceUrl);
-      return url.protocol === 'https:' && url.hostname === (binding.searchBackend?.host ?? legacySearchHost(rule));
+      return url.protocol === 'https:' && (url.hostname === (binding.searchBackend?.host ?? legacySearchHost(rule)) || url.hostname === binding.searchFallback?.host);
     } catch {
       return false;
     }
@@ -589,7 +589,7 @@ export function evaluateEgress(
     return { decision: 'refuse', reason: 'binding-stale', detail: '断言会话、冻结来源或剩余额度已变化；未发送。' };
   }
   if (binding.learningCurationScope !== undefined && (binding.policy.operationalScope !== 'ordinary-production' ||
-    binding.policy.providerProcessingVersion !== 'v31' || binding.outboundDataCategory !== 'editorial-learning-example' ||
+    (binding.policy.providerProcessingVersion !== 'v31' && binding.policy.providerProcessingVersion !== 'v32') || binding.outboundDataCategory !== 'editorial-learning-example' ||
     payload.messages.length !== 1 || payload.tools?.length || payload.messages[0]?.role !== 'user' ||
     sha256Hex(messageText(payload.messages[0]!) ?? '') !== binding.learningCurationScope.messageDigest ||
     scope.ceilingState?.() !== 'within' || !binding.learningCurationScope.current())) {
@@ -598,7 +598,7 @@ export function evaluateEgress(
   if (!isSupportedProviderProcessingVersion(binding.policy.operationalScope, binding.policy.providerProcessingVersion))
     return refuse('payload-out-of-scope', '处理策略版本无法识别；未发送任何内容。');
   const global = binding.globalAgentScope;
-  if (global !== undefined && (binding.policy.providerProcessingVersion === 'v30' || binding.policy.providerProcessingVersion === 'v31')) {
+  if (global !== undefined && (binding.policy.providerProcessingVersion === 'v30' || binding.policy.providerProcessingVersion === 'v31' || binding.policy.providerProcessingVersion === 'v32')) {
     const qualified = global.qualification;
     const messages = [...binding.admittedUserMessages];
     if (qualified === undefined || qualified.providerProcessingVersion !== binding.policy.providerProcessingVersion || selectedPolicyIdentityOf({ providerProcessingVersion: qualified.providerProcessingVersion, providerProcessingSha256: qualified.providerProcessingSha256,
@@ -617,7 +617,7 @@ export function evaluateEgress(
       global.rule.source.unlistedSourcesAllowed === false && global.rule.outboundCategoryRestriction === 'none' &&
       global.rule.outboundDataDisclosureRequired === true && global.rule.redaction.housePeopleNamesAndRolesStripped === true &&
       global.rule.redaction.remarksAndInternalNotesStripped === true
-    : binding.policy.providerProcessingVersion === 'v31' && scoped!.source['ambientWholeLibraryReadAllowed'] === false &&
+    : (binding.policy.providerProcessingVersion === 'v31' || binding.policy.providerProcessingVersion === 'v32') && scoped!.source['ambientWholeLibraryReadAllowed'] === false &&
       scoped!.source['lastOpenBookSuppliesAuthority'] === false && scoped!.source['unlistedSourcesAllowed'] === false &&
       scoped!.scopedTools['directMemoryOrManuscriptMutationAllowed'] === false && scoped!.scopedTools['shellFilesystemWebOrUnrestrictedNetworkAllowed'] === false &&
       scoped!.outboundDataDisclosureRequired === true && scoped!.redaction.housePeopleNamesAndRolesStripped === true &&

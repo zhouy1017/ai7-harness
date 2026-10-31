@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { BASELINE_PROMPT_CONTRACT_DIGEST } from '../../src/service/analysis/contract.js';
 import { DIALOGUE_PROMPT_CONTRACT, DIALOGUE_PROMPT_CONTRACT_DIGEST, buildDialogueMessage } from '../../src/service/dialogue/contract.js';
-import { productionBindingRefusal } from '../../src/service/launch-policy.js';
+import { modelServiceChannels, productionBindingRefusal } from '../../src/service/launch-policy.js';
 import { AI7_FAILURE_CODES } from '../../src/service/provider/classification.js';
 import { CredentialBroker } from '../../src/service/provider/credential-broker.js';
 import { DeepSeekOpenAiCompatibleAdapter, PROVIDER_ROUTE_PROFILES, assembleProviderRequest, type DeepSeekTransport } from '../../src/service/provider/deepseek-adapter.js';
@@ -98,17 +98,20 @@ describe('capability dispositions per family and per model', () => {
         expect(modelDisposition(model, aspect) === 'supported', `${model.key} ${aspect}`).toBe(route.supported[aspect].includes(model.model));
       }
     }
-    // Nothing beyond the recorded evidence is supported: no Messages or Gemini row reads a text answer yet.
-    for (const route of ['anthropic-claude', 'google-gemini', 'opencode-zen-messages', 'opencode-go-messages', 'opencode-zen-responses'] as const) {
+    // Nothing beyond the recorded evidence is supported: the Claude 官方 and Gemini 官方 rows read text on documentation (#1225), no gateway row does.
+    for (const route of ['opencode-zen', 'opencode-zen-messages', 'opencode-go-messages', 'opencode-zen-responses'] as const) {
       expect(GENERATED_ROUTE_DISPOSITIONS[route].supported, route).toEqual({ text: [], stream: [], functionTools: [] });
     }
+    expect(GENERATED_ROUTE_DISPOSITIONS['anthropic-claude'].supported).toEqual({ text: ['claude-opus-5', 'claude-fable-5-1', 'claude-sonnet-5', 'claude-haiku-4-5'], stream: [], functionTools: [] });
+    expect(GENERATED_ROUTE_DISPOSITIONS['google-gemini'].supported).toEqual({ text: ['gemini-3.8-flash', 'gemini-3.1-pro-preview', 'gemini-2.5-pro'], stream: [], functionTools: [] });
   });
 
   it('refuses every untested shipped row by name before any ticket, credential or transport', async () => {
     for (const row of ROWS) {
       const model = shipped(row.route, row.model);
-      const demand = row.family === 'openai-responses' ? { stream: true, functionTools: false } : { stream: false, functionTools: false };
-      const reason = row.family === 'openai-responses' ? 'untested:stream' : 'untested:text';
+      // Every shipped official row reads text on evidence now (#1225), so its first untested demand is the stream.
+      const demand = { stream: true, functionTools: false };
+      const reason = 'untested:stream';
       expect(providerPreflight(model, demand)).toMatchObject({ code: 'PROVIDER_PREFLIGHT_REFUSED', reason, family: row.family, route: row.route, model: row.model });
       const { adapter, touched } = harness(model, async () => { throw new Error('never reached'); }, demand.stream);
       const chunks = await collect(adapter.stream(demand.stream ? dialogue(model) : unit(model)));
@@ -127,14 +130,22 @@ describe('capability dispositions per family and per model', () => {
     expect(modelDisposition({ ...luna, capabilities: { ...luna.capabilities, streaming: 'messages-sse' } }, 'stream')).toBe('untested');
   });
 
-  it('refuses a family the selected policy does not admit for the role, by name', () => {
-    for (const row of ROWS) {
-      const main = productionBindingRefusal(declared(row), 'main');
-      expect(main, row.family).toMatchObject({ reason: 'family-not-admitted-by-selected-policy', family: row.family });
-      const fast = productionBindingRefusal(declared(row), 'fast');
-      if (row.family === 'openai-responses') expect(fast).toBeNull();
-      else expect(fast, row.family).toMatchObject({ reason: 'family-not-admitted-by-selected-policy' });
+  it('admits all four families for both roles under v32, so a Zen gateway model reads its own untested:text (Issues #1221, #1225)', () => {
+    for (const role of ['main', 'fast'] as const) {
+      // Chat completions is the reviewed table's own family; the other three are the declared rows above.
+      for (const row of ROWS) expect(productionBindingRefusal(declared(row), role), `${role} ${row.family}`).toBeNull();
+      expect(productionBindingRefusal(shipped('opencode-go', 'deepseek-v4.1-flash'), role)).toBeNull();
     }
+    const channels = modelServiceChannels();
+    const models = channels.flatMap((channel) => channel.models);
+    expect(models.some((model) => model.main === 'family-not-admitted-by-selected-policy' || model.fast === 'family-not-admitted-by-selected-policy')).toBe(false);
+    expect(new Set(models.map((model) => model.family))).toEqual(new Set(['openai-chat-completions', 'openai-responses', 'anthropic-messages', 'google-generate-content']));
+    const claude = channels.find((channel) => channel.channelId === 'anthropic-claude')!.models.find((model) => model.modelId === 'claude-fable-5-1')!;
+    const zen = channels.find((channel) => channel.channelId === 'opencode-zen')!.models.find((model) => model.modelId === 'claude-fable-5-1')!;
+    expect([claude.main, claude.fast, zen.main, zen.fast]).toEqual(['eligible', 'eligible', 'untested:text', 'untested:text']);
+    // OpenAI Responses for Main gained its runtime record (W22b-A2 #1225), so it is chosen for both roles.
+    const luna = channels.find((channel) => channel.channelId === 'openai-platform')!.models.find((model) => model.modelId === 'gpt-5.6-luna')!;
+    expect([luna.main, luna.fast]).toEqual(['eligible', 'eligible']);
     // Every reviewed model-table row passes, so selection is unchanged.
     for (const role of ['main', 'fast'] as const) {
       for (const binding of CONFIGURED_RUNTIME_MODEL_TABLE.ordinaryProduction[role]) {

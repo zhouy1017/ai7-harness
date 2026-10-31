@@ -7,6 +7,7 @@ import { DIALOGUE_RETRIEVAL_PROMPT_CONTRACT, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_
 import { sha256Hex } from '../analysis/canonical.js';
 import { DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS, type ModelRequestGovernor, type ModelRequestProducer } from '../analysis/execution.js';
 import { describeComposition, prepareExecution, type HarnessTurnOutcome, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
+import type { OrdinaryProductionRouteId } from '../../shared/protocol.js';
 import { isOrdinaryProductionRuntime, type DeveloperLiveRuntime, type LiveRuntime, type OrdinaryProductionRuntime } from '../launch-policy.js';
 import {
   MODEL_SERVICE_SETUP_REQUIRED_REASON,
@@ -560,7 +561,7 @@ export class DialogueExecutionOwner {
           }
           : {
             harnessSessionId: sessionId,
-            route: route.profile.route as 'opencode-go' | 'deepseek-open-platform',
+            route: route.profile.route as OrdinaryProductionRouteId,
             model,
             operationalScope: route.operationalScope,
             behaviorCompositionSha256: harness.composition.digest,

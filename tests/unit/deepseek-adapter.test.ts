@@ -417,8 +417,15 @@ describe('model capability profiles', () => {
         reasoningChannel: 'none', usageAttribution: 'includes-reasoning', toolCalling: 'none', webSearchTool: 'provider-tool',
       });
     }
+    // #1225 admits buffered text alone on the Claude 官方 and Gemini 官方 rows, on vendor documentation read 2026-10-31.
+    const claude = ['claude-opus-5', 'claude-fable-5-1', 'claude-sonnet-5', 'claude-haiku-4-5'].map((model) => PROVIDER_MODEL_PROFILES[`anthropic-claude/${model}`]!);
+    const gemini = ['gemini-3.8-flash', 'gemini-3.1-pro-preview', 'gemini-2.5-pro'].map((model) => PROVIDER_MODEL_PROFILES[`google-gemini/${model}`]!);
+    for (const profile of [...claude, ...gemini]) {
+      expect(profile.capabilities).toMatchObject({ reasoningControl: 'none', structuredOutput: 'none', reasoningChannel: 'none', usageAttribution: 'unknown', toolCalling: 'none',
+        answerChannel: profile.route === 'anthropic-claude' ? 'content-text-blocks' : 'candidate-parts-text' });
+    }
     expect(Object.values(PROVIDER_MODEL_PROFILES).filter((profile) => profile.capabilities.answerChannel !== 'none'))
-      .toEqual([DEEPSEEK_V4_PRO_PROFILE, officialFlash, openaiSol, openaiLuna, OPENCODE_GO_V4_FLASH_PROFILE, OPENCODE_GO_V41_FLASH_PROFILE]);
+      .toEqual([...claude, DEEPSEEK_V4_PRO_PROFILE, officialFlash, ...gemini, openaiSol, openaiLuna, OPENCODE_GO_V4_FLASH_PROFILE, OPENCODE_GO_V41_FLASH_PROFILE]);
     // Every generated row is in the table once: building it dropped nothing.
     expect(Object.keys(PROVIDER_MODEL_PROFILES)).toHaveLength(GENERATED_MODEL_PROFILES.length);
   });

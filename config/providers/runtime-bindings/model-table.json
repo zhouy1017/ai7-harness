@@ -5,25 +5,81 @@
   "policyBaseline": {
     "main": [
       { "route": "opencode-go", "model": "deepseek-v4.1-flash" },
-      { "route": "deepseek-open-platform", "model": "deepseek-flash" }
+      { "route": "deepseek-open-platform", "model": "deepseek-flash" },
+      { "route": "openai-platform", "model": "gpt-5.6-luna" },
+      { "route": "openai-platform", "model": "gpt-5.6-sol" },
+      { "route": "anthropic-claude", "model": "claude-opus-5" },
+      { "route": "anthropic-claude", "model": "claude-fable-5-1" },
+      { "route": "anthropic-claude", "model": "claude-sonnet-5" },
+      { "route": "anthropic-claude", "model": "claude-haiku-4-5" },
+      { "route": "google-gemini", "model": "gemini-3.8-flash" },
+      { "route": "google-gemini", "model": "gemini-3.1-pro-preview" },
+      { "route": "google-gemini", "model": "gemini-2.5-pro" },
+      { "route": "opencode-zen", "model": "deepseek-v4.1-flash" },
+      { "route": "opencode-zen", "model": "glm-5.3-flash" },
+      { "route": "opencode-zen", "model": "kimi-k3" },
+      { "route": "opencode-zen", "model": "qwen3.8-max" },
+      { "route": "opencode-zen-messages", "model": "claude-fable-5-1" },
+      { "route": "opencode-zen-messages", "model": "claude-opus-5-5" },
+      { "route": "opencode-zen-messages", "model": "claude-sonnet-5-5" },
+      { "route": "opencode-zen-messages", "model": "claude-haiku-5-5" },
+      { "route": "opencode-zen-responses", "model": "gpt-6.1-sol" },
+      { "route": "opencode-zen-responses", "model": "gpt-6-astra" },
+      { "route": "opencode-zen-responses", "model": "gpt-5.6-sol" },
+      { "route": "opencode-zen-responses", "model": "gpt-5.6-luna" }
     ],
     "fast": [
       { "route": "opencode-go", "model": "deepseek-v4.1-flash" },
       { "route": "deepseek-open-platform", "model": "deepseek-flash" },
       { "route": "openai-platform", "model": "gpt-5.6-luna" },
-      { "route": "openai-platform", "model": "gpt-5.6-sol" }
+      { "route": "openai-platform", "model": "gpt-5.6-sol" },
+      { "route": "anthropic-claude", "model": "claude-opus-5" },
+      { "route": "anthropic-claude", "model": "claude-fable-5-1" },
+      { "route": "anthropic-claude", "model": "claude-sonnet-5" },
+      { "route": "anthropic-claude", "model": "claude-haiku-4-5" },
+      { "route": "google-gemini", "model": "gemini-3.8-flash" },
+      { "route": "google-gemini", "model": "gemini-3.1-pro-preview" },
+      { "route": "google-gemini", "model": "gemini-2.5-pro" },
+      { "route": "opencode-zen", "model": "deepseek-v4.1-flash" },
+      { "route": "opencode-zen", "model": "glm-5.3-flash" },
+      { "route": "opencode-zen", "model": "kimi-k3" },
+      { "route": "opencode-zen", "model": "qwen3.8-max" },
+      { "route": "opencode-zen-messages", "model": "claude-fable-5-1" },
+      { "route": "opencode-zen-messages", "model": "claude-opus-5-5" },
+      { "route": "opencode-zen-messages", "model": "claude-sonnet-5-5" },
+      { "route": "opencode-zen-messages", "model": "claude-haiku-5-5" },
+      { "route": "opencode-zen-responses", "model": "gpt-6.1-sol" },
+      { "route": "opencode-zen-responses", "model": "gpt-6-astra" },
+      { "route": "opencode-zen-responses", "model": "gpt-5.6-sol" },
+      { "route": "opencode-zen-responses", "model": "gpt-5.6-luna" }
     ]
   },
   "ordinaryProduction": {
     "main": [
       { "route": "opencode-go", "model": "deepseek-v4.1-flash" },
-      { "route": "deepseek-open-platform", "model": "deepseek-flash" }
+      { "route": "deepseek-open-platform", "model": "deepseek-flash" },
+      { "route": "openai-platform", "model": "gpt-5.6-luna" },
+      { "route": "openai-platform", "model": "gpt-5.6-sol" },
+      { "route": "anthropic-claude", "model": "claude-opus-5" },
+      { "route": "anthropic-claude", "model": "claude-fable-5-1" },
+      { "route": "anthropic-claude", "model": "claude-sonnet-5" },
+      { "route": "anthropic-claude", "model": "claude-haiku-4-5" },
+      { "route": "google-gemini", "model": "gemini-3.8-flash" },
+      { "route": "google-gemini", "model": "gemini-3.1-pro-preview" },
+      { "route": "google-gemini", "model": "gemini-2.5-pro" }
     ],
     "fast": [
       { "route": "opencode-go", "model": "deepseek-v4.1-flash" },
       { "route": "deepseek-open-platform", "model": "deepseek-flash" },
       { "route": "openai-platform", "model": "gpt-5.6-luna" },
-      { "route": "openai-platform", "model": "gpt-5.6-sol" }
+      { "route": "openai-platform", "model": "gpt-5.6-sol" },
+      { "route": "anthropic-claude", "model": "claude-opus-5" },
+      { "route": "anthropic-claude", "model": "claude-fable-5-1" },
+      { "route": "anthropic-claude", "model": "claude-sonnet-5" },
+      { "route": "anthropic-claude", "model": "claude-haiku-4-5" },
+      { "route": "google-gemini", "model": "gemini-3.8-flash" },
+      { "route": "google-gemini", "model": "gemini-3.1-pro-preview" },
+      { "route": "google-gemini", "model": "gemini-2.5-pro" }
     ]
   }
 }
