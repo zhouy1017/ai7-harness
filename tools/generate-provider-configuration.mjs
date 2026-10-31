@@ -773,6 +773,13 @@ function renderShared({ providers, searchBackends = [], runtimeModelTable }) {
     '/** Reviewed bindings within declared protocol families (ADR 0095 §6); eligibility still requires the selected policy. */',
     `export const CONFIGURED_RUNTIME_MODEL_TABLE = ${renderValue(runtimeModelTable, 0)} as const;`,
     '',
+    '/** The display name of each policy-baseline model, by `route/model`: the label 设置 › 模型服务 names it by (Issue #1225). */',
+    'export const CONFIGURED_RUNTIME_MODEL_LABELS: Readonly<Record<string, string>> = {',
+    ...[...new Set([...runtimeModelTable.policyBaseline.main, ...runtimeModelTable.policyBaseline.fast].map(({ route, model }) => `${route}/${model}`))]
+      .map((key) => `  ${literal(key)}: ${literal(providers.flatMap((provider) => provider.routes).find((entry) => entry.profile.route === key.slice(0, key.indexOf('/')))
+        .models.find((entry) => entry.model === key.slice(key.indexOf('/') + 1)).displayName)},`),
+    '};',
+    '',
     '/** One credential slot per configured provider (ADR 0073 §4): the members of `CredentialSlotId`, and the Credential Broker\'s closed set. */',
     'export const CONFIGURED_CREDENTIAL_SLOTS = [',
     ...slots.map((slot) => `  ${literal(slot.slot)},`),

@@ -157,12 +157,11 @@ describe('provider documents and the generator (ADR 0073 §2)', () => {
     const add = (role: 'main' | 'fast', route: string, model: string) => (input: ReturnType<typeof freshInput>) => {
       (input as unknown as { runtimeBindings: Bindings }).runtimeBindings.data.ordinaryProduction[role].push({ route, model });
     };
-    // v32 admits Responses for Main, so a readable Responses row there resolves; a baseline without the family refuses it.
-    expect(refusalAfter(add('main', 'openai-platform', 'gpt-5.6-luna'))).toBeNull();
+    // v32 admits Responses for Main, so its readable Responses rows resolve (#1225); a baseline without the family refuses them.
+    expect(refusalAfter(() => undefined)).toBeNull();
     expect(refusalAfter((input) => {
       const data = (input as unknown as { runtimeBindings: Bindings }).runtimeBindings.data;
       data.policyBaseline.main = data.policyBaseline.main.filter((binding) => binding.route !== 'openai-platform' && binding.route !== 'opencode-zen-responses');
-      add('main', 'openai-platform', 'gpt-5.6-luna')(input);
     })).toContain('PROVIDER_CONFIGURATION/runtime-binding-protocol');
     // Messages and Gemini rows read no text answer on evidence yet, so no role can choose one (Issue #1180).
     expect(refusalAfter(add('fast', 'anthropic-claude', 'claude-opus-5'))).toContain('PROVIDER_CONFIGURATION/runtime-binding-unreadable');

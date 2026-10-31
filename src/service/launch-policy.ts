@@ -2167,8 +2167,6 @@ export function bindOrdinaryProductionRules(reading: OrdinaryProductionPolicyRea
     if (!allowedRoutes.includes(allowed.route)) continue;
     const profile = modelProfileFor(allowed.route as RemoteExecutionRoute, allowed.model);
     if (profile === null || productionBindingRefusal(profile, kind.modelRole === 'Fast Interaction Role' ? 'fast' : 'main') !== null) continue;
-    // This admission proves buffered, tool-free 来源译文 only. Other contracts keep their existing capability requirements.
-    if (allowed.route === 'openai-platform' && (kind.modelRole !== 'Fast Interaction Role' || !kind.taskKinds.includes(MATERIAL_TRANSLATION_KIND))) continue;
     admitted.push({
       ruleId,
       taskKinds: [...kind.taskKinds],

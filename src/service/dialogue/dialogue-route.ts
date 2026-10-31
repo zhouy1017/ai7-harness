@@ -95,7 +95,6 @@ export function admittedFastRoleRoute(policy: LaunchPolicyProjection, kindId: st
   if (profile === undefined || profile.endpoint !== endpoint || profile.credentialSlot !== credentialSlot) return null;
   const modelProfile = modelProfileFor(route as RemoteExecutionRoute, model);
   if (modelProfile === null || modelProfile.capabilities.answerChannel === 'none') return null;
-  if (route === 'openai-platform' && kindId !== 'material-translation' && kindId !== 'model-connection-test') return null;
   return {
     ...(kindId === 'global-agent-dialogue' ? { globalAgentDialogue: rule['globalAgentDialogue'] as AdmittedProviderRule['globalAgentDialogue'] } : {}),
     ...(kindId === 'global-agent-scoped-dialogue' ? { globalAgentScopedDialogue: rule['globalAgentScopedDialogue'] as AdmittedProviderRule['globalAgentScopedDialogue'] } : {}),

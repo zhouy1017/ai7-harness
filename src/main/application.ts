@@ -6985,9 +6985,7 @@ export async function runApplication(): Promise<void> {
             purposeLabel: '快速交互与低风险候选生成',
             status: fastStatus,
             statusLabel: labelOf(fastStatus),
-            statusDetail: fastBinding?.providerId === 'openai-platform'
-              ? '独立选择；仅来源译文的缓冲文本已准入。工具、交互对话与原生流式尚未支持。'
-              : '独立保存快速交互模型；主编辑角色的切换不会改变此选择。',
+            statusDetail: '独立保存快速交互模型；主编辑角色的切换不会改变此选择。',
             binding: fastBinding,
             connection: fastConnection,
           }

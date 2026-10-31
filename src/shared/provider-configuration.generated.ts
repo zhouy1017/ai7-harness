@@ -334,6 +334,18 @@ export const CONFIGURED_RUNTIME_MODEL_TABLE = {
         model: 'deepseek-flash',
         credentialSlot: 'deepseek-api-key',
       },
+      {
+        route: 'openai-platform',
+        endpoint: 'https://api.openai.com/v1/responses',
+        model: 'gpt-5.6-luna',
+        credentialSlot: 'openai-platform',
+      },
+      {
+        route: 'openai-platform',
+        endpoint: 'https://api.openai.com/v1/responses',
+        model: 'gpt-5.6-sol',
+        credentialSlot: 'openai-platform',
+      },
     ],
     fast: [
       {
@@ -363,6 +375,33 @@ export const CONFIGURED_RUNTIME_MODEL_TABLE = {
     ],
   },
 } as const;
+
+/** The display name of each policy-baseline model, by `route/model`: the label 设置 › 模型服务 names it by (Issue #1225). */
+export const CONFIGURED_RUNTIME_MODEL_LABELS: Readonly<Record<string, string>> = {
+  'opencode-go/deepseek-v4.1-flash': 'DeepSeek V4.1 Flash',
+  'deepseek-open-platform/deepseek-flash': 'DeepSeek V4.1 Flash',
+  'openai-platform/gpt-5.6-luna': 'GPT-5.6 Luna',
+  'openai-platform/gpt-5.6-sol': 'GPT-5.6 Sol',
+  'anthropic-claude/claude-opus-5': 'Claude Opus 5',
+  'anthropic-claude/claude-fable-5-1': 'Claude Fable 5.1',
+  'anthropic-claude/claude-sonnet-5': 'Claude Sonnet 5',
+  'anthropic-claude/claude-haiku-4-5': 'Claude Haiku 4.5',
+  'google-gemini/gemini-3.8-flash': 'Gemini 3.8 Flash',
+  'google-gemini/gemini-3.1-pro-preview': 'Gemini 3.1 Pro Preview',
+  'google-gemini/gemini-2.5-pro': 'Gemini 2.5 Pro',
+  'opencode-zen/deepseek-v4.1-flash': 'DeepSeek V4.1 Flash（OpenCode Zen）',
+  'opencode-zen/glm-5.3-flash': 'GLM 5.3 Flash（OpenCode Zen）',
+  'opencode-zen/kimi-k3': 'Kimi K3（OpenCode Zen）',
+  'opencode-zen/qwen3.8-max': 'Qwen3.8 Max（OpenCode Zen）',
+  'opencode-zen-messages/claude-fable-5-1': 'Claude Fable 5.1（OpenCode Zen）',
+  'opencode-zen-messages/claude-opus-5-5': 'Claude Opus 5.5（OpenCode Zen）',
+  'opencode-zen-messages/claude-sonnet-5-5': 'Claude Sonnet 5.5（OpenCode Zen）',
+  'opencode-zen-messages/claude-haiku-5-5': 'Claude Haiku 5.5（OpenCode Zen）',
+  'opencode-zen-responses/gpt-6.1-sol': 'GPT 6.1 Sol（OpenCode Zen）',
+  'opencode-zen-responses/gpt-6-astra': 'GPT 6 Astra（OpenCode Zen）',
+  'opencode-zen-responses/gpt-5.6-sol': 'GPT 5.6 Sol（OpenCode Zen）',
+  'opencode-zen-responses/gpt-5.6-luna': 'GPT 5.6 Luna（OpenCode Zen）',
+};
 
 /** One credential slot per configured provider (ADR 0073 §4): the members of `CredentialSlotId`, and the Credential Broker's closed set. */
 export const CONFIGURED_CREDENTIAL_SLOTS = [

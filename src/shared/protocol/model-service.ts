@@ -1,4 +1,9 @@
 import type { ModelServiceRouteId } from '../protocol.js';
+import type { CONFIGURED_RUNTIME_MODEL_TABLE } from '../provider-configuration.generated.js';
+
+type ProductionBinding = (typeof CONFIGURED_RUNTIME_MODEL_TABLE)['ordinaryProduction'][keyof (typeof CONFIGURED_RUNTIME_MODEL_TABLE)['ordinaryProduction']][number];
+/** A configured route the runtime model table records for a production role: what a Run, a turn or a test may bind (Issue #1225). */
+export type OrdinaryProductionRouteId = ProductionBinding['route'];
 
 /**
  * The six channels 设置 › 模型服务's one flow offers (ADR 0094 §1; Issue #1215), in the order it lists them. A channel is a

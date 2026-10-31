@@ -21,7 +21,7 @@ import {
 import type { AssembledModelPayload } from '../../src/service/provider/payload.js';
 import { createCanonicalProductionDataRoot, DEVELOPMENT_CACHE_SIBLING_DIRECTORIES } from '../../src/shared/data-root.js';
 import { DEVELOPMENT_CREDENTIAL_REFERENCES } from '../../src/shared/protected-secret-identity.js';
-import { MODEL_SERVICE_ROUTE_BINDINGS, MODEL_SERVICE_ROUTES, parseTrustedLaunchForm } from '../../src/shared/protocol.js';
+import { MODEL_SERVICE_ROUTES, modelServiceModels, parseTrustedLaunchForm } from '../../src/shared/protocol.js';
 import { CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES, CONFIGURED_DEVELOPMENT_SLOTS } from '../../src/shared/provider-configuration.generated.js';
 
 // Issue #811: the local ordinary-production launch. Everything here is provider-free: no credential, no store write, no network.
@@ -160,13 +160,14 @@ describe('the configured binding the resolver reads (#853 v13, carried by #863 v
     const policy = JSON.parse(await readFile(join(REPO_ROOT, 'docs', 'policies', 'provider-processing-policy.v27.json'), 'utf8')) as {
       roleBindings: Record<string, { defaultBinding?: string; allowedBindings: unknown[] }>;
     };
+    // v27's Fast bindings are both roles' reviewed choices since Main took the OpenAI text rows (Issue #1225).
     for (const role of ['Main Editorial Role', 'Fast Interaction Role']) {
-      expect(policy.roleBindings[role]!.allowedBindings).toEqual(role === 'Fast Interaction Role' ? ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS : ORDINARY_PRODUCTION_ALLOWED_BINDINGS);
+      expect(policy.roleBindings['Fast Interaction Role']!.allowedBindings).toEqual(role === 'Fast Interaction Role' ? ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS : ORDINARY_PRODUCTION_ALLOWED_BINDINGS);
       expect(policy.roleBindings[role]!.defaultBinding).toBe('opencode-go');
     }
     expect(MODEL_SERVICE_ROUTES).toEqual([...new Set(ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS.map((binding) => binding.route))]);
     for (const binding of ORDINARY_PRODUCTION_ALLOWED_BINDINGS) {
-      expect(MODEL_SERVICE_ROUTE_BINDINGS[binding.route]).toMatchObject({ providerId: binding.route, modelId: binding.model, credentialSlot: binding.credentialSlot, approvedFallbackChain: [] });
+      expect(modelServiceModels(binding.route).find((model) => model.modelId === binding.model)).toMatchObject({ providerId: binding.route, credentialSlot: binding.credentialSlot, approvedFallbackChain: [] });
     }
   });
 
@@ -329,7 +330,8 @@ describe('the enrollment helper\'s named-reference form (Issue #811 item 5)', ()
   it('takes exactly a production slot, a production reference and a file', async () => {
     // @ts-expect-error tools/*.mjs carry no declarations; the helper is exercised as the plain module it is.
     const helper = (await import('../../tools/enroll-dev-credential.mjs')) as Helper;
-    expect(helper.PRODUCTION_CONNECTION_SLOTS).toEqual(ORDINARY_PRODUCTION_ALLOWED_BINDINGS.map((binding) => binding.credentialSlot));
+    // The helper enrolls only the two routes with recorded live evidence; the documentary channels are entered in 设置 (#1225).
+    expect(helper.PRODUCTION_CONNECTION_SLOTS).toEqual(ORDINARY_PRODUCTION_ALLOWED_BINDINGS.filter((binding) => binding.route === 'opencode-go' || binding.route === 'deepseek-open-platform').map((binding) => binding.credentialSlot));
     const reference = randomUUID();
     for (const slot of helper.PRODUCTION_CONNECTION_SLOTS) {
       expect(helper.parseEnrollmentArguments(['--slot', slot, '--credential-reference', reference, '--from-file', KEY_PATH]))

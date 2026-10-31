@@ -57,7 +57,9 @@
   "ordinaryProduction": {
     "main": [
       { "route": "opencode-go", "model": "deepseek-v4.1-flash" },
-      { "route": "deepseek-open-platform", "model": "deepseek-flash" }
+      { "route": "deepseek-open-platform", "model": "deepseek-flash" },
+      { "route": "openai-platform", "model": "gpt-5.6-luna" },
+      { "route": "openai-platform", "model": "gpt-5.6-sol" }
     ],
     "fast": [
       { "route": "opencode-go", "model": "deepseek-v4.1-flash" },

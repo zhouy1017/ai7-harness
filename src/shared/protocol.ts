@@ -1,6 +1,6 @@
 import type { GlobalAgentOperations, GlobalAgentRendererApi } from './protocol/global-agent.js';
 import type { HouseWordListOperations, HouseWordListApi } from './protocol/house-word-list.js'; import type { CustomAnalysisPreparationFrom, TaskPlanCustomDimension } from './protocol/custom-analysis-redo.js';
-import type { JournalEditInput } from './protocol/manuscript-structure.js'; import type { SelectionSpanBlockPin, SelectionSpanField } from './protocol/selection-span.js'; import type { GlobalAttentionProjection } from './protocol/global-attention.js'; import type { ModelServiceChannelProjection } from './protocol/model-service.js'; import type { SearchBackendConnectionProjection, SearchBackendProbeProjection, SearchBackendSettingsProjection, SearchCandidateId, SearchConnectionTestPolicy } from './protocol/search-backends.js';
+import type { JournalEditInput } from './protocol/manuscript-structure.js'; import type { SelectionSpanBlockPin, SelectionSpanField } from './protocol/selection-span.js'; import type { GlobalAttentionProjection } from './protocol/global-attention.js'; import type { ModelServiceChannelProjection, OrdinaryProductionRouteId } from './protocol/model-service.js'; import type { SearchBackendConnectionProjection, SearchBackendProbeProjection, SearchBackendSettingsProjection, SearchCandidateId, SearchConnectionTestPolicy } from './protocol/search-backends.js';
 export type { JournalEditInput, JournalStructuralEdit } from './protocol/manuscript-structure.js';
 import type { ManuscriptBlockProjection } from './protocol/manuscript-notes.js';
 export type { ManuscriptBlockKind, ManuscriptBlockProjection, ManuscriptNoteProjection } from './protocol/manuscript-notes.js';
@@ -2583,9 +2583,9 @@ export type DeveloperLiveCeiling =
   | { readonly kind: 'tokens-per-frozen-unit'; readonly tokensPerFrozenUnit: number };
 /**
  * The execution route an analysis Run binds: the in-process deterministic adapter, the developer-live OpenCode Go route, or —
- * under ordinary-production (Issue #811) — the editor's configured Go or DeepSeek 开放平台（官方） route.
+ * under ordinary-production (Issues #811, #1225) — a route the runtime model table records for a production role.
  */
-export type ExecutionRouteId = 'ai7-local-deterministic' | 'opencode-go' | 'deepseek-open-platform';
+export type ExecutionRouteId = 'ai7-local-deterministic' | OrdinaryProductionRouteId;
 /** A remote Provider route a Provider Resolution Plan may name: a route a provider document declares (ADR 0073 §2). */
 export type RemoteProviderId = ConfiguredRouteId;
 /** A logical credential slot of the Main Editorial Role: one per configured provider (ADR 0073 §4). */

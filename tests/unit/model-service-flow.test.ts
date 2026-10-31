@@ -109,12 +109,13 @@ describe('the one model-service flow', () => {
     expect(listed.every((item) => item.textContent.includes('untested:text') && item.querySelectorAll('input,button').length === 0)).toBe(true);
   });
 
-  it('says a Fast-only model\'s Main disposition and where it can still be assigned', () => {
+  it('says a Fast-only model\'s Main disposition, and offers OpenAI to both roles now Main records it (#1225)', () => {
     const luna = modelServiceChannels().find((channel) => channel.channelId === 'openai-platform')!.models.find((model) => model.modelId === 'gpt-5.6-luna')!;
-    expect(modelRolesLabel(luna)).toBe('主编辑角色：尚无已审核的运行配置（not-in-runtime-model-table）；快速交互角色：可在高级设置中单独指定');
+    expect([luna.main, luna.fast]).toEqual(['eligible', 'eligible']);
+    expect(modelRolesLabel({ ...luna, main: 'not-in-runtime-model-table' })).toBe('主编辑角色：尚无已审核的运行配置（not-in-runtime-model-table）；快速交互角色：可在高级设置中单独指定');
     const { node } = flow(settings(['opencode-go', 'openai-platform']));
     pickChannel(node, 'openai-platform');
-    expect(node.querySelectorAll('[data-model-choice]')).toHaveLength(0);
+    expect(Array.from(node.querySelectorAll('[data-model-choice]'), (choice) => choice.dataset['modelChoice'])).toEqual(['gpt-5.6-sol', 'gpt-5.6-luna']);
   });
 
   it('sets both roles through the existing route and Fast choices, and renders the settings that answer', async () => {

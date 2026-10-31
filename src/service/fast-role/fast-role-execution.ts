@@ -196,7 +196,6 @@ export function fastRoleRouteRefusal(deps: Pick<FastRoleExecutionDeps, 'fixture'
   if (deps.live !== null) {
     const production = isOrdinaryProductionRuntime(deps.live.runtime);
     if (deps.live.routes[kindId] == null) {
-      if (production && deps.live.routes[MATERIAL_TRANSLATION_KIND]?.profile.route === 'openai-platform') return '所选快速交互模型仅支持来源译文的缓冲文本；此操作需要尚未准入的能力。未发送任何内容。';
       return production ? MODEL_SERVICE_SETUP_REQUIRED_REASON : `当前运行范围未允许${kind.label}：选定的模型处理规则没有准许它使用实时模型。`;
     }
     // Ordinary production sends the editor's own manuscript (Issue #811); only developer-live is held to the Public SampleBooks.

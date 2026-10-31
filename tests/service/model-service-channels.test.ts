@@ -28,7 +28,8 @@ describe('the model-service channel catalogue', () => {
     expect(byId('anthropic-claude').models.every((model) => model.main === 'untested:text' && model.fast === 'untested:text')).toBe(true);
     expect(byId('google-gemini').models.every((model) => model.family === 'google-generate-content' && model.main === 'untested:text')).toBe(true);
     const luna = byId('openai-platform').models.find((model) => model.modelId === 'gpt-5.6-luna')!;
-    expect([luna.main, luna.fast]).toEqual(['not-in-runtime-model-table', 'eligible']);
+    // OpenAI Responses for Main has its runtime record (Issue #1225), so it reads eligible for both roles.
+    expect([luna.main, luna.fast]).toEqual(['eligible', 'eligible']);
     expect(byId('opencode-go').models.find((model) => model.modelId === 'deepseek-v4-flash')!.main).toBe('not-in-runtime-model-table');
     expect(byId('opencode-zen').models.length).toBeGreaterThan(0);
     expect(byId('opencode-zen').models.some((model) => model.main === 'eligible' || model.fast === 'eligible')).toBe(false);
@@ -61,7 +62,5 @@ describe('the one choice for both roles', () => {
     const saved = store.saveModelServiceConnection('Synthetic OpenAI', null, 'needs-attention', 'openai-platform');
     store.saveModelServiceConnection(saved.connectionName, saved.credentialReference, 'ready', 'openai-platform');
     expect(() => store!.selectModelServiceRoute('openai-platform')).toThrow(expect.objectContaining({ code: 'MODEL_SERVICE_CONNECTION_INVALID' }));
-    const luna = modelServiceChannels().find((channel) => channel.channelId === 'openai-platform')!.models.find((model) => model.modelId === 'gpt-5.6-luna')!;
-    expect(luna.main).not.toBe('eligible');
   });
 });

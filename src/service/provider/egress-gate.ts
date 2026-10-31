@@ -1,7 +1,7 @@
 import { SEARCH_BACKENDS } from './search-backends.js';
 import { LOCAL_TOOL_RESULT_MAX_BYTES, type LocalToolsRule } from './local-tools.js';
 import { randomUUID } from 'node:crypto';
-import type { AdmittedProviderRule, OrdinaryProductionProviderProcessingVersion, SearchConnectionTestPolicy } from '../../shared/protocol.js';
+import type { AdmittedProviderRule, OrdinaryProductionProviderProcessingVersion, OrdinaryProductionRouteId, SearchConnectionTestPolicy } from '../../shared/protocol.js';
 import type { ConfiguredCredentialSlot, ConfiguredRouteId } from '../../shared/provider-configuration.generated.js';
 import { CONFIGURED_RUNTIME_MODEL_TABLE } from '../../shared/provider-configuration.generated.js';
 import type { OutboundDataCategoryId } from '../../shared/protocol.js';
@@ -45,14 +45,12 @@ export const OPENCODE_GO_ROUTE = CONFIGURED_RUNTIME_MODEL_TABLE.developerLive.ro
 export const OPENCODE_GO_MODEL = CONFIGURED_RUNTIME_MODEL_TABLE.developerLive.model;
 
 /**
- * Every route a Provider Resolution Plan may bind. No configured route beyond these two is here —
- * not the OpenCode Go plan's `/messages` and `/responses` paths, nor any route a provider document
- * declares: a declared format is a claim about the request shape, and a route becomes bindable only
- * when a Provider Processing revision names its exact binding (ADR 0073 §3). This gate is the place
- * that enforces it, so this union is a narrower statement than `RemoteExecutionRoute` rather than a
- * superset of it.
+ * Every route a Provider Resolution Plan may bind: the local adapter, and the routes the reviewed runtime model table records —
+ * the developer-live binding and each production role's choices (Issues #811, #1225). Not every route a provider document
+ * declares: a declared format is a claim about the request shape, and a route becomes bindable only when a Provider Processing
+ * revision names its exact binding (ADR 0073 §3, ADR 0095 §6). This union is a narrower statement than `RemoteExecutionRoute`.
  */
-export type ExecutionRoute = typeof LOCAL_DETERMINISTIC_ROUTE | typeof DEEPSEEK_ROUTE | typeof OPENCODE_GO_ROUTE;
+export type ExecutionRoute = typeof LOCAL_DETERMINISTIC_ROUTE | typeof DEEPSEEK_ROUTE | typeof OPENCODE_GO_ROUTE | OrdinaryProductionRouteId;
 /**
  * Every remote route a profile may be declared for, bindable or not; all of them are served by the same adapter. The
  * members are the routes the provider documents under `config/providers/` declare (ADR 0073 §2): a closed union,

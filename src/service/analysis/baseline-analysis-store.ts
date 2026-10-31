@@ -144,7 +144,7 @@ import {
   type UnreadWalkCut,
 } from './unread-changes.js';
 import { TASK_INPUT_CHECKPOINT_PURPOSE } from './identity.js';
-import { ACTIVE_SET_VERSION, DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, ORDINARY_PRODUCTION_ALLOWED_BINDINGS, ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION } from '../launch-policy.js';
+import { ACTIVE_SET_VERSION, DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, ORDINARY_PRODUCTION_ALLOWED_BINDINGS, ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION, type OrdinaryProductionAllowedBinding } from '../launch-policy.js';
 import { DEVELOPMENT_CREDENTIAL_REFERENCES } from '../../shared/protected-secret-identity.js';
 import { MAX_TASK_INTENT_GOAL_LENGTH, MODEL_SERVICE_SETUP_REQUIRED_REASON } from '../../shared/protocol.js';
 import type { AnalysisKindDefinition, AnalysisReductionResult } from './kind-definition.js';
@@ -757,10 +757,10 @@ export interface ExecutionPlanFacts {
 
 /** One frozen ordinary-production binding: one of the two allowed routes, exactly (Issue #811). */
 export interface ProductionPlanBinding {
-  readonly route: 'opencode-go' | 'deepseek-open-platform';
-  readonly model: 'deepseek-v4.1-flash' | 'deepseek-flash';
+  readonly route: OrdinaryProductionAllowedBinding['route'];
+  readonly model: OrdinaryProductionAllowedBinding['model'];
   readonly endpoint: string;
-  readonly credentialSlot: 'opencode-go' | 'deepseek-api-key';
+  readonly credentialSlot: OrdinaryProductionAllowedBinding['credentialSlot'];
 }
 
 export interface ExecutionBindingRecord {
@@ -6427,8 +6427,8 @@ export class BaselineAnalysisStore {
     // ADR 0091 work, Issue #990) and the official row.
     const live = this.#launch.live;
     const production = this.#launch.operationalScope === 'ordinary-production';
-    const connectionId = live !== null && live.scope === 'ordinary-production' && live.route === 'opencode-go'
-      ? 'main-editorial-opencode-go'
+    const connectionId = live !== null && live.scope === 'ordinary-production' && live.route !== 'deepseek-open-platform'
+      ? (live.route === 'opencode-go' ? 'main-editorial-opencode-go' : live.route)
       : 'main-editorial-deepseek-v4-pro';
     const row = this.#db.prepare(
       `SELECT m.manuscript_id, mb.branch_id, bws.base_revision_id, bws.journal_sequence, bws.working_digest,

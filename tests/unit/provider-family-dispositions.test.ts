@@ -139,9 +139,9 @@ describe('capability dispositions per family and per model', () => {
     expect(new Set(models.map((model) => model.family))).toEqual(new Set(['openai-chat-completions', 'openai-responses', 'anthropic-messages', 'google-generate-content']));
     const claude = channels.find((channel) => channel.channelId === 'anthropic-claude')!.models.find((model) => model.modelId === 'claude-fable-5-1')!;
     expect([claude.main, claude.fast]).toEqual(['untested:text', 'untested:text']);
-    // Admitted is not chosen: OpenAI Responses for Main waits for its runtime record (W22b-A2).
+    // OpenAI Responses for Main gained its runtime record (W22b-A2 #1225), so it is chosen for both roles.
     const luna = channels.find((channel) => channel.channelId === 'openai-platform')!.models.find((model) => model.modelId === 'gpt-5.6-luna')!;
-    expect([luna.main, luna.fast]).toEqual(['not-in-runtime-model-table', 'eligible']);
+    expect([luna.main, luna.fast]).toEqual(['eligible', 'eligible']);
     // Every reviewed model-table row passes, so selection is unchanged.
     for (const role of ['main', 'fast'] as const) {
       for (const binding of CONFIGURED_RUNTIME_MODEL_TABLE.ordinaryProduction[role]) {
