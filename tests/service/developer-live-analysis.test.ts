@@ -363,6 +363,13 @@ async function runLive(
   return store.inspectBaselineAnalysis(bookId, (runRecordId) => execution.progressFor(runRecordId));
 }
 
+/** A fresh live plan with synthetic answers and a transport-call collector. */
+async function liveScenario(ceiling: Ceiling = CEILING) {
+  const live = await prepareLive(roots.dataRoot, ceiling);
+  const { units: responses, named } = await unitAnswers(live.prepared);
+  return { ...live, responses, named, calls: [] as StubCall[] };
+}
+
 /** The AI7 error code one call refuses with, or `no-throw`; the messages themselves are product text. */
 function refusalCode(action: () => unknown): unknown {
   try {
@@ -447,181 +454,172 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
       goal: BASELINE_ANALYSIS_TASK_GOAL, update: null, reconfirm: false, launchPolicy, background,
     }))).toBe('ANALYSIS_TASK_PREPARED');
   });
-  it('freezes the selected plan and transmits the full declared chain through the gate', async () => {
-    const calls: StubCall[] = [];
-    const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
-    const { units: responses, named } = await unitAnswers(prepared);
-    const execution = owner(store, stubTransport({ calls, responses, named }));
-    const settled = await runLive(store, bookId, prepared, execution);
+  describe('a completed developer-live chain', () => {
+    let calls: StubCall[];
+    let prepared: BaselineAnalysisProjection;
+    let settled: BaselineAnalysisProjection;
 
-    // The frozen plan names the live binding, not the denied production one.
-    const provider = settled.providerResolutionPlan!;
-    expect(provider.remoteBinding).toMatchObject({
-      providerId: 'opencode-go',
-      modelId: 'deepseek-v4.1-flash',
-      credentialSlot: 'opencode-go',
-      credentialReference: DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE,
-      providerProcessing: { operationalScope: 'developer-live', version: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' },
+    beforeEach(async () => {
+      const live = await liveScenario();
+      ({ prepared, calls } = live);
+      settled = await runLive(live.store, live.bookId, prepared, owner(live.store, stubTransport(live)));
     });
-    expect(provider.executionRoute).toEqual({ kind: 'opencode-go', model: 'deepseek-v4.1-flash', endpoint: OPENCODE_GO_ROUTE_PROFILE.endpoint });
-    expect(provider.runBudgetCeiling).toEqual(CEILING);
-    expect(settled.planEnvelope!.providerStatus).toBe('remote-eligible-developer-live');
-    expect(settled.planEnvelope!.dispatchAllowed).toBe(true);
 
-    // The gate admitted the whole chain ADR 0079 §2.2 bounds: eight unit turns, the reduction's one
-    // topic-section turn, the sample's one anchor-unit turn, and the one report reflection turn.
-    expect(calls).toHaveLength(FULL_CHAIN_TURNS);
-    for (const call of calls) {
-      expect(call.url).toBe('https://opencode.ai/zen/go/v1/chat/completions');
-      expect(call.headers.authorization).toBe('Bearer placeholder-development-key');
-      expect(call.headers['user-agent']).toBe(OPENCODE_GO_USER_AGENT);
-      expect(call.headers[OPENCODE_GO_SESSION_HEADER]).toMatch(/^[0-9a-f-]{36}$/u);
-      const body = JSON.parse(call.body) as Record<string, unknown>;
-      expect(body.model).toBe('deepseek-v4.1-flash');
-      // The V4.1 profile declares no format constraint, so none reaches the wire on the real path either.
-      expect(body).not.toHaveProperty('response_format');
-      expect(body).not.toHaveProperty('thinking');
-      expect(body).not.toHaveProperty('reasoning_effort');
-      // Provider Processing v10's baseline rule names no platform tools (Issue #473): no request offers the model a tool.
-      expect(body).not.toHaveProperty('tools');
-      expect(JSON.stringify(body.messages)).not.toContain('tool_calls');
-      // The credential never enters the body or its digest.
-      expect(call.body).not.toContain('placeholder-development-key');
-    }
+    it('freezes the selected live binding and composition in the plan', async () => {
+      const provider = settled.providerResolutionPlan!;
+      expect(provider.remoteBinding).toMatchObject({
+        providerId: 'opencode-go',
+        modelId: 'deepseek-v4.1-flash',
+        credentialSlot: 'opencode-go',
+        credentialReference: DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE,
+        providerProcessing: { operationalScope: 'developer-live', version: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' },
+      });
+      expect(provider.executionRoute).toEqual({ kind: 'opencode-go', model: 'deepseek-v4.1-flash', endpoint: OPENCODE_GO_ROUTE_PROFILE.endpoint });
+      expect(provider.runBudgetCeiling).toEqual(CEILING);
+      expect(settled.planEnvelope!.providerStatus).toBe('remote-eligible-developer-live');
+      expect(settled.planEnvelope!.dispatchAllowed).toBe(true);
 
-    // One technical Session per turn: every turn carries its own Session id, and the unit-only spans
-    // record exactly the unit turns' ones, with the binding's own id as the lineage root above them.
-    const sessionHeaders = calls.map((call) => call.headers[OPENCODE_GO_SESSION_HEADER]!);
-    expect(new Set(sessionHeaders).size).toBe(FULL_CHAIN_TURNS);
-    const attempt = settled.run!.attempt!;
-    const spanSessions = attempt.spans.map((span) => span.harnessSessionId);
-    expect(new Set(spanSessions).size).toBe(SAMPLE1_UNITS);
-    expect(spanSessions).toEqual(sessionHeaders.slice(0, SAMPLE1_UNITS));
-    expect(spanSessions).not.toContain(attempt.executionBinding!.harnessSessionId);
-    expect(attempt.credentialReadinessCheck).toMatchObject({ slot: 'opencode-go', readiness: 'present', valueReleased: false });
-
-    // The revision records the live route and the selected policy pin, through the existing real path.
-    const revision = settled.resultSetRevision!;
-    expect(revision.adapterPin).toEqual({ route: 'opencode-go', model: 'deepseek-v4.1-flash', fixtureIdentity: null, fixtureSha256: null });
-    expect(revision.policyPin).toEqual({
-      operationalScope: 'developer-live', providerProcessingVersion: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, activePolicySetVersion: ACTIVE_SET_VERSION, liveTransmissions: 'bounded-by-run',
+      expect(settled.planEnvelope!.compositionVersion).toBe(2);
+      expect(describeComposition('opencode-go', 'deepseek-v4.1-flash', BASELINE_PROMPT_CONTRACT_DIGEST).digest).toBe(DEV_LIVE_COMPOSITION_DIGEST);
     });
-    // The revision counts the three revision-facing stages: eight unit turns, the reduction turn and
-    // the sampling turn. The reflection turn is dispatched after the revision is persisted, so its
-    // usage is recorded on the Run Report alone. Every turn is a distinct technical Session.
-    expect(revision.usage.requests).toBe(FULL_CHAIN_TURNS - 1);
-    expect(settled.taskOutcome!.report!.usagePerStage['run-report-reflection'].requests).toBe(1);
-    expect(revision.gaps).toEqual([]);
-    expect(revision.crossUnitReduction.state).toBe('closed');
-    expect(revision.crossUnitFindings).toHaveLength(2);
-    expect(revision.assuranceSample.state).toBe('closed');
-    expect(revision.reducerClosure.stages.at(-1)?.stage).toBe('assurance-sampling');
-    expect(settled.taskOutcome!.report!.ifRedone.state).toBe('closed');
-    expect(settled.run!.state).toBe('completed');
 
-    // Every live call is a named test item, numbered by the ledger under the Task mode's purpose.
-    const lines = await ledgerLines(cacheRoot);
-    const currentUnitContract = clarificationPromptContractDigest(BASELINE_PROMPT_CONTRACT_DIGEST);
-    expect(prepared.planEnvelope!.promptContractDigest).toBe(currentUnitContract);
-    expect(lines.map((line) => line.promptContractDigest)).toEqual([
-      ...Array.from({ length: SAMPLE1_UNITS }, () => currentUnitContract),
-      BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST, RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST,
-    ]);
-    expect(lines.every((line) => line.taskPromptContractDigest === currentUnitContract)).toBe(true);
-    expect(lines.map((line) => line.itemId)).toEqual(
-      Array.from({ length: FULL_CHAIN_TURNS }, (_unused, index) => `S40/first-baseline/${index + 1}`),
-    );
-    expect(new Set(lines.map((line) => line.outcome))).toEqual(new Set(['transmitted']));
-    // The ledger records identities and counts, never content.
-    for (const line of lines) {
-      expect(JSON.stringify(line)).not.toContain('placeholder-development-key');
-      expect(line).not.toHaveProperty('requestBody');
-      expect(line).not.toHaveProperty('response');
-      // The shared once-only transmission writes the analysis path's model-call lines exactly as before (Issue #473).
-      expect(line).not.toHaveProperty('kind');
-    }
-    // New plans pin v2; the explicit v1 constructor still reproduces the predecessor's frozen digest.
-    expect(settled.planEnvelope!.compositionVersion).toBe(2);
-    expect(describeComposition('opencode-go', 'deepseek-v4.1-flash', BASELINE_PROMPT_CONTRACT_DIGEST).digest).toBe(DEV_LIVE_COMPOSITION_DIGEST);
-    await store.close();
+    it('transmits every declared turn through the gate without tools or credential payloads', async () => {
+      expect(calls).toHaveLength(FULL_CHAIN_TURNS);
+      for (const call of calls) {
+        expect(call.url).toBe('https://opencode.ai/zen/go/v1/chat/completions');
+        expect(call.headers.authorization).toBe('Bearer placeholder-development-key');
+        expect(call.headers['user-agent']).toBe(OPENCODE_GO_USER_AGENT);
+        expect(call.headers[OPENCODE_GO_SESSION_HEADER]).toMatch(/^[0-9a-f-]{36}$/u);
+        const body = JSON.parse(call.body) as Record<string, unknown>;
+        expect(body.model).toBe('deepseek-v4.1-flash');
+        expect(body).not.toHaveProperty('response_format');
+        expect(body).not.toHaveProperty('thinking');
+        expect(body).not.toHaveProperty('reasoning_effort');
+        expect(body).not.toHaveProperty('tools');
+        expect(JSON.stringify(body.messages)).not.toContain('tool_calls');
+        expect(call.body).not.toContain('placeholder-development-key');
+      }
+    });
+
+    it('assigns each turn its own technical Session under the execution binding', async () => {
+      const sessionHeaders = calls.map((call) => call.headers[OPENCODE_GO_SESSION_HEADER]!);
+      expect(new Set(sessionHeaders).size).toBe(FULL_CHAIN_TURNS);
+      const attempt = settled.run!.attempt!;
+      const spanSessions = attempt.spans.map((span) => span.harnessSessionId);
+      expect(new Set(spanSessions).size).toBe(SAMPLE1_UNITS);
+      expect(spanSessions).toEqual(sessionHeaders.slice(0, SAMPLE1_UNITS));
+      expect(spanSessions).not.toContain(attempt.executionBinding!.harnessSessionId);
+      expect(attempt.credentialReadinessCheck).toMatchObject({ slot: 'opencode-go', readiness: 'present', valueReleased: false });
+    });
+
+    it('closes the complete revision and accounts for reflection on the Run Report', async () => {
+      const revision = settled.resultSetRevision!;
+      expect(revision.adapterPin).toEqual({ route: 'opencode-go', model: 'deepseek-v4.1-flash', fixtureIdentity: null, fixtureSha256: null });
+      expect(revision.policyPin).toEqual({
+        operationalScope: 'developer-live', providerProcessingVersion: DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, activePolicySetVersion: ACTIVE_SET_VERSION, liveTransmissions: 'bounded-by-run',
+      });
+      expect(revision.usage.requests).toBe(FULL_CHAIN_TURNS - 1);
+      expect(settled.taskOutcome!.report!.usagePerStage['run-report-reflection'].requests).toBe(1);
+      expect(revision.gaps).toEqual([]);
+      expect(revision.crossUnitReduction.state).toBe('closed');
+      expect(revision.crossUnitFindings).toHaveLength(2);
+      expect(revision.assuranceSample.state).toBe('closed');
+      expect(revision.reducerClosure.stages.at(-1)?.stage).toBe('assurance-sampling');
+      expect(settled.taskOutcome!.report!.ifRedone.state).toBe('closed');
+      expect(settled.run!.state).toBe('completed');
+    });
+
+    it('records each transmitted turn as a named test item without payloads', async () => {
+      const lines = await ledgerLines(cacheRoot);
+      const currentUnitContract = clarificationPromptContractDigest(BASELINE_PROMPT_CONTRACT_DIGEST);
+      expect(prepared.planEnvelope!.promptContractDigest).toBe(currentUnitContract);
+      expect(lines.map((line) => line.promptContractDigest)).toEqual([
+        ...Array.from({ length: SAMPLE1_UNITS }, () => currentUnitContract),
+        BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST, ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2_DIGEST, RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST,
+      ]);
+      expect(lines.every((line) => line.taskPromptContractDigest === currentUnitContract)).toBe(true);
+      expect(lines.map((line) => line.itemId)).toEqual(
+        Array.from({ length: FULL_CHAIN_TURNS }, (_unused, index) => `S40/first-baseline/${index + 1}`),
+      );
+      expect(new Set(lines.map((line) => line.outcome))).toEqual(new Set(['transmitted']));
+      for (const line of lines) {
+        expect(JSON.stringify(line)).not.toContain('placeholder-development-key');
+        expect(line).not.toHaveProperty('requestBody');
+        expect(line).not.toHaveProperty('response');
+        expect(line).not.toHaveProperty('kind');
+      }
+    });
   });
 
-  /**
-   * The three declared suboperations are gated one key each. Under the verified v10 bytes all three
-   * are named, so this is the fail-closed half: a projection that names the reduction and neither the
-   * sample nor the reflection. The reduction closes, the sample is drawn but not dispatched, and the
-   * report says exactly which policy stopped each step.
-   */
-  it('records policy-bounded and transmits nothing for a sample the active policy does not name', async () => {
-    const calls: StubCall[] = [];
-    const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
-    const { units: responses, named } = await unitAnswers(prepared);
-    const namesReductionOnly: LaunchPolicyProjection = {
-      ...launchPolicy,
-      providerProcessing: {
-        ...launchPolicy.providerProcessing,
-        crossUnitReductionAllowed: true,
-        assuranceSamplingAllowed: false,
-        runReportReflectionAllowed: false,
-      },
-    };
-    const transport = stubTransport({ calls, responses, named });
-    const settled = await runLive(store, bookId, prepared, owner(store, transport, CEILING, namesReductionOnly));
+  describe('a policy authorizing reduction without sampling or reflection', () => {
+    let calls: StubCall[];
+    let settled: BaselineAnalysisProjection;
 
-    // Eight unit turns and the one reduction turn the policy names; not one sampling turn.
-    expect(calls).toHaveLength(SAMPLE1_UNITS + 1);
-    expect(calls.some((call) => call.body.includes('保证抽样'))).toBe(false);
-    const revision = settled.resultSetRevision!;
-    expect(revision.usage.requests).toBe(SAMPLE1_UNITS + 1);
-    expect(revision.crossUnitReduction.state).toBe('closed');
-    expect(revision.crossUnitFindings).toHaveLength(2);
-
-    // The sample was drawn — it is the dispatch the policy stopped, not the draw — and says exactly why.
-    expect(revision.assuranceSample).toMatchObject({
-      state: 'gap',
-      size: 2,
-      candidateCount: 2,
-      dispositions: [],
-      precision: [],
-      usage: null,
-      reason: '保证抽样未派发：当前 Provider Processing 策略仅授权单元数内的传输',
+    beforeEach(async () => {
+      const live = await liveScenario();
+      ({ calls } = live);
+      const { store, bookId, prepared } = live;
+      const namesReductionOnly: LaunchPolicyProjection = {
+        ...launchPolicy,
+        providerProcessing: {
+          ...launchPolicy.providerProcessing,
+          crossUnitReductionAllowed: true,
+          assuranceSamplingAllowed: false,
+          runReportReflectionAllowed: false,
+        },
+      };
+      const transport = stubTransport(live);
+      settled = await runLive(store, bookId, prepared, owner(store, transport, CEILING, namesReductionOnly));
     });
-    expect(revision.assuranceSample.seed).toMatch(/^[0-9a-f]{64}$/u);
-    // Nothing about the findings or the axis moved: no disposition exists to move them.
-    expect(revision.assurance.sampledPrecision).toBeNull();
-    expect(revision.assurance.label).not.toContain('抽样');
-    expect(revision.reducerClosure.stages.at(-1)).toEqual({ stage: 'assurance-sampling', state: 'closed-with-gaps', inputCount: 2 });
 
-    // The Run Report's reflection turn is one more transmission this policy does not name either, so
-    // it never formed a request: no call carries its header, and the report says exactly why.
-    expect(calls.some((call) => (JSON.parse(call.body) as { messages: Array<{ role: string; content: string }> })
-      .messages.findLast((message) => message.role === 'user')!.content.startsWith('运行反思 '))).toBe(false);
-    const report = settled.taskOutcome!.report!;
-    expect(report.ifRedone).toEqual({
-      state: 'policy-bounded',
-      items: [],
-      reason: '运行反思未派发：当前 Provider Processing 策略仅授权单元数内的传输',
+    it('draws the sample but refuses its transmission without changing findings', async () => {
+      expect(calls).toHaveLength(SAMPLE1_UNITS + 1);
+      expect(calls.some((call) => call.body.includes('保证抽样'))).toBe(false);
+      const revision = settled.resultSetRevision!;
+      expect(revision.usage.requests).toBe(SAMPLE1_UNITS + 1);
+      expect(revision.crossUnitReduction.state).toBe('closed');
+      expect(revision.crossUnitFindings).toHaveLength(2);
+
+      expect(revision.assuranceSample).toMatchObject({
+        state: 'gap',
+        size: 2,
+        candidateCount: 2,
+        dispositions: [],
+        precision: [],
+        usage: null,
+        reason: '保证抽样未派发：当前 Provider Processing 策略仅授权单元数内的传输',
+      });
+      expect(revision.assuranceSample.seed).toMatch(/^[0-9a-f]{64}$/u);
+      expect(revision.assurance.sampledPrecision).toBeNull();
+      expect(revision.assurance.label).not.toContain('抽样');
+      expect(revision.reducerClosure.stages.at(-1)).toEqual({ stage: 'assurance-sampling', state: 'closed-with-gaps', inputCount: 2 });
     });
-    // A turn that never dispatched costs nothing, and the reconciliation is untouched by it.
-    expect(report.usagePerStage['run-report-reflection']).toEqual({ requests: 0, inputTokens: 0, outputTokens: 0 });
-    expect(runReportUsageReconciles(report, revision.usage)).toBe(true);
-    expect(report.usagePerStage['cross-unit-reduction'].requests).toBe(1);
-    expect(report.usagePerStage['assurance-sampling'].requests).toBe(0);
-    await store.close();
+
+    it('reports policy-bounded reflection without transmitting or charging for it', async () => {
+      const revision = settled.resultSetRevision!;
+      expect(calls.some((call) => (JSON.parse(call.body) as { messages: Array<{ role: string; content: string }> })
+        .messages.findLast((message) => message.role === 'user')!.content.startsWith('运行反思 '))).toBe(false);
+      const report = settled.taskOutcome!.report!;
+      expect(report.ifRedone).toEqual({
+        state: 'policy-bounded',
+        items: [],
+        reason: '运行反思未派发：当前 Provider Processing 策略仅授权单元数内的传输',
+      });
+      expect(report.usagePerStage['run-report-reflection']).toEqual({ requests: 0, inputTokens: 0, outputTokens: 0 });
+      expect(runReportUsageReconciles(report, revision.usage)).toBe(true);
+      expect(report.usagePerStage['cross-unit-reduction'].requests).toBe(1);
+      expect(report.usagePerStage['assurance-sampling'].requests).toBe(0);
+    });
   });
 
   it('answers what the Run is doing while a unit is in flight, and measures each step as it settles', async () => {
-    const calls: StubCall[] = [];
-    const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
-    const { units: responses, named } = await unitAnswers(prepared);
+    const { store, bookId, prepared, responses, named, calls } = await liveScenario();
     const held = heldTransport({ calls, responses, named });
     const execution = owner(store, held.transport);
     const authorized = store.authorizeBaselineAnalysis(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
     const runRecordId = authorized.dispatchRunRecordId!;
     execution.admitAndDispatch(runRecordId);
 
-    // Unit 1's request is in the transport and no answer has come back. This is the ninety-second
-    // interval the first live Run could say nothing about; every fact below is one the owner holds.
     await held.arrived(0);
     const inFlight = execution.progressFor(runRecordId)!;
     expect(inFlight.currentUnitOrdinal).toBe(1);
@@ -631,8 +629,6 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     expect(inFlight.longestSettledUnitMs).toBeNull();
     expect(Number.isNaN(Date.parse(inFlight.currentUnitStartedAt!))).toBe(false);
 
-    // The store composes the fifth fact from the Run Record's own latest transition, and the whole
-    // projection stays identities, counts, and instants: no unit message, no answer, no payload.
     const executing = store.inspectBaselineAnalysis(bookId, (id) => execution.progressFor(id));
     expect(executing.run!.state).toBe('executing');
     const projected = executing.run!.progress!;
@@ -641,8 +637,6 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     expect(projected.currentUnitStartedAt).toBe(inFlight.currentUnitStartedAt);
     expect(JSON.stringify(projected)).not.toContain('分析单元');
 
-    // Released, unit 1 settles; by the time unit 2 has reached the transport the Run has measured a
-    // step of its own, which is what the stale case is judged against from here on.
     held.release(0);
     await held.arrived(1);
     const nextUnit = execution.progressFor(runRecordId)!;
@@ -657,8 +651,6 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     for (let index = 1; index < FULL_CHAIN_TURNS; index += 1) held.release(index);
     await execution.whenIdle();
 
-    // A settled Run projects no progress at all: the signal ends with the state that produced it,
-    // rather than lingering as the first live Run's status toast did.
     const settled = store.inspectBaselineAnalysis(bookId, (id) => execution.progressFor(id));
     expect(settled.run!.state).toBe('completed');
     expect(settled.run!.progress).toBeNull();
@@ -668,9 +660,7 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
   });
 
   it('cancels a paused Run into the partial revision of what it kept though the credential is gone, sending nothing more (Issue #422, S76b)', async () => {
-    const calls: StubCall[] = [];
-    const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
-    const { units: responses, named } = await unitAnswers(prepared);
+    const { store, bookId, prepared, responses, named, calls } = await liveScenario();
     const held = heldTransport({ calls, responses, named });
     let credential: string | null = 'placeholder-development-key';
     const execution = new BaselineAnalysisExecutionOwner({
@@ -904,9 +894,7 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
   });
 
   it('records an empty answer as its own outcome instead of handing the contract an empty string', async () => {
-    const calls: StubCall[] = [];
-    const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
-    const { units: responses, named } = await unitAnswers(prepared);
+    const { store, bookId, prepared, responses, named, calls } = await liveScenario();
     const execution = owner(store, stubTransport({
       calls,
       responses,
@@ -944,73 +932,67 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     await store.close();
   });
 
-  it('stops at the Run Budget Ceiling with the partial revision preserved', async () => {
-    const calls: StubCall[] = [];
-    // 100 tokens for the first unit against a 100-token ceiling: the second unit never dispatches,
-    // because the ceiling is evaluated from accumulated usage before the unit forms its request.
-    const ceiling: Ceiling = { kind: 'tokens', maxTotalTokens: 100 };
-    const { store, bookId, prepared } = await prepareLive(roots.dataRoot, ceiling);
-    const { units: responses } = await unitAnswers(prepared, { inputTokens: 60, outputTokens: 40 });
-    const execution = owner(store, stubTransport({ calls, responses }), ceiling);
-    const settled = await runLive(store, bookId, prepared, execution);
+  describe('a Run stopped at its 100-token ceiling', () => {
+    let store: EditorialStore;
+    let bookId: string;
+    let calls: StubCall[];
+    let settled: BaselineAnalysisProjection;
 
-    expect(calls).toHaveLength(1);
-    expect(settled.run!.state).toBe('interrupted');
-    expect(settled.taskOutcome!.classification).toBe('interrupted');
-    // The closed CHECK sets record `interrupted`; the safe next action is where the two developer-live
-    // interruptions are told apart, and it names the ceiling rather than a limit window.
-    expect(settled.taskOutcome!.safeNextAction).toContain('--run-budget-ceiling');
-    expect(settled.taskOutcome!.safeNextAction).not.toContain('账户限额');
-    // 待我处理 says it as the drawer does (Issue #541): the launch set the ceiling, which the plan cannot raise, so the way on
-    // is 改计划重做 after a relaunch, never 调整预算并重做.
-    const budgetItem = store.inspectGlobalAttention(() => null, false).groups.flatMap((group) => group.items)
-      .find((entry) => entry.state === 'analysis-budget-reached');
-    expect(budgetItem).toMatchObject({ nextStep: 'redo', target: { kind: 'analysis-plan', bookId } });
-    // The partial revision survives: one unit closed, the rest recorded as exact gaps.
-    const revision = settled.resultSetRevision!;
-    expect(revision.coverage.unitsTotal).toBe(SAMPLE1_UNITS);
-    expect(revision.coverage.unitsClosed).toBe(1);
-    expect(revision.usage.inputTokens + revision.usage.outputTokens).toBe(100);
+    beforeEach(async () => {
+      calls = [];
+      const ceiling: Ceiling = { kind: 'tokens', maxTotalTokens: 100 };
+      const live = await prepareLive(roots.dataRoot, ceiling);
+      ({ store, bookId } = live);
+      const { prepared } = live;
+      const { units: responses } = await unitAnswers(prepared, { inputTokens: 60, outputTokens: 40 });
+      const execution = owner(store, stubTransport({ calls, responses }), ceiling);
+      settled = await runLive(store, bookId, prepared, execution);
+    });
 
-    // An interrupted Run still leaves a Run Report, and it carries what the interruption cost it:
-    // one unit's usage, seven not-attempted gaps, and the two suboperations that never ran.
-    const report = settled.taskOutcome!.report!;
-    expect(settled.taskOutcome!.reportAbsentReason).toBeNull();
-    expect(report.classification).toBe('interrupted');
-    expect(runReportUsageReconciles(report, revision.usage)).toBe(true);
-    expect(report.usagePerStage.units).toEqual({ requests: 1, inputTokens: 60, outputTokens: 40 });
-    expect(report.usagePerStage['cross-unit-reduction']).toEqual({ requests: 0, inputTokens: 0, outputTokens: 0 });
-    expect(report.usagePerStage['assurance-sampling']).toEqual({ requests: 0, inputTokens: 0, outputTokens: 0 });
-    expect(report.units).toEqual({ submitted: SAMPLE1_UNITS, reused: 0, recomputed: SAMPLE1_UNITS, gaps: SAMPLE1_UNITS - 1, retried: 0 });
-    // Every gap the revision carries is named once, and the units it never reached say exactly that.
-    expect(report.failures).toEqual(revision.gaps.map((entry) => ({ stage: 'units', code: entry.code, reason: entry.reason })));
-    expect(report.unitRows.filter((row) => row.gapCode === 'not-attempted')).toHaveLength(SAMPLE1_UNITS - 1);
-    expect(report.unitRows[0]).toMatchObject({ unitOrdinal: 1, state: 'closed', attempts: 1, usage: { inputTokens: 60, outputTokens: 40 } });
-    // The two suboperations and the reflection never ran; the deterministic reduction did.
-    expect(report.stages.map((stage) => [stage.stage, stage.state])).toEqual([
-      ['units', 'closed-with-gaps'], ['cross-unit-reduction', 'not-run'], ['assurance-sampling', 'not-run'], ['reduction', 'closed'],
-    ]);
-    expect(report.stages[1]!.wallMs).toBeNull();
-    expect(report.stages[2]!.wallMs).toBeNull();
-    expect(report.ifRedone.state).toBe('not-run');
-    expect(report.ifRedone.items).toEqual([]);
-    await store.close();
+    it('preserves the partial revision and offers redo at the launch ceiling', async () => {
+      expect(calls).toHaveLength(1);
+      expect(settled.run!.state).toBe('interrupted');
+      expect(settled.taskOutcome!.classification).toBe('interrupted');
+      expect(settled.taskOutcome!.safeNextAction).toContain('--run-budget-ceiling');
+      expect(settled.taskOutcome!.safeNextAction).not.toContain('账户限额');
+      const budgetItem = store.inspectGlobalAttention(() => null, false).groups.flatMap((group) => group.items)
+        .find((entry) => entry.state === 'analysis-budget-reached');
+      expect(budgetItem).toMatchObject({ nextStep: 'redo', target: { kind: 'analysis-plan', bookId } });
+      const revision = settled.resultSetRevision!;
+      expect(revision.coverage.unitsTotal).toBe(SAMPLE1_UNITS);
+      expect(revision.coverage.unitsClosed).toBe(1);
+      expect(revision.usage.inputTokens + revision.usage.outputTokens).toBe(100);
+    });
+
+    it('reports the paid unit and the stages and ranges it never attempted', async () => {
+      const revision = settled.resultSetRevision!;
+      const report = settled.taskOutcome!.report!;
+      expect(settled.taskOutcome!.reportAbsentReason).toBeNull();
+      expect(report.classification).toBe('interrupted');
+      expect(runReportUsageReconciles(report, revision.usage)).toBe(true);
+      expect(report.usagePerStage.units).toEqual({ requests: 1, inputTokens: 60, outputTokens: 40 });
+      expect(report.usagePerStage['cross-unit-reduction']).toEqual({ requests: 0, inputTokens: 0, outputTokens: 0 });
+      expect(report.usagePerStage['assurance-sampling']).toEqual({ requests: 0, inputTokens: 0, outputTokens: 0 });
+      expect(report.units).toEqual({ submitted: SAMPLE1_UNITS, reused: 0, recomputed: SAMPLE1_UNITS, gaps: SAMPLE1_UNITS - 1, retried: 0 });
+      expect(report.failures).toEqual(revision.gaps.map((entry) => ({ stage: 'units', code: entry.code, reason: entry.reason })));
+      expect(report.unitRows.filter((row) => row.gapCode === 'not-attempted')).toHaveLength(SAMPLE1_UNITS - 1);
+      expect(report.unitRows[0]).toMatchObject({ unitOrdinal: 1, state: 'closed', attempts: 1, usage: { inputTokens: 60, outputTokens: 40 } });
+      expect(report.stages.map((stage) => [stage.stage, stage.state])).toEqual([
+        ['units', 'closed-with-gaps'], ['cross-unit-reduction', 'not-run'], ['assurance-sampling', 'not-run'], ['reduction', 'closed'],
+      ]);
+      expect(report.stages[1]!.wallMs).toBeNull();
+      expect(report.stages[2]!.wallMs).toBeNull();
+      expect(report.ifRedone.state).toBe('not-run');
+      expect(report.ifRedone.items).toEqual([]);
+    });
   });
 
-  /**
-   * The launch form named no ceiling, so the launch bound the policy's per-frozen-unit default and
-   * nothing resolved it into a total until this Run's Coverage Manifest froze (ADR 0070, ADR 0079
-   * §2.3). What the frozen Provider Resolution Plan carries must therefore be this manuscript's own
-   * arithmetic — 30,000 tokens times the units the manifest actually holds — and not a constant.
-   */
+  // With no explicit ceiling, the frozen manifest sizes the policy default (ADR 0070, ADR 0079 §2.3).
   it('freezes the per-frozen-unit default into the total this frozen manifest sizes', async () => {
-    const calls: StubCall[] = [];
-    const { store, bookId, prepared } = await prepareLive(roots.dataRoot, POLICY_DEFAULT_CEILING);
-    const { units: responses, named } = await unitAnswers(prepared);
+    const { store, bookId, prepared, responses, named, calls } = await liveScenario(POLICY_DEFAULT_CEILING);
     const settled = await runLive(store, bookId, prepared, owner(store, stubTransport({ calls, responses, named }), POLICY_DEFAULT_CEILING));
 
-    // The unit count is read from the frozen manifest, never restated as a literal: a manuscript of a
-    // different length would move this number and the assertion with it.
+    // The total follows this manifest's unit count.
     const unitCount = settled.coverageManifest!.units.length;
     expect(unitCount).toBe(SAMPLE1_UNITS);
     expect(settled.providerResolutionPlan!.runBudgetCeiling).toEqual({
@@ -1020,8 +1002,7 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     // The plan carries a total, never the formula: the ceiling the gate reads can hold no unit count.
     expect(settled.providerResolutionPlan!.runBudgetCeiling).not.toHaveProperty('tokensPerFrozenUnit');
 
-    // Every surface that names the ceiling states that same resolved total, and the Run spent far less
-    // than it, so the whole declared chain ran inside the default.
+    // Every surface names the same resolved total.
     const resolved = `任务运行预算上限 ${DEVELOPER_LIVE_POLICY_BINDING.defaultRunBudgetCeilingTokensPerFrozenUnit * unitCount} tokens`;
     expect(settled.namedNonEffects.find((statement) => statement.includes('Provider Processing'))).toContain(resolved);
     expect(settled.updateControls!.providerConsequence).toContain(resolved);
@@ -1030,88 +1011,87 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     await store.close();
   });
 
-  /**
-   * The Run Budget Ceiling is a material plan field (ADR 0009), and this is the only scope that binds
-   * an explicit one. So this is where Issue #281's derivation is provable: the frozen half of the
-   * comparison is read from the Provider Resolution Plan the version froze, not from a constant. A
-   * launch re-bound at another ceiling therefore suspends the plan instead of silently reading
-   * `unset` — which is the hole the settable ceiling of S16 (#51) would otherwise fall into.
-   */
-  it('suspends a frozen plan when the launch re-binds another Run Budget Ceiling, and takes the way back', async () => {
-    const { store, bookId, prepared } = await prepareLive(roots.dataRoot, CEILING);
-    const ledger = store.baselineAnalysisLedger;
-    const goal = prepared.taskIntent!.goal;
-    const prepareAgain = (reconfirm: boolean): BaselineAnalysisProjection => {
-      const result = store.createBaselineAnalysisPreparationWork(bookId, goal, null, launchPolicy, reconfirm);
-      expect(result.done).toBe(true);
-      return result.projection!;
-    };
+  describe('launch ceiling changes on a frozen plan', () => {
     const OTHER: Ceiling = { kind: 'tokens', maxTotalTokens: 250_000 };
     const THIRD: Ceiling = { kind: 'tokens', maxTotalTokens: 125_000 };
+    let store: EditorialStore;
+    let bookId: string;
+    let prepared: BaselineAnalysisProjection;
 
-    // What version 1 froze is the launch's own ceiling, read back out of the plan component.
-    expect(prepared.providerResolutionPlan!.runBudgetCeiling).toEqual(CEILING);
-    expect(prepared.planVersion!.materialInputs.runBudgetCeiling).toEqual(CEILING);
-    expect(prepared.planVersion!.materialInputs.expectedOutcome).toBe(prepared.taskIntent!.expectedOutcome);
-    expect(prepared.planVersion!.materialInputs.outboundDataCategory).toBe('public-or-synthetic');
-    expect(prepared.actions).toEqual({ canPrepare: false, canAuthorize: true, canReconfirmPlan: false });
-    // The launch sets a developer-live ceiling (Issue #51, S16a): the plan offers no 设置上限…, and an edit naming one is refused.
-    const taskIntentId = prepared.taskIntent!.taskIntentId;
-    expect(store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId }).edit.budget)
-      .toEqual({ ceiling: CEILING, settable: false, reason: PLAN_CEILING_LAUNCH_REASON });
-    let refused: unknown = null;
-    try {
-      store.editBaselineAnalysisPlan({
-        bookId, taskIntentId, planEnvelopeDigest: prepared.planEnvelope!.digest, removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 1000 },
-      });
-    } catch (error) {
-      refused = error;
+    beforeEach(async () => {
+      ({ store, bookId, prepared } = await prepareLive(roots.dataRoot));
+    });
+
+    function prepareAgain(reconfirm: boolean): BaselineAnalysisProjection {
+      const result = store.createBaselineAnalysisPreparationWork(bookId, prepared.taskIntent!.goal, null, launchPolicy, reconfirm);
+      expect(result.done).toBe(true);
+      return result.projection!;
     }
-    expect(refused).toMatchObject({ code: 'ANALYSIS_PLAN_EDIT_INVALID', message: PLAN_CEILING_LAUNCH_REASON });
 
-    // Re-binding the launch at another ceiling is durable-state drift the next read detects on its own.
-    ledger.bindLaunch(liveBinding(OTHER));
-    const drifted = store.inspectBaselineAnalysis(bookId);
-    const live = drifted.planRevision!;
-    expect(live).toMatchObject({ planRevisionId: null, trigger: 'inspect', detectedAt: null, state: 'pending', resolved: false, supersedes: [], priorOrdinal: 1 });
-    expect(live.changedFields).toEqual(['runBudgetCeiling']);
-    expect(live.diff).toEqual([{ field: 'runBudgetCeiling', label: expect.any(String), prior: CEILING, proposed: OTHER, materiality: 'material' }]);
-    expect(drifted.planVersion).toMatchObject({ ordinal: 1, state: 'superseded' });
-    expect(drifted.actions).toEqual({ canPrepare: false, canAuthorize: false, canReconfirmPlan: true });
+    function rebindCeiling(): BaselineAnalysisProjection {
+      store.baselineAnalysisLedger.bindLaunch(liveBinding(OTHER));
+      return store.inspectBaselineAnalysis(bookId);
+    }
 
-    // Reconfirming records the drift the read detected: `inspect` is the trigger kind that names it,
-    // and version 2 freezes the ceiling now bound.
-    const reconfirmed = prepareAgain(true);
-    expect(reconfirmed.planVersion).toMatchObject({ ordinal: 2, state: 'current' });
-    expect(reconfirmed.providerResolutionPlan!.runBudgetCeiling).toEqual(OTHER);
-    expect(reconfirmed.planVersion!.materialInputs.runBudgetCeiling).toEqual(OTHER);
-    expect(reconfirmed.planRevisions).toHaveLength(1);
-    expect(reconfirmed.planRevisions[0]).toMatchObject({ trigger: 'inspect', state: 'resolved', resolved: true, priorOrdinal: 1, nextOrdinal: 2 });
-    expect(reconfirmed.planRevisions[0]!.detectedAt).not.toBeNull();
-    expect(reconfirmed.planRevisions[0]!.diff).toEqual(live.diff);
-    expect(reconfirmed.planRevision).toBeNull();
-    expect(reconfirmed.actions).toEqual({ canPrepare: false, canAuthorize: true, canReconfirmPlan: false });
+    it('keeps the frozen ceiling launch-owned and refuses a plan edit of it', async () => {
+      expect(prepared.providerResolutionPlan!.runBudgetCeiling).toEqual(CEILING);
+      expect(prepared.planVersion!.materialInputs.runBudgetCeiling).toEqual(CEILING);
+      expect(prepared.planVersion!.materialInputs.expectedOutcome).toBe(prepared.taskIntent!.expectedOutcome);
+      expect(prepared.planVersion!.materialInputs.outboundDataCategory).toBe('public-or-synthetic');
+      expect(prepared.actions).toEqual({ canPrepare: false, canAuthorize: true, canReconfirmPlan: false });
+      const taskIntentId = prepared.taskIntent!.taskIntentId;
+      expect(store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId }).edit.budget)
+        .toEqual({ ceiling: CEILING, settable: false, reason: PLAN_CEILING_LAUNCH_REASON });
+      expect(() => store.editBaselineAnalysisPlan({
+        bookId, taskIntentId, planEnvelopeDigest: prepared.planEnvelope!.digest, removedSteps: [], disallowedAdaptations: [], runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 1000 },
+      })).toThrowError(expect.objectContaining({ code: 'ANALYSIS_PLAN_EDIT_INVALID', message: PLAN_CEILING_LAUNCH_REASON }));
+    });
 
-    // A third ceiling drifts version 2; preparing again at the ceiling version 2 froze is the way back.
-    ledger.bindLaunch(liveBinding(THIRD));
-    const secondDrift = prepareAgain(false);
-    const pending = secondDrift.planRevision!;
-    expect(pending).toMatchObject({ trigger: 'prepare', state: 'pending', resolved: false, priorOrdinal: 2, supersedes: [] });
-    expect(pending.changedFields).toEqual(['runBudgetCeiling']);
-    expect(secondDrift.actions.canAuthorize).toBe(false);
+    it('suspends authorization when inspection detects another launch ceiling', async () => {
+      const drifted = rebindCeiling();
+      const live = drifted.planRevision!;
+      expect(live).toMatchObject({ planRevisionId: null, trigger: 'inspect', detectedAt: null, state: 'pending', resolved: false, supersedes: [], priorOrdinal: 1 });
+      expect(live.changedFields).toEqual(['runBudgetCeiling']);
+      expect(live.diff).toEqual([{ field: 'runBudgetCeiling', label: expect.any(String), prior: CEILING, proposed: OTHER, materiality: 'material' }]);
+      expect(drifted.planVersion).toMatchObject({ ordinal: 1, state: 'superseded' });
+      expect(drifted.actions).toEqual({ canPrepare: false, canAuthorize: false, canReconfirmPlan: true });
+    });
 
-    ledger.bindLaunch(liveBinding(OTHER));
-    const reverted = prepareAgain(false);
-    expect(reverted.planRevisions).toHaveLength(3);
-    expect(reverted.planRevisions.map((entry) => entry.state)).toEqual(['resolved', 'superseded', 'reverted']);
-    expect(reverted.planRevisions[2]).toMatchObject({ trigger: 'prepare', priorOrdinal: 2, nextOrdinal: 2, supersedes: [pending.planRevisionId] });
-    expect(reverted.planRevisions[2]!.diff).toEqual([{ field: 'runBudgetCeiling', label: expect.any(String), prior: THIRD, proposed: OTHER, materiality: 'material' }]);
-    // Version 2 was never replaced: it stands, it is authorizable again, and no third version exists.
-    expect(reverted.planVersions.map((version) => [version.ordinal, version.state])).toEqual([[1, 'superseded'], [2, 'current']]);
-    expect(reverted.planEnvelope!.digest).toBe(reconfirmed.planEnvelope!.digest);
-    expect(reverted.planRevision).toBeNull();
-    expect(reverted.actions).toEqual({ canPrepare: false, canAuthorize: true, canReconfirmPlan: false });
-    await store.close();
+    it('reconfirms the detected ceiling as a new authorizable plan version', async () => {
+      const live = rebindCeiling().planRevision!;
+      const reconfirmed = prepareAgain(true);
+      expect(reconfirmed.planVersion).toMatchObject({ ordinal: 2, state: 'current' });
+      expect(reconfirmed.providerResolutionPlan!.runBudgetCeiling).toEqual(OTHER);
+      expect(reconfirmed.planVersion!.materialInputs.runBudgetCeiling).toEqual(OTHER);
+      expect(reconfirmed.planRevisions).toHaveLength(1);
+      expect(reconfirmed.planRevisions[0]).toMatchObject({ trigger: 'inspect', state: 'resolved', resolved: true, priorOrdinal: 1, nextOrdinal: 2 });
+      expect(reconfirmed.planRevisions[0]!.detectedAt).not.toBeNull();
+      expect(reconfirmed.planRevisions[0]!.diff).toEqual(live.diff);
+      expect(reconfirmed.planRevision).toBeNull();
+      expect(reconfirmed.actions).toEqual({ canPrepare: false, canAuthorize: true, canReconfirmPlan: false });
+    });
+
+    it('restores version two when the launch returns to its frozen ceiling', async () => {
+      rebindCeiling();
+      const reconfirmed = prepareAgain(true);
+      store.baselineAnalysisLedger.bindLaunch(liveBinding(THIRD));
+      const secondDrift = prepareAgain(false);
+      const pending = secondDrift.planRevision!;
+      expect(pending).toMatchObject({ trigger: 'prepare', state: 'pending', resolved: false, priorOrdinal: 2, supersedes: [] });
+      expect(pending.changedFields).toEqual(['runBudgetCeiling']);
+      expect(secondDrift.actions.canAuthorize).toBe(false);
+
+      store.baselineAnalysisLedger.bindLaunch(liveBinding(OTHER));
+      const reverted = prepareAgain(false);
+      expect(reverted.planRevisions).toHaveLength(3);
+      expect(reverted.planRevisions.map((entry) => entry.state)).toEqual(['resolved', 'superseded', 'reverted']);
+      expect(reverted.planRevisions[2]).toMatchObject({ trigger: 'prepare', priorOrdinal: 2, nextOrdinal: 2, supersedes: [pending.planRevisionId] });
+      expect(reverted.planRevisions[2]!.diff).toEqual([{ field: 'runBudgetCeiling', label: expect.any(String), prior: THIRD, proposed: OTHER, materiality: 'material' }]);
+      expect(reverted.planVersions.map((version) => [version.ordinal, version.state])).toEqual([[1, 'superseded'], [2, 'current']]);
+      expect(reverted.planEnvelope!.digest).toBe(reconfirmed.planEnvelope!.digest);
+      expect(reverted.planRevision).toBeNull();
+      expect(reverted.actions).toEqual({ canPrepare: false, canAuthorize: true, canReconfirmPlan: false });
+    });
   });
 
   /**
@@ -1190,9 +1170,7 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
   // classification — and nothing caches it, so nothing replays a result nobody saw: the Run stops 结果待确认, which has no
   // 续行, and nothing in it ever transmits the range again.
   it('completes with an unknown-unit gap on a dropped answer, records it sent and uncached, and never transmits it again', async () => {
-    const calls: StubCall[] = [];
-    const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
-    const { units: responses, named } = await unitAnswers(prepared);
+    const { store, bookId, prepared, responses, named, calls } = await liveScenario();
     const inner = stubTransport({ calls, responses, named }) as unknown as (url: string, init: { headers: Record<string, string>; body: string }) => Promise<{ status: number; json(): Promise<unknown> }>;
     let dropped = 0;
     const transport = async (url: string, init: { headers: Record<string, string>; body: string }) => {
@@ -1230,9 +1208,7 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
   });
 
   it('states the bound scope, version, route, and ceiling on every reading that names them', async () => {
-    const calls: StubCall[] = [];
-    const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
-    const { units: responses, named } = await unitAnswers(prepared);
+    const { store, bookId, prepared, responses, named, calls } = await liveScenario();
     const settled = await runLive(store, bookId, prepared, owner(store, stubTransport({ calls, responses, named })));
     expect(calls).toHaveLength(FULL_CHAIN_TURNS);
 
@@ -1336,15 +1312,8 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
   });
 
   it('refuses to prepare a baseline analysis Task whose lineage is not a Public SampleBook, before any transport, workspace-profile pin, or credential is touched', async () => {
-    // A manuscript composed from an excerpt of the one admitted Public SampleBook: real prose, and a
-    // lineage that must never reach a Run Authorization, let alone dispatch. Composing from exact
-    // sample1 does not make the result exact sample1 — the composed container carries its own digest,
-    // which `tests/unit/composed-fixture.test.ts` pins as never equal to `SAMPLE1_SHA256`, and the
-    // assertion below reads that digest back before anything else happens. This is the earlier,
-    // always-reached refusal — deleting it would leave every other test in this file green while the
-    // transmit guarantee it exists to protect is gone. Nothing composed here can be transmitted: the
-    // refusal fires at preparation, and the transmittable set the case above pins admits only the five
-    // Public SampleBooks by their exact digests.
+    // A composed sample1 excerpt has its own digest and is refused at preparation, before
+    // authorization or transport. Only the exact five Public SampleBooks may be transmitted.
     const store = await openLiveStore(roots.dataRoot);
     const selectedPath = join(roots.inputRoot, 'non-sample1.docx');
     await composeManuscriptDocx(selectedPath, {
@@ -1414,9 +1383,7 @@ async function enrolledLive(policy: LaunchPolicyProjection, ceilingTokens: numbe
 
 describe('后台处理登记 under developer-live with a stub transport (Issue #864)', { timeout: 60_000 }, () => {
   it('holds two foreground places under a live launch and refuses any other capacity', async () => {
-    const calls: StubCall[] = [];
-    const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
-    const { units: responses, named } = await unitAnswers(prepared);
+    const { store, bookId, prepared, responses, named, calls } = await liveScenario();
     const held = heldTransport({ calls, responses, named });
     const execution = owner(store, held.transport);
     try {
@@ -1494,12 +1461,11 @@ describe('后台处理登记 under developer-live with a stub transport (Issue #
   });
 });
 
-
 describe('manual pause at a live bounded-turn boundary (#1114)', () => {
-  it.each(['unit', 'reduction', 'sampling', 'reflection', 'cancel-over-pause'] as const)('%s waits without abort, or lets explicit cancel override it', async (stage) => {
-    const calls: StubCall[] = [];
-    const { store, bookId, prepared } = await prepareLive(roots.dataRoot);
-    const { units: responses, named } = await unitAnswers(prepared);
+  type Stage = 'unit' | 'reduction' | 'sampling' | 'reflection';
+
+  async function startHeldRun(stage: Stage) {
+    const { store, bookId, prepared, responses, named, calls } = await liveScenario();
     const inner = stubTransport({ calls, responses, named });
     let release = () => {};
     let arrived = () => {};
@@ -1524,42 +1490,64 @@ describe('manual pause at a live bounded-turn boundary (#1114)', () => {
     const execution = owner(store, nativeFetch, CEILING, launchPolicy, null);
     const taskIntentId = prepared.taskIntent!.taskIntentId;
     const runRecordId = store.authorizeBaselineAnalysis(bookId, taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!;
+    execution.admitAndDispatch(runRecordId);
+    await ready;
+    return { store, bookId, taskIntentId, runRecordId, execution, observed, calls, release };
+  }
+
+  it.each(['unit', 'reduction', 'sampling'] as const)('%s pauses at the turn boundary and resumes the same attempt without repeating a turn', async (stage) => {
+    const { store, bookId, taskIntentId, runRecordId, execution, observed, calls, release } = await startHeldRun(stage);
     try {
-      execution.admitAndDispatch(runRecordId); await ready;
       const attemptId = store.baselineAnalysisLedger.executionBindingOf(runRecordId)!.attemptId;
       const before = calls.length;
-      if (stage === 'reflection') {
-        expect(store.inspectBaselineAnalysis(bookId, () => null).run?.state).toBe('completed');
-        expect(() => store.requestBaselineAnalysisPause(bookId, taskIntentId)).toThrow();
-        expect(observed.signal?.aborted).toBe(false);
-        release(); await execution.whenIdle();
-        expect(calls).toHaveLength(FULL_CHAIN_TURNS);
-        expect(() => execution.admitAndDispatch(runRecordId, store.baselineAnalysisLedger, { resume: true })).toThrow();
-        return;
-      }
-      store.requestBaselineAnalysisPause(bookId, taskIntentId); execution.pauseRun(runRecordId);
+      store.requestBaselineAnalysisPause(bookId, taskIntentId);
+      execution.pauseRun(runRecordId);
       expect(store.inspectBaselineAnalysis(bookId, (id) => execution.progressFor(id)).state).toBe('pausing');
       expect(observed.signal?.aborted).toBe(false);
       expect(calls).toHaveLength(before);
-      if (stage === 'cancel-over-pause') {
-        store.requestBaselineAnalysisCancel(bookId, taskIntentId); execution.cancelRun(runRecordId);
-        expect(observed.signal?.aborted).toBe(true);
-        await execution.whenIdle();
-        const cancelled = store.inspectBaselineAnalysis(bookId, () => null);
-        expect(cancelled.state).toBe('cancelled');
-        expect(cancelled.resultSetRevision?.gaps[0]?.code).toBe('outcome-unknown');
-        expect(calls).toHaveLength(before);
-      } else {
-        release(); await execution.whenIdle();
-        expect(store.inspectBaselineAnalysis(bookId, () => null).state).toBe('paused');
-        expect(calls).toHaveLength(before + 1);
-        execution.admitAndDispatch(runRecordId, store.baselineAnalysisLedger, { resume: true }); await execution.whenIdle();
-        const settled = store.inspectBaselineAnalysis(bookId, () => null);
-        expect(settled.run?.state).toBe('completed');
-        expect(store.baselineAnalysisLedger.executionBindingOf(runRecordId)!.attemptId).toBe(attemptId);
-        expect(calls).toHaveLength(FULL_CHAIN_TURNS);
-        expect(new Set(calls.map((call) => call.body)).size).toBe(FULL_CHAIN_TURNS);
-      }
+      release();
+      await execution.whenIdle();
+      expect(store.inspectBaselineAnalysis(bookId, () => null).state).toBe('paused');
+      expect(calls).toHaveLength(before + 1);
+      execution.admitAndDispatch(runRecordId, store.baselineAnalysisLedger, { resume: true });
+      await execution.whenIdle();
+      expect(store.inspectBaselineAnalysis(bookId, () => null).run?.state).toBe('completed');
+      expect(store.baselineAnalysisLedger.executionBindingOf(runRecordId)!.attemptId).toBe(attemptId);
+      expect(calls).toHaveLength(FULL_CHAIN_TURNS);
+      expect(new Set(calls.map((call) => call.body)).size).toBe(FULL_CHAIN_TURNS);
+    } finally { release(); await execution.dispose(); }
+  });
+
+  it('lets explicit cancellation override a pending pause and marks the in-flight result unknown', async () => {
+    const { store, bookId, taskIntentId, runRecordId, execution, observed, calls, release } = await startHeldRun('unit');
+    try {
+      const before = calls.length;
+      store.requestBaselineAnalysisPause(bookId, taskIntentId);
+      execution.pauseRun(runRecordId);
+      expect(store.inspectBaselineAnalysis(bookId, (id) => execution.progressFor(id)).state).toBe('pausing');
+      expect(observed.signal?.aborted).toBe(false);
+      expect(calls).toHaveLength(before);
+      store.requestBaselineAnalysisCancel(bookId, taskIntentId);
+      execution.cancelRun(runRecordId);
+      expect(observed.signal?.aborted).toBe(true);
+      await execution.whenIdle();
+      const cancelled = store.inspectBaselineAnalysis(bookId, () => null);
+      expect(cancelled.state).toBe('cancelled');
+      expect(cancelled.resultSetRevision?.gaps[0]?.code).toBe('outcome-unknown');
+      expect(calls).toHaveLength(before);
+    } finally { release(); await execution.dispose(); }
+  });
+
+  it('refuses pause and resume after completion while reflection finishes without abort', async () => {
+    const { store, bookId, taskIntentId, runRecordId, execution, observed, calls, release } = await startHeldRun('reflection');
+    try {
+      expect(store.inspectBaselineAnalysis(bookId, () => null).run?.state).toBe('completed');
+      expect(() => store.requestBaselineAnalysisPause(bookId, taskIntentId)).toThrow();
+      expect(observed.signal?.aborted).toBe(false);
+      release();
+      await execution.whenIdle();
+      expect(calls).toHaveLength(FULL_CHAIN_TURNS);
+      expect(() => execution.admitAndDispatch(runRecordId, store.baselineAnalysisLedger, { resume: true })).toThrow();
     } finally { release(); await execution.dispose(); }
   });
 });
