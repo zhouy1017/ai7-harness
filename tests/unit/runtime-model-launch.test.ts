@@ -36,7 +36,8 @@ describe('reviewed runtime model table', () => {
   it.each([
     { route: 'unknown', model: 'unknown' },
     { route: 'opencode-go', model: 'unknown' },
-    { route: 'openai-platform', model: 'gpt-5.6-luna' },
+    // Admitted by v32's baseline, yet without a readable text answer it is no runtime choice (Issue #1221).
+    { route: 'anthropic-claude', model: 'claude-opus-5' },
   ])('refuses an unreadable or out-of-family configuration row ($route/$model)', (binding) => {
     const input = structuredClone(generator.readProviderDocuments());
     input.runtimeBindings.data.ordinaryProduction.main = [binding];

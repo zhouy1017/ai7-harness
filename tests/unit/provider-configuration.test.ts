@@ -152,12 +152,18 @@ describe('provider documents and the generator (ADR 0073 §2)', () => {
   });
 
   it('keeps every model-table choice inside the families and readable rows the policy baseline admits (ADR 0095 §6)', () => {
-    type Bindings = { data: { ordinaryProduction: Record<'main' | 'fast', Array<{ route: string; model: string }>> } };
+    type Roles = Record<'main' | 'fast', Array<{ route: string; model: string }>>;
+    type Bindings = { data: { ordinaryProduction: Roles; policyBaseline: Roles } };
     const add = (role: 'main' | 'fast', route: string, model: string) => (input: ReturnType<typeof freshInput>) => {
       (input as unknown as { runtimeBindings: Bindings }).runtimeBindings.data.ordinaryProduction[role].push({ route, model });
     };
-    // Responses is admitted for the Fast role alone; a readable Responses row for Main is a new family there.
-    expect(refusalAfter(add('main', 'openai-platform', 'gpt-5.6-luna'))).toContain('PROVIDER_CONFIGURATION/runtime-binding-protocol');
+    // v32 admits Responses for Main, so a readable Responses row there resolves; a baseline without the family refuses it.
+    expect(refusalAfter(add('main', 'openai-platform', 'gpt-5.6-luna'))).toBeNull();
+    expect(refusalAfter((input) => {
+      const data = (input as unknown as { runtimeBindings: Bindings }).runtimeBindings.data;
+      data.policyBaseline.main = data.policyBaseline.main.filter((binding) => binding.route !== 'openai-platform' && binding.route !== 'opencode-zen-responses');
+      add('main', 'openai-platform', 'gpt-5.6-luna')(input);
+    })).toContain('PROVIDER_CONFIGURATION/runtime-binding-protocol');
     // Messages and Gemini rows read no text answer on evidence yet, so no role can choose one (Issue #1180).
     expect(refusalAfter(add('fast', 'anthropic-claude', 'claude-opus-5'))).toContain('PROVIDER_CONFIGURATION/runtime-binding-unreadable');
     expect(refusalAfter(add('fast', 'google-gemini', 'gemini-3.8-flash'))).toContain('PROVIDER_CONFIGURATION/runtime-binding-unreadable');

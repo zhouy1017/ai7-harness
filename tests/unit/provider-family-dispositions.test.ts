@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { BASELINE_PROMPT_CONTRACT_DIGEST } from '../../src/service/analysis/contract.js';
 import { DIALOGUE_PROMPT_CONTRACT, DIALOGUE_PROMPT_CONTRACT_DIGEST, buildDialogueMessage } from '../../src/service/dialogue/contract.js';
-import { productionBindingRefusal } from '../../src/service/launch-policy.js';
+import { modelServiceChannels, productionBindingRefusal } from '../../src/service/launch-policy.js';
 import { AI7_FAILURE_CODES } from '../../src/service/provider/classification.js';
 import { CredentialBroker } from '../../src/service/provider/credential-broker.js';
 import { DeepSeekOpenAiCompatibleAdapter, PROVIDER_ROUTE_PROFILES, assembleProviderRequest, type DeepSeekTransport } from '../../src/service/provider/deepseek-adapter.js';
@@ -127,14 +127,21 @@ describe('capability dispositions per family and per model', () => {
     expect(modelDisposition({ ...luna, capabilities: { ...luna.capabilities, streaming: 'messages-sse' } }, 'stream')).toBe('untested');
   });
 
-  it('refuses a family the selected policy does not admit for the role, by name', () => {
-    for (const row of ROWS) {
-      const main = productionBindingRefusal(declared(row), 'main');
-      expect(main, row.family).toMatchObject({ reason: 'family-not-admitted-by-selected-policy', family: row.family });
-      const fast = productionBindingRefusal(declared(row), 'fast');
-      if (row.family === 'openai-responses') expect(fast).toBeNull();
-      else expect(fast, row.family).toMatchObject({ reason: 'family-not-admitted-by-selected-policy' });
+  it('admits all four families for both roles under v32, so a Claude 官方 model reads its own untested:text (Issue #1221)', () => {
+    for (const role of ['main', 'fast'] as const) {
+      // Chat completions is the reviewed table's own family; the other three are the declared rows above.
+      for (const row of ROWS) expect(productionBindingRefusal(declared(row), role), `${role} ${row.family}`).toBeNull();
+      expect(productionBindingRefusal(shipped('opencode-go', 'deepseek-v4.1-flash'), role)).toBeNull();
     }
+    const channels = modelServiceChannels();
+    const models = channels.flatMap((channel) => channel.models);
+    expect(models.some((model) => model.main === 'family-not-admitted-by-selected-policy' || model.fast === 'family-not-admitted-by-selected-policy')).toBe(false);
+    expect(new Set(models.map((model) => model.family))).toEqual(new Set(['openai-chat-completions', 'openai-responses', 'anthropic-messages', 'google-generate-content']));
+    const claude = channels.find((channel) => channel.channelId === 'anthropic-claude')!.models.find((model) => model.modelId === 'claude-fable-5-1')!;
+    expect([claude.main, claude.fast]).toEqual(['untested:text', 'untested:text']);
+    // Admitted is not chosen: OpenAI Responses for Main waits for its runtime record (W22b-A2).
+    const luna = channels.find((channel) => channel.channelId === 'openai-platform')!.models.find((model) => model.modelId === 'gpt-5.6-luna')!;
+    expect([luna.main, luna.fast]).toEqual(['not-in-runtime-model-table', 'eligible']);
     // Every reviewed model-table row passes, so selection is unchanged.
     for (const role of ['main', 'fast'] as const) {
       for (const binding of CONFIGURED_RUNTIME_MODEL_TABLE.ordinaryProduction[role]) {

@@ -24,10 +24,11 @@ describe('the model-service channel catalogue', () => {
   it('names why every other declared model cannot be chosen, and carries no endpoint or credential slot', () => {
     const channels = modelServiceChannels();
     const byId = (channelId: string) => channels.find((channel) => channel.channelId === channelId)!;
-    expect(byId('anthropic-claude').models.every((model) => model.main === 'family-not-admitted-by-selected-policy' && model.fast === 'family-not-admitted-by-selected-policy')).toBe(true);
-    expect(byId('google-gemini').models.every((model) => model.family === 'google-generate-content' && model.main === 'family-not-admitted-by-selected-policy')).toBe(true);
+    // v32 admits every family (Issue #1221); these models now wait on their own text evidence.
+    expect(byId('anthropic-claude').models.every((model) => model.main === 'untested:text' && model.fast === 'untested:text')).toBe(true);
+    expect(byId('google-gemini').models.every((model) => model.family === 'google-generate-content' && model.main === 'untested:text')).toBe(true);
     const luna = byId('openai-platform').models.find((model) => model.modelId === 'gpt-5.6-luna')!;
-    expect([luna.main, luna.fast]).toEqual(['family-not-admitted-by-selected-policy', 'eligible']);
+    expect([luna.main, luna.fast]).toEqual(['not-in-runtime-model-table', 'eligible']);
     expect(byId('opencode-go').models.find((model) => model.modelId === 'deepseek-v4-flash')!.main).toBe('not-in-runtime-model-table');
     expect(byId('opencode-zen').models.length).toBeGreaterThan(0);
     expect(byId('opencode-zen').models.some((model) => model.main === 'eligible' || model.fast === 'eligible')).toBe(false);

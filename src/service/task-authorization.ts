@@ -1546,7 +1546,7 @@ const PROVIDER_PROCESSING_PINS: Readonly<Record<TrustedOperationalScope, Provide
 
 /** The developer-live versions earlier launches selected, whose retained records stay readable after a successor is selected. */
 const RETAINED_DEVELOPER_LIVE_VERSIONS: readonly DeveloperLiveProviderProcessingVersion[] = ['v5', 'v9', 'v10', 'v11', 'v12', 'v14', 'v16', 'v18', 'v20', 'v22'];
-const RETAINED_ORDINARY_PRODUCTION_VERSIONS: readonly OrdinaryProductionProviderProcessingVersion[] = ['v13', 'v15', 'v17', 'v19', 'v21', 'v23', 'v25', 'v26', 'v27', 'v30'];
+const RETAINED_ORDINARY_PRODUCTION_VERSIONS: readonly OrdinaryProductionProviderProcessingVersion[] = ['v13', 'v15', 'v17', 'v19', 'v21', 'v23', 'v25', 'v26', 'v27', 'v30', 'v31'];
 
 /**
  * The pin a stored value carries, or `null` when it is not exactly the pin of the scope it names.

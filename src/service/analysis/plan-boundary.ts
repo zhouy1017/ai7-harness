@@ -215,7 +215,7 @@ export function providerPlanPolicyMetadata(providerPlan: Readonly<Record<string,
     'ANALYSIS_RECORD_INVALID', '计划的处理策略版本无法识别。');
   const hasIdentity = Object.hasOwn(providerPlan, 'selectedPolicyIdentity');
   const hasProfile = Object.hasOwn(providerPlan, 'localFixtureProfile');
-  const currentContract = ['v29', 'v30', 'v31'].includes(String(pin?.version));
+  const currentContract = ['v29', 'v30', 'v31', 'v32'].includes(String(pin?.version));
   requireAnalysis(hasIdentity || (!hasProfile && !currentContract), 'ANALYSIS_RECORD_INVALID', '计划缺少已选策略身份。');
   if (!hasIdentity) return {};
   const selected = selectedPolicyIdentityOf(providerPlan.selectedPolicyIdentity);

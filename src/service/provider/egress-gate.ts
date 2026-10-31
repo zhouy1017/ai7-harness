@@ -589,7 +589,7 @@ export function evaluateEgress(
     return { decision: 'refuse', reason: 'binding-stale', detail: '断言会话、冻结来源或剩余额度已变化；未发送。' };
   }
   if (binding.learningCurationScope !== undefined && (binding.policy.operationalScope !== 'ordinary-production' ||
-    binding.policy.providerProcessingVersion !== 'v31' || binding.outboundDataCategory !== 'editorial-learning-example' ||
+    (binding.policy.providerProcessingVersion !== 'v31' && binding.policy.providerProcessingVersion !== 'v32') || binding.outboundDataCategory !== 'editorial-learning-example' ||
     payload.messages.length !== 1 || payload.tools?.length || payload.messages[0]?.role !== 'user' ||
     sha256Hex(messageText(payload.messages[0]!) ?? '') !== binding.learningCurationScope.messageDigest ||
     scope.ceilingState?.() !== 'within' || !binding.learningCurationScope.current())) {
@@ -598,7 +598,7 @@ export function evaluateEgress(
   if (!isSupportedProviderProcessingVersion(binding.policy.operationalScope, binding.policy.providerProcessingVersion))
     return refuse('payload-out-of-scope', '处理策略版本无法识别；未发送任何内容。');
   const global = binding.globalAgentScope;
-  if (global !== undefined && (binding.policy.providerProcessingVersion === 'v30' || binding.policy.providerProcessingVersion === 'v31')) {
+  if (global !== undefined && (binding.policy.providerProcessingVersion === 'v30' || binding.policy.providerProcessingVersion === 'v31' || binding.policy.providerProcessingVersion === 'v32')) {
     const qualified = global.qualification;
     const messages = [...binding.admittedUserMessages];
     if (qualified === undefined || qualified.providerProcessingVersion !== binding.policy.providerProcessingVersion || selectedPolicyIdentityOf({ providerProcessingVersion: qualified.providerProcessingVersion, providerProcessingSha256: qualified.providerProcessingSha256,
@@ -617,7 +617,7 @@ export function evaluateEgress(
       global.rule.source.unlistedSourcesAllowed === false && global.rule.outboundCategoryRestriction === 'none' &&
       global.rule.outboundDataDisclosureRequired === true && global.rule.redaction.housePeopleNamesAndRolesStripped === true &&
       global.rule.redaction.remarksAndInternalNotesStripped === true
-    : binding.policy.providerProcessingVersion === 'v31' && scoped!.source['ambientWholeLibraryReadAllowed'] === false &&
+    : (binding.policy.providerProcessingVersion === 'v31' || binding.policy.providerProcessingVersion === 'v32') && scoped!.source['ambientWholeLibraryReadAllowed'] === false &&
       scoped!.source['lastOpenBookSuppliesAuthority'] === false && scoped!.source['unlistedSourcesAllowed'] === false &&
       scoped!.scopedTools['directMemoryOrManuscriptMutationAllowed'] === false && scoped!.scopedTools['shellFilesystemWebOrUnrestrictedNetworkAllowed'] === false &&
       scoped!.outboundDataDisclosureRequired === true && scoped!.redaction.housePeopleNamesAndRolesStripped === true &&
