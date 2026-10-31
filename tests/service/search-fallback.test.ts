@@ -239,5 +239,8 @@ describe('the 联网检索 备用来源 in the 联网取证 stage (#1226)', () =
     await review('不存密钥');
     const store_ = join(roots.dataRoot, 'store');
     for (const file of readdirSync(store_)) expect(readFileSync(join(store_, file)).includes(SECRET)).toBe(false);
+    // Making the 备用来源 the default leaves no fallback: a backend is never its own fallback.
+    store.selectSearchBackend(BRAVE.id);
+    expect(store.getSearchBackendSettings()).toMatchObject({ selectedBackendId: BRAVE.id, fallbackBackendId: null });
   }, 60_000);
 });
