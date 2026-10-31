@@ -35,8 +35,25 @@ export interface SearchBackendCandidateProjection {
   disclosure: readonly string[];
 }
 
+/**
+ * The 备用来源 a Plan froze beside `webToolsBackend` under Provider Processing v32 (Issue #1226; ADR 0094 §2): the one fallback
+ * the Run's search binding may send the same canonical query to after the default failed twice on an admitted class.
+ */
+export interface FrozenWebToolsFallback {
+  backendId: string;
+  host: string;
+  configurationDigest: string;
+  credentialReference: string;
+  selectedAt: string;
+}
+
+/** Choose the default backend, or (Issue #1226) with `role: 'fallback'` the one 备用来源 — `null` clears it. */
+export type SearchBackendSelectionInput = { backendId: string; role?: undefined } | { backendId: string | null; role: 'fallback' };
+
 export interface SearchBackendSettingsProjection {
   selectedBackendId: string;
+  /** The one 备用来源 a Plan freezes beside the default (Issue #1226), or `null`; never the default itself. */
+  fallbackBackendId: string | null;
   backends: ReadonlyArray<{
     backendId: string;
     name: string;

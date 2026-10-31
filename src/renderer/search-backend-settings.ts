@@ -2,7 +2,8 @@ import type { ModelServiceSettingsProjection, RendererApi, SearchBackendCandidat
 
 /**
  * 设置 › 模型服务 › 联网检索 (Issue #883): the shipped backends in rank order with 选择后端 and 测试检索, and (Issue #1055) the
- * declared direct-search candidate disclosed as 未实测, never selectable, with one explicit 测试连接. Every probe result lives
+ * declared direct-search candidate disclosed as 未实测, never selectable, with one explicit 测试连接; and (Issue #1226) at most one
+ * 备用来源 among the ranked backends whose key is saved, never the default, clearable. Every probe result lives
  * only in this section's DOM: a repaint, leaving 设置 or restarting AI7 clears it, and nothing is stored.
  */
 export type SearchBackendSettingsApi = Pick<RendererApi, 'selectSearchBackend' | 'probeSearchBackend' | 'saveSearchBackendCredential' | 'removeSearchBackendCredential'>;
@@ -15,6 +16,7 @@ export interface SearchBackendSettingsOptions {
 }
 
 export const SEARCH_CANDIDATE_PROBE_LABEL = '测试连接';
+export const SEARCH_FALLBACK_NOTE = '默认后端连接未建立、服务出错或限流时，同一检索先重发一次；仍失败，再改发到备用来源一次。只能选一个已保存密钥的后端；候选接口不能作为备用来源。';
 export const SEARCH_CANDIDATE_OUTCOME_LABELS: Readonly<Record<SearchCandidateProbeOutcome, string>> = Object.freeze({
   succeeded: '连接成功',
   'succeeded-empty': '连接成功 · 没有结果',
@@ -87,12 +89,19 @@ export function renderSearchBackendSettings(projection: ModelServiceSettingsProj
   const section = element('section', 'review-section');
   section.setAttribute('aria-label', '联网检索');
   section.dataset['searchBackends'] = 'true';
-  section.append(element('h3', undefined, '联网检索'), element('p', 'field-note', '新任务使用所选后端；已开始的运行继续使用计划里冻结的后端。'));
+  section.append(element('h3', undefined, '联网检索'), element('p', 'field-note', '新任务使用所选后端；已开始的运行继续使用计划里冻结的后端。'),
+    element('p', 'field-note', `备用来源：${SEARCH_FALLBACK_NOTE}`));
+  const { selectedBackendId, fallbackBackendId } = projection.searchBackends;
+  const saveFallback = (backendId: string | null, done: string): void => void (async () => {
+    try { render(await api.selectSearchBackend({ backendId, role: 'fallback' })); setStatus(done); }
+    catch (error) { setStatus(errorMessage(error, '无法保存备用来源。'), 'error'); }
+  })();
   for (const backend of projection.searchBackends.backends) {
     const card = element('article', 'model-role-card');
     card.dataset['searchBackend'] = backend.backendId;
-    card.dataset['selected'] = String(backend.backendId === projection.searchBackends.selectedBackendId);
-    card.append(element('h4', undefined, `${backend.rank}. ${backend.name}${backend.backendId === projection.searchBackends.selectedBackendId ? ' · 已选择' : ''}`),
+    card.dataset['selected'] = String(backend.backendId === selectedBackendId);
+    card.dataset['fallback'] = String(backend.backendId === fallbackBackendId);
+    card.append(element('h4', undefined, `${backend.rank}. ${backend.name}${backend.backendId === selectedBackendId ? ' · 已选择' : ''}${backend.backendId === fallbackBackendId ? ' · 备用来源' : ''}`),
       element('p', 'field-note', `${backend.reachable ? '可达' : '不可达'} · 延迟 p50 ${backend.p50Ms === null ? '未知' : `${backend.p50Ms} ms`} · 单价 ${backend.price} · ${backend.keyRequired ? '需要密钥' : '无需密钥'}`),
       element('p', 'field-note', `中文命中率 ${(backend.chineseHitRate * 100).toFixed(1)}% · 国际命中率 ${(backend.internationalHitRate * 100).toFixed(1)}%`));
     if (backend.note !== null) card.append(element('p', 'field-note', backend.note));
@@ -113,7 +122,13 @@ export function renderSearchBackendSettings(projection: ModelServiceSettingsProj
       } catch (error) { output.replaceChildren(element('p', 'attention-note', errorMessage(error, '测试检索未完成。'))); }
       finally { probe.disabled = false; }
     })());
-    actions.append(choose, probe);
+    const keyed = backend.connection.credentialOperationState === 'ready';
+    const fallback = button(backend.backendId === fallbackBackendId ? '清除备用来源' : '设为备用来源', 'quiet', () => saveFallback(
+      backend.backendId === fallbackBackendId ? null : backend.backendId, backend.backendId === fallbackBackendId ? '备用来源已清除' : '备用来源已保存'));
+    fallback.dataset['action'] = backend.backendId === fallbackBackendId ? 'clear-search-fallback' : 'select-search-fallback';
+    fallback.disabled = backend.backendId !== fallbackBackendId && (backend.backendId === selectedBackendId || !keyed);
+    fallback.title = backend.backendId === selectedBackendId ? '默认后端不能同时作为备用来源' : keyed ? '' : '需先保存这个后端的密钥';
+    actions.append(choose, probe, fallback);
     if (projection.launchPolicy.operationalScope === 'ordinary-production') {
       const secret = element('input'); secret.type = 'password'; secret.autocomplete = 'off';
       secret.setAttribute('aria-label', `${backend.name} 密钥`);

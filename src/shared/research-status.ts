@@ -36,7 +36,9 @@ export function researchStatusLine(report: Pick<RunReportProjection, 'webToolsBa
   if (backend === undefined) return '未联网核查';
   const usage = report.usagePerStage['platform-tools'];
   const calls = Object.values(usage.searchCalls ?? {}).reduce((sum, count) => sum + count, 0);
-  const suffix = ` · ${researchBackendName(backend)}`;
+  // Issue #1226: sends to any other backend than the frozen default went to its frozen 备用来源, counted per backend.
+  const switched = Object.entries(usage.searchCalls ?? {}).filter(([id, count]) => id !== backend.backendId && count > 0);
+  const suffix = ` · ${researchBackendName(backend)}${switched.length === 0 ? '' : ` · 已切换备用来源 ${switched.map(([id, count]) => `${BACKEND_NAMES[id] ?? id} ${count} 次`).join('、')}`}`;
   // A Run that froze a backend and stopped short never reads as 未联网核查, even before its first search.
   if (report.classification !== 'completed' || report.failures.length > 0 || (usage.refusedSearchCalls ?? 0) > 0) {
     const reason = report.failures.map((failure) => failure.reason).join('；') ||

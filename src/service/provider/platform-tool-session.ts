@@ -16,6 +16,8 @@ import {
   type AdmittedToolResult,
   type EgressAttemptScope,
   type EgressBindingFacts,
+  type SearchBackendBinding,
+  type SearchServiceTicket,
 } from './egress-gate.js';
 import { platformToolCallOnce } from './live-transmission.js';
 import {
@@ -30,16 +32,45 @@ import {
   type BreakerVerdict,
 } from './platform-tools.js';
 import type { PlatformToolFetch } from './platform-tool-http.js';
+import type { FrozenWebToolsFallback } from '../../shared/protocol.js';
+import type { SearchFallbackTerms } from '../launch-policy.js';
+import { searchBackend, searchBackendConfigurationDigest } from './search-backends/index.js';
 import type { ProviderResultCache } from './provider-result-cache.js';
 import { authorizePublicFetch, sendPublicFetch, type TicketHostAdmission } from './public-source-fetch.js';
 import type { ResearchSnapshotCache } from './research-snapshot-cache.js';
-import { authorizeSearchCall, searchFailureClass, sendSearchCall, type SearchFailureClass } from './search-service.js';
+import { authorizeSearchCall, searchFailureClass, sendSearchCall, SEARCH_SERVICE_TIMEOUT_MS, type SearchFailureClass } from './search-service.js';
 
 interface DispatchAccounting {
   readonly unit: object;
   readonly callId: string;
   readonly tool: PlatformToolName;
   observation: BreakerVerdict | null;
+}
+
+/** Why a search went to the 备用来源 (Issue #1226): the policy's admitted class of the default's second failure. */
+export type SearchResendClass = 'transport-failure-before-any-response-byte' | 'http-5xx' | 'http-429';
+/** A source the 备用来源 returned: the backend it was actually sent to, the default it fell back from, and why. */
+export interface SearchFallbackAttribution { readonly backendId: string; readonly fallbackFrom: string; readonly failureClass: SearchResendClass }
+/** Where one search submission goes: the binding and gate book it is ticketed under, and its snapshot origin. */
+interface SearchTarget { readonly binding: EgressBindingFacts; readonly book: EgressTicketBook; readonly backend: SearchBackendBinding; readonly origin: string }
+
+/**
+ * The Run's search binding for a Plan's frozen 备用来源 (Issue #1226): bound only while the selected policy's verified terms still
+ * admit it, its registry declaration is the one frozen and its key is present — otherwise the Run is refused before any send.
+ */
+export async function bindSearchFallback(frozen: FrozenWebToolsFallback, terms: SearchFallbackTerms | null, primary: SearchBackendBinding, broker: CredentialBroker):
+  Promise<{ readonly backend: SearchBackendBinding; readonly resendableFailureClasses: readonly string[] } | { readonly refused: { readonly code: string; readonly message: string } }> {
+  let adapter: ReturnType<typeof searchBackend> | null = null;
+  try { adapter = searchBackend(frozen.backendId); } catch { adapter = null; }
+  if (terms === null || adapter === null || frozen.backendId === primary.backendId || !terms.eligibleBackendIds.includes(frozen.backendId) ||
+      adapter.declaration.host !== frozen.host || searchBackendConfigurationDigest(frozen.backendId) !== frozen.configurationDigest) {
+    return { refused: { code: 'PLATFORM_TOOL_BACKEND_DRIFT', message: '冻结的联网检索备用来源配置无效。' } };
+  }
+  if (await broker.checkPlanReadiness(adapter.declaration.credentialSlot, frozen.credentialReference) !== 'present') {
+    return { refused: { code: 'SEARCH_CREDENTIAL_MISSING', message: `备用来源 ${adapter.declaration.displayName} 缺少密钥；请在 设置 › 模型服务 › 联网检索 配置。` } };
+  }
+  return { backend: { backendId: frozen.backendId, host: frozen.host, endpoint: adapter.declaration.endpoint!, credentialSlot: adapter.declaration.credentialSlot,
+    credentialReference: frozen.credentialReference }, resendableFailureClasses: terms.resendableFailureClasses };
 }
 
 export interface FactualSearchAccounting {
@@ -107,6 +138,11 @@ export class PlatformToolSession implements PlatformToolOwner {
   readonly provenance: Array<{ sourceKind: 'tool'; backendId: string | null; host: string; capturedAt: string; argumentsDigest: string; responseDigest: string }> = [];
   /** Where a search goes, as the rule names it: the Research Snapshot Cache never answers one service's query with another's. */
   readonly #searchOrigin: string;
+  /** The frozen 备用来源 and the admitted resend classes (v32, Issue #1226); `null` keeps a fallback-free Plan's exact behavior. */
+  readonly #fallback: { readonly target: SearchTarget; readonly classes: readonly string[] } | null;
+  /** Each source a fallback search returned, by its address; and each fallback-answered call's backend, for its admitted result. */
+  readonly fallbackSources = new Map<string, SearchFallbackAttribution>();
+  readonly #resultBackends = new Map<string, string>();
   readonly #breaker: PlatformToolBreaker;
   readonly #book: EgressTicketBook | null;
   readonly #retrieval: RetrievalIndex | null;
@@ -146,6 +182,8 @@ export class PlatformToolSession implements PlatformToolOwner {
     readonly broker?: CredentialBroker;
     readonly evidenceSearchRoundTripOnly?: boolean;
     readonly onUsage?: (usage: { inputTokens: number; outputTokens: number }) => void;
+    /** The Plan's frozen 备用来源 binding and the selected policy's resendable classes (Issue #1226). */
+    readonly searchFallback?: { readonly backend: SearchBackendBinding; readonly resendableFailureClasses: readonly string[] };
   }) {
     const rule = deps.binding.platformTools ?? null;
     const local = deps.binding.localTools?.targetedRetrieval.allowed === true;
@@ -173,6 +211,11 @@ export class PlatformToolSession implements PlatformToolOwner {
     this.#breaker = deps.breaker ?? new PlatformToolBreaker();
     // The gate opens this attempt's book for this binding; every redemption re-reads the attempt's current binding (#676).
     this.#book = rule === null ? null : EgressTicketBook.open(deps.binding, { currentBindingDigest: () => this.#base.currentBindingDigest() });
+    const fallback = deps.searchFallback;
+    if (fallback === undefined || rule === null || deps.binding.searchBackend === undefined) { this.#fallback = null; return; }
+    const binding = { ...deps.binding, searchBackend: fallback.backend };
+    this.#fallback = { classes: fallback.resendableFailureClasses, target: { binding, backend: fallback.backend, origin: `${fallback.backend.backendId}@${fallback.backend.host}`,
+      book: EgressTicketBook.open(binding, { currentBindingDigest: () => this.#base.currentBindingDigest() }) } };
   }
 
   /** The scope the gate evaluates every model call and every tool decision of this attempt against. */
@@ -313,7 +356,7 @@ export class PlatformToolSession implements PlatformToolOwner {
     this.#admittedToolResults.set(toolResultKey(result.callId, result.tool), {
       callId: result.callId,
       sourceKind: 'tool',
-      ...(result.tool === 'websearch' && this.#binding.searchBackend !== undefined ? { backendId: this.#binding.searchBackend.backendId } : {}),
+      ...(result.tool === 'websearch' && this.#binding.searchBackend !== undefined ? { backendId: this.#resultBackends.get(result.callId) ?? this.#binding.searchBackend.backendId } : {}),
       ...(result.sourceUrl === null ? {} : { host: new URL(result.sourceUrl).hostname, capturedAt: new Date().toISOString() }),
       tool: result.tool,
       sourceUrl: result.sourceUrl,
@@ -416,7 +459,8 @@ export class PlatformToolSession implements PlatformToolOwner {
     return this.#observeWeb(this.#dispatchState(call, call.dispatch), `refused:${this.#refusedRoundTrips}`) === 'tripped' ? refusal('联网核查未完成：本单元的工具往返已达到熔断上限。') : refusal(text);
   }
 
-  async #settle<Authorized>(item: PlatformToolCallItem, call: { authorize(): Authorized; send(authorized: Authorized): Promise<PlatformToolCallResult> }): Promise<{ snapshot: ResearchSnapshot | null; status: number; replayed: boolean }> {
+  async #settle<Authorized>(item: PlatformToolCallItem, call: { authorize(): Authorized; send(authorized: Authorized): Promise<PlatformToolCallResult> },
+    backend: SearchBackendBinding | undefined = this.#binding.searchBackend): Promise<{ snapshot: ResearchSnapshot | null; status: number; replayed: boolean }> {
     const measured = { authorize: call.authorize, send: async (authorized: Authorized): Promise<PlatformToolCallResult> => {
       if (this.#evidenceOnly && item.kind === 'search-call' && Object.values(this.usage.searchCalls).some((count) => count > 0)) {
         this.evidenceNeedsCommander = true;
@@ -424,12 +468,12 @@ export class PlatformToolSession implements PlatformToolOwner {
       }
       this.usage.requests += 1;
       if (item.kind === 'search-call') {
-        const id = this.#binding.searchBackend?.backendId ?? this.#searchOrigin;
+        const id = backend?.backendId ?? this.#searchOrigin;
         this.usage.searchCalls[id] = (this.usage.searchCalls[id] ?? 0) + 1;
       } else this.usage.fetchCount += 1;
       const result = await call.send(authorized);
       if (item.kind === 'fetch') this.usage.fetchBytes += result.bytes.byteLength;
-      if (this.#binding.searchBackend?.backendId === 'search-deepseek' && item.kind === 'search-call') {
+      if (backend?.backendId === 'search-deepseek' && item.kind === 'search-call') {
         try {
           const body = JSON.parse(new TextDecoder().decode(result.bytes)) as { usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number } };
           const inputTokens = (body.usage?.input_tokens ?? 0) + (body.usage?.cache_read_input_tokens ?? 0);
@@ -439,7 +483,7 @@ export class PlatformToolSession implements PlatformToolOwner {
           }
         } catch { /* No vendor payload leaves this boundary. */ }
       }
-      this.provenance.push({ sourceKind: 'tool', backendId: item.kind === 'fetch' ? null : this.#binding.searchBackend?.backendId ?? null,
+      this.provenance.push({ sourceKind: 'tool', backendId: item.kind === 'fetch' ? null : backend?.backendId ?? null,
         host: item.host, capturedAt: new Date().toISOString(), argumentsDigest: item.argumentsDigest, responseDigest: sha256Hex(result.bytes) });
       return result;
     } };
@@ -449,6 +493,65 @@ export class PlatformToolSession implements PlatformToolOwner {
       kind: item.kind, origin: item.origin, argumentsDigest: item.argumentsDigest, url: result.url, retrievedAt: new Date().toISOString(), status: result.status,
       contentType: result.contentType, responseDigest: sha256Hex(result.bytes), responseBytes: result.bytes.byteLength, bodyBase64: Buffer.from(result.bytes).toString('base64'), text: result.text,
     } };
+  }
+
+  /**
+   * One canonical query under a frozen 备用来源 (Issue #1226; ADR 0094 §2; v32 `knownOrUnknownFailedSubmissionResendAllowed`): sent to
+   * the default; on an admitted class — a transport that failed before any response byte, HTTP 5xx, or HTTP 429 after its
+   * Retry-After (at most the search deadline) — resent once to the default; on a second admitted failure sent once to the
+   * fallback. A submission that was answered (any other status, or a body that then failed) or that the Run cancelled is never
+   * sent again anywhere. Every send is its own gate ticket under the same reservation, counted in the per-claim tool budget and
+   * the Run's usage; the breaker is not observed again. The last failure is returned or thrown as the single send's would be.
+   */
+  async #searchWithFallback(args: Extract<PlatformToolArguments, { tool: 'websearch' }>, first: SearchServiceTicket, call: PlatformToolExecution):
+    Promise<{ snapshot: ResearchSnapshot | null; status: number; replayed: boolean }> {
+    const fallback = this.#fallback!;
+    const primary: SearchTarget = { binding: this.#binding, book: this.#book!, backend: this.#binding.searchBackend!, origin: this.#searchOrigin };
+    const credentialed = this.#broker === undefined ? undefined : { broker: this.#broker, admitHost: this.#admitHost, modelRole: 'Main Editorial Role' as const };
+    let ticket: SearchServiceTicket | null = first;
+    let last: { readonly settled: { snapshot: ResearchSnapshot | null; status: number; replayed: boolean } } | { readonly error: unknown } | null = null;
+    let cause: SearchResendClass | null = null;
+    let superseded: SearchFailureClass | null = null;
+    for (const [attempt, target] of ([primary, primary, fallback.target] as const).entries()) {
+      if (ticket === null) {
+        if (this.#claimAccounting !== null && !this.#claimAccounting.reserveTool(`${call.callId}#${attempt === 1 ? 'resend' : 'fallback'}`)) break;
+        const decision = evaluateSearchServiceCall({ arguments: args }, target.binding, this.egressScope, target.book);
+        if (decision.decision !== 'call-search-service') break;
+        ticket = decision.ticket;
+        // The earlier failure is superseded only once the next send is ticketed; a refused next send leaves it the answer.
+        this.#countSearchFailure(superseded!);
+      }
+      const sent: SearchServiceTicket = ticket;
+      const seen = { responded: false, retryAfter: null as string | null };
+      const fetch: PlatformToolFetch = async (url, init) => {
+        const response = await this.#fetch(url, init);
+        seen.responded = true; seen.retryAfter = response.headers.get('retry-after');
+        return response;
+      };
+      try {
+        const settled = await this.#settle({ kind: 'search-call', purpose: this.#purpose, argumentsDigest: sent.argumentsDigest, host: sent.host, origin: target.origin },
+          { authorize: () => authorizeSearchCall({ ticket: sent, book: target.book, arguments: args }), send: (authorized) => sendSearchCall(authorized, fetch, call.signal, credentialed) }, target.backend);
+        if (settled.replayed) target.book.revoke(sent);
+        last = { settled };
+        if (settled.snapshot !== null) {
+          if (target === fallback.target) {
+            this.#resultBackends.set(call.callId, target.backend.backendId);
+            for (const url of urlsIn(settled.snapshot.text)) if (!this.fallbackSources.has(url)) this.fallbackSources.set(url, { backendId: target.backend.backendId, fallbackFrom: primary.backend.backendId, failureClass: cause! });
+          }
+          return settled;
+        }
+        cause = settled.status === 429 ? 'http-429' : settled.status >= 500 && settled.status <= 599 ? 'http-5xx' : null;
+      } catch (error) {
+        last = { error };
+        cause = seen.responded || call.signal.aborted ? null : 'transport-failure-before-any-response-byte';
+      }
+      if (attempt === 2 || cause === null || !fallback.classes.includes(cause) || call.signal.aborted) break;
+      superseded = 'settled' in last ? searchFailureClass({ status: last.settled.status }) : searchFailureClass({ code: errorCode(last.error) });
+      if (attempt === 0 && cause === 'http-429') await retryAfterWait(seen.retryAfter, call.signal);
+      ticket = null;
+    }
+    if (last === null || 'error' in last) throw last?.error ?? new Error('PLATFORM_TOOL_FAILED');
+    return last.settled;
   }
 
   async #execute(call: PlatformToolExecution): Promise<{ readonly text: string; readonly sourceUrl: string | null }> {
@@ -511,13 +614,13 @@ export class PlatformToolSession implements PlatformToolOwner {
           this.usage.refusedSearchCalls += 1;
           return refusal('断言检索额度已用完，或该查询已经提交；失败和结果未知的提交不会重发。');
         }
-        const settled = await this.#settle(
+        const settled = this.#fallback !== null ? await this.#searchWithFallback(args, decision.ticket, call) : await this.#settle(
           { kind: 'search-call', purpose: this.#purpose, argumentsDigest: decision.ticket.argumentsDigest, host: decision.ticket.host, origin: this.#searchOrigin },
           {
             authorize: () => authorizeSearchCall({ ticket: decision.ticket, book: this.#book!, arguments: args }),
             send: (authorized) => sendSearchCall(authorized, this.#fetch, call.signal, this.#broker === undefined ? undefined : { broker: this.#broker, admitHost: this.#admitHost, modelRole: 'Main Editorial Role' }),
           });
-        if (settled.replayed) this.#book.revoke(decision.ticket);
+        if (settled.replayed && this.#fallback === null) this.#book.revoke(decision.ticket);
         if (settled.snapshot === null) {
           this.#countSearchFailure(searchFailureClass({ status: settled.status }));
           return refusal(`搜索服务没有返回可用结果（状态 ${settled.status}）。`);
@@ -573,6 +676,21 @@ const BREAKER_UNIT_END: PlatformToolUnitEnd = Object.freeze({
   settles: 'unit-only',
 });
 const LOCAL_BREAKER_UNIT_END: PlatformToolUnitEnd = Object.freeze({ reason: 'circuit-breaker-tripped', disclosure: LOCAL_TOOL_BREAKER_END, retry: 'never', settles: 'unit-only' });
+
+function errorCode(error: unknown): string {
+  return error !== null && typeof error === 'object' && typeof (error as { code?: unknown }).code === 'string' ? (error as { code: string }).code : 'PLATFORM_TOOL_FAILED';
+}
+
+/** Honour an HTTP 429's Retry-After (seconds or an HTTP date) before the one resend, never longer than the search deadline. */
+function retryAfterWait(header: string | null, signal: AbortSignal): Promise<void> {
+  const seconds = header === null ? 0 : /^\d+$/u.test(header.trim()) ? Number(header.trim()) * 1000 : Date.parse(header) - Date.now();
+  const ms = Math.min(Math.max(Number.isFinite(seconds) ? seconds : 0, 0), SEARCH_SERVICE_TIMEOUT_MS);
+  return ms === 0 || signal.aborted ? Promise.resolve() : new Promise((resolve) => {
+    const timer = setTimeout(() => { signal.removeEventListener('abort', done); resolve(); }, ms);
+    const done = (): void => { clearTimeout(timer); resolve(); };
+    signal.addEventListener('abort', done, { once: true });
+  });
+}
 
 function refusal(text: string): { readonly text: string; readonly sourceUrl: null } {
   return { text, sourceUrl: null };

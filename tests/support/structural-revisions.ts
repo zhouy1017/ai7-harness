@@ -94,6 +94,7 @@ export function asRevision101(db: DatabaseSync): void {
  * same rows in the same order, their indexes and triggers as they were.
  */
 export function asRevision102(db: DatabaseSync): void {
+  asRevision103(db);
   if (db.prepare(`SELECT 1 FROM model_service_connections WHERE provider_id IN ('opencode-zen', 'anthropic-claude', 'google-gemini')
       OR (provider_id = 'openai-platform' AND selected IS NOT NULL) LIMIT 1`).get() !== undefined ||
     db.prepare("SELECT 1 FROM dialogue_execution_bindings WHERE route NOT IN ('ai7-local-deterministic', 'opencode-go', 'deepseek-open-platform') LIMIT 1").get() !== undefined) {
@@ -110,4 +111,11 @@ export function asRevision102(db: DatabaseSync): void {
     for (const dependent of dependents) db.exec(dependent);
   }
   db.exec('PRAGMA user_version = 102');
+}
+
+/** A genuine revision-103 store from a current one with no 备用来源 chosen (#1226): revision 104's one-row relation dropped. */
+export function asRevision103(db: DatabaseSync): void {
+  if (db.prepare('SELECT 1 FROM search_backend_fallback LIMIT 1').get() !== undefined) throw new Error('a revision-103 store holds no search fallback');
+  db.exec('DROP TABLE search_backend_fallback');
+  db.exec('PRAGMA user_version = 103');
 }
