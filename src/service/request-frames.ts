@@ -1,7 +1,7 @@
 import { validLocalOptions } from './review/deterministic/plan.js';
 import { validStructureChoice } from '../shared/protocol/import-structure.js';
 import { CUSTOM_ANALYSIS_PREPARATION_PURPOSES, type CustomAnalysisPreparationPurpose } from '../shared/protocol/custom-analysis-redo.js';
-import { SEARCH_CANDIDATE_IDS } from '../shared/protocol/search-backends.js';
+import { SEARCH_CANDIDATE_IDS } from '../shared/protocol/search-backends.js'; import { MODEL_SERVICE_ROUTES } from '../shared/protocol/model-service.js';
 import { MAX_SELECTION_SPAN_BLOCKS } from '../shared/selection-span.js';
 import { validateInspectHouseWordListInput, validateSaveHouseWordListInput } from '../shared/protocol/house-word-list.js';
 import { validSupervisionInput } from './learning/supervision-directives.js';
@@ -522,23 +522,23 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
         ['route', 'connectionName', 'credentialReference', 'credentialOperationState'],
         tentativeId,
       );
-      if ((input.route !== 'opencode-go' && input.route !== 'deepseek-open-platform' && input.route !== 'openai-platform') || !isBoundedString(input.connectionName, 80) ||
+      if (!(MODEL_SERVICE_ROUTES as readonly unknown[]).includes(input.route) || !isBoundedString(input.connectionName, 80) ||
           !(input.credentialReference === null || (isBoundedString(input.credentialReference, 36) && UUID_PATTERN.test(input.credentialReference))) ||
           (input.credentialOperationState !== 'ready' && input.credentialOperationState !== 'needs-attention')) {
         throw new ProtocolError(tentativeId);
       }
       break;
     }
-    // The route new Tasks use (Issue #811): one of the two production routes.
+    // The route new Tasks use (Issues #811, #1225): one of the Model Service routes.
     case 'selectFastRoleModel':
     case 'testModelServiceConnection': {
       const input = requireInput(value.input, ['route', 'modelId'], tentativeId);
-      if (!['opencode-go', 'deepseek-open-platform', 'openai-platform'].includes(input.route as string) || !isBoundedString(input.modelId, 128)) throw new ProtocolError(tentativeId);
+      if (!(MODEL_SERVICE_ROUTES as readonly unknown[]).includes(input.route) || !isBoundedString(input.modelId, 128)) throw new ProtocolError(tentativeId);
       break;
     }
     case 'selectModelServiceRoute': {
       const input = requireInput(value.input, ['route'], tentativeId);
-      if (input.route !== 'opencode-go' && input.route !== 'deepseek-open-platform' && input.route !== 'openai-platform') throw new ProtocolError(tentativeId);
+      if (!(MODEL_SERVICE_ROUTES as readonly unknown[]).includes(input.route)) throw new ProtocolError(tentativeId);
       break;
     }
     case 'setModelServiceCredentialState': {

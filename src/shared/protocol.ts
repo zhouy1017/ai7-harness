@@ -1,6 +1,6 @@
 import type { GlobalAgentOperations, GlobalAgentRendererApi } from './protocol/global-agent.js';
 import type { HouseWordListOperations, HouseWordListApi } from './protocol/house-word-list.js'; import type { CustomAnalysisPreparationFrom, TaskPlanCustomDimension } from './protocol/custom-analysis-redo.js';
-import type { JournalEditInput } from './protocol/manuscript-structure.js'; import type { SelectionSpanBlockPin, SelectionSpanField } from './protocol/selection-span.js'; import type { GlobalAttentionProjection } from './protocol/global-attention.js'; import type { ModelServiceChannelProjection, OrdinaryProductionRouteId } from './protocol/model-service.js'; import type { SearchBackendConnectionProjection, SearchBackendProbeProjection, SearchBackendSettingsProjection, SearchCandidateId, SearchConnectionTestPolicy } from './protocol/search-backends.js';
+import type { JournalEditInput } from './protocol/manuscript-structure.js'; import type { SelectionSpanBlockPin, SelectionSpanField } from './protocol/selection-span.js'; import type { GlobalAttentionProjection } from './protocol/global-attention.js'; import type { ModelServiceBindingProjection, ModelServiceChannelProjection, ModelServiceConnectionId, ModelServiceRouteId, OrdinaryProductionRouteId } from './protocol/model-service.js'; import type { SearchBackendConnectionProjection, SearchBackendProbeProjection, SearchBackendSettingsProjection, SearchCandidateId, SearchConnectionTestPolicy } from './protocol/search-backends.js';
 export type { JournalEditInput, JournalStructuralEdit } from './protocol/manuscript-structure.js';
 import type { ManuscriptBlockProjection } from './protocol/manuscript-notes.js';
 export type { ManuscriptBlockKind, ManuscriptBlockProjection, ManuscriptNoteProjection } from './protocol/manuscript-notes.js';
@@ -136,7 +136,7 @@ import type { PublicSampleBookSourceDigest } from './public-samplebooks.js';
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 189 as const;
+export const SERVICE_PROTOCOL_VERSION = 190 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 export interface BookFindingProjection {
@@ -2371,25 +2371,6 @@ export type ModelRoleStatus = 'available' | 'setup-required' | 'needs-attention'
 export type ModelRoleStatusLabel = '可用' | '需设置' | '需处理' | '不可用';
 export type ModelCredentialOperationState = 'ready' | 'missing' | 'needs-attention';
 
-/**
- * Production channels: existing Go/DeepSeek choices and the reviewed OpenAI buffered-text choices (Issue #1044).
- * Each role still requires its own capability-matched policy admission.
- */
-export type ModelServiceRouteId = 'opencode-go' | 'deepseek-open-platform' | 'openai-platform';
-/** One connection row per route; the official row keeps the identity Issue #712 gave it. */
-export type ModelServiceConnectionId = 'main-editorial-deepseek-v4-pro' | 'main-editorial-opencode-go' | 'openai-platform';
-
-export interface ModelServiceBindingProjection {
-  providerId: ModelServiceRouteId;
-  providerLabel: 'OpenCode Go' | 'DeepSeek 开放平台（官方）' | 'OpenAI 官方';
-  modelId: 'deepseek-v4.1-flash' | 'deepseek-flash' | 'gpt-5.6-sol' | 'gpt-5.6-luna';
-  modelLabel: string;
-  adapterRevision: 1;
-  configurationRevision: 1;
-  approvedFallbackChain: readonly [];
-  credentialSlot: 'opencode-go' | 'deepseek-api-key' | 'openai-platform';
-}
-
 export interface ModelServiceConnectionProjection {
   connectionId: ModelServiceConnectionId;
   roleId: 'main-editorial';
@@ -3190,33 +3171,6 @@ export interface ModelServiceUnsupportedProviderProjection {
   providerId: string;
   providerLabel: string;
   statusLabel: '尚未支持';
-}
-
-/** The routes in the order 设置 › 模型服务 lists them: the default first (Issue #811). */
-export const MODEL_SERVICE_ROUTES: ReadonlyArray<ModelServiceRouteId> = ['opencode-go', 'deepseek-open-platform', 'openai-platform'];
-
-/** Each channel's default model. `modelServiceModels` lists its reviewed choices; no fallback chain. */
-export const MODEL_SERVICE_ROUTE_BINDINGS: Readonly<Record<ModelServiceRouteId, ModelServiceBindingProjection>> = {
-  'opencode-go': {
-    providerId: 'opencode-go', providerLabel: 'OpenCode Go', modelId: 'deepseek-v4.1-flash', modelLabel: 'DeepSeek V4.1 Flash',
-    adapterRevision: 1, configurationRevision: 1, approvedFallbackChain: [], credentialSlot: 'opencode-go',
-  },
-  'deepseek-open-platform': {
-    providerId: 'deepseek-open-platform', providerLabel: 'DeepSeek 开放平台（官方）', modelId: 'deepseek-flash', modelLabel: 'DeepSeek V4.1 Flash',
-    adapterRevision: 1, configurationRevision: 1, approvedFallbackChain: [], credentialSlot: 'deepseek-api-key',
-  },
-  'openai-platform': {
-    providerId: 'openai-platform', providerLabel: 'OpenAI 官方', modelId: 'gpt-5.6-luna', modelLabel: 'GPT-5.6 Luna',
-    adapterRevision: 1, configurationRevision: 1, approvedFallbackChain: [], credentialSlot: 'openai-platform',
-  },
-};
-
-/** Reviewed text choices only. Native tools/streams are not admitted by this catalogue. */
-export function modelServiceModels(route: ModelServiceRouteId): readonly ModelServiceBindingProjection[] {
-  const binding = MODEL_SERVICE_ROUTE_BINDINGS[route];
-  return route === 'openai-platform'
-    ? [binding, { ...binding, modelId: 'gpt-5.6-sol', modelLabel: 'GPT-5.6 Sol' }]
-    : [binding];
 }
 
 /**

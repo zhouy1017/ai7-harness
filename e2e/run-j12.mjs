@@ -307,7 +307,8 @@ async function configuredUnboundProviderNames() {
   const routes = new Set();
   for (const file of (await readdir(directory)).filter((name) => name.endsWith('.json') && !name.endsWith('.schema.json')).sort()) {
     const document = JSON.parse(await readFile(join(directory, file), 'utf8'));
-    if (document.providerId === 'deepseek-open-platform' || document.providerId === 'opencode-go' || document.providerId === 'openai-platform') continue;
+    // The six Model Service routes are bound (Issue #1225 adds OpenCode Zen, Claude 官方 and Gemini 官方); every other provider is not.
+    if (['deepseek-open-platform', 'opencode-go', 'openai-platform', 'opencode-zen', 'anthropic-claude', 'google-gemini'].includes(document.providerId)) continue;
     names.add(document.displayName);
     listed.add(document.displayName);
     for (const route of document.routes) {
@@ -1315,7 +1316,7 @@ async function main() {
     const diagnosticsSummary = JSON.parse(await readFile(resolve(diagnosticsBundle, 'summary.json'), 'utf8'));
     const builtPolicySet = JSON.parse(await readFile(resolve(ROOT, 'dist/docs/policies/active-policy-set.v23.json'), 'utf8'));
     // 数据版本 and 数据库修订 named apart (Issue #967): the Data Version is 1, the schema revision the store's own.
-    requireJourney(diagnosticsSummary.appVersion === packageVersion && diagnosticsSummary.dataVersion === 1 && diagnosticsSummary.schemaRevision === CREDENTIAL_CLEANUP_SCHEMA_VERSION && diagnosticsSummary.protocol === 189 &&
+    requireJourney(diagnosticsSummary.appVersion === packageVersion && diagnosticsSummary.dataVersion === 1 && diagnosticsSummary.schemaRevision === CREDENTIAL_CLEANUP_SCHEMA_VERSION && diagnosticsSummary.protocol === 190 &&
       diagnosticsSummary.policySetVersion === builtPolicySet.version && diagnosticsSummary.logs === '无日志文件', 'diagnostics-summary');
     requireJourney((await readFile(resolve(diagnosticsBundle, 'README.txt'), 'utf8')).includes('不含数据库、书稿'), 'diagnostics-exclusions');
     await click(primary, '查看诊断位置', 'diagnostics-reveal');
@@ -1347,7 +1348,7 @@ async function main() {
         main?.dataset.modelRoleStatus==='setup-required' &&
         main.textContent.includes('DeepSeek 开放平台（官方）') && main.textContent.includes('OpenCode Go') && main.textContent.includes('DeepSeek V4.1 Flash') &&
         main.textContent.includes('已批准备用链') && main.textContent.includes('无') &&
-        JSON.stringify(Array.from(main.querySelectorAll('[data-model-route]')).map((node)=>node.dataset.modelRoute))===JSON.stringify(['opencode-go','deepseek-open-platform','openai-platform']) &&
+        JSON.stringify(Array.from(main.querySelectorAll('[data-model-route]')).map((node)=>node.dataset.modelRoute))===JSON.stringify(['opencode-go','deepseek-open-platform','openai-platform','opencode-zen','anthropic-claude','google-gemini']) &&
         Array.from(main.querySelectorAll('[data-model-route]')).every((node)=>node.dataset.modelRouteInUse==='false'&&node.dataset.modelRouteStatus==='setup-required') &&
         roles.filter((node)=>node.dataset.modelRole!=='main-editorial').every((node)=>node.dataset.modelRoleStatus==='setup-required'&&!node.textContent.includes('DeepSeek')) &&
         statuses.length===4 && statuses.every((node)=>node.getAttribute('aria-label')?.includes(node.textContent??'')) &&
@@ -1386,7 +1387,9 @@ async function main() {
       if(JSON.stringify(channels)!==JSON.stringify(['opencode-zen','opencode-go','anthropic-claude','google-gemini','openai-platform','deepseek-open-platform'])||!(zen instanceof HTMLInputElement))return false;
       zen.click();
       const items=Array.from(flow.querySelectorAll('.model-service-flow-ineligible li'));
-      const shown=flow.dataset.flowChannel==='opencode-zen' && flow.querySelectorAll('[data-model-choice]').length===0 && flow.querySelector('[data-action="enter-channel-credential"]')===null &&
+      // Issue #1225: Zen now offers its credential entry; with no credential saved, no model it lists can be chosen.
+      const shown=flow.dataset.flowChannel==='opencode-zen' && Array.from(flow.querySelectorAll('[data-model-choice]')).every((node)=>node.disabled) &&
+        flow.querySelector('[data-action="enter-channel-credential"]')?.textContent==='填写凭据' && flow.querySelector('[data-action="use-model-for-both-roles"]')?.disabled===true &&
         items.length>0 && items.every((item)=>/（(family-not-admitted-by-selected-policy|untested:text|unsupported:text|not-in-runtime-model-table)）/.test(item.textContent) && item.querySelectorAll('input,button').length===0) &&
         ${JSON.stringify(unbound.routes)}.every((name)=>!flow.textContent.includes(name));
       flow.querySelector('[data-model-channel="opencode-go"] input').click();
@@ -1485,7 +1488,8 @@ async function main() {
         firstConnection.binding?.modelId === 'deepseek-flash' &&
         firstConnection.connection?.selected === true &&
         JSON.stringify(firstConnection.routes?.map((route) => [route.route, route.isDefault, route.inUse, route.status])) ===
-          JSON.stringify([['opencode-go', true, false, 'setup-required'], ['deepseek-open-platform', false, true, 'available'], ['openai-platform', false, false, 'setup-required']]) &&
+          JSON.stringify([['opencode-go', true, false, 'setup-required'], ['deepseek-open-platform', false, true, 'available'], ['openai-platform', false, false, 'setup-required'],
+            ['opencode-zen', false, false, 'setup-required'], ['anthropic-claude', false, false, 'setup-required'], ['google-gemini', false, false, 'setup-required']]) &&
         firstConnection.unsupported?.length > 0 && firstConnection.unsupported.every((provider) => provider.statusLabel === '尚未支持') &&
         firstConnection.binding?.adapterRevision === 1 &&
         firstConnection.binding?.configurationRevision === 1 &&

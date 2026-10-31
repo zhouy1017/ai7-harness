@@ -10,7 +10,7 @@ import type { PinnedLocalToolSources } from '../retrieval/index.js';
 import { kindResearchDeclaration } from './live-kind-admission.js';
 import { factualReviewDefinitionsByDigest, factualReviewKindDefinition, factualReviewLevelDefinition, withFactualResearch } from './kind-definition.js';
 import { factualClaimKindDefinition } from './factual-claim-contract.js';
-import { FACTUAL_REVIEW_KIND, type EvidenceAssuranceLevel, type ProcedureDefinitionPin } from '../../shared/protocol.js';
+import { FACTUAL_REVIEW_KIND, MODEL_SERVICE_CONNECTION_IDS, modelServiceChannelOf, type EvidenceAssuranceLevel, type ProcedureDefinitionPin } from '../../shared/protocol.js';
 import { FACTUAL_VERIFICATION_POLICY_VERSION } from './factual-review-contract.js';
 import { factualReviewUnitResultOfRecordV2 } from './factual-review-contract-v2.js';
 import { platformToolsFromProjection } from '../provider/search-service.js';
@@ -6427,9 +6427,9 @@ export class BaselineAnalysisStore {
     // ADR 0091 work, Issue #990) and the official row.
     const live = this.#launch.live;
     const production = this.#launch.operationalScope === 'ordinary-production';
-    const connectionId = live !== null && live.scope === 'ordinary-production' && live.route !== 'deepseek-open-platform'
-      ? (live.route === 'opencode-go' ? 'main-editorial-opencode-go' : live.route)
-      : 'main-editorial-deepseek-v4-pro';
+    // The connection row of the live route's channel (Issue #1225): a Zen model's route names the one Zen row.
+    const channel = live !== null && live.scope === 'ordinary-production' ? modelServiceChannelOf(live.route) : null;
+    const connectionId = channel === null ? 'main-editorial-deepseek-v4-pro' : MODEL_SERVICE_CONNECTION_IDS[channel];
     const row = this.#db.prepare(
       `SELECT m.manuscript_id, mb.branch_id, bws.base_revision_id, bws.journal_sequence, bws.working_digest,
               mr.source_version_id, sv.source_digest,

@@ -98,12 +98,12 @@ describe('the one model-service flow', () => {
     expect(ready.querySelector('[data-model-choice="deepseek-flash"]')!.checked).toBe(true);
   });
 
-  it('shows a channel without a credential slot with every model and its disposition by name, and nothing to choose', () => {
+  it('offers a credential entry on Claude 官方 (#1225) and lists every untested model with its disposition by name, nothing to choose', () => {
     const { node } = flow(settings(['opencode-go']));
     pickChannel(node, 'anthropic-claude');
     expect(node.dataset['flowChannel']).toBe('anthropic-claude');
     expect(node.querySelectorAll('[data-model-choice]')).toHaveLength(0);
-    expect(node.querySelector('button[data-action="enter-channel-credential"]')).toBeNull();
+    expect(node.querySelector('button[data-action="enter-channel-credential"]')!.textContent).toBe('填写凭据');
     const listed = node.querySelectorAll('.model-service-flow-ineligible li');
     expect(listed.length).toBe(modelServiceChannels().find((channel) => channel.channelId === 'anthropic-claude')!.models.length);
     expect(listed.every((item) => item.textContent.includes('untested:text') && item.querySelectorAll('input,button').length === 0)).toBe(true);

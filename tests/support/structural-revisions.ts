@@ -1,5 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { NOTE_BLOCK_KIND_TABLES } from '../../src/service/manuscript/note-schema.js';
+import { MODEL_SERVICE_CONNECTION_REVISION_84_SQL } from '../../src/service/model-service-connections.js';
+import { DIALOGUE_EXECUTION_BINDINGS_REVISION_72_SQL } from '../../src/service/dialogue/dialogue-ledger.js';
 
 /** Revision 99's text of the two command relations revision 100 rebuilds (Issue #1175). */
 const REVISION_99_COMMAND_SQL = {
@@ -80,7 +82,32 @@ export function asRevision100(db: DatabaseSync): void {
  * revision 102 adds dropped, with the lineage triggers that go with them.
  */
 export function asRevision101(db: DatabaseSync): void {
+  asRevision102(db);
   if (db.prepare('SELECT 1 FROM manuscript_import_lineage LIMIT 1').get() !== undefined) throw new Error('a revision-101 store holds no import lineage');
   db.exec('DROP TABLE manuscript_import_lineage; DROP TABLE staged_import_structure_choices; DROP TABLE staged_import_paragraph_pieces');
   db.exec('PRAGMA user_version = 101');
+}
+
+/**
+ * A genuine revision-102 store from a current one whose connections and dialogue bindings stay on the routes revision 102 knew
+ * (#1225): `model_service_connections` and `dialogue_execution_bindings` rebuilt with their revision-84 and revision-72 texts, the
+ * same rows in the same order, their indexes and triggers as they were.
+ */
+export function asRevision102(db: DatabaseSync): void {
+  if (db.prepare(`SELECT 1 FROM model_service_connections WHERE provider_id IN ('opencode-zen', 'anthropic-claude', 'google-gemini')
+      OR (provider_id = 'openai-platform' AND selected IS NOT NULL) LIMIT 1`).get() !== undefined ||
+    db.prepare("SELECT 1 FROM dialogue_execution_bindings WHERE route NOT IN ('ai7-local-deterministic', 'opencode-go', 'deepseek-open-platform') LIMIT 1").get() !== undefined) {
+    throw new Error('a revision-102 store holds no Zen, Claude or Gemini connection, no OpenAI Main choice and no turn on their routes');
+  }
+  db.exec('PRAGMA foreign_keys = OFF');
+  for (const [table, sql] of [['model_service_connections', MODEL_SERVICE_CONNECTION_REVISION_84_SQL], ['dialogue_execution_bindings', DIALOGUE_EXECUTION_BINDINGS_REVISION_72_SQL]] as const) {
+    const dependents = db.prepare("SELECT sql FROM sqlite_schema WHERE type IN ('index', 'trigger') AND tbl_name = ? AND sql IS NOT NULL")
+      .all(table).map((row) => String(row.sql));
+    const columns = db.prepare(`PRAGMA table_info(${table})`).all().map((row) => String(row.name)).join(', ');
+    db.exec(`CREATE TEMP TABLE kept_${table} AS SELECT rowid AS prior_rowid, ${columns} FROM ${table} ORDER BY rowid; DROP TABLE ${table}`);
+    db.exec(sql);
+    db.exec(`INSERT INTO ${table}(rowid, ${columns}) SELECT prior_rowid, ${columns} FROM kept_${table} ORDER BY prior_rowid; DROP TABLE kept_${table}`);
+    for (const dependent of dependents) db.exec(dependent);
+  }
+  db.exec('PRAGMA user_version = 102');
 }

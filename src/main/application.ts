@@ -69,7 +69,7 @@ import {
   type J04ModelAdapterControl,
   type J08RecoveryControl,
   type ModelServiceSettingsProjection,
-  modelServiceModels,
+  modelServiceModels, modelServiceTestRequired,
   type ModelServiceConnectionProjection,
   type ModelServiceCredentialInput,
   type ModelServiceRouteId,
@@ -6589,7 +6589,7 @@ export async function runApplication(): Promise<void> {
     await requireSameCanonicalDataDirectory(shellRoot, app.getPath('userData'));
     // The Data Version (数据版本) and the store's schema revision (数据库修订) apart (Issue #967): the unit suite holds each to its owner.
     const crashFacts = () => ({
-      appVersion: softwareVersion, buildIdentity, dataVersion: buildIdentity.dataVersion, schemaRevision: 102, protocol: SERVICE_PROTOCOL_VERSION,
+      appVersion: softwareVersion, buildIdentity, dataVersion: buildIdentity.dataVersion, schemaRevision: 103, protocol: SERVICE_PROTOCOL_VERSION,
       platform: process.platform, arch: process.arch, electron: process.versions.electron ?? 'unknown',
       uptimeSeconds: process.uptime(),
     });
@@ -6948,20 +6948,20 @@ export async function runApplication(): Promise<void> {
       const inUseRoute: ModelServiceRouteId | null = selected?.binding.providerId ??
         (connectionOf('opencode-go')?.credentialOperationState === 'ready' ? 'opencode-go' : null);
       const connection = inUseRoute === null ? null : connectionOf(inUseRoute);
-      const mainStatus = statusOf(connection);
+      // A documentary channel's model serves a role only after its own passed text test on this credential (Issue #1225 revision 3).
+      const untested = (c: ModelServiceConnectionProjection | null | undefined): boolean => c != null && modelServiceTestRequired(c.binding.providerId) && (c.connectionTest?.outcome !== 'passed' || c.connectionTest.modelId !== c.binding.modelId || c.connectionTest.credentialUpdatedAt !== c.credentialUpdatedAt);
+      const mainStatus = untested(connection) && statusOf(connection) === 'available' ? 'needs-attention' as const : statusOf(connection);
       const mainStatusLabel = labelOf(mainStatus);
       const mainBinding = connection?.binding ?? MODEL_SERVICE_ROUTE_BINDINGS[inUseRoute ?? 'opencode-go'];
       const fastConnection = connections.find((candidate) => candidate.fastSelected) ?? connectionOf('opencode-go');
-      const fastStatus = fastConnection?.binding.providerId === 'openai-platform' &&
-        (fastConnection.connectionTest?.outcome !== 'passed' || fastConnection.connectionTest.modelId !== fastConnection.binding.modelId ||
-          fastConnection.connectionTest.credentialUpdatedAt !== fastConnection.credentialUpdatedAt) ? 'needs-attention' as const : statusOf(fastConnection);
+      const fastStatus = untested(fastConnection) && statusOf(fastConnection) === 'available' ? 'needs-attention' as const : statusOf(fastConnection);
       const fastBinding = fastConnection?.binding ?? null;
       const mainStatusDetail = protectedSecretStore === undefined
         ? '当前操作系统安全凭据库不可用；未启用替代存储。'
         : mainStatus === 'available'
           ? '连接名称与凭据已由操作系统安全凭据库保护。'
           : mainStatus === 'needs-attention'
-            ? '凭据状态无法确认；请重新输入或移除。'
+            ? untested(connection) ? '请先测试此模型的文本连接；测试通过后才用于新任务。' : '凭据状态无法确认；请重新输入或移除。'
             : '请输入连接名称与凭据。';
       const unconfigured = (
         roleId: 'fast-interaction' | 'difficult-escalation' | 'frontier',
@@ -6990,7 +6990,7 @@ export async function runApplication(): Promise<void> {
             connection: fastConnection,
           }
         : unconfigured('fast-interaction', '快速交互角色', '快速交互与低风险候选生成');
-      const supportedLabels = new Set([CONFIGURED_PROVIDER_LABELS['opencode-go'], CONFIGURED_PROVIDER_LABELS['deepseek-open-platform'], CONFIGURED_PROVIDER_LABELS['openai-platform']]);
+      const supportedLabels = new Set(MODEL_SERVICE_ROUTES.map((route) => CONFIGURED_PROVIDER_LABELS[route]));
       const unsupportedProviders: ModelServiceUnsupportedProviderProjection[] = [];
       for (const route of CONFIGURED_ROUTE_IDS) {
         const providerLabel = CONFIGURED_PROVIDER_LABELS[route];
@@ -7043,10 +7043,10 @@ export async function runApplication(): Promise<void> {
       };
     };
     const routeOf = (value: unknown): ModelServiceRouteId => {
-      if (value !== 'opencode-go' && value !== 'deepseek-open-platform' && value !== 'openai-platform') {
+      if (!MODEL_SERVICE_ROUTES.includes(value as ModelServiceRouteId)) {
         throw new ServiceCallError('MODEL_SERVICE_CREDENTIAL_INVALID', '模型服务路线无效。');
       }
-      return value;
+      return value as ModelServiceRouteId;
     };
     /**
      * Save a route's connection name and credential — the DeepSeek 开放平台（官方） route when none is named, as S55a always saved
