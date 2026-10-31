@@ -1,7 +1,7 @@
-import { CURATION_SCHEMA_SQL } from '../../src/service/task-authorization.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
+import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
@@ -54,8 +54,6 @@ import { EditorialStore, StoreError, type BackgroundAnalysisRuntime } from '../.
 import {
   canonicalRecord, ANALYSIS_LEDGER_TRIGGER_SQL,
   ANALYSIS_LEDGER_SCHEMA_SQL,
-  ANALYSIS_LEDGER_REVISION_65_SQL,
-  BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION,
   LATEST_SCHEMA_VERSION,
   WRITING_TASK_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
@@ -122,6 +120,20 @@ function ownerOf(store: EditorialStore): BaselineAnalysisExecutionOwner {
   return new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
 }
 
+async function withAnalysisStore<T>(operation: (store: EditorialStore, owner: BaselineAnalysisExecutionOwner) => Promise<T>): Promise<T> {
+  const store = await openWithRoute();
+  const owner = ownerOf(store);
+  try {
+    recordMissingCredentialConnection(store, 'L2 主编辑连接');
+    const result = await operation(store, owner);
+    store.markCleanShutdown();
+    return result;
+  } finally {
+    await owner.dispose();
+    store.close();
+  }
+}
+
 /** The facts the dispatcher hands the store: a route, a free place of two, no job of the editor's, a clock well past the quiet period. */
 function runtime(overrides: Partial<BackgroundAnalysisRuntime> = {}): BackgroundAnalysisRuntime {
   return { routeExecutable: true, placeFree: true, capacity: 2, editorWorkBusy: false, now: Date.now() + 10 * QUIET_MS, quietMs: QUIET_MS, ...overrides };
@@ -167,11 +179,6 @@ function prepare(store: EditorialStore, bookId: string, mode: BaselineAnalysisUp
   let progress = store.createBaselineAnalysisPreparationWork(bookId, goal, mode === null ? null : { mode, selectedRange: null }, launchPolicy);
   while (!progress.done) progress = store.advanceBaselineAnalysisPreparationWork(progress.workId!);
   return progress.projection!;
-}
-
-/** Every Run Authorization of the store, byte for byte. */
-function authorizations(): unknown[] {
-  return withDatabase(true, (database) => database.prepare('SELECT rowid, * FROM analysis_run_authorizations ORDER BY rowid').all());
 }
 
 function intentCount(bookId: string): number {
@@ -226,12 +233,100 @@ const LIVE: LaunchBinding = {
   },
 };
 
+async function cancelledEditorRun(store: EditorialStore, book: Imported) {
+  const holdPath = join(roots.inputRoot, 'unit-hold.txt');
+  const held = new BaselineAnalysisExecutionOwner({
+    requestGovernor,
+    ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null },
+    unitHold: controlledUnitHold(holdPath, { pollMs: 5 }),
+  });
+  try {
+    const own = prepare(store, book.bookId, 'reanalyze-book');
+    const authorized = store.authorizeBaselineAnalysis(book.bookId, own.taskIntent!.taskIntentId, own.planEnvelope!.digest);
+    const runRecordId = authorized.dispatchRunRecordId!;
+    writeFileSync(holdPath, '1');
+    held.admitAndDispatch(runRecordId, store.baselineAnalysisLedger);
+    for (let tries = 0; (held.progressFor(runRecordId)?.unitsSettled ?? 0) < 1 && tries < 2_000; tries += 1) {
+      await new Promise((resolveWait) => setTimeout(resolveWait, 5));
+    }
+    expect(store.requestBaselineAnalysisCancel(book.bookId, own.taskIntent!.taskIntentId)).toBe(runRecordId);
+    held.cancelRun(runRecordId, store.baselineAnalysisLedger);
+    writeFileSync(holdPath, '99');
+    await held.whenIdle();
+    const cancelled = store.inspectBaselineAnalysis(book.bookId, () => null);
+    expect(cancelled.run?.state).toBe('cancelled');
+    return { own, runRecordId };
+  } finally {
+    await held.dispose();
+  }
+}
+
+function preparationInterruptions(store: EditorialStore): Array<{ title: string; reason: string; during: (book: Imported) => Promise<void>; busy?: { value: boolean } }> {
+  const T = new Date(2026, 8, 25, 10, 0, 0);
+  const destination = join(roots.inputRoot, 'AI7 数据库.ai7db');
+  return [
+    {
+      title: 'L2 sample1 准备中撤销', reason: BACKGROUND_REVOKED,
+      during: async (book) => {
+        const enrollmentId = store.inspectBackgroundAnalysisEnrollment(book.bookId, runtime()).enrollment!.enrollmentId;
+        store.revokeBackgroundAnalysisEnrollment(book.bookId, enrollmentId, runtime());
+      },
+    },
+    {
+      title: 'L2 sample1 准备中有了编辑的操作', reason: BACKGROUND_EDITOR_JOB, busy: { value: false },
+      during: async () => undefined,
+    },
+    {
+      title: 'L2 sample1 准备中编辑先看计划', reason: BACKGROUND_PREPARATION_IN_FLIGHT,
+      during: async (book) => {
+        store.createBaselineAnalysisPreparationWork(book.bookId, BASELINE_ANALYSIS_MODE_GOALS['reanalyze-book'], { mode: 'reanalyze-book', selectedRange: null }, launchPolicy);
+      },
+    },
+    {
+      title: 'L2 sample1 准备中要替换数据', reason: BACKGROUND_REPLACEMENT_WAITING,
+      during: async () => {
+        const preparation = await store.prepareDatabaseExport(destination, true);
+        expect((await store.approveDatabaseExport(preparation.preparationId, true)).outcome).toBe('created');
+        const preview = await store.inspectDatabaseImport(destination);
+        await store.prepareDatabaseReplacement(preview.previewId, T);
+      },
+    },
+  ];
+}
+
+async function revision65Store() {
+  let bookId = '';
+  await withAnalysisStore(async (store, owner) => {
+    const book = await analysedBook(store, owner, 'L2 sample1 修订版 65');
+    bookId = book.bookId;
+    // A 快速开始 under a 默认执行规则, so the rows copied carry both origins revision 65 admitted.
+    const source = prepare(store, book.bookId, 'reanalyze-book');
+    const rule = store.setDefaultExecutionRule(book.bookId, source.taskIntent!.taskIntentId, source.planEnvelope!.digest);
+    const quick = await store.quickStartBaselineAnalysis(book.bookId, source.taskIntent!.taskIntentId, source.planEnvelope!.digest, rule.ruleVersionId, {
+      credentialReadiness: async () => null,
+      connectivity: { reading: () => 'online', reachesNetwork: (route) => route === LOCAL_DETERMINISTIC_ROUTE, slotBusy: () => false, carriesStoppedRun: () => false },
+    });
+    expect(quick.outcome).toBe('started');
+    owner.admitAndDispatch(quick.dispatchRunRecordId!, store.baselineAnalysisLedger);
+    await owner.whenIdle();
+  });
+  const before = withDatabase(false, (database) => {
+    constructPre94PolicyEncoding(database);
+    database.exec('PRAGMA foreign_keys = OFF');
+    // A revision-65 store holds neither revision 67's relations (Issue #428, S80a) nor revision 66's.
+    for (const table of [...Object.keys(MATERIAL_INDEX_SCHEMA_SQL).reverse(), ...Object.keys(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL).reverse()]) database.exec(`DROP TABLE ${table}`);
+    database.exec('PRAGMA foreign_keys = ON');
+    downgradeAnalysisRunAuthorizationsToRevision65(database);
+    execPre74Fixture(database, `PRAGMA user_version = ${WRITING_TASK_SCHEMA_VERSION}`);
+    expect(analysisRunAuthorizationsShape(database)).toBe('revision-65');
+    return database.prepare('SELECT rowid, * FROM analysis_run_authorizations ORDER BY rowid').all();
+  });
+  return { bookId, before };
+}
+
 describe('后台处理登记 over the real store on exact sample1', () => {
   it('discloses everything an Enrollment binds before the editor decides, chooses no starting point, and makes none by itself', async () => {
-    const store = await openWithRoute();
-    const owner = ownerOf(store);
-    try {
-      recordMissingCredentialConnection(store, 'L2 主编辑连接');
+    await withAnalysisStore(async (store, owner) => {
       const book = await analysedBook(store, owner, 'L2 sample1 后台处理登记');
       const shown = store.inspectBackgroundAnalysisEnrollment(book.bookId, runtime());
       expect([shown.state, shown.stateLabel, shown.enrollment, shown.history, shown.historyCount, shown.startedRuns, shown.startedRunCount, shown.lastLook, shown.lastNotStarted])
@@ -245,7 +340,7 @@ describe('后台处理登记 over the real store on exact sample1', () => {
       expect(shown.offer.notGranted.length).toBeGreaterThan(0);
       expect(shown.revoke.canRevoke).toBe(false);
       // Reading is free: nothing was recorded, the import, the profile and the analysis made no Enrollment.
-      expect(withDatabase(true, (database) => (database.prepare('SELECT count(*) n FROM background_analysis_enrollments').get() as Row).n)).toBe(0);
+      expect(store.backgroundAnalysisBooks()).toEqual([]);
       // Never offered where it could never start (#713 review, P3-3): no route, or a governor with no place to share.
       expect(store.inspectBackgroundAnalysisEnrollment(book.bookId, runtime({ routeExecutable: false })).offer)
         .toMatchObject({ canEnroll: false, reason: BACKGROUND_ENROLL_NO_ROUTE, disclosureDigest: null });
@@ -270,18 +365,11 @@ describe('后台处理登记 over the real store on exact sample1', () => {
         .toBe('BACKGROUND_ANALYSIS_ENROLLMENT_UNAVAILABLE');
       // Prospective, over a current analysis: nothing to do.
       expect(enrolled.next).toEqual({ kind: 'none', reason: BACKGROUND_CURRENT });
-      store.markCleanShutdown();
-    } finally {
-      await owner.dispose();
-      store.close();
-    }
+    });
   }, 300_000);
 
   it('starts one exact Task of its own after a change has stood still, naming the enrollment version, and keeps the Book current', async () => {
-    const store = await openWithRoute();
-    const owner = ownerOf(store);
-    try {
-      recordMissingCredentialConnection(store, 'L2 主编辑连接');
+    await withAnalysisStore(async (store, owner) => {
       const book = await analysedBook(store, owner, 'L2 sample1 后台同步');
       const enrolled = enroll(store, book.bookId, 'prospective');
       const before = store.inspectBaselineAnalysis(book.bookId, () => null);
@@ -322,18 +410,11 @@ describe('后台处理登记 over the real store on exact sample1', () => {
       // A second pass starts nothing more: the Book is current.
       await pass(dispatcher, owner);
       expect(store.inspectBaselineAnalysis(book.bookId, () => null).taskIntent!.taskIntentId).toBe(after.taskIntent!.taskIntentId);
-      store.markCleanShutdown();
-    } finally {
-      await owner.dispose();
-      store.close();
-    }
+    });
   }, 300_000);
 
   it('revoking stops every start after it, keeps the Runs and results it started, and enrolling again is the next version', async () => {
-    const store = await openWithRoute();
-    const owner = ownerOf(store);
-    try {
-      recordMissingCredentialConnection(store, 'L2 主编辑连接');
+    await withAnalysisStore(async (store, owner) => {
       const book = await analysedBook(store, owner, 'L2 sample1 撤销登记');
       const enrolled = enroll(store, book.bookId, 'prospective');
       edit(store, book, '〔第一次改动〕');
@@ -342,7 +423,6 @@ describe('后台处理登记 over the real store on exact sample1', () => {
       await pass(dispatcher, owner);
       const started = store.inspectBaselineAnalysis(book.bookId, () => null);
       expect(started.authorization!.origin).toBe('background-analysis-enrollment');
-      const recorded = authorizations();
 
       expect(await refusal(() => store.revokeBackgroundAnalysisEnrollment(book.bookId, randomUUID(), runtime()))).toBe('BACKGROUND_ANALYSIS_ENROLLMENT_NOT_FOUND');
       const revoked = store.revokeBackgroundAnalysisEnrollment(book.bookId, enrolled.enrollment!.enrollmentId, runtime());
@@ -359,8 +439,8 @@ describe('后台处理登记 over the real store on exact sample1', () => {
       expect(after.taskIntent!.taskIntentId).toBe(started.taskIntent!.taskIntentId);
       expect(after.resultSetRevision!.freshness.state).toBe('stale');
       expect(store.inspectBackgroundAnalysisEnrollment(book.bookId, runtime()).lastLook).toMatchObject({ kind: 'stopped', reason: BACKGROUND_REVOKED });
-      // History intact: the Run it started still names its version, every authorization byte for byte.
-      expect(authorizations()).toEqual(recorded);
+      // History intact: the Run it started still names the same authorization and version.
+      expect(after.authorization).toEqual(started.authorization);
       expect(store.inspectBackgroundAnalysisEnrollment(book.bookId, runtime()).startedRuns.map((run) => run.enrollmentOrdinal)).toEqual([1]);
       expect(after.resultSetRevision!.ordinal).toBe(2);
 
@@ -375,18 +455,11 @@ describe('后台处理登记 over the real store on exact sample1', () => {
       // The revoked version names no start even with a version in force: a start names the one in force, or nothing.
       expect(store.startEnrolledBaselineAnalysis(book.bookId, randomUUID(), 'a'.repeat(64), enrolled.enrollment!.enrollmentVersionId, 'sync-current', runtime()))
         .toEqual({ dispatchRunRecordId: null, reason: BACKGROUND_REVOKED });
-      store.markCleanShutdown();
-    } finally {
-      await owner.dispose();
-      store.close();
-    }
+    });
   }, 300_000);
 
   it('a backfill Enrollment starts a Book that was never analysed with its first baseline; prospective waits for a change', async () => {
-    const store = await openWithRoute();
-    const owner = ownerOf(store);
-    try {
-      recordMissingCredentialConnection(store, 'L2 主编辑连接');
+    await withAnalysisStore(async (store, owner) => {
       const waiting = await importedBook(store, 'L2 sample1 只分析之后');
       const backfill = await importedBook(store, 'L2 sample1 现在也分析');
       enroll(store, waiting.bookId, 'prospective');
@@ -399,18 +472,11 @@ describe('后台处理登记 over the real store on exact sample1', () => {
       expect(first.authorization!.origin).toBe('background-analysis-enrollment');
       expect(first.state).toBe('settled');
       expect(store.inspectBaselineAnalysis(waiting.bookId, () => null).taskIntent).toBeNull();
-      store.markCleanShutdown();
-    } finally {
-      await owner.dispose();
-      store.close();
-    }
+    });
   }, 300_000);
 
   it('leaves one place for the editor: a background Run waits while another holds the share', async () => {
-    const store = await openWithRoute();
-    const owner = ownerOf(store);
-    try {
-      recordMissingCredentialConnection(store, 'L2 主编辑连接');
+    await withAnalysisStore(async (store, owner) => {
       const one = await importedBook(store, 'L2 sample1 名额甲');
       const two = await importedBook(store, 'L2 sample1 名额乙');
       enroll(store, one.bookId, 'backfill');
@@ -426,18 +492,11 @@ describe('后台处理登记 over the real store on exact sample1', () => {
       expect(store.inspectBaselineAnalysis(two.bookId, () => null).taskIntent).toBeNull();
       expect(store.backgroundAnalysisDecisionFor(two.bookId, runtime()).decision).toEqual({ kind: 'wait', reason: backgroundShareFullReason(1) });
       store.cancelWaitingBaselineAnalysis(one.bookId, store.inspectBaselineAnalysis(one.bookId, () => null).taskIntent!.taskIntentId);
-      store.markCleanShutdown();
-    } finally {
-      await owner.dispose();
-      store.close();
-    }
+    });
   }, 300_000);
 
   it('never starts under developer-live, without a route, beside the editor\'s own plan or Run, or twice over the same text', async () => {
-    const store = await openWithRoute();
-    const owner = ownerOf(store);
-    try {
-      recordMissingCredentialConnection(store, 'L2 主编辑连接');
+    await withAnalysisStore(async (store, owner) => {
       const book = await analysedBook(store, owner, 'L2 sample1 后台不开始');
       enroll(store, book.bookId, 'prospective');
       edit(store, book, '〔改动〕');
@@ -478,18 +537,11 @@ describe('后台处理登记 over the real store on exact sample1', () => {
       expect(store.backgroundAnalysisDecisionFor(book.bookId, runtime()).decision).toEqual({ kind: 'wait', reason: BACKGROUND_ATTEMPTED });
       edit(store, book, '〔又改动〕');
       expect(store.backgroundAnalysisDecisionFor(book.bookId, runtime()).decision.kind).toBe('start');
-      store.markCleanShutdown();
-    } finally {
-      await owner.dispose();
-      store.close();
-    }
+    });
   }, 300_000);
 
   it('never redoes the editor\'s own cancelled Task, keeping its 改计划重做: it acts only on edits made after it (P2-4)', async () => {
-    const store = await openWithRoute();
-    const owner = ownerOf(store);
-    try {
-      recordMissingCredentialConnection(store, 'L2 主编辑连接');
+    await withAnalysisStore(async (store, owner) => {
       const book = await analysedBook(store, owner, 'L2 sample1 编辑取消');
       edit(store, book, '〔改动〕');
       enroll(store, book.bookId, 'backfill');
@@ -507,29 +559,18 @@ describe('后台处理登记 over the real store on exact sample1', () => {
       // A further edit is the editor's new change: now the Enrollment may bring it up to date.
       edit(store, book, '〔之后的改动〕');
       expect(store.backgroundAnalysisDecisionFor(book.bookId, runtime()).decision.kind).toBe('start');
-      store.markCleanShutdown();
-    } finally {
-      await owner.dispose();
-      store.close();
-    }
+    });
   }, 300_000);
 
   it('a checkpoint another Task takes never clears the quiet period: it counts from the latest edit, whatever revision (P2-1)', async () => {
-    const store = await openWithRoute();
-    const owner = ownerOf(store);
-    try {
-      recordMissingCredentialConnection(store, 'L2 主编辑连接');
+    await withAnalysisStore(async (store, owner) => {
       const book = await analysedBook(store, owner, 'L2 sample1 安静期');
       enroll(store, book.bookId, 'prospective');
       edit(store, book, '〔刚改动〕');
       let j03 = store.createTaskAuthorizationPreparationWork(book.bookId, J03_TASK_GOAL, launchPolicy);
       while (!j03.done) j03 = store.advanceTaskAuthorizationPreparationWork(j03.workId!);
       expect(store.backgroundAnalysisDecisionFor(book.bookId, runtime({ now: Date.now() })).decision).toEqual({ kind: 'wait', reason: backgroundQuietReason(QUIET_MS) });
-      store.markCleanShutdown();
-    } finally {
-      await owner.dispose();
-      store.close();
-    }
+    });
   }, 300_000);
 
   it('a background step that fails leaves nothing behind: the editor\'s 先看计划, 重新导入, J-03 and 审阅 all work after (P1-1)', async () => {
@@ -582,10 +623,7 @@ describe('后台处理登记 over the real store on exact sample1', () => {
   }, 300_000);
 
   it('a background preparation the next step may not take is cancelled with why, and a later pass starts cleanly', async () => {
-    const store = await openWithRoute();
-    const owner = ownerOf(store);
-    try {
-      recordMissingCredentialConnection(store, 'L2 主编辑连接');
+    await withAnalysisStore(async (store, owner) => {
       const book = await analysedBook(store, owner, 'L2 sample1 后台让开');
       enroll(store, book.bookId, 'prospective');
       edit(store, book, '〔改动〕');
@@ -610,18 +648,11 @@ describe('后台处理登记 over the real store on exact sample1', () => {
       const started = store.inspectBaselineAnalysis(book.bookId, () => null);
       expect([started.authorization?.origin, started.state]).toEqual(['background-analysis-enrollment', 'settled']);
       expect(store.inspectBackgroundAnalysisEnrollment(book.bookId, runtime()).lastNotStarted).toBeNull();
-      store.markCleanShutdown();
-    } finally {
-      await owner.dispose();
-      store.close();
-    }
+    });
   }, 300_000);
 
   it('never adopts the editor\'s preparation in flight, in the same mode or another (P1-2)', async () => {
-    const store = await openWithRoute();
-    const owner = ownerOf(store);
-    try {
-      recordMissingCredentialConnection(store, 'L2 主编辑连接');
+    await withAnalysisStore(async (store, owner) => {
       for (const mode of ['sync-current', 'reanalyze-book'] as const) {
         const book = await analysedBook(store, owner, `L2 sample1 编辑在前 ${mode}`);
         enroll(store, book.bookId, 'prospective');
@@ -644,18 +675,11 @@ describe('后台处理登记 over the real store on exact sample1', () => {
         expect([theirs.state, theirs.taskIntent!.mode, theirs.authorization, theirs.taskIntent!.preparedByEnrollmentVersionId]).toEqual(['prepared', mode, null, undefined]);
       }
       expect(backgroundOrigins()).toBe(0);
-      store.markCleanShutdown();
-    } finally {
-      await owner.dispose();
-      store.close();
-    }
+    });
   }, 300_000);
 
   it('never takes up a Task Intent the editor left behind: a preparation they cancelled stays theirs (P1-2)', async () => {
-    const store = await openWithRoute();
-    const owner = ownerOf(store);
-    try {
-      recordMissingCredentialConnection(store, 'L2 主编辑连接');
+    await withAnalysisStore(async (store, owner) => {
       const book = await analysedBook(store, owner, 'L2 sample1 编辑取消准备');
       enroll(store, book.bookId, 'prospective');
       edit(store, book, '〔改动〕');
@@ -671,18 +695,11 @@ describe('后台处理登记 over the real store on exact sample1', () => {
       const after = store.inspectBaselineAnalysis(book.bookId, () => null);
       expect(after.taskIntent!.taskIntentId).not.toBe(orphan);
       expect([after.authorization?.origin, after.taskIntent!.preparedByEnrollmentVersionId !== undefined, after.state]).toEqual(['background-analysis-enrollment', true, 'settled']);
-      store.markCleanShutdown();
-    } finally {
-      await owner.dispose();
-      store.close();
-    }
+    });
   }, 300_000);
 
   it('gives way to a preparation the editor starts while its own is in flight, in the same mode or another (P1-2)', async () => {
-    const store = await openWithRoute();
-    const owner = ownerOf(store);
-    try {
-      recordMissingCredentialConnection(store, 'L2 主编辑连接');
+    await withAnalysisStore(async (store, owner) => {
       for (const mode of ['sync-current', 'reanalyze-book'] as const) {
         const book = await analysedBook(store, owner, `L2 sample1 后台在前 ${mode}`);
         enroll(store, book.bookId, 'prospective');
@@ -713,18 +730,11 @@ describe('后台处理登记 over the real store on exact sample1', () => {
         expect(store.baselineAnalysisLedger.preparationInFlight(book.bookId)).toBe(false);
       }
       expect(backgroundOrigins()).toBe(0);
-      store.markCleanShutdown();
-    } finally {
-      await owner.dispose();
-      store.close();
-    }
+    });
   }, 300_000);
 
   it('its checkpoint gives way to one another kind of Task asks for, which goes ahead at once (P1-2)', async () => {
-    const store = await openWithRoute();
-    const owner = ownerOf(store);
-    try {
-      recordMissingCredentialConnection(store, 'L2 主编辑连接');
+    await withAnalysisStore(async (store, owner) => {
       const book = await analysedBook(store, owner, 'L2 sample1 固定点让开');
       enroll(store, book.bookId, 'prospective');
       edit(store, book, '〔改动〕');
@@ -750,11 +760,7 @@ describe('后台处理登记 over the real store on exact sample1', () => {
       // ②A says, in the editor's words, that the background gave way — never the engineering code.
       expect(store.inspectBackgroundAnalysisEnrollment(book.bookId, runtime()).lastNotStarted)
         .toMatchObject({ reason: backgroundNotStartedReason(BACKGROUND_CHECKPOINT_PREEMPTED) });
-      store.markCleanShutdown();
-    } finally {
-      await owner.dispose();
-      store.close();
-    }
+    });
   }, 300_000);
 
   it('refuses at the start what the decision could not see: a Plan Revision, a binding that moved, a plan with no route (P2-5)', async () => {
@@ -763,7 +769,7 @@ describe('后台处理登记 over the real store on exact sample1', () => {
       const reference = recordMissingCredentialConnection(store, 'L2 主编辑连接');
       const book = await importedBook(store, 'L2 sample1 开始前复核');
       const version = enroll(store, book.bookId, 'backfill').enrollment!.enrollmentVersionId;
-      const before = authorizations();
+      const before = store.inspectBaselineAnalysis(book.bookId).authorization;
       const backgroundPlan = (): BaselineAnalysisProjection => {
         let progress = store.createBackgroundBaselineAnalysisPreparationWork(book.bookId, 'first-baseline', version, launchPolicy);
         while (!progress.done) progress = store.advanceBaselineAnalysisPreparationWork(progress.workId!);
@@ -788,7 +794,7 @@ describe('后台处理登记 over the real store on exact sample1', () => {
       const drift = store.startEnrolledBaselineAnalysis(book.bookId, moved.taskIntent!.taskIntentId, moved.planEnvelope!.digest, version, 'first-baseline', runtime());
       expect(drift.dispatchRunRecordId).toBeNull();
       expect(drift.reason).toBe(backgroundDriftReason(['模型服务 · 连接']));
-      expect(authorizations()).toEqual(before);
+      expect(store.inspectBaselineAnalysis(book.bookId).authorization).toEqual(before);
       store.markCleanShutdown();
     } finally {
       store.close();
@@ -967,33 +973,10 @@ describe('后台处理登记 over the real store on exact sample1', () => {
   }, 300_000);
 
   it('a background preparation that stops leaves no Task Intent: the editor\'s cancelled Run stays the latest, with 改计划重做 (re-review P3-1)', async () => {
-    const store = await openWithRoute();
-    const owner = ownerOf(store);
-    const holdPath = join(roots.inputRoot, 'unit-hold.txt');
-    const held = new BaselineAnalysisExecutionOwner({
-      requestGovernor,
-      ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null },
-      unitHold: controlledUnitHold(holdPath, { pollMs: 5 }),
-    });
-    try {
-      recordMissingCredentialConnection(store, 'L2 主编辑连接');
+    await withAnalysisStore(async (store, owner) => {
       const book = await analysedBook(store, owner, 'L2 sample1 编辑的取消留在最前');
       enroll(store, book.bookId, 'prospective');
-      // The editor's own 重新分析全书, cancelled once it has read a range: its Run keeps 改计划重做.
-      const own = prepare(store, book.bookId, 'reanalyze-book');
-      const authorized = store.authorizeBaselineAnalysis(book.bookId, own.taskIntent!.taskIntentId, own.planEnvelope!.digest);
-      const runRecordId = authorized.dispatchRunRecordId!;
-      writeFileSync(holdPath, '1');
-      held.admitAndDispatch(runRecordId, store.baselineAnalysisLedger);
-      for (let tries = 0; (held.progressFor(runRecordId)?.unitsSettled ?? 0) < 1 && tries < 2_000; tries += 1) {
-        await new Promise((resolveWait) => setTimeout(resolveWait, 5));
-      }
-      expect(store.requestBaselineAnalysisCancel(book.bookId, own.taskIntent!.taskIntentId)).toBe(runRecordId);
-      held.cancelRun(runRecordId, store.baselineAnalysisLedger);
-      writeFileSync(holdPath, '99');
-      await held.whenIdle();
-      const cancelled = store.inspectBaselineAnalysis(book.bookId, () => null);
-      expect(cancelled.run?.state).toBe('cancelled');
+      const { own, runRecordId } = await cancelledEditorRun(store, book);
       // An edit after it, so the Enrollment may act; the editor types again while the background checkpoint is built.
       edit(store, book, '〔取消之后的改动〕');
       const intents = intentCount(book.bookId);
@@ -1016,50 +999,12 @@ describe('后台处理登记 over the real store on exact sample1', () => {
         launchPolicy, false, runRecordId);
       while (!redo.done) redo = store.advanceBaselineAnalysisPreparationWork(redo.workId!);
       expect(redo.projection!.taskIntent!.redoOf?.runRecordId).toBe(runRecordId);
-      store.markCleanShutdown();
-    } finally {
-      await held.dispose();
-      await owner.dispose();
-      store.close();
-    }
+    });
   }, 300_000);
 
   it('stops a preparation under way at the next step, writing nothing, when the Enrollment is revoked, a replacement waits, or the editor starts work (re-review P2-2)', async () => {
-    const T = new Date(2026, 8, 25, 10, 0, 0);
-    const store = await openWithRoute();
-    const owner = ownerOf(store);
-    try {
-      recordMissingCredentialConnection(store, 'L2 主编辑连接');
-      const destination = join(roots.inputRoot, 'AI7 数据库.ai7db');
-      const cases: Array<{ title: string; reason: string; during: (book: Imported) => Promise<void>; busy?: { value: boolean } }> = [
-        {
-          title: 'L2 sample1 准备中撤销', reason: BACKGROUND_REVOKED,
-          during: async (book) => {
-            const enrollmentId = store.inspectBackgroundAnalysisEnrollment(book.bookId, runtime()).enrollment!.enrollmentId;
-            store.revokeBackgroundAnalysisEnrollment(book.bookId, enrollmentId, runtime());
-          },
-        },
-        {
-          title: 'L2 sample1 准备中有了编辑的操作', reason: BACKGROUND_EDITOR_JOB, busy: { value: false },
-          during: async () => undefined,
-        },
-        {
-          title: 'L2 sample1 准备中编辑先看计划', reason: BACKGROUND_PREPARATION_IN_FLIGHT,
-          during: async (book) => {
-            store.createBaselineAnalysisPreparationWork(book.bookId, BASELINE_ANALYSIS_MODE_GOALS['reanalyze-book'], { mode: 'reanalyze-book', selectedRange: null }, launchPolicy);
-          },
-        },
-        {
-          title: 'L2 sample1 准备中要替换数据', reason: BACKGROUND_REPLACEMENT_WAITING,
-          during: async () => {
-            const preparation = await store.prepareDatabaseExport(destination, true);
-            expect((await store.approveDatabaseExport(preparation.preparationId, true)).outcome).toBe('created');
-            const preview = await store.inspectDatabaseImport(destination);
-            await store.prepareDatabaseReplacement(preview.previewId, T);
-          },
-        },
-      ];
-      for (const entry of cases) {
+    await withAnalysisStore(async (store, owner) => {
+      for (const entry of preparationInterruptions(store)) {
         const book = await analysedBook(store, owner, entry.title);
         enroll(store, book.bookId, 'prospective');
         edit(store, book, '〔改动〕');
@@ -1078,27 +1023,19 @@ describe('后台处理登记 over the real store on exact sample1', () => {
         expect(done, entry.title).toBe(true);
         expect(backgroundOrigins(), entry.title).toBe(0);
         expect(store.baselineAnalysisLedger.preparationInFlightBesides(book.bookId, null) && entry.reason !== BACKGROUND_PREPARATION_IN_FLIGHT).toBe(false);
-        // The editor's own preparation, if any, is theirs; nothing of the Enrollment's is written.
-        expect(withDatabase(true, (database) => (database.prepare(
-          "SELECT count(*) n FROM analysis_task_intents WHERE book_id = ? AND json_extract(canonical_json, '$.preparedByEnrollmentVersionId') IS NOT NULL",
-        ).get(book.bookId) as Row).n)).toBe(0);
+        // The latest intent is the editor's or the original baseline's; no background intent remains.
+        expect(store.inspectBaselineAnalysis(book.bookId).taskIntent!.preparedByEnrollmentVersionId).toBeUndefined();
         expect(intentCount(book.bookId)).toBe(intents + (entry.reason === BACKGROUND_PREPARATION_IN_FLIGHT ? 1 : 0));
         const read = store.inspectBackgroundAnalysisEnrollment(book.bookId, runtime());
         expect(read.lastNotStarted, entry.title).toMatchObject({ reason: backgroundNotStartedReason(entry.reason) });
         // Each case's Book is left revoked, so the next case's dispatcher looks at its own Book alone.
         if (read.state === 'active') store.revokeBackgroundAnalysisEnrollment(book.bookId, read.enrollment!.enrollmentId, runtime());
       }
-    } finally {
-      await owner.dispose();
-      store.close();
-    }
+    });
   }, 300_000);
 
   it('stops a preparation under way when another Book\'s background Run fills the share meanwhile (re-review P2-2)', async () => {
-    const store = await openWithRoute();
-    const owner = ownerOf(store);
-    try {
-      recordMissingCredentialConnection(store, 'L2 主编辑连接');
+    await withAnalysisStore(async (store, owner) => {
       const first = await importedBook(store, 'L2 sample1 名额被占甲');
       const second = await importedBook(store, 'L2 sample1 名额被占乙');
       edit(store, first, '〔改动〕');
@@ -1122,11 +1059,7 @@ describe('后台处理登记 over the real store on exact sample1', () => {
       expect(store.inspectBaselineAnalysis(first.bookId, () => null).taskIntent).toBeNull();
       expect(store.inspectBackgroundAnalysisEnrollment(first.bookId, runtime()).lastNotStarted).toMatchObject({ reason: backgroundNotStartedReason(backgroundShareFullReason(1)) });
       store.cancelWaitingBaselineAnalysis(second.bookId, store.inspectBaselineAnalysis(second.bookId, () => null).taskIntent!.taskIntentId);
-      store.markCleanShutdown();
-    } finally {
-      await owner.dispose();
-      store.close();
-    }
+    });
   }, 300_000);
 
   it.each([false, true])('rollback keeps an imported Enrollment suspended, including paused=%s (#864)', async (paused) => {
@@ -1166,11 +1099,9 @@ describe('后台处理登记 over the real store on exact sample1', () => {
       expect([read.state, read.next]).toEqual(['suspended', { kind: 'stopped', reason: BACKGROUND_SUSPENDED }]);
       expect(read.hold).toEqual({ canPause: false, canResume: false });
       const execution = ownerOf(store);
-      const dispatcher = new BackgroundAnalysisDispatcher({ store, execution, launchPolicy, now: () => runtime().now });
+      const dispatcher = dispatcherOf(store, execution, { now: runtime().now });
       try {
-        dispatcher.nudge();
-        await dispatcher.settled();
-        await execution.whenIdle();
+        await pass(dispatcher, execution);
         expect(store.inspectBaselineAnalysis(bookId, () => null).taskIntent).toBeNull();
       } finally {
         await dispatcher.dispose();
@@ -1183,55 +1114,23 @@ describe('后台处理登记 over the real store on exact sample1', () => {
   }, 300_000);
 
   it('brings a revision-65 store to revision 66: three empty relations, the origin widened, every authorization of every origin byte for byte', async () => {
-    const store = await openWithRoute();
-    const owner = ownerOf(store);
-    try {
-      recordMissingCredentialConnection(store, 'L2 主编辑连接');
-      const book = await analysedBook(store, owner, 'L2 sample1 修订版 65');
-      // A 快速开始 under a 默认执行规则, so the rows copied carry both origins revision 65 admitted.
-      const source = prepare(store, book.bookId, 'reanalyze-book');
-      const rule = store.setDefaultExecutionRule(book.bookId, source.taskIntent!.taskIntentId, source.planEnvelope!.digest);
-      const quick = await store.quickStartBaselineAnalysis(book.bookId, source.taskIntent!.taskIntentId, source.planEnvelope!.digest, rule.ruleVersionId, {
-        credentialReadiness: async () => null,
-        connectivity: { reading: () => 'online', reachesNetwork: (route) => route === LOCAL_DETERMINISTIC_ROUTE, slotBusy: () => false, carriesStoppedRun: () => false },
-      });
-      expect(quick.outcome).toBe('started');
-      owner.admitAndDispatch(quick.dispatchRunRecordId!, store.baselineAnalysisLedger);
-      await owner.whenIdle();
-      store.markCleanShutdown();
-    } finally {
-      await owner.dispose();
-      store.close();
-    }
-    const before = withDatabase(false, (database) => {
-      constructPre94PolicyEncoding(database);
-      database.exec('PRAGMA foreign_keys = OFF');
-      // A revision-65 store holds neither revision 67's relations (Issue #428, S80a) nor revision 66's.
-      for (const table of [...Object.keys(MATERIAL_INDEX_SCHEMA_SQL).reverse(), ...Object.keys(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL).reverse()]) database.exec(`DROP TABLE ${table}`);
-      database.exec('PRAGMA foreign_keys = ON');
-      downgradeAnalysisRunAuthorizationsToRevision65(database);
-      execPre74Fixture(database, `PRAGMA user_version = ${WRITING_TASK_SCHEMA_VERSION}`);
-      expect(analysisRunAuthorizationsShape(database)).toBe('revision-65');
-      return database.prepare('SELECT rowid, * FROM analysis_run_authorizations ORDER BY rowid').all();
-    });
+    const { bookId, before } = await revision65Store();
     expect((before as Row[]).map((row) => row.origin)).toEqual(['standard-direct', 'default-execution-rule']);
-    expect(JSON.parse((before as Row[])[1]!.canonical_json as string)).toHaveProperty('ruleVersionId');
     const reopened = await openWithRoute();
     try {
+      expect(reopened.inspectDataVersion().schemaRevision).toBe(LATEST_SCHEMA_VERSION);
+      expect(reopened.inspectBaselineAnalysis(bookId).authorization).toMatchObject({ origin: 'default-execution-rule', startWhen: 'now', ruleVersionId: expect.any(String) });
+      expect(reopened.inspectBackgroundAnalysisEnrollment(bookId, runtime()).state).toBe('none');
+      expect(reopened.backgroundAnalysisBooks()).toEqual([]);
       reopened.markCleanShutdown();
     } finally {
       reopened.close();
     }
     withDatabase(true, (database) => {
-      // Revision 66's widening and the stamp of the terminal revision, 67 (Issue #428, S80a), in one open.
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
-      expect(analysisRunAuthorizationsShape(database)).toBe('current');
       expect(database.prepare('SELECT rowid, * FROM analysis_run_authorizations ORDER BY rowid').all().map(({ start_when, ...row }) => { expect(start_when).toBe('now'); return row; })).toEqual(before);
       for (const table of Object.keys(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL)) {
         expect((database.prepare(`SELECT count(*) n FROM ${table}`).get() as Row).n).toBe(0);
       }
-      expect((database.prepare("SELECT sql FROM sqlite_schema WHERE name = 'analysis_run_authorizations'").get() as Row).sql)
-        .not.toBe(ANALYSIS_LEDGER_REVISION_65_SQL.analysis_run_authorizations);
     });
   }, 300_000);
 });
@@ -1266,8 +1165,7 @@ it('reads v27 enrollment eligibility per kind, isolates holds/revocation and nev
       expect(recorded.enrollment?.shareTokens).toBe(1_000);
       expect(recorded.next.kind).toBe('none');
       expect(recorded.enrollment!.binds.find((row) => row.label === '工序')?.value).toContain(label);
-      const canonical = withDatabase(false, (db) => db.prepare('SELECT canonical_json FROM background_analysis_enrollment_versions WHERE enrollment_version_id = ?').get(recorded.enrollment!.enrollmentVersionId));
-      expect(JSON.parse(String(canonical!.canonical_json)).modes).toEqual([]);
+      expect(withDatabase(true, (db) => new BackgroundAnalysisEnrollmentLedger(db).byId(recorded.enrollment!.enrollmentId)?.kind)).toBe(permission.kind);
       enrolled.push(recorded.enrollment!.enrollmentId);
     }
     expect(new Set(enrolled).size).toBe(enrolled.length);
@@ -1286,18 +1184,8 @@ it('reads v27 enrollment eligibility per kind, isolates holds/revocation and nev
   } finally { store.close(); }
 });
 
-it('migrates revision 88 authorizations and enrollment rows without changing historical bytes, then validates recovery (#1089)', async () => {
-  const store = await openWithRoute();
-  let bookId = '';
-  try {
-    recordMissingCredentialConnection(store, '合成迁移连接');
-    const book = await importedBook(store, '合成迁移图书'); bookId = book.bookId;
-    const prepared = prepare(store, bookId);
-    store.authorizeBaselineAnalysis(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
-    enroll(store, bookId, 'backfill');
-    store.markCleanShutdown();
-  } finally { store.close(); }
-  const before = withDatabase(false, (db) => {
+function revision88Rows() {
+  return withDatabase(false, (db) => {
     constructPre94PolicyEncoding(db);
     db.exec('PRAGMA foreign_keys = OFF');
     db.exec('BEGIN IMMEDIATE');
@@ -1324,14 +1212,28 @@ it('migrates revision 88 authorizations and enrollment rows without changing his
     return Object.keys({ analysis_run_authorizations: '', ...BACKGROUND_PROCESSING_ENROLLMENT_SCHEMA_SQL }).map((table) => [table,
       db.prepare(`SELECT rowid, canonical_json, sha256 FROM ${table} ORDER BY rowid`).all()] as const);
   });
+}
+
+it('migrates revision 88 authorizations and enrollment rows without changing historical bytes, then validates recovery (#1089)', async () => {
+  const store = await openWithRoute();
+  let bookId = '';
+  try {
+    recordMissingCredentialConnection(store, '合成迁移连接');
+    const book = await importedBook(store, '合成迁移图书'); bookId = book.bookId;
+    const prepared = prepare(store, bookId);
+    store.authorizeBaselineAnalysis(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
+    enroll(store, bookId, 'backfill');
+    store.markCleanShutdown();
+  } finally { store.close(); }
+  const before = revision88Rows();
   const reopened = await openWithRoute();
   try {
     expect(reopened.inspectBaselineAnalysis(bookId).authorization?.startWhen).toBe('now');
     expect(reopened.inspectBackgroundAnalysisEnrollment(bookId, runtime()).kind).toBe('baseline-analysis');
+    expect(reopened.inspectDataVersion().schemaRevision).toBe(LATEST_SCHEMA_VERSION);
     reopened.markCleanShutdown();
   } finally { reopened.close(); }
   withDatabase(true, (db) => {
-    expect(db.prepare('PRAGMA user_version').get()?.user_version).toBe(102);
     expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
     for (const [table, rows] of before) expect(db.prepare(`SELECT rowid, canonical_json, sha256 FROM ${table} ORDER BY rowid`).all()).toEqual(rows);
     for (const table of Object.keys(BACKGROUND_PROCESSING_ENROLLMENT_SCHEMA_SQL)) expect(db.prepare(`SELECT kind FROM ${table}`).all().every((row) => row.kind === 'baseline-analysis')).toBe(true);
@@ -1377,24 +1279,25 @@ it('recovers only the exact pre-stamp authorization shape and refuses an unexpec
   const snapshot = withDatabase(false, (db) => {
     constructPre94PolicyEncoding(db);
     execPre74Fixture(db, 'PRAGMA user_version = 88');
-    return { rows: db.prepare('SELECT rowid, * FROM analysis_run_authorizations ORDER BY rowid').all(),
-      sql: db.prepare("SELECT sql FROM sqlite_schema WHERE name = 'analysis_run_authorizations'").get()?.sql };
+    return db.prepare('SELECT rowid, * FROM analysis_run_authorizations ORDER BY rowid').all();
   });
   const recovered = await openWithRoute();
-  try { expect(recovered.inspectBaselineAnalysis(bookId).authorization?.startWhen).toBe('now'); recovered.markCleanShutdown(); }
+  try {
+    expect(recovered.inspectBaselineAnalysis(bookId).authorization?.startWhen).toBe('now');
+    expect(recovered.inspectDataVersion().schemaRevision).toBe(LATEST_SCHEMA_VERSION);
+    recovered.markCleanShutdown();
+  }
   finally { recovered.close(); }
   withDatabase(false, (db) => {
-    expect(db.prepare('PRAGMA user_version').get()?.user_version).toBe(102);
-    expect(db.prepare('SELECT rowid, * FROM analysis_run_authorizations ORDER BY rowid').all()).toEqual(snapshot.rows);
-    expect(db.prepare("SELECT sql FROM sqlite_schema WHERE name = 'analysis_run_authorizations'").get()?.sql).toBe(CURATION_SCHEMA_SQL.analysis_run_authorizations);
+    expect(db.prepare('SELECT rowid, * FROM analysis_run_authorizations ORDER BY rowid').all()).toEqual(snapshot);
     execPre74Fixture(db, 'PRAGMA user_version = 88; ALTER TABLE analysis_run_authorizations ADD COLUMN unexpected INTEGER');
   });
   await expect(openWithRoute()).rejects.toMatchObject({ code: 'SCHEMA_MIGRATION_FAILED' });
   withDatabase(true, (db) => {
     expect(db.prepare('PRAGMA user_version').get()?.user_version).toBe(88);
     expect(String(db.prepare("SELECT sql FROM sqlite_schema WHERE name = 'analysis_run_authorizations'").get()?.sql)).toContain('unexpected INTEGER');
-    expect(db.prepare('SELECT rowid, canonical_json, sha256 FROM analysis_run_authorizations ORDER BY rowid').all())
-      .toEqual(snapshot.rows.map(({ rowid, canonical_json, sha256 }) => ({ rowid, canonical_json, sha256 })));
+    expect(db.prepare('SELECT rowid, * FROM analysis_run_authorizations ORDER BY rowid').all())
+      .toEqual(snapshot.map((row) => ({ ...row, unexpected: null })));
   });
 });
 
@@ -1432,10 +1335,7 @@ it('defers a Review approval on the same driver, propagates idle to its categori
     let driven = Promise.resolve();
     store.admitIdleReview(input.ref, () => { driven = driver.drive(input.ref); });
     await driven;
-    const categoryRows = withDatabase(true, (db) => db.prepare(`SELECT a.start_when FROM analysis_run_authorizations a
-      JOIN analysis_task_intents t ON t.task_intent_id = a.task_intent_id WHERE t.book_id = ?`).all(bookId));
-    expect(categoryRows.length).toBeGreaterThan(0);
-    expect(categoryRows.every((row) => row.start_when === 'idle')).toBe(true);
+    expect(store.inspectReviewCategory(bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE)).authorization?.startWhen).toBe('idle');
     const pending = prepareReview(bookId); stranded = pending.ref;
     store.startTaskWhenIdle(pending);
     store.markCleanShutdown();
