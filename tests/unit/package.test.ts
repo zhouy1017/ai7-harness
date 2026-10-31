@@ -90,9 +90,9 @@ describe('host-native offline package inputs', () => {
       expect(sign).not.toHaveBeenCalled();
       const resources = NtExecutableResource.from(NtExecutable.from(await readFile(file)));
       const info = Resource.VersionInfo.fromEntries(resources.entries)[0];
-      expect(info.fixedInfo.fileVersionMS).toBe(3); // 0.3
+      expect(info.fixedInfo.fileVersionMS).toBe(4); // 0.4
       expect(info.fixedInfo.fileVersionLS).toBe(1234); // 0.1234
-      expect(info.fixedInfo.productVersionMS).toBe(3);
+      expect(info.fixedInfo.productVersionMS).toBe(4);
       expect(info.fixedInfo.productVersionLS).toBe(1234);
       const strings = info.getStringValues(info.getAllLanguagesForStringValues()[0]);
       expect(strings).toMatchObject({ FileVersion: '0.4.0.1234', ProductVersion: '0.4.0.1234', ProductName: 'AI7' });
