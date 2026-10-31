@@ -28,6 +28,8 @@ Generated `node_modules/`, `.pnpm-store/`, `.cache/`, `.runtime/`, `dist/`, `rel
 
 [bounded-schema-sql.ts](../../src/service/manuscript/bounded-schema-sql.ts) holds the bounded manuscript store's existing schema SQL, expected historical shapes and foreign-key signatures; [bounded-manuscript.ts](../../src/service/bounded-manuscript.ts) re-exports its public SQL constants.
 
+[bounded-schema-check.ts](../../src/service/manuscript/bounded-schema-check.ts) holds the same store's exact table, index, trigger and search-schema checks, including its existing column-signature cache; initialization, migrations and the store class remain in the hub.
+
 ## Tooling ownership
 
 The existing commands `node tools/nightly-queue.mjs …` and imports from `tools/orca-release.mjs` remain compatible. Their implementations live in [queue.mjs](../../tools/ci/queue.mjs) and [release-authority.mjs](../../tools/ci/release-authority.mjs). The latter authorizes repository merges; it is distinct from creating a product release. Keeping the entry paths stable also preserves trusted control checkouts used by existing workflow runs.
