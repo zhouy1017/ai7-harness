@@ -80,7 +80,15 @@ export function asRevision100(db: DatabaseSync): void {
  * revision 102 adds dropped, with the lineage triggers that go with them.
  */
 export function asRevision101(db: DatabaseSync): void {
+  asRevision102(db);
   if (db.prepare('SELECT 1 FROM manuscript_import_lineage LIMIT 1').get() !== undefined) throw new Error('a revision-101 store holds no import lineage');
   db.exec('DROP TABLE manuscript_import_lineage; DROP TABLE staged_import_structure_choices; DROP TABLE staged_import_paragraph_pieces');
   db.exec('PRAGMA user_version = 101');
+}
+
+/** A genuine revision-102 store from a current one with no 备用来源 chosen (#1226): revision 104's one-row relation dropped. */
+export function asRevision102(db: DatabaseSync): void {
+  if (db.prepare('SELECT 1 FROM search_backend_fallback LIMIT 1').get() !== undefined) throw new Error('a revision-102 store holds no search fallback');
+  db.exec('DROP TABLE search_backend_fallback');
+  db.exec('PRAGMA user_version = 102');
 }

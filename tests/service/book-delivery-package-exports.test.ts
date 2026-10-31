@@ -407,7 +407,7 @@ describe('图书交付包 · 导出 (S67b)', () => {
           expect(receipt.archive).toEqual(preparation.archive);
           expect(receipt.finalPath).toBe(destination);
         }
-        expect(db.prepare('PRAGMA user_version').get()!.user_version).toBe(102);
+        expect(db.prepare('PRAGMA user_version').get()!.user_version).toBe(104);
       } finally { db.close(); }
       history = JSON.stringify(store.inspectBookDeliveryPackage(bookId).versions);
       store.markCleanShutdown();

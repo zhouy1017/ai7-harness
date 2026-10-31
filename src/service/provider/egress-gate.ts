@@ -147,6 +147,8 @@ export interface EgressBindingFacts {
     { readonly rule?: undefined; readonly scopedRule: NonNullable<AdmittedProviderRule['globalAgentScopedDialogue']> });
   readonly seriesScopeGuard?: () => string | null;
   readonly searchBackend?: SearchBackendBinding;
+  /** The Plan's frozen 备用来源 (Issue #1226), present only when one was frozen: its exact host's results are admitted too. */
+  readonly searchFallback?: SearchBackendBinding;
   readonly bindingDigest: string;
   readonly route: ExecutionRoute;
   readonly model: string;
@@ -565,7 +567,7 @@ function toolResultSourceAdmitted(admitted: AdmittedToolResult, rule: PlatformTo
   if (admitted.tool === 'websearch') {
     try {
       const url = new URL(admitted.sourceUrl);
-      return url.protocol === 'https:' && url.hostname === (binding.searchBackend?.host ?? legacySearchHost(rule));
+      return url.protocol === 'https:' && (url.hostname === (binding.searchBackend?.host ?? legacySearchHost(rule)) || url.hostname === binding.searchFallback?.host);
     } catch {
       return false;
     }

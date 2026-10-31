@@ -1,5 +1,5 @@
 import { procedureStageBudget } from '../procedures/execution.js';
-import { PlatformToolSession, platformToolModelProfile } from '../provider/platform-tool-session.js';
+import { PlatformToolSession, bindSearchFallback, platformToolModelProfile, type SearchFallbackAttribution } from '../provider/platform-tool-session.js';
 import { excerptLocated, independenceGroups, mapVerificationOutcome, registrableDomain, type FactualClaimSession } from '../factual-verification.js';
 import { factualClaimVerificationInput, freezeFactualClaimLedger } from './factual-claim-ledger.js';
 import { parseFactualClaimVerification } from './factual-claim-contract.js';
@@ -32,7 +32,7 @@ import {
   DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION,
   ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION,
   allowedProductionBindingOf,
-  isOrdinaryProductionRuntime,
+  isOrdinaryProductionRuntime, searchFallbackTermsOf,
   type DeveloperLiveRuntime,
   type LiveRuntime,
   type OrdinaryProductionRuntime,
@@ -235,7 +235,7 @@ export interface ExecutionOwnerDependencies {
    * Where a research unit's retained external evidence is kept the moment the unit settles (Issue #425, S70; SRC-013): the
    * store's research evidence ledger. Absent, nothing is retained.
    */
-  readonly researchEvidence?: ((input: { bookId: string; runRecordId: string; unitOrdinal: number; backendId: string | null; unit: RetainedUnit }) => void) | null;
+  readonly researchEvidence?: ((input: { bookId: string; runRecordId: string; unitOrdinal: number; backendId: string | null; unit: RetainedUnit; fallbackSources?: ReadonlyMap<string, SearchFallbackAttribution> }) => void) | null;
   /**
    * The level a 事实核查 Run executes under, decided once as it starts (Issue #901; EASSURE-002): the store records the planned
    * level and, when this device reads offline then, the effective 快速整理 with its disclosure. Absent, nothing is recorded.
@@ -2056,7 +2056,7 @@ export class BaselineAnalysisExecutionOwner {
           const snapshots = cache === null ? null : new ResearchSnapshotCache((live as DeveloperLiveRuntime).launch.providerCacheRoot);
           if (snapshots !== null) await snapshots.open();
           const ready = await broker.checkPlanReadiness(backend.declaration.credentialSlot, facts.searchCredentialReference);
-          if (ready !== 'present') throw new ExecutionAdmissionError('SEARCH_CREDENTIAL_MISSING', `${backend.declaration.displayName} 缺少密钥；请在 设置 › 模型服务 › 联网检索 配置。`);
+          if (ready !== 'present') throw new ExecutionAdmissionError('SEARCH_CREDENTIAL_MISSING', `${backend.declaration.displayName} 缺少密钥；请在 设置 › 模型服务 › 联网检索 配置。`); const fallback = facts.webToolsFallback === undefined ? undefined : await bindSearchFallback(facts.webToolsFallback, searchFallbackTermsOf(policy), bindingFacts.searchBackend!, broker); if (fallback !== undefined && 'refused' in fallback) throw new ExecutionAdmissionError(fallback.refused.code, fallback.refused.message); if (fallback !== undefined) bindingFacts = { ...bindingFacts, searchFallback: fallback.backend };
           platformSession = new PlatformToolSession({
             sourceExcluded: (url) => facts.factualDecision?.excludedSources.includes(url) ?? false,
             ...(claimSession?.stage !== 'web-verification' ? {} : { factualClaimAccounting: {
@@ -2069,7 +2069,7 @@ export class BaselineAnalysisExecutionOwner {
             binding: bindingFacts, scope: { currentBindingDigest: () => currentBindingDigest, acceptedOutputDigests, ceilingState },
             ...(retrieval === null ? {} : { retrieval }),
             fetch: live.nativeFetch, admitHost: admitTicketHost, broker: broker, cache, snapshots, purpose: testItemPurpose, evidenceSearchRoundTripOnly: bootstrap,
-            onUsage: (usage) => accumulated.push(usage),
+            onUsage: (usage) => accumulated.push(usage), ...(fallback === undefined ? {} : { searchFallback: fallback }),
           });
         }
         if (platformSession === null && retrieval !== null) platformSession = new PlatformToolSession({
@@ -2103,7 +2103,7 @@ export class BaselineAnalysisExecutionOwner {
     };
     type AnalysisContext = Awaited<ReturnType<typeof createContext>>;
     const stageContext = await createContext(harnessSessionId);
-    const context = stageContext;
+    const context = stageContext; const claimSearchCalls: Record<string, number> = {}; // #1226: a frozen 备用来源's claim sends, for the Run Report.
     const { harness, liveAdapter, admittedUserMessages, acceptedOutputDigests, pendingLoopUsage, ceilingState, retrieval } = context;
     active.transmissions = () => liveAdapter.instance?.transmissions ?? 0;
     active.channel = live === null ? null : route;
@@ -3281,7 +3281,7 @@ export class BaselineAnalysisExecutionOwner {
         const rule = liveKindRule(policy, FACTUAL_REVIEW_KIND)?.claimScopedFactualStages;
         if (rule === undefined || rule.procedureId !== facts.compositionOptions?.procedure?.procedureId ||
           rule.procedureVersion !== facts.compositionOptions.procedure.version) throw new ExecutionAdmissionError('FACTUAL_CLAIM_POLICY_MISSING', '断言阶段缺少准确的规则或工序。');
-        const retainedByUnit = new Map<number, RetainedUnit[]>();
+        const retainedByUnit = new Map<number, RetainedUnit[]>(); const fallbackSources = new Map<string, SearchFallbackAttribution>();
         for (const claim of claims.claims) {
           if (active.cancelRequested || active.interrupted || active.pauseRequested || sourceStopped() || ceilingState('web-verification') === 'reached' || scopeChanged()) break;
           const input = factualClaimVerificationInput(claims, claim.claimId, rule.claimVerification.maximumMetadataUtf8Bytes);
@@ -3342,10 +3342,10 @@ export class BaselineAnalysisExecutionOwner {
               rounds = claimOwner.claimRounds(session.sessionId);
             }
             retainedByUnit.set(producer.sourceUnitOrdinal, [...(retainedByUnit.get(producer.sourceUnitOrdinal) ?? []), ...rounds.map((round) => round.evidence)]);
-          } finally { await isolated.finish(); contexts.delete(isolated); }
+          } finally { for (const [url, source] of isolated.platformSession?.fallbackSources ?? []) if (!fallbackSources.has(url)) fallbackSources.set(url, source); if (facts.webToolsFallback !== undefined) for (const [id, count] of Object.entries(isolated.platformSession?.usage.searchCalls ?? {})) claimSearchCalls[id] = (claimSearchCalls[id] ?? 0) + count; await isolated.finish(); contexts.delete(isolated); }
         }
         for (const [unitOrdinal, retained] of retainedByUnit) {
-          this.#deps.researchEvidence?.({ bookId: facts.bookId, runRecordId: facts.runRecordId, unitOrdinal,
+          this.#deps.researchEvidence?.({ bookId: facts.bookId, runRecordId: facts.runRecordId, unitOrdinal, ...(fallbackSources.size === 0 ? {} : { fallbackSources }),
             backendId: facts.webToolsBackend!.backendId, unit: { state: retained.some((entry) => entry.state === 'incomplete') ? 'incomplete' : 'completed',
               searchCalls: retained.reduce((sum, entry) => sum + entry.searchCalls, 0), retentionFetches: 0,
               failedRetrievals: retained.reduce((sum, entry) => sum + entry.failedRetrievals, 0),
@@ -3620,7 +3620,7 @@ export class BaselineAnalysisExecutionOwner {
         recordedAt: new Date().toISOString(),
         spans: clock.spans(),
         usage: stageUsage,
-        ...(context.platformSession === null ? {} : { platformTools: context.platformSession.usage, webToolsBackend: facts.webToolsBackend }),
+        ...(context.platformSession === null ? Object.keys(claimSearchCalls).length === 0 ? {} : { platformTools: { requests: 0, inputTokens: 0, outputTokens: 0, searchCalls: claimSearchCalls, refusedSearchCalls: 0, fetchCount: 0, fetchBytes: 0 }, webToolsBackend: facts.webToolsBackend } : { platformTools: Object.keys(claimSearchCalls).length === 0 ? context.platformSession.usage : { ...context.platformSession.usage, searchCalls: { ...context.platformSession.usage.searchCalls, ...claimSearchCalls } }, webToolsBackend: facts.webToolsBackend }),
         unitRows: runReportUnitRows(unitRecords, unitObservations),
         submitted: submittedUnits.length,
         // Exactly the three fields decision 4 names; the adaptation's own digests, codes, and
