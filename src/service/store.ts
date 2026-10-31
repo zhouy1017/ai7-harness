@@ -3468,7 +3468,7 @@ function readModelConnectionTest(row: SqlRow): ModelConnectionTestStatus | null 
   const facts = value.provenance;
   requireStore(value.outcome !== 'passed' || (value.code === null && facts !== undefined), 'MODEL_CONNECTION_TEST_INVALID', '连接测试状态无效。');
   if (facts !== undefined) requireStore(isModelTextAttemptProvenance(facts) && facts.model === value.modelId && facts.route === row.provider_id &&
-    facts.credentialReference === row.credential_reference && facts.credentialSlot === row.credential_slot && (facts.policyVersion === 'v25' || facts.policyVersion === 'v26' || facts.policyVersion === 'v27' || facts.policyVersion === 'v30' || facts.policyVersion === 'v31') && facts.failureCode === value.code &&
+    facts.credentialReference === row.credential_reference && facts.credentialSlot === row.credential_slot && (facts.policyVersion === 'v25' || facts.policyVersion === 'v26' || facts.policyVersion === 'v27' || facts.policyVersion === 'v30' || facts.policyVersion === 'v31' || facts.policyVersion === 'v32') && facts.failureCode === value.code &&
     (facts.credentialUpdatedAt === undefined || facts.credentialUpdatedAt === value.credentialUpdatedAt) &&
     allowedProductionBindingOf({ route: facts.route, endpoint: facts.endpoint, model: facts.model, credentialSlot: facts.credentialSlot, credentialReference: facts.credentialReference }, 'fast-interaction') !== null,
     'MODEL_CONNECTION_TEST_INVALID', '连接测试来历无效。');
@@ -9249,7 +9249,7 @@ export class EditorialStore {
     const policy = selectedPolicyIdentityOf(launch.policy?.selectedPolicyIdentity);
     const rule = liveKindRule(launch.policy, 'factual-recheck', [], 'background')?.factualRecheck;
     if (enrollment.kind !== 'factual-recheck' || enrollment.state !== 'active' || enrollment.paused || enrollment.version.share === null ||
-      launch.operationalScope !== 'ordinary-production' || live?.scope !== 'ordinary-production' || policy?.providerProcessingVersion !== 'v31' ||
+      launch.operationalScope !== 'ordinary-production' || live?.scope !== 'ordinary-production' || (policy?.providerProcessingVersion !== 'v31' && policy?.providerProcessingVersion !== 'v32') ||
       rule?.maximumClaims !== 1 || this.replacementFrozen()) return null;
     const enrolledBinding = backgroundEnrollments.enrollmentBinding(this.#backgroundEnrollmentHost, enrollment.bookId, 'factual-recheck');
     if (enrolledBinding === null || canonicalJson({ ...enrolledBinding, runBudgetCeiling: enrollment.version.binding.runBudgetCeiling }) !== canonicalJson(enrollment.version.binding)) return null;
@@ -12079,7 +12079,7 @@ export class EditorialStore {
 
   #globalOriginalFieldsSelected(): boolean {
     const policy = this.#baselineAnalysis.launch.policy;
-    if (policy?.providerProcessing.version !== 'v30' && policy?.providerProcessing.version !== 'v31') return false;
+    if (policy?.providerProcessing.version !== 'v30' && policy?.providerProcessing.version !== 'v31' && policy?.providerProcessing.version !== 'v32') return false;
     requireStore(policy.integrityState === 'verified' && policy.operationalScope === 'ordinary-production' &&
       selectedPolicyIdentityOf(policy.selectedPolicyIdentity)?.providerProcessingVersion === policy.providerProcessing.version,
     'GLOBAL_AGENT_POLICY_BLOCKED', '当前处理策略身份无法核实；未发送任何内容。');
@@ -12095,7 +12095,7 @@ export class EditorialStore {
     requireStore(binding !== null && connection !== undefined, 'GLOBAL_AGENT_POLICY_BLOCKED', '模型服务连接已变化；未发送任何内容。');
     const policy = resolveSourceCheckoutLaunchPolicySync(this.#codeRoot, 'ordinary-production',
       this.getConfiguredModelRoleBinding('main-editorial'), binding);
-    requireStore(policy.integrityState === 'verified' && (policy.providerProcessing.version === 'v30' || policy.providerProcessing.version === 'v31') &&
+    requireStore(policy.integrityState === 'verified' && (policy.providerProcessing.version === 'v30' || policy.providerProcessing.version === 'v31' || policy.providerProcessing.version === 'v32') &&
       canonicalJson(policy.selectedPolicyIdentity) === canonicalJson(this.#baselineAnalysis.launch.policy?.selectedPolicyIdentity),
     'GLOBAL_AGENT_POLICY_BLOCKED', '当前策略字节或已选身份无法核实；未发送任何内容。');
     return { binding, credentialUpdatedAt: connection.credentialUpdatedAt, policy };
@@ -17006,7 +17006,7 @@ export class EditorialStore {
     requireStore(Number.isFinite(Date.parse(result.testedAt)) && (result.outcome !== 'passed' || facts !== undefined), 'MODEL_CONNECTION_TEST_INVALID', '连接测试状态无效。');
     if (facts !== undefined) requireStore(facts.role === 'Fast Interaction Role' && facts.model === result.modelId &&
       facts.credentialReference === connection.credentialReference && facts.route === connection.binding.providerId &&
-      facts.credentialSlot === connection.binding.credentialSlot && DIGEST_PATTERN.test(facts.bindingDigest) && (facts.policyVersion === 'v25' || facts.policyVersion === 'v26' || facts.policyVersion === 'v27' || facts.policyVersion === 'v30' || facts.policyVersion === 'v31') &&
+      facts.credentialSlot === connection.binding.credentialSlot && DIGEST_PATTERN.test(facts.bindingDigest) && (facts.policyVersion === 'v25' || facts.policyVersion === 'v26' || facts.policyVersion === 'v27' || facts.policyVersion === 'v30' || facts.policyVersion === 'v31' || facts.policyVersion === 'v32') &&
       allowedProductionBindingOf({ route: facts.route, endpoint: facts.endpoint, model: facts.model, credentialSlot: facts.credentialSlot, credentialReference: facts.credentialReference }, 'fast-interaction') !== null &&
       (facts.failureCode === null || /^[A-Z0-9_]{1,100}$/u.test(facts.failureCode)) &&
       (counts == null || [counts.inputTokens, counts.outputTokens, ...(counts.reasoningTokens === undefined ? [] : [counts.reasoningTokens]),

@@ -64,12 +64,12 @@ describe('the one model-service flow', () => {
     expect(node.querySelector('button[data-action="enter-channel-credential"]')).toBeNull();
     const listed = node.querySelectorAll('.model-service-flow-ineligible li');
     expect(listed.length).toBe(modelServiceChannels().find((channel) => channel.channelId === 'anthropic-claude')!.models.length);
-    expect(listed.every((item) => item.textContent.includes('family-not-admitted-by-selected-policy') && item.querySelectorAll('input,button').length === 0)).toBe(true);
+    expect(listed.every((item) => item.textContent.includes('untested:text') && item.querySelectorAll('input,button').length === 0)).toBe(true);
   });
 
   it('says a Fast-only model\'s Main disposition and where it can still be assigned', () => {
     const luna = modelServiceChannels().find((channel) => channel.channelId === 'openai-platform')!.models.find((model) => model.modelId === 'gpt-5.6-luna')!;
-    expect(modelRolesLabel(luna)).toBe('主编辑角色：所选策略未准入此协议（family-not-admitted-by-selected-policy）；快速交互角色：可在高级设置中单独指定');
+    expect(modelRolesLabel(luna)).toBe('主编辑角色：尚无已审核的运行配置（not-in-runtime-model-table）；快速交互角色：可在高级设置中单独指定');
     const { node } = flow(settings(['opencode-go', 'openai-platform']));
     pickChannel(node, 'openai-platform');
     expect(node.querySelectorAll('[data-model-choice]')).toHaveLength(0);

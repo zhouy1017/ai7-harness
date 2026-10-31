@@ -741,7 +741,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       expect(prepared.planVersion).toMatchObject({ ordinal: 1, state: 'current', planRevisionId: null, planEnvelopeDigest: prepared.planEnvelope!.digest });
       expect(prepared.planVersion?.materialInputs).toEqual({
         selectedPolicyIdentity: { providerProcessingVersion: 'v1', providerProcessingSha256: 'd9dfe8c13a58649d8d9f607364030468ae71832b94c9436291d29000795d725a',
-          activePolicySetVersion: 'v22', activePolicySetSha256: '68125ebd3e1266f02fc1cf02c0a548fa652c4cad3ee052bbfaebc68922758ebb' },
+          activePolicySetVersion: 'v23', activePolicySetSha256: 'fe666f4a92b7a82503d69b345233cbec7a93846f97e10027524d7e3d3a76f2ab' },
         providerBinding: { providerId: 'deepseek-open-platform', modelId: 'deepseek-v4-pro', adapterRevision: 1, configurationRevision: 1, credentialReference },
         artifactPin: { identity: '@ai7/editorial-workspace-profile', version: '1.0.0', nativeCarrierSha256: 'ae485040c8fa602ab2e98ec91dd122201d40a8be41d8a4f86f7cd55ddb1e434d', sidecarRevision: 2, sidecarSha256: '980b565f25bdff29e539365e17344346017b05146a45cfea35c8ed7d528a1bff' },
         selectedRange: null,

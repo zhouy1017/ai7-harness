@@ -126,12 +126,12 @@ describe('the denied Task kind reads its statements from the bound launch', () =
     expect(() => planProviderProcessingPin({ ...forged, operationalScope: null })).toThrowError(TaskAuthorizationError);
   });
 
-  it('pins a new ordinary-production plan to Provider Processing v31, bounded by the Run', () => {
+  it('pins a new ordinary-production plan to Provider Processing v32, bounded by the Run', () => {
     const production: LaunchPolicyProjection = {
       ...launch('development-ci'),
       operationalScope: 'ordinary-production',
       providerProcessing: {
-        version: 'v31',
+        version: 'v32',
         decision: 'eligible-only',
         authorizedLiveTransmissionCount: 'bounded-by-run',
         liveTransmissionAllowed: true,
@@ -141,8 +141,8 @@ describe('the denied Task kind reads its statements from the bound launch', () =
       },
     };
     const pin = planProviderProcessingPin(production);
-    expect(pin).toEqual({ operationalScope: 'ordinary-production', version: 'v31', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' });
-    expect(planStopCondition(pin)).toBe('Provider Processing v31 admits dispatch bounded by the Run');
+    expect(pin).toEqual({ operationalScope: 'ordinary-production', version: 'v32', decision: 'eligible-only', authorizedLiveTransmissionCount: 'bounded-by-run' });
+    expect(planStopCondition(pin)).toBe('Provider Processing v32 admits dispatch bounded by the Run');
     // A launch whose stated version disagrees with its scope is still refused rather than pinned.
     expect(() => planProviderProcessingPin({ ...production, providerProcessing: { ...production.providerProcessing, version: 'v13' } }))
       .toThrowError(TaskAuthorizationError);

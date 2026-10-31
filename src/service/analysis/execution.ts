@@ -558,7 +558,7 @@ export class BaselineAnalysisExecutionOwner {
       let ticket: TransmitTicket | null = null, admitted = false;
       const facts: EgressBindingFacts = { bindingDigest: bound.bindingDigest, route: binding.route, model: binding.model,
         systemPrompt: CURATION_CONTRACT.systemPrompt, outboundDataCategory: 'editorial-learning-example',
-        policy: { operationalScope: 'ordinary-production', providerProcessingVersion: 'v31', liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
+        policy: { operationalScope: 'ordinary-production', providerProcessingVersion: 'v32', liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
         admittedUserMessages: new Set([frozen.bundle.emittedText]), ruleOutboundCategories: new Set(rule.outboundDataCategories),
         contractCategories: new Set(['editorial-learning-example', 'house-review-preference-excerpt']),
         learningCurationScope: { messageDigest: frozen.bundle.emittedDigest, current } };
@@ -652,7 +652,7 @@ export class BaselineAnalysisExecutionOwner {
       };
       const facts: EgressBindingFacts = { bindingDigest: bound.bindingDigest, route: binding.route, model: binding.model,
         systemPrompt: frozen.prompt, outboundDataCategory: 'unpublished-excerpts',
-        policy: { operationalScope: 'ordinary-production', providerProcessingVersion: 'v31', liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
+        policy: { operationalScope: 'ordinary-production', providerProcessingVersion: 'v32', liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
         admittedUserMessages: new Set([frozen.message]), ruleOutboundCategories: new Set(rule!.outboundDataCategories),
         factualClaimScope: { stage: 'web-verification', current }, platformTools: tools,
         searchBackend: { backendId: frozen.search.backendId, host: frozen.search.host, endpoint: backend.declaration.endpoint!,

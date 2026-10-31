@@ -1643,7 +1643,7 @@ export class BaselineAnalysisStore {
       VALUES (?,?,'factual-recheck','ai7.factual-claim-verification/1',?,?,?,?, 'factual-recheck')`)
       .run(taskIntentId, candidate.selection.bookId, '核查编辑要求补充证据的一条冻结断言', instant, intent.json, intent.digest);
     const plan = canonicalRecord({ schema: 'ai7.factual-recheck-plan/1', ...frozen, taskIntentId, runRecordId, authorizationId,
-      session, compositionDigest, policyVersion: 'v31', stages: ['web-verification'], startWhen: 'idle', recordedAt: instant });
+      session, compositionDigest, policyVersion: ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION, stages: ['web-verification'], startWhen: 'idle', recordedAt: instant });
     for (const [component, value] of [['run-source-scope', { selection: candidate.selection, messageDigest: session.sourceMessageDigest,
       messageByteCount: Buffer.byteLength(candidate.message, 'utf8') }], ['provider-resolution-plan', { binding: candidate.binding, search: candidate.search }], ['plan-envelope', JSON.parse(plan.json)]] as const) {
       const record = canonicalRecord(value);
@@ -2687,7 +2687,7 @@ export class BaselineAnalysisStore {
 
   #selectedPlanMetadata(policy = this.#launch.policy): Pick<MaterialPlanInputsProjection, 'selectedPolicyIdentity' | 'localFixtureProfile'> {
     if (policy?.selectedPolicyIdentity === undefined) {
-      requireAnalysis(!['v21', 'v22'].includes(policy?.activePolicySetVersion ?? '') && !['v29', 'v30', 'v31'].includes(policy?.providerProcessing.version ?? ''),
+      requireAnalysis(!['v21', 'v22', 'v23'].includes(policy?.activePolicySetVersion ?? '') && !['v29', 'v30', 'v31', 'v32'].includes(policy?.providerProcessing.version ?? ''),
         'ANALYSIS_POLICY_UNAVAILABLE', '当前计划缺少已选处理策略身份。');
       return {};
     }

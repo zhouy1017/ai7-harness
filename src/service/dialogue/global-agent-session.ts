@@ -122,7 +122,7 @@ export function admittedGlobalAgentScopedRoute(policy: LaunchPolicyProjection): 
   const declared = policy.providerProcessing.admittedRules.filter((entry) => entry.ruleId === GLOBAL_AGENT_SCOPED_RULE_ID);
   const rule = route?.globalAgentScopedDialogue;
   const local = route?.localTools;
-  if (route?.operationalScope !== 'ordinary-production' || route.ruleId !== GLOBAL_AGENT_SCOPED_RULE_ID || route.providerProcessingVersion !== 'v31' ||
+  if (route?.operationalScope !== 'ordinary-production' || route.ruleId !== GLOBAL_AGENT_SCOPED_RULE_ID || (route.providerProcessingVersion !== 'v31' && route.providerProcessingVersion !== 'v32') ||
       route.modelRole !== 'Fast Interaction Role' || declared.length !== 1 || declared[0]!.webSearchToolAllowed !== false ||
       declared[0]!.platformTools !== null || rule === undefined || local == null || local.targetedRetrieval.allowed !== true) return null;
   const { source, scopedTools: tools } = rule;
@@ -227,8 +227,8 @@ function qualifiedGlobalPreparation(store: GlobalAgentTurnStore, owner: Dialogue
   const ruleId = scope === undefined ? 'ordinary-production-global-agent-dialogue' : GLOBAL_AGENT_SCOPED_RULE_ID;
   const connection = store.globalAgentModelConnection();
   const routeId = route.profile.route;
-  if (policy.integrityState !== 'verified' || policy.operationalScope !== 'ordinary-production' || selected === null || (selected.providerProcessingVersion !== 'v30' && selected.providerProcessingVersion !== 'v31') ||
-      (scope !== undefined && selected.providerProcessingVersion !== 'v31') ||
+  if (policy.integrityState !== 'verified' || policy.operationalScope !== 'ordinary-production' || selected === null || (selected.providerProcessingVersion !== 'v30' && selected.providerProcessingVersion !== 'v31' && selected.providerProcessingVersion !== 'v32') ||
+      (scope !== undefined && selected.providerProcessingVersion === 'v30') ||
       policy.activePolicySetVersion !== selected.activePolicySetVersion || policy.providerProcessing.version !== selected.providerProcessingVersion ||
       route.providerProcessingVersion !== selected.providerProcessingVersion ||
       route.modelRole !== 'Fast Interaction Role' || route.ruleId !== ruleId ||
@@ -283,7 +283,7 @@ function qualifiedGlobalPreparation(store: GlobalAgentTurnStore, owner: Dialogue
 export function prepareGlobalAgentDisclosure(store: GlobalAgentTurnStore, owner: DialogueExecutionOwner,
   policy: LaunchPolicyProjection, input: PrepareGlobalAgentTurnInput): GlobalAgentDisclosure {
   const route = input.kind === 'ask' && input.scope !== undefined ? owner.requireGlobalScopedReady(policy) : owner.requireGlobalReady(policy);
-  if (policy.providerProcessing.version === 'v30' || policy.providerProcessing.version === 'v31')
+  if (policy.providerProcessing.version === 'v30' || policy.providerProcessing.version === 'v31' || policy.providerProcessing.version === 'v32')
     return qualifiedGlobalPreparation(store, owner, policy, input, store.prepareGlobalAgentTurn(input)).disclosure;
   return globalAgentDisclosure(store.prepareGlobalAgentTurn(input), store.inspectGlobalAgent().sourceCandidates ?? [],
     route, owner.globalDisclosureReference());
@@ -296,7 +296,7 @@ export function startGlobalAgentTurn(store: GlobalAgentTurnStore, owner: Dialogu
   if (disclosureSha256 !== disclosure.sha256) throw new DialogueError('GLOBAL_AGENT_DISCLOSURE_CHANGED', '发送内容或模型服务已经变化；请重新查看将发送的内容。未发送任何内容。');
   const initialPolicy = policy();
   const route = input.kind === 'ask' && input.scope !== undefined ? owner.requireGlobalScopedReady(initialPolicy) : owner.requireGlobalReady(initialPolicy);
-  const prepared = (initialPolicy.providerProcessing.version === 'v30' || initialPolicy.providerProcessing.version === 'v31')
+  const prepared = (initialPolicy.providerProcessing.version === 'v30' || initialPolicy.providerProcessing.version === 'v31' || initialPolicy.providerProcessing.version === 'v32')
     ? qualifiedGlobalPreparation(store, owner, initialPolicy, input, store.prepareGlobalAgentTurn(input)) : null;
   if (prepared !== null && prepared.disclosure.sha256 !== disclosure.sha256)
     throw new DialogueError('GLOBAL_AGENT_DISCLOSURE_CHANGED', '发送内容或模型服务已经变化；请重新查看将发送的内容。');

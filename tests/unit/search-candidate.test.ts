@@ -87,7 +87,7 @@ const POLICY: SearchConnectionTestPolicy = Object.freeze<SearchConnectionTestPol
 
 function decide(overrides: Partial<Parameters<typeof evaluateSearchCandidateProbe>[0]> = {}, reads = { connection: 0 }) {
   const candidate = searchBackendCandidate('search-deepseek', 'deepseek-direct-search-v1');
-  return evaluateSearchCandidateProbe({ operationalScope: 'ordinary-production', providerProcessingVersion: 'v31', policy: POLICY,
+  return evaluateSearchCandidateProbe({ operationalScope: 'ordinary-production', providerProcessingVersion: 'v32', policy: POLICY,
     candidate: { ...candidate.search, backendId: candidate.backendId, candidateId: candidate.candidateId, credentialSlot: candidate.credentialSlot, arguments: candidate.search.probeArguments },
     configurationDigest: candidateConfigurationDigestOf(document()), developmentReference: () => false,
     connection: () => { reads.connection += 1; return { credentialReference: '6f9c1d2e-3b4a-4c5d-8e6f-7a8b9c0d1e2f', credentialOperationState: 'ready' }; }, ...overrides });
@@ -119,7 +119,7 @@ describe('the candidate probe decision and its single credential release', () =>
     const ticket: SearchCandidateProbeTicket = decision.ticket;
     expect(ticket).toMatchObject({ backendId: 'search-deepseek', candidateId: 'deepseek-direct-search-v1', endpoint: POLICY.endpoint, method: 'POST',
       protocol: 'deepseek-direct-search', arguments: POLICY.arguments, argumentsDigest: POLICY.argumentsCanonicalSha256, credentialSlot: 'search-deepseek',
-      policy: { operationalScope: 'ordinary-production', providerProcessingVersion: 'v31' } });
+      policy: { operationalScope: 'ordinary-production', providerProcessingVersion: 'v32' } });
     expect(Object.isFrozen(ticket)).toBe(true);
     let reads = 0;
     const broker = new CredentialBroker({ resolve: async () => { reads += 1; return 'placeholder'; } }, { developmentReferences: 'refused' });
