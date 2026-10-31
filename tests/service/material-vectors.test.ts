@@ -620,7 +620,7 @@ describe('revision 76', () => {
   it('migrates an exact revision-75 store by adding its two relations, moving nothing else, and refuses a 76 without them', async () => {
     expect(MATERIAL_INDEX_LAYER_SCHEMA_VERSION).toBe(76);
     // Revision 84 follows the imported Skill revisions and adds independent model selections and translation attempt metadata.
-    expect(LATEST_SCHEMA_VERSION).toBe(MATERIAL_INDEX_LAYER_SCHEMA_VERSION + 27);
+    expect(LATEST_SCHEMA_VERSION).toBe(MATERIAL_INDEX_LAYER_SCHEMA_VERSION + 28);
     const schemaRows = (): Array<{ name: string; sql: string }> => {
       const database = new DatabaseSync(storePath(), { readOnly: true });
       try {
