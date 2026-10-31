@@ -96,6 +96,39 @@ function emptyBook(store: EditorialStore, title: string, internalNumber: string 
 
 const TITLE = '合并组稿';
 
+async function withStore<T>(dataRoot: string, run: (store: EditorialStore) => T | Promise<T>): Promise<T> {
+  const store = await EditorialStore.open(dataRoot, roots.codeRoot);
+  try { return await run(store); } finally { store.close(); }
+}
+
+async function manuscriptPackage(): Promise<string> {
+  return withStore(roots.dataRoot, async (store) => {
+    await importBook(store, await compose(TITLE, [1, 2]));
+    return exportedFrom(store, 'AI7 数据库.ai7db');
+  });
+}
+
+async function emptyBookPackage(titles: string[], name = 'AI7 数据库.ai7db', dataRoot = roots.dataRoot): Promise<string> {
+  return withStore(dataRoot, async (store) => {
+    for (const title of titles) emptyBook(store, title);
+    return exportedFrom(store, name);
+  });
+}
+
+async function prepareMerge(packagePath: string, at = T, dataRoot = otherRoot): Promise<string> {
+  await withStore(dataRoot, async (store) => {
+    await store.prepareDatabaseMerge((await store.inspectDatabaseImport(packagePath)).previewId, at);
+  });
+  return replacementStagingFor(dataRoot);
+}
+
+async function pendingMerge(dataRoot = otherRoot) {
+  const staging = replacementStagingFor(dataRoot);
+  const envelope = JSON.parse(await readFile(join(staging, 'intent.json'), 'utf8')) as { json: string };
+  const intent = parseCanonicalJson(envelope.json) as ReplacementIntent;
+  return { staging, intent, listed: { ...intent.mergeBooks!, path: join(staging, MERGING_BOOKS_FILE) } };
+}
+
 /** A Book with a manuscript and its history, a mark, a milestone, a 发稿版本, a Production Document delivered and a package. */
 async function richBook(store: EditorialStore): Promise<{ bookId: string; manuscriptId: string; branchId: string }> {
   const book = await importBook(store, await compose(TITLE, [1, 2, 3, 4]));
@@ -140,12 +173,36 @@ function readings(store: EditorialStore, book: { bookId: string; manuscriptId: s
   };
 }
 
+async function composeSingleWord(mode: string): Promise<string> {
+  const path = join(roots.inputRoot, `word-public-merge-${mode}.docx`);
+  await composeRevisedDocx(path, { source: ADMITTED_BASELINE_DOCX, title: '公开包中的 Word 图书', paragraphs: [
+    { runs: [{ text: { block: 8, from: 0, to: 10 } }, { text: { block: 9, from: 0, to: 5 },
+      revision: { kind: 'ins', author: '作者', date: '2026-10-25T00:00:00Z' } }] },
+  ] });
+  return path;
+}
+
+async function importWord(store: EditorialStore, path: string, mode: 'suggestions' | 'accepted-baseline', bookId?: string) {
+  const staged = await store.stageSelectedManuscript(randomUUID(), path);
+  if (bookId !== undefined) expect(store.getBookOverview(bookId).manuscriptState.state).toBe('empty');
+  const target = bookId === undefined
+    ? { kind: 'new-book' as const, choiceId: 'new-book' as const, confirmedTitle: staged.titleSuggestion.value }
+    : { kind: 'existing-book' as const, bookId, relationship: 'first-manuscript' as const };
+  const review = store.prepareNewBookReview(staged.draftId, staged.draftVersion, target, false, 'retain',
+    { mode, learnFromEdits: true, acceptedBaselineConfirmed: mode === 'accepted-baseline' });
+  if (review.reviewDigest === null) throw new Error('expected complete Word review');
+  const commitId = randomUUID();
+  const commit = await store.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest, commitId });
+  await store.acknowledgeImportCompletion(commitId);
+  return { commit, commitId };
+}
+
 const storeOf = (dataRoot: string): string => join(dataRoot, 'store', 'ai7.sqlite');
 
 describe('complete Word manifest from one cloned empty Book', () => {
 let seed: ServiceTestRoots;
 let seedBookId: string;
-let completeManifest: Array<{ id: string; digest: string; json: string }> | null = null;
+let completeManifest: Array<{ id: string; digest: string }> | null = null;
 beforeAll(async () => {
   seed = await createServiceTestRoots('ai7-service-word-manifest-seed-');
   const store = await EditorialStore.open(seed.dataRoot, seed.codeRoot);
@@ -154,33 +211,10 @@ beforeAll(async () => {
 });
 afterAll(async () => { await seed.dispose(); });
 
-it.each([{ mode: 'suggestions', count: 201 }, { mode: 'suggestions', count: 2_001 }, { mode: 'accepted-baseline', count: 2_001 }] as const)(
-  'retains the independent $count-edit Word manifest through public $mode import, all pages, reopen and selected-Book merge', async ({ mode, count }) => {
-  cpSync(seed.dataRoot, roots.dataRoot, { recursive: true });
-  const path = join(roots.inputRoot, `word-manifest-${mode}.docx`);
-  const span = { block: 9, from: 0, to: 5 };
-  const inserted = await sourceSpanText(ADMITTED_BASELINE_DOCX, span);
-  const date = '2026-10-25T00:00:00Z';
-  await composeRevisedDocx(path, { source: ADMITTED_BASELINE_DOCX, title: '完整 Word 修改清单', paragraphs: Array.from({ length: count }, (_, index) =>
-    ({ runs: [{ text: { block: 8, from: 0, to: 10 } }, { text: span, revision: { kind: 'ins', author: `作者${index}`, date } }] })) });
-  const compiled = await compileWordTrackedDocx(path);
-  if (compiled.kind !== 'ready') throw new Error('expected supported independent insertion recipe');
-  expect(compiled.graph.paragraphs).toHaveLength(count);
-  expect(compiled.graph.events).toHaveLength(count);
+function expectedManifest(compiled: Extract<Awaited<ReturnType<typeof compileWordTrackedDocx>>, { kind: 'ready' }>, bookId: string, inserted: string, date: string) {
   const byParagraph = new Map(compiled.graph.events.map((event) => [event.location.paragraphIndex, event]));
   const byEvent = new Map(compiled.graph.atoms.filter((atom) => atom.kind === 'text' && atom.eventMembership.length === 1)
     .map((atom) => [atom.eventMembership[0]!, atom]));
-  let source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-  const staged = await source.stageSelectedManuscript(randomUUID(), path);
-  expect(source.getBookOverview(seedBookId).manuscriptState.state).toBe('empty');
-  const review = source.prepareNewBookReview(staged.draftId, staged.draftVersion,
-    { kind: 'existing-book', bookId: seedBookId, relationship: 'first-manuscript' }, false, 'retain',
-    { mode, learnFromEdits: true, acceptedBaselineConfirmed: mode === 'accepted-baseline' });
-  if (review.reviewDigest === null) throw new Error('expected complete Word review');
-  const commitId = randomUUID();
-  const commit = await source.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest, commitId });
-  try { await source.acknowledgeImportCompletion(commitId); }
-  catch (error) { source.close(); throw error; }
   // Enumerate the known recipe independently of compiler.templates and the production sample builder.
   const expected = compiled.graph.paragraphs.map((paragraph, index) => {
     const event = byParagraph.get(paragraph.paragraphIndex)!;
@@ -195,66 +229,90 @@ it.each([{ mode: 'suggestions', count: 201 }, { mode: 'suggestions', count: 2_00
       sourceLocation: null, destinationLocation: { part: atom.part, paragraphIndex: atom.paragraphIndex, atomOrdinal: atom.atomOrdinal, codeUnitOffset: 0 } };
     const templateKey = sha256Hex(canonicalJson({ schema: 'ai7.word-sample-key/1', sourceDigest: compiled.sourceDigest,
       extractorIdentity: 'ai7-word-tracked-extractor/1', ...content }));
-    const sample: WordTrackedEditSample = { sampleId: `wts_${sha256Hex(canonicalJson({ schema: 'ai7.word-sample-id/1', bookId: commit.bookId, templateKey }))}`,
-      bookId: commit.bookId, sourceDigest: compiled.sourceDigest, extractorIdentity: 'ai7-word-tracked-extractor/1', graphDigest: compiled.graphDigest, ...content };
+    const sample: WordTrackedEditSample = { sampleId: `wts_${sha256Hex(canonicalJson({ schema: 'ai7.word-sample-id/1', bookId: bookId, templateKey }))}`,
+      bookId, sourceDigest: compiled.sourceDigest, extractorIdentity: 'ai7-word-tracked-extractor/1', graphDigest: compiled.graphDigest, ...content };
     const record = canonicalRecord({ schema: 'ai7.word-tracked-edit-sample/1', ...sample });
-    return { id: sample.sampleId, digest: record.digest, json: record.json };
+    return { id: sample.sampleId, digest: record.digest };
   }).sort((a, b) => a.id.localeCompare(b.id));
+  return expected;
+}
+
+async function verifyWordManifest(store: EditorialStore, book: Awaited<ReturnType<typeof importBook>>, commitId: string,
+  expected: Array<{ id: string; digest: string }>, inserted: string, mode: 'suggestions' | 'accepted-baseline'): Promise<void> {
+  const signals: Array<{ id: string; digest: string }> = [];
+  for (let offset: number | null = 0; offset !== null;) {
+    const page = store.inspectEditorialLearning({ signalOffset: offset, itemOffset: 0 });
+    expect(page.signals.length).toBeLessThanOrEqual(30);
+    for (const signal of page.signals) {
+      if (signal.kind !== 'word-tracked-edit') throw new Error('recipe produced a non-Word signal');
+      expect(signal.currentEligibility).toBe('house'); expect(signal.memoryCandidate).toBeNull();
+      expect(signal.source.importCommitId).toBe(commitId);
+      signals.push({ id: signal.source.sampleId, digest: signal.source.sampleDigest });
+    }
+    offset = page.nextSignalOffset;
+  }
+  expect(signals.sort((a, b) => a.id.localeCompare(b.id))).toEqual(expected);
+  const materials: string[] = [];
+  let after: Parameters<EditorialStore['inspectLearningMaterials']>[1] = null;
+  do {
+    const page = store.inspectLearningMaterials(book.bookId, after);
+    for (const book of page.books) for (const material of book.materials) {
+      expect(material.target.kind).toBe('word-tracked-edit'); expect(material.sourceTask).toBeNull();
+      expect(material.wordCurrentEligibility).toBe('house'); materials.push(material.materialKey);
+    }
+    after = page.nextCursor;
+  } while (after !== null);
+  expect(materials.sort()).toEqual(expected.map((entry) => `word-sample:${entry.id}`).sort());
+  const marks = new Set<string>();
+  let cursor: string | null = null;
+  do {
+    const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, cursor);
+    expect(window.marksTruncated).toBe(false);
+    for (const mark of window.marks) marks.add(mark.markId);
+    cursor = window.nextCursor;
+  } while (cursor !== null);
+  expect(marks.size).toBe(mode === 'suggestions' ? expected.length : 0);
+  for (const index of [0, Math.floor(expected.length / 2), expected.length - 1]) {
+    const entry = expected[index]!;
+    let cursor: Awaited<ReturnType<EditorialStore['inspectWordTrackedEditSample']>>['nextCursor'] = null;
+    const text: string[] = [];
+    do {
+      const page = await store.inspectWordTrackedEditSample({ bookId: book.bookId, sampleId: entry.id, sampleDigest: entry.digest, after: cursor });
+      expect(page.items.length).toBeLessThanOrEqual(40);
+      for (const item of page.items) if (item.section === 'after' && item.kind === 'text' && item.field === 'text') text.push(item.text ?? '');
+      cursor = page.nextCursor;
+    } while (cursor !== null);
+    expect(text.join('')).toBe(inserted);
+  }
+}
+
+it.each([{ mode: 'suggestions', count: 201 }, { mode: 'suggestions', count: 2_001 }, { mode: 'accepted-baseline', count: 2_001 }] as const)(
+  'retains the independent $count-edit Word manifest through public $mode import, all pages, reopen and selected-Book merge', async ({ mode, count }) => {
+  cpSync(seed.dataRoot, roots.dataRoot, { recursive: true });
+  const path = join(roots.inputRoot, `word-manifest-${mode}.docx`);
+  const span = { block: 9, from: 0, to: 5 };
+  const inserted = await sourceSpanText(ADMITTED_BASELINE_DOCX, span);
+  const date = '2026-10-25T00:00:00Z';
+  await composeRevisedDocx(path, { source: ADMITTED_BASELINE_DOCX, title: '完整 Word 修改清单', paragraphs: Array.from({ length: count }, (_, index) =>
+    ({ runs: [{ text: { block: 8, from: 0, to: 10 } }, { text: span, revision: { kind: 'ins', author: `作者${index}`, date } }] })) });
+  const compiled = await compileWordTrackedDocx(path);
+  if (compiled.kind !== 'ready') throw new Error('expected supported independent insertion recipe');
+  expect(compiled.graph.paragraphs).toHaveLength(count);
+  expect(compiled.graph.events).toHaveLength(count);
+  let source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  const { commit, commitId } = await importWord(source, path, mode, seedBookId);
+  const expected = expectedManifest(compiled, commit.bookId, inserted, date);
   expect(new Set(expected.map((entry) => entry.id)).size).toBe(count);
   if (count === 2_001) {
     completeManifest ??= expected;
     expect(expected).toEqual(completeManifest);
   }
-  const verify = async (store: EditorialStore, dataRoot: string): Promise<void> => {
-    const db = new DatabaseSync(storeOf(dataRoot), { readOnly: true });
-    try {
-      expect(db.prepare('SELECT sample_id id, sha256 digest, canonical_json json FROM word_tracked_edit_samples WHERE book_id = ? ORDER BY sample_id').all(commit.bookId))
-        .toEqual(expected);
-      expect(db.prepare('SELECT sample_id id, sample_digest digest FROM word_tracked_edit_sample_imports WHERE commit_id = ? ORDER BY sample_id').all(commitId))
-        .toEqual(expected.map(({ id, digest }) => ({ id, digest })));
-      expect(db.prepare('SELECT count(*) total FROM word_import_mark_sources WHERE commit_id = ?').get(commitId)?.total).toBe(mode === 'suggestions' ? count : 0);
-    } finally { db.close(); }
-    const signals: Array<{ id: string; digest: string }> = [];
-    for (let offset: number | null = 0; offset !== null;) {
-      const page = store.inspectEditorialLearning({ signalOffset: offset, itemOffset: 0 });
-      expect(page.signals.length).toBeLessThanOrEqual(30);
-      for (const signal of page.signals) {
-        if (signal.kind !== 'word-tracked-edit') throw new Error('recipe produced a non-Word signal');
-        expect(signal.currentEligibility).toBe('house'); expect(signal.memoryCandidate).toBeNull();
-        signals.push({ id: signal.source.sampleId, digest: signal.source.sampleDigest });
-      }
-      offset = page.nextSignalOffset;
-    }
-    expect(signals.sort((a, b) => a.id.localeCompare(b.id))).toEqual(expected.map(({ id, digest }) => ({ id, digest })));
-    const materials: string[] = [];
-    let after: Parameters<EditorialStore['inspectLearningMaterials']>[1] = null;
-    do {
-      const page = store.inspectLearningMaterials(commit.bookId, after);
-      for (const book of page.books) for (const material of book.materials) {
-        expect(material.target.kind).toBe('word-tracked-edit'); expect(material.sourceTask).toBeNull();
-        expect(material.wordCurrentEligibility).toBe('house'); materials.push(material.materialKey);
-      }
-      after = page.nextCursor;
-    } while (after !== null);
-    expect(materials.sort()).toEqual(expected.map((entry) => `word-sample:${entry.id}`).sort());
-    for (const index of [0, Math.floor(count / 2), count - 1]) {
-      const entry = expected[index]!;
-      let cursor: Awaited<ReturnType<EditorialStore['inspectWordTrackedEditSample']>>['nextCursor'] = null;
-      const text: string[] = [];
-      do {
-        const page = await store.inspectWordTrackedEditSample({ bookId: commit.bookId, sampleId: entry.id, sampleDigest: entry.digest, after: cursor });
-        expect(page.items.length).toBeLessThanOrEqual(40);
-        for (const item of page.items) if (item.section === 'after' && item.kind === 'text' && item.field === 'text') text.push(item.text ?? '');
-        cursor = page.nextCursor;
-      } while (cursor !== null);
-      expect(text.join('')).toBe(inserted);
-    }
-  };
+  const verify = (store: EditorialStore) => verifyWordManifest(store, commit, commitId, expected, inserted, mode);
   try {
-    await verify(source, roots.dataRoot);
+    await verify(source);
     source.markCleanShutdown(); source.close();
     source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    await verify(source, roots.dataRoot);
+    await verify(source);
     emptyBook(source, '未选入的图书');
     source.markCleanShutdown();
   } finally { source.close(); }
@@ -262,7 +320,7 @@ it.each([{ mode: 'suggestions', count: 201 }, { mode: 'suggestions', count: 2_00
   withAttached(otherRoot, roots.dataRoot, (db) => mergeBooks(db, [commit.bookId], { source: roots.dataRoot, target: otherRoot }));
   target = await EditorialStore.open(otherRoot, roots.codeRoot);
   try {
-    await verify(target, otherRoot);
+    await verify(target);
     expect(target.listBooks(null).items.map((book) => book.bookId)).toEqual([commit.bookId]);
     target.markCleanShutdown();
   } finally { target.close(); }
@@ -309,40 +367,66 @@ function titles(store: EditorialStore): string[] {
   return store.listBooks(null).items.map((item) => item.title).sort();
 }
 
+async function richMergeFixture() {
+  const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  let book: { bookId: string; manuscriptId: string; branchId: string };
+  let before: unknown;
+  let emptyId: string;
+  let foundBefore: number;
+  try {
+    book = await richBook(source);
+    emptyId = emptyBook(source, '空白之书', 'AI7-0001');
+    // Issue #922: a Custom Analysis Dimension belongs to the house, so a Book merge must leave its document history behind.
+    const dimension = source.saveCustomAnalysisDimension({ dimensionId: null, title: '合并维度', questionTemplate: '本单元从哪里开始？' }).dimensions[0]!;
+    source.enableCustomAnalysisDimension(dimension.versions[0]!.versionId);
+    // The rich Book is in a Series here; the Series stays behind.
+    const series = source.createSeries({ title: '合并书系', note: '' });
+    const membership = source.previewSeriesMembershipChange({ seriesId: series.seriesId, bookId: book.bookId, kind: 'add' });
+    source.changeSeriesMembership({ seriesId: series.seriesId, bookId: book.bookId, kind: 'add', previewDigest: membership.previewDigest });
+    before = readings(source, book);
+    foundBefore = found(source, book, '合并前');
+  } finally {
+    source.close();
+  }
+  const target = await EditorialStore.open(otherRoot, roots.codeRoot);
+  try {
+    emptyBook(target, TITLE);
+    emptyBook(target, '本机之书', 'AI7-0001');
+  } finally {
+    target.close();
+  }
+
+  return { book, before, emptyId, foundBefore };
+}
+
+function ownedFiles(bookId: string) {
+  return withAttached(otherRoot, roots.dataRoot, (db) => ({
+    keys: (db.prepare(`SELECT DISTINCT co.relative_key AS k FROM src.content_objects co
+      JOIN src.source_versions sv ON sv.object_digest = co.object_digest WHERE sv.book_id = ?`).all(bookId) as Array<{ k: string }>).map((row) => row.k),
+    snapshots: (db.prepare('SELECT object_relative_key AS k FROM src.recovery_snapshots WHERE book_id = ?')
+      .all(bookId) as Array<{ k: string }>).map((row) => row.k),
+  }));
+}
+
 describe('合并图书 over two real stores', () => {
   it.each(['suggestions', 'accepted-baseline'] as const)('carries Word %s through public package inspection and selected-Book merge under destination learning controls', async (mode) => {
-    let source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    const existingBookId = emptyBook(source, '两处原有的图书');
-    source.markCleanShutdown(); source.close();
+    const existingBookId = await withStore(roots.dataRoot, (store) => {
+      const bookId = emptyBook(store, '两处原有的图书');
+      store.markCleanShutdown();
+      return bookId;
+    });
     cpSync(roots.dataRoot, otherRoot, { recursive: true });
-    source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    const path = join(roots.inputRoot, `word-public-merge-${mode}.docx`);
-    const wordTables = ['word_revision_sources', 'word_revision_imports', 'word_manuscript_source_segments',
-      'word_tracked_edit_samples', 'word_tracked_edit_sample_imports', 'word_import_mark_sources'];
+    const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     let packagePath: string;
     let bookId: string;
     let detailInput: Parameters<EditorialStore['inspectWordTrackedEditSample']>[0];
     let detail: Awaited<ReturnType<EditorialStore['inspectWordTrackedEditSample']>>;
-    let originalWord: ReturnType<typeof learningRows>[];
     try {
-      await composeRevisedDocx(path, { source: ADMITTED_BASELINE_DOCX, title: '公开包中的 Word 图书', paragraphs: [
-        { runs: [{ text: { block: 8, from: 0, to: 10 } }, { text: { block: 9, from: 0, to: 5 },
-          revision: { kind: 'ins', author: '作者', date: '2026-10-25T00:00:00Z' } }] },
-      ] });
-      const staged = await source.stageSelectedManuscript(randomUUID(), path);
-      const reviewed = source.prepareNewBookReview(staged.draftId, staged.draftVersion,
-        { kind: 'new-book', choiceId: 'new-book', confirmedTitle: staged.titleSuggestion.value }, false, 'retain',
-        { mode, learnFromEdits: true, acceptedBaselineConfirmed: mode === 'accepted-baseline' });
-      if (reviewed.reviewDigest === null) throw new Error('expected complete public Word merge fixture');
-      const commitId = randomUUID();
-      bookId = (await source.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: reviewed.draftVersion,
-        reviewDigest: reviewed.reviewDigest, commitId })).bookId;
-      await source.acknowledgeImportCompletion(commitId);
+      ({ commit: { bookId } } = await importWord(source, await composeSingleWord(mode), mode));
       const signal = source.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }).signals[0]!;
       if (signal.kind !== 'word-tracked-edit') throw new Error('expected real Word merge signal');
       detailInput = { bookId, sampleId: signal.source.sampleId, sampleDigest: signal.source.sampleDigest, after: null };
       detail = await source.inspectWordTrackedEditSample(detailInput);
-      originalWord = wordTables.map((table) => learningRows(roots.dataRoot, table));
       source.changeEditorialLearning({ kind: 'switch', enabled: false, expectedEntries: 0 });
       packagePath = await exportedFrom(source, `word-public-${mode}.ai7db`);
       source.markCleanShutdown();
@@ -350,7 +434,7 @@ describe('合并图书 over two real stores', () => {
     let target = await EditorialStore.open(otherRoot, roots.codeRoot);
     try {
       target.changeEditorialLearning({ kind: 'switch', enabled: false, expectedEntries: 0 });
-      const ownControls = learningRows(otherRoot);
+      const ownControls = learningControls(target);
       const preview = await target.inspectDatabaseImport(packagePath);
       expect(preview).toMatchObject({ compatibility: 'compatible', contents: { books: 2, sourceVersions: 1 } });
       const waiting = await target.prepareDatabaseMerge(preview.previewId, T);
@@ -359,8 +443,7 @@ describe('合并图书 over two real stores', () => {
       target.markCleanShutdown(); target.close();
       target = await EditorialStore.open(otherRoot, roots.codeRoot);
       expect(target.listBooks(null).items.map((book) => book.bookId).sort()).toEqual([existingBookId, bookId].sort());
-      expect(wordTables.map((table) => learningRows(otherRoot, table))).toEqual(originalWord);
-      expect(learningRows(otherRoot)).toEqual(ownControls);
+      expect(learningControls(target)).toEqual(ownControls);
       expect(await target.inspectWordTrackedEditSample(detailInput)).toEqual(detail);
       expect(target.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }).signals[0]!.currentEligibility).toBe('excluded');
       expect((await target.inspectDatabaseReplacements()).replacements[0]).toMatchObject({ kind: 'merge', outcome: 'applied', mergedCount: 1 });
@@ -372,7 +455,6 @@ describe('合并图书 over two real stores', () => {
       target.recordLearningRemediation({ ...input, previewDigest: exclusion.previewDigest });
       expect(target.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }).signals[0]!.currentEligibility).toBe('excluded');
       expect(await target.inspectWordTrackedEditSample(detailInput)).toEqual(detail);
-      expect(wordTables.map((table) => learningRows(otherRoot, table))).toEqual(originalWord);
       target.markCleanShutdown();
     } finally { target.close(); }
   });
@@ -391,67 +473,32 @@ describe('合并图书 over two real stores', () => {
   }, 180_000);
 
   it('merges a Book with every record it owns, beside a Book of the same title, and reads it as the store it came from', async () => {
-    let source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    let book: { bookId: string; manuscriptId: string; branchId: string };
-    let before: unknown;
-    let emptyId: string;
-    let foundBefore: number;
-    try {
-      book = await richBook(source);
-      emptyId = emptyBook(source, '空白之书', 'AI7-0001');
-      // Issue #922: a Custom Analysis Dimension belongs to the house, so a Book merge must leave its document history behind.
-      const dimension = source.saveCustomAnalysisDimension({ dimensionId: null, title: '合并维度', questionTemplate: '本单元从哪里开始？' }).dimensions[0]!;
-      source.enableCustomAnalysisDimension(dimension.versions[0]!.versionId);
-      // The rich Book is in a Series here; the Series stays behind.
-      const series = source.createSeries({ title: '合并书系', note: '' });
-      const membership = source.previewSeriesMembershipChange({ seriesId: series.seriesId, bookId: book.bookId, kind: 'add' });
-      source.changeSeriesMembership({ seriesId: series.seriesId, bookId: book.bookId, kind: 'add', previewDigest: membership.previewDigest });
-      before = readings(source, book);
-      foundBefore = found(source, book, '合并前');
-    } finally {
-      source.close();
-    }
-    let target = await EditorialStore.open(otherRoot, roots.codeRoot);
-    try {
-      emptyBook(target, TITLE);
-      emptyBook(target, '本机之书', 'AI7-0001');
-    } finally {
-      target.close();
-    }
-
+    const { book, before, emptyId, foundBefore } = await richMergeFixture();
     const plan = withAttached(otherRoot, roots.dataRoot, (db) => planMerge(db));
     expect(plan.books.map((entry) => [entry.bookId, entry.title, entry.status, entry.internalNumberCleared])).toEqual([
       [book.bookId, TITLE, 'same-title', false],
       [emptyId, '空白之书', 'new', true],
     ]);
     expect(plan.notices).toEqual(['internal-number', 'series']);
-    const keys = withAttached(otherRoot, roots.dataRoot, (db) => (db.prepare(
-      `SELECT DISTINCT co.relative_key AS k FROM src.content_objects co JOIN src.source_versions sv ON sv.object_digest = co.object_digest
-       WHERE sv.book_id = ?`,
-    ).all(book.bookId) as Array<{ k: string }>).map((row) => row.k));
+    const { keys, snapshots } = ownedFiles(book.bookId);
     expect(keys.length).toBeGreaterThan(0);
-    const snapshots = withAttached(otherRoot, roots.dataRoot, (db) => (db.prepare(
-      'SELECT object_relative_key AS k FROM src.recovery_snapshots WHERE book_id = ?').all(book.bookId) as Array<{ k: string }>).map((row) => row.k));
     expect(snapshots.length).toBeGreaterThan(0);
     const counts = withAttached(otherRoot, roots.dataRoot, (db) => mergeBooks(db, [book.bookId, emptyId], { source: roots.dataRoot, target: otherRoot }));
     expect(counts.books).toBe(2);
     expect(counts.rows).toBeGreaterThan(50);
     expect(counts.files).toBeGreaterThan(0);
-    // The stored files the Book's Source Versions and its milestone name came with it.
     for (const key of keys) expect(existsSync(join(otherRoot, 'objects', ...key.split('/')))).toBe(true);
     for (const key of snapshots) expect(existsSync(join(otherRoot, 'recovery-objects', ...key.split('/')))).toBe(true);
 
-    target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    let target = await EditorialStore.open(otherRoot, roots.codeRoot);
     try {
       expect(titles(target)).toEqual([TITLE, TITLE, '本机之书', '空白之书'].sort());
       expect(readings(target, book)).toEqual(before);
-      // Its working text is searchable as it was, and its Series stayed behind.
       expect(found(target, book, '合并前')).toBe(foundBefore);
       expect(foundBefore).toBeGreaterThan(0);
       expect(target.inspectSeriesList().series).toEqual([]);
       expect(target.inspectCustomAnalysisDimensions(null).dimensions).toEqual([]);
       expect(target.inspectBookSeries(book.bookId).memberships).toEqual([]);
-      // A 内部编号 already another Book's here is not taken.
       expect(target.listBooks(null).items.filter((item) => item.title === '空白之书').map((item) => item.internalNumber)).toEqual([null]);
       expect(target.listBooks(null).items.filter((item) => item.title === '本机之书').map((item) => item.internalNumber)).toEqual(['AI7-0001']);
       // A Book already here is not taken again, and nothing changes.
@@ -470,17 +517,11 @@ describe('合并图书 over two real stores', () => {
         .toThrowError(expect.objectContaining({ code: 'DATABASE_MERGE_BOOK_PRESENT' }) as unknown as Error);
       target = await EditorialStore.open(otherRoot, roots.codeRoot);
       expect(titles(target)).toEqual([TITLE, TITLE, '本机之书', '空白之书'].sort());
-    } finally {
-      target.close();
-    }
-    // The store the Book came from is untouched by the merge.
-    source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
+    } finally { target.close(); }
+    await withStore(roots.dataRoot, (source) => {
       expect(readings(source, book)).toEqual(before);
       expect(source.inspectCustomAnalysisDimensions(null).dimensions[0]!.versions[0]!.state).toBe('enabled');
-    } finally {
-      source.close();
-    }
+    });
   }, 180_000);
 
   it('leaves the store as it was when a merge cannot finish', async () => {
@@ -595,6 +636,11 @@ function learningRows(dataRoot: string, table = 'editorial_learning_controls'): 
   try { return db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all(); } finally { db.close(); }
 }
 
+function learningControls(store: EditorialStore) {
+  const { enabled, controlEntries, excludedBooks, excludedMaterials } = learning(store);
+  return { enabled, controlEntries, excludedBooks, excludedMaterials };
+}
+
 const learning = (store: EditorialStore) => store.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
 function excludeBook(store: EditorialStore, bookId: string, excluded: boolean): void {
   store.changeEditorialLearning({ kind: 'book', bookId, excluded, expectedEntries: learning(store).controlEntries });
@@ -616,67 +662,85 @@ function learningDecision(store: EditorialStore, book: { manuscriptId: string; b
     disposition: 'rejected', editedText: null, reason: '公开合并理由' });
 }
 
+async function learningMergeFixture() {
+  const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  const excluded = await importBook(source, await compose('学习排除图书', [1, 2]));
+  const comparison = await importBook(source, await compose('学习恢复图书', [21, 22]));
+  learningDecision(source, excluded); learningDecision(source, comparison);
+  const excludedSignal = learning(source).signals.find((signal) => signal.source.bookId === excluded.bookId)!;
+  const comparisonSignal = learning(source).signals.find((signal) => signal.source.bookId === comparison.bookId)!;
+  learningDecision(source, comparison, 4);
+  const materialSignal = learning(source).signals.find((signal) => ![excludedSignal.signalId, comparisonSignal.signalId].includes(signal.signalId))!;
+  source.changeEditorialLearning({ kind: 'material', signalId: materialSignal.signalId });
+  source.createEditorialMemory({ clientMemoryId: randomUUID(), signalId: comparisonSignal.signalId,
+    title: '源出版社记忆', editorialDimension: '语言', confidence: 0.5 });
+  excludeBook(source, excluded.bookId, true); excludeBook(source, comparison.bookId, true);
+  excludeBook(source, excluded.bookId, false); excludeBook(source, comparison.bookId, false);
+  excludeBook(source, excluded.bookId, true);
+  learningSwitch(source, false);
+  const packagePath = await exportedFrom(source, 'learning-exclusions.ai7db');
+  const sourceControls = learningControls(source);
+  const sourceSignals = learning(source).signals.map(({ signalId, source }) => ({ signalId, source }));
+  source.markCleanShutdown(); source.close();
+
+  const target = await EditorialStore.open(otherRoot, roots.codeRoot);
+  const localBook = await importBook(target, await compose('本机排除图书', [41, 42]));
+  learningDecision(target, localBook);
+  const localSignal = learning(target).signals[0]!;
+  target.changeEditorialLearning({ kind: 'material', signalId: localSignal.signalId });
+  excludeBook(target, localBook.bookId, true); learningSwitch(target, false); learningSwitch(target, true);
+  const destinationSignals = learning(target).signals;
+  const preview = await target.inspectDatabaseImport(packagePath);
+  await target.prepareDatabaseMerge(preview.previewId, T);
+  target.markCleanShutdown(); target.close();
+  return { excluded, comparison, excludedSignal, comparisonSignal, materialSignal, packagePath, sourceControls, sourceSignals, destinationSignals,
+    localBookId: localBook.bookId, localMaterialKey: localSignal.source.materialKey };
+}
+
+const preferenceSource = (bookId: string, bookTitle: string, categoryId: string, categoryLabel: string, reason: string): HousePreferenceSource => ({
+  bookId, bookTitle, categoryId, categoryLabel, materialDigest: sha256Hex(`${bookId}/${categoryId}`), decisionId: randomUUID(),
+  eligibilityDecisionId: randomUUID(), eligibility: 'house', operationalScope: 'ordinary-production', disposition: 'rejected', reason,
+  attribution: { peopleVersion: 0, authors: [], editors: [] }, quality: NO_EDIT_QUALITY });
+const withPreferences = <T>(run: (preferences: HouseReviewPreferenceLedger, db: DatabaseSync) => T): T => {
+  const db = new DatabaseSync(storeOf(otherRoot));
+  try { return run(new HouseReviewPreferenceLedger(db), db); } finally { db.close(); }
+};
+
+function verifyMergedPreferences(excludedId: string, comparisonId: string): string {
+  return withPreferences((preferences) => {
+    const scope = 'ordinary-production';
+    expect(preferences.history(scope)).toEqual([]);
+    const version = preferences.rebuild(scope, [
+      preferenceSource(excludedId, '学习排除图书', 'typos-and-usage', '错别字与规范用语', '保留作者用字'),
+      preferenceSource(comparisonId, '学习恢复图书', 'style-and-format', '体例与格式', '体例从旧')])!;
+    const line = (categoryId: string) => version.lines.find((entry) => entry.categoryId === categoryId)!;
+    expect(line('typos-and-usage').sources.map((source) => source.bookId)).toEqual([excludedId]);
+    expect(line('style-and-format').sources.map((source) => source.bookId)).toEqual([comparisonId]);
+    expect(preferences.use(scope, comparisonId, 'style-and-format')).toMatchObject({
+      versionId: version.versionId, lines: [line('style-and-format').text], sourceCount: 1 });
+    expect(preferences.use(scope, comparisonId, 'typos-and-usage')).toBeNull();
+    expect(preferences.use(scope, excludedId, 'style-and-format')).toBeNull();
+    return line('typos-and-usage').text;
+  });
+}
+
 describe('Book learning controls across database merge (#1115)', () => {
   it('exports, merges and reopens exclusions without granting capture or memory use, while a restored comparison Book works', async () => {
-    const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    const excluded = await importBook(source, await compose('学习排除图书', [1, 2]));
-    const comparison = await importBook(source, await compose('学习恢复图书', [21, 22]));
-    learningDecision(source, excluded); learningDecision(source, comparison);
-    const excludedSignal = learning(source).signals.find((signal) => signal.source.bookId === excluded.bookId)!;
-    const comparisonSignal = learning(source).signals.find((signal) => signal.source.bookId === comparison.bookId)!;
-    learningDecision(source, comparison, 4);
-    const materialSignal = learning(source).signals.find((signal) => ![excludedSignal.signalId, comparisonSignal.signalId].includes(signal.signalId))!;
-    source.changeEditorialLearning({ kind: 'material', signalId: materialSignal.signalId });
-    source.createEditorialMemory({ clientMemoryId: randomUUID(), signalId: comparisonSignal.signalId,
-      title: '源出版社记忆', editorialDimension: '语言', confidence: 0.5 });
-    excludeBook(source, excluded.bookId, true); excludeBook(source, comparison.bookId, true);
-    excludeBook(source, excluded.bookId, false); excludeBook(source, comparison.bookId, false);
-    excludeBook(source, excluded.bookId, true);
-    learningSwitch(source, false);
-    const packagePath = await exportedFrom(source, 'learning-exclusions.ai7db');
-    source.markCleanShutdown(); source.close();
-    const sourceControls = learningRows(roots.dataRoot);
-    const sourceSignals = learningRows(roots.dataRoot, 'learning_signals');
-    const sourceEligibility = learningRows(roots.dataRoot, 'learning_eligibility_decisions');
-
+    const { excluded, comparison, excludedSignal, comparisonSignal, materialSignal, packagePath,
+      sourceControls, sourceSignals, destinationSignals, localBookId, localMaterialKey } = await learningMergeFixture();
     let target = await EditorialStore.open(otherRoot, roots.codeRoot);
-    const localBook = await importBook(target, await compose('本机排除图书', [41, 42]));
-    learningDecision(target, localBook);
-    const localSignal = learning(target).signals[0]!;
-    target.changeEditorialLearning({ kind: 'material', signalId: localSignal.signalId });
-    excludeBook(target, localBook.bookId, true); learningSwitch(target, false); learningSwitch(target, true);
-    const destinationControls = learningRows(otherRoot);
-    const destinationEligibility = learningRows(otherRoot, 'learning_eligibility_decisions');
-    const destinationSignals = learningRows(otherRoot, 'learning_signals');
-    const preview = await target.inspectDatabaseImport(packagePath);
-    await target.prepareDatabaseMerge(preview.previewId, T);
-    target.markCleanShutdown(); target.close();
-    target = await EditorialStore.open(otherRoot, roots.codeRoot);
     try {
       const projection = learning(target);
       expect(projection.enabled).toBe(true);
-      expect(projection.excludedBooks.map((book) => book.bookId).sort()).toEqual([localBook.bookId, excluded.bookId].sort());
+      expect(projection.excludedBooks.map((book) => book.bookId).sort()).toEqual([localBookId, excluded.bookId].sort());
       expect(projection.signals.find((signal) => signal.signalId === excludedSignal.signalId)).toMatchObject({
         ...excludedSignal, currentEligibility: 'excluded' });
       expect(projection.signals.find((signal) => signal.signalId === comparisonSignal.signalId)?.currentEligibility).toBe('house');
       expect(projection.signals.find((signal) => signal.signalId === materialSignal.signalId)?.currentEligibility).toBe('excluded');
       expect(projection.items).toEqual([]); // House memory does not travel with its Book-owned source.
-      expect(learningRows(otherRoot, 'learning_signals')).toEqual([...destinationSignals, ...sourceSignals]);
-      expect(learningRows(otherRoot, 'learning_eligibility_decisions')).toEqual([...destinationEligibility, ...sourceEligibility]);
-      expect(projection.excludedMaterials).toContainEqual({ bookId: localBook.bookId, materialKey: localSignal.source.materialKey });
-      const carried = learningRows(otherRoot);
-      expect(carried.slice(0, destinationControls.length)).toEqual(destinationControls);
-      const selected = sourceControls.filter((row) => row.kind === 'book');
-      expect(carried.slice(destinationControls.length).map((row) => row.entry_id)).toEqual(selected.map((row) => row.entry_id));
-      for (const [index, row] of carried.slice(destinationControls.length).entries()) {
-        const original = selected[index]!;
-        const ordinal = destinationControls.length + index + 1;
-        const source = JSON.parse(String(original.canonical_json));
-        const record = canonicalRecord({ ...source, ordinal, importedFrom: { record: source, sha256: original.sha256 } });
-        expect(row).toEqual({ ...original, ordinal, canonical_json: record.json, sha256: record.digest });
-        // The embedded source is the source row's exact bytes, held to its digest.
-        expect(canonicalJson(JSON.parse(String(row.canonical_json)).importedFrom.record)).toBe(original.canonical_json);
-      }
+      expect(projection.controlEntries).toBe(8);
+      expect(projection.signals).toEqual(expect.arrayContaining([...destinationSignals, ...sourceSignals.map((signal) => expect.objectContaining(signal))]));
+      expect(projection.excludedMaterials).toContainEqual({ bookId: localBookId, materialKey: localMaterialKey });
       const memory = (signalId: string) => target.createEditorialMemory({ clientMemoryId: randomUUID(), signalId,
         title: '合并后记忆', editorialDimension: '语言', confidence: 0.5 });
       const refusal = (signalId: string): unknown => { try { memory(signalId); return null; } catch (error) { return code(error); } };
@@ -695,41 +759,17 @@ describe('Book learning controls across database merge (#1115)', () => {
       target.markCleanShutdown(); target.close();
       target = await EditorialStore.open(otherRoot, roots.codeRoot);
       expect(learning(target)).toEqual(beforeRestart);
-      expect(learningRows(otherRoot)).toEqual(carried);
-      expect(learningRows(roots.dataRoot)).toEqual(sourceControls);
+      await withStore(roots.dataRoot, (source) => expect(learningControls(source)).toEqual(sourceControls));
       target.markCleanShutdown();
     } finally { target.close(); }
 
-    // The actual consumer (Issue #1113) over the merged data. House preferences never merge, so controlled sources name the
-    // imported Books: the line the imported excluded Book supports is refused, the restored comparison Book's line is used.
     const scope = 'ordinary-production';
-    const preferenceSource = (bookId: string, bookTitle: string, categoryId: string, categoryLabel: string, reason: string): HousePreferenceSource => ({
-      bookId, bookTitle, categoryId, categoryLabel, materialDigest: sha256Hex(`${bookId}/${categoryId}`), decisionId: randomUUID(),
-      eligibilityDecisionId: randomUUID(), eligibility: 'house', operationalScope: scope, disposition: 'rejected', reason,
-      attribution: { peopleVersion: 0, authors: [], editors: [] }, quality: NO_EDIT_QUALITY });
-    const withPreferences = <T>(run: (preferences: HouseReviewPreferenceLedger, db: DatabaseSync) => T): T => {
-      const db = new DatabaseSync(storeOf(otherRoot));
-      try { return run(new HouseReviewPreferenceLedger(db), db); } finally { db.close(); }
-    };
-    const typosLine = withPreferences((preferences, db) => {
-      expect(db.prepare('SELECT count(*) AS n FROM house_review_preference_versions').get()!.n).toBe(0);
-      const version = preferences.rebuild(scope, [
-        preferenceSource(excluded.bookId, '学习排除图书', 'typos-and-usage', '错别字与规范用语', '保留作者用字'),
-        preferenceSource(comparison.bookId, '学习恢复图书', 'style-and-format', '体例与格式', '体例从旧')])!;
-      const line = (categoryId: string) => version.lines.find((entry) => entry.categoryId === categoryId)!;
-      expect(line('typos-and-usage').sources.map((source) => source.bookId)).toEqual([excluded.bookId]);
-      expect(line('style-and-format').sources.map((source) => source.bookId)).toEqual([comparison.bookId]);
-      expect(preferences.use(scope, comparison.bookId, 'style-and-format')).toMatchObject({
-        versionId: version.versionId, lines: [line('style-and-format').text], sourceCount: 1 });
-      expect(preferences.use(scope, comparison.bookId, 'typos-and-usage')).toBeNull();
-      expect(preferences.use(scope, excluded.bookId, 'style-and-format')).toBeNull();
-      return line('typos-and-usage').text;
-    });
+    const typosLine = verifyMergedPreferences(excluded.bookId, comparison.bookId);
     // Restoring the imported Book after its carried history lets the same line be used: the carried exclusion was the refusal.
     target = await EditorialStore.open(otherRoot, roots.codeRoot);
     try {
       excludeBook(target, excluded.bookId, false);
-      expect(learningRows(otherRoot).at(-1)).toMatchObject({ ordinal: learningRows(otherRoot).length, kind: 'book', book_id: excluded.bookId, value: 0 });
+      expect(learning(target).excludedBooks.map((book) => book.bookId)).not.toContain(excluded.bookId);
       target.markCleanShutdown();
     } finally { target.close(); }
     withPreferences((preferences) => expect(preferences.use(scope, comparison.bookId, 'typos-and-usage')?.lines).toEqual([typosLine]));
@@ -887,7 +927,6 @@ describe('只导入其中的图书 over the store', () => {
     const original = work.projection!.providerResolutionPlan!;
     expect(original.selectedPolicyIdentity).toEqual(policy.selectedPolicyIdentity);
     expect(original.localFixtureProfile).toBeUndefined();
-    const sourceRows = learningRows(roots.dataRoot, 'analysis_plan_records');
     const packagePath = await exportedFrom(source, 'selected-policy-merge.ai7db');
     source.close();
     let target = await EditorialStore.open(otherRoot, roots.codeRoot, control);
@@ -902,7 +941,6 @@ describe('只导入其中的图书 over the store', () => {
     target = await EditorialStore.open(otherRoot, roots.codeRoot, control);
     try {
       expect(target.inspectFactualReview(book.bookId).providerResolutionPlan).toEqual(original);
-      expect(learningRows(otherRoot, 'analysis_plan_records')).toEqual(sourceRows);
       const global = target.inspectGlobalAgent();
       expect(global.items).toEqual(targetHouse.items);
       expect(global.sourceCandidates).toEqual(targetHouse.sourceCandidates);
@@ -967,14 +1005,7 @@ describe('只导入其中的图书 over the store', () => {
   }, 180_000);
 
   it('writes the backup before a merge alone in the backup location, beside 定期自动备份 (Issue #434, S86d restack)', async () => {
-    const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    let packagePath: string;
-    try {
-      emptyBook(source, '空白之书');
-      packagePath = await exportedFrom(source, 'AI7 数据库.ai7db');
-    } finally {
-      source.close();
-    }
+    const packagePath = await emptyBookPackage(['空白之书'], 'AI7 数据库.ai7db');
     const tomorrow = new Date(T.getTime() + 25 * 60 * 60 * 1000);
     const target = await EditorialStore.open(otherRoot, roots.codeRoot);
     try {
@@ -997,14 +1028,7 @@ describe('只导入其中的图书 over the store', () => {
   }, 180_000);
 
   it('leaves the data as it was when the merge cannot finish at the next open, and merges once however it is interrupted', async () => {
-    const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    let packagePath: string;
-    try {
-      await importBook(source, await compose(TITLE, [1, 2]));
-      packagePath = await exportedFrom(source, 'AI7 数据库.ai7db');
-    } finally {
-      source.close();
-    }
+    const packagePath = await manuscriptPackage();
     let target = await EditorialStore.open(otherRoot, roots.codeRoot);
     try {
       emptyBook(target, '本机之书');
@@ -1026,10 +1050,7 @@ describe('只导入其中的图书 over the store', () => {
     } finally {
       target.close();
     }
-    const staging = replacementStagingFor(otherRoot);
-    const intent = JSON.parse(await readFile(join(staging, 'intent.json'), 'utf8')) as { json: string };
-    const prepared = parseCanonicalJson(intent.json) as ReplacementIntent & { schema: string };
-    const listed = { ...prepared.mergeBooks!, path: join(staging, MERGING_BOOKS_FILE) };
+    const { staging, intent: prepared, listed } = await pendingMerge();
     saveStoreFiles(otherRoot, join(staging, 'store-before'));
     // Journals beside the package's store are not the package: they are gone before the merge reads it (Issue #434 review).
     const journals = ['-journal', '-wal', '-shm'].map((suffix) => join(staging, 'incoming', 'store', `ai7.sqlite${suffix}`));
@@ -1050,6 +1071,61 @@ describe('只导入其中的图书 over the store', () => {
     }
   }, 180_000);
 });
+
+async function profileMergeFixture() {
+  // J-03's Task is bound to exact `sample1` lineage: the Book is the admitted public input itself, imported whole.
+  const launchPolicy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot);
+  const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  let bookId: string;
+  let profile: unknown;
+  let task: unknown;
+  let packagePath: string;
+  try {
+    ({ bookId } = await importBook(source, join(roots.codeRoot, 'SampleBooks', ADMITTED_BASELINE_DOCX)));
+    await source.installEditorialWorkspaceProfile(bookId);
+    await source.enableEditorialWorkspaceProfile(bookId);
+    const credentialReference = randomUUID();
+    source.saveModelServiceConnection('主编辑连接', credentialReference, 'needs-attention');
+    source.setModelServiceCredentialState(credentialReference, 'missing');
+    let progress = source.createTaskAuthorizationPreparationWork(bookId, J03_TASK_GOAL, launchPolicy);
+    while (!progress.done) progress = source.advanceTaskAuthorizationPreparationWork(progress.workId!);
+    const prepared = progress.projection!;
+    source.authorizeTaskAuthorization(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
+    profile = await source.inspectEditorialWorkspaceProfile(bookId);
+    task = source.inspectTaskAuthorization(bookId);
+    expect([(profile as { lifecycle: { state: string } }).lifecycle.state, (task as { state: string }).state]).toEqual(['enabled-for-book', 'authorized']);
+    packagePath = await exportedFrom(source, 'AI7 数据库.ai7db');
+  } finally {
+    source.close();
+  }
+  return { bookId, profile, task, packagePath };
+}
+
+function rewriteOffPageMergeBook(): void {
+  const ledger = new DatabaseSync(storeOf(otherRoot));
+  try {
+    ledger.exec('DROP TRIGGER database_merge_books_no_update');
+    ledger.prepare("UPDATE database_merge_books SET title = '丁书' WHERE title = '乙书'").run();
+    ledger.exec(DATABASE_MERGE_TRIGGER_SQL.database_merge_books_no_update!);
+    // Twenty newer replacement records push it off the page 导入记录 lists: it is verified all the same.
+    for (let index = 0; index < MAX_DATABASE_REPLACEMENTS_LISTED; index += 1) {
+      const at = new Date(Date.now() + (index + 1) * 60 * 60 * 1000).toISOString();
+      const stored = {
+        replacementId: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`, kind: 'replace', outcome: 'failed',
+        packageFileName: `AI7 数据库 ${index}.ai7db`, packageSha256: 'a'.repeat(64), backupFileName: `AI7 替换前备份 ${index}.ai7db`,
+        backupSha256: 'b'.repeat(64), preparedAt: at, recordedAt: at, failure: 'changed',
+      };
+      const record = canonicalRecord({ schema: 'ai7.database-replacement/1', ...stored });
+      ledger.prepare(
+        `INSERT INTO database_replacements(replacement_id, kind, outcome, package_file_name, package_sha256, backup_file_name, backup_sha256, prepared_at, recorded_at, canonical_json, sha256)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(stored.replacementId, stored.kind, stored.outcome, stored.packageFileName, stored.packageSha256, stored.backupFileName,
+        stored.backupSha256, stored.preparedAt, stored.recordedAt, record.json, record.digest);
+    }
+  } finally {
+    ledger.close();
+  }
+}
 
 describe('what a merge refuses, puts back and brings forward', () => {
   it('refuses a Book whose records reference a Book not chosen', async () => {
@@ -1140,14 +1216,7 @@ describe('what a merge refuses, puts back and brings forward', () => {
   }, 180_000);
 
   it('records a merge that could not finish writing its Books as such, not as data that would not open (Issue #644)', async () => {
-    const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    let packagePath: string;
-    try {
-      await importBook(source, await compose(TITLE, [1, 2]));
-      packagePath = await exportedFrom(source, 'AI7 数据库.ai7db');
-    } finally {
-      source.close();
-    }
+    const packagePath = await manuscriptPackage();
     let target = await EditorialStore.open(otherRoot, roots.codeRoot);
     try {
       emptyBook(target, '本机之书');
@@ -1177,31 +1246,11 @@ describe('what a merge refuses, puts back and brings forward', () => {
   }, 180_000);
 
   it('verifies what waits again when it resumes a merge before its Books went in, and merges nothing that changed (Issue #434 review)', async () => {
-    const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    let packagePath: string;
-    try {
-      await importBook(source, await compose(TITLE, [1, 2]));
-      packagePath = await exportedFrom(source, 'AI7 数据库.ai7db');
-    } finally {
-      source.close();
-    }
-    const prepared = async (at: Date): Promise<string> => {
-      const target = await EditorialStore.open(otherRoot, roots.codeRoot);
-      try {
-        await target.prepareDatabaseMerge((await target.inspectDatabaseImport(packagePath)).previewId, at);
-      } finally {
-        target.close();
-      }
-      return replacementStagingFor(otherRoot);
-    };
+    const packagePath = await manuscriptPackage();
+    const prepared = (at: Date) => prepareMerge(packagePath, at);
     const phase = (staging: string, value: string): Promise<void> => writeFile(join(staging, 'phase.json'), JSON.stringify(value));
-    let target = await EditorialStore.open(otherRoot, roots.codeRoot);
-    try {
-      emptyBook(target, '本机之书');
-    } finally {
-      target.close();
-    }
-    // Stopped while the store's files were being saved, then a file put among what waits: nothing is merged.
+    await withStore(otherRoot, (store) => { emptyBook(store, '本机之书'); });
+    let target: EditorialStore;
     let staging = await prepared(T);
     await phase(staging, 'saving-store');
     await writeFile(join(staging, 'incoming', 'extra.bin'), 'extra');
@@ -1209,16 +1258,13 @@ describe('what a merge refuses, puts back and brings forward', () => {
     try {
       expect(titles(target)).toEqual(['本机之书']);
       expect((await target.inspectDatabaseReplacements()).replacements[0]).toMatchObject({ kind: 'merge', outcome: 'failed', failure: 'changed' });
-    } finally {
-      target.close();
-    }
+    } finally { target.close(); }
     // Stopped once they were saved — here even after the merge went in — then a member of the package changed: the saved files
     // go back, and nothing is merged.
     staging = await prepared(LATER);
     saveStoreFiles(otherRoot, join(staging, 'store-before'));
     await phase(staging, 'merging');
-    const intent = JSON.parse(await readFile(join(staging, 'intent.json'), 'utf8')) as { json: string };
-    const listed = { ...(parseCanonicalJson(intent.json) as { mergeBooks: { sha256: string; count: number } }).mergeBooks, path: join(staging, MERGING_BOOKS_FILE) };
+    const { listed } = await pendingMerge();
     expect(mergeIntoStoreFile(otherRoot, join(staging, 'incoming'), listed)).toBe('merged');
     const member = join(staging, 'incoming', 'store', 'ai7.sqlite');
     const bytes = await readFile(member);
@@ -1227,9 +1273,7 @@ describe('what a merge refuses, puts back and brings forward', () => {
     try {
       expect(titles(target)).toEqual(['本机之书']);
       expect((await target.inspectDatabaseReplacements()).replacements[0]).toMatchObject({ kind: 'merge', outcome: 'failed', failure: 'changed' });
-    } finally {
-      target.close();
-    }
+    } finally { target.close(); }
     // The journals SQLite keeps beside the package's store while a merge reads it are not the package's: the merge goes on — and
     // a write-ahead log put there with committed rows, as another program could leave one, never reaches it (Issue #434 review).
     staging = await prepared(LATEST);
@@ -1244,17 +1288,13 @@ describe('what a merge refuses, puts back and brings forward', () => {
       writer.prepare("UPDATE books SET title = '改过的书名'").run();
       copyFileSync(`${clone}-wal`, `${packageStore}-wal`);
       copyFileSync(`${clone}-shm`, `${packageStore}-shm`);
-    } finally {
-      writer.close();
-    }
+    } finally { writer.close(); }
     target = await EditorialStore.open(otherRoot, roots.codeRoot);
     try {
       expect(titles(target)).toEqual([TITLE, '本机之书'].sort());
       expect((await target.inspectDatabaseReplacements()).replacements[0]).toMatchObject({ kind: 'merge', outcome: 'applied' });
       target.markCleanShutdown();
-    } finally {
-      target.close();
-    }
+    } finally { target.close(); }
   }, 180_000);
 
   it('migrates a genuine revision-97 package on selected-Book merge (#1170)', async () => {
@@ -1538,31 +1578,7 @@ describe('what a merge refuses, puts back and brings forward', () => {
   }, 180_000);
 
   it('brings a Book its 编辑工作区方案 pins and its J-03 Task, to data without the 方案 or a connection and to data with its own (Issue #434 review)', async () => {
-    // J-03's Task is bound to exact `sample1` lineage: the Book is the admitted public input itself, imported whole.
-    const launchPolicy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot);
-    const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    let bookId: string;
-    let profile: unknown;
-    let task: unknown;
-    let packagePath: string;
-    try {
-      ({ bookId } = await importBook(source, join(roots.codeRoot, 'SampleBooks', ADMITTED_BASELINE_DOCX)));
-      await source.installEditorialWorkspaceProfile(bookId);
-      await source.enableEditorialWorkspaceProfile(bookId);
-      const credentialReference = randomUUID();
-      source.saveModelServiceConnection('主编辑连接', credentialReference, 'needs-attention');
-      source.setModelServiceCredentialState(credentialReference, 'missing');
-      let progress = source.createTaskAuthorizationPreparationWork(bookId, J03_TASK_GOAL, launchPolicy);
-      while (!progress.done) progress = source.advanceTaskAuthorizationPreparationWork(progress.workId!);
-      const prepared = progress.projection!;
-      source.authorizeTaskAuthorization(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
-      profile = await source.inspectEditorialWorkspaceProfile(bookId);
-      task = source.inspectTaskAuthorization(bookId);
-      expect([(profile as { lifecycle: { state: string } }).lifecycle.state, (task as { state: string }).state]).toEqual(['enabled-for-book', 'authorized']);
-      packagePath = await exportedFrom(source, 'AI7 数据库.ai7db');
-    } finally {
-      source.close();
-    }
+    const { bookId, profile, task, packagePath } = await profileMergeFixture();
     const carrier = (dataRoot: string): string => join(dataRoot, 'native-artifacts', 'sha256', 'ae', EDITORIAL_WORKSPACE_PROFILE_DIGEST, 'package.json');
 
     // Data that has neither installed the 方案 nor recorded a connection: the Book brings the 方案 whole, with its carrier.
@@ -1571,9 +1587,7 @@ describe('what a merge refuses, puts back and brings forward', () => {
       const preview = await target.inspectDatabaseImport(packagePath);
       expect([preview.books.map((entry) => entry.status), preview.mergeNotices]).toEqual([['new'], []]);
       await target.prepareDatabaseMerge(preview.previewId, T);
-    } finally {
-      target.close();
-    }
+    } finally { target.close(); }
     target = await EditorialStore.open(otherRoot, roots.codeRoot);
     try {
       expect((await target.inspectDatabaseReplacements()).replacements[0]).toMatchObject({ kind: 'merge', outcome: 'applied' });
@@ -1582,42 +1596,30 @@ describe('what a merge refuses, puts back and brings forward', () => {
       // Its Task reads as it was recorded, though this data has no connection of its own to run anything with.
       expect(target.getModelServiceConnection()).toBeNull();
       expect(target.inspectTaskAuthorization(bookId)).toEqual(task);
-    } finally {
-      target.close();
-    }
+    } finally { target.close(); }
 
     // Data with the 方案 installed for a Book of its own and a connection under another credential reference keeps both.
     const thirdRoot = join(dirname(roots.dataRoot), 'third-data');
     target = await EditorialStore.open(thirdRoot, roots.codeRoot);
     let ownReference: string;
+    let ownBookId: string;
+    let ownProfile: Awaited<ReturnType<EditorialStore['inspectEditorialWorkspaceProfile']>>;
     try {
-      const own = emptyBook(target, '本机之书');
-      await target.installEditorialWorkspaceProfile(own);
-      await target.enableEditorialWorkspaceProfile(own);
+      ownBookId = emptyBook(target, '本机之书');
+      await target.installEditorialWorkspaceProfile(ownBookId);
+      await target.enableEditorialWorkspaceProfile(ownBookId);
+      ownProfile = await target.inspectEditorialWorkspaceProfile(ownBookId);
       ownReference = target.saveModelServiceConnection('本机连接', randomUUID(), 'ready').credentialReference;
       await target.prepareDatabaseMerge((await target.inspectDatabaseImport(packagePath)).previewId, T);
-    } finally {
-      target.close();
-    }
-    const installations = (dataRoot: string): unknown => {
-      const db = new DatabaseSync(storeOf(dataRoot), { readOnly: true });
-      try {
-        return db.prepare('SELECT artifact_id, installed_at FROM native_artifact_installations').all().map((row) => ({ ...row }));
-      } finally {
-        db.close();
-      }
-    };
-    const installedAt = installations(thirdRoot);
+    } finally { target.close(); }
     target = await EditorialStore.open(thirdRoot, roots.codeRoot);
     try {
       expect((await target.inspectDatabaseReplacements()).replacements[0]).toMatchObject({ kind: 'merge', outcome: 'applied' });
       expect(await target.inspectEditorialWorkspaceProfile(bookId)).toEqual(profile);
       expect(target.inspectTaskAuthorization(bookId)).toEqual(task);
       expect(target.getModelServiceConnection()?.credentialReference).toBe(ownReference);
-      expect(installations(thirdRoot)).toEqual(installedAt);
-    } finally {
-      target.close();
-    }
+      expect(await target.inspectEditorialWorkspaceProfile(ownBookId)).toEqual(ownProfile);
+    } finally { target.close(); }
   }, 180_000);
 
   it('lists replacements and merges as one history, newest first, and offers 回退 for the latest replacement (Issue #434 review)', async () => {
@@ -1669,15 +1671,7 @@ describe('what a merge refuses, puts back and brings forward', () => {
   }, 180_000);
 
   it("merges only the Books its staged list names, as its intent names the list, and keeps each merge's Books as rows it verifies (Issue #434 review)", async () => {
-    const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    let packagePath: string;
-    try {
-      emptyBook(source, '甲书');
-      emptyBook(source, '乙书');
-      packagePath = await exportedFrom(source, 'AI7 数据库.ai7db');
-    } finally {
-      source.close();
-    }
+    const packagePath = await emptyBookPackage(['甲书', '乙书'], 'AI7 数据库.ai7db');
     let target = await EditorialStore.open(otherRoot, roots.codeRoot);
     try {
       const waiting = await target.prepareDatabaseMerge((await target.inspectDatabaseImport(packagePath)).previewId, T);
@@ -1687,9 +1681,7 @@ describe('what a merge refuses, puts back and brings forward', () => {
       const lines = (await readFile(list, 'utf8')).split('\n');
       await writeFile(list, lines.map((line) => line.replace('乙书', '丙书')).join('\n'));
       expect((await target.inspectDatabaseReplacements()).pending).toMatchObject({ mergeBooks: [], mergeBooksTotal: 2 });
-    } finally {
-      target.close();
-    }
+    } finally { target.close(); }
     // At the next start it merges nothing, and says what waited had changed.
     target = await EditorialStore.open(otherRoot, roots.codeRoot);
     try {
@@ -1697,9 +1689,7 @@ describe('what a merge refuses, puts back and brings forward', () => {
       expect((await target.inspectDatabaseReplacements()).replacements[0]).toMatchObject({ kind: 'merge', outcome: 'failed', failure: 'changed', mergedCount: 0, mergedTitles: [] });
       // Prepared again, with something that is not a file where its list goes: that is what waited having changed too.
       await target.prepareDatabaseMerge((await target.inspectDatabaseImport(packagePath)).previewId, LATER);
-    } finally {
-      target.close();
-    }
+    } finally { target.close(); }
     const list = join(replacementStagingFor(otherRoot), MERGING_BOOKS_FILE);
     await rm(list);
     await mkdir(list);
@@ -1709,49 +1699,21 @@ describe('what a merge refuses, puts back and brings forward', () => {
       expect((await target.inspectDatabaseReplacements()).replacements[0]).toMatchObject({ kind: 'merge', outcome: 'failed', failure: 'changed', mergedCount: 0 });
       // Prepared again and merged: its record names both Books, from rows of its own.
       await target.prepareDatabaseMerge((await target.inspectDatabaseImport(packagePath)).previewId, new Date(LATER.getTime() + 60_000));
-    } finally {
-      target.close();
-    }
+    } finally { target.close(); }
     target = await EditorialStore.open(otherRoot, roots.codeRoot);
     try {
       expect(titles(target)).toEqual(['乙书', '甲书']);
       const record = (await target.inspectDatabaseReplacements()).replacements[0]!;
       expect([record.outcome, record.mergedCount, [...record.mergedTitles!].sort()]).toEqual(['applied', 2, ['乙书', '甲书']]);
       target.markCleanShutdown();
-    } finally {
-      target.close();
-    }
+    } finally { target.close(); }
     // A row rewritten by hand is not the list the record names: 导入记录 does not read.
-    const ledger = new DatabaseSync(storeOf(otherRoot));
-    try {
-      ledger.exec('DROP TRIGGER database_merge_books_no_update');
-      ledger.prepare("UPDATE database_merge_books SET title = '丁书' WHERE title = '乙书'").run();
-      ledger.exec(DATABASE_MERGE_TRIGGER_SQL.database_merge_books_no_update!);
-      // Twenty newer replacement records push it off the page 导入记录 lists: it is verified all the same.
-      for (let index = 0; index < MAX_DATABASE_REPLACEMENTS_LISTED; index += 1) {
-        const at = new Date(Date.now() + (index + 1) * 60 * 60 * 1000).toISOString();
-        const stored = {
-          replacementId: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`, kind: 'replace', outcome: 'failed',
-          packageFileName: `AI7 数据库 ${index}.ai7db`, packageSha256: 'a'.repeat(64), backupFileName: `AI7 替换前备份 ${index}.ai7db`,
-          backupSha256: 'b'.repeat(64), preparedAt: at, recordedAt: at, failure: 'changed',
-        };
-        const record = canonicalRecord({ schema: 'ai7.database-replacement/1', ...stored });
-        ledger.prepare(
-          `INSERT INTO database_replacements(replacement_id, kind, outcome, package_file_name, package_sha256, backup_file_name, backup_sha256, prepared_at, recorded_at, canonical_json, sha256)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ).run(stored.replacementId, stored.kind, stored.outcome, stored.packageFileName, stored.packageSha256, stored.backupFileName,
-          stored.backupSha256, stored.preparedAt, stored.recordedAt, record.json, record.digest);
-      }
-    } finally {
-      ledger.close();
-    }
+    rewriteOffPageMergeBook();
     target = await EditorialStore.open(otherRoot, roots.codeRoot);
     try {
       expect(code(await target.inspectDatabaseReplacements().catch((error: unknown) => error))).toBe('DATABASE_REPLACEMENT_RECORD_INVALID');
       target.markCleanShutdown();
-    } finally {
-      target.close();
-    }
+    } finally { target.close(); }
   }, 180_000);
 
   it('says what stays behind only of the Books merging would take, never of a Book already here (Issue #434 review)', async () => {
@@ -1790,14 +1752,7 @@ describe('what a merge refuses, puts back and brings forward', () => {
   }, 180_000);
 
   it('commits a merge and its receipt together, or neither (Issue #434 review)', async () => {
-    const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    let packagePath: string;
-    try {
-      emptyBook(source, '甲书');
-      packagePath = await exportedFrom(source, 'AI7 数据库.ai7db');
-    } finally {
-      source.close();
-    }
+    const packagePath = await emptyBookPackage(['甲书'], 'AI7 数据库.ai7db');
     const target = await EditorialStore.open(otherRoot, roots.codeRoot);
     try {
       await target.prepareDatabaseMerge((await target.inspectDatabaseImport(packagePath)).previewId, T);
@@ -1945,11 +1900,6 @@ describe('what a merge refuses, puts back and brings forward', () => {
       expect(store.inspectLibraryMaterial(materialId).index.translation?.lastAttempt?.outcome).toBe('failed');
       return materialId;
     };
-    const records = (root: string) => {
-      const database = new DatabaseSync(storeOf(root), { readOnly: true });
-      try { return database.prepare('SELECT * FROM material_translation_attempts ORDER BY attempt_id').all(); }
-      finally { database.close(); }
-    };
     const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     let packagePath: string; let sourceItem: string; let bookId: string;
     try {
@@ -1958,13 +1908,13 @@ describe('what a merge refuses, puts back and brings forward', () => {
       attribute(source, sourceItem, 0, bookId);
       packagePath = await exportedFrom(source, 'public-attempt-merge.ai7db');
     } finally { source.close(); }
-    const sourceRecords = records(roots.dataRoot);
-    expect(sourceRecords).toHaveLength(1);
+    const sourceAttempt = await withStore(roots.dataRoot, (store) => store.inspectLibraryMaterial(sourceItem).index.translation?.lastAttempt);
     let target = await EditorialStore.open(otherRoot, roots.codeRoot);
-    let localItem: string; let localRecords: ReturnType<typeof records>;
+    let localItem: string;
+    let localAttempt: NonNullable<ReturnType<EditorialStore['inspectLibraryMaterial']>['index']['translation']>['lastAttempt'];
     try {
       localItem = await failedAttempt(target, 'Public destination attempt');
-      localRecords = records(otherRoot);
+      localAttempt = target.inspectLibraryMaterial(localItem).index.translation?.lastAttempt;
       const preview = await target.inspectDatabaseImport(packagePath);
       await target.prepareDatabaseMerge(preview.previewId, T);
     } finally { target.close(); }
@@ -1972,13 +1922,10 @@ describe('what a merge refuses, puts back and brings forward', () => {
     try {
       expect((await target.inspectDatabaseReplacements()).replacements[0]?.outcome).toBe('applied');
       expect(target.listBooks(null).items.map((book) => book.bookId)).toContain(bookId);
-      expect(target.inspectLibraryMaterial(sourceItem).index.translation?.lastAttempt).toBeUndefined();
-      expect(target.inspectLibraryMaterial(localItem).index.translation?.lastAttempt?.outcome).toBe('failed');
-      expect(records(otherRoot)).toEqual(localRecords);
-      expect(records(roots.dataRoot)).toEqual(sourceRecords);
-      const database = new DatabaseSync(storeOf(otherRoot), { readOnly: true });
-      try { expect(database.prepare('SELECT count(*) AS count FROM material_index_translations').get()!.count).toBe(0); }
-      finally { database.close(); }
+      expect(target.inspectLibraryMaterial(sourceItem).index.translation).toBeNull();
+      expect(target.inspectLibraryMaterial(localItem).index.translation?.lastAttempt).toEqual(localAttempt);
+      expect(target.inspectLibraryMaterial(localItem).index.translation?.translated).toBe(0);
+      await withStore(roots.dataRoot, (store) => expect(store.inspectLibraryMaterial(sourceItem).index.translation?.lastAttempt).toEqual(sourceAttempt));
       expect(calls).toBe(2);
     } finally { target.close(); }
   });
@@ -2020,7 +1967,7 @@ describe('what a merge refuses, puts back and brings forward', () => {
     }
   }, 180_000);
 
-  it('adds to an item this data already holds only the rest of its history, and refuses one whose history went another way or that a Book not merging held (Issue #434 review)', async () => {
+  async function libraryHistoryFixture() {
     // Both data folders hold the same 资料库 items, and 丙书: this one's copy was taken from the other, whole.
     let source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     let shared: string;
@@ -2057,15 +2004,20 @@ describe('what a merge refuses, puts back and brings forward', () => {
     } finally {
       copy.close();
     }
+    return { shared, diverged, fresh, packagePath };
+  }
+
+  it('adds to an item this data already holds only the rest of its history, and refuses one whose history went another way or that a Book not merging held (Issue #434 review)', async () => {
+    const { shared, diverged, fresh, packagePath: firstPackage } = await libraryHistoryFixture();
+    let packagePath = firstPackage;
+    let copy: EditorialStore;
     // Merged into the copy whose item has no decision since: the item gains the rest of its history, and is 乙书's.
     let target = await EditorialStore.open(otherRoot, roots.codeRoot);
     try {
       const preview = await target.inspectDatabaseImport(packagePath);
       expect([preview.bookCounts, preview.mergeRefusal]).toEqual([{ new: 1, present: 1, sameTitle: 0 }, null]);
       await target.prepareDatabaseMerge(preview.previewId, T);
-    } finally {
-      target.close();
-    }
+    } finally { target.close(); }
     target = await EditorialStore.open(otherRoot, roots.codeRoot);
     try {
       expect(titles(target)).toEqual(['丙书', '乙书']);
@@ -2073,40 +2025,30 @@ describe('what a merge refuses, puts back and brings forward', () => {
       expect([item.attribution, item.decisionCount]).toEqual([expect.objectContaining({ scope: 'book', bookTitle: '乙书' }), 1]);
       expect(target.inspectLibraryMaterials(null).materials.map((entry) => entry.title).sort()).toEqual(['丙书用过的资料', '共同的资料']);
       target.markCleanShutdown();
-    } finally {
-      target.close();
-    }
+    } finally { target.close(); }
     // Into the copy where the item went to the house instead: its history went another way, and nothing is prepared.
     copy = await EditorialStore.open(diverged, roots.codeRoot);
     try {
       expect((await copy.inspectDatabaseImport(packagePath)).mergeRefusal).toBe('图书带来的资料《共同的资料》在本机资料库里也有，但两边的记录不同，不能合并。');
       copy.markCleanShutdown();
-    } finally {
-      copy.close();
-    }
+    } finally { copy.close(); }
     // A package whose item also went to 丙书, a Book that stays here and does not merge, cannot bring that decision.
-    source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
       packagePath = await exportedFrom(source, 'AI7 数据库 2.ai7db');
-    } finally {
-      source.close();
-    }
+    } finally { source.close(); }
     copy = await EditorialStore.open(diverged, roots.codeRoot);
     try {
       const refused = await copy.prepareDatabaseMerge((await copy.inspectDatabaseImport(packagePath)).previewId, T).catch((error: unknown) => error);
       expect(code(refused)).toBe('DATABASE_MERGE_LIBRARY_CONFLICT');
       copy.markCleanShutdown();
-    } finally {
-      copy.close();
-    }
+    } finally { copy.close(); }
     // Into a copy that took nothing since: the shared item could come, but not the one that also went to 丙书.
     copy = await EditorialStore.open(fresh, roots.codeRoot);
     try {
       expect((await copy.inspectDatabaseImport(packagePath)).mergeRefusal).toBe('图书带来的资料《丙书用过的资料》也归属过没有一起合并的图书，不能合并。');
       copy.markCleanShutdown();
-    } finally {
-      copy.close();
-    }
+    } finally { copy.close(); }
   }, 240_000);
 });
 
