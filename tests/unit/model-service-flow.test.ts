@@ -3,6 +3,7 @@ import { modelServiceChannels } from '../../src/service/launch-policy.js';
 import { MODEL_SERVICE_ROUTES, MODEL_SERVICE_ROUTE_BINDINGS, type ModelServiceRouteId, type ModelServiceSettingsProjection } from '../../src/shared/protocol.js';
 import { USE_FOR_BOTH_ROLES_LABEL, modelRolesLabel, modelServiceFlow, type ModelServiceFlowApi } from '../../src/renderer/model-service-flow.js';
 import { compactModelSelectionLabel, compactModelSelector } from '../../src/renderer/shell.js';
+import { createModelServiceSettings } from '../../src/renderer/model-service-settings.js';
 import { installMiniDom, type MiniElement } from '../support/mini-dom.js';
 
 // 设置 › 模型服务's one flow and the header's compact selector (Issue #1215), over the real generated channel catalogue and a
@@ -44,6 +45,47 @@ const pickChannel = (root: MiniElement, channelId: string) => {
 };
 
 describe('the one model-service flow', () => {
+  it('keeps the chosen channel through a settings repaint and resets it when the shell reopens the screen', async () => {
+    const projection = { ...settings([], null), roles: [],
+      routeChoice: { ...settings([], null).routeChoice, unsupportedProviders: [] },
+      proxy: { mode: 'direct' }, searchBackends: { backends: [], candidates: [] },
+      protectedSecretStore: { label: '合成凭据库', availability: 'available' }, authorityStatement: '合成设置',
+      launchPolicy: { integrityState: 'verified', providerProcessing: { authorizedLiveTransmissionCount: 0, label: '本地' },
+        externalExport: { label: '未授权' }, publicReleasePermission: { label: '未授权' } },
+    } as unknown as ModelServiceSettingsProjection;
+    const calls = { getModelServiceSettings: vi.fn(async () => projection), saveModelServiceProxy: vi.fn(async () => projection) };
+    vi.stubGlobal('window', { ai7: calls });
+    try {
+      const element = <K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] => {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text !== undefined) node.textContent = text;
+        return node;
+      };
+      const root = element('main');
+      const setStatus = vi.fn();
+      const initializeStartup = vi.fn(async () => undefined);
+      const screen = createModelServiceSettings({ element, panel: () => element('section'), setStatus, initializeStartup,
+        button: (label, className, action) => {
+          const node = element('button', className, label); node.addEventListener('click', () => void action()); return node;
+        },
+        rendererErrorMessage: (_error, fallback) => fallback,
+        replaceScreen: (_state, content) => root.replaceChildren(content),
+      });
+      await screen.renderModelServiceSettings();
+      const page = root as unknown as MiniElement;
+      pickChannel(page, 'anthropic-claude');
+      page.querySelector('[data-model-service-proxy] form')!.dispatchEvent({ type: 'submit' });
+      await vi.waitFor(() => expect(calls.saveModelServiceProxy).toHaveBeenCalledWith({ mode: 'direct' }));
+      expect(page.querySelector('[data-model-service-flow]')!.dataset['flowChannel']).toBe('anthropic-claude');
+      await screen.renderModelServiceSettings();
+      expect(page.querySelector('[data-model-service-flow]')!.dataset['flowChannel']).toBe('opencode-go');
+      expect(setStatus).toHaveBeenLastCalledWith('模型服务设置已打开');
+      page.querySelectorAll('button').find((node) => node.textContent === '返回')!.click();
+      expect(initializeStartup).toHaveBeenCalledOnce();
+    } finally { vi.unstubAllGlobals(); }
+  });
+
   it('lists the six channels and offers the in-use channel\'s model to both roles only once its credential is ready', () => {
     const fresh = flow(settings([], null)).node;
     expect(fresh.querySelectorAll('[data-model-channel]').map((label) => label.dataset['modelChannel'])).toEqual(

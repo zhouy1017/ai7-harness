@@ -28,6 +28,8 @@ Generated `node_modules/`, `.pnpm-store/`, `.cache/`, `.runtime/`, `dist/`, `rel
 
 [knowledge-base.ts](../../src/renderer/knowledge-base.ts) holds 知识库 and 质量与学习; the shell supplies its existing helpers and routes through one factory.
 
+[model-service-settings.ts](../../src/renderer/model-service-settings.ts) holds 模型服务; the shell supplies its existing helpers and routes through one factory.
+
 [store-records.ts](../../src/service/store-records.ts) holds the authority store's record primitives (its errors, assertion, canonical JSON, SHA-256, patterns and typed row reads). [store.ts](../../src/service/store.ts) keeps transactions, schema, authoritative state, error boundaries and one-line public delegates; its operation groups live with their feature owners as functions over a typed store host: 书系 in [series.ts](../../src/service/series.ts), 可复用工序 in [captured-procedures.ts](../../src/service/captured-procedures.ts), 按我的评分重写评语 in [evaluation-rewrites.ts](../../src/service/evaluation-rewrites.ts), 学习监督 and 学习素材/学习整理 in [house-review-preference.ts](../../src/service/house-review-preference.ts), 自定义分析维度 in [custom-analysis-dimensions.ts](../../src/service/custom-analysis-dimensions.ts), 后台分析登记 in [background-analysis-enrollments.ts](../../src/service/background-analysis-enrollments.ts) and 审稿意见 in [readers-reports.ts](../../src/service/readers-reports.ts).
 
 ## Tooling ownership
