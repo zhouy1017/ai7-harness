@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { modelServiceChannels } from '../../src/service/launch-policy.js';
 import { MODEL_SERVICE_ROUTES, MODEL_SERVICE_ROUTE_BINDINGS, type ModelServiceRouteId, type ModelServiceSettingsProjection } from '../../src/shared/protocol.js';
-import { USE_FOR_BOTH_ROLES_LABEL, modelRolesLabel, modelServiceFlow, type ModelServiceFlowApi } from '../../src/renderer/model-service-flow.js';
+import { USE_FOR_BOTH_ROLES_LABEL, modelRolesLabel, modelServiceChoices, modelServiceFlow, type ModelServiceFlowApi } from '../../src/renderer/model-service-flow.js';
 import { compactModelSelectionLabel, compactModelSelector } from '../../src/renderer/shell.js';
 import { createModelServiceSettings } from '../../src/renderer/model-service-settings.js';
 import { installMiniDom, type MiniElement } from '../support/mini-dom.js';
@@ -98,23 +98,24 @@ describe('the one model-service flow', () => {
     expect(ready.querySelector('[data-model-choice="deepseek-flash"]')!.checked).toBe(true);
   });
 
-  it('shows a channel without a credential slot with every model and its disposition by name, and nothing to choose', () => {
+  it('offers a credential entry on OpenCode Zen (#1225) and lists every untested model with its disposition by name, nothing to choose', () => {
     const { node } = flow(settings(['opencode-go']));
-    pickChannel(node, 'anthropic-claude');
-    expect(node.dataset['flowChannel']).toBe('anthropic-claude');
+    pickChannel(node, 'opencode-zen');
+    expect(node.dataset['flowChannel']).toBe('opencode-zen');
     expect(node.querySelectorAll('[data-model-choice]')).toHaveLength(0);
-    expect(node.querySelector('button[data-action="enter-channel-credential"]')).toBeNull();
+    expect(node.querySelector('button[data-action="enter-channel-credential"]')!.textContent).toBe('填写凭据');
     const listed = node.querySelectorAll('.model-service-flow-ineligible li');
-    expect(listed.length).toBe(modelServiceChannels().find((channel) => channel.channelId === 'anthropic-claude')!.models.length);
+    expect(listed.length).toBe(modelServiceChannels().find((channel) => channel.channelId === 'opencode-zen')!.models.length);
     expect(listed.every((item) => item.textContent.includes('untested:text') && item.querySelectorAll('input,button').length === 0)).toBe(true);
   });
 
-  it('says a Fast-only model\'s Main disposition and where it can still be assigned', () => {
+  it('says a Fast-only model\'s Main disposition, and offers OpenAI to both roles now Main records it (#1225)', () => {
     const luna = modelServiceChannels().find((channel) => channel.channelId === 'openai-platform')!.models.find((model) => model.modelId === 'gpt-5.6-luna')!;
-    expect(modelRolesLabel(luna)).toBe('主编辑角色：尚无已审核的运行配置（not-in-runtime-model-table）；快速交互角色：可在高级设置中单独指定');
+    expect([luna.main, luna.fast]).toEqual(['eligible', 'eligible']);
+    expect(modelRolesLabel({ ...luna, main: 'not-in-runtime-model-table' })).toBe('主编辑角色：尚无已审核的运行配置（not-in-runtime-model-table）；快速交互角色：可在高级设置中单独指定');
     const { node } = flow(settings(['opencode-go', 'openai-platform']));
     pickChannel(node, 'openai-platform');
-    expect(node.querySelectorAll('[data-model-choice]')).toHaveLength(0);
+    expect(Array.from(node.querySelectorAll('[data-model-choice]'), (choice) => choice.dataset['modelChoice'])).toEqual(['gpt-5.6-sol', 'gpt-5.6-luna']);
   });
 
   it('sets both roles through the existing route and Fast choices, and renders the settings that answer', async () => {
@@ -127,6 +128,29 @@ describe('the one model-service flow', () => {
     await vi.waitFor(() => expect(render).toHaveBeenCalledWith(answer));
     expect(calls.saveModelServiceCredential).toHaveBeenCalledWith({ route: 'deepseek-open-platform', select: true });
     expect(calls.selectFastRoleModel).toHaveBeenCalledWith({ route: 'deepseek-open-platform', modelId: 'deepseek-flash' });
+  });
+
+  it('offers a Claude 官方 model to both roles only after its passed test, setting the Fast model before the Main route (#1225)', async () => {
+    const untested = settings(['opencode-go', 'anthropic-claude'], 'opencode-go');
+    const { node } = flow(untested);
+    pickChannel(node, 'anthropic-claude');
+    const opus = node.querySelector('[data-model-choice="claude-opus-5"]')!;
+    expect([opus.disabled, opus.closest('label')!.textContent.includes('需先测试连接'), button(node, 'use-model-for-both-roles').disabled]).toEqual([false, true, true]);
+    expect(modelServiceChoices(untested).some((choice) => choice.route === 'anthropic-claude')).toBe(false);
+    const tested = settings(['opencode-go', 'anthropic-claude'], 'opencode-go');
+    const claude = tested.routeChoice.routes.find((option) => option.route === 'anthropic-claude')!.connection!;
+    Object.assign(claude, { credentialUpdatedAt: 'T1', connectionTest: { modelId: 'claude-opus-5', outcome: 'passed', credentialUpdatedAt: 'T1' } });
+    const order: string[] = [];
+    const calls = api(tested);
+    vi.mocked(calls.selectFastRoleModel).mockImplementation(async () => { order.push('fast'); return tested; });
+    vi.mocked(calls.saveModelServiceCredential).mockImplementation(async () => { order.push('main'); return tested; });
+    const ready = flow(tested, calls).node;
+    pickChannel(ready, 'anthropic-claude');
+    expect(button(ready, 'use-model-for-both-roles').disabled).toBe(false);
+    expect(modelServiceChoices(tested).filter((choice) => choice.route === 'anthropic-claude').map((choice) => choice.modelId)).toEqual(['claude-opus-5']);
+    button(ready, 'use-model-for-both-roles').click();
+    await vi.waitFor(() => expect(order).toEqual(['fast', 'main']));
+    expect(calls.saveModelServiceCredential).toHaveBeenCalledWith({ route: 'anthropic-claude', select: true });
   });
 
   it('tests the chosen model\'s connection on the existing path and states its declared capabilities', async () => {

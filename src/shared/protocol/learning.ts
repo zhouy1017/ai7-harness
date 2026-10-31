@@ -232,7 +232,7 @@ export interface EnabledLearningEnvelope {
   budget: LearningCurationBudget;
   contractDigest: string;
   policy: import('../protocol.js').SelectedPolicyIdentity;
-  binding: { route: 'opencode-go' | 'deepseek-open-platform'; endpoint: string; model: string; credentialSlot: import('../protocol.js').CredentialSlotId; credentialReference: string };
+  binding: { route: import('./model-service.js').OrdinaryProductionRouteId; endpoint: string; model: string; credentialSlot: import('../protocol.js').CredentialSlotId; credentialReference: string };
   sourceKinds: readonly ['proposal-decision', 'manual-edit-journal', 'word-tracked-edit'];
   scope: 'eligible-local-books';
   supervisionDigest: string;

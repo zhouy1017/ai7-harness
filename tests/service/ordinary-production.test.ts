@@ -1672,7 +1672,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
         const prepared = await restarted.prepareDatabaseExport(destination, true);
         expect((await restarted.approveDatabaseExport(prepared.preparationId, true)).outcome).toBe('created');
         const preview = await restarted.inspectDatabaseImport(destination);
-        expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 102, dataVersion: 1 });
+        expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 103, dataVersion: 1 });
         await restarted.prepareDatabaseReplacement(preview.previewId);
         restarted.close();
         const replaced = await EditorialStore.open(roots.dataRoot, roots.codeRoot); opened.push(replaced);

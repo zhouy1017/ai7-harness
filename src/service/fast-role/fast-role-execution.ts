@@ -3,11 +3,11 @@ import { sha256Hex } from '../analysis/canonical.js';
 import { DEVELOPER_LIVE_TRANSMITTABLE_SOURCE_DIGESTS, type ModelRequestGovernor, type ModelRequestProducer } from '../analysis/execution.js';
 import { admittedFastRoleRoute, type AdmittedFastRoleRoute } from '../dialogue/dialogue-route.js';
 import { describeComposition, prepareExecution, type HarnessTurnOutcome, type PrimaryAgentHarnessHandle } from '../harness/primary-agent-harness.js';
-import { CONNECTION_TEST_KIND, CONNECTION_TEST_POLICY, ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy, isOrdinaryProductionRuntime, type DeveloperLiveRuntime, type LiveRuntime, type OrdinaryProductionRuntime } from '../launch-policy.js';
+import { CONNECTION_TEST_KIND, CONNECTION_TEST_POLICY, modelServiceChannels, resolveSourceCheckoutLaunchPolicy, isOrdinaryProductionRuntime, type DeveloperLiveRuntime, type LiveRuntime, type OrdinaryProductionRuntime } from '../launch-policy.js';
 import type { EditorialStore } from '../store.js';
 import type { ModelTextAttemptProvenance, FastModelSelectionInput, ModelConnectionTestStatus, LaunchPolicyProjection } from '../../shared/protocol.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../shared/protected-secret-identity.js';
-import { MODEL_SERVICE_SETUP_REQUIRED_REASON, type DeveloperLiveProviderProcessingVersion, type OrdinaryProductionProviderProcessingVersion } from '../../shared/protocol.js';
+import { MODEL_SERVICE_SETUP_REQUIRED_REASON, modelServiceRuntimeBinding, type DeveloperLiveProviderProcessingVersion, type OrdinaryProductionProviderProcessingVersion } from '../../shared/protocol.js';
 import { AI7_FAILURE_CODES } from '../provider/classification.js';
 import { CredentialBroker, type CredentialSlotBinding, type SecretResolver } from '../provider/credential-broker.js';
 import { DeepSeekOpenAiCompatibleAdapter, modelRequestNotSent, type DeepSeekTransport } from '../provider/deepseek-adapter.js';
@@ -196,7 +196,6 @@ export function fastRoleRouteRefusal(deps: Pick<FastRoleExecutionDeps, 'fixture'
   if (deps.live !== null) {
     const production = isOrdinaryProductionRuntime(deps.live.runtime);
     if (deps.live.routes[kindId] == null) {
-      if (production && deps.live.routes[MATERIAL_TRANSLATION_KIND]?.profile.route === 'openai-platform') return '所选快速交互模型仅支持来源译文的缓冲文本；此操作需要尚未准入的能力。未发送任何内容。';
       return production ? MODEL_SERVICE_SETUP_REQUIRED_REASON : `当前运行范围未允许${kind.label}：选定的模型处理规则没有准许它使用实时模型。`;
     }
     // Ordinary production sends the editor's own manuscript (Issue #811); only developer-live is held to the Public SampleBooks.
@@ -531,8 +530,14 @@ export async function testModelServiceConnection(
   const cancelled = (): boolean => signal?.aborted === true;
   if (runtime === null) throw new FastRoleError('MODEL_CONNECTION_TEST_UNAVAILABLE', '当前运行范围不允许实时连接测试；没有发送任何内容。');
   const connection = store.getModelServiceRouteConnection(input.route);
-  const allowed = ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS.find((binding) => binding.route === input.route && binding.model === input.modelId);
-  if (allowed === undefined || connection === null || connection.credentialOperationState !== 'ready') {
+  // The channel's model takes its reviewed runtime record — a Zen model its own Zen route (Issue #1225); any other declared model
+  // is refused by its named disposition (family not admitted, text untested or unsupported, no runtime record) before any ticket.
+  const allowed = modelServiceRuntimeBinding(input.route, input.modelId, 'fast');
+  if (allowed === undefined) {
+    const declared = modelServiceChannels().find((channel) => channel.route === input.route)?.models.find((model) => model.modelId === input.modelId);
+    throw new FastRoleError('MODEL_CONNECTION_TEST_UNAVAILABLE', `所选模型不能测试文本连接（${declared?.fast ?? 'not-declared'}）；没有发送任何内容。`);
+  }
+  if (connection === null || connection.credentialOperationState !== 'ready') {
     throw new FastRoleError('MODEL_CONNECTION_TEST_UNAVAILABLE', '请先保护凭据并选择已准入的文本模型；没有发送任何内容。');
   }
   if (cancelled()) {

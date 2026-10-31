@@ -67,7 +67,7 @@ describe('admittedFastRoleRoute', () => {
 
 
 describe('the selected OpenAI buffered text route (Issue #1044)', () => {
-  it('admits only the exact reviewed text binding and rejects endpoint/slot/tool/stream mismatches', async () => {
+  it('admits only the exact reviewed text binding, for every Fast kind (#1225), and rejects endpoint/slot/model mismatches', async () => {
     const binding = { route: 'openai-platform', endpoint: 'https://api.openai.com/v1/responses', model: 'gpt-5.6-sol',
       credentialSlot: 'openai-platform', credentialReference: '00000000-0000-4000-8000-000000000104' };
     const policy = await resolveSourceCheckoutLaunchPolicy(await resolveCodeRoot(), 'ordinary-production', null, binding);
@@ -75,8 +75,9 @@ describe('the selected OpenAI buffered text route (Issue #1044)', () => {
     expect(route?.modelProfile.model).toBe(binding.model);
     expect(route?.modelProfile.capabilities.toolCalling).toBe('none');
     expect(route?.modelProfile.capabilities.streaming ?? 'none').toBe('none');
-    expect(admittedDialogueRoute(policy)).toBeNull();
-    expect(admittedFastRoleRoute(policy, 'editorial-polish', 'editor-selected-manuscript-excerpt')).toBeNull();
+    // Buffered text binds every Fast kind (Issue #1225 revision 3); a demand for a stream or tools is refused by name at preflight.
+    expect(admittedDialogueRoute(policy)?.modelProfile.model).toBe(binding.model);
+    expect(admittedFastRoleRoute(policy, 'editorial-polish', 'editor-selected-manuscript-excerpt')?.profile.route).toBe('openai-platform');
     for (const changed of [{ ...binding, endpoint: 'https://example.invalid/v1/responses' }, { ...binding, credentialSlot: 'opencode-go' },
       { ...binding, model: 'gpt-6-astra' }]) {
       const rejected = await resolveSourceCheckoutLaunchPolicy(await resolveCodeRoot(), 'ordinary-production', null, changed);

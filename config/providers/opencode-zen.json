@@ -630,6 +630,7 @@
   "openQuestions": [
     "The Zen page's Gemini rows are reached at `https://opencode.ai/zen/v1/models/<id>`; whether that path takes the `:generateContent` request the implemented shape appends is not stated, so no route is declared for them.",
     "Excluded from this reading: every limited-time free model the page lists (the `-free` ids and Big Pickle), because a trial that ends is not a supported model, and the Jev rows on `/systemone`, which is not a chat shape.",
-    "The page names no session header for Zen, so no route sends one; whether any model accepts a request at all is settled only by a named live test item under ADR 0067."
+    "The page names no session header for Zen, so no route sends one; whether any model accepts a request at all is settled only by a named live test item under ADR 0067.",
+    "Text answer untested for every model (Issue #1225): read again on 2026-10-31, https://opencode.ai/docs/zen/ (`/docs/zen.md` now 404) is titled Models under OpenCode Console, lists all twelve v32-bound ids with endpoints under `https://opencode.ai/inference/openai/v1/` and `https://opencode.ai/inference/anthropic/v1/` instead of the `https://opencode.ai/zen/v1/` endpoints this document and Provider Processing v32 bind, says every text model also works through the other APIs, and states no response format, answer field or usage field. No answer channel is declared until a page states it or a named live item records it; the endpoint change is recorded here, not resolved, because the endpoints are policy bindings."
   ]
 }

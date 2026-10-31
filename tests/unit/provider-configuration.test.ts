@@ -157,16 +157,15 @@ describe('provider documents and the generator (ADR 0073 §2)', () => {
     const add = (role: 'main' | 'fast', route: string, model: string) => (input: ReturnType<typeof freshInput>) => {
       (input as unknown as { runtimeBindings: Bindings }).runtimeBindings.data.ordinaryProduction[role].push({ route, model });
     };
-    // v32 admits Responses for Main, so a readable Responses row there resolves; a baseline without the family refuses it.
-    expect(refusalAfter(add('main', 'openai-platform', 'gpt-5.6-luna'))).toBeNull();
+    // v32 admits Responses for Main, so its readable Responses rows resolve (#1225); a baseline without the family refuses them.
+    expect(refusalAfter(() => undefined)).toBeNull();
     expect(refusalAfter((input) => {
       const data = (input as unknown as { runtimeBindings: Bindings }).runtimeBindings.data;
       data.policyBaseline.main = data.policyBaseline.main.filter((binding) => binding.route !== 'openai-platform' && binding.route !== 'opencode-zen-responses');
-      add('main', 'openai-platform', 'gpt-5.6-luna')(input);
     })).toContain('PROVIDER_CONFIGURATION/runtime-binding-protocol');
-    // Messages and Gemini rows read no text answer on evidence yet, so no role can choose one (Issue #1180).
-    expect(refusalAfter(add('fast', 'anthropic-claude', 'claude-opus-5'))).toContain('PROVIDER_CONFIGURATION/runtime-binding-unreadable');
-    expect(refusalAfter(add('fast', 'google-gemini', 'gemini-3.8-flash'))).toContain('PROVIDER_CONFIGURATION/runtime-binding-unreadable');
+    // The Zen rows read no text answer on evidence (Issue #1225), so no role can choose one.
+    expect(refusalAfter(add('fast', 'opencode-zen-messages', 'claude-fable-5-1'))).toContain('PROVIDER_CONFIGURATION/runtime-binding-unreadable');
+    expect(refusalAfter(add('fast', 'opencode-zen', 'kimi-k3'))).toContain('PROVIDER_CONFIGURATION/runtime-binding-unreadable');
   });
 
   it('refuses a document that breaks a rule, naming the rule and the place', () => {
@@ -579,6 +578,12 @@ describe('the generated configuration (ADR 0073 §3, §4)', () => {
       if (profile === DEEPSEEK_V4_PRO_PROFILE || profile === OPENCODE_GO_V4_FLASH_PROFILE || profile === OPENCODE_GO_V41_FLASH_PROFILE) continue;
       // Issue #811: the official route's V4.1 Flash, which ordinary production binds, reads its documented channels.
       if (profile.key === 'deepseek-open-platform/deepseek-flash') continue;
+      // Issue #1225: the Claude 官方 and Gemini 官方 rows read their family's documented answer channel, and nothing else.
+      if (profile.route === 'anthropic-claude' || profile.route === 'google-gemini') {
+        expect(profile.capabilities.answerChannel).toBe(profile.route === 'anthropic-claude' ? 'content-text-blocks' : 'candidate-parts-text');
+        expect([profile.capabilities.toolCalling, profile.capabilities.streaming ?? 'none', profile.capabilities.usageAttribution]).toEqual(['none', 'none', 'unknown']);
+        continue;
+      }
       if (profile.key === 'openai-platform/gpt-5.6-sol' || profile.key === 'openai-platform/gpt-5.6-luna') {
         expect(profile.capabilities.answerChannel).toBe('output-message-text');
         expect(profile.capabilities.toolCalling).toBe('none');

@@ -1,6 +1,7 @@
 import type { ModelServiceRouteOptionProjection, ModelServiceSettingsProjection, ModelServiceChannelId } from '../shared/protocol.js';
 import { MODEL_CONNECTION_TEST_NOTE, mainRoleConnectionTest, modelConnectionTestDisclosure, modelConnectionTestLabel } from './model-service-roles.js';
 import { modelServiceFlow } from './model-service-flow.js';
+import { modelServiceTestRequired } from '../shared/protocol/model-service.js';
 import { renderSearchBackendSettings } from './search-backend-settings.js';
 import { launchPolicyIntegritySentence } from './plan-preview-labels.js';
 import type { ShellPlace } from './shell.js';
@@ -142,7 +143,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
       const stored = element('p', 'success-note', `连接名称：${option.connection.connectionName} · 凭据值不再显示`);
       stored.dataset['credentialState'] = option.connection.credentialOperationState;
       const actions = element('div', 'button-row');
-      if (option.route !== 'openai-platform' && !option.inUse && option.connection.credentialOperationState === 'ready') {
+      if (!option.inUse && option.connection.credentialOperationState === 'ready') {
         const use = button(`改用${option.binding.providerLabel}`, 'secondary', async () => {
           use.disabled = true;
           setStatus('正在切换新任务使用的模型服务路线…', 'busy');
@@ -183,7 +184,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
       const ready = option.connection.credentialOperationState === 'ready';
       test.disabled = !ready;
       const updateSelection = (): void => {
-        useFast.disabled = !ready || (option.route === 'openai-platform' &&
+        useFast.disabled = !ready || (modelServiceTestRequired(option.route) &&
           (testState?.outcome !== 'passed' || testState.modelId !== models.value || testState.credentialUpdatedAt !== option.connection?.credentialUpdatedAt));
       };
       models.addEventListener('change', updateSelection); updateSelection();
