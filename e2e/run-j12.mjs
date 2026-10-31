@@ -1316,7 +1316,7 @@ async function main() {
     const diagnosticsSummary = JSON.parse(await readFile(resolve(diagnosticsBundle, 'summary.json'), 'utf8'));
     const builtPolicySet = JSON.parse(await readFile(resolve(ROOT, 'dist/docs/policies/active-policy-set.v23.json'), 'utf8'));
     // 数据版本 and 数据库修订 named apart (Issue #967): the Data Version is 1, the schema revision the store's own.
-    requireJourney(diagnosticsSummary.appVersion === packageVersion && diagnosticsSummary.dataVersion === 1 && diagnosticsSummary.schemaRevision === CREDENTIAL_CLEANUP_SCHEMA_VERSION && diagnosticsSummary.protocol === 190 &&
+    requireJourney(diagnosticsSummary.appVersion === packageVersion && diagnosticsSummary.dataVersion === 1 && diagnosticsSummary.schemaRevision === CREDENTIAL_CLEANUP_SCHEMA_VERSION && diagnosticsSummary.protocol === 191 &&
       diagnosticsSummary.policySetVersion === builtPolicySet.version && diagnosticsSummary.logs === '无日志文件', 'diagnostics-summary');
     requireJourney((await readFile(resolve(diagnosticsBundle, 'README.txt'), 'utf8')).includes('不含数据库、书稿'), 'diagnostics-exclusions');
     await click(primary, '查看诊断位置', 'diagnostics-reveal');
@@ -1442,6 +1442,22 @@ async function main() {
     requireJourney(await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.searchBackends.selectedBackendId==='search-brave')`), 'search-backend-selection-saved');
     const unknownSearchBackend = await primary.evaluate(`window.ai7.selectSearchBackend({backendId:'search-kimi'}).then(()=>false,(error)=>error.code==='SEARCH_BACKEND_NOT_SHIPPED')`);
     requireJourney(unknownSearchBackend, 'unshipped-search-backend-refused');
+    // The 备用来源 (Issue #1226): one per ranked card, offered only for a backend whose key is saved and that is not the default —
+    // under development-ci no key is saved, so every control is disabled; the default, a keyless backend and the direct-search
+    // candidate are refused, and clearing succeeds. Choosing a keyed fallback is composed service evidence (tests/service/search-fallback.test.ts).
+    await assertRenderer(primary, `(() => { const cards=Array.from(document.querySelectorAll('[data-search-backend]'));
+      return cards.length===5 && cards.every((card)=>{ const control=card.querySelector('[data-action="select-search-fallback"]'); return control instanceof HTMLButtonElement && control.textContent==='设为备用来源' && control.disabled && card.dataset.fallback==='false'; }) &&
+        document.querySelector('[data-search-backends]').textContent.includes('候选接口不能作为备用来源');
+    })()`, 'search-fallback-control');
+    const fallbackRefusals = await primary.evaluate(`Promise.all([
+      window.ai7.selectSearchBackend({backendId:'search-brave',role:'fallback'}).then(()=>null,(error)=>error.code),
+      window.ai7.selectSearchBackend({backendId:'search-parallel',role:'fallback'}).then(()=>null,(error)=>error.code),
+      window.ai7.selectSearchBackend({backendId:'deepseek-direct-search-v1',role:'fallback'}).then(()=>null,(error)=>error.code),
+      window.ai7.selectSearchBackend({backendId:'search-deepseek',candidateId:'deepseek-direct-search-v1',role:'fallback'}).then(()=>null,(error)=>error.code),
+    ])`);
+    requireJourney(fallbackRefusals[0] === 'SEARCH_FALLBACK_IS_DEFAULT' && fallbackRefusals[1] === 'SEARCH_CREDENTIAL_MISSING' &&
+      fallbackRefusals.slice(2).every((code) => typeof code === 'string' && code.length > 0), 'search-fallback-refusals');
+    requireJourney(await primary.evaluate(`window.ai7.selectSearchBackend({backendId:null,role:'fallback'}).then((settings)=>settings.searchBackends.fallbackBackendId===null)`), 'search-fallback-cleared');
     // The DeepSeek direct-search candidate (Issue #1055 into W22-S10a #1181): disclosed as 未实测 beside the ranked backends, not
     // selectable, its one explicit 测试连接 refused under development-ci before any credential or transport; closed identifiers only.
     const candidateSettings = await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.searchBackends.candidates)`);

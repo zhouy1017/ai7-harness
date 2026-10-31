@@ -64,3 +64,28 @@ describe('the direct-search candidate in 联网检索', () => {
     expect(candidateProbeLines(legacy)).toEqual([]);
   });
 });
+
+describe('the 备用来源 control in 联网检索 (#1226)', () => {
+  it('offers only a keyed non-default backend, sends role fallback, and clears the chosen one', async () => {
+    const keyed = (backendId: string) => backendId === 'search-brave' || backendId === 'search-parallel';
+    const settings = { ...projection(), searchBackends: searchBackendSettingsProjection(SHIPPED.map((backendId) => ({ backendId,
+      credentialReference: keyed(backendId) ? `11111111-1111-4111-8111-11111111111${SHIPPED.indexOf(backendId)}` : null,
+      credentialOperationState: keyed(backendId) ? 'ready' as const : 'missing' as const, selected: backendId === 'search-tinyfish', selectedAt: '2026-10-31T00:00:00.000Z' })),
+    { backendId: 'search-parallel' }) } as ModelServiceSettingsProjection;
+    const api = { probeSearchBackend: vi.fn(), selectSearchBackend: vi.fn(async () => settings), saveSearchBackendCredential: vi.fn(), removeSearchBackendCredential: vi.fn() };
+    const node = renderSearchBackendSettings(settings, { api, render: vi.fn(), setStatus: vi.fn(), errorMessage: (_error, fallback) => fallback }) as unknown as MiniElement;
+    const control = (id: string) => node.querySelector(`[data-search-backend="${id}"]`)!.querySelectorAll('button').find((item) => item.dataset['action']?.endsWith('search-fallback'))!;
+    expect(control('search-tinyfish').disabled).toBe(true);
+    expect(control('search-deepseek').disabled).toBe(true);
+    expect(node.querySelector('[data-search-backend="search-parallel"]')!.dataset['fallback']).toBe('true');
+    expect(node.querySelector('[data-search-backend="search-parallel"]')!.textContent).toContain('备用来源');
+    control('search-brave').click();
+    await settle();
+    expect(api.selectSearchBackend).toHaveBeenLastCalledWith({ backendId: 'search-brave', role: 'fallback' });
+    expect(control('search-parallel').textContent).toBe('清除备用来源');
+    control('search-parallel').click();
+    await settle();
+    expect(api.selectSearchBackend).toHaveBeenLastCalledWith({ backendId: null, role: 'fallback' });
+    expect(node.querySelector('[data-search-candidate="deepseek-direct-search-v1"]')!.querySelectorAll('button').map((item) => item.textContent)).toEqual([SEARCH_CANDIDATE_PROBE_LABEL]);
+  });
+});

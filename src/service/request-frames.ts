@@ -498,8 +498,9 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     case 'selectSearchBackend':
     case 'removeSearchBackendCredential': {
-      const input = requireInput(value.input, ['backendId'], tentativeId);
-      if (!isBoundedString(input.backendId, 80) || !/^search-[a-z][a-z0-9-]*$/u.test(input.backendId)) throw new ProtocolError(tentativeId);
+      // Issue #1226: `role: 'fallback'` names the 备用来源, whose `null` clears it; a candidate id is never a backend here.
+      const input = op === 'selectSearchBackend' ? requireInputWithOptional(value.input, ['backendId'], ['role'], tentativeId) : requireInput(value.input, ['backendId'], tentativeId);
+      if ((input.role !== undefined && input.role !== 'fallback') || !(input.role === 'fallback' && input.backendId === null) && (!isBoundedString(input.backendId, 80) || !/^search-[a-z][a-z0-9-]*$/u.test(input.backendId))) throw new ProtocolError(tentativeId);
       break;
     }
     case 'probeSearchBackend': {

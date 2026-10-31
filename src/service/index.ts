@@ -192,7 +192,7 @@ async function dispatch(
     case 'getSearchBackendSettings':
       return { id: request.id, ok: true, op: request.op, result: store.getSearchBackendSettings() };
     case 'selectSearchBackend':
-      store.selectSearchBackend(request.input.backendId);
+      store.selectSearchBackend(request.input.backendId, request.input.role);
       return { id: request.id, ok: true, op: request.op, result: store.getSearchBackendSettings() };
     case 'saveSearchBackendCredential':
       return { id: request.id, ok: true, op: request.op, result: store.saveSearchBackendCredential(request.input.backendId, request.input.credentialReference, request.input.credentialOperationState) };

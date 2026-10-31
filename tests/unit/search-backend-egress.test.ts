@@ -178,7 +178,7 @@ describe('frozen backend egress and per-Run tool accounting', () => {
     expect(ticketHostHolds()).toBe(0);
   });
 
-  it('admits a search result only from the frozen backend host', () => {
+  it('admits a search result only from the frozen backend host, or from the frozen 备用来源 host when one is bound (#1226)', () => {
     const UNIT = `分析单元 1/1 · 单元摘要 ${'1'.repeat(64)}\n[blk_${'a'.repeat(24)}] (paragraph) 合成段落。`;
     const CALL: AssembledContentBlock[] = [{ type: 'tool-call', id: 'call_1', name: 'websearch', arguments: '{"query":"public fact"}' }];
     const RESULT = '[{"title":"Public source","url":"https://example.org/source"}]';
@@ -190,13 +190,20 @@ describe('frozen backend egress and per-Run tool accounting', () => {
         { role: 'assistant', content: CALL, source: { kind: 'model', provider: OPENCODE_GO_ROUTE, model: OPENCODE_GO_MODEL } },
         { role: 'user', content: [{ type: 'tool-result', toolCallId: 'call_1', content: [{ type: 'text', text: RESULT }] }], source: { kind: 'tool', callId: 'call_1' } },
       ] };
-    const from = (sourceUrl: string) => evaluateEgress(payload, facts, { ...scope, acceptedToolCallDigests: new Set([assistantToolCallDigest(CALL)]),
+    const brave = shipped.find((entry) => entry.id === 'search-brave')!;
+    const fallback = { ...binding.searchBackend!, backendId: brave.id, host: brave.host!, endpoint: brave.endpoint!, credentialSlot: brave.credentialSlot };
+    const from = (sourceUrl: string, bound: EgressBindingFacts = facts) => evaluateEgress(payload, bound, { ...scope, acceptedToolCallDigests: new Set([assistantToolCallDigest(CALL)]),
       admittedToolResults: new Map([[toolResultKey('call_1', 'websearch'), { callId: 'call_1', tool: 'websearch', sourceUrl,
         sha256: createHash('sha256').update(RESULT).digest('hex'), byteCount: Buffer.byteLength(RESULT) }]]),
       breakerState: () => 'intact', citationAdmits: () => false });
     expect(from(frozen.endpoint!).decision).toBe('transmit-remote');
     for (const other of [...shipped.filter((entry) => entry.id !== frozen.id).map((entry) => entry.endpoint!), 'https://search.parallel.ai/mcp', `http://${frozen.host}/`]) {
       expect(from(other)).toMatchObject({ decision: 'refuse', reason: 'payload-out-of-scope' });
+    }
+    // The bound fallback's exact host is admitted too; every host neither frozen nor bound is still refused.
+    expect(from(brave.endpoint!, { ...facts, searchFallback: fallback }).decision).toBe('transmit-remote');
+    for (const other of shipped.filter((entry) => entry.id !== frozen.id && entry.id !== brave.id).map((entry) => entry.endpoint!)) {
+      expect(from(other, { ...facts, searchFallback: fallback })).toMatchObject({ decision: 'refuse', reason: 'payload-out-of-scope' });
     }
   });
 

@@ -1658,6 +1658,22 @@ export function readSearchFallbackTerms(rule: unknown): SearchFallbackTerms {
 }
 
 /**
+ * The verified fallback terms (#1226), service-internal and never a wire field, keyed by the exact selected document the verifier
+ * read (its version and SHA-256), so a projection carried through a preparation's clone still reads the terms of its own document.
+ */
+const searchFallbackOfDocument = new Map<string, SearchFallbackTerms>();
+function withSearchFallbackTerms(terms: SearchFallbackTerms | undefined, projection: LaunchPolicyProjection): LaunchPolicyProjection {
+  const identity = projection.selectedPolicyIdentity;
+  if (terms !== undefined && identity !== undefined) searchFallbackOfDocument.set(`${identity.providerProcessingVersion}:${identity.providerProcessingSha256}`, terms);
+  return projection;
+}
+/** The admitted search fallback and resend terms of the verified document a launch projection names, or `null` (v31 and earlier). */
+export function searchFallbackTermsOf(projection: LaunchPolicyProjection | null | undefined): SearchFallbackTerms | null {
+  const identity = projection?.operationalScope === 'ordinary-production' ? projection.selectedPolicyIdentity : undefined;
+  return identity === undefined ? null : searchFallbackOfDocument.get(`${identity.providerProcessingVersion}:${identity.providerProcessingSha256}`) ?? null;
+}
+
+/**
  * Verify v26's additions exactly before verifying its inherited terms with the v25 reader.
  * Projection happens only after both checks pass. Missing, extra or differently shaped terms fail closed.
  * The governor terms state configurable defaults only; their effective numbers are runtime configuration (ADR 0095 §2, §6).
@@ -2440,7 +2456,7 @@ function* verifyLaunchPolicyInputs(
       const admittedRules = bindOrdinaryProductionRules(reading, configuredBinding, configuredFastBinding);
       if (admittedRules === null) return deny('binding-not-allowed');
       const configured = admittedRules.length > 0;
-      return {
+      return withSearchFallbackTerms(reading.searchFallback, {
         integrityState: 'verified',
         denialReason: null,
         operationalScope: 'ordinary-production',
@@ -2467,7 +2483,7 @@ function* verifyLaunchPolicyInputs(
         },
         externalExport,
         publicReleasePermission,
-      };
+      });
     }
     verifyDevelopmentCiPolicy(selectedPolicy);
     return {

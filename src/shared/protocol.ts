@@ -1,6 +1,6 @@
 import type { GlobalAgentOperations, GlobalAgentRendererApi } from './protocol/global-agent.js';
 import type { HouseWordListOperations, HouseWordListApi } from './protocol/house-word-list.js'; import type { CustomAnalysisPreparationFrom, TaskPlanCustomDimension } from './protocol/custom-analysis-redo.js';
-import type { JournalEditInput } from './protocol/manuscript-structure.js'; import type { SelectionSpanBlockPin, SelectionSpanField } from './protocol/selection-span.js'; import type { GlobalAttentionProjection } from './protocol/global-attention.js'; import type { ModelServiceBindingProjection, ModelServiceChannelProjection, ModelServiceConnectionId, ModelServiceRouteId, OrdinaryProductionRouteId } from './protocol/model-service.js'; import type { SearchBackendConnectionProjection, SearchBackendProbeProjection, SearchBackendSettingsProjection, SearchCandidateId, SearchConnectionTestPolicy } from './protocol/search-backends.js';
+import type { JournalEditInput } from './protocol/manuscript-structure.js'; import type { SelectionSpanBlockPin, SelectionSpanField } from './protocol/selection-span.js'; import type { GlobalAttentionProjection } from './protocol/global-attention.js'; import type { ModelServiceBindingProjection, ModelServiceChannelProjection, ModelServiceConnectionId, ModelServiceRouteId, OrdinaryProductionRouteId } from './protocol/model-service.js'; import type { SearchBackendConnectionProjection, SearchBackendProbeProjection, SearchBackendSelectionInput, SearchBackendSettingsProjection, FrozenWebToolsFallback, SearchCandidateId, SearchConnectionTestPolicy } from './protocol/search-backends.js';
 export type { JournalEditInput, JournalStructuralEdit } from './protocol/manuscript-structure.js';
 import type { ManuscriptBlockProjection } from './protocol/manuscript-notes.js';
 export type { ManuscriptBlockKind, ManuscriptBlockProjection, ManuscriptNoteProjection } from './protocol/manuscript-notes.js';
@@ -136,7 +136,7 @@ import type { PublicSampleBookSourceDigest } from './public-samplebooks.js';
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 190 as const;
+export const SERVICE_PROTOCOL_VERSION = 191 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 export interface BookFindingProjection {
@@ -4975,7 +4975,7 @@ export interface BaselineAnalysisProjection {
   runSourceScope: null | TaskAuthorizationProjection['runSourceScope'];
   coverageManifest: null | CoverageManifestProjection;
   providerResolutionPlan: null | {
-    webToolsBackend?: FrozenWebToolsBackend;
+    webToolsBackend?: FrozenWebToolsBackend; webToolsFallback?: FrozenWebToolsFallback;
     selectedPolicyIdentity?: SelectedPolicyIdentity;
     localFixtureProfile?: LocalFixtureProfile;
     searchCredentialReference?: string;
@@ -11736,7 +11736,7 @@ export type UsageCsvExportResult = { outcome: 'cancelled' } | { outcome: 'writte
 
 export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordListOperations {
   getSearchBackendSettings: { input: Record<string, never>; output: SearchBackendSettingsProjection };
-  selectSearchBackend: { input: { backendId: string }; output: SearchBackendSettingsProjection };
+  selectSearchBackend: { input: SearchBackendSelectionInput; output: SearchBackendSettingsProjection };
   probeSearchBackend: { input: { backendId: string; candidateId?: SearchCandidateId }; output: SearchBackendProbeProjection };
   saveSearchBackendCredential: {
     input: { backendId: string; credentialReference: string | null; credentialOperationState: ModelCredentialOperationState };
@@ -12826,7 +12826,7 @@ export type PickerReselectResult =
   | { status: 'reselected'; continuation: ContinueImportProjection };
 
 export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
-  selectSearchBackend(input: { backendId: string }): Promise<ModelServiceSettingsProjection>;
+  selectSearchBackend(input: SearchBackendSelectionInput): Promise<ModelServiceSettingsProjection>;
   probeSearchBackend(input: { backendId: string; candidateId?: SearchCandidateId }): Promise<SearchBackendProbeProjection>;
   saveSearchBackendCredential(input: { backendId: string; secret: string }): Promise<ModelServiceSettingsProjection>;
   removeSearchBackendCredential(input: { backendId: string }): Promise<ModelServiceSettingsProjection>;
